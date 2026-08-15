@@ -323,6 +323,8 @@ class Handler(BaseHTTPRequestHandler):
                 self._handle_facebox_bytes()
             elif parsed.path == "/api/config":
                 self._handle_post_config()
+            elif parsed.path == "/api/debug-log":
+                self._handle_debug_log()
             else:
                 self._send_error_json(404, f"unknown endpoint: {parsed.path}")
         except BrokenPipeError:
@@ -499,6 +501,16 @@ class Handler(BaseHTTPRequestHandler):
         image_bytes = self.rfile.read(length)
         box = facebox_for_bytes(f"anchor:{name}", image_bytes)
         self._send_json(200, {"box": box})
+
+    def _handle_debug_log(self):
+        # TEMP diagnostics (page -> server.log); remove after investigation
+        try:
+            length = int(self.headers.get("Content-Length") or 0)
+            line = self.rfile.read(length).decode("utf-8", "replace")
+            print(f"[page] {line}", flush=True)
+        except Exception:
+            pass
+        self._send(204, "")
 
     def _handle_post_config(self):
         global COMMENTS_PATH
