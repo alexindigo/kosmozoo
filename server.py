@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
-"""Review server for the Kosmo image-review SPA.
+"""Kosmozoo image-review server.
 
-Python stdlib only. Serves review.html and proxies the configured ComfyUI
+Python stdlib only. Serves index.html and proxies the configured ComfyUI
 hosts so the page never hits CORS. Binds 127.0.0.1:8765 (no auth).
 
 Usage: python3 review_server.py
@@ -30,7 +30,7 @@ PORT = 8765
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 COMMENTS_PATH = os.path.join(BASE_DIR, "feedback.json")
-REVIEW_HTML = os.path.join(BASE_DIR, "review.html")
+INDEX_HTML = os.path.join(BASE_DIR, "index.html")
 DOWNLOADS_DIR = os.path.expanduser("~/Downloads")
 
 STATUS_TIMEOUT = 8    # seconds, /api/hosts reachability probe
@@ -38,7 +38,7 @@ STATUS_TIMEOUT = 8    # seconds, /api/hosts reachability probe
 PROXY_TIMEOUT = 30    # seconds, JSON endpoints
 IMAGE_TIMEOUT = 60    # seconds, image bytes
 
-UA = {"User-Agent": "kozmo-review/1.0"}
+UA = {"User-Agent": "kosmozoo/1.0"}
 
 _comments_lock = threading.Lock()
 
@@ -126,7 +126,7 @@ def probe_host(addr):
 
 class Handler(BaseHTTPRequestHandler):
     protocol_version = "HTTP/1.1"
-    server_version = "KosmoReview/1.0"
+    server_version = "Kosmozoo/1.0"
 
     def log_message(self, fmt, *args):  # quieter logs
         print(f"{self.address_string()} - {fmt % args}")
@@ -198,10 +198,10 @@ class Handler(BaseHTTPRequestHandler):
 
     def _handle_index(self):
         try:
-            with open(REVIEW_HTML, "rb") as f:
+            with open(INDEX_HTML, "rb") as f:
                 body = f.read()
         except FileNotFoundError:
-            self._send_error_json(404, "review.html not found")
+            self._send_error_json(404, "index.html not found")
             return
         self._send(200, body, "text/html; charset=utf-8",
                    {"Cache-Control": "no-store"})
@@ -328,7 +328,7 @@ class Handler(BaseHTTPRequestHandler):
 
 def main():
     server = ThreadingHTTPServer((BIND, PORT), Handler)
-    print(f"Kosmo review server on http://{BIND}:{PORT}")
+    print(f"Kosmozoo review server on http://{BIND}:{PORT}")
     print(f"Hosts: {', '.join(f'{k} ({v})' for k, v in HOSTS.items())}")
     try:
         server.serve_forever()

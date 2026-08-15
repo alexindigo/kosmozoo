@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Kosmo Review</title>
+<title>Kosmozoo</title>
 <style>
   :root {
     --bg: #14151a; --panel: #1d1f26; --card: #22242d; --border: #343745;
@@ -219,7 +219,7 @@
 </head>
 <body>
 <header>
-  <h1>Kosmo Review</h1>
+  <h1>Kosmozoo</h1>
   <select id="hostSel"></select>
   <button id="refreshBtn">Refresh</button>
   <span id="status"></span>
@@ -250,6 +250,19 @@
 <script>
 'use strict';
 
+// ---------- localStorage namespace: one-time kzreview.* -> kosmozoo.* ----------
+// Runs before any key is read. Copies values, removes old keys.
+for (const name of ['anchors.v1', 'anchorWidth', 'zoom.v1', 'guides.v1']) {
+  try {
+    const v = localStorage.getItem(`kzreview.${name}`);
+    if (v !== null) {
+      if (localStorage.getItem(`kosmozoo.${name}`) === null)
+        localStorage.setItem(`kosmozoo.${name}`, v);
+      localStorage.removeItem(`kzreview.${name}`);
+    }
+  } catch (e) { /* storage unavailable */ }
+}
+
 const $ = (id) => document.getElementById(id);
 const candidatesEl = $('candidates'), hostSel = $('hostSel'),
       statusEl = $('status'), anchorList = $('anchorList'),
@@ -261,8 +274,8 @@ let comments = {};            // "host:file" -> {neg, pos} (legacy strings norma
 const saveTimers = {};        // key -> timeout id
 
 // localStorage keys
-const LS_WIDTH = 'kzreview.anchorWidth';   // e.g. "420px"
-const LS_VERDICT = 'kzreview.verdict.v1';  // legacy, migrated to server
+const LS_WIDTH = 'kosmozoo.anchorWidth';   // e.g. "420px"
+const LS_VERDICT_LEGACY = 'kzreview.verdict.v1';  // legacy, migrated to server
 localStorage.removeItem('kzreview.saved.v1');  // superseded by /api/downloads
 
 // Votes live in feedback.json on the server (canonical). comments[key]
@@ -299,7 +312,7 @@ async function migrateLegacyVotes() {
     if (Array.isArray(h)) for (const k of h) merged[k] = 'down';
   } catch (e) { /* none */ }
   try {
-    const v = JSON.parse(localStorage.getItem(LS_VERDICT));
+    const v = JSON.parse(localStorage.getItem(LS_VERDICT_LEGACY));
     if (v && typeof v === 'object' && !Array.isArray(v))
       Object.assign(merged, v);
   } catch (e) { /* none */ }
@@ -318,7 +331,7 @@ async function migrateLegacyVotes() {
     }
   }
   localStorage.removeItem('kzreview.hidden.v1');
-  localStorage.removeItem(LS_VERDICT);
+  localStorage.removeItem(LS_VERDICT_LEGACY);
 }
 
 // Filenames present in ~/Downloads (source of truth for the save button).
@@ -807,7 +820,7 @@ async function saveComment(key, neg, pos, savedEl) {
 
 // ---------- per-image zoom state (persisted, shared with lightbox) ----------
 
-const LS_ZOOM = 'kzreview.zoom.v1';   // { "host:file" | "anchor:name": {s,tx,ty} }
+const LS_ZOOM = 'kosmozoo.zoom.v1';   // { "host:file" | "anchor:name": {s,tx,ty} }
 const zoomStore = (() => {
   try { return JSON.parse(localStorage.getItem(LS_ZOOM)) || {}; }
   catch (e) { return {}; }
@@ -1133,7 +1146,7 @@ lbImg.addEventListener('click', () => {
 // ---------- lightbox guides (fixed to viewport, survive navigation) ----------
 
 const guideLayer = $('guideLayer');
-const LS_GUIDES = 'kzreview.guides.v1';   // [{axis, pos}]
+const LS_GUIDES = 'kosmozoo.guides.v1';   // [{axis, pos}]
 let guidesRestored = false;
 
 function persistGuides() {
@@ -1280,7 +1293,7 @@ divider.addEventListener('mousedown', (e) => {
 // Large images are downscaled (max 1200px, JPEG q0.85) to fit the ~5MB
 // localStorage quota; on quota overflow the pane still works in-memory.
 
-const LS_KEY = 'kzreview.anchors.v1';
+const LS_KEY = 'kosmozoo.anchors.v1';
 
 function loadAnchorStore() {
   try { return JSON.parse(localStorage.getItem(LS_KEY)) || []; }
