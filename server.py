@@ -30,13 +30,15 @@ HOSTS = {
 }
 
 BIND = "127.0.0.1"
-PORT = 8765
+# all overridable from the environment
+PORT = int(os.environ.get("KOZMOZOO_PORT", "2084"))
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 # feedback.json is canonical curation data and lives OUTSIDE the repo.
 # The path is configurable (☰ menu); persisted in config.json (gitignored).
 DEFAULT_COMMENTS_PATH = os.path.expanduser(
-    "~/Documents/kosmozoo/feedback.json")
+    os.environ.get("KOZMOZOO_FEEDBACK",
+                   "~/Documents/kosmozoo/feedback.json"))
 CONFIG_PATH = os.path.join(BASE_DIR, "config.json")
 COMMENTS_PATH = DEFAULT_COMMENTS_PATH
 try:
@@ -46,7 +48,8 @@ try:
 except (FileNotFoundError, json.JSONDecodeError):
     pass
 INDEX_HTML = os.path.join(BASE_DIR, "index.html")
-DOWNLOADS_DIR = os.path.expanduser("~/Downloads")
+DOWNLOADS_DIR = os.path.expanduser(
+    os.environ.get("KOZMOZOO_DOWNLOADS", "~/Downloads"))
 VENDOR_DIR = os.path.join(BASE_DIR, "vendor")
 VENDOR_MIME = {
     ".mjs": "text/javascript",
