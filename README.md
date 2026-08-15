@@ -90,7 +90,6 @@ fetch_vendor.sh      # vendors MediaPipe tasks-vision (+BlazeFace) for the
 setup_facedetect.sh  # project venv + torch CPU + anime-face-detector
                      #  (weights cached in ~/.cache/huggingface, offline after)
 detect_worker.py     # long-lived JSON-lines detection worker (spawned on demand)
-
 config.json          # local machine config (gitignored): feedbackPath, buckets
 ```
 

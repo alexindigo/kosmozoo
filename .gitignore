@@ -8,3 +8,4 @@ config.json
 metadata_cache.json
 TODO.md
 .envrc
+todo_watch.py
