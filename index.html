@@ -30,6 +30,7 @@
   button:hover { border-color: var(--accent); }
   #status { color: var(--dim); font-size: 12px; }
   #unhideBtn { color: var(--dim); }   /* grey thumbs-down */
+  #hideUpBtn { color: var(--dim); }   /* grey thumbs-up */
   #dlFeedback { margin-left: auto; }
 
   /* slide toggle switch */
@@ -213,6 +214,7 @@
     user-select: none; -webkit-user-drag: none;
   }
   #lightbox img#lbBase { pointer-events: none; cursor: default; }
+  #lightbox img#lbPrev { pointer-events: none; display: none; }
   #lightbox img.dragging { cursor: grabbing; }
   /* bottom-left: candidate-over-anchor transparency slider */
   #lbMixWrap {
@@ -302,6 +304,7 @@
   <button id="refreshBtn">Refresh</button>
   <span id="status"></span>
   <button id="unhideBtn" title="unhide all thumbs-down images">Unhide <svg viewBox="0 0 24 24" width="12" height="12" style="vertical-align:-1px"><path fill="currentColor" d="M15 3H6c-.83 0-1.54.5-1.84 1.22l-3.02 7.05c-.09.23-.14.47-.14.73v2c0 1.1.9 2 2 2h6.31l-.95 4.57-.03.32c0 .41.17.79.44 1.06L9.83 23l6.59-6.59c.36-.36.58-.86.58-1.41V5c0-1.1-.9-2-2-2zm4 0v12h4V3h-4z"/></svg></button>
+  <button id="hideUpBtn" title="hide all thumbs-up images for this session (they stay marked; reload restores)">Hide <svg viewBox="0 0 24 24" width="12" height="12" style="vertical-align:-1px"><path fill="currentColor" d="M1 21h4V9H1v12zm22-11c0-1.1-.9-2-2-2h-6.31l.95-4.57.03-.32c0-.41-.17-.79-.44-1.06L14.17 1 7.59 7.59C7.22 7.95 7 8.45 7 9v10c0 1.1.9 2 2 2h9c.83 0 1.54-.5 1.84-1.22l3.02-7.05c.09-.23.14-.47.14-.73v-2z"/></svg></button>
   <a id="dlFeedback" class="btn" href="/api/feedback" download="feedback.json"
      title="download the exact feedback.json as stored on the server">Download feedback</a>
   <div id="menuWrap">
@@ -333,6 +336,7 @@
   <button id="lbClose" title="close (Esc)">×</button>
   <img id="lbBase" class="layer" alt="">
   <img id="lbImg" class="layer" alt="">
+  <img id="lbPrev" class="layer" alt="">
   <div id="faceBox"></div>
   <div id="guideLayer"></div>
   <div id="guideStripTop" title="drag down to place a horizontal guide"></div>
@@ -389,6 +393,14 @@ localStorage.removeItem('kzreview.saved.v1');  // superseded by /api/downloads
 function voteOf(key) {
   const v = comments[key];
   return (v && typeof v === 'object' && v.vote) || null;
+}
+
+// Session-only view filter: thumbs-up images hidden via the header button.
+// Not persisted — a full page reload restores them (votes stay marked).
+const hiddenUp = new Set();
+
+function isHidden(key) {
+  return voteOf(key) === 'down' || hiddenUp.has(key);
 }
 
 async function setVerdict(key, vote) {   // vote: 'up' | 'down' | null
@@ -575,7 +587,7 @@ function resetList() {
 
 function statusSummary() {
   const hidden = allFiles.filter(
-    f => voteOf(`${currentHost}:${f}`) === 'down').length;
+    f => isHidden(`${currentHost}:${f}`)).length;
   return `${allFiles.length} images from ${currentHost}` +
          (hidden ? ` (${hidden} hidden)` : '');
 }
@@ -666,7 +678,7 @@ function renderChunk() {
   while (renderedCount < allFiles.length && added < CHUNK) {
     const i = renderedCount++;
     const name = allFiles[i];
-    if (voteOf(`${currentHost}:${name}`) === 'down') continue;  // hidden
+    if (isHidden(`${currentHost}:${name}`)) continue;  // hidden
     const card = renderCard(name, metaMapGlobal[name], i);
     cardEls[i] = card;
     frag.appendChild(card);
@@ -1038,7 +1050,8 @@ function makeZoomable(img, hooks = {}) {
 
 // ---------- lightbox: pinch/scroll zoom + pan ----------
 
-const lightbox = $('lightbox'), lbImg = $('lbImg'), lbBase = $('lbBase');
+const lightbox = $('lightbox'), lbImg = $('lbImg'), lbBase = $('lbBase'),
+      lbPrev = $('lbPrev');
 let lbZoom = 1, lbX = 0, lbY = 0;
 let lbMix = 100;   // candidate opacity % over the current anchor
 
@@ -1069,20 +1082,22 @@ let lbSourceImg = null;
 let lbColumn = 'cand';   // 'cand' | 'anchor'
 let lbIndex = 0;
 const lbPos = { cand: 0, anchor: 0 };   // each column remembers its position
-let lbLoadGen = 0;       // invalidates in-flight preloads on switch/close
-
-// Preload the target image, THEN swap lbImg.src — the previous image stays
-// visible while the new one downloads (no black flash). Last call wins.
-function lbShowEntry(entry, place) {
-  const gen = ++lbLoadGen;
-  const pre = new Image();
-  pre.onload = () => {
-    if (gen !== lbLoadGen) return;
-    lbImg.src = entry.src;
-    place();
-  };
-  pre.onerror = () => {};   // keep showing the previous image on failure
-  pre.src = entry.src;
+// Swap cover: on switch the outgoing image stays displayed (at its exact
+// view) on a cover layer until the incoming image has loaded — kills both
+// the download wait and the decode-gap blink. (Preload-by-deferral was
+// tried and regressed cached switches; this covers both cases.)
+function lbCoverSwap() {
+  const src = lbImg.getAttribute('src');
+  if (!src || !lbImg.naturalWidth) return;   // nothing to cover with
+  lbPrev.src = src;
+  lbPrev.style.setProperty('--zoom', lbZoom);
+  lbPrev.style.setProperty('--px', lbX + 'px');
+  lbPrev.style.setProperty('--py', lbY + 'px');
+  lbPrev.style.display = 'block';
+}
+function lbUncover() {
+  lbPrev.style.display = 'none';
+  lbPrev.removeAttribute('src');
 }
 
 function lbList(col) {
@@ -1166,7 +1181,9 @@ function lbWriteBack() {
 // placed with the previous image's aspect box (position lands shifted).
 lbImg.addEventListener('load', () => {
   lbImg._loadedSrc = lbImg.getAttribute('src');
+  lbUncover();   // new image ready to paint: drop the cover
 });
+lbImg.addEventListener('error', () => lbUncover());
 
 function lbPlaceCarry(carry, forSrc) {
   lbZoom = carry ? carry.scale : 1;
@@ -1219,26 +1236,25 @@ function lbSwitch(dCol, dRow) {
   } else return;
 
   lbWriteBack();          // outgoing image keeps the view you set
+  lbCoverSwap();          // ...and stays on screen until the new one loads
   lbColumn = col;
   lbIndex = idx;
   lbPos[col] = idx;
   const entry = lbList(col)[idx];
   lbSourceImg = entry.img;
+  lbImg.src = entry.src;
   if (faceAlignOn() && col === 'cand' && faceLoadState === 'ready') {
-    lbShowEntry(entry, () => {
-      lbPlaceCarry(null, entry.src);   // alignment overrides recalled zoom
-      alignToAnchorFace();
-    });
+    lbPlaceCarry(null, entry.src);   // alignment overrides recalled zoom
+    alignToAnchorFace();
   } else {
-    lbShowEntry(entry, () =>
-      lbPlaceCarry(carryZoom(entry.img), entry.src));  // recall its own zoom
+    lbPlaceCarry(carryZoom(entry.img), entry.src);   // recall its own zoom
   }
   lbBaseUpdate();
   refreshFaceBox();
 }
 
 function openLightbox(src, carry = null, sourceImg = null) {
-  lbLoadGen++;   // invalidate any in-flight switch preload
+  lbUncover();   // no cover needed: nothing was on screen
   lbSourceImg = sourceImg;
   if (sourceImg) lbLocate(sourceImg);
   lbImg.src = src;
@@ -1259,9 +1275,9 @@ function openLightbox(src, carry = null, sourceImg = null) {
 }
 
 function closeLightbox() {
-  lbLoadGen++;   // a late preload must not resurrect the closed lightbox
   lbWriteBack();
   lbSourceImg = null;
+  lbUncover();
   lightbox.classList.remove('open');
   lbImg.removeAttribute('src');
   lbImg._loadedSrc = null;   // force a fresh load cycle next open
@@ -2105,6 +2121,19 @@ $('lbMix').addEventListener('input', (e) => {
   lbImg.style.opacity = lbMix / 100;
   $('lbMixVal').textContent = lbMix + '%';
 });
+// Hide all thumbs-up images for this session (votes untouched).
+$('hideUpBtn').addEventListener('click', () => {
+  let n = 0;
+  for (let i = 0; i < allFiles.length; i++) {
+    const key = `${currentHost}:${allFiles[i]}`;
+    if (voteOf(key) !== 'up' || hiddenUp.has(key)) continue;
+    hiddenUp.add(key);
+    if (cardEls[i]) removeCard(i);
+    n++;
+  }
+  setStatus(statusSummary() + (n ? ` — hid ${n} thumbs-up` : ''));
+});
+
 $('unhideBtn').addEventListener('click', async () => {
   // unhide = clear all thumbs-down votes (thumbs-up stay marked)
   const downs = Object.keys(comments).filter(k => voteOf(k) === 'down');
