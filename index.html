@@ -1072,16 +1072,6 @@ function makeZoomable(img, hooks = {}) {
 
 // ---------- lightbox: pinch/scroll zoom + pan ----------
 
-// TEMP diagnostics (switch-reset investigation; remove after): beacon
-// lightbox state transitions to the server log.
-function dbg(tag, obj) {
-  try {
-    navigator.sendBeacon('/api/debug-log',
-      JSON.stringify({ tag, ...obj }));
-  } catch (e) { /* never break the UI for logging */ }
-}
-const _srcTail = (s) => String(s || '').slice(-32);
-
 const lightbox = $('lightbox'), lbImg = $('lbImg'), lbBase = $('lbBase'),
       lbPrev = $('lbPrev');
 let lbZoom = 1, lbX = 0, lbY = 0;
@@ -1099,8 +1089,6 @@ function lbApply() {
 // null when not zoomed.
 function carryZoom(img) {
   const z = img._zoomState;
-  dbg('carry', { has: !!z, scale: z && z.scale, tx: z && z.tx,
-                 offW: img.offsetWidth });
   if (!z || z.scale <= 1) return null;
   return {
     scale: z.scale,
@@ -1194,20 +1182,9 @@ function lbBaseUpdate() {
 }
 
 function lbWriteBack() {
-  if (!lbSourceImg || !lbSourceImg._setZoom || !lbImg.naturalWidth) {
-    dbg('wb-skip', { col: lbColumn, idx: lbIndex, lbZoom, lbX, lbY,
-                     nat: lbImg.naturalWidth,
-                     hasSrc: !!lbSourceImg,
-                     offW: lbSourceImg && lbSourceImg.offsetWidth });
-    return;
-  }
+  if (!lbSourceImg || !lbSourceImg._setZoom || !lbImg.naturalWidth) return;
   const img = lbSourceImg;
-  if (!img.offsetWidth || !img.offsetHeight) {
-    dbg('wb-skip0', { col: lbColumn, idx: lbIndex, lbZoom });
-    return;
-  }
-  dbg('wb', { col: lbColumn, idx: lbIndex, lbZoom, lbX, lbY,
-              offW: img.offsetWidth });
+  if (!img.offsetWidth || !img.offsetHeight) return;
   const ar = lbImg.naturalWidth / lbImg.naturalHeight;
   const boxW = Math.min(0.95 * window.innerWidth,
                         0.95 * window.innerHeight * ar);
@@ -1231,9 +1208,6 @@ lbImg.addEventListener('load', () => {
 lbImg.addEventListener('error', () => lbUncover());
 
 function lbPlaceCarry(carry, forSrc) {
-  dbg('placeCarry', { src: _srcTail(forSrc), carry,
-                      loadedMatch: lbImg._loadedSrc === forSrc,
-                      nat: lbImg.naturalWidth, complete: lbImg.complete });
   lbZoom = carry ? carry.scale : 1;
   lbX = 0; lbY = 0;
   lbApply();
@@ -1248,10 +1222,6 @@ function lbPlaceCarry(carry, forSrc) {
       lbX = (0.5 - carry.cX) * boxW;
       lbY = (0.5 - carry.cY) * boxH;
       lbApply();
-      dbg('place-applied', { src: _srcTail(forSrc), lbX, lbY, lbZoom });
-    } else {
-      dbg('place-noop', { src: _srcTail(forSrc),
-                          carry: !!carry, nat: lbImg.naturalWidth });
     }
   };
   if (lbImg._loadedSrc === forSrc) place();
@@ -1289,8 +1259,6 @@ function lbSwitch(dCol, dRow) {
 
   lbWriteBack();          // outgoing image keeps the view you set
   lbCoverSwap();          // ...and stays on screen until the new one loads
-  dbg('switch', { from: `${lbColumn}:${lbIndex}`, to: `${col}:${idx}`,
-                  align: faceAlignOn() });
   lbColumn = col;
   lbIndex = idx;
   lbPos[col] = idx;
