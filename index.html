@@ -338,7 +338,7 @@
   <div id="guideStripTop" title="drag down to place a horizontal guide"></div>
   <div id="guideStripLeft" title="drag right to place a vertical guide"></div>
   <label id="lbAlignWrap" class="switchwrap" title="frame the candidate's face box to match the current anchor's face box (position + size)">
-    <input type="checkbox" id="lbAlign"><span class="track"></span>match facebox ⚓
+    <input type="checkbox" id="lbAlign"><span class="track"></span>match facebox
   </label>
   <label id="lbGuidesWrap" class="switchwrap" title="show/hide guides">
     <input type="checkbox" id="lbGuides"><span class="track"></span>guides
@@ -350,7 +350,7 @@
     <input type="range" id="lbMix" min="0" max="100" value="100">
     <span id="lbMixVal">100%</span>
   </div>
-  <div id="lbHint">pinch / -+ to zoom · scroll / drag / shift+arrows to pan · arrows to switch · drag from top/left edge for a guide (dblclick removes) · Esc closes</div>
+  <div id="lbHint">pinch / -+ zoom · scroll / drag / shift+arrows pan · matched or Shift-drag pans both · arrows switch · guides from edges (dblclick removes) · Esc closes</div>
 </div>
 
 <script>
@@ -1086,6 +1086,21 @@ function lbLocate(sourceImg) {
 }
 
 // Persist the current lightbox view into the outgoing image's inline state.
+// Linked pan: move the counterpart image's stored view by the same screen
+// delta (normalized per view, so face-matched pairs stay locked).
+function lbPanCounterpart(dx, dy) {
+  const anchors = lbList('anchor');
+  const cards = lbList('cand');
+  const other = lbColumn === 'cand'
+    ? anchors[Math.min(lbPos.anchor, anchors.length - 1)]
+    : cards[Math.min(lbPos.cand, cards.length - 1)];
+  if (!other || !other.img || !other.img._zoomState) return;
+  const z = other.img._zoomState;
+  const ns = { s: z.scale, tx: z.tx + dx / z.scale, ty: z.ty + dy / z.scale };
+  if (other.img._setZoom) other.img._setZoom(ns);   // persists too
+  else other.img._zoomState = ns;
+}
+
 // Base layer: the current anchor, at its own stored zoom/pan, under the
 // candidate. The slider controls the candidate's opacity over it.
 function lbBaseUpdate() {
@@ -1287,9 +1302,18 @@ lbImg.addEventListener('pointermove', (e) => {
   const prev = lbPointers.get(e.pointerId);
   lbPointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
   if (lbPointers.size === 1) {
-    lbX += e.clientX - prev.x;
-    lbY += e.clientY - prev.y;
-    lbDragMoved += Math.abs(e.clientX - prev.x) + Math.abs(e.clientY - prev.y);
+    const dx = e.clientX - prev.x, dy = e.clientY - prev.y;
+    if (faceAlignOn() || e.shiftKey) {
+      // linked pan: both images track the pointer 1:1
+      lbX += dx / lbZoom;
+      lbY += dy / lbZoom;
+      lbPanCounterpart(dx, dy);
+      lbBaseUpdate();
+    } else {
+      lbX += dx;
+      lbY += dy;
+    }
+    lbDragMoved += Math.abs(dx) + Math.abs(dy);
   } else if (lbPointers.size === 2) {
     const [a, b] = [...lbPointers.values()];
     const d = Math.hypot(a.x - b.x, a.y - b.y);
