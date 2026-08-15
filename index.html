@@ -94,6 +94,10 @@
     position: absolute; top: 82px; left: 24px; z-index: 104;
     background: rgba(20,20,28,.65); border-radius: 8px; padding: 7px 10px;
   }
+  #lbOverlayWrap {
+    position: absolute; top: 116px; left: 24px; z-index: 104;
+    background: rgba(20,20,28,.65); border-radius: 8px; padding: 7px 10px;
+  }
   /* guides hidden: lines and creation strips both off */
   #lightbox.guides-hidden #guideLayer,
   #lightbox.guides-hidden #guideStripTop,
@@ -221,14 +225,30 @@
   #lightbox.open { display: block; }
   #lightbox img.layer {
     position: absolute; left: 50%; top: 50%;
-    transform: translate(-50%,-50%) scale(var(--zoom,1))
-               translate(var(--px,0px), var(--py,0px));
+    /* transform is fully JS-computed (zoom/pan/flip/rotate); this is the
+       pre-JS fallback only */
+    transform: translate(-50%,-50%);
     max-width: 95vw; max-height: 95vh; cursor: grab;
     user-select: none; -webkit-user-drag: none;
   }
   #lightbox img#lbBase { pointer-events: none; cursor: default; }
   #lightbox img#lbPrev { pointer-events: none; display: none; }
   #lightbox img.dragging { cursor: grabbing; }
+  /* untransformed screen-space clip wrapper for the candidate layer:
+     the split line and the clip then share the same viewport coordinates */
+  #lbClipWrap {
+    position: absolute; inset: 0; pointer-events: none;
+  }
+  #lbClipWrap img { pointer-events: auto; }
+  /* split-wipe handle (overlay mode) */
+  #lbSplit {
+    position: absolute; top: 0; bottom: 0; width: 9px; margin-left: -4px;
+    cursor: col-resize; z-index: 105; display: none;
+  }
+  #lbSplit .line {
+    width: 2px; height: 100%; margin: 0 auto;
+    background: var(--accent); box-shadow: 0 0 4px rgba(0,0,0,.9);
+  }
   /* bottom-left: candidate-over-anchor transparency slider */
   #lbMixWrap {
     position: absolute; bottom: 14px; left: 24px; z-index: 104;
@@ -388,7 +408,7 @@
 <div id="lightbox">
   <button id="lbClose" title="close (Esc)">×</button>
   <img id="lbBase" class="layer" alt="">
-  <img id="lbImg" class="layer" alt="">
+  <div id="lbClipWrap"><img id="lbImg" class="layer" alt=""></div>
   <img id="lbPrev" class="layer" alt="">
   <div id="faceBox"></div>
   <div id="guideLayer"></div>
@@ -403,11 +423,15 @@
   <label id="lbFaceBoxWrap" class="switchwrap" title="show/hide detected face box + eye markers">
     <input type="checkbox" id="lbFaceBoxT"><span class="track"></span>facebox
   </label>
+  <label id="lbOverlayWrap" class="switchwrap" title="anchor underlay + wipe/opacity comparison tools">
+    <input type="checkbox" id="lbOverlay"><span class="track"></span>overlay
+  </label>
   <div id="lbMixWrap" title="candidate opacity over the current anchor">
     <input type="range" id="lbMix" min="0" max="100" value="100">
     <span id="lbMixVal">100%</span>
   </div>
-  <div id="lbHint">pinch / -+ zoom · drag / shift+arrows pan · matched or Shift-drag pans both · arrows switch · guides from edges (dblclick removes) · Esc closes</div>
+  <div id="lbSplit" title="drag to wipe-compare (left: anchor · right: candidate)"><div class="line"></div></div>
+  <div id="lbHint">pinch / -+ zoom · drag / shift+arrows pan · Alt+drag rotate · H/V flip · matched or Shift-drag pans both · arrows switch · split line wipes · guides from edges · Esc closes</div>
 </div>
 
 <script>
@@ -1135,14 +1159,15 @@ function makeZoomable(img, hooks = {}) {
       img.style.transform = `translate(${tx}px, ${ty}px) scale(${scale})`;
       img.classList.add('zoomed');
     }
-    img._zoomState = { scale, tx, ty };
+    img._zoomState = { ...img._zoomState, scale, tx, ty };  // keep fh/fv/rot
     if (hooks.zoomKey) saveZoomKey(hooks.zoomKey, img._zoomState);
     if (hooks.onZoomChange) hooks.onZoomChange(scale > 1);
   };
   img._setZoom = (z) => {
-    scale = z.s || z.scale || 1;
-    tx = z.tx || 0;
-    ty = z.ty || 0;
+    img._zoomState = { ...img._zoomState, ...z };
+    scale = img._zoomState.s ?? img._zoomState.scale ?? 1;
+    tx = img._zoomState.tx || 0;
+    ty = img._zoomState.ty || 0;
     apply();
   };
   img.addEventListener('wheel', (e) => {
@@ -1198,12 +1223,40 @@ function makeZoomable(img, hooks = {}) {
 const lightbox = $('lightbox'), lbImg = $('lbImg'), lbBase = $('lbBase'),
       lbPrev = $('lbPrev');
 let lbZoom = 1, lbX = 0, lbY = 0;
+let lbFlipH = false, lbFlipV = false, lbRot = 0;   // persisted per image
 let lbMix = 100;   // candidate opacity % over the current anchor
+let lbSplitX = null;   // split-wipe position (viewport px); null = off
+
+// Full view transform: center, rotate, zoom+flip, pan (order matters).
+function lbTransformFor(s) {
+  const sx = s.fh ? -1 : 1, sy = s.fv ? -1 : 1;
+  return `translate(-50%,-50%) rotate(${s.rot || 0}deg) ` +
+         `scale(${s.scale * sx}, ${s.scale * sy}) ` +
+         `translate(${s.tx}px, ${s.ty}px)`;
+}
+
+// screen-px drag delta -> state delta (inverse of the display transform)
+function lbPanDelta(dx, dy) {
+  const rad = -lbRot * Math.PI / 180;
+  const c = Math.cos(rad), s = Math.sin(rad);
+  const rx = dx * c - dy * s, ry = dx * s + dy * c;
+  const sx = lbFlipH ? -1 : 1, sy = lbFlipV ? -1 : 1;
+  return [rx / (lbZoom * sx), ry / (lbZoom * sy)];
+}
+
+// image center on screen (rotation pivot): V + R·S·(t)
+function lbPivotScreen() {
+  const sx = lbFlipH ? -1 : 1, sy = lbFlipV ? -1 : 1;
+  const rad = lbRot * Math.PI / 180;
+  const tx = lbZoom * sx * lbX, ty = lbZoom * sy * lbY;
+  return [window.innerWidth / 2 + Math.cos(rad) * tx - Math.sin(rad) * ty,
+          window.innerHeight / 2 + Math.sin(rad) * tx + Math.cos(rad) * ty];
+}
 
 function lbApply() {
-  lbImg.style.setProperty('--zoom', lbZoom);
-  lbImg.style.setProperty('--px', lbX + 'px');
-  lbImg.style.setProperty('--py', lbY + 'px');
+  lbImg.style.transform = lbTransformFor(
+    { scale: lbZoom, tx: lbX, ty: lbY, fh: lbFlipH, fv: lbFlipV,
+      rot: lbRot });
   updateFaceBoxOverlay();
 }
 
@@ -1212,11 +1265,12 @@ function lbApply() {
 // null when not zoomed.
 function carryZoom(img) {
   const z = img._zoomState;
-  if (!z || z.scale <= 1) return null;
+  if (!z || (z.scale <= 1 && !z.fh && !z.fv && !z.rot)) return null;
   return {
     scale: z.scale,
     cX: 0.5 - z.tx / (z.scale * img.offsetWidth),
     cY: 0.5 - z.ty / (z.scale * img.offsetHeight),
+    fh: !!z.fh, fv: !!z.fv, rot: z.rot || 0,
   };
 }
 
@@ -1235,9 +1289,8 @@ function lbCoverSwap() {
   const src = lbImg.getAttribute('src');
   if (!src || !lbImg.naturalWidth) return;   // nothing to cover with
   lbPrev.src = src;
-  lbPrev.style.setProperty('--zoom', lbZoom);
-  lbPrev.style.setProperty('--px', lbX + 'px');
-  lbPrev.style.setProperty('--py', lbY + 'px');
+  lbPrev.style.transform = lbImg.style.transform;   // exact current view
+  lbPrev.style.opacity = lbImg.style.opacity;
   lbPrev.style.display = 'block';
 }
 function lbUncover() {
@@ -1283,25 +1336,44 @@ function lbPanCounterpart(dx, dy) {
 
 // Base layer: the current anchor, at its own stored zoom/pan, under the
 // candidate. The slider controls the candidate's opacity over it.
+// The whole underlay stack (base + slider + split line) obeys the
+// "overlay" toggle and only applies to the candidate column.
 function lbBaseUpdate() {
   const wrap = $('lbMixWrap');
+  const split = $('lbSplit');
   const anchors = lbList('anchor');
-  const show = lightbox.classList.contains('open') && lbColumn === 'cand' &&
-               anchors.length > 0;
+  const show = lightbox.classList.contains('open') && overlayOn() &&
+               lbColumn === 'cand' && anchors.length > 0;
   wrap.style.display = show ? 'flex' : 'none';
+  split.style.display = show ? 'block' : 'none';
   if (!show) {
     lbBase.removeAttribute('src');
     lbImg.style.opacity = '';
+    $('lbClipWrap').style.clipPath = '';
     return;
   }
   const aEntry = anchors[Math.min(lbPos.anchor, anchors.length - 1)];
   if (lbBase.getAttribute('src') !== aEntry.src) lbBase.src = aEntry.src;
   const az = (aEntry.img && aEntry.img._zoomState) || { scale: 1, tx: 0, ty: 0 };
-  lbBase.style.setProperty('--zoom', az.scale);
-  lbBase.style.setProperty('--px', az.tx + 'px');
-  lbBase.style.setProperty('--py', az.ty + 'px');
+  lbBase.style.transform = lbTransformFor(az);   // incl. its flips/rotation
   lbImg.style.opacity = lbMix / 100;
   $('lbMixVal').textContent = lbMix + '%';
+  lbApplySplit();
+}
+
+// Split-wipe: clip the candidate's (untransformed) wrapper left of the
+// line, so the clip is in the same screen space as the handle.
+// (left of line = anchor underlay; right = candidate)
+function lbApplySplit() {
+  const split = $('lbSplit');
+  split.style.left =
+    (lbSplitX == null ? window.innerWidth / 2 : lbSplitX) + 'px';
+  const wrap = $('lbClipWrap');
+  if (lbSplitX == null) {
+    wrap.style.clipPath = '';
+    return;
+  }
+  wrap.style.clipPath = `inset(0 0 0 ${lbSplitX}px)`;
 }
 
 function lbWriteBack() {
@@ -1316,6 +1388,7 @@ function lbWriteBack() {
     s: lbZoom,
     tx: lbX * lbZoom * img.offsetWidth / boxW,
     ty: lbY * lbZoom * img.offsetHeight / boxH,
+    fh: lbFlipH, fv: lbFlipV, rot: lbRot,
   });
 }
 
@@ -1333,6 +1406,9 @@ lbImg.addEventListener('error', () => lbUncover());
 function lbPlaceCarry(carry, forSrc) {
   lbZoom = carry ? carry.scale : 1;
   lbX = 0; lbY = 0;
+  lbFlipH = carry ? carry.fh : false;
+  lbFlipV = carry ? carry.fv : false;
+  lbRot = carry ? carry.rot : 0;
   lbApply();
   const place = () => {
     if (forSrc && lbImg.getAttribute('src') !== forSrc) return;  // superseded
@@ -1437,14 +1513,32 @@ $('lbClose').addEventListener('click', closeLightbox);
 document.addEventListener('keydown', (e) => {
   if (!lightbox.classList.contains('open')) return;
   if (e.key === 'Escape') closeLightbox();
-  // Shift+arrows: pan the image 1 screen pixel (lbX/lbY are pre-scale units)
+  // Alt+Left/Right: move the split-wipe line (10px; +Shift for 1px)
+  else if (e.altKey && (e.key === 'ArrowLeft' || e.key === 'ArrowRight')) {
+    e.preventDefault();
+    if (lbSplitX == null) lbSplitX = window.innerWidth / 2;
+    const step = (e.shiftKey ? 1 : 10) * (e.key === 'ArrowRight' ? 1 : -1);
+    lbSplitX = Math.max(0, Math.min(window.innerWidth, lbSplitX + step));
+    lbApplySplit();
+  }
+  // Shift+arrows: pan the image 1 screen pixel (direction-correct under
+  // rotation/flips)
   else if (e.shiftKey && e.key.startsWith('Arrow')) {
     e.preventDefault();
-    const step = 1 / lbZoom;
-    if (e.key === 'ArrowRight') lbX += step;
-    else if (e.key === 'ArrowLeft') lbX -= step;
-    else if (e.key === 'ArrowDown') lbY += step;
-    else if (e.key === 'ArrowUp') lbY -= step;
+    const d = e.key === 'ArrowRight' ? [1, 0] : e.key === 'ArrowLeft'
+      ? [-1, 0] : e.key === 'ArrowDown' ? [0, 1] : [0, -1];
+    const [dtx, dty] = lbPanDelta(d[0], d[1]);
+    lbX += dtx;
+    lbY += dty;
+    lbApply();
+  }
+  // H/V: flip the lightbox image horizontally/vertically
+  else if (!e.ctrlKey && !e.altKey && !e.metaKey &&
+           (e.key === 'h' || e.key === 'H' || e.key === 'v' ||
+            e.key === 'V')) {
+    e.preventDefault();
+    if (e.key.toLowerCase() === 'h') lbFlipH = !lbFlipH;
+    else lbFlipV = !lbFlipV;
     lbApply();
   }
   // -/+ : zoom so the displayed image width changes by 1 screen pixel
@@ -1478,6 +1572,30 @@ lightbox.addEventListener('wheel', (e) => {
 const lbPointers = new Map();
 let lbPinchDist = 0, lbDragMoved = 0;
 lbImg.addEventListener('pointerdown', (e) => {
+  if (e.altKey) {   // Alt+drag = rotate freely about the image center
+    e.preventDefault();
+    lbImg.setPointerCapture(e.pointerId);
+    lbDragMoved = 0;
+    const piv = lbPivotScreen();
+    const a0 = Math.atan2(e.clientY - piv[1], e.clientX - piv[0]);
+    const r0 = lbRot;
+    const move = (ev) => {
+      const a = Math.atan2(ev.clientY - piv[1], ev.clientX - piv[0]);
+      const d = (a - a0) * 180 / Math.PI;
+      if (Math.abs(d) > 0.5) lbDragMoved = 10;   // don't close on release
+      lbRot = r0 + d;
+      lbApply();
+    };
+    const up = () => {
+      lbImg.removeEventListener('pointermove', move);
+      lbImg.removeEventListener('pointerup', up);
+      lbImg.removeEventListener('pointercancel', up);
+    };
+    lbImg.addEventListener('pointermove', move);
+    lbImg.addEventListener('pointerup', up);
+    lbImg.addEventListener('pointercancel', up);
+    return;
+  }
   lbPointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
   lbImg.setPointerCapture(e.pointerId);
   lbImg.classList.add('dragging');
@@ -1495,10 +1613,15 @@ lbImg.addEventListener('pointermove', (e) => {
     const dx = e.clientX - prev.x, dy = e.clientY - prev.y;
     if (faceAlignOn() || e.shiftKey) {
       // linked pan: both images track the pointer 1:1
-      lbX += dx / lbZoom;
-      lbY += dy / lbZoom;
+      const [dtx, dty] = lbPanDelta(dx, dy);
+      lbX += dtx;
+      lbY += dty;
       lbPanCounterpart(dx, dy);
       lbBaseUpdate();
+    } else if (lbRot || lbFlipH || lbFlipV) {
+      const [dtx, dty] = lbPanDelta(dx, dy);   // direction-correct under R/flip
+      lbX += dtx;
+      lbY += dty;
     } else {
       lbX += dx;
       lbY += dy;
@@ -1558,13 +1681,26 @@ function updateFaceBoxOverlay() {
     return;
   }
   const box = lbBoxFor(lbFaceBox.nw, lbFaceBox.nh);
+  const sx = lbFlipH ? -1 : 1, sy = lbFlipV ? -1 : 1;
   const Vx = window.innerWidth / 2, Vy = window.innerHeight / 2;
+  // image fraction -> screen px, evaluated at rotation=0; the overlay div
+  // then gets the rotation itself, pivoted at the image center
+  const map0 = (fx, fy) => [
+    Vx + lbZoom * sx * ((fx - 0.5) * box.w + lbX),
+    Vy + lbZoom * sy * ((fy - 0.5) * box.h + lbY)];
+  const [l0, t0] = map0(lbFaceBox.x, lbFaceBox.y);
+  const [r0, b0] = map0(lbFaceBox.x + lbFaceBox.w, lbFaceBox.y + lbFaceBox.h);
+  const left = Math.min(l0, r0), top = Math.min(t0, b0);
   el.style.display = 'block';
-  el.style.left = (Vx + lbZoom * ((lbFaceBox.x - 0.5) * box.w + lbX)) + 'px';
-  el.style.top = (Vy + lbZoom * ((lbFaceBox.y - 0.5) * box.h + lbY)) + 'px';
-  el.style.width = (lbZoom * lbFaceBox.w * box.w) + 'px';
-  el.style.height = (lbZoom * lbFaceBox.h * box.h) + 'px';
-  // eye dots at the computed eye centers (the actual alignment basis)
+  el.style.left = left + 'px';
+  el.style.top = top + 'px';
+  el.style.width = Math.abs(r0 - l0) + 'px';
+  el.style.height = Math.abs(b0 - t0) + 'px';
+  const [pivX, pivY] = lbPivotScreen();
+  el.style.transformOrigin = `${pivX - left}px ${pivY - top}px`;
+  el.style.transform = `rotate(${lbRot}deg)`;
+  // eye dots at the computed eye centers (the actual alignment basis),
+  // in px within the unrotated box div
   if (!el._eyeDots) {
     el._eyeDots = [0, 1].map(() => {
       const d = document.createElement('span');
@@ -1577,8 +1713,9 @@ function updateFaceBoxOverlay() {
   el._eyeDots.forEach((d, i) => {
     d.style.display = eyes ? 'block' : 'none';
     if (eyes) {
-      d.style.left = ((eyes[i][0] - lbFaceBox.x) / lbFaceBox.w * 100) + '%';
-      d.style.top = ((eyes[i][1] - lbFaceBox.y) / lbFaceBox.h * 100) + '%';
+      const [ex, ey] = map0(eyes[i][0], eyes[i][1]);
+      d.style.left = (ex - left) + 'px';
+      d.style.top = (ey - top) + 'px';
     }
   });
 }
@@ -2210,6 +2347,7 @@ async function init() {
   $('lbAlign').checked = faceAlignOn();
   $('lbGuides').checked = guidesVisible();
   $('lbFaceBoxT').checked = faceBoxVisible();
+  $('lbOverlay').checked = overlayOn();
   $('faceModel').value = faceModel();
   applyGuidesVisibility();
   if (faceDetectEnabled()) {
@@ -2317,6 +2455,39 @@ $('lbMix').addEventListener('input', (e) => {
   lbMix = Number(e.target.value);
   lbImg.style.opacity = lbMix / 100;
   $('lbMixVal').textContent = lbMix + '%';
+});
+
+// overlay (underlay + slider + split) toggle — on by default
+const LS_OVERLAY = 'kosmozoo.lightbox.overlay';
+function overlayOn() { return localStorage.getItem(LS_OVERLAY) !== '0'; }
+$('lbOverlay').addEventListener('change', (e) => {
+  try {
+    localStorage.setItem(LS_OVERLAY, e.target.checked ? '1' : '0');
+  } catch (err) {}
+  lbBaseUpdate();
+});
+
+// split-wipe: drag the vertical line; off the edge disables it
+$('lbSplit').addEventListener('pointerdown', (e) => {
+  e.preventDefault();
+  e.stopPropagation();
+  const split = $('lbSplit');
+  split.setPointerCapture(e.pointerId);
+  if (lbSplitX == null) lbSplitX = window.innerWidth / 2;
+  const move = (ev) => {
+    lbSplitX = Math.max(0, Math.min(window.innerWidth, ev.clientX));
+    lbApplySplit();
+  };
+  const up = (ev) => {
+    document.removeEventListener('pointermove', move);
+    document.removeEventListener('pointerup', up);
+    if (ev.clientX <= 4 || ev.clientX >= window.innerWidth - 4) {
+      lbSplitX = null;              // dragged off the edge -> wipe off
+      lbApplySplit();
+    }
+  };
+  document.addEventListener('pointermove', move);
+  document.addEventListener('pointerup', up);
 });
 // Hide all thumbs-up images for this session (votes untouched).
 $('hideUpBtn').addEventListener('click', () => {
