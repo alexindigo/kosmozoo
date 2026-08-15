@@ -32,6 +32,14 @@ BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 COMMENTS_PATH = os.path.join(BASE_DIR, "feedback.json")
 INDEX_HTML = os.path.join(BASE_DIR, "index.html")
 DOWNLOADS_DIR = os.path.expanduser("~/Downloads")
+VENDOR_DIR = os.path.join(BASE_DIR, "vendor")
+VENDOR_MIME = {
+    ".mjs": "text/javascript",
+    ".js": "text/javascript",
+    ".wasm": "application/wasm",
+    ".tflite": "application/octet-stream",
+    ".json": "application/json",
+}
 
 STATUS_TIMEOUT = 8    # seconds, /api/hosts reachability probe
                       # (ComfyUI stalls its API while generating)
@@ -175,6 +183,8 @@ class Handler(BaseHTTPRequestHandler):
                            extra_headers={"Cache-Control": "no-store"})
             elif path == "/api/downloads":
                 self._handle_downloads()
+            elif path.startswith("/vendor/"):
+                self._handle_vendor(path)
             else:
                 self._send_error_json(404, f"unknown endpoint: {path}")
         except BrokenPipeError:
@@ -286,6 +296,25 @@ class Handler(BaseHTTPRequestHandler):
             names = []
         self._send(200, json.dumps({"files": names}, ensure_ascii=False),
                    extra_headers={"Cache-Control": "no-store"})
+
+    def _handle_vendor(self, path):
+        rel = path[len("/vendor/"):]
+        full = os.path.normpath(os.path.join(VENDOR_DIR, rel))
+        # containment check (blocks .. traversal and absolute injection)
+        base = os.path.realpath(VENDOR_DIR) + os.sep
+        if not rel or not os.path.realpath(full).startswith(base):
+            self._send_error_json(400, "bad path")
+            return
+        ext = os.path.splitext(full)[1]
+        ctype = VENDOR_MIME.get(ext, "application/octet-stream")
+        try:
+            with open(full, "rb") as f:
+                body = f.read()
+        except (FileNotFoundError, NotADirectoryError, IsADirectoryError):
+            self._send_error_json(404, "not found")
+            return
+        self._send(200, body, ctype,
+                   {"Cache-Control": "max-age=86400"})  # pinned assets
 
     def _handle_post_comment(self):
         try:

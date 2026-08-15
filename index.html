@@ -29,6 +29,59 @@
   button:hover { border-color: var(--accent); }
   #status { color: var(--dim); font-size: 12px; }
   #copyBtn { margin-left: auto; }
+  #unhideBtn { color: var(--dim); }   /* grey thumbs-down */
+
+  /* slide toggle switch */
+  .switchwrap {
+    display: inline-flex; align-items: center; gap: 7px;
+    cursor: pointer; font-size: 12px; color: var(--dim); user-select: none;
+  }
+  .switchwrap input { display: none; }
+  .switchwrap .track {
+    width: 26px; height: 15px; border-radius: 8px; background: var(--border);
+    position: relative; transition: background .15s; flex: 0 0 auto;
+  }
+  .switchwrap .track::after {
+    content: ''; position: absolute; top: 2px; left: 2px;
+    width: 11px; height: 11px; border-radius: 50%; background: var(--dim);
+    transition: left .15s, background .15s;
+  }
+  .switchwrap input:checked + .track { background: var(--accent); }
+  .switchwrap input:checked + .track::after { left: 13px; background: #fff; }
+
+  /* header menu */
+  #menuWrap { position: relative; }
+  #menu {
+    position: absolute; top: calc(100% + 8px); right: 0; z-index: 50;
+    background: var(--panel); border: 1px solid var(--border);
+    border-radius: 8px; padding: 10px 12px; min-width: 190px;
+    display: flex; flex-direction: column; gap: 8px;
+  }
+  #menu[hidden] { display: none; }  /* author display:flex would otherwise
+                                       override the hidden attribute */
+  #menuStatus { font-size: 11px; color: var(--dim); }
+
+  /* lightbox facebox-align toggle + guides toggle */
+  #lbAlignWrap {
+    position: absolute; top: 14px; left: 24px; z-index: 104;
+    background: rgba(20,20,28,.65); border-radius: 8px; padding: 7px 10px;
+  }
+  #lbGuidesWrap {
+    position: absolute; top: 48px; left: 24px; z-index: 104;
+    background: rgba(20,20,28,.65); border-radius: 8px; padding: 7px 10px;
+  }
+  /* guides hidden: lines and creation strips both off */
+  #lightbox.guides-hidden #guideLayer,
+  #lightbox.guides-hidden #guideStripTop,
+  #lightbox.guides-hidden #guideStripLeft { display: none; }
+
+  /* detected face box overlay (follows image zoom/pan) */
+  #faceBox {
+    position: absolute; z-index: 101; display: none;
+    border: 2px solid var(--bad); border-radius: 4px;
+    box-shadow: 0 0 4px rgba(0,0,0,.8), inset 0 0 4px rgba(0,0,0,.4);
+    pointer-events: none;
+  }
 
   main {
     display: flex; gap: 16px; padding: 16px; align-items: start;
@@ -223,9 +276,16 @@
   <select id="hostSel"></select>
   <button id="refreshBtn">Refresh</button>
   <span id="status"></span>
-  <button id="unhideBtn">Unhide 👎</button>
+  <button id="unhideBtn" title="unhide all thumbs-down images">Unhide <svg viewBox="0 0 24 24" width="12" height="12" style="vertical-align:-1px"><path fill="currentColor" d="M15 3H6c-.83 0-1.54.5-1.84 1.22l-3.02 7.05c-.09.23-.14.47-.14.73v2c0 1.1.9 2 2 2h6.31l-.95 4.57-.03.32c0 .41.17.79.44 1.06L9.83 23l6.59-6.59c.36-.36.58-.86.58-1.41V5c0-1.1-.9-2-2-2zm4 0v12h4V3h-4z"/></svg></button>
   <button id="copyBtn">Copy all comments</button>
   <button id="dlBtn">Download notes</button>
+  <div id="menuWrap">
+    <button id="menuBtn" title="options">☰</button>
+    <div id="menu" hidden>
+      <label class="switchwrap"><input type="checkbox" id="faceDetectToggle"><span class="track"></span>face detection</label>
+      <div id="menuStatus"></div>
+    </div>
+  </div>
 </header>
 <main>
   <section id="candidatesCol">
@@ -241,10 +301,17 @@
 <div id="lightbox">
   <button id="lbClose" title="close (Esc)">×</button>
   <img id="lbImg" alt="">
+  <div id="faceBox"></div>
   <div id="guideLayer"></div>
   <div id="guideStripTop" title="drag down to place a horizontal guide"></div>
   <div id="guideStripLeft" title="drag right to place a vertical guide"></div>
-  <div id="lbHint">scroll / pinch / -+ to zoom · drag / shift+arrows to pan · arrows to switch · drag from top/left edge for a guide (dblclick removes) · Esc closes</div>
+  <label id="lbAlignWrap" class="switchwrap" title="frame the candidate's face box to match the current anchor's face box (position + size)">
+    <input type="checkbox" id="lbAlign"><span class="track"></span>match facebox ⚓
+  </label>
+  <label id="lbGuidesWrap" class="switchwrap" title="show/hide guides">
+    <input type="checkbox" id="lbGuides"><span class="track"></span>guides
+  </label>
+  <div id="lbHint">pinch / -+ to zoom · scroll / drag / shift+arrows to pan · arrows to switch · drag from top/left edge for a guide (dblclick removes) · Esc closes</div>
 </div>
 
 <script>
@@ -600,6 +667,7 @@ function renderCard(filename, meta, idx) {
   const card = document.createElement('div');
   card.className = 'card';
   card.dataset.idx = idx;
+  card.dataset.name = filename;
   card.dataset.imgUrl =
     `/api/image?host=${encodeURIComponent(currentHost)}` +
     `&file=${encodeURIComponent(filename)}`;
@@ -925,6 +993,7 @@ function lbApply() {
   lbImg.style.setProperty('--zoom', lbZoom);
   lbImg.style.setProperty('--px', lbX + 'px');
   lbImg.style.setProperty('--py', lbY + 'px');
+  updateFaceBoxOverlay();
 }
 
 // Zoom state of an inline image -> {scale, cX, cY} where (cX,cY) is the
@@ -951,9 +1020,11 @@ const lbPos = { cand: 0, anchor: 0 };   // each column remembers its position
 function lbList(col) {
   return col === 'cand'
     ? [...candidatesEl.querySelectorAll('.card')].map(c => ({
-        src: c.dataset.imgUrl, img: c.querySelector('img') }))
+        src: c.dataset.imgUrl, img: c.querySelector('img'),
+        key: `${currentHost}:${c.dataset.name}` }))
     : [...anchorList.querySelectorAll('.anchor')].map(a => ({
-        src: a.dataset.src, img: a.querySelector('img') }));
+        src: a.dataset.src, img: a.querySelector('img'),
+        key: `anchor:${a.dataset.name}` }));
 }
 
 function lbLocate(sourceImg) {
@@ -1040,7 +1111,13 @@ function lbSwitch(dCol, dRow) {
   const entry = lbList(col)[idx];
   lbSourceImg = entry.img;
   lbImg.src = entry.src;
-  lbPlaceCarry(carryZoom(entry.img), entry.src);   // recall its own zoom
+  if (faceAlignOn() && col === 'cand' && faceLoadState === 'ready') {
+    lbPlaceCarry(null, entry.src);   // alignment overrides recalled zoom
+    alignToAnchorFace();
+  } else {
+    lbPlaceCarry(carryZoom(entry.img), entry.src);   // recall its own zoom
+  }
+  refreshFaceBox();
 }
 
 function openLightbox(src, carry = null, sourceImg = null) {
@@ -1052,7 +1129,14 @@ function openLightbox(src, carry = null, sourceImg = null) {
     guidesRestored = true;
     restoreGuides();
   }
-  lbPlaceCarry(carry, src);
+  updateAlignToggleVisibility();
+  if (faceAlignOn() && lbColumn === 'cand' && faceLoadState === 'ready') {
+    lbPlaceCarry(null, src);         // alignment overrides carried zoom
+    alignToAnchorFace();
+  } else {
+    lbPlaceCarry(carry, src);
+  }
+  refreshFaceBox();
 }
 
 function closeLightbox() {
@@ -1060,6 +1144,8 @@ function closeLightbox() {
   lbSourceImg = null;
   lightbox.classList.remove('open');
   lbImg.removeAttribute('src');
+  lbFaceBox = null;
+  updateFaceBoxOverlay();
 }
 
 $('lbClose').addEventListener('click', closeLightbox);
@@ -1076,12 +1162,14 @@ document.addEventListener('keydown', (e) => {
     else if (e.key === 'ArrowUp') lbY -= step;
     lbApply();
   }
-  // -/+ : zoom so the displayed image width changes by one screen pixel
+  // -/+ : zoom so the displayed image width changes by 1 screen pixel
+  //       (10 px with Shift held)
   else if (e.key === '-' || e.key === '_' || e.key === '=' || e.key === '+') {
     e.preventDefault();
     const boxW = lbImg.offsetWidth || 1;
     const dir = (e.key === '-' || e.key === '_') ? -1 : 1;
-    const factor = Math.max(0.5, boxW + dir) / boxW;
+    const step = (e.shiftKey ? 10 : 1) * dir;
+    const factor = Math.max(0.5, boxW + step) / boxW;
     lbZoom = Math.min(12, Math.max(0.2, lbZoom * factor));
     lbApply();
   }
@@ -1091,11 +1179,17 @@ document.addEventListener('keydown', (e) => {
   else if (e.key === 'ArrowUp') { e.preventDefault(); lbSwitch(0, -1); }
 });
 
-// Trackpad pinch = ctrl+wheel in browsers; plain scroll zooms too.
+// Trackpad pinch = ctrl+wheel -> zoom. Plain wheel/trackpad scroll -> pan
+// (never zoom: scroll-zoom is terrible UX).
 lightbox.addEventListener('wheel', (e) => {
   e.preventDefault();
-  const factor = Math.exp(-e.deltaY * (e.ctrlKey ? 0.01 : 0.0025));
-  lbZoom = Math.min(12, Math.max(0.2, lbZoom * factor));
+  if (e.ctrlKey) {
+    const factor = Math.exp(-e.deltaY * 0.01);
+    lbZoom = Math.min(12, Math.max(0.2, lbZoom * factor));
+  } else {
+    lbX -= e.deltaX / lbZoom;   // lbX/lbY are pre-scale units
+    lbY -= e.deltaY / lbZoom;
+  }
   lbApply();
 }, { passive: false });
 
@@ -1143,7 +1237,47 @@ lbImg.addEventListener('click', () => {
   closeLightbox();
 });
 
+// ---------- facebox overlay ----------
+
+let lbFaceBox = null;   // {x,y,w,h,nw,nh} | null — for the current image
+
+// Detect (cached) and draw the face box for the current lightbox image.
+async function refreshFaceBox() {
+  lbFaceBox = null;
+  updateFaceBoxOverlay();
+  if (faceLoadState !== 'ready') return;
+  const entry = lbList(lbColumn)[lbIndex];
+  if (!entry) return;
+  const forSrc = entry.src;
+  const box = await detectFaceBox(entry);
+  if (lbImg.getAttribute('src') !== forSrc) return;   // switched meanwhile
+  lbFaceBox = box;
+  updateFaceBoxOverlay();
+}
+
+function updateFaceBoxOverlay() {
+  const el = $('faceBox');
+  if (!lightbox.classList.contains('open') || !lbFaceBox ||
+      faceLoadState !== 'ready') {
+    el.style.display = 'none';
+    return;
+  }
+  const box = lbBoxFor(lbFaceBox.nw, lbFaceBox.nh);
+  const Vx = window.innerWidth / 2, Vy = window.innerHeight / 2;
+  el.style.display = 'block';
+  el.style.left = (Vx + lbZoom * ((lbFaceBox.x - 0.5) * box.w + lbX)) + 'px';
+  el.style.top = (Vy + lbZoom * ((lbFaceBox.y - 0.5) * box.h + lbY)) + 'px';
+  el.style.width = (lbZoom * lbFaceBox.w * box.w) + 'px';
+  el.style.height = (lbZoom * lbFaceBox.h * box.h) + 'px';
+}
+
 // ---------- lightbox guides (fixed to viewport, survive navigation) ----------
+
+const LS_GUIDES_VIS = 'kosmozoo.guides.visible';   // default on
+function guidesVisible() { return localStorage.getItem(LS_GUIDES_VIS) !== '0'; }
+function applyGuidesVisibility() {
+  lightbox.classList.toggle('guides-hidden', !guidesVisible());
+}
 
 const guideLayer = $('guideLayer');
 const LS_GUIDES = 'kosmozoo.guides.v1';   // [{axis, pos}]
@@ -1222,6 +1356,133 @@ for (const [stripId, axis] of [['guideStripTop', 'h'], ['guideStripLeft', 'v']])
     document.addEventListener('pointermove', move);
     document.addEventListener('pointerup', up);
   });
+}
+
+// ---------- face detection (opt-in, lazy-loaded; MediaPipe BlazeFace) ----------
+
+const LS_FACE = 'kosmozoo.faceDetect.enabled';
+const LS_ALIGN = 'kosmozoo.faceAlign';
+const LS_FACEBOXES = 'kosmozoo.faceBoxes.v1';  // { key: {x,y,w,h,nw,nh} | null }
+
+let faceDetector = null;
+let faceLoadState = 'off';      // off | loading | ready | error
+
+function faceDetectEnabled() { return localStorage.getItem(LS_FACE) === '1'; }
+function faceAlignOn() { return localStorage.getItem(LS_ALIGN) === '1'; }
+
+function faceStatus(msg) { $('menuStatus').textContent = msg; }
+
+function updateAlignToggleVisibility() {
+  $('lbAlignWrap').style.display =
+    faceDetectEnabled() && faceLoadState === 'ready' ? '' : 'none';
+}
+
+function importFaceLib() {          // seam for tests
+  return import('/vendor/vision_bundle.mjs');
+}
+
+async function enableFaceDetection() {
+  if (faceLoadState === 'loading' || faceLoadState === 'ready') return;
+  faceLoadState = 'loading';
+  faceStatus('loading face detector…');
+  try {
+    const mp = await importFaceLib();
+    const vision = await mp.FilesetResolver.forVisionTasks('/vendor/wasm');
+    faceDetector = await mp.FaceDetector.createFromOptions(vision, {
+      baseOptions: {
+        modelAssetPath: '/vendor/blaze_face_short_range.tflite',
+      },
+      runningMode: 'IMAGE',
+    });
+    faceLoadState = 'ready';
+    faceStatus('ready');
+    if (lightbox.classList.contains('open')) refreshFaceBox();
+  } catch (err) {
+    faceLoadState = 'error';
+    faceDetector = null;
+    faceStatus('load failed: ' + err.message);
+  }
+  updateAlignToggleVisibility();
+}
+
+// detection cache (persisted; detect once per image)
+const faceBoxCache = (() => {
+  try { return JSON.parse(localStorage.getItem(LS_FACEBOXES)) || {}; }
+  catch (e) { return {}; }
+})();
+let faceBoxPersistTimer = null;
+function persistFaceBoxes() {
+  clearTimeout(faceBoxPersistTimer);
+  faceBoxPersistTimer = setTimeout(() => {
+    try { localStorage.setItem(LS_FACEBOXES, JSON.stringify(faceBoxCache)); }
+    catch (e) { /* in-memory only */ }
+  }, 300);
+}
+
+// entry: {src, key}. Returns {x,y,w,h (fractions), nw,nh (natural px)} or null.
+async function detectFaceBox(entry) {
+  if (entry.key in faceBoxCache) return faceBoxCache[entry.key];
+  let box = null;
+  try {
+    const img = new Image();
+    img.src = entry.src;
+    await img.decode();
+    if (img.naturalWidth) {
+      const res = faceDetector.detect(img);
+      const det = res && res.detections && res.detections[0];
+      if (det && det.boundingBox) {
+        box = {
+          x: det.boundingBox.originX / img.naturalWidth,
+          y: det.boundingBox.originY / img.naturalHeight,
+          w: det.boundingBox.width / img.naturalWidth,
+          h: det.boundingBox.height / img.naturalHeight,
+          nw: img.naturalWidth, nh: img.naturalHeight,
+        };
+      }
+    }
+  } catch (e) { /* treated as "no face" */ }
+  faceBoxCache[entry.key] = box;
+  persistFaceBoxes();
+  return box;
+}
+
+// Lightbox display box (untransformed layout size) for a natural size.
+function lbBoxFor(nw, nh) {
+  const ar = nw / nh;
+  const boxW = Math.min(0.95 * window.innerWidth, 0.95 * window.innerHeight * ar);
+  return { w: boxW, h: boxW / ar };
+}
+
+// Frame the current candidate so its face box matches the current anchor's
+// face box on screen (position + size). The anchor keeps its own stored
+// zoom/pan as the reference and is never re-framed.
+async function alignToAnchorFace() {
+  if (!faceAlignOn() || faceLoadState !== 'ready' || lbColumn !== 'cand')
+    return;
+  const anchors = lbList('anchor');
+  if (!anchors.length) { setStatus('face align: no anchors'); return; }
+  const aEntry = anchors[Math.min(lbPos.anchor, anchors.length - 1)];
+  const cEntry = lbList('cand')[lbIndex];
+  const forSrc = cEntry.src;
+  const [aBox, cBox] = await Promise.all(
+    [detectFaceBox(aEntry), detectFaceBox(cEntry)]);
+  if (lbImg.getAttribute('src') !== forSrc) return;   // switched meanwhile
+  if (!aBox || !cBox) { setStatus('face align: no face found'); return; }
+
+  const az = (aEntry.img && aEntry.img._zoomState) || { scale: 1, tx: 0, ty: 0 };
+  const boxA = lbBoxFor(aBox.nw, aBox.nh);
+  const boxC = lbBoxFor(cBox.nw, cBox.nh);
+  const fcA = { x: aBox.x + aBox.w / 2, y: aBox.y + aBox.h / 2 };
+  const fcC = { x: cBox.x + cBox.w / 2, y: cBox.y + cBox.h / 2 };
+
+  // anchor face on screen: center V + s_a*((fcA-0.5)*boxA + t_a),
+  // height s_a * aBox.h * boxA.h — solve candidate view for the same rect
+  lbZoom = Math.min(12, Math.max(0.2,
+    az.scale * aBox.h * boxA.h / (cBox.h * boxC.h)));
+  const k = az.scale / lbZoom;
+  lbX = k * ((fcA.x - 0.5) * boxA.w + az.tx) - (fcC.x - 0.5) * boxC.w;
+  lbY = k * ((fcA.y - 0.5) * boxA.h + az.ty) - (fcC.y - 0.5) * boxC.h;
+  lbApply();
 }
 
 // ---------- copy / download notes ----------
@@ -1427,20 +1688,22 @@ function renderAnchor(name, src, meta) {
   const img = document.createElement('img');
   img.src = src;
   img.style.cursor = 'zoom-in';
-  img.draggable = false;   // let the card's reorder drag work from the image
   img.addEventListener('click', () => openLightbox(src, carryZoom(img), img));
-  // Pane thumbnails never render zoomed (a shifted crop leaves a gap and
-  // detaches the × from the image). The zoom state still exists — the
-  // lightbox recalls it on open and writes back on close.
+  // Live pinch-zoom works in the pane, but the thumbnail never LOADS zoomed
+  // (a restored crop leaves a gap and detaches the ×). Lightbox write-backs
+  // update state+store while keeping the thumbnail visually unzoomed.
   const anchorZoomKey = `anchor:${name}`;
+  makeZoomable(img, { zoomKey: anchorZoomKey,
+                      onZoomChange: (z) => { wrap.draggable = !z; } });
   const storedZoom = zoomStore[anchorZoomKey];
-  img._zoomState = storedZoom
-    ? { scale: storedZoom.s, tx: storedZoom.tx, ty: storedZoom.ty }
-    : { scale: 1, tx: 0, ty: 0 };
+  if (storedZoom)   // seed state for lightbox carry only — no transform
+    img._zoomState = { scale: storedZoom.s, tx: storedZoom.tx, ty: storedZoom.ty };
+  const origSetZoom = img._setZoom;
   img._setZoom = (z) => {
-    const state = { scale: z.s || z.scale || 1, tx: z.tx || 0, ty: z.ty || 0 };
-    img._zoomState = state;
-    saveZoomKey(anchorZoomKey, state);
+    origSetZoom(z);                       // sync internals + persist
+    img.style.transform = '';             // ...but keep the thumbnail clean
+    img.classList.remove('zoomed');
+    wrap.draggable = true;
   };
   const imgWrap = document.createElement('div');
   imgWrap.className = 'aimgwrap';
@@ -1577,6 +1840,17 @@ async function init() {
     comments = await api('/api/comments');
   } catch (err) { /* start with empty */ }
   await refresh();
+  // face detection: restore toggles, load in the background if enabled
+  $('lbAlign').checked = faceAlignOn();
+  $('lbGuides').checked = guidesVisible();
+  applyGuidesVisibility();
+  if (faceDetectEnabled()) {
+    $('faceDetectToggle').checked = true;
+    enableFaceDetection();          // async; UI never blocks on it
+  } else {
+    faceStatus('off');
+    updateAlignToggleVisibility();
+  }
 }
 
 hostSel.addEventListener('change', () => {
@@ -1584,6 +1858,35 @@ hostSel.addEventListener('change', () => {
   loadCandidates();
 });
 $('refreshBtn').addEventListener('click', refresh);
+
+// ---------- header menu + face-detection toggles ----------
+
+$('menuBtn').addEventListener('click', () => {
+  $('menu').hidden = !$('menu').hidden;
+});
+document.addEventListener('click', (e) => {
+  if (!$('menuWrap').contains(e.target)) $('menu').hidden = true;
+});
+
+$('faceDetectToggle').addEventListener('change', async (e) => {
+  const on = e.target.checked;
+  try { localStorage.setItem(LS_FACE, on ? '1' : '0'); } catch (err) {}
+  if (on) await enableFaceDetection();
+  updateAlignToggleVisibility();
+});
+
+$('lbAlign').addEventListener('change', (e) => {
+  const on = e.target.checked;
+  try { localStorage.setItem(LS_ALIGN, on ? '1' : '0'); } catch (err) {}
+  if (on && lightbox.classList.contains('open')) alignToAnchorFace();
+});
+
+$('lbGuides').addEventListener('change', (e) => {
+  try {
+    localStorage.setItem(LS_GUIDES_VIS, e.target.checked ? '1' : '0');
+  } catch (err) {}
+  applyGuidesVisibility();
+});
 $('unhideBtn').addEventListener('click', async () => {
   // unhide = clear all thumbs-down votes (thumbs-up stay marked)
   const downs = Object.keys(comments).filter(k => voteOf(k) === 'down');
