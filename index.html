@@ -229,7 +229,8 @@
     padding: 6px 8px; font: inherit;
   }
   .card textarea:focus { outline: none; border-color: var(--accent); }
-  .saved { font-size: 11px; color: var(--ok); margin-left: 6px; opacity: 0;
+  .saved { font-size: 11px; color: var(--ok); margin-right: 8px;
+           align-self: center; white-space: nowrap; opacity: 0;
            transition: opacity .3s; }
   .saved.show { opacity: 1; }
 
@@ -700,6 +701,9 @@ function renderCard(filename, meta, idx) {
 
   const fname = document.createElement('div');
   fname.className = 'fname';
+  const savedEl = document.createElement('span');
+  savedEl.className = 'saved';
+  savedEl.textContent = 'Feedback saved';
   const fnameText = document.createElement('span');
   fnameText.textContent = filename;
   const btnWrap = document.createElement('span');
@@ -742,7 +746,7 @@ function renderCard(filename, meta, idx) {
     saveBtn.textContent = 'saved';
     saveBtn.title = 'already in ~/Downloads (click to download again)';
   });
-  btnWrap.append(downBtn, upBtn, saveBtn);   // red left, green right
+  btnWrap.append(savedEl, downBtn, upBtn, saveBtn);  // "Feedback saved" left of thumbs
   fname.append(fnameText, btnWrap);
   card.appendChild(fname);
 
@@ -794,14 +798,19 @@ function renderCard(filename, meta, idx) {
   const pair2 = document.createElement('div');
   pair2.className = 'pair';
   const parts = commentParts(comments[key]);
-  const saved = document.createElement('span');
-  saved.className = 'saved';
-  saved.textContent = 'saved';
 
+  // auto-save: every keystroke, 500ms debounce; blur flushes immediately
+  let dirty = false;
   const scheduleSave = () => {
+    dirty = true;
     clearTimeout(saveTimers[key]);
-    saveTimers[key] = setTimeout(
-      () => saveComment(key, negTa.value, posTa.value, saved), 600);
+    saveTimers[key] = setTimeout(flushSave, 500);
+  };
+  const flushSave = () => {
+    if (!dirty) return;
+    dirty = false;
+    clearTimeout(saveTimers[key]);
+    saveComment(key, negTa.value, posTa.value, savedEl);
   };
 
   // nearest rendered card above/below (skipping sentinel/end markers)
@@ -827,6 +836,7 @@ function renderCard(filename, meta, idx) {
     ta.placeholder = placeholder;
     ta.value = initial;
     ta.addEventListener('input', scheduleSave);
+    ta.addEventListener('blur', flushSave);
     const row = document.createElement('div');
     row.className = 'btnrow';
     const belowBtn = document.createElement('button');
@@ -847,7 +857,6 @@ function renderCard(filename, meta, idx) {
   pair2.append(neg.col, pos.col);
   card.appendChild(pair2);       // feedback boxes right under label/thumbs/save
   card.appendChild(pair1);       // properties + description below
-  card.appendChild(saved);
   return card;
 }
 
