@@ -39,13 +39,22 @@ BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 DEFAULT_COMMENTS_PATH = os.path.expanduser(
     os.environ.get("KOZMOZOO_FEEDBACK", "~/Documents/kosmozoo_feedback.json"))
 CONFIG_PATH = os.path.join(BASE_DIR, "config.json")
-COMMENTS_PATH = DEFAULT_COMMENTS_PATH
-try:
-    with open(CONFIG_PATH, encoding="utf-8") as _f:
-        COMMENTS_PATH = json.load(_f).get("feedbackPath",
-                                          DEFAULT_COMMENTS_PATH)
-except (FileNotFoundError, json.JSONDecodeError):
-    pass
+
+
+def _load_config():
+    try:
+        with open(CONFIG_PATH, encoding="utf-8") as f:
+            return json.load(f)
+    except (FileNotFoundError, json.JSONDecodeError):
+        return {}
+
+
+_cfg = _load_config()
+COMMENTS_PATH = os.path.expanduser(
+    _cfg.get("feedbackPath") or os.environ.get("KOZMOZOO_FEEDBACK")
+    or DEFAULT_COMMENTS_PATH)
+BUCKETS = _cfg.get("buckets") or [b for b in os.environ.get(
+    "KOZMOZOO_BUCKETS", ",".join(DEFAULT_BUCKETS)).split(",") if b]
 INDEX_HTML = os.path.join(BASE_DIR, "index.html")
 DOWNLOADS_DIR = os.path.expanduser(
     os.environ.get("KOZMOZOO_DOWNLOADS", "~/Downloads"))
@@ -58,9 +67,11 @@ VENDOR_MIME = {
     ".json": "application/json",
 }
 
-# curation buckets (stored per image in feedback.json entries)
-BUCKETS = ("good", "almost", "almost_almost", "not_kozmo", "other_kozmo",
-           "broken")
+# curation buckets (stored per image in feedback.json entries) —
+# configurable: config.json "buckets" or KOZMOZOO_BUCKETS env; the default
+# is generic on purpose
+DEFAULT_BUCKETS = ["good", "almost", "needs_work", "reject", "other",
+                   "broken"]
 # note-type tags; "character" is the default and is stored as "absent"
 TAGS = ("character", "scene", "style")
 
@@ -431,7 +442,8 @@ class Handler(BaseHTTPRequestHandler):
             elif path == "/api/feedback":
                 self._handle_feedback_download()
             elif path == "/api/config":
-                self._send_json(200, {"feedbackPath": COMMENTS_PATH})
+                self._send_json(200, {"feedbackPath": COMMENTS_PATH,
+                                      "buckets": BUCKETS})
             elif path == "/api/facebox-warmup":
                 self._handle_facebox_warmup()
             elif path == "/api/downloads":
@@ -680,31 +692,51 @@ class Handler(BaseHTTPRequestHandler):
         self._send_json(200, {"box": box})
 
     def _handle_post_config(self):
-        global COMMENTS_PATH
+        global COMMENTS_PATH, BUCKETS
         try:
             length = int(self.headers.get("Content-Length") or 0)
             payload = json.loads(self.rfile.read(length))
         except (ValueError, json.JSONDecodeError):
             self._send_error_json(400, "invalid JSON")
             return
-        path = payload.get("feedbackPath")
-        if not isinstance(path, str) or not path.strip():
-            self._send_error_json(400, "expected {feedbackPath} string")
+        cfg = _load_config()
+        changed = False
+        if "feedbackPath" in payload:
+            path = payload["feedbackPath"]
+            if not isinstance(path, str) or not path.strip():
+                self._send_error_json(400, "expected {feedbackPath} string")
+                return
+            path = os.path.expanduser(path.strip())
+            if not path.startswith("/"):
+                self._send_error_json(400, "must be an absolute path")
+                return
+            if not os.path.isdir(os.path.dirname(path) or "/"):
+                self._send_error_json(400, "parent directory doesn't exist")
+                return
+            COMMENTS_PATH = path
+            cfg["feedbackPath"] = path
+            changed = True
+        if "buckets" in payload:
+            buckets = payload["buckets"]
+            if not isinstance(buckets, list) or not buckets or \
+                    not all(isinstance(b, str) and b.strip()
+                            for b in buckets):
+                self._send_error_json(
+                    400, "buckets must be a non-empty list of strings")
+                return
+            BUCKETS = [b.strip() for b in buckets]
+            cfg["buckets"] = BUCKETS
+            changed = True
+        if not changed:
+            self._send_error_json(400, "nothing to update")
             return
-        path = os.path.expanduser(path.strip())
-        if not path.startswith("/"):
-            self._send_error_json(400, "must be an absolute path")
-            return
-        if not os.path.isdir(os.path.dirname(path) or "/"):
-            self._send_error_json(400, "parent directory doesn't exist")
-            return
-        COMMENTS_PATH = path
         fd, tmp = tempfile.mkstemp(dir=BASE_DIR, suffix=".tmp")
         with os.fdopen(fd, "w", encoding="utf-8") as f:
-            json.dump({"feedbackPath": path}, f, indent=2)
+            json.dump(cfg, f, indent=2)
             f.write("\n")
         os.replace(tmp, CONFIG_PATH)
-        self._send_json(200, {"ok": True, "feedbackPath": COMMENTS_PATH})
+        self._send_json(200, {"ok": True, "feedbackPath": COMMENTS_PATH,
+                              "buckets": BUCKETS})
 
     def _handle_post_comment(self):
         try:

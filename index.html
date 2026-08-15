@@ -9,6 +9,7 @@
     --bg: #14151a; --panel: #1d1f26; --card: #22242d; --border: #343745;
     --fg: #e6e6ea; --dim: #9a9dab; --accent: #7aa2f7; --ok: #9ece6a;
     --bad: #f7768e;
+    --wipe-orange: #f76b0c;   /* split-wipe line color */
   }
   * { box-sizing: border-box; }
   body {
@@ -247,7 +248,11 @@
   }
   #lbSplit .line {
     width: 2px; height: 100%; margin: 0 auto;
-    background: var(--accent); box-shadow: 0 0 4px rgba(0,0,0,.9);
+    background: var(--wipe-orange); box-shadow: 0 0 4px rgba(0,0,0,.9);
+  }
+  #lbSplitWrap {
+    position: absolute; top: 150px; left: 24px; z-index: 104;
+    background: rgba(20,20,28,.65); border-radius: 8px; padding: 7px 10px;
   }
   /* bottom-left: candidate-over-anchor transparency slider */
   #lbMixWrap {
@@ -429,6 +434,9 @@
   <label id="lbOverlayWrap" class="switchwrap" title="anchor underlay + wipe/opacity comparison tools">
     <input type="checkbox" id="lbOverlay"><span class="track"></span>overlay
   </label>
+  <label id="lbSplitWrap" class="switchwrap" title="split-wipe: draggable line, left = anchor / right = candidate">
+    <input type="checkbox" id="lbSplitT"><span class="track"></span>split
+  </label>
   <div id="lbMixWrap" title="candidate opacity over the current anchor">
     <input type="range" id="lbMix" min="0" max="100" value="100">
     <span id="lbMixVal">100%</span>
@@ -439,19 +447,6 @@
 
 <script>
 'use strict';
-
-// ---------- localStorage namespace: one-time kzreview.* -> kosmozoo.* ----------
-// Runs before any key is read. Copies values, removes old keys.
-for (const name of ['anchors.v1', 'anchorWidth', 'zoom.v1', 'guides.v1']) {
-  try {
-    const v = localStorage.getItem(`kzreview.${name}`);
-    if (v !== null) {
-      if (localStorage.getItem(`kosmozoo.${name}`) === null)
-        localStorage.setItem(`kosmozoo.${name}`, v);
-      localStorage.removeItem(`kzreview.${name}`);
-    }
-  } catch (e) { /* storage unavailable */ }
-}
 
 const $ = (id) => document.getElementById(id);
 const candidatesEl = $('candidates'), hostSel = $('hostSel'),
@@ -465,8 +460,6 @@ const saveTimers = {};        // key -> timeout id
 
 // localStorage keys
 const LS_WIDTH = 'kosmozoo.anchorWidth';   // e.g. "420px"
-const LS_VERDICT_LEGACY = 'kzreview.verdict.v1';  // legacy, migrated to server
-localStorage.removeItem('kzreview.saved.v1');  // superseded by /api/downloads
 
 // Votes live in feedback.json on the server (canonical). comments[key]
 // may be {neg, pos, vote} or a legacy plain string.
@@ -513,38 +506,12 @@ function setVerdict(key, vote) {   // vote: 'up' | 'down' | null
   return postField(key, 'vote', vote);
 }
 
-// One-time migration of localStorage verdicts/hidden into feedback.json.
-async function migrateLegacyVotes() {
-  const merged = {};
-  try {
-    const h = JSON.parse(localStorage.getItem('kzreview.hidden.v1'));
-    if (Array.isArray(h)) for (const k of h) merged[k] = 'down';
-  } catch (e) { /* none */ }
-  try {
-    const v = JSON.parse(localStorage.getItem(LS_VERDICT_LEGACY));
-    if (v && typeof v === 'object' && !Array.isArray(v))
-      Object.assign(merged, v);
-  } catch (e) { /* none */ }
-  const keys = Object.keys(merged);
-  if (!keys.length) return;
-  for (const k of keys) {
-    if (merged[k] !== 'up' && merged[k] !== 'down') continue;
-    const [host, ...rest] = k.split(':');
-    try {
-      await fetch('/api/comments', {
-        method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ host, file: rest.join(':'), vote: merged[k] }),
-      });
-    } catch (e) {
-      return;   // server unreachable: keep keys, retry next load
-    }
-  }
-  localStorage.removeItem('kzreview.hidden.v1');
-  localStorage.removeItem(LS_VERDICT_LEGACY);
-}
-
 // Filenames present in ~/Downloads (source of truth for the save button).
 let downloadsSet = new Set();
+
+// Curation buckets come from the server config (config.json / env), so the
+// code carries no project-specific taxonomy.
+let bucketList = [];
 
 // Stored comment value -> {neg, pos} (tolerates legacy plain-string values)
 function commentParts(v) {
@@ -953,8 +920,7 @@ function renderCard(filename, meta, idx) {
   const advRow = document.createElement('div');
   advRow.className = 'adv-flex advrow';
   advRow.append(
-    mkSel('bucket', ['', 'good', 'almost', 'almost_almost', 'not_kozmo',
-                     'other_kozmo', 'broken'], extras.bucket, 'bucket'),
+    mkSel('bucket', ['', ...bucketList], extras.bucket, 'bucket'),
     mkSel('tag', ['character', 'scene', 'style'], extras.tag, 'tag'),
   );
   card.appendChild(advRow);
@@ -1348,7 +1314,7 @@ function lbBaseUpdate() {
   const show = lightbox.classList.contains('open') && overlayOn() &&
                lbColumn === 'cand' && anchors.length > 0;
   wrap.style.display = show ? 'flex' : 'none';
-  split.style.display = show ? 'block' : 'none';
+  split.style.display = show && splitOn() ? 'block' : 'none';
   if (!show) {
     lbBase.removeAttribute('src');
     lbImg.style.opacity = '';
@@ -1357,8 +1323,10 @@ function lbBaseUpdate() {
   }
   const aEntry = anchors[Math.min(lbPos.anchor, anchors.length - 1)];
   if (lbBase.getAttribute('src') !== aEntry.src) lbBase.src = aEntry.src;
-  const az = (aEntry.img && aEntry.img._zoomState) || { scale: 1, tx: 0, ty: 0 };
-  lbBase.style.transform = lbTransformFor(az);   // incl. its flips/rotation
+  // the underlay renders at the CURRENT shared view (that's what makes the
+  // comparison meaningful); on write-back the anchor's state catches up
+  lbBase.style.transform = lbTransformFor({ scale: lbZoom, tx: lbX, ty: lbY,
+    fh: lbFlipH, fv: lbFlipV, rot: lbRot });
   lbImg.style.opacity = lbMix / 100;
   $('lbMixVal').textContent = lbMix + '%';
   lbApplySplit();
@@ -1470,6 +1438,11 @@ function lbSwitch(dCol, dRow) {
   if (faceAlignOn() && col === 'cand' && faceLoadState === 'ready') {
     lbPlaceCarry(null, entry.src);   // alignment overrides recalled zoom
     alignToAnchorFace();
+  } else if (dCol && overlayOn() &&
+             !(faceAlignOn() && faceLoadState === 'ready')) {
+    // pair switch (candidate <-> anchor) in comparison mode (align off):
+    // the two images share the current view — no jump on switch
+    lbApply();
   } else {
     lbPlaceCarry(carryZoom(entry.img), entry.src);   // recall its own zoom
   }
@@ -2342,7 +2315,10 @@ async function init() {
   for (const a of loadAnchorStore()) {
     if (a && a.src) renderAnchor(a.name || 'anchor', a.src, a.meta || null);
   }
-  await migrateLegacyVotes();
+  try {
+    const cfg = await api('/api/config');
+    bucketList = cfg.buckets || [];
+  } catch (err) { /* no buckets configured */ }
   try {
     comments = await api('/api/comments');
   } catch (err) { /* start with empty */ }
@@ -2357,6 +2333,7 @@ async function init() {
   $('lbGuides').checked = guidesVisible();
   $('lbFaceBoxT').checked = faceBoxVisible();
   $('lbOverlay').checked = overlayOn();
+  $('lbSplitT').checked = splitOn();
   $('faceModel').value = faceModel();
   applyGuidesVisibility();
   if (faceDetectEnabled()) {
@@ -2473,6 +2450,30 @@ $('lbOverlay').addEventListener('change', (e) => {
   try {
     localStorage.setItem(LS_OVERLAY, e.target.checked ? '1' : '0');
   } catch (err) {}
+  lbBaseUpdate();
+});
+
+// split-wipe toggle — OFF by default; on activation the line starts at the
+// candidate image's left edge (candidate fully visible; drag right to
+// reveal the anchor)
+const LS_SPLIT = 'kosmozoo.split';
+function splitOn() { return localStorage.getItem(LS_SPLIT) === '1'; }
+
+// current view's left image edge on screen (rotation-agnostic)
+function lbImageLeftEdge() {
+  if (!lbImg.naturalWidth) return window.innerWidth / 2;
+  const box = lbBoxFor(lbImg.naturalWidth, lbImg.naturalHeight);
+  const sx = lbFlipH ? -1 : 1;
+  const Vx = window.innerWidth / 2;
+  const e0 = Vx + lbZoom * sx * ((0 - 0.5) * box.w + lbX);
+  const e1 = Vx + lbZoom * sx * ((1 - 0.5) * box.w + lbX);
+  return Math.min(e0, e1);
+}
+
+$('lbSplitT').addEventListener('change', (e) => {
+  const on = e.target.checked;
+  try { localStorage.setItem(LS_SPLIT, on ? '1' : '0'); } catch (err) {}
+  lbSplitX = on ? lbImageLeftEdge() : null;
   lbBaseUpdate();
 });
 
