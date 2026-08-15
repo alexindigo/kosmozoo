@@ -83,6 +83,11 @@
     box-shadow: 0 0 4px rgba(0,0,0,.8), inset 0 0 4px rgba(0,0,0,.4);
     pointer-events: none;
   }
+  #faceBox .eye {
+    position: absolute; width: 9px; height: 9px; border-radius: 50%;
+    background: var(--accent); border: 1px solid #000;
+    transform: translate(-50%, -50%);
+  }
 
   main {
     display: flex; gap: 16px; padding: 16px; align-items: start;
@@ -1279,6 +1284,23 @@ function updateFaceBoxOverlay() {
   el.style.top = (Vy + lbZoom * ((lbFaceBox.y - 0.5) * box.h + lbY)) + 'px';
   el.style.width = (lbZoom * lbFaceBox.w * box.w) + 'px';
   el.style.height = (lbZoom * lbFaceBox.h * box.h) + 'px';
+  // eye dots: the actual alignment basis, positioned relative to the box
+  if (!el._eyeDots) {
+    el._eyeDots = [0, 1].map(() => {
+      const d = document.createElement('span');
+      d.className = 'eye';
+      el.appendChild(d);
+      return d;
+    });
+  }
+  const showEyes = lbFaceBox.kps && lbFaceBox.kps.length >= 2;
+  el._eyeDots.forEach((d, i) => {
+    d.style.display = showEyes ? 'block' : 'none';
+    if (showEyes) {
+      d.style.left = ((lbFaceBox.kps[i][0] - lbFaceBox.x) / lbFaceBox.w * 100) + '%';
+      d.style.top = ((lbFaceBox.kps[i][1] - lbFaceBox.y) / lbFaceBox.h * 100) + '%';
+    }
+  });
 }
 
 // ---------- lightbox guides (fixed to viewport, survive navigation) ----------
@@ -1372,7 +1394,7 @@ for (const [stripId, axis] of [['guideStripTop', 'h'], ['guideStripLeft', 'v']])
 
 const LS_FACE = 'kosmozoo.faceDetect.enabled';
 const LS_ALIGN = 'kosmozoo.faceAlign';
-const LS_FACEBOXES = 'kosmozoo.faceBoxes.v1';  // { key: {x,y,w,h,nw,nh} | null }
+const LS_FACEBOXES = 'kosmozoo.faceBoxes.v2';  // { key: {x,y,w,h,kps,nw,nh} | null }
 
 let faceDetector = null;
 let faceLoadState = 'off';      // off | loading | ready | error
@@ -1429,7 +1451,9 @@ function persistFaceBoxes() {
   }, 300);
 }
 
-// entry: {src, key}. Returns {x,y,w,h (fractions), nw,nh (natural px)} or null.
+// entry: {src, key}. Returns {x,y,w,h (fractions), kps (keypoint
+// fractions), nw,nh (natural px)} or null. Keypoints: MediaPipe returns
+// them normalized [0,1] (boundingBox is absolute px) — handle both.
 async function detectFaceBox(entry) {
   if (entry.key in faceBoxCache) return faceBoxCache[entry.key];
   let box = null;
@@ -1446,6 +1470,10 @@ async function detectFaceBox(entry) {
           y: det.boundingBox.originY / img.naturalHeight,
           w: det.boundingBox.width / img.naturalWidth,
           h: det.boundingBox.height / img.naturalHeight,
+          kps: (det.keypoints || []).map(k =>
+            (k.x <= 1 && k.y <= 1)
+              ? [k.x, k.y]
+              : [k.x / img.naturalWidth, k.y / img.naturalHeight]),
           nw: img.naturalWidth, nh: img.naturalHeight,
         };
       }
@@ -1454,6 +1482,22 @@ async function detectFaceBox(entry) {
   faceBoxCache[entry.key] = box;
   persistFaceBoxes();
   return box;
+}
+
+// Anatomical alignment frame from eye keypoints (indices 0/1 are the two
+// eyes — symmetric, order irrelevant): midpoint + inter-eye distance in
+// height-fraction units. Falls back to box center + box height.
+function faceFrame(box) {
+  const ar = box.nw / box.nh;
+  if (box.kps && box.kps.length >= 2) {
+    const [rx, ry] = box.kps[0], [lx, ly] = box.kps[1];
+    return {
+      cx: (rx + lx) / 2,
+      cy: (ry + ly) / 2,
+      scale: Math.hypot((lx - rx) * ar, ly - ry),   // eye distance, height-frac
+    };
+  }
+  return { cx: box.x + box.w / 2, cy: box.y + box.h / 2, scale: box.h };
 }
 
 // Lightbox display box (untransformed layout size) for a natural size.
@@ -1482,16 +1526,18 @@ async function alignToAnchorFace() {
   const az = (aEntry.img && aEntry.img._zoomState) || { scale: 1, tx: 0, ty: 0 };
   const boxA = lbBoxFor(aBox.nw, aBox.nh);
   const boxC = lbBoxFor(cBox.nw, cBox.nh);
-  const fcA = { x: aBox.x + aBox.w / 2, y: aBox.y + aBox.h / 2 };
-  const fcC = { x: cBox.x + cBox.w / 2, y: cBox.y + cBox.h / 2 };
+  // anatomical frames: eye midpoint + inter-eye distance (not the raw
+  // detector box — its tightness varies per image, which isn't comparable)
+  const fA = faceFrame(aBox);
+  const fC = faceFrame(cBox);
 
-  // anchor face on screen: center V + s_a*((fcA-0.5)*boxA + t_a),
-  // height s_a * aBox.h * boxA.h — solve candidate view for the same rect
+  // anchor's displayed eye distance: s_a * scaleA * boxA.h — solve the
+  // candidate view so its eyes land at the same point with the same span
   lbZoom = Math.min(12, Math.max(0.2,
-    az.scale * aBox.h * boxA.h / (cBox.h * boxC.h)));
+    az.scale * fA.scale * boxA.h / (fC.scale * boxC.h)));
   const k = az.scale / lbZoom;
-  lbX = k * ((fcA.x - 0.5) * boxA.w + az.tx) - (fcC.x - 0.5) * boxC.w;
-  lbY = k * ((fcA.y - 0.5) * boxA.h + az.ty) - (fcC.y - 0.5) * boxC.h;
+  lbX = k * ((fA.cx - 0.5) * boxA.w + az.tx) - (fC.cx - 0.5) * boxC.w;
+  lbY = k * ((fA.cy - 0.5) * boxA.h + az.ty) - (fC.cy - 0.5) * boxC.h;
   lbApply();
 }
 
