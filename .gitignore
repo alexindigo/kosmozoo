@@ -3,3 +3,4 @@ __pycache__/
 vendor/
 .venv/
 faceboxes_cache.json
+feedback.json

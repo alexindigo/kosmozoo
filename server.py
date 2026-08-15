@@ -32,7 +32,8 @@ BIND = "127.0.0.1"
 PORT = 8765
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-COMMENTS_PATH = os.path.join(BASE_DIR, "feedback.json")
+# feedback.json is canonical curation data and lives OUTSIDE the repo
+COMMENTS_PATH = os.path.expanduser("~/Documents/kosmozoo/feedback.json")
 INDEX_HTML = os.path.join(BASE_DIR, "index.html")
 DOWNLOADS_DIR = os.path.expanduser("~/Downloads")
 VENDOR_DIR = os.path.join(BASE_DIR, "vendor")
