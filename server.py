@@ -32,8 +32,18 @@ BIND = "127.0.0.1"
 PORT = 8765
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-# feedback.json is canonical curation data and lives OUTSIDE the repo
-COMMENTS_PATH = os.path.expanduser("~/Documents/kosmozoo/feedback.json")
+# feedback.json is canonical curation data and lives OUTSIDE the repo.
+# The path is configurable (☰ menu); persisted in config.json (gitignored).
+DEFAULT_COMMENTS_PATH = os.path.expanduser(
+    "~/Documents/kosmozoo/feedback.json")
+CONFIG_PATH = os.path.join(BASE_DIR, "config.json")
+COMMENTS_PATH = DEFAULT_COMMENTS_PATH
+try:
+    with open(CONFIG_PATH, encoding="utf-8") as _f:
+        COMMENTS_PATH = json.load(_f).get("feedbackPath",
+                                          DEFAULT_COMMENTS_PATH)
+except (FileNotFoundError, json.JSONDecodeError):
+    pass
 INDEX_HTML = os.path.join(BASE_DIR, "index.html")
 DOWNLOADS_DIR = os.path.expanduser("~/Downloads")
 VENDOR_DIR = os.path.join(BASE_DIR, "vendor")
@@ -101,7 +111,10 @@ def upsert_comment(key, fields):
             data.pop(key, None)
         else:
             data[key] = entry
-        fd, tmp = tempfile.mkstemp(dir=BASE_DIR, suffix=".tmp")
+        # temp file must live next to the target (os.replace can't cross
+        # filesystems — the configured path may be on another mount)
+        fd, tmp = tempfile.mkstemp(dir=os.path.dirname(COMMENTS_PATH),
+                                   suffix=".tmp")
         try:
             with os.fdopen(fd, "w", encoding="utf-8") as f:
                 json.dump(data, f, indent=2, ensure_ascii=False)
@@ -284,6 +297,8 @@ class Handler(BaseHTTPRequestHandler):
                            extra_headers={"Cache-Control": "no-store"})
             elif path == "/api/feedback":
                 self._handle_feedback_download()
+            elif path == "/api/config":
+                self._send_json(200, {"feedbackPath": COMMENTS_PATH})
             elif path == "/api/facebox-warmup":
                 self._handle_facebox_warmup()
             elif path == "/api/facebox":
@@ -306,6 +321,8 @@ class Handler(BaseHTTPRequestHandler):
                 self._handle_post_comment()
             elif parsed.path == "/api/facebox-bytes":
                 self._handle_facebox_bytes()
+            elif parsed.path == "/api/config":
+                self._handle_post_config()
             else:
                 self._send_error_json(404, f"unknown endpoint: {parsed.path}")
         except BrokenPipeError:
@@ -482,6 +499,33 @@ class Handler(BaseHTTPRequestHandler):
         image_bytes = self.rfile.read(length)
         box = facebox_for_bytes(f"anchor:{name}", image_bytes)
         self._send_json(200, {"box": box})
+
+    def _handle_post_config(self):
+        global COMMENTS_PATH
+        try:
+            length = int(self.headers.get("Content-Length") or 0)
+            payload = json.loads(self.rfile.read(length))
+        except (ValueError, json.JSONDecodeError):
+            self._send_error_json(400, "invalid JSON")
+            return
+        path = payload.get("feedbackPath")
+        if not isinstance(path, str) or not path.strip():
+            self._send_error_json(400, "expected {feedbackPath} string")
+            return
+        path = os.path.expanduser(path.strip())
+        if not path.startswith("/"):
+            self._send_error_json(400, "must be an absolute path")
+            return
+        if not os.path.isdir(os.path.dirname(path) or "/"):
+            self._send_error_json(400, "parent directory doesn't exist")
+            return
+        COMMENTS_PATH = path
+        fd, tmp = tempfile.mkstemp(dir=BASE_DIR, suffix=".tmp")
+        with os.fdopen(fd, "w", encoding="utf-8") as f:
+            json.dump({"feedbackPath": path}, f, indent=2)
+            f.write("\n")
+        os.replace(tmp, CONFIG_PATH)
+        self._send_json(200, {"ok": True, "feedbackPath": COMMENTS_PATH})
 
     def _handle_post_comment(self):
         try:

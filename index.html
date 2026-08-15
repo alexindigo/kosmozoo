@@ -67,6 +67,18 @@
     font-size: 12px; color: var(--dim);
   }
   #faceModelWrap select { font-size: 12px; padding: 3px 6px; }
+  #fbPathWrap {
+    display: flex; flex-direction: column; gap: 5px;
+    font-size: 11px; color: var(--dim);
+  }
+  #fbPathWrap .fbrow { display: flex; gap: 6px; }
+  #fbPathWrap input {
+    flex: 1; min-width: 0; background: var(--bg); color: var(--fg);
+    border: 1px solid var(--border); border-radius: 6px;
+    padding: 5px 7px; font: 11px ui-monospace, monospace;
+  }
+  #fbPathWrap input:focus { outline: none; border-color: var(--accent); }
+  #fbPathWrap button { font-size: 11px; padding: 4px 8px; }
 
   /* lightbox facebox-align toggle + guides toggle */
   #lbAlignWrap {
@@ -318,6 +330,13 @@
         </select>
       </label>
       <div id="menuStatus"></div>
+      <div id="fbPathWrap">
+        <span>feedback.json path</span>
+        <div class="fbrow">
+          <input type="text" id="fbPath" spellcheck="false">
+          <button id="fbPathApply">apply</button>
+        </div>
+      </div>
     </div>
   </div>
 </header>
@@ -2072,8 +2091,32 @@ $('refreshBtn').addEventListener('click', refresh);
 
 // ---------- header menu + face-detection toggles ----------
 
-$('menuBtn').addEventListener('click', () => {
-  $('menu').hidden = !$('menu').hidden;
+$('menuBtn').addEventListener('click', async () => {
+  const menu = $('menu');
+  menu.hidden = !menu.hidden;
+  if (!menu.hidden) {
+    try {
+      const cfg = await api('/api/config');
+      $('fbPath').value = cfg.feedbackPath;
+    } catch (err) { /* leave stale */ }
+  }
+});
+
+$('fbPathApply').addEventListener('click', async () => {
+  const path = $('fbPath').value;
+  try {
+    const r = await fetch('/api/config', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ feedbackPath: path }),
+    });
+    const d = await r.json();
+    if (!r.ok) throw new Error(d.error || r.status);
+    $('fbPath').value = d.feedbackPath;
+    setStatus(`feedback path → ${d.feedbackPath}`);
+    comments = await api('/api/comments');   // re-read from the new file
+  } catch (err) {
+    setStatus(`feedback path failed: ${err.message}`, true);
+  }
 });
 document.addEventListener('click', (e) => {
   if (!$('menuWrap').contains(e.target)) $('menu').hidden = true;

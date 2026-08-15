@@ -4,3 +4,4 @@ vendor/
 .venv/
 faceboxes_cache.json
 feedback.json
+config.json
