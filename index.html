@@ -1064,6 +1064,21 @@ let lbSourceImg = null;
 let lbColumn = 'cand';   // 'cand' | 'anchor'
 let lbIndex = 0;
 const lbPos = { cand: 0, anchor: 0 };   // each column remembers its position
+let lbLoadGen = 0;       // invalidates in-flight preloads on switch/close
+
+// Preload the target image, THEN swap lbImg.src — the previous image stays
+// visible while the new one downloads (no black flash). Last call wins.
+function lbShowEntry(entry, place) {
+  const gen = ++lbLoadGen;
+  const pre = new Image();
+  pre.onload = () => {
+    if (gen !== lbLoadGen) return;
+    lbImg.src = entry.src;
+    place();
+  };
+  pre.onerror = () => {};   // keep showing the previous image on failure
+  pre.src = entry.src;
+}
 
 function lbList(col) {
   return col === 'cand'
@@ -1204,18 +1219,21 @@ function lbSwitch(dCol, dRow) {
   lbPos[col] = idx;
   const entry = lbList(col)[idx];
   lbSourceImg = entry.img;
-  lbImg.src = entry.src;
   if (faceAlignOn() && col === 'cand' && faceLoadState === 'ready') {
-    lbPlaceCarry(null, entry.src);   // alignment overrides recalled zoom
-    alignToAnchorFace();
+    lbShowEntry(entry, () => {
+      lbPlaceCarry(null, entry.src);   // alignment overrides recalled zoom
+      alignToAnchorFace();
+    });
   } else {
-    lbPlaceCarry(carryZoom(entry.img), entry.src);   // recall its own zoom
+    lbShowEntry(entry, () =>
+      lbPlaceCarry(carryZoom(entry.img), entry.src));  // recall its own zoom
   }
   lbBaseUpdate();
   refreshFaceBox();
 }
 
 function openLightbox(src, carry = null, sourceImg = null) {
+  lbLoadGen++;   // invalidate any in-flight switch preload
   lbSourceImg = sourceImg;
   if (sourceImg) lbLocate(sourceImg);
   lbImg.src = src;
@@ -1236,6 +1254,7 @@ function openLightbox(src, carry = null, sourceImg = null) {
 }
 
 function closeLightbox() {
+  lbLoadGen++;   // a late preload must not resurrect the closed lightbox
   lbWriteBack();
   lbSourceImg = null;
   lightbox.classList.remove('open');
