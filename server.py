@@ -181,6 +181,8 @@ class Handler(BaseHTTPRequestHandler):
             elif path == "/api/comments":
                 self._send(200, json.dumps(read_comments(), ensure_ascii=False),
                            extra_headers={"Cache-Control": "no-store"})
+            elif path == "/api/feedback":
+                self._handle_feedback_download()
             elif path == "/api/downloads":
                 self._handle_downloads()
             elif path.startswith("/vendor/"):
@@ -288,6 +290,18 @@ class Handler(BaseHTTPRequestHandler):
                     self.wfile.write(chunk)
         except urllib.error.HTTPError as exc:
             self._send_error_json(exc.code, f"upstream: {exc.reason}")
+
+    def _handle_feedback_download(self):
+        # the exact canonical file, byte-for-byte, as a download
+        try:
+            with open(COMMENTS_PATH, "rb") as f:
+                body = f.read()
+        except FileNotFoundError:
+            body = b"{}\n"
+        self._send(200, body, "application/json", {
+            "Content-Disposition": 'attachment; filename="feedback.json"',
+            "Cache-Control": "no-store",
+        })
 
     def _handle_downloads(self):
         try:

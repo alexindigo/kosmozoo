@@ -22,14 +22,15 @@
     position: sticky; top: 0; z-index: 10;
   }
   header h1 { font-size: 16px; margin: 0 12px 0 0; }
-  select, button {
+  select, button, a.btn {
     background: var(--card); color: var(--fg); border: 1px solid var(--border);
     border-radius: 6px; padding: 6px 10px; font: inherit; cursor: pointer;
   }
+  a.btn { text-decoration: none; display: inline-block; }
   button:hover { border-color: var(--accent); }
   #status { color: var(--dim); font-size: 12px; }
-  #copyBtn { margin-left: auto; }
   #unhideBtn { color: var(--dim); }   /* grey thumbs-down */
+  #dlFeedback { margin-left: auto; }
 
   /* slide toggle switch */
   .switchwrap {
@@ -278,8 +279,8 @@
   <button id="refreshBtn">Refresh</button>
   <span id="status"></span>
   <button id="unhideBtn" title="unhide all thumbs-down images">Unhide <svg viewBox="0 0 24 24" width="12" height="12" style="vertical-align:-1px"><path fill="currentColor" d="M15 3H6c-.83 0-1.54.5-1.84 1.22l-3.02 7.05c-.09.23-.14.47-.14.73v2c0 1.1.9 2 2 2h6.31l-.95 4.57-.03.32c0 .41.17.79.44 1.06L9.83 23l6.59-6.59c.36-.36.58-.86.58-1.41V5c0-1.1-.9-2-2-2zm4 0v12h4V3h-4z"/></svg></button>
-  <button id="copyBtn">Copy all comments</button>
-  <button id="dlBtn">Download notes</button>
+  <a id="dlFeedback" class="btn" href="/api/feedback" download="feedback.json"
+     title="download the exact feedback.json as stored on the server">Download feedback</a>
   <div id="menuWrap">
     <button id="menuBtn" title="options">☰</button>
     <div id="menu" hidden>
@@ -1493,48 +1494,6 @@ async function alignToAnchorFace() {
   lbY = k * ((fcA.y - 0.5) * boxA.h + az.ty) - (fcC.y - 0.5) * boxC.h;
   lbApply();
 }
-
-// ---------- copy / download notes ----------
-
-function formatComments(all) {
-  return Object.keys(all).sort().map(k => {
-    const p = commentParts(all[k]);
-    const lines = [k];
-    if (p.neg.trim()) lines.push(`  - ${p.neg}`);
-    if (p.pos.trim()) lines.push(`  + ${p.pos}`);
-    return lines.join('\n');
-  }).join('\n\n');
-}
-
-$('copyBtn').addEventListener('click', async () => {
-  try {
-    const all = await api('/api/comments');
-    const keys = Object.keys(all);
-    if (!keys.length) { setStatus('no comments to copy'); return; }
-    await navigator.clipboard.writeText(formatComments(all));
-    setStatus(`copied ${keys.length} comment(s)`);
-  } catch (err) {
-    setStatus(`copy failed: ${err.message}`, true);
-  }
-});
-
-$('dlBtn').addEventListener('click', async () => {
-  try {
-    const all = await api('/api/comments');
-    const keys = Object.keys(all);
-    if (!keys.length) { setStatus('no comments to download'); return; }
-    const blob = new Blob([formatComments(all)],
-                          { type: 'text/plain;charset=utf-8' });
-    const a = document.createElement('a');
-    a.href = URL.createObjectURL(blob);
-    a.download = 'review-notes.txt';
-    a.click();
-    URL.revokeObjectURL(a.href);
-    setStatus(`downloaded ${keys.length} comment(s)`);
-  } catch (err) {
-    setStatus(`download failed: ${err.message}`, true);
-  }
-});
 
 // ---------- divider drag (anchors pane width) ----------
 
