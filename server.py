@@ -301,8 +301,6 @@ class Handler(BaseHTTPRequestHandler):
                 self._send_json(200, {"feedbackPath": COMMENTS_PATH})
             elif path == "/api/facebox-warmup":
                 self._handle_facebox_warmup()
-            elif path == "/api/facebox":
-                self._handle_facebox(qs)
             elif path == "/api/downloads":
                 self._handle_downloads()
             elif path.startswith("/vendor/"):
@@ -491,26 +489,6 @@ class Handler(BaseHTTPRequestHandler):
                 _face_worker_start()
         self._send_json(200, {"ready": True})
 
-    def _handle_facebox(self, qs):
-        base = self._require_host(qs)
-        if not base:
-            return
-        filename = qs.get("file", [None])[0]
-        if not filename or not re.fullmatch(r"[\w.\-/ ]+", filename):
-            self._send_error_json(400, "bad filename")
-            return
-        key = f"{qs['host'][0]}:{filename}"
-        cache = _facebox_cache_load()
-        if key in cache:
-            self._send_json(200, {"box": cache[key]})
-            return
-        url = (f"{base}/api/view?type=output&filename="
-               + urllib.parse.quote(filename))
-        req = urllib.request.Request(url, headers=UA)
-        with urllib.request.urlopen(req, timeout=IMAGE_TIMEOUT) as resp:
-            image_bytes = resp.read()
-        self._send_json(200, {"box": facebox_for_bytes(key, image_bytes)})
-
     def _handle_facebox_bytes(self):
         try:
             length = int(self.headers.get("Content-Length") or 0)
@@ -519,13 +497,15 @@ class Handler(BaseHTTPRequestHandler):
         if length <= 0 or length > 40_000_000:
             self._send_error_json(400, "bad body size")
             return
-        name = urllib.parse.parse_qs(
-            urllib.parse.urlparse(self.path).query).get("name", [""])[0]
-        if not name:
-            self._send_error_json(400, "missing name")
+        # key is the cache identity: "host:file" (candidates) or
+        # "anchor:<name>" (anchors) — the client owns namespacing
+        key = urllib.parse.parse_qs(
+            urllib.parse.urlparse(self.path).query).get("key", [""])[0]
+        if not key or not re.fullmatch(r"[\w.\-: /]+", key):
+            self._send_error_json(400, "bad key")
             return
         image_bytes = self.rfile.read(length)
-        box = facebox_for_bytes(f"anchor:{name}", image_bytes)
+        box = facebox_for_bytes(key, image_bytes)
         self._send_json(200, {"box": box})
 
     def _handle_post_config(self):

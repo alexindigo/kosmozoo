@@ -1648,20 +1648,16 @@ async function detectFaceBox(entry) {
   return box;
 }
 
-// anime-face-detector via the local server worker (28 landmarks).
+// anime-face-detector via the local server worker (28 landmarks). The
+// image bytes always come from the BROWSER (its HTTP cache — the image was
+// already downloaded for display), so detection never touches the ComfyUI
+// host and can't stall when it's busy generating.
 async function detectFaceBoxServer(entry) {
   try {
-    let resp;
-    if (entry.key.startsWith('anchor:')) {
-      const blob = await (await fetch(entry.src)).blob();
-      resp = await fetch(
-        `/api/facebox-bytes?name=${encodeURIComponent(entry.key.slice(7))}`,
-        { method: 'POST', body: blob });
-    } else {
-      const [host, ...rest] = entry.key.split(':');
-      resp = await fetch(`/api/facebox?host=${encodeURIComponent(host)}` +
-                         `&file=${encodeURIComponent(rest.join(':'))}`);
-    }
+    const blob = await (await fetch(entry.src)).blob();   // browser cache
+    const resp = await fetch(
+      `/api/facebox-bytes?key=${encodeURIComponent(entry.key)}`,
+      { method: 'POST', body: blob });
     if (!resp.ok) return null;          // transient server/proxy error
     const data = await resp.json();
     return data.box || null;            // null here = genuine "no face found"
