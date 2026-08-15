@@ -61,6 +61,11 @@
   #menu[hidden] { display: none; }  /* author display:flex would otherwise
                                        override the hidden attribute */
   #menuStatus { font-size: 11px; color: var(--dim); }
+  #faceModelWrap {
+    display: flex; justify-content: space-between; align-items: center;
+    font-size: 12px; color: var(--dim);
+  }
+  #faceModelWrap select { font-size: 12px; padding: 3px 6px; }
 
   /* lightbox facebox-align toggle + guides toggle */
   #lbAlignWrap {
@@ -290,6 +295,12 @@
     <button id="menuBtn" title="options">☰</button>
     <div id="menu" hidden>
       <label class="switchwrap"><input type="checkbox" id="faceDetectToggle"><span class="track"></span>face detection</label>
+      <label id="faceModelWrap">model
+        <select id="faceModel">
+          <option value="anime">anime (local)</option>
+          <option value="mp">mediapipe</option>
+        </select>
+      </label>
       <div id="menuStatus"></div>
     </div>
   </div>
@@ -1284,7 +1295,7 @@ function updateFaceBoxOverlay() {
   el.style.top = (Vy + lbZoom * ((lbFaceBox.y - 0.5) * box.h + lbY)) + 'px';
   el.style.width = (lbZoom * lbFaceBox.w * box.w) + 'px';
   el.style.height = (lbZoom * lbFaceBox.h * box.h) + 'px';
-  // eye dots: the actual alignment basis, positioned relative to the box
+  // eye dots at the computed eye centers (the actual alignment basis)
   if (!el._eyeDots) {
     el._eyeDots = [0, 1].map(() => {
       const d = document.createElement('span');
@@ -1293,12 +1304,12 @@ function updateFaceBoxOverlay() {
       return d;
     });
   }
-  const showEyes = lbFaceBox.kps && lbFaceBox.kps.length >= 2;
+  const eyes = faceFrame(lbFaceBox).eyes;
   el._eyeDots.forEach((d, i) => {
-    d.style.display = showEyes ? 'block' : 'none';
-    if (showEyes) {
-      d.style.left = ((lbFaceBox.kps[i][0] - lbFaceBox.x) / lbFaceBox.w * 100) + '%';
-      d.style.top = ((lbFaceBox.kps[i][1] - lbFaceBox.y) / lbFaceBox.h * 100) + '%';
+    d.style.display = eyes ? 'block' : 'none';
+    if (eyes) {
+      d.style.left = ((eyes[i][0] - lbFaceBox.x) / lbFaceBox.w * 100) + '%';
+      d.style.top = ((eyes[i][1] - lbFaceBox.y) / lbFaceBox.h * 100) + '%';
     }
   });
 }
@@ -1394,13 +1405,17 @@ for (const [stripId, axis] of [['guideStripTop', 'h'], ['guideStripLeft', 'v']])
 
 const LS_FACE = 'kosmozoo.faceDetect.enabled';
 const LS_ALIGN = 'kosmozoo.faceAlign';
-const LS_FACEBOXES = 'kosmozoo.faceBoxes.v2';  // { key: {x,y,w,h,kps,nw,nh} | null }
+const LS_FACEBOXES = 'kosmozoo.faceBoxes.v3';  // { "model:key": box|null }
+const LS_FACEMODEL = 'kosmozoo.faceDetect.model';  // 'anime' (default) | 'mp'
+localStorage.removeItem('kosmozoo.faceBoxes.v1');  // superseded schemas
+localStorage.removeItem('kosmozoo.faceBoxes.v2');
 
-let faceDetector = null;
+let faceDetector = null;   // mp FaceDetector instance, or 'anime' marker
 let faceLoadState = 'off';      // off | loading | ready | error
 
 function faceDetectEnabled() { return localStorage.getItem(LS_FACE) === '1'; }
 function faceAlignOn() { return localStorage.getItem(LS_ALIGN) === '1'; }
+function faceModel() { return localStorage.getItem(LS_FACEMODEL) || 'anime'; }
 
 function faceStatus(msg) { $('menuStatus').textContent = msg; }
 
@@ -1416,16 +1431,28 @@ function importFaceLib() {          // seam for tests
 async function enableFaceDetection() {
   if (faceLoadState === 'loading' || faceLoadState === 'ready') return;
   faceLoadState = 'loading';
-  faceStatus('loading face detector…');
+  const model = faceModel();
+  faceStatus(model === 'anime'
+    ? 'starting local detector…' : 'loading face detector…');
   try {
-    const mp = await importFaceLib();
-    const vision = await mp.FilesetResolver.forVisionTasks('/vendor/wasm');
-    faceDetector = await mp.FaceDetector.createFromOptions(vision, {
-      baseOptions: {
-        modelAssetPath: '/vendor/blaze_face_short_range.tflite',
-      },
-      runningMode: 'IMAGE',
-    });
+    if (model === 'anime') {
+      // server-side worker (anime-face-detector, torch CPU); blocks until ready
+      const resp = await fetch('/api/facebox-warmup');
+      if (!resp.ok) {
+        const d = await resp.json().catch(() => ({}));
+        throw new Error(d.error || resp.status);
+      }
+      faceDetector = 'anime';
+    } else {
+      const mp = await importFaceLib();
+      const vision = await mp.FilesetResolver.forVisionTasks('/vendor/wasm');
+      faceDetector = await mp.FaceDetector.createFromOptions(vision, {
+        baseOptions: {
+          modelAssetPath: '/vendor/blaze_face_short_range.tflite',
+        },
+        runningMode: 'IMAGE',
+      });
+    }
     faceLoadState = 'ready';
     faceStatus('ready');
     if (lightbox.classList.contains('open')) refreshFaceBox();
@@ -1451,11 +1478,42 @@ function persistFaceBoxes() {
   }, 300);
 }
 
-// entry: {src, key}. Returns {x,y,w,h (fractions), kps (keypoint
-// fractions), nw,nh (natural px)} or null. Keypoints: MediaPipe returns
-// them normalized [0,1] (boundingBox is absolute px) — handle both.
+// entry: {src, key}. Dispatches by selected model; cache keys are
+// model-namespaced ("anime:host:file" / "mp:host:file").
 async function detectFaceBox(entry) {
-  if (entry.key in faceBoxCache) return faceBoxCache[entry.key];
+  const key = `${faceModel()}:${entry.key}`;
+  if (key in faceBoxCache) return faceBoxCache[key];
+  const box = faceModel() === 'anime'
+    ? await detectFaceBoxServer(entry)
+    : await detectFaceBoxMp(entry);
+  faceBoxCache[key] = box;
+  persistFaceBoxes();
+  return box;
+}
+
+// anime-face-detector via the local server worker (28 landmarks).
+async function detectFaceBoxServer(entry) {
+  try {
+    let resp;
+    if (entry.key.startsWith('anchor:')) {
+      const blob = await (await fetch(entry.src)).blob();
+      resp = await fetch(
+        `/api/facebox-bytes?name=${encodeURIComponent(entry.key.slice(7))}`,
+        { method: 'POST', body: blob });
+    } else {
+      const [host, ...rest] = entry.key.split(':');
+      resp = await fetch(`/api/facebox?host=${encodeURIComponent(host)}` +
+                         `&file=${encodeURIComponent(rest.join(':'))}`);
+    }
+    const data = await resp.json();
+    return data.box || null;
+  } catch (e) {
+    return null;
+  }
+}
+
+// MediaPipe BlazeFace, client-side (6 keypoints). entry: {src, key}.
+async function detectFaceBoxMp(entry) {
   let box = null;
   try {
     const img = new Image();
@@ -1479,25 +1537,37 @@ async function detectFaceBox(entry) {
       }
     }
   } catch (e) { /* treated as "no face" */ }
-  faceBoxCache[entry.key] = box;
-  persistFaceBoxes();
   return box;
 }
 
-// Anatomical alignment frame from eye keypoints (indices 0/1 are the two
-// eyes — symmetric, order irrelevant): midpoint + inter-eye distance in
-// height-fraction units. Falls back to box center + box height.
+// Anatomical alignment frame: eye midpoint + inter-eye distance in
+// height-fraction units. Anime layout (28 pts): eyes are 11-16 and 17-22
+// (lid points; center = their mean). BlazeFace (6 pts): 0/1 are the eyes.
+// Falls back to box center + box height when no keypoints exist.
 function faceFrame(box) {
   const ar = box.nw / box.nh;
+  if (box.kps && box.kps.length >= 28) {
+    const eyeC = (from, to) => {
+      let x = 0, y = 0;
+      for (let i = from; i <= to; i++) {
+        x += box.kps[i][0];
+        y += box.kps[i][1];
+      }
+      return [x / (to - from + 1), y / (to - from + 1)];
+    };
+    const [lx, ly] = eyeC(11, 16), [rx, ry] = eyeC(17, 22);
+    return { cx: (lx + rx) / 2, cy: (ly + ry) / 2,
+             scale: Math.hypot((lx - rx) * ar, ly - ry),
+             eyes: [[lx, ly], [rx, ry]] };
+  }
   if (box.kps && box.kps.length >= 2) {
     const [rx, ry] = box.kps[0], [lx, ly] = box.kps[1];
-    return {
-      cx: (rx + lx) / 2,
-      cy: (ry + ly) / 2,
-      scale: Math.hypot((lx - rx) * ar, ly - ry),   // eye distance, height-frac
-    };
+    return { cx: (rx + lx) / 2, cy: (ry + ly) / 2,
+             scale: Math.hypot((lx - rx) * ar, ly - ry),
+             eyes: [[lx, ly], [rx, ry]] };
   }
-  return { cx: box.x + box.w / 2, cy: box.y + box.h / 2, scale: box.h };
+  return { cx: box.x + box.w / 2, cy: box.y + box.h / 2,
+           scale: box.h, eyes: null };
 }
 
 // Lightbox display box (untransformed layout size) for a natural size.
@@ -1857,6 +1927,7 @@ async function init() {
   // face detection: restore toggles, load in the background if enabled
   $('lbAlign').checked = faceAlignOn();
   $('lbGuides').checked = guidesVisible();
+  $('faceModel').value = faceModel();
   applyGuidesVisibility();
   if (faceDetectEnabled()) {
     $('faceDetectToggle').checked = true;
@@ -1886,6 +1957,15 @@ $('faceDetectToggle').addEventListener('change', async (e) => {
   const on = e.target.checked;
   try { localStorage.setItem(LS_FACE, on ? '1' : '0'); } catch (err) {}
   if (on) await enableFaceDetection();
+  updateAlignToggleVisibility();
+});
+
+$('faceModel').addEventListener('change', (e) => {
+  try { localStorage.setItem(LS_FACEMODEL, e.target.value); } catch (err) {}
+  faceDetector = null;                 // model switched: reload on demand
+  if (faceLoadState !== 'off') faceLoadState = 'off';
+  faceStatus('off');
+  if (faceDetectEnabled()) enableFaceDetection();
   updateAlignToggleVisibility();
 });
 

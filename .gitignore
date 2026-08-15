@@ -1,3 +1,5 @@
 server.log
 __pycache__/
 vendor/
+.venv/
+faceboxes_cache.json

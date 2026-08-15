@@ -7,9 +7,12 @@ hosts so the page never hits CORS. Binds 127.0.0.1:8765 (no auth).
 Usage: python3 review_server.py
 """
 
+import base64
+import itertools
 import json
 import os
 import re
+import subprocess
 import tempfile
 import threading
 import urllib.error
@@ -40,6 +43,11 @@ VENDOR_MIME = {
     ".tflite": "application/octet-stream",
     ".json": "application/json",
 }
+
+# local anime face detection (detect_worker.py in the project venv)
+FACEWORKER_PY = os.path.join(BASE_DIR, ".venv", "bin", "python")
+DETECT_WORKER = os.path.join(BASE_DIR, "detect_worker.py")
+FACEBOX_CACHE_PATH = os.path.join(BASE_DIR, "faceboxes_cache.json")
 
 STATUS_TIMEOUT = 8    # seconds, /api/hosts reachability probe
                       # (ComfyUI stalls its API while generating)
@@ -130,6 +138,98 @@ def probe_host(addr):
         return False
 
 
+# --- face-detection worker --------------------------------------------------
+
+_face_worker = None
+_face_worker_lock = threading.Lock()   # worker protocol is strictly serial
+_face_req_ids = itertools.count(1)
+_facebox_cache = None
+_facebox_cache_lock = threading.RLock()   # put() re-enters via _load()
+
+
+def _face_worker_start():
+    global _face_worker
+    if not os.path.exists(FACEWORKER_PY):
+        raise RuntimeError(
+            "face detection not set up; run ./setup_facedetect.sh")
+    proc = subprocess.Popen(
+        [FACEWORKER_PY, DETECT_WORKER],
+        stdin=subprocess.PIPE, stdout=subprocess.PIPE,
+        stderr=subprocess.DEVNULL, cwd=BASE_DIR, text=True, bufsize=1)
+    # blocks until models are loaded (first-ever run downloads weights)
+    line = proc.stdout.readline()
+    if not line:
+        raise RuntimeError("face worker died during model load")
+    if not json.loads(line).get("ready"):
+        raise RuntimeError(f"face worker not ready: {line.strip()}")
+    _face_worker = proc
+
+
+def face_detect(image_bytes):
+    """Run one detection through the persistent worker (serial)."""
+    global _face_worker
+    with _face_worker_lock:
+        if _face_worker is None or _face_worker.poll() is not None:
+            _face_worker = None
+            _face_worker_start()
+        req_id = next(_face_req_ids)
+        _face_worker.stdin.write(json.dumps(
+            {"id": req_id, "b64": base64.b64encode(image_bytes).decode()})
+            + "\n")
+        _face_worker.stdin.flush()
+        res = json.loads(_face_worker.stdout.readline())
+        if res.get("id") != req_id:
+            raise RuntimeError("face worker protocol desync")
+        if "error" in res:
+            raise RuntimeError(res["error"])
+        return res
+
+
+def _facebox_cache_load():
+    global _facebox_cache
+    with _facebox_cache_lock:
+        if _facebox_cache is None:
+            try:
+                with open(FACEBOX_CACHE_PATH, encoding="utf-8") as f:
+                    _facebox_cache = json.load(f)
+            except (FileNotFoundError, json.JSONDecodeError):
+                _facebox_cache = {}
+        return _facebox_cache
+
+
+def _facebox_cache_put(key, value):
+    with _facebox_cache_lock:
+        cache = _facebox_cache_load()
+        cache[key] = value
+        fd, tmp = tempfile.mkstemp(dir=BASE_DIR, suffix=".tmp")
+        with os.fdopen(fd, "w", encoding="utf-8") as f:
+            json.dump(cache, f)
+        os.replace(tmp, FACEBOX_CACHE_PATH)
+
+
+def _worker_result_to_box(res):
+    faces = res.get("faces") or []
+    if not faces:
+        return None
+    f = max(faces, key=lambda x: x.get("score") or 0)
+    w, h = res["w"], res["h"]
+    x0, y0, x1, y1 = f["bbox"]
+    return {
+        "x": x0 / w, "y": y0 / h, "w": (x1 - x0) / w, "h": (y1 - y0) / h,
+        "kps": [[x / w, y / h] for x, y, _s in f["kps"]],
+        "nw": w, "nh": h, "m": "anime",
+    }
+
+
+def facebox_for_bytes(key, image_bytes):
+    cached = _facebox_cache_load()
+    if key in cached:
+        return cached[key]
+    box = _worker_result_to_box(face_detect(image_bytes))
+    _facebox_cache_put(key, box)
+    return box
+
+
 # --- HTTP handler -----------------------------------------------------------
 
 class Handler(BaseHTTPRequestHandler):
@@ -183,6 +283,10 @@ class Handler(BaseHTTPRequestHandler):
                            extra_headers={"Cache-Control": "no-store"})
             elif path == "/api/feedback":
                 self._handle_feedback_download()
+            elif path == "/api/facebox-warmup":
+                self._handle_facebox_warmup()
+            elif path == "/api/facebox":
+                self._handle_facebox(qs)
             elif path == "/api/downloads":
                 self._handle_downloads()
             elif path.startswith("/vendor/"):
@@ -199,6 +303,8 @@ class Handler(BaseHTTPRequestHandler):
         try:
             if parsed.path == "/api/comments":
                 self._handle_post_comment()
+            elif parsed.path == "/api/facebox-bytes":
+                self._handle_facebox_bytes()
             else:
                 self._send_error_json(404, f"unknown endpoint: {parsed.path}")
         except BrokenPipeError:
@@ -329,6 +435,52 @@ class Handler(BaseHTTPRequestHandler):
             return
         self._send(200, body, ctype,
                    {"Cache-Control": "max-age=86400"})  # pinned assets
+
+    def _handle_facebox_warmup(self):
+        global _face_worker
+        # blocks until the worker has models loaded (first run downloads)
+        with _face_worker_lock:
+            if _face_worker is None or _face_worker.poll() is not None:
+                _face_worker = None
+                _face_worker_start()
+        self._send_json(200, {"ready": True})
+
+    def _handle_facebox(self, qs):
+        base = self._require_host(qs)
+        if not base:
+            return
+        filename = qs.get("file", [None])[0]
+        if not filename or not re.fullmatch(r"[\w.\-/ ]+", filename):
+            self._send_error_json(400, "bad filename")
+            return
+        key = f"{qs['host'][0]}:{filename}"
+        cache = _facebox_cache_load()
+        if key in cache:
+            self._send_json(200, {"box": cache[key]})
+            return
+        url = (f"{base}/api/view?type=output&filename="
+               + urllib.parse.quote(filename))
+        req = urllib.request.Request(url, headers=UA)
+        with urllib.request.urlopen(req, timeout=IMAGE_TIMEOUT) as resp:
+            image_bytes = resp.read()
+        self._send_json(200, {"box": facebox_for_bytes(key, image_bytes)})
+
+    def _handle_facebox_bytes(self):
+        try:
+            length = int(self.headers.get("Content-Length") or 0)
+        except ValueError:
+            length = 0
+        if length <= 0 or length > 40_000_000:
+            self._send_error_json(400, "bad body size")
+            return
+        name = urllib.parse.parse_qs(
+            urllib.parse.urlparse(self.path).query).get("name", [""])[0]
+        if not name:
+            self._send_error_json(400, "missing name")
+            return
+        image_bytes = self.rfile.read(length)
+        box = facebox_for_bytes(f"anchor:{name}", image_bytes)
+        self._send_json(200, {"box": box})
 
     def _handle_post_comment(self):
         try:
