@@ -37,8 +37,7 @@ BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 # feedback.json is canonical curation data and lives OUTSIDE the repo.
 # The path is configurable (☰ menu); persisted in config.json (gitignored).
 DEFAULT_COMMENTS_PATH = os.path.expanduser(
-    os.environ.get("KOZMOZOO_FEEDBACK",
-                   "~/Documents/kosmozoo/feedback.json"))
+    os.environ.get("KOZMOZOO_FEEDBACK", "~/Documents/kosmozoo_feedback.json"))
 CONFIG_PATH = os.path.join(BASE_DIR, "config.json")
 COMMENTS_PATH = DEFAULT_COMMENTS_PATH
 try:
