@@ -314,8 +314,36 @@ class Handler(BaseHTTPRequestHandler):
         except Exception as exc:
             self._send_error_json(502, f"{type(exc).__name__}: {exc}")
 
+    def _drain_chunked(self):
+        # Consume a chunked request body so it can't bleed into the next
+        # request on a keep-alive connection. (Content-Length-less bodies
+        # once corrupted the next request: a sendBeacon's JSON prepended
+        # itself to the next request line.)
+        while True:
+            line = self.rfile.readline().strip()
+            try:
+                size = int(line, 16)
+            except ValueError:
+                return
+            if size == 0:
+                while True:
+                    trailer = self.rfile.readline()
+                    if trailer in (b"\r\n", b"\n", b""):
+                        return
+            remaining = size
+            while remaining > 0:
+                chunk = self.rfile.read(min(remaining, 65536))
+                if not chunk:
+                    return
+                remaining -= len(chunk)
+            self.rfile.readline()   # trailing CRLF after each chunk
+
     def do_POST(self):
         parsed = urllib.parse.urlparse(self.path)
+        if "chunked" in (self.headers.get("Transfer-Encoding") or "").lower():
+            self._drain_chunked()
+            self._send_error_json(400, "chunked request bodies not supported")
+            return
         try:
             if parsed.path == "/api/comments":
                 self._handle_post_comment()

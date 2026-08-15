@@ -1611,10 +1611,16 @@ async function enableFaceDetection() {
   updateFaceTogglesVisibility();
 }
 
-// detection cache (persisted; detect once per image)
+// detection cache (persisted; detect once per image). Nulls are NOT kept:
+// they used to poison images permanently when a transient error got cached
+// (the beacon/501 incident). Genuine no-face results stay cheap via the
+// server-side cache, so re-detecting them client-side is fast.
 const faceBoxCache = (() => {
-  try { return JSON.parse(localStorage.getItem(LS_FACEBOXES)) || {}; }
-  catch (e) { return {}; }
+  let raw = {};
+  try { raw = JSON.parse(localStorage.getItem(LS_FACEBOXES)) || {}; }
+  catch (e) { /* start fresh */ }
+  for (const k of Object.keys(raw)) if (raw[k] === null) delete raw[k];
+  return raw;
 })();
 let faceBoxPersistTimer = null;
 function persistFaceBoxes() {
@@ -1626,15 +1632,19 @@ function persistFaceBoxes() {
 }
 
 // entry: {src, key}. Dispatches by selected model; cache keys are
-// model-namespaced ("anime:host:file" / "mp:host:file").
+// model-namespaced ("anime:host:file" / "mp:host:file"). Only successful
+// detections are cached — errors return null WITHOUT caching (retry next
+// time), so a transient failure can never poison an image permanently.
 async function detectFaceBox(entry) {
   const key = `${faceModel()}:${entry.key}`;
   if (key in faceBoxCache) return faceBoxCache[key];
   const box = faceModel() === 'anime'
     ? await detectFaceBoxServer(entry)
     : await detectFaceBoxMp(entry);
-  faceBoxCache[key] = box;
-  persistFaceBoxes();
+  if (box) {                      // null = error or no-face: don't cache
+    faceBoxCache[key] = box;
+    persistFaceBoxes();
+  }
   return box;
 }
 
@@ -1652,8 +1662,9 @@ async function detectFaceBoxServer(entry) {
       resp = await fetch(`/api/facebox?host=${encodeURIComponent(host)}` +
                          `&file=${encodeURIComponent(rest.join(':'))}`);
     }
+    if (!resp.ok) return null;          // transient server/proxy error
     const data = await resp.json();
-    return data.box || null;
+    return data.box || null;            // null here = genuine "no face found"
   } catch (e) {
     return null;
   }
