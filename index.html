@@ -76,6 +76,10 @@
     position: absolute; top: 48px; left: 24px; z-index: 104;
     background: rgba(20,20,28,.65); border-radius: 8px; padding: 7px 10px;
   }
+  #lbFaceBoxWrap {
+    position: absolute; top: 82px; left: 24px; z-index: 104;
+    background: rgba(20,20,28,.65); border-radius: 8px; padding: 7px 10px;
+  }
   /* guides hidden: lines and creation strips both off */
   #lightbox.guides-hidden #guideLayer,
   #lightbox.guides-hidden #guideStripTop,
@@ -201,14 +205,23 @@
     background: rgba(0,0,0,.88); overflow: hidden;
   }
   #lightbox.open { display: block; }
-  #lightbox img {
+  #lightbox img.layer {
     position: absolute; left: 50%; top: 50%;
     transform: translate(-50%,-50%) scale(var(--zoom,1))
                translate(var(--px,0px), var(--py,0px));
     max-width: 95vw; max-height: 95vh; cursor: grab;
     user-select: none; -webkit-user-drag: none;
   }
+  #lightbox img#lbBase { pointer-events: none; cursor: default; }
   #lightbox img.dragging { cursor: grabbing; }
+  /* bottom-left: candidate-over-anchor transparency slider */
+  #lbMixWrap {
+    position: absolute; bottom: 14px; left: 24px; z-index: 104;
+    display: flex; gap: 8px; align-items: center;
+    background: rgba(20,20,28,.65); border-radius: 8px; padding: 7px 10px;
+    color: var(--dim); font-size: 12px;
+  }
+  #lbMix { width: 150px; accent-color: var(--accent); }
   #lbClose {
     position: absolute; top: 14px; right: 16px; z-index: 101;
     width: 34px; height: 34px; border-radius: 50%; font-size: 18px;
@@ -318,7 +331,8 @@
 </main>
 <div id="lightbox">
   <button id="lbClose" title="close (Esc)">×</button>
-  <img id="lbImg" alt="">
+  <img id="lbBase" class="layer" alt="">
+  <img id="lbImg" class="layer" alt="">
   <div id="faceBox"></div>
   <div id="guideLayer"></div>
   <div id="guideStripTop" title="drag down to place a horizontal guide"></div>
@@ -329,6 +343,13 @@
   <label id="lbGuidesWrap" class="switchwrap" title="show/hide guides">
     <input type="checkbox" id="lbGuides"><span class="track"></span>guides
   </label>
+  <label id="lbFaceBoxWrap" class="switchwrap" title="show/hide detected face box + eye markers">
+    <input type="checkbox" id="lbFaceBoxT"><span class="track"></span>facebox
+  </label>
+  <div id="lbMixWrap" title="candidate opacity over the current anchor">
+    <input type="range" id="lbMix" min="0" max="100" value="100">
+    <span id="lbMixVal">100%</span>
+  </div>
   <div id="lbHint">pinch / -+ to zoom · scroll / drag / shift+arrows to pan · arrows to switch · drag from top/left edge for a guide (dblclick removes) · Esc closes</div>
 </div>
 
@@ -1012,8 +1033,9 @@ function makeZoomable(img, hooks = {}) {
 
 // ---------- lightbox: pinch/scroll zoom + pan ----------
 
-const lightbox = $('lightbox'), lbImg = $('lbImg');
+const lightbox = $('lightbox'), lbImg = $('lbImg'), lbBase = $('lbBase');
 let lbZoom = 1, lbX = 0, lbY = 0;
+let lbMix = 100;   // candidate opacity % over the current anchor
 
 function lbApply() {
   lbImg.style.setProperty('--zoom', lbZoom);
@@ -1064,6 +1086,29 @@ function lbLocate(sourceImg) {
 }
 
 // Persist the current lightbox view into the outgoing image's inline state.
+// Base layer: the current anchor, at its own stored zoom/pan, under the
+// candidate. The slider controls the candidate's opacity over it.
+function lbBaseUpdate() {
+  const wrap = $('lbMixWrap');
+  const anchors = lbList('anchor');
+  const show = lightbox.classList.contains('open') && lbColumn === 'cand' &&
+               anchors.length > 0;
+  wrap.style.display = show ? 'flex' : 'none';
+  if (!show) {
+    lbBase.removeAttribute('src');
+    lbImg.style.opacity = '';
+    return;
+  }
+  const aEntry = anchors[Math.min(lbPos.anchor, anchors.length - 1)];
+  if (lbBase.getAttribute('src') !== aEntry.src) lbBase.src = aEntry.src;
+  const az = (aEntry.img && aEntry.img._zoomState) || { scale: 1, tx: 0, ty: 0 };
+  lbBase.style.setProperty('--zoom', az.scale);
+  lbBase.style.setProperty('--px', az.tx + 'px');
+  lbBase.style.setProperty('--py', az.ty + 'px');
+  lbImg.style.opacity = lbMix / 100;
+  $('lbMixVal').textContent = lbMix + '%';
+}
+
 function lbWriteBack() {
   if (!lbSourceImg || !lbSourceImg._setZoom || !lbImg.naturalWidth) return;
   const img = lbSourceImg;
@@ -1143,6 +1188,7 @@ function lbSwitch(dCol, dRow) {
   } else {
     lbPlaceCarry(carryZoom(entry.img), entry.src);   // recall its own zoom
   }
+  lbBaseUpdate();
   refreshFaceBox();
 }
 
@@ -1155,13 +1201,14 @@ function openLightbox(src, carry = null, sourceImg = null) {
     guidesRestored = true;
     restoreGuides();
   }
-  updateAlignToggleVisibility();
+  updateFaceTogglesVisibility();
   if (faceAlignOn() && lbColumn === 'cand' && faceLoadState === 'ready') {
     lbPlaceCarry(null, src);         // alignment overrides carried zoom
     alignToAnchorFace();
   } else {
     lbPlaceCarry(carry, src);
   }
+  lbBaseUpdate();
   refreshFaceBox();
 }
 
@@ -1170,6 +1217,9 @@ function closeLightbox() {
   lbSourceImg = null;
   lightbox.classList.remove('open');
   lbImg.removeAttribute('src');
+  lbBase.removeAttribute('src');
+  lbImg.style.opacity = '';
+  $('lbMixWrap').style.display = 'none';
   lbFaceBox = null;
   updateFaceBoxOverlay();
 }
@@ -1281,10 +1331,15 @@ async function refreshFaceBox() {
   updateFaceBoxOverlay();
 }
 
+const LS_FACEBOX_VIS = 'kosmozoo.facebox.visible';   // default on
+function faceBoxVisible() {
+  return localStorage.getItem(LS_FACEBOX_VIS) !== '0';
+}
+
 function updateFaceBoxOverlay() {
   const el = $('faceBox');
   if (!lightbox.classList.contains('open') || !lbFaceBox ||
-      faceLoadState !== 'ready') {
+      faceLoadState !== 'ready' || !faceBoxVisible()) {
     el.style.display = 'none';
     return;
   }
@@ -1419,9 +1474,10 @@ function faceModel() { return localStorage.getItem(LS_FACEMODEL) || 'anime'; }
 
 function faceStatus(msg) { $('menuStatus').textContent = msg; }
 
-function updateAlignToggleVisibility() {
-  $('lbAlignWrap').style.display =
-    faceDetectEnabled() && faceLoadState === 'ready' ? '' : 'none';
+function updateFaceTogglesVisibility() {
+  const show = faceDetectEnabled() && faceLoadState === 'ready' ? '' : 'none';
+  $('lbAlignWrap').style.display = show;
+  $('lbFaceBoxWrap').style.display = show;
 }
 
 function importFaceLib() {          // seam for tests
@@ -1461,7 +1517,7 @@ async function enableFaceDetection() {
     faceDetector = null;
     faceStatus('load failed: ' + err.message);
   }
-  updateAlignToggleVisibility();
+  updateFaceTogglesVisibility();
 }
 
 // detection cache (persisted; detect once per image)
@@ -1927,6 +1983,7 @@ async function init() {
   // face detection: restore toggles, load in the background if enabled
   $('lbAlign').checked = faceAlignOn();
   $('lbGuides').checked = guidesVisible();
+  $('lbFaceBoxT').checked = faceBoxVisible();
   $('faceModel').value = faceModel();
   applyGuidesVisibility();
   if (faceDetectEnabled()) {
@@ -1934,7 +1991,7 @@ async function init() {
     enableFaceDetection();          // async; UI never blocks on it
   } else {
     faceStatus('off');
-    updateAlignToggleVisibility();
+    updateFaceTogglesVisibility();
   }
 }
 
@@ -1957,7 +2014,7 @@ $('faceDetectToggle').addEventListener('change', async (e) => {
   const on = e.target.checked;
   try { localStorage.setItem(LS_FACE, on ? '1' : '0'); } catch (err) {}
   if (on) await enableFaceDetection();
-  updateAlignToggleVisibility();
+  updateFaceTogglesVisibility();
 });
 
 $('faceModel').addEventListener('change', (e) => {
@@ -1966,7 +2023,7 @@ $('faceModel').addEventListener('change', (e) => {
   if (faceLoadState !== 'off') faceLoadState = 'off';
   faceStatus('off');
   if (faceDetectEnabled()) enableFaceDetection();
-  updateAlignToggleVisibility();
+  updateFaceTogglesVisibility();
 });
 
 $('lbAlign').addEventListener('change', (e) => {
@@ -1980,6 +2037,20 @@ $('lbGuides').addEventListener('change', (e) => {
     localStorage.setItem(LS_GUIDES_VIS, e.target.checked ? '1' : '0');
   } catch (err) {}
   applyGuidesVisibility();
+});
+
+$('lbFaceBoxT').addEventListener('change', (e) => {
+  try {
+    localStorage.setItem(LS_FACEBOX_VIS, e.target.checked ? '1' : '0');
+  } catch (err) {}
+  updateFaceBoxOverlay();
+});
+
+// candidate-over-anchor transparency slider
+$('lbMix').addEventListener('input', (e) => {
+  lbMix = Number(e.target.value);
+  lbImg.style.opacity = lbMix / 100;
+  $('lbMixVal').textContent = lbMix + '%';
 });
 $('unhideBtn').addEventListener('click', async () => {
   // unhide = clear all thumbs-down votes (thumbs-up stay marked)
