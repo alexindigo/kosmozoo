@@ -851,18 +851,23 @@ function renderCard(filename, meta, idx) {
     saveComment(key, negTa.value, posTa.value, savedEl);
   };
 
-  // nearest rendered card above/below (skipping sentinel/end markers)
-  const neighborCard = (dir) => {
-    let s = card[`${dir}ElementSibling`];
-    while (s && !s.classList.contains('card')) s = s[`${dir}ElementSibling`];
-    return s || null;
-  };
+  // Neighbor in full list order. Rendered neighbor: copy its live textarea
+  // (may hold unsaved edits). Hidden/not-yet-rendered neighbor: copy its
+  // stored feedback. Empty source -> no-op (never wipes the target).
   const copyFrom = (dir, cls, ta) => {
-    const n = neighborCard(dir);
-    if (!n) return;
-    const src = n.querySelector(`textarea.${cls}`);
-    if (!src) return;
-    ta.value = src.value;
+    const nIdx = idx + (dir === 'next' ? 1 : -1);
+    if (nIdx < 0 || nIdx >= allFiles.length) return;
+    const nCard = cardEls[nIdx];
+    let text = '';
+    if (nCard) {
+      const src = nCard.querySelector(`textarea.${cls}`);
+      text = src ? src.value : '';
+    } else {
+      const p = commentParts(comments[`${currentHost}:${allFiles[nIdx]}`]);
+      text = cls === 'neg' ? p.neg : p.pos;
+    }
+    if (!text) return;
+    ta.value = text;
     scheduleSave();
   };
 
