@@ -1,0 +1,340 @@
+#!/usr/bin/env python3
+"""Review server for the Kosmo image-review SPA.
+
+Python stdlib only. Serves review.html and proxies the configured ComfyUI
+hosts so the page never hits CORS. Binds 127.0.0.1:8765 (no auth).
+
+Usage: python3 review_server.py
+"""
+
+import json
+import os
+import re
+import tempfile
+import threading
+import urllib.error
+import urllib.parse
+import urllib.request
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+
+# --- Config ---------------------------------------------------------------
+# Hosts shown in the dropdown. Label -> host:port of a ComfyUI server.
+# host-b-sibling intentionally omitted (broken, being re-formatted 2026-08-14).
+HOSTS = {
+    "host-a": "comfyui.local:8188",
+    "host-b": "anton.local:8888",
+}
+
+BIND = "127.0.0.1"
+PORT = 8765
+
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+COMMENTS_PATH = os.path.join(BASE_DIR, "feedback.json")
+REVIEW_HTML = os.path.join(BASE_DIR, "review.html")
+DOWNLOADS_DIR = os.path.expanduser("~/Downloads")
+
+STATUS_TIMEOUT = 8    # seconds, /api/hosts reachability probe
+                      # (ComfyUI stalls its API while generating)
+PROXY_TIMEOUT = 30    # seconds, JSON endpoints
+IMAGE_TIMEOUT = 60    # seconds, image bytes
+
+UA = {"User-Agent": "kozmo-review/1.0"}
+
+_comments_lock = threading.Lock()
+
+
+# --- comments.json I/O -----------------------------------------------------
+
+def read_comments():
+    with _comments_lock:
+        try:
+            with open(COMMENTS_PATH, "r", encoding="utf-8") as f:
+                return json.load(f)
+        except (FileNotFoundError, json.JSONDecodeError):
+            return {}
+
+
+def upsert_comment(key, fields):
+    """Partial update of one entry. fields may contain neg (str),
+    pos (str), vote ('up'|'down'|None to clear). Entries with no
+    remaining content are removed."""
+    with _comments_lock:
+        try:
+            with open(COMMENTS_PATH, "r", encoding="utf-8") as f:
+                data = json.load(f)
+        except (FileNotFoundError, json.JSONDecodeError):
+            data = {}
+        entry = data.get(key)
+        if entry is None:
+            entry = {}
+        elif isinstance(entry, str):      # legacy plain-string comment
+            entry = {"neg": entry, "pos": ""}
+        if "neg" in fields:
+            entry["neg"] = fields["neg"]
+        if "pos" in fields:
+            entry["pos"] = fields["pos"]
+        if "vote" in fields:
+            if fields["vote"] in ("up", "down"):
+                entry["vote"] = fields["vote"]
+            else:
+                entry.pop("vote", None)
+        if not entry.get("neg", "").strip() \
+                and not entry.get("pos", "").strip() \
+                and not entry.get("vote"):
+            data.pop(key, None)
+        else:
+            data[key] = entry
+        fd, tmp = tempfile.mkstemp(dir=BASE_DIR, suffix=".tmp")
+        try:
+            with os.fdopen(fd, "w", encoding="utf-8") as f:
+                json.dump(data, f, indent=2, ensure_ascii=False)
+                f.write("\n")
+            os.replace(tmp, COMMENTS_PATH)
+        except BaseException:
+            try:
+                os.unlink(tmp)
+            except OSError:
+                pass
+            raise
+        return data
+
+
+# --- ComfyUI proxy helpers --------------------------------------------------
+
+def host_base(host_label):
+    addr = HOSTS.get(host_label)
+    return f"http://{addr}" if addr else None
+
+
+def fetch_json(url, timeout):
+    req = urllib.request.Request(url, headers=UA)
+    with urllib.request.urlopen(req, timeout=timeout) as resp:
+        return resp.status, resp.read()
+
+
+def probe_host(addr):
+    try:
+        req = urllib.request.Request(
+            f"http://{addr}/api/system_stats", headers=UA)
+        with urllib.request.urlopen(req, timeout=STATUS_TIMEOUT) as resp:
+            return resp.status == 200
+    except Exception:
+        return False
+
+
+# --- HTTP handler -----------------------------------------------------------
+
+class Handler(BaseHTTPRequestHandler):
+    protocol_version = "HTTP/1.1"
+    server_version = "KosmoReview/1.0"
+
+    def log_message(self, fmt, *args):  # quieter logs
+        print(f"{self.address_string()} - {fmt % args}")
+
+    # -- response helpers --
+
+    def _send(self, status, body=b"", content_type="application/json",
+              extra_headers=None):
+        if isinstance(body, str):
+            body = body.encode("utf-8")
+        self.send_response(status)
+        self.send_header("Content-Type", content_type)
+        self.send_header("Content-Length", str(len(body)))
+        if extra_headers:
+            for k, v in extra_headers.items():
+                self.send_header(k, v)
+        self.end_headers()
+        if body:
+            self.wfile.write(body)
+
+    def _send_json(self, status, obj):
+        self._send(status, json.dumps(obj, ensure_ascii=False))
+
+    def _send_error_json(self, status, message):
+        self._send_json(status, {"error": message})
+
+    # -- routing --
+
+    def do_GET(self):
+        parsed = urllib.parse.urlparse(self.path)
+        path = parsed.path
+        qs = urllib.parse.parse_qs(parsed.query)
+        try:
+            if path == "/":
+                self._handle_index()
+            elif path == "/api/hosts":
+                self._handle_hosts()
+            elif path == "/api/files":
+                self._handle_files(qs)
+            elif path == "/api/image":
+                self._handle_image(qs)
+            elif path == "/api/history":
+                self._handle_history(qs)
+            elif path == "/api/comments":
+                self._send(200, json.dumps(read_comments(), ensure_ascii=False),
+                           extra_headers={"Cache-Control": "no-store"})
+            elif path == "/api/downloads":
+                self._handle_downloads()
+            else:
+                self._send_error_json(404, f"unknown endpoint: {path}")
+        except BrokenPipeError:
+            pass
+        except Exception as exc:
+            self._send_error_json(502, f"{type(exc).__name__}: {exc}")
+
+    def do_POST(self):
+        parsed = urllib.parse.urlparse(self.path)
+        try:
+            if parsed.path == "/api/comments":
+                self._handle_post_comment()
+            else:
+                self._send_error_json(404, f"unknown endpoint: {parsed.path}")
+        except BrokenPipeError:
+            pass
+        except Exception as exc:
+            self._send_error_json(502, f"{type(exc).__name__}: {exc}")
+
+    # -- endpoints --
+
+    def _handle_index(self):
+        try:
+            with open(REVIEW_HTML, "rb") as f:
+                body = f.read()
+        except FileNotFoundError:
+            self._send_error_json(404, "review.html not found")
+            return
+        self._send(200, body, "text/html; charset=utf-8",
+                   {"Cache-Control": "no-store"})
+
+    def _handle_hosts(self):
+        # Probe in parallel: total wait is the slowest host, not the sum.
+        results = {}
+
+        def probe(name, addr):
+            results[name] = probe_host(addr)
+
+        threads = [threading.Thread(target=probe, args=(n, a), daemon=True)
+                   for n, a in HOSTS.items()]
+        for t in threads:
+            t.start()
+        for t in threads:
+            t.join(STATUS_TIMEOUT + 2)
+        out = [{"name": name, "address": addr,
+                "online": results.get(name, False)}
+               for name, addr in HOSTS.items()]
+        self._send_json(200, out)
+
+    def _require_host(self, qs):
+        host = qs.get("host", [None])[0]
+        base = host_base(host) if host else None
+        if not base:
+            self._send_error_json(400, f"unknown host: {host!r}")
+        return base
+
+    def _handle_files(self, qs):
+        base = self._require_host(qs)
+        if not base:
+            return
+        status, body = fetch_json(f"{base}/internal/files/output",
+                                  PROXY_TIMEOUT)
+        self._send(status, body, extra_headers={"Cache-Control": "no-store"})
+
+    def _handle_history(self, qs):
+        base = self._require_host(qs)
+        if not base:
+            return
+        status, body = fetch_json(f"{base}/api/history", PROXY_TIMEOUT)
+        self._send(status, body, extra_headers={"Cache-Control": "no-store"})
+
+    def _handle_image(self, qs):
+        base = self._require_host(qs)
+        if not base:
+            return
+        filename = qs.get("file", [None])[0]
+        if not filename:
+            self._send_error_json(400, "missing file parameter")
+            return
+        if not re.fullmatch(r"[\w.\-/ ]+", filename):
+            self._send_error_json(400, "bad filename")
+            return
+        url = (f"{base}/api/view?type=output&filename="
+               + urllib.parse.quote(filename))
+        req = urllib.request.Request(url, headers=UA)
+        try:
+            with urllib.request.urlopen(req, timeout=IMAGE_TIMEOUT) as resp:
+                ctype = resp.headers.get(
+                    "Content-Type", "application/octet-stream")
+                self.send_response(resp.status)
+                self.send_header("Content-Type", ctype)
+                self.send_header("Cache-Control", "max-age=3600")
+                cl = resp.headers.get("Content-Length")
+                if cl:
+                    self.send_header("Content-Length", cl)
+                self.end_headers()
+                while True:
+                    chunk = resp.read(64 * 1024)
+                    if not chunk:
+                        break
+                    self.wfile.write(chunk)
+        except urllib.error.HTTPError as exc:
+            self._send_error_json(exc.code, f"upstream: {exc.reason}")
+
+    def _handle_downloads(self):
+        try:
+            names = os.listdir(DOWNLOADS_DIR)
+        except (FileNotFoundError, PermissionError):
+            names = []
+        self._send(200, json.dumps({"files": names}, ensure_ascii=False),
+                   extra_headers={"Cache-Control": "no-store"})
+
+    def _handle_post_comment(self):
+        try:
+            length = int(self.headers.get("Content-Length") or 0)
+        except ValueError:
+            self._send_error_json(400, "bad Content-Length")
+            return
+        if length <= 0 or length > 1_000_000:
+            self._send_error_json(400, "bad body size")
+            return
+        try:
+            payload = json.loads(self.rfile.read(length))
+        except json.JSONDecodeError:
+            self._send_error_json(400, "invalid JSON")
+            return
+        host = payload.get("host")
+        file = payload.get("file")
+        if not isinstance(host, str) or not isinstance(file, str) \
+                or host not in HOSTS or not file:
+            self._send_error_json(400, "expected {host (known), file}")
+            return
+        fields = {}
+        for k in ("neg", "pos"):
+            if k in payload:
+                if not isinstance(payload[k], str):
+                    self._send_error_json(400, f"{k} must be a string")
+                    return
+                fields[k] = payload[k]
+        if "vote" in payload:
+            if payload["vote"] not in ("up", "down", None):
+                self._send_error_json(400, "vote must be 'up'|'down'|null")
+                return
+            fields["vote"] = payload["vote"]
+        if not fields:
+            self._send_error_json(400, "nothing to update")
+            return
+        data = upsert_comment(f"{host}:{file}", fields)
+        self._send_json(200, {"ok": True, "count": len(data)})
+
+
+def main():
+    server = ThreadingHTTPServer((BIND, PORT), Handler)
+    print(f"Kosmo review server on http://{BIND}:{PORT}")
+    print(f"Hosts: {', '.join(f'{k} ({v})' for k, v in HOSTS.items())}")
+    try:
+        server.serve_forever()
+    except KeyboardInterrupt:
+        print("\nbye")
+
+
+if __name__ == "__main__":
+    main()

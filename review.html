@@ -1,0 +1,1587 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Kosmo Review</title>
+<style>
+  :root {
+    --bg: #14151a; --panel: #1d1f26; --card: #22242d; --border: #343745;
+    --fg: #e6e6ea; --dim: #9a9dab; --accent: #7aa2f7; --ok: #9ece6a;
+    --bad: #f7768e;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; background: var(--bg); color: var(--fg);
+    font: 14px/1.45 system-ui, sans-serif;
+  }
+  header {
+    display: flex; align-items: center; gap: 10px;
+    padding: 10px 16px; background: var(--panel);
+    border-bottom: 1px solid var(--border);
+    position: sticky; top: 0; z-index: 10;
+  }
+  header h1 { font-size: 16px; margin: 0 12px 0 0; }
+  select, button {
+    background: var(--card); color: var(--fg); border: 1px solid var(--border);
+    border-radius: 6px; padding: 6px 10px; font: inherit; cursor: pointer;
+  }
+  button:hover { border-color: var(--accent); }
+  #status { color: var(--dim); font-size: 12px; }
+  #copyBtn { margin-left: auto; }
+
+  main {
+    display: flex; gap: 16px; padding: 16px; align-items: start;
+  }
+  #candidatesCol { flex: 1; min-width: 0; }
+
+  /* candidates */
+  #candidates { display: flex; flex-direction: column; gap: 16px; }
+
+  /* hide scrollbars, scrolling itself stays enabled */
+  body { scrollbar-width: none; }
+  body::-webkit-scrollbar { display: none; }
+
+  /* snap scrolling: candidates align to the top when scrolling settles */
+  html { scroll-snap-type: y proximity; }
+  .card { scroll-snap-align: start; scroll-margin-top: 66px; }
+
+  #divider {
+    flex: 0 0 7px; align-self: stretch; cursor: col-resize;
+    background: var(--border); border-radius: 4px; margin: 0 -6px;
+    position: relative; z-index: 5;
+  }
+  #divider:hover { background: var(--accent); }
+  body.resizing { cursor: col-resize; user-select: none; }
+  body.resizing iframe, body.resizing img { pointer-events: none; }
+  .card {
+    background: var(--card); border: 1px solid var(--border);
+    border-radius: 8px; padding: 12px;
+  }
+  /* image box keeps its height via aspect-ratio even when the img is
+     unloaded (windowed virtualization), so the list doesn't jump */
+  .imgwrap {
+    position: relative; width: 100%; aspect-ratio: var(--ar, 1);
+    background: #0d0e12; border-radius: 4px; overflow: hidden;
+  }
+  .imgwrap img {
+    display: block; width: 100%; height: 100%; object-fit: contain;
+  }
+  .imgwrap.empty img { visibility: hidden; }
+  .imgwrap.loading::after {
+    content: ''; position: absolute; inset: 0; margin: auto;
+    width: 32px; height: 32px; border-radius: 50%;
+    border: 3px solid var(--border); border-top-color: var(--accent);
+    animation: spin 1s linear infinite;
+  }
+  .imgwrap.error::after {
+    content: '⚠ failed to load'; position: absolute; inset: 0;
+    display: flex; align-items: center; justify-content: center;
+    color: var(--bad); font-size: 13px;
+  }
+  @keyframes spin { to { transform: rotate(360deg); } }
+  .sentinel {
+    display: flex; align-items: center; justify-content: center;
+    gap: 8px; color: var(--dim); padding: 16px;
+  }
+  .sentinel::before {
+    content: ''; width: 16px; height: 16px; border-radius: 50%;
+    border: 2px solid var(--border); border-top-color: var(--accent);
+    animation: spin 1s linear infinite;
+  }
+  .endoflist { text-align: center; color: var(--dim); padding: 16px; }
+  .fname {
+    font-weight: 600; margin: 8px 0 2px; word-break: break-all;
+    display: flex; justify-content: space-between; align-items: flex-start;
+    gap: 8px;
+  }
+  .votebtn, .savebtn {
+    flex: 0 0 auto; padding: 2px 8px; font-size: 11px; color: var(--dim);
+  }
+  .votebtn svg { vertical-align: -1px; }
+  /* identity colors, muted until active/hover: down=red, up=green */
+  .votebtn.down { color: rgba(247, 118, 142, .45); }
+  .votebtn.up { color: rgba(158, 206, 106, .45); }
+  .votebtn.down:hover, .votebtn.down.on { color: var(--bad); border-color: var(--bad); }
+  .votebtn.up:hover, .votebtn.up.on { color: var(--ok); border-color: var(--ok); }
+  .savebtn:hover { color: var(--ok); border-color: var(--ok); }
+  .pair {
+    display: grid; grid-template-columns: 1fr 1fr; gap: 10px;
+    margin-top: 6px;
+  }
+  .props { color: var(--dim); font-size: 12px; }
+  .props .nometa { color: var(--bad); }
+  .props .plabel { color: var(--fg); opacity: .55; }
+  .desc {
+    color: var(--dim); font-size: 12px; font-style: italic;
+    word-break: break-word;
+  }
+  .card textarea.neg { border-color: var(--bad); }
+  .card textarea.pos { border-color: var(--ok); }
+  .card textarea.neg:focus { border-color: var(--bad); outline: none; }
+  .card textarea.pos:focus { border-color: var(--ok); outline: none; }
+  .boxcol { display: flex; flex-direction: column; gap: 4px; }
+  .btnrow { display: flex; gap: 6px; }
+  .btnrow button {
+    flex: 1; padding: 2px 4px; font-size: 11px; color: var(--dim);
+  }
+
+  /* anchor embedded metadata */
+  .ameta { margin-top: 4px; display: none; }
+  .ameta .pair { grid-template-columns: 1fr; gap: 4px; margin-top: 4px; }
+  .anchor .props, .anchor .desc { font-size: 11px; }
+
+  /* lightbox (pinch/ctrl-wheel zoom) */
+  #lightbox {
+    display: none; position: fixed; inset: 0; z-index: 100;
+    background: rgba(0,0,0,.88); overflow: hidden;
+  }
+  #lightbox.open { display: block; }
+  #lightbox img {
+    position: absolute; left: 50%; top: 50%;
+    transform: translate(-50%,-50%) scale(var(--zoom,1))
+               translate(var(--px,0px), var(--py,0px));
+    max-width: 95vw; max-height: 95vh; cursor: grab;
+    user-select: none; -webkit-user-drag: none;
+  }
+  #lightbox img.dragging { cursor: grabbing; }
+  #lbClose {
+    position: absolute; top: 14px; right: 16px; z-index: 101;
+    width: 34px; height: 34px; border-radius: 50%; font-size: 18px;
+    background: rgba(30,30,40,.8);
+    display: flex; align-items: center; justify-content: center;
+    padding: 0; line-height: 1;
+  }
+  #lbHint {
+    position: absolute; bottom: 12px; left: 50%; transform: translateX(-50%);
+    color: var(--dim); font-size: 12px; pointer-events: none;
+  }
+  /* guide creation strips (lightbox top/left edges) + guide lines */
+  #guideStripTop, #guideStripLeft { position: absolute; z-index: 103; }
+  #guideStripTop { top: 0; left: 0; right: 0; height: 18px; cursor: row-resize; }
+  #guideStripLeft { top: 0; left: 0; bottom: 0; width: 18px; cursor: col-resize; }
+  #guideLayer {
+    position: absolute; inset: 0; z-index: 102; pointer-events: none;
+  }
+  .guide {
+    position: absolute; pointer-events: auto;
+    background: rgba(34, 211, 238, .9); box-shadow: 0 0 3px rgba(0,0,0,.9);
+  }
+  .guide.h { left: 0; right: 0; height: 2px; cursor: row-resize; }
+  .guide.v { top: 0; bottom: 0; width: 2px; cursor: col-resize; }
+  .card textarea {
+    width: 100%; min-height: 44px; resize: vertical;
+    background: var(--bg); color: var(--fg);
+    border: 1px solid var(--border); border-radius: 6px;
+    padding: 6px 8px; font: inherit;
+  }
+  .card textarea:focus { outline: none; border-color: var(--accent); }
+  .saved { font-size: 11px; color: var(--ok); margin-left: 6px; opacity: 0;
+           transition: opacity .3s; }
+  .saved.show { opacity: 1; }
+
+  /* anchors */
+  #anchors {
+    position: sticky; top: 66px; max-height: calc(100vh - 82px);
+    overflow-y: auto; background: var(--panel);
+    border: 1px solid var(--border); border-radius: 8px; padding: 12px;
+    /* width is dragged via #divider */
+    width: 360px; min-width: 220px; max-width: 70vw;
+    flex: 0 0 auto;
+    scrollbar-width: none;
+  }
+  #anchors::-webkit-scrollbar { display: none; }
+  #dropzone {
+    border: 2px dashed var(--border); border-radius: 8px;
+    padding: 18px; text-align: center; color: var(--dim);
+    cursor: pointer; margin-top: 4px;
+  }
+  #dropzone.over { border-color: var(--accent); color: var(--accent); }
+  .anchor { position: relative; margin-bottom: 12px; cursor: grab; }
+  .anchor.dragging { opacity: .4; }
+  .imgwrap img.zoomed, .aimgwrap img.zoomed { cursor: grab; }
+  .imgwrap img, .aimgwrap img { will-change: transform; }
+  .anchor img { display: block; width: 100%; border-radius: 6px; }
+  .anchor .aname { font-size: 11px; color: var(--dim); margin-top: 3px;
+                   word-break: break-all; }
+  .aimgwrap { position: relative; overflow: hidden; border-radius: 6px; }
+  .aimgwrap img { display: block; }
+  .anchor .rm {
+    position: absolute; top: 4px; right: 4px; width: 24px; height: 24px;
+    padding: 0; border-radius: 50%; line-height: 1;
+    display: flex; align-items: center; justify-content: center;
+    background: rgba(20, 20, 28, .35); border: 1px solid rgba(255,255,255,.15);
+    color: rgba(255, 255, 255, .7);
+  }
+  .anchor .rm:hover { background: rgba(20,20,28,.8); color: #fff; }
+  .empty { color: var(--dim); text-align: center; padding: 30px 0; }
+</style>
+</head>
+<body>
+<header>
+  <h1>Kosmo Review</h1>
+  <select id="hostSel"></select>
+  <button id="refreshBtn">Refresh</button>
+  <span id="status"></span>
+  <button id="unhideBtn">Unhide 👎</button>
+  <button id="copyBtn">Copy all comments</button>
+  <button id="dlBtn">Download notes</button>
+</header>
+<main>
+  <section id="candidatesCol">
+    <div id="candidates"></div>
+  </section>
+  <div id="divider" title="drag to resize anchors"></div>
+  <aside id="anchors">
+    <div id="anchorList"></div>
+    <div id="dropzone">Drop images here<br>(or click to browse)</div>
+    <input type="file" id="fileInput" accept="image/*" multiple hidden>
+  </aside>
+</main>
+<div id="lightbox">
+  <button id="lbClose" title="close (Esc)">×</button>
+  <img id="lbImg" alt="">
+  <div id="guideLayer"></div>
+  <div id="guideStripTop" title="drag down to place a horizontal guide"></div>
+  <div id="guideStripLeft" title="drag right to place a vertical guide"></div>
+  <div id="lbHint">scroll / pinch / -+ to zoom · drag / shift+arrows to pan · arrows to switch · drag from top/left edge for a guide (dblclick removes) · Esc closes</div>
+</div>
+
+<script>
+'use strict';
+
+const $ = (id) => document.getElementById(id);
+const candidatesEl = $('candidates'), hostSel = $('hostSel'),
+      statusEl = $('status'), anchorList = $('anchorList'),
+      dropzone = $('dropzone'), fileInput = $('fileInput'),
+      divider = $('divider'), anchorsEl = $('anchors');
+
+let currentHost = null;
+let comments = {};            // "host:file" -> {neg, pos} (legacy strings normalized)
+const saveTimers = {};        // key -> timeout id
+
+// localStorage keys
+const LS_WIDTH = 'kzreview.anchorWidth';   // e.g. "420px"
+const LS_VERDICT = 'kzreview.verdict.v1';  // legacy, migrated to server
+localStorage.removeItem('kzreview.saved.v1');  // superseded by /api/downloads
+
+// Votes live in feedback.json on the server (canonical). comments[key]
+// may be {neg, pos, vote} or a legacy plain string.
+function voteOf(key) {
+  const v = comments[key];
+  return (v && typeof v === 'object' && v.vote) || null;
+}
+
+async function setVerdict(key, vote) {   // vote: 'up' | 'down' | null
+  const e = (comments[key] && typeof comments[key] === 'object')
+    ? { ...comments[key] } : {};
+  if (vote) e.vote = vote;
+  else delete e.vote;
+  if (!(e.neg || '').trim() && !(e.pos || '').trim() && !e.vote)
+    delete comments[key];
+  else comments[key] = e;
+  const [host, ...rest] = key.split(':');
+  try {
+    await fetch('/api/comments', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ host, file: rest.join(':'), vote }),
+    });
+  } catch (err) {
+    setStatus(`vote save failed: ${err.message}`, true);
+  }
+}
+
+// One-time migration of localStorage verdicts/hidden into feedback.json.
+async function migrateLegacyVotes() {
+  const merged = {};
+  try {
+    const h = JSON.parse(localStorage.getItem('kzreview.hidden.v1'));
+    if (Array.isArray(h)) for (const k of h) merged[k] = 'down';
+  } catch (e) { /* none */ }
+  try {
+    const v = JSON.parse(localStorage.getItem(LS_VERDICT));
+    if (v && typeof v === 'object' && !Array.isArray(v))
+      Object.assign(merged, v);
+  } catch (e) { /* none */ }
+  const keys = Object.keys(merged);
+  if (!keys.length) return;
+  for (const k of keys) {
+    if (merged[k] !== 'up' && merged[k] !== 'down') continue;
+    const [host, ...rest] = k.split(':');
+    try {
+      await fetch('/api/comments', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ host, file: rest.join(':'), vote: merged[k] }),
+      });
+    } catch (e) {
+      return;   // server unreachable: keep keys, retry next load
+    }
+  }
+  localStorage.removeItem('kzreview.hidden.v1');
+  localStorage.removeItem(LS_VERDICT);
+}
+
+// Filenames present in ~/Downloads (source of truth for the save button).
+let downloadsSet = new Set();
+
+// Stored comment value -> {neg, pos} (tolerates legacy plain-string values)
+function commentParts(v) {
+  if (!v) return { neg: '', pos: '' };
+  if (typeof v === 'string') return { neg: v, pos: '' };
+  return { neg: v.neg || '', pos: v.pos || '' };
+}
+
+// ---------- helpers ----------
+
+function setStatus(msg, isError = false) {
+  statusEl.textContent = msg;
+  statusEl.style.color = isError ? 'var(--bad)' : 'var(--dim)';
+}
+
+async function api(path) {
+  const resp = await fetch(path);
+  if (!resp.ok) {
+    let msg = resp.status;
+    try { msg = (await resp.json()).error || msg; } catch (e) { /* keep */ }
+    throw new Error(msg);
+  }
+  return resp.json();
+}
+
+// Strip the " [output]" style suffix /internal/files/output appends.
+function cleanFileName(entry) {
+  return String(entry).replace(/\s+\[[^\]]+\]$/, '');
+}
+
+// ---------- metadata extraction from /api/history ----------
+
+// history entry -> {seed, steps, cfg, sampler, scheduler, denoise,
+//                   loras: [{name, strength}], prompt}
+function extractMeta(entry) {
+  const graph = entry.prompt && entry.prompt[2];
+  if (!graph) return null;
+  const nodes = Object.entries(graph).map(([id, n]) => ({ id, ...n }));
+
+  const ks = nodes.find(n => n.class_type === 'KSampler') ||
+             nodes.find(n => /sampler/i.test(n.class_type || ''));
+  const meta = { loras: [] };
+  if (ks && ks.inputs) {
+    for (const k of ['seed', 'steps', 'cfg', 'sampler_name', 'scheduler',
+                     'denoise']) {
+      if (typeof ks.inputs[k] !== 'undefined') meta[k] = ks.inputs[k];
+    }
+  }
+
+  // Positive prompt: follow links from KSampler.positive until a node
+  // with a string `text` input (CLIPTextEncode), e.g. through FluxGuidance.
+  let promptText = '';
+  let node = ks && ks.inputs && Array.isArray(ks.inputs.positive)
+    ? graph[ks.inputs.positive[0]] : null;
+  for (let i = 0; i < 8 && node; i++) {
+    if (node.inputs && typeof node.inputs.text === 'string') {
+      promptText = node.inputs.text;
+      break;
+    }
+    const next = Object.values(node.inputs || {}).find(Array.isArray);
+    node = next ? graph[next[0]] : null;
+  }
+  meta.prompt = promptText.replace(/\s+/g, ' ').trim();
+
+  // Image dimensions (for exact aspect-ratio placeholders before first load)
+  const latent = nodes.find(n => /Empty.*Latent/i.test(n.class_type || ''));
+  if (latent && latent.inputs) {
+    if (typeof latent.inputs.width === 'number')
+      meta.width = latent.inputs.width;
+    if (typeof latent.inputs.height === 'number')
+      meta.height = latent.inputs.height;
+  }
+
+  // LoRA loaders (LoraLoader, NunchakuFluxLoraLoader, ...)
+  for (const n of nodes) {
+    if (/lora/i.test(n.class_type || '') && /load/i.test(n.class_type || '')) {
+      const inp = n.inputs || {};
+      meta.loras.push({
+        name: inp.lora_name || inp.lora || '?',
+        strength: inp.lora_strength ?? inp.strength_model ?? inp.strength,
+      });
+    }
+  }
+  return meta;
+}
+
+// Build filename -> meta map from full /api/history response.
+function buildMetaMap(history) {
+  const map = {};
+  for (const entry of Object.values(history || {})) {
+    const meta = extractMeta(entry);
+    if (!meta) continue;
+    for (const out of Object.values(entry.outputs || {})) {
+      for (const img of out.images || []) {
+        if (img.type === 'output' && img.filename) map[img.filename] = meta;
+      }
+    }
+  }
+  return map;
+}
+
+// ---------- candidates: chunked render + windowed image loading ----------
+// Cards render CHUNK at a time; a sentinel WINDOW_PAD cards before the end
+// of the rendered list triggers the next chunk. Image bytes load only for
+// cards within the viewport ± WINDOW_PAD; images outside get their src
+// removed (height is preserved via aspect-ratio, so the list doesn't jump).
+
+const CHUNK = 20;
+const WINDOW_PAD = 10;
+
+let allFiles = [];            // filenames for current host, newest-first
+let metaMapGlobal = {};       // filename -> meta
+let renderedCount = 0;
+let cardEls = [];             // idx -> card element
+let visibleSet = new Set();   // card indices intersecting the viewport
+let loadedSet = new Set();    // card indices whose img currently has src
+let listObserver = null;
+let sentinelObserver = null;
+let sentinelEl = null;
+
+function resetList() {
+  if (listObserver) listObserver.disconnect();
+  if (sentinelObserver) sentinelObserver.disconnect();
+  candidatesEl.innerHTML = '';
+  renderedCount = 0;
+  cardEls = [];
+  visibleSet = new Set();
+  loadedSet = new Set();
+  sentinelEl = null;
+}
+
+function statusSummary() {
+  const hidden = allFiles.filter(
+    f => voteOf(`${currentHost}:${f}`) === 'down').length;
+  return `${allFiles.length} images from ${currentHost}` +
+         (hidden ? ` (${hidden} hidden)` : '');
+}
+
+async function loadCandidates() {
+  if (!currentHost) return;
+  resetList();
+  allFiles = [];
+  metaMapGlobal = {};
+  setStatus(`loading image list from ${currentHost}…`);
+  try {
+    const [files, history, dls] = await Promise.all([
+      api(`/api/files?host=${encodeURIComponent(currentHost)}`),
+      api(`/api/history?host=${encodeURIComponent(currentHost)}`),
+      api('/api/downloads'),
+    ]);
+    downloadsSet = new Set(dls.files || []);
+    metaMapGlobal = buildMetaMap(history);
+    allFiles = files.map(cleanFileName);   // endpoint is newest-first
+    if (!allFiles.length) {
+      candidatesEl.innerHTML = '<div class="empty">no output images</div>';
+      setStatus(`no output images on ${currentHost}`);
+      return;
+    }
+    setupObservers();
+    renderChunk();
+    setStatus(statusSummary());
+  } catch (err) {
+    setStatus(`load failed: ${err.message}`, true);
+  }
+}
+
+function setupObservers() {
+  listObserver = new IntersectionObserver((entries) => {
+    let changed = false;
+    for (const en of entries) {
+      const idx = Number(en.target.dataset.idx);
+      if (en.isIntersecting) {
+        if (!visibleSet.has(idx)) { visibleSet.add(idx); changed = true; }
+      } else if (visibleSet.delete(idx)) changed = true;
+    }
+    if (changed) applyWindow();
+  });
+  sentinelObserver = new IntersectionObserver((entries) => {
+    if (entries.some(en => en.isIntersecting)) renderChunk();
+  });
+}
+
+// Load images inside viewport ± WINDOW_PAD, unload everything outside.
+function applyWindow() {
+  if (!visibleSet.size) return;
+  const min = Math.min(...visibleSet) - WINDOW_PAD;
+  const max = Math.max(...visibleSet) + WINDOW_PAD;
+  for (const idx of [...loadedSet]) {
+    if (idx < min || idx > max) unloadImage(idx);
+  }
+  const lo = Math.max(0, min), hi = Math.min(renderedCount - 1, max);
+  for (let i = lo; i <= hi; i++) {
+    if (!loadedSet.has(i)) loadImage(i);
+  }
+}
+
+function loadImage(idx) {
+  const card = cardEls[idx];
+  if (!card) return;
+  const wrap = card.querySelector('.imgwrap');
+  const img = wrap.querySelector('img');
+  wrap.classList.remove('empty');
+  wrap.classList.add('loading');
+  img.src = card.dataset.imgUrl;
+  loadedSet.add(idx);
+}
+
+function unloadImage(idx) {
+  const card = cardEls[idx];
+  if (!card) return;
+  const wrap = card.querySelector('.imgwrap');
+  const img = wrap.querySelector('img');
+  img.removeAttribute('src');   // aborts fetch / releases decoded bytes
+  wrap.classList.remove('loading');
+  wrap.classList.add('empty');
+  loadedSet.delete(idx);
+}
+
+function renderChunk() {
+  let added = 0;
+  const frag = document.createDocumentFragment();
+  while (renderedCount < allFiles.length && added < CHUNK) {
+    const i = renderedCount++;
+    const name = allFiles[i];
+    if (voteOf(`${currentHost}:${name}`) === 'down') continue;  // hidden
+    const card = renderCard(name, metaMapGlobal[name], i);
+    cardEls[i] = card;
+    frag.appendChild(card);
+    listObserver.observe(card);
+    added++;
+  }
+  candidatesEl.appendChild(frag);
+
+  if (sentinelEl) sentinelEl.remove();
+  if (renderedCount < allFiles.length) {
+    if (!sentinelEl) {
+      sentinelEl = document.createElement('div');
+      sentinelEl.className = 'sentinel';
+      sentinelEl.textContent = 'loading more…';
+      sentinelObserver.observe(sentinelEl);
+    }
+    // Place sentinel WINDOW_PAD rendered cards before the end of the list:
+    // reaching it means the user scrolled into the last WINDOW_PAD cards.
+    const rendered = cardEls.filter(Boolean);
+    const trigger = rendered[Math.max(0, rendered.length - WINDOW_PAD)];
+    if (trigger) candidatesEl.insertBefore(sentinelEl, trigger);
+    else candidatesEl.appendChild(sentinelEl);
+  } else {
+    const done = document.createElement('div');
+    done.className = 'endoflist';
+    done.textContent = `— all ${allFiles.length} images —`;
+    candidatesEl.appendChild(done);
+  }
+  // Newly rendered cards inside the current window may not get an
+  // IntersectionObserver change event (nothing intersecting changed),
+  // so apply the window explicitly after each chunk.
+  applyWindow();
+}
+
+function renderCard(filename, meta, idx) {
+  const key = `${currentHost}:${filename}`;
+  const card = document.createElement('div');
+  card.className = 'card';
+  card.dataset.idx = idx;
+  card.dataset.imgUrl =
+    `/api/image?host=${encodeURIComponent(currentHost)}` +
+    `&file=${encodeURIComponent(filename)}`;
+
+  const wrap = document.createElement('div');
+  wrap.className = 'imgwrap empty';
+  if (meta && meta.width && meta.height)
+    wrap.style.setProperty('--ar', `${meta.width} / ${meta.height}`);
+  const img = document.createElement('img');
+  img.alt = filename;
+  img.addEventListener('load', () => {
+    if (img.naturalWidth && img.naturalHeight)
+      wrap.style.setProperty(
+        '--ar', `${img.naturalWidth} / ${img.naturalHeight}`);
+    wrap.classList.remove('loading');
+  });
+  img.addEventListener('error', () => {
+    if (img.getAttribute('src')) {   // ignore unload-triggered error events
+      wrap.classList.remove('loading');
+      wrap.classList.add('error');
+    }
+  });
+  wrap.appendChild(img);
+  wrap.style.cursor = 'zoom-in';
+  wrap.addEventListener('click',
+    () => openLightbox(card.dataset.imgUrl, carryZoom(img), img));
+  makeZoomable(img, { zoomKey: key });
+  if (zoomStore[key]) img._setZoom(zoomStore[key]);
+  card.appendChild(wrap);
+
+  const fname = document.createElement('div');
+  fname.className = 'fname';
+  const fnameText = document.createElement('span');
+  fnameText.textContent = filename;
+  const btnWrap = document.createElement('span');
+  btnWrap.style.whiteSpace = 'nowrap';
+  const verdict = voteOf(key);
+  const THUMB_UP = '<svg viewBox="0 0 24 24" width="12" height="12"><path fill="currentColor" d="M1 21h4V9H1v12zm22-11c0-1.1-.9-2-2-2h-6.31l.95-4.57.03-.32c0-.41-.17-.79-.44-1.06L14.17 1 7.59 7.59C7.22 7.95 7 8.45 7 9v10c0 1.1.9 2 2 2h9c.83 0 1.54-.5 1.84-1.22l3.02-7.05c.09-.23.14-.47.14-.73v-2z"/></svg>';
+  const THUMB_DOWN = '<svg viewBox="0 0 24 24" width="12" height="12"><path fill="currentColor" d="M15 3H6c-.83 0-1.54.5-1.84 1.22l-3.02 7.05c-.09.23-.14.47-.14.73v2c0 1.1.9 2 2 2h6.31l-.95 4.57-.03.32c0 .41.17.79.44 1.06L9.83 23l6.59-6.59c.36-.36.58-.86.58-1.41V5c0-1.1-.9-2-2-2zm4 0v12h4V3h-4z"/></svg>';
+  const downBtn = document.createElement('button');
+  downBtn.className = 'votebtn down' + (verdict === 'down' ? ' on' : '');
+  downBtn.innerHTML = THUMB_DOWN;
+  downBtn.title = 'thumbs down — hides (Unhide up top restores)';
+  downBtn.addEventListener('click', () => {
+    setVerdict(key, 'down');
+    removeCard(idx);
+    setStatus(statusSummary());
+  });
+  const upBtn = document.createElement('button');
+  upBtn.className = 'votebtn up' + (verdict === 'up' ? ' on' : '');
+  upBtn.innerHTML = THUMB_UP;
+  upBtn.title = 'thumbs up';
+  upBtn.addEventListener('click', () => {
+    setVerdict(key, voteOf(key) === 'up' ? null : 'up');
+    upBtn.classList.toggle('on', voteOf(key) === 'up');
+  });
+  const saveBtn = document.createElement('button');
+  const isSaved = () => downloadsSet.has(filename);
+  saveBtn.className = 'savebtn';
+  saveBtn.textContent = isSaved() ? 'saved' : 'save';
+  saveBtn.title = isSaved()
+    ? 'already in ~/Downloads (click to download again)'
+    : 'download this image';
+  saveBtn.addEventListener('click', () => {
+    const a = document.createElement('a');
+    a.href = card.dataset.imgUrl;
+    a.download = filename;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    downloadsSet.add(filename);   // optimistic; refreshed from disk on reload
+    saveBtn.textContent = 'saved';
+    saveBtn.title = 'already in ~/Downloads (click to download again)';
+  });
+  btnWrap.append(downBtn, upBtn, saveBtn);   // red left, green right
+  fname.append(fnameText, btnWrap);
+  card.appendChild(fname);
+
+  // row 1: properties (left) | description (right)
+  const pair1 = document.createElement('div');
+  pair1.className = 'pair';
+  const props = document.createElement('div');
+  props.className = 'props';
+  if (meta) {
+    const rows = [];
+    if (meta.seed !== undefined) rows.push(['seed', meta.seed]);
+    if (meta.steps !== undefined) rows.push(['steps', meta.steps]);
+    if (meta.cfg !== undefined) rows.push(['cfg', meta.cfg]);
+    if (meta.denoise !== undefined)
+      rows.push(['denoise', Number(meta.denoise).toFixed(2)]);
+    if (meta.sampler_name)
+      rows.push(['sampler', meta.scheduler
+        ? `${meta.sampler_name}/${meta.scheduler}` : meta.sampler_name]);
+    for (const l of meta.loras || [])
+      rows.push(['lora', `${l.name}${l.strength != null ? '@' + l.strength : ''}`]);
+    if (meta.width && meta.height)
+      rows.push(['size', `${meta.width}×${meta.height}`]);
+    if (rows.length) {
+      for (const [k, v] of rows) {
+        const line = document.createElement('div');
+        const label = document.createElement('span');
+        label.className = 'plabel';
+        label.textContent = `${k}: `;
+        line.appendChild(label);
+        line.appendChild(document.createTextNode(v));
+        props.appendChild(line);
+      }
+    } else {
+      props.textContent = '(no sampler metadata)';
+    }
+  } else {
+    props.innerHTML = '<span class="nometa">no metadata in history</span>';
+  }
+  const desc = document.createElement('div');
+  desc.className = 'desc';
+  if (meta && meta.prompt) {
+    desc.textContent = meta.prompt.length > 300
+      ? meta.prompt.slice(0, 300) + '…' : meta.prompt;
+    desc.title = meta.prompt;
+  }
+  pair1.append(props, desc);
+
+  // row 2: negatives (red) | positives (green), each with copy buttons
+  const pair2 = document.createElement('div');
+  pair2.className = 'pair';
+  const parts = commentParts(comments[key]);
+  const saved = document.createElement('span');
+  saved.className = 'saved';
+  saved.textContent = 'saved';
+
+  const scheduleSave = () => {
+    clearTimeout(saveTimers[key]);
+    saveTimers[key] = setTimeout(
+      () => saveComment(key, negTa.value, posTa.value, saved), 600);
+  };
+
+  // nearest rendered card above/below (skipping sentinel/end markers)
+  const neighborCard = (dir) => {
+    let s = card[`${dir}ElementSibling`];
+    while (s && !s.classList.contains('card')) s = s[`${dir}ElementSibling`];
+    return s || null;
+  };
+  const copyFrom = (dir, cls, ta) => {
+    const n = neighborCard(dir);
+    if (!n) return;
+    const src = n.querySelector(`textarea.${cls}`);
+    if (!src) return;
+    ta.value = src.value;
+    scheduleSave();
+  };
+
+  const mkBoxCol = (cls, placeholder, initial) => {
+    const col = document.createElement('div');
+    col.className = 'boxcol';
+    const ta = document.createElement('textarea');
+    ta.className = cls;
+    ta.placeholder = placeholder;
+    ta.value = initial;
+    ta.addEventListener('input', scheduleSave);
+    const row = document.createElement('div');
+    row.className = 'btnrow';
+    const belowBtn = document.createElement('button');
+    belowBtn.textContent = 'copy from below';
+    belowBtn.addEventListener('click', () => copyFrom('next', cls, ta));
+    const aboveBtn = document.createElement('button');
+    aboveBtn.textContent = 'copy from above';
+    aboveBtn.addEventListener('click', () => copyFrom('previous', cls, ta));
+    row.append(belowBtn, aboveBtn);
+    col.append(ta, row);
+    return { col, ta };
+  };
+
+  const neg = mkBoxCol('neg', 'negatives…', parts.neg);
+  const pos = mkBoxCol('pos', 'positives…', parts.pos);
+  const negTa = neg.ta;
+  const posTa = pos.ta;
+  pair2.append(neg.col, pos.col);
+  card.appendChild(pair2);       // feedback boxes right under label/thumbs/save
+  card.appendChild(pair1);       // properties + description below
+  card.appendChild(saved);
+  return card;
+}
+
+// Remove a rendered card from the list (verdict storage is the caller's job).
+function removeCard(idx) {
+  const card = cardEls[idx];
+  if (card) {
+    listObserver.unobserve(card);
+    visibleSet.delete(idx);
+    loadedSet.delete(idx);
+    card.remove();
+    cardEls[idx] = undefined;
+  }
+  setStatus(statusSummary());
+}
+
+async function saveComment(key, neg, pos, savedEl) {
+  const [host, ...rest] = key.split(':');
+  try {
+    await fetch('/api/comments', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ host, file: rest.join(':'), neg, pos }),
+    });
+    // merge locally, preserving any vote (server does a partial update)
+    const e = (comments[key] && typeof comments[key] === 'object')
+      ? { ...comments[key] } : {};
+    e.neg = neg;
+    e.pos = pos;
+    if (!neg.trim() && !pos.trim() && !e.vote) delete comments[key];
+    else comments[key] = e;
+    savedEl.classList.add('show');
+    setTimeout(() => savedEl.classList.remove('show'), 1200);
+  } catch (err) {
+    setStatus(`comment save failed: ${err.message}`, true);
+  }
+}
+
+// ---------- per-image zoom state (persisted, shared with lightbox) ----------
+
+const LS_ZOOM = 'kzreview.zoom.v1';   // { "host:file" | "anchor:name": {s,tx,ty} }
+const zoomStore = (() => {
+  try { return JSON.parse(localStorage.getItem(LS_ZOOM)) || {}; }
+  catch (e) { return {}; }
+})();
+let zoomPersistTimer = null;
+function persistZoom() {
+  clearTimeout(zoomPersistTimer);
+  zoomPersistTimer = setTimeout(() => {
+    try { localStorage.setItem(LS_ZOOM, JSON.stringify(zoomStore)); }
+    catch (e) { /* in-memory only */ }
+  }, 300);
+}
+function saveZoomKey(key, state) {
+  if (!key) return;
+  if (state && state.scale > 1)
+    zoomStore[key] = { s: state.scale, tx: state.tx, ty: state.ty };
+  else delete zoomStore[key];
+  persistZoom();
+}
+
+// ---------- inline pinch zoom (trackpad pinch = ctrl+wheel) ----------
+// Zooms the image in place, keeping the point under the cursor fixed.
+// Plain wheel scrolls the page; drag pans while zoomed; dblclick resets.
+// hooks.onZoomChange(zoomed) lets hosts disable conflicting drags.
+// hooks.zoomKey persists the state per image.
+
+function makeZoomable(img, hooks = {}) {
+  let scale = 1, tx = 0, ty = 0, dragMoved = 0;
+  const apply = () => {
+    if (scale <= 1.001) {
+      scale = 1; tx = 0; ty = 0;
+      img.style.transform = '';
+      img.classList.remove('zoomed');
+    } else {
+      img.style.transform = `translate(${tx}px, ${ty}px) scale(${scale})`;
+      img.classList.add('zoomed');
+    }
+    img._zoomState = { scale, tx, ty };
+    if (hooks.zoomKey) saveZoomKey(hooks.zoomKey, img._zoomState);
+    if (hooks.onZoomChange) hooks.onZoomChange(scale > 1);
+  };
+  img._setZoom = (z) => {
+    scale = z.s || z.scale || 1;
+    tx = z.tx || 0;
+    ty = z.ty || 0;
+    apply();
+  };
+  img.addEventListener('wheel', (e) => {
+    if (!e.ctrlKey) return;                    // plain scroll = page scroll
+    e.preventDefault();                        // stop browser page-zoom
+    const factor = Math.exp(-e.deltaY * 0.012);
+    const newScale = Math.min(12, Math.max(1, scale * factor));
+    if (newScale === scale) return;
+    const r = img.parentElement.getBoundingClientRect();
+    const ox = r.left + r.width / 2, oy = r.top + r.height / 2;
+    const k = 1 - newScale / scale;
+    tx += k * (e.clientX - ox - tx);           // keep cursor point fixed
+    ty += k * (e.clientY - oy - ty);
+    scale = newScale;
+    apply();
+  }, { passive: false });
+  img.addEventListener('pointerdown', (e) => {
+    if (scale <= 1) return;
+    e.preventDefault();
+    img.setPointerCapture(e.pointerId);
+    dragMoved = 0;
+    let lx = e.clientX, ly = e.clientY;
+    const move = (ev) => {
+      tx += ev.clientX - lx; ty += ev.clientY - ly;
+      dragMoved += Math.abs(ev.clientX - lx) + Math.abs(ev.clientY - ly);
+      lx = ev.clientX; ly = ev.clientY;
+      apply();
+    };
+    const up = () => {
+      img.removeEventListener('pointermove', move);
+      img.removeEventListener('pointerup', up);
+      img.removeEventListener('pointercancel', up);
+    };
+    img.addEventListener('pointermove', move);
+    img.addEventListener('pointerup', up);
+    img.addEventListener('pointercancel', up);
+  });
+  // swallow only the click that ends a pan-drag; a clean click while
+  // zoomed propagates and opens the lightbox carrying the zoom state
+  img.addEventListener('click', (e) => {
+    if (dragMoved > 5) {
+      e.stopImmediatePropagation();
+      e.preventDefault();
+      dragMoved = 0;
+    }
+  }, true);
+  img.addEventListener('dblclick', (e) => { e.preventDefault(); scale = 1; apply(); });
+  img.draggable = false;
+}
+
+// ---------- lightbox: pinch/scroll zoom + pan ----------
+
+const lightbox = $('lightbox'), lbImg = $('lbImg');
+let lbZoom = 1, lbX = 0, lbY = 0;
+
+function lbApply() {
+  lbImg.style.setProperty('--zoom', lbZoom);
+  lbImg.style.setProperty('--px', lbX + 'px');
+  lbImg.style.setProperty('--py', lbY + 'px');
+}
+
+// Zoom state of an inline image -> {scale, cX, cY} where (cX,cY) is the
+// image point (fraction of the element box) at the center of its frame.
+// null when not zoomed.
+function carryZoom(img) {
+  const z = img._zoomState;
+  if (!z || z.scale <= 1) return null;
+  return {
+    scale: z.scale,
+    cX: 0.5 - z.tx / (z.scale * img.offsetWidth),
+    cY: 0.5 - z.ty / (z.scale * img.offsetHeight),
+  };
+}
+
+// carry: keep the same scale and the same image point centered.
+// sourceImg: the inline image this view belongs to — lightbox zoom/pan
+// is written back to it (and persisted) on close / navigation.
+let lbSourceImg = null;
+let lbColumn = 'cand';   // 'cand' | 'anchor'
+let lbIndex = 0;
+const lbPos = { cand: 0, anchor: 0 };   // each column remembers its position
+
+function lbList(col) {
+  return col === 'cand'
+    ? [...candidatesEl.querySelectorAll('.card')].map(c => ({
+        src: c.dataset.imgUrl, img: c.querySelector('img') }))
+    : [...anchorList.querySelectorAll('.anchor')].map(a => ({
+        src: a.dataset.src, img: a.querySelector('img') }));
+}
+
+function lbLocate(sourceImg) {
+  const cards = lbList('cand');
+  const ci = cards.findIndex(e => e.img === sourceImg);
+  if (ci >= 0) { lbColumn = 'cand'; lbIndex = ci; lbPos.cand = ci; return; }
+  const anchors = lbList('anchor');
+  const ai = anchors.findIndex(e => e.img === sourceImg);
+  if (ai >= 0) { lbColumn = 'anchor'; lbIndex = ai; lbPos.anchor = ai; return; }
+  lbColumn = 'cand'; lbIndex = 0;
+}
+
+// Persist the current lightbox view into the outgoing image's inline state.
+function lbWriteBack() {
+  if (!lbSourceImg || !lbSourceImg._setZoom || !lbImg.naturalWidth) return;
+  const img = lbSourceImg;
+  if (!img.offsetWidth || !img.offsetHeight) return;
+  const ar = lbImg.naturalWidth / lbImg.naturalHeight;
+  const boxW = Math.min(0.95 * window.innerWidth,
+                        0.95 * window.innerHeight * ar);
+  const boxH = boxW / ar;
+  img._setZoom({
+    s: lbZoom,
+    tx: lbX * lbZoom * img.offsetWidth / boxW,
+    ty: lbY * lbZoom * img.offsetHeight / boxH,
+  });
+}
+
+// Place the lightbox view from a carry ({scale, cX, cY}) once the image
+// box is known. Guards against stale load events after rapid switches.
+function lbPlaceCarry(carry, forSrc) {
+  lbZoom = carry ? carry.scale : 1;
+  lbX = 0; lbY = 0;
+  lbApply();
+  const place = () => {
+    if (forSrc && lbImg.getAttribute('src') !== forSrc) return;  // superseded
+    if (carry && lbImg.naturalWidth) {
+      const ar = lbImg.naturalWidth / lbImg.naturalHeight;
+      const boxW = Math.min(0.95 * window.innerWidth,
+                            0.95 * window.innerHeight * ar);
+      const boxH = boxW / ar;
+      lbX = (0.5 - carry.cX) * boxW;
+      lbY = (0.5 - carry.cY) * boxH;
+      lbApply();
+    }
+  };
+  if (lbImg.complete && lbImg.naturalWidth) place();
+  else lbImg.addEventListener('load', place, { once: true });
+}
+
+// Arrow-key navigation: Left/Right switch columns (candidates <-> anchors),
+// Up/Down move within the column. Each image is recalled at its OWN stored
+// zoom/position; the outgoing image keeps the view you adjusted it to.
+// Edges do nothing.
+function lbSwitch(dCol, dRow) {
+  let col = lbColumn, idx = lbIndex;
+  if (dCol === 1) {
+    if (col !== 'cand' || !lbList('anchor').length) return;
+    lbPos.cand = lbIndex;                        // remember where we left
+    col = 'anchor';
+    idx = Math.min(lbPos.anchor, lbList('anchor').length - 1);
+  } else if (dCol === -1) {
+    if (col !== 'anchor') return;
+    lbPos.anchor = lbIndex;
+    col = 'cand';
+    idx = Math.min(lbPos.cand, lbList('cand').length - 1);
+  } else if (dRow) {
+    let list = lbList(col);
+    // extending candidates on demand when navigating at the rendered edge
+    if (col === 'cand' && idx + dRow >= list.length - 1 &&
+        renderedCount < allFiles.length) {
+      renderChunk();
+      list = lbList(col);
+    }
+    const n = Math.max(0, Math.min(list.length - 1, idx + dRow));
+    if (n === idx) return;
+    idx = n;
+  } else return;
+
+  lbWriteBack();          // outgoing image keeps the view you set
+  lbColumn = col;
+  lbIndex = idx;
+  lbPos[col] = idx;
+  const entry = lbList(col)[idx];
+  lbSourceImg = entry.img;
+  lbImg.src = entry.src;
+  lbPlaceCarry(carryZoom(entry.img), entry.src);   // recall its own zoom
+}
+
+function openLightbox(src, carry = null, sourceImg = null) {
+  lbSourceImg = sourceImg;
+  if (sourceImg) lbLocate(sourceImg);
+  lbImg.src = src;
+  lightbox.classList.add('open');
+  if (!guidesRestored) {   // lazy: needs a visible lightbox for sane bounds
+    guidesRestored = true;
+    restoreGuides();
+  }
+  lbPlaceCarry(carry, src);
+}
+
+function closeLightbox() {
+  lbWriteBack();
+  lbSourceImg = null;
+  lightbox.classList.remove('open');
+  lbImg.removeAttribute('src');
+}
+
+$('lbClose').addEventListener('click', closeLightbox);
+document.addEventListener('keydown', (e) => {
+  if (!lightbox.classList.contains('open')) return;
+  if (e.key === 'Escape') closeLightbox();
+  // Shift+arrows: pan the image 1 screen pixel (lbX/lbY are pre-scale units)
+  else if (e.shiftKey && e.key.startsWith('Arrow')) {
+    e.preventDefault();
+    const step = 1 / lbZoom;
+    if (e.key === 'ArrowRight') lbX += step;
+    else if (e.key === 'ArrowLeft') lbX -= step;
+    else if (e.key === 'ArrowDown') lbY += step;
+    else if (e.key === 'ArrowUp') lbY -= step;
+    lbApply();
+  }
+  // -/+ : zoom so the displayed image width changes by one screen pixel
+  else if (e.key === '-' || e.key === '_' || e.key === '=' || e.key === '+') {
+    e.preventDefault();
+    const boxW = lbImg.offsetWidth || 1;
+    const dir = (e.key === '-' || e.key === '_') ? -1 : 1;
+    const factor = Math.max(0.5, boxW + dir) / boxW;
+    lbZoom = Math.min(12, Math.max(0.2, lbZoom * factor));
+    lbApply();
+  }
+  else if (e.key === 'ArrowRight') { e.preventDefault(); lbSwitch(1, 0); }
+  else if (e.key === 'ArrowLeft') { e.preventDefault(); lbSwitch(-1, 0); }
+  else if (e.key === 'ArrowDown') { e.preventDefault(); lbSwitch(0, 1); }
+  else if (e.key === 'ArrowUp') { e.preventDefault(); lbSwitch(0, -1); }
+});
+
+// Trackpad pinch = ctrl+wheel in browsers; plain scroll zooms too.
+lightbox.addEventListener('wheel', (e) => {
+  e.preventDefault();
+  const factor = Math.exp(-e.deltaY * (e.ctrlKey ? 0.01 : 0.0025));
+  lbZoom = Math.min(12, Math.max(0.2, lbZoom * factor));
+  lbApply();
+}, { passive: false });
+
+// Pan by dragging; touch pinch via pointer events.
+const lbPointers = new Map();
+let lbPinchDist = 0, lbDragMoved = 0;
+lbImg.addEventListener('pointerdown', (e) => {
+  lbPointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
+  lbImg.setPointerCapture(e.pointerId);
+  lbImg.classList.add('dragging');
+  lbDragMoved = 0;
+  if (lbPointers.size === 2) {
+    const [a, b] = [...lbPointers.values()];
+    lbPinchDist = Math.hypot(a.x - b.x, a.y - b.y);
+  }
+});
+lbImg.addEventListener('pointermove', (e) => {
+  if (!lbPointers.has(e.pointerId)) return;
+  const prev = lbPointers.get(e.pointerId);
+  lbPointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
+  if (lbPointers.size === 1) {
+    lbX += e.clientX - prev.x;
+    lbY += e.clientY - prev.y;
+    lbDragMoved += Math.abs(e.clientX - prev.x) + Math.abs(e.clientY - prev.y);
+  } else if (lbPointers.size === 2) {
+    const [a, b] = [...lbPointers.values()];
+    const d = Math.hypot(a.x - b.x, a.y - b.y);
+    if (lbPinchDist > 0)
+      lbZoom = Math.min(12, Math.max(0.2, lbZoom * (d / lbPinchDist)));
+    lbPinchDist = d;
+  }
+  lbApply();
+});
+const lbPointerEnd = (e) => {
+  lbPointers.delete(e.pointerId);
+  if (!lbPointers.size) lbImg.classList.remove('dragging');
+  lbPinchDist = 0;
+};
+lbImg.addEventListener('pointerup', lbPointerEnd);
+lbImg.addEventListener('pointercancel', lbPointerEnd);
+
+// Click on the image closes the lightbox (but not the click ending a drag)
+lbImg.addEventListener('click', () => {
+  if (lbDragMoved > 5) { lbDragMoved = 0; return; }
+  closeLightbox();
+});
+
+// ---------- lightbox guides (fixed to viewport, survive navigation) ----------
+
+const guideLayer = $('guideLayer');
+const LS_GUIDES = 'kzreview.guides.v1';   // [{axis, pos}]
+let guidesRestored = false;
+
+function persistGuides() {
+  const items = [...guideLayer.querySelectorAll('.guide')].map(g => ({
+    axis: g.classList.contains('h') ? 'h' : 'v',
+    pos: parseFloat(g.classList.contains('h') ? g.style.top : g.style.left),
+  }));
+  try { localStorage.setItem(LS_GUIDES, JSON.stringify(items)); }
+  catch (e) { /* in-memory only */ }
+}
+
+function restoreGuides() {
+  let items = [];
+  try { items = JSON.parse(localStorage.getItem(LS_GUIDES)) || []; }
+  catch (e) { /* none */ }
+  for (const it of items) {
+    if (it && (it.axis === 'h' || it.axis === 'v') && isFinite(it.pos))
+      addGuide(it.axis, it.pos);
+  }
+}
+
+function addGuide(axis, pos) {
+  const g = document.createElement('div');
+  g.className = `guide ${axis}`;
+  g._setPos = (p) => {
+    const max = axis === 'h' ? lightbox.clientHeight : lightbox.clientWidth;
+    pos = Math.max(0, Math.min(max, p));
+    if (axis === 'h') g.style.top = pos + 'px';
+    else g.style.left = pos + 'px';
+  };
+  g._setPos(pos);
+  g.addEventListener('dblclick', (e) => {
+    e.stopPropagation();
+    g.remove();
+    persistGuides();
+  });
+  g.addEventListener('pointerdown', (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    g.setPointerCapture(e.pointerId);
+    const move = (ev) => g._setPos(axis === 'h' ? ev.clientY : ev.clientX);
+    const up = (ev) => {
+      g.removeEventListener('pointermove', move);
+      g.removeEventListener('pointerup', up);
+      g.removeEventListener('pointercancel', up);
+      const p = axis === 'h' ? ev.clientY : ev.clientX;
+      if (p < 6) g.remove();   // dragged back off the creating edge
+      persistGuides();
+    };
+    g.addEventListener('pointermove', move);
+    g.addEventListener('pointerup', up);
+    g.addEventListener('pointercancel', up);
+  });
+  guideLayer.appendChild(g);
+  persistGuides();
+  return g;
+}
+
+// Drag from a lightbox edge creates a guide and immediately drags it.
+for (const [stripId, axis] of [['guideStripTop', 'h'], ['guideStripLeft', 'v']]) {
+  $(stripId).addEventListener('pointerdown', (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    const g = addGuide(axis, axis === 'h' ? e.clientY : e.clientX);
+    const move = (ev) => g._setPos(axis === 'h' ? ev.clientY : ev.clientX);
+    const up = (ev) => {
+      document.removeEventListener('pointermove', move);
+      document.removeEventListener('pointerup', up);
+      const p = axis === 'h' ? ev.clientY : ev.clientX;
+      if (p < 6) g.remove();   // never pulled out of the edge -> discard
+      persistGuides();
+    };
+    document.addEventListener('pointermove', move);
+    document.addEventListener('pointerup', up);
+  });
+}
+
+// ---------- copy / download notes ----------
+
+function formatComments(all) {
+  return Object.keys(all).sort().map(k => {
+    const p = commentParts(all[k]);
+    const lines = [k];
+    if (p.neg.trim()) lines.push(`  - ${p.neg}`);
+    if (p.pos.trim()) lines.push(`  + ${p.pos}`);
+    return lines.join('\n');
+  }).join('\n\n');
+}
+
+$('copyBtn').addEventListener('click', async () => {
+  try {
+    const all = await api('/api/comments');
+    const keys = Object.keys(all);
+    if (!keys.length) { setStatus('no comments to copy'); return; }
+    await navigator.clipboard.writeText(formatComments(all));
+    setStatus(`copied ${keys.length} comment(s)`);
+  } catch (err) {
+    setStatus(`copy failed: ${err.message}`, true);
+  }
+});
+
+$('dlBtn').addEventListener('click', async () => {
+  try {
+    const all = await api('/api/comments');
+    const keys = Object.keys(all);
+    if (!keys.length) { setStatus('no comments to download'); return; }
+    const blob = new Blob([formatComments(all)],
+                          { type: 'text/plain;charset=utf-8' });
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(blob);
+    a.download = 'review-notes.txt';
+    a.click();
+    URL.revokeObjectURL(a.href);
+    setStatus(`downloaded ${keys.length} comment(s)`);
+  } catch (err) {
+    setStatus(`download failed: ${err.message}`, true);
+  }
+});
+
+// ---------- divider drag (anchors pane width) ----------
+
+divider.addEventListener('mousedown', (e) => {
+  e.preventDefault();
+  document.body.classList.add('resizing');
+  const onMove = (ev) => {
+    const mainRect = divider.parentElement.getBoundingClientRect();
+    const w = Math.min(Math.max(mainRect.right - ev.clientX - 12, 220),
+                       window.innerWidth * 0.7);
+    anchorsEl.style.width = `${Math.round(w)}px`;
+  };
+  const onUp = () => {
+    document.body.classList.remove('resizing');
+    document.removeEventListener('mousemove', onMove);
+    document.removeEventListener('mouseup', onUp);
+    try { localStorage.setItem(LS_WIDTH, anchorsEl.style.width); }
+    catch (e) { /* in-memory only */ }
+  };
+  document.addEventListener('mousemove', onMove);
+  document.addEventListener('mouseup', onUp);
+});
+
+// ---------- anchors (local only, nothing uploads) ----------
+// Anchors persist in localStorage (image dataURLs + names, in pane order).
+// Large images are downscaled (max 1200px, JPEG q0.85) to fit the ~5MB
+// localStorage quota; on quota overflow the pane still works in-memory.
+
+const LS_KEY = 'kzreview.anchors.v1';
+
+function loadAnchorStore() {
+  try { return JSON.parse(localStorage.getItem(LS_KEY)) || []; }
+  catch (e) { return []; }
+}
+
+function persistAnchors() {
+  const items = [...anchorList.querySelectorAll('.anchor')].map(el => ({
+    name: el.dataset.name,
+    src: el.dataset.src,
+    ...(el.dataset.meta ? { meta: JSON.parse(el.dataset.meta) } : {}),
+  }));
+  try {
+    localStorage.setItem(LS_KEY, JSON.stringify(items));
+  } catch (e) {
+    setStatus('anchors not saved: browser storage full', true);
+  }
+}
+
+// ComfyUI embeds the API graph in a PNG tEXt/iTXt chunk named "prompt".
+// Returns {width, height, promptGraph} or null.
+function parsePngMeta(buf) {
+  const dv = new DataView(buf);
+  const SIG = [0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A];
+  if (buf.byteLength < 8 || SIG.some((b, i) => dv.getUint8(i) !== b))
+    return null;
+  const dec = new TextDecoder();
+  let width = 0, height = 0, promptGraph = null;
+  let off = 8;
+  while (off + 12 <= buf.byteLength) {
+    const len = dv.getUint32(off);
+    const type = dec.decode(new Uint8Array(buf, off + 4, 4));
+    const data = new Uint8Array(buf, off + 8, len);
+    if (type === 'IHDR') {
+      width = dv.getUint32(off + 8);
+      height = dv.getUint32(off + 12);
+    } else if (type === 'tEXt' || type === 'iTXt') {
+      const nul = data.indexOf(0);
+      if (nul > 0) {
+        const keyword = dec.decode(data.subarray(0, nul));
+        if (keyword === 'prompt') {
+          if (type === 'tEXt') {
+            try { promptGraph = JSON.parse(dec.decode(data.subarray(nul + 1))); }
+            catch (e) { /* keep looking */ }
+          } else {
+            // iTXt: keyword\0 compFlag compMethod lang\0 translated\0 text
+            const compFlag = data[nul + 1];
+            if (compFlag === 0) {
+              let p = nul + 4;
+              p += data.indexOf(0, p) - p + 1;
+              p += data.indexOf(0, p) - p + 1;
+              try { promptGraph = JSON.parse(dec.decode(data.subarray(p))); }
+              catch (e) { /* keep looking */ }
+            }
+          }
+        }
+      }
+    }
+    off += 12 + len;
+    if (type === 'IEND') break;
+  }
+  return promptGraph ? { width, height, promptGraph } : null;
+}
+
+// Same extraction as candidates: history entry shape -> reuse extractMeta.
+function metaFromPng(pngMeta) {
+  const m = extractMeta({ prompt: [0, '', pngMeta.promptGraph] });
+  if (m && pngMeta.width && pngMeta.height) {
+    m.width = pngMeta.width;
+    m.height = pngMeta.height;
+  }
+  return m;
+}
+
+function fillAnchorMeta(el, meta) {
+  const bits = [];
+  if (meta.seed !== undefined) bits.push(`seed ${meta.seed}`);
+  if (meta.steps !== undefined) bits.push(`${meta.steps} steps`);
+  if (meta.cfg !== undefined) bits.push(`cfg ${meta.cfg}`);
+  if (meta.denoise !== undefined) bits.push(`dn ${Number(meta.denoise).toFixed(2)}`);
+  if (meta.sampler_name)
+    bits.push(meta.scheduler ? `${meta.sampler_name}/${meta.scheduler}`
+                             : meta.sampler_name);
+  for (const l of meta.loras || [])
+    bits.push(`${l.name}${l.strength != null ? '@' + l.strength : ''}`);
+  if (meta.width && meta.height) bits.push(`${meta.width}×${meta.height}`);
+  const pair = document.createElement('div');
+  pair.className = 'pair';
+  const props = document.createElement('div');
+  props.className = 'props';
+  props.textContent = bits.join(' · ');
+  const desc = document.createElement('div');
+  desc.className = 'desc';
+  if (meta.prompt) {
+    desc.textContent = meta.prompt.length > 200
+      ? meta.prompt.slice(0, 200) + '…' : meta.prompt;
+    desc.title = meta.prompt;
+  }
+  pair.append(props, desc);
+  el.appendChild(pair);
+  el.style.display = 'block';
+}
+
+// Downscale via canvas so persisted anchors fit the storage quota.
+function shrinkImage(src, fileName) {
+  return new Promise((resolve) => {
+    const img = new Image();
+    img.onload = () => {
+      const MAX = 1200;
+      if (Math.max(img.width, img.height) <= MAX) return resolve(src);
+      const scale = MAX / Math.max(img.width, img.height);
+      const c = document.createElement('canvas');
+      c.width = Math.round(img.width * scale);
+      c.height = Math.round(img.height * scale);
+      c.getContext('2d').drawImage(img, 0, 0, c.width, c.height);
+      resolve(/\.png$/i.test(fileName)
+        ? c.toDataURL('image/png')
+        : c.toDataURL('image/jpeg', 0.85));
+    };
+    img.onerror = () => resolve(src);
+    img.src = src;
+  });
+}
+
+function renderAnchor(name, src, meta) {
+  const wrap = document.createElement('div');
+  wrap.className = 'anchor';
+  wrap.dataset.name = name;
+  wrap.dataset.src = src;
+  if (meta) wrap.dataset.meta = JSON.stringify(meta);
+  const img = document.createElement('img');
+  img.src = src;
+  img.style.cursor = 'zoom-in';
+  img.draggable = false;   // let the card's reorder drag work from the image
+  img.addEventListener('click', () => openLightbox(src, carryZoom(img), img));
+  // Pane thumbnails never render zoomed (a shifted crop leaves a gap and
+  // detaches the × from the image). The zoom state still exists — the
+  // lightbox recalls it on open and writes back on close.
+  const anchorZoomKey = `anchor:${name}`;
+  const storedZoom = zoomStore[anchorZoomKey];
+  img._zoomState = storedZoom
+    ? { scale: storedZoom.s, tx: storedZoom.tx, ty: storedZoom.ty }
+    : { scale: 1, tx: 0, ty: 0 };
+  img._setZoom = (z) => {
+    const state = { scale: z.s || z.scale || 1, tx: z.tx || 0, ty: z.ty || 0 };
+    img._zoomState = state;
+    saveZoomKey(anchorZoomKey, state);
+  };
+  const imgWrap = document.createElement('div');
+  imgWrap.className = 'aimgwrap';
+  imgWrap.appendChild(img);
+  const nameEl = document.createElement('div');
+  nameEl.className = 'aname';
+  nameEl.textContent = name;
+  const metaEl = document.createElement('div');
+  metaEl.className = 'ameta';
+  if (meta) fillAnchorMeta(metaEl, meta);
+    const rm = document.createElement('button');
+  rm.className = 'rm';
+  rm.textContent = '×';
+  rm.title = 'remove anchor';
+  rm.addEventListener('click', () => { wrap.remove(); persistAnchors(); });
+  imgWrap.appendChild(rm);   // semi-transparent overlay on the image itself
+  wrap.append(imgWrap, nameEl, metaEl);
+  anchorList.appendChild(wrap);
+
+  // drag-and-drop reordering (distinguished from file drops:
+  // internal drags carry no files, only our own type marker)
+  wrap.draggable = true;
+  wrap.addEventListener('dragstart', (e) => {
+    e.dataTransfer.setData('text/x-anchor', '');
+    e.dataTransfer.effectAllowed = 'move';
+    anchorDragEl = wrap;
+    wrap.classList.add('dragging');
+  });
+  wrap.addEventListener('dragend', () => {
+    wrap.classList.remove('dragging');
+    anchorDragEl = null;
+    persistAnchors();
+  });
+}
+
+async function addAnchor(file) {
+  if (!file.type.startsWith('image/')) return;
+  const [src, buf] = await Promise.all([
+    new Promise((resolve) => {
+      const reader = new FileReader();
+      reader.onload = () => resolve(reader.result);
+      reader.onerror = () => resolve(null);
+      reader.readAsDataURL(file);
+    }),
+    file.arrayBuffer(),
+  ]);
+  if (!src) return;
+  let meta = null;
+  try {
+    const pngMeta = parsePngMeta(buf);   // from ORIGINAL bytes (before shrink)
+    if (pngMeta) meta = metaFromPng(pngMeta);
+  } catch (e) { /* metadata optional */ }
+  renderAnchor(file.name, await shrinkImage(src, file.name), meta);
+  persistAnchors();
+}
+
+let anchorDragEl = null;
+
+anchorList.addEventListener('dragover', (e) => {
+  if (!anchorDragEl) return;               // external file drag: ignore here
+  e.preventDefault();                      // allow drop
+  e.dataTransfer.dropEffect = 'move';
+  const over = e.target.closest('.anchor');
+  if (!over || over === anchorDragEl) return;
+  const rect = over.getBoundingClientRect();
+  const before = (e.clientY - rect.top) < rect.height / 2;
+  anchorList.insertBefore(anchorDragEl, before ? over : over.nextSibling);
+});
+anchorList.addEventListener('drop', (e) => {
+  if (anchorDragEl) e.preventDefault();    // reorder done in dragover
+});
+
+dropzone.addEventListener('dragover', (e) => {
+  e.preventDefault();
+  dropzone.classList.add('over');
+});
+dropzone.addEventListener('dragleave', () => dropzone.classList.remove('over'));
+dropzone.addEventListener('drop', (e) => {
+  e.preventDefault();
+  dropzone.classList.remove('over');
+  if (anchorDragEl) return;                // was an anchor reorder, not files
+  for (const f of e.dataTransfer.files) addAnchor(f);
+});
+dropzone.addEventListener('click', () => fileInput.click());
+fileInput.addEventListener('change', () => {
+  for (const f of fileInput.files) addAnchor(f);
+  fileInput.value = '';
+});
+
+// ---------- hosts + init ----------
+
+// Reachability is advisory, not a gate: offline hosts stay selectable
+// (ComfyUI stalls its API while generating, so a failed probe is often
+// transient). Every refresh re-probes.
+async function refreshHosts() {
+  const hosts = await api('/api/hosts');
+  hostSel.innerHTML = '';
+  for (const h of hosts) {
+    const opt = document.createElement('option');
+    opt.value = h.name;
+    opt.textContent = h.online ? h.name : `${h.name} (offline)`;
+    hostSel.appendChild(opt);
+  }
+  if (currentHost && hosts.some(h => h.name === currentHost)) {
+    hostSel.value = currentHost;           // keep selection across re-probes
+  } else {
+    currentHost = (hosts.find(h => h.online) || hosts[0] || {}).name || null;
+    if (currentHost) hostSel.value = currentHost;
+  }
+  if (!hosts.some(h => h.online)) setStatus('all hosts offline', true);
+}
+
+async function refresh() {
+  setStatus('probing hosts…');
+  try {
+    await refreshHosts();
+  } catch (err) {
+    setStatus(`host probe failed: ${err.message}`, true);
+  }
+  try {
+    comments = await api('/api/comments');
+  } catch (err) { /* keep existing */ }
+  await loadCandidates();
+}
+
+async function init() {
+  const savedWidth = localStorage.getItem(LS_WIDTH);
+  if (savedWidth) anchorsEl.style.width = savedWidth;
+  for (const a of loadAnchorStore()) {
+    if (a && a.src) renderAnchor(a.name || 'anchor', a.src, a.meta || null);
+  }
+  await migrateLegacyVotes();
+  try {
+    comments = await api('/api/comments');
+  } catch (err) { /* start with empty */ }
+  await refresh();
+}
+
+hostSel.addEventListener('change', () => {
+  currentHost = hostSel.value;
+  loadCandidates();
+});
+$('refreshBtn').addEventListener('click', refresh);
+$('unhideBtn').addEventListener('click', async () => {
+  // unhide = clear all thumbs-down votes (thumbs-up stay marked)
+  const downs = Object.keys(comments).filter(k => voteOf(k) === 'down');
+  for (const k of downs) await setVerdict(k, null);
+  resetList();
+  setupObservers();
+  renderChunk();
+  setStatus(statusSummary() + (downs.length ? ` — unhid ${downs.length}` : ''));
+});
+
+init();
+</script>
+</body>
+</html>
