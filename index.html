@@ -242,7 +242,7 @@
   #lbClipWrap img { pointer-events: auto; }
   /* split-wipe handle (overlay mode) */
   #lbSplit {
-    position: absolute; top: 0; bottom: 0; width: 9px; margin-left: -4px;
+    position: absolute; top: 0; bottom: 0; width: 17px; margin-left: -8px;
     cursor: col-resize; z-index: 105; display: none;
   }
   #lbSplit .line {
@@ -277,10 +277,13 @@
   }
   .guide {
     position: absolute; pointer-events: auto;
-    background: rgba(34, 211, 238, .9); box-shadow: 0 0 3px rgba(0,0,0,.9);
+    background: rgba(34, 211, 238, .9);
+    background-clip: content-box;   /* visual line stays 2px; padding = grab area */
   }
-  .guide.h { left: 0; right: 0; height: 2px; cursor: row-resize; }
-  .guide.v { top: 0; bottom: 0; width: 2px; cursor: col-resize; }
+  .guide.h { left: 0; right: 0; height: 2px; padding: 5px 0;
+             cursor: row-resize; }
+  .guide.v { top: 0; bottom: 0; width: 2px; padding: 0 5px;
+             cursor: col-resize; }
   .card textarea {
     width: 100%; min-height: 44px; resize: vertical;
     background: var(--bg); color: var(--fg);
@@ -1583,7 +1586,11 @@ lbImg.addEventListener('pointerdown', (e) => {
       const a = Math.atan2(ev.clientY - piv[1], ev.clientX - piv[0]);
       const d = (a - a0) * 180 / Math.PI;
       if (Math.abs(d) > 0.5) lbDragMoved = 10;   // don't close on release
-      lbRot = r0 + d;
+      let rot = r0 + d;
+      // snap to level (0°) within 4° — touchpad-friendly
+      const snapped = Math.round(rot / 360) * 360;
+      if (Math.abs(rot - snapped) < 4) rot = snapped;
+      lbRot = rot;
       lbApply();
     };
     const up = () => {
@@ -1757,8 +1764,10 @@ function addGuide(axis, pos) {
   g._setPos = (p) => {
     const max = axis === 'h' ? lightbox.clientHeight : lightbox.clientWidth;
     pos = Math.max(0, Math.min(max, p));
-    if (axis === 'h') g.style.top = pos + 'px';
-    else g.style.left = pos + 'px';
+    // the padded grab area is wider than the visible line; keep the
+    // visible line centered on the pointer position
+    if (axis === 'h') g.style.top = (pos - 6) + 'px';
+    else g.style.left = (pos - 6) + 'px';
   };
   g._setPos(pos);
   g.addEventListener('dblclick', (e) => {
