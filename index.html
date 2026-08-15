@@ -350,7 +350,7 @@
     <input type="range" id="lbMix" min="0" max="100" value="100">
     <span id="lbMixVal">100%</span>
   </div>
-  <div id="lbHint">pinch / -+ zoom · scroll / drag / shift+arrows pan · matched or Shift-drag pans both · arrows switch · guides from edges (dblclick removes) · Esc closes</div>
+  <div id="lbHint">pinch / -+ zoom · drag / shift+arrows pan · matched or Shift-drag pans both · arrows switch · guides from edges (dblclick removes) · Esc closes</div>
 </div>
 
 <script>
@@ -1140,13 +1140,21 @@ function lbWriteBack() {
 }
 
 // Place the lightbox view from a carry ({scale, cX, cY}) once the image
-// box is known. Guards against stale load events after rapid switches.
+// box is known. Browsers keep complete/naturalWidth stale briefly after a
+// src change, so only trust dims once THIS src has finished loading
+// (tracked via lbImg._loadedSrc) — otherwise a cached-looking image gets
+// placed with the previous image's aspect box (position lands shifted).
+lbImg.addEventListener('load', () => {
+  lbImg._loadedSrc = lbImg.getAttribute('src');
+});
+
 function lbPlaceCarry(carry, forSrc) {
   lbZoom = carry ? carry.scale : 1;
   lbX = 0; lbY = 0;
   lbApply();
   const place = () => {
     if (forSrc && lbImg.getAttribute('src') !== forSrc) return;  // superseded
+    if (forSrc && lbImg._loadedSrc !== forSrc) return;  // stale dims
     if (carry && lbImg.naturalWidth) {
       const ar = lbImg.naturalWidth / lbImg.naturalHeight;
       const boxW = Math.min(0.95 * window.innerWidth,
@@ -1157,7 +1165,7 @@ function lbPlaceCarry(carry, forSrc) {
       lbApply();
     }
   };
-  if (lbImg.complete && lbImg.naturalWidth) place();
+  if (lbImg._loadedSrc === forSrc) place();
   else lbImg.addEventListener('load', place, { once: true });
 }
 
@@ -1232,6 +1240,7 @@ function closeLightbox() {
   lbSourceImg = null;
   lightbox.classList.remove('open');
   lbImg.removeAttribute('src');
+  lbImg._loadedSrc = null;   // force a fresh load cycle next open
   lbBase.removeAttribute('src');
   lbImg.style.opacity = '';
   $('lbMixWrap').style.display = 'none';
@@ -1270,17 +1279,13 @@ document.addEventListener('keydown', (e) => {
   else if (e.key === 'ArrowUp') { e.preventDefault(); lbSwitch(0, -1); }
 });
 
-// Trackpad pinch = ctrl+wheel -> zoom. Plain wheel/trackpad scroll -> pan
-// (never zoom: scroll-zoom is terrible UX).
+// Trackpad pinch = ctrl+wheel -> zoom. Plain scroll does nothing in the
+// lightbox (scroll-pan fought with pinch-zoom on trackpads).
 lightbox.addEventListener('wheel', (e) => {
   e.preventDefault();
-  if (e.ctrlKey) {
-    const factor = Math.exp(-e.deltaY * 0.01);
-    lbZoom = Math.min(12, Math.max(0.2, lbZoom * factor));
-  } else {
-    lbX -= e.deltaX / lbZoom;   // lbX/lbY are pre-scale units
-    lbY -= e.deltaY / lbZoom;
-  }
+  if (!e.ctrlKey) return;
+  const factor = Math.exp(-e.deltaY * 0.01);
+  lbZoom = Math.min(12, Math.max(0.2, lbZoom * factor));
   lbApply();
 }, { passive: false });
 
