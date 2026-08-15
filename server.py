@@ -26,6 +26,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 HOSTS = {
     "host-a": "comfyui.local:8188",
     "host-b": "anton.local:8888",
+    "host-c": "ark.local:8188",
 }
 
 BIND = "127.0.0.1"
@@ -55,10 +56,21 @@ VENDOR_MIME = {
     ".json": "application/json",
 }
 
+# curation buckets (stored per image in feedback.json entries)
+BUCKETS = ("good", "almost", "almost_almost", "not_kozmo", "other_kozmo",
+           "broken")
+# note-type tags; "character" is the default and is stored as "absent"
+TAGS = ("character", "scene", "style")
+
 # local anime face detection (detect_worker.py in the project venv)
 FACEWORKER_PY = os.path.join(BASE_DIR, ".venv", "bin", "python")
 DETECT_WORKER = os.path.join(BASE_DIR, "detect_worker.py")
 FACEBOX_CACHE_PATH = os.path.join(BASE_DIR, "faceboxes_cache.json")
+
+# persistent metadata cache: ComfyUI /api/history is volatile (lost on the
+# host's restart), so every fetched history entry's per-image metadata is
+# merged into metadata_cache.json and never deleted
+METADATA_CACHE_PATH = os.path.join(BASE_DIR, "metadata_cache.json")
 
 STATUS_TIMEOUT = 8    # seconds, /api/hosts reachability probe
                       # (ComfyUI stalls its API while generating)
@@ -83,8 +95,9 @@ def read_comments():
 
 def upsert_comment(key, fields):
     """Partial update of one entry. fields may contain neg (str),
-    pos (str), vote ('up'|'down'|None to clear). Entries with no
-    remaining content are removed."""
+    pos (str), vote ('up'|'down'|None to clear), bucket (BUCKETS|"" to
+    clear), tag (TAGS|None to clear; 'character' is default = absent).
+    Entries with no remaining content are removed."""
     with _comments_lock:
         try:
             with open(COMMENTS_PATH, "r", encoding="utf-8") as f:
@@ -105,9 +118,21 @@ def upsert_comment(key, fields):
                 entry["vote"] = fields["vote"]
             else:
                 entry.pop("vote", None)
+        if "bucket" in fields:
+            if fields["bucket"] in BUCKETS:
+                entry["bucket"] = fields["bucket"]
+            else:
+                entry.pop("bucket", None)
+        if "tag" in fields:
+            if fields["tag"] in ("scene", "style"):
+                entry["tag"] = fields["tag"]
+            else:
+                entry.pop("tag", None)   # 'character' = default = absent
         if not entry.get("neg", "").strip() \
                 and not entry.get("pos", "").strip() \
-                and not entry.get("vote"):
+                and not entry.get("vote") \
+                and not entry.get("bucket") \
+                and not entry.get("tag"):
             data.pop(key, None)
         else:
             data[key] = entry
@@ -235,6 +260,110 @@ def _worker_result_to_box(res):
     }
 
 
+# --- metadata extraction + persistent cache (ported from the page's JS) ----
+
+_metadata_cache = None
+_metadata_lock = threading.RLock()   # merge re-enters via _load()
+
+
+def _metadata_cache_load():
+    global _metadata_cache
+    with _metadata_lock:
+        if _metadata_cache is None:
+            try:
+                with open(METADATA_CACHE_PATH, encoding="utf-8") as f:
+                    _metadata_cache = json.load(f)
+            except (FileNotFoundError, json.JSONDecodeError):
+                _metadata_cache = {}
+        return _metadata_cache
+
+
+def _metadata_cache_save():
+    fd, tmp = tempfile.mkstemp(dir=BASE_DIR, suffix=".tmp")
+    with os.fdopen(fd, "w", encoding="utf-8") as f:
+        json.dump(_metadata_cache, f)
+    os.replace(tmp, METADATA_CACHE_PATH)
+
+
+def _walk_text(graph, start_link):
+    """Follow positive/negative input links until a node with string text.
+    A ConditioningZeroOut on the path means an intentionally empty prompt."""
+    node = graph.get(start_link[0]) if isinstance(start_link, list) else None
+    for _ in range(8):
+        if not node:
+            return ""
+        if "zeroout" in (node.get("class_type") or "").lower():
+            return ""
+        text = node.get("inputs", {}).get("text")
+        if isinstance(text, str):
+            return text
+        nxt = next((v for v in node.get("inputs", {}).values()
+                    if isinstance(v, list)), None)
+        node = graph.get(nxt[0]) if nxt else None
+    return ""
+
+
+def extract_meta(entry):
+    """Per-image metadata from one /api/history entry's prompt graph."""
+    prompt = entry.get("prompt")
+    if not isinstance(prompt, list) or len(prompt) < 3:
+        return None
+    graph = prompt[2]
+    if not isinstance(graph, dict):
+        return None
+    nodes = list(graph.values())
+    ks = next((n for n in nodes if n.get("class_type") == "KSampler"), None)
+    if ks is None:
+        ks = next((n for n in nodes
+                   if "sampler" in (n.get("class_type") or "").lower()), None)
+    meta = {"loras": []}
+    if isinstance(prompt[0], (int, float)):
+        meta["q"] = prompt[0]                     # queue order
+    if ks:
+        for k in ("seed", "steps", "cfg", "sampler_name", "scheduler",
+                  "denoise"):
+            v = ks.get("inputs", {}).get(k)
+            if v is not None:
+                meta[k] = v
+        meta["prompt"] = _walk_text(graph, ks.get("inputs", {})
+                                    .get("positive")).strip()
+        meta["negPrompt"] = _walk_text(graph, ks.get("inputs", {})
+                                       .get("negative")).strip()
+    for n in nodes:
+        ct = (n.get("class_type") or "")
+        if "lora" in ct.lower() and "load" in ct.lower():
+            inp = n.get("inputs", {})
+            meta["loras"].append({
+                "name": inp.get("lora_name") or inp.get("lora") or "?",
+                "strength": inp.get("lora_strength",
+                                   inp.get("strength_model",
+                                           inp.get("strength"))),
+            })
+    latent = next((n for n in nodes
+                   if "latent" in (n.get("class_type") or "").lower()
+                   and "empty" in (n.get("class_type") or "").lower()), None)
+    if latent:
+        w = latent.get("inputs", {}).get("width")
+        h = latent.get("inputs", {}).get("height")
+        if isinstance(w, (int, float)) and isinstance(h, (int, float)):
+            meta["width"], meta["height"] = w, h
+    return meta
+
+
+def history_output_metas(history):
+    """filename -> meta for every output image in a /api/history response."""
+    out = {}
+    for entry in history.values():
+        meta = extract_meta(entry)
+        if not meta:
+            continue
+        for output in (entry.get("outputs") or {}).values():
+            for img in output.get("images", []):
+                if img.get("type") == "output" and img.get("filename"):
+                    out[img["filename"]] = meta
+    return out
+
+
 def facebox_for_bytes(key, image_bytes):
     cached = _facebox_cache_load()
     if key in cached:
@@ -292,6 +421,8 @@ class Handler(BaseHTTPRequestHandler):
                 self._handle_image(qs)
             elif path == "/api/history":
                 self._handle_history(qs)
+            elif path == "/api/metadata":
+                self._handle_metadata(qs)
             elif path == "/api/comments":
                 self._send(200, json.dumps(read_comments(), ensure_ascii=False),
                            extra_headers={"Cache-Control": "no-store"})
@@ -401,12 +532,50 @@ class Handler(BaseHTTPRequestHandler):
                                   PROXY_TIMEOUT)
         self._send(status, body, extra_headers={"Cache-Control": "no-store"})
 
+    def _merge_history_into_metadata(self, host, body_bytes):
+        try:
+            history = json.loads(body_bytes)
+        except json.JSONDecodeError:
+            return
+        live = history_output_metas(history)
+        if not live:
+            return
+        with _metadata_lock:
+            cache = _metadata_cache_load()
+            cache.update({f"{host}:{k}": v for k, v in live.items()})
+            _metadata_cache_save()
+
     def _handle_history(self, qs):
         base = self._require_host(qs)
         if not base:
             return
         status, body = fetch_json(f"{base}/api/history", PROXY_TIMEOUT)
+        if status == 200:
+            self._merge_history_into_metadata(qs["host"][0], body)
         self._send(status, body, extra_headers={"Cache-Control": "no-store"})
+
+    def _handle_metadata(self, qs):
+        """filename -> meta: persistent cache merged with live history
+        (live wins; cache covers images whose history vanished)."""
+        base = self._require_host(qs)
+        if not base:
+            return
+        host = qs["host"][0]
+        live = {}
+        try:
+            status, body = fetch_json(f"{base}/api/history", PROXY_TIMEOUT)
+            if status == 200:
+                self._merge_history_into_metadata(host, body)
+                live = history_output_metas(json.loads(body))
+        except Exception:
+            pass    # host stalled/down: serve cache alone
+        cache = _metadata_cache_load()
+        prefix = host + ":"
+        merged = {k[len(prefix):]: v for k, v in cache.items()
+                  if k.startswith(prefix)}
+        merged.update(live)
+        self._send(200, json.dumps(merged, ensure_ascii=False),
+                   extra_headers={"Cache-Control": "no-store"})
 
     def _handle_image(self, qs):
         base = self._require_host(qs)
@@ -567,6 +736,18 @@ class Handler(BaseHTTPRequestHandler):
                 self._send_error_json(400, "vote must be 'up'|'down'|null")
                 return
             fields["vote"] = payload["vote"]
+        if "bucket" in payload:
+            if payload["bucket"] not in BUCKETS + ("", None):
+                self._send_error_json(
+                    400, f"bucket must be one of {BUCKETS} or empty")
+                return
+            fields["bucket"] = payload["bucket"]
+        if "tag" in payload:
+            if payload["tag"] not in TAGS + (None,):
+                self._send_error_json(
+                    400, f"tag must be one of {TAGS} or null")
+                return
+            fields["tag"] = payload["tag"]
         if not fields:
             self._send_error_json(400, "nothing to update")
             return

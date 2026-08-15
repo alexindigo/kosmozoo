@@ -5,3 +5,5 @@ vendor/
 faceboxes_cache.json
 feedback.json
 config.json
+metadata_cache.json
+TODO.md
