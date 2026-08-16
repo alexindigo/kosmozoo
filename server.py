@@ -26,8 +26,8 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 # ("name=host:port,name2=host2:port2"); the default is a local instance.
 DEFAULT_HOSTS = {"local": "127.0.0.1:8188"}
 
-BIND = "127.0.0.1"
 # all overridable from the environment
+BIND = os.environ.get("KOZMOZOO_BIND", "0.0.0.0")
 PORT = int(os.environ.get("KOZMOZOO_PORT", "2084"))
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -825,7 +825,9 @@ class Handler(BaseHTTPRequestHandler):
 
 def main():
     server = ThreadingHTTPServer((BIND, PORT), Handler)
-    print(f"Kosmozoo review server on http://{BIND}:{PORT}")
+    shown = "127.0.0.1" if BIND == "0.0.0.0" else BIND
+    print(f"Kosmozoo review server on http://{shown}:{PORT}"
+          + (" (all interfaces)" if BIND == "0.0.0.0" else ""))
     print(f"Hosts: {', '.join(f'{k} ({v})' for k, v in HOSTS.items())}")
     try:
         server.serve_forever()

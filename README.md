@@ -9,8 +9,9 @@ lands in one canonical `feedback.json` that downstream tooling (training
 digests, curation scripts) can consume directly.
 
 No npm, no bundler, no framework: `server.py` (stdlib `http.server`) +
-`index.html` (inline CSS/JS). Binds `127.0.0.1` only — it is a local tool,
-not a network service.
+`index.html` (inline CSS/JS). Binds `0.0.0.0` by default (reachable on the
+LAN — there is no auth; set `KOZMOZOO_BIND=127.0.0.1` to keep it
+localhost-only).
 
 ## Features
 
@@ -101,7 +102,8 @@ Environment variables:
 
 | Var | Default | Meaning |
 |---|---|---|
-| `KOZMOZOO_PORT` | `2084` | listen port (binds 127.0.0.1) |
+| `KOZMOZOO_PORT` | `2084` | listen port |
+| `KOZMOZOO_BIND` | `0.0.0.0` | bind address (`127.0.0.1` = localhost-only) |
 | `KOZMOZOO_DOWNLOADS` | `~/Downloads` | dir the card "save" button checks |
 | `KOZMOZOO_FEEDBACK` | `~/Documents/kosmozoo_feedback.json` | default feedback.json path |
 | `KOZMOZOO_BUCKETS` | generic list | comma-separated curation bucket names |
