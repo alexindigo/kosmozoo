@@ -118,6 +118,17 @@
     position: absolute; top: 116px; left: 24px; z-index: 104;
     background: rgba(20,20,28,.65); border-radius: 8px; padding: 7px 10px;
   }
+  #lbSplitWrap {
+    position: absolute; top: 150px; left: 24px; z-index: 104;
+    background: rgba(20,20,28,.65); border-radius: 8px; padding: 7px 10px;
+  }
+  #lbFlipWrap {
+    position: absolute; top: 184px; left: 24px; z-index: 104;
+    background: rgba(20,20,28,.65); border-radius: 8px; padding: 6px 8px;
+    display: flex; gap: 6px;
+  }
+  #lbFlipWrap button { font-size: 11px; padding: 3px 9px; }
+  #lbFlipWrap button.on { border-color: var(--accent); color: var(--accent); }
   /* guides hidden: lines and creation strips both off */
   #lightbox.guides-hidden #guideLayer,
   #lightbox.guides-hidden #guideStripTop,
@@ -268,10 +279,6 @@
   #lbSplit .line {
     width: 2px; height: 100%; margin: 0 auto;
     background: var(--wipe-orange); box-shadow: 0 0 4px rgba(0,0,0,.9);
-  }
-  #lbSplitWrap {
-    position: absolute; top: 150px; left: 24px; z-index: 104;
-    background: rgba(20,20,28,.65); border-radius: 8px; padding: 7px 10px;
   }
   /* bottom-left: candidate-over-anchor transparency slider */
   #lbMixWrap {
@@ -467,6 +474,10 @@
   <label id="lbSplitWrap" class="switchwrap" title="split-wipe: draggable line, left = anchor / right = candidate">
     <input type="checkbox" id="lbSplitT"><span class="track"></span>split
   </label>
+  <div id="lbFlipWrap">
+    <button id="lbFlipH" title="flip horizontal (H)">⇋ H</button>
+    <button id="lbFlipV" title="flip vertical (V)">⇅ V</button>
+  </div>
   <div id="lbMixWrap" title="candidate opacity over the current anchor">
     <input type="range" id="lbMix" min="0" max="100" value="100">
     <span id="lbMixVal">100%</span>
@@ -1261,10 +1272,18 @@ function lbPivotScreen() {
           window.innerHeight / 2 + Math.sin(rad) * tx + Math.cos(rad) * ty];
 }
 
+function lbToggleFlip(axis) {
+  if (axis === 'h') lbFlipH = !lbFlipH;
+  else lbFlipV = !lbFlipV;
+  lbApply();
+}
+
 function lbApply() {
   lbImg.style.transform = lbTransformFor(
     { scale: lbZoom, tx: lbX, ty: lbY, fh: lbFlipH, fv: lbFlipV,
       rot: lbRot });
+  $('lbFlipH').classList.toggle('on', lbFlipH);
+  $('lbFlipV').classList.toggle('on', lbFlipV);
   updateFaceBoxOverlay();
 }
 
@@ -1552,9 +1571,7 @@ document.addEventListener('keydown', (e) => {
            (e.key === 'h' || e.key === 'H' || e.key === 'v' ||
             e.key === 'V')) {
     e.preventDefault();
-    if (e.key.toLowerCase() === 'h') lbFlipH = !lbFlipH;
-    else lbFlipV = !lbFlipV;
-    lbApply();
+    lbToggleFlip(e.key.toLowerCase());
   }
   // -/+ : zoom so the displayed image width changes by 1 screen pixel
   //       (10 px with Shift held)
@@ -2550,6 +2567,10 @@ $('lbMix').addEventListener('input', (e) => {
   lbImg.style.opacity = lbMix / 100;
   $('lbMixVal').textContent = lbMix + '%';
 });
+
+// flip buttons (mirror of the H/V keys)
+$('lbFlipH').addEventListener('click', () => lbToggleFlip('h'));
+$('lbFlipV').addEventListener('click', () => lbToggleFlip('v'));
 
 // overlay (underlay + slider + split) toggle — on by default
 const LS_OVERLAY = 'kosmozoo.lightbox.overlay';
