@@ -40,7 +40,18 @@
   a.btn { text-decoration: none; display: inline-block; }
   button:hover { border-color: var(--accent); }
   button.on { border-color: var(--accent); color: var(--accent); }
-  #status { color: var(--dim); font-size: 12px; }
+  /* status: floating chip, bottom-left; auto-fades when nothing is active
+     (ongoing states re-assert themselves, e.g. the metadata poll) */
+  #status {
+    position: fixed; left: 12px; bottom: 10px; z-index: 60;
+    color: var(--dim); font-size: 12px;
+    background: color-mix(in srgb, var(--panel) 88%, transparent);
+    border: 1px solid var(--border); border-radius: 6px;
+    padding: 4px 10px; max-width: 60vw;
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+    pointer-events: none; opacity: 1; transition: opacity .6s ease;
+  }
+  #status.fade { opacity: 0; }
   #unhideBtn { color: var(--dim); }   /* grey thumbs-down */
   #hideUpBtn { color: var(--dim); }   /* grey thumbs-up */
   #dlFeedback { margin-left: auto; }
@@ -650,9 +661,16 @@ function commentParts(v) {
 
 // ---------- helpers ----------
 
+let statusFadeTimer = null;
 function setStatus(msg, isError = false) {
   statusEl.textContent = msg;
   statusEl.style.color = isError ? 'var(--bad)' : 'var(--dim)';
+  statusEl.classList.remove('fade');
+  clearTimeout(statusFadeTimer);
+  if (!msg) return;
+  // transient by default: fades unless something re-asserts it
+  statusFadeTimer = setTimeout(
+    () => statusEl.classList.add('fade'), isError ? 10000 : 6000);
 }
 
 async function api(path) {
