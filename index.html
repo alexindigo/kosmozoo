@@ -40,18 +40,28 @@
   a.btn { text-decoration: none; display: inline-block; }
   button:hover { border-color: var(--accent); }
   button.on { border-color: var(--accent); color: var(--accent); }
-  /* status: floating chip, bottom-left; auto-fades when nothing is active
-     (ongoing states re-assert themselves, e.g. the metadata poll) */
-  #status {
+  /* status stack, bottom-left: transient infos fade 6s after they appear;
+     active states (loading, metadata scan) stay pinned until their activity
+     ends; errors stay until clicked. Full width — no text cropping. */
+  #statusStack {
     position: fixed; left: 12px; bottom: 10px; z-index: 60;
-    color: var(--dim); font-size: 12px;
+    display: flex; flex-direction: column; gap: 6px; align-items: flex-start;
+    max-width: calc(100vw - 24px); pointer-events: none;
+  }
+  .statuschip {
     background: color-mix(in srgb, var(--panel) 88%, transparent);
     border: 1px solid var(--border); border-radius: 6px;
-    padding: 4px 10px; max-width: 60vw;
-    overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
-    pointer-events: none; opacity: 1; transition: opacity .6s ease;
+    padding: 4px 10px; font-size: 12px; color: var(--dim);
+    max-width: calc(100vw - 24px); white-space: normal;
+    overflow-wrap: anywhere;
+    opacity: 1; transition: opacity .6s ease;
   }
-  #status.fade { opacity: 0; }
+  .statuschip.active { color: var(--fg); border-left: 3px solid var(--accent); }
+  .statuschip.error {
+    color: var(--bad); border-color: var(--bad);
+    cursor: pointer; pointer-events: auto;
+  }
+  .statuschip.fade { opacity: 0; }
   #unhideBtn { color: var(--dim); }   /* grey thumbs-down */
   #hideUpBtn { color: var(--dim); }   /* grey thumbs-up */
   #dlFeedback { margin-left: auto; }
@@ -496,7 +506,6 @@
          spellcheck="false" title="filter by filename substring">
   <button id="refreshBtn">Refresh</button>
   <button id="groupBtn" class="adv-ib" title="group candidates by identical prompt (Advanced)">Group by prompt</button>
-  <span id="status"></span>
   <button id="unhideBtn" title="unhide all thumbs-down images">Unhide <svg viewBox="0 0 24 24" width="12" height="12" style="vertical-align:-1px"><path fill="currentColor" d="M15 3H6c-.83 0-1.54.5-1.84 1.22l-3.02 7.05c-.09.23-.14.47-.14.73v2c0 1.1.9 2 2 2h6.31l-.95 4.57-.03.32c0 .41.17.79.44 1.06L9.83 23l6.59-6.59c.36-.36.58-.86.58-1.41V5c0-1.1-.9-2-2-2zm4 0v12h4V3h-4z"/></svg></button>
   <button id="hideUpBtn" title="hide all thumbs-up images for this session (they stay marked; reload restores)">Hide <svg viewBox="0 0 24 24" width="12" height="12" style="vertical-align:-1px"><path fill="currentColor" d="M1 21h4V9H1v12zm22-11c0-1.1-.9-2-2-2h-6.31l.95-4.57.03-.32c0-.41-.17-.79-.44-1.06L14.17 1 7.59 7.59C7.22 7.95 7 8.45 7 9v10c0 1.1.9 2 2 2h9c.83 0 1.54-.5 1.84-1.22l3.02-7.05c.09-.23.14-.47.14-.73v-2z"/></svg></button>
   <a id="dlFeedback" class="btn" href="/api/feedback" download="feedback.json"
@@ -543,6 +552,7 @@
     <input type="file" id="fileInput" accept="image/*" multiple hidden>
   </aside>
 </main>
+<div id="statusStack"></div>
 <div id="lightbox">
   <button id="lbClose" title="close (Esc)">×</button>
   <img id="lbBase" class="layer" alt="">
@@ -588,7 +598,7 @@
 
 const $ = (id) => document.getElementById(id);
 const candidatesEl = $('candidates'),
-      statusEl = $('status'), anchorList = $('anchorList'),
+      anchorList = $('anchorList'),
       dropzone = $('dropzone'), fileInput = $('fileInput'),
       divider = $('divider'), anchorsEl = $('anchors');
 
@@ -661,16 +671,66 @@ function commentParts(v) {
 
 // ---------- helpers ----------
 
-let statusFadeTimer = null;
+// --- status stack -----------------------------------------------------------
+// transient info: one shared chip, fades 6s after its last update.
+// active states: pinned chips keyed by id, visible until cleared (a 30s
+// load shows for 30s), then gone. Errors: sticky chips, click to dismiss.
+let transientChip = null;
+let transientFadeTimer = null;
+const activeChips = new Map();   // id -> chip element
+
 function setStatus(msg, isError = false) {
-  statusEl.textContent = msg;
-  statusEl.style.color = isError ? 'var(--bad)' : 'var(--dim)';
-  statusEl.classList.remove('fade');
-  clearTimeout(statusFadeTimer);
-  if (!msg) return;
-  // transient by default: fades unless something re-asserts it
-  statusFadeTimer = setTimeout(
-    () => statusEl.classList.add('fade'), isError ? 10000 : 6000);
+  if (isError) { pushErrorStatus(msg); return; }
+  if (!msg) {
+    if (transientChip) { transientChip.remove(); transientChip = null; }
+    clearTimeout(transientFadeTimer);
+    return;
+  }
+  if (!transientChip || !transientChip.parentElement) {
+    transientChip = document.createElement('div');
+    transientChip.className = 'statuschip';
+    $('statusStack').appendChild(transientChip);
+  }
+  transientChip.textContent = msg;
+  transientChip.classList.remove('fade');
+  clearTimeout(transientFadeTimer);
+  transientFadeTimer = setTimeout(() => {
+    if (transientChip) transientChip.classList.add('fade');
+    setTimeout(() => {
+      if (transientChip) { transientChip.remove(); transientChip = null; }
+    }, 700);
+  }, 6000);
+}
+
+function setActive(id, msg) {
+  let el = activeChips.get(id);
+  if (!el) {
+    el = document.createElement('div');
+    el.className = 'statuschip active';
+    activeChips.set(id, el);
+    $('statusStack').appendChild(el);
+  }
+  el.textContent = msg;
+}
+
+function clearActive(id) {
+  const el = activeChips.get(id);
+  if (el) { el.remove(); activeChips.delete(id); }
+}
+
+function pushErrorStatus(msg) {
+  const el = document.createElement('div');
+  el.className = 'statuschip error';
+  el.textContent = msg;
+  el.title = 'click to dismiss';
+  el.addEventListener('click', () => el.remove());
+  $('statusStack').appendChild(el);
+}
+
+// metadata scan chip mirrors the backlog (called wherever metaPending moves)
+function updateMetaChip() {
+  if (metaPending > 0) setActive('meta', `metadata scan — ${metaPending} left`);
+  else clearActive('meta');
 }
 
 async function api(path) {
@@ -806,7 +866,6 @@ function statusSummary() {
     s = `${allFiles.length} images from ${currentHost}` +
         (hidden ? ` (${hidden} hidden)` : '');
   }
-  if (metaPending > 0) s += ` · metadata ${metaPending} left`;
   return s;
 }
 
@@ -815,7 +874,7 @@ async function loadCandidates() {
   resetList();
   allFiles = [];
   metaMapGlobal = {};
-  setStatus(`loading image list from ${currentHost}…`);
+  setActive('load', `loading image list from ${currentHost}…`);
   try {
     // /api/metadata = persistent store merged with live history (server-side)
     const enc = encodeURIComponent(currentHost);
@@ -842,6 +901,7 @@ async function loadCandidates() {
       downloadsSet = new Set(Object.keys(d.exists || {})
         .filter(k => d.exists[k]));
     } catch (e) { /* save buttons just won't pre-grey */ }
+    clearActive('load');
     if (!allFiles.length) {
       candidatesEl.innerHTML = '<div class="empty">no output images</div>';
       setStatus(`no output images on ${currentHost}`);
@@ -850,9 +910,11 @@ async function loadCandidates() {
     renderList();
     setStatus(statusSummary());
     updateScraperUi();
+    updateMetaChip();
     if (metaPending > 0) scheduleMetaPoll();
     restoreScrollPos();
   } catch (err) {
+    clearActive('load');
     showLoadError(err);   // the panel covers it — no duplicate in the status line
   }
 }
@@ -916,6 +978,7 @@ async function pollMetadata() {
   try {
     const r = await api(`/api/metadata?host=${encodeURIComponent(currentHost)}`);
     metaPending = r.pending || 0;
+    updateMetaChip();
     if (r.v !== metaVersion) {
       metaVersion = r.v;
       mergeMetadata(r.items || {});
@@ -978,6 +1041,7 @@ async function flushWant() {
     if (typeof d.pending === 'number') {
       metaPending = d.pending;
       updateScraperUi();
+      updateMetaChip();
       if (metaPending > 0) scheduleMetaPoll();
       setStatus(statusSummary());
     }
@@ -2919,12 +2983,13 @@ function renderHostPicker(hosts) {
 }
 
 async function refresh() {
-  setStatus('probing hosts…');
+  setActive('probe', 'probing hosts…');
   try {
     await refreshHosts();
   } catch (err) {
     setStatus(`host probe failed: ${err.message}`, true);
   }
+  clearActive('probe');
   try {
     comments = await api('/api/comments');
   } catch (err) { /* keep existing */ }
