@@ -102,7 +102,7 @@
   /* host picker (dropdown styled like the ☰ menu panel) */
   #hostPicker { position: relative; }
   #hostBtn { display: flex; align-items: center; gap: 7px; }
-  #hostBtn .chev { font-size: 10px; color: var(--dim); }
+  #hostBtn .chev { font-size: 14px; line-height: 1; color: var(--dim); }
   #hostBtn .hdot {
     width: 7px; height: 7px; border-radius: 50%;
     background: var(--accent); flex: 0 0 auto;
@@ -814,6 +814,7 @@ async function loadCandidates() {
     setStatus(statusSummary());
     updateScraperUi();
     if (metaPending > 0) scheduleMetaPoll();
+    restoreScrollPos();
   } catch (err) {
     setStatus(`load failed: ${err.message}`, true);
   }
@@ -897,6 +898,48 @@ async function flushWant() {
       setStatus(statusSummary());
     }
   } catch (e) { /* next render re-wants */ }
+}
+
+// --- per-host scroll position (survives reload / host switch) -------------
+
+function scrollPosMap() {
+  try { return JSON.parse(localStorage.getItem('kosmozoo.scroll') || '{}'); }
+  catch (e) { return {}; }
+}
+
+function saveScrollPosMap(map) {
+  try { localStorage.setItem('kosmozoo.scroll', JSON.stringify(map)); }
+  catch (e) { /* private mode etc. */ }
+}
+
+function saveScrollPos() {
+  if (!currentHost || filterText) return;  // filtered views aren't the host list
+  const map = scrollPosMap();
+  map[currentHost] = window.scrollY || 0;
+  saveScrollPosMap(map);
+}
+
+let scrollSaveTimer = null;
+window.addEventListener('scroll', () => {
+  clearTimeout(scrollSaveTimer);
+  scrollSaveTimer = setTimeout(saveScrollPos, 400);
+});
+
+// After a reload/switch the list re-renders chunked; extend chunks until
+// the stored depth exists, then jump. Grouped mode renders everything at
+// once, so the jump works directly.
+function restoreScrollPos() {
+  const target = scrollPosMap()[currentHost];
+  if (!target) return;
+  if (!groupMode) {
+    const de = document.documentElement;
+    let guard = 500;   // chunks
+    while (viewPos < viewFiles.length && guard-- > 0 &&
+           ((de && de.scrollHeight) || 0) < target) {
+      renderChunk();
+    }
+  }
+  window.scrollTo(0, target);
 }
 
 // Chunked flat list (default) or grouped-by-prompt (Advanced toggle).
@@ -1197,11 +1240,11 @@ function renderCard(filename, meta, idx) {
   const fnameText = document.createElement('span');
   fnameText.textContent = filename;
   fnameText.className = 'copyable';
-  fnameText.title = 'click to copy the filename';
+  fnameText.title = 'click to copy host#filename';
   fnameText.addEventListener('click', async (e) => {
     e.stopPropagation();
     try {
-      await navigator.clipboard.writeText(filename);
+      await navigator.clipboard.writeText(`${currentHost}#${filename}`);
       fnameText.classList.add('copied');
       setTimeout(() => fnameText.classList.remove('copied'), 800);
     } catch (err) { /* clipboard unavailable (permissions/shim) */ }
@@ -2726,10 +2769,21 @@ fileInput.addEventListener('change', () => {
 // Reachability is advisory, not a gate: offline hosts stay selectable
 // (ComfyUI stalls its API while generating, so a failed probe is often
 // transient). Every refresh re-probes.
+// Host selection persists across reloads (localStorage).
+function selectHost(name) {
+  currentHost = name;
+  try { localStorage.setItem('kosmozoo.host', name || ''); }
+  catch (e) { /* private mode etc. */ }
+}
+
 async function refreshHosts() {
   const hosts = await api('/api/hosts');
+  if (!currentHost) {
+    const stored = localStorage.getItem('kosmozoo.host');
+    if (stored && hosts.some(h => h.name === stored)) currentHost = stored;
+  }
   if (!(currentHost && hosts.some(h => h.name === currentHost)))
-    currentHost = (hosts.find(h => h.online) || hosts[0] || {}).name || null;
+    selectHost((hosts.find(h => h.online) || hosts[0] || {}).name || null);
   renderHostPicker(hosts);
   if (!hosts.some(h => h.online)) setStatus('all hosts offline', true);
 }
@@ -2770,7 +2824,8 @@ function renderHostPicker(hosts) {
     row.addEventListener('click', () => {
       $('hostDrop').hidden = true;
       if (h.name === currentHost) return;
-      currentHost = h.name;
+      saveScrollPos();          // keep the old host's position
+      selectHost(h.name);
       renderHostPicker(hosts);
       loadCandidates();
     });
@@ -2936,8 +2991,13 @@ async function removeHost(name) {
     const map = {};
     for (const h of hosts) if (h.name !== name) map[h.name] = h.address;
     await saveHosts(map);
-    if (currentHost === name)
-      currentHost = (hosts.find(h => h.name !== name) || {}).name || null;
+    if (currentHost === name) {
+      // dropping the selected host: its scroll entry goes with it
+      const map2 = scrollPosMap();
+      delete map2[name];
+      saveScrollPosMap(map2);
+      selectHost((hosts.find(h => h.name !== name) || {}).name || null);
+    }
     await refreshHosts();
     if (currentHost) await loadCandidates();
   } catch (err) {
