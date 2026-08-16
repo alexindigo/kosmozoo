@@ -99,24 +99,49 @@
   }
   #fbPathWrap input:focus { outline: none; border-color: var(--accent); }
   #fbPathWrap button { font-size: 11px; padding: 4px 8px; }
-  #hostsWrap {
-    display: flex; flex-direction: column; gap: 5px;
-    font-size: 11px; color: var(--dim);
+  /* host picker (dropdown styled like the ☰ menu panel) */
+  #hostPicker { position: relative; }
+  #hostBtn { display: flex; align-items: center; gap: 7px; }
+  #hostBtn .chev { font-size: 10px; color: var(--dim); }
+  #hostBtn .hdot {
+    width: 7px; height: 7px; border-radius: 50%;
+    background: var(--accent); flex: 0 0 auto;
   }
-  .hostrow {
-    display: flex; justify-content: space-between; align-items: center;
-    gap: 6px;
+  #hostBtn .hdot.off { background: var(--dim); }
+  #hostDrop {
+    position: absolute; top: calc(100% + 8px); left: 0; z-index: 50;
+    background: var(--panel); border: 1px solid var(--border);
+    border-radius: 8px; padding: 8px; min-width: 280px;
+    display: flex; flex-direction: column; gap: 2px;
   }
-  .hostrow code { color: var(--fg); }
-  .hostrow button { padding: 0 6px; font-size: 11px; color: var(--bad); }
-  #hostsWrap .fbrow input { min-width: 0; flex: 1; }
-  #hostsWrap input {
-    background: var(--bg); color: var(--fg);
+  #hostDrop[hidden] { display: none; }
+  .hostpick {
+    display: flex; align-items: center; gap: 8px; padding: 6px 8px;
+    border-radius: 6px; cursor: pointer; font-size: 13px;
+  }
+  .hostpick:hover { background: var(--card); }
+  .hostpick.current { box-shadow: inset 0 0 0 1px var(--accent); }
+  .hostpick.off > .hname, .hostpick.off > .haddr { opacity: .5; }
+  .hostpick .hname { flex: 0 0 auto; font-weight: 600; }
+  .hostpick .haddr {
+    flex: 1; color: var(--dim); font-size: 11px;
+    font-family: ui-monospace, monospace;
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  }
+  .hostpick .rm {
+    padding: 0 6px; font-size: 11px; color: var(--bad); flex: 0 0 auto;
+  }
+  .haddrow {
+    display: flex; gap: 6px; margin-top: 4px;
+    border-top: 1px solid var(--border); padding-top: 8px;
+  }
+  .haddrow input {
+    min-width: 0; flex: 1; background: var(--bg); color: var(--fg);
     border: 1px solid var(--border); border-radius: 6px;
     padding: 5px 7px; font: 11px ui-monospace, monospace;
   }
-  #hostsWrap input:focus { outline: none; border-color: var(--accent); }
-  #hostsWrap button { font-size: 11px; padding: 4px 8px; }
+  .haddrow input:focus { outline: none; border-color: var(--accent); }
+  .haddrow button { font-size: 11px; padding: 4px 8px; }
 
   /* lightbox facebox-align toggle + guides toggle */
   #lbAlignWrap {
@@ -428,7 +453,19 @@
   <img src="/logo-64.png" alt="kosmozoo" width="24" height="24"
        style="border-radius:6px">
   <h1>Kosmozoo</h1>
-  <select id="hostSel"></select>
+  <div id="hostPicker">
+    <button id="hostBtn" title="choose host">
+      <span class="hdot off" id="hostDot"></span><span id="hostBtnLabel">host…</span><span class="chev">▾</span>
+    </button>
+    <div id="hostDrop" hidden>
+      <div id="hostList"></div>
+      <div class="haddrow">
+        <input type="text" id="hostName" placeholder="name" spellcheck="false">
+        <input type="text" id="hostAddr" placeholder="host:port" spellcheck="false">
+        <button id="hostAdd">add</button>
+      </div>
+    </div>
+  </div>
   <input type="text" id="filterInput" placeholder="filter filenames…"
          spellcheck="false" title="filter by filename substring">
   <button id="refreshBtn">Refresh</button>
@@ -464,15 +501,6 @@
         <div class="fbrow">
           <input type="text" id="fbPath" spellcheck="false">
           <button id="fbPathApply">apply</button>
-        </div>
-      </div>
-      <div id="hostsWrap">
-        <span>hosts</span>
-        <div id="hostsList"></div>
-        <div class="fbrow">
-          <input type="text" id="hostName" placeholder="name">
-          <input type="text" id="hostAddr" placeholder="host:port">
-          <button id="hostAdd">add</button>
         </div>
       </div>
     </div>
@@ -533,7 +561,7 @@
 'use strict';
 
 const $ = (id) => document.getElementById(id);
-const candidatesEl = $('candidates'), hostSel = $('hostSel'),
+const candidatesEl = $('candidates'),
       statusEl = $('status'), anchorList = $('anchorList'),
       dropzone = $('dropzone'), fileInput = $('fileInput'),
       divider = $('divider'), anchorsEl = $('anchors');
@@ -2651,20 +2679,54 @@ fileInput.addEventListener('change', () => {
 // transient). Every refresh re-probes.
 async function refreshHosts() {
   const hosts = await api('/api/hosts');
-  hostSel.innerHTML = '';
-  for (const h of hosts) {
-    const opt = document.createElement('option');
-    opt.value = h.name;
-    opt.textContent = h.online ? h.name : `${h.name} (offline)`;
-    hostSel.appendChild(opt);
-  }
-  if (currentHost && hosts.some(h => h.name === currentHost)) {
-    hostSel.value = currentHost;           // keep selection across re-probes
-  } else {
+  if (!(currentHost && hosts.some(h => h.name === currentHost)))
     currentHost = (hosts.find(h => h.online) || hosts[0] || {}).name || null;
-    if (currentHost) hostSel.value = currentHost;
-  }
+  renderHostPicker(hosts);
   if (!hosts.some(h => h.online)) setStatus('all hosts offline', true);
+}
+
+// Collapsed state: status dot + current host name. Open state: one row per
+// host (click to select, × to remove) + the add-host row at the bottom.
+function renderHostPicker(hosts) {
+  const cur = hosts.find(h => h.name === currentHost);
+  $('hostBtnLabel').textContent = currentHost || 'no hosts';
+  $('hostDot').classList.toggle('off', !(cur && cur.online));
+  const list = $('hostList');
+  list.innerHTML = '';
+  for (const h of hosts) {
+    const row = document.createElement('div');
+    row.className = 'hostpick' + (h.name === currentHost ? ' current' : '') +
+                    (h.online ? '' : ' off');
+    row.title = `${h.name} — ${h.address}` + (h.online ? '' : ' (offline)');
+    const dot = document.createElement('span');
+    dot.className = 'hdot' + (h.online ? '' : ' off');
+    dot.style.cssText =
+      'width:7px;height:7px;border-radius:50%;flex:0 0 auto;' +
+      `background:var(--${h.online ? 'accent' : 'dim'})`;
+    const name = document.createElement('span');
+    name.className = 'hname';
+    name.textContent = h.name;
+    const addr = document.createElement('span');
+    addr.className = 'haddr';
+    addr.textContent = h.address + (h.online ? '' : ' · offline');
+    const rm = document.createElement('button');
+    rm.className = 'rm';
+    rm.textContent = '×';
+    rm.title = `remove ${h.name}`;
+    rm.addEventListener('click', (e) => {
+      e.stopPropagation();
+      removeHost(h.name);
+    });
+    row.append(dot, name, addr, rm);
+    row.addEventListener('click', () => {
+      $('hostDrop').hidden = true;
+      if (h.name === currentHost) return;
+      currentHost = h.name;
+      renderHostPicker(hosts);
+      loadCandidates();
+    });
+    list.appendChild(row);
+  }
 }
 
 async function refresh() {
@@ -2717,9 +2779,13 @@ async function init() {
   }
 }
 
-hostSel.addEventListener('change', () => {
-  currentHost = hostSel.value;
-  loadCandidates();
+$('hostBtn').addEventListener('click', async () => {
+  const drop = $('hostDrop');
+  drop.hidden = !drop.hidden;
+  if (!drop.hidden) {
+    try { renderHostPicker(await api('/api/hosts')); }
+    catch (err) { /* leave stale */ }
+  }
 });
 $('refreshBtn').addEventListener('click', refresh);
 
@@ -2758,7 +2824,6 @@ $('menuBtn').addEventListener('click', async () => {
       if (cfg.scraper) scraperState = cfg.scraper;
       paintScraperUi();
     } catch (err) { /* leave stale */ }
-    loadHostsMenu();
   }
 });
 
@@ -2805,28 +2870,7 @@ $('scraperPause').addEventListener('click', async () => {
   paintScraperUi();
 });
 
-// ---------- hosts editor (in the menu) ----------
-
-async function loadHostsMenu() {
-  try {
-    const hosts = await api('/api/hosts');
-    const list = $('hostsList');
-    list.innerHTML = '';
-    for (const h of hosts) {
-      const row = document.createElement('div');
-      row.className = 'hostrow';
-      const label = document.createElement('code');
-      label.textContent = `${h.name} — ${h.address}` +
-        (h.online ? '' : ' (offline)');
-      const rm = document.createElement('button');
-      rm.textContent = '×';
-      rm.title = 'remove host';
-      rm.addEventListener('click', () => removeHost(h.name));
-      row.append(label, rm);
-      list.appendChild(row);
-    }
-  } catch (err) { /* leave stale */ }
-}
+// ---------- hosts editor (inside the host picker dropdown) ----------
 
 async function saveHosts(hosts) {
   const r = await fetch('/api/config', {
@@ -2847,7 +2891,6 @@ async function removeHost(name) {
       currentHost = (hosts.find(h => h.name !== name) || {}).name || null;
     await refreshHosts();
     if (currentHost) await loadCandidates();
-    await loadHostsMenu();
   } catch (err) {
     setStatus(`host remove failed: ${err.message}`, true);
   }
@@ -2866,7 +2909,6 @@ $('hostAdd').addEventListener('click', async () => {
     $('hostName').value = '';
     $('hostAddr').value = '';
     await refreshHosts();
-    await loadHostsMenu();
     setStatus(`host ${name} added`);
   } catch (err) {
     setStatus(`host add failed: ${err.message}`, true);
@@ -2891,6 +2933,7 @@ $('fbPathApply').addEventListener('click', async () => {
 });
 document.addEventListener('click', (e) => {
   if (!$('menuWrap').contains(e.target)) $('menu').hidden = true;
+  if (!$('hostPicker').contains(e.target)) $('hostDrop').hidden = true;
 });
 
 $('advToggle').addEventListener('change', (e) => {
