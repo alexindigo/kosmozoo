@@ -238,9 +238,9 @@
     animation: spin 1s linear infinite;
   }
   .imgwrap.error::after {
-    content: '⚠ failed to load'; position: absolute; inset: 0;
+    content: '⚠ failed to load — click to retry'; position: absolute; inset: 0;
     display: flex; align-items: center; justify-content: center;
-    color: var(--bad); font-size: 13px;
+    color: var(--bad); font-size: 13px; text-align: center; padding: 4px;
   }
   @keyframes spin { to { transform: rotate(360deg); } }
   .sentinel {
@@ -926,6 +926,31 @@ function setupObservers() {
 }
 
 // Load images inside viewport ± WINDOW_PAD, unload everything outside.
+// Errored cards (host was busy) auto-retry every ERROR_RETRY_MS while
+// they stay in the window.
+const ERROR_RETRY_MS = 8000;
+let errorRetryTimer = null;
+
+function scheduleErrorRetry() {
+  if (errorRetryTimer) return;
+  errorRetryTimer = setTimeout(() => {
+    errorRetryTimer = null;
+    const min = Math.min(...visibleSet) - WINDOW_PAD;
+    const max = Math.max(...visibleSet) + WINDOW_PAD;
+    let any = false;
+    for (const idx of [...loadedSet]) {
+      if (idx < min || idx > max) continue;
+      const card = cardEls[idx];
+      const wrap = card && card.querySelector('.imgwrap');
+      if (wrap && wrap.classList.contains('error')) {
+        retryLoadImage(idx);
+        any = true;
+      }
+    }
+    if (any) scheduleErrorRetry();   // still errored → keep retrying
+  }, ERROR_RETRY_MS);
+}
+
 function applyWindow() {
   if (!visibleSet.size) return;
   const min = Math.min(...visibleSet) - WINDOW_PAD;
@@ -939,6 +964,7 @@ function applyWindow() {
   for (let i = lo; i <= hi; i++) {
     if (!loadedSet.has(i)) loadImage(i);
   }
+  scheduleErrorRetry();
 }
 
 function loadImage(idx) {
@@ -947,8 +973,24 @@ function loadImage(idx) {
   const wrap = card.querySelector('.imgwrap');
   const img = wrap.querySelector('img');
   wrap.classList.remove('empty');
+  wrap.classList.remove('error');
   wrap.classList.add('loading');
   img.src = card.dataset.imgUrl;
+  loadedSet.add(idx);
+}
+
+// Manual retry for failed images (click on the error placeholder).
+// Cache-busts so a partial/aborted cached response can't be reused.
+function retryLoadImage(idx) {
+  const card = cardEls[idx];
+  if (!card) return;
+  const wrap = card.querySelector('.imgwrap');
+  const img = wrap.querySelector('img');
+  img.removeAttribute('src');
+  wrap.classList.remove('error');
+  wrap.classList.add('loading');
+  img.src = card.dataset.imgUrl +
+    (card.dataset.imgUrl.includes('?') ? '&' : '?') + '_r=' + Date.now();
   loadedSet.add(idx);
 }
 
@@ -1134,8 +1176,15 @@ function renderCard(filename, meta, idx) {
   });
   wrap.appendChild(img);
   wrap.style.cursor = 'zoom-in';
-  wrap.addEventListener('click',
-    () => openLightbox(card.dataset.imgUrl, img));
+  wrap.addEventListener('click', () => {
+    // failed loads (host was busy, transient network) retry instead of
+    // opening the lightbox on a broken image
+    if (wrap.classList.contains('error')) {
+      retryLoadImage(idx);
+      return;
+    }
+    openLightbox(card.dataset.imgUrl, img);
+  });
   makeZoomable(img, { zoomKey: key });
   if (zoomStore[key]) img._setZoom(zoomStore[key]);
   card.appendChild(wrap);
