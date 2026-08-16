@@ -1294,6 +1294,7 @@ function lbApply() {
   $('lbFlipH').classList.toggle('on', lbFlipH);
   $('lbFlipV').classList.toggle('on', lbFlipV);
   updateFaceBoxOverlay();
+  lbBaseUpdate();   // underlay tracks the current view every frame
 }
 
 // Zoom state of an inline image -> {scale, cX, cY} where (cX,cY) is the
@@ -1508,9 +1509,9 @@ function lbSwitch(dCol, dRow) {
   if (faceAlignOn() && col === 'cand' && faceLoadState === 'ready') {
     lbPlaceCarry(null, entry.src);   // alignment overrides recalled zoom
     alignToAnchorFace();
-  } else if (dCol && overlayOn() &&
+  } else if (dCol && overlayOn() && splitOn() &&
              !(faceAlignOn() && faceLoadState === 'ready')) {
-    // pair switch (candidate <-> anchor) in comparison mode (align off):
+    // pair switch (candidate <-> anchor) with the split wipe active:
     // the two images share the current view — no jump on switch
     lbApply();
   } else {
