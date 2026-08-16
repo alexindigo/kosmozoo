@@ -884,7 +884,11 @@ async function loadCandidates() {
       api(`/api/metadata?host=${enc}`)
         .catch(e => { throw new Error(`metadata: ${e.message}`); }),
     ]);
-    metaMapGlobal = metadata.items || {};
+    // new shape: {items, pending, v}; tolerate the pre-sqlite bare map
+    // during a server-transition window (old process + new page)
+    const bare = metadata && !metadata.items && typeof metadata === 'object'
+      && !('pending' in metadata);
+    metaMapGlobal = metadata.items || (bare ? metadata : {}) || {};
     metaVersion = metadata.v || 0;
     metaPending = metadata.pending || 0;
     allFiles = files.map(cleanFileName);   // endpoint is newest-first

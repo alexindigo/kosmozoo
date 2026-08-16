@@ -475,7 +475,8 @@ def extract_meta(entry):
         for k in ("seed", "steps", "cfg", "sampler_name", "scheduler",
                   "denoise"):
             v = ks.get("inputs", {}).get(k)
-            if v is not None:
+            # linked inputs arrive as [node, slot] lists — not displayable
+            if isinstance(v, (int, float, str)):
                 meta[k] = v
         meta["prompt"] = _walk_text(graph, ks.get("inputs", {})
                                     .get("positive")).strip()
