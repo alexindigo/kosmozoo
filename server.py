@@ -818,7 +818,7 @@ class Handler(BaseHTTPRequestHandler):
                 return
             fields["vote"] = payload["vote"]
         if "bucket" in payload:
-            if payload["bucket"] not in BUCKETS + ("", None):
+            if payload["bucket"] not in list(BUCKETS) + ["", None]:
                 self._send_error_json(
                     400, f"bucket must be one of {BUCKETS} or empty")
                 return

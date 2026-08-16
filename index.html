@@ -868,6 +868,10 @@ function renderCard(filename, meta, idx) {
   card.className = 'card';
   card.dataset.idx = idx;
   card.dataset.name = filename;
+  if (meta && meta.width && meta.height) {
+    card.dataset.nw = meta.width;
+    card.dataset.nh = meta.height;
+  }
   card.dataset.imgUrl =
     `/api/image?host=${encodeURIComponent(currentHost)}` +
     `&file=${encodeURIComponent(filename)}`;
@@ -893,7 +897,7 @@ function renderCard(filename, meta, idx) {
   wrap.appendChild(img);
   wrap.style.cursor = 'zoom-in';
   wrap.addEventListener('click',
-    () => openLightbox(card.dataset.imgUrl, carryZoom(img), img));
+    () => openLightbox(card.dataset.imgUrl, img));
   makeZoomable(img, { zoomKey: key });
   if (zoomStore[key]) img._setZoom(zoomStore[key]);
   card.appendChild(wrap);
@@ -1148,68 +1152,193 @@ async function saveComment(key, neg, pos, savedEl) {
   }
 }
 
-// ---------- per-image zoom state (persisted, shared with lightbox) ----------
+// ---------- lightbox ----------
+// Design: ONE state object (S) is the source of truth; render() is the
+// only function that writes the DOM. View pan units are FRACTIONS of the
+// displayed image box (unit-free per-image persistence — no offsetWidth /
+// naturalWidth conversions in state math). Feature flags via LS helpers.
+//
+// External contract (used by the rest of the page):
+//   LB.open(src, sourceImg)  — open the lightbox on an image
+//   LB.render()              — re-apply state to the DOM
+//   LB.setView(v)            — set the current view + persist to the image
+//   LB.current()             — current entry {key, src, el, nw, nh}
+//   LB.anchorCurrent()       — current anchor entry (same shape) or null
+//   LB.boxFor(nw, nh)        — the lightbox display box for a natural size
+//   refreshFaceBox()         — (re)detect + draw the face overlay for the
+//                              current image (called by the detection init)
+//   guidesVisible() / applyGuidesVisibility() — guide visibility toggle
 
-const LS_ZOOM = 'kosmozoo.zoom.v1';   // { "host:file" | "anchor:name": {s,tx,ty} }
+const LS_ZOOM = 'kosmozoo.zoom.v2';   // {key: {s, txf, tyf, fh, fv, rot}}
+localStorage.removeItem('kosmozoo.zoom.v1');  // px-unit states, incompatible
+const LS_GUIDES = 'kosmozoo.guides.v1';       // [{axis, pos}]
+const LS_GUIDES_VIS = 'kosmozoo.guides.visible';
+const LS_OVERLAY = 'kosmozoo.lightbox.overlay';
+const LS_SPLIT = 'kosmozoo.split';
+
+// --- elements (bare names for compatibility with the rest of the page) ---
+const lightbox = $('lightbox');
+const lbImg = $('lbImg'), lbBase = $('lbBase'), lbPrev = $('lbPrev');
+const lbClipWrap = $('lbClipWrap');
+const lbFaceBoxEl = $('faceBox');
+const lbGuideLayer = $('guideLayer');
+const lbStripTop = $('guideStripTop'), lbStripLeft = $('guideStripLeft');
+const lbMixWrap = $('lbMixWrap'), lbMix = $('lbMix'), lbMixVal = $('lbMixVal');
+const lbSplitEl = $('lbSplit');
+const lbAnchorTag = $('lbAnchorTag');
+const lbFlipH = $('lbFlipH'), lbFlipV = $('lbFlipV');
+
+// --- state (single source of truth) ---
+const S = {
+  open: false,
+  view: null,          // {scale, txf, tyf, fh, fv, rot}; pan in box fractions
+  col: 'cand',         // 'cand' | 'anchor'
+  pos: { cand: 0, anchor: 0 },
+  entry: null,         // current {key, src, el, nw, nh}
+  mix: 100,            // candidate opacity % over the current anchor
+  splitX: null,        // split-wipe line, viewport px; null = off
+  faceBox: null,       // detection for the current image
+  dragMoved: 0,        // click-vs-drag disambiguation
+};
+
+function lbFreshView() { return { scale: 1, txf: 0, tyf: 0, fh: false, fv: false, rot: 0 }; }
+S.view = lbFreshView();
+
+// --- feature flags ---
+function overlayOn() { return localStorage.getItem(LS_OVERLAY) !== '0'; } // default on
+function splitOn() { return localStorage.getItem(LS_SPLIT) === '1'; }     // default off
+function guidesVisible() { return localStorage.getItem(LS_GUIDES_VIS) !== '0'; }
+
+// --- geometry (the only place px<->fraction conversions exist) ---
+function lbBoxFor(nw, nh) {
+  const ar = nw / nh;
+  const w = Math.min(0.95 * window.innerWidth, 0.95 * window.innerHeight * ar);
+  return { w, h: w / ar };
+}
+
+// view transform for an image laid out at the given box
+function lbTransform(v, box) {
+  const sx = v.fh ? -1 : 1, sy = v.fv ? -1 : 1;
+  return `translate(-50%,-50%) rotate(${v.rot}deg) ` +
+         `scale(${v.scale * sx}, ${v.scale * sy}) ` +
+         `translate(${v.txf * box.w}px, ${v.tyf * box.h}px)`;
+}
+
+// image fraction -> screen px under view+box (evaluated at rotation=0;
+// overlays take the rotation themselves)
+function lbMapFrac(v, box, fx, fy) {
+  const sx = v.fh ? -1 : 1, sy = v.fv ? -1 : 1;
+  return [
+    window.innerWidth / 2 + v.scale * sx * ((fx - 0.5 + v.txf) * box.w),
+    window.innerHeight / 2 + v.scale * sy * ((fy - 0.5 + v.tyf) * box.h),
+  ];
+}
+
+// image center on screen = rotation pivot (V + R·S·t)
+function lbPivotScreen(v, box) {
+  const sx = v.fh ? -1 : 1, sy = v.fv ? -1 : 1;
+  const rad = v.rot * Math.PI / 180;
+  const tx = v.scale * sx * v.txf * box.w, ty = v.scale * sy * v.tyf * box.h;
+  return [window.innerWidth / 2 + Math.cos(rad) * tx - Math.sin(rad) * ty,
+          window.innerHeight / 2 + Math.sin(rad) * tx + Math.cos(rad) * ty];
+}
+
+// screen-px drag delta -> view fraction delta (inverse of the display
+// transform), so pans stay pointer-true under rotation/flips
+function lbPanFrac(dx, dy) {
+  const rad = -S.view.rot * Math.PI / 180;
+  const c = Math.cos(rad), s = Math.sin(rad);
+  const rx = dx * c - dy * s, ry = dx * s + dy * c;
+  const box = lbCurrentBox() || { w: window.innerWidth, h: window.innerHeight };
+  const sx = S.view.fh ? -1 : 1, sy = S.view.fv ? -1 : 1;
+  return [rx / (S.view.scale * sx * box.w), ry / (S.view.scale * sy * box.h)];
+}
+
+function lbCurrentBox() {
+  const nw = (S.entry && S.entry.nw) || lbImg.naturalWidth;
+  const nh = (S.entry && S.entry.nh) || lbImg.naturalHeight;
+  return nw ? lbBoxFor(nw, nh) : null;
+}
+
+// ---------- per-image state (unit-free, persisted) ----------
+
 const zoomStore = (() => {
   try { return JSON.parse(localStorage.getItem(LS_ZOOM)) || {}; }
   catch (e) { return {}; }
 })();
 let zoomPersistTimer = null;
-function persistZoom() {
+function persistZoomStore() {
   clearTimeout(zoomPersistTimer);
   zoomPersistTimer = setTimeout(() => {
     try { localStorage.setItem(LS_ZOOM, JSON.stringify(zoomStore)); }
     catch (e) { /* in-memory only */ }
   }, 300);
 }
+
 function saveZoomKey(key, state) {
   if (!key) return;
-  if (state && state.scale > 1)
-    zoomStore[key] = { s: state.scale, tx: state.tx, ty: state.ty };
+  if (state && (state.s > 1 || state.fh || state.fv || state.rot ||
+                state.txf || state.tyf))
+    zoomStore[key] = { s: state.s, txf: state.txf || 0, tyf: state.tyf || 0,
+                       fh: !!state.fh, fv: !!state.fv, rot: state.rot || 0 };
   else delete zoomStore[key];
-  persistZoom();
+  persistZoomStore();
 }
 
-// ---------- inline pinch zoom (trackpad pinch = ctrl+wheel) ----------
-// Zooms the image in place, keeping the point under the cursor fixed.
-// Plain wheel scrolls the page; drag pans while zoomed; dblclick resets.
-// hooks.onZoomChange(zoomed) lets hosts disable conflicting drags.
-// hooks.zoomKey persists the state per image.
+// inline image element <-> view state. Element is the live store;
+// zoomStore is the persistent copy. State shape:
+// { s, txf, tyf, fh, fv, rot } — or absent when untouched.
+function readImageState(img) {
+  const z = img && img._zoomState;
+  if (!z) return null;
+  if (z.s <= 1 && !z.txf && !z.tyf && !z.fh && !z.fv && !z.rot) return null;
+  return { scale: z.s, txf: z.txf || 0, tyf: z.tyf || 0,
+           fh: !!z.fh, fv: !!z.fv, rot: z.rot || 0 };
+}
+function writeImageState(img, v) {
+  if (!img || !img._setZoom) return;
+  img._setZoom({ s: v.scale, txf: v.txf, tyf: v.tyf,
+                 fh: v.fh, fv: v.fv, rot: v.rot });
+}
+
+
+// ---------- inline pinch zoom (candidates + anchors, fraction units) ----------
 
 function makeZoomable(img, hooks = {}) {
-  let scale = 1, tx = 0, ty = 0, dragMoved = 0;
+  let scale = 1, txf = 0, tyf = 0;
   const apply = () => {
-    if (scale <= 1.001) {
-      scale = 1; tx = 0; ty = 0;
+    if (scale <= 1.001) { scale = 1; txf = 0; tyf = 0; }
+    img._zoomState = { ...img._zoomState, s: scale, txf, tyf };
+    if (scale === 1 && !txf && !tyf) {
       img.style.transform = '';
       img.classList.remove('zoomed');
     } else {
-      img.style.transform = `translate(${tx}px, ${ty}px) scale(${scale})`;
+      img.style.transform =
+        `translate(${txf * img.offsetWidth}px, ${tyf * img.offsetHeight}px) ` +
+        `scale(${scale})`;
       img.classList.add('zoomed');
     }
-    img._zoomState = { ...img._zoomState, scale, tx, ty };  // keep fh/fv/rot
     if (hooks.zoomKey) saveZoomKey(hooks.zoomKey, img._zoomState);
     if (hooks.onZoomChange) hooks.onZoomChange(scale > 1);
   };
   img._setZoom = (z) => {
     img._zoomState = { ...img._zoomState, ...z };
-    scale = img._zoomState.s ?? img._zoomState.scale ?? 1;
-    tx = img._zoomState.tx || 0;
-    ty = img._zoomState.ty || 0;
+    scale = img._zoomState.s ?? 1;
+    txf = img._zoomState.txf || 0;
+    tyf = img._zoomState.tyf || 0;
     apply();
   };
   img.addEventListener('wheel', (e) => {
-    if (!e.ctrlKey) return;                    // plain scroll = page scroll
-    e.preventDefault();                        // stop browser page-zoom
+    if (!e.ctrlKey) return;
+    e.preventDefault();
     const factor = Math.exp(-e.deltaY * 0.012);
     const newScale = Math.min(12, Math.max(1, scale * factor));
     if (newScale === scale) return;
     const r = img.parentElement.getBoundingClientRect();
     const ox = r.left + r.width / 2, oy = r.top + r.height / 2;
     const k = 1 - newScale / scale;
-    tx += k * (e.clientX - ox - tx);           // keep cursor point fixed
-    ty += k * (e.clientY - oy - ty);
+    txf += k * ((e.clientX - ox) / r.width - txf);
+    tyf += k * ((e.clientY - oy) / r.height - tyf);
     scale = newScale;
     apply();
   }, { passive: false });
@@ -1217,11 +1346,10 @@ function makeZoomable(img, hooks = {}) {
     if (scale <= 1) return;
     e.preventDefault();
     img.setPointerCapture(e.pointerId);
-    dragMoved = 0;
     let lx = e.clientX, ly = e.clientY;
     const move = (ev) => {
-      tx += ev.clientX - lx; ty += ev.clientY - ly;
-      dragMoved += Math.abs(ev.clientX - lx) + Math.abs(ev.clientY - ly);
+      txf += (ev.clientX - lx) / (scale * img.offsetWidth);
+      tyf += (ev.clientY - ly) / (scale * img.offsetHeight);
       lx = ev.clientX; ly = ev.clientY;
       apply();
     };
@@ -1234,410 +1362,326 @@ function makeZoomable(img, hooks = {}) {
     img.addEventListener('pointerup', up);
     img.addEventListener('pointercancel', up);
   });
-  // swallow only the click that ends a pan-drag; a clean click while
-  // zoomed propagates and opens the lightbox carrying the zoom state
-  img.addEventListener('click', (e) => {
-    if (dragMoved > 5) {
-      e.stopImmediatePropagation();
-      e.preventDefault();
-      dragMoved = 0;
-    }
+  // swallow the click that ends a pan-drag (so it doesn't open the lightbox)
+  let dragMoved = 0;
+  img.addEventListener('pointerdown', () => { dragMoved = 0; }, true);
+  img.addEventListener('pointermove', (e) => {
+    if (scale > 1) dragMoved += 1;
   }, true);
-  img.addEventListener('dblclick', (e) => { e.preventDefault(); scale = 1; apply(); });
+  img.addEventListener('click', (e) => {
+    if (dragMoved > 5) { e.stopImmediatePropagation(); e.preventDefault(); dragMoved = 0; }
+  }, true);
+  img.addEventListener('dblclick', (e) => { e.preventDefault(); scale = 1; txf = tyf = 0; apply(); });
   img.draggable = false;
 }
 
-// ---------- lightbox: pinch/scroll zoom + pan ----------
+// ---------- the one render path ----------
 
-const lightbox = $('lightbox'), lbImg = $('lbImg'), lbBase = $('lbBase'),
-      lbPrev = $('lbPrev');
-let lbZoom = 1, lbX = 0, lbY = 0;
-let lbFlipH = false, lbFlipV = false, lbRot = 0;   // persisted per image
-let lbMix = 100;   // candidate opacity % over the current anchor
-let lbSplitX = null;   // split-wipe position (viewport px); null = off
+function render() {
+  const box = lbCurrentBox();
+  if (box) lbImg.style.transform = lbTransform(S.view, box);
+  lbFlipH.classList.toggle('on', S.view.fh);
+  lbFlipV.classList.toggle('on', S.view.fv);
 
-// Full view transform: center, rotate, zoom+flip, pan (order matters).
-function lbTransformFor(s) {
-  const sx = s.fh ? -1 : 1, sy = s.fv ? -1 : 1;
-  return `translate(-50%,-50%) rotate(${s.rot || 0}deg) ` +
-         `scale(${s.scale * sx}, ${s.scale * sy}) ` +
-         `translate(${s.tx}px, ${s.ty}px)`;
+  // underlay + comparison stack (candidates only, overlay mode on)
+  const anchors = lbListEntries('anchor');
+  const showOverlay = S.open && overlayOn() && S.col === 'cand' &&
+                      anchors.length > 0;
+  const wipeOn = showOverlay && splitOn();
+  lbMixWrap.style.display = showOverlay ? 'flex' : 'none';
+  lbSplitEl.style.display = wipeOn ? 'block' : 'none';
+  lbAnchorTag.style.display = S.open && S.col === 'anchor' ? 'block' : 'none';
+  if (showOverlay) {
+    const a = anchors[Math.min(S.pos.anchor, anchors.length - 1)];
+    if (lbBase.getAttribute('src') !== a.src) lbBase.src = a.src;
+    const abox = a.nw ? lbBoxFor(a.nw, a.nh) : null;
+    if (abox) lbBase.style.transform = lbTransform(S.view, abox);
+    lbImg.style.opacity = S.mix / 100;
+    lbMixVal.textContent = S.mix + '%';
+  } else {
+    lbBase.removeAttribute('src');
+    lbImg.style.opacity = '';
+  }
+  lbSplitEl.style.left =
+    (S.splitX == null ? window.innerWidth / 2 : S.splitX) + 'px';
+  lbClipWrap.style.clipPath =
+    (wipeOn && S.splitX != null) ? `inset(0 0 0 ${S.splitX}px)` : '';
+
+  renderFaceBox();
 }
 
-// screen-px drag delta -> state delta (inverse of the display transform)
-function lbPanDelta(dx, dy) {
-  const rad = -lbRot * Math.PI / 180;
-  const c = Math.cos(rad), s = Math.sin(rad);
-  const rx = dx * c - dy * s, ry = dx * s + dy * c;
-  const sx = lbFlipH ? -1 : 1, sy = lbFlipV ? -1 : 1;
-  return [rx / (lbZoom * sx), ry / (lbZoom * sy)];
+// ---------- image pipeline (the only place src changes hands) ----------
+
+let lbLoadGen = 0;
+
+// Set the current entry and show it: outgoing image covers the swap until
+// the incoming one has actually loaded (no blink, no stale-dims placement).
+function lbShow(entry) {
+  const outgoing = S.entry;
+  if (outgoing && outgoing.el) writeImageState(outgoing.el, S.view);
+  if (outgoing && lbImg.getAttribute('src') && lbImg.naturalWidth) {
+    lbPrev.src = lbImg.getAttribute('src');
+    const obox = outgoing.nw ? lbBoxFor(outgoing.nw, outgoing.nh)
+        : lbBoxFor(lbImg.naturalWidth, lbImg.naturalHeight);
+    if (obox) lbPrev.style.transform = lbTransform(S.view, obox);
+    lbPrev.style.opacity = lbImg.style.opacity;
+    lbPrev.style.display = 'block';
+  }
+  S.entry = entry;
+  S.faceBox = null;
+  const gen = ++lbLoadGen;
+  lbImg.src = entry.src;
+  // dims: known from metadata/detection/prior load -> place immediately;
+  // otherwise place when this src has actually finished loading
+  if (!entry.nw && entry.el && entry.el.naturalWidth) {
+    entry.nw = entry.el.naturalWidth;
+    entry.nh = entry.el.naturalHeight;
+  }
+  if (entry.nw) {
+    render();
+  } else {
+    lbImg.style.transform = '';   // CSS fallback centers it unscaled
+    render();                     // underlay/facebox/etc. update
+    const onload = () => {
+      if (gen !== lbLoadGen) return;
+      if (lbImg.getAttribute('src') !== entry.src) return;
+      entry.nw = lbImg.naturalWidth;
+      entry.nh = lbImg.naturalHeight;
+      render();
+    };
+    lbImg.addEventListener('load', onload, { once: true });
+    lbImg.addEventListener('error', onload, { once: true });  // show broken, not stuck
+  }
+  refreshFaceBox();
 }
 
-// image center on screen (rotation pivot): V + R·S·(t)
-function lbPivotScreen() {
-  const sx = lbFlipH ? -1 : 1, sy = lbFlipV ? -1 : 1;
-  const rad = lbRot * Math.PI / 180;
-  const tx = lbZoom * sx * lbX, ty = lbZoom * sy * lbY;
-  return [window.innerWidth / 2 + Math.cos(rad) * tx - Math.sin(rad) * ty,
-          window.innerHeight / 2 + Math.sin(rad) * tx + Math.cos(rad) * ty];
-}
+lbImg.addEventListener('load', () => { lbUncover(); });
+lbImg.addEventListener('error', () => lbUncover());
 
-function lbToggleFlip(axis) {
-  if (axis === 'h') lbFlipH = !lbFlipH;
-  else lbFlipV = !lbFlipV;
-  lbApply();
-}
-
-function lbApply() {
-  lbImg.style.transform = lbTransformFor(
-    { scale: lbZoom, tx: lbX, ty: lbY, fh: lbFlipH, fv: lbFlipV,
-      rot: lbRot });
-  $('lbFlipH').classList.toggle('on', lbFlipH);
-  $('lbFlipV').classList.toggle('on', lbFlipV);
-  updateFaceBoxOverlay();
-  lbBaseUpdate();   // underlay tracks the current view every frame
-}
-
-// Zoom state of an inline image -> {scale, cX, cY} where (cX,cY) is the
-// image point (fraction of the element box) at the center of its frame.
-// null when not zoomed.
-function carryZoom(img) {
-  const z = img._zoomState;
-  if (!z || (z.scale <= 1 && !z.fh && !z.fv && !z.rot)) return null;
-  return {
-    scale: z.scale,
-    cX: 0.5 - z.tx / (z.scale * img.offsetWidth),
-    cY: 0.5 - z.ty / (z.scale * img.offsetHeight),
-    fh: !!z.fh, fv: !!z.fv, rot: z.rot || 0,
-  };
-}
-
-// carry: keep the same scale and the same image point centered.
-// sourceImg: the inline image this view belongs to — lightbox zoom/pan
-// is written back to it (and persisted) on close / navigation.
-let lbSourceImg = null;
-let lbColumn = 'cand';   // 'cand' | 'anchor'
-let lbIndex = 0;
-const lbPos = { cand: 0, anchor: 0 };   // each column remembers its position
-// Swap cover: on switch the outgoing image stays displayed (at its exact
-// view) on a cover layer until the incoming image has loaded — kills both
-// the download wait and the decode-gap blink. (Preload-by-deferral was
-// tried and regressed cached switches; this covers both cases.)
-function lbCoverSwap() {
-  const src = lbImg.getAttribute('src');
-  if (!src || !lbImg.naturalWidth) return;   // nothing to cover with
-  lbPrev.src = src;
-  lbPrev.style.transform = lbImg.style.transform;   // exact current view
-  lbPrev.style.opacity = lbImg.style.opacity;
-  lbPrev.style.display = 'block';
-}
 function lbUncover() {
   lbPrev.style.display = 'none';
   lbPrev.removeAttribute('src');
 }
 
-function lbList(col) {
+// ---------- column model ----------
+
+function lbListEntries(col) {
   return col === 'cand'
-    ? [...candidatesEl.querySelectorAll('.card')].map(c => ({
-        src: c.dataset.imgUrl, img: c.querySelector('img'),
-        key: `${currentHost}:${c.dataset.name}` }))
-    : [...anchorList.querySelectorAll('.anchor')].map(a => ({
-        src: a.dataset.src, img: a.querySelector('img'),
-        key: `anchor:${a.dataset.name}` }));
+    ? [...candidatesEl.querySelectorAll('.card')].map(c => {
+        const img = c.querySelector('img');
+        return { key: `${currentHost}:${c.dataset.name}`,
+                 src: c.dataset.imgUrl, img: img, el: img,
+                 nw: c.dataset.nw ? +c.dataset.nw : (img && img.naturalWidth) || 0,
+                 nh: c.dataset.nh ? +c.dataset.nh : (img && img.naturalHeight) || 0 };
+      })
+    : [...anchorList.querySelectorAll('.anchor')].map(a => {
+        const img = a.querySelector('img');
+        return { key: `anchor:${a.dataset.name}`, src: a.dataset.src,
+                 img: img, el: img,
+                 nw: (img && img.naturalWidth) || 0,
+                 nh: (img && img.naturalHeight) || 0 };
+      });
 }
 
 function lbLocate(sourceImg) {
-  const cards = lbList('cand');
+  const cards = lbListEntries('cand');
   const ci = cards.findIndex(e => e.img === sourceImg);
-  if (ci >= 0) { lbColumn = 'cand'; lbIndex = ci; lbPos.cand = ci; return; }
-  const anchors = lbList('anchor');
+  if (ci >= 0) { S.col = 'cand'; S.pos.cand = ci; return cards[ci]; }
+  const anchors = lbListEntries('anchor');
   const ai = anchors.findIndex(e => e.img === sourceImg);
-  if (ai >= 0) { lbColumn = 'anchor'; lbIndex = ai; lbPos.anchor = ai; return; }
-  lbColumn = 'cand'; lbIndex = 0;
+  if (ai >= 0) { S.col = 'anchor'; S.pos.anchor = ai; return anchors[ai]; }
+  S.col = 'cand'; S.pos.cand = 0;
+  return cards[0];
 }
 
-// Persist the current lightbox view into the outgoing image's inline state.
 // Linked pan: move the counterpart image's stored view by the same screen
-// delta (normalized per view, so face-matched pairs stay locked).
+// delta (each in its own box fractions).
 function lbPanCounterpart(dx, dy) {
-  const anchors = lbList('anchor');
-  const cards = lbList('cand');
-  const other = lbColumn === 'cand'
-    ? anchors[Math.min(lbPos.anchor, anchors.length - 1)]
-    : cards[Math.min(lbPos.cand, cards.length - 1)];
-  if (!other || !other.img || !other.img._zoomState) return;
-  const z = other.img._zoomState;
-  const ns = { s: z.scale, tx: z.tx + dx / z.scale, ty: z.ty + dy / z.scale };
-  if (other.img._setZoom) other.img._setZoom(ns);   // persists too
-  else other.img._zoomState = ns;
+  const other = lbListEntries(S.col === 'cand' ? 'anchor' : 'cand')
+    [S.col === 'cand' ? Math.min(S.pos.anchor, lbListEntries('anchor').length - 1)
+                     : Math.min(S.pos.cand, lbListEntries('cand').length - 1)];
+  if (!other || !other.el) return;
+  const oz = readImageState(other.el) || lbFreshView();
+  const obox = other.nw ? lbBoxFor(other.nw, other.nh) : null;
+  if (!obox) return;
+  const sx = oz.fh ? -1 : 1, sy = oz.fv ? -1 : 1;
+  oz.txf += dx / (oz.scale * sx * obox.w);
+  oz.tyf += dy / (oz.scale * sy * obox.h);
+  writeImageState(other.el, oz);
 }
 
-// Base layer: the current anchor, at its own stored zoom/pan, under the
-// candidate. The slider controls the candidate's opacity over it.
-// The whole underlay stack (base + slider + split line) obeys the
-// "overlay" toggle and only applies to the candidate column.
-function lbBaseUpdate() {
-  const wrap = $('lbMixWrap');
-  const split = $('lbSplit');
-  const tag = $('lbAnchorTag');
-  const anchors = lbList('anchor');
-  const open = lightbox.classList.contains('open');
-  tag.style.display = open && lbColumn === 'anchor' ? 'block' : 'none';
-  const show = open && overlayOn() &&
-               lbColumn === 'cand' && anchors.length > 0;
-  wrap.style.display = show ? 'flex' : 'none';
-  split.style.display = show && splitOn() ? 'block' : 'none';
-  if (!show) {
-    lbBase.removeAttribute('src');
-    lbImg.style.opacity = '';
-    $('lbClipWrap').style.clipPath = '';
-    return;
-  }
-  const aEntry = anchors[Math.min(lbPos.anchor, anchors.length - 1)];
-  if (lbBase.getAttribute('src') !== aEntry.src) lbBase.src = aEntry.src;
-  // the underlay renders at the CURRENT shared view (that's what makes the
-  // comparison meaningful); on write-back the anchor's state catches up
-  lbBase.style.transform = lbTransformFor({ scale: lbZoom, tx: lbX, ty: lbY,
-    fh: lbFlipH, fv: lbFlipV, rot: lbRot });
-  lbImg.style.opacity = lbMix / 100;
-  $('lbMixVal').textContent = lbMix + '%';
-  lbApplySplit();
-}
+// ---------- navigation ----------
 
-// Split-wipe: clip the candidate's (untransformed) wrapper left of the
-// line, so the clip is in the same screen space as the handle.
-// (left of line = anchor underlay; right = candidate)
-function lbApplySplit() {
-  const split = $('lbSplit');
-  split.style.left =
-    (lbSplitX == null ? window.innerWidth / 2 : lbSplitX) + 'px';
-  const wrap = $('lbClipWrap');
-  if (lbSplitX == null) {
-    wrap.style.clipPath = '';
-    return;
-  }
-  wrap.style.clipPath = `inset(0 0 0 ${lbSplitX}px)`;
-}
-
-function lbWriteBack() {
-  if (!lbSourceImg || !lbSourceImg._setZoom || !lbImg.naturalWidth) return;
-  const img = lbSourceImg;
-  if (!img.offsetWidth || !img.offsetHeight) return;
-  const ar = lbImg.naturalWidth / lbImg.naturalHeight;
-  const boxW = Math.min(0.95 * window.innerWidth,
-                        0.95 * window.innerHeight * ar);
-  const boxH = boxW / ar;
-  img._setZoom({
-    s: lbZoom,
-    tx: lbX * lbZoom * img.offsetWidth / boxW,
-    ty: lbY * lbZoom * img.offsetHeight / boxH,
-    fh: lbFlipH, fv: lbFlipV, rot: lbRot,
-  });
-}
-
-// Place the lightbox view from a carry ({scale, cX, cY}) once the image
-// box is known. Browsers keep complete/naturalWidth stale briefly after a
-// src change, so only trust dims once THIS src has finished loading
-// (tracked via lbImg._loadedSrc) — otherwise a cached-looking image gets
-// placed with the previous image's aspect box (position lands shifted).
-lbImg.addEventListener('load', () => {
-  lbImg._loadedSrc = lbImg.getAttribute('src');
-  lbUncover();   // new image ready to paint: drop the cover
-});
-lbImg.addEventListener('error', () => lbUncover());
-
-function lbPlaceCarry(carry, forSrc) {
-  lbZoom = carry ? carry.scale : 1;
-  lbX = 0; lbY = 0;
-  lbFlipH = carry ? carry.fh : false;
-  lbFlipV = carry ? carry.fv : false;
-  lbRot = carry ? carry.rot : 0;
-  lbApply();
-  const place = () => {
-    if (forSrc && lbImg.getAttribute('src') !== forSrc) return;  // superseded
-    if (forSrc && lbImg._loadedSrc !== forSrc) return;  // stale dims
-    if (carry && lbImg.naturalWidth) {
-      const ar = lbImg.naturalWidth / lbImg.naturalHeight;
-      const boxW = Math.min(0.95 * window.innerWidth,
-                            0.95 * window.innerHeight * ar);
-      const boxH = boxW / ar;
-      lbX = (0.5 - carry.cX) * boxW;
-      lbY = (0.5 - carry.cY) * boxH;
-      lbApply();
-    }
-  };
-  if (lbImg._loadedSrc === forSrc) place();
-  else lbImg.addEventListener('load', place, { once: true });
-}
-
-// Arrow-key navigation: Left/Right switch columns (candidates <-> anchors),
-// Up/Down move within the column. Each image is recalled at its OWN stored
-// zoom/position; the outgoing image keeps the view you adjusted it to.
-// Edges do nothing.
-function lbSwitch(dCol, dRow) {
-  let col = lbColumn, idx = lbIndex;
+function lbNavigate(dCol, dRow) {
+  let col = S.col, idx = S.pos[S.col];
   if (dCol === 1) {
-    if (col !== 'cand' || !lbList('anchor').length) return;
-    lbPos.cand = lbIndex;                        // remember where we left
+    if (col !== 'cand' || !lbListEntries('anchor').length) return;
     col = 'anchor';
-    idx = Math.min(lbPos.anchor, lbList('anchor').length - 1);
+    idx = Math.min(S.pos.anchor, lbListEntries('anchor').length - 1);
   } else if (dCol === -1) {
     if (col !== 'anchor') return;
-    lbPos.anchor = lbIndex;
     col = 'cand';
-    idx = Math.min(lbPos.cand, lbList('cand').length - 1);
+    idx = Math.min(S.pos.cand, lbListEntries('cand').length - 1);
   } else if (dRow) {
-    let list = lbList(col);
-    // extending candidates on demand when navigating at the rendered edge
+    let list = lbListEntries(col);
     if (col === 'cand' && idx + dRow >= list.length - 1 &&
         renderedCount < allFiles.length) {
       renderChunk();
-      list = lbList(col);
+      list = lbListEntries(col);
     }
     const n = Math.max(0, Math.min(list.length - 1, idx + dRow));
     if (n === idx) return;
     idx = n;
   } else return;
 
-  lbWriteBack();          // outgoing image keeps the view you set
-  lbCoverSwap();          // ...and stays on screen until the new one loads
-  lbColumn = col;
-  lbIndex = idx;
-  lbPos[col] = idx;
-  const entry = lbList(col)[idx];
-  lbSourceImg = entry.img;
-  lbImg.src = entry.src;
-  if (faceAlignOn() && col === 'cand' && faceLoadState === 'ready') {
-    // recall its own zoom first — if alignment can't run (no face found),
-    // the candidate keeps its state instead of resetting to 1x
-    lbPlaceCarry(carryZoom(entry.img), entry.src);
-    alignToAnchorFace();             // overrides when it can
-  } else if (dCol && overlayOn() && splitOn() &&
-             !(faceAlignOn() && faceLoadState === 'ready')) {
-    // pair switch (candidate <-> anchor) with the split wipe active:
-    // the two images share the current view — no jump on switch
-    lbApply();
-  } else {
-    lbPlaceCarry(carryZoom(entry.img), entry.src);   // recall its own zoom
-  }
-  lbBaseUpdate();
-  refreshFaceBox();
+  S.col = col;
+  S.pos[col] = idx;
+  const entry = lbListEntries(col)[idx];
+
+  // ORDER MATTERS: lbShow writes back the OUTGOING image's state from the
+  // CURRENT S.view; only after that may S.view change to the incoming one.
+  const align = faceAlignOn() && col === 'cand' && faceLoadState === 'ready';
+  const share = dCol && overlayOn() && splitOn() &&
+                !(faceAlignOn() && faceLoadState === 'ready');
+  const nextView = share ? S.view
+                         : (readImageState(entry.el) || lbFreshView());
+  lbShow(entry);          // write-back + cover + src swap (old view)
+  S.view = nextView;      // now the incoming image's view
+  render();
+  if (align) alignToAnchorFace();   // overrides the fallback when it can
 }
 
-function openLightbox(src, carry = null, sourceImg = null) {
-  lbUncover();   // no cover needed: nothing was on screen
-  lbSourceImg = sourceImg;
-  if (sourceImg) lbLocate(sourceImg);
-  lbImg.src = src;
+// ---------- open/close ----------
+
+function openLightbox(src, sourceImg) {
+  lbUncover();
+  const entry = lbLocate(sourceImg);
+  S.open = true;
   lightbox.classList.add('open');
-  if (!guidesRestored) {   // lazy: needs a visible lightbox for sane bounds
-    guidesRestored = true;
+  if (!S._guidesRestored) {
+    S._guidesRestored = true;
     restoreGuides();
   }
   updateFaceTogglesVisibility();
-  if (faceAlignOn() && lbColumn === 'cand' && faceLoadState === 'ready') {
-    lbPlaceCarry(null, src);         // alignment overrides carried zoom
+  S.view = readImageState(entry.el) || lbFreshView();
+  if (faceAlignOn() && S.col === 'cand' && faceLoadState === 'ready') {
+    lbShow(entry);
     alignToAnchorFace();
   } else {
-    lbPlaceCarry(carry, src);
+    lbShow(entry);
   }
-  lbBaseUpdate();
-  refreshFaceBox();
+  render();
 }
 
 function closeLightbox() {
-  lbWriteBack();
-  lbSourceImg = null;
-  lbUncover();
+  if (S.entry && S.entry.el) writeImageState(S.entry.el, S.view);
+  S.open = false;
+  S.entry = null;
+  S.faceBox = null;
   lightbox.classList.remove('open');
+  lbUncover();
   lbImg.removeAttribute('src');
-  lbImg._loadedSrc = null;   // force a fresh load cycle next open
   lbBase.removeAttribute('src');
   lbImg.style.opacity = '';
-  $('lbMixWrap').style.display = 'none';
-  $('lbAnchorTag').style.display = 'none';
-  lbFaceBox = null;
-  updateFaceBoxOverlay();
+  lbMixWrap.style.display = 'none';
+  lbAnchorTag.style.display = 'none';
+  renderFaceBox();
+}
+
+// ---------- input ----------
+
+function lbApplyView(persist = true) {
+  if (persist && S.entry && S.entry.el) writeImageState(S.entry.el, S.view);
+  render();
 }
 
 $('lbClose').addEventListener('click', closeLightbox);
+
 document.addEventListener('keydown', (e) => {
   if (!lightbox.classList.contains('open')) return;
   if (e.key === 'Escape') closeLightbox();
-  // Alt+Left/Right: move the split-wipe line (10px; +Shift for 1px)
+  // Alt+Left/Right: split-wipe line (10px; +Shift = 1px)
   else if (e.altKey && (e.key === 'ArrowLeft' || e.key === 'ArrowRight')) {
     e.preventDefault();
-    if (lbSplitX == null) lbSplitX = window.innerWidth / 2;
+    if (S.splitX == null) S.splitX = window.innerWidth / 2;
     const step = (e.shiftKey ? 1 : 10) * (e.key === 'ArrowRight' ? 1 : -1);
-    lbSplitX = Math.max(0, Math.min(window.innerWidth, lbSplitX + step));
-    lbApplySplit();
+    S.splitX = Math.max(0, Math.min(window.innerWidth, S.splitX + step));
+    render();
   }
-  // Shift+arrows: pan the image 1 screen pixel (direction-correct under
-  // rotation/flips)
+  // Shift+arrows: pan 1 screen px (direction-true under rotation/flip)
   else if (e.shiftKey && e.key.startsWith('Arrow')) {
     e.preventDefault();
     const d = e.key === 'ArrowRight' ? [1, 0] : e.key === 'ArrowLeft'
       ? [-1, 0] : e.key === 'ArrowDown' ? [0, 1] : [0, -1];
-    const [dtx, dty] = lbPanDelta(d[0], d[1]);
-    lbX += dtx;
-    lbY += dty;
-    lbApply();
+    const [dtx, dty] = lbPanFrac(d[0], d[1]);
+    S.view.txf += dtx;
+    S.view.tyf += dty;
+    lbApplyView();
   }
-  // H/V: flip the lightbox image horizontally/vertically
+  // H/V: flip
   else if (!e.ctrlKey && !e.altKey && !e.metaKey &&
            (e.key === 'h' || e.key === 'H' || e.key === 'v' ||
             e.key === 'V')) {
     e.preventDefault();
     lbToggleFlip(e.key.toLowerCase());
   }
-  // -/+ : zoom so the displayed image width changes by 1 screen pixel
-  //       (10 px with Shift held)
-  else if (e.key === '-' || e.key === '_' || e.key === '=' || e.key === '+') {
+  // -/+: zoom so the displayed image width changes by 1px (10 with Shift)
+  else if (e.key === '-' || e.key === '_' || e.key === '=' ||
+           e.key === '+') {
     e.preventDefault();
-    const boxW = lbImg.offsetWidth || 1;
+    const box = lbCurrentBox();
+    const boxW = (box && box.w) || 1;
     const dir = (e.key === '-' || e.key === '_') ? -1 : 1;
     const step = (e.shiftKey ? 10 : 1) * dir;
     const factor = Math.max(0.5, boxW + step) / boxW;
-    lbZoom = Math.min(12, Math.max(0.2, lbZoom * factor));
-    lbApply();
+    S.view.scale = Math.min(12, Math.max(0.2, S.view.scale * factor));
+    lbApplyView();
   }
-  else if (e.key === 'ArrowRight') { e.preventDefault(); lbSwitch(1, 0); }
-  else if (e.key === 'ArrowLeft') { e.preventDefault(); lbSwitch(-1, 0); }
-  else if (e.key === 'ArrowDown') { e.preventDefault(); lbSwitch(0, 1); }
-  else if (e.key === 'ArrowUp') { e.preventDefault(); lbSwitch(0, -1); }
+  else if (e.key === 'ArrowRight') { e.preventDefault(); lbNavigate(1, 0); }
+  else if (e.key === 'ArrowLeft') { e.preventDefault(); lbNavigate(-1, 0); }
+  else if (e.key === 'ArrowDown') { e.preventDefault(); lbNavigate(0, 1); }
+  else if (e.key === 'ArrowUp') { e.preventDefault(); lbNavigate(0, -1); }
 });
 
-// Trackpad pinch = ctrl+wheel -> zoom. Plain scroll does nothing in the
-// lightbox (scroll-pan fought with pinch-zoom on trackpads).
+function lbToggleFlip(axis) {
+  if (axis === 'h') S.view.fh = !S.view.fh;
+  else S.view.fv = !S.view.fv;
+  lbApplyView();
+}
+
+// wheel: ctrl+wheel (trackpad pinch) zooms; plain scroll does nothing
 lightbox.addEventListener('wheel', (e) => {
   e.preventDefault();
   if (!e.ctrlKey) return;
   const factor = Math.exp(-e.deltaY * 0.01);
-  lbZoom = Math.min(12, Math.max(0.2, lbZoom * factor));
-  lbApply();
+  S.view.scale = Math.min(12, Math.max(0.2, S.view.scale * factor));
+  lbApplyView();
 }, { passive: false });
 
-// Pan by dragging; touch pinch via pointer events.
+// pointer: drag = pan (linked when matched or Shift held), Alt+drag =
+// rotate about the image center (snaps to 0° within 4°)
 const lbPointers = new Map();
-let lbPinchDist = 0, lbDragMoved = 0;
+let lbPinchDist = 0;
+
 lbImg.addEventListener('pointerdown', (e) => {
-  if (e.altKey) {   // Alt+drag = rotate freely about the image center
+  S.dragMoved = 0;
+  lbImg.setPointerCapture(e.pointerId);
+  if (e.altKey) {
     e.preventDefault();
-    lbImg.setPointerCapture(e.pointerId);
-    lbDragMoved = 0;
-    const piv = lbPivotScreen();
+    const box = lbCurrentBox();
+    if (!box) return;
+    const piv = lbPivotScreen(S.view, box);
     const a0 = Math.atan2(e.clientY - piv[1], e.clientX - piv[0]);
-    const r0 = lbRot;
+    const r0 = S.view.rot;
     const move = (ev) => {
       const a = Math.atan2(ev.clientY - piv[1], ev.clientX - piv[0]);
       const d = (a - a0) * 180 / Math.PI;
-      if (Math.abs(d) > 0.5) lbDragMoved = 10;   // don't close on release
+      if (Math.abs(d) > 0.5) S.dragMoved = 10;
       let rot = r0 + d;
-      // snap to level (0°) within 4° — touchpad-friendly
       const snapped = Math.round(rot / 360) * 360;
       if (Math.abs(rot - snapped) < 4) rot = snapped;
-      lbRot = rot;
-      lbApply();
+      S.view.rot = rot;
+      lbApplyView();
     };
     const up = () => {
       lbImg.removeEventListener('pointermove', move);
@@ -1650,44 +1694,42 @@ lbImg.addEventListener('pointerdown', (e) => {
     return;
   }
   lbPointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
-  lbImg.setPointerCapture(e.pointerId);
   lbImg.classList.add('dragging');
-  lbDragMoved = 0;
   if (lbPointers.size === 2) {
     const [a, b] = [...lbPointers.values()];
     lbPinchDist = Math.hypot(a.x - b.x, a.y - b.y);
   }
 });
+
 lbImg.addEventListener('pointermove', (e) => {
   if (!lbPointers.has(e.pointerId)) return;
   const prev = lbPointers.get(e.pointerId);
   lbPointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
   if (lbPointers.size === 1) {
     const dx = e.clientX - prev.x, dy = e.clientY - prev.y;
-    if (faceAlignOn() || e.shiftKey) {
-      // linked pan: both images track the pointer 1:1
-      const [dtx, dty] = lbPanDelta(dx, dy);
-      lbX += dtx;
-      lbY += dty;
-      lbPanCounterpart(dx, dy);
-      lbBaseUpdate();
-    } else if (lbRot || lbFlipH || lbFlipV) {
-      const [dtx, dty] = lbPanDelta(dx, dy);   // direction-correct under R/flip
-      lbX += dtx;
-      lbY += dty;
+    const linked = faceAlignOn() || e.shiftKey;
+    const box = lbCurrentBox() || { w: window.innerWidth, h: window.innerHeight };
+    const sx = S.view.fh ? -1 : 1, sy = S.view.fv ? -1 : 1;
+    if (linked || S.view.rot || S.view.fh || S.view.fv) {
+      const [dtx, dty] = lbPanFrac(dx, dy);
+      S.view.txf += dtx;
+      S.view.tyf += dty;
     } else {
-      lbX += dx;
-      lbY += dy;
+      S.view.txf += dx / (S.view.scale * box.w);
+      S.view.tyf += dy / (S.view.scale * box.h);
     }
-    lbDragMoved += Math.abs(dx) + Math.abs(dy);
+    if (linked) {
+      lbPanCounterpart(dx, dy);
+    }
+    S.dragMoved += Math.abs(dx) + Math.abs(dy);
   } else if (lbPointers.size === 2) {
     const [a, b] = [...lbPointers.values()];
     const d = Math.hypot(a.x - b.x, a.y - b.y);
     if (lbPinchDist > 0)
-      lbZoom = Math.min(12, Math.max(0.2, lbZoom * (d / lbPinchDist)));
+      S.view.scale = Math.min(12, Math.max(0.2, S.view.scale * (d / lbPinchDist)));
     lbPinchDist = d;
   }
-  lbApply();
+  lbApplyView();
 });
 const lbPointerEnd = (e) => {
   lbPointers.delete(e.pointerId);
@@ -1697,63 +1739,82 @@ const lbPointerEnd = (e) => {
 lbImg.addEventListener('pointerup', lbPointerEnd);
 lbImg.addEventListener('pointercancel', lbPointerEnd);
 
-// Click on the image closes the lightbox (but not the click ending a drag)
+// click closes (not the click ending a drag/rotate)
 lbImg.addEventListener('click', () => {
-  if (lbDragMoved > 5) { lbDragMoved = 0; return; }
+  if (S.dragMoved > 5) { S.dragMoved = 0; return; }
   closeLightbox();
 });
 
-// ---------- facebox overlay ----------
+// ---------- underlay extras (slider / split drag / flips) ----------
 
-let lbFaceBox = null;   // {x,y,w,h,nw,nh} | null — for the current image
+lbMix.addEventListener('input', (e) => {
+  S.mix = Number(e.target.value);
+  render();
+});
 
-// Detect (cached) and draw the face box for the current lightbox image.
-async function refreshFaceBox() {
-  lbFaceBox = null;
-  updateFaceBoxOverlay();
-  if (faceLoadState !== 'ready') return;
-  const entry = lbList(lbColumn)[lbIndex];
-  if (!entry) return;
-  const forSrc = entry.src;
-  const box = await detectFaceBox(entry);
-  if (lbImg.getAttribute('src') !== forSrc) return;   // switched meanwhile
-  lbFaceBox = box;
-  updateFaceBoxOverlay();
+$('lbFlipH').addEventListener('click', () => lbToggleFlip('h'));
+$('lbFlipV').addEventListener('click', () => lbToggleFlip('v'));
+
+lbSplitEl.addEventListener('pointerdown', (e) => {
+  e.preventDefault();
+  e.stopPropagation();
+  lbSplitEl.setPointerCapture(e.pointerId);
+  if (S.splitX == null) S.splitX = window.innerWidth / 2;
+  const move = (ev) => {
+    S.splitX = Math.max(0, Math.min(window.innerWidth, ev.clientX));
+    render();
+  };
+  const up = (ev) => {
+    document.removeEventListener('pointermove', move);
+    document.removeEventListener('pointerup', up);
+    if (ev.clientX <= 4 || ev.clientX >= window.innerWidth - 4) {
+      S.splitX = null;
+      render();
+    }
+  };
+  document.addEventListener('pointermove', move);
+  document.addEventListener('pointerup', up);
+});
+
+// split toggle: starts at the image's left edge (candidate fully visible)
+function lbImageLeftEdge() {
+  const box = lbCurrentBox();
+  if (!box) return window.innerWidth / 2;
+  const e0 = lbMapFrac(S.view, box, 0, 0.5)[0];
+  const e1 = lbMapFrac(S.view, box, 1, 0.5)[0];
+  return Math.min(e0, e1);
 }
+
+// ---------- facebox overlay ----------
 
 const LS_FACEBOX_VIS = 'kosmozoo.facebox.visible';   // default on
 function faceBoxVisible() {
   return localStorage.getItem(LS_FACEBOX_VIS) !== '0';
 }
 
-function updateFaceBoxOverlay() {
-  const el = $('faceBox');
-  if (!lightbox.classList.contains('open') || !lbFaceBox ||
-      faceLoadState !== 'ready' || !faceBoxVisible()) {
+
+function updateFaceBoxOverlay() { renderFaceBox(); }   // compat alias
+
+function renderFaceBox() {
+  const el = lbFaceBoxEl;
+  if (!S.open || !S.faceBox || faceLoadState !== 'ready' || !faceBoxVisible()) {
     el.style.display = 'none';
     return;
   }
-  const box = lbBoxFor(lbFaceBox.nw, lbFaceBox.nh);
-  const sx = lbFlipH ? -1 : 1, sy = lbFlipV ? -1 : 1;
-  const Vx = window.innerWidth / 2, Vy = window.innerHeight / 2;
-  // image fraction -> screen px, evaluated at rotation=0; the overlay div
-  // then gets the rotation itself, pivoted at the image center
-  const map0 = (fx, fy) => [
-    Vx + lbZoom * sx * ((fx - 0.5) * box.w + lbX),
-    Vy + lbZoom * sy * ((fy - 0.5) * box.h + lbY)];
-  const [l0, t0] = map0(lbFaceBox.x, lbFaceBox.y);
-  const [r0, b0] = map0(lbFaceBox.x + lbFaceBox.w, lbFaceBox.y + lbFaceBox.h);
+  const box = lbCurrentBox();
+  if (!box) { el.style.display = 'none'; return; }
+  const fb = S.faceBox;
+  const [l0, t0] = lbMapFrac(S.view, box, fb.x, fb.y);
+  const [r0, b0] = lbMapFrac(S.view, box, fb.x + fb.w, fb.y + fb.h);
   const left = Math.min(l0, r0), top = Math.min(t0, b0);
   el.style.display = 'block';
   el.style.left = left + 'px';
   el.style.top = top + 'px';
   el.style.width = Math.abs(r0 - l0) + 'px';
   el.style.height = Math.abs(b0 - t0) + 'px';
-  const [pivX, pivY] = lbPivotScreen();
+  const [pivX, pivY] = lbPivotScreen(S.view, box);
   el.style.transformOrigin = `${pivX - left}px ${pivY - top}px`;
-  el.style.transform = `rotate(${lbRot}deg)`;
-  // eye dots at the computed eye centers (the actual alignment basis),
-  // in px within the unrotated box div
+  el.style.transform = `rotate(${S.view.rot}deg)`;
   if (!el._eyeDots) {
     el._eyeDots = [0, 1].map(() => {
       const d = document.createElement('span');
@@ -1762,33 +1823,35 @@ function updateFaceBoxOverlay() {
       return d;
     });
   }
-  const eyes = faceFrame(lbFaceBox).eyes;
+  const eyes = faceFrame(fb).eyes;
   el._eyeDots.forEach((d, i) => {
     d.style.display = eyes ? 'block' : 'none';
     if (eyes) {
-      const [ex, ey] = map0(eyes[i][0], eyes[i][1]);
+      const [ex, ey] = lbMapFrac(S.view, box, eyes[i][0], eyes[i][1]);
       d.style.left = (ex - left) + 'px';
       d.style.top = (ey - top) + 'px';
     }
   });
 }
 
-// ---------- lightbox guides (fixed to viewport, survive navigation) ----------
-
-const LS_GUIDES_VIS = 'kosmozoo.guides.visible';   // default on
-function guidesVisible() { return localStorage.getItem(LS_GUIDES_VIS) !== '0'; }
-function applyGuidesVisibility() {
-  lightbox.classList.toggle('guides-hidden', !guidesVisible());
+async function refreshFaceBox() {
+  S.faceBox = null;
+  renderFaceBox();
+  if (faceLoadState !== 'ready' || !S.entry) return;
+  const entry = S.entry;
+  const box = await detectFaceBox(entry);
+  if (S.entry !== entry) return;
+  S.faceBox = box;
+  renderFaceBox();
 }
 
-const guideLayer = $('guideLayer');
-const LS_GUIDES = 'kosmozoo.guides.v1';   // [{axis, pos}]
-let guidesRestored = false;
+// ---------- guides ----------
 
 function persistGuides() {
-  const items = [...guideLayer.querySelectorAll('.guide')].map(g => ({
+  const items = [...lbGuideLayer.querySelectorAll('.guide')].map(g => ({
     axis: g.classList.contains('h') ? 'h' : 'v',
-    pos: parseFloat(g.classList.contains('h') ? g.style.top : g.style.left),
+    pos: parseFloat(g.classList.contains('h') ? g.style.top : g.style.left) +
+           6,   // undo the visual-centering offset
   }));
   try { localStorage.setItem(LS_GUIDES, JSON.stringify(items)); }
   catch (e) { /* in-memory only */ }
@@ -1804,14 +1867,18 @@ function restoreGuides() {
   }
 }
 
+function applyGuidesVisibility() {
+  lightbox.classList.toggle('guides-hidden', !guidesVisible());
+}
+
 function addGuide(axis, pos) {
   const g = document.createElement('div');
   g.className = `guide ${axis}`;
   g._setPos = (p) => {
     const max = axis === 'h' ? lightbox.clientHeight : lightbox.clientWidth;
     pos = Math.max(0, Math.min(max, p));
-    // the padded grab area is wider than the visible line; keep the
-    // visible line centered on the pointer position
+    // padded grab area is wider than the visible line; keep the visible
+    // line centered on the pointer position
     if (axis === 'h') g.style.top = (pos - 6) + 'px';
     else g.style.left = (pos - 6) + 'px';
   };
@@ -1838,14 +1905,13 @@ function addGuide(axis, pos) {
     g.addEventListener('pointerup', up);
     g.addEventListener('pointercancel', up);
   });
-  guideLayer.appendChild(g);
+  lbGuideLayer.appendChild(g);
   persistGuides();
   return g;
 }
 
-// Drag from a lightbox edge creates a guide and immediately drags it.
-for (const [stripId, axis] of [['guideStripTop', 'h'], ['guideStripLeft', 'v']]) {
-  $(stripId).addEventListener('pointerdown', (e) => {
+for (const [strip, axis] of [[lbStripTop, 'h'], [lbStripLeft, 'v']]) {
+  strip.addEventListener('pointerdown', (e) => {
     e.preventDefault();
     e.stopPropagation();
     const g = addGuide(axis, axis === 'h' ? e.clientY : e.clientX);
@@ -1854,7 +1920,7 @@ for (const [stripId, axis] of [['guideStripTop', 'h'], ['guideStripLeft', 'v']])
       document.removeEventListener('pointermove', move);
       document.removeEventListener('pointerup', up);
       const p = axis === 'h' ? ev.clientY : ev.clientX;
-      if (p < 6) g.remove();   // never pulled out of the edge -> discard
+      if (p < 6) g.remove();
       persistGuides();
     };
     document.addEventListener('pointermove', move);
@@ -1862,6 +1928,39 @@ for (const [stripId, axis] of [['guideStripTop', 'h'], ['guideStripLeft', 'v']])
   });
 }
 
+// ---------- public API used elsewhere in the page ----------
+
+const LB = {
+  open: openLightbox,
+  close: closeLightbox,
+  render,
+  applyView: lbApplyView,
+  toggleFlip: lbToggleFlip,
+  // state accessors for the detection/alignment section
+  current: () => S.entry,
+  currentCol: () => S.col,
+  anchorEntry: () => {
+    const anchors = lbListEntries('anchor');
+    return anchors.length
+      ? anchors[Math.min(S.pos.anchor, anchors.length - 1)] : null;
+  },
+  anchorView: () => {
+    const a = LB.anchorEntry();
+    return (a && readImageState(a.el)) || lbFreshView();
+  },
+  setView(v) { S.view = { ...lbFreshView(), ...v }; lbApplyView(); },
+  view: () => S.view,
+  boxFor: lbBoxFor,
+  mapFrac: lbMapFrac,
+  isOpen: () => S.open,
+  splitSetX(x) { S.splitX = x; render(); },
+  setSplitOn(on) {
+    try { localStorage.setItem(LS_SPLIT, on ? '1' : '0'); } catch (e) {}
+    S.splitX = on ? lbImageLeftEdge() : null;
+    render();
+  },
+  mixSet(v) { S.mix = v; render(); },
+};
 // ---------- face detection (opt-in, lazy-loaded; MediaPipe BlazeFace) ----------
 
 const LS_FACE = 'kosmozoo.faceDetect.enabled';
@@ -2043,45 +2142,40 @@ function faceFrame(box) {
            scale: box.h, eyes: null };
 }
 
-// Lightbox display box (untransformed layout size) for a natural size.
-function lbBoxFor(nw, nh) {
-  const ar = nw / nh;
-  const boxW = Math.min(0.95 * window.innerWidth, 0.95 * window.innerHeight * ar);
-  return { w: boxW, h: boxW / ar };
-}
-
-// Frame the current candidate so its face box matches the current anchor's
-// face box on screen (position + size). The anchor keeps its own stored
-// zoom/pan as the reference and is never re-framed.
+// Frame the current candidate so its face matches the current anchor's
+// face on screen (position + size). The anchor keeps its own stored view
+// as the reference and is never re-framed. Math is in box fractions (the
+// lightbox module's units).
 async function alignToAnchorFace() {
-  if (!faceAlignOn() || faceLoadState !== 'ready' || lbColumn !== 'cand')
+  if (!faceAlignOn() || faceLoadState !== 'ready' ||
+      LB.currentCol() !== 'cand')
     return;
-  const anchors = lbList('anchor');
-  if (!anchors.length) { setStatus('face align: no anchors'); return; }
-  const aEntry = anchors[Math.min(lbPos.anchor, anchors.length - 1)];
-  const cEntry = lbList('cand')[lbIndex];
-  const forSrc = cEntry.src;
+  const aEntry = LB.anchorEntry();
+  const cEntry = LB.current();
+  if (!aEntry || !cEntry) { setStatus('face align: no anchors'); return; }
   const [aBox, cBox] = await Promise.all(
     [detectFaceBox(aEntry), detectFaceBox(cEntry)]);
-  if (lbImg.getAttribute('src') !== forSrc) return;   // switched meanwhile
+  if (LB.current() !== cEntry) return;   // switched meanwhile
   if (!aBox || !cBox) { setStatus('face align: no face found'); return; }
 
-  const az = (aEntry.img && aEntry.img._zoomState) || { scale: 1, tx: 0, ty: 0 };
-  const boxA = lbBoxFor(aBox.nw, aBox.nh);
-  const boxC = lbBoxFor(cBox.nw, cBox.nh);
-  // anatomical frames: eye midpoint + inter-eye distance (not the raw
-  // detector box — its tightness varies per image, which isn't comparable)
+  const av = LB.anchorView();
+  const boxA = LB.boxFor(aBox.nw, aBox.nh);
+  const boxC = LB.boxFor(cBox.nw, cBox.nh);
   const fA = faceFrame(aBox);
   const fC = faceFrame(cBox);
 
-  // anchor's displayed eye distance: s_a * scaleA * boxA.h — solve the
-  // candidate view so its eyes land at the same point with the same span
-  lbZoom = Math.min(12, Math.max(0.2,
-    az.scale * fA.scale * boxA.h / (fC.scale * boxC.h)));
-  const k = az.scale / lbZoom;
-  lbX = k * ((fA.cx - 0.5) * boxA.w + az.tx) - (fC.cx - 0.5) * boxC.w;
-  lbY = k * ((fA.cy - 0.5) * boxA.h + az.ty) - (fC.cy - 0.5) * boxC.h;
-  lbApply();
+  // anchor's eyes on screen: center + span; solve the candidate view so
+  // its eyes land identically
+  const [tx, ty] = LB.mapFrac(av, boxA, fA.cx, fA.cy);
+  const span = av.scale * fA.scale * boxA.h;
+  const scale = Math.min(12, Math.max(0.2, span / (fC.scale * boxC.h)));
+  const v = LB.view();
+  const sx = v.fh ? -1 : 1, sy = v.fv ? -1 : 1;
+  const txf = (tx - window.innerWidth / 2) / (scale * sx * boxC.w) -
+              (fC.cx - 0.5);
+  const tyf = (ty - window.innerHeight / 2) / (scale * sy * boxC.h) -
+              (fC.cy - 0.5);
+  LB.setView({ scale, txf, tyf });
 }
 
 // ---------- divider drag (anchors pane width) ----------
@@ -2245,7 +2339,7 @@ function renderAnchor(name, src, meta) {
   const img = document.createElement('img');
   img.src = src;
   img.style.cursor = 'zoom-in';
-  img.addEventListener('click', () => openLightbox(src, carryZoom(img), img));
+  img.addEventListener('click', () => openLightbox(src, img));
   // Live pinch-zoom works in the pane, but the thumbnail never LOADS zoomed
   // (a restored crop leaves a gap and detaches the ×). Lightbox write-backs
   // update state+store while keeping the thumbnail visually unzoomed.
@@ -2254,7 +2348,9 @@ function renderAnchor(name, src, meta) {
                       onZoomChange: (z) => { wrap.draggable = !z; } });
   const storedZoom = zoomStore[anchorZoomKey];
   if (storedZoom)   // seed state for lightbox carry only — no transform
-    img._zoomState = { scale: storedZoom.s, tx: storedZoom.tx, ty: storedZoom.ty };
+    img._zoomState = { s: storedZoom.s, txf: storedZoom.txf || 0,
+                       tyf: storedZoom.tyf || 0, fh: !!storedZoom.fh,
+                       fv: !!storedZoom.fv, rot: storedZoom.rot || 0 };
   const origSetZoom = img._setZoom;
   img._setZoom = (z) => {
     origSetZoom(z);                       // sync internals + persist
@@ -2562,10 +2658,12 @@ $('faceModel').addEventListener('change', (e) => {
   updateFaceTogglesVisibility();
 });
 
+// ---------- lightbox toggle handlers (delegate to the module) ----------
+
 $('lbAlign').addEventListener('change', (e) => {
   const on = e.target.checked;
   try { localStorage.setItem(LS_ALIGN, on ? '1' : '0'); } catch (err) {}
-  if (on && lightbox.classList.contains('open')) alignToAnchorFace();
+  if (on && LB.isOpen() && LB.currentCol() === 'cand') alignToAnchorFace();
 });
 
 $('lbGuides').addEventListener('change', (e) => {
@@ -2582,73 +2680,17 @@ $('lbFaceBoxT').addEventListener('change', (e) => {
   updateFaceBoxOverlay();
 });
 
-// candidate-over-anchor transparency slider
-$('lbMix').addEventListener('input', (e) => {
-  lbMix = Number(e.target.value);
-  lbImg.style.opacity = lbMix / 100;
-  $('lbMixVal').textContent = lbMix + '%';
-});
-
-// flip buttons (mirror of the H/V keys)
-$('lbFlipH').addEventListener('click', () => lbToggleFlip('h'));
-$('lbFlipV').addEventListener('click', () => lbToggleFlip('v'));
-
-// overlay (underlay + slider + split) toggle — on by default
-const LS_OVERLAY = 'kosmozoo.lightbox.overlay';
-function overlayOn() { return localStorage.getItem(LS_OVERLAY) !== '0'; }
 $('lbOverlay').addEventListener('change', (e) => {
   try {
     localStorage.setItem(LS_OVERLAY, e.target.checked ? '1' : '0');
   } catch (err) {}
-  lbBaseUpdate();
+  LB.render();
 });
-
-// split-wipe toggle — OFF by default; on activation the line starts at the
-// candidate image's left edge (candidate fully visible; drag right to
-// reveal the anchor)
-const LS_SPLIT = 'kosmozoo.split';
-function splitOn() { return localStorage.getItem(LS_SPLIT) === '1'; }
-
-// current view's left image edge on screen (rotation-agnostic)
-function lbImageLeftEdge() {
-  if (!lbImg.naturalWidth) return window.innerWidth / 2;
-  const box = lbBoxFor(lbImg.naturalWidth, lbImg.naturalHeight);
-  const sx = lbFlipH ? -1 : 1;
-  const Vx = window.innerWidth / 2;
-  const e0 = Vx + lbZoom * sx * ((0 - 0.5) * box.w + lbX);
-  const e1 = Vx + lbZoom * sx * ((1 - 0.5) * box.w + lbX);
-  return Math.min(e0, e1);
-}
 
 $('lbSplitT').addEventListener('change', (e) => {
-  const on = e.target.checked;
-  try { localStorage.setItem(LS_SPLIT, on ? '1' : '0'); } catch (err) {}
-  lbSplitX = on ? lbImageLeftEdge() : null;
-  lbBaseUpdate();
+  LB.setSplitOn(e.target.checked);
 });
 
-// split-wipe: drag the vertical line; off the edge disables it
-$('lbSplit').addEventListener('pointerdown', (e) => {
-  e.preventDefault();
-  e.stopPropagation();
-  const split = $('lbSplit');
-  split.setPointerCapture(e.pointerId);
-  if (lbSplitX == null) lbSplitX = window.innerWidth / 2;
-  const move = (ev) => {
-    lbSplitX = Math.max(0, Math.min(window.innerWidth, ev.clientX));
-    lbApplySplit();
-  };
-  const up = (ev) => {
-    document.removeEventListener('pointermove', move);
-    document.removeEventListener('pointerup', up);
-    if (ev.clientX <= 4 || ev.clientX >= window.innerWidth - 4) {
-      lbSplitX = null;              // dragged off the edge -> wipe off
-      lbApplySplit();
-    }
-  };
-  document.addEventListener('pointermove', move);
-  document.addEventListener('pointerup', up);
-});
 // Hide all thumbs-up images for this session (votes untouched).
 $('hideUpBtn').addEventListener('click', () => {
   let n = 0;
