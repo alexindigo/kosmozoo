@@ -243,6 +243,21 @@
     color: var(--bad); font-size: 13px; text-align: center; padding: 4px;
   }
   @keyframes spin { to { transform: rotate(360deg); } }
+  .loadfail {
+    margin: 40px auto; max-width: 540px; padding: 20px 24px;
+    background: var(--card); border: 1px solid var(--bad);
+    border-radius: 10px; display: flex; flex-direction: column; gap: 12px;
+  }
+  .loadfail-title { font-size: 16px; font-weight: 600; color: var(--bad); }
+  .loadfail-detail {
+    font: 12px ui-monospace, monospace; color: var(--dim);
+    word-break: break-all;
+  }
+  .loadfail-steps {
+    margin: 0; padding-left: 20px; font-size: 13px; line-height: 1.8;
+  }
+  .loadfail a { color: var(--accent); }
+  .loadfail-retry { align-self: flex-start; padding: 8px 16px; }
   .sentinel {
     display: flex; align-items: center; justify-content: center;
     gap: 8px; color: var(--dim); padding: 16px;
@@ -567,6 +582,7 @@ const candidatesEl = $('candidates'),
       divider = $('divider'), anchorsEl = $('anchors');
 
 let currentHost = null;
+let hostsCache = {};          // host name -> address (for error panels)
 let comments = {};            // "host:file" -> {neg, pos} (legacy strings normalized)
 const saveTimers = {};        // key -> timeout id
 
@@ -783,10 +799,13 @@ async function loadCandidates() {
   metaMapGlobal = {};
   setStatus(`loading image list from ${currentHost}…`);
   try {
-    // /api/metadata = persistent cache merged with live history (server-side)
+    // /api/metadata = persistent store merged with live history (server-side)
+    const enc = encodeURIComponent(currentHost);
     const [files, metadata] = await Promise.all([
-      api(`/api/files?host=${encodeURIComponent(currentHost)}`),
-      api(`/api/metadata?host=${encodeURIComponent(currentHost)}`),
+      api(`/api/files?host=${enc}`)
+        .catch(e => { throw new Error(`file list: ${e.message}`); }),
+      api(`/api/metadata?host=${enc}`)
+        .catch(e => { throw new Error(`metadata: ${e.message}`); }),
     ]);
     metaMapGlobal = metadata.items || {};
     metaVersion = metadata.v || 0;
@@ -816,8 +835,56 @@ async function loadCandidates() {
     if (metaPending > 0) scheduleMetaPoll();
     restoreScrollPos();
   } catch (err) {
+    showLoadError(err);
     setStatus(`load failed: ${err.message}`, true);
   }
+}
+
+// Load failures get the body, not just the status line: what failed, what
+// to try, and a retry button. (ComfyUI stalls/errors its API while
+// generating — transient failures are expected and recoverable.)
+function showLoadError(err) {
+  const addr = hostsCache[currentHost] || '';
+  candidatesEl.innerHTML = '';
+  const box = document.createElement('div');
+  box.className = 'loadfail';
+  const title = document.createElement('div');
+  title.className = 'loadfail-title';
+  title.textContent = `⚠ couldn't load images from ${currentHost}`;
+  const detail = document.createElement('div');
+  detail.className = 'loadfail-detail';
+  detail.textContent = String((err && err.message) || err);
+  const steps = document.createElement('ol');
+  steps.className = 'loadfail-steps';
+  const items = [
+    'Retry — ComfyUI stalls its API while generating; a moment later it often just works.',
+  ];
+  if (addr) items.push(`Check the host directly: ${addr} (its queue page).`);
+  items.push(
+    'If the host was reconfigured, fix or re-add it in the host picker (top-left).',
+    'If this server was recently updated, restart it (systemctl --user restart kosmozoo).');
+  for (const t of items) {
+    const li = document.createElement('li');
+    if (addr && t.includes(addr)) {
+      const [before, after] = t.split(addr);
+      const a = document.createElement('a');
+      a.href = `http://${addr}`;
+      a.target = '_blank';
+      a.rel = 'noopener';
+      a.textContent = addr;
+      li.append(document.createTextNode(before), a,
+                document.createTextNode(after));
+    } else {
+      li.textContent = t;
+    }
+    steps.appendChild(li);
+  }
+  const btn = document.createElement('button');
+  btn.className = 'loadfail-retry';
+  btn.textContent = 'Retry / refresh';
+  btn.addEventListener('click', refresh);
+  box.append(title, detail, steps, btn);
+  candidatesEl.appendChild(box);
 }
 
 // --- metadata backfill: poll + in-place patch + scroll-driven wants -------
@@ -2778,6 +2845,7 @@ function selectHost(name) {
 
 async function refreshHosts() {
   const hosts = await api('/api/hosts');
+  hostsCache = Object.fromEntries(hosts.map(h => [h.name, h.address]));
   if (!currentHost) {
     const stored = localStorage.getItem('kosmozoo.host');
     if (stored && hosts.some(h => h.name === stored)) currentHost = stored;
