@@ -53,6 +53,7 @@
   }
   .switchwrap input:checked + .track { background: var(--accent); }
   .switchwrap input:checked + .track::after { left: 13px; background: #fff; }
+  .switchwrap.disabled { opacity: .45; }
 
   /* header menu */
   #menuWrap { position: relative; }
@@ -1507,8 +1508,10 @@ function lbSwitch(dCol, dRow) {
   lbSourceImg = entry.img;
   lbImg.src = entry.src;
   if (faceAlignOn() && col === 'cand' && faceLoadState === 'ready') {
-    lbPlaceCarry(null, entry.src);   // alignment overrides recalled zoom
-    alignToAnchorFace();
+    // recall its own zoom first — if alignment can't run (no face found),
+    // the candidate keeps its state instead of resetting to 1x
+    lbPlaceCarry(carryZoom(entry.img), entry.src);
+    alignToAnchorFace();             // overrides when it can
   } else if (dCol && overlayOn() && splitOn() &&
              !(faceAlignOn() && faceLoadState === 'ready')) {
     // pair switch (candidate <-> anchor) with the split wipe active:
@@ -1877,10 +1880,14 @@ function faceModel() { return localStorage.getItem(LS_FACEMODEL) || 'anime'; }
 
 function faceStatus(msg) { $('menuStatus').textContent = msg; }
 
+// Face toggles are never invisibly-active: hidden only when face detection
+// is disabled in the menu; visible-but-greyed while the model isn't ready.
 function updateFaceTogglesVisibility() {
-  const show = faceDetectEnabled() && faceLoadState === 'ready' ? '' : 'none';
+  const show = faceDetectEnabled() ? '' : 'none';
   $('lbAlignWrap').style.display = show;
   $('lbFaceBoxWrap').style.display = show;
+  $('lbAlignWrap').classList.toggle('disabled', faceLoadState !== 'ready');
+  $('lbFaceBoxWrap').classList.toggle('disabled', faceLoadState !== 'ready');
 }
 
 function importFaceLib() {          // seam for tests
