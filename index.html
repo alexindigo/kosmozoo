@@ -835,8 +835,7 @@ async function loadCandidates() {
     if (metaPending > 0) scheduleMetaPoll();
     restoreScrollPos();
   } catch (err) {
-    showLoadError(err);
-    setStatus(`load failed: ${err.message}`, true);
+    showLoadError(err);   // the panel covers it — no duplicate in the status line
   }
 }
 
