@@ -28,6 +28,12 @@
     background: var(--card); color: var(--fg); border: 1px solid var(--border);
     border-radius: 6px; padding: 6px 10px; font: inherit; cursor: pointer;
   }
+  #filterInput {
+    background: var(--card); color: var(--fg); border: 1px solid var(--border);
+    border-radius: 6px; padding: 6px 10px; font: inherit; cursor: text;
+    width: 170px;
+  }
+  #filterInput:focus { outline: none; border-color: var(--accent); }
   a.btn { text-decoration: none; display: inline-block; }
   button:hover { border-color: var(--accent); }
   button.on { border-color: var(--accent); color: var(--accent); }
@@ -413,6 +419,8 @@
        style="border-radius:6px">
   <h1>Kosmozoo</h1>
   <select id="hostSel"></select>
+  <input type="text" id="filterInput" placeholder="filter filenames…"
+         spellcheck="false" title="filter by filename substring">
   <button id="refreshBtn">Refresh</button>
   <button id="groupBtn" class="adv-ib" title="group candidates by identical prompt (Advanced)">Group by prompt</button>
   <span id="status"></span>
@@ -667,19 +675,32 @@ const WINDOW_PAD = 10;
 
 let allFiles = [];            // filenames for current host, newest-first
 let metaMapGlobal = {};       // filename -> meta
-let renderedCount = 0;
-let cardEls = [];             // idx -> card element
+let filterText = '';          // filename substring filter (header input)
+let viewFiles = [];           // allFiles indices matching the filter
+let viewPos = 0;              // render progress within viewFiles
+let cardEls = [];             // allFiles idx -> card element
 let visibleSet = new Set();   // card indices intersecting the viewport
 let loadedSet = new Set();    // card indices whose img currently has src
 let listObserver = null;
 let sentinelObserver = null;
 let sentinelEl = null;
 
+function recomputeView() {
+  if (!filterText) {
+    viewFiles = allFiles.map((_, i) => i);
+    return;
+  }
+  const q = filterText.toLowerCase();
+  viewFiles = [];
+  for (let i = 0; i < allFiles.length; i++)
+    if (allFiles[i].toLowerCase().includes(q)) viewFiles.push(i);
+}
+
 function resetList() {
   if (listObserver) listObserver.disconnect();
   if (sentinelObserver) sentinelObserver.disconnect();
   candidatesEl.innerHTML = '';
-  renderedCount = 0;
+  viewPos = 0;
   cardEls = [];
   visibleSet = new Set();
   loadedSet = new Set();
@@ -689,6 +710,12 @@ function resetList() {
 function statusSummary() {
   const hidden = allFiles.filter(
     f => isHidden(`${currentHost}:${f}`)).length;
+  if (filterText) {
+    const shown = viewFiles.filter(
+      i => !isHidden(`${currentHost}:${allFiles[i]}`)).length;
+    return `${shown} of ${allFiles.length} matching “${filterText}” from ` +
+           `${currentHost}` + (hidden ? ` (${hidden} hidden)` : '');
+  }
   return `${allFiles.length} images from ${currentHost}` +
          (hidden ? ` (${hidden} hidden)` : '');
 }
@@ -707,6 +734,7 @@ async function loadCandidates() {
     ]);
     metaMapGlobal = metadata;
     allFiles = files.map(cleanFileName);   // endpoint is newest-first
+    recomputeView();
     // downloads check is batched, names-only -> {name: bool} (no listing)
     downloadsSet = new Set();
     try {
@@ -764,8 +792,8 @@ function applyWindow() {
   for (const idx of [...loadedSet]) {
     if (idx < min || idx > max) unloadImage(idx);
   }
-  // cardEls is indexed by allFiles position (sparse) — valid in both
-  // chunked and grouped modes; renderedCount only tracks chunked progress
+  // cardEls is indexed by allFiles position (sparse) — valid in chunked,
+  // grouped and filtered modes; viewPos tracks chunked render progress
   const lo = Math.max(0, min), hi = Math.min(cardEls.length - 1, max);
   for (let i = lo; i <= hi; i++) {
     if (!loadedSet.has(i)) loadImage(i);
@@ -797,8 +825,8 @@ function unloadImage(idx) {
 function renderChunk() {
   let added = 0;
   const frag = document.createDocumentFragment();
-  while (renderedCount < allFiles.length && added < CHUNK) {
-    const i = renderedCount++;
+  while (viewPos < viewFiles.length && added < CHUNK) {
+    const i = viewFiles[viewPos++];
     const name = allFiles[i];
     if (isHidden(`${currentHost}:${name}`)) continue;  // hidden
     const card = renderCard(name, metaMapGlobal[name], i);
@@ -810,7 +838,7 @@ function renderChunk() {
   candidatesEl.appendChild(frag);
 
   if (sentinelEl) sentinelEl.remove();
-  if (renderedCount < allFiles.length) {
+  if (viewPos < viewFiles.length) {
     if (!sentinelEl) {
       sentinelEl = document.createElement('div');
       sentinelEl.className = 'sentinel';
@@ -826,7 +854,9 @@ function renderChunk() {
   } else {
     const done = document.createElement('div');
     done.className = 'endoflist';
-    done.textContent = `— all ${allFiles.length} images —`;
+    done.textContent = filterText
+      ? `— all ${viewFiles.length} matching “${filterText}” —`
+      : `— all ${allFiles.length} images —`;
     candidatesEl.appendChild(done);
   }
   // Newly rendered cards inside the current window may not get an
@@ -841,7 +871,7 @@ function renderChunk() {
 // their allFiles index. Hidden filtering applies as in flat mode.
 function renderGrouped() {
   const groups = new Map();   // prompt -> [{name, meta, idx}]
-  for (let i = 0; i < allFiles.length; i++) {
+  for (const i of viewFiles) {
     const name = allFiles[i];
     if (isHidden(`${currentHost}:${name}`)) continue;
     const meta = metaMapGlobal[name];
@@ -1542,7 +1572,7 @@ function lbNavigate(dCol, dRow) {
   } else if (dRow) {
     let list = lbListEntries(col);
     if (col === 'cand' && idx + dRow >= list.length - 1 &&
-        renderedCount < allFiles.length) {
+        viewPos < viewFiles.length) {
       renderChunk();
       list = lbListEntries(col);
     }
@@ -2553,6 +2583,29 @@ hostSel.addEventListener('change', () => {
   loadCandidates();
 });
 $('refreshBtn').addEventListener('click', refresh);
+
+// filename filter (substring, case-insensitive); debounced
+let filterTimer = null;
+function applyFilter() {
+  filterText = $('filterInput').value.trim();
+  recomputeView();
+  renderList();
+  setStatus(statusSummary());
+  window.scrollTo(0, 0);   // new set starts at the top
+}
+$('filterInput').addEventListener('input', () => {
+  clearTimeout(filterTimer);
+  filterTimer = setTimeout(applyFilter, 300);
+});
+// Esc in the box clears the filter
+$('filterInput').addEventListener('keydown', (e) => {
+  if (e.key === 'Escape') {
+    e.preventDefault();
+    clearTimeout(filterTimer);
+    e.currentTarget.value = '';
+    applyFilter();
+  }
+});
 
 // ---------- header menu + face-detection toggles ----------
 
