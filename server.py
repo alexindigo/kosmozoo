@@ -463,7 +463,8 @@ class Handler(BaseHTTPRequestHandler):
                 self._handle_feedback_download()
             elif path == "/api/config":
                 self._send_json(200, {"feedbackPath": COMMENTS_PATH,
-                                      "buckets": BUCKETS})
+                                      "buckets": BUCKETS,
+                                      "hosts": HOSTS})
             elif path == "/api/facebox-warmup":
                 self._handle_facebox_warmup()
             elif path == "/api/downloads":
@@ -712,7 +713,7 @@ class Handler(BaseHTTPRequestHandler):
         self._send_json(200, {"box": box})
 
     def _handle_post_config(self):
-        global COMMENTS_PATH, BUCKETS
+        global COMMENTS_PATH, BUCKETS, HOSTS
         try:
             length = int(self.headers.get("Content-Length") or 0)
             payload = json.loads(self.rfile.read(length))
@@ -746,6 +747,19 @@ class Handler(BaseHTTPRequestHandler):
                 return
             BUCKETS = [b.strip() for b in buckets]
             cfg["buckets"] = BUCKETS
+            changed = True
+        if "hosts" in payload:
+            hosts = payload["hosts"]
+            if not isinstance(hosts, dict) or not hosts or \
+                    not all(isinstance(k, str) and isinstance(v, str)
+                            and re.fullmatch(r"[\w.\-]+", k)
+                            and re.fullmatch(r"[\w.\-:]+", v)
+                            for k, v in hosts.items()):
+                self._send_error_json(
+                    400, "hosts must be {name: host:port} strings")
+                return
+            HOSTS = dict(hosts)
+            cfg["hosts"] = HOSTS
             changed = True
         if not changed:
             self._send_error_json(400, "nothing to update")

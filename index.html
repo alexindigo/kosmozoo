@@ -82,6 +82,24 @@
   }
   #fbPathWrap input:focus { outline: none; border-color: var(--accent); }
   #fbPathWrap button { font-size: 11px; padding: 4px 8px; }
+  #hostsWrap {
+    display: flex; flex-direction: column; gap: 5px;
+    font-size: 11px; color: var(--dim);
+  }
+  .hostrow {
+    display: flex; justify-content: space-between; align-items: center;
+    gap: 6px;
+  }
+  .hostrow code { color: var(--fg); }
+  .hostrow button { padding: 0 6px; font-size: 11px; color: var(--bad); }
+  #hostsWrap .fbrow input { min-width: 0; flex: 1; }
+  #hostsWrap input {
+    background: var(--bg); color: var(--fg);
+    border: 1px solid var(--border); border-radius: 6px;
+    padding: 5px 7px; font: 11px ui-monospace, monospace;
+  }
+  #hostsWrap input:focus { outline: none; border-color: var(--accent); }
+  #hostsWrap button { font-size: 11px; padding: 4px 8px; }
 
   /* lightbox facebox-align toggle + guides toggle */
   #lbAlignWrap {
@@ -400,6 +418,15 @@
         <div class="fbrow">
           <input type="text" id="fbPath" spellcheck="false">
           <button id="fbPathApply">apply</button>
+        </div>
+      </div>
+      <div id="hostsWrap">
+        <span>hosts</span>
+        <div id="hostsList"></div>
+        <div class="fbrow">
+          <input type="text" id="hostName" placeholder="name">
+          <input type="text" id="hostAddr" placeholder="host:port">
+          <button id="hostAdd">add</button>
         </div>
       </div>
     </div>
@@ -2364,6 +2391,75 @@ $('menuBtn').addEventListener('click', async () => {
       const cfg = await api('/api/config');
       $('fbPath').value = cfg.feedbackPath;
     } catch (err) { /* leave stale */ }
+    loadHostsMenu();
+  }
+});
+
+// ---------- hosts editor (in the menu) ----------
+
+async function loadHostsMenu() {
+  try {
+    const hosts = await api('/api/hosts');
+    const list = $('hostsList');
+    list.innerHTML = '';
+    for (const h of hosts) {
+      const row = document.createElement('div');
+      row.className = 'hostrow';
+      const label = document.createElement('code');
+      label.textContent = `${h.name} — ${h.address}` +
+        (h.online ? '' : ' (offline)');
+      const rm = document.createElement('button');
+      rm.textContent = '×';
+      rm.title = 'remove host';
+      rm.addEventListener('click', () => removeHost(h.name));
+      row.append(label, rm);
+      list.appendChild(row);
+    }
+  } catch (err) { /* leave stale */ }
+}
+
+async function saveHosts(hosts) {
+  const r = await fetch('/api/config', {
+    method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ hosts }),
+  });
+  const d = await r.json();
+  if (!r.ok) throw new Error(d.error || r.status);
+}
+
+async function removeHost(name) {
+  try {
+    const hosts = await api('/api/hosts');
+    const map = {};
+    for (const h of hosts) if (h.name !== name) map[h.name] = h.address;
+    await saveHosts(map);
+    if (currentHost === name)
+      currentHost = (hosts.find(h => h.name !== name) || {}).name || null;
+    await refreshHosts();
+    if (currentHost) await loadCandidates();
+    await loadHostsMenu();
+  } catch (err) {
+    setStatus(`host remove failed: ${err.message}`, true);
+  }
+}
+
+$('hostAdd').addEventListener('click', async () => {
+  const name = $('hostName').value.trim();
+  const addr = $('hostAddr').value.trim();
+  if (!name || !addr) return;
+  try {
+    const hosts = await api('/api/hosts');
+    const map = {};
+    for (const h of hosts) map[h.name] = h.address;
+    map[name] = addr;
+    await saveHosts(map);
+    $('hostName').value = '';
+    $('hostAddr').value = '';
+    await refreshHosts();
+    await loadHostsMenu();
+    setStatus(`host ${name} added`);
+  } catch (err) {
+    setStatus(`host add failed: ${err.message}`, true);
   }
 });
 
