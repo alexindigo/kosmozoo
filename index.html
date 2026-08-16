@@ -481,6 +481,44 @@
     color: rgba(255, 255, 255, .7);
   }
   .anchor .rm:hover { background: rgba(20,20,28,.8); color: #fff; }
+  .anchor .ainfo {
+    position: absolute; top: 4px; left: 4px; width: 24px; height: 24px;
+    padding: 0; border-radius: 50%; line-height: 1;
+    display: flex; align-items: center; justify-content: center;
+    background: rgba(20, 20, 28, .35); border: 1px solid rgba(255,255,255,.15);
+    color: rgba(255, 255, 255, .7);
+  }
+  .anchor .ainfo:hover { background: rgba(20,20,28,.8); color: #fff; }
+  /* anchor info overlay (embedded PNG parameters) */
+  #infoOverlay {
+    position: fixed; inset: 0; z-index: 80;
+    background: rgba(0, 0, 0, .55);
+    display: flex; align-items: center; justify-content: center;
+  }
+  #infoOverlay[hidden] { display: none; }
+  #infoPanel {
+    position: relative; width: min(560px, calc(100vw - 48px));
+    max-height: 80vh; overflow-y: auto;
+    background: var(--panel); border: 1px solid var(--border);
+    border-radius: 10px; padding: 16px 18px;
+  }
+  #infoClose {
+    position: absolute; top: 8px; right: 8px; width: 26px; height: 26px;
+    padding: 0; border-radius: 50%; line-height: 1; font-size: 14px;
+  }
+  #infoTitle {
+    font: 12px ui-monospace, monospace; color: var(--dim);
+    word-break: break-all; margin-bottom: 10px; padding-right: 30px;
+  }
+  #infoBody .props { font-size: 12px; }
+  #infoBody .props .plabel { color: var(--dim); }
+  #infoBody .infosec { margin-top: 10px; }
+  #infoBody .infosec .plabel { color: var(--dim); font-size: 11px; }
+  #infoBody .infotext {
+    font-size: 12px; line-height: 1.5; white-space: pre-wrap;
+    overflow-wrap: anywhere; margin-top: 2px;
+  }
+  #infoBody .info-none { color: var(--dim); font-size: 13px; padding: 12px 0; }
   .empty { color: var(--dim); text-align: center; padding: 30px 0; }
 </style>
 </head>
@@ -553,6 +591,13 @@
   </aside>
 </main>
 <div id="statusStack"></div>
+<div id="infoOverlay" hidden>
+  <div id="infoPanel">
+    <button id="infoClose" title="close (Esc)">×</button>
+    <div id="infoTitle"></div>
+    <div id="infoBody"></div>
+  </div>
+</div>
 <div id="lightbox">
   <button id="lbClose" title="close (Esc)">×</button>
   <img id="lbBase" class="layer" alt="">
@@ -2059,6 +2104,14 @@ function lbApplyView(persist = true) {
 
 $('lbClose').addEventListener('click', closeLightbox);
 
+// info overlay is a topmost modal: its Esc/backdrop handling runs first
+document.addEventListener('keydown', (e) => {
+  if (e.key === 'Escape' && !$('infoOverlay').hidden) {
+    e.stopImmediatePropagation();
+    $('infoOverlay').hidden = true;
+  }
+}, true);   // capture: outrank the lightbox handler
+
 document.addEventListener('keydown', (e) => {
   if (!lightbox.classList.contains('open')) return;
   if (e.key === 'Escape') closeLightbox();
@@ -2842,6 +2895,17 @@ function renderAnchor(name, src, meta) {
   rm.textContent = '×';
   rm.title = 'remove anchor';
   rm.addEventListener('click', () => { wrap.remove(); persistAnchors(); });
+  // ⓘ top-left: embedded PNG parameters (parsed at drop time, persisted)
+  const info = document.createElement('button');
+  info.className = 'ainfo';
+  info.innerHTML = '<svg viewBox="0 0 24 24" width="13" height="13"><path fill="currentColor" d="M12 2a10 10 0 1 0 0 20 10 10 0 0 0 0-20zm0 4.6a1.3 1.3 0 1 1 0 2.6 1.3 1.3 0 0 1 0-2.6zM10 11h4v7h1.4v1.6H8.6V18H10v-5.4H8.6V11H10z"/></svg>';
+  info.title = 'embedded parameters';
+  info.addEventListener('click', (e) => {
+    e.stopPropagation();
+    showAnchorInfo(name,
+      wrap.dataset.meta ? JSON.parse(wrap.dataset.meta) : null);
+  });
+  imgWrap.appendChild(info);
   imgWrap.appendChild(rm);   // semi-transparent overlay on the image itself
   wrap.append(imgWrap, nameEl, metaEl);
   anchorList.appendChild(wrap);
@@ -2861,6 +2925,74 @@ function renderAnchor(name, src, meta) {
     persistAnchors();
   });
 }
+
+// Anchor ⓘ overlay: the parameters embedded in the PNG (captured at drop
+// time), or a short notice when the image carries none.
+function showAnchorInfo(name, meta) {
+  $('infoTitle').textContent = name;
+  const body = $('infoBody');
+  body.innerHTML = '';
+  if (!meta) {
+    const p = document.createElement('div');
+    p.className = 'info-none';
+    p.textContent = 'This image has no embedded parameters.';
+    body.appendChild(p);
+  } else {
+    const props = document.createElement('div');
+    props.className = 'props';
+    const rows = [];
+    if (meta.seed !== undefined) rows.push(['seed', meta.seed]);
+    if (meta.steps !== undefined) rows.push(['steps', meta.steps]);
+    if (meta.cfg !== undefined) rows.push(['cfg', meta.cfg]);
+    if (meta.denoise !== undefined)
+      rows.push(['denoise', Number(meta.denoise).toFixed(2)]);
+    if (meta.sampler_name)
+      rows.push(['sampler', meta.scheduler
+        ? `${meta.sampler_name}/${meta.scheduler}` : meta.sampler_name]);
+    for (const l of meta.loras || [])
+      rows.push(['lora', `${l.name}${l.strength != null ? '@' + l.strength : ''}`]);
+    if (meta.width && meta.height)
+      rows.push(['size', `${meta.width}×${meta.height}`]);
+    for (const [k, v] of rows) {
+      const line = document.createElement('div');
+      const label = document.createElement('span');
+      label.className = 'plabel';
+      label.textContent = `${k}: `;
+      line.appendChild(label);
+      line.appendChild(document.createTextNode(v));
+      props.appendChild(line);
+    }
+    if (rows.length) body.appendChild(props);
+    for (const [label, text] of [['prompt', meta.prompt],
+                                 ['negative', meta.negPrompt]]) {
+      if (!text) continue;
+      const sec = document.createElement('div');
+      sec.className = 'infosec';
+      const lab = document.createElement('div');
+      lab.className = 'plabel';
+      lab.textContent = label;
+      const txt = document.createElement('div');
+      txt.className = 'infotext';
+      txt.textContent = text;
+      sec.append(lab, txt);
+      body.appendChild(sec);
+    }
+    if (!rows.length && !meta.prompt && !meta.negPrompt) {
+      const p = document.createElement('div');
+      p.className = 'info-none';
+      p.textContent = 'This image has no embedded parameters.';
+      body.appendChild(p);
+    }
+  }
+  $('infoOverlay').hidden = false;
+}
+
+$('infoClose').addEventListener('click', () => {
+  $('infoOverlay').hidden = true;
+});
+$('infoOverlay').addEventListener('click', (e) => {
+  if (e.target === $('infoOverlay')) $('infoOverlay').hidden = true;
+});
 
 async function addAnchor(file) {
   if (!file.type.startsWith('image/')) return;
