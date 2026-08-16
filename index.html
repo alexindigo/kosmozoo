@@ -123,6 +123,10 @@
     position: absolute; top: 150px; left: 24px; z-index: 104;
     background: rgba(20,20,28,.65); border-radius: 8px; padding: 7px 10px;
   }
+  #lbLinkedWrap {
+    position: absolute; top: 184px; left: 24px; z-index: 104;
+    background: rgba(20,20,28,.65); border-radius: 8px; padding: 7px 10px;
+  }
   #lbFlipWrap {
     position: absolute; bottom: 58px; left: 24px; z-index: 104;
     background: rgba(20,20,28,.65); border-radius: 8px; padding: 6px 8px;
@@ -482,6 +486,9 @@
   </label>
   <label id="lbSplitWrap" class="switchwrap" title="split-wipe: draggable line, left = anchor / right = candidate">
     <input type="checkbox" id="lbSplitT"><span class="track"></span>split
+  </label>
+  <label id="lbLinkedWrap" class="switchwrap" title="link candidate+anchor views: switch keeps the shared frame; pan/zoom/flip/rotate apply to both">
+    <input type="checkbox" id="lbLinked"><span class="track"></span>linked
   </label>
   <div id="lbFlipWrap">
     <button id="lbFlipH" title="flip horizontal (H)">⇋ H</button>
@@ -1175,6 +1182,7 @@ const LS_GUIDES = 'kosmozoo.guides.v1';       // [{axis, pos}]
 const LS_GUIDES_VIS = 'kosmozoo.guides.visible';
 const LS_OVERLAY = 'kosmozoo.lightbox.overlay';
 const LS_SPLIT = 'kosmozoo.split';
+const LS_LINKED = 'kosmozoo.lightbox.linked';
 
 // --- elements (bare names for compatibility with the rest of the page) ---
 const lightbox = $('lightbox');
@@ -1207,6 +1215,9 @@ S.view = lbFreshView();
 // --- feature flags ---
 function overlayOn() { return localStorage.getItem(LS_OVERLAY) !== '0'; } // default on
 function splitOn() { return localStorage.getItem(LS_SPLIT) === '1'; }     // default off
+// "linked": candidate+anchor share one view — switch keeps it, and
+// pan/zoom/flip/rotate apply to both. Default OFF (independent views).
+function linkedOn() { return localStorage.getItem(LS_LINKED) === '1'; }
 function guidesVisible() { return localStorage.getItem(LS_GUIDES_VIS) !== '0'; }
 
 // --- geometry (the only place px<->fraction conversions exist) ---
@@ -1394,8 +1405,12 @@ function render() {
   if (showOverlay) {
     const a = anchors[Math.min(S.pos.anchor, anchors.length - 1)];
     if (lbBase.getAttribute('src') !== a.src) lbBase.src = a.src;
+    // underlay: the shared current view when linked, the anchor's own
+    // stored view when independent
+    const av = linkedOn() ? S.view
+                          : (a.el && readImageState(a.el)) || lbFreshView();
     const abox = a.nw ? lbBoxFor(a.nw, a.nh) : null;
-    if (abox) lbBase.style.transform = lbTransform(S.view, abox);
+    if (abox) lbBase.style.transform = lbTransform(av, abox);
     lbImg.style.opacity = S.mix / 100;
     lbMixVal.textContent = S.mix + '%';
   } else {
@@ -1494,20 +1509,14 @@ function lbLocate(sourceImg) {
   return cards[0];
 }
 
-// Linked pan: move the counterpart image's stored view by the same screen
-// delta (each in its own box fractions).
-function lbPanCounterpart(dx, dy) {
-  const other = lbListEntries(S.col === 'cand' ? 'anchor' : 'cand')
-    [S.col === 'cand' ? Math.min(S.pos.anchor, lbListEntries('anchor').length - 1)
-                     : Math.min(S.pos.cand, lbListEntries('cand').length - 1)];
-  if (!other || !other.el) return;
-  const oz = readImageState(other.el) || lbFreshView();
-  const obox = other.nw ? lbBoxFor(other.nw, other.nh) : null;
-  if (!obox) return;
-  const sx = oz.fh ? -1 : 1, sy = oz.fv ? -1 : 1;
-  oz.txf += dx / (oz.scale * sx * obox.w);
-  oz.tyf += dy / (oz.scale * sy * obox.h);
-  writeImageState(other.el, oz);
+// When linked, the counterpart's stored view follows every view change
+// (one shared frame for the pair). Views are unit-free (fractions), so the
+// same object fits both images.
+function lbCounterpartEntry() {
+  const col = S.col === 'cand' ? 'anchor' : 'cand';
+  const list = lbListEntries(col);
+  if (!list.length) return null;
+  return list[Math.min(S.pos[col], list.length - 1)];
 }
 
 // ---------- navigation ----------
@@ -1541,7 +1550,7 @@ function lbNavigate(dCol, dRow) {
   // ORDER MATTERS: lbShow writes back the OUTGOING image's state from the
   // CURRENT S.view; only after that may S.view change to the incoming one.
   const align = faceAlignOn() && col === 'cand' && faceLoadState === 'ready';
-  const share = dCol && overlayOn() && splitOn() &&
+  const share = dCol && linkedOn() &&
                 !(faceAlignOn() && faceLoadState === 'ready');
   const nextView = share ? S.view
                          : (readImageState(entry.el) || lbFreshView());
@@ -1592,6 +1601,10 @@ function closeLightbox() {
 
 function lbApplyView(persist = true) {
   if (persist && S.entry && S.entry.el) writeImageState(S.entry.el, S.view);
+  if (persist && linkedOn()) {
+    const other = lbCounterpartEntry();
+    if (other && other.el) writeImageState(other.el, S.view);
+  }
   render();
 }
 
@@ -1707,9 +1720,8 @@ lbImg.addEventListener('pointermove', (e) => {
   lbPointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
   if (lbPointers.size === 1) {
     const dx = e.clientX - prev.x, dy = e.clientY - prev.y;
-    const linked = faceAlignOn() || e.shiftKey;
+    const linked = linkedOn() || e.shiftKey;
     const box = lbCurrentBox() || { w: window.innerWidth, h: window.innerHeight };
-    const sx = S.view.fh ? -1 : 1, sy = S.view.fv ? -1 : 1;
     if (linked || S.view.rot || S.view.fh || S.view.fv) {
       const [dtx, dty] = lbPanFrac(dx, dy);
       S.view.txf += dtx;
@@ -1718,9 +1730,7 @@ lbImg.addEventListener('pointermove', (e) => {
       S.view.txf += dx / (S.view.scale * box.w);
       S.view.tyf += dy / (S.view.scale * box.h);
     }
-    if (linked) {
-      lbPanCounterpart(dx, dy);
-    }
+    // when linked, lbApplyView persists the shared view to BOTH images
     S.dragMoved += Math.abs(dx) + Math.abs(dy);
   } else if (lbPointers.size === 2) {
     const [a, b] = [...lbPointers.values()];
@@ -2507,6 +2517,7 @@ async function init() {
   $('lbFaceBoxT').checked = faceBoxVisible();
   $('lbOverlay').checked = overlayOn();
   $('lbSplitT').checked = splitOn();
+  $('lbLinked').checked = linkedOn();
   $('faceModel').value = faceModel();
   applyGuidesVisibility();
   if (faceDetectEnabled()) {
@@ -2689,6 +2700,13 @@ $('lbOverlay').addEventListener('change', (e) => {
 
 $('lbSplitT').addEventListener('change', (e) => {
   LB.setSplitOn(e.target.checked);
+});
+
+$('lbLinked').addEventListener('change', (e) => {
+  try {
+    localStorage.setItem(LS_LINKED, e.target.checked ? '1' : '0');
+  } catch (err) {}
+  LB.render();
 });
 
 // Hide all thumbs-up images for this session (votes untouched).
