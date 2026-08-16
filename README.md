@@ -185,6 +185,10 @@ Then point it at your ComfyUI host(s) — either `KOZMOZOO_HOSTS` or
 
 ### systemd --user (autostart)
 
+The AUR package (`kosmozoo-git`) ships this unit at
+`/usr/lib/systemd/user/kosmozoo.service` pointing at the packaged install —
+just `systemctl --user enable --now kosmozoo`. For a repo checkout, use:
+
 ```ini
 # ~/.config/systemd/user/kosmozoo.service
 [Unit]
