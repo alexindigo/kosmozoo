@@ -115,11 +115,17 @@ Environment variables:
 | `KOZMOZOO_METADATA` | `./metadata.db` | sqlite metadata store path |
 | `KOZMOZOO_BUCKETS` | generic list | comma-separated curation bucket names |
 | `KOZMOZOO_HOSTS` | `local=127.0.0.1:8188` | comma-separated `name=host:port` pairs |
+| `KOZMOZOO_STATE` | app dir, or `$XDG_STATE_HOME/kosmozoo` | writable state dir (config.json, metadata.db, faceboxes_cache.json) |
+| `KOZMOZOO_VENV` | `./.venv` | face-detection venv (see `setup_facedetect.sh`) |
 
 `config.json` (written by the ☰ menu) overrides env for `feedbackPath`,
 `buckets`, `hosts`, and `scraperEnabled`. Hosts are also settable via
 `KOZMOZOO_HOSTS` (`"name=host:port,name2=host2:port2"`). Default: a single
 local ComfyUI at `127.0.0.1:8188`.
+
+State files live next to the app in a repo checkout; when the app
+directory is read-only (packaged install under `/usr/lib`), state falls
+back to `$XDG_STATE_HOME/kosmozoo` (`~/.local/state/kosmozoo`).
 
 ### feedback.json entry shape
 

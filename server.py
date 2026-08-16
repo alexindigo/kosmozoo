@@ -36,11 +36,28 @@ BIND = os.environ.get("KOZMOZOO_BIND", "0.0.0.0")
 PORT = int(os.environ.get("KOZMOZOO_PORT", "2084"))
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+
+
+# Writable state directory: config.json, metadata.db, faceboxes_cache.json.
+# Default is BASE_DIR (repo checkout). When BASE_DIR is read-only (packaged
+# install under /usr/lib), state falls back to an XDG-style per-user dir.
+# Explicit override: KOZMOZOO_STATE.
+def _default_state_dir():
+    if os.access(BASE_DIR, os.W_OK):
+        return BASE_DIR
+    return os.path.join(
+        os.environ.get("XDG_STATE_HOME",
+                       os.path.expanduser("~/.local/state")), "kosmozoo")
+
+
+STATE_DIR = os.path.expanduser(
+    os.environ.get("KOZMOZOO_STATE", _default_state_dir()))
+os.makedirs(STATE_DIR, exist_ok=True)
 # feedback.json is canonical curation data and lives OUTSIDE the repo.
 # The path is configurable (☰ menu); persisted in config.json (gitignored).
 DEFAULT_COMMENTS_PATH = os.path.expanduser(
     os.environ.get("KOZMOZOO_FEEDBACK", "~/Documents/kosmozoo_feedback.json"))
-CONFIG_PATH = os.path.join(BASE_DIR, "config.json")
+CONFIG_PATH = os.path.join(STATE_DIR, "config.json")
 
 
 def _load_config():
@@ -92,9 +109,11 @@ VENDOR_MIME = {
 TAGS = ("character", "scene", "style")
 
 # local anime face detection (detect_worker.py in the project venv)
-FACEWORKER_PY = os.path.join(BASE_DIR, ".venv", "bin", "python")
+_venv = os.environ.get("KOZMOZOO_VENV")
+FACEWORKER_PY = (os.path.join(_venv, "bin", "python") if _venv
+                 else os.path.join(BASE_DIR, ".venv", "bin", "python"))
 DETECT_WORKER = os.path.join(BASE_DIR, "detect_worker.py")
-FACEBOX_CACHE_PATH = os.path.join(BASE_DIR, "faceboxes_cache.json")
+FACEBOX_CACHE_PATH = os.path.join(STATE_DIR, "faceboxes_cache.json")
 
 # persistent metadata store: ComfyUI /api/history is volatile (lost on the
 # host's restart), and the PNG files themselves carry the executed graph in
@@ -102,8 +121,8 @@ FACEBOX_CACHE_PATH = os.path.join(BASE_DIR, "faceboxes_cache.json")
 # metadata_cache.json is imported once and renamed to .imported.
 METADATA_DB_PATH = os.path.expanduser(
     os.environ.get("KOZMOZOO_METADATA",
-                   os.path.join(BASE_DIR, "metadata.db")))
-METADATA_CACHE_PATH = os.path.join(BASE_DIR, "metadata_cache.json")  # legacy
+                   os.path.join(STATE_DIR, "metadata.db")))
+METADATA_CACHE_PATH = os.path.join(STATE_DIR, "metadata_cache.json")  # legacy
 
 # background metadata scraper: walks the host's image list and extracts
 # PNG-embedded metadata for files the store doesn't know yet. Toggleable
@@ -278,7 +297,7 @@ def _facebox_cache_put(key, value):
     with _facebox_cache_lock:
         cache = _facebox_cache_load()
         cache[key] = value
-        fd, tmp = tempfile.mkstemp(dir=BASE_DIR, suffix=".tmp")
+        fd, tmp = tempfile.mkstemp(dir=STATE_DIR, suffix=".tmp")
         with os.fdopen(fd, "w", encoding="utf-8") as f:
             json.dump(cache, f)
         os.replace(tmp, FACEBOX_CACHE_PATH)
@@ -926,7 +945,7 @@ class Handler(BaseHTTPRequestHandler):
             SCRAPER_ENABLED = bool(payload["enabled"])
             cfg = _load_config()
             cfg["scraperEnabled"] = SCRAPER_ENABLED
-            fd, tmp = tempfile.mkstemp(dir=BASE_DIR, suffix=".tmp")
+            fd, tmp = tempfile.mkstemp(dir=STATE_DIR, suffix=".tmp")
             with os.fdopen(fd, "w", encoding="utf-8") as f:
                 json.dump(cfg, f, indent=2)
                 f.write("\n")
@@ -1149,7 +1168,7 @@ class Handler(BaseHTTPRequestHandler):
         if not changed:
             self._send_error_json(400, "nothing to update")
             return
-        fd, tmp = tempfile.mkstemp(dir=BASE_DIR, suffix=".tmp")
+        fd, tmp = tempfile.mkstemp(dir=STATE_DIR, suffix=".tmp")
         with os.fdopen(fd, "w", encoding="utf-8") as f:
             json.dump(cfg, f, indent=2)
             f.write("\n")
