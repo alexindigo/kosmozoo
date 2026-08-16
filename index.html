@@ -53,7 +53,7 @@
   }
   .switchwrap input:checked + .track { background: var(--accent); }
   .switchwrap input:checked + .track::after { left: 13px; background: #fff; }
-  .switchwrap.disabled { opacity: .45; }
+  .switchwrap.disabled { opacity: .45; pointer-events: none; }
 
   /* header menu */
   #menuWrap { position: relative; }
@@ -1205,6 +1205,7 @@ const S = {
   entry: null,         // current {key, src, el, nw, nh}
   mix: 100,            // candidate opacity % over the current anchor
   splitX: null,        // split-wipe line, viewport px; null = off
+  splitPending: false, // toggle-on deferred until image dims are known
   faceBox: null,       // detection for the current image
   dragMoved: 0,        // click-vs-drag disambiguation
 };
@@ -1389,6 +1390,13 @@ function makeZoomable(img, hooks = {}) {
 // ---------- the one render path ----------
 
 function render() {
+  // pending split activation: wait for image dims so the line can start
+  // at the image's edge instead of the viewport center
+  if (S.splitPending && lbCurrentBox()) {
+    S.splitPending = false;
+    S.splitX = lbImageLeftEdge();
+  }
+  updateToggleStates();
   const box = lbCurrentBox();
   if (box) lbImg.style.transform = lbTransform(S.view, box);
   lbFlipH.classList.toggle('on', S.view.fh);
@@ -1966,7 +1974,13 @@ const LB = {
   splitSetX(x) { S.splitX = x; render(); },
   setSplitOn(on) {
     try { localStorage.setItem(LS_SPLIT, on ? '1' : '0'); } catch (e) {}
-    S.splitX = on ? lbImageLeftEdge() : null;
+    if (on && !lbCurrentBox()) {
+      S.splitPending = true;      // apply at the image edge once dims land
+      S.splitX = null;
+    } else {
+      S.splitPending = false;
+      S.splitX = on ? lbImageLeftEdge() : null;
+    }
     render();
   },
   mixSet(v) { S.mix = v; render(); },
@@ -1989,15 +2003,20 @@ function faceModel() { return localStorage.getItem(LS_FACEMODEL) || 'anime'; }
 
 function faceStatus(msg) { $('menuStatus').textContent = msg; }
 
-// Face toggles are never invisibly-active: hidden only when face detection
-// is disabled in the menu; visible-but-greyed while the model isn't ready.
-function updateFaceTogglesVisibility() {
-  const show = faceDetectEnabled() ? '' : 'none';
-  $('lbAlignWrap').style.display = show;
-  $('lbFaceBoxWrap').style.display = show;
-  $('lbAlignWrap').classList.toggle('disabled', faceLoadState !== 'ready');
-  $('lbFaceBoxWrap').classList.toggle('disabled', faceLoadState !== 'ready');
+// All lightbox toggles stay VISIBLE; ones that can't apply right now get
+// greyed + inert instead (never invisibly-active). Face toggles need the
+// detector ready; overlay/split need anchors present.
+function updateToggleStates() {
+  const faceReady = faceDetectEnabled() && faceLoadState === 'ready';
+  $('lbAlignWrap').classList.toggle('disabled', !faceReady);
+  $('lbFaceBoxWrap').classList.toggle('disabled', !faceReady);
+  const hasAnchors = lbListEntries('anchor').length > 0;
+  $('lbOverlayWrap').classList.toggle('disabled', !hasAnchors);
+  $('lbSplitWrap').classList.toggle('disabled',
+    !hasAnchors || S.col !== 'cand');
 }
+// compat: detection init calls this name
+function updateFaceTogglesVisibility() { updateToggleStates(); }
 
 function importFaceLib() {          // seam for tests
   return import('/vendor/vision_bundle.mjs');
