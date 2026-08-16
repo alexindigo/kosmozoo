@@ -426,6 +426,14 @@ class Handler(BaseHTTPRequestHandler):
         try:
             if path == "/":
                 self._handle_index()
+            elif path in ("/logo.png", "/logo-64.png", "/social.png"):
+                try:
+                    with open(os.path.join(BASE_DIR, path[1:]), "rb") as f:
+                        body = f.read()
+                    self._send(200, body, "image/png",
+                               {"Cache-Control": "max-age=86400"})
+                except FileNotFoundError:
+                    self._send_error_json(404, "not found")
             elif path == "/api/hosts":
                 self._handle_hosts()
             elif path == "/api/files":

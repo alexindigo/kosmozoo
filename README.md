@@ -1,3 +1,5 @@
+<p align="center"><img src="logo.png" width="200" alt="kosmozoo logo"></p>
+
 # kosmozoo
 
 A local, zero-build review & curation tool for ComfyUI image output. A
