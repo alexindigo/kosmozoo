@@ -105,9 +105,12 @@ Environment variables:
 | `KOZMOZOO_DOWNLOADS` | `~/Downloads` | dir the card "save" button checks |
 | `KOZMOZOO_FEEDBACK` | `~/Documents/kosmozoo_feedback.json` | default feedback.json path |
 | `KOZMOZOO_BUCKETS` | generic list | comma-separated curation bucket names |
+| `KOZMOZOO_HOSTS` | `local=127.0.0.1:8188` | comma-separated `name=host:port` pairs |
 
 `config.json` (written by the ☰ menu) overrides env for `feedbackPath` and
-`buckets`. Hosts are the `HOSTS` dict at the top of `server.py`.
+`buckets`, and `hosts`. Hosts are also settable via `KOZMOZOO_HOSTS`
+(`"name=host:port,name2=host2:port2"`). Default: a single local ComfyUI
+at `127.0.0.1:8188`.
 
 ### feedback.json entry shape
 
@@ -160,7 +163,8 @@ cd kosmozoo
 python3 server.py
 ```
 
-Then edit `HOSTS` in `server.py` to point at your ComfyUI host(s).
+Then point it at your ComfyUI host(s) — either `KOZMOZOO_HOSTS` or
+`"hosts"` in `config.json` (`{"host-a": "myhost:8188", ...}`).
 
 ### systemd --user (autostart)
 

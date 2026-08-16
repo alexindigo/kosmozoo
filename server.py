@@ -21,13 +21,10 @@ import urllib.request
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 # --- Config ---------------------------------------------------------------
-# Hosts shown in the dropdown. Label -> host:port of a ComfyUI server.
-# host-b-sibling intentionally omitted (broken, being re-formatted 2026-08-14).
-HOSTS = {
-    "host-a": "comfyui.local:8188",
-    "host-b": "anton.local:8888",
-    "host-c": "ark.local:8188",
-}
+# Hosts shown in the dropdown, label -> host:port of a ComfyUI server.
+# Configured via config.json "hosts" or the KOZMOZOO_HOSTS env var
+# ("name=host:port,name2=host2:port2"); the default is a local instance.
+DEFAULT_HOSTS = {"local": "127.0.0.1:8188"}
 
 BIND = "127.0.0.1"
 # all overridable from the environment
@@ -50,6 +47,25 @@ def _load_config():
 
 
 _cfg = _load_config()
+
+# curation buckets (stored per image in feedback.json entries) —
+# configurable: config.json "buckets" or KOZMOZOO_BUCKETS env; the default
+# is generic on purpose
+DEFAULT_BUCKETS = ["good", "almost", "needs_work", "reject", "other",
+                   "broken"]
+
+
+def _parse_hosts_env(raw):
+    out = {}
+    for part in raw.split(","):
+        name, _, addr = part.partition("=")
+        if name.strip() and addr.strip():
+            out[name.strip()] = addr.strip()
+    return out
+
+
+HOSTS = _cfg.get("hosts") or _parse_hosts_env(
+    os.environ.get("KOZMOZOO_HOSTS", "")) or DEFAULT_HOSTS
 COMMENTS_PATH = os.path.expanduser(
     _cfg.get("feedbackPath") or os.environ.get("KOZMOZOO_FEEDBACK")
     or DEFAULT_COMMENTS_PATH)
@@ -67,11 +83,6 @@ VENDOR_MIME = {
     ".json": "application/json",
 }
 
-# curation buckets (stored per image in feedback.json entries) —
-# configurable: config.json "buckets" or KOZMOZOO_BUCKETS env; the default
-# is generic on purpose
-DEFAULT_BUCKETS = ["good", "almost", "needs_work", "reject", "other",
-                   "broken"]
 # note-type tags; "character" is the default and is stored as "absent"
 TAGS = ("character", "scene", "style")
 
