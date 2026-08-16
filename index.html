@@ -288,6 +288,14 @@
     color: var(--dim); font-size: 12px;
   }
   #lbMix { width: 150px; accent-color: var(--accent); }
+  /* "ANCHOR" tag sits where the slider sits, when viewing an anchor */
+  #lbAnchorTag {
+    position: absolute; bottom: 14px; left: 24px; z-index: 104;
+    display: none; padding: 7px 12px; border-radius: 8px;
+    background: rgba(20,20,28,.65);
+    color: var(--wipe-orange); font-weight: 700; letter-spacing: 2px;
+    font-size: 12px; user-select: none;
+  }
   #lbClose {
     position: absolute; top: 14px; right: 16px; z-index: 101;
     width: 34px; height: 34px; border-radius: 50%; font-size: 18px;
@@ -482,6 +490,7 @@
     <input type="range" id="lbMix" min="0" max="100" value="100">
     <span id="lbMixVal">100%</span>
   </div>
+  <div id="lbAnchorTag">ANCHOR</div>
   <div id="lbSplit" title="drag to wipe-compare (left: anchor · right: candidate)"><div class="line"></div></div>
   <div id="lbHint">pinch / -+ zoom · drag / shift+arrows pan · Alt+drag rotate · H/V flip · matched or Shift-drag pans both · arrows switch · split line wipes · guides from edges · Esc closes</div>
 </div>
@@ -1368,8 +1377,11 @@ function lbPanCounterpart(dx, dy) {
 function lbBaseUpdate() {
   const wrap = $('lbMixWrap');
   const split = $('lbSplit');
+  const tag = $('lbAnchorTag');
   const anchors = lbList('anchor');
-  const show = lightbox.classList.contains('open') && overlayOn() &&
+  const open = lightbox.classList.contains('open');
+  tag.style.display = open && lbColumn === 'anchor' ? 'block' : 'none';
+  const show = open && overlayOn() &&
                lbColumn === 'cand' && anchors.length > 0;
   wrap.style.display = show ? 'flex' : 'none';
   split.style.display = show && splitOn() ? 'block' : 'none';
@@ -1539,6 +1551,7 @@ function closeLightbox() {
   lbBase.removeAttribute('src');
   lbImg.style.opacity = '';
   $('lbMixWrap').style.display = 'none';
+  $('lbAnchorTag').style.display = 'none';
   lbFaceBox = null;
   updateFaceBoxOverlay();
 }
