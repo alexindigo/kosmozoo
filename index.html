@@ -673,14 +673,23 @@ async function loadCandidates() {
   setStatus(`loading image list from ${currentHost}…`);
   try {
     // /api/metadata = persistent cache merged with live history (server-side)
-    const [files, metadata, dls] = await Promise.all([
+    const [files, metadata] = await Promise.all([
       api(`/api/files?host=${encodeURIComponent(currentHost)}`),
       api(`/api/metadata?host=${encodeURIComponent(currentHost)}`),
-      api('/api/downloads'),
     ]);
-    downloadsSet = new Set(dls.files || []);
     metaMapGlobal = metadata;
     allFiles = files.map(cleanFileName);   // endpoint is newest-first
+    // downloads check is batched, names-only -> {name: bool} (no listing)
+    downloadsSet = new Set();
+    try {
+      const r = await fetch('/api/downloads-check', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ files: allFiles }),
+      });
+      const d = await r.json();
+      downloadsSet = new Set(Object.keys(d.exists || {})
+        .filter(k => d.exists[k]));
+    } catch (e) { /* save buttons just won't pre-grey */ }
     if (!allFiles.length) {
       candidatesEl.innerHTML = '<div class="empty">no output images</div>';
       setStatus(`no output images on ${currentHost}`);

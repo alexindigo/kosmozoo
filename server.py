@@ -467,8 +467,7 @@ class Handler(BaseHTTPRequestHandler):
                                       "hosts": HOSTS})
             elif path == "/api/facebox-warmup":
                 self._handle_facebox_warmup()
-            elif path == "/api/downloads":
-                self._handle_downloads()
+
             elif path.startswith("/vendor/"):
                 self._handle_vendor(path)
             else:
@@ -513,6 +512,8 @@ class Handler(BaseHTTPRequestHandler):
                 self._handle_post_comment()
             elif parsed.path == "/api/facebox-bytes":
                 self._handle_facebox_bytes()
+            elif parsed.path == "/api/downloads-check":
+                self._handle_downloads_check()
             elif parsed.path == "/api/config":
                 self._handle_post_config()
             else:
@@ -657,13 +658,25 @@ class Handler(BaseHTTPRequestHandler):
             "Cache-Control": "no-store",
         })
 
-    def _handle_downloads(self):
+    def _handle_downloads_check(self):
+        """Existence check by name only (no listing). Basenames only —
+        anything path-like returns False without touching the disk."""
         try:
-            names = os.listdir(DOWNLOADS_DIR)
-        except (FileNotFoundError, PermissionError):
-            names = []
-        self._send(200, json.dumps({"files": names}, ensure_ascii=False),
-                   extra_headers={"Cache-Control": "no-store"})
+            length = int(self.headers.get("Content-Length") or 0)
+            payload = json.loads(self.rfile.read(length))
+        except (ValueError, json.JSONDecodeError):
+            self._send_error_json(400, "invalid JSON")
+            return
+        files = payload.get("files")
+        if not isinstance(files, list) or len(files) > 10000 or \
+                not all(isinstance(f, str) for f in files):
+            self._send_error_json(400, "expected {files: [names]}")
+            return
+        out = {}
+        for f in files:
+            out[f] = ("/" not in f and "\\" not in f and
+                      os.path.exists(os.path.join(DOWNLOADS_DIR, f)))
+        self._send_json(200, {"exists": out})
 
     def _handle_vendor(self, path):
         rel = path[len("/vendor/"):]
