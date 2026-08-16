@@ -1,4 +1,4 @@
-<p align="center"><img src="logo.png" width="200" alt="kosmozoo logo"></p>
+<p align="center"><img src="logo-512.png" width="200" alt="kosmozoo logo"></p>
 
 # kosmozoo
 

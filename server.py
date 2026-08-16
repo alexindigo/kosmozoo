@@ -426,7 +426,8 @@ class Handler(BaseHTTPRequestHandler):
         try:
             if path == "/":
                 self._handle_index()
-            elif path in ("/logo.png", "/logo-64.png", "/social.png"):
+            elif path in ("/logo-64.png", "/logo-256.png",
+                          "/logo-512.png", "/social.png"):
                 try:
                     with open(os.path.join(BASE_DIR, path[1:]), "rb") as f:
                         body = f.read()
