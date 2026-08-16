@@ -138,7 +138,7 @@ at `127.0.0.1:8188`.
 | `GET/POST /api/comments` | feedback read / partial-update upsert |
 | `GET /api/feedback` | download the exact feedback.json bytes |
 | `GET/POST /api/config` | feedback path + bucket list |
-| `GET /api/downloads` | filenames in the downloads dir |
+| `POST /api/downloads-check` | per-name exists check (no listing; basenames only) |
 | `GET /api/facebox-warmup` · `POST /api/facebox-bytes?key=K` | local face detection |
 | `GET /vendor/...` | vendored MediaPipe assets |
 
