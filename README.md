@@ -78,9 +78,15 @@ Gates the extra UI; default off:
 ### Data durability
 - `feedback.json` is the canonical store (lives outside the repo by
   default); atomic writes; entries prune only when fully empty.
-- `metadata_cache.json` merges every history fetch per host and never
-  deletes — cards keep their metadata after ComfyUI restarts wipe its
-  history.
+- `metadata.db` (sqlite) is the durable per-image metadata store. It is fed
+  from two sources: live ComfyUI `/api/history` merges (fast path for fresh
+  generations) and **PNG chunk parsing** — ComfyUI embeds the executed
+  graph (`prompt`) and the editable `workflow` as tEXt chunks, so a
+  background scraper reads just the first ~16KB of each image and extracts
+  metadata even for files whose history is long gone. The scraper is
+  toggleable from the ☰ menu (persisted in `config.json`) with a pause
+  button; images you actually scroll to always jump the queue regardless.
+  A legacy `metadata_cache.json` is imported once and renamed `.imported`.
 - `faceboxes_cache.json` — detections, computed once per image.
 
 ## Files / layout
@@ -106,13 +112,14 @@ Environment variables:
 | `KOZMOZOO_BIND` | `0.0.0.0` | bind address (`127.0.0.1` = localhost-only) |
 | `KOZMOZOO_DOWNLOADS` | `~/Downloads` | dir the card "save" button checks |
 | `KOZMOZOO_FEEDBACK` | `~/Documents/kosmozoo_feedback.json` | default feedback.json path |
+| `KOZMOZOO_METADATA` | `./metadata.db` | sqlite metadata store path |
 | `KOZMOZOO_BUCKETS` | generic list | comma-separated curation bucket names |
 | `KOZMOZOO_HOSTS` | `local=127.0.0.1:8188` | comma-separated `name=host:port` pairs |
 
-`config.json` (written by the ☰ menu) overrides env for `feedbackPath` and
-`buckets`, and `hosts`. Hosts are also settable via `KOZMOZOO_HOSTS`
-(`"name=host:port,name2=host2:port2"`). Default: a single local ComfyUI
-at `127.0.0.1:8188`.
+`config.json` (written by the ☰ menu) overrides env for `feedbackPath`,
+`buckets`, `hosts`, and `scraperEnabled`. Hosts are also settable via
+`KOZMOZOO_HOSTS` (`"name=host:port,name2=host2:port2"`). Default: a single
+local ComfyUI at `127.0.0.1:8188`.
 
 ### feedback.json entry shape
 
@@ -134,7 +141,9 @@ at `127.0.0.1:8188`.
 | `GET /api/hosts` | configured hosts + online status |
 | `GET /api/files?host=X` | proxied ComfyUI output file list |
 | `GET /api/image?host=X&file=Y` | proxied image bytes (cached headers) |
-| `GET /api/metadata?host=X` | filename → metadata (persistent cache ∪ live history) |
+| `GET /api/metadata?host=X` | `{items, pending, v}` — filename → metadata (sqlite store ∪ live history), extraction backlog, store version |
+| `POST /api/meta-want` | `{host, files}` — prioritize filenames for PNG extraction (scroll-driven) |
+| `GET/POST /api/scraper` | background scan toggle (persisted) + pause/resume |
 | `GET/POST /api/comments` | feedback read / partial-update upsert |
 | `GET /api/feedback` | download the exact feedback.json bytes |
 | `GET/POST /api/config` | feedback path + bucket list |

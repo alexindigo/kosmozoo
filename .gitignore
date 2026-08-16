@@ -6,5 +6,9 @@ faceboxes_cache.json
 feedback.json
 config.json
 metadata_cache.json
+metadata_cache.json.imported
+metadata.db
+metadata.db-wal
+metadata.db-shm
 TODO.md
 .envrc

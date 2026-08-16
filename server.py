@@ -12,12 +12,17 @@ import itertools
 import json
 import os
 import re
+import sqlite3
+import struct
 import subprocess
 import tempfile
 import threading
+import time
 import urllib.error
 import urllib.parse
 import urllib.request
+import zlib
+from collections import deque
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 # --- Config ---------------------------------------------------------------
@@ -91,10 +96,19 @@ FACEWORKER_PY = os.path.join(BASE_DIR, ".venv", "bin", "python")
 DETECT_WORKER = os.path.join(BASE_DIR, "detect_worker.py")
 FACEBOX_CACHE_PATH = os.path.join(BASE_DIR, "faceboxes_cache.json")
 
-# persistent metadata cache: ComfyUI /api/history is volatile (lost on the
-# host's restart), so every fetched history entry's per-image metadata is
-# merged into metadata_cache.json and never deleted
-METADATA_CACHE_PATH = os.path.join(BASE_DIR, "metadata_cache.json")
+# persistent metadata store: ComfyUI /api/history is volatile (lost on the
+# host's restart), and the PNG files themselves carry the executed graph in
+# tEXt chunks. Both sources merge into one durable sqlite store; the legacy
+# metadata_cache.json is imported once and renamed to .imported.
+METADATA_DB_PATH = os.path.expanduser(
+    os.environ.get("KOZMOZOO_METADATA",
+                   os.path.join(BASE_DIR, "metadata.db")))
+METADATA_CACHE_PATH = os.path.join(BASE_DIR, "metadata_cache.json")  # legacy
+
+# background metadata scraper: walks the host's image list and extracts
+# PNG-embedded metadata for files the store doesn't know yet. Toggleable
+# from the UI; persisted in config.json ("scraperEnabled", default on).
+SCRAPER_ENABLED = bool(_cfg.get("scraperEnabled", True))
 
 STATUS_TIMEOUT = 8    # seconds, /api/hosts reachability probe
                       # (ComfyUI stalls its API while generating)
@@ -284,29 +298,124 @@ def _worker_result_to_box(res):
     }
 
 
-# --- metadata extraction + persistent cache (ported from the page's JS) ----
+# --- metadata store (sqlite; extraction ported from the page's JS) ---------
 
-_metadata_cache = None
-_metadata_lock = threading.RLock()   # merge re-enters via _load()
+_metadata_db = None
+_metadata_lock = threading.RLock()   # guards the single shared connection
+_meta_versions = {}                  # host -> int, bumped on every merge
 
 
-def _metadata_cache_load():
-    global _metadata_cache
+def _db():
+    global _metadata_db
     with _metadata_lock:
-        if _metadata_cache is None:
-            try:
-                with open(METADATA_CACHE_PATH, encoding="utf-8") as f:
-                    _metadata_cache = json.load(f)
-            except (FileNotFoundError, json.JSONDecodeError):
-                _metadata_cache = {}
-        return _metadata_cache
+        if _metadata_db is None:
+            _metadata_db = sqlite3.connect(METADATA_DB_PATH,
+                                           check_same_thread=False)
+            _metadata_db.execute("PRAGMA journal_mode=WAL")
+            _metadata_db.execute("PRAGMA busy_timeout=5000")
+            _metadata_db.execute(
+                """
+                CREATE TABLE IF NOT EXISTS images (
+                    host TEXT NOT NULL,
+                    filename TEXT NOT NULL,
+                    meta TEXT,                    -- extracted metadata JSON
+                    source TEXT,                  -- 'history' | 'png'
+                    has_workflow INTEGER DEFAULT 0,  -- PNG had a workflow chunk
+                    nopng INTEGER DEFAULT 0,  -- PNG parsed, no prompt chunk
+                    updated_at REAL,
+                    PRIMARY KEY (host, filename)
+                )
+                """)
+            _metadata_db.commit()
+            _import_legacy_cache(_metadata_db)
+        return _metadata_db
 
 
-def _metadata_cache_save():
-    fd, tmp = tempfile.mkstemp(dir=BASE_DIR, suffix=".tmp")
-    with os.fdopen(fd, "w", encoding="utf-8") as f:
-        json.dump(_metadata_cache, f)
-    os.replace(tmp, METADATA_CACHE_PATH)
+def _import_legacy_cache(db):
+    """One-time import of metadata_cache.json; renamed to .imported after."""
+    try:
+        with open(METADATA_CACHE_PATH, encoding="utf-8") as f:
+            legacy = json.load(f)
+    except (FileNotFoundError, json.JSONDecodeError):
+        return
+    rows = []
+    for key, meta in legacy.items():
+        host, sep, fn = key.partition(":")
+        if sep and isinstance(meta, dict):
+            rows.append((host, fn, json.dumps(meta, ensure_ascii=False),
+                         "import", 0, 0, time.time()))
+    if rows:
+        db.executemany(
+            "INSERT OR IGNORE INTO images VALUES (?,?,?,?,?,?,?)", rows)
+        db.commit()
+    os.replace(METADATA_CACHE_PATH, METADATA_CACHE_PATH + ".imported")
+    print(f"imported {len(rows)} legacy metadata entries into metadata.db")
+
+
+def _meta_version_bump(host):
+    _meta_versions[host] = _meta_versions.get(host, 0) + 1
+
+
+def meta_put(host, mapping, source, has_workflow=False):
+    """Batch-upsert {filename: meta}. A 'png' row clears the nopng marker;
+    has_workflow is sticky (history upserts never erase it)."""
+    if not mapping:
+        return
+    now = time.time()
+    with _metadata_lock:
+        db = _db()
+        db.executemany(
+            "INSERT INTO images (host, filename, meta, source,"
+            " has_workflow, nopng, updated_at) VALUES (?,?,?,?,?,0,?)"
+            " ON CONFLICT(host, filename) DO UPDATE SET"
+            " meta=excluded.meta, source=excluded.source,"
+            " has_workflow=MAX(images.has_workflow, excluded.has_workflow),"
+            " nopng=CASE WHEN excluded.source='png' THEN 0"
+            "            ELSE images.nopng END,"
+            " updated_at=excluded.updated_at",
+            [(host, fn, json.dumps(m, ensure_ascii=False), source,
+              1 if has_workflow else 0, now)
+             for fn, m in mapping.items()])
+        db.commit()
+    _meta_version_bump(host)
+
+
+def meta_mark_nopng(host, filenames):
+    """Negative markers for valid PNGs without a prompt chunk — never
+    refetched. INSERT OR IGNORE: never clobbers a real metadata row."""
+    if not filenames:
+        return
+    now = time.time()
+    with _metadata_lock:
+        db = _db()
+        db.executemany(
+            "INSERT OR IGNORE INTO images (host, filename, meta, source,"
+            " has_workflow, nopng, updated_at) VALUES (?,?,NULL,'png',0,1,?)",
+            [(host, fn, now) for fn in filenames])
+        db.commit()
+
+
+def meta_all(host):
+    """filename -> meta for serving; hasWorkflow injected when known."""
+    with _metadata_lock:
+        rows = _db().execute(
+            "SELECT filename, meta, has_workflow FROM images"
+            " WHERE host=? AND meta IS NOT NULL", (host,)).fetchall()
+    out = {}
+    for fn, m, hw in rows:
+        meta = json.loads(m)
+        if hw:
+            meta["hasWorkflow"] = True
+        out[fn] = meta
+    return out
+
+
+def meta_known(host):
+    """Filenames with any row (real metadata or nopng marker)."""
+    with _metadata_lock:
+        rows = _db().execute(
+            "SELECT filename FROM images WHERE host=?", (host,)).fetchall()
+    return {r[0] for r in rows}
 
 
 def _walk_text(graph, start_link):
@@ -388,6 +497,204 @@ def history_output_metas(history):
     return out
 
 
+# --- PNG metadata: tEXt/zTXt/iTXt chunks (ComfyUI writes them pre-IDAT) ----
+
+PNG_SIG = b"\x89PNG\r\n\x1a\n"
+PNG_READ_CAP = 256 * 1024   # safety cap on stream reads before IDAT
+
+
+def parse_png_text_chunks(stream):
+    """Read PNG chunks from a binary stream until the first IDAT; returns
+    {keyword: str}, or None if the stream isn't a PNG. Stops early —
+    ComfyUI writes prompt/workflow right after IHDR."""
+    if stream.read(8) != PNG_SIG:
+        return None
+    out = {}
+    total = 8
+    while total < PNG_READ_CAP:
+        hdr = stream.read(8)
+        if len(hdr) < 8:
+            break
+        length, ctype = struct.unpack(">I4s", hdr)
+        if ctype == b"IDAT":
+            break
+        data = stream.read(length + 4)   # payload + CRC
+        total += 12 + length
+        if len(data) < length + 4:
+            break
+        payload = data[:length]
+        try:
+            if ctype == b"tEXt":
+                key, _, val = payload.partition(b"\x00")
+                out[key.decode("latin1")] = val.decode("latin1")
+            elif ctype == b"zTXt":
+                key, _, rest = payload.partition(b"\x00")
+                if rest[:1] == b"\x00":   # method 0 = zlib
+                    out[key.decode("latin1")] = zlib.decompress(
+                        rest[1:]).decode("utf-8", "replace")
+            elif ctype == b"iTXt":
+                key, _, rest = payload.partition(b"\x00")
+                if len(rest) >= 2:
+                    compressed = rest[0]
+                    rest = rest[2:]       # flag + method bytes
+                    _lang, _, rest = rest.partition(b"\x00")
+                    _trans, _, text = rest.partition(b"\x00")
+                    if compressed:
+                        text = zlib.decompress(text)
+                    out[key.decode("latin1")] = text.decode(
+                        "utf-8", "replace")
+        except (ValueError, zlib.error, UnicodeDecodeError):
+            continue
+    return out
+
+
+def meta_from_png_stream(stream):
+    """(meta, has_workflow) from a PNG byte stream; meta is None when the
+    file carries no prompt chunk (e.g. edited/re-exported PNGs)."""
+    chunks = parse_png_text_chunks(stream)
+    if chunks is None:
+        return None, False
+    has_wf = "workflow" in chunks
+    try:
+        graph = json.loads(chunks["prompt"])
+    except (KeyError, json.JSONDecodeError):
+        return None, has_wf
+    if not isinstance(graph, dict):
+        return None, has_wf
+    # the prompt chunk IS the executed API-format graph — the same shape
+    # extract_meta consumes from history entries
+    return extract_meta({"prompt": [0, 0, graph]}), has_wf
+
+
+# --- metadata extraction worker (one thread per host) -----------------------
+# Priority queue: client-reported visible filenames first (meta-want —
+# always active), then the background listing walk (only when the scraper
+# toggle is enabled). Single-flight with a short inter-file delay keeps
+# ComfyUI's API responsive while it generates.
+
+_meta_workers = {}           # host -> worker state dict
+_meta_workers_lock = threading.Lock()
+_scraper_resume = threading.Event()    # clear = paused
+_scraper_resume.set()
+SCRAPER_INTER_FILE_DELAY = 0.1         # seconds between file fetches
+SCRAPER_MAX_ERRORS = 3                 # consecutive transport errors -> nap
+
+
+def _meta_worker_ensure(host):
+    with _meta_workers_lock:
+        w = _meta_workers.get(host)
+        if w is None:
+            w = {"wake": threading.Event(), "prio": deque(),
+                 "prio_set": set(), "walk": deque(), "walk_set": set(),
+                 "inflight": None}
+            _meta_workers[host] = w
+            threading.Thread(target=_meta_worker_main, args=(host,),
+                             daemon=True,
+                             name=f"meta-worker-{host}").start()
+        return w
+
+
+def _meta_pending(host):
+    w = _meta_workers.get(host)
+    if not w:
+        return 0
+    with _meta_workers_lock:
+        return len(w["prio"]) + len(w["walk"]) + (1 if w["inflight"] else 0)
+
+
+def _meta_worker_feed(host, names, priority=False):
+    """Queue names that the store doesn't know yet. Returns pending count."""
+    if not names:
+        return _meta_pending(host)
+    known = meta_known(host)
+    w = _meta_worker_ensure(host)
+    with _meta_workers_lock:
+        for name in names:
+            if name in known or name in w["prio_set"]:
+                continue
+            if priority:
+                # promote from the walk queue: prio drains even when the
+                # background walk is disabled
+                if name in w["walk_set"]:
+                    w["walk_set"].discard(name)
+                    try:
+                        w["walk"].remove(name)
+                    except ValueError:
+                        pass
+                w["prio"].append(name)
+                w["prio_set"].add(name)
+            elif name not in w["walk_set"]:
+                w["walk"].append(name)
+                w["walk_set"].add(name)
+        w["wake"].set()
+        return len(w["prio"]) + len(w["walk"])
+
+
+def _meta_worker_main(host):
+    base = host_base(host)
+    w = _meta_workers[host]
+    errors = 0
+    while True:
+        with _meta_workers_lock:
+            w["inflight"] = None
+            if w["prio"]:
+                name = w["prio"].popleft()
+                w["prio_set"].discard(name)
+            elif SCRAPER_ENABLED and w["walk"]:
+                name = w["walk"].popleft()
+                w["walk_set"].discard(name)
+            else:
+                name = None
+                w["wake"].clear()
+            if name is not None:
+                w["inflight"] = name
+        if name is None:
+            w["wake"].wait(30)   # idle; cheap periodic re-check
+            continue
+        _scraper_resume.wait()   # pause gate (blocks while paused)
+        url = (f"{base}/api/view?type=output&filename="
+               + urllib.parse.quote(name))
+        try:
+            req = urllib.request.Request(url, headers=UA)
+            with urllib.request.urlopen(req, timeout=IMAGE_TIMEOUT) as resp:
+                meta, has_wf = meta_from_png_stream(resp)
+            errors = 0
+        except urllib.error.HTTPError as e:
+            if e.code == 404:
+                # gone from the host — permanent; never retry
+                meta_mark_nopng(host, [name])
+                continue
+            errors += 1
+            with _meta_workers_lock:
+                w["inflight"] = None
+                if name not in w["walk_set"]:
+                    w["walk"].append(name)
+                    w["walk_set"].add(name)
+            time.sleep(min(2 ** errors, 30))
+            continue
+        except Exception:
+            errors += 1
+            # host stalled/down: requeue for later, back off progressively
+            with _meta_workers_lock:
+                w["inflight"] = None
+                if name not in w["walk_set"]:
+                    w["walk"].append(name)
+                    w["walk_set"].add(name)
+            time.sleep(min(2 ** errors, 30))
+            continue
+        if meta:
+            meta_put(host, {name: meta}, "png", has_workflow=has_wf)
+        else:
+            meta_mark_nopng(host, [name])
+        time.sleep(SCRAPER_INTER_FILE_DELAY)
+
+
+def clean_file_name(entry):
+    """Port of the page's cleanFileName: strip the " [123]" suffix the
+    /internal/files/output listing appends."""
+    return re.sub(r"\s+\[[^\]]+\]$", "", str(entry))
+
+
 def facebox_for_bytes(key, image_bytes):
     cached = _facebox_cache_load()
     if key in cached:
@@ -464,7 +771,13 @@ class Handler(BaseHTTPRequestHandler):
             elif path == "/api/config":
                 self._send_json(200, {"feedbackPath": COMMENTS_PATH,
                                       "buckets": BUCKETS,
-                                      "hosts": HOSTS})
+                                      "hosts": HOSTS,
+                                      "scraper": {
+                                          "enabled": SCRAPER_ENABLED,
+                                          "paused":
+                                              not _scraper_resume.is_set()}})
+            elif path == "/api/scraper":
+                self._handle_scraper_get()
             elif path == "/api/facebox-warmup":
                 self._handle_facebox_warmup()
 
@@ -516,6 +829,10 @@ class Handler(BaseHTTPRequestHandler):
                 self._handle_downloads_check()
             elif parsed.path == "/api/config":
                 self._handle_post_config()
+            elif parsed.path == "/api/meta-want":
+                self._handle_meta_want()
+            elif parsed.path == "/api/scraper":
+                self._handle_scraper_post()
             else:
                 self._send_error_json(404, f"unknown endpoint: {parsed.path}")
         except BrokenPipeError:
@@ -566,7 +883,64 @@ class Handler(BaseHTTPRequestHandler):
             return
         status, body = fetch_json(f"{base}/internal/files/output",
                                   PROXY_TIMEOUT)
+        if status == 200:
+            # feed the background walk: files the store doesn't know yet
+            try:
+                listing = [clean_file_name(f) for f in json.loads(body)]
+                _meta_worker_feed(qs["host"][0], listing)
+            except (json.JSONDecodeError, TypeError):
+                pass
         self._send(status, body, extra_headers={"Cache-Control": "no-store"})
+
+    def _handle_meta_want(self):
+        """POST {host, files}: filenames currently on screen — they jump
+        the extraction queue. Always active, even when the background
+        walk is disabled."""
+        try:
+            length = int(self.headers.get("Content-Length") or 0)
+            payload = json.loads(self.rfile.read(length))
+        except (ValueError, json.JSONDecodeError):
+            self._send_error_json(400, "bad body")
+            return
+        host = payload.get("host")
+        if not host_base(host):
+            self._send_error_json(400, f"unknown host: {host!r}")
+            return
+        files = [clean_file_name(f) for f in payload.get("files", [])][:500]
+        pending = _meta_worker_feed(host, files, priority=True)
+        self._send_json(200, {"ok": True, "pending": pending})
+
+    def _handle_scraper_get(self):
+        self._send_json(200, {"enabled": SCRAPER_ENABLED,
+                              "paused": not _scraper_resume.is_set()})
+
+    def _handle_scraper_post(self):
+        global SCRAPER_ENABLED
+        try:
+            length = int(self.headers.get("Content-Length") or 0)
+            payload = json.loads(self.rfile.read(length))
+        except (ValueError, json.JSONDecodeError):
+            self._send_error_json(400, "bad body")
+            return
+        if "enabled" in payload:
+            SCRAPER_ENABLED = bool(payload["enabled"])
+            cfg = _load_config()
+            cfg["scraperEnabled"] = SCRAPER_ENABLED
+            fd, tmp = tempfile.mkstemp(dir=BASE_DIR, suffix=".tmp")
+            with os.fdopen(fd, "w", encoding="utf-8") as f:
+                json.dump(cfg, f, indent=2)
+                f.write("\n")
+            os.replace(tmp, CONFIG_PATH)
+        if "paused" in payload:
+            if payload["paused"]:
+                _scraper_resume.clear()
+            else:
+                _scraper_resume.set()
+        # wake all workers so they notice the state change immediately
+        for w in _meta_workers.values():
+            w["wake"].set()
+        self._send_json(200, {"enabled": SCRAPER_ENABLED,
+                              "paused": not _scraper_resume.is_set()})
 
     def _merge_history_into_metadata(self, host, body_bytes):
         try:
@@ -576,10 +950,7 @@ class Handler(BaseHTTPRequestHandler):
         live = history_output_metas(history)
         if not live:
             return
-        with _metadata_lock:
-            cache = _metadata_cache_load()
-            cache.update({f"{host}:{k}": v for k, v in live.items()})
-            _metadata_cache_save()
+        meta_put(host, live, "history")
 
     def _handle_history(self, qs):
         base = self._require_host(qs)
@@ -591,8 +962,9 @@ class Handler(BaseHTTPRequestHandler):
         self._send(status, body, extra_headers={"Cache-Control": "no-store"})
 
     def _handle_metadata(self, qs):
-        """filename -> meta: persistent cache merged with live history
-        (live wins; cache covers images whose history vanished)."""
+        """{items, pending, v}: sqlite store merged with live history
+        (live wins; the store covers images whose history vanished).
+        pending = files queued for PNG extraction; v = store version."""
         base = self._require_host(qs)
         if not base:
             return
@@ -604,14 +976,14 @@ class Handler(BaseHTTPRequestHandler):
                 self._merge_history_into_metadata(host, body)
                 live = history_output_metas(json.loads(body))
         except Exception:
-            pass    # host stalled/down: serve cache alone
-        cache = _metadata_cache_load()
-        prefix = host + ":"
-        merged = {k[len(prefix):]: v for k, v in cache.items()
-                  if k.startswith(prefix)}
+            pass    # host stalled/down: serve the store alone
+        merged = meta_all(host)
         merged.update(live)
-        self._send(200, json.dumps(merged, ensure_ascii=False),
-                   extra_headers={"Cache-Control": "no-store"})
+        self._send_json(200, {
+            "items": merged,
+            "pending": _meta_pending(host),
+            "v": _meta_versions.get(host, 0),
+        })
 
     def _handle_image(self, qs):
         base = self._require_host(qs)

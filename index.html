@@ -34,6 +34,9 @@
     width: 170px;
   }
   #filterInput:focus { outline: none; border-color: var(--accent); }
+  .fname .copyable { cursor: copy; }
+  .fname .copyable:hover { color: var(--accent); }
+  .fname .copied { color: var(--accent); }
   a.btn { text-decoration: none; display: inline-block; }
   button:hover { border-color: var(--accent); }
   button.on { border-color: var(--accent); color: var(--accent); }
@@ -72,6 +75,13 @@
   #menu[hidden] { display: none; }  /* author display:flex would otherwise
                                        override the hidden attribute */
   #menuStatus { font-size: 11px; color: var(--dim); }
+  #scraperWrap {
+    display: flex; align-items: center; gap: 8px; font-size: 12px;
+  }
+  #scraperWrap .switchwrap { flex: 0 0 auto; }
+  #scraperPause { padding: 2px 8px; font-size: 12px; line-height: 1.4; }
+  #scraperPause:disabled { opacity: .4; cursor: default; }
+  #scraperPending { color: var(--dim); font-size: 11px; }
   #faceModelWrap {
     display: flex; justify-content: space-between; align-items: center;
     font-size: 12px; color: var(--dim);
@@ -440,6 +450,14 @@
           <option value="mp">mediapipe</option>
         </select>
       </label>
+      <hr class="menusep">
+      <div id="scraperWrap">
+        <label class="switchwrap" title="walk the host's image list and extract PNG-embedded metadata in the background">
+          <input type="checkbox" id="scraperToggle"><span class="track"></span>metadata scan
+        </label>
+        <button id="scraperPause" title="pause/resume the background scan (laptop mode)">⏸</button>
+        <span id="scraperPending"></span>
+      </div>
       <div id="menuStatus"></div>
       <div id="fbPathWrap">
         <span>feedback.json path</span>
@@ -674,7 +692,13 @@ const CHUNK = 20;
 const WINDOW_PAD = 10;
 
 let allFiles = [];            // filenames for current host, newest-first
+let fileIndex = new Map();    // filename -> allFiles position
 let metaMapGlobal = {};       // filename -> meta
+let metaVersion = 0;          // server-side metadata store version
+let metaPending = 0;          // files queued for PNG metadata extraction
+let metaPollTimer = null;
+const wantSet = new Set();    // rendered-but-meta-less filenames to report
+let wantTimer = null;
 let filterText = '';          // filename substring filter (header input)
 let viewFiles = [];           // allFiles indices matching the filter
 let viewPos = 0;              // render progress within viewFiles
@@ -710,14 +734,18 @@ function resetList() {
 function statusSummary() {
   const hidden = allFiles.filter(
     f => isHidden(`${currentHost}:${f}`)).length;
+  let s;
   if (filterText) {
     const shown = viewFiles.filter(
       i => !isHidden(`${currentHost}:${allFiles[i]}`)).length;
-    return `${shown} of ${allFiles.length} matching “${filterText}” from ` +
-           `${currentHost}` + (hidden ? ` (${hidden} hidden)` : '');
+    s = `${shown} of ${allFiles.length} matching “${filterText}” from ` +
+        `${currentHost}` + (hidden ? ` (${hidden} hidden)` : '');
+  } else {
+    s = `${allFiles.length} images from ${currentHost}` +
+        (hidden ? ` (${hidden} hidden)` : '');
   }
-  return `${allFiles.length} images from ${currentHost}` +
-         (hidden ? ` (${hidden} hidden)` : '');
+  if (metaPending > 0) s += ` · metadata ${metaPending} left`;
+  return s;
 }
 
 async function loadCandidates() {
@@ -732,8 +760,11 @@ async function loadCandidates() {
       api(`/api/files?host=${encodeURIComponent(currentHost)}`),
       api(`/api/metadata?host=${encodeURIComponent(currentHost)}`),
     ]);
-    metaMapGlobal = metadata;
+    metaMapGlobal = metadata.items || {};
+    metaVersion = metadata.v || 0;
+    metaPending = metadata.pending || 0;
     allFiles = files.map(cleanFileName);   // endpoint is newest-first
+    fileIndex = new Map(allFiles.map((n, i) => [n, i]));
     recomputeView();
     // downloads check is batched, names-only -> {name: bool} (no listing)
     downloadsSet = new Set();
@@ -753,9 +784,91 @@ async function loadCandidates() {
     }
     renderList();
     setStatus(statusSummary());
+    updateScraperUi();
+    if (metaPending > 0) scheduleMetaPoll();
   } catch (err) {
     setStatus(`load failed: ${err.message}`, true);
   }
+}
+
+// --- metadata backfill: poll + in-place patch + scroll-driven wants -------
+
+function scheduleMetaPoll(delay = 5000) {
+  clearTimeout(metaPollTimer);
+  metaPollTimer = setTimeout(pollMetadata, delay);
+}
+
+async function pollMetadata() {
+  if (!currentHost) return;
+  try {
+    const r = await api(`/api/metadata?host=${encodeURIComponent(currentHost)}`);
+    metaPending = r.pending || 0;
+    if (r.v !== metaVersion) {
+      metaVersion = r.v;
+      mergeMetadata(r.items || {});
+    }
+    updateScraperUi();
+    setStatus(statusSummary());
+  } catch (e) { /* transient; next poll retries */ }
+  if (metaPending > 0) scheduleMetaPoll();
+}
+
+function mergeMetadata(items) {
+  const newly = [];
+  for (const [k, v] of Object.entries(items)) {
+    if (!metaMapGlobal[k]) newly.push(k);
+    metaMapGlobal[k] = v;
+  }
+  for (const name of newly) patchCardMeta(name);
+}
+
+// A card rendered before its metadata arrived gets patched in place.
+function patchCardMeta(name) {
+  const idx = fileIndex.get(name);
+  if (idx === undefined) return;
+  const card = cardEls[idx];
+  if (!card) return;
+  const meta = metaMapGlobal[name];
+  if (!meta) return;
+  const props = card.querySelector('.props');
+  const desc = card.querySelector('.desc');
+  if (props && desc) fillCardMeta(props, desc, meta);
+  if (meta.width && meta.height) {
+    card.dataset.nw = meta.width;
+    card.dataset.nh = meta.height;
+    const wrap = card.querySelector('.imgwrap');
+    if (wrap)
+      wrap.style.setProperty('--ar', `${meta.width} / ${meta.height}`);
+  }
+}
+
+// Scroll-driven extraction: rendered-but-meta-less filenames are reported
+// to the server (debounced), which moves them to the front of the queue.
+function wantMeta(name) {
+  if (metaMapGlobal[name] || wantSet.has(name)) return;
+  wantSet.add(name);
+  clearTimeout(wantTimer);
+  wantTimer = setTimeout(flushWant, 1500);
+}
+
+async function flushWant() {
+  if (!currentHost) return;
+  const files = [...wantSet].filter(n => !metaMapGlobal[n]);
+  wantSet.clear();
+  if (!files.length) return;
+  try {
+    const r = await fetch('/api/meta-want', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ host: currentHost, files }),
+    });
+    const d = await r.json();
+    if (typeof d.pending === 'number') {
+      metaPending = d.pending;
+      updateScraperUi();
+      if (metaPending > 0) scheduleMetaPoll();
+      setStatus(statusSummary());
+    }
+  } catch (e) { /* next render re-wants */ }
 }
 
 // Chunked flat list (default) or grouped-by-prompt (Advanced toggle).
@@ -829,6 +942,7 @@ function renderChunk() {
     const i = viewFiles[viewPos++];
     const name = allFiles[i];
     if (isHidden(`${currentHost}:${name}`)) continue;  // hidden
+    wantMeta(name);   // on-screen metadata jumps the extraction queue
     const card = renderCard(name, metaMapGlobal[name], i);
     cardEls[i] = card;
     frag.appendChild(card);
@@ -874,6 +988,7 @@ function renderGrouped() {
   for (const i of viewFiles) {
     const name = allFiles[i];
     if (isHidden(`${currentHost}:${name}`)) continue;
+    wantMeta(name);   // on-screen metadata jumps the extraction queue
     const meta = metaMapGlobal[name];
     const p = (meta && meta.prompt) || '(no prompt in history)';
     if (!groups.has(p)) groups.set(p, []);
@@ -897,6 +1012,64 @@ function renderGrouped() {
     candidatesEl.appendChild(det);
   }
   applyWindow();
+}
+
+// Advanced metadata panel content; also used to patch rendered cards in
+// place when backfilled metadata arrives after the card was rendered.
+// Idempotent: uses .onclick assignment (never stacks listeners).
+function fillCardMeta(props, desc, meta) {
+  props.textContent = '';
+  desc.textContent = '';
+  desc.title = '';
+  desc.onclick = null;
+  if (meta) {
+    const rows = [];
+    if (meta.seed !== undefined) rows.push(['seed', meta.seed]);
+    if (meta.steps !== undefined) rows.push(['steps', meta.steps]);
+    if (meta.cfg !== undefined) rows.push(['cfg', meta.cfg]);
+    if (meta.denoise !== undefined)
+      rows.push(['denoise', Number(meta.denoise).toFixed(2)]);
+    if (meta.sampler_name)
+      rows.push(['sampler', meta.scheduler
+        ? `${meta.sampler_name}/${meta.scheduler}` : meta.sampler_name]);
+    for (const l of meta.loras || [])
+      rows.push(['lora', `${l.name}${l.strength != null ? '@' + l.strength : ''}`]);
+    if (meta.width && meta.height)
+      rows.push(['size', `${meta.width}×${meta.height}`]);
+    if (rows.length) {
+      for (const [k, v] of rows) {
+        const line = document.createElement('div');
+        const label = document.createElement('span');
+        label.className = 'plabel';
+        label.textContent = `${k}: `;
+        line.appendChild(label);
+        line.appendChild(document.createTextNode(v));
+        props.appendChild(line);
+      }
+    } else {
+      props.textContent = '(no sampler metadata)';
+    }
+  } else {
+    const span = document.createElement('span');
+    span.className = 'nometa';
+    span.textContent = 'no metadata yet';
+    props.appendChild(span);
+  }
+  if (meta && meta.prompt) {
+    const excerpt = meta.prompt.length > 300
+      ? meta.prompt.slice(0, 300) + '…' : meta.prompt;
+    desc.textContent = excerpt;
+    desc.title = meta.prompt;
+    // Advanced: click expands to the full prompt (+ negative when present)
+    desc.onclick = () => {
+      if (!document.body.classList.contains('advanced')) return;
+      const on = desc.classList.toggle('expanded');
+      desc.textContent = on
+        ? meta.prompt +
+          (meta.negPrompt ? `\n\n— negative —\n${meta.negPrompt}` : '')
+        : excerpt;
+    };
+  }
 }
 
 function renderCard(filename, meta, idx) {
@@ -946,6 +1119,16 @@ function renderCard(filename, meta, idx) {
   savedEl.textContent = 'Feedback saved';
   const fnameText = document.createElement('span');
   fnameText.textContent = filename;
+  fnameText.className = 'copyable';
+  fnameText.title = 'click to copy the filename';
+  fnameText.addEventListener('click', async (e) => {
+    e.stopPropagation();
+    try {
+      await navigator.clipboard.writeText(filename);
+      fnameText.classList.add('copied');
+      setTimeout(() => fnameText.classList.remove('copied'), 800);
+    } catch (err) { /* clipboard unavailable (permissions/shim) */ }
+  });
   const btnWrap = document.createElement('span');
   btnWrap.style.whiteSpace = 'nowrap';
   const verdict = voteOf(key);
@@ -1031,53 +1214,9 @@ function renderCard(filename, meta, idx) {
   pair1.className = 'pair';
   const props = document.createElement('div');
   props.className = 'props';
-  if (meta) {
-    const rows = [];
-    if (meta.seed !== undefined) rows.push(['seed', meta.seed]);
-    if (meta.steps !== undefined) rows.push(['steps', meta.steps]);
-    if (meta.cfg !== undefined) rows.push(['cfg', meta.cfg]);
-    if (meta.denoise !== undefined)
-      rows.push(['denoise', Number(meta.denoise).toFixed(2)]);
-    if (meta.sampler_name)
-      rows.push(['sampler', meta.scheduler
-        ? `${meta.sampler_name}/${meta.scheduler}` : meta.sampler_name]);
-    for (const l of meta.loras || [])
-      rows.push(['lora', `${l.name}${l.strength != null ? '@' + l.strength : ''}`]);
-    if (meta.width && meta.height)
-      rows.push(['size', `${meta.width}×${meta.height}`]);
-    if (rows.length) {
-      for (const [k, v] of rows) {
-        const line = document.createElement('div');
-        const label = document.createElement('span');
-        label.className = 'plabel';
-        label.textContent = `${k}: `;
-        line.appendChild(label);
-        line.appendChild(document.createTextNode(v));
-        props.appendChild(line);
-      }
-    } else {
-      props.textContent = '(no sampler metadata)';
-    }
-  } else {
-    props.innerHTML = '<span class="nometa">no metadata in history</span>';
-  }
   const desc = document.createElement('div');
   desc.className = 'desc';
-  if (meta && meta.prompt) {
-    const excerpt = meta.prompt.length > 300
-      ? meta.prompt.slice(0, 300) + '…' : meta.prompt;
-    desc.textContent = excerpt;
-    desc.title = meta.prompt;
-    // Advanced: click expands to the full prompt (+ negative when present)
-    desc.addEventListener('click', () => {
-      if (!document.body.classList.contains('advanced')) return;
-      const on = desc.classList.toggle('expanded');
-      desc.textContent = on
-        ? meta.prompt +
-          (meta.negPrompt ? `\n\n— negative —\n${meta.negPrompt}` : '')
-        : excerpt;
-    });
-  }
+  fillCardMeta(props, desc, meta);
   pair1.append(props, desc);
 
   // row 2: negatives (red) | positives (green), each with copy buttons
@@ -2616,9 +2755,54 @@ $('menuBtn').addEventListener('click', async () => {
     try {
       const cfg = await api('/api/config');
       $('fbPath').value = cfg.feedbackPath;
+      if (cfg.scraper) scraperState = cfg.scraper;
+      paintScraperUi();
     } catch (err) { /* leave stale */ }
     loadHostsMenu();
   }
+});
+
+// ---------- metadata scraper controls (menu) ----------
+
+let scraperState = { enabled: true, paused: false };
+
+function paintScraperUi() {
+  $('scraperToggle').checked = !!scraperState.enabled;
+  $('scraperPause').textContent = scraperState.paused ? '▶' : '⏸';
+  $('scraperPause').disabled = !scraperState.enabled;
+  $('scraperPending').textContent =
+    scraperState.enabled && metaPending > 0 ? `${metaPending} left` : '';
+}
+
+// Called from the metadata poll loop; cheap no-op when the menu is closed.
+function updateScraperUi() {
+  paintScraperUi();
+}
+
+$('scraperToggle').addEventListener('change', async () => {
+  try {
+    const r = await fetch('/api/scraper', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ enabled: $('scraperToggle').checked }),
+    });
+    scraperState = await r.json();
+  } catch (err) {
+    setStatus(`scraper toggle failed: ${err.message}`, true);
+  }
+  paintScraperUi();
+});
+
+$('scraperPause').addEventListener('click', async () => {
+  try {
+    const r = await fetch('/api/scraper', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ paused: !scraperState.paused }),
+    });
+    scraperState = await r.json();
+  } catch (err) {
+    setStatus(`scraper pause failed: ${err.message}`, true);
+  }
+  paintScraperUi();
 });
 
 // ---------- hosts editor (in the menu) ----------
