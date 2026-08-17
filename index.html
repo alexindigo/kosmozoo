@@ -477,12 +477,15 @@
   .aimgwrap img { display: block; }
   .anchor .rm {
     position: absolute; top: 6px; right: 6px; width: 32px; height: 32px;
-    padding: 0; border-radius: 50%; line-height: 1; font-size: 16px;
+    padding: 0; border-radius: 50%; line-height: 1; font-size: 20px;
     display: flex; align-items: center; justify-content: center;
     background: rgba(20, 20, 28, .35); border: 1px solid rgba(255,255,255,.15);
     color: rgba(255, 255, 255, .7);
   }
-  .anchor .rm:hover { background: rgba(20,20,28,.8); color: #fff; }
+  .anchor .rm:hover, .anchor .ainfo:hover {
+    background: rgba(20,20,28,.8); color: var(--wipe-orange);
+    border-color: color-mix(in srgb, var(--wipe-orange) 55%, transparent);
+  }
   .anchor .ainfo {
     position: absolute; top: 6px; left: 6px; width: 32px; height: 32px;
     padding: 0; border-radius: 50%; line-height: 1;
@@ -490,7 +493,6 @@
     background: rgba(20, 20, 28, .35); border: 1px solid rgba(255,255,255,.15);
     color: rgba(255, 255, 255, .7);
   }
-  .anchor .ainfo:hover { background: rgba(20,20,28,.8); color: #fff; }
   /* anchor info overlay (embedded PNG parameters) */
   #infoOverlay {
     position: fixed; inset: 0; z-index: 80;
@@ -2916,7 +2918,7 @@ function renderAnchor(name, src, meta) {
   // ⓘ top-left: embedded PNG parameters (parsed at drop time, persisted)
   const info = document.createElement('button');
   info.className = 'ainfo';
-  info.innerHTML = '<svg viewBox="0 0 24 24" width="17" height="17"><path fill="currentColor" d="M12 2a10 10 0 1 0 0 20 10 10 0 0 0 0-20zm0 4.6a1.3 1.3 0 1 1 0 2.6 1.3 1.3 0 0 1 0-2.6zM10 11h4v7h1.4v1.6H8.6V18H10v-5.4H8.6V11H10z"/></svg>';
+  info.innerHTML = '<svg viewBox="0 0 24 24" width="21" height="21"><path fill="currentColor" d="M12 2a10 10 0 1 0 0 20 10 10 0 0 0 0-20zm0 4.6a1.3 1.3 0 1 1 0 2.6 1.3 1.3 0 0 1 0-2.6zM10 11h4v7h1.4v1.6H8.6V18H10v-5.4H8.6V11H10z"/></svg>';
   info.title = 'embedded parameters';
   info.addEventListener('click', (e) => {
     e.stopPropagation();
