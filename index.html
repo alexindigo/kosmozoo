@@ -181,8 +181,10 @@
     position: absolute; top: 116px; left: 24px; z-index: 104;
     background: rgba(20,20,28,.65); border-radius: 8px; padding: 7px 10px;
   }
+  /* split is an overlay-mode child: indented under the overlay toggle,
+     greyed when overlay is off (see updateToggleStates) */
   #lbSplitWrap {
-    position: absolute; top: 150px; left: 24px; z-index: 104;
+    position: absolute; top: 148px; left: 42px; z-index: 104;
     background: rgba(20,20,28,.65); border-radius: 8px; padding: 7px 10px;
   }
   #lbLinkedWrap {
@@ -619,7 +621,7 @@
   <label id="lbOverlayWrap" class="switchwrap" title="anchor underlay + wipe/opacity comparison tools">
     <input type="checkbox" id="lbOverlay"><span class="track"></span>overlay
   </label>
-  <label id="lbSplitWrap" class="switchwrap" title="split-wipe: draggable line, left = anchor / right = candidate">
+  <label id="lbSplitWrap" class="switchwrap" title="split-wipe (needs overlay): draggable line, left = anchor / right = candidate">
     <input type="checkbox" id="lbSplitT"><span class="track"></span>split
   </label>
   <label id="lbLinkedWrap" class="switchwrap" title="link candidate+anchor views: switch keeps the shared frame; pan/zoom/flip/rotate apply to both">
@@ -1912,9 +1914,10 @@ function render() {
     lbImg.style.opacity = '';
   }
   lbSplitEl.style.left =
-    (S.splitX == null ? window.innerWidth / 2 : S.splitX) + 'px';
+    (S.splitX == null ? window.innerWidth / 2 : lbSplitClampX(S.splitX)) + 'px';
   lbClipWrap.style.clipPath =
-    (wipeOn && S.splitX != null) ? `inset(0 0 0 ${S.splitX}px)` : '';
+    (wipeOn && S.splitX != null)
+      ? `inset(0 0 0 ${lbSplitClampX(S.splitX)}px)` : '';
 
   renderFaceBox();
 }
@@ -2072,6 +2075,13 @@ function openLightbox(src, sourceImg) {
     alignToAnchorFace();
   } else {
     lbShow(entry);
+  }
+  // persisted split toggle: arm the line on open (edge when dims are known,
+  // pending otherwise) — otherwise the handle parked mid-viewport with no
+  // wipe until first dragged
+  if (splitOn() && S.splitX == null && !S.splitPending) {
+    if (lbCurrentBox()) S.splitX = lbImageLeftEdge();
+    else S.splitPending = true;
   }
   render();
 }
@@ -2288,13 +2298,19 @@ lbSplitEl.addEventListener('pointerdown', (e) => {
   document.addEventListener('pointerup', up);
 });
 
-// split toggle: starts at the image's left edge (candidate fully visible)
+// split toggle: starts at the image's left edge (candidate fully visible).
+// Clamped into the viewport: with a zoomed/panned stored view the true edge
+// can be far off-screen, which parked the line (and the wipe) invisibly.
+function lbSplitClampX(x) {
+  return Math.max(0, Math.min(window.innerWidth, x));
+}
+
 function lbImageLeftEdge() {
   const box = lbCurrentBox();
   if (!box) return window.innerWidth / 2;
   const e0 = lbMapFrac(S.view, box, 0, 0.5)[0];
   const e1 = lbMapFrac(S.view, box, 1, 0.5)[0];
-  return Math.min(e0, e1);
+  return lbSplitClampX(Math.min(e0, e1));
 }
 
 // ---------- facebox overlay ----------
@@ -2468,6 +2484,8 @@ const LB = {
   splitSetX(x) { S.splitX = x; render(); },
   setSplitOn(on) {
     try { localStorage.setItem(LS_SPLIT, on ? '1' : '0'); } catch (e) {}
+    // note: split is an overlay-mode tool — the toggle is greyed+inert
+    // while overlay is off, and turning overlay off clears split
     if (on && !lbCurrentBox()) {
       S.splitPending = true;      // apply at the image edge once dims land
       S.splitX = null;
@@ -2507,7 +2525,7 @@ function updateToggleStates() {
   const hasAnchors = lbListEntries('anchor').length > 0;
   $('lbOverlayWrap').classList.toggle('disabled', !hasAnchors);
   $('lbSplitWrap').classList.toggle('disabled',
-    !hasAnchors || S.col !== 'cand');
+    !overlayOn() || !hasAnchors || S.col !== 'cand');
 }
 // compat: detection init calls this name
 function updateFaceTogglesVisibility() { updateToggleStates(); }
@@ -3389,6 +3407,14 @@ $('lbOverlay').addEventListener('change', (e) => {
   try {
     localStorage.setItem(LS_OVERLAY, e.target.checked ? '1' : '0');
   } catch (err) {}
+  if (!e.target.checked) {
+    // split-wipe is an overlay-mode tool: no underlay, no line. Turn it
+    // off explicitly so the toggle never looks on while doing nothing.
+    try { localStorage.setItem(LS_SPLIT, '0'); } catch (err) {}
+    $('lbSplitT').checked = false;
+    S.splitX = null;
+    S.splitPending = false;
+  }
   LB.render();
 });
 
