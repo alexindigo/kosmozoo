@@ -1,0 +1,24 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>kosmozoo</title>
+<link rel="stylesheet" href="./css/app.css">
+</head>
+<body>
+<header id="chrome">
+  <select id="hostPicker" title="ComfyUI host"></select>
+  <input id="filter" type="search" placeholder="filter" spellcheck="false">
+  <span id="status" aria-live="polite"></span>
+</header>
+<main id="grid" role="list"></main>
+<div id="lightbox" hidden>
+  <img id="lbCandidate" alt="">
+  <img id="lbAnchor" alt="">
+  <div id="lbGuides"></div>
+  <div id="lbRoi"></div>
+</div>
+<script type="module" src="./js/main.mjs"></script>
+</body>
+</html>
