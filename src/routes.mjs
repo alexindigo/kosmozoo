@@ -142,6 +142,61 @@ export function makeRouter(ctx) {
     return Response.json(ctx.plugins ? ctx.plugins.list() : []);
   });
 
+  // --- scraper control (the menu's "metadata scan" row) ---------------------
+  add("GET", "/api/scraper", async () => {
+    const pending = {};
+    for (const name of Object.keys(ctx.hosts)) {
+      pending[name] = ctx.scraper ? ctx.scraper.pending(name) : 0;
+    }
+    return Response.json({
+      enabled: ctx.settings.get("core.scraper", "enabled", true),
+      paused: ctx.settings.get("core.scraper", "paused", false),
+      pending,
+    });
+  });
+
+  add("POST", "/api/scraper", async (req) => {
+    const body = await req.json();
+    if (typeof body.enabled === "boolean") {
+      await ctx.settings.set("core.scraper", "enabled", body.enabled);
+    }
+    if (typeof body.paused === "boolean") {
+      await ctx.settings.set("core.scraper", "paused", body.paused);
+    }
+    return Response.json({
+      enabled: ctx.settings.get("core.scraper", "enabled", true),
+      paused: ctx.settings.get("core.scraper", "paused", false),
+    });
+  });
+
+  // --- feedback document ----------------------------------------------------
+  // Download the exact feedback.json as stored (the outgoing dlFeedback link).
+  add("GET", "/api/feedback", async () => {
+    const { readFile } = await import("node:fs/promises");
+    try {
+      const body = await readFile(ctx.store.feedbackPath);
+      return new Response(body, {
+        headers: {
+          "Content-Type": "application/json",
+          "Content-Disposition": "attachment; filename=\"kosmozoo_feedback.json\"",
+        },
+      });
+    } catch {
+      return Response.json({ error: "no feedback document yet" }, { status: 404 });
+    }
+  });
+
+  // Where judgments live. Applied live: the store re-opens at the new path.
+  add("PUT", "/api/feedback-path", async (req) => {
+    const { path } = await req.json();
+    if (!path || typeof path !== "string") {
+      return Response.json({ error: "path required" }, { status: 400 });
+    }
+    await ctx.store.setFeedbackPath(path);
+    await ctx.settings.set("core", "feedbackPath", path);
+    return Response.json({ feedbackPath: ctx.store.feedbackPath });
+  });
+
   return {
     get ctx() { return ctx; },
     set ctx(v) { ctx = v; },
