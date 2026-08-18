@@ -17,6 +17,7 @@ export class Store {
   #feedbackPath;
   #meta;      // { version, data: { "host:filename": { meta, source, hasWorkflow, nopng, ext, updatedAt } } }
   #feedback;  // { version, data: { "host:filename": { notes:{pos,neg}, vote, favorite, plugins:{...} } } }
+  #metaVersion = 0;  // bumped on every meta write; the client's poll channel
 
   static async open(stateDir, feedbackPath) {
     const s = new Store();
@@ -33,10 +34,36 @@ export class Store {
   }
   async metaPut(host, filename, meta, { source = "history", hasWorkflow = false, nopng = false, ext = 1 } = {}) {
     this.#meta.data[hostKey(host, filename)] = { meta, source, hasWorkflow, nopng, ext, updatedAt: Date.now() };
+    this.#metaVersion++;
     await this.#saveMeta();
   }
   metaCount() {
     return Object.keys(this.#meta.data).length;
+  }
+
+  // The client's poll channel: bumped on every meta write.
+  get metaVersion() { return this.#metaVersion; }
+
+  // filename -> meta for one host (nulls skipped — nopng markers stay server-side)
+  metaForHost(host) {
+    const out = {};
+    const prefix = host + ":";
+    for (const [k, v] of Object.entries(this.#meta.data)) {
+      if (k.startsWith(prefix) && v.meta) out[k.slice(prefix.length)] = v.meta;
+    }
+    return out;
+  }
+
+  // Filenames needing NO (re)extraction: current extractor version, or a
+  // nopng negative marker (outgoing meta_fresh). Without this the scraper's
+  // walk re-queues already-scraped files on every listing.
+  metaFresh(host, minExt) {
+    const out = new Set();
+    for (const [k, v] of Object.entries(this.#meta.data)) {
+      if (!k.startsWith(host + ":")) continue;
+      if (v.nopng || v.ext >= minExt) out.add(k.slice(host.length + 1));
+    }
+    return out;
   }
 
   // --- judgments (irreplaceable) -----------------------------------------
