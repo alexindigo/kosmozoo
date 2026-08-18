@@ -4,10 +4,15 @@ import { S, render, onRender } from "./state.mjs";
 import { api } from "./api.mjs";
 import { openAt, close, initLightbox } from "./lightbox.mjs";
 import { addAnchorFiles } from "./anchors.mjs";
-import { initRoi } from "./roi.mjs";
+import { initRoi, setRoi } from "./roi.mjs";
+import { initClientPlugins } from "./plugins-client.mjs";
+import { axisStatus } from "./axes.mjs";
 import { renderChunked, setVisibleRange, resetWindow, prefetchFrom } from "./volume.mjs";
 
 const $ = (id) => document.getElementById(id);
+
+// test seam: e2e drives the same state the keys do (window.__kz)
+window.__kz = { S, setRoi };
 
 // drag-and-drop anywhere drops anchors (local files, never uploaded)
 document.addEventListener("dragover", (e) => e.preventDefault());
@@ -69,12 +74,13 @@ onRender((s) => {
     step();
   });
   const anchorsNote = s.anchors.length ? ` · ${s.anchors.length} anchor(s)` : "";
-  $("status").textContent = `${s.images.length} images${anchorsNote}`;
+  $("status").textContent = `${s.images.length} images${anchorsNote} · ${axisStatus()}`;
 });
 
 // --- boot ------------------------------------------------------------------
 
 async function boot() {
+  await initClientPlugins(); // before axes so plugin modes are registered
   await initLightbox();
   await initRoi();
   S.hosts = await api.hosts();

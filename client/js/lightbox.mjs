@@ -10,6 +10,10 @@
 import { S, render } from "./state.mjs";
 import { api } from "./api.mjs";
 import { freshView, transform, viewToPersisted, viewFromPersisted } from "./geometry.mjs";
+import { cycleAxis } from "./axes.mjs";
+import { zoomToRoi } from "./roi.mjs";
+import { prefetchFrom, applyWindow } from "./volume.mjs";
+import { applyComposition } from "./plugins-client.mjs";
 
 const $ = (id) => document.getElementById(id);
 
@@ -20,6 +24,16 @@ let persistedViews = {};
 export async function initLightbox() {
   persistedViews = await api.settings(viewStoreKey).catch(() => ({}));
   document.addEventListener("keydown", onKey);
+  // Detector status drives the face-anchored alignment need (absent ≠ broken).
+  try {
+    const plugins = await api.plugins();
+    if (plugins.some((p) => p.name === "detector")) {
+      const r = await fetch("/api/plugins/detector/status");
+      S.detector = await r.json();
+    }
+  } catch {
+    S.detector = { state: "absent" };
+  }
 }
 
 function currentImage() {
@@ -73,6 +87,7 @@ async function switchColumn() {
   S.lightbox.col = S.lightbox.col === "candidate" ? "anchor" : "candidate";
   if (!shared) readBack();
   // shared: leave S.lightbox.view untouched — identical registration.
+  await applyComp(); // column visibility is the composition mode's business
   render();
 }
 
@@ -86,7 +101,6 @@ export async function lbShow() {
   lb.hidden = false;
 
   const el = S.lightbox.col === "anchor" ? $("lbAnchor") : $("lbCandidate");
-  const other = S.lightbox.col === "anchor" ? $("lbCandidate") : $("lbAnchor");
 
   // Preload off-DOM; only swap once decoded (cover the swap).
   const img = new Image();
@@ -99,8 +113,7 @@ export async function lbShow() {
   if (gen !== S.lightbox.loadGen) return; // a newer navigation superseded us
   el.src = src;
   el.style.transform = transform(S.lightbox.view, currentBox(img));
-  other.style.opacity = "0";
-  el.style.opacity = "1";
+  await applyComp(); // visibility is the composition mode's business
   render();
 }
 
@@ -112,6 +125,8 @@ function currentBox(img) {
 }
 
 // Blink: Left/Right alternates candidate ↔ anchor.
+// c/a cycle the composition/alignment axes (keys are the primary input);
+// r frames the ROI.
 async function onKey(e) {
   if (!S.lightbox.open) return;
   switch (e.key) {
@@ -123,12 +138,60 @@ async function onKey(e) {
       e.preventDefault(); await step(-1); break;
     case "ArrowDown":
       e.preventDefault(); await step(1); break;
+    case "c":
+      e.preventDefault(); cycleAxis("composition"); applyComp(); break;
+    case "a":
+      e.preventDefault(); cycleAxis("alignment"); break;
+    case "r":
+      e.preventDefault();
+      if (S.roi) { S.lightbox.view = zoomToRoi(S.lightbox.view); applyView(); }
+      break;
     case "Escape":
       e.preventDefault(); await close(); break;
   }
 }
 
-// harvest #2 on navigation too: write back before moving.
+// Apply the current view transform to the visible column's image.
+function applyView() {
+  const el = S.lightbox.col === "anchor" ? $("lbAnchor") : $("lbCandidate");
+  if (el?.src) {
+    el.style.transform = transform(S.lightbox.view, currentBox(el));
+  }
+}
+
+// Composition modes composite the pair; flicker (default) shows one column.
+async function applyComp() {
+  const cand = $("lbCandidate"), anch = $("lbAnchor");
+  const mode = S.axes.composition;
+  if (mode === "flicker") {
+    // one column visible — blink territory
+    cand.style.mixBlendMode = "";
+    cand.style.clipPath = "none";
+    cand.style.opacity = S.lightbox.col === "candidate" ? "1" : "0";
+    anch.style.opacity = S.lightbox.col === "anchor" ? "1" : "0";
+    return;
+  }
+  if (!anchorImage()) return; // composite modes need an anchor
+  // both visible: anchor is the underlay, candidate takes the mode's blend
+  anch.style.opacity = "1";
+  anch.style.transform = transform(S.lightbox.view, currentBox(anch));
+  if (mode === "blend") {
+    cand.style.mixBlendMode = "";
+    cand.style.clipPath = "none";
+    cand.style.opacity = "0.5";
+  } else if (mode === "split") {
+    cand.style.mixBlendMode = "";
+    cand.style.opacity = "1";
+    cand.style.clipPath = "inset(0 0 0 50%)"; // right half candidate
+  } else {
+    // plugin-provided modes (difference, …) via the client registry
+    await applyComposition(mode, cand, anch);
+  }
+  render();
+}
+
+// harvest #2 on navigation too: write back before moving. The window
+// follows the keyboard; prefetch warms the direction of travel.
 async function step(dir) {
   await writeBack();
   const next = S.lightbox.index + dir;
@@ -136,6 +199,8 @@ async function step(dir) {
   S.lightbox.index = next;
   S.lightbox.col = "candidate";
   readBack();
+  prefetchFrom(next, dir);
+  applyWindow();
   await lbShow();
 }
 

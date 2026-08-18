@@ -71,7 +71,7 @@ Deno.test("state: lightbox carries a load-generation guard (harvest #1)", () => 
 
 Deno.test("state: three axes declared, ROI manual-first (null until set)", () => {
   assertEquals(S.axes.alignment, "shared");
-  assertEquals(S.axes.composition, "blend");
+  assertEquals(S.axes.composition, "flicker"); // manual blink is the default mode
   assertEquals(S.roi, null);
   assert(Array.isArray(S.guides));
 });

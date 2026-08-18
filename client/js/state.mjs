@@ -29,8 +29,10 @@ export const S = {
   // axes (see docs/spec.md §1)
   axes: {
     alignment: "shared",      // 'independent' | 'shared' | 'face-anchored'
-    composition: "blend",     // 'blend' | 'split' | 'difference' | 'flicker'
+    composition: "flicker",   // 'flicker' | 'blend' | 'split' | 'difference'
   },
+  axisReason: null,           // why a just-cycled-past value is unavailable
+  detector: null,             // detector plugin status, when present
   roi: null,            // { fx, fy, fw, fh } box-fractions, manual-first
   guides: [],           // [{ axis, pos }] — persist globally (harvest #12)
 };
