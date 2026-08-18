@@ -1,0 +1,30 @@
+{
+  "name": "kosmozoo",
+  "image": "mcr.microsoft.com/devcontainers/base:debian",
+  "features": {
+    // TODO(user): pin by digest, not tag, per repo policy. From a host with
+    // GHCR access:
+    //   TOKEN=$(curl -sf "https://ghcr.io/token?scope=repository:devcontainers/features/deno:pull" | jq -r .token)
+    //   curl -sf -H "Authorization: Bearer $TOKEN" \
+    //     -H "Accept: application/vnd.oci.image.index.v1+json" \
+    //     https://ghcr.io/v2/devcontainers/features/deno/manifests/1 \
+    //     | jq -r '.manifests[0].digest'   # or the top-level digest
+    // then replace the value below with
+    //   "ghcr.io/devcontainers/features/deno@sha256:<digest>": {}
+    // Anonymous token issuance was 403 from this network at authoring time,
+    // so the digest could not be resolved automatically.
+    "ghcr.io/devcontainers/features/deno:1": {}
+  },
+  "runArgs": [
+    "--memory=4g",
+    "--memory-swap=4g",
+    "--pids-limit=256",
+    "--cpus=2"
+  ],
+  "forwardPorts": [2084],
+  "customizations": {
+    "vscode": {
+      "extensions": ["denoland.vscode-deno"]
+    }
+  }
+}
