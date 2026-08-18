@@ -136,6 +136,20 @@ async function attempt(name, fn) {
     check("identical pair composites near-black", mean < 2, `mean=${mean.toFixed(2)}`);
   });
 
+  // vote keys persist to the engine and survive the reveal
+  await attempt("vote keys persist (u/d/f)", async () => {
+    await page.key("u");
+    await page.poll("window.__kz.S.images[window.__kz.S.lightbox.index]?.judgment?.vote === 'up'", 5000);
+    const id = await page.evaluate("window.__kz.S.images[window.__kz.S.lightbox.index].id");
+    const serverSide = await page.evaluate(
+      `(async () => (await fetch("/api/judgments/" + encodeURIComponent(${JSON.stringify(id)}))).json())()`);
+    check("vote reached the engine", serverSide.vote === "up", JSON.stringify(serverSide));
+    await page.key("f");
+    await page.poll("window.__kz.S.images[window.__kz.S.lightbox.index]?.judgment?.favorite === true", 5000);
+    await page.key("u"); // toggle back off
+    await page.poll("!window.__kz.S.images[window.__kz.S.lightbox.index]?.judgment?.vote", 5000);
+  });
+
   // --- row 12 ---------------------------------------------------------------
   await attempt("row 12: volume", async () => {
     await page.key("Escape");

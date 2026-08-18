@@ -14,6 +14,7 @@ import { cycleAxis } from "./axes.mjs";
 import { zoomToRoi } from "./roi.mjs";
 import { prefetchFrom, applyWindow } from "./volume.mjs";
 import { applyComposition } from "./plugins-client.mjs";
+import { setVote, toggleFavorite } from "./judgment.mjs";
 
 const $ = (id) => document.getElementById(id);
 
@@ -143,6 +144,18 @@ async function onKey(e) {
       e.preventDefault(); cycleAxis("composition"); applyComp(); break;
     case "a":
       e.preventDefault(); cycleAxis("alignment"); break;
+    case "u":
+      e.preventDefault();
+      await setVote(currentImage(), currentImage()?.judgment?.vote === "up" ? null : "up");
+      break;
+    case "d":
+      e.preventDefault();
+      await setVote(currentImage(), currentImage()?.judgment?.vote === "down" ? null : "down");
+      break;
+    case "f":
+      e.preventDefault();
+      await toggleFavorite(currentImage());
+      break;
     case "r":
       e.preventDefault();
       if (S.roi) { S.lightbox.view = zoomToRoi(S.lightbox.view); applyView(); }

@@ -7,7 +7,7 @@ import { addAnchorFiles } from "./anchors.mjs";
 import { initRoi, setRoi } from "./roi.mjs";
 import { initClientPlugins } from "./plugins-client.mjs";
 import { axisStatus } from "./axes.mjs";
-import { isVisible } from "./judgment.mjs";
+import { isVisible, initJudgment } from "./judgment.mjs";
 import { renderChunked, setVisibleRange, resetWindow, prefetchFrom } from "./volume.mjs";
 
 const $ = (id) => document.getElementById(id);
@@ -108,6 +108,7 @@ async function boot() {
   await initClientPlugins(); // before axes so plugin modes are registered
   await initLightbox();
   await initRoi();
+  await initJudgment();
   S.hosts = await api.hosts();
   S.host = Object.keys(S.hosts)[0] ?? null;
   render();
