@@ -70,6 +70,18 @@ export class Store {
     return Object.keys(this.#feedback.data).length;
   }
 
+  get feedbackPath() {
+    return this.#feedbackPath;
+  }
+
+  // Move the judgment document to a new path, live: open (or create) the
+  // target, swap it in. The old file is left untouched.
+  async setFeedbackPath(path) {
+    const doc = await loadVersioned(path, { current: CURRENT, empty: () => ({}) });
+    this.#feedbackPath = path;
+    this.#feedback = doc;
+  }
+
   // Batch exporters iterate the whole judgment document (plugin host use).
   feedbackAll() {
     return structuredClone(this.#feedback.data);

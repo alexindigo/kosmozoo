@@ -18,11 +18,14 @@ import { PluginHost } from "./plugins.mjs";
 const PORT = parseInt(Deno.env.get("KOZMOZOO_PORT") ?? "2084", 10);
 
 const stateDir = await ensureStateDir(resolveStateDir());
-const feedbackPath = Deno.env.get("KOZMOZOO_FEEDBACK")
-  ?? `${Deno.env.get("HOME")}/Documents/kosmozoo_feedback.json`;
 
 const settings = await Settings.open(stateDir);
-const store = await Store.open(stateDir, feedbackPath);
+const store = await Store.open(
+  stateDir,
+  settings.get("core", "feedbackPath", null)
+    ?? Deno.env.get("KOZMOZOO_FEEDBACK")
+    ?? `${Deno.env.get("HOME")}/Documents/kosmozoo_feedback.json`,
+);
 const hosts = await loadHosts(settings); // env seeds first boot, then user-managed
 
 const router = makeRouter({ hosts, store, settings, plugins: null });
@@ -33,6 +36,7 @@ router.ctx = { hosts, store, settings, plugins };
 // Background metadata walker — headless, politeness set intact.
 const scraper = new Scraper({ hosts, store, settings });
 scraper.start();
+router.ctx.scraper = scraper;
 
 Deno.serve({ port: PORT }, async (req) => {
   const url = new URL(req.url);
