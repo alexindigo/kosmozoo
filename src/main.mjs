@@ -12,6 +12,8 @@ import { Store } from "./store.mjs";
 import { parseHosts } from "./hosts.mjs";
 import { makeRouter } from "./routes.mjs";
 import { serveStatic } from "./static.mjs";
+import { Scraper } from "./scraper.mjs";
+import { PluginHost } from "./plugins.mjs";
 
 const PORT = parseInt(Deno.env.get("KOZMOZOO_PORT") ?? "2084", 10);
 
@@ -24,6 +26,13 @@ const store = await Store.open(stateDir, feedbackPath);
 const hosts = parseHosts();
 
 const router = makeRouter({ hosts, store, settings, plugins: null });
+const plugins = new PluginHost({ store, settings, router, hosts });
+const discovered = await plugins.discover();
+router.ctx = { hosts, store, settings, plugins };
+
+// Background metadata walker — headless, politeness set intact.
+const scraper = new Scraper({ hosts, store, settings });
+scraper.start();
 
 Deno.serve({ port: PORT }, async (req) => {
   const url = new URL(req.url);
@@ -34,8 +43,15 @@ Deno.serve({ port: PORT }, async (req) => {
       return Response.json({ error: String(e?.message ?? e) }, { status: 500 });
     }
   }
+  // plugin client halves: /plugins/<name>/client.js
+  if (url.pathname.startsWith("/plugins/")) {
+    return serveStatic(url.pathname); // static.mjs maps this tier
+  }
   return serveStatic(url.pathname);
 });
 
 console.log(`kosmozoo engine on http://127.0.0.1:${PORT}  (state: ${stateDir})`);
 console.log(`hosts: ${Object.keys(hosts).join(", ")}`);
+if (discovered.length) {
+  console.log(`plugins: ${discovered.map((p) => p.name).join(", ")}`);
+}

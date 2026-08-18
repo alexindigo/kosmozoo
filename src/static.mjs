@@ -3,6 +3,7 @@
 
 import { join, normalize, extname } from "node:path";
 import { readFile } from "node:fs/promises";
+import { pluginDirs } from "./plugins.mjs";
 
 const CLIENT_ROOT = new URL("../client", import.meta.url).pathname;
 
@@ -30,6 +31,21 @@ export async function serveStatic(pathname) {
     } catch {
       return new Response("not found", { status: 404 });
     }
+  }
+
+  // /plugins/<name>/client.js serves a plugin's client half from its
+  // discovery directory. No traversal; name must be a bare identifier.
+  if (pathname.startsWith("/plugins/")) {
+    const rest = pathname.slice("/plugins/".length);
+    if (!/^[a-z0-9_-]+\/client\.js$/.test(rest)) return new Response("forbidden", { status: 403 });
+    const name = rest.split("/")[0];
+    for (const tier of pluginDirs()) {
+      try {
+        const body = await readFile(join(tier, name, "client.js"));
+        return new Response(body, { headers: { "Content-Type": "text/javascript; charset=utf-8" } });
+      } catch { /* try next tier */ }
+    }
+    return new Response("not found", { status: 404 });
   }
 
   let p = pathname === "/" ? "/index.html" : pathname;

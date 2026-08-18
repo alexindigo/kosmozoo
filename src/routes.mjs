@@ -6,7 +6,8 @@
 import { splitHostKey, probeHost, proxyImage } from "./hosts.mjs";
 
 export function makeRouter(ctx) {
-  // ctx: { hosts, store, settings, plugins }
+  // ctx: { hosts, store, settings, plugins } — `router.ctx` is settable so
+  // main.mjs can hand the plugin host back in after construction.
   const routes = [];
 
   const add = (method, pattern, handler) => {
@@ -116,6 +117,8 @@ export function makeRouter(ctx) {
   });
 
   return {
+    get ctx() { return ctx; },
+    set ctx(v) { ctx = v; },
     async handle(req) {
       const url = new URL(req.url);
       const m = match(req.method, url.pathname);
