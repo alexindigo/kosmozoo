@@ -12,7 +12,7 @@ import { renderChunked, setVisibleRange, resetWindow, prefetchFrom } from "./vol
 const $ = (id) => document.getElementById(id);
 
 // test seam: e2e drives the same state the keys do (window.__kz)
-window.__kz = { S, setRoi };
+window.__kz = { S, setRoi, addAnchorFiles };
 
 // drag-and-drop anywhere drops anchors (local files, never uploaded)
 document.addEventListener("dragover", (e) => e.preventDefault());
@@ -77,6 +77,36 @@ onRender((s) => {
   $("status").textContent = `${s.images.length} images${anchorsNote} · ${axisStatus()}`;
 });
 
+// Scroll wiring: the window's scroll half is estimated from grid geometry
+// (fixed row height via aspect-ratio), rAF-throttled. This is mechanism #2
+// (scroll safety net) of the three-mechanism progress design.
+let scrollTick = false;
+window.addEventListener("scroll", () => {
+  if (scrollTick) return;
+  scrollTick = true;
+  requestAnimationFrame(() => {
+    scrollTick = false;
+    const grid = $("grid");
+    const first = grid.querySelector(".card");
+    if (!first) return;
+    const rowH = first.getBoundingClientRect().height + 6; // card + gap
+    const cols = Math.max(1, Math.floor(grid.clientWidth / (first.getBoundingClientRect().width + 6)));
+    const lo = Math.max(0, Math.floor(window.scrollY / rowH) * cols - cols);
+    const hi = Math.min(S.images.length - 1, Math.ceil((window.scrollY + window.innerHeight) / rowH) * cols + cols);
+    setVisibleRange(lo, hi);
+  });
+}, { passive: true });
+
+// Per-host scroll position: restored on host switch (mechanism #3,
+// programmatic restore), persisted in settings.
+const scrollSave = { t: null };
+window.addEventListener("scroll", () => {
+  clearTimeout(scrollSave.t);
+  scrollSave.t = setTimeout(() => {
+    if (S.host) api.setSettings("core.ui", { [`scroll.${S.host}`]: window.scrollY }).catch(() => {});
+  }, 500);
+}, { passive: true });
+
 // --- boot ------------------------------------------------------------------
 
 async function boot() {
@@ -89,6 +119,10 @@ async function boot() {
   if (S.host) {
     S.images = await api.images(S.host);
     render();
+    const saved = await api.settings("core.ui").catch(() => ({}));
+    if (saved[`scroll.${S.host}`]) {
+      requestAnimationFrame(() => window.scrollTo(0, saved[`scroll.${S.host}`]));
+    }
   }
 }
 

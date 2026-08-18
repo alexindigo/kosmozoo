@@ -163,17 +163,24 @@ function applyView() {
 async function applyComp() {
   const cand = $("lbCandidate"), anch = $("lbAnchor");
   const mode = S.axes.composition;
+  const candImg = currentImage();
+  const anchImg = anchorImage();
+  const candSrc = candImg ? api.imageBytesUrl(candImg.id) : null;
+  const anchSrc = anchImg?.src ?? null;
   if (mode === "flicker") {
-    // one column visible — blink territory
+    // one column visible — blink territory; src handled by lbShow
     cand.style.mixBlendMode = "";
     cand.style.clipPath = "none";
     cand.style.opacity = S.lightbox.col === "candidate" ? "1" : "0";
     anch.style.opacity = S.lightbox.col === "anchor" ? "1" : "0";
     return;
   }
-  if (!anchorImage()) return; // composite modes need an anchor
+  if (!anchSrc) return; // composite modes need an anchor
   // both visible: anchor is the underlay, candidate takes the mode's blend
+  if (anch.dataset.cur !== anchSrc) { anch.src = anchSrc; anch.dataset.cur = anchSrc; }
+  if (candSrc && cand.dataset.cur !== candSrc) { cand.src = candSrc; cand.dataset.cur = candSrc; }
   anch.style.opacity = "1";
+  cand.style.opacity = "1";
   anch.style.transform = transform(S.lightbox.view, currentBox(anch));
   if (mode === "blend") {
     cand.style.mixBlendMode = "";
@@ -181,7 +188,6 @@ async function applyComp() {
     cand.style.opacity = "0.5";
   } else if (mode === "split") {
     cand.style.mixBlendMode = "";
-    cand.style.opacity = "1";
     cand.style.clipPath = "inset(0 0 0 50%)"; // right half candidate
   } else {
     // plugin-provided modes (difference, …) via the client registry

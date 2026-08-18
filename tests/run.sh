@@ -16,4 +16,4 @@ if [ -z "$(ls -A tests/fixtures 2>/dev/null)" ]; then
 fi
 
 FILTER="${1:-}"
-deno test --allow-all ${FILTER:+--filter "$FILTER"} tests/
+deno test --allow-all ${FILTER:+--filter "$FILTER"} tests/t_*.mjs
