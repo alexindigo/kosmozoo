@@ -3,6 +3,35 @@
 // Multi-host is a core capability (four hosts configured today), so host
 // stays part of image identity: keys are `host:filename`.
 
+// Hosts are user config and change over time (spec §5): env seeds the map
+// on first boot, then it is user-managed and persisted in settings
+// (core.hosts.map). The returned object is mutated in place so every holder
+// of the reference (router ctx, scraper) sees changes.
+export async function loadHosts(settings, env = Deno.env.toObject()) {
+  const existing = settings.get("core.hosts", "map", null);
+  if (existing && Object.keys(existing).length) return existing;
+  const seed = parseHosts(env);
+  await settings.set("core.hosts", "map", seed);
+  return seed;
+}
+
+const NAME_RE = /^[\w][\w.-]*$/;
+const ADDR_RE = /^[\w.-]+:\d+$/;
+
+export function validateHost(name, address) {
+  if (!name || !NAME_RE.test(name)) return "bad name (word chars, dots, hyphens)";
+  if (!address || !ADDR_RE.test(address)) return "bad address (host:port)";
+  return null;
+}
+
+export function addHost(map, name, address) {
+  map[name] = address;
+}
+
+export function removeHost(map, name) {
+  delete map[name];
+}
+
 export function parseHosts(env = Deno.env.toObject()) {
   // KOZMOZOO_HOSTS: "name=host:port,name2=host2:port2"
   const raw = env.KOZMOZOO_HOSTS ?? "local=127.0.0.1:8188";

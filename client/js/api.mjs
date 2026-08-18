@@ -15,6 +15,8 @@ async function req(method, path, body) {
 
 export const api = {
   hosts: () => req("GET", "/api/hosts"),
+  addHost: (name, address) => req("POST", "/api/hosts", { name, address }),
+  removeHost: (name) => req("DELETE", `/api/hosts/${encodeURIComponent(name)}`),
   images: (host) => req("GET", `/api/images?host=${encodeURIComponent(host)}`),
   image: (id) => req("GET", `/api/images/${encodeURIComponent(id)}`),
   imageBytesUrl: (id) => `${BASE}/api/images/${encodeURIComponent(id)}/bytes`,

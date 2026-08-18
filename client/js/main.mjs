@@ -26,7 +26,9 @@ document.addEventListener("drop", async (e) => {
 
 onRender((s) => {
   const picker = $("hostPicker");
-  if (picker.options.length !== Object.keys(s.hosts).length) {
+  const names = Object.keys(s.hosts).join(""); // rebuild on any set change
+  if (picker.dataset.names !== names) {
+    picker.dataset.names = names;
     picker.innerHTML = "";
     for (const [name, h] of Object.entries(s.hosts)) {
       const opt = document.createElement("option");
@@ -126,6 +128,32 @@ $("hostPicker").addEventListener("change", async (e) => {
   S.host = e.target.value;
   S.images = await api.images(S.host);
   render();
+});
+$("hostAdd").addEventListener("click", async () => {
+  const input = prompt("Add host  (name=host:port)", "");
+  if (!input) return;
+  const eq = input.indexOf("=");
+  if (eq < 1) { $("status").textContent = "host must be name=host:port"; return; }
+  try {
+    await api.addHost(input.slice(0, eq).trim(), input.slice(eq + 1).trim());
+    S.hosts = await api.hosts();
+    render();
+  } catch (err) {
+    $("status").textContent = `add host failed: ${err.message}`;
+  }
+});
+$("hostRemove").addEventListener("click", async () => {
+  if (!S.host) return;
+  if (!confirm(`Remove host "${S.host}"?`)) return;
+  try {
+    await api.removeHost(S.host);
+    S.hosts = await api.hosts();
+    S.host = Object.keys(S.hosts)[0] ?? null;
+    S.images = S.host ? await api.images(S.host) : [];
+    render();
+  } catch (err) {
+    $("status").textContent = `remove host failed: ${err.message}`;
+  }
 });
 $("filter").addEventListener("input", (e) => { S.filter = e.target.value; render(); });
 $("grid").addEventListener("click", async (e) => {

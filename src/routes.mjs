@@ -3,7 +3,7 @@
 // Resource-shaped, documented, public. Plugin routes live under
 // /api/plugins/<name>/... and are registered by the plugin host (Phase 10).
 
-import { splitHostKey, probeHost, proxyImage } from "./hosts.mjs";
+import { splitHostKey, probeHost, proxyImage, validateHost, addHost, removeHost } from "./hosts.mjs";
 
 export function makeRouter(ctx) {
   // ctx: { hosts, store, settings, plugins } — `router.ctx` is settable so
@@ -41,6 +41,32 @@ export function makeRouter(ctx) {
       out[name] = { address: addr, online: await probeHost(addr) };
     }
     return Response.json(out);
+  });
+
+  // Hosts are user-managed at runtime (the outgoing app's menu add/remove).
+  // Persisted to settings core.hosts.map; env only seeds the first boot.
+  add("POST", "/api/hosts", async (req) => {
+    let body;
+    try {
+      body = await req.json();
+    } catch {
+      return Response.json({ error: "JSON body: {name, address}" }, { status: 400 });
+    }
+    const err = validateHost(body.name, body.address);
+    if (err) return Response.json({ error: err }, { status: 400 });
+    addHost(ctx.hosts, body.name, body.address);
+    await ctx.settings.set("core.hosts", "map", ctx.hosts);
+    return Response.json({ name: body.name, address: body.address, online: await probeHost(body.address) });
+  });
+
+  add("DELETE", "/api/hosts/<name>", async (_req, { name }) => {
+    if (!(name in ctx.hosts)) return Response.json({ error: "unknown host" }, { status: 404 });
+    if (Object.keys(ctx.hosts).length === 1) {
+      return Response.json({ error: "cannot remove the last host" }, { status: 400 });
+    }
+    removeHost(ctx.hosts, name);
+    await ctx.settings.set("core.hosts", "map", ctx.hosts);
+    return Response.json({ removed: name });
   });
 
   add("GET", "/api/images", async (req, _params, url) => {

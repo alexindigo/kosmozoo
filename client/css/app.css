@@ -10,6 +10,9 @@ html, body { margin: 0; height: 100%; background: #111; color: #ddd;
   background: #1a1a1a; border-bottom: 1px solid #333; z-index: 10; }
 #chrome select, #chrome input { background: #222; color: #ddd;
   border: 1px solid #444; border-radius: 4px; padding: 3px 6px; }
+#chrome button { background: #222; color: #ddd; border: 1px solid #444;
+  border-radius: 4px; padding: 2px 9px; cursor: pointer; font-size: 14px; }
+#chrome button:hover { border-color: #888; }
 #status { margin-left: auto; opacity: 0.7; }
 
 #grid { padding: 44px 8px 8px; display: grid;

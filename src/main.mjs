@@ -9,7 +9,7 @@
 import { resolveStateDir, ensureStateDir } from "./state.mjs";
 import { Settings } from "./settings.mjs";
 import { Store } from "./store.mjs";
-import { parseHosts } from "./hosts.mjs";
+import { parseHosts, loadHosts } from "./hosts.mjs";
 import { makeRouter } from "./routes.mjs";
 import { serveStatic } from "./static.mjs";
 import { Scraper } from "./scraper.mjs";
@@ -23,7 +23,7 @@ const feedbackPath = Deno.env.get("KOZMOZOO_FEEDBACK")
 
 const settings = await Settings.open(stateDir);
 const store = await Store.open(stateDir, feedbackPath);
-const hosts = parseHosts();
+const hosts = await loadHosts(settings); // env seeds first boot, then user-managed
 
 const router = makeRouter({ hosts, store, settings, plugins: null });
 const plugins = new PluginHost({ store, settings, router, hosts });

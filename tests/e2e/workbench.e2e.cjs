@@ -150,6 +150,26 @@ async function attempt(name, fn) {
     await page.poll("!window.__kz.S.images[window.__kz.S.lightbox.index]?.judgment?.vote", 5000);
   });
 
+  // host management through the real API (the + / − chrome calls these)
+  await attempt("host add/remove via API", async () => {
+    await page.evaluate(`(async () => {
+      await fetch("/api/hosts", { method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ name: "e2e-tmp", address: "127.0.0.1:9" }) });
+      return true;
+    })()`);
+    await page.evaluate("(async () => { window.__kz.S.hosts = await (await fetch('/api/hosts')).json(); })()");
+    await page.evaluate("window.__kz.S.hosts && (window.__kz.render ?? (()=>{})), true");
+    let has = await page.evaluate("'e2e-tmp' in window.__kz.S.hosts");
+    check("added host appears in state", has);
+    await page.evaluate(`(async () => {
+      await fetch("/api/hosts/e2e-tmp", { method: "DELETE" });
+      window.__kz.S.hosts = await (await fetch("/api/hosts")).json();
+      return true;
+    })()`);
+    has = await page.evaluate("'e2e-tmp' in window.__kz.S.hosts");
+    check("removed host gone from state", !has);
+  });
+
   // --- row 12 ---------------------------------------------------------------
   await attempt("row 12: volume", async () => {
     await page.key("Escape");
