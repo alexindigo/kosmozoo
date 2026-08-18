@@ -7,6 +7,7 @@ import { addAnchorFiles } from "./anchors.mjs";
 import { initRoi, setRoi } from "./roi.mjs";
 import { initClientPlugins } from "./plugins-client.mjs";
 import { axisStatus } from "./axes.mjs";
+import { isVisible } from "./judgment.mjs";
 import { renderChunked, setVisibleRange, resetWindow, prefetchFrom } from "./volume.mjs";
 
 const $ = (id) => document.getElementById(id);
@@ -37,8 +38,10 @@ onRender((s) => {
   if (s.host) picker.value = s.host;
 });
 
-// The grid renders card skeletons chunk by chunk; image *bytes* are loaded
-// only inside the active window (volume.mjs). render() just schedules.
+// The grid renders card skeletons chunk by chunk via volume.mjs (which keeps
+// the cardEls registry the window loader reads); image *bytes* load only
+// inside the active window. Judgment visibility (down-vote hides) and the
+// filename filter both shape the view here.
 let gridScheduled = false;
 onRender((s) => {
   if (gridScheduled) return;
@@ -49,29 +52,21 @@ onRender((s) => {
     grid.innerHTML = "";
     resetWindow();
     const filter = s.filter.toLowerCase();
-    const view = filter
-      ? s.images.map((img, i) => [img, i]).filter(([img]) => img.filename.toLowerCase().includes(filter))
-      : s.images.map((img, i) => [img, i]);
-    // renderChunked builds skeletons for the *filtered view's* indices
-    let i = 0;
-    const step = () => {
-      const end = Math.min(i + 60, view.length);
-      for (; i < end; i++) {
-        const [img, idx] = view[i];
-        const card = document.createElement("div");
-        card.className = "card";
-        card.dataset.index = idx;
-        if (img.judgment?.vote) card.dataset.vote = img.judgment.vote;
-        if (img.judgment?.favorite) card.dataset.favorite = "1";
-        const el = document.createElement("img");
-        el.alt = img.filename;
-        card.appendChild(el);
-        grid.appendChild(card);
-      }
-      if (i < view.length) requestAnimationFrame(step);
-      else setVisibleRange(0, Math.min(view.length, 50));
-    };
-    step();
+    const view = [];
+    for (let i = 0; i < s.images.length; i++) {
+      const img = s.images[i];
+      if (filter && !img.filename.toLowerCase().includes(filter)) continue;
+      if (!isVisible(img)) continue; // down-voted and not revealed
+      view.push(i);
+    }
+    renderChunked(grid, view, (card, img) => {
+      if (img.judgment?.vote) card.dataset.vote = img.judgment.vote;
+      if (img.judgment?.favorite) card.dataset.favorite = "1";
+    }, () => {
+      // initial window: the first screenful
+      const cols = Math.max(1, Math.floor(grid.clientWidth / 186));
+      setVisibleRange(0, Math.min(view.length, cols * 4));
+    });
   });
   const anchorsNote = s.anchors.length ? ` · ${s.anchors.length} anchor(s)` : "";
   $("status").textContent = `${s.images.length} images${anchorsNote} · ${axisStatus()}`;

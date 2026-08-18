@@ -87,8 +87,9 @@ async function switchColumn() {
   S.lightbox.col = S.lightbox.col === "candidate" ? "anchor" : "candidate";
   if (!shared) readBack();
   // shared: leave S.lightbox.view untouched — identical registration.
-  await applyComp(); // column visibility is the composition mode's business
-  render();
+  // lbShow loads the incoming column's src (generation-guarded), applies the
+  // view, and lets the composition mode decide visibility.
+  await lbShow();
 }
 
 // harvest #1 + #3: load with a generation guard; hold the outgoing frame
@@ -111,7 +112,7 @@ export async function lbShow() {
     // keep showing the outgoing frame on failure
   }
   if (gen !== S.lightbox.loadGen) return; // a newer navigation superseded us
-  el.src = src;
+  if (el.dataset.cur !== src) { el.src = src; el.dataset.cur = src; }
   el.style.transform = transform(S.lightbox.view, currentBox(img));
   await applyComp(); // visibility is the composition mode's business
   render();

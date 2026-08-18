@@ -24,6 +24,7 @@ let visibleLo = 0, visibleHi = 0;
 export function resetWindow() {
   cardEls.length = 0;
   loadedSet.clear();
+  renderedPos = 0;
   visibleLo = 0; visibleHi = 0;
 }
 
@@ -114,21 +115,27 @@ export function prefetchFrom(index, dir, fetcher = globalThis.fetch) {
 }
 
 // Chunked render: build card skeletons a frame at a time so a 3,000-image
-// grid doesn't block first paint.
-export function renderChunked(grid, done) {
-  const start = cardEls.length;
-  const end = Math.min(start + CHUNK, S.images.length);
-  for (let i = start; i < end; i++) {
+// grid doesn't block first paint. cardEls is indexed by IMAGE index (sparse
+// under filtering); view is the display order of image indices. decorate()
+// carries the grid's visual concerns (badges) without volume.mjs knowing them.
+let renderedPos = 0;
+export function renderChunked(grid, view, decorate, done) {
+  const start = renderedPos;
+  const end = Math.min(start + CHUNK, view.length);
+  for (let p = start; p < end; p++) {
+    const imgIdx = view[p];
     const card = document.createElement("div");
     card.className = "card";
-    card.dataset.index = i;
+    card.dataset.index = imgIdx;
     const img = document.createElement("img");
-    img.alt = S.images[i].filename;
+    img.alt = S.images[imgIdx].filename;
     card.appendChild(img);
+    decorate?.(card, S.images[imgIdx], imgIdx);
     grid.appendChild(card);
-    cardEls.push(card);
+    cardEls[imgIdx] = card;
   }
-  if (end < S.images.length) requestAnimationFrame(() => renderChunked(grid, done));
+  renderedPos = end;
+  if (end < view.length) requestAnimationFrame(() => renderChunked(grid, view, decorate, done));
   else done?.();
 }
 
