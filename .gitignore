@@ -12,3 +12,4 @@ metadata.db-wal
 metadata.db-shm
 TODO.md
 .envrc
+state/
