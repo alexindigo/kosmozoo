@@ -70,6 +70,11 @@ export class Store {
     return Object.keys(this.#feedback.data).length;
   }
 
+  // Batch exporters iterate the whole judgment document (plugin host use).
+  feedbackAll() {
+    return structuredClone(this.#feedback.data);
+  }
+
   async #saveMeta() {
     await atomicWrite(this.#metaPath, new TextEncoder().encode(JSON.stringify(this.#meta)));
   }

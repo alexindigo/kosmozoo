@@ -96,6 +96,16 @@ export class PluginHost {
       judgments: {
         get: (host, filename) => store.judgmentGet(host, filename),
         set: (host, filename, field, value) => store.judgmentSet(host, filename, field, value),
+        _all: () => store.feedbackAll(), // batch exporters iterate this
+      },
+      // engine-mediated host fetch so plugins never talk to ComfyUI directly
+      _fetchImageBytes: async (hostFilenameKey) => {
+        const i = hostFilenameKey.indexOf(":");
+        const host = hostFilenameKey.slice(0, i), filename = hostFilenameKey.slice(i + 1);
+        const { proxyImage } = await import("./hosts.mjs");
+        const r = await proxyImage(ctx.hosts[host], filename);
+        if (r.status !== 200) return null;
+        return new Uint8Array(await new Response(r.body).arrayBuffer());
       },
     };
   }
