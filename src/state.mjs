@@ -6,7 +6,7 @@
 // discipline feedback.json already proved). Migrations run at load; a rename
 // or shape change carries a migration — never silent loss.
 
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { mkdir, rename, writeFile, readFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 
@@ -39,6 +39,7 @@ export async function ensureStateDir(preferred) {
 
 // Atomic write: tmp file in the same directory, then rename over the target.
 export async function atomicWrite(path, bytes) {
+  await mkdir(dirname(path), { recursive: true });
   const tmp = join(path + ".tmp." + crypto.randomUUID());
   await writeFile(tmp, bytes);
   await rename(tmp, path);

@@ -2,8 +2,18 @@
 
 import { S, render, onRender } from "./state.mjs";
 import { api } from "./api.mjs";
+import { openAt, close, initLightbox } from "./lightbox.mjs";
+import { addAnchorFiles } from "./anchors.mjs";
+import { initRoi } from "./roi.mjs";
 
 const $ = (id) => document.getElementById(id);
+
+// drag-and-drop anywhere drops anchors (local files, never uploaded)
+document.addEventListener("dragover", (e) => e.preventDefault());
+document.addEventListener("drop", async (e) => {
+  e.preventDefault();
+  if (e.dataTransfer?.files?.length) await addAnchorFiles([...e.dataTransfer.files]);
+});
 
 // --- renderers (the only DOM writers) -------------------------------------
 
@@ -40,12 +50,18 @@ onRender((s) => {
     card.appendChild(el);
     grid.appendChild(card);
   }
-  $("status").textContent = `${s.images.length} images`;
+  const anchorsNote = s.anchors.length ? ` · ${s.anchors.length} anchor(s)` : "";
+  $("status").textContent = `${s.images.length} images${anchorsNote}`;
 });
+
+// lightbox visibility is driven by lightbox.mjs (lbShow/close); nothing here
+// writes its DOM directly.
 
 // --- boot ------------------------------------------------------------------
 
 async function boot() {
+  await initLightbox();
+  await initRoi();
   S.hosts = await api.hosts();
   S.host = Object.keys(S.hosts)[0] ?? null;
   render();
@@ -61,12 +77,10 @@ $("hostPicker").addEventListener("change", async (e) => {
   render();
 });
 $("filter").addEventListener("input", (e) => { S.filter = e.target.value; render(); });
-$("grid").addEventListener("click", (e) => {
+$("grid").addEventListener("click", async (e) => {
   const card = e.target.closest(".card");
   if (!card) return;
-  S.lightbox.open = true;
-  S.lightbox.index = parseInt(card.dataset.index, 10);
-  render();
+  await openAt(parseInt(card.dataset.index, 10));
 });
 
 boot().catch((e) => { $("status").textContent = `load failed: ${e.message}`; });

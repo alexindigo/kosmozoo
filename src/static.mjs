@@ -18,6 +18,20 @@ const MIME = {
 };
 
 export async function serveStatic(pathname) {
+  // /shared/<file> exposes selected src/ modules (the extractor) to the
+  // browser — one implementation, engine and client.
+  if (pathname.startsWith("/shared/")) {
+    const name = pathname.slice("/shared/".length);
+    if (!/^[a-z0-9_-]+\.mjs$/.test(name)) return new Response("forbidden", { status: 403 });
+    const full = new URL(`./${name}`, import.meta.url).pathname;
+    try {
+      const body = await readFile(full);
+      return new Response(body, { headers: { "Content-Type": "text/javascript; charset=utf-8" } });
+    } catch {
+      return new Response("not found", { status: 404 });
+    }
+  }
+
   let p = pathname === "/" ? "/index.html" : pathname;
   // prevent traversal
   const full = normalize(join(CLIENT_ROOT, p));
