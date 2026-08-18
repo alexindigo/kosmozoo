@@ -5,6 +5,7 @@ import { api } from "./api.mjs";
 import { openAt, close, initLightbox } from "./lightbox.mjs";
 import { addAnchorFiles } from "./anchors.mjs";
 import { initRoi } from "./roi.mjs";
+import { renderChunked, setVisibleRange, resetWindow, prefetchFrom } from "./volume.mjs";
 
 const $ = (id) => document.getElementById(id);
 
@@ -31,31 +32,45 @@ onRender((s) => {
   if (s.host) picker.value = s.host;
 });
 
+// The grid renders card skeletons chunk by chunk; image *bytes* are loaded
+// only inside the active window (volume.mjs). render() just schedules.
+let gridScheduled = false;
 onRender((s) => {
-  const grid = $("grid");
-  grid.innerHTML = "";
-  const filter = s.filter.toLowerCase();
-  for (let i = 0; i < s.images.length; i++) {
-    const img = s.images[i];
-    if (filter && !img.filename.toLowerCase().includes(filter)) continue;
-    const card = document.createElement("div");
-    card.className = "card";
-    card.dataset.index = i;
-    if (img.judgment?.vote) card.dataset.vote = img.judgment.vote;
-    if (img.judgment?.favorite) card.dataset.favorite = "1";
-    const el = document.createElement("img");
-    el.loading = "lazy";
-    el.src = api.imageBytesUrl(img.id);
-    el.alt = img.filename;
-    card.appendChild(el);
-    grid.appendChild(card);
-  }
+  if (gridScheduled) return;
+  gridScheduled = true;
+  requestAnimationFrame(() => {
+    gridScheduled = false;
+    const grid = $("grid");
+    grid.innerHTML = "";
+    resetWindow();
+    const filter = s.filter.toLowerCase();
+    const view = filter
+      ? s.images.map((img, i) => [img, i]).filter(([img]) => img.filename.toLowerCase().includes(filter))
+      : s.images.map((img, i) => [img, i]);
+    // renderChunked builds skeletons for the *filtered view's* indices
+    let i = 0;
+    const step = () => {
+      const end = Math.min(i + 60, view.length);
+      for (; i < end; i++) {
+        const [img, idx] = view[i];
+        const card = document.createElement("div");
+        card.className = "card";
+        card.dataset.index = idx;
+        if (img.judgment?.vote) card.dataset.vote = img.judgment.vote;
+        if (img.judgment?.favorite) card.dataset.favorite = "1";
+        const el = document.createElement("img");
+        el.alt = img.filename;
+        card.appendChild(el);
+        grid.appendChild(card);
+      }
+      if (i < view.length) requestAnimationFrame(step);
+      else setVisibleRange(0, Math.min(view.length, 50));
+    };
+    step();
+  });
   const anchorsNote = s.anchors.length ? ` · ${s.anchors.length} anchor(s)` : "";
   $("status").textContent = `${s.images.length} images${anchorsNote}`;
 });
-
-// lightbox visibility is driven by lightbox.mjs (lbShow/close); nothing here
-// writes its DOM directly.
 
 // --- boot ------------------------------------------------------------------
 
