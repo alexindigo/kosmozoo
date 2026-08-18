@@ -486,6 +486,70 @@
     background: rgba(20,20,28,.8); color: var(--wipe-orange);
     border-color: color-mix(in srgb, var(--wipe-orange) 55%, transparent);
   }
+  /* metadata strip: semi-transparent one-liner over the image bottom */
+  .mstrip {
+    position: absolute; left: 0; right: 0; bottom: 0;
+    background: rgba(20, 20, 28, .55); color: rgba(255,255,255,.88);
+    font-size: 10.5px; padding: 2px 7px;
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+    pointer-events: none; display: none;
+  }
+  #lbStrip {
+    position: fixed; left: 50%; transform: translateX(-50%);
+    bottom: 14px; z-index: 104; max-width: 92vw;
+    background: rgba(20,20,28,.65); color: rgba(255,255,255,.9);
+    border-radius: 6px; padding: 4px 12px; font-size: 12.5px;
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+    pointer-events: none; display: none;
+  }
+  /* menu link + fields picker panel */
+  .menulink {
+    background: none; border: none; color: var(--accent); padding: 2px 0;
+    font-size: 12px; text-align: left; cursor: pointer;
+  }
+  .menulink:hover { text-decoration: underline; }
+  #fieldsOverlay {
+    position: fixed; inset: 0; z-index: 80;
+    background: rgba(0, 0, 0, .55);
+    display: flex; align-items: center; justify-content: center;
+  }
+  #fieldsOverlay[hidden] { display: none; }
+  #fieldsPanel {
+    position: relative; width: min(520px, calc(100vw - 48px));
+    max-height: 80vh; overflow-y: auto;
+    background: var(--panel); border: 1px solid var(--border);
+    border-radius: 10px; padding: 16px 18px;
+  }
+  #fieldsClose {
+    position: absolute; top: 8px; right: 8px; width: 26px; height: 26px;
+    padding: 0; border-radius: 50%; line-height: 1; font-size: 14px;
+  }
+  #fieldsTitle { font-size: 15px; font-weight: 600; margin-bottom: 4px; }
+  #fieldsSub { font-size: 11.5px; color: var(--dim); margin-bottom: 12px; }
+  #fieldsTable { display: flex; flex-direction: column; gap: 2px; }
+  .frow {
+    display: flex; align-items: center; gap: 10px; padding: 3px 2px 3px 16px;
+    font-size: 13px; border-radius: 4px;
+  }
+  .frow:hover { background: var(--card); }
+  .frow.head { color: var(--dim); font-size: 11px; padding-left: 2px; }
+  .frow .fname2 { flex: 1; font-family: ui-monospace, monospace; font-size: 12px; }
+  .frow .switchwrap, .frow.head span { width: 96px; justify-content: center; }
+  .frow.head span { text-align: center; }
+  .frow.head .fname2 { text-align: left; }
+  .fgrouphead {
+    display: flex; align-items: center; gap: 10px;
+    padding: 8px 2px 3px; margin-top: 6px;
+    border-top: 1px solid var(--border);
+    font-size: 12px; font-weight: 600; color: var(--fg);
+  }
+  .fgrouphead .gname { flex: 1; }
+  .fgrouphead .switchwrap { width: 96px; justify-content: center; }
+  .fgroupbody:first-of-type .fgrouphead { border-top: none; margin-top: 0; }
+  /* compact switches for the picker */
+  .switchwrap.mini .track { width: 22px; height: 13px; }
+  .switchwrap.mini .track::after { width: 9px; height: 9px; }
+  .switchwrap.mini input:checked + .track::after { left: 11px; }
   .anchor .ainfo {
     position: absolute; top: 6px; left: 6px; width: 32px; height: 32px;
     padding: 0; border-radius: 50%; line-height: 1;
@@ -572,6 +636,7 @@
         <button id="scraperPause" title="pause/resume the background scan (laptop mode)">⏸</button>
         <span id="scraperPending"></span>
       </div>
+      <button id="fieldsBtn" class="menulink">metadata fields…</button>
       <div id="menuStatus"></div>
       <div id="fbPathWrap">
         <span>feedback.json path</span>
@@ -600,6 +665,16 @@
     <button id="infoClose" title="close (Esc)">×</button>
     <div id="infoTitle"></div>
     <div id="infoBody"></div>
+  </div>
+</div>
+<div id="fieldsOverlay" hidden>
+  <div id="fieldsPanel">
+    <button id="fieldsClose" title="close (Esc)">×</button>
+    <div id="fieldsTitle">Metadata fields</div>
+    <div id="fieldsSub"><b>under image</b> — the card's metadata panel ·
+      <b>strip</b> — a semi-transparent strip over the image bottom
+      (cards) / screen bottom (lightbox)</div>
+    <div id="fieldsTable"></div>
   </div>
 </div>
 <div id="lightbox">
@@ -638,6 +713,7 @@
     <span id="lbMixVal">100%</span>
   </div>
   <div id="lbAnchorTag">ANCHOR</div>
+  <div id="lbStrip"></div>
   <div id="lbSplit" title="drag to wipe-compare (left: anchor · right: candidate)"><div class="line"></div></div>
   <div id="lbHint">pinch / -+ zoom · drag / shift+arrows pan · Alt+drag rotate · H/V flip · matched or Shift-drag pans both · arrows switch · split line wipes · guides from edges · Esc closes</div>
 </div>
@@ -806,30 +882,76 @@ function extractMeta(entry) {
   if (!graph) return null;
   const nodes = Object.entries(graph).map(([id, n]) => ({ id, ...n }));
 
+  const firstNode = (...bits) => nodes.find(n =>
+    bits.some(b => (n.class_type || '').toLowerCase().includes(b)));
+  const scalarIn = (node, ...keys) => {
+    if (!node || !node.inputs) return null;
+    for (const k of keys) {
+      const v = node.inputs[k];
+      if (['string', 'number'].includes(typeof v)) return v;
+    }
+    return null;
+  };
+  const base = v => v ? String(v).split('/').pop().split('\\').pop() : v;
+
+
   const ks = nodes.find(n => n.class_type === 'KSampler') ||
-             nodes.find(n => /sampler/i.test(n.class_type || ''));
+             nodes.find(n => /sampler/i.test(n.class_type || '') &&
+                             !/select/i.test(n.class_type || '') &&
+                             typeof (n.inputs || {}).steps === 'number' &&
+                             (n.inputs || {}).seed != null);
   const meta = { loras: [] };
+  // linked seed input ([nodeId, slot]) -> the seed node's scalar value
+  const followSeed = (link) => {
+    const t = Array.isArray(link) ? graph[String(link[0])] : null;
+    const v = t && t.inputs && t.inputs.seed;
+    return (typeof v === 'number') ? v : null;
+  };
   if (ks && ks.inputs) {
     for (const k of ['seed', 'steps', 'cfg', 'sampler_name', 'scheduler',
                      'denoise']) {
-      if (typeof ks.inputs[k] !== 'undefined') meta[k] = ks.inputs[k];
+      let v = ks.inputs[k];
+      if (Array.isArray(v) && k === 'seed') v = followSeed(v);
+      if (typeof v !== 'undefined' && v !== null && !Array.isArray(v))
+        meta[k] = v;
     }
+  } else {
+    // SamplerCustomAdvanced-style pipelines: fields live on helper nodes
+    let v = scalarIn(firstNode('randomnoise'), 'noise_seed');
+    if (v == null) v = scalarIn(firstNode('seed'), 'seed');
+    if (v != null) meta.seed = v;
+    v = scalarIn(firstNode('scheduler'), 'steps');
+    if (v != null) meta.steps = v;
+    const guider = firstNode('cfgguider');
+    v = scalarIn(guider, 'cfg');
+    if (v != null) meta.cfg = v;
+    v = scalarIn(firstNode('ksamplerselect'), 'sampler_name');
+    if (v) meta.sampler_name = v;
   }
 
-  // Positive prompt: follow links from KSampler.positive until a node
-  // with a string `text` input (CLIPTextEncode), e.g. through FluxGuidance.
-  let promptText = '';
-  let node = ks && ks.inputs && Array.isArray(ks.inputs.positive)
-    ? graph[ks.inputs.positive[0]] : null;
-  for (let i = 0; i < 8 && node; i++) {
-    if (node.inputs && typeof node.inputs.text === 'string') {
-      promptText = node.inputs.text;
-      break;
+  // Positive/negative prompts: follow links until a node with a string
+  // `text` input (CLIPTextEncode), e.g. through FluxGuidance. Starts from
+  // KSampler, or from guider nodes on SamplerCustomAdvanced pipelines.
+  const walkText = (startLink) => {
+    let node = Array.isArray(startLink) ? graph[startLink[0]] : null;
+    for (let i = 0; i < 8 && node; i++) {
+      if (node.inputs && typeof node.inputs.text === 'string')
+        return node.inputs.text;
+      const next = Object.values(node.inputs || {}).find(Array.isArray);
+      node = next ? graph[next[0]] : null;
     }
-    const next = Object.values(node.inputs || {}).find(Array.isArray);
-    node = next ? graph[next[0]] : null;
-  }
-  meta.prompt = promptText.replace(/\s+/g, ' ').trim();
+    return '';
+  };
+  const guiderN = ks ? null : firstNode('basicguider');
+  const negGuider = ks ? null : firstNode('cfgguider');
+  const posStart = ks && ks.inputs ? ks.inputs.positive
+    : (guiderN && guiderN.inputs && guiderN.inputs.conditioning) ||
+      (negGuider && negGuider.inputs && negGuider.inputs.positive);
+  meta.prompt = walkText(posStart).replace(/\s+/g, ' ').trim();
+  meta.negPrompt = walkText(
+    ks && ks.inputs ? ks.inputs.negative
+                    : negGuider && negGuider.inputs && negGuider.inputs.negative)
+    .replace(/\s+/g, ' ').trim();
 
   // Image dimensions (for exact aspect-ratio placeholders before first load)
   const latent = nodes.find(n => /Empty.*Latent/i.test(n.class_type || ''));
@@ -850,6 +972,63 @@ function extractMeta(entry) {
       });
     }
   }
+
+  // --- extra node-derived fields (mirrors server.py extract_meta) --------
+  let v = scalarIn(firstNode('fluxguidance'), 'guidance');
+  if (v != null) meta.guidance = v;
+  v = scalarIn(firstNode('unetloader'), 'unet_name')
+      ?? scalarIn(firstNode('checkpointloader'), 'ckpt_name');
+  if (v) meta.model = base(v);
+  v = scalarIn(firstNode('vaeloader'), 'vae_name');
+  if (v) meta.vae = base(v);
+  let ipaFile = null, ipaType = null, ipaRange = null; const ipaWeights = [];
+  let cnName = null; const cnStrengths = [];
+  for (const n of nodes) {
+    const ct = (n.class_type || '').toLowerCase();
+    const inp = n.inputs || {};
+    if (ct.includes('ipadapter')) {
+      // SDXL loaders: ipadapter_file; Flux loaders: ipadapter
+      const f = scalarIn(n, 'ipadapter_file', 'ipadapter');
+      if (f && !ipaFile) ipaFile = base(f);
+      if (typeof inp.weight === 'number') ipaWeights.push(inp.weight);
+      if (!ipaType && typeof inp.weight_type === 'string')
+        ipaType = inp.weight_type;
+      // SDXL: start_at/end_at; Flux: start_percent/end_percent
+      let st = inp.start_at, en = inp.end_at;
+      if (typeof st !== 'number') { st = inp.start_percent; en = inp.end_percent; }
+      if (typeof st === 'number' && typeof en === 'number')
+        ipaRange = `${st}–${en}`;
+    }
+    if (ct.includes('controlnetloader') && !cnName)
+      cnName = base(scalarIn(n, 'control_net_name'));
+    if (ct.includes('controlnetapply') &&
+        typeof inp.strength === 'number')
+      cnStrengths.push(inp.strength);
+  }
+  if (ipaFile) meta.ipa_model = ipaFile;
+  if (ipaWeights.length) meta.ipa_weight = ipaWeights.join('+');
+  if (ipaType) meta.ipa_type = ipaType;
+  if (ipaRange) meta.ipa_range = ipaRange;
+  const cv = scalarIn(firstNode('clipvision'), 'clip_name');
+  if (cv) meta.clip_vision = base(cv);
+  if (cnName || cnStrengths.length)
+    meta.controlnet = [cnName, cnStrengths.join('+')].filter(Boolean).join(' ');
+  // PuLID (identity adapter): model file + weight + timing range
+  const pl = scalarIn(firstNode('pulidfluxmodelloader', 'pulidmodelloader'),
+                      'pulid_file');
+  if (pl) meta.pulid = base(pl);
+  const ap = firstNode('applypulid');
+  if (ap && ap.inputs) {
+    if (typeof ap.inputs.weight === 'number')
+      meta.pulid_weight = ap.inputs.weight;
+    if (typeof ap.inputs.start_at === 'number' &&
+        typeof ap.inputs.end_at === 'number')
+      meta.pulid_range = `${ap.inputs.start_at}–${ap.inputs.end_at}`;
+  }
+  v = scalarIn(firstNode('modelsampling'), 'shift');
+  if (v != null) meta.shift = v;
+  v = scalarIn(firstNode('clipsetlastlayer'), 'stop_at_clip_layer');
+  if (typeof v === 'number') meta.clip_skip = Math.abs(v);
   return meta;
 }
 
@@ -1062,6 +1241,7 @@ function patchCardMeta(name) {
   const props = card.querySelector('.props');
   const desc = card.querySelector('.desc');
   if (props && desc) fillCardMeta(props, desc, meta);
+  updateCardStrip(card, meta);
   if (meta.width && meta.height) {
     card.dataset.nw = meta.width;
     card.dataset.nh = meta.height;
@@ -1124,6 +1304,25 @@ let scrollSaveTimer = null;
 window.addEventListener('scroll', () => {
   clearTimeout(scrollSaveTimer);
   scrollSaveTimer = setTimeout(saveScrollPos, 400);
+});
+
+// Chunk on approach to the bottom — sentinel-independent. (The
+// IntersectionObserver sentinel can be stranded above the viewport after a
+// scroll-restore jump: nothing more renders, the list looks "cut off".)
+let scrollChunkPending = false;
+window.addEventListener('scroll', () => {
+  if (scrollChunkPending) return;
+  scrollChunkPending = true;
+  setTimeout(() => {
+    scrollChunkPending = false;
+    const de = document.documentElement;
+    if (!de || groupMode) return;
+    if (viewPos < viewFiles.length &&
+        de.scrollHeight - (window.scrollY + window.innerHeight) <
+          window.innerHeight * 1.5) {
+      renderChunk();
+    }
+  }, 120);
 });
 
 // After a reload/switch the list re-renders chunked; extend chunks until
@@ -1328,6 +1527,115 @@ function renderGrouped() {
   applyWindow();
 }
 
+// --- selectable metadata fields (☰ → metadata fields…) --------------------
+// One registry drives the card panel ("under image"), the on-image strip,
+// and the lightbox strip. Config persists in localStorage.
+// Fields grouped by the node they come from; the flat list (used by the
+// card panel, strips and the ⓘ overlay) derives from the groups.
+const META_FIELD_GROUPS = [
+  ['KSampler', [
+    ['seed',     m => m.seed],
+    ['steps',    m => m.steps],
+    ['cfg',      m => m.cfg],
+    ['denoise',  m => m.denoise != null ? Number(m.denoise).toFixed(2) : null],
+    ['sampler',  m => m.sampler_name
+      ? (m.scheduler ? `${m.sampler_name}/${m.scheduler}` : m.sampler_name)
+      : null],
+  ]],
+  ['LoRA loaders', [
+    ['loras',    m => (m.loras || []).map(l =>
+      l.name + (l.strength != null ? '@' + l.strength : '')).join(', ') || null],
+  ]],
+  ['FluxGuidance', [
+    ['guidance', m => m.guidance],
+  ]],
+  ['Model loaders', [
+    ['model',    m => m.model],
+    ['vae',      m => m.vae],
+  ]],
+  ['IPAdapter', [
+    ['ipa_model',  m => m.ipa_model],
+    ['ipa_weight', m => m.ipa_weight],
+    ['ipa_type',   m => m.ipa_type],
+    ['ipa_range',  m => m.ipa_range],
+    ['clip_vision', m => m.clip_vision],
+  ]],
+  ['ControlNet', [
+    ['controlnet', m => m.controlnet],
+  ]],
+  ['PuLID', [
+    ['pulid',        m => m.pulid],
+    ['pulid_weight', m => m.pulid_weight],
+    ['pulid_range',  m => m.pulid_range],
+  ]],
+  ['ModelSampling', [
+    ['shift',    m => m.shift],
+  ]],
+  ['CLIP', [
+    ['clip_skip', m => m.clip_skip],
+    ['prompt',    m => m.prompt],
+    ['negative',  m => m.negPrompt],
+  ]],
+  ['Latent', [
+    ['size',     m => (m.width && m.height) ? `${m.width}×${m.height}` : null],
+  ]],
+];
+const META_FIELDS = META_FIELD_GROUPS.flatMap(([, fields]) => fields);
+const LS_META_FIELDS = 'kosmozoo.meta.fields.v1';
+const DEFAULT_META_FIELDS = {
+  seed:     { card: true,  strip: false },
+  steps:    { card: true,  strip: false },
+  cfg:      { card: true,  strip: false },
+  denoise:  { card: true,  strip: false },
+  sampler:  { card: true,  strip: false },
+  loras:    { card: true,  strip: false },
+  guidance: { card: false, strip: false },
+  model:    { card: false, strip: false },
+  vae:      { card: false, strip: false },
+  ipa_model: { card: false, strip: false },
+  ipa_weight: { card: false, strip: false },
+  ipa_type: { card: false, strip: false },
+  ipa_range: { card: false, strip: false },
+  clip_vision: { card: false, strip: false },
+  controlnet: { card: false, strip: false },
+  pulid: { card: false, strip: false },
+  pulid_weight: { card: false, strip: false },
+  pulid_range: { card: false, strip: false },
+  shift:    { card: false, strip: false },
+  clip_skip: { card: false, strip: false },
+  size:     { card: true,  strip: false },
+  prompt:   { card: true,  strip: false },
+  negative: { card: false, strip: false },
+};
+
+let metaFieldsCfg = (() => {
+  try {
+    const stored = JSON.parse(localStorage.getItem(LS_META_FIELDS) || '{}');
+    const out = {};
+    for (const [name] of META_FIELDS)
+      out[name] = { ...DEFAULT_META_FIELDS[name], ...(stored[name] || {}) };
+    return out;
+  } catch (e) { return structuredClone(DEFAULT_META_FIELDS); }
+})();
+
+function persistMetaFields() {
+  try { localStorage.setItem(LS_META_FIELDS, JSON.stringify(metaFieldsCfg)); }
+  catch (e) {}
+}
+
+// one-line strip text from the strip-enabled fields: "seed 1 · 20 steps · …"
+function metaStripText(meta) {
+  const bits = [];
+  for (const [name, get] of META_FIELDS) {
+    if (!metaFieldsCfg[name] || !metaFieldsCfg[name].strip) continue;
+    const v = get(meta);
+    if (v == null || v === '') continue;
+    bits.push(name === 'prompt' || name === 'negative'
+      ? String(v) : `${name} ${v}`);
+  }
+  return bits.join(' · ');
+}
+
 // Advanced metadata panel content; also used to patch rendered cards in
 // place when backfilled metadata arrives after the card was rendered.
 // Idempotent: uses .onclick assignment (never stacks listeners).
@@ -1338,18 +1646,12 @@ function fillCardMeta(props, desc, meta) {
   desc.onclick = null;
   if (meta) {
     const rows = [];
-    if (meta.seed !== undefined) rows.push(['seed', meta.seed]);
-    if (meta.steps !== undefined) rows.push(['steps', meta.steps]);
-    if (meta.cfg !== undefined) rows.push(['cfg', meta.cfg]);
-    if (meta.denoise !== undefined)
-      rows.push(['denoise', Number(meta.denoise).toFixed(2)]);
-    if (meta.sampler_name)
-      rows.push(['sampler', meta.scheduler
-        ? `${meta.sampler_name}/${meta.scheduler}` : meta.sampler_name]);
-    for (const l of meta.loras || [])
-      rows.push(['lora', `${l.name}${l.strength != null ? '@' + l.strength : ''}`]);
-    if (meta.width && meta.height)
-      rows.push(['size', `${meta.width}×${meta.height}`]);
+    for (const [name, get] of META_FIELDS) {
+      if (name === 'prompt' || name === 'negative') continue;
+      if (!metaFieldsCfg[name] || !metaFieldsCfg[name].card) continue;
+      const v = get(meta);
+      if (v != null && v !== '') rows.push([name, v]);
+    }
     if (rows.length) {
       for (const [k, v] of rows) {
         const line = document.createElement('div');
@@ -1369,10 +1671,13 @@ function fillCardMeta(props, desc, meta) {
     span.textContent = 'no metadata yet';
     props.appendChild(span);
   }
-  if (meta && meta.prompt) {
+  if (meta && meta.prompt && metaFieldsCfg.prompt.card) {
     const excerpt = meta.prompt.length > 300
       ? meta.prompt.slice(0, 300) + '…' : meta.prompt;
-    desc.textContent = excerpt;
+    const negBit = (metaFieldsCfg.negative.card && meta.negPrompt)
+      ? `\n\nneg: ${meta.negPrompt.length > 140
+          ? meta.negPrompt.slice(0, 140) + '…' : meta.negPrompt}` : '';
+    desc.textContent = excerpt + negBit;
     desc.title = meta.prompt;
     // Advanced: click expands to the full prompt (+ negative when present)
     desc.onclick = () => {
@@ -1381,9 +1686,30 @@ function fillCardMeta(props, desc, meta) {
       desc.textContent = on
         ? meta.prompt +
           (meta.negPrompt ? `\n\n— negative —\n${meta.negPrompt}` : '')
-        : excerpt;
+        : excerpt + negBit;
     };
   }
+}
+
+// on-image strip for a card (bottom of the thumbnail)
+function updateCardStrip(card, meta) {
+  const strip = card.querySelector('.mstrip');
+  if (!strip) return;
+  const txt = meta ? metaStripText(meta) : '';
+  strip.textContent = txt;
+  strip.style.display = txt ? 'block' : 'none';
+}
+
+// re-apply the field config to every rendered card (picker changes)
+function refreshAllCardMeta() {
+  cardEls.forEach((card, i) => {
+    if (!card) return;
+    const meta = metaMapGlobal[allFiles[i]];
+    const props = card.querySelector('.props');
+    const desc = card.querySelector('.desc');
+    if (props && desc) fillCardMeta(props, desc, meta);
+    updateCardStrip(card, meta);
+  });
 }
 
 function renderCard(filename, meta, idx) {
@@ -1419,6 +1745,9 @@ function renderCard(filename, meta, idx) {
     }
   });
   wrap.appendChild(img);
+  const mstrip = document.createElement('div');
+  mstrip.className = 'mstrip';
+  wrap.appendChild(mstrip);
   wrap.style.cursor = 'zoom-in';
   wrap.addEventListener('click', () => {
     // failed loads (host was busy, transient network) retry instead of
@@ -1538,6 +1867,7 @@ function renderCard(filename, meta, idx) {
   const desc = document.createElement('div');
   desc.className = 'desc';
   fillCardMeta(props, desc, meta);
+  updateCardStrip(card, meta);
   pair1.append(props, desc);
 
   // row 2: negatives (red) | positives (green), each with copy buttons
@@ -1683,6 +2013,7 @@ const lbGuideLayer = $('guideLayer');
 const lbStripTop = $('guideStripTop'), lbStripLeft = $('guideStripLeft');
 const lbMixWrap = $('lbMixWrap'), lbMix = $('lbMix'), lbMixVal = $('lbMixVal');
 const lbSplitEl = $('lbSplit');
+const lbStripEl = $('lbStrip');
 const lbAnchorTag = $('lbAnchorTag');
 const lbFlipH = $('lbFlipH'), lbFlipV = $('lbFlipV');
 
@@ -1708,7 +2039,12 @@ function overlayOn() { return localStorage.getItem(LS_OVERLAY) !== '0'; } // def
 function splitOn() { return localStorage.getItem(LS_SPLIT) === '1'; }     // default off
 // "linked": candidate+anchor share one view — switch keeps it, and
 // pan/zoom/flip/rotate apply to both. Default OFF (independent views).
-function linkedOn() { return localStorage.getItem(LS_LINKED) === '1'; }
+// linked couples the candidate/anchor views; face-match alignment implies
+// it (its whole point is keeping the pair coupled) without needing the
+// explicit toggle
+function linkedOn() {
+  return localStorage.getItem(LS_LINKED) === '1' || faceAlignOn();
+}
 function guidesVisible() { return localStorage.getItem(LS_GUIDES_VIS) !== '0'; }
 
 // --- geometry (the only place px<->fraction conversions exist) ---
@@ -1921,7 +2257,25 @@ function render() {
     (wipeOn && S.splitX != null)
       ? `inset(0 0 0 ${lbSplitClampX(S.splitX)}px)` : '';
 
+  // metadata strip, bottom of screen (fields chosen in ☰ → metadata fields…)
+  const stripMeta = S.open ? lbCurrentMeta() : null;
+  const stripTxt = stripMeta ? metaStripText(stripMeta) : '';
+  lbStripEl.textContent = stripTxt;
+  lbStripEl.style.display = stripTxt ? 'block' : 'none';
+
   renderFaceBox();
+}
+
+// current lightbox entry's metadata: candidates via the store, anchors via
+// the drop-time snapshot on the card
+function lbCurrentMeta() {
+  if (!S.entry) return null;
+  if (S.col === 'cand')
+    return metaMapGlobal[S.entry.key.split(':').slice(1).join(':')] || null;
+  let p = S.entry.el;
+  while (p && !(p.dataset && p.dataset.meta)) p = p.parentElement;
+  if (p) { try { return JSON.parse(p.dataset.meta); } catch (e) {} }
+  return null;
 }
 
 // ---------- image pipeline (the only place src changes hands) ----------
@@ -2107,7 +2461,10 @@ function closeLightbox() {
 
 function lbApplyView(persist = true) {
   if (persist && S.entry && S.entry.el) writeImageState(S.entry.el, S.view);
-  if (persist && linkedOn()) {
+  // linked mode mirrors the view into the counterpart — EXCEPT an aligned
+  // candidate: that view is derived from the anchor's stored reference, and
+  // writing it back would compound the scale on every align/switch
+  if (persist && linkedOn() && !(faceAlignOn() && S.col === 'cand')) {
     const other = lbCounterpartEntry();
     if (other && other.el) writeImageState(other.el, S.view);
   }
@@ -2116,11 +2473,15 @@ function lbApplyView(persist = true) {
 
 $('lbClose').addEventListener('click', closeLightbox);
 
-// info overlay is a topmost modal: its Esc/backdrop handling runs first
+// info/fields overlays are topmost modals: their Esc handling runs first
 document.addEventListener('keydown', (e) => {
-  if (e.key === 'Escape' && !$('infoOverlay').hidden) {
-    e.stopImmediatePropagation();
-    $('infoOverlay').hidden = true;
+  if (e.key !== 'Escape') return;
+  for (const id of ['fieldsOverlay', 'infoOverlay']) {
+    if (!$(id).hidden) {
+      e.stopImmediatePropagation();
+      $(id).hidden = true;
+      break;
+    }
   }
 }, true);   // capture: outrank the lightbox handler
 
@@ -2958,21 +3319,16 @@ function showAnchorInfo(name, meta) {
     p.textContent = 'This image has no embedded parameters.';
     body.appendChild(p);
   } else {
+    // the ⓘ overlay is the full-details view: every field the image carries,
+    // regardless of the picker config (that governs the always-on surfaces)
     const props = document.createElement('div');
     props.className = 'props';
     const rows = [];
-    if (meta.seed !== undefined) rows.push(['seed', meta.seed]);
-    if (meta.steps !== undefined) rows.push(['steps', meta.steps]);
-    if (meta.cfg !== undefined) rows.push(['cfg', meta.cfg]);
-    if (meta.denoise !== undefined)
-      rows.push(['denoise', Number(meta.denoise).toFixed(2)]);
-    if (meta.sampler_name)
-      rows.push(['sampler', meta.scheduler
-        ? `${meta.sampler_name}/${meta.scheduler}` : meta.sampler_name]);
-    for (const l of meta.loras || [])
-      rows.push(['lora', `${l.name}${l.strength != null ? '@' + l.strength : ''}`]);
-    if (meta.width && meta.height)
-      rows.push(['size', `${meta.width}×${meta.height}`]);
+    for (const [name, get] of META_FIELDS) {
+      if (name === 'prompt' || name === 'negative') continue;
+      const v = get(meta);
+      if (v != null && v !== '') rows.push([name, v]);
+    }
     for (const [k, v] of rows) {
       const line = document.createElement('div');
       const label = document.createElement('span');
@@ -3012,6 +3368,121 @@ $('infoClose').addEventListener('click', () => {
 });
 $('infoOverlay').addEventListener('click', (e) => {
   if (e.target === $('infoOverlay')) $('infoOverlay').hidden = true;
+});
+
+// ---------- metadata fields picker (☰ → metadata fields…) ----------
+
+// per-group master toggles live in the same two columns as field toggles
+function syncGroupMasters(gbody, fields) {
+  for (const col of ['card', 'strip']) {
+    const master = gbody.querySelector('.fgrouphead')
+      && [...gbody.querySelectorAll('.fgrouphead input')]
+        .find(c => c.dataset.col === col);
+    if (master)
+      master.checked = fields.some(([n]) => metaFieldsCfg[n][col]);
+  }
+}
+
+function mkFieldToggle(field, col) {
+  const lab = document.createElement('label');
+  lab.className = 'switchwrap mini';
+  const cb = document.createElement('input');
+  cb.type = 'checkbox';
+  cb.checked = !!metaFieldsCfg[field][col];
+  cb.dataset.field = field;
+  cb.dataset.col = col;
+  const track = document.createElement('span');
+  track.className = 'track';
+  cb.addEventListener('change', () => {
+    metaFieldsCfg[field][col] = cb.checked;
+    persistMetaFields();
+    refreshAllCardMeta();
+    if (S.open) render();
+    const groupRow = lab.closest('.fgroupbody');
+    if (groupRow) {
+      const fields = META_FIELD_GROUPS
+        .find(g => g[0] === groupRow.dataset.group)[1];
+      syncGroupMasters(groupRow, fields);
+    }
+  });
+  lab.append(cb, track);
+  return lab;
+}
+
+function buildFieldsPanel() {
+  const tbl = $('fieldsTable');
+  tbl.innerHTML = '';
+  const head = document.createElement('div');
+  head.className = 'frow head';
+  const hName = document.createElement('span');
+  hName.className = 'fname2';
+  hName.textContent = 'field (grouped by node)';
+  const hCard = document.createElement('span');
+  hCard.textContent = 'under image';
+  const hStrip = document.createElement('span');
+  hStrip.textContent = 'strip';
+  head.append(hName, hCard, hStrip);
+  tbl.appendChild(head);
+
+  for (const [gname, fields] of META_FIELD_GROUPS) {
+    const gbody = document.createElement('div');
+    gbody.className = 'fgroupbody';
+    gbody.dataset.group = gname;
+    const ghead = document.createElement('div');
+    ghead.className = 'fgrouphead';
+    const glabel = document.createElement('span');
+    glabel.className = 'gname';
+    glabel.textContent = gname;
+    ghead.appendChild(glabel);
+    // one master toggle per column, same positions as the field toggles
+    for (const col of ['card', 'strip']) {
+      const master = document.createElement('label');
+      master.className = 'switchwrap mini';
+      master.title = `toggle all ${gname} fields (${col === 'card' ? 'under image' : 'strip'})`;
+      const mcb = document.createElement('input');
+      mcb.type = 'checkbox';
+      mcb.dataset.col = col;
+      mcb.checked = fields.some(([n]) => metaFieldsCfg[n][col]);
+      const mtrack = document.createElement('span');
+      mtrack.className = 'track';
+      mcb.addEventListener('change', () => {
+        for (const [n] of fields) metaFieldsCfg[n][col] = mcb.checked;
+        persistMetaFields();
+        refreshAllCardMeta();
+        if (S.open) render();
+        [...gbody.querySelectorAll('.frow input')]
+          .filter(c => c.dataset.col === col)
+          .forEach(cb => { cb.checked = mcb.checked; });
+      });
+      master.append(mcb, mtrack);
+      ghead.appendChild(master);
+    }
+    gbody.appendChild(ghead);
+    for (const [name] of fields) {
+      const row = document.createElement('div');
+      row.className = 'frow';
+      const label = document.createElement('span');
+      label.className = 'fname2';
+      label.textContent = name;
+      row.appendChild(label);
+      row.appendChild(mkFieldToggle(name, 'card'));
+      row.appendChild(mkFieldToggle(name, 'strip'));
+      gbody.appendChild(row);
+    }
+    tbl.appendChild(gbody);
+  }
+}
+
+$('fieldsBtn').addEventListener('click', () => {
+  buildFieldsPanel();
+  $('fieldsOverlay').hidden = false;
+  $('menu').hidden = true;
+});
+$('fieldsClose').addEventListener('click', () => {
+  $('fieldsOverlay').hidden = true;
+});
+$('fieldsOverlay').addEventListener('click', (e) => {
+  if (e.target === $('fieldsOverlay')) $('fieldsOverlay').hidden = true;
 });
 
 async function addAnchor(file) {

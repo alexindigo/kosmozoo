@@ -324,6 +324,11 @@ _metadata_lock = threading.RLock()   # guards the single shared connection
 _meta_versions = {}                  # host -> int, bumped on every merge
 
 
+# bump when extract_meta changes: rows extracted by an older version are
+# re-parsed by the background worker (one pass, then they're current)
+EXTRACTOR_VERSION = 2
+
+
 def _db():
     global _metadata_db
     with _metadata_lock:
@@ -341,10 +346,17 @@ def _db():
                     source TEXT,                  -- 'history' | 'png'
                     has_workflow INTEGER DEFAULT 0,  -- PNG had a workflow chunk
                     nopng INTEGER DEFAULT 0,  -- PNG parsed, no prompt chunk
+                    ext INTEGER NOT NULL DEFAULT 0,  -- extractor version
                     updated_at REAL,
                     PRIMARY KEY (host, filename)
                 )
                 """)
+            cols = {r[1] for r in
+                    _metadata_db.execute("PRAGMA table_info(images)")}
+            if "ext" not in cols:
+                _metadata_db.execute(
+                    "ALTER TABLE images ADD COLUMN ext"
+                    " INTEGER NOT NULL DEFAULT 0")
             _metadata_db.commit()
             _import_legacy_cache(_metadata_db)
         return _metadata_db
@@ -376,8 +388,9 @@ def _meta_version_bump(host):
 
 
 def meta_put(host, mapping, source, has_workflow=False):
-    """Batch-upsert {filename: meta}. A 'png' row clears the nopng marker;
-    has_workflow is sticky (history upserts never erase it)."""
+    """Batch-upsert {filename: meta}, stamped with the current extractor
+    version. A 'png' row clears the nopng marker; has_workflow is sticky
+    (history upserts never erase it)."""
     if not mapping:
         return
     now = time.time()
@@ -385,15 +398,17 @@ def meta_put(host, mapping, source, has_workflow=False):
         db = _db()
         db.executemany(
             "INSERT INTO images (host, filename, meta, source,"
-            " has_workflow, nopng, updated_at) VALUES (?,?,?,?,?,0,?)"
+            " has_workflow, nopng, ext, updated_at)"
+            " VALUES (?,?,?,?,?,0,?,?)"
             " ON CONFLICT(host, filename) DO UPDATE SET"
             " meta=excluded.meta, source=excluded.source,"
             " has_workflow=MAX(images.has_workflow, excluded.has_workflow),"
             " nopng=CASE WHEN excluded.source='png' THEN 0"
             "            ELSE images.nopng END,"
+            " ext=excluded.ext,"
             " updated_at=excluded.updated_at",
             [(host, fn, json.dumps(m, ensure_ascii=False), source,
-              1 if has_workflow else 0, now)
+              1 if has_workflow else 0, EXTRACTOR_VERSION, now)
              for fn, m in mapping.items()])
         db.commit()
     _meta_version_bump(host)
@@ -437,6 +452,17 @@ def meta_known(host):
     return {r[0] for r in rows}
 
 
+def meta_fresh(host):
+    """Filenames that need NO (re)extraction: current extractor version,
+    or a nopng negative marker."""
+    with _metadata_lock:
+        rows = _db().execute(
+            "SELECT filename FROM images WHERE host=?"
+            " AND (ext >= ? OR nopng = 1)",
+            (host, EXTRACTOR_VERSION)).fetchall()
+    return {r[0] for r in rows}
+
+
 def _walk_text(graph, start_link):
     """Follow positive/negative input links until a node with string text.
     A ConditioningZeroOut on the path means an intentionally empty prompt."""
@@ -455,6 +481,38 @@ def _walk_text(graph, start_link):
     return ""
 
 
+def _first_node(nodes, *class_bits):
+    """First node whose class_type contains any of the bits (lowercase)."""
+    for n in nodes:
+        ct = (n.get("class_type") or "").lower()
+        if any(b in ct for b in class_bits):
+            return n
+    return None
+
+
+def _scalar_input(node, *keys):
+    """First present scalar (str/int/float) input — links arrive as lists."""
+    if not node:
+        return None
+    for k in keys:
+        v = node.get("inputs", {}).get(k)
+        if isinstance(v, (int, float, str)):
+            return v
+    return None
+
+
+def _basename(v):
+    return str(v).replace("\\", "/").split("/")[-1] if v else v
+
+
+def _follow_seed(graph, link):
+    """Linked seed input [node_id, slot] -> the target node's scalar seed,
+    when it has one (rgthree 'Seed' does; widget-only custom nodes don't)."""
+    node = graph.get(str(link[0])) if isinstance(link, list) and link else None
+    v = node.get("inputs", {}).get("seed") if node else None
+    return v if isinstance(v, (int, float)) else None
+
+
 def extract_meta(entry):
     """Per-image metadata from one /api/history entry's prompt graph."""
     prompt = entry.get("prompt")
@@ -466,8 +524,16 @@ def extract_meta(entry):
     nodes = list(graph.values())
     ks = next((n for n in nodes if n.get("class_type") == "KSampler"), None)
     if ks is None:
+        # KSampler-like variants are identified by their input signature:
+        # "sampler" in the name alone also matches KSamplerSelect and
+        # SamplerCustomAdvanced, which carry no seed/steps
         ks = next((n for n in nodes
-                   if "sampler" in (n.get("class_type") or "").lower()), None)
+                   if "sampler" in (n.get("class_type") or "").lower()
+                   and "select" not in (n.get("class_type") or "").lower()
+                   and isinstance(n.get("inputs", {}).get("steps"),
+                                  (int, float))
+                   and n.get("inputs", {}).get("seed") is not None),
+                  None)
     meta = {"loras": []}
     if isinstance(prompt[0], (int, float)):
         meta["q"] = prompt[0]                     # queue order
@@ -475,13 +541,43 @@ def extract_meta(entry):
         for k in ("seed", "steps", "cfg", "sampler_name", "scheduler",
                   "denoise"):
             v = ks.get("inputs", {}).get(k)
-            # linked inputs arrive as [node, slot] lists — not displayable
+            if isinstance(v, list) and k == "seed":
+                v = _follow_seed(graph, v)   # linked seed node (rgthree, …)
             if isinstance(v, (int, float, str)):
                 meta[k] = v
         meta["prompt"] = _walk_text(graph, ks.get("inputs", {})
                                     .get("positive")).strip()
         meta["negPrompt"] = _walk_text(graph, ks.get("inputs", {})
                                        .get("negative")).strip()
+    else:
+        # SamplerCustomAdvanced-style pipelines: the fields live on helper
+        # nodes (verified against real fleet graphs)
+        v = _scalar_input(_first_node(nodes, "randomnoise"), "noise_seed")
+        if v is None:
+            v = _scalar_input(_first_node(nodes, "seed"), "seed")
+        if v is not None:
+            meta["seed"] = v
+        v = _scalar_input(_first_node(nodes, "scheduler"), "steps")
+        if v is not None:
+            meta["steps"] = v
+        guider = _first_node(nodes, "cfgguider")
+        v = _scalar_input(guider, "cfg")
+        if v is not None:
+            meta["cfg"] = v
+        v = _scalar_input(_first_node(nodes, "ksamplerselect"),
+                          "sampler_name")
+        if v:
+            meta["sampler_name"] = v
+        bg = _first_node(nodes, "basicguider")
+        pos_link = None
+        if bg:
+            pos_link = bg.get("inputs", {}).get("conditioning")
+        elif guider:
+            pos_link = guider.get("inputs", {}).get("positive")
+        meta["prompt"] = _walk_text(graph, pos_link).strip()
+        if guider:
+            meta["negPrompt"] = _walk_text(
+                graph, guider.get("inputs", {}).get("negative")).strip()
     for n in nodes:
         ct = (n.get("class_type") or "")
         if "lora" in ct.lower() and "load" in ct.lower():
@@ -500,6 +596,90 @@ def extract_meta(entry):
         h = latent.get("inputs", {}).get("height")
         if isinstance(w, (int, float)) and isinstance(h, (int, float)):
             meta["width"], meta["height"] = w, h
+
+    # --- extra node-derived fields (all opt-in in the fields picker) ----
+    g = _first_node(nodes, "fluxguidance")
+    v = _scalar_input(g, "guidance")
+    if v is not None:
+        meta["guidance"] = v
+    mdl = _first_node(nodes, "unetloader")
+    v = _scalar_input(mdl, "unet_name")
+    if not v:
+        mdl = _first_node(nodes, "checkpointloader")
+        v = _scalar_input(mdl, "ckpt_name")
+    if v:
+        meta["model"] = _basename(v)
+    vae = _first_node(nodes, "vaeloader")
+    v = _scalar_input(vae, "vae_name")
+    if v:
+        meta["vae"] = _basename(v)
+    # ipadapter: loader file ("ipadapter_file" on SDXL loaders, "ipadapter"
+    # on Flux loaders), apply weight(s), weight type, timing range
+    # ("start_at/end_at" on SDXL, "start_percent/end_percent" on Flux)
+    ipa_file, ipa_weights, ipa_type, ipa_range = None, [], None, None
+    for n in nodes:
+        if "ipadapter" not in (n.get("class_type") or "").lower():
+            continue
+        inp = n.get("inputs", {})
+        f = _scalar_input(n, "ipadapter_file", "ipadapter")
+        if f and not ipa_file:
+            ipa_file = _basename(f)
+        if isinstance(inp.get("weight"), (int, float)):
+            ipa_weights.append(inp["weight"])
+        if not ipa_type and isinstance(inp.get("weight_type"), str):
+            ipa_type = inp["weight_type"]
+        st, en = inp.get("start_at"), inp.get("end_at")
+        if not isinstance(st, (int, float)):
+            st, en = inp.get("start_percent"), inp.get("end_percent")
+        if isinstance(st, (int, float)) and isinstance(en, (int, float)):
+            ipa_range = f"{st:g}–{en:g}"
+    if ipa_file:
+        meta["ipa_model"] = ipa_file
+    if ipa_weights:
+        meta["ipa_weight"] = "+".join(f"{w:g}" for w in ipa_weights)
+    if ipa_type:
+        meta["ipa_type"] = ipa_type
+    if ipa_range:
+        meta["ipa_range"] = ipa_range
+    cv = _first_node(nodes, "clipvision")
+    v = _scalar_input(cv, "clip_name")
+    if v:
+        meta["clip_vision"] = _basename(v)
+    # PuLID (identity adapter): model file + weight + timing range
+    pl = _first_node(nodes, "pulidfluxmodelloader", "pulidmodelloader")
+    v = _scalar_input(pl, "pulid_file")
+    if v:
+        meta["pulid"] = _basename(v)
+    ap = _first_node(nodes, "applypulid")
+    if ap:
+        inp = ap.get("inputs", {})
+        w = inp.get("weight")
+        if isinstance(w, (int, float)):
+            meta["pulid_weight"] = w
+        st, en = inp.get("start_at"), inp.get("end_at")
+        if isinstance(st, (int, float)) and isinstance(en, (int, float)):
+            meta["pulid_range"] = f"{st:g}–{en:g}"
+    # controlnet: loader name + apply strengths
+    cn_name, cn_strengths = None, []
+    for n in nodes:
+        ct = (n.get("class_type") or "").lower()
+        if "controlnetloader" in ct and not cn_name:
+            cn_name = _basename(_scalar_input(n, "control_net_name"))
+        if "controlnetapply" in ct:
+            s = n.get("inputs", {}).get("strength")
+            if isinstance(s, (int, float)):
+                cn_strengths.append(s)
+    if cn_name or cn_strengths:
+        meta["controlnet"] = " ".join(
+            [x for x in [cn_name, "+".join(f"{s:g}" for s in cn_strengths)] if x])
+    ms = _first_node(nodes, "modelsampling")
+    v = _scalar_input(ms, "shift")
+    if v is not None:
+        meta["shift"] = v
+    cs = _first_node(nodes, "clipsetlastlayer")
+    v = _scalar_input(cs, "stop_at_clip_layer")
+    if isinstance(v, (int, float)):
+        meta["clip_skip"] = abs(int(v))
     return meta
 
 
@@ -623,14 +803,15 @@ def _meta_pending(host):
 
 
 def _meta_worker_feed(host, names, priority=False):
-    """Queue names that the store doesn't know yet. Returns pending count."""
+    """Queue names that are unknown or stale (older extractor version).
+    Returns pending count."""
     if not names:
         return _meta_pending(host)
-    known = meta_known(host)
+    fresh = meta_fresh(host)
     w = _meta_worker_ensure(host)
     with _meta_workers_lock:
         for name in names:
-            if name in known or name in w["prio_set"]:
+            if name in fresh or name in w["prio_set"] or name in w["walk_set"]:
                 continue
             if priority:
                 # promote from the walk queue: prio drains even when the
