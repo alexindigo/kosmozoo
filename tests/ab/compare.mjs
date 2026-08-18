@@ -24,10 +24,18 @@ const { values } = parseArgs({
 
 const fixtures = values.fixtures;
 
-// Canonicalise: stable key order, drop undefined. Both engines must produce
-// identical canonical JSON per fixture.
+// Canonicalise: re-parse then re-stringify with stable key order, so the
+// comparison is content-equal regardless of each engine's JSON formatting
+// (Python's json.dumps defaults differ from JSON.stringify's separators).
 function canon(obj) {
-  return JSON.stringify(obj, (k, v) => (v === undefined ? null : v));
+  const sorted = (v) => {
+    if (Array.isArray(v)) return v.map(sorted);
+    if (v && typeof v === "object") {
+      return Object.fromEntries(Object.keys(v).sort().map((k) => [k, sorted(v[k])]));
+    }
+    return v;
+  };
+  return JSON.stringify(sorted(obj));
 }
 
 async function readPythonBaseline() {

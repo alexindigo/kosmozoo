@@ -62,7 +62,11 @@ def main():
             result[name] = {"nopng": True}
             continue
         # extract_meta expects a history entry; wrap the graph in one.
-        entry = {"prompt": [2, "ab", graph]}
+        # prompt[0] is queue order — an artifact of the wrapper, not the
+        # graph. Use 0 to match the PNG path (meta_from_png_stream wraps as
+        # {"prompt": [0, 0, graph]}), so "same graph -> same metadata" holds
+        # across both ingestion paths and both engines.
+        entry = {"prompt": [0, 0, graph]}
         meta = server.extract_meta(entry)
         result[name] = meta
     print(json.dumps(result, sort_keys=True, ensure_ascii=False))
