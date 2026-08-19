@@ -201,6 +201,11 @@ function scheduleErrorRetry() {
 
 // --- progress mechanisms #2 and #3 ------------------------------------------------
 
+// The candidates column scrolls itself (no page-level scroll).
+function scroller() {
+  return document.getElementById("candidatesCol");
+}
+
 // #2: scroll-distance safety net — the sentinel can be stranded above the
 // viewport after a restore jump.
 let scrollChunkPending = false;
@@ -209,10 +214,10 @@ export function onScrollSafetyNet() {
   scrollChunkPending = true;
   setTimeout(() => {
     scrollChunkPending = false;
-    const de = document.documentElement;
-    if (!de) return;
+    const col = scroller();
+    if (!col) return;
     if (viewPos < view.length &&
-        de.scrollHeight - (window.scrollY + window.innerHeight) < window.innerHeight * 1.5) {
+        col.scrollHeight - (col.scrollTop + col.clientHeight) < col.clientHeight * 1.5) {
       renderChunk();
     }
   }, 120);
@@ -220,13 +225,13 @@ export function onScrollSafetyNet() {
 
 // #3: extend chunks until the stored depth exists, then jump.
 export function restoreScroll(target) {
-  if (!target || !container) return;
+  const col = scroller();
+  if (!target || !col) return;
   let guard = 500;
-  const de = document.documentElement;
-  while (viewPos < view.length && guard-- > 0 && (de?.scrollHeight ?? 0) < target) {
+  while (viewPos < view.length && guard-- > 0 && col.scrollHeight < target) {
     renderChunk();
   }
-  window.scrollTo(0, target);
+  col.scrollTop = target;
 }
 
 // --- lightbox-driven window ---------------------------------------------------------

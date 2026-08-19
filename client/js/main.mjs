@@ -16,6 +16,8 @@ import { initHostPicker, selectHost, initialHost } from "./hostpicker.mjs";
 import { initFeed, renderFeed, onScrollSafetyNet, cardAt, restoreScroll } from "./feed.mjs";
 import { loadFieldsCfg, openFieldsOverlay, initFieldsOverlay } from "./fields.mjs";
 import { buildCard, patchCardMeta, savedSet } from "./card.mjs";
+import { initViews } from "./views.mjs";
+import { iconSvg } from "./icons.mjs";
 
 const $ = (id) => document.getElementById(id);
 
@@ -140,7 +142,7 @@ function registerCoreChrome() {
     },
   });
   chrome.headerButton({
-    id: "hideUpBtn", label: "Hide 👍", title: "hide thumbed-up images for this session (reload restores)",
+    id: "hideUpBtn", label: "Hide up-voted", title: "hide thumbed-up images for this session (reload restores)",
     onClick: () => {
       const on = toggleHideUp();
       rebuildFeed();
@@ -167,7 +169,7 @@ function registerCoreChrome() {
       label.append(box, track, document.createTextNode("metadata scan"));
       const pause = document.createElement("button");
       pause.id = "scraperPause";
-      pause.textContent = S.scraper?.paused ? "▶" : "⏸";
+      pause.innerHTML = S.scraper?.paused ? iconSvg("player-play", 12) : iconSvg("player-pause", 12);
       pause.title = "pause/resume the background scan (laptop mode)";
       pause.addEventListener("click", async () => {
         await api.setScraper({ paused: !S.scraper?.paused });
@@ -278,7 +280,7 @@ function showLoadError(err) {
   box.className = "loadfail";
   const title = document.createElement("div");
   title.className = "loadfail-title";
-  title.textContent = `⚠ couldn't load images from ${S.host}`;
+  title.innerHTML = `${iconSvg("alert-triangle", 18)} couldn't load images from ${S.host}`;
   const detail = document.createElement("div");
   detail.className = "loadfail-detail";
   detail.textContent = String(err?.message ?? err);
@@ -312,6 +314,7 @@ async function boot() {
   await initLightbox();
   await initRoi();
   await initJudgment();
+  await initViews(); // shared per-image view store (feed zoom <-> lightbox)
   initHostPicker();
   initAnchorsPane();
   initInfoOverlay();
@@ -328,12 +331,13 @@ async function boot() {
   document.addEventListener("click", (e) => {
     if (S.menuOpen && !$("menuWrap").contains(e.target)) { S.menuOpen = false; render(); }
   });
-  window.addEventListener("scroll", onScrollSafetyNet, { passive: true });
-  window.addEventListener("scroll", () => {
+  const col = $("candidatesCol");
+  col.addEventListener("scroll", onScrollSafetyNet, { passive: true });
+  col.addEventListener("scroll", () => {
     clearTimeout(boot._scrollSave);
     boot._scrollSave = setTimeout(() => {
       if (S.host && !S.filter) { // filtered views aren't the host list
-        api.setSettings("core.ui", { [`scroll.${S.host}`]: window.scrollY }).catch(() => {});
+        api.setSettings("core.ui", { [`scroll.${S.host}`]: col.scrollTop }).catch(() => {});
       }
     }, 400);
   }, { passive: true });

@@ -15,15 +15,13 @@ import { zoomToRoi } from "./roi.mjs";
 import { prefetchFrom, applyWindow } from "./feed.mjs";
 import { applyComposition } from "./plugins-client.mjs";
 import { setVote, toggleFavorite } from "./judgment.mjs";
+import { getView, setView, flushViews } from "./views.mjs";
 
 const $ = (id) => document.getElementById(id);
 
-// Per-image persisted views (box-fractions), keyed "host:filename".
-const viewStoreKey = "core.views";
-let persistedViews = {};
+// Per-image persisted views live in views.mjs (shared with in-feed zoom).
 
 export async function initLightbox() {
-  persistedViews = await api.settings(viewStoreKey).catch(() => ({}));
   document.addEventListener("keydown", onKey);
   // Detector status drives the face-anchored alignment need (absent ≠ broken).
   try {
@@ -66,31 +64,15 @@ function activeSrc() {
 // harvest #2: write the outgoing view back BEFORE reading the incoming one.
 // Debounced: the map updates immediately; the engine write batches (400ms),
 // so per-step navigation costs no network round trip. Closing flushes.
-let persistTimer = null;
-let dirtyKeys = new Set();
-
 async function writeBack() {
   const key = activeKey();
   if (!key) return;
-  const p = viewToPersisted(S.lightbox.view);
-  if (p) persistedViews[key] = p; else delete persistedViews[key];
-  dirtyKeys.add(key);
-  clearTimeout(persistTimer);
-  persistTimer = setTimeout(flushPersist, 400);
-}
-
-async function flushPersist() {
-  clearTimeout(persistTimer);
-  if (!dirtyKeys.size) return;
-  const patch = {};
-  for (const k of dirtyKeys) patch[k] = persistedViews[k] ?? null;
-  dirtyKeys = new Set();
-  await api.setSettings(viewStoreKey, patch).catch(() => {});
+  setView(key, viewToPersisted(S.lightbox.view)); // debounced inside views.mjs
 }
 
 function readBack() {
   const key = activeKey();
-  const stored = key ? persistedViews[key] : null;
+  const stored = key ? getView(key) : null;
   // harvest #4: read from the persisted *source*; derived (face-aligned)
   // views are recomputed, never persisted over the source.
   S.lightbox.view = viewFromPersisted(stored) ?? freshView();
@@ -262,7 +244,7 @@ export async function openAnchor(anchorIdx) {
 
 export async function close() {
   await writeBack();
-  await flushPersist(); // durability point: closing flushes pending view writes
+  await flushViews(); // durability point: closing flushes pending view writes
   S.lightbox.open = false;
   $("lightbox").hidden = true;
   render();
