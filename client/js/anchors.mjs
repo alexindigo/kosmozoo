@@ -252,7 +252,7 @@ onRender((s) => {
       titleActions: [
         actionButton("ainfo", iconSvg("info-circle", 14), "embedded parameters",
           () => showAnchorInfo(a.name, a.meta)),
-        actionButton("rm", iconSvg("x", 12), "remove anchor",
+        actionButton("rm", iconSvg("trash", 13), "remove anchor",
           () => removeAnchor(a.name)),
       ],
     });
