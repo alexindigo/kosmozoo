@@ -244,6 +244,11 @@ onRender((s) => {
 
 async function loadCandidates() {
   if (!S.host) return;
+  // a host switch must not leave the previous host's feed on screen:
+  // clear first, then load
+  S.images = [];
+  $("grid").innerHTML = ""; // old host's feed leaves the screen immediately
+  render();
   chrome.status.active("load", `loading image list from ${S.host}…`);
   try {
     S.images = await api.images(S.host);
@@ -264,6 +269,7 @@ async function loadCandidates() {
     const y = ui[`scroll.${S.host}`];
     if (y) restoreScroll(y);
     await pollMetadata();
+    render(); // surfaces reflect the loaded host (picker label, axes, etc.)
   } catch (err) {
     chrome.status.clear("load");
     showLoadError(err);
