@@ -16,8 +16,9 @@ import { api } from "./api.mjs";
 import { metaFromPngBytes } from "/shared/extractor.mjs";
 import { fullFieldRows } from "./fields.mjs";
 import { chrome } from "./chrome.mjs";
-import { makeZoomable } from "./zoomable.mjs";
 import { iconSvg } from "./icons.mjs";
+import { openAnchor } from "./lightbox.mjs";
+import { imageCard, aspectFromMeta, actionButton } from "./imageCard.mjs";
 
 const LS_KEY = "kosmozoo.anchors.v1";
 const MAX_DIM = 1200;
@@ -224,6 +225,8 @@ function showAnchorInfo(name, meta) {
 }
 
 // --- renderer (the column's only DOM writer) -------------------------------------------
+// The anchor INSTANCE of the shared image card: same card, injected with
+// name / info+remove actions / meta-summary strip.
 
 onRender((s) => {
   if (typeof document === "undefined") return;
@@ -235,75 +238,57 @@ onRender((s) => {
   }
   list.innerHTML = "";
   for (const a of s.anchors) {
-    const wrap = document.createElement("div");
-    wrap.className = "anchor";
-    wrap.dataset.name = a.name;
-    wrap.draggable = true;
-
-    const imgWrap = document.createElement("div");
-    imgWrap.className = "aimgwrap";
-    const img = document.createElement("img");
-    img.src = a.src;
-    img.alt = a.name;
-    img.addEventListener("click", async (e) => {
-      e.stopPropagation();
-      const { openAnchor } = await import("./lightbox.mjs");
-      openAnchor(s.anchors.indexOf(a));
+    const idx = s.anchors.indexOf(a);
+    let cardEl = null; // assigned when imageCard returns; the zoom hook skips until then
+    const card = imageCard({
+      src: a.src,
+      alt: a.name,
+      ar: aspectFromMeta(a.meta),
+      stripText: anchorSummary(a.meta),
+      zoomKey: `anchor:${a.name}`,
+      onZoomChange: (zoomed) => { if (cardEl) cardEl.draggable = !zoomed; },
+      onOpen: () => openAnchor(idx),
+      title: anchorTitle(a.name),
+      titleActions: [
+        actionButton("ainfo", iconSvg("info-circle", 14), "embedded parameters",
+          () => showAnchorInfo(a.name, a.meta)),
+        actionButton("rm", iconSvg("x", 12), "remove anchor",
+          () => removeAnchor(a.name)),
+      ],
     });
-    makeZoomable(img, { key: `anchor:${a.name}`,
-      onZoomChange: (zoomed) => { wrap.draggable = !zoomed; } });
-    imgWrap.appendChild(img);
-    wrap.appendChild(imgWrap);
-
-    // action row under the image, like the candidate card's vote row
-    const row = document.createElement("div");
-    row.className = "arow";
-    const nameEl = document.createElement("div");
-    nameEl.className = "aname";
-    nameEl.textContent = a.name;
-    nameEl.title = a.name;
-    const btnWrap = document.createElement("span");
-    btnWrap.className = "btnwrap";
-    const info = document.createElement("button");
-    info.className = "votebtn ainfo";
-    info.innerHTML = iconSvg("info-circle", 14);
-    info.title = "embedded parameters";
-    info.addEventListener("click", (e) => {
-      e.stopPropagation();
-      showAnchorInfo(a.name, a.meta);
-    });
-    const rm = document.createElement("button");
-    rm.className = "votebtn rm";
-    rm.innerHTML = iconSvg("x", 12);
-    rm.title = "remove anchor";
-    rm.addEventListener("click", () => removeAnchor(a.name));
-    btnWrap.append(info, rm);
-    row.append(nameEl, btnWrap);
-    wrap.appendChild(row);
-
-    const metaEl = document.createElement("div");
-    metaEl.className = "ameta";
-    if (a.meta) {
-      const bits = [];
-      if (a.meta.seed != null) bits.push(`seed ${a.meta.seed}`);
-      if (a.meta.steps != null) bits.push(`${a.meta.steps} steps`);
-      if (a.meta.guidance != null) bits.push(`g ${a.meta.guidance}`);
-      if (a.meta.model) bits.push(a.meta.model);
-      metaEl.textContent = bits.join(" · ");
-      metaEl.title = a.meta.prompt ?? "";
-    }
-    wrap.appendChild(metaEl);
-    wrap.addEventListener("dragstart", (e) => {
+    cardEl = card;
+    card.classList.add("anchor");
+    card.dataset.name = a.name;
+    card.draggable = true;
+    card.addEventListener("dragstart", (e) => {
       e.dataTransfer.setData("text/x-anchor", "");
       e.dataTransfer.effectAllowed = "move";
-      reorderDrag = wrap;
-      wrap.classList.add("dragging");
+      reorderDrag = card;
+      card.classList.add("dragging");
     });
-    wrap.addEventListener("dragend", () => {
-      wrap.classList.remove("dragging");
+    card.addEventListener("dragend", () => {
+      card.classList.remove("dragging");
       reorderDrag = null;
       syncOrderFromDom();
     });
-    list.appendChild(wrap);
+    list.appendChild(card);
   }
 });
+
+function anchorTitle(name) {
+  const el = document.createElement("span");
+  el.className = "aname";
+  el.textContent = name;
+  el.title = name;
+  return el;
+}
+
+function anchorSummary(meta) {
+  if (!meta) return "";
+  const bits = [];
+  if (meta.seed != null) bits.push(`seed ${meta.seed}`);
+  if (meta.steps != null) bits.push(`${meta.steps} steps`);
+  if (meta.guidance != null) bits.push(`g ${meta.guidance}`);
+  if (meta.model) bits.push(meta.model);
+  return bits.join(" · ");
+}
