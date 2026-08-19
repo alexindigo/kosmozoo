@@ -32,8 +32,8 @@ export function buildCard(image, imgIdx) {
 
   card.appendChild(buildImageBox(image, imgIdx));
   card.appendChild(buildHeaderRow(image));
-  card.appendChild(buildMetaRow(image));
-  card.appendChild(buildNotesRow(image, imgIdx));
+  card.appendChild(buildNotesRow(image, imgIdx));  // feedback right under votes
+  card.appendChild(buildMetaRow(image));           // properties + prompt below
   return card;
 }
 
