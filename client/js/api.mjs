@@ -26,4 +26,10 @@ export const api = {
   settings: (ns) => req("GET", `/api/settings/${encodeURIComponent(ns)}`),
   setSettings: (ns, kv) => req("PATCH", `/api/settings/${encodeURIComponent(ns)}`, kv),
   plugins: () => req("GET", "/api/plugins"),
+  scraper: () => req("GET", "/api/scraper"),
+  setScraper: (kv) => req("POST", "/api/scraper", kv),
+  metadata: (host) => req("GET", `/api/metadata?host=${encodeURIComponent(host)}`),
+  metaWant: (host, files) => req("POST", "/api/meta-want", { host, files }),
+  downloadsCheck: (files) => req("POST", "/api/downloads-check", { files }),
+  feedbackPath: (path) => req("PUT", "/api/feedback-path", { path }),
 };

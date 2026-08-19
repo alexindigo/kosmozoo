@@ -16,6 +16,7 @@ export async function initJudgment() {
   S.judgment = {
     downvoteHides: ns.downvoteHides ?? true,
     revealThumbedDown: false,   // temporary, session-only
+    hideUp: false,              // session: hide thumbed-up (reload restores)
   };
 }
 
@@ -39,24 +40,32 @@ export async function toggleFavorite(image) {
 
 // --- notes -----------------------------------------------------------------
 
-// Debounced autosave; prune-when-empty is the store's job (harvest #13).
+// Direct save (card textareas debounce + flush themselves and call this).
+export async function saveNotes(image, notes) {
+  await api.setJudgment(image.id, { notes }).catch(() => {});
+  if (!image.judgment) image.judgment = {};
+  if (!notes.pos && !notes.neg) delete image.judgment.notes;
+  else image.judgment.notes = notes;
+}
+
+// Debounced autosave for other surfaces; prune-when-empty is the store's job
+// (harvest #13).
 const noteTimers = new Map();
 export function setNote(image, which, text) {
   // which: 'pos' | 'neg'
   clearTimeout(noteTimers.get(image.id + which));
-  noteTimers.set(image.id + which, setTimeout(async () => {
-    const notes = { ...(image.judgment?.notes ?? {}), [which]: text };
-    await api.setJudgment(image.id, { notes }).catch(() => {});
-    if (!image.judgment) image.judgment = {};
-    image.judgment.notes = notes;
+  noteTimers.set(image.id + which, setTimeout(() => {
+    saveNotes(image, { ...(image.judgment?.notes ?? {}), [which]: text });
   }, 400));
 }
 
 // --- visibility (filter, not data) ------------------------------------------
 
 // Whether an image is visible given the judgment state. Down-vote hides by
-// default (coupling exposed as a setting); the reveal is temporary.
+// default (coupling exposed as a setting); the reveal is temporary. "Hide
+// thumbed-up" is a session filter — marks survive, reload restores.
 export function isVisible(image) {
+  if (S.judgment?.hideUp && image.judgment?.vote === "up") return false;
   const down = image.judgment?.vote === "down";
   if (!down) return true;
   if (!S.judgment?.downvoteHides) return true;
@@ -67,6 +76,14 @@ export function isVisible(image) {
 export function toggleRevealThumbedDown() {
   S.judgment.revealThumbedDown = !S.judgment.revealThumbedDown;
   render();
+  return S.judgment.revealThumbedDown;
+}
+
+// "Hide thumbed-up" — the session-only counterpart.
+export function toggleHideUp() {
+  S.judgment.hideUp = !S.judgment.hideUp;
+  render();
+  return S.judgment.hideUp;
 }
 
 export async function setDownvoteHides(on) {

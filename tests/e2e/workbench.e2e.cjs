@@ -48,7 +48,7 @@ async function attempt(name, fn) {
 
   // --- row 10 ---------------------------------------------------------------
   await attempt("lightbox opens", async () => {
-    await page.evaluate("document.querySelector('.card').click(), true");
+    await page.evaluate("document.querySelector('.card .imgwrap').click(), true");
     await page.poll("window.__kz.S.lightbox.open === true", 5000);
   });
 
@@ -176,20 +176,24 @@ async function attempt(name, fn) {
     await page.poll("window.__kz.S.lightbox.open === false", 5000);
     await page.evaluate("window.__kz.setRoi(0, 0, 0, 0), true");
 
-    // chunked render completes the skeleton pass over ~1 frame per 60 cards
-    await page.poll(`document.querySelectorAll('.card').length === ${total}`, 45000);
-    const cards = await page.evaluate("document.querySelectorAll('.card').length");
-    check("all cards rendered (chunked)", cards === total, `${cards}/${total}`);
-
-    await page.evaluate("window.scrollTo(0, document.body.scrollHeight), true");
+    // chunked feed: renders on approach (sentinel + scroll net). Scroll-step
+    // until the end-of-list marker shows.
+    let reachedEnd = false;
+    for (let i = 0; i < 400; i++) {
+      await page.evaluate("window.scrollTo(0, document.body.scrollHeight), true");
+      await sleep(250);
+      reachedEnd = await page.evaluate("!!document.querySelector('.endoflist')");
+      if (reachedEnd) break;
+    }
+    check("feed renders to the end under scrolling (chunked, sentinel+net)", reachedEnd);
     await page.poll(`(() => {
       const n = window.__kz.S.images.length - 1;
-      const el = document.querySelector('.card[data-index="' + n + '"] img');
+      const el = document.querySelector('.card[data-idx="' + n + '"] img');
       return !!(el && el.getAttribute("src"));
     })()`, 15000);
     check("scroll to end loads tail images", true);
 
-    await page.evaluate("document.querySelector('.card').click(), true");
+    await page.evaluate("document.querySelector('.card .imgwrap').click(), true");
     await page.poll("window.__kz.S.lightbox.open === true", 5000);
     const t0 = Date.now();
     for (let i = 0; i < 50; i++) await page.key("ArrowDown");
@@ -198,7 +202,7 @@ async function attempt(name, fn) {
     const follows = await page.evaluate(`(() => {
       const idx = window.__kz.S.lightbox.index;
       for (let i = Math.max(0, idx - 4); i <= idx; i++) {
-        const el = document.querySelector('.card[data-index="' + i + '"] img');
+        const el = document.querySelector('.card[data-idx="' + i + '"] img');
         if (el && el.getAttribute("src")) return true;
       }
       return false;

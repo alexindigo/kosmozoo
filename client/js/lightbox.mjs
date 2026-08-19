@@ -12,7 +12,7 @@ import { api } from "./api.mjs";
 import { freshView, transform, viewToPersisted, viewFromPersisted } from "./geometry.mjs";
 import { cycleAxis } from "./axes.mjs";
 import { zoomToRoi } from "./roi.mjs";
-import { prefetchFrom, applyWindow } from "./volume.mjs";
+import { prefetchFrom, applyWindow } from "./feed.mjs";
 import { applyComposition } from "./plugins-client.mjs";
 import { setVote, toggleFavorite } from "./judgment.mjs";
 
@@ -63,12 +63,29 @@ function activeSrc() {
 }
 
 // harvest #2: write the outgoing view back BEFORE reading the incoming one.
+// harvest #2: write the outgoing view back BEFORE reading the incoming one.
+// Debounced: the map updates immediately; the engine write batches (400ms),
+// so per-step navigation costs no network round trip. Closing flushes.
+let persistTimer = null;
+let dirtyKeys = new Set();
+
 async function writeBack() {
   const key = activeKey();
   if (!key) return;
   const p = viewToPersisted(S.lightbox.view);
   if (p) persistedViews[key] = p; else delete persistedViews[key];
-  await api.setSettings(viewStoreKey, { [key]: p ?? null }).catch(() => {});
+  dirtyKeys.add(key);
+  clearTimeout(persistTimer);
+  persistTimer = setTimeout(flushPersist, 400);
+}
+
+async function flushPersist() {
+  clearTimeout(persistTimer);
+  if (!dirtyKeys.size) return;
+  const patch = {};
+  for (const k of dirtyKeys) patch[k] = persistedViews[k] ?? null;
+  dirtyKeys = new Set();
+  await api.setSettings(viewStoreKey, patch).catch(() => {});
 }
 
 function readBack() {
@@ -131,6 +148,7 @@ function currentBox(img) {
 // r frames the ROI.
 async function onKey(e) {
   if (!S.lightbox.open) return;
+  if (S.keysPanelOpen || S.capturing) return; // the keys panel outranks
   switch (e.key) {
     case "ArrowLeft":
     case "ArrowRight":
@@ -232,8 +250,19 @@ export async function openAt(index) {
   await lbShow();
 }
 
+// Clicking an anchor in the anchors column opens THAT anchor in the
+// lightbox (anchor column); blink from there compares against the feed.
+export async function openAnchor(anchorIdx) {
+  S.lightbox.open = true;
+  S.lightbox.col = "anchor";
+  S.lightbox.anchorIndex = anchorIdx;
+  readBack();
+  await lbShow();
+}
+
 export async function close() {
   await writeBack();
+  await flushPersist(); // durability point: closing flushes pending view writes
   S.lightbox.open = false;
   $("lightbox").hidden = true;
   render();
