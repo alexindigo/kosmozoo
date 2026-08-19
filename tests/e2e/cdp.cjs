@@ -111,10 +111,36 @@ class CDP {
   }
 
   // App listens on document keydown; synthetic events reach it.
-  async key(key) {
+  // mods: { shift, alt, ctrl, meta }.
+  async key(key, mods = {}) {
     await this.evaluate(
-      `document.dispatchEvent(new KeyboardEvent("keydown", { key: ${JSON.stringify(key)}, bubbles: true })), true`,
+      `document.dispatchEvent(new KeyboardEvent("keydown", {
+        key: ${JSON.stringify(key)}, bubbles: true,
+        shiftKey: ${!!mods.shift}, altKey: ${!!mods.alt},
+        ctrlKey: ${!!mods.ctrl}, metaKey: ${!!mods.meta},
+      })), true`,
     );
+  }
+
+  // Mouse via Input domain (synthesizes pointer events too).
+  // modBits: alt=1 ctrl=2 meta=4 shift=8.
+  async mouse(type, x, y, opts = {}) {
+    await this.send("Input.dispatchMouseEvent", {
+      type, x, y,
+      button: opts.button ?? "left",
+      clickCount: opts.clickCount ?? 0,
+      modifiers: opts.modifiers ?? 0,
+      ...(type === "mouseWheel" ? { deltaX: opts.deltaX ?? 0, deltaY: opts.deltaY ?? 0 } : {}),
+    });
+  }
+
+  async drag(x0, y0, x1, y1, { steps = 6, modifiers = 0 } = {}) {
+    await this.mouse("mousePressed", x0, y0, { clickCount: 1, modifiers });
+    for (let i = 1; i <= steps; i++) {
+      await this.mouse("mouseMoved", x0 + (x1 - x0) * i / steps, y0 + (y1 - y0) * i / steps, { modifiers });
+      await sleep(16);
+    }
+    await this.mouse("mouseReleased", x1, y1, { clickCount: 1, modifiers });
   }
 
   async close() {

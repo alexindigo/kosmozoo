@@ -16,6 +16,8 @@ import { api } from "./api.mjs";
 import { setVote, toggleFavorite, saveNotes } from "./judgment.mjs";
 import { metaStripText, fillCardMeta } from "./fields.mjs";
 import { retryImage } from "./feed.mjs";
+import { makeZoomable } from "./zoomable.mjs";
+import { iconSvg } from "./icons.mjs";
 
 // which filenames already exist in the downloads dir (save button greys)
 export const savedSet = new Set();
@@ -73,6 +75,8 @@ function buildImageBox(image, imgIdx) {
     wrap.classList.add("error");
   });
   wrap.appendChild(img);
+  // in-feed zoom: candidate crops persist and carry into the lightbox
+  makeZoomable(img, { key: image.id, restore: true });
 
   const strip = document.createElement("div");
   strip.className = "mstrip";
@@ -120,17 +124,17 @@ function buildHeaderRow(image) {
   savedFlashes.set(image.id, saved);
 
   const j = image.judgment ?? {};
-  const down = voteButton("down", "👎", "thumbs down — hides (Unhide up top restores)", j.vote === "down");
+  const down = voteButton("down", iconSvg("thumb-down"), "thumbs down — hides (Unhide up top restores)", j.vote === "down");
   down.addEventListener("click", async () => {
     await setVote(image, "down");
     removeCard(image); // hides by default: the card leaves the feed
   });
-  const up = voteButton("up", "👍", "thumbs up", j.vote === "up");
+  const up = voteButton("up", iconSvg("thumb-up"), "thumbs up", j.vote === "up");
   up.addEventListener("click", async () => {
     await setVote(image, j.vote === "up" ? null : "up");
     up.classList.toggle("on", image.judgment?.vote === "up");
   });
-  const fav = voteButton("favorite", "★", "favorite — interesting in itself, not project fitness", !!j.favorite);
+  const fav = voteButton("favorite", iconSvg("star"), "favorite — interesting in itself, not project fitness", !!j.favorite);
   fav.addEventListener("click", async () => {
     await toggleFavorite(image);
     fav.classList.toggle("on", !!image.judgment?.favorite);

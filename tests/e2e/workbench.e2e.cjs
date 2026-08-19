@@ -170,6 +170,36 @@ async function attempt(name, fn) {
     check("removed host gone from state", !has);
   });
 
+  // --- candidate in-feed zoom (parity with anchor thumbs) ------------------
+  await attempt("in-feed zoom: candidate card zooms + persists; emoji-free UI", async () => {
+    // the lightbox overlays the feed — close it so the wheel hits the card
+    await page.key("Escape");
+    await page.poll("window.__kz.S.lightbox.open === false", 3000);
+    // Ctrl+wheel on a card image zooms it in place
+    const box = await page.evaluate(`(() => {
+      const img = document.querySelector('.card .imgwrap img');
+      const r = img.getBoundingClientRect();
+      return { x: r.left + r.width / 2, y: r.top + r.height / 2 };
+    })()`);
+    await page.mouse("mouseWheel", box.x, box.y, { deltaY: -240, modifiers: 2 });
+    await page.poll("document.querySelector('.card .imgwrap img').classList.contains('zoomed')", 3000);
+    check("Ctrl+wheel zooms a candidate card in place", true);
+    const tf = await page.evaluate("document.querySelector('.card .imgwrap img').style.transform");
+    check("zoom applies a transform", tf.includes("scale("), tf.slice(0, 40));
+    // double-click resets
+    await page.mouse("mousePressed", box.x, box.y, { clickCount: 2 });
+    await page.mouse("mouseReleased", box.x, box.y, { clickCount: 2 });
+    await page.poll("!document.querySelector('.card .imgwrap img').classList.contains('zoomed')", 3000);
+    check("double-click resets the zoom", true);
+    // no emoji anywhere in the UI
+    const emojiFound = await page.evaluate(`(() => {
+      const re = /[\\u{1F300}-\\u{1FAFF}\\u{2600}-\\u{27BF}\\u{2190}-\\u{21FF}\\u{2B00}-\\u{2BFF}]/u;
+      const texts = [...document.querySelectorAll("button, a, .votebtn, .savebtn")].map(e => e.textContent);
+      return texts.filter(t => re.test(t));
+    })()`);
+    check("no emoji in buttons (icons are SVG)", emojiFound.length === 0, emojiFound.join(","));
+  });
+
   // --- row 12 ---------------------------------------------------------------
   await attempt("row 12: volume", async () => {
     await page.key("Escape");
@@ -180,7 +210,7 @@ async function attempt(name, fn) {
     // until the end-of-list marker shows.
     let reachedEnd = false;
     for (let i = 0; i < 400; i++) {
-      await page.evaluate("window.scrollTo(0, document.body.scrollHeight), true");
+      await page.evaluate("(() => { const c = document.getElementById(\"candidatesCol\"); c.scrollTop = c.scrollHeight; })(), true");
       await sleep(250);
       reachedEnd = await page.evaluate("!!document.querySelector('.endoflist')");
       if (reachedEnd) break;
