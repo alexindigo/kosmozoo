@@ -16,6 +16,7 @@ import { prefetchFrom, applyWindow } from "./feed.mjs";
 import { applyComposition } from "./plugins-client.mjs";
 import { setVote, toggleFavorite } from "./judgment.mjs";
 import { getView, setView, flushViews } from "./views.mjs";
+import { chrome } from "./chrome.mjs";
 
 const $ = (id) => document.getElementById(id);
 
@@ -103,7 +104,9 @@ export async function lbShow() {
 
   const el = S.lightbox.col === "anchor" ? $("lbAnchor") : $("lbCandidate");
 
-  // Preload off-DOM; only swap once decoded (cover the swap).
+  // Preload off-DOM; only swap once decoded (cover the swap). Slow hosts get
+  // a loading chip rather than a black screen.
+  chrome.status.active("lb-load", "loading image…");
   const img = new Image();
   img.src = src;
   try {
@@ -111,6 +114,7 @@ export async function lbShow() {
   } catch {
     // keep showing the outgoing frame on failure
   }
+  chrome.status.clear("lb-load");
   if (gen !== S.lightbox.loadGen) return; // a newer navigation superseded us
   if (el.dataset.cur !== src) { el.src = src; el.dataset.cur = src; }
   el.style.transform = transform(S.lightbox.view, currentBox(img));
