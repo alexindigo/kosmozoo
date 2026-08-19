@@ -2,13 +2,17 @@
 
 :root { color-scheme: dark;
   /* palette: black, dark grey, light grey, white, light blue, bright orange,
-     red (errors only) */
+     red (errors only). Green is allowed ONLY for positive-feedback
+     affordances (pos notes, up votes, saved confirmations) — never for
+     general UI elements. */
   --black: #000;
-  --bg: var(--bg); --panel: var(--panel); --card: var(--card); --raise: var(--raise);
-  --border: var(--border); --dim: var(--dim); --mid: var(--mid); --fg: var(--fg); --white: #fff;
+  --bg: #111; --panel: #1a1a1a; --card: #151515; --raise: #222;
+  --border: #333; --dim: #666; --mid: #999; --fg: #ddd; --white: #fff;
   --accent: #7ab3ff;   /* light blue */
   --orange: #ff8800;   /* bright orange */
-  --red: var(--red);         /* errors */
+  --red: #f66;         /* errors */
+  --green: #9ece6a;    /* positive feedback ONLY */
+  --green-dim: rgba(158, 206, 106, .55);
 }
 * { box-sizing: border-box; }
 html, body { height: 100%; }
@@ -117,7 +121,7 @@ main { display: flex; flex: 1; min-height: 0; }
 .card { scroll-snap-align: start; scroll-margin-top: 8px;
   background: var(--panel); border: 1px solid var(--raise); border-radius: 8px;
   padding: 12px; }
-.card[data-vote="up"] { border-color: color-mix(in srgb, var(--accent) 55%, transparent); }
+.card[data-vote="up"] { border-color: var(--green-dim); }
 .card[data-favorite="1"] { box-shadow: 0 0 0 1px var(--orange); }
 
 /* image box: aspect-true, reserved before pixels land */
@@ -143,7 +147,7 @@ main { display: flex; flex: 1; min-height: 0; }
   overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .fname .copyable:hover { color: var(--accent); }
 .fname .copyable.copied { color: var(--accent); }
-.saved { color: var(--accent); font-size: 11px; opacity: 0; transition: opacity .3s;
+.saved { color: var(--green); font-size: 11px; opacity: 0; transition: opacity .3s;
   margin-right: 8px; align-self: center; white-space: nowrap; }
 .saved.show { opacity: 1; }
 .btnwrap { white-space: nowrap; display: flex; gap: 4px; }
@@ -152,11 +156,11 @@ main { display: flex; flex: 1; min-height: 0; }
   border-radius: 4px; cursor: pointer; }
 .votebtn svg { vertical-align: -1px; }
 .votebtn:hover, .savebtn:hover { border-color: var(--dim); color: var(--mid); }
-/* identity colors, muted until active/hover: down=red, up=light blue */
+/* identity colors, muted until active/hover: down=red, up=green (feedback) */
 .votebtn.down { color: rgba(247, 118, 142, .55); }
-.votebtn.up { color: rgba(122, 179, 255, .55); }
+.votebtn.up { color: var(--green-dim); }
 .votebtn.down:hover, .votebtn.down.on { color: var(--red); border-color: var(--red); }
-.votebtn.up:hover, .votebtn.up.on { color: var(--accent); border-color: var(--accent); }
+.votebtn.up:hover, .votebtn.up.on { color: var(--green); border-color: var(--green); }
 .votebtn.favorite { color: rgba(255, 136, 0, .55); }
 .votebtn.favorite:hover, .votebtn.favorite.on { color: var(--orange); border-color: var(--orange); }
 
@@ -174,7 +178,7 @@ main { display: flex; flex: 1; min-height: 0; }
   background: var(--bg); border: 1px solid var(--border); border-radius: 6px;
   color: var(--fg); font: inherit; padding: 6px 8px; }
 .boxcol textarea.neg { border-color: var(--red); }
-.boxcol textarea.pos { border-color: var(--accent); }
+.boxcol textarea.pos { border-color: var(--green); }
 .boxcol textarea:focus { outline: none; }
 .boxcol textarea.neg:focus { border-color: var(--red); }
 .boxcol textarea.pos:focus { border-color: var(--accent); }
