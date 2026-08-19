@@ -16,6 +16,9 @@ export const S = {
   hosts: {},            // name -> { address, online }
   host: null,           // selected host name
   images: [],           // [{ id, host, filename, meta, judgment }] — shared list model
+  scraper: null,        // { enabled, paused, pending: {host: n} }
+  feedbackPath: null,   // where judgments live (engine-side)
+  fieldsCfg: null,      // metadata fields picker config (core.fields.cfg)
   // session UI state (dies with the page)
   lightbox: {
     open: false,
@@ -23,9 +26,19 @@ export const S = {
     col: "candidate",   // 'candidate' | 'anchor'
     view: freshView(),
     loadGen: 0,         // load-generation guard (harvest #1)
+    splitX: null,       // split-wipe line, viewport px; null = centered
+    blendOpacity: 0.5,
+    anchorIndex: 0,
   },
-  anchors: [],          // [{ name, src(blobURL), meta? }] — local drops
+  anchors: [],          // [{ name, src(dataURL), meta? }] — local drops, persisted
+  anchorPaneWidth: 300, // px; divider-adjusted, persisted
   filter: "",
+  hostMenuOpen: false,
+  menuOpen: false,
+  menuFilter: "",
+  keysPanelOpen: false,
+  keysFilter: "",
+  capturing: null,      // action id awaiting a keypress (rebind)
   // axes (see docs/spec.md §1)
   axes: {
     alignment: "shared",      // 'independent' | 'shared' | 'face-anchored'
@@ -35,6 +48,7 @@ export const S = {
   detector: null,             // detector plugin status, when present
   roi: null,            // { fx, fy, fw, fh } box-fractions, manual-first
   guides: [],           // [{ axis, pos }] — persist globally (harvest #12)
+  dragGuide: null,      // in-progress guide drag from an edge { axis, pos }
 };
 
 // The only DOM writer. Re-renders the surfaces from S. Individual surfaces

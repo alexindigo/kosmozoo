@@ -8,18 +8,86 @@
 </head>
 <body>
 <header id="chrome">
-  <select id="hostPicker" title="ComfyUI host"></select>
-  <button id="hostAdd" title="Add host (name=host:port)">+</button>
-  <button id="hostRemove" title="Remove current host">−</button>
-  <input id="filter" type="search" placeholder="filter" spellcheck="false">
-  <span id="status" aria-live="polite"></span>
+  <img src="/logo-64.png" alt="kosmozoo" width="24" height="24" style="border-radius:6px">
+  <h1>Kosmozoo</h1>
+  <div id="hostPicker">
+    <button id="hostBtn" title="choose host">
+      <span class="hdot off" id="hostDot"></span><span id="hostBtnLabel">host…</span><span class="chev">▾</span>
+    </button>
+    <div id="hostDrop" hidden>
+      <div id="hostList"></div>
+      <div class="haddrow">
+        <input type="text" id="hostName" placeholder="name" spellcheck="false">
+        <input type="text" id="hostAddr" placeholder="host:port" spellcheck="false">
+        <button id="hostAdd">add</button>
+      </div>
+    </div>
+  </div>
+  <input id="filter" type="search" placeholder="filter filenames…" spellcheck="false">
+  <span id="headerButtons"></span>
+  <span id="status"></span>
+  <span class="flexspacer"></span>
+  <a id="dlFeedback" class="btn" href="/api/feedback" download="kosmozoo_feedback.json"
+     title="download the exact feedback.json as stored on the server">Download feedback</a>
+  <div id="menuWrap">
+    <button id="menuBtn" title="options">☰</button>
+    <div id="menu" hidden></div>
+  </div>
 </header>
-<main id="grid" role="list"></main>
+<main>
+  <section id="candidatesCol"><div id="grid"></div></section>
+  <div id="divider" title="drag to resize the split"></div>
+  <aside id="anchors">
+    <div id="anchorList"></div>
+    <div id="dropzone">Drop images here<br>(or click to browse)</div>
+    <input type="file" id="fileInput" accept="image/*" multiple hidden>
+  </aside>
+</main>
+<div id="statusStack"></div>
+<div id="fieldsOverlay" hidden>
+  <div id="fieldsPanel">
+    <button id="fieldsClose" title="close (Esc)">×</button>
+    <div id="fieldsTitle">Metadata fields</div>
+    <div id="fieldsSub"><b>under image</b> — the card's metadata panel ·
+      <b>strip</b> — a semi-transparent strip over the image bottom
+      (cards) / screen bottom (lightbox)</div>
+    <div id="fieldsTable"></div>
+  </div>
+</div>
+<div id="infoOverlay" hidden>
+  <div id="infoPanel">
+    <button id="infoClose" title="close (Esc)">×</button>
+    <div id="infoTitle"></div>
+    <div id="infoBody"></div>
+  </div>
+</div>
+<div id="keysPanel" hidden>
+  <div id="keysPanelInner">
+    <div id="keysPanelHead">
+      <h2>Actions & keys</h2>
+      <input id="keysSearch" type="search" placeholder="filter actions…" spellcheck="false">
+      <button id="keysReset" title="restore all default bindings">reset all</button>
+    </div>
+    <div id="keysList"></div>
+    <div id="keysFoot">click a binding to change it · right-click resets one · Esc cancels capture</div>
+  </div>
+</div>
 <div id="lightbox" hidden>
   <img id="lbCandidate" alt="">
   <img id="lbAnchor" alt="">
+  <div id="lbSplitLine" hidden></div>
   <div id="lbGuides"></div>
   <div id="lbRoi"></div>
+  <div id="lbChrome">
+    <input id="lbBlend" type="range" min="0" max="1" step="0.01" value="0.5"
+           title="blend opacity (candidate over anchor)" hidden>
+  </div>
+  <button id="lbKeysBtn" title="actions & keys (?)">
+    <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.6">
+      <rect x="2" y="6" width="20" height="12" rx="2"/>
+      <path d="M6 10h.01M10 10h.01M14 10h.01M18 10h.01M6 14h.01M18 14h.01M9 14h6"/>
+    </svg>
+  </button>
 </div>
 <script type="module" src="./js/main.mjs"></script>
 </body>

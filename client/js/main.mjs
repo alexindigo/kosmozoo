@@ -1,19 +1,26 @@
-// client/js/main.mjs — SPA entry. Wires state -> render and boots the app.
+// client/js/main.mjs — SPA entry: boot, core chrome registration (through
+// the same registry plugins use), and the feed's orchestration (metadata
+// poll/patch, meta-want, scroll persistence, status summary).
 
 import { S, render, onRender } from "./state.mjs";
 import { api } from "./api.mjs";
-import { openAt, close, initLightbox } from "./lightbox.mjs";
-import { addAnchorFiles } from "./anchors.mjs";
+import { initLightbox } from "./lightbox.mjs";
+import { addAnchorFiles, initAnchorsPane, initInfoOverlay, initAnchorsWidth } from "./anchors.mjs";
 import { initRoi, setRoi } from "./roi.mjs";
 import { initClientPlugins } from "./plugins-client.mjs";
 import { axisStatus } from "./axes.mjs";
-import { isVisible, initJudgment } from "./judgment.mjs";
-import { renderChunked, setVisibleRange, resetWindow, prefetchFrom } from "./volume.mjs";
+import { isVisible, initJudgment, toggleRevealThumbedDown, toggleHideUp, setDownvoteHides } from "./judgment.mjs";
+import { chrome, initKeyDispatch, toggleMenu } from "./chrome.mjs";
+import { initKeysPanel, initKeysPanelDom, toggleKeysPanel } from "./keys-panel.mjs";
+import { initHostPicker, selectHost, initialHost } from "./hostpicker.mjs";
+import { initFeed, renderFeed, onScrollSafetyNet, cardAt, restoreScroll } from "./feed.mjs";
+import { loadFieldsCfg, openFieldsOverlay, initFieldsOverlay } from "./fields.mjs";
+import { buildCard, patchCardMeta, savedSet } from "./card.mjs";
 
 const $ = (id) => document.getElementById(id);
 
-// test seam: e2e drives the same state the keys do (window.__kz)
-window.__kz = { S, setRoi, addAnchorFiles };
+// test seam: e2e drives the same state the keys do
+window.__kz = { S, setRoi, addAnchorFiles, chrome, render };
 
 // drag-and-drop anywhere drops anchors (local files, never uploaded)
 document.addEventListener("dragover", (e) => e.preventDefault());
@@ -22,144 +29,334 @@ document.addEventListener("drop", async (e) => {
   if (e.dataTransfer?.files?.length) await addAnchorFiles([...e.dataTransfer.files]);
 });
 
-// --- renderers (the only DOM writers) -------------------------------------
+// --- metadata channel: poll + patch in place + scroll-driven wants --------------
 
-onRender((s) => {
-  const picker = $("hostPicker");
-  const names = Object.keys(s.hosts).join(""); // rebuild on any set change
-  if (picker.dataset.names !== names) {
-    picker.dataset.names = names;
-    picker.innerHTML = "";
-    for (const [name, h] of Object.entries(s.hosts)) {
-      const opt = document.createElement("option");
-      opt.value = name;
-      opt.textContent = `${name}${h.online ? "" : " (offline)"}`;
-      picker.appendChild(opt);
+let metaVersion = 0;
+let metaPending = 0;
+let metaPollTimer = null;
+const wantSet = new Set();
+let wantTimer = null;
+
+function wantMeta(image) {
+  if (image.meta || wantSet.has(image.filename)) return;
+  wantSet.add(image.filename);
+  clearTimeout(wantTimer);
+  wantTimer = setTimeout(flushWant, 1500);
+}
+
+async function flushWant() {
+  if (!S.host) return;
+  const files = [...wantSet];
+  wantSet.clear();
+  if (!files.length) return;
+  try {
+    const r = await api.metaWant(S.host, files);
+    if (typeof r.pending === "number") {
+      metaPending = r.pending;
+      updateScanChip();
+      if (metaPending > 0) scheduleMetaPoll();
     }
-  }
-  if (s.host) picker.value = s.host;
-});
+  } catch { /* next render re-wants */ }
+}
 
-// The grid renders card skeletons chunk by chunk via volume.mjs (which keeps
-// the cardEls registry the window loader reads); image *bytes* load only
-// inside the active window. Judgment visibility (down-vote hides) and the
-// filename filter both shape the view here.
-let gridScheduled = false;
-onRender((s) => {
-  if (gridScheduled) return;
-  gridScheduled = true;
-  requestAnimationFrame(() => {
-    gridScheduled = false;
-    const grid = $("grid");
-    grid.innerHTML = "";
-    resetWindow();
-    const filter = s.filter.toLowerCase();
-    const view = [];
-    for (let i = 0; i < s.images.length; i++) {
-      const img = s.images[i];
-      if (filter && !img.filename.toLowerCase().includes(filter)) continue;
-      if (!isVisible(img)) continue; // down-voted and not revealed
-      view.push(i);
+function scheduleMetaPoll(delay = 5000) {
+  clearTimeout(metaPollTimer);
+  metaPollTimer = setTimeout(pollMetadata, delay);
+}
+
+async function pollMetadata() {
+  if (!S.host) return;
+  try {
+    const r = await api.metadata(S.host);
+    metaPending = r.pending ?? 0;
+    updateScanChip();
+    if (r.v !== metaVersion) {
+      metaVersion = r.v;
+      mergeMetadata(r.items ?? {});
     }
-    renderChunked(grid, view, (card, img) => {
-      if (img.judgment?.vote) card.dataset.vote = img.judgment.vote;
-      if (img.judgment?.favorite) card.dataset.favorite = "1";
-    }, () => {
-      // initial window: the first screenful
-      const cols = Math.max(1, Math.floor(grid.clientWidth / 186));
-      setVisibleRange(0, Math.min(view.length, cols * 4));
-    });
-  });
-  const anchorsNote = s.anchors.length ? ` · ${s.anchors.length} anchor(s)` : "";
-  $("status").textContent = `${s.images.length} images${anchorsNote} · ${axisStatus()}`;
-});
+  } catch { /* transient; next poll retries */ }
+  if (metaPending > 0) scheduleMetaPoll();
+}
 
-// Scroll wiring: the window's scroll half is estimated from grid geometry
-// (fixed row height via aspect-ratio), rAF-throttled. This is mechanism #2
-// (scroll safety net) of the three-mechanism progress design.
-let scrollTick = false;
-window.addEventListener("scroll", () => {
-  if (scrollTick) return;
-  scrollTick = true;
-  requestAnimationFrame(() => {
-    scrollTick = false;
-    const grid = $("grid");
-    const first = grid.querySelector(".card");
-    if (!first) return;
-    const rowH = first.getBoundingClientRect().height + 6; // card + gap
-    const cols = Math.max(1, Math.floor(grid.clientWidth / (first.getBoundingClientRect().width + 6)));
-    const lo = Math.max(0, Math.floor(window.scrollY / rowH) * cols - cols);
-    const hi = Math.min(S.images.length - 1, Math.ceil((window.scrollY + window.innerHeight) / rowH) * cols + cols);
-    setVisibleRange(lo, hi);
-  });
-}, { passive: true });
-
-// Per-host scroll position: restored on host switch (mechanism #3,
-// programmatic restore), persisted in settings.
-const scrollSave = { t: null };
-window.addEventListener("scroll", () => {
-  clearTimeout(scrollSave.t);
-  scrollSave.t = setTimeout(() => {
-    if (S.host) api.setSettings("core.ui", { [`scroll.${S.host}`]: window.scrollY }).catch(() => {});
-  }, 500);
-}, { passive: true });
-
-// --- boot ------------------------------------------------------------------
-
-async function boot() {
-  await initClientPlugins(); // before axes so plugin modes are registered
-  await initLightbox();
-  await initRoi();
-  await initJudgment();
-  S.hosts = await api.hosts();
-  S.host = Object.keys(S.hosts)[0] ?? null;
-  render();
-  if (S.host) {
-    S.images = await api.images(S.host);
-    render();
-    const saved = await api.settings("core.ui").catch(() => ({}));
-    if (saved[`scroll.${S.host}`]) {
-      requestAnimationFrame(() => window.scrollTo(0, saved[`scroll.${S.host}`]));
-    }
+// A card rendered before its metadata arrived gets patched in place.
+function mergeMetadata(items) {
+  for (const [name, meta] of Object.entries(items)) {
+    const idx = S.images.findIndex((i) => i.filename === name);
+    if (idx < 0) continue;
+    if (!S.images[idx].meta) S.images[idx].meta = meta;
+    const card = cardAt(idx);
+    if (card) patchCardMeta(card, meta);
   }
 }
 
-$("hostPicker").addEventListener("change", async (e) => {
-  S.host = e.target.value;
-  S.images = await api.images(S.host);
-  render();
-});
-$("hostAdd").addEventListener("click", async () => {
-  const input = prompt("Add host  (name=host:port)", "");
-  if (!input) return;
-  const eq = input.indexOf("=");
-  if (eq < 1) { $("status").textContent = "host must be name=host:port"; return; }
-  try {
-    await api.addHost(input.slice(0, eq).trim(), input.slice(eq + 1).trim());
-    S.hosts = await api.hosts();
-    render();
-  } catch (err) {
-    $("status").textContent = `add host failed: ${err.message}`;
+function updateScanChip() {
+  if (metaPending > 0) chrome.status.active("meta", `metadata scan — ${metaPending} left`);
+  else chrome.status.clear("meta");
+}
+
+// --- core chrome -----------------------------------------------------------------
+
+function statusSummary() {
+  const hidden = S.images.filter((i) => i.judgment?.vote === "down").length;
+  const base = S.filter
+    ? `${viewCount()} of ${S.images.length} matching “${S.filter}” from ${S.host}`
+    : `${S.images.length} images from ${S.host}`;
+  return base + (hidden ? ` (${hidden} hidden)` : "");
+}
+
+function viewCount() {
+  const q = S.filter.toLowerCase();
+  return S.images.filter((i) =>
+    (!q || i.filename.toLowerCase().includes(q)) && isVisible(i)).length;
+}
+
+function rebuildFeed() {
+  const q = S.filter.toLowerCase();
+  const view = [];
+  for (let i = 0; i < S.images.length; i++) {
+    const img = S.images[i];
+    if (q && !img.filename.toLowerCase().includes(q)) continue;
+    if (!isVisible(img)) continue;
+    view.push(i);
   }
-});
-$("hostRemove").addEventListener("click", async () => {
-  if (!S.host) return;
-  if (!confirm(`Remove host "${S.host}"?`)) return;
-  try {
-    await api.removeHost(S.host);
-    S.hosts = await api.hosts();
-    S.host = Object.keys(S.hosts)[0] ?? null;
-    S.images = S.host ? await api.images(S.host) : [];
-    render();
-  } catch (err) {
-    $("status").textContent = `remove host failed: ${err.message}`;
-  }
-});
-$("filter").addEventListener("input", (e) => { S.filter = e.target.value; render(); });
-$("grid").addEventListener("click", async (e) => {
-  const card = e.target.closest(".card");
-  if (!card) return;
-  await openAt(parseInt(card.dataset.index, 10));
+  renderFeed($("grid"), view);
+}
+
+function registerCoreChrome() {
+  chrome.headerButton({
+    id: "refreshBtn", label: "Refresh", title: "re-fetch hosts and image list",
+    onClick: async () => {
+      S.hosts = await api.hosts();
+      if (S.host) await loadCandidates();
+      chrome.status.info("refreshed");
+    },
+  });
+  chrome.headerButton({
+    id: "unhideBtn", label: "Unhide", title: "temporarily show thumbed-down images (votes are kept)",
+    onClick: () => {
+      const on = toggleRevealThumbedDown();
+      rebuildFeed();
+      chrome.status.info(on ? "thumbed-down revealed (temporary)" : "thumbed-down hidden");
+    },
+  });
+  chrome.headerButton({
+    id: "hideUpBtn", label: "Hide 👍", title: "hide thumbed-up images for this session (reload restores)",
+    onClick: () => {
+      const on = toggleHideUp();
+      rebuildFeed();
+      chrome.status.info(on ? "thumbed-up hidden this session" : "thumbed-up visible");
+    },
+  });
+
+  chrome.menuItem({
+    id: "scraper", kind: "custom", searchText: "metadata scan",
+    render(row) {
+      const label = document.createElement("label");
+      label.className = "switchwrap";
+      label.title = "walk the host's image list and extract PNG-embedded metadata in the background";
+      const box = document.createElement("input");
+      box.type = "checkbox";
+      box.checked = !!S.scraper?.enabled;
+      box.addEventListener("change", async () => {
+        await api.setScraper({ enabled: box.checked });
+        S.scraper = await api.scraper();
+        render();
+      });
+      const track = document.createElement("span");
+      track.className = "track";
+      label.append(box, track, document.createTextNode("metadata scan"));
+      const pause = document.createElement("button");
+      pause.id = "scraperPause";
+      pause.textContent = S.scraper?.paused ? "▶" : "⏸";
+      pause.title = "pause/resume the background scan (laptop mode)";
+      pause.addEventListener("click", async () => {
+        await api.setScraper({ paused: !S.scraper?.paused });
+        S.scraper = await api.scraper();
+        render();
+      });
+      const counter = document.createElement("span");
+      counter.id = "scraperPending";
+      counter.className = "menuextra";
+      counter.textContent = scraperPendingText();
+      row.append(label, pause, counter);
+    },
+  });
+
+  chrome.menuItem({
+    id: "fields", kind: "action", label: "metadata fields…",
+    searchText: "metadata fields card strip picker",
+    onClick: () => openFieldsOverlay(),
+  });
+
+  chrome.menuItem({
+    id: "downvote-hides", kind: "toggle",
+    label: "down-vote hides",
+    title: "thumbs-down removes an image from view (reveal with the Unhide button)",
+    get: () => S.judgment?.downvoteHides ?? true,
+    set: (v) => setDownvoteHides(v),
+  });
+
+  chrome.menuItem({
+    id: "feedback-path", kind: "custom", searchText: "feedback.json path",
+    render(row) {
+      const lab = document.createElement("div");
+      lab.className = "menulabel";
+      lab.textContent = "feedback.json path";
+      const wrap = document.createElement("div");
+      wrap.className = "fbpathrow";
+      const input = document.createElement("input");
+      input.type = "text";
+      input.spellcheck = false;
+      input.value = S.feedbackPath ?? "";
+      const apply = document.createElement("button");
+      apply.textContent = "apply";
+      apply.addEventListener("click", async () => {
+        try {
+          const r = await api.feedbackPath(input.value.trim());
+          S.feedbackPath = r.feedbackPath;
+          chrome.status.info(`feedback path → ${r.feedbackPath}`);
+          if (S.host) await loadCandidates();
+        } catch (err) {
+          chrome.status.error(`feedback path failed: ${err.message}`);
+        }
+      });
+      wrap.append(input, apply);
+      row.append(lab, wrap);
+    },
+  });
+}
+
+function scraperPendingText() {
+  const p = S.scraper?.pending ?? {};
+  const total = Object.values(p).reduce((a, b) => a + b, 0);
+  return total > 0 ? `${total} left` : "";
+}
+
+// status line in the header shows the axes; the summary sentence goes through
+// the transient chip on load/vote, per the cadence
+onRender((s) => {
+  $("status").textContent = axisStatus();
 });
 
-boot().catch((e) => { $("status").textContent = `load failed: ${e.message}`; });
+// --- load candidates -------------------------------------------------------------
+
+async function loadCandidates() {
+  if (!S.host) return;
+  chrome.status.active("load", `loading image list from ${S.host}…`);
+  try {
+    S.images = await api.images(S.host);
+    try {
+      const d = await api.downloadsCheck(S.images.map((i) => i.filename));
+      savedSet.clear();
+      for (const [k, v] of Object.entries(d.exists ?? {})) if (v) savedSet.add(k);
+    } catch { /* save buttons just won't pre-grey */ }
+    chrome.status.clear("load");
+    if (!S.images.length) {
+      $("grid").innerHTML = '<div class="empty">no output images</div>';
+      chrome.status.info(`no output images on ${S.host}`);
+      return;
+    }
+    rebuildFeed();
+    chrome.status.info(statusSummary());
+    const ui = await api.settings("core.ui").catch(() => ({}));
+    const y = ui[`scroll.${S.host}`];
+    if (y) restoreScroll(y);
+    await pollMetadata();
+  } catch (err) {
+    chrome.status.clear("load");
+    showLoadError(err);
+  }
+}
+
+// Load failures get the body, not just the status line: what failed, what to
+// try, and a retry button.
+function showLoadError(err) {
+  const addr = S.hosts[S.host]?.address ?? "";
+  const grid = $("grid");
+  grid.innerHTML = "";
+  const box = document.createElement("div");
+  box.className = "loadfail";
+  const title = document.createElement("div");
+  title.className = "loadfail-title";
+  title.textContent = `⚠ couldn't load images from ${S.host}`;
+  const detail = document.createElement("div");
+  detail.className = "loadfail-detail";
+  detail.textContent = String(err?.message ?? err);
+  const steps = document.createElement("ol");
+  steps.className = "loadfail-steps";
+  const items = [
+    "Retry — ComfyUI stalls its API while generating; a moment later it often just works.",
+    addr ? `Check the host directly: ${addr} (its queue page).` : null,
+    "If the host was reconfigured, fix or re-add it in the host picker (top-left).",
+  ].filter(Boolean);
+  for (const t of items) {
+    const li = document.createElement("li");
+    li.textContent = t;
+    steps.appendChild(li);
+  }
+  const btn = document.createElement("button");
+  btn.className = "loadfail-retry";
+  btn.textContent = "Retry / refresh";
+  btn.addEventListener("click", loadCandidates);
+  box.append(title, detail, steps, btn);
+  grid.appendChild(box);
+}
+
+// --- boot --------------------------------------------------------------------------
+
+async function boot() {
+  await initClientPlugins(); // before axes so plugin modes are registered
+  initKeyDispatch();
+  await initKeysPanel(); // BEFORE lightbox keys: the panel outranks on Escape
+  initKeysPanelDom();
+  await initLightbox();
+  await initRoi();
+  await initJudgment();
+  initHostPicker();
+  initAnchorsPane();
+  initInfoOverlay();
+  initFieldsOverlay();
+  registerCoreChrome();
+
+  initFeed({
+    card: (image, imgIdx) => buildCard(image, imgIdx),
+    onScreen: (image) => isVisible(image),
+    wantMeta: (image) => wantMeta(image),
+  });
+
+  $("menuBtn").addEventListener("click", (e) => { e.stopPropagation(); toggleMenu(); });
+  document.addEventListener("click", (e) => {
+    if (S.menuOpen && !$("menuWrap").contains(e.target)) { S.menuOpen = false; render(); }
+  });
+  window.addEventListener("scroll", onScrollSafetyNet, { passive: true });
+  window.addEventListener("scroll", () => {
+    clearTimeout(boot._scrollSave);
+    boot._scrollSave = setTimeout(() => {
+      if (S.host && !S.filter) { // filtered views aren't the host list
+        api.setSettings("core.ui", { [`scroll.${S.host}`]: window.scrollY }).catch(() => {});
+      }
+    }, 400);
+  }, { passive: true });
+  $("lbKeysBtn").addEventListener("click", (e) => { e.stopPropagation(); toggleKeysPanel(); });
+
+  S.hosts = await api.hosts();
+  const ui = await api.settings("core.ui").catch(() => ({}));
+  const fieldsStored = await api.settings("core.fields").catch(() => ({}));
+  S.fieldsCfg = loadFieldsCfg(fieldsStored.cfg);
+  S.scraper = await api.scraper().catch(() => null);
+  S.feedbackPath = (await api.settings("core").catch(() => ({})))?.feedbackPath ?? null;
+  await initAnchorsWidth();
+  await selectHost(initialHost(S.hosts, ui.host));
+  await loadCandidates();
+
+  // scraper status chip + menu counter: poll every 2s
+  setInterval(async () => {
+    S.scraper = await api.scraper().catch(() => S.scraper);
+    const counter = $("scraperPending");
+    if (counter) counter.textContent = scraperPendingText();
+  }, 2000);
+}
+
+$("filter").addEventListener("input", (e) => { S.filter = e.target.value; rebuildFeed(); });
+
+boot().catch((e) => chrome.status.error(`load failed: ${e.message}`));
