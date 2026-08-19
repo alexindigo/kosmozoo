@@ -252,26 +252,35 @@ onRender((s) => {
     });
     makeZoomable(img, { key: `anchor:${a.name}`,
       onZoomChange: (zoomed) => { wrap.draggable = !zoomed; } });
+    imgWrap.appendChild(img);
+    wrap.appendChild(imgWrap);
 
+    // action row under the image, like the candidate card's vote row
+    const row = document.createElement("div");
+    row.className = "arow";
+    const nameEl = document.createElement("div");
+    nameEl.className = "aname";
+    nameEl.textContent = a.name;
+    nameEl.title = a.name;
+    const btnWrap = document.createElement("span");
+    btnWrap.className = "btnwrap";
     const info = document.createElement("button");
-    info.className = "ainfo";
-    info.innerHTML = iconSvg("info-circle", 16);
+    info.className = "votebtn ainfo";
+    info.innerHTML = iconSvg("info-circle", 14);
     info.title = "embedded parameters";
     info.addEventListener("click", (e) => {
       e.stopPropagation();
       showAnchorInfo(a.name, a.meta);
     });
     const rm = document.createElement("button");
-    rm.className = "rm";
+    rm.className = "votebtn rm";
     rm.innerHTML = iconSvg("x", 12);
     rm.title = "remove anchor";
     rm.addEventListener("click", () => removeAnchor(a.name));
-    imgWrap.append(img, info, rm);
+    btnWrap.append(info, rm);
+    row.append(nameEl, btnWrap);
+    wrap.appendChild(row);
 
-    const nameEl = document.createElement("div");
-    nameEl.className = "aname";
-    nameEl.textContent = a.name;
-    nameEl.title = a.name;
     const metaEl = document.createElement("div");
     metaEl.className = "ameta";
     if (a.meta) {
@@ -283,8 +292,7 @@ onRender((s) => {
       metaEl.textContent = bits.join(" · ");
       metaEl.title = a.meta.prompt ?? "";
     }
-
-    wrap.append(imgWrap, nameEl, metaEl);
+    wrap.appendChild(metaEl);
     wrap.addEventListener("dragstart", (e) => {
       e.dataTransfer.setData("text/x-anchor", "");
       e.dataTransfer.effectAllowed = "move";

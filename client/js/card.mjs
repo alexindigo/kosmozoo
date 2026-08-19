@@ -18,6 +18,7 @@ import { metaStripText, fillCardMeta } from "./fields.mjs";
 import { retryImage } from "./feed.mjs";
 import { makeZoomable } from "./zoomable.mjs";
 import { iconSvg } from "./icons.mjs";
+import { openAt } from "./lightbox.mjs";
 
 // which filenames already exist in the downloads dir (save button greys)
 export const savedSet = new Set();
@@ -85,13 +86,12 @@ function buildImageBox(image, imgIdx) {
   strip.style.display = txt ? "block" : "none";
   wrap.appendChild(strip);
 
-  wrap.addEventListener("click", async () => {
+  wrap.addEventListener("click", () => {
     if (wrap.classList.contains("error")) {
       retryImage(imgIdx);
       return; // never open the lightbox on a broken frame
     }
-    const { openAt } = await import("./lightbox.mjs");
-    openAt(imgIdx);
+    openAt(imgIdx); // static import: the open is synchronous, no race
   });
   return wrap;
 }
