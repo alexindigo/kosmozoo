@@ -131,47 +131,56 @@ main { display: flex; flex: 1; min-height: 0; }
 .imgwrap.error::after { content: "load failed — click to retry";
   position: absolute; inset: 0; display: grid; place-items: center;
   color: var(--red); font-size: 12px; }
-.mstrip { position: absolute; left: 0; right: 0; bottom: 0; padding: 2px 8px;
-  font: 10px ui-monospace, monospace; color: var(--mid)
-  background: rgba(0,0,0,.55); white-space: nowrap; overflow: hidden;
+.mstrip { position: absolute; left: 0; right: 0; bottom: 0; padding: 2px 7px;
+  font-size: 10.5px; color: rgba(255,255,255,.88);
+  background: rgba(20, 20, 28, .55); white-space: nowrap; overflow: hidden;
   text-overflow: ellipsis; pointer-events: none; display: none; }
 
-/* header row */
-.fname { display: flex; align-items: center; gap: 8px; margin: 8px 0 4px;
-  font: 12px ui-monospace, monospace; color: var(--mid); }
-.fname .copyable { cursor: copy; overflow: hidden; text-overflow: ellipsis;
-  white-space: nowrap; }
-.fname .copyable:hover { color: var(--fg); }
+/* header row: filename left, saved-flash + votes right (old card cadence) */
+.fname { display: flex; justify-content: space-between; align-items: flex-start;
+  gap: 8px; margin: 8px 0 2px; font-weight: 600; color: var(--mid); }
+.fname .copyable { font-weight: 600; color: var(--mid); cursor: copy;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.fname .copyable:hover { color: var(--accent); }
 .fname .copyable.copied { color: var(--accent); }
-.saved { color: var(--accent); font-size: 11px; opacity: 0; transition: opacity .3s; }
+.saved { color: var(--accent); font-size: 11px; opacity: 0; transition: opacity .3s;
+  margin-right: 8px; align-self: center; white-space: nowrap; }
 .saved.show { opacity: 1; }
-.btnwrap { margin-left: auto; white-space: nowrap; display: flex; gap: 4px; }
-.votebtn, .savebtn { background: var(--raise); color: var(--dim) border: 1px solid var(--border);
-  border-radius: 4px; padding: 2px 7px; font-size: 12px; cursor: pointer; }
-.votebtn:hover, .savebtn:hover { border-color: var(--dim) color: var(--fg); }
-.votebtn.down.on { color: var(--red); border-color: #a33; }
-.votebtn.up.on { color: var(--accent); border-color: color-mix(in srgb, var(--accent) 55%, transparent); }
-.votebtn.favorite.on { color: var(--orange); border-color: var(--orange); }
+.btnwrap { white-space: nowrap; display: flex; gap: 4px; }
+.votebtn, .savebtn { flex: 0 0 auto; padding: 2px 8px; font-size: 11px;
+  background: var(--raise); color: var(--dim); border: 1px solid var(--border);
+  border-radius: 4px; cursor: pointer; }
+.votebtn svg { vertical-align: -1px; }
+.votebtn:hover, .savebtn:hover { border-color: var(--dim); color: var(--mid); }
+/* identity colors, muted until active/hover: down=red, up=light blue */
+.votebtn.down { color: rgba(247, 118, 142, .55); }
+.votebtn.up { color: rgba(122, 179, 255, .55); }
+.votebtn.down:hover, .votebtn.down.on { color: var(--red); border-color: var(--red); }
+.votebtn.up:hover, .votebtn.up.on { color: var(--accent); border-color: var(--accent); }
+.votebtn.favorite { color: rgba(255, 136, 0, .55); }
+.votebtn.favorite:hover, .votebtn.favorite.on { color: var(--orange); border-color: var(--orange); }
 
-/* metadata row: props left, description right */
-.pair { display: flex; gap: 12px; margin-top: 8px; }
-.props { flex: 0 0 42%; font: 11px ui-monospace, monospace; color: var(--mid);
-  overflow-wrap: anywhere; }
-.props .plabel { color: var(--dim); }
-.props .nometa { color: var(--dim) font-style: italic; }
-.desc { flex: 1; font-size: 12px; color: var(--mid); white-space: pre-wrap;
+/* metadata row: props left, description right (grid halves, old metrics) */
+.pair { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-top: 6px; }
+.props { color: var(--dim); font-size: 12px; overflow-wrap: anywhere; }
+.props .plabel { color: var(--fg); opacity: .55; }
+.props .nometa { color: var(--red); }
+.desc { color: var(--dim); font-size: 12px; font-style: italic;
   overflow-wrap: anywhere; }
 
-/* notes row: negatives red, positives green */
-.boxcol textarea { width: 100%; min-height: 84px; resize: vertical;
-  background: #141414; border: 1px solid var(--border); border-radius: 6px;
-  color: var(--fg); font: 12px/1.4 system-ui, sans-serif; padding: 6px 8px; }
-.boxcol textarea.neg { border-left: 3px solid #a33; }
-.boxcol textarea.pos { border-left: 3px solid color-mix(in srgb, var(--accent) 55%, transparent); }
-.boxcol textarea:focus { outline: none; border-color: var(--accent); }
-.btnrow { display: flex; gap: 6px; margin-top: 4px; }
-.btnrow button { flex: 1; background: none; border: 1px solid var(--raise); color: var(--dim);
-  border-radius: 4px; font-size: 11px; padding: 3px 6px; cursor: pointer; }
+/* notes row: negatives red, positives light-blue — full borders (old style) */
+.boxcol { display: flex; flex-direction: column; gap: 4px; }
+.boxcol textarea { width: 100%; min-height: 44px; resize: vertical;
+  background: var(--bg); border: 1px solid var(--border); border-radius: 6px;
+  color: var(--fg); font: inherit; padding: 6px 8px; }
+.boxcol textarea.neg { border-color: var(--red); }
+.boxcol textarea.pos { border-color: var(--accent); }
+.boxcol textarea:focus { outline: none; }
+.boxcol textarea.neg:focus { border-color: var(--red); }
+.boxcol textarea.pos:focus { border-color: var(--accent); }
+.btnrow { display: flex; gap: 6px; }
+.btnrow button { flex: 1; padding: 2px 4px; font-size: 11px; color: var(--dim);
+  background: none; border: 1px solid var(--raise); border-radius: 4px; cursor: pointer; }
 .btnrow button:hover { color: var(--mid); border-color: var(--dim) }
 
 /* list progress affordances */
