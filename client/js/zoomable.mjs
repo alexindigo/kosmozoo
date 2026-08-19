@@ -1,15 +1,13 @@
-// client/js/zoomable.mjs — in-feed zoom for any image (candidate cards and
-// anchor thumbs alike). Ctrl+wheel zooms toward the cursor; drag pans while
-// zoomed; double-click resets. A drag suppresses its trailing click (a pan
-// must not open the lightbox). Views persist via views.mjs, so a crop made
-// here carries into the lightbox.
-//
-// restore: candidates reload their stored crop in the feed; anchor thumbs
-// never load zoomed (the crop is for the lightbox) — pass restore: false.
+// client/js/zoomable.mjs — in-feed zoom for ANY image. One code path for
+// candidate cards and anchor thumbs alike: same functionality, same code.
+// Ctrl+wheel zooms toward the cursor; drag pans while zoomed; double-click
+// resets. A drag suppresses its trailing click (a pan must not open the
+// lightbox). Views persist via views.mjs, so a crop made here carries into
+// the lightbox and back — and reloads restore it.
 
 import { getView, setView } from "./views.mjs";
 
-export function makeZoomable(img, { key, restore = true, onZoomChange } = {}) {
+export function makeZoomable(img, { key, onZoomChange } = {}) {
   let scale = 1, txf = 0, tyf = 0, dragMoved = 0;
 
   const apply = () => {
@@ -29,7 +27,7 @@ export function makeZoomable(img, { key, restore = true, onZoomChange } = {}) {
     onZoomChange?.(scale > 1);
   };
 
-  if (restore && key) {
+  if (key) {
     const stored = getView(key);
     if (stored) { scale = stored.s; txf = stored.txf; tyf = stored.tyf; apply(); }
   }

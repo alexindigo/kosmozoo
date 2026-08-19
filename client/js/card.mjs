@@ -75,8 +75,8 @@ function buildImageBox(image, imgIdx) {
     wrap.classList.add("error");
   });
   wrap.appendChild(img);
-  // in-feed zoom: candidate crops persist and carry into the lightbox
-  makeZoomable(img, { key: image.id, restore: true });
+  // in-feed zoom: same code path as anchor thumbs; crops persist and carry
+  makeZoomable(img, { key: image.id });
 
   const strip = document.createElement("div");
   strip.className = "mstrip";

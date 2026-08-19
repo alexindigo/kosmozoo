@@ -250,7 +250,7 @@ onRender((s) => {
       const { openAnchor } = await import("./lightbox.mjs");
       openAnchor(s.anchors.indexOf(a));
     });
-    makeZoomable(img, { key: `anchor:${a.name}`, restore: false,
+    makeZoomable(img, { key: `anchor:${a.name}`,
       onZoomChange: (zoomed) => { wrap.draggable = !zoomed; } });
 
     const info = document.createElement("button");
