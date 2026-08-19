@@ -197,6 +197,43 @@ export function makeRouter(ctx) {
     return Response.json({ feedbackPath: ctx.store.feedbackPath });
   });
 
+  // --- metadata channel -------------------------------------------------------
+  // Versioned poll: the client merges when v moves (in-place card patching),
+  // and drives the scan chip off pending.
+  add("GET", "/api/metadata", async (_req, _params, url) => {
+    const host = url.searchParams.get("host");
+    if (!host || !ctx.hosts[host]) return Response.json({ error: "unknown host" }, { status: 400 });
+    return Response.json({
+      items: ctx.store.metaForHost(host),
+      pending: ctx.scraper ? ctx.scraper.pending(host) : 0,
+      v: ctx.store.metaVersion,
+    });
+  });
+
+  // Scroll-driven extraction: the client reports rendered-but-meta-less
+  // filenames; they jump the queue (priority lane drains before the walk).
+  add("POST", "/api/meta-want", async (req) => {
+    const { host, files } = await req.json();
+    if (!host || !ctx.hosts[host]) return Response.json({ error: "unknown host" }, { status: 400 });
+    if (!Array.isArray(files)) return Response.json({ error: "files must be an array" }, { status: 400 });
+    const pending = ctx.scraper?.feed(host, files, true) ?? 0;
+    return Response.json({ pending });
+  });
+
+  // Save-button greying: which filenames already exist in the downloads dir.
+  add("POST", "/api/downloads-check", async (req) => {
+    const { files } = await req.json();
+    if (!Array.isArray(files)) return Response.json({ error: "files must be an array" }, { status: 400 });
+    const { readdir } = await import("node:fs/promises");
+    let present = new Set();
+    try {
+      present = new Set(await readdir(ctx.downloadsDir));
+    } catch { /* dir missing -> nothing exists */ }
+    const exists = {};
+    for (const f of files) exists[f] = present.has(f);
+    return Response.json({ exists });
+  });
+
   return {
     get ctx() { return ctx; },
     set ctx(v) { ctx = v; },
