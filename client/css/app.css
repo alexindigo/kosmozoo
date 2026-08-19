@@ -163,15 +163,15 @@ main { display: flex; flex: 1; min-height: 0; }
   overflow-wrap: anywhere; }
 
 /* notes row: negatives red, positives green */
-.boxcol textarea { width: 100%; min-height: 54px; resize: vertical;
+.boxcol textarea { width: 100%; min-height: 84px; resize: vertical;
   background: #141414; border: 1px solid var(--border); border-radius: 6px;
   color: var(--fg); font: 12px/1.4 system-ui, sans-serif; padding: 6px 8px; }
 .boxcol textarea.neg { border-left: 3px solid #a33; }
 .boxcol textarea.pos { border-left: 3px solid color-mix(in srgb, var(--accent) 55%, transparent); }
 .boxcol textarea:focus { outline: none; border-color: var(--accent); }
 .btnrow { display: flex; gap: 6px; margin-top: 4px; }
-.btnrow button { background: none; border: 1px solid var(--raise); color: var(--dim);
-  border-radius: 4px; font-size: 10px; padding: 1px 6px; cursor: pointer; }
+.btnrow button { flex: 1; background: none; border: 1px solid var(--raise); color: var(--dim);
+  border-radius: 4px; font-size: 11px; padding: 3px 6px; cursor: pointer; }
 .btnrow button:hover { color: var(--mid); border-color: var(--dim) }
 
 /* list progress affordances */
