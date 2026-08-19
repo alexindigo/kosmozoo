@@ -64,15 +64,25 @@ export async function probeHost(addr) {
   }
 }
 
-// Proxy image bytes from a host's /api/view.
+// Proxy image bytes from a host's /api/view. Upstream ComfyUI serves some
+// files as application/octet-stream (with nosniff) — the browser can't
+// render those, so map the extension when the upstream type is useless.
+const EXT_MIME = {
+  png: "image/png", jpg: "image/jpeg", jpeg: "image/jpeg", webp: "image/webp",
+  gif: "image/gif", svg: "image/svg+xml", avif: "image/avif", bmp: "image/bmp",
+};
+
 export async function proxyImage(addr, filename) {
   const url = `http://${addr}/api/view?type=output&filename=${encodeURIComponent(filename)}`;
   const r = await fetch(url);
   if (!r.ok) return { status: r.status };
   const headers = new Headers();
   const ct = r.headers.get("Content-Type");
+  const ext = filename.split(".").pop().toLowerCase();
+  const mime = EXT_MIME[ext];
+  if (mime && (!ct || /octet-stream/i.test(ct))) headers.set("Content-Type", mime);
+  else if (ct) headers.set("Content-Type", ct);
   const cl = r.headers.get("Content-Length");
-  if (ct) headers.set("Content-Type", ct);
   if (cl) headers.set("Content-Length", cl);
   return { status: 200, body: r.body, headers };
 }

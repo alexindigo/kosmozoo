@@ -15,7 +15,7 @@ ENGINE_PORT="${E2E_ENGINE_PORT:-18260}"
 PW_IMAGE="${PW_IMAGE:-mcr.microsoft.com/playwright:v1.49.1-noble}"
 
 cleanup() {
-  docker rm -f kz-e2e-fake kz-e2e-engine >/dev/null 2>&1 || true
+  docker rm -f kz-e2e-fake kz-e2e-fake2 kz-e2e-engine >/dev/null 2>&1 || true
 }
 trap cleanup EXIT
 cleanup
@@ -25,9 +25,16 @@ docker run -d --name kz-e2e-fake --network host -v "$WORK":/work -w /work \
   denoland/deno:latest run --allow-net --allow-read \
   tests/fake-comfy.mjs --port "$FAKE_PORT" --bulk 3000 >/dev/null
 
-# 2. engine against the fake host, plugins from the repo tier
+# 1b. a second fake host (different fixtures dir? same fixtures is fine — the
+# point is the host switch reloads the feed from ITS list)
+FAKE2_PORT="${E2E_FAKE2_PORT:-18262}"
+docker run -d --name kz-e2e-fake2 --network host -v "$WORK":/work -w /work \
+  denoland/deno:latest run --allow-net --allow-read \
+  tests/fake-comfy.mjs --port "$FAKE2_PORT" --bulk 40 >/dev/null
+
+# 2. engine against both fake hosts, plugins from the repo tier
 docker run -d --name kz-e2e-engine --network host -v "$WORK":/work -w /work \
-  -e KOZMOZOO_HOSTS="fake=127.0.0.1:$FAKE_PORT" \
+  -e KOZMOZOO_HOSTS="fake=127.0.0.1:$FAKE_PORT,another=127.0.0.1:$FAKE2_PORT" \
   -e KOZMOZOO_PORT="$ENGINE_PORT" \
   -e KOZMOZOO_STATE=/tmp/kz-e2e-state \
   -e KOZMOZOO_FEEDBACK=/tmp/kz-e2e-state/feedback.json \

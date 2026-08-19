@@ -200,6 +200,40 @@ async function attempt(name, fn) {
     check("no emoji in buttons (icons are SVG)", emojiFound.length === 0, emojiFound.join(","));
   });
 
+  // host switch reloads the feed from the new host (was broken: old feed stayed)
+  await attempt("host switch reloads the feed", async () => {
+    const before = { host: await page.evaluate("window.__kz.S.host"), count: await page.evaluate("window.__kz.S.images.length") };
+    // open the picker, click the 'another' row
+    await page.evaluate("document.getElementById('hostBtn').click(), true");
+    await page.poll("document.getElementById('hostDrop').hidden === false", 3000);
+    await page.evaluate(`(() => {
+      const rows = [...document.querySelectorAll('#hostList .hostpick')];
+      const row = rows.find(r => r.textContent.includes('another'));
+      row.click();
+      return true;
+    })()`);
+    await page.poll("window.__kz.S.host === 'another'", 5000);
+    // the reload follows the host flip — assert the outcome, not the instant
+    await page.poll(`(() => {
+      const imgs = window.__kz.S.images;
+      return imgs.length > 0 && imgs.length < 100 && imgs.every(i => i.host === 'another');
+    })()`, 15000);
+    const after = { host: await page.evaluate("window.__kz.S.host"), count: await page.evaluate("window.__kz.S.images.length") };
+    check("host switched", after.host === "another");
+    check("feed reloaded from the new host", after.count !== before.count,
+      `${before.count} -> ${after.count}`);
+    const firstHost = await page.evaluate("window.__kz.S.images[0]?.host");
+    check("feed cards belong to the new host", firstHost === "another", firstHost ?? "none");
+    // switch back for the rest of the suite
+    await page.evaluate("document.getElementById('hostBtn').click(), true");
+    await page.poll("document.getElementById('hostDrop').hidden === false", 3000);
+    await page.evaluate(`(() => {
+      [...document.querySelectorAll('#hostList .hostpick')].find(r => r.textContent.includes('fake')).click();
+      return true;
+    })()`);
+    await page.poll("window.__kz.S.host === 'fake' && window.__kz.S.images.length > 100", 8000);
+  });
+
   // --- row 12 ---------------------------------------------------------------
   await attempt("row 12: volume", async () => {
     await page.key("Escape");
