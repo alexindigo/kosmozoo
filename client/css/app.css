@@ -19,7 +19,9 @@ body::-webkit-scrollbar { display: none; }
 body.resizing { cursor: col-resize; user-select: none; }
 
 /* --- header -------------------------------------------------------------- */
-#chrome { position: fixed; top: 0; left: 0; right: 0; height: 37px;
+/* --- header: in normal flow — it can never overlap content ---------------- */
+body { display: flex; flex-direction: column; }
+#chrome { height: 37px; flex: 0 0 auto;
   display: flex; gap: 8px; align-items: center; padding: 0 8px;
   background: var(--panel); border-bottom: 1px solid var(--border); z-index: 10; }
 #chrome h1 { font-size: 15px; margin: 0 4px 0 2px; font-weight: 600; }
@@ -70,7 +72,7 @@ body.resizing { cursor: col-resize; user-select: none; }
 
 /* --- main: two feeds share the window; divider splits; each column scrolls
    itself (no page-level scroll) ------------------------------------------- */
-main { display: flex; height: calc(100vh - 37px); margin-top: 37px; }
+main { display: flex; flex: 1; min-height: 0; }
 #candidatesCol { flex: 1; min-width: 0; overflow-y: auto;
   scroll-snap-type: y proximity; scrollbar-width: none; }
 #candidatesCol::-webkit-scrollbar { display: none; }
@@ -89,7 +91,7 @@ main { display: flex; height: calc(100vh - 37px); margin-top: 37px; }
 /* anchors feed items (same anatomy as candidate cards, minus judgment) */
 .anchor { position: relative; }
 .anchor.dragging { opacity: .4; }
-.aimgwrap { position: relative; }
+.aimgwrap { position: relative; overflow: hidden; border-radius: 6px; }
 .aimgwrap img { width: 100%; border-radius: 6px; display: block; }
 .aimgwrap .ainfo { position: absolute; top: 4px; left: 4px;
   background: rgba(0,0,0,.6); border: none; color: var(--fg); border-radius: 50%;
