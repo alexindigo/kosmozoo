@@ -110,7 +110,7 @@ onRender((s) => {
     addr.textContent = h.address + (h.online ? "" : " · offline");
     const rm = document.createElement("button");
     rm.className = "rm";
-    rm.innerHTML = iconSvg("x", 12);
+    rm.innerHTML = iconSvg("trash", 12);
     rm.title = `remove ${name}`;
     rm.addEventListener("click", (e) => {
       e.stopPropagation();

@@ -13,7 +13,7 @@ import { isVisible, initJudgment, toggleRevealThumbedDown, toggleHideUp, setDown
 import { chrome, initKeyDispatch, toggleMenu } from "./chrome.mjs";
 import { initKeysPanel, initKeysPanelDom, toggleKeysPanel } from "./keys-panel.mjs";
 import { initHostPicker, selectHost, initialHost } from "./hostpicker.mjs";
-import { initFeed, renderFeed, onScrollSafetyNet, cardAt, restoreScroll } from "./feed.mjs";
+import { initFeed, renderFeed, onScrollSafetyNet, cardAt, restoreScroll, resetFeed } from "./feed.mjs";
 import { loadFieldsCfg, openFieldsOverlay, initFieldsOverlay } from "./fields.mjs";
 import { buildCard, patchCardMeta, savedSet } from "./card.mjs";
 import { initViews } from "./views.mjs";
@@ -245,9 +245,12 @@ onRender((s) => {
 async function loadCandidates() {
   if (!S.host) return;
   // a host switch must not leave the previous host's feed on screen:
-  // clear first, then load
+  // clear first, then load. resetFeed() drops stale card refs (an
+  // innerHTML-only clear would leave cardEls pointing at removed nodes and
+  // the sentinel insert crashes on the next chunk).
   S.images = [];
-  $("grid").innerHTML = ""; // old host's feed leaves the screen immediately
+  resetFeed();
+  $("grid").innerHTML = "";
   render();
   chrome.status.active("load", `loading image list from ${S.host}…`);
   try {
