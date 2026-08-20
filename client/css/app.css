@@ -92,17 +92,6 @@ main { display: flex; flex: 1; min-height: 0; }
   gap: 10px; scrollbar-width: none; }
 #anchorList::-webkit-scrollbar { display: none; }
 
-/* anchors feed items (same anatomy as candidate cards, minus judgment) */
-.anchor { position: relative; }
-.anchor.dragging { opacity: .4; }
-.aimgwrap { position: relative; overflow: hidden; border-radius: 6px; }
-.aimgwrap img { width: 100%; border-radius: 6px; display: block; }
-.anchor .arow { display: flex; justify-content: space-between; align-items: center;
-  gap: 8px; margin-top: 4px; }
-.anchor .arow .btnwrap { display: flex; gap: 4px; }
-.anchor .aname { font: 11px ui-monospace, monospace; color: var(--mid);
-  overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.anchor .ameta { font-size: 10px; color: var(--dim); margin-top: 2px; }
 #dropzone { margin: 8px 0 0; border: 1px dashed #3a3a3a; border-radius: 8px;
   padding: 18px 8px; text-align: center; color: var(--dim) font-size: 12px;
   cursor: pointer; }
@@ -132,13 +121,20 @@ main { display: flex; flex: 1; min-height: 0; }
   background: rgba(20, 20, 28, .55); white-space: nowrap; overflow: hidden;
   text-overflow: ellipsis; pointer-events: none; display: none; }
 
-/* header row: filename left, saved-flash + votes right (old card cadence) */
-.fname { display: flex; justify-content: space-between; align-items: flex-start;
+/* the shared title row under the image: title left, actions right */
+.ctitle { display: flex; justify-content: space-between; align-items: flex-start;
   gap: 8px; margin: 8px 0 2px; font-weight: 600; color: var(--mid); }
-.fname .copyable { font-weight: 600; color: var(--mid); cursor: copy;
+.ctitle .btnwrap { white-space: nowrap; display: flex; gap: 4px; align-items: center; }
+
+/* anchor cards get the same chrome; column-specific bits: */
+.anchor .aname { font: 11px ui-monospace, monospace; color: var(--mid);
   overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.fname .copyable:hover { color: var(--accent); }
-.fname .copyable.copied { color: var(--accent); }
+.anchor.dragging { opacity: .4; }
+
+/* candidate title specifics */
+.fname .copyable, .copyable { cursor: copy; }
+.copyable:hover { color: var(--accent); }
+.copyable.copied { color: var(--accent); }
 .saved { color: var(--green); font-size: 11px; opacity: 0; transition: opacity .3s;
   margin-right: 8px; align-self: center; white-space: nowrap; }
 .saved.show { opacity: 1; }
