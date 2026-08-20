@@ -77,15 +77,17 @@ const port = parseInt(values.port, 10);
 const fixtures = new Map();
 try {
   for (const f of await readdir(fixtureDir)) {
-    if (!f.endsWith(".png")) continue;
+    if (!f.endsWith(".png") && !f.endsWith(".svg")) continue;
     const bytes = await readFile(join(fixtureDir, f));
-    const text = readPngText(bytes);
     let promptGraph = null;
-    if (text.prompt) {
-      try {
-        promptGraph = JSON.parse(text.prompt);
-      } catch {
-        // fixture with unparseable prompt chunk — serves as a negative
+    if (f.endsWith(".png")) {
+      const text = readPngText(bytes);
+      if (text.prompt) {
+        try {
+          promptGraph = JSON.parse(text.prompt);
+        } catch {
+          // fixture with unparseable prompt chunk — serves as a negative
+        }
       }
     }
     fixtures.set(f, { bytes, promptGraph });
@@ -143,8 +145,10 @@ export const server = Deno.serve({ port }, (req) => {
     if (name === MISSING) return new Response("not found", { status: 404 });
     if (fixtures.has(name)) {
       const bytes = fixtures.get(name).bytes;
+      // Real ComfyUI serves SVG (and sometimes everything) as octet-stream.
+      const type = name.endsWith(".svg") ? "application/octet-stream" : "image/png";
       return new Response(bytes, {
-        headers: { "Content-Type": "image/png", "Content-Length": String(bytes.length) },
+        headers: { "Content-Type": type, "Content-Length": String(bytes.length) },
       });
     }
     if (/^bulk-\d{5}\.png$/.test(name)) {

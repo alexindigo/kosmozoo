@@ -315,7 +315,7 @@ async function boot() {
   await initRoi();
   await initJudgment();
   await initViews(); // shared per-image view store (feed zoom <-> lightbox)
-  initHostPicker();
+  initHostPicker({ onSelect: loadCandidates });
   initAnchorsPane();
   initInfoOverlay();
   initFieldsOverlay();
@@ -350,8 +350,7 @@ async function boot() {
   S.scraper = await api.scraper().catch(() => null);
   S.feedbackPath = (await api.settings("core").catch(() => ({})))?.feedbackPath ?? null;
   await initAnchorsWidth();
-  await selectHost(initialHost(S.hosts, ui.host));
-  await loadCandidates();
+  await selectHost(initialHost(S.hosts, ui.host)); // selects + loadCandidates via onSelect
 
   // scraper status chip + menu counter: poll every 2s
   setInterval(async () => {

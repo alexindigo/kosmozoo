@@ -8,7 +8,6 @@
 
 import { S, render, onRender } from "./state.mjs";
 import { api } from "./api.mjs";
-import { restoreScroll } from "./feed.mjs";
 import { chrome } from "./chrome.mjs";
 import { iconSvg } from "./icons.mjs";
 
@@ -17,7 +16,10 @@ const $ = (id) => document.getElementById(id);
 function statusInfo(msg) { chrome.status.info(msg); }
 function statusError(msg) { chrome.status.error(msg); }
 
-export function initHostPicker() {
+let selectCallback = null;
+
+export function initHostPicker({ onSelect } = {}) {
+  selectCallback = onSelect ?? null;
   $("hostBtn").addEventListener("click", (e) => {
     e.stopPropagation();
     S.hostMenuOpen = !S.hostMenuOpen;
@@ -68,10 +70,10 @@ export async function selectHost(name) {
   S.host = name;
   S.hostMenuOpen = false;
   api.setSettings("core.ui", { host: name }).catch(() => {});
-  S.images = name ? await api.images(name) : [];
-  render();
-  const ui = await api.settings("core.ui").catch(() => ({}));
-  restoreScroll(ui[`scroll.${name}`]);
+  // switching hosts reloads the feed from that host (loadCandidates owns
+  // fetch + rebuild + scroll restore + summary + metadata poll)
+  if (selectCallback) await selectCallback();
+  else render();
 }
 
 // stored host if still present, else first online, else first
