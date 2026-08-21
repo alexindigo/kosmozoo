@@ -3,7 +3,7 @@
 // Resource-shaped, documented, public. Plugin routes live under
 // /api/plugins/<name>/... and are registered by the plugin host (Phase 10).
 
-import { splitHostKey, probeHost, proxyImage, validateHost, addHost, removeHost } from "./hosts.mjs";
+import { splitHostKey, probeHost, hostList, hostReadBytes, validateHost, addHost, removeHost } from "./hosts.mjs";
 
 export function makeRouter(ctx) {
   // ctx: { hosts, store, settings, plugins } — `router.ctx` is settable so
@@ -72,11 +72,12 @@ export function makeRouter(ctx) {
   add("GET", "/api/images", async (req, _params, url) => {
     const host = url.searchParams.get("host");
     if (!host || !ctx.hosts[host]) return Response.json({ error: "unknown host" }, { status: 400 });
-    // File listing comes from the host; metadata is overlaid from the store.
-    const r = await fetch(`http://${ctx.hosts[host]}/internal/files/output`);
-    const raw = await r.json();
-    // Strip the real listing's " [size]" suffix (clean_file_name quirk).
-    const names = raw.map((n) => String(n).replace(/\s+\[[^\]]+\]$/, ""));
+    // File listing comes from the host (HTTP or folder adapter); metadata
+    // is overlaid from the store.
+    const names = await hostList(ctx.hosts[host]);
+    // The listing feeds the background walk (deduped + meta_fresh-filtered
+    // inside feed()); on-screen names would use feed(host, names, true).
+    ctx.scraper?.feed(host, names);
     return Response.json(names.map((filename) => ({
       id: `${host}:${filename}`,
       host,
@@ -99,7 +100,8 @@ export function makeRouter(ctx) {
   add("GET", "/api/images/<id>/bytes", async (_req, { id }) => {
     const [host, filename] = splitHostKey(id);
     if (!ctx.hosts[host]) return new Response("unknown host", { status: 404 });
-    const r = await proxyImage(ctx.hosts[host], filename);
+    const r = await hostReadBytes(ctx.hosts[host], filename);
+    if (r.status === 400) return new Response("bad filename", { status: 400 });
     if (r.status !== 200) return new Response("upstream error", { status: r.status });
     return new Response(r.body, { headers: r.headers });
   });

@@ -8,6 +8,7 @@
 // Must run headless — extraction never requires an open browser.
 
 import { metaFromPngBytes } from "./extractor.mjs";
+import { hostReadBytes } from "./hosts.mjs";
 
 const INTER_FILE_DELAY = 100;   // ms between file fetches
 const MAX_BACKOFF = 30_000;     // backoff cap
@@ -59,11 +60,10 @@ export class Scraper {
 
   async #fetchMeta(host, name) {
     const addr = this.hosts[host];
-    const url = `http://${addr}/api/view?type=output&filename=${encodeURIComponent(name)}`;
-    const r = await fetch(url, { signal: AbortSignal.timeout(15_000) });
+    const r = await hostReadBytes(addr, name);
     if (r.status === 404) return { permanent: true }; // gone from the host — never retry
-    if (!r.ok) throw new Error(`status ${r.status}`);
-    const buf = new Uint8Array(await r.arrayBuffer());
+    if (r.status !== 200) throw new Error(`status ${r.status}`);
+    const buf = new Uint8Array(await new Response(r.body).arrayBuffer());
     const [meta, hasWorkflow] = await metaFromPngBytes(buf);
     return { meta, hasWorkflow };
   }
