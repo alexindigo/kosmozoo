@@ -32,9 +32,9 @@ docker run -d --name kz-e2e-fake2 --network host -v "$WORK":/work -w /work \
   denoland/deno:latest run --allow-net --allow-read \
   tests/fake-comfy.mjs --port "$FAKE2_PORT" --bulk 40 >/dev/null
 
-# 2. engine against both fake hosts, plugins from the repo tier
+# 2. engine against both fake hosts + a folder host, plugins from the repo tier
 docker run -d --name kz-e2e-engine --network host -v "$WORK":/work -w /work \
-  -e KOZMOZOO_HOSTS="fake=127.0.0.1:$FAKE_PORT,another=127.0.0.1:$FAKE2_PORT" \
+  -e KOZMOZOO_HOSTS="fake=127.0.0.1:$FAKE_PORT,another=127.0.0.1:$FAKE2_PORT,fixture-dir=folder:/work/tests/fixtures" \
   -e KOZMOZOO_PORT="$ENGINE_PORT" \
   -e KOZMOZOO_STATE=/tmp/kz-e2e-state \
   -e KOZMOZOO_FEEDBACK=/tmp/kz-e2e-state/feedback.json \

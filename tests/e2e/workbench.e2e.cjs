@@ -234,6 +234,42 @@ async function attempt(name, fn) {
     await page.poll("window.__kz.S.host === 'fake' && window.__kz.S.images.length > 100", 8000);
   });
 
+  // a folder host is just another host: the feed loads from the filesystem
+  await attempt("folder host: feed loads from a local folder", async () => {
+    await page.evaluate("document.getElementById('hostBtn').click(), true");
+    await page.poll("document.getElementById('hostDrop').hidden === false", 3000);
+    await page.evaluate(`(() => {
+      [...document.querySelectorAll('#hostList .hostpick')].find(r => r.textContent.includes('fixture-dir')).click();
+      return true;
+    })()`);
+    await page.poll("window.__kz.S.host === 'fixture-dir'", 5000);
+    await page.poll(`(() => {
+      const imgs = window.__kz.S.images;
+      return imgs.length > 0 && imgs.every(i => i.host === 'fixture-dir') &&
+             imgs.some(i => i.filename === 'flux-basic.png') &&
+             imgs.some(i => i.filename === 'logo.svg');
+    })()`, 15000);
+    check("folder host loads its files into the feed", true);
+    // its bytes come from disk: the SVG renders (extension mapping applies)
+    const r = await page.evaluate(
+      "fetch('/api/images/fixture-dir:logo.svg/bytes').then(r => r.headers.get('Content-Type'))");
+    check("folder bytes map octet-stream to the right type", r === "image/svg+xml", r ?? "none");
+    // metadata pipeline works off the folder too (scraper extracted from the PNG)
+    await page.poll(`(() => {
+      const img = window.__kz.S.images.find(i => i.filename === 'flux-basic.png');
+      return img && img.meta && img.meta.seed === 999;
+    })()`, 20000);
+    check("metadata extracted from a ComfyUI PNG in the folder", true);
+    // back to the main fake for the rest of the suite
+    await page.evaluate("document.getElementById('hostBtn').click(), true");
+    await page.poll("document.getElementById('hostDrop').hidden === false", 3000);
+    await page.evaluate(`(() => {
+      [...document.querySelectorAll('#hostList .hostpick')].find(r => r.textContent.includes('fake')).click();
+      return true;
+    })()`);
+    await page.poll("window.__kz.S.host === 'fake' && window.__kz.S.images.length > 100", 8000);
+  });
+
   // --- row 12 ---------------------------------------------------------------
   await attempt("row 12: volume", async () => {
     await page.key("Escape");
