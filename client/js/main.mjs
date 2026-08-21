@@ -13,10 +13,11 @@ import { isVisible, initJudgment, toggleRevealThumbedDown, toggleHideUp, setDown
 import { chrome, initKeyDispatch, toggleMenu } from "./chrome.mjs";
 import { initKeysPanel, initKeysPanelDom, toggleKeysPanel } from "./keys-panel.mjs";
 import { initHostPicker, selectHost, initialHost } from "./hostpicker.mjs";
-import { initFeed, renderFeed, onScrollSafetyNet, cardAt, restoreScroll, resetFeed } from "./feed.mjs";
+import { initFeed, renderFeed, onScrollSafetyNet, cardAt, restoreScroll, resetFeed, eachCard, retryImage } from "./feed.mjs";
 import { loadFieldsCfg, openFieldsOverlay, initFieldsOverlay } from "./fields.mjs";
-import { buildCard, patchCardMeta, savedSet } from "./card.mjs";
+import { buildCard, savedSet } from "./card.mjs";
 import { initViews } from "./views.mjs";
+import { openAt, openAnchor } from "./lightbox.mjs";
 import { iconSvg } from "./icons.mjs";
 
 const $ = (id) => document.getElementById(id);
@@ -80,20 +81,28 @@ async function pollMetadata() {
   if (metaPending > 0) scheduleMetaPoll();
 }
 
-// A card rendered before its metadata arrived gets patched in place.
+// A card rendered before its metadata arrived gets patched in place —
+// through the instance's own setMeta, never by reaching into its DOM.
 function mergeMetadata(items) {
   for (const [name, meta] of Object.entries(items)) {
     const idx = S.images.findIndex((i) => i.filename === name);
     if (idx < 0) continue;
     if (!S.images[idx].meta) S.images[idx].meta = meta;
     const card = cardAt(idx);
-    if (card) patchCardMeta(card, meta);
+    if (card) card.setMeta(meta);
   }
 }
 
 function updateScanChip() {
   if (metaPending > 0) chrome.status.active("meta", `metadata scan — ${metaPending} left`);
   else chrome.status.clear("meta");
+}
+
+// Picker changes re-apply to every rendered card through the instances' own
+// setMeta — the parent orchestrates; nobody reaches into a card's DOM.
+function refreshAllCardMeta() {
+  eachCard((handle, idx) => handle.setMeta(S.images[idx]?.meta ?? null));
+  if (S.lightbox.open) render();
 }
 
 // --- core chrome -----------------------------------------------------------------
@@ -262,7 +271,7 @@ async function loadCandidates() {
     } catch { /* save buttons just won't pre-grey */ }
     chrome.status.clear("load");
     if (!S.images.length) {
-      $("grid").innerHTML = '<div class="empty">no output images</div>';
+      $("grid").innerHTML = '<div class="feedempty">no output images</div>';
       chrome.status.info(`no output images on ${S.host}`);
       return;
     }
@@ -325,13 +334,16 @@ async function boot() {
   await initJudgment();
   await initViews(); // shared per-image view store (feed zoom <-> lightbox)
   initHostPicker({ onSelect: loadCandidates });
-  initAnchorsPane();
+  initAnchorsPane({ onOpen: openAnchor });
   initInfoOverlay();
-  initFieldsOverlay();
+  initFieldsOverlay({ onChanged: refreshAllCardMeta });
   registerCoreChrome();
 
   initFeed({
-    card: (image, imgIdx) => buildCard(image, imgIdx),
+    card: (image, imgIdx) => buildCard(image, imgIdx, {
+      onOpen: () => openAt(imgIdx),          // parent wires the lightbox
+      onErrorClick: () => retryImage(imgIdx), // and the feed's retry path
+    }),
     onScreen: (image) => isVisible(image),
     wantMeta: (image) => wantMeta(image),
   });
