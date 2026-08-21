@@ -144,26 +144,15 @@ export function fullFieldRows(meta) {
   return rows;
 }
 
-// picker changes re-apply to every rendered card
-export function refreshAllCardMeta() {
-  document.querySelectorAll(".card").forEach((card) => {
-    const meta = S.images[Number(card.dataset.idx)]?.meta;
-    const props = card.querySelector(".props");
-    const desc = card.querySelector(".desc");
-    if (props && desc) fillCardMeta(props, desc, meta);
-    const strip = card.querySelector(".mstrip");
-    if (strip) {
-      const txt = meta ? metaStripText(meta) : "";
-      strip.textContent = txt;
-      strip.style.display = txt ? "block" : "none";
-    }
-  });
-  if (S.lightbox.open) render();
-}
-
 // --- the picker overlay ------------------------------------------------------------
+//
+// The overlay never touches cards. Picker changes fire the injected
+// onChanged callback; the parent decides what re-renders.
 
-export function initFieldsOverlay() {
+let onChangedHook = null;
+
+export function initFieldsOverlay({ onChanged } = {}) {
+  onChangedHook = onChanged ?? null;
   const overlay = document.getElementById("fieldsOverlay");
   document.getElementById("fieldsClose").addEventListener("click", () => { overlay.hidden = true; });
   overlay.addEventListener("click", (e) => { if (e.target === overlay) overlay.hidden = true; });
@@ -208,7 +197,7 @@ function buildFieldsPanel() {
       mcb.addEventListener("change", async () => {
         for (const [n] of fields) S.fieldsCfg[n][col] = mcb.checked;
         await persist();
-        refreshAllCardMeta();
+        onChangedHook?.();
         gbody.querySelectorAll(`input[data-col="${col}"]`).forEach((cb) => { cb.checked = mcb.checked; });
       });
       master.append(mcb, mtrack);
@@ -242,7 +231,7 @@ function fieldToggle(field, col, gbody) {
   cb.addEventListener("change", async () => {
     S.fieldsCfg[field][col] = cb.checked;
     await persist();
-    refreshAllCardMeta();
+    onChangedHook?.();
     // sync the group masters
     const gname = gbody.dataset.group;
     const fields = META_FIELD_GROUPS.find((g) => g[0] === gname)[1];

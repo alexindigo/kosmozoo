@@ -17,7 +17,6 @@ import { metaFromPngBytes } from "/shared/extractor.mjs";
 import { fullFieldRows } from "./fields.mjs";
 import { chrome } from "./chrome.mjs";
 import { iconSvg } from "./icons.mjs";
-import { openAnchor } from "./lightbox.mjs";
 import { imageCard, aspectFromMeta, actionButton } from "./imageCard.mjs";
 
 const LS_KEY = "kosmozoo.anchors.v1";
@@ -98,9 +97,12 @@ function removeAnchor(name) {
   render();
 }
 
+let onOpenAnchor = null;
+
 // --- pane setup ---------------------------------------------------------------------
 
-export function initAnchorsPane() {
+export function initAnchorsPane({ onOpen } = {}) {
+  onOpenAnchor = onOpen ?? null;
   const dz = document.getElementById("dropzone");
   const fi = document.getElementById("fileInput");
   dz.addEventListener("click", () => fi.click());
@@ -239,15 +241,14 @@ onRender((s) => {
   list.innerHTML = "";
   for (const a of s.anchors) {
     const idx = s.anchors.indexOf(a);
-    let cardEl = null; // assigned when imageCard returns; the zoom hook skips until then
+    let cardEl = null; // assigned when the handle lands; the zoom hook skips until then
     const card = imageCard({
-      src: a.src,
       alt: a.name,
       ar: aspectFromMeta(a.meta),
       stripText: anchorSummary(a.meta),
       zoomKey: `anchor:${a.name}`,
       onZoomChange: (zoomed) => { if (cardEl) cardEl.draggable = !zoomed; },
-      onOpen: () => openAnchor(idx),
+      onOpen: () => onOpenAnchor?.(idx),
       title: anchorTitle(a.name),
       titleActions: [
         actionButton("ainfo", iconSvg("info-circle", 14), "embedded parameters",
@@ -256,22 +257,23 @@ onRender((s) => {
           () => removeAnchor(a.name)),
       ],
     });
-    cardEl = card;
-    card.classList.add("anchor");
-    card.dataset.name = a.name;
-    card.draggable = true;
-    card.addEventListener("dragstart", (e) => {
+    card.setSrc(a.src); // anchors carry their bytes; the component loads them
+    cardEl = card.el;
+    card.el.classList.add("anchor");
+    card.el.dataset.name = a.name;
+    card.el.draggable = true;
+    card.el.addEventListener("dragstart", (e) => {
       e.dataTransfer.setData("text/x-anchor", "");
       e.dataTransfer.effectAllowed = "move";
-      reorderDrag = card;
-      card.classList.add("dragging");
+      reorderDrag = card.el;
+      card.el.classList.add("dragging");
     });
-    card.addEventListener("dragend", () => {
-      card.classList.remove("dragging");
+    card.el.addEventListener("dragend", () => {
+      card.el.classList.remove("dragging");
       reorderDrag = null;
       syncOrderFromDom();
     });
-    list.appendChild(card);
+    list.appendChild(card.el);
   }
 });
 

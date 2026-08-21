@@ -1,53 +1,36 @@
-// client/js/imageCard.mjs — THE image card. One component, two instances:
-// the candidate feed and the anchor feed render the same card and inject
-// their contents at render time.
+// client/js/imageCard.mjs — THE image card. One component, used by every
+// feed. Pure presentation + pure inputs:
 //
-// The card owns presentation: rounded shell with the gap between card edge
-// and image, the aspect-true image box (reserves height before pixels land,
-// load/error states, zoom attachment, click semantics), and the slots —
-// title row, action row, footer. Behavior belongs to the caller's
-// callbacks; the card is presentation only.
+//   Inputs at construction: alt, ar, stripText, zoomKey, onZoomChange,
+//                           onOpen, onErrorClick, title, titleActions, footer
+//   Input after construction: setSrc(url | null)  — the ONLY one
+//   Read-only outputs: el, state
+//
+// The component knows its children, never its parents. It doesn't know what
+// a candidate or an anchor is; it renders an image and executes the
+// callbacks it was given, unaware of what they do. No caller reaches into
+// its DOM: no setSrc poking, no class flipping from outside.
+//
+// Internal states are scoped (ic-*) so page CSS can never collide with them.
 
 import { makeZoomable } from "./zoomable.mjs";
 
 export function imageCard({
-  src = null,            // assigned at build when present (anchors);
-                         // the feed's window loader assigns for candidates
-  alt, ar,               // aspect-true reservation, "w / h" or null
-  stripText = "",
+  alt, ar = null, stripText = "",
   zoomKey, onZoomChange,
   onOpen, onErrorClick,
-  title,                 // element for the title row's left side
-  titleActions = [],     // elements for the title row's right side
-  footer = [],           // element(s) appended after the title row
+  title, titleActions = [], footer = [],
 }) {
   const card = document.createElement("div");
   card.className = "card";
-  card.appendChild(buildImageBox({ src, alt, ar, stripText, zoomKey, onZoomChange, onOpen, onErrorClick }));
-  card.appendChild(buildTitleRow(title, titleActions));
-  for (const el of [].concat(footer)) card.appendChild(el);
-  return card;
-}
 
-function buildImageBox({ src, alt, ar, stripText, zoomKey, onZoomChange, onOpen, onErrorClick }) {
+  // --- image box: presentation + load lifecycle, owned here -----------------
   const wrap = document.createElement("div");
-  wrap.className = "imgwrap empty";
+  wrap.className = "imgwrap ic-empty";
   if (ar) wrap.style.setProperty("--ar", ar);
 
   const img = document.createElement("img");
   img.alt = alt;
-  img.addEventListener("load", () => {
-    if (img.naturalWidth && img.naturalHeight) {
-      wrap.style.setProperty("--ar", `${img.naturalWidth} / ${img.naturalHeight}`);
-    }
-    wrap.classList.remove("loading");
-  });
-  img.addEventListener("error", () => {
-    if (!img.getAttribute("src")) return; // unload-triggered: not an error
-    wrap.classList.remove("loading");
-    wrap.classList.add("error");
-  });
-  if (src) img.src = src;
   wrap.appendChild(img);
 
   const strip = document.createElement("div");
@@ -56,30 +39,80 @@ function buildImageBox({ src, alt, ar, stripText, zoomKey, onZoomChange, onOpen,
   strip.style.display = stripText ? "block" : "none";
   wrap.appendChild(strip);
 
+  let state = "empty"; // "empty" | "loading" | "loaded" | "error"
+
+  img.addEventListener("load", () => {
+    if (img.naturalWidth && img.naturalHeight) {
+      wrap.style.setProperty("--ar", `${img.naturalWidth} / ${img.naturalHeight}`);
+    }
+    wrap.classList.remove("ic-loading", "ic-error", "ic-empty");
+    state = "loaded";
+  });
+  img.addEventListener("error", () => {
+    if (!img.getAttribute("src")) return; // unload-triggered: not an error
+    wrap.classList.remove("ic-loading", "ic-empty");
+    wrap.classList.add("ic-error");
+    state = "error";
+  });
+
   makeZoomable(img, { key: zoomKey, onZoomChange });
 
   wrap.addEventListener("click", () => {
-    if (wrap.classList.contains("error")) {
-      onErrorClick?.();
-      return; // never open the lightbox on a broken frame
+    if (state === "error") {
+      onErrorClick?.(); // never open the lightbox on a broken frame
+      return;
     }
     onOpen?.();
   });
-  return wrap;
-}
 
-// the row under the image: title left, actions right — one layout for both
-function buildTitleRow(title, actions) {
-  const row = document.createElement("div");
-  row.className = "ctitle";
-  if (title) row.appendChild(title);
-  if (actions.length) {
-    const wrap = document.createElement("span");
-    wrap.className = "btnwrap";
-    for (const b of actions) wrap.appendChild(b);
-    row.appendChild(wrap);
+  card.appendChild(wrap);
+
+  // --- title row -------------------------------------------------------------
+  if (title) {
+    const row = document.createElement("div");
+    row.className = "ctitle";
+    row.appendChild(title);
+    if (titleActions.length) {
+      const btns = document.createElement("span");
+      btns.className = "btnwrap";
+      for (const b of titleActions) btns.appendChild(b);
+      row.appendChild(btns);
+    }
+    card.appendChild(row);
   }
-  return row;
+
+  // --- footer slots -----------------------------------------------------------
+  for (const el of [].concat(footer)) card.appendChild(el);
+
+  // --- the public handle -------------------------------------------------------
+  return {
+    el: card,
+    get state() { return state; },
+
+    // the ONLY post-construction input: "here is the image source" / "none".
+    setSrc(src) {
+      if (src === null || src === undefined) {
+        img.removeAttribute("src"); // aborts the fetch, releases decoded bytes
+        wrap.classList.remove("ic-loading", "ic-error");
+        wrap.classList.add("ic-empty");
+        state = "empty";
+        return;
+      }
+      wrap.classList.remove("ic-error", "ic-empty");
+      wrap.classList.add("ic-loading");
+      state = "loading";
+      img.src = src;
+    },
+
+    // presentation setters — no one reaches into the DOM
+    setStripText(text) {
+      strip.textContent = text ?? "";
+      strip.style.display = text ? "block" : "none";
+    },
+    setAr(value) {
+      if (value) wrap.style.setProperty("--ar", value);
+    },
+  };
 }
 
 // helper for callers: aspect string from extracted metadata

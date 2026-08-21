@@ -97,10 +97,10 @@ export function renderChunk() {
     const imgIdx = view[viewPos++];
     const image = S.images[imgIdx];
     wantHook?.(image);
-    const el = buildCard(image, imgIdx);
-    cardEls[imgIdx] = el;
-    frag.appendChild(el);
-    listObserver.observe(el);
+    const handle = buildCard(image, imgIdx); // a card handle, not an element
+    cardEls[imgIdx] = handle;
+    frag.appendChild(handle.el);
+    listObserver.observe(handle.el);
     added++;
   }
   container.appendChild(frag);
@@ -113,7 +113,7 @@ export function renderChunk() {
       sentinelEl.textContent = "loading more…";
       sentinelObserver.observe(sentinelEl);
     }
-    const rendered = cardEls.filter(Boolean);
+    const rendered = cardEls.filter(Boolean).map((h) => h.el);
     const trigger = rendered[Math.max(0, rendered.length - WINDOW_PAD)];
     if (trigger) container.insertBefore(sentinelEl, trigger);
     else container.appendChild(sentinelEl);
@@ -147,33 +147,24 @@ export function applyWindow() {
 }
 
 function loadImage(idx) {
-  const img = cardEls[idx]?.querySelector(".imgwrap img");
-  if (!img) return;
-  const wrap = img.closest(".imgwrap");
-  wrap.classList.remove("empty", "error");
-  wrap.classList.add("loading");
-  img.src = api.imageBytesUrl(S.images[idx].id);
+  const card = cardEls[idx];
+  if (!card) return;
+  card.setSrc(api.imageBytesUrl(S.images[idx].id));
   loadedSet.add(idx);
 }
 
 export function retryImage(idx) {
-  const img = cardEls[idx]?.querySelector(".imgwrap img");
-  if (!img) return;
-  const wrap = img.closest(".imgwrap");
-  img.removeAttribute("src");
-  wrap.classList.remove("error");
-  wrap.classList.add("loading");
-  img.src = api.imageBytesUrl(S.images[idx].id) + "?_r=" + Date.now();
+  const card = cardEls[idx];
+  if (!card) return;
+  card.setSrc(null);
+  card.setSrc(api.imageBytesUrl(S.images[idx].id) + "?_r=" + Date.now());
   loadedSet.add(idx);
 }
 
 function unloadImage(idx) {
-  const img = cardEls[idx]?.querySelector(".imgwrap img");
-  if (!img) return;
-  img.removeAttribute("src");
-  const wrap = img.closest(".imgwrap");
-  wrap.classList.remove("loading");
-  wrap.classList.add("empty");
+  const card = cardEls[idx];
+  if (!card) return;
+  card.setSrc(null); // aborts fetch, releases decoded bytes — inside the card
   loadedSet.delete(idx);
 }
 
@@ -189,8 +180,7 @@ function scheduleErrorRetry() {
     let any = false;
     for (const idx of [...loadedSet]) {
       if (idx < min || idx > max) continue;
-      const wrap = cardEls[idx]?.querySelector(".imgwrap");
-      if (wrap?.classList.contains("error")) {
+      if (cardEls[idx]?.state === "error") {
         retryImage(idx);
         any = true;
       }
@@ -265,6 +255,9 @@ export function viewStep(imgIdx, dir) {
 }
 
 export function cardAt(idx) { return cardEls[idx]; }
+export function eachCard(fn) {
+  for (const [idx, h] of cardEls.entries()) if (h) fn(h, idx);
+}
 export function viewIndices() { return view; }
 
 // test seam (Deno has no DOM): drive viewStep without renderFeed

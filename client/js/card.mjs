@@ -2,14 +2,15 @@
 // The card (imageCard.mjs) owns presentation; this module injects what a
 // candidate is: filename (copy), vote/favorite/save actions, saved flash,
 // notes boxes with copy-from-neighbor, and the params+prompt panel.
+//
+// Encapsulation: onOpen/onErrorClick are INJECTED (the parent wires them to
+// the lightbox/feed). This module doesn't know the lightbox exists.
 
 import { S } from "./state.mjs";
 import { api } from "./api.mjs";
 import { setVote, toggleFavorite, saveNotes } from "./judgment.mjs";
 import { metaStripText, fillCardMeta } from "./fields.mjs";
-import { retryImage } from "./feed.mjs";
 import { iconSvg } from "./icons.mjs";
-import { openAt } from "./lightbox.mjs";
 import { imageCard, aspectFromMeta, actionButton } from "./imageCard.mjs";
 
 // which filenames already exist in the downloads dir (save button greys)
@@ -18,23 +19,33 @@ export const savedSet = new Set();
 // "Feedback saved" flash elements, keyed by image id
 const savedFlashes = new Map();
 
-export function buildCard(image, imgIdx) {
-  const card = imageCard({
+export function buildCard(image, imgIdx, { onOpen, onErrorClick } = {}) {
+  const handle = imageCard({
     alt: image.filename,
     ar: aspectFromMeta(image.meta),
     stripText: image.meta ? metaStripText(image.meta) : "",
     zoomKey: image.id,
-    onOpen: () => openAt(imgIdx),
-    onErrorClick: () => retryImage(imgIdx),
+    onOpen,
+    onErrorClick,
     title: buildTitle(image),
     titleActions: buildActions(image),
     footer: [buildNotesRow(image, imgIdx), buildMetaRow(image)],
   });
-  card.dataset.idx = imgIdx;
-  card.dataset.name = image.filename;
-  if (image.judgment?.vote) card.dataset.vote = image.judgment.vote;
-  if (image.judgment?.favorite) card.dataset.favorite = "1";
-  return card;
+  handle.el.dataset.idx = imgIdx;
+  handle.el.dataset.name = image.filename;
+  if (image.judgment?.vote) handle.el.dataset.vote = image.judgment.vote;
+  if (image.judgment?.favorite) handle.el.dataset.favorite = "1";
+
+  // instance-level meta updates: strip + aspect are the card's; props/desc
+  // are this instance's own footer content
+  const propsEl = handle.el.querySelector(".props");
+  const descEl = handle.el.querySelector(".desc");
+  handle.setMeta = (meta) => {
+    handle.setStripText(meta ? metaStripText(meta) : "");
+    if (meta?.width && meta?.height) handle.setAr(`${meta.width} / ${meta.height}`);
+    fillCardMeta(propsEl, descEl, meta);
+  };
+  return handle;
 }
 
 // --- injected: title (filename, click-to-copy host#file) -----------------------
@@ -194,18 +205,3 @@ function buildMetaRow(image) {
   return row;
 }
 
-// A card rendered before its metadata arrived gets patched in place.
-export function patchCardMeta(card, meta) {
-  const props = card.querySelector(".props");
-  const desc = card.querySelector(".desc");
-  if (props && desc) fillCardMeta(props, desc, meta);
-  const strip = card.querySelector(".mstrip");
-  if (strip) {
-    const txt = meta ? metaStripText(meta) : "";
-    strip.textContent = txt;
-    strip.style.display = txt ? "block" : "none";
-  }
-  if (meta?.width && meta?.height) {
-    card.querySelector(".imgwrap")?.style.setProperty("--ar", `${meta.width} / ${meta.height}`);
-  }
-}
