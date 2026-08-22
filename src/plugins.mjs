@@ -107,6 +107,13 @@ export class PluginHost {
         if (r.status !== 200) return null;
         return new Uint8Array(await new Response(r.body).arrayBuffer());
       },
+      // hash + cache access for plugins that need the ingested bytes
+      _hashFor: (host, filename) => store.hashFor(host, filename),
+      _cacheGet: async (hash) => {
+        const { cacheGet } = await import("./cache.mjs");
+        return cacheGet(hash);
+      },
+      _hostAddr: (host) => ctx.hosts[host] ?? null,
     };
   }
 
