@@ -316,59 +316,107 @@ main { display: flex; flex: 1; min-height: 0; }
 
 /* --- variations panel (vz-*) ------------------------------------------------ */
 .vz-panel { position: absolute; inset: 0; z-index: 15;
-  background: rgba(17,17,17,.96); padding: 16px;
-  font-size: 12px; color: var(--fg); overflow: hidden; }
-.vz-body { display: flex; gap: 16px; flex: 1; min-height: 0; }
+  background: rgba(17,17,17,.97); padding: 20px 24px;
+  font-size: 12px; color: var(--fg); overflow: hidden;
+  display: flex; gap: 20px; }
 
-/* sliders column */
-.vz-sliders { flex: 1; display: flex; flex-direction: column;
-  justify-content: center; gap: 14px; }
-.vz-slider-row { display: flex; align-items: center; gap: 8px; }
-.vz-slider-row.vz-off { opacity: 0.3; }
-.vz-cb { accent-color: var(--orange); width: 14px; height: 14px; }
-.vz-label { min-width: 62px; color: var(--fg); font-weight: 500; }
-.vz-current { color: var(--orange); font-size: 11px;
-  font-family: ui-monospace, monospace; min-width: 36px; text-align: center; }
+/* left column: title + sliders */
+.vz-left { flex: 1; display: flex; flex-direction: column;
+  justify-content: center; min-width: 0; }
+.vz-title { font-size: 15px; color: var(--white); text-align: center;
+  margin-bottom: 24px; font-weight: 500; }
+.vz-sliders { display: flex; flex-direction: column; gap: 22px; }
 
-/* dual-thumb range slider */
-.vz-rangewrap { flex: 1; position: relative; height: 24px; }
-.vz-thumb { position: absolute; top: 0; left: 0; width: 100%; height: 24px;
-  -webkit-appearance: none; appearance: none; background: transparent;
-  pointer-events: none; margin: 0; padding: 0; }
+/* one slider row: checkbox on the left, inner block on the right */
+.vz-slider-row { display: flex; align-items: flex-start; gap: 12px; }
+.vz-slider-row.vz-off { opacity: 0.35; }
+.vz-slider-row.vz-off .vz-min-lbl,
+.vz-slider-row.vz-off .vz-max-lbl,
+.vz-slider-row.vz-off .vz-current,
+.vz-slider-row.vz-off .vz-thumb,
+.vz-slider-row.vz-off .vz-track,
+.vz-slider-row.vz-off .vz-marker { visibility: hidden; }
+.vz-cb { -webkit-appearance: none; appearance: none;
+  width: 16px; height: 16px; border-radius: 3px;
+  background: transparent; border: 2px solid var(--orange);
+  cursor: pointer; margin: 8px 0 0; flex: 0 0 auto; }
+.vz-cb:checked { background: var(--orange); }
+
+.vz-slider-inner { flex: 1; display: flex; flex-direction: column; gap: 2px; }
+.vz-label { color: var(--fg); font-size: 13px; font-weight: 400;
+  margin-bottom: 6px; }
+
+/* dual-thumb slider layout */
+.vz-rangewrap { position: relative; height: 44px; padding-top: 16px; }
+
+/* min/max value labels above the thumbs — positioned absolutely by JS */
+.vz-bound { position: absolute; top: -2px; transform: translateX(-50%);
+  color: var(--fg); font-size: 11px;
+  font-family: ui-monospace, monospace; pointer-events: none;
+  white-space: nowrap; }
+
+/* orange marker + current value label below */
+.vz-marker { position: absolute; top: 12px; width: 2px; height: 20px;
+  background: var(--orange); pointer-events: none;
+  transform: translateX(-50%); }
+.vz-current { position: absolute; top: 32px; transform: translateX(-50%);
+  color: var(--orange); font-size: 11px;
+  font-family: ui-monospace, monospace; pointer-events: none;
+  white-space: nowrap; }
+
+/* two overlapping range inputs form the dual thumb */
+.vz-thumb { position: absolute; top: 16px; left: 0; width: 100%;
+  height: 20px; -webkit-appearance: none; appearance: none;
+  background: transparent; pointer-events: none; margin: 0; padding: 0; }
 .vz-thumb::-webkit-slider-thumb { -webkit-appearance: none; appearance: none;
   width: 14px; height: 14px; border-radius: 50%; background: var(--accent);
   border: 2px solid var(--bg); cursor: pointer; pointer-events: auto; }
 .vz-thumb::-moz-range-thumb { width: 14px; height: 14px; border-radius: 50%;
   background: var(--accent); border: 2px solid var(--bg); cursor: pointer;
   pointer-events: auto; }
-.vz-thumb::-webkit-slider-runnable-track { background: transparent; height: 4px; }
-.vz-thumb::-moz-range-track { background: transparent; height: 4px; }
-.vz-track { position: absolute; top: 10px; height: 4px; background: var(--accent);
-  border-radius: 2px; pointer-events: none; }
-.vz-marker { position: absolute; top: -2px; width: 2px; height: 24px;
-  background: var(--orange); pointer-events: none; }
-.vz-bound { min-width: 36px; color: var(--fg); font-size: 11px;
-  text-align: center; font-family: ui-monospace, monospace; }
+.vz-thumb::-webkit-slider-runnable-track { background: transparent; height: 2px; }
+.vz-thumb::-moz-range-track { background: transparent; height: 2px; }
 
-/* sidebar column */
-.vz-side { width: 150px; display: flex; flex-direction: column;
-  justify-content: center; gap: 8px; flex: 0 0 auto; }
-.vz-title { font-weight: 700; font-size: 14px; color: var(--white); }
-.vz-count { font-size: 32px; font-weight: 700; color: var(--accent);
-  text-align: center; line-height: 1; margin: 4px 0; }
-.vz-field { display: flex; align-items: center; gap: 6px; }
-.vz-flabel { color: var(--mid); min-width: 36px; }
-.vz-finput { flex: 1; background: var(--bg); color: var(--white);
-  border: 1px solid var(--dim); border-radius: 4px; padding: 3px 6px;
-  font-size: 12px; }
-.vz-finput:focus { outline: none; border-color: var(--accent); }
+/* track: 1px black line across the full width, blue band between thumbs */
+.vz-rangewrap::before { content: ""; position: absolute; left: 0; right: 0;
+  top: 22px; height: 1px; background: var(--dim); }
+.vz-track { position: absolute; top: 21px; height: 3px; background: var(--accent);
+  border-radius: 1px; pointer-events: none; }
+
+/* --- vertical divider --- */
+.vz-divider { width: 1px; background: var(--dim); flex: 0 0 auto; }
+
+/* --- right column --- */
+.vz-right { width: 130px; display: flex; flex-direction: column;
+  justify-content: center; gap: 4px; flex: 0 0 auto; }
+.vz-rlabel { color: var(--fg); font-size: 12px; font-weight: 400;
+  margin-top: 8px; }
+.vz-rlabel:first-child { margin-top: 0; }
+.vz-incrow { display: flex; align-items: stretch; gap: 6px;
+  margin-top: 2px; }
+.vz-step-btn { background: transparent; color: var(--fg);
+  border: none; font-size: 16px; cursor: pointer; padding: 0 4px;
+  line-height: 1; }
+.vz-step-btn:hover { color: var(--accent); }
+.vz-inc { flex: 1; background: var(--bg); color: var(--fg);
+  border: 1px solid var(--dim); border-radius: 6px; padding: 3px 8px;
+  font-size: 12px; text-align: center;
+  font-family: ui-monospace, monospace; }
+.vz-inc:focus { outline: none; border-color: var(--accent); }
+.vz-count { font-size: 30px; font-weight: 700; color: var(--fg);
+  line-height: 1.1; margin-top: 2px; }
+.vz-tinput { background: var(--bg); color: var(--fg);
+  border: 1px solid var(--dim); border-radius: 6px; padding: 4px 8px;
+  font-size: 12px; margin-top: 2px;
+  font-family: ui-monospace, monospace; }
+.vz-tinput:focus { outline: none; border-color: var(--accent); }
 .vz-run { background: var(--accent); color: var(--black); border: none;
-  border-radius: 6px; padding: 8px 0; font-size: 14px; font-weight: 600;
-  cursor: pointer; margin-top: 6px; width: 100%; }
+  border-radius: 8px; padding: 8px 0; font-size: 14px; font-weight: 600;
+  cursor: pointer; margin-top: 12px; }
 .vz-run:hover { filter: brightness(1.15); }
 .vz-run:disabled { opacity: 0.5; cursor: default; }
 .vz-error { color: var(--red); font-size: 11px; min-height: 14px;
-  word-break: break-all; }
+  margin-top: 4px; word-break: break-word; }
 .vz-error.vz-ok { color: var(--green); }
 .vz-close { position: absolute; top: 8px; right: 8px; z-index: 16;
   background: none; border: none; color: var(--mid); cursor: pointer;
