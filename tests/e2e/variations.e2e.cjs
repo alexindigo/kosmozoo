@@ -51,22 +51,25 @@ async function main() {
       check("wand click opens variations panel", hasPanel);
     });
 
-    // --- panel is an inline row within the card (below the image) ---
-    await attempt("panel is inline within the card", async () => {
+    // --- panel overlays the image, contained within the card's imgwrap ---
+    await attempt("panel overlays image, contained in imgwrap", async () => {
       const info = await cdp.evaluate(`(() => {
         const card = document.querySelector('.card[data-idx="0"]');
+        const imgwrap = card.querySelector('.imgwrap');
         const panel = card.querySelector('.vz-panel');
         if (!panel) return { error: 'no panel' };
-        const ctitle = card.querySelector('.ctitle');
+        const wr = imgwrap.getBoundingClientRect();
+        const pr = panel.getBoundingClientRect();
         return {
-          panelInCard: card.contains(panel),
           panelParent: panel.parentElement?.className,
-          afterCtitle: ctitle ? panel.compareDocumentPosition(ctitle) & Node.DOCUMENT_POSITION_PRECEDING : null,
-          position: getComputedStyle(panel).position,
+          panelPosition: getComputedStyle(panel).position,
+          wrapPosition: getComputedStyle(imgwrap).position,
+          contained: pr.x >= wr.x && pr.y >= wr.y && pr.right <= wr.right && pr.bottom <= wr.bottom,
+          sameSize: pr.width === wr.width && pr.height === wr.height,
         };
       })()`);
-      check("panel is inline within the card",
-        info.panelInCard === true && info.panelParent === "card",
+      check("panel overlays image, contained in imgwrap",
+        info.contained === true && info.sameSize === true,
         JSON.stringify(info));
     });
 
@@ -80,12 +83,11 @@ async function main() {
 
     // --- variations count updates on enable ---
     await attempt("enabling denoise slider updates variations count", async () => {
-      // Enable the denoise checkbox (first slider)
-      await cdp.evaluate(`
-        const cb = document.querySelector('.card[data-idx="0"] .vz-slider-row .vz-cb');
-        cb.checked = true;
-        cb.dispatchEvent(new Event('change'));
-      `);
+      await cdp.evaluate(`(() => {
+        const cb1 = document.querySelector('.card[data-idx="0"] .vz-slider-row .vz-cb');
+        cb1.checked = true;
+        cb1.dispatchEvent(new Event('change'));
+      })()`);
       await sleep(100);
       const count = await cdp.evaluate(`
         document.querySelector('.card[data-idx="0"] .vz-count')?.textContent
@@ -99,16 +101,35 @@ async function main() {
       const before = parseInt(await cdp.evaluate(`
         document.querySelector('.card[data-idx="0"] .vz-count')?.textContent
       `), 10);
-      await cdp.evaluate(`
+      await cdp.evaluate(`(() => {
         const inc = document.querySelector('.card[data-idx="0"] .vz-inc');
         inc.value = '0.1';
         inc.dispatchEvent(new Event('input'));
-      `);
+      })()`);
       await sleep(100);
       const after = parseInt(await cdp.evaluate(`
         document.querySelector('.card[data-idx="0"] .vz-count')?.textContent
       `), 10);
       check("increment change updates count", before !== after, before + " → " + after);
+    });
+
+    // --- dual-thumb slider updates range ---
+    await attempt("dual-thumb slider updates min/max labels", async () => {
+      const labels = await cdp.evaluate(`(() => {
+        const row = document.querySelector('.card[data-idx="0"] .vz-slider-row');
+        const minThumb = row.querySelector('.vz-thumb-min');
+        const maxThumb = row.querySelector('.vz-thumb-max');
+        minThumb.value = '0.3';
+        minThumb.dispatchEvent(new Event('input'));
+        maxThumb.value = '0.9';
+        maxThumb.dispatchEvent(new Event('input'));
+        return {
+          min: row.querySelector('.vz-min-lbl')?.textContent,
+          max: row.querySelector('.vz-max-lbl')?.textContent,
+        };
+      })()`);
+      check("dual-thumb updates labels", labels.min === "0.3" && labels.max === "0.9",
+        JSON.stringify(labels));
     });
 
     // --- panel closes on wand re-click ---
@@ -148,16 +169,18 @@ async function main() {
       `);
       await sleep(200);
 
-      // Enable denoise slider and set range via IIFE to avoid redeclaration
+      // Enable denoise slider and set range via dual-thumb inputs
       await cdp.evaluate(`(() => {
-        const cb2 = document.querySelector('.card[data-idx="0"] .vz-slider-row .vz-cb');
+        const row = document.querySelector('.card[data-idx="0"] .vz-slider-row');
+        const cb2 = row.querySelector('.vz-cb');
         cb2.checked = true;
         cb2.dispatchEvent(new Event('change'));
-        const row = document.querySelector('.card[data-idx="0"] .vz-slider-row');
-        const mn = row.querySelector('.vz-min');
-        const mx = row.querySelector('.vz-max');
-        if (mn) { mn.value = '0.3'; mn.disabled = false; mn.dispatchEvent(new Event('input')); }
-        if (mx) { mx.value = '0.9'; mx.disabled = false; mx.dispatchEvent(new Event('input')); }
+        const mn = row.querySelector('.vz-thumb-min');
+        const mx = row.querySelector('.vz-thumb-max');
+        mn.value = '0.3';
+        mn.dispatchEvent(new Event('input'));
+        mx.value = '0.9';
+        mx.dispatchEvent(new Event('input'));
       })()`);
       await sleep(200);
 
