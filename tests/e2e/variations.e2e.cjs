@@ -132,6 +132,17 @@ async function main() {
         JSON.stringify(labels));
     });
 
+    // --- panel blocks click-through to the image below ---
+    await attempt("clicking panel does not open lightbox", async () => {
+      await cdp.evaluate(`(() => {
+        const panel = document.querySelector('.card[data-idx="0"] .vz-panel');
+        panel.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+      })()`);
+      await sleep(200);
+      const lbOpen = await cdp.evaluate(`window.__kz.S.lightbox.open`);
+      check("clicking panel does not open lightbox", lbOpen === false);
+    });
+
     // --- panel closes on wand re-click ---
     await attempt("wand re-click closes panel", async () => {
       await cdp.evaluate(`
