@@ -58,6 +58,9 @@ The first three plugins each prove a different shape:
    foundation).
 3. **detector** — brings its own external dependency (a detection *service*,
    addressed like a ComfyUI host), and degrades to absent when unconfigured.
+4. **variations** — server + client (batch parameter sweep). Reads the cached
+   PNG's embedded ComfyUI graph, generates permutations, clones + mutates the
+   graph, and POSTs each to the source host's `/api/prompt`.
 
 ## Hello world
 
