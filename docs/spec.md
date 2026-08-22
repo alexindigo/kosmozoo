@@ -178,3 +178,26 @@ entries (files gone) keep their old keys.
 `deno task import-legacy` opens the frozen Python `metadata.db` read-only and
 merges its rows into the local store.  Idempotent (skips already-present
 rows).
+
+## 7. Plugin surfaces
+
+The `kz` object handed to `register(kz)` exposes:
+
+| Call | Kind | Purpose |
+|---|---|---|
+| `kz.mode(id, def)` | capability | a composition mode (blend/split/difference/flicker) |
+| `kz.alignment(id, def)` | capability | an alignment contribution (e.g. `face-anchored`) |
+| `kz.route(method, path, handler)` | route | server route under `/api/plugins/<name><path>` |
+| `kz.probe(def)` | capability | an extractor probe contribution |
+| `kz.exporter(def)` | capability | a training-export sink |
+| `kz.settings.get/set(k, v)` / `.ns()` | persistence | namespaced `plugins.<name>.*` settings |
+| `kz.store.getField/setField(host, file, field, v)` | persistence | plugin fields on the judgment record |
+| `kz.judgments.get/set(...)` | data | the core judgment record (notes/vote/favorite) |
+| `kz._hashFor(host, filename)` | internal | resolve hash from address |
+| `kz._cacheGet(hash)` | internal | read cached image bytes |
+| `kz._hostAddr(host)` | internal | resolve host name to address |
+| `kz._fetchImageBytes(key)` | internal | fetch image bytes from a host |
+
+Methods prefixed `_` are engine-internal accessors for plugins that need
+storage or cache access. They are not part of the public API contract and
+may change without notice.
