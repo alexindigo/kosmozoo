@@ -1,87 +1,139 @@
 // plugins/variations/plugin.mjs — batch parameter sweep from a card.
 //
-// One route: POST /run — reads the cached PNG's embedded ComfyUI graph,
-// generates permutations (cartesian product of enabled ranges, edges
-// inclusive, current-image permutation excluded), clones + mutates the
-// graph per permutation, and POSTs each to the source host's /api/prompt.
+// Routes:
+//   GET  /probe/:id   — inspect a graph, return per-param node labels and
+//                       current values (client uses this to render the panel
+//                       with correct `<node>:<param>` labels for the graph
+//                       it's looking at; KSampler nodes drop the prefix).
+//   POST /run         — read the cached PNG's embedded graph, generate
+//                       permutations (cartesian × enabled ranges, edges
+//                       inclusive, current excluded), clone + mutate the
+//                       graph per permutation, POST to source host's
+//                       /api/prompt. Final filename per submission is
+//                       <prefix><basename><suffix> — prefix/suffix wrap the
+//                       original name; they do NOT replace it.
 
 import { parsePngTextChunks, firstNode, scalarInput } from "../../src/extractor.mjs";
 
-// --- parameter → node mapping ------------------------------------------------
+// --- parameter probes: locate the node that carries each param --------------
+//
+// Each probe returns { node, key, ownerLabel } where:
+//   node        — the graph node object (or null if absent)
+//   key         — the input key on that node
+//   ownerLabel  — user-facing label prefix; "" for KSampler-carrier,
+//                 "<lowercased-node>" otherwise (e.g. "scheduler", "cfgguider").
 
-// Each parameter knows which graph nodes carry it and how to write the value.
-// Reuses the extractor's probe knowledge (firstNode, scalarInput).
+function probeDenoise(nodes) {
+  const ks = nodes.find((n) => n.class_type === "KSampler");
+  if (ks) return { node: ks, key: "denoise", ownerLabel: "" };
+  const sched = firstNode(nodes, "scheduler");
+  if (sched && typeof sched.inputs?.denoise === "number") {
+    return { node: sched, key: "denoise", ownerLabel: "scheduler" };
+  }
+  return { node: null };
+}
+
+function probeCfg(nodes) {
+  const ks = nodes.find((n) => n.class_type === "KSampler");
+  if (ks) return { node: ks, key: "cfg", ownerLabel: "" };
+  const guider = firstNode(nodes, "cfgguider");
+  if (guider && typeof guider.inputs?.cfg === "number") {
+    return { node: guider, key: "cfg", ownerLabel: "cfgguider" };
+  }
+  return { node: null };
+}
+
+function probeSteps(nodes) {
+  const ks = nodes.find((n) => n.class_type === "KSampler");
+  if (ks) return { node: ks, key: "steps", ownerLabel: "" };
+  const sched = firstNode(nodes, "scheduler");
+  if (sched && typeof sched.inputs?.steps === "number") {
+    return { node: sched, key: "steps", ownerLabel: "scheduler" };
+  }
+  return { node: null };
+}
+
+function probeSeed(nodes) {
+  const ks = nodes.find((n) => n.class_type === "KSampler");
+  if (ks && typeof ks.inputs?.seed === "number") {
+    return { node: ks, key: "seed", ownerLabel: "" };
+  }
+  // SamplerCustomAdvanced flow: RandomNoise.noise_seed
+  const rn = firstNode(nodes, "randomnoise");
+  if (rn && typeof rn.inputs?.noise_seed === "number") {
+    return { node: rn, key: "noise_seed", ownerLabel: "randomnoise" };
+  }
+  // rgthree Seed node with a scalar seed input
+  const s = firstNode(nodes, "seed");
+  if (s && typeof s.inputs?.seed === "number") {
+    return { node: s, key: "seed", ownerLabel: "seed" };
+  }
+  return { node: null };
+}
+
+// ipa_weight: potentially many IPAdapter nodes, all get the same value.
+function probeIpaWeight(nodes) {
+  const carriers = [];
+  for (const n of nodes) {
+    if (!String(n.class_type ?? "").toLowerCase().includes("ipadapter")) continue;
+    if (typeof n.inputs?.weight === "number") carriers.push(n);
+  }
+  if (!carriers.length) return { node: null };
+  // ipa_weight is never on KSampler; always prefix with "ipadapter"
+  return { node: carriers, key: "weight", ownerLabel: "ipadapter" };
+}
 
 const PARAM_PROBES = {
-  denoise: {
-    // KSampler carries denoise directly; SamplerCustomAdvanced via scheduler.
-    set(graph, value) {
-      const nodes = Object.values(graph);
-      const ks = nodes.find((n) => n.class_type === "KSampler");
-      if (ks) { ks.inputs.denoise = value; return true; }
-      const sched = firstNode(nodes, "scheduler");
-      if (sched && typeof sched.inputs?.denoise === "number") {
-        sched.inputs.denoise = value; return true;
-      }
-      return false;
-    },
-    get(meta) { return meta.denoise ?? null; },
-  },
-  cfg: {
-    set(graph, value) {
-      const nodes = Object.values(graph);
-      const ks = nodes.find((n) => n.class_type === "KSampler");
-      if (ks) { ks.inputs.cfg = value; return true; }
-      const guider = firstNode(nodes, "cfgguider");
-      if (guider && typeof guider.inputs?.cfg === "number") {
-        guider.inputs.cfg = value; return true;
-      }
-      return false;
-    },
-    get(meta) { return meta.cfg ?? null; },
-  },
-  steps: {
-    set(graph, value) {
-      const nodes = Object.values(graph);
-      const ks = nodes.find((n) => n.class_type === "KSampler");
-      if (ks) { ks.inputs.steps = Math.round(value); return true; }
-      const sched = firstNode(nodes, "scheduler");
-      if (sched && typeof sched.inputs?.steps === "number") {
-        sched.inputs.steps = Math.round(value); return true;
-      }
-      return false;
-    },
-    get(meta) { return meta.steps ?? null; },
-  },
-  ipa_weight: {
-    set(graph, value) {
-      const nodes = Object.values(graph);
-      let found = false;
-      for (const n of nodes) {
-        if (!String(n.class_type ?? "").toLowerCase().includes("ipadapter")) continue;
-        if (typeof n.inputs?.weight === "number") {
-          n.inputs.weight = value;
-          found = true;
-        }
-      }
-      return found;
-    },
-    get(meta) {
-      // meta.ipa_weight may be "0.8" or "0.8+0.6" (multi-node)
-      const raw = meta.ipa_weight;
-      if (!raw) return null;
-      const first = String(raw).split("+")[0];
-      const v = parseFloat(first);
-      return isNaN(v) ? null : v;
-    },
-  },
+  denoise: probeDenoise,
+  cfg: probeCfg,
+  steps: probeSteps,
+  seed: probeSeed,
+  ipa_weight: probeIpaWeight,
 };
 
-// --- permutation engine -------------------------------------------------------
+// --- per-image inspection ----------------------------------------------------
+
+// Return { <param>: { label, current } | null } for every param, given the
+// graph parsed from the image's PNG. `label` is the user-facing template key
+// (e.g. "denoise" for KSampler-carriers, "scheduler:denoise" otherwise).
+function inspectGraph(graph) {
+  const nodes = Object.values(graph);
+  const out = {};
+  for (const [param, probe] of Object.entries(PARAM_PROBES)) {
+    const r = probe(nodes);
+    if (!r.node) { out[param] = null; continue; }
+    const node = Array.isArray(r.node) ? r.node[0] : r.node;
+    const current = node.inputs?.[r.key] ?? null;
+    const label = r.ownerLabel ? `${r.ownerLabel}:${param}` : param;
+    out[param] = { label, current };
+  }
+  return out;
+}
+
+// --- graph mutation ----------------------------------------------------------
+
+function mutateGraph(graph, permutation) {
+  const clone = structuredClone(graph);
+  const nodes = Object.values(clone);
+  const applied = [];
+  for (const [param, value] of Object.entries(permutation)) {
+    const probe = PARAM_PROBES[param];
+    if (!probe) continue;
+    const r = probe(nodes);
+    if (!r.node) continue;
+    const targets = Array.isArray(r.node) ? r.node : [r.node];
+    // integer-typed params round; floats pass through
+    const v = (param === "steps" || param === "seed") ? Math.round(value) : value;
+    for (const t of targets) t.inputs[r.key] = v;
+    applied.push(param);
+  }
+  return { graph: clone, applied };
+}
+
+// --- permutation engine ------------------------------------------------------
 
 function rangeValues(min, max, step) {
   const values = [];
-  // floating-point safe: iterate by index, not by accumulating
   const count = Math.round((max - min) / step) + 1;
   for (let i = 0; i < count; i++) {
     values.push(Math.round((min + i * step) * 1e10) / 1e10);
@@ -105,12 +157,9 @@ function cartesianProduct(arrays) {
 export function generatePermutations(ranges, increment, currentValues) {
   const enabled = Object.entries(ranges).filter(([, r]) => r.enabled);
   if (enabled.length === 0) return [];
-
   const keys = enabled.map(([k]) => k);
   const valueArrays = enabled.map(([, r]) => rangeValues(r.min, r.max, increment));
   const product = cartesianProduct(valueArrays);
-
-  // Exclude the permutation matching the current image's values
   const currentKey = keys.map((k) => String(currentValues[k])).join("|");
   return product.filter((perm) => {
     const key = keys.map((k, i) => String(perm[i])).join("|");
@@ -118,129 +167,124 @@ export function generatePermutations(ranges, increment, currentValues) {
   }).map((perm) => Object.fromEntries(keys.map((k, i) => [k, perm[i]])));
 }
 
-// --- filename template --------------------------------------------------------
+// --- filename template -------------------------------------------------------
 
 function formatValue(v) {
-  // Trim trailing zeros: 0.6500000000 → "0.65", 20.0 → "20"
   return String(parseFloat(Number(v).toFixed(10)));
 }
 
-export function templateReplace(template, values, currentValues) {
-  return template.replace(/\{(\w+)\}/g, (_, key) => {
-    if (key in values) return formatValue(values[key]);
-    if (key in currentValues) return formatValue(currentValues[key]);
-    return `{${key}}`; // unknown placeholder left as-is
+// Substitute both bare keys ({denoise}) and node-prefixed keys
+// ({scheduler:denoise}). Both map back to the same internal param name.
+// `labelMap` is param -> canonical label for this graph (e.g. denoise -> "denoise"
+// on KSampler or "scheduler:denoise" on custom). The template may use either.
+export function templateReplace(template, values, currentValues, labelMap = {}) {
+  // Build a lookup that accepts both bare param names and their labels.
+  const lookup = {};
+  for (const [param, val] of Object.entries(currentValues)) {
+    lookup[param] = val;
+    const lbl = labelMap[param];
+    if (lbl && lbl !== param) lookup[lbl] = val;
+  }
+  for (const [param, val] of Object.entries(values)) {
+    lookup[param] = val;
+    const lbl = labelMap[param];
+    if (lbl && lbl !== param) lookup[lbl] = val;
+  }
+  return template.replace(/\{([\w:]+)\}/g, (_, key) => {
+    if (key in lookup) return formatValue(lookup[key]);
+    return `{${key}}`;
   });
 }
 
-// --- graph mutation ------------------------------------------------------------
+// --- filename injection ------------------------------------------------------
+//
+// Prefix/suffix WRAP the original filename (basename without extension).
+// SaveImage's filename_prefix input receives `<prefix><basename><suffix>`.
+// ComfyUI adds its own numeric counter + ".png" downstream.
 
-function mutateGraph(graph, permutation) {
-  const clone = structuredClone(graph);
-  const nodes = Object.values(clone);
-  const applied = [];
-  for (const [param, value] of Object.entries(permutation)) {
-    const probe = PARAM_PROBES[param];
-    if (!probe) continue;
-    if (probe.set(clone, value)) applied.push(param);
-  }
-  return { graph: clone, applied };
+function stripExtension(name) {
+  const dot = name.lastIndexOf(".");
+  return dot > 0 ? name.slice(0, dot) : name;
 }
 
-// --- filename prefix injection --------------------------------------------------
-
-function setFilenamePrefix(graph, prefix) {
+function setFilenamePrefix(graph, wrapped) {
   const nodes = Object.values(graph);
+  let touched = false;
   for (const n of nodes) {
     const ct = String(n.class_type ?? "").toLowerCase();
     if (ct === "saveimage" && n.inputs) {
-      n.inputs.filename_prefix = prefix;
+      n.inputs.filename_prefix = wrapped;
+      touched = true;
     }
   }
+  return touched;
 }
 
-// --- plugin registration ---------------------------------------------------------
+// --- plugin registration -----------------------------------------------------
 
 export function register(kz) {
+  // Inspect a graph without modifying anything — the client uses this to
+  // learn the per-graph label for each param (e.g. "denoise" vs
+  // "scheduler:denoise") and the current values for orange-marker placement.
+  kz.route("GET", "/probe/<id>", async (_req, { id }) => {
+    const i = id.indexOf(":");
+    if (i < 0) return Response.json({ error: "id must be host:filename" }, { status: 400 });
+    const host = id.slice(0, i), filename = id.slice(i + 1);
+    const hash = kz._hashFor(host, filename);
+    if (!hash) return Response.json({ error: "image not ingested (no hash)" }, { status: 404 });
+    const bytes = await kz._cacheGet(hash);
+    if (!bytes) return Response.json({ error: "image not in cache" }, { status: 404 });
+    const chunks = await parsePngTextChunks(bytes);
+    if (!chunks?.prompt) return Response.json({ error: "no embedded ComfyUI graph in this PNG" }, { status: 422 });
+    let graph;
+    try { graph = JSON.parse(chunks.prompt); }
+    catch { return Response.json({ error: "embedded graph is not valid JSON" }, { status: 422 }); }
+    return Response.json({ params: inspectGraph(graph) });
+  });
+
   kz.route("POST", "/run", async (req) => {
     let body;
-    try {
-      body = await req.json();
-    } catch {
-      return Response.json({ error: "JSON body required" }, { status: 400 });
-    }
+    try { body = await req.json(); }
+    catch { return Response.json({ error: "JSON body required" }, { status: 400 }); }
 
     const { id, host, filename, ranges, increment, prefix, suffix } = body;
     if (!id || !host || !filename || !ranges || !increment) {
       return Response.json({ error: "missing required fields" }, { status: 400 });
     }
 
-    // Resolve host address.
     const addr = kz._hostAddr(host);
-    if (!addr) {
-      return Response.json({ error: "unknown host" }, { status: 404 });
-    }
+    if (!addr) return Response.json({ error: "unknown host" }, { status: 404 });
 
-    // Resolve hash and read cached bytes.
     const hash = kz._hashFor(host, filename);
-    if (!hash) {
-      return Response.json({ error: "image not ingested (no hash)" }, { status: 404 });
-    }
+    if (!hash) return Response.json({ error: "image not ingested (no hash)" }, { status: 404 });
     const bytes = await kz._cacheGet(hash);
-    if (!bytes) {
-      return Response.json({ error: "image not in cache" }, { status: 404 });
-    }
+    if (!bytes) return Response.json({ error: "image not in cache" }, { status: 404 });
 
-    // Parse the embedded graph.
     const chunks = await parsePngTextChunks(bytes);
-    if (!chunks?.prompt) {
-      return Response.json({ error: "no embedded ComfyUI graph in this PNG" }, { status: 422 });
-    }
+    if (!chunks?.prompt) return Response.json({ error: "no embedded ComfyUI graph in this PNG" }, { status: 422 });
     let graph;
-    try {
-      graph = JSON.parse(chunks.prompt);
-    } catch {
-      return Response.json({ error: "embedded graph is not valid JSON" }, { status: 422 });
-    }
+    try { graph = JSON.parse(chunks.prompt); }
+    catch { return Response.json({ error: "embedded graph is not valid JSON" }, { status: 422 }); }
 
-    // Get current parameter values from the graph for template substitution
-    // and permutation exclusion.
+    // Inspect once for current values + labels.
+    const inspection = inspectGraph(graph);
     const currentValues = {};
-    const nodes = Object.values(graph);
-    for (const [param, probe] of Object.entries(PARAM_PROBES)) {
-      // Re-extract current values from the graph itself (not from metadata,
-      // which may be stale or use different node paths).
-      if (param === "denoise") {
-        const ks = nodes.find((n) => n.class_type === "KSampler");
-        currentValues.denoise = ks?.inputs?.denoise
-          ?? scalarInput(firstNode(nodes, "scheduler"), "denoise") ?? null;
-      } else if (param === "cfg") {
-        const ks = nodes.find((n) => n.class_type === "KSampler");
-        currentValues.cfg = ks?.inputs?.cfg
-          ?? scalarInput(firstNode(nodes, "cfgguider"), "cfg") ?? null;
-      } else if (param === "steps") {
-        const ks = nodes.find((n) => n.class_type === "KSampler");
-        currentValues.steps = ks?.inputs?.steps
-          ?? scalarInput(firstNode(nodes, "scheduler"), "steps") ?? null;
-      } else if (param === "ipa_weight") {
-        const weights = [];
-        for (const n of nodes) {
-          if (String(n.class_type ?? "").toLowerCase().includes("ipadapter")
-              && typeof n.inputs?.weight === "number") {
-            weights.push(n.inputs.weight);
-          }
-        }
-        currentValues.ipa_weight = weights.length ? weights[0] : null;
-      }
+    const labelMap = {};
+    for (const [param, info] of Object.entries(inspection)) {
+      if (!info) continue;
+      currentValues[param] = info.current;
+      labelMap[param] = info.label;
     }
 
-    // Generate permutations.
     const permutations = generatePermutations(ranges, increment, currentValues);
     if (permutations.length === 0) {
       return Response.json({ error: "no permutations (check ranges and increment)" }, { status: 400 });
     }
 
-    // Submit each permutation.
+    const basename = stripExtension(filename);
+    const pfx = prefix ?? "";
+    const sfx = suffix ?? "";
+
     const errors = [];
     let submitted = 0;
     for (const perm of permutations) {
@@ -250,9 +294,15 @@ export function register(kz) {
         continue;
       }
 
-      // Set filename prefix.
-      const name = (prefix ?? "") + templateReplace(suffix ?? "", perm, currentValues);
-      setFilenamePrefix(mutated, name);
+      // Wrap the original basename with the templated prefix/suffix.
+      const wrapped =
+        templateReplace(pfx, perm, currentValues, labelMap) +
+        basename +
+        templateReplace(sfx, perm, currentValues, labelMap);
+      if (!setFilenamePrefix(mutated, wrapped)) {
+        errors.push({ permutation: perm, error: "no SaveImage node in graph" });
+        continue;
+      }
 
       try {
         const resp = await fetch(`http://${addr}/api/prompt`, {

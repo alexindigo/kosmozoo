@@ -21,10 +21,11 @@ import { iconSvg } from "./icons.mjs";
 // --- parameter definitions ---------------------------------------------------
 
 const PARAMS = [
-  { key: "denoise",    label: "denoise",    decimals: 2, clamp: [0, 1],   spread: 0.15 },
-  { key: "ipa_weight", label: "ipa weight", decimals: 2, clamp: [0, 2],   spread: 0.3  },
-  { key: "steps",      label: "steps",      decimals: 0, clamp: [1, 150], spread: 10   },
-  { key: "cfg",        label: "cfg",        decimals: 1, clamp: [0, 30],  spread: 2    },
+  { key: "denoise",    label: "denoise",    decimals: 2, clamp: [0, 1],           spread: 0.15 },
+  { key: "ipa_weight", label: "ipa weight", decimals: 2, clamp: [0, 2],           spread: 0.3  },
+  { key: "steps",      label: "steps",      decimals: 0, clamp: [1, 150],         spread: 10   },
+  { key: "cfg",        label: "cfg",        decimals: 1, clamp: [0, 30],          spread: 2    },
+  { key: "seed",       label: "seed",       decimals: 0, clamp: [0, 4294967295],  spread: 100  },
 ];
 
 // --- open panels registry -----------------------------------------------------
@@ -94,6 +95,11 @@ function openPanel(cardEl, image) {
 
   const ranges = {};
 
+  // Tracks the last-focused prefix/suffix input so slider labels can insert
+  // {key} placeholders at the cursor. Held in a closure so the label
+  // mousedown handlers see the currently-focused input.
+  const templateTarget = { input: null, start: 0, end: 0 };
+
   // --- left column: title + sliders ---
   const left = document.createElement("div");
   left.className = "vz-left";
@@ -105,17 +111,40 @@ function openPanel(cardEl, image) {
 
   const sliders = document.createElement("div");
   sliders.className = "vz-sliders";
+  const rows = {}; // param key -> { el, setLabel, setCurrent }
   for (const p of PARAMS) {
     const current = currentValue(p.key, meta);
     const def = defaultRange(p, current);
     const row = buildSliderRow(p, current, def, (enabled, min, max) => {
       ranges[p.key] = { min, max, enabled };
       updateCount();
-    });
+    }, templateTarget);
     sliders.appendChild(row.el);
     ranges[p.key] = { min: def.min, max: def.max, enabled: false };
+    rows[p.key] = row;
   }
   left.appendChild(sliders);
+
+  // Probe the graph asynchronously for the canonical label per param
+  // (e.g. "scheduler:denoise" vs "denoise") and current values authoritatively
+  // read from the graph itself. Panel is visible immediately with meta-based
+  // defaults; labels/currents refine when probe returns.
+  fetch(`/api/plugins/variations/probe/${encodeURIComponent(image.id)}`)
+    .then((r) => r.ok ? r.json() : null)
+    .then((data) => {
+      if (!data?.params) return;
+      for (const [param, info] of Object.entries(data.params)) {
+        const row = rows[param];
+        if (!row) continue;
+        if (!info) {
+          row.setAbsent();
+          continue;
+        }
+        if (info.label) row.setLabel(info.label);
+        if (info.current != null) row.setCurrent(info.current);
+      }
+    })
+    .catch(() => { /* probe unavailable — labels stay at PARAMS defaults */ });
 
   // --- vertical divider ---
   const divider = document.createElement("div");
@@ -174,6 +203,7 @@ function openPanel(cardEl, image) {
   const prefixInput = document.createElement("input");
   prefixInput.type = "text";
   prefixInput.className = "vz-tinput vz-prefix";
+  prefixInput.title = "click a slider name (denoise/ipa weight/steps/cfg) to insert its placeholder";
 
   // suffix
   const suffixLabel = document.createElement("div");
@@ -183,6 +213,21 @@ function openPanel(cardEl, image) {
   suffixInput.type = "text";
   suffixInput.className = "vz-tinput vz-suffix";
   suffixInput.value = "_{denoise}_";
+  suffixInput.title = "click a slider name (denoise/ipa weight/steps/cfg) to insert its placeholder";
+
+  // Track focused template input so slider-label clicks insert into it.
+  for (const inp of [prefixInput, suffixInput]) {
+    const remember = () => {
+      templateTarget.input = inp;
+      templateTarget.start = inp.selectionStart ?? inp.value.length;
+      templateTarget.end = inp.selectionEnd ?? inp.value.length;
+    };
+    inp.addEventListener("focus", remember);
+    inp.addEventListener("select", remember);
+    inp.addEventListener("keyup", remember);
+    inp.addEventListener("mouseup", remember);
+    inp.addEventListener("input", remember);
+  }
 
   // Run button
   const runBtn = document.createElement("button");
@@ -289,7 +334,7 @@ function openPanel(cardEl, image) {
 // Checkbox on the far left, label above the slider, dual-thumb slider with
 // numeric labels above each thumb, orange marker below with current value.
 
-function buildSliderRow(param, current, defaults, onChange) {
+function buildSliderRow(param, current, defaults, onChange, templateTarget) {
   const el = document.createElement("div");
   el.className = "vz-slider-row vz-off";
 
@@ -300,9 +345,30 @@ function buildSliderRow(param, current, defaults, onChange) {
   const inner = document.createElement("div");
   inner.className = "vz-slider-inner";
 
+  // The label's placeholder key is mutable — updated by setLabel() after
+  // the async probe returns (e.g. "denoise" -> "scheduler:denoise").
+  let placeholderKey = param.key;
+
   const label = document.createElement("div");
   label.className = "vz-label";
   label.textContent = param.label;
+  label.title = "click to insert {" + placeholderKey + "} into prefix/suffix";
+  // mousedown fires before the input's blur, so the input still holds
+  // the cursor position we captured in templateTarget.
+  label.addEventListener("mousedown", (e) => {
+    if (!templateTarget?.input) return;
+    e.preventDefault(); // don't steal focus from the input
+    const inp = templateTarget.input;
+    const s = templateTarget.start;
+    const en = templateTarget.end;
+    const placeholder = "{" + placeholderKey + "}";
+    inp.value = inp.value.slice(0, s) + placeholder + inp.value.slice(en);
+    const caret = s + placeholder.length;
+    inp.setSelectionRange(caret, caret);
+    templateTarget.start = caret;
+    templateTarget.end = caret;
+    inp.focus();
+  });
 
   const rangeWrap = document.createElement("div");
   rangeWrap.className = "vz-rangewrap";
@@ -400,5 +466,39 @@ function buildSliderRow(param, current, defaults, onChange) {
 
   updateTrack(true);
 
-  return { el, cb, minRange, maxRange };
+  // Refine the placeholder key from the graph probe (e.g. "scheduler:denoise").
+  // The visible label stays the human-friendly PARAMS.label; only the
+  // insertion string and tooltip change.
+  function setLabel(newKey) {
+    placeholderKey = newKey;
+    label.title = "click to insert {" + placeholderKey + "} into prefix/suffix";
+  }
+
+  // Refresh the orange marker with the authoritative current value from the
+  // graph (may differ from meta when the extractor version is behind).
+  function setCurrent(v) {
+    if (v == null) {
+      marker.style.display = "none";
+      curLabel.style.display = "none";
+      return;
+    }
+    marker.style.display = "";
+    curLabel.style.display = "";
+    curLabel.textContent = String(v);
+    const pct = ((v - param.clamp[0]) / (param.clamp[1] - param.clamp[0])) * 100;
+    marker.style.left = `${pct}%`;
+    curLabel.style.left = `${pct}%`;
+  }
+
+  // The graph doesn't carry this parameter — grey the whole row out and keep
+  // the checkbox disabled.
+  function setAbsent() {
+    cb.disabled = true;
+    el.classList.add("vz-absent");
+    label.title = "not present in this image's graph";
+    marker.style.display = "none";
+    curLabel.style.display = "none";
+  }
+
+  return { el, cb, minRange, maxRange, setLabel, setCurrent, setAbsent };
 }

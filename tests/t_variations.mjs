@@ -98,6 +98,27 @@ Deno.test("templateReplace handles integer values", () => {
   assertEquals(result, "30");
 });
 
+Deno.test("templateReplace accepts node-prefixed placeholders via labelMap", () => {
+  const result = templateReplace(
+    "_{scheduler:denoise}_{randomnoise:seed}_",
+    { denoise: 0.75, seed: 12345 },
+    { denoise: 0.65, seed: 12345 },
+    { denoise: "scheduler:denoise", seed: "randomnoise:seed" },
+  );
+  assertEquals(result, "_0.75_12345_");
+});
+
+Deno.test("templateReplace accepts bare keys too when labelMap prefixes exist", () => {
+  const result = templateReplace(
+    "_{denoise}_",
+    { denoise: 0.75 },
+    { denoise: 0.65 },
+    { denoise: "scheduler:denoise" },
+  );
+  // Bare "denoise" should still work — bare key wins for that param
+  assertEquals(result, "_0.75_");
+});
+
 // --- graph mutation ----------------------------------------------------------
 
 Deno.test("mutateGraph: KSampler denoise", async () => {

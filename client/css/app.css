@@ -336,6 +336,8 @@ main { display: flex; flex: 1; min-height: 0; }
 .vz-slider-row.vz-off .vz-thumb,
 .vz-slider-row.vz-off .vz-track,
 .vz-slider-row.vz-off .vz-marker { visibility: hidden; }
+.vz-slider-row.vz-absent { opacity: 0.2; }
+.vz-slider-row.vz-absent .vz-cb { cursor: not-allowed; }
 .vz-cb { -webkit-appearance: none; appearance: none;
   width: 16px; height: 16px; border-radius: 3px;
   background: transparent; border: 2px solid var(--orange);
@@ -344,7 +346,8 @@ main { display: flex; flex: 1; min-height: 0; }
 
 .vz-slider-inner { flex: 1; display: flex; flex-direction: column; gap: 2px; }
 .vz-label { color: var(--fg); font-size: 13px; font-weight: 400;
-  margin-bottom: 6px; }
+  margin-bottom: 6px; cursor: pointer; display: inline-block; }
+.vz-label:hover { color: var(--accent); }
 
 /* dual-thumb slider layout */
 .vz-rangewrap { position: relative; height: 44px; padding-top: 16px; }
