@@ -1,0 +1,13 @@
+{
+  "imports": {
+    "@db/sqlite": "jsr:@db/sqlite@0.13.0"
+  },
+  "tasks": {
+    "setup": "deno eval 'import { Database } from \"@db/sqlite\"; new Database(\":memory:\").close();'",
+    "dev": "deno run --allow-all src/main.mjs",
+    "test": "deno test --allow-all"
+  },
+  "env": {
+    "DENO_SQLITE_PATH": "/usr/lib/libsqlite3.so"
+  }
+}
