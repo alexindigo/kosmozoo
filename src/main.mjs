@@ -14,6 +14,7 @@ import { makeRouter } from "./routes.mjs";
 import { serveStatic } from "./static.mjs";
 import { Scraper } from "./scraper.mjs";
 import { PluginHost } from "./plugins.mjs";
+import { Ingest } from "./ingest.mjs";
 
 const PORT = parseInt(Deno.env.get("KOZMOZOO_PORT") ?? "2084", 10);
 
@@ -39,6 +40,10 @@ router.ctx = { hosts, store, settings, plugins, downloadsDir };
 const scraper = new Scraper({ hosts, store, settings });
 scraper.start();
 router.ctx.scraper = scraper;
+
+// Image ingestion — every served byte flows through here.
+const ingest = new Ingest(store, hosts);
+router.ctx.ingest = ingest;
 
 Deno.serve({ port: PORT }, async (req) => {
   const url = new URL(req.url);

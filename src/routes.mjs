@@ -3,7 +3,8 @@
 // Resource-shaped, documented, public. Plugin routes live under
 // /api/plugins/<name>/... and are registered by the plugin host (Phase 10).
 
-import { splitHostKey, probeHost, hostList, hostReadBytes, validateHost, addHost, removeHost } from "./hosts.mjs";
+import { splitHostKey, probeHost, hostList, hostReadBytes, validateHost, addHost, removeHost, EXT_MIME } from "./hosts.mjs";
+import { cacheGet } from "./cache.mjs";
 
 export function makeRouter(ctx) {
   // ctx: { hosts, store, settings, plugins } — `router.ctx` is settable so
@@ -100,9 +101,44 @@ export function makeRouter(ctx) {
   add("GET", "/api/images/<id>/bytes", async (_req, { id }) => {
     const [host, filename] = splitHostKey(id);
     if (!ctx.hosts[host]) return new Response("unknown host", { status: 404 });
+
+    const ext = filename.split(".").pop().toLowerCase();
+    const mime = EXT_MIME[ext];
+    const makeResponse = (bytes) => {
+      const h = new Headers();
+      if (mime) h.set("Content-Type", mime);
+      h.set("Content-Length", String(bytes.length));
+      return new Response(bytes, { headers: h });
+    };
+
+    // Cache-first: resolve address → hash, serve from cache.
+    const hash = ctx.store.hashFor(host, filename);
+    if (hash) {
+      const cached = await cacheGet(hash);
+      if (cached) return makeResponse(cached);
+    }
+
+    // Not in cache: read through ingestion (read → hash → cache → index).
+    if (ctx.ingest) {
+      const ingested = await ctx.ingest.ensure(host, filename);
+      if (ingested) {
+        const cached = await cacheGet(ingested);
+        if (cached) return makeResponse(cached);
+      }
+    }
+
+    // Ingestion failed (host down, bad filename): proxy as last resort.
     const r = await hostReadBytes(ctx.hosts[host], filename);
     if (r.status === 400) return new Response("bad filename", { status: 400 });
     if (r.status !== 200) return new Response("upstream error", { status: r.status });
+
+    // Ingest in the background for next time.
+    if (ctx.ingest && r.body) {
+      const bytes = new Uint8Array(await new Response(r.body).arrayBuffer());
+      const h = makeResponse(bytes);
+      ctx.ingest.ensureBytes(host, filename, bytes).catch(() => {});
+      return h;
+    }
     return new Response(r.body, { headers: r.headers });
   });
 
