@@ -74,11 +74,32 @@ async function main() {
     });
 
     // --- panel has sliders ---
-    await attempt("panel shows 4 parameter sliders", async () => {
-      const rows = await cdp.evaluate(`
-        document.querySelectorAll('.card[data-idx="0"] .vz-slider-row').length
-      `);
-      check("panel shows 4 parameter sliders", rows === 4, "rows=" + rows);
+    await attempt("panel shows 5 parameter sliders (incl. seed)", async () => {
+      const info = await cdp.evaluate(`(() => {
+        const rows = document.querySelectorAll('.card[data-idx="0"] .vz-slider-row');
+        const labels = [...rows].map((r) => r.querySelector('.vz-label')?.textContent);
+        return { count: rows.length, labels };
+      })()`);
+      check("panel shows 5 parameter sliders",
+        info.count === 5 && info.labels.includes("seed"),
+        JSON.stringify(info));
+    });
+
+    // --- probe refines current values from the graph ---
+    await attempt("probe fills in seed current value", async () => {
+      await sleep(300); // wait for probe
+      const cur = await cdp.evaluate(`(() => {
+        const rows = document.querySelectorAll('.card[data-idx="0"] .vz-slider-row');
+        for (const r of rows) {
+          if (r.querySelector('.vz-label')?.textContent === 'seed') {
+            return r.querySelector('.vz-current')?.textContent;
+          }
+        }
+        return null;
+      })()`);
+      check("seed row shows a current value from the graph",
+        cur != null && cur !== "",
+        "current=" + cur);
     });
 
     // --- variations count updates on enable ---
@@ -130,6 +151,32 @@ async function main() {
       })()`);
       check("dual-thumb updates labels", labels.min === "0.3" && labels.max === "0.9",
         JSON.stringify(labels));
+    });
+
+    // --- clicking a slider label inserts {key} into focused prefix/suffix ---
+    // The placeholder key is the graph-specific label (e.g. "scheduler:denoise"
+    // for SamplerCustomAdvanced graphs; "denoise" for KSampler graphs).
+    await attempt("slider label click inserts {key} at cursor", async () => {
+      // Wait for the async probe to refine the placeholder key
+      await sleep(300);
+      const result = await cdp.evaluate(`(() => {
+        const row = document.querySelector('.card[data-idx="0"] .vz-slider-row');
+        const suffix = document.querySelector('.card[data-idx="0"] .vz-suffix');
+        suffix.value = "pre__post";
+        suffix.focus();
+        suffix.setSelectionRange(4, 4);
+        suffix.dispatchEvent(new Event('focus'));
+        suffix.dispatchEvent(new Event('mouseup'));
+        const label = row.querySelector('.vz-label');
+        label.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, cancelable: true }));
+        return { value: suffix.value, caret: suffix.selectionStart };
+      })()`);
+      // Accept either bare "denoise" (KSampler) or "scheduler:denoise" (SamplerCustomAdvanced)
+      const okBare = result.value === "pre_{denoise}_post";
+      const okPrefixed = result.value === "pre_{scheduler:denoise}_post";
+      check("suffix contains graph-appropriate {denoise} at cursor",
+        okBare || okPrefixed,
+        JSON.stringify(result));
     });
 
     // --- panel blocks click-through to the image below ---
