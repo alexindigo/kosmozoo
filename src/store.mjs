@@ -1,77 +1,149 @@
-// src/store.mjs — image metadata + judgment store.
+// src/store.mjs — image metadata (sqlite) + judgment store (JSON).
 //
-// Engine state is a versioned JSON document (no third-party storage
-// dependency; the feedback.json discipline generalised). Image metadata is
-// re-derivable from hosts; judgments are irreplaceable and live in the
-// user-configured feedback.json path (outside the repo) — the store keeps
-// them in separate documents so the portable curation file stays portable.
+// Metadata moves from a versioned JSON document to sqlite via
+// jsr:@db/sqlite@0.13.0 — same API surface, backed by the schema below.
+// Judgments stay in the portable feedback.json (re-keyed to hash in the
+// next commit).
 
 import { join } from "node:path";
+import { Database } from "@db/sqlite";
 import { loadVersioned, atomicWrite } from "./state.mjs";
-import { hostKey } from "./hosts.mjs";
+import { hostKey, splitHostKey } from "./hosts.mjs";
 
-const CURRENT = 1;
+const SCHEMA_VERSION = 1;
+
+const SCHEMA = `
+CREATE TABLE IF NOT EXISTS metadata (
+  host         TEXT NOT NULL,
+  filename     TEXT NOT NULL,
+  meta         TEXT,
+  source       TEXT,
+  has_workflow INTEGER NOT NULL DEFAULT 0,
+  nopng        INTEGER NOT NULL DEFAULT 0,
+  ext          INTEGER NOT NULL DEFAULT 0,
+  updated_at   REAL NOT NULL,
+  PRIMARY KEY (host, filename)
+);
+PRAGMA user_version = ${SCHEMA_VERSION};
+`;
 
 export class Store {
-  #metaPath;
+  #db;
   #feedbackPath;
-  #meta;      // { version, data: { "host:filename": { meta, source, hasWorkflow, nopng, ext, updatedAt } } }
-  #feedback;  // { version, data: { "host:filename": { notes:{pos,neg}, vote, favorite, plugins:{...} } } }
-  #metaVersion = 0;  // bumped on every meta write; the client's poll channel
+  #feedback;
+  #metaVersion = 0;
 
   static async open(stateDir, feedbackPath) {
     const s = new Store();
-    s.#metaPath = join(stateDir, "metadata.json");
+    const dbPath = join(stateDir, "metadata.db");
+    s.#db = new Database(dbPath);
+    s.#db.exec("PRAGMA journal_mode = WAL");
+    s.#db.exec(SCHEMA);
+
+    // One-time migration from the old JSON metadata store if it exists and
+    // sqlite is empty.
+    const count = s.#db.prepare("SELECT COUNT(*) FROM metadata").value()[0];
+    if (count === 0) {
+      await s.#migrateFromJson(join(stateDir, "metadata.json"));
+    }
+
     s.#feedbackPath = feedbackPath;
-    s.#meta = await loadVersioned(s.#metaPath, { current: CURRENT, empty: () => ({}) });
-    s.#feedback = await loadVersioned(s.#feedbackPath, { current: CURRENT, empty: () => ({}) });
+    s.#feedback = await loadVersioned(feedbackPath, {
+      current: 1,
+      empty: () => ({}),
+      migrations: {},
+    });
     return s;
   }
 
-  // --- metadata (re-derivable) -------------------------------------------
-  metaGet(host, filename) {
-    return this.#meta.data[hostKey(host, filename)]?.meta ?? null;
-  }
-  async metaPut(host, filename, meta, { source = "history", hasWorkflow = false, nopng = false, ext = 1 } = {}) {
-    this.#meta.data[hostKey(host, filename)] = { meta, source, hasWorkflow, nopng, ext, updatedAt: Date.now() };
-    this.#metaVersion++;
-    await this.#saveMeta();
-  }
-  metaCount() {
-    return Object.keys(this.#meta.data).length;
+  // One-shot: read old metadata.json versioned document, insert into sqlite.
+  async #migrateFromJson(jsonPath) {
+    const { readFile } = await import("node:fs/promises");
+    let doc;
+    try {
+      doc = JSON.parse(await readFile(jsonPath, "utf-8"));
+    } catch {
+      return; // no old store
+    }
+    const insert = this.#db.prepare(
+      "INSERT OR REPLACE INTO metadata (host, filename, meta, source, has_workflow, nopng, ext, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)"
+    );
+    const txn = this.#db.transaction((rows) => {
+      for (const [key, v] of rows) {
+        const [host, filename] = splitHostKey(key);
+        txn.run(
+          host, filename,
+          v.meta ? JSON.stringify(v.meta) : null,
+          v.source ?? null,
+          v.hasWorkflow ? 1 : 0,
+          v.nopng ? 1 : 0,
+          v.ext ?? 0,
+          v.updatedAt ?? Date.now()
+        );
+      }
+    });
+    txn(Object.entries(doc.data ?? {}));
+    this.#metaVersion = count;
   }
 
-  // The client's poll channel: bumped on every meta write.
+  // --- metadata (sqlite-backed, re-derivable) ----------------------------
+
+  metaGet(host, filename) {
+    const row = this.#db.prepare(
+      "SELECT meta FROM metadata WHERE host = ? AND filename = ?"
+    ).value(host, filename);
+    if (!row || row[0] === null) return null;
+    try { return JSON.parse(row[0]); } catch { return null; }
+  }
+
+  async metaPut(host, filename, meta, { source = "history", hasWorkflow = false, nopng = false, ext = 1 } = {}) {
+    this.#db.prepare(
+      `INSERT OR REPLACE INTO metadata (host, filename, meta, source, has_workflow, nopng, ext, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
+    ).run(
+      host, filename,
+      meta ? JSON.stringify(meta) : null,
+      source,
+      hasWorkflow ? 1 : 0,
+      nopng ? 1 : 0,
+      ext,
+      Date.now()
+    );
+    this.#metaVersion++;
+  }
+
+  metaCount() {
+    return this.#db.prepare("SELECT COUNT(*) FROM metadata").value()[0];
+  }
+
   get metaVersion() { return this.#metaVersion; }
 
-  // filename -> meta for one host (nulls skipped — nopng markers stay server-side)
   metaForHost(host) {
     const out = {};
-    const prefix = host + ":";
-    for (const [k, v] of Object.entries(this.#meta.data)) {
-      if (k.startsWith(prefix) && v.meta) out[k.slice(prefix.length)] = v.meta;
+    const rows = this.#db.prepare(
+      "SELECT filename, meta FROM metadata WHERE host = ? AND meta IS NOT NULL"
+    ).all(host);
+    for (const row of rows) {
+      try { out[row.filename] = JSON.parse(row.meta); } catch { /* skip corrupt */ }
     }
     return out;
   }
 
-  // Filenames needing NO (re)extraction: current extractor version, or a
-  // nopng negative marker (outgoing meta_fresh). Without this the scraper's
-  // walk re-queues already-scraped files on every listing.
   metaFresh(host, minExt) {
     const out = new Set();
-    for (const [k, v] of Object.entries(this.#meta.data)) {
-      if (!k.startsWith(host + ":")) continue;
-      if (v.nopng || v.ext >= minExt) out.add(k.slice(host.length + 1));
-    }
+    const rows = this.#db.prepare(
+      "SELECT filename FROM metadata WHERE host = ? AND (nopng = 1 OR ext >= ?)"
+    ).all(host, minExt);
+    for (const row of rows) out.add(row.filename);
     return out;
   }
 
-  // --- judgments (irreplaceable) -----------------------------------------
+  // --- judgments (JSON-backed, irreplaceable — re-keyed to hash later) ---
+
   judgmentGet(host, filename) {
     return structuredClone(this.#feedback.data[hostKey(host, filename)] ?? null);
   }
-  // Field set to its default is stored as absent; an entry prunes only when
-  // fully empty (harvest #13).
+
   async judgmentSet(host, filename, field, value) {
     const key = hostKey(host, filename);
     const entry = this.#feedback.data[key] ?? {};
@@ -101,23 +173,25 @@ export class Store {
     return this.#feedbackPath;
   }
 
-  // Move the judgment document to a new path, live: open (or create) the
-  // target, swap it in. The old file is left untouched.
   async setFeedbackPath(path) {
-    const doc = await loadVersioned(path, { current: CURRENT, empty: () => ({}) });
+    const doc = await loadVersioned(path, {
+      current: 1,
+      empty: () => ({}),
+      migrations: {},
+    });
     this.#feedbackPath = path;
     this.#feedback = doc;
   }
 
-  // Batch exporters iterate the whole judgment document (plugin host use).
   feedbackAll() {
     return structuredClone(this.#feedback.data);
   }
 
-  async #saveMeta() {
-    await atomicWrite(this.#metaPath, new TextEncoder().encode(JSON.stringify(this.#meta)));
-  }
   async #saveFeedback() {
     await atomicWrite(this.#feedbackPath, new TextEncoder().encode(JSON.stringify(this.#feedback, null, 2)));
+  }
+
+  close() {
+    this.#db.close();
   }
 }
