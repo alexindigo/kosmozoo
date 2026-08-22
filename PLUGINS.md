@@ -39,6 +39,11 @@ What `register(kz)` can touch:
 | `kz.store.getField/setField(host, file, field, v)` | persistence | plugin fields on the judgment record, namespaced |
 | `kz.judgments.get/set(...)` | data | the core judgment record (notes/vote/favorite) |
 
+Judgment entries are keyed by **content hash** (SHA-256), not by
+`host:filename`.  The same image on two hosts shares one judgment record.
+Each entry carries a `ref: "<host>:<filename>"` so the portable file stays
+human-readable.
+
 A plugin declares its own config (a service URL), its own optional
 dependency, and its own failure states (*"service unreachable"*, *"model not
 downloaded"*, *"loading"*) and surfaces them as **reasons** on the relevant
