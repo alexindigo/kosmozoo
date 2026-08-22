@@ -102,7 +102,7 @@ async function main() {
         document.querySelector('.card[data-idx="0"] .vz-count')?.textContent
       `), 10);
       await cdp.evaluate(`(() => {
-        const inc = document.querySelector('.card[data-idx="0"] .vz-step');
+        const inc = document.querySelector('.card[data-idx="0"] .vz-inc');
         inc.value = '0.1';
         inc.dispatchEvent(new Event('input'));
       })()`);
