@@ -87,7 +87,9 @@ export class Store {
       migrations: {},
     });
     // Migrate legacy host:filename judgment keys to hash keys.
-    s.#migrateJudgments();
+    if (s.#migrateJudgments()) {
+      await atomicWrite(s.#feedbackPath, new TextEncoder().encode(JSON.stringify(s.#feedback, null, 2)));
+    }
     return s;
   }
 
@@ -335,6 +337,7 @@ export class Store {
     if (changed) {
       this.#feedback.data = newData;
     }
+    return changed;
   }
 
   feedbackCount() {
