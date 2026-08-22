@@ -9,13 +9,10 @@
 // current value is read from image.meta and shown as the orange marker;
 // min/max bounds default to a sensible spread around that value.
 
-import { api } from "./api.mjs";
 import { iconSvg } from "./icons.mjs";
 
 // --- parameter definitions ---------------------------------------------------
 
-// spread: how far from the current value the default min/max bounds sit.
-// clamp: hard limits for the parameter.
 const PARAMS = [
   { key: "denoise",    label: "denoise",    decimals: 2, clamp: [0, 1],   spread: 0.15 },
   { key: "ipa_weight", label: "ipa weight", decimals: 2, clamp: [0, 2],   spread: 0.3  },
@@ -50,7 +47,6 @@ function currentValue(key, meta) {
   const raw = meta[key];
   if (raw == null) return null;
   if (key === "ipa_weight") {
-    // multi-node: "0.8+0.6" — take the first
     const first = String(raw).split("+")[0];
     const v = parseFloat(first);
     return isNaN(v) ? null : v;
@@ -59,21 +55,14 @@ function currentValue(key, meta) {
   return isNaN(v) ? null : v;
 }
 
-// Default min/max centered on the current value, clamped to the parameter's
-// hard limits.
+// Default min/max centered on the current value, clamped.
 function defaultRange(param, current) {
   if (current == null) return { min: param.clamp[0], max: param.clamp[1] };
-  const half = param.spread;
-  let lo = current - half;
-  let hi = current + half;
-  // Round to the parameter's decimal precision
   const f = Math.pow(10, param.decimals);
-  lo = Math.round(lo * f) / f;
-  hi = Math.round(hi * f) / f;
-  // Clamp
+  let lo = Math.round((current - param.spread) * f) / f;
+  let hi = Math.round((current + param.spread) * f) / f;
   lo = Math.max(lo, param.clamp[0]);
   hi = Math.min(hi, param.clamp[1]);
-  // Ensure min < max (at least one step apart)
   if (lo >= hi) {
     lo = Math.max(param.clamp[0], current - param.spread * 2);
     hi = Math.min(param.clamp[1], current + param.spread * 2);
@@ -96,16 +85,17 @@ function openPanel(cardEl, image) {
   panel.addEventListener("pointerdown", (e) => e.stopPropagation());
   panel.addEventListener("pointerup", (e) => e.stopPropagation());
 
-  // --- left: sliders ---
+  const ranges = {};
+  const body = document.createElement("div");
+  body.className = "vz-body";
+
+  // --- sliders ---
   const sliders = document.createElement("div");
   sliders.className = "vz-sliders";
-
-  const ranges = {};
 
   for (const p of PARAMS) {
     const current = currentValue(p.key, meta);
     const def = defaultRange(p, current);
-
     const row = buildSliderRow(p, current, def, (enabled, min, max) => {
       ranges[p.key] = { min, max, enabled };
       updateCount();
@@ -114,62 +104,64 @@ function openPanel(cardEl, image) {
     ranges[p.key] = { min: def.min, max: def.max, enabled: false };
   }
 
-  // --- right: config + run ---
-  const right = document.createElement("div");
-  right.className = "vz-right";
+  // --- sidebar: config + run ---
+  const side = document.createElement("div");
+  side.className = "vz-side";
 
   const title = document.createElement("div");
   title.className = "vz-title";
-  title.textContent = "Generate image variations";
+  title.textContent = "Variations";
 
-  // increments
   const incRow = document.createElement("div");
-  incRow.className = "vz-incrow";
+  incRow.className = "vz-field";
   const incLabel = document.createElement("span");
-  incLabel.textContent = "increments";
+  incLabel.className = "vz-flabel";
+  incLabel.textContent = "step";
   const incInput = document.createElement("input");
   incInput.type = "number";
-  incInput.className = "vz-inc";
+  incInput.className = "vz-finput vz-step";
   incInput.value = "0.05";
   incInput.step = "0.01";
   incInput.min = "0.001";
   incInput.addEventListener("input", updateCount);
   incRow.append(incLabel, incInput);
 
-  // variations count
   const countEl = document.createElement("div");
   countEl.className = "vz-count";
   countEl.textContent = "0";
 
-  // prefix
-  const prefixLabel = document.createElement("label");
+  const prefixRow = document.createElement("div");
+  prefixRow.className = "vz-field";
+  const prefixLabel = document.createElement("span");
+  prefixLabel.className = "vz-flabel";
   prefixLabel.textContent = "prefix";
   const prefixInput = document.createElement("input");
   prefixInput.type = "text";
-  prefixInput.className = "vz-prefix";
-  prefixLabel.appendChild(prefixInput);
+  prefixInput.className = "vz-finput vz-wide";
+  prefixRow.append(prefixLabel, prefixInput);
 
-  // suffix
-  const suffixLabel = document.createElement("label");
+  const suffixRow = document.createElement("div");
+  suffixRow.className = "vz-field";
+  const suffixLabel = document.createElement("span");
+  suffixLabel.className = "vz-flabel";
   suffixLabel.textContent = "suffix";
   const suffixInput = document.createElement("input");
   suffixInput.type = "text";
-  suffixInput.className = "vz-suffix";
+  suffixInput.className = "vz-finput vz-wide";
   suffixInput.value = "_{denoise}_";
-  suffixLabel.appendChild(suffixInput);
+  suffixRow.append(suffixLabel, suffixInput);
 
-  // run button
   const runBtn = document.createElement("button");
   runBtn.className = "vz-run";
   runBtn.textContent = "Run";
   runBtn.addEventListener("click", () => runVariations(image));
 
-  // error area
   const errEl = document.createElement("div");
   errEl.className = "vz-error";
 
-  right.append(title, incRow, countEl, prefixLabel, suffixLabel, runBtn, errEl);
-  panel.append(sliders, right);
+  side.append(title, countEl, incRow, prefixRow, suffixRow, runBtn, errEl);
+  body.append(sliders, side);
+  panel.appendChild(body);
   imgwrap.appendChild(panel);
 
   openPanels.set(image.id, { panel, card: cardEl });
@@ -187,7 +179,7 @@ function openPanel(cardEl, image) {
       const count = Math.round((r.max - r.min) / increment) + 1;
       total *= Math.max(count, 1);
     }
-    if (anyEnabled && total > 0) total -= 1; // exclude current
+    if (anyEnabled && total > 0) total -= 1;
     countEl.textContent = anyEnabled ? String(total) : "0";
   }
 
@@ -212,14 +204,20 @@ function openPanel(cardEl, image) {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(body),
       });
-      const data = await res.json();
       if (!res.ok) {
-        errEl.textContent = data.error ?? `error ${res.status}`;
-      } else {
-        errEl.textContent = `submitted ${data.submitted}/${data.total}`;
-        errEl.classList.add("vz-ok");
-        setTimeout(() => closePanel(), 3000);
+        const text = await res.text();
+        try {
+          const data = JSON.parse(text);
+          errEl.textContent = data.error ?? `error ${res.status}`;
+        } catch {
+          errEl.textContent = text.length > 60 ? text.slice(0, 60) + "…" : text;
+        }
+        return;
       }
+      const data = await res.json();
+      errEl.textContent = `submitted ${data.submitted}/${data.total}`;
+      errEl.classList.add("vz-ok");
+      setTimeout(() => closePanel(), 3000);
     } catch (e) {
       errEl.textContent = `fetch failed: ${e.message}`;
     } finally {
@@ -246,9 +244,6 @@ function openPanel(cardEl, image) {
 
 // --- slider row builder --------------------------------------------------------
 
-// Each row: checkbox + label + dual-thumb range slider + orange marker.
-// Two overlapping <input type="range"> elements — one for the lower bound,
-// one for the upper. The orange tick marks the image's current value.
 function buildSliderRow(param, current, defaults, onChange) {
   const el = document.createElement("div");
   el.className = "vz-slider-row vz-off";
@@ -261,7 +256,6 @@ function buildSliderRow(param, current, defaults, onChange) {
   label.className = "vz-label";
   label.textContent = param.label;
 
-  // current value display
   const curEl = document.createElement("span");
   curEl.className = "vz-current";
   curEl.textContent = current != null ? String(current) : "—";
@@ -271,20 +265,15 @@ function buildSliderRow(param, current, defaults, onChange) {
   rangeWrap.className = "vz-rangewrap";
 
   const step = Math.pow(10, -param.decimals);
-  const lo = defaults.min;
-  const hi = defaults.max;
 
-  // --- dual-thumb: two overlapping range inputs ---
-  // The "min" thumb controls the lower bound, the "max" thumb the upper.
-  // CSS clips the track so they render as one slider with two thumbs.
-
+  // dual-thumb: two overlapping range inputs
   const minRange = document.createElement("input");
   minRange.type = "range";
   minRange.className = "vz-thumb vz-thumb-min";
   minRange.min = param.clamp[0];
   minRange.max = param.clamp[1];
   minRange.step = step;
-  minRange.value = lo;
+  minRange.value = defaults.min;
   minRange.disabled = true;
 
   const maxRange = document.createElement("input");
@@ -293,14 +282,14 @@ function buildSliderRow(param, current, defaults, onChange) {
   maxRange.min = param.clamp[0];
   maxRange.max = param.clamp[1];
   maxRange.step = step;
-  maxRange.value = hi;
+  maxRange.value = defaults.max;
   maxRange.disabled = true;
 
-  // The colored track between the two thumbs
+  // colored track between the two thumbs
   const track = document.createElement("div");
   track.className = "vz-track";
 
-  // Orange tick at current value
+  // orange tick at current value
   const marker = document.createElement("div");
   marker.className = "vz-marker";
   if (current != null) {
@@ -310,16 +299,14 @@ function buildSliderRow(param, current, defaults, onChange) {
     marker.style.display = "none";
   }
 
-  // Min/max numeric readouts
+  // min/max numeric readouts
   const minLabel = document.createElement("span");
   minLabel.className = "vz-bound vz-min-lbl";
-  minLabel.textContent = String(lo);
+  minLabel.textContent = String(defaults.min);
 
   const maxLabel = document.createElement("span");
   maxLabel.className = "vz-bound vz-max-lbl";
-  maxLabel.textContent = String(hi);
-
-  // --- wire dual-thumb behavior ---
+  maxLabel.textContent = String(defaults.max);
 
   function updateTrack(silent = false) {
     const minV = parseFloat(minRange.value);
@@ -340,7 +327,6 @@ function buildSliderRow(param, current, defaults, onChange) {
     onChange(cb.checked, minV, maxV);
   }
 
-  // Prevent thumbs from crossing
   minRange.addEventListener("input", () => {
     if (parseFloat(minRange.value) > parseFloat(maxRange.value)) {
       minRange.value = maxRange.value;
@@ -354,7 +340,6 @@ function buildSliderRow(param, current, defaults, onChange) {
     updateTrack();
   });
 
-  // Enable/disable
   cb.addEventListener("change", () => {
     const on = cb.checked;
     minRange.disabled = !on;
@@ -369,7 +354,7 @@ function buildSliderRow(param, current, defaults, onChange) {
   rangeWrap.append(minRange, maxRange, track, marker);
   el.append(cb, label, curEl, rangeWrap, minLabel, maxLabel);
 
-  // Initial track position (silent — don't fire callback during construction)
+  // Initial track position (silent)
   updateTrack(true);
 
   return { el, cb, minRange, maxRange };
