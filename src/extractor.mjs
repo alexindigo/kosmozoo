@@ -13,7 +13,7 @@
 // A ConditioningZeroOut on the path means an intentionally empty prompt.
 // Graph inputs arrive as arrays when they are links (harvest #9); ≤8 hops,
 // zeroout on the path ⇒ empty string (harvest #10).
-function walkText(graph, startLink) {
+export function walkText(graph, startLink) {
   let node = Array.isArray(startLink) ? graph[startLink[0]] : null;
   for (let i = 0; i < 8; i++) {
     if (!node) return "";
@@ -27,7 +27,7 @@ function walkText(graph, startLink) {
 }
 
 // First node whose class_type contains any of the bits (lowercase).
-function firstNode(nodes, ...bits) {
+export function firstNode(nodes, ...bits) {
   for (const n of nodes) {
     const ct = String(n.class_type ?? "").toLowerCase();
     if (bits.some((b) => ct.includes(b))) return n;
@@ -36,7 +36,7 @@ function firstNode(nodes, ...bits) {
 }
 
 // First present scalar (str/int/float) input — links arrive as lists.
-function scalarInput(node, ...keys) {
+export function scalarInput(node, ...keys) {
   if (!node) return null;
   for (const k of keys) {
     const v = node.inputs?.[k];
@@ -45,13 +45,13 @@ function scalarInput(node, ...keys) {
   return null;
 }
 
-function basename(v) {
+export function basename(v) {
   return v ? String(v).replace(/\\/g, "/").split("/").pop() : v;
 }
 
 // Linked seed input [node_id, slot] -> the target node's scalar seed, when
 // it has one (rgthree 'Seed' does; widget-only custom nodes don't).
-function followSeed(graph, link) {
+export function followSeed(graph, link) {
   const node = Array.isArray(link) && link.length ? graph[String(link[0])] : null;
   const v = node?.inputs?.seed;
   return typeof v === "number" ? v : null;
