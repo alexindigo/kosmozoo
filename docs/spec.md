@@ -82,10 +82,99 @@ Non-obvious behaviour the rewrite must not rediscover one bug at a time.
 ## 5. Boundaries
 
 - Zero-build: native TS/ESM, no bundler, no npm, no framework.
-- Core has no third-party dependencies.
+- Core has one pinned dependency: `jsr:@db/sqlite@0.13.0`.
+- Native sqlite3 library comes from the system (pacman model) —
+  `DENO_SQLITE_PATH=/usr/lib/libsqlite3.so`.
 - `feedback.json` stays a portable JSON document outside the repo.
 - Running kosmozoo stays one `deno run` away — the devcontainer is for
   contributing, never for running.
 - No ML runtime, model weights, or Python anywhere in core. Specialized
   capabilities live behind a plugin/service boundary.
 - Security deliberately deferred: no auth, no sandbox, no capability model.
+
+## 6. Storage (hash identity + sqlite + cache)
+
+Identity is content hash (SHA-256).  `host:filename` is an address, not an
+identity; the same image on two hosts or in a download folder is the same
+thing.
+
+### Schema (`metadata.db`, `PRAGMA user_version = 2`, ordered migrations)
+
+```
+CREATE TABLE files (
+  host     TEXT NOT NULL,
+  filename TEXT NOT NULL,
+  hash     TEXT,                -- sha256; null until ingested
+  size     INTEGER,
+  PRIMARY KEY (host, filename)
+);
+CREATE INDEX files_by_hash ON files(hash);
+
+CREATE TABLE images (
+  hash         TEXT PRIMARY KEY,
+  meta         TEXT,            -- extractor JSON blob
+  source       TEXT,            -- 'history' | 'png'
+  has_workflow INTEGER NOT NULL DEFAULT 0,
+  nopng        INTEGER NOT NULL DEFAULT 0,
+  ext          INTEGER NOT NULL DEFAULT 0,
+  updated_at   REAL NOT NULL
+);
+
+CREATE TABLE metadata (        -- legacy (v1), still used for unhashed rows
+  host         TEXT NOT NULL,
+  filename     TEXT NOT NULL,
+  meta         TEXT,
+  source       TEXT,
+  has_workflow INTEGER NOT NULL DEFAULT 0,
+  nopng        INTEGER NOT NULL DEFAULT 0,
+  ext          INTEGER NOT NULL DEFAULT 0,
+  updated_at   REAL NOT NULL,
+  PRIMARY KEY (host, filename)
+);
+```
+
+Migrations are ordered (`user_version` 0→1→2) and idempotent.
+
+### Cache (`~/.local/share/kosmozoo/cache/`)
+
+Layout: `<ab>/<hash>.png`.  Atomic writes only (tmp → rename) — a corrupt
+write never poisons an image.  Unbounded (LRU when disk pressure warrants).
+Override: `KOZMOZOO_CACHE`.
+
+### Ingestion (read → hash → cache → index)
+
+Every image the engine touches flows through ingestion.  There is no "miss"
+path — bytes enter the cache and the store is indexed before anything else
+sees them.
+
+1. Read bytes from host (HTTP proxy or folder read).
+2. Compute SHA-256 hash.
+3. Write to cache (atomic).
+4. Update `files.hash` + `files.size`.
+5. Move metadata from `metadata` → `images` table.
+
+### Serve path (cache-first)
+
+`GET /api/images/<id>/bytes`:
+1. Resolve `host:filename` → hash via `files`.
+2. Serve from cache.
+3. If not cached: read through ingestion (hash → cache → index), then serve.
+4. Ingestion failure: proxy from host as last resort (background-ingest for
+   next time).
+
+A ComfyUI host busy training is no longer a read outage — cached bytes serve
+offline.
+
+### Judgments
+
+Judgment entries in `feedback.json` are keyed by content hash, with a
+human-readable `ref: "<host>:<filename>"` per entry.  Legacy
+`host:filename` keys are migrated lazily on first write; a startup migration
+re-keys any remaining legacy entries whose files have been hashed.  Orphan
+entries (files gone) keep their old keys.
+
+### Legacy import
+
+`deno task import-legacy` opens the frozen Python `metadata.db` read-only and
+merges its rows into the local store.  Idempotent (skips already-present
+rows).
