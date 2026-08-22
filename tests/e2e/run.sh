@@ -57,3 +57,10 @@ docker run --rm --network host -v "$WORK":/work -w /work \
   -e E2E_FAKE="http://127.0.0.1:$FAKE_PORT" \
   --entrypoint node "$PW_IMAGE" \
   /work/tests/e2e/workbench.e2e.cjs
+
+# 4. variations panel e2e
+docker run --rm --network host -v "$WORK":/work -w /work \
+  -e E2E_ENGINE="http://127.0.0.1:$ENGINE_PORT" \
+  -e E2E_FAKE="http://127.0.0.1:$FAKE_PORT" \
+  --entrypoint node "$PW_IMAGE" \
+  /work/tests/e2e/variations.e2e.cjs

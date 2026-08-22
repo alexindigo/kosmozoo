@@ -103,7 +103,7 @@ export class PluginHost {
         const i = hostFilenameKey.indexOf(":");
         const host = hostFilenameKey.slice(0, i), filename = hostFilenameKey.slice(i + 1);
         const { proxyImage } = await import("./hosts.mjs");
-        const r = await proxyImage(ctx.hosts[host], filename);
+        const r = await proxyImage(this.ctx.hosts[host], filename);
         if (r.status !== 200) return null;
         return new Uint8Array(await new Response(r.body).arrayBuffer());
       },
@@ -113,7 +113,7 @@ export class PluginHost {
         const { cacheGet } = await import("./cache.mjs");
         return cacheGet(hash);
       },
-      _hostAddr: (host) => ctx.hosts[host] ?? null,
+      _hostAddr: (host) => this.ctx.hosts[host] ?? null,
     };
   }
 
