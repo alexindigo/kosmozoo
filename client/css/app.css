@@ -324,7 +324,7 @@ main { display: flex; flex: 1; min-height: 0; }
 .vz-slider-row { display: flex; align-items: center; gap: 8px; }
 .vz-slider-row.vz-off { opacity: 0.35; }
 .vz-cb { accent-color: var(--orange); }
-.vz-label { min-width: 70px; color: var(--mid); }
+.vz-label { min-width: 70px; color: var(--fg); font-weight: 500; }
 .vz-rangewrap { flex: 1; position: relative; height: 24px; }
 
 /* dual-thumb: two overlapping range inputs */
@@ -347,22 +347,24 @@ main { display: flex; flex: 1; min-height: 0; }
 /* orange tick at the image's current value */
 .vz-marker { position: absolute; top: -2px; width: 2px; height: 24px;
   background: var(--orange); pointer-events: none; }
-.vz-bound { min-width: 40px; color: var(--mid); font-size: 11px;
+.vz-bound { min-width: 40px; color: var(--fg); font-size: 12px;
   text-align: center; font-family: ui-monospace, monospace; }
 .vz-right { width: 160px; display: flex; flex-direction: column; gap: 8px;
   justify-content: center; flex: 0 0 auto; }
-.vz-title { font-weight: 600; font-size: 13px; margin-bottom: 4px; }
+.vz-title { font-weight: 600; font-size: 14px; margin-bottom: 4px; color: var(--white); }
+.vz-current { color: var(--orange); font-size: 11px; font-family: ui-monospace, monospace;
+  min-width: 32px; text-align: center; }
 .vz-incrow { display: flex; align-items: center; gap: 6px; }
-.vz-incrow span { color: var(--dim); }
-.vz-inc { width: 60px; background: var(--raise); color: var(--fg);
-  border: 1px solid var(--border); border-radius: 4px; padding: 2px 6px;
+.vz-incrow span { color: var(--fg); }
+.vz-inc { width: 60px; background: var(--bg); color: var(--white);
+  border: 1px solid var(--dim); border-radius: 4px; padding: 2px 6px;
   font-size: 12px; text-align: center; }
 .vz-count { font-size: 28px; font-weight: 700; color: var(--accent);
   text-align: center; margin: 4px 0; }
 .vz-right label { display: flex; flex-direction: column; gap: 2px;
-  color: var(--dim); font-size: 11px; }
-.vz-right input[type="text"] { background: var(--raise); color: var(--fg);
-  border: 1px solid var(--border); border-radius: 4px; padding: 4px 6px;
+  color: var(--fg); font-size: 12px; }
+.vz-right input[type="text"] { background: var(--bg); color: var(--white);
+  border: 1px solid var(--dim); border-radius: 4px; padding: 4px 6px;
   font-size: 12px; }
 .vz-run { background: var(--accent); color: var(--black); border: none;
   border-radius: 6px; padding: 8px 16px; font-size: 14px; font-weight: 600;

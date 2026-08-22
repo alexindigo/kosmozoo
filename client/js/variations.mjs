@@ -91,6 +91,10 @@ function openPanel(cardEl, image) {
   const meta = image.meta ?? {};
   const panel = document.createElement("div");
   panel.className = "vz-panel";
+  // Block all pointer events from reaching the image/lightbox below
+  panel.addEventListener("click", (e) => e.stopPropagation());
+  panel.addEventListener("pointerdown", (e) => e.stopPropagation());
+  panel.addEventListener("pointerup", (e) => e.stopPropagation());
 
   // --- left: sliders ---
   const sliders = document.createElement("div");
