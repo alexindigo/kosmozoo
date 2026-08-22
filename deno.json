@@ -5,7 +5,8 @@
   "tasks": {
     "setup": "deno eval 'import { Database } from \"@db/sqlite\"; new Database(\":memory:\").close();'",
     "dev": "deno run --allow-all src/main.mjs",
-    "test": "deno test --allow-all"
+    "test": "deno test --allow-all",
+    "import-legacy": "deno run --allow-all src/import-legacy.mjs"
   },
   "env": {
     "DENO_SQLITE_PATH": "/usr/lib/libsqlite3.so"
