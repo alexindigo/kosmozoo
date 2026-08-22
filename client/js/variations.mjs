@@ -1,20 +1,26 @@
-// client/js/variations.mjs — variations panel: overlay on a card's image
-// area for batch parameter sweeps.
+// client/js/variations.mjs — variations panel: expandable footer row within
+// a card for batch parameter sweeps.
 //
-// The panel is absolutely positioned within the card's .imgwrap (position:
-// relative), covers the image, and scrolls with the card. Multiple panels
-// can be open simultaneously (tracked in a Map by image id).
+// The panel appears as a new row below the image, inside the card's DOM
+// flow. It scrolls with the card, pushes notes/meta down, and multiple
+// panels can be open simultaneously (tracked in a Map by image id).
+//
+// The panel populates from the image's extracted metadata: each slider's
+// current value is read from image.meta and shown as the orange marker;
+// min/max bounds default to a sensible spread around that value.
 
 import { api } from "./api.mjs";
 import { iconSvg } from "./icons.mjs";
 
 // --- parameter definitions ---------------------------------------------------
 
+// spread: how far from the current value the default min/max bounds sit.
+// clamp: hard limits for the parameter.
 const PARAMS = [
-  { key: "denoise", label: "denoise", min: 0, max: 1, decimals: 2 },
-  { key: "ipa_weight", label: "ipa weight", min: 0, max: 2, decimals: 2 },
-  { key: "steps", label: "steps", min: 1, max: 150, decimals: 0 },
-  { key: "cfg", label: "cfg", min: 0, max: 30, decimals: 1 },
+  { key: "denoise",    label: "denoise",    decimals: 2, clamp: [0, 1],   spread: 0.15 },
+  { key: "ipa_weight", label: "ipa weight", decimals: 2, clamp: [0, 2],   spread: 0.3  },
+  { key: "steps",      label: "steps",      decimals: 0, clamp: [1, 150], spread: 10   },
+  { key: "cfg",        label: "cfg",        decimals: 1, clamp: [0, 30],  spread: 2    },
 ];
 
 // --- open panels registry -----------------------------------------------------
@@ -38,17 +44,47 @@ export function closeAllVariations() {
   openPanels.clear();
 }
 
+// --- current value extraction --------------------------------------------------
+
+function currentValue(key, meta) {
+  const raw = meta[key];
+  if (raw == null) return null;
+  if (key === "ipa_weight") {
+    // multi-node: "0.8+0.6" — take the first
+    const first = String(raw).split("+")[0];
+    const v = parseFloat(first);
+    return isNaN(v) ? null : v;
+  }
+  const v = parseFloat(raw);
+  return isNaN(v) ? null : v;
+}
+
+// Default min/max centered on the current value, clamped to the parameter's
+// hard limits.
+function defaultRange(param, current) {
+  if (current == null) return { min: param.clamp[0], max: param.clamp[1] };
+  const half = param.spread;
+  let lo = current - half;
+  let hi = current + half;
+  // Round to the parameter's decimal precision
+  const f = Math.pow(10, param.decimals);
+  lo = Math.round(lo * f) / f;
+  hi = Math.round(hi * f) / f;
+  // Clamp
+  lo = Math.max(lo, param.clamp[0]);
+  hi = Math.min(hi, param.clamp[1]);
+  // Ensure min < max (at least one step apart)
+  if (lo >= hi) {
+    lo = Math.max(param.clamp[0], current - param.spread * 2);
+    hi = Math.min(param.clamp[1], current + param.spread * 2);
+    if (lo >= hi) { lo = param.clamp[0]; hi = param.clamp[1]; }
+  }
+  return { min: lo, max: hi };
+}
+
 // --- panel construction ---------------------------------------------------------
 
 function openPanel(cardEl, image) {
-  const imgwrap = cardEl.querySelector(".imgwrap");
-  if (!imgwrap) return;
-
-  // Ensure .imgwrap is position:relative for the overlay
-  if (getComputedStyle(imgwrap).position === "static") {
-    imgwrap.style.position = "relative";
-  }
-
   const meta = image.meta ?? {};
   const panel = document.createElement("div");
   panel.className = "vz-panel";
@@ -58,17 +94,17 @@ function openPanel(cardEl, image) {
   sliders.className = "vz-sliders";
 
   const ranges = {};
-  const sliderRefs = {};
 
   for (const p of PARAMS) {
-    const current = getCurrentValue(p.key, meta);
-    const row = buildSliderRow(p, current, (enabled, min, max) => {
+    const current = currentValue(p.key, meta);
+    const def = defaultRange(p, current);
+
+    const row = buildSliderRow(p, current, def, (enabled, min, max) => {
       ranges[p.key] = { min, max, enabled };
       updateCount();
     });
     sliders.appendChild(row.el);
-    ranges[p.key] = { min: current ?? p.min, max: current ?? p.max, enabled: false };
-    sliderRefs[p.key] = row;
+    ranges[p.key] = { min: def.min, max: def.max, enabled: false };
   }
 
   // --- right: config + run ---
@@ -127,23 +163,19 @@ function openPanel(cardEl, image) {
 
   right.append(title, incRow, countEl, prefixLabel, suffixLabel, runBtn, errEl);
   panel.append(sliders, right);
-  imgwrap.appendChild(panel);
+
+  // Insert as a new row in the card, after the imgwrap/ctitle area.
+  // The card's .ctitle is the title row; we insert the panel right after it.
+  const ctitle = cardEl.querySelector(".ctitle");
+  if (ctitle && ctitle.nextSibling) {
+    cardEl.insertBefore(panel, ctitle.nextSibling);
+  } else {
+    cardEl.appendChild(panel);
+  }
 
   openPanels.set(image.id, { panel, card: cardEl });
 
   // --- helpers ---
-
-  function getCurrentValue(key, meta) {
-    const raw = meta[key];
-    if (raw == null) return null;
-    if (key === "ipa_weight") {
-      const first = String(raw).split("+")[0];
-      const v = parseFloat(first);
-      return isNaN(v) ? null : v;
-    }
-    const v = parseFloat(raw);
-    return isNaN(v) ? null : v;
-  }
 
   function updateCount() {
     const increment = parseFloat(incInput.value) || 0.05;
@@ -162,6 +194,7 @@ function openPanel(cardEl, image) {
 
   async function runVariations(img) {
     errEl.textContent = "";
+    errEl.classList.remove("vz-ok");
     runBtn.disabled = true;
     runBtn.textContent = "Running…";
 
@@ -186,9 +219,7 @@ function openPanel(cardEl, image) {
       } else {
         errEl.textContent = `submitted ${data.submitted}/${data.total}`;
         errEl.classList.add("vz-ok");
-        setTimeout(() => {
-          closePanel();
-        }, 3000);
+        setTimeout(() => closePanel(), 3000);
       }
     } catch (e) {
       errEl.textContent = `fetch failed: ${e.message}`;
@@ -203,7 +234,7 @@ function openPanel(cardEl, image) {
     openPanels.delete(image.id);
   }
 
-  // close on × (add a small × button)
+  // close on ×
   const closeBtn = document.createElement("button");
   closeBtn.className = "vz-close";
   closeBtn.innerHTML = iconSvg("x", 14);
@@ -216,9 +247,12 @@ function openPanel(cardEl, image) {
 
 // --- slider row builder --------------------------------------------------------
 
-function buildSliderRow(param, currentValue, onChange) {
+// Each row: checkbox + label + range slider + orange marker + min/max inputs.
+// The marker sits at the image's current value. The min/max inputs default to
+// a spread around that value.
+function buildSliderRow(param, current, defaults, onChange) {
   const el = document.createElement("div");
-  el.className = "vz-slider-row";
+  el.className = "vz-slider-row vz-off";
 
   const cb = document.createElement("input");
   cb.type = "checkbox";
@@ -228,39 +262,48 @@ function buildSliderRow(param, currentValue, onChange) {
   label.className = "vz-label";
   label.textContent = param.label;
 
+  // current value display (the orange tick's numeric label)
+  const curEl = document.createElement("span");
+  curEl.className = "vz-current";
+  curEl.textContent = current != null ? String(current) : "—";
+  curEl.title = "current value";
+
   const rangeWrap = document.createElement("div");
   rangeWrap.className = "vz-rangewrap";
 
   const range = document.createElement("input");
   range.type = "range";
   range.className = "vz-range";
-  range.min = param.min;
-  range.max = param.max;
+  range.min = param.clamp[0];
+  range.max = param.clamp[1];
   range.step = Math.pow(10, -param.decimals);
-  range.value = currentValue ?? param.min;
+  range.value = current ?? param.clamp[0];
   range.disabled = true;
 
   // Orange tick at current value
   const marker = document.createElement("div");
   marker.className = "vz-marker";
-  if (currentValue != null) {
-    const pct = ((currentValue - param.min) / (param.max - param.min)) * 100;
+  if (current != null) {
+    const pct = ((current - param.clamp[0]) / (param.clamp[1] - param.clamp[0])) * 100;
     marker.style.left = `${pct}%`;
+  } else {
+    marker.style.display = "none";
   }
 
-  // Min/max display
+  // Min/max inputs — populated with the spread defaults
+  const step = Math.pow(10, -param.decimals);
   const minInput = document.createElement("input");
   minInput.type = "number";
   minInput.className = "vz-bound vz-min";
-  minInput.value = currentValue ?? param.min;
-  minInput.step = Math.pow(10, -param.decimals);
+  minInput.value = defaults.min;
+  minInput.step = step;
   minInput.disabled = true;
 
   const maxInput = document.createElement("input");
   maxInput.type = "number";
   maxInput.className = "vz-bound vz-max";
-  maxInput.value = param.max;
-  maxInput.step = Math.pow(10, -param.decimals);
+  maxInput.value = defaults.max;
+  maxInput.step = step;
   maxInput.disabled = true;
 
   // Wire events
@@ -273,23 +316,17 @@ function buildSliderRow(param, currentValue, onChange) {
     fireChange();
   });
 
-  range.addEventListener("input", () => {
-    // For now the range slider sets the CENTER of the range.
-    // The min/max inputs define the actual bounds.
-    // A future iteration could use a dual-thumb slider.
-  });
-
   minInput.addEventListener("input", fireChange);
   maxInput.addEventListener("input", fireChange);
 
   function fireChange() {
-    const min = parseFloat(minInput.value) || param.min;
-    const max = parseFloat(maxInput.value) || param.max;
-    onChange(cb.checked, Math.min(min, max), Math.max(min, max));
+    const lo = parseFloat(minInput.value) || defaults.min;
+    const hi = parseFloat(maxInput.value) || defaults.max;
+    onChange(cb.checked, Math.min(lo, hi), Math.max(lo, hi));
   }
 
   rangeWrap.append(range, marker);
-  el.append(cb, label, rangeWrap, minInput, maxInput);
+  el.append(cb, label, curEl, rangeWrap, minInput, maxInput);
 
   return { el, cb, range, minInput, maxInput };
 }

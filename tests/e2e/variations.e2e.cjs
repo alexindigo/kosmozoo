@@ -51,6 +51,25 @@ async function main() {
       check("wand click opens variations panel", hasPanel);
     });
 
+    // --- panel is an inline row within the card (below the image) ---
+    await attempt("panel is inline within the card", async () => {
+      const info = await cdp.evaluate(`(() => {
+        const card = document.querySelector('.card[data-idx="0"]');
+        const panel = card.querySelector('.vz-panel');
+        if (!panel) return { error: 'no panel' };
+        const ctitle = card.querySelector('.ctitle');
+        return {
+          panelInCard: card.contains(panel),
+          panelParent: panel.parentElement?.className,
+          afterCtitle: ctitle ? panel.compareDocumentPosition(ctitle) & Node.DOCUMENT_POSITION_PRECEDING : null,
+          position: getComputedStyle(panel).position,
+        };
+      })()`);
+      check("panel is inline within the card",
+        info.panelInCard === true && info.panelParent === "card",
+        JSON.stringify(info));
+    });
+
     // --- panel has sliders ---
     await attempt("panel shows 4 parameter sliders", async () => {
       const rows = await cdp.evaluate(`
