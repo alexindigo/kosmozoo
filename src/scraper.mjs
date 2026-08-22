@@ -12,7 +12,7 @@ import { hostReadBytes } from "./hosts.mjs";
 
 const INTER_FILE_DELAY = 100;   // ms between file fetches
 const MAX_BACKOFF = 30_000;     // backoff cap
-const EXTRACTOR_VERSION = 1;
+const EXTRACTOR_VERSION = 2;
 
 export class Scraper {
   // hosts: { name: "host:port" }; store: Store; enabled/paused come from settings

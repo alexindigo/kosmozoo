@@ -89,6 +89,13 @@ export function extractMeta(entry) {
       if (Array.isArray(v) && k === "seed") v = followSeed(graph, v);
       if (typeof v === "number" || typeof v === "string") meta[k] = v;
     }
+    // Fallback for KSampler graphs where seed is a widget on a custom node
+    // that followSeed can't unpack — probe the standard seed carriers.
+    if (meta.seed === undefined) {
+      let v = scalarInput(firstNode(nodes, "randomnoise"), "noise_seed");
+      if (v === null) v = scalarInput(firstNode(nodes, "seed"), "seed");
+      if (v !== null) meta.seed = v;
+    }
     meta.prompt = walkText(graph, ks.inputs?.positive).trim();
     meta.negPrompt = walkText(graph, ks.inputs?.negative).trim();
   } else {
