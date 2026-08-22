@@ -86,6 +86,8 @@ export class Store {
       empty: () => ({}),
       migrations: {},
     });
+    // Migrate legacy host:filename judgment keys to hash keys.
+    s.#migrateJudgments();
     return s;
   }
 
@@ -245,14 +247,27 @@ export class Store {
     return out;
   }
 
-  // --- judgments (JSON-backed, irreplaceable — re-keyed to hash later) ---
+  // --- judgments (JSON-backed, irreplaceable — keyed by hash) ---
+
+  // Resolve (host, filename) to the best judgment key.  If the file has been
+  // hashed and an entry exists under that hash, use the hash.  If not, but
+  // an entry exists under the legacy host:filename key, use that.  Otherwise
+  // prefer the hash key for writes and fall back to the legacy key for reads.
+  #judgmentKey(host, filename) {
+    const hash = this.hashFor(host, filename);
+    if (hash && this.#feedback.data[hash]) return [hash, true];
+    const legacy = hostKey(host, filename);
+    if (this.#feedback.data[legacy]) return [legacy, false];
+    return [hash || legacy, !!hash];
+  }
 
   judgmentGet(host, filename) {
-    return structuredClone(this.#feedback.data[hostKey(host, filename)] ?? null);
+    const [key] = this.#judgmentKey(host, filename);
+    return structuredClone(this.#feedback.data[key] ?? null);
   }
 
   async judgmentSet(host, filename, field, value) {
-    const key = hostKey(host, filename);
+    const [key, isHash] = this.#judgmentKey(host, filename);
     const entry = this.#feedback.data[key] ?? {};
     if (field.startsWith("plugins.")) {
       const [, plugin, ...rest] = field.split(".");
@@ -267,9 +282,59 @@ export class Store {
       if (value === null || value === undefined || value === "") delete entry[field];
       else entry[field] = value;
     }
+    // If we just created an entry under a hash key and there was a legacy
+    // entry, remove the legacy one (migration happens lazily on first write).
+    if (isHash) {
+      const legacy = hostKey(host, filename);
+      if (this.#feedback.data[legacy] && key !== legacy) {
+        delete this.#feedback.data[legacy];
+      }
+      // Stamp the ref field so the portable file is human-readable.
+      entry.ref = legacy;
+    }
     if (Object.keys(entry).length === 0) delete this.#feedback.data[key];
     else this.#feedback.data[key] = entry;
     await this.#saveFeedback();
+  }
+
+  // Migrate existing judgment entries from host:filename keys to hash keys.
+  // Idempotent: entries already keyed by hash are left alone.
+  #migrateJudgments() {
+    const hashes = new Map();
+    let changed = false;
+    const newData = {};
+
+    for (const [key, entry] of Object.entries(this.#feedback.data)) {
+      if (!key.includes(":")) {
+        // Already a hash key (or other non-host:filename key) — keep.
+        newData[key] = entry;
+        continue;
+      }
+      // Looks like a legacy "host:filename" key.  Try to resolve a hash.
+      const [host, filename] = splitHostKey(key);
+      // Build a cache of host lookups so we only query files once per host.
+      if (!hashes.has(host)) {
+        const rows = this.#db.prepare(
+          "SELECT filename, hash FROM files WHERE host = ? AND hash IS NOT NULL"
+        ).all(host);
+        const m = new Map();
+        for (const row of rows) m.set(row.filename, row.hash);
+        hashes.set(host, m);
+      }
+      const hash = hashes.get(host).get(filename);
+      if (hash) {
+        entry.ref = key;
+        newData[hash] = entry;
+        changed = true;
+      } else {
+        // File gone — keep as orphan under the legacy key.
+        newData[key] = entry;
+      }
+    }
+
+    if (changed) {
+      this.#feedback.data = newData;
+    }
   }
 
   feedbackCount() {
