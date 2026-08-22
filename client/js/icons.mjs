@@ -52,8 +52,14 @@ const PATHS = {
   <path d="M9 7v-3a1 1 0 0 1 1 -1h4a1 1 0 0 1 1 1v3" />`,
   "alert-triangle": `<path stroke="none" d="M0 0h24v24H0z" fill="none"/>
   <path d="M12 9v4" />
-  <path d="M10.363 3.591l-8.106 13.534a1.914 1.914 0 0 0 1.636 2.871h16.214a1.914 1.914 0 0 0 1.636 -2.87l-8.106 -13.536a1.914 1.914 0 0 0 -3.274 0z" />
+  <path d="M10.363 3.591l-8.106 13.534a1.914 1.914 0 0 0 1.636 2.871h16.214a1.914 1.914 0 0 0 1.636 -2.87l-8.106-13.536a1.914 1.914 0 0 0 -3.274 0z" />
   <path d="M12 16h.01" />`,
+  "wand": `<path stroke="none" d="M0 0h24v24H0z" fill="none"/>
+  <path d="M6 21l15 -15l-3 -3l-15 15l3 3" />
+  <path d="M14 7l3 3" />
+  <path d="M9 5l1.5 1.5" />
+  <path d="M8.5 8.5l1.5 1.5" />
+  <path d="M5 9l1.5 1.5" />`,
 };
 
 export function icon(name, size = 14) {

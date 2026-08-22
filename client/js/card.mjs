@@ -12,6 +12,7 @@ import { setVote, toggleFavorite, saveNotes } from "./judgment.mjs";
 import { metaStripText, fillCardMeta } from "./fields.mjs";
 import { iconSvg } from "./icons.mjs";
 import { imageCard, aspectFromMeta, actionButton } from "./imageCard.mjs";
+import { toggleVariations } from "./variations.mjs";
 
 // which filenames already exist in the downloads dir (save button greys)
 export const savedSet = new Set();
@@ -76,6 +77,9 @@ function buildActions(image) {
 
   const j = image.judgment ?? {};
   const actions = [
+    actionButton("variations", iconSvg("wand", 16), "generate variations", (e) => {
+      toggleVariations(e.currentTarget.closest(".card"), image);
+    }),
     actionButton("down", iconSvg("thumb-down"), "thumbs down — hides (Unhide up top restores)", async () => {
       await setVote(image, "down");
       card_remove(image);
