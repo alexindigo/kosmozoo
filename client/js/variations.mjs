@@ -1,9 +1,9 @@
-// client/js/variations.mjs — variations panel: expandable footer row within
-// a card for batch parameter sweeps.
+// client/js/variations.mjs — variations panel: overlay on a card's image
+// area for batch parameter sweeps.
 //
-// The panel appears as a new row below the image, inside the card's DOM
-// flow. It scrolls with the card, pushes notes/meta down, and multiple
-// panels can be open simultaneously (tracked in a Map by image id).
+// The panel is absolutely positioned within the card's .imgwrap (which has
+// position: relative), covers the image, and scrolls with the card.
+// Multiple panels can be open simultaneously (tracked in a Map by image id).
 //
 // The panel populates from the image's extracted metadata: each slider's
 // current value is read from image.meta and shown as the orange marker;
@@ -85,6 +85,9 @@ function defaultRange(param, current) {
 // --- panel construction ---------------------------------------------------------
 
 function openPanel(cardEl, image) {
+  const imgwrap = cardEl.querySelector(".imgwrap");
+  if (!imgwrap) return;
+
   const meta = image.meta ?? {};
   const panel = document.createElement("div");
   panel.className = "vz-panel";
@@ -163,15 +166,7 @@ function openPanel(cardEl, image) {
 
   right.append(title, incRow, countEl, prefixLabel, suffixLabel, runBtn, errEl);
   panel.append(sliders, right);
-
-  // Insert as a new row in the card, after the imgwrap/ctitle area.
-  // The card's .ctitle is the title row; we insert the panel right after it.
-  const ctitle = cardEl.querySelector(".ctitle");
-  if (ctitle && ctitle.nextSibling) {
-    cardEl.insertBefore(panel, ctitle.nextSibling);
-  } else {
-    cardEl.appendChild(panel);
-  }
+  imgwrap.appendChild(panel);
 
   openPanels.set(image.id, { panel, card: cardEl });
 
@@ -247,9 +242,9 @@ function openPanel(cardEl, image) {
 
 // --- slider row builder --------------------------------------------------------
 
-// Each row: checkbox + label + range slider + orange marker + min/max inputs.
-// The marker sits at the image's current value. The min/max inputs default to
-// a spread around that value.
+// Each row: checkbox + label + dual-thumb range slider + orange marker.
+// Two overlapping <input type="range"> elements — one for the lower bound,
+// one for the upper. The orange tick marks the image's current value.
 function buildSliderRow(param, current, defaults, onChange) {
   const el = document.createElement("div");
   el.className = "vz-slider-row vz-off";
@@ -262,7 +257,7 @@ function buildSliderRow(param, current, defaults, onChange) {
   label.className = "vz-label";
   label.textContent = param.label;
 
-  // current value display (the orange tick's numeric label)
+  // current value display
   const curEl = document.createElement("span");
   curEl.className = "vz-current";
   curEl.textContent = current != null ? String(current) : "—";
@@ -271,14 +266,35 @@ function buildSliderRow(param, current, defaults, onChange) {
   const rangeWrap = document.createElement("div");
   rangeWrap.className = "vz-rangewrap";
 
-  const range = document.createElement("input");
-  range.type = "range";
-  range.className = "vz-range";
-  range.min = param.clamp[0];
-  range.max = param.clamp[1];
-  range.step = Math.pow(10, -param.decimals);
-  range.value = current ?? param.clamp[0];
-  range.disabled = true;
+  const step = Math.pow(10, -param.decimals);
+  const lo = defaults.min;
+  const hi = defaults.max;
+
+  // --- dual-thumb: two overlapping range inputs ---
+  // The "min" thumb controls the lower bound, the "max" thumb the upper.
+  // CSS clips the track so they render as one slider with two thumbs.
+
+  const minRange = document.createElement("input");
+  minRange.type = "range";
+  minRange.className = "vz-thumb vz-thumb-min";
+  minRange.min = param.clamp[0];
+  minRange.max = param.clamp[1];
+  minRange.step = step;
+  minRange.value = lo;
+  minRange.disabled = true;
+
+  const maxRange = document.createElement("input");
+  maxRange.type = "range";
+  maxRange.className = "vz-thumb vz-thumb-max";
+  maxRange.min = param.clamp[0];
+  maxRange.max = param.clamp[1];
+  maxRange.step = step;
+  maxRange.value = hi;
+  maxRange.disabled = true;
+
+  // The colored track between the two thumbs
+  const track = document.createElement("div");
+  track.className = "vz-track";
 
   // Orange tick at current value
   const marker = document.createElement("div");
@@ -290,43 +306,67 @@ function buildSliderRow(param, current, defaults, onChange) {
     marker.style.display = "none";
   }
 
-  // Min/max inputs — populated with the spread defaults
-  const step = Math.pow(10, -param.decimals);
-  const minInput = document.createElement("input");
-  minInput.type = "number";
-  minInput.className = "vz-bound vz-min";
-  minInput.value = defaults.min;
-  minInput.step = step;
-  minInput.disabled = true;
+  // Min/max numeric readouts
+  const minLabel = document.createElement("span");
+  minLabel.className = "vz-bound vz-min-lbl";
+  minLabel.textContent = String(lo);
 
-  const maxInput = document.createElement("input");
-  maxInput.type = "number";
-  maxInput.className = "vz-bound vz-max";
-  maxInput.value = defaults.max;
-  maxInput.step = step;
-  maxInput.disabled = true;
+  const maxLabel = document.createElement("span");
+  maxLabel.className = "vz-bound vz-max-lbl";
+  maxLabel.textContent = String(hi);
 
-  // Wire events
-  cb.addEventListener("change", () => {
-    const on = cb.checked;
-    range.disabled = !on;
-    minInput.disabled = !on;
-    maxInput.disabled = !on;
-    el.classList.toggle("vz-off", !on);
-    fireChange();
-  });
+  // --- wire dual-thumb behavior ---
 
-  minInput.addEventListener("input", fireChange);
-  maxInput.addEventListener("input", fireChange);
-
-  function fireChange() {
-    const lo = parseFloat(minInput.value) || defaults.min;
-    const hi = parseFloat(maxInput.value) || defaults.max;
-    onChange(cb.checked, Math.min(lo, hi), Math.max(lo, hi));
+  function updateTrack(silent = false) {
+    const minV = parseFloat(minRange.value);
+    const maxV = parseFloat(maxRange.value);
+    const lo = Math.min(minV, maxV);
+    const hi = Math.max(minV, maxV);
+    const range = param.clamp[1] - param.clamp[0];
+    const lpct = ((lo - param.clamp[0]) / range) * 100;
+    const rpct = ((hi - param.clamp[0]) / range) * 100;
+    track.style.left = lpct + "%";
+    track.style.width = (rpct - lpct) + "%";
+    minLabel.textContent = String(lo);
+    maxLabel.textContent = String(hi);
+    if (!silent) fireChange(lo, hi);
   }
 
-  rangeWrap.append(range, marker);
-  el.append(cb, label, curEl, rangeWrap, minInput, maxInput);
+  function fireChange(minV, maxV) {
+    onChange(cb.checked, minV, maxV);
+  }
 
-  return { el, cb, range, minInput, maxInput };
+  // Prevent thumbs from crossing
+  minRange.addEventListener("input", () => {
+    if (parseFloat(minRange.value) > parseFloat(maxRange.value)) {
+      minRange.value = maxRange.value;
+    }
+    updateTrack();
+  });
+  maxRange.addEventListener("input", () => {
+    if (parseFloat(maxRange.value) < parseFloat(minRange.value)) {
+      maxRange.value = minRange.value;
+    }
+    updateTrack();
+  });
+
+  // Enable/disable
+  cb.addEventListener("change", () => {
+    const on = cb.checked;
+    minRange.disabled = !on;
+    maxRange.disabled = !on;
+    el.classList.toggle("vz-off", !on);
+    fireChange(
+      Math.min(parseFloat(minRange.value), parseFloat(maxRange.value)),
+      Math.max(parseFloat(minRange.value), parseFloat(maxRange.value)),
+    );
+  });
+
+  rangeWrap.append(minRange, maxRange, track, marker);
+  el.append(cb, label, curEl, rangeWrap, minLabel, maxLabel);
+
+  // Initial track position (silent — don't fire callback during construction)
+  updateTrack(true);
+
+  return { el, cb, minRange, maxRange };
 }
