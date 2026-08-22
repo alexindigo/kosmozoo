@@ -118,7 +118,7 @@ export async function hostList(addr) {
 // Proxy image bytes from a host's /api/view. Upstream ComfyUI serves some
 // files as application/octet-stream (with nosniff) — the browser can't
 // render those, so map the extension when the upstream type is useless.
-const EXT_MIME = {
+export const EXT_MIME = {
   png: "image/png", jpg: "image/jpeg", jpeg: "image/jpeg", webp: "image/webp",
   gif: "image/gif", svg: "image/svg+xml", avif: "image/avif", bmp: "image/bmp",
 };
