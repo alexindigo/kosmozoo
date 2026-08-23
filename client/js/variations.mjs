@@ -211,6 +211,13 @@ function openPanel(cardEl, image) {
       ranges[p.key] = { min: def.min, max: def.max, enabled: false, increment: p.defaultInc };
       rows[p.key] = row;
     }
+    // Default-on: denoise is the most common single-axis sweep. If the
+    // graph exposes it, flip it on so the user lands on a sensible starting
+    // state (auto-suffix + reorder + count all happen via the change event).
+    if (rows.denoise) {
+      rows.denoise.cb.checked = true;
+      rows.denoise.cb.dispatchEvent(new Event("change"));
+    }
     updateCount();
   }
 
@@ -306,10 +313,14 @@ function openPanel(cardEl, image) {
     countLabel, countEl,
     prefixLabel, prefixInput,
     suffixLabel, suffixInput,
-    runBtn, errEl,
   );
 
   body.append(left, divider, right);
+
+  // Footer spans the modal width — Run centered, error text below.
+  const footer = document.createElement("div");
+  footer.className = "vz-footer";
+  footer.append(runBtn, errEl);
 
   const closeBtn = document.createElement("button");
   closeBtn.className = "vz-close";
@@ -317,7 +328,7 @@ function openPanel(cardEl, image) {
   closeBtn.title = "close (Esc)";
   closeBtn.addEventListener("click", closeModal);
 
-  panel.append(title, body, closeBtn);
+  panel.append(title, body, footer, closeBtn);
   root.appendChild(panel);
   document.body.appendChild(root);
 
@@ -366,7 +377,12 @@ function openPanel(cardEl, image) {
       total *= Math.max(count, 1);
     }
     if (anyEnabled && total > 0) total -= 1;
-    countEl.textContent = anyEnabled ? String(total) : "0";
+    const n = anyEnabled ? total : 0;
+    countEl.textContent = String(n);
+    // Warning colors: >1000 red, >100 yellow, otherwise the default. This
+    // is a gentle "you're about to submit a lot of runs" cue.
+    countEl.classList.toggle("vz-count-warn", n > 100 && n <= 1000);
+    countEl.classList.toggle("vz-count-hot", n > 1000);
   }
 
   async function runVariations(img) {
