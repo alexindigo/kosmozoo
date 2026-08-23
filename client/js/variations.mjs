@@ -509,6 +509,13 @@ function buildSliderRow(param, current, defaults, onChange, templateTarget) {
   const laneTrack = document.createElement("div");
   laneTrack.className = "vz-lane vz-lane-track";
 
+  // the full-range track line: a visual sibling centered on the lane, so
+  // rail, connect band, thumbs and marker share one centerline by
+  // construction (the noUi base stays transparent)
+  const rail = document.createElement("div");
+  rail.className = "vz-rail";
+  laneTrack.appendChild(rail);
+
   const sliderEl = document.createElement("div");
   sliderEl.className = "vz-slider";
   laneTrack.appendChild(sliderEl);

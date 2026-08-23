@@ -252,6 +252,48 @@ async function main() {
         JSON.stringify(result));
     });
 
+    // --- track rail exists and shares one centerline with everything ---
+    await attempt("rail spans the lane; rail/connect/thumbs/marker share a centerline", async () => {
+      const g = await cdp.evaluate(`(() => {
+        const row = document.querySelector('.vz-slider-row[data-param-key="denoise"]');
+        const c = (el) => {
+          const r = el.getBoundingClientRect();
+          return { top: r.top, h: r.height, w: r.width, center: r.top + r.height / 2 };
+        };
+        const lane = c(row.querySelector('.vz-lane-track'));
+        const rail = c(row.querySelector('.vz-rail'));
+        const connect = c(row.querySelector('.noUi-connect'));
+        const h0 = c(row.querySelector('.noUi-handle[data-handle="0"]'));
+        const h1 = c(row.querySelector('.noUi-handle[data-handle="1"]'));
+        const marker = c(row.querySelector('.vz-marker'));
+        return { lane, rail, connect, h0, h1, marker };
+      })()`);
+      const near = (a, b) => Math.abs(a - b) < 0.75;
+      check("rail spans the full lane width", g.rail.w >= g.lane.w - 1, `rail=${g.rail.w} lane=${g.lane.w}`);
+      check("rail centered on the lane", near(g.rail.center, g.lane.center), `rail=${g.rail.center} lane=${g.lane.center}`);
+      check("connect band on the rail centerline", near(g.connect.center, g.rail.center), `connect=${g.connect.center} rail=${g.rail.center}`);
+      check("both thumbs on the rail centerline",
+        near(g.h0.center, g.rail.center) && near(g.h1.center, g.rail.center),
+        `h0=${g.h0.center} h1=${g.h1.center} rail=${g.rail.center}`);
+      check("current-value marker on the rail centerline", near(g.marker.center, g.rail.center), `marker=${g.marker.center} rail=${g.rail.center}`);
+    });
+
+    // --- disabled rows keep rail + marker (context for the current value) ---
+    await attempt("disabled row shows rail and marker, hides slider", async () => {
+      const v = await cdp.evaluate(`(() => {
+        const row = [...document.querySelectorAll('.vz-slider-row')].find(r => r.classList.contains('vz-off'));
+        if (!row) return { error: 'no off row' };
+        const vis = (el) => el && getComputedStyle(el).visibility !== 'hidden' && el.getBoundingClientRect().width > 0;
+        return {
+          rail: vis(row.querySelector('.vz-rail')),
+          marker: vis(row.querySelector('.vz-marker')),
+          sliderHidden: !vis(row.querySelector('.vz-slider')),
+        };
+      })()`);
+      check("off row: rail+marker visible, slider hidden",
+        v.rail === true && v.marker === true && v.sliderHidden === true, JSON.stringify(v));
+    });
+
     // --- label click inserts {key} into focused suffix ---
     await attempt("slider label click inserts {key} at cursor", async () => {
       await sleep(300); // let probe refine label

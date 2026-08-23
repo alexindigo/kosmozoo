@@ -406,8 +406,7 @@ main { display: flex; flex: 1; min-height: 0; }
    image's actual value is legible on every row (enabled or not). */
 .vz-slider-row.vz-off .vz-min-lbl,
 .vz-slider-row.vz-off .vz-max-lbl,
-.vz-slider-row.vz-off .vz-slider,
-.vz-slider-row.vz-off .vz-track { visibility: hidden; }
+.vz-slider-row.vz-off .vz-slider { visibility: hidden; }
 .vz-slider-row.vz-absent { opacity: 0.25; }
 .vz-slider-row.vz-absent .vz-cb { cursor: not-allowed; }
 .vz-loading { color: var(--mid); font-size: 12px; padding: 20px 4px;
@@ -444,7 +443,9 @@ main { display: flex; flex: 1; min-height: 0; }
 /* Lane 2: the noUiSlider element. The library's default horizontal slider
    height is 18px — match that so the internal layout math aligns. */
 .vz-lane-track { position: relative; height: 18px; margin-bottom: 2px; }
-.vz-slider { width: 100%; height: 18px; }
+.vz-rail { position: absolute; left: 0; right: 0; top: 50%; height: 2px;
+  transform: translateY(-50%); background: var(--border); border-radius: 1px; }
+.vz-slider { position: relative; width: 100%; height: 18px; }
 
 /* noUiSlider overrides — match our palette. Key: don't override the base's
    dimensions (it fills the target by default). The track line is drawn by
@@ -452,8 +453,11 @@ main { display: flex; flex: 1; min-height: 0; }
 .vz-lane-track .noUi-target { background: transparent; border: none;
   box-shadow: none; }
 .vz-lane-track .noUi-base { background: transparent; }
-.vz-lane-track .noUi-connect { background: var(--accent); height: 3px;
-  top: 50%; transform: translateY(-50%); border-radius: 1px; }
+/* the library owns `transform` on connects (inline positioning), so
+   centering goes through a margin tied to the band's own height var */
+.vz-lane-track .noUi-connect { --band-h: 3px;
+  background: var(--accent); height: var(--band-h);
+  top: 50%; margin-top: calc(var(--band-h) / -2); border-radius: 1px; }
 .vz-lane-track .noUi-origin { height: 14px; width: 14px; }
 .vz-lane-track .noUi-handle { width: 14px; height: 14px;
   border-radius: 50%; background: var(--accent); border: 2px solid var(--bg);
