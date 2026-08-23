@@ -87,10 +87,28 @@ main { display: flex; flex: 1; min-height: 0; }
   background: var(--raise); border-radius: 4px; margin: 0 -6px; position: relative;
   z-index: 5; transition: background .15s; }
 #divider:hover { background: var(--mid); }
-#anchors { flex: 0 0 auto; background: var(--card); border: 1px solid var(--raise);
-  border-radius: 8px; margin: 8px 8px 8px 0; padding: 8px;
+#workspace { flex: 0 0 auto; background: var(--card); border: 1px solid var(--raise);
+  border-radius: 8px; margin: 8px 0; padding: 8px;
   display: flex; flex-direction: column; overflow: hidden;
   width: 300px; min-width: 220px; max-width: 70vw; }
+.ws-space { flex: 1; min-height: 0; display: flex; flex-direction: column; }
+.ws-space[hidden] { display: none; }
+
+/* workspace bar: one button per space, pinned to the window's right edge */
+#wsBar { flex: 0 0 32px; display: flex; flex-direction: column; align-items: center;
+  gap: 6px; padding: 8px 6px 8px 0; }
+#wsBar button { width: 26px; height: 26px; display: grid; place-items: center;
+  background: var(--panel); border: 1px solid var(--raise); border-radius: 6px;
+  color: var(--dim); cursor: pointer; padding: 0; }
+#wsBar button:hover { color: var(--fg); border-color: var(--mid); }
+#wsBar button.on { color: var(--accent); border-color: var(--accent); }
+
+/* details space: current image's full metadata */
+#wsDetailsBody { flex: 1; overflow-y: auto; scrollbar-width: none; }
+#wsDetailsBody::-webkit-scrollbar { display: none; }
+.ws-head { margin-bottom: 10px; }
+.ws-name { font-size: 12px; overflow-wrap: anywhere; }
+.ws-sub { color: var(--dim); font-size: 11px; margin-top: 2px; }
 #anchorList { flex: 1; overflow-y: auto; display: flex; flex-direction: column;
   gap: 10px; scrollbar-width: none; }
 #anchorList::-webkit-scrollbar { display: none; }
@@ -106,6 +124,7 @@ main { display: flex; flex: 1; min-height: 0; }
   background: var(--panel); border: 1px solid var(--raise); border-radius: 8px;
   padding: 12px; }
 .card[data-vote="up"] { border-color: var(--green-dim); }
+.card.current { box-shadow: 0 0 0 1px var(--sky); }
 .card[data-favorite="1"] { box-shadow: 0 0 0 1px var(--orange); }
 
 /* image box: aspect-true, reserved before pixels land.
@@ -159,7 +178,10 @@ main { display: flex; flex: 1; min-height: 0; }
 .votebtn.down:hover, .votebtn.down.on { color: var(--red); border-color: var(--red); }
 .votebtn.up:hover, .votebtn.up.on { color: var(--green); border-color: var(--green); }
 .votebtn.favorite { color: rgba(255, 136, 0, .55); }
-.votebtn.favorite:hover, .votebtn.favorite.on { color: var(--orange); border-color: var(--orange); }
+.votebtn.favorite:hover { color: var(--orange); border-color: var(--orange); }
+/* favorited: the star itself fills in — no standing border (hover-only) */
+.votebtn.favorite.on { color: var(--orange); }
+.votebtn.favorite.on svg path:not([stroke="none"]) { fill: currentColor; }
 
 /* metadata row: props left, description right (grid halves, old metrics) */
 .pair { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-top: 6px; }
@@ -269,12 +291,12 @@ main { display: flex; flex: 1; min-height: 0; }
   align-items: center; padding: 8px 4px 2px; border-top: 1px solid var(--raise);
   margin-top: 6px; }
 .fgrouphead .gname { color: var(--fg); font-size: 12px; font-weight: 600; }
-#infoBody .props { font: 12px ui-monospace, monospace; color: var(--mid); }
-#infoBody .infosec { margin-top: 10px; }
-#infoBody .infotext { color: var(--mid) font-size: 12px; white-space: pre-wrap;
+.metabody .props { font: 12px ui-monospace, monospace; color: var(--mid); }
+.metabody .infosec { margin-top: 10px; }
+.metabody .infotext { color: var(--mid); font-size: 12px; white-space: pre-wrap;
   overflow-wrap: anywhere; }
-#infoBody .info-none { color: var(--dim); font-style: italic; }
-#infoBody .plabel { color: var(--dim); }
+.metabody .info-none { color: var(--dim); font-style: italic; }
+.metabody .plabel { color: var(--dim); }
 
 /* --- keys panel ------------------------------------------------------------- */
 #keysPanel { position: fixed; inset: 0; z-index: 80; background: rgba(0,0,0,.55); }

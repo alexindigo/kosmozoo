@@ -6,6 +6,8 @@ import { S, render, onRender } from "./state.mjs";
 import { api } from "./api.mjs";
 import { initLightbox } from "./lightbox.mjs";
 import { addAnchorFiles, initAnchorsPane, initInfoOverlay, initAnchorsWidth } from "./anchors.mjs";
+import { initWorkspace } from "./workspace.mjs";
+import { parseHash, syncRoute, stripHostPrefix, findByFile } from "./route.mjs";
 import { initRoi, setRoi } from "./roi.mjs";
 import { initClientPlugins } from "./plugins-client.mjs";
 import { axisStatus } from "./axes.mjs";
@@ -13,7 +15,7 @@ import { isVisible, initJudgment, toggleRevealThumbedDown, toggleHideUp, setDown
 import { chrome, initKeyDispatch, toggleMenu } from "./chrome.mjs";
 import { initKeysPanel, initKeysPanelDom, toggleKeysPanel } from "./keys-panel.mjs";
 import { initHostPicker, selectHost, initialHost } from "./hostpicker.mjs";
-import { initFeed, renderFeed, onScrollSafetyNet, cardAt, restoreScroll, resetFeed, eachCard, retryImage } from "./feed.mjs";
+import { initFeed, renderFeed, onScrollSafetyNet, cardAt, restoreToIndex, resetFeed, eachCard, retryImage, viewIndices } from "./feed.mjs";
 import { loadFieldsCfg, openFieldsOverlay, initFieldsOverlay } from "./fields.mjs";
 import { buildCard, savedSet } from "./card.mjs";
 import { initViews } from "./views.mjs";
@@ -251,6 +253,26 @@ onRender((s) => {
 
 // --- load candidates -------------------------------------------------------------
 
+// pasted links / back button: the hash is truth — adopt it, then center.
+// A filename the list doesn't have yet (fresh variations output) triggers
+// one refetch; if it's still absent the URL is kept, not overwritten.
+async function onHashChange() {
+  const r = parseHash();
+  if (!r) return;
+  if (r.host && r.host !== S.host) {
+    if (!S.hosts[r.host]) return;
+    S.currentFile = r.filename ?? null;
+    await selectHost(r.host); // loadCandidates re-centers from currentFile
+    return;
+  }
+  if (!r.filename) return;
+  S.currentFile = r.filename;
+  const idx = findByFile(r.filename);
+  if (idx >= 0) restoreToIndex(idx);
+  else await loadCandidates();
+  render();
+}
+
 async function loadCandidates() {
   if (!S.host) return;
   // a host switch must not leave the previous host's feed on screen:
@@ -286,9 +308,17 @@ async function loadCandidates() {
     }
     rebuildFeed();
     chrome.status.info(statusSummary());
-    const ui = await api.settings("core.ui").catch(() => ({}));
-    const y = ui[`scroll.${S.host}`];
-    if (y) restoreScroll(y);
+    // the URL is truth: re-center from it after every (re)fetch. Only a
+    // first visit with no hash at all invents a current image (top card).
+    if (!S.currentFile && !parseHash()?.filename) {
+      const first = viewIndices()[0];
+      if (first != null) {
+        S.currentFile = stripHostPrefix(S.host, S.images[first].filename);
+      }
+    }
+    const target = findByFile(S.currentFile);
+    if (target >= 0) restoreToIndex(target);
+    syncRoute();
     await pollMetadata();
     render(); // surfaces reflect the loaded host (picker label, axes, etc.)
   } catch (err) {
@@ -344,6 +374,7 @@ async function boot() {
   await initViews(); // shared per-image view store (feed zoom <-> lightbox)
   initHostPicker({ onSelect: loadCandidates });
   initAnchorsPane({ onOpen: openAnchor });
+  initWorkspace();
   initInfoOverlay();
   initFieldsOverlay({ onChanged: refreshAllCardMeta });
   registerCoreChrome();
@@ -363,14 +394,8 @@ async function boot() {
   });
   const col = $("candidatesCol");
   col.addEventListener("scroll", onScrollSafetyNet, { passive: true });
-  col.addEventListener("scroll", () => {
-    clearTimeout(boot._scrollSave);
-    boot._scrollSave = setTimeout(() => {
-      if (S.host && !S.filter) { // filtered views aren't the host list
-        api.setSettings("core.ui", { [`scroll.${S.host}`]: col.scrollTop }).catch(() => {});
-      }
-    }, 400);
-  }, { passive: true });
+  // position persists via the URL hash (current image), not a stored px —
+  // a px jump races the deep-link centering and clobbers it
   $("lbKeysBtn").addEventListener("click", (e) => { e.stopPropagation(); toggleKeysPanel(); });
 
   S.hosts = await api.hosts();
@@ -380,7 +405,12 @@ async function boot() {
   S.scraper = await api.scraper().catch(() => null);
   S.feedbackPath = (await api.settings("core").catch(() => ({})))?.feedbackPath ?? null;
   await initAnchorsWidth();
-  await selectHost(initialHost(S.hosts, ui.host)); // selects + loadCandidates via onSelect
+  // the URL hash outranks the stored host: /#host[#filename] is shareable state
+  const route = parseHash();
+  S.currentFile = route?.filename ?? null;
+  const host = route?.host && S.hosts[route.host] ? route.host : initialHost(S.hosts, ui.host);
+  await selectHost(host); // selects + loadCandidates via onSelect
+  window.addEventListener("hashchange", onHashChange);
 
   // scraper status chip + menu counter: poll every 2s
   setInterval(async () => {
