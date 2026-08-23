@@ -23,7 +23,7 @@ import { parsePngTextChunks, firstNode, scalarInput } from "../../src/extractor.
 //   ownerLabel  — user-facing label prefix; "" for KSampler-carrier,
 //                 "<lowercased-node>" otherwise (e.g. "scheduler", "cfgguider").
 
-function probeDenoise(nodes) {
+function probeDenoise(nodes /*, graph */) {
   const ks = nodes.find((n) => n.class_type === "KSampler");
   if (ks) return { node: ks, key: "denoise", ownerLabel: "" };
   const sched = firstNode(nodes, "scheduler");
@@ -33,7 +33,7 @@ function probeDenoise(nodes) {
   return { node: null };
 }
 
-function probeCfg(nodes) {
+function probeCfg(nodes /*, graph */) {
   const ks = nodes.find((n) => n.class_type === "KSampler");
   if (ks) return { node: ks, key: "cfg", ownerLabel: "" };
   const guider = firstNode(nodes, "cfgguider");
@@ -43,7 +43,7 @@ function probeCfg(nodes) {
   return { node: null };
 }
 
-function probeSteps(nodes) {
+function probeSteps(nodes /*, graph */) {
   const ks = nodes.find((n) => n.class_type === "KSampler");
   if (ks) return { node: ks, key: "steps", ownerLabel: "" };
   const sched = firstNode(nodes, "scheduler");
@@ -53,7 +53,7 @@ function probeSteps(nodes) {
   return { node: null };
 }
 
-function probeSeed(nodes) {
+function probeSeed(nodes, graph) {
   const ks = nodes.find((n) => n.class_type === "KSampler");
   if (ks && typeof ks.inputs?.seed === "number") {
     return { node: ks, key: "seed", ownerLabel: "" };
@@ -68,11 +68,25 @@ function probeSeed(nodes) {
   if (s && typeof s.inputs?.seed === "number") {
     return { node: s, key: "seed", ownerLabel: "seed" };
   }
+  // Fallback: KSampler.seed links to a widget-only seed node (DomovoySeed,
+  // rgthree Seed variants, etc.) whose current value isn't exposed as a
+  // scalar in the API graph. We can still WRITE to it by setting
+  // `inputs.seed` on that node — ComfyUI treats unknown input keys as
+  // widget overrides for many custom nodes. Current value stays null so
+  // the row shows enabled but without a marker.
+  if (ks && Array.isArray(ks.inputs?.seed) && ks.inputs.seed.length && graph) {
+    const linkedId = String(ks.inputs.seed[0]);
+    const target = graph[linkedId];
+    if (target) {
+      const label = String(target.class_type ?? "seed").toLowerCase();
+      return { node: target, key: "seed", ownerLabel: label, writeOnly: true };
+    }
+  }
   return { node: null };
 }
 
 // ipa_weight: potentially many IPAdapter nodes, all get the same value.
-function probeIpaWeight(nodes) {
+function probeIpaWeight(nodes /*, graph */) {
   const carriers = [];
   for (const n of nodes) {
     if (!String(n.class_type ?? "").toLowerCase().includes("ipadapter")) continue;
@@ -93,19 +107,25 @@ const PARAM_PROBES = {
 
 // --- per-image inspection ----------------------------------------------------
 
-// Return { <param>: { label, current } | null } for every param, given the
-// graph parsed from the image's PNG. `label` is the user-facing template key
-// (e.g. "denoise" for KSampler-carriers, "scheduler:denoise" otherwise).
+// Return { <param>: { label, current, writeOnly? } | null } for every
+// param, given the graph parsed from the image's PNG. `label` is the
+// user-facing template key (e.g. "denoise" for KSampler-carriers,
+// "scheduler:denoise" otherwise). `writeOnly: true` marks params whose
+// target node is present but doesn't expose a readable current value
+// (widget-only custom seed nodes).
 function inspectGraph(graph) {
   const nodes = Object.values(graph);
   const out = {};
   for (const [param, probe] of Object.entries(PARAM_PROBES)) {
-    const r = probe(nodes);
+    const r = probe(nodes, graph);
     if (!r.node) { out[param] = null; continue; }
     const node = Array.isArray(r.node) ? r.node[0] : r.node;
-    const current = node.inputs?.[r.key] ?? null;
+    const rawCurrent = node.inputs?.[r.key];
+    const current = typeof rawCurrent === "number" ? rawCurrent : null;
     const label = r.ownerLabel ? `${r.ownerLabel}:${param}` : param;
-    out[param] = { label, current };
+    const info = { label, current };
+    if (r.writeOnly) info.writeOnly = true;
+    out[param] = info;
   }
   return out;
 }
@@ -119,7 +139,7 @@ function mutateGraph(graph, permutation) {
   for (const [param, value] of Object.entries(permutation)) {
     const probe = PARAM_PROBES[param];
     if (!probe) continue;
-    const r = probe(nodes);
+    const r = probe(nodes, clone);
     if (!r.node) continue;
     const targets = Array.isArray(r.node) ? r.node : [r.node];
     // integer-typed params round; floats pass through

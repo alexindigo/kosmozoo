@@ -244,6 +244,10 @@ function openPanel(cardEl, image) {
         if (!info) { row.setAbsent(); continue; }
         if (info.label) row.setLabel(info.label);
         if (info.current != null) row.setCurrent(info.current);
+        // writeOnly: target node exists but current value isn't readable
+        // (widget-only custom seed nodes like DomovoySeed). The row stays
+        // enabled — we can still SET a value — but the marker is hidden.
+        if (info.writeOnly) row.setWriteOnly?.();
       }
     })
     .catch(() => {});
@@ -527,6 +531,16 @@ function buildSliderRow(param, current, defaults, onChange, templateTarget) {
     marker.style.display = "none";
     curLabel.style.display = "none";
   }
+  // The target node is present but its current value isn't readable
+  // (widget-only custom node such as DomovoySeed). Row stays enabled —
+  // varying still works, we just can't show the current-value marker.
+  function setWriteOnly() {
+    el.classList.add("vz-writeonly");
+    marker.style.display = "none";
+    curLabel.style.display = "none";
+    label.title = "click to insert {" + placeholderKey +
+      "} into prefix/suffix (current value not exposed by this graph)";
+  }
 
-  return { el, cb, minRange, maxRange, setLabel, setCurrent, setAbsent };
+  return { el, cb, minRange, maxRange, setLabel, setCurrent, setAbsent, setWriteOnly };
 }
