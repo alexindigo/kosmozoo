@@ -21,6 +21,15 @@ export const savedSet = new Set();
 const savedFlashes = new Map();
 
 export function buildCard(image, imgIdx, { onOpen, onErrorClick } = {}) {
+  // Shared state: the buttons' click handlers need handle.setJudgment,
+  // but imageCard only creates .btnwrap when titleActions.length > 0.
+  // The handlers reference this shared object, which gets the handle's
+  // setJudgment assigned after the card is built.
+  const cardState = { setJudgment: null };
+
+  // Build the action buttons (they reference cardState for setJudgment)
+  const actions = buildActions(image, cardState);
+
   const handle = imageCard({
     alt: image.filename,
     ar: aspectFromMeta(image.meta),
@@ -29,13 +38,31 @@ export function buildCard(image, imgIdx, { onOpen, onErrorClick } = {}) {
     onOpen,
     onErrorClick,
     title: buildTitle(image),
-    titleActions: buildActions(image),
+    titleActions: actions,
     footer: [buildNotesRow(image, imgIdx), buildMetaRow(image)],
   });
   handle.el.dataset.idx = imgIdx;
   handle.el.dataset.name = image.filename;
-  if (image.judgment?.vote) handle.el.dataset.vote = image.judgment.vote;
-  if (image.judgment?.favorite) handle.el.dataset.favorite = "1";
+
+  // Judgment visual state — ONE place, derived from image.judgment at call
+  // time. Never captured from a stale closure. Called at creation and after
+  // every judgment mutation. No render() is ever called for judgment changes.
+  handle.setJudgment = (judgment) => {
+    const j = judgment ?? {};
+    // data attributes drive the card's border colors via CSS
+    if (j.vote) handle.el.dataset.vote = j.vote;
+    else delete handle.el.dataset.vote;
+    if (j.favorite) handle.el.dataset.favorite = "1";
+    else delete handle.el.dataset.favorite;
+    // button .on classes
+    const btn = (cls) => handle.el.querySelector(`.votebtn.${cls}`);
+    btn("down")?.classList.toggle("on", j.vote === "down");
+    btn("up")?.classList.toggle("on", j.vote === "up");
+    btn("favorite")?.classList.toggle("on", !!j.favorite);
+  };
+
+  // Wire the shared state so the buttons can call handle.setJudgment
+  cardState.setJudgment = handle.setJudgment;
 
   // instance-level meta updates: strip + aspect are the card's; props/desc
   // are this instance's own footer content
@@ -46,6 +73,9 @@ export function buildCard(image, imgIdx, { onOpen, onErrorClick } = {}) {
     if (meta?.width && meta?.height) handle.setAr(`${meta.width} / ${meta.height}`);
     fillCardMeta(propsEl, descEl, meta);
   };
+
+  // Initial judgment state
+  handle.setJudgment(image.judgment);
   return handle;
 }
 
@@ -76,40 +106,40 @@ function buildTitle(image) {
 }
 
 // --- injected: action row (saved flash + down/up/favorite/save) ----------------
+//
+// The card's visual state is derived from image.judgment in ONE place:
+// handle.setJudgment(). Click handlers mutate the judgment then call it.
+// No render() is ever called for judgment changes — the card updates its
+// own DOM in place, so e.currentTarget is never a stale reference.
 
-function buildActions(image) {
+function buildActions(image, cardState) {
   const saved = document.createElement("span");
   saved.className = "saved";
   saved.textContent = "Feedback saved";
   savedFlashes.set(image.id, saved);
 
-  const j = image.judgment ?? {};
   const actions = [
     actionButton("variations", iconSvg("wand", 16), "generate variations", (e) => {
       toggleVariations(e.currentTarget.closest(".card"), image);
     }),
     actionButton("down", iconSvg("thumb-down"), "thumbs down — hides (Unhide up top restores)", async () => {
       await setVote(image, "down");
-      card_remove(image);
-    }, j.vote === "down"),
-    actionButton("up", iconSvg("thumb-up"), "thumbs up", async (e) => {
-      await setVote(image, j.vote === "up" ? null : "up");
-      e.currentTarget.classList.toggle("on", image.judgment?.vote === "up");
-    }, j.vote === "up"),
-    actionButton("favorite", iconSvg("star"), "favorite — interesting in itself, not project fitness", async (e) => {
+      cardState.setJudgment?.(image.judgment);
+    }, false),
+    actionButton("up", iconSvg("thumb-up"), "thumbs up", async () => {
+      await setVote(image, image.judgment?.vote === "up" ? null : "up");
+      cardState.setJudgment?.(image.judgment);
+    }, false),
+    actionButton("favorite", iconSvg("star"), "favorite — interesting in itself, not project fitness", async () => {
       await toggleFavorite(image);
-      // No render() in toggleFavorite, so this button stays in the DOM and
-      // the .on class lands on the live element.
-      e.currentTarget.classList.toggle("on", !!image.judgment?.favorite);
-    }, !!j.favorite),
+      cardState.setJudgment?.(image.judgment);
+    }, false),
   ];
   actions.unshift(saved);
 
   const save = document.createElement("button");
   save.className = "savebtn";
   const paint = () => {
-    // Save button greys when either the raw filename or the host-prefixed
-    // form is on disk — legacy saves lack the prefix, new saves have it.
     const has = savedSet.has(image.filename)
       || savedSet.has(hostPrefixed(image.host, image.filename));
     save.textContent = has ? "saved" : "save";
@@ -118,9 +148,6 @@ function buildActions(image) {
   paint();
   save.addEventListener("click", (e) => {
     e.stopPropagation();
-    // Downloads land in ~/Downloads with a `<host>#<filename>` name so
-    // files from different hosts don't collide when they share a name.
-    // Skip the prefix if the filename already carries it.
     const downloadName = hostPrefixed(image.host, image.filename);
     const a = document.createElement("a");
     a.href = api.imageBytesUrl(image.id);
