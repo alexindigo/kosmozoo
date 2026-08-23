@@ -309,18 +309,20 @@ function openPanel(cardEl, image) {
   const errEl = document.createElement("div");
   errEl.className = "vz-error";
 
+  // Spacer pushes Run + error to the BOTTOM of the right column, so the
+  // primary action sits opposite the tallest content on the left.
+  const rightSpacer = document.createElement("div");
+  rightSpacer.className = "vz-rspacer";
+
   right.append(
     countLabel, countEl,
     prefixLabel, prefixInput,
     suffixLabel, suffixInput,
+    rightSpacer,
+    runBtn, errEl,
   );
 
   body.append(left, divider, right);
-
-  // Footer spans the modal width — Run centered, error text below.
-  const footer = document.createElement("div");
-  footer.className = "vz-footer";
-  footer.append(runBtn, errEl);
 
   const closeBtn = document.createElement("button");
   closeBtn.className = "vz-close";
@@ -328,7 +330,7 @@ function openPanel(cardEl, image) {
   closeBtn.title = "close (Esc)";
   closeBtn.addEventListener("click", closeModal);
 
-  panel.append(title, body, footer, closeBtn);
+  panel.append(title, body, closeBtn);
   root.appendChild(panel);
   document.body.appendChild(root);
 

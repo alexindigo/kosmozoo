@@ -443,9 +443,12 @@ main { display: flex; flex: 1; min-height: 0; }
 /* vertical divider */
 .vz-divider { width: 1px; background: var(--dim); flex: 0 0 auto; }
 
-/* right column */
+/* right column — stretches full body height so the spacer can shove Run
+   to the bottom of the column. */
 .vz-right { width: 150px; display: flex; flex-direction: column;
-  justify-content: flex-start; gap: 4px; flex: 0 0 auto; }
+  justify-content: flex-start; gap: 4px; flex: 0 0 auto;
+  align-self: stretch; }
+.vz-rspacer { flex: 1 1 auto; min-height: 8px; }
 .vz-rlabel { color: var(--fg); font-size: 12px; font-weight: 400;
   margin-top: 10px; }
 .vz-rlabel:first-child { margin-top: 0; }
@@ -461,17 +464,15 @@ main { display: flex; flex: 1; min-height: 0; }
   font-size: 12px; margin-top: 2px;
   font-family: ui-monospace, monospace; }
 .vz-tinput:focus { outline: none; border-color: var(--accent); }
-/* Full-width footer: Run centered, error text below it. */
-.vz-footer { display: flex; flex-direction: column; align-items: stretch;
-  gap: 6px; margin-top: 18px; padding-top: 16px;
-  border-top: 1px solid var(--raise); }
+/* Run button — sky blue, sits at the bottom of the right column via the
+   spacer above it. Fills the column width for a solid primary-action target. */
 .vz-run { background: var(--sky); color: var(--black); border: none;
-  border-radius: 8px; padding: 12px 0; font-size: 15px; font-weight: 600;
-  cursor: pointer; align-self: center; min-width: 240px; }
+  border-radius: 8px; padding: 10px 0; font-size: 14px; font-weight: 600;
+  cursor: pointer; width: 100%; }
 .vz-run:hover { filter: brightness(1.1); box-shadow: 0 0 0 3px var(--sky-dim); }
 .vz-run:disabled { opacity: 0.5; cursor: default; }
-.vz-error { color: var(--red); font-size: 12px; min-height: 14px;
-  text-align: center; word-break: break-word; }
+.vz-error { color: var(--red); font-size: 11px; min-height: 14px;
+  margin-top: 6px; word-break: break-word; }
 .vz-error.vz-ok { color: var(--green); }
 .vz-close { position: absolute; top: 10px; right: 12px;
   background: none; border: none; color: var(--dim); cursor: pointer;
