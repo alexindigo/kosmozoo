@@ -105,9 +105,19 @@ main { display: flex; flex: 1; min-height: 0; }
 .card[data-vote="up"] { border-color: var(--green-dim); }
 .card[data-favorite="1"] { box-shadow: 0 0 0 1px var(--orange); }
 
-/* image box: aspect-true, reserved before pixels land */
-.imgwrap { position: relative; width: 100%; aspect-ratio: var(--ar, 1);
-  background: #0a0a0c; border-radius: 4px; overflow: hidden; }
+/* image box: aspect-true, reserved before pixels land.
+   The wrap uses aspect-ratio so its height stays reserved before pixels
+   land (no layout jump). A card-level max-height caps how tall it gets
+   so notes+meta stay above the fold; the wrap's max-width shrinks
+   proportionally so a square/tall image doesn't sit with black bars
+   left/right when its natural height would exceed the cap. --ar-num/
+   --ar-den default to a 1:1 fallback. */
+.imgwrap { position: relative;
+  width: 100%; aspect-ratio: var(--ar-num, 1) / var(--ar-den, 1);
+  max-height: 60vh;
+  max-width: calc(60vh * var(--ar-num, 1) / var(--ar-den, 1));
+  background: #0a0a0c; border-radius: 4px; overflow: hidden;
+  margin: 0 auto; }
 .imgwrap img { width: 100%; height: 100%; object-fit: contain; display: block;
   cursor: zoom-in; }
 .imgwrap.ic-empty img { cursor: default; }
