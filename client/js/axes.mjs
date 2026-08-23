@@ -9,7 +9,7 @@
 // split, difference (plugin). Alignment: independent / shared /
 // face-anchored (plugin, needs a configured detector service).
 
-import { S, render } from "./state.mjs";
+import { state, render } from "./state.mjs";
 import { compositionModesList } from "./plugins-client.mjs";
 
 // What each axis value needs to be live. need.ok is computed at cycle time;
@@ -17,10 +17,10 @@ import { compositionModesList } from "./plugins-client.mjs";
 function alignmentNeeds(id) {
   if (id !== "face-anchored") return [];
   return [{
-    ok: S.detector?.state === "ready",
-    reason: S.detector?.state === "unconfigured"
+    ok: state.detector?.state === "ready",
+    reason: state.detector?.state === "unconfigured"
       ? "no detector service configured (plugins.detector.serviceUrl)"
-      : `detector ${S.detector?.state ?? "absent"}`,
+      : `detector ${state.detector?.state ?? "absent"}`,
   }];
 }
 
@@ -50,24 +50,24 @@ export function axisAvailable(axis, id) {
 // Returns the new value.
 export function cycleAxis(axis, dir = 1) {
   const values = AXES[axis];
-  let cur = S.axes[axis];
+  let cur = state.axes[axis];
   let skippedReason = null;
   for (let step = 0; step < values.length; step++) {
     cur = values[(values.indexOf(cur) + dir + values.length) % values.length];
     const a = axisAvailable(axis, cur);
     if (a.ok) {
-      S.axes[axis] = cur;
-      S.axisReason = skippedReason; // remember what was skipped past
+      state.axes[axis] = cur;
+      state.axisReason = skippedReason; // remember what was skipped past
       render();
       return cur;
     }
     skippedReason = `${cur}: ${a.reason}`;
   }
-  return S.axes[axis]; // nothing available changed — leave as-is
+  return state.axes[axis]; // nothing available changed — leave as-is
 }
 
 export function axisStatus() {
-  const parts = [`align:${S.axes.alignment}`, `comp:${S.axes.composition}`];
-  if (S.axisReason) parts.push(`(${S.axisReason})`);
+  const parts = [`align:${state.axes.alignment}`, `comp:${state.axes.composition}`];
+  if (state.axisReason) parts.push(`(${state.axisReason})`);
   return parts.join(" ");
 }

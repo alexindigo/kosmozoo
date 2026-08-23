@@ -6,14 +6,14 @@
 // setting. "Show thumbed-down" is a temporary reveal — never a data deletion
 // (the outgoing code deleted every down-vote to achieve the same effect).
 
-import { S, render } from "./state.mjs";
+import { state, render } from "./state.mjs";
 import { api } from "./api.mjs";
 
 const COUPLING_KEY = "core.judgment";
 
 export async function initJudgment() {
   const ns = await api.settings(COUPLING_KEY).catch(() => ({}));
-  S.judgment = {
+  state.judgment = {
     downvoteHides: ns.downvoteHides ?? true,
     revealThumbedDown: false,   // temporary, session-only
     hideUp: false,              // session: hide thumbed-up (reload restores)
@@ -69,29 +69,29 @@ export function setNote(image, which, text) {
 // default (coupling exposed as a setting); the reveal is temporary. "Hide
 // thumbed-up" is a session filter — marks survive, reload restores.
 export function isVisible(image) {
-  if (S.judgment?.hideUp && image.judgment?.vote === "up") return false;
+  if (state.judgment?.hideUp && image.judgment?.vote === "up") return false;
   const down = image.judgment?.vote === "down";
   if (!down) return true;
-  if (!S.judgment?.downvoteHides) return true;
-  return !!S.judgment?.revealThumbedDown;
+  if (!state.judgment?.downvoteHides) return true;
+  return !!state.judgment?.revealThumbedDown;
 }
 
 // "Show thumbed-down" toggles a session flag — the votes are never touched.
 export function toggleRevealThumbedDown() {
-  S.judgment.revealThumbedDown = !S.judgment.revealThumbedDown;
+  state.judgment.revealThumbedDown = !state.judgment.revealThumbedDown;
   render();
-  return S.judgment.revealThumbedDown;
+  return state.judgment.revealThumbedDown;
 }
 
 // "Hide thumbed-up" — the session-only counterpart.
 export function toggleHideUp() {
-  S.judgment.hideUp = !S.judgment.hideUp;
+  state.judgment.hideUp = !state.judgment.hideUp;
   render();
-  return S.judgment.hideUp;
+  return state.judgment.hideUp;
 }
 
 export async function setDownvoteHides(on) {
-  S.judgment.downvoteHides = on;
+  state.judgment.downvoteHides = on;
   await api.setSettings(COUPLING_KEY, { downvoteHides: on }).catch(() => {});
   render();
 }

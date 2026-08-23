@@ -15,7 +15,7 @@ async function main() {
     await cdp.send("Emulation.setDeviceMetricsOverride",
       { width: 1400, height: 900, deviceScaleFactor: 1, mobile: false });
     await cdp.goto(URL + "/");
-    await cdp.poll(`window.__kz && window.__kz.S && window.__kz.S.images.length > 0`, 20000);
+    await cdp.poll(`window.kosmozoo && window.kosmozoo.state && window.kosmozoo.state.images.length > 0`, 20000);
 
     // Switch to the requested host
     await cdp.evaluate(`(async () => {
@@ -26,11 +26,11 @@ async function main() {
       if (row) row.click();
     })()`);
     await sleep(2000);
-    await cdp.poll(`window.__kz.S.host === ${JSON.stringify(HOST)}`, 5000);
+    await cdp.poll(`window.kosmozoo.state.host === ${JSON.stringify(HOST)}`, 5000);
 
     // Find the card matching the requested filename
     const foundIdx = await cdp.evaluate(`(() => {
-      const idx = window.__kz.S.images.findIndex(i => i.filename === ${JSON.stringify(FILE)});
+      const idx = window.kosmozoo.state.images.findIndex(i => i.filename === ${JSON.stringify(FILE)});
       return idx;
     })()`);
     if (foundIdx < 0) {

@@ -4,7 +4,7 @@
 
 import { assert, assertEquals, assertNotEquals } from "jsr:@std/assert";
 import { freshView, viewToPersisted, viewFromPersisted, transform, mapFrac, pivotScreen, panFrac } from "../client/js/geometry.mjs";
-import { S, render, onRender } from "../client/js/state.mjs";
+import { state, render, onRender } from "../client/js/state.mjs";
 
 const BOX = { w: 1000, h: 500 };
 
@@ -64,14 +64,14 @@ Deno.test("state: single render path — render() fans out to all surfaces", () 
 });
 
 Deno.test("state: lightbox carries a load-generation guard (harvest #1)", () => {
-  assertEquals(typeof S.lightbox.loadGen, "number");
-  const g = ++S.lightbox.loadGen;
-  assertNotEquals(g, S.lightbox.loadGen - 0 === g ? g + 1 : g); // monotonic
+  assertEquals(typeof state.lightbox.loadGen, "number");
+  const g = ++state.lightbox.loadGen;
+  assertNotEquals(g, state.lightbox.loadGen - 0 === g ? g + 1 : g); // monotonic
 });
 
 Deno.test("state: three axes declared, ROI manual-first (null until set)", () => {
-  assertEquals(S.axes.alignment, "shared");
-  assertEquals(S.axes.composition, "flicker"); // manual blink is the default mode
-  assertEquals(S.roi, null);
-  assert(Array.isArray(S.guides));
+  assertEquals(state.axes.alignment, "shared");
+  assertEquals(state.axes.composition, "flicker"); // manual blink is the default mode
+  assertEquals(state.roi, null);
+  assert(Array.isArray(state.guides));
 });

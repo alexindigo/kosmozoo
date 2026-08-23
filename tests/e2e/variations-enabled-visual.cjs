@@ -15,7 +15,7 @@ async function main() {
     await cdp.send("Emulation.setDeviceMetricsOverride",
       { width: 1400, height: 900, deviceScaleFactor: 1, mobile: false });
     await cdp.goto(URL + "/");
-    await cdp.poll(`window.__kz && window.__kz.S && window.__kz.S.images.length > 0`, 20000);
+    await cdp.poll(`window.kosmozoo && window.kosmozoo.state && window.kosmozoo.state.images.length > 0`, 20000);
 
     await cdp.evaluate(`(async () => {
       document.getElementById('hostBtn').click();
@@ -27,7 +27,7 @@ async function main() {
     await sleep(2000);
 
     const foundIdx = await cdp.evaluate(`(() => {
-      const idx = window.__kz.S.images.findIndex(i => i.filename === ${JSON.stringify(FILE)});
+      const idx = window.kosmozoo.state.images.findIndex(i => i.filename === ${JSON.stringify(FILE)});
       return idx;
     })()`);
     if (foundIdx < 0) { console.error("image not found"); return; }

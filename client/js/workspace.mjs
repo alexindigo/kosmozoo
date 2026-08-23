@@ -8,7 +8,7 @@
 // (route.mjs). Scroll is a writer of the current image (user-driven);
 // everything else only reads it.
 
-import { S, onRender } from "./state.mjs";
+import { state, onRender } from "./state.mjs";
 import { buildMetaBody } from "./fields.mjs";
 import { detailsImage, setCurrentFile, stripHostPrefix } from "./route.mjs";
 
@@ -16,15 +16,15 @@ const LS_SPACE = "kosmozoo.workspace.v1";
 
 export function initWorkspace() {
   try {
-    if (localStorage.getItem(LS_SPACE) === "anchors") S.workspace = "anchors";
+    if (localStorage.getItem(LS_SPACE) === "anchors") state.workspace = "anchors";
   } catch { /* private mode: session-only */ }
 
   const bar = document.getElementById("wsBar");
   for (const btn of bar.querySelectorAll("button[data-space]")) {
     btn.addEventListener("click", () => {
-      if (S.workspace === btn.dataset.space) return;
-      S.workspace = btn.dataset.space;
-      try { localStorage.setItem(LS_SPACE, S.workspace); } catch { /* ignore */ }
+      if (state.workspace === btn.dataset.space) return;
+      state.workspace = btn.dataset.space;
+      try { localStorage.setItem(LS_SPACE, state.workspace); } catch { /* ignore */ }
       applySpace();
     });
   }
@@ -37,7 +37,7 @@ export function initWorkspace() {
     if (raf) return;
     raf = requestAnimationFrame(() => {
       raf = 0;
-      if (S.lightbox.open) return;
+      if (state.lightbox.open) return;
       const file = topCardFile(col);
       if (file) setCurrentFile(file);
     });
@@ -45,11 +45,11 @@ export function initWorkspace() {
 }
 
 function applySpace() {
-  document.getElementById("wsDetails").hidden = S.workspace !== "details";
-  document.getElementById("wsAnchors").hidden = S.workspace !== "anchors";
-  document.getElementById("wsBtnDetails").classList.toggle("on", S.workspace === "details");
-  document.getElementById("wsBtnAnchors").classList.toggle("on", S.workspace === "anchors");
-  if (S.workspace === "details") renderDetails();
+  document.getElementById("wsDetails").hidden = state.workspace !== "details";
+  document.getElementById("wsAnchors").hidden = state.workspace !== "anchors";
+  document.getElementById("wsBtnDetails").classList.toggle("on", state.workspace === "details");
+  document.getElementById("wsBtnAnchors").classList.toggle("on", state.workspace === "anchors");
+  if (state.workspace === "details") renderDetails();
 }
 
 // the last card whose top crossed the feed's vertical midpoint
@@ -58,8 +58,8 @@ function topCardFile(col) {
   let file = null;
   for (const el of col.querySelectorAll(".card[data-idx]")) {
     if (el.getBoundingClientRect().top > mid) break;
-    const img = S.images[Number(el.dataset.idx)];
-    if (img) file = stripHostPrefix(S.host, img.filename);
+    const img = state.images[Number(el.dataset.idx)];
+    if (img) file = stripHostPrefix(state.host, img.filename);
   }
   return file;
 }
@@ -67,10 +67,10 @@ function topCardFile(col) {
 // sky-blue ring on the card the URL names (hidden/absent → no ring, URL kept)
 function markCurrent() {
   for (const el of document.querySelectorAll(".card.current")) el.classList.remove("current");
-  if (!S.currentFile) return;
+  if (!state.currentFile) return;
   for (const el of document.querySelectorAll(".card[data-idx][data-name]")) {
-    const img = S.images[Number(el.dataset.idx)];
-    if (img && stripHostPrefix(S.host, img.filename) === S.currentFile) {
+    const img = state.images[Number(el.dataset.idx)];
+    if (img && stripHostPrefix(state.host, img.filename) === state.currentFile) {
       el.classList.add("current");
       return;
     }

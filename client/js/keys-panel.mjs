@@ -3,7 +3,7 @@
 // listed with its effective binding; click a binding to recapture it;
 // overrides persist in settings core.keys.
 
-import { S, render, onRender } from "./state.mjs";
+import { state, render, onRender } from "./state.mjs";
 import { api } from "./api.mjs";
 import {
   chrome, actionsList, rebind, resetKey, resetAllKeys,
@@ -13,22 +13,22 @@ import {
 const $ = (id) => document.getElementById(id);
 
 export function toggleKeysPanel() {
-  S.keysPanelOpen = !S.keysPanelOpen;
-  S.capturing = null;
+  state.keysPanelOpen = !state.keysPanelOpen;
+  state.capturing = null;
   render();
 }
 
 export async function initKeysPanel() {
   chrome.bind("app.keys", "?", () => toggleKeysPanel(), { desc: "actions & keys panel", ctx: "global" });
   chrome.bind("keys.close", "Escape", () => {
-    if (S.keysPanelOpen && !S.capturing) { S.keysPanelOpen = false; render(); }
-  }, { when: () => S.keysPanelOpen, desc: "close panel", ctx: "keys" });
+    if (state.keysPanelOpen && !state.capturing) { state.keysPanelOpen = false; render(); }
+  }, { when: () => state.keysPanelOpen, desc: "close panel", ctx: "keys" });
 
   setCaptureHook((e) => {
-    const id = S.capturing;
+    const id = state.capturing;
     if (!id) return;
     if (e.key === "Escape" && !e.ctrlKey && !e.altKey && !e.shiftKey && !e.metaKey) {
-      S.capturing = null; // plain Escape cancels capture
+      state.capturing = null; // plain Escape cancels capture
       render();
       return;
     }
@@ -40,7 +40,7 @@ export async function initKeysPanel() {
       api.setSettings("core.keys", { [id]: combo }).catch(() => {});
       chrome.status.info(`${id} → ${combo}`);
     }
-    S.capturing = null;
+    state.capturing = null;
     render();
   });
 
@@ -50,7 +50,7 @@ export async function initKeysPanel() {
 
 export function initKeysPanelDom() {
   $("keysSearch").addEventListener("input", (e) => {
-    S.keysFilter = e.target.value;
+    state.keysFilter = e.target.value;
     render();
   });
   $("keysReset").addEventListener("click", async () => {
@@ -71,12 +71,12 @@ onRender(() => {
   if (typeof document === "undefined") return;
   const panel = $("keysPanel");
   if (!panel) return;
-  panel.hidden = !S.keysPanelOpen;
-  if (!S.keysPanelOpen) return;
+  panel.hidden = !state.keysPanelOpen;
+  if (!state.keysPanelOpen) return;
 
   const list = $("keysList");
   list.innerHTML = "";
-  const q = (S.keysFilter ?? "").toLowerCase();
+  const q = (state.keysFilter ?? "").toLowerCase();
   for (const a of actionsList()) {
     if (q && !`${a.desc} ${a.id} ${a.ctx}`.toLowerCase().includes(q)) continue;
     const row = document.createElement("div");
@@ -90,11 +90,11 @@ onRender(() => {
     const kbd = document.createElement("button");
     kbd.className = "kbd" + (a.overridden ? " overridden" : "");
     kbd.dataset.action = a.id;
-    kbd.textContent = S.capturing === a.id ? "press keys…" : a.key;
+    kbd.textContent = state.capturing === a.id ? "press keys…" : a.key;
     kbd.title = a.overridden
       ? `default: ${a.defaultKey} — click to rebind, right-click resets`
       : "click to rebind";
-    kbd.addEventListener("click", () => { S.capturing = a.id; render(); });
+    kbd.addEventListener("click", () => { state.capturing = a.id; render(); });
     kbd.addEventListener("contextmenu", (e) => {
       e.preventDefault();
       resetKey(a.id);

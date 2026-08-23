@@ -7,7 +7,7 @@
 //   #3 hold the outgoing frame until the incoming image has loaded
 //   #4 derived state (face-aligned view) never persists over its source
 
-import { S, render } from "./state.mjs";
+import { state, render } from "./state.mjs";
 import { api } from "./api.mjs";
 import { freshView, transform, viewToPersisted, viewFromPersisted } from "./geometry.mjs";
 import { cycleAxis } from "./axes.mjs";
@@ -30,23 +30,23 @@ export async function initLightbox() {
     const plugins = await api.plugins();
     if (plugins.some((p) => p.name === "detector")) {
       const r = await fetch("/api/plugins/detector/status");
-      S.detector = await r.json();
+      state.detector = await r.json();
     }
   } catch {
-    S.detector = { state: "absent" };
+    state.detector = { state: "absent" };
   }
 }
 
 function lightboxCandidate() {
-  return S.images[S.lightbox.index] ?? null;
+  return state.images[state.lightbox.index] ?? null;
 }
 
 function anchorImage() {
-  return S.anchors[S.lightbox.anchorIndex ?? 0] ?? null;
+  return state.anchors[state.lightbox.anchorIndex ?? 0] ?? null;
 }
 
 function activeKey() {
-  if (S.lightbox.col === "anchor") {
+  if (state.lightbox.col === "anchor") {
     const a = anchorImage();
     return a ? `anchor:${a.name}` : null;
   }
@@ -55,7 +55,7 @@ function activeKey() {
 }
 
 function activeSrc() {
-  if (S.lightbox.col === "anchor") {
+  if (state.lightbox.col === "anchor") {
     return anchorImage()?.src ?? null;
   }
   const img = lightboxCandidate();
@@ -69,7 +69,7 @@ function activeSrc() {
 async function writeBack() {
   const key = activeKey();
   if (!key) return;
-  setView(key, viewToPersisted(S.lightbox.view)); // debounced inside views.mjs
+  setView(key, viewToPersisted(state.lightbox.view)); // debounced inside views.mjs
 }
 
 function readBack() {
@@ -77,18 +77,18 @@ function readBack() {
   const stored = key ? getView(key) : null;
   // harvest #4: read from the persisted *source*; derived (face-aligned)
   // views are recomputed, never persisted over the source.
-  S.lightbox.view = viewFromPersisted(stored) ?? freshView();
+  state.lightbox.view = viewFromPersisted(stored) ?? freshView();
 }
 
 // Shared-view axis: the candidate/anchor pair shares one registration when
 // alignment is "shared" — view carries over unchanged across a column switch
 // (blink mechanism #1). Independent: each column keeps its own.
 async function switchColumn() {
-  const shared = S.axes.alignment !== "independent";
+  const shared = state.axes.alignment !== "independent";
   if (!shared) await writeBack();
-  S.lightbox.col = S.lightbox.col === "candidate" ? "anchor" : "candidate";
+  state.lightbox.col = state.lightbox.col === "candidate" ? "anchor" : "candidate";
   if (!shared) readBack();
-  // shared: leave S.lightbox.view untouched — identical registration.
+  // shared: leave state.lightbox.view untouched — identical registration.
   // lbShow loads the incoming column's src (generation-guarded), applies the
   // view, and lets the composition mode decide visibility.
   await lbShow();
@@ -98,12 +98,12 @@ async function switchColumn() {
 // until the incoming image has loaded (no flash during the swap).
 export async function lbShow() {
   const lb = $("lightbox");
-  const gen = ++S.lightbox.loadGen;
+  const gen = ++state.lightbox.loadGen;
   const src = activeSrc();
   if (!src) { lb.hidden = true; return; }
   lb.hidden = false;
 
-  const el = S.lightbox.col === "anchor" ? $("lbAnchor") : $("lbCandidate");
+  const el = state.lightbox.col === "anchor" ? $("lbAnchor") : $("lbCandidate");
 
   // Preload off-DOM; only swap once decoded (cover the swap). Slow hosts get
   // a loading chip rather than a black screen.
@@ -116,9 +116,9 @@ export async function lbShow() {
     // keep showing the outgoing frame on failure
   }
   chrome.status.clear("lb-load");
-  if (gen !== S.lightbox.loadGen) return; // a newer navigation superseded us
+  if (gen !== state.lightbox.loadGen) return; // a newer navigation superseded us
   if (el.dataset.cur !== src) { el.src = src; el.dataset.cur = src; }
-  el.style.transform = transform(S.lightbox.view, currentBox(img));
+  el.style.transform = transform(state.lightbox.view, currentBox(img));
   await applyComp(); // visibility is the composition mode's business
   render();
   syncRoute(); // user-driven navigation names the shown image in the URL
@@ -135,12 +135,12 @@ function currentBox(img) {
 // c/a cycle the composition/alignment axes (keys are the primary input);
 // r frames the ROI.
 async function onKey(e) {
-  if (!S.lightbox.open) return;
-  if (S.keysPanelOpen || S.capturing) return; // the keys panel outranks
+  if (!state.lightbox.open) return;
+  if (state.keysPanelOpen || state.capturing) return; // the keys panel outranks
   switch (e.key) {
     case "ArrowLeft":
     case "ArrowRight":
-      if (S.anchors.length) { e.preventDefault(); await switchColumn(); }
+      if (state.anchors.length) { e.preventDefault(); await switchColumn(); }
       break;
     case "ArrowUp":
       e.preventDefault(); await step(-1); break;
@@ -164,7 +164,7 @@ async function onKey(e) {
       break;
     case "r":
       e.preventDefault();
-      if (S.roi) { S.lightbox.view = zoomToRoi(S.lightbox.view); applyView(); }
+      if (state.roi) { state.lightbox.view = zoomToRoi(state.lightbox.view); applyView(); }
       break;
     case "Escape":
       e.preventDefault(); await close(); break;
@@ -173,16 +173,16 @@ async function onKey(e) {
 
 // Apply the current view transform to the visible column's image.
 function applyView() {
-  const el = S.lightbox.col === "anchor" ? $("lbAnchor") : $("lbCandidate");
+  const el = state.lightbox.col === "anchor" ? $("lbAnchor") : $("lbCandidate");
   if (el?.src) {
-    el.style.transform = transform(S.lightbox.view, currentBox(el));
+    el.style.transform = transform(state.lightbox.view, currentBox(el));
   }
 }
 
 // Composition modes composite the pair; flicker (default) shows one column.
 async function applyComp() {
   const cand = $("lbCandidate"), anch = $("lbAnchor");
-  const mode = S.axes.composition;
+  const mode = state.axes.composition;
   const candImg = lightboxCandidate();
   const anchImg = anchorImage();
   const candSrc = candImg ? api.imageBytesUrl(candImg.id) : null;
@@ -191,8 +191,8 @@ async function applyComp() {
     // one column visible — blink territory; src handled by lbShow
     cand.style.mixBlendMode = "";
     cand.style.clipPath = "none";
-    cand.style.opacity = S.lightbox.col === "candidate" ? "1" : "0";
-    anch.style.opacity = S.lightbox.col === "anchor" ? "1" : "0";
+    cand.style.opacity = state.lightbox.col === "candidate" ? "1" : "0";
+    anch.style.opacity = state.lightbox.col === "anchor" ? "1" : "0";
     return;
   }
   if (!anchSrc) return; // composite modes need an anchor
@@ -201,7 +201,7 @@ async function applyComp() {
   if (candSrc && cand.dataset.cur !== candSrc) { cand.src = candSrc; cand.dataset.cur = candSrc; }
   anch.style.opacity = "1";
   cand.style.opacity = "1";
-  anch.style.transform = transform(S.lightbox.view, currentBox(anch));
+  anch.style.transform = transform(state.lightbox.view, currentBox(anch));
   if (mode === "blend") {
     cand.style.mixBlendMode = "";
     cand.style.clipPath = "none";
@@ -220,11 +220,11 @@ async function applyComp() {
 // follows the keyboard; prefetch warms the direction of travel.
 async function step(dir) {
   await writeBack();
-  const next = S.lightbox.index + dir;
-  if (next < 0 || next >= S.images.length) return;
-  S.lightbox.index = next;
-  S.lightbox.col = "candidate";
-  setCurrentFile(stripHostPrefix(S.host, S.images[next].filename));
+  const next = state.lightbox.index + dir;
+  if (next < 0 || next >= state.images.length) return;
+  state.lightbox.index = next;
+  state.lightbox.col = "candidate";
+  setCurrentFile(stripHostPrefix(state.host, state.images[next].filename));
   readBack();
   prefetchFrom(next, dir);
   applyWindow();
@@ -232,10 +232,10 @@ async function step(dir) {
 }
 
 export async function openAt(index) {
-  S.lightbox.open = true;
-  S.lightbox.index = index;
-  S.lightbox.col = "candidate";
-  setCurrentFile(stripHostPrefix(S.host, S.images[index].filename));
+  state.lightbox.open = true;
+  state.lightbox.index = index;
+  state.lightbox.col = "candidate";
+  setCurrentFile(stripHostPrefix(state.host, state.images[index].filename));
   readBack();
   await lbShow();
 }
@@ -243,9 +243,9 @@ export async function openAt(index) {
 // Clicking an anchor in the anchors column opens THAT anchor in the
 // lightbox (anchor column); blink from there compares against the feed.
 export async function openAnchor(anchorIdx) {
-  S.lightbox.open = true;
-  S.lightbox.col = "anchor";
-  S.lightbox.anchorIndex = anchorIdx;
+  state.lightbox.open = true;
+  state.lightbox.col = "anchor";
+  state.lightbox.anchorIndex = anchorIdx;
   readBack();
   await lbShow();
 }
@@ -253,10 +253,10 @@ export async function openAnchor(anchorIdx) {
 export async function close() {
   await writeBack();
   await flushViews(); // durability point: closing flushes pending view writes
-  S.lightbox.open = false;
+  state.lightbox.open = false;
   $("lightbox").hidden = true;
   render();
   syncRoute(); // back to the feed's current file
-  const idx = findByFile(S.currentFile);
+  const idx = findByFile(state.currentFile);
   if (idx >= 0) restoreToIndex(idx); // feed re-centers where browsing left off
 }

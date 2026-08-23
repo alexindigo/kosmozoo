@@ -1,5 +1,5 @@
 // client/js/route.mjs — the URL hash is the source of truth for the
-// current image; S.currentFile is its in-memory mirror, never the reverse.
+// current image; state.currentFile is its in-memory mirror, never the reverse.
 //
 //   /#<host>            current host selection
 //   /#<host>#<filename> host + current image (filename stripped of any
@@ -9,7 +9,7 @@
 // one writer (syncRoute). Internal events (refresh, votes, reloads) never
 // invent a current image: they re-center from what the URL already says.
 
-import { S } from "./state.mjs";
+import { state } from "./state.mjs";
 
 export function parseHash() {
   const h = (typeof location === "undefined" ? "" : location.hash).replace(/^#/, "");
@@ -35,39 +35,39 @@ export function matchesFile(image, host, file) {
 
 export function findByFile(file) {
   if (!file) return -1;
-  return S.images.findIndex((i) => matchesFile(i, S.host, file));
+  return state.images.findIndex((i) => matchesFile(i, state.host, file));
 }
 
 // the image the details space shows: lightbox image while open, else the
 // URL's current file resolved against the list (hidden images included —
 // the URL outranks visibility)
 export function detailsImage() {
-  if (S.lightbox.open) {
-    if (S.lightbox.col === "candidate") return S.images[S.lightbox.index] ?? null;
-    return S.anchors[S.lightbox.anchorIndex ?? 0] ?? null;
+  if (state.lightbox.open) {
+    if (state.lightbox.col === "candidate") return state.images[state.lightbox.index] ?? null;
+    return state.anchors[state.lightbox.anchorIndex ?? 0] ?? null;
   }
-  const idx = findByFile(S.currentFile);
-  return idx >= 0 ? S.images[idx] : null;
+  const idx = findByFile(state.currentFile);
+  return idx >= 0 ? state.images[idx] : null;
 }
 
 // the only hash writer. Reflects user-driven state (scroll, lightbox nav);
 // never called to "fix up" the URL after internal events.
 export function syncRoute() {
-  if (typeof location === "undefined" || !S.host) return;
-  let file = S.currentFile;
-  if (S.lightbox.open) {
+  if (typeof location === "undefined" || !state.host) return;
+  let file = state.currentFile;
+  if (state.lightbox.open) {
     // anchors have no host#filename address; candidates follow the nav
-    const img = S.lightbox.col === "candidate" ? S.images[S.lightbox.index] : null;
-    file = img ? stripHostPrefix(S.host, img.filename) : null;
+    const img = state.lightbox.col === "candidate" ? state.images[state.lightbox.index] : null;
+    file = img ? stripHostPrefix(state.host, img.filename) : null;
   }
-  const want = "#" + encodeURIComponent(S.host)
+  const want = "#" + encodeURIComponent(state.host)
     + (file ? "#" + encodeURIComponent(file) : "");
   if (location.hash !== want) history.replaceState(null, "", want);
 }
 
 // user-driven change of the current image (scroll, deep link): mirror + URL
 export function setCurrentFile(file) {
-  if (file === S.currentFile) return;
-  S.currentFile = file;
+  if (file === state.currentFile) return;
+  state.currentFile = file;
   syncRoute();
 }
