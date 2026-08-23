@@ -64,3 +64,10 @@ docker run --rm --network host -v "$WORK":/work -w /work \
   -e E2E_FAKE="http://127.0.0.1:$FAKE_PORT" \
   --entrypoint node "$PW_IMAGE" \
   /work/tests/e2e/variations.e2e.cjs
+
+# 5. /diff comparison view e2e
+docker run --rm --network host -v "$WORK":/work -w /work \
+  -e E2E_ENGINE="http://127.0.0.1:$ENGINE_PORT" \
+  -e E2E_FAKE="http://127.0.0.1:$FAKE_PORT" \
+  --entrypoint node "$PW_IMAGE" \
+  /work/tests/e2e/diff.e2e.cjs

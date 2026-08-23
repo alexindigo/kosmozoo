@@ -141,6 +141,7 @@ function currentBox(img) {
 // r frames the ROI.
 async function onKey(e) {
   if (!state.lightbox.open) return;
+  if (state.diff.open) return; // the diff view owns the keyboard
   if (state.keysPanelOpen || state.capturing) return; // the keys panel outranks
   switch (e.key) {
     case "ArrowLeft":

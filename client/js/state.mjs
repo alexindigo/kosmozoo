@@ -35,6 +35,11 @@ export const state = {
   workspace: "details", // right column space: 'details' | 'anchors', persisted
   // the current image lives ONLY in the URL (route.mjs) — no mirror here,
   // a second representation would be a drift surface
+  diff: {                 // the /diff comparison view (grows as we go)
+    open: false,
+    left: null,           // { source, file }
+    right: null,          // { source, file }
+  },
   filter: "",
   hostMenuOpen: false,
   menuOpen: false,

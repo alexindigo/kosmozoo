@@ -7,6 +7,7 @@ import { api } from "./api.mjs";
 import { initLightbox } from "./lightbox.mjs";
 import { addAnchorFiles, initAnchorsPane, initInfoOverlay, initAnchorsWidth } from "./anchors.mjs";
 import { initWorkspace } from "./workspace.mjs";
+import { initDiff, openDiff } from "./diff.mjs";
 import { parseUrl, writeFeedHash, stripHostPrefix, findByFile } from "./route.mjs";
 import { initRoi, setRoi } from "./roi.mjs";
 import { initClientPlugins } from "./plugins-client.mjs";
@@ -25,7 +26,7 @@ import { iconSvg } from "./icons.mjs";
 const $ = (id) => document.getElementById(id);
 
 // public namespace: e2e (and the console) drives the same state the keys do
-window.kosmozoo = { state, render, setRoi, addAnchorFiles, chrome };
+window.kosmozoo = { state, render, setRoi, addAnchorFiles, chrome, openDiff };
 
 // drag-and-drop anywhere drops anchors (local files, never uploaded)
 document.addEventListener("dragover", (e) => e.preventDefault());
@@ -258,7 +259,15 @@ onRender((s) => {
 // one refetch; if it's still absent the URL is kept, not overwritten.
 async function onUrlChange() {
   const r = parseUrl();
-  if (r.view === "diff") return; // the diff view owns /diff (commit 3)
+  if (r.view === "diff") {
+    openDiff(r.left, r.right); // back/forward into a diff URL re-opens it
+    return;
+  }
+  if (state.diff.open) {
+    // back out of a diff URL: drop the view, then apply the feed URL
+    state.diff = { open: false, left: null, right: null };
+    render();
+  }
   if (r.host && r.host !== state.host) {
     if (!state.hosts[r.host]) return;
     await selectHost(r.host, { keepFile: true }); // hash already pristine
@@ -378,6 +387,7 @@ async function boot() {
   initHostPicker({ onSelect: loadCandidates });
   initAnchorsPane({ onOpen: openAnchor });
   initWorkspace();
+  initDiff();
   initInfoOverlay();
   initFieldsOverlay({ onChanged: refreshAllCardMeta });
   registerCoreChrome();
@@ -410,8 +420,10 @@ async function boot() {
   await initAnchorsWidth();
   // the URL hash outranks the stored host: /#host[#filename] is shareable state
   const route = parseUrl();
-  const host = route.host && state.hosts[route.host] ? route.host : initialHost(state.hosts, ui.host);
+  const urlHost = route.view === "diff" ? route.left?.source : route.host;
+  const host = urlHost && state.hosts[urlHost] ? urlHost : initialHost(state.hosts, ui.host);
   await selectHost(host, { keepFile: true }); // hash pristine at boot
+  if (route.view === "diff") openDiff(route.left, route.right);
   window.addEventListener("hashchange", onUrlChange);
   window.addEventListener("popstate", onUrlChange);
 
