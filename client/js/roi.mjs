@@ -6,25 +6,25 @@
 // as a persistent ROI marker. ROI is in box-fractions, so once the pair is
 // registered an ROI applies to both images automatically.
 
-import { S, render } from "./state.mjs";
+import { state, render } from "./state.mjs";
 import { api } from "./api.mjs";
 
 const GUIDES_KEY = "core.guides";
 
 export async function initRoi() {
-  S.guides = (await api.settings(GUIDES_KEY).catch(() => ({})))?.list ?? [];
+  state.guides = (await api.settings(GUIDES_KEY).catch(() => ({})))?.list ?? [];
 }
 
 // --- guides (persistent, global) -------------------------------------------
 
 export async function addGuide(axis, pos) {
-  S.guides.push({ axis, pos });
-  await api.setSettings(GUIDES_KEY, { list: S.guides }).catch(() => {});
+  state.guides.push({ axis, pos });
+  await api.setSettings(GUIDES_KEY, { list: state.guides }).catch(() => {});
   render();
 }
 
 export async function clearGuides() {
-  S.guides = [];
+  state.guides = [];
   await api.setSettings(GUIDES_KEY, { list: [] }).catch(() => {});
   render();
 }
@@ -32,20 +32,20 @@ export async function clearGuides() {
 // --- ROI (box-fractions, manual-first) -------------------------------------
 
 export function setRoi(fx, fy, fw, fh) {
-  S.roi = fw > 0 && fh > 0 ? { fx, fy, fw, fh } : null;
+  state.roi = fw > 0 && fh > 0 ? { fx, fy, fw, fh } : null;
   render();
 }
 
 export function clearRoi() {
-  S.roi = null;
+  state.roi = null;
   render();
 }
 
 // Zoom the lightbox view to frame the ROI. Both images share registration
 // once aligned, so framing the ROI frames it on both.
 export function zoomToRoi(view) {
-  if (!S.roi) return view;
-  const { fx, fy, fw, fh } = S.roi;
+  if (!state.roi) return view;
+  const { fx, fy, fw, fh } = state.roi;
   return {
     ...view,
     s: 1 / Math.max(fw, fh),

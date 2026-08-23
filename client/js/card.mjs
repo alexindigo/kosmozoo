@@ -6,7 +6,7 @@
 // Encapsulation: onOpen/onErrorClick are INJECTED (the parent wires them to
 // the lightbox/feed). This module doesn't know the lightbox exists.
 
-import { S } from "./state.mjs";
+import { state } from "./state.mjs";
 import { matchesFile } from "./route.mjs";
 import { api } from "./api.mjs";
 import { setVote, toggleFavorite, saveNotes } from "./judgment.mjs";
@@ -44,7 +44,7 @@ export function buildCard(image, imgIdx, { onOpen, onErrorClick } = {}) {
   });
   handle.el.dataset.idx = imgIdx;
   handle.el.dataset.name = image.filename;
-  if (S.currentFile && matchesFile(image, S.host, S.currentFile)) {
+  if (state.currentFile && matchesFile(image, state.host, state.currentFile)) {
     handle.el.classList.add("current");
   }
 
@@ -167,7 +167,7 @@ function buildActions(image, cardState) {
 }
 
 function card_remove(image) {
-  const idx = S.images.indexOf(image);
+  const idx = state.images.indexOf(image);
   if (idx < 0) return;
   document.querySelector(`.card[data-idx="${idx}"]`)?.remove();
 }
@@ -227,13 +227,13 @@ function flashSaved(image) {
 // rendered or not). A rendered neighbor's live textarea wins (it may hold
 // unsaved edits); an unrendered one contributes its stored judgment.
 function copyFrom(srcIdx, cls, dir, ta) {
-  for (let i = srcIdx + dir; i >= 0 && i < S.images.length; i += dir) {
+  for (let i = srcIdx + dir; i >= 0 && i < state.images.length; i += dir) {
     let text = "";
     const rendered = document.querySelector(`.card[data-idx="${i}"] textarea.${cls}`);
     if (rendered) {
       text = rendered.value;
     } else {
-      text = S.images[i]?.judgment?.notes?.[cls] ?? "";
+      text = state.images[i]?.judgment?.notes?.[cls] ?? "";
     }
     if (text) {
       ta.value = text;

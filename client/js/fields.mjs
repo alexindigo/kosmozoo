@@ -7,7 +7,7 @@
 //   ⓘ overlay — ALL fields, picker-exempt by design (the full-details view)
 // The picker overlay has per-field card/strip toggles and per-group masters.
 
-import { S, render } from "./state.mjs";
+import { state, render } from "./state.mjs";
 import { api } from "./api.mjs";
 
 export const META_FIELD_GROUPS = [
@@ -75,13 +75,13 @@ export function loadFieldsCfg(stored) {
 }
 
 async function persist() {
-  await api.setSettings("core.fields", { cfg: S.fieldsCfg }).catch(() => {});
+  await api.setSettings("core.fields", { cfg: state.fieldsCfg }).catch(() => {});
 }
 
 // --- surfaces -------------------------------------------------------------------
 
 export function fillCardMeta(props, desc, meta) {
-  const cfg = S.fieldsCfg;
+  const cfg = state.fieldsCfg;
   props.textContent = "";
   desc.textContent = "";
   desc.title = "";
@@ -125,7 +125,7 @@ export function fillCardMeta(props, desc, meta) {
 export function metaStripText(meta) {
   const bits = [];
   for (const [name, get] of META_FIELDS) {
-    if (!S.fieldsCfg[name]?.strip) continue;
+    if (!state.fieldsCfg[name]?.strip) continue;
     const v = get(meta);
     if (v == null || v === "") continue;
     bits.push(name === "prompt" || name === "negative" ? String(v) : `${name} ${v}`);
@@ -237,11 +237,11 @@ function buildFieldsPanel() {
       const mcb = document.createElement("input");
       mcb.type = "checkbox";
       mcb.dataset.col = col;
-      mcb.checked = fields.some(([n]) => S.fieldsCfg[n][col]);
+      mcb.checked = fields.some(([n]) => state.fieldsCfg[n][col]);
       const mtrack = document.createElement("span");
       mtrack.className = "track";
       mcb.addEventListener("change", async () => {
-        for (const [n] of fields) S.fieldsCfg[n][col] = mcb.checked;
+        for (const [n] of fields) state.fieldsCfg[n][col] = mcb.checked;
         await persist();
         onChangedHook?.();
         gbody.querySelectorAll(`input[data-col="${col}"]`).forEach((cb) => { cb.checked = mcb.checked; });
@@ -269,13 +269,13 @@ function fieldToggle(field, col, gbody) {
   lab.className = "switchwrap mini";
   const cb = document.createElement("input");
   cb.type = "checkbox";
-  cb.checked = !!S.fieldsCfg[field][col];
+  cb.checked = !!state.fieldsCfg[field][col];
   cb.dataset.field = field;
   cb.dataset.col = col;
   const track = document.createElement("span");
   track.className = "track";
   cb.addEventListener("change", async () => {
-    S.fieldsCfg[field][col] = cb.checked;
+    state.fieldsCfg[field][col] = cb.checked;
     await persist();
     onChangedHook?.();
     // sync the group masters
@@ -283,7 +283,7 @@ function fieldToggle(field, col, gbody) {
     const fields = META_FIELD_GROUPS.find((g) => g[0] === gname)[1];
     const group = gbody.closest(".fgroup");
     group.querySelectorAll(".fgrouphead input").forEach((m) => {
-      m.checked = fields.some(([n]) => S.fieldsCfg[n][m.dataset.col]);
+      m.checked = fields.some(([n]) => state.fieldsCfg[n][m.dataset.col]);
     });
   });
   lab.append(cb, track);

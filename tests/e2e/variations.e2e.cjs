@@ -27,7 +27,7 @@ async function main() {
   const cdp = await CDP.launch(9334);
   try {
     await cdp.goto(ENGINE);
-    await cdp.poll(`window.__kz && window.__kz.S.images.length > 0`);
+    await cdp.poll(`window.kosmozoo && window.kosmozoo.state.images.length > 0`);
     await cdp.poll(`!!document.querySelector('.card[data-idx="0"]')`);
 
     // --- wand button appears on cards ---

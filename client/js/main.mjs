@@ -2,7 +2,7 @@
 // the same registry plugins use), and the feed's orchestration (metadata
 // poll/patch, meta-want, scroll persistence, status summary).
 
-import { S, render, onRender } from "./state.mjs";
+import { state, render, onRender } from "./state.mjs";
 import { api } from "./api.mjs";
 import { initLightbox } from "./lightbox.mjs";
 import { addAnchorFiles, initAnchorsPane, initInfoOverlay, initAnchorsWidth } from "./anchors.mjs";
@@ -24,8 +24,8 @@ import { iconSvg } from "./icons.mjs";
 
 const $ = (id) => document.getElementById(id);
 
-// test seam: e2e drives the same state the keys do
-window.__kz = { S, setRoi, addAnchorFiles, chrome, render };
+// public namespace: e2e (and the console) drives the same state the keys do
+window.kosmozoo = { state, render, setRoi, addAnchorFiles, chrome };
 
 // drag-and-drop anywhere drops anchors (local files, never uploaded)
 document.addEventListener("dragover", (e) => e.preventDefault());
@@ -50,12 +50,12 @@ function wantMeta(image) {
 }
 
 async function flushWant() {
-  if (!S.host) return;
+  if (!state.host) return;
   const files = [...wantSet];
   wantSet.clear();
   if (!files.length) return;
   try {
-    const r = await api.metaWant(S.host, files);
+    const r = await api.metaWant(state.host, files);
     if (typeof r.pending === "number") {
       metaPending = r.pending;
       updateScanChip();
@@ -70,9 +70,9 @@ function scheduleMetaPoll(delay = 5000) {
 }
 
 async function pollMetadata() {
-  if (!S.host) return;
+  if (!state.host) return;
   try {
-    const r = await api.metadata(S.host);
+    const r = await api.metadata(state.host);
     metaPending = r.pending ?? 0;
     updateScanChip();
     if (r.v !== metaVersion) {
@@ -87,9 +87,9 @@ async function pollMetadata() {
 // through the instance's own setMeta, never by reaching into its DOM.
 function mergeMetadata(items) {
   for (const [name, meta] of Object.entries(items)) {
-    const idx = S.images.findIndex((i) => i.filename === name);
+    const idx = state.images.findIndex((i) => i.filename === name);
     if (idx < 0) continue;
-    if (!S.images[idx].meta) S.images[idx].meta = meta;
+    if (!state.images[idx].meta) state.images[idx].meta = meta;
     const card = cardAt(idx);
     if (card) card.setMeta(meta);
   }
@@ -103,31 +103,31 @@ function updateScanChip() {
 // Picker changes re-apply to every rendered card through the instances' own
 // setMeta — the parent orchestrates; nobody reaches into a card's DOM.
 function refreshAllCardMeta() {
-  eachCard((handle, idx) => handle.setMeta(S.images[idx]?.meta ?? null));
-  if (S.lightbox.open) render();
+  eachCard((handle, idx) => handle.setMeta(state.images[idx]?.meta ?? null));
+  if (state.lightbox.open) render();
 }
 
 // --- core chrome -----------------------------------------------------------------
 
 function statusSummary() {
-  const hidden = S.images.filter((i) => i.judgment?.vote === "down").length;
-  const base = S.filter
-    ? `${viewCount()} of ${S.images.length} matching “${S.filter}” from ${S.host}`
-    : `${S.images.length} images from ${S.host}`;
+  const hidden = state.images.filter((i) => i.judgment?.vote === "down").length;
+  const base = state.filter
+    ? `${viewCount()} of ${state.images.length} matching “${state.filter}” from ${state.host}`
+    : `${state.images.length} images from ${state.host}`;
   return base + (hidden ? ` (${hidden} hidden)` : "");
 }
 
 function viewCount() {
-  const q = S.filter.toLowerCase();
-  return S.images.filter((i) =>
+  const q = state.filter.toLowerCase();
+  return state.images.filter((i) =>
     (!q || i.filename.toLowerCase().includes(q)) && isVisible(i)).length;
 }
 
 function rebuildFeed() {
-  const q = S.filter.toLowerCase();
+  const q = state.filter.toLowerCase();
   const view = [];
-  for (let i = 0; i < S.images.length; i++) {
-    const img = S.images[i];
+  for (let i = 0; i < state.images.length; i++) {
+    const img = state.images[i];
     if (q && !img.filename.toLowerCase().includes(q)) continue;
     if (!isVisible(img)) continue;
     view.push(i);
@@ -139,8 +139,8 @@ function registerCoreChrome() {
   chrome.headerButton({
     id: "refreshBtn", label: "Refresh", title: "re-fetch hosts and image list",
     onClick: async () => {
-      S.hosts = await api.hosts();
-      if (S.host) await loadCandidates();
+      state.hosts = await api.hosts();
+      if (state.host) await loadCandidates();
       chrome.status.info("refreshed");
     },
   });
@@ -169,10 +169,10 @@ function registerCoreChrome() {
       label.title = "walk the host's image list and extract PNG-embedded metadata in the background";
       const box = document.createElement("input");
       box.type = "checkbox";
-      box.checked = !!S.scraper?.enabled;
+      box.checked = !!state.scraper?.enabled;
       box.addEventListener("change", async () => {
         await api.setScraper({ enabled: box.checked });
-        S.scraper = await api.scraper();
+        state.scraper = await api.scraper();
         render();
       });
       const track = document.createElement("span");
@@ -180,11 +180,11 @@ function registerCoreChrome() {
       label.append(box, track, document.createTextNode("metadata scan"));
       const pause = document.createElement("button");
       pause.id = "scraperPause";
-      pause.innerHTML = S.scraper?.paused ? iconSvg("player-play", 12) : iconSvg("player-pause", 12);
+      pause.innerHTML = state.scraper?.paused ? iconSvg("player-play", 12) : iconSvg("player-pause", 12);
       pause.title = "pause/resume the background scan (laptop mode)";
       pause.addEventListener("click", async () => {
-        await api.setScraper({ paused: !S.scraper?.paused });
-        S.scraper = await api.scraper();
+        await api.setScraper({ paused: !state.scraper?.paused });
+        state.scraper = await api.scraper();
         render();
       });
       const counter = document.createElement("span");
@@ -205,7 +205,7 @@ function registerCoreChrome() {
     id: "downvote-hides", kind: "toggle",
     label: "down-vote hides",
     title: "thumbs-down removes an image from view (reveal with the Unhide button)",
-    get: () => S.judgment?.downvoteHides ?? true,
+    get: () => state.judgment?.downvoteHides ?? true,
     set: (v) => setDownvoteHides(v),
   });
 
@@ -220,15 +220,15 @@ function registerCoreChrome() {
       const input = document.createElement("input");
       input.type = "text";
       input.spellcheck = false;
-      input.value = S.feedbackPath ?? "";
+      input.value = state.feedbackPath ?? "";
       const apply = document.createElement("button");
       apply.textContent = "apply";
       apply.addEventListener("click", async () => {
         try {
           const r = await api.feedbackPath(input.value.trim());
-          S.feedbackPath = r.feedbackPath;
+          state.feedbackPath = r.feedbackPath;
           chrome.status.info(`feedback path → ${r.feedbackPath}`);
-          if (S.host) await loadCandidates();
+          if (state.host) await loadCandidates();
         } catch (err) {
           chrome.status.error(`feedback path failed: ${err.message}`);
         }
@@ -240,7 +240,7 @@ function registerCoreChrome() {
 }
 
 function scraperPendingText() {
-  const p = S.scraper?.pending ?? {};
+  const p = state.scraper?.pending ?? {};
   const total = Object.values(p).reduce((a, b) => a + b, 0);
   return total > 0 ? `${total} left` : "";
 }
@@ -259,14 +259,14 @@ onRender((s) => {
 async function onHashChange() {
   const r = parseHash();
   if (!r) return;
-  if (r.host && r.host !== S.host) {
-    if (!S.hosts[r.host]) return;
-    S.currentFile = r.filename ?? null;
+  if (r.host && r.host !== state.host) {
+    if (!state.hosts[r.host]) return;
+    state.currentFile = r.filename ?? null;
     await selectHost(r.host); // loadCandidates re-centers from currentFile
     return;
   }
   if (!r.filename) return;
-  S.currentFile = r.filename;
+  state.currentFile = r.filename;
   const idx = findByFile(r.filename);
   if (idx >= 0) restoreToIndex(idx);
   else await loadCandidates();
@@ -274,24 +274,24 @@ async function onHashChange() {
 }
 
 async function loadCandidates() {
-  if (!S.host) return;
+  if (!state.host) return;
   // a host switch must not leave the previous host's feed on screen:
   // clear first, then load. resetFeed() drops stale card refs (an
   // innerHTML-only clear would leave cardEls pointing at removed nodes and
   // the sentinel insert crashes on the next chunk).
-  S.images = [];
+  state.images = [];
   resetFeed();
   $("grid").innerHTML = "";
   render();
-  chrome.status.active("load", `loading image list from ${S.host}…`);
+  chrome.status.active("load", `loading image list from ${state.host}…`);
   try {
-    S.images = await api.images(S.host);
+    state.images = await api.images(state.host);
     try {
       // Ask about both raw and host-prefixed filenames — new saves land
       // as `<host>#<filename>` but legacy saves may still be raw. The
       // card considers itself "saved" if either form exists on disk.
       const q = new Set();
-      for (const img of S.images) {
+      for (const img of state.images) {
         q.add(img.filename);
         const pfx = img.host + "#";
         if (!img.filename.startsWith(pfx)) q.add(pfx + img.filename);
@@ -301,22 +301,22 @@ async function loadCandidates() {
       for (const [k, v] of Object.entries(d.exists ?? {})) if (v) savedSet.add(k);
     } catch { /* save buttons just won't pre-grey */ }
     chrome.status.clear("load");
-    if (!S.images.length) {
+    if (!state.images.length) {
       $("grid").innerHTML = '<div class="feedempty">no output images</div>';
-      chrome.status.info(`no output images on ${S.host}`);
+      chrome.status.info(`no output images on ${state.host}`);
       return;
     }
     rebuildFeed();
     chrome.status.info(statusSummary());
     // the URL is truth: re-center from it after every (re)fetch. Only a
     // first visit with no hash at all invents a current image (top card).
-    if (!S.currentFile && !parseHash()?.filename) {
+    if (!state.currentFile && !parseHash()?.filename) {
       const first = viewIndices()[0];
       if (first != null) {
-        S.currentFile = stripHostPrefix(S.host, S.images[first].filename);
+        state.currentFile = stripHostPrefix(state.host, state.images[first].filename);
       }
     }
-    const target = findByFile(S.currentFile);
+    const target = findByFile(state.currentFile);
     if (target >= 0) restoreToIndex(target);
     syncRoute();
     await pollMetadata();
@@ -330,14 +330,14 @@ async function loadCandidates() {
 // Load failures get the body, not just the status line: what failed, what to
 // try, and a retry button.
 function showLoadError(err) {
-  const addr = S.hosts[S.host]?.address ?? "";
+  const addr = state.hosts[state.host]?.address ?? "";
   const grid = $("grid");
   grid.innerHTML = "";
   const box = document.createElement("div");
   box.className = "loadfail";
   const title = document.createElement("div");
   title.className = "loadfail-title";
-  title.innerHTML = `${iconSvg("alert-triangle", 18)} couldn't load images from ${S.host}`;
+  title.innerHTML = `${iconSvg("alert-triangle", 18)} couldn't load images from ${state.host}`;
   const detail = document.createElement("div");
   detail.className = "loadfail-detail";
   detail.textContent = String(err?.message ?? err);
@@ -390,7 +390,7 @@ async function boot() {
 
   $("menuBtn").addEventListener("click", (e) => { e.stopPropagation(); toggleMenu(); });
   document.addEventListener("click", (e) => {
-    if (S.menuOpen && !$("menuWrap").contains(e.target)) { S.menuOpen = false; render(); }
+    if (state.menuOpen && !$("menuWrap").contains(e.target)) { state.menuOpen = false; render(); }
   });
   const col = $("candidatesCol");
   col.addEventListener("scroll", onScrollSafetyNet, { passive: true });
@@ -398,28 +398,28 @@ async function boot() {
   // a px jump races the deep-link centering and clobbers it
   $("lbKeysBtn").addEventListener("click", (e) => { e.stopPropagation(); toggleKeysPanel(); });
 
-  S.hosts = await api.hosts();
+  state.hosts = await api.hosts();
   const ui = await api.settings("core.ui").catch(() => ({}));
   const fieldsStored = await api.settings("core.fields").catch(() => ({}));
-  S.fieldsCfg = loadFieldsCfg(fieldsStored.cfg);
-  S.scraper = await api.scraper().catch(() => null);
-  S.feedbackPath = (await api.settings("core").catch(() => ({})))?.feedbackPath ?? null;
+  state.fieldsCfg = loadFieldsCfg(fieldsStored.cfg);
+  state.scraper = await api.scraper().catch(() => null);
+  state.feedbackPath = (await api.settings("core").catch(() => ({})))?.feedbackPath ?? null;
   await initAnchorsWidth();
   // the URL hash outranks the stored host: /#host[#filename] is shareable state
   const route = parseHash();
-  S.currentFile = route?.filename ?? null;
-  const host = route?.host && S.hosts[route.host] ? route.host : initialHost(S.hosts, ui.host);
+  state.currentFile = route?.filename ?? null;
+  const host = route?.host && state.hosts[route.host] ? route.host : initialHost(state.hosts, ui.host);
   await selectHost(host); // selects + loadCandidates via onSelect
   window.addEventListener("hashchange", onHashChange);
 
   // scraper status chip + menu counter: poll every 2s
   setInterval(async () => {
-    S.scraper = await api.scraper().catch(() => S.scraper);
+    state.scraper = await api.scraper().catch(() => state.scraper);
     const counter = $("scraperPending");
     if (counter) counter.textContent = scraperPendingText();
   }, 2000);
 }
 
-$("filter").addEventListener("input", (e) => { S.filter = e.target.value; rebuildFeed(); });
+$("filter").addEventListener("input", (e) => { state.filter = e.target.value; rebuildFeed(); });
 
 boot().catch((e) => chrome.status.error(`load failed: ${e.message}`));

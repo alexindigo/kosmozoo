@@ -11,7 +11,7 @@
 // send bytes). Reorder by drag with a marked internal type so the dropzone
 // can tell reorder from file drop.
 
-import { S, render, onRender } from "./state.mjs";
+import { state, render, onRender } from "./state.mjs";
 import { api } from "./api.mjs";
 import { metaFromPngBytes } from "/shared/extractor.mjs";
 import { buildMetaBody } from "./fields.mjs";
@@ -36,7 +36,7 @@ export async function addAnchorFiles(files) {
     try {
       [meta] = await metaFromPngBytes(new Uint8Array(buf));
     } catch { /* metadata optional */ }
-    S.anchors.push({ name: file.name, src: await shrinkToStore(dataUrl, file.name), meta });
+    state.anchors.push({ name: file.name, src: await shrinkToStore(dataUrl, file.name), meta });
   }
   persistAnchors();
   render();
@@ -73,26 +73,26 @@ function shrinkToStore(src, fileName) {
 
 export function loadAnchors() {
   try {
-    S.anchors = (JSON.parse(localStorage.getItem(LS_KEY)) || [])
+    state.anchors = (JSON.parse(localStorage.getItem(LS_KEY)) || [])
       .filter((a) => a && a.name && a.src);
   } catch {
-    S.anchors = [];
+    state.anchors = [];
   }
 }
 
 function persistAnchors() {
   try {
     localStorage.setItem(LS_KEY, JSON.stringify(
-      S.anchors.map((a) => ({ name: a.name, src: a.src, ...(a.meta ? { meta: a.meta } : {}) }))));
+      state.anchors.map((a) => ({ name: a.name, src: a.src, ...(a.meta ? { meta: a.meta } : {}) }))));
   } catch {
     chrome.status.error("anchors not saved: browser storage full");
   }
 }
 
 function removeAnchor(name) {
-  const i = S.anchors.findIndex((a) => a.name === name);
+  const i = state.anchors.findIndex((a) => a.name === name);
   if (i < 0) return;
-  S.anchors.splice(i, 1);
+  state.anchors.splice(i, 1);
   persistAnchors();
   render();
 }
@@ -129,14 +129,14 @@ export function initAnchorsPane({ onOpen } = {}) {
     const move = (ev) => {
       // right of the divider: workspace + the 32px workspace bar
       const w = Math.min(Math.max(window.innerWidth - ev.clientX - 34, 220), window.innerWidth * 0.7);
-      S.anchorPaneWidth = Math.round(w);
-      aside.style.width = S.anchorPaneWidth + "px";
+      state.anchorPaneWidth = Math.round(w);
+      aside.style.width = state.anchorPaneWidth + "px";
     };
     const up = () => {
       document.body.classList.remove("resizing");
       divider.removeEventListener("pointermove", move);
       divider.removeEventListener("pointerup", up);
-      api.setSettings("core.ui", { anchorWidth: S.anchorPaneWidth + "px" }).catch(() => {});
+      api.setSettings("core.ui", { anchorWidth: state.anchorPaneWidth + "px" }).catch(() => {});
     };
     divider.addEventListener("pointermove", move);
     divider.addEventListener("pointerup", up);
@@ -147,8 +147,8 @@ export function initAnchorsPane({ onOpen } = {}) {
 export async function initAnchorsWidth() {
   const ui = await api.settings("core.ui").catch(() => ({}));
   if (ui.anchorWidth) {
-    S.anchorPaneWidth = parseInt(ui.anchorWidth, 10) || S.anchorPaneWidth;
-    document.getElementById("workspace").style.width = S.anchorPaneWidth + "px";
+    state.anchorPaneWidth = parseInt(ui.anchorWidth, 10) || state.anchorPaneWidth;
+    document.getElementById("workspace").style.width = state.anchorPaneWidth + "px";
   }
 }
 
@@ -174,7 +174,7 @@ function initReorder(list) {
 
 function syncOrderFromDom() {
   const order = [...document.querySelectorAll("#anchorList .anchor")].map((el) => el.dataset.name);
-  S.anchors.sort((a, b) => order.indexOf(a.name) - order.indexOf(b.name));
+  state.anchors.sort((a, b) => order.indexOf(a.name) - order.indexOf(b.name));
   persistAnchors();
 }
 

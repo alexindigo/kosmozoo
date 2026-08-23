@@ -11,7 +11,7 @@
 import { freshView } from "./geometry.mjs";
 
 // The single application state object.
-export const S = {
+export const state = {
   // server-driven data
   hosts: {},            // name -> { address, online }
   host: null,           // selected host name
@@ -56,8 +56,8 @@ export const S = {
   dragGuide: null,      // in-progress guide drag from an edge { axis, pos }
 };
 
-// The only DOM writer. Re-renders the surfaces from S. Individual surfaces
+// The only DOM writer. Re-renders the surfaces from state. Individual surfaces
 // subscribe to the parts they own; nothing else touches the DOM.
 const renderers = [];
 export function onRender(fn) { renderers.push(fn); }
-export function render() { for (const fn of renderers) fn(S); }
+export function render() { for (const fn of renderers) fn(state); }

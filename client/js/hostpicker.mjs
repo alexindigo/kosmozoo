@@ -6,7 +6,7 @@
 // Current host is ring-highlighted; offline hosts are dimmed. Selection
 // lives in the URL hash (/#host[#filename]); stored host is a no-hash fallback.
 
-import { S, render, onRender } from "./state.mjs";
+import { state, render, onRender } from "./state.mjs";
 import { api } from "./api.mjs";
 import { chrome } from "./chrome.mjs";
 import { iconSvg } from "./icons.mjs";
@@ -22,12 +22,12 @@ export function initHostPicker({ onSelect } = {}) {
   selectCallback = onSelect ?? null;
   $("hostBtn").addEventListener("click", (e) => {
     e.stopPropagation();
-    S.hostMenuOpen = !S.hostMenuOpen;
+    state.hostMenuOpen = !state.hostMenuOpen;
     render();
   });
   document.addEventListener("click", (e) => {
-    if (S.hostMenuOpen && !$("hostPicker").contains(e.target)) {
-      S.hostMenuOpen = false;
+    if (state.hostMenuOpen && !$("hostPicker").contains(e.target)) {
+      state.hostMenuOpen = false;
       render();
     }
   });
@@ -45,7 +45,7 @@ async function addHost() {
     await api.addHost(name, addr);
     $("hostName").value = "";
     $("hostAddr").value = "";
-    S.hosts = await api.hosts();
+    state.hosts = await api.hosts();
     statusInfo(`host ${name} added`);
     render();
   } catch (err) {
@@ -56,10 +56,10 @@ async function addHost() {
 async function removeHost(name) {
   try {
     await api.removeHost(name);
-    S.hosts = await api.hosts();
-    if (S.host === name) {
-      S.currentFile = null;
-      await selectHost(Object.keys(S.hosts)[0] ?? null);
+    state.hosts = await api.hosts();
+    if (state.host === name) {
+      state.currentFile = null;
+      await selectHost(Object.keys(state.hosts)[0] ?? null);
     }
     statusInfo(`host ${name} removed`);
     render();
@@ -69,8 +69,8 @@ async function removeHost(name) {
 }
 
 export async function selectHost(name) {
-  S.host = name;
-  S.hostMenuOpen = false;
+  state.host = name;
+  state.hostMenuOpen = false;
   api.setSettings("core.ui", { host: name }).catch(() => {});
   // switching hosts reloads the feed from that host (loadCandidates owns
   // fetch + rebuild + scroll restore + summary + metadata poll)
@@ -120,7 +120,7 @@ onRender((s) => {
     });
     row.append(dot, nm, addr, rm);
     row.addEventListener("click", () => {
-      S.currentFile = null; // new host: the URL's file part dies with the old one
+      state.currentFile = null; // new host: the URL's file part dies with the old one
       selectHost(name);
     });
     list.appendChild(row);

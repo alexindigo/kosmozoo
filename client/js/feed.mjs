@@ -1,6 +1,6 @@
 // client/js/feed.mjs — the list engine for the candidates feed.
 //
-// The feed renders the shared list model (S.images) as full-width record
+// The feed renders the shared list model (state.images) as full-width record
 // cards, CHUNK at a time, with image bytes loaded only inside the active
 // window. Design contracts:
 //
@@ -19,7 +19,7 @@
 //   chunks when stepping past the rendered end; its position drives the
 //   window (keyboard walking must not freeze image loading).
 
-import { S } from "./state.mjs";
+import { state } from "./state.mjs";
 import { api } from "./api.mjs";
 
 const CHUNK = 20;
@@ -95,7 +95,7 @@ export function renderChunk() {
   const frag = document.createDocumentFragment();
   while (viewPos < view.length && added < CHUNK) {
     const imgIdx = view[viewPos++];
-    const image = S.images[imgIdx];
+    const image = state.images[imgIdx];
     wantHook?.(image);
     const handle = buildCard(image, imgIdx); // a card handle, not an element
     cardEls[imgIdx] = handle;
@@ -120,9 +120,9 @@ export function renderChunk() {
   } else {
     const done = document.createElement("div");
     done.className = "endoflist";
-    done.textContent = S.filter
-      ? `— all ${view.length} matching “${S.filter}” —`
-      : `— all ${S.images.length} images —`;
+    done.textContent = state.filter
+      ? `— all ${view.length} matching “${state.filter}” —`
+      : `— all ${state.images.length} images —`;
     container.appendChild(done);
   }
   // newly rendered cards inside the window may not get an observer event
@@ -133,14 +133,14 @@ export function renderChunk() {
 
 export function applyWindow() {
   const base = [...visibleSet];
-  if (S.lightbox.open && S.lightbox.index >= 0) base.push(S.lightbox.index);
+  if (state.lightbox.open && state.lightbox.index >= 0) base.push(state.lightbox.index);
   if (!base.length) return;
   const min = Math.min(...base) - WINDOW_PAD;
   const max = Math.max(...base) + WINDOW_PAD;
   for (const idx of [...loadedSet]) {
     if (idx < min || idx > max) unloadImage(idx);
   }
-  for (let i = Math.max(0, min); i <= Math.min(S.images.length - 1, max); i++) {
+  for (let i = Math.max(0, min); i <= Math.min(state.images.length - 1, max); i++) {
     if (!loadedSet.has(i)) loadImage(i);
   }
   scheduleErrorRetry();
@@ -149,7 +149,7 @@ export function applyWindow() {
 function loadImage(idx) {
   const card = cardEls[idx];
   if (!card) return;
-  card.setSrc(api.imageBytesUrl(S.images[idx].id));
+  card.setSrc(api.imageBytesUrl(state.images[idx].id));
   loadedSet.add(idx);
 }
 
@@ -157,7 +157,7 @@ export function retryImage(idx) {
   const card = cardEls[idx];
   if (!card) return;
   card.setSrc(null);
-  card.setSrc(api.imageBytesUrl(S.images[idx].id) + "?_r=" + Date.now());
+  card.setSrc(api.imageBytesUrl(state.images[idx].id) + "?_r=" + Date.now());
   loadedSet.add(idx);
 }
 
@@ -173,7 +173,7 @@ function scheduleErrorRetry() {
   errorRetryTimer = setTimeout(() => {
     errorRetryTimer = null;
     const base = [...visibleSet];
-    if (S.lightbox.open && S.lightbox.index >= 0) base.push(S.lightbox.index);
+    if (state.lightbox.open && state.lightbox.index >= 0) base.push(state.lightbox.index);
     if (!base.length) return;
     const min = Math.min(...base) - WINDOW_PAD;
     const max = Math.max(...base) + WINDOW_PAD;
@@ -229,8 +229,8 @@ export function restoreToIndex(idx) {
 export function prefetchFrom(imgIdx, dir, fetcher = globalThis.fetch) {
   for (let i = 1; i <= PREFETCH; i++) {
     const idx = imgIdx + dir * i;
-    if (idx < 0 || idx >= S.images.length) break;
-    fetcher(api.imageBytesUrl(S.images[idx].id)).then((r) => r.arrayBuffer()).catch(() => {});
+    if (idx < 0 || idx >= state.images.length) break;
+    fetcher(api.imageBytesUrl(state.images[idx].id)).then((r) => r.arrayBuffer()).catch(() => {});
   }
 }
 

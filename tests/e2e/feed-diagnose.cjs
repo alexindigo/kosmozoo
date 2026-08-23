@@ -78,7 +78,7 @@ const LAYOUT_JS = `(() => {
     colRect: rect(col),
     scrollTop: col ? col.scrollTop : null,
     scrollHeight: col ? col.scrollHeight : null,
-    imagesInState: window.__kz && window.__kz.S ? window.__kz.S.images.length : null,
+    imagesInState: window.kosmozoo && window.kosmozoo.state ? window.kosmozoo.state.images.length : null,
     cards,
   };
 })()`;
@@ -90,7 +90,7 @@ const LAYOUT_JS = `(() => {
       await page.send("Emulation.setDeviceMetricsOverride",
         { width: vp.w, height: vp.h, deviceScaleFactor: 1, mobile: false });
       await page.goto(BASE + "/");
-      await page.poll("window.__kz && window.__kz.S && window.__kz.S.images.length > 0", 30000);
+      await page.poll("window.kosmozoo && window.kosmozoo.state && window.kosmozoo.state.images.length > 0", 30000);
       await page.poll("!!document.querySelector('.card[data-idx=\"0\"]')", 15000);
       // let images load
       await sleep(2500);

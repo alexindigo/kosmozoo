@@ -17,7 +17,7 @@
 // Menu, header buttons, and the key dispatcher read the registries; nothing
 // else writes them.
 
-import { S, render, onRender } from "./state.mjs";
+import { state, render, onRender } from "./state.mjs";
 
 const $ = (id) => document.getElementById(id);
 
@@ -169,7 +169,7 @@ export function setCaptureHook(fn) { captureHook = fn; }
 
 export function initKeyDispatch() {
   document.addEventListener("keydown", (e) => {
-    if (S.capturing && captureHook) {
+    if (state.capturing && captureHook) {
       e.preventDefault();
       e.stopPropagation();
       captureHook(e);
@@ -210,8 +210,8 @@ onRender(() => {
   if (typeof document === "undefined") return;
   const menu = $("menu");
   if (!menu) return;
-  menu.hidden = !S.menuOpen;
-  if (!S.menuOpen) return;
+  menu.hidden = !state.menuOpen;
+  if (!state.menuOpen) return;
   // rebuild on every open: rows read live state
   menu.innerHTML = "";
   const search = document.createElement("input");
@@ -219,13 +219,13 @@ onRender(() => {
   search.type = "search";
   search.placeholder = "filter settings…";
   search.spellcheck = false;
-  search.value = S.menuFilter ?? "";
-  search.addEventListener("input", () => { S.menuFilter = search.value; render(); });
+  search.value = state.menuFilter ?? "";
+  search.addEventListener("input", () => { state.menuFilter = search.value; render(); });
   menu.appendChild(search);
   const rows = document.createElement("div");
   rows.id = "menuRows";
   menu.appendChild(rows);
-  const q = (S.menuFilter ?? "").toLowerCase();
+  const q = (state.menuFilter ?? "").toLowerCase();
   for (const item of menuItems) {
     const hay = (item.label ?? item.searchText ?? item.id).toLowerCase();
     if (q && !hay.includes(q)) continue;
@@ -257,6 +257,6 @@ onRender(() => {
 });
 
 export function toggleMenu() {
-  S.menuOpen = !S.menuOpen;
+  state.menuOpen = !state.menuOpen;
   render();
 }
