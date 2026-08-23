@@ -196,20 +196,24 @@ function openPanel(cardEl, image) {
       const p = paramDef(key);
       if (!p) continue; // registry doesn't know this param — skip
       const def = defaultRange(p, current);
-      const row = buildSliderRow(p, current, def, (state) => {
-        const wasEnabled = ranges[p.key]?.enabled;
-        ranges[p.key] = state;
-        if (state.enabled !== wasEnabled) {
-          reorderSliderCards();
-          if (state.enabled) autoInsertSuffix(row.getPlaceholderKey());
-          else autoRemoveSuffix(row.getPlaceholderKey());
-        }
-        updateCount();
-      }, templateTarget);
-      if (label && label !== p.key) row.setLabel(label);
-      sliders.appendChild(row.el);
-      ranges[p.key] = { min: def.min, max: def.max, enabled: false, increment: p.defaultInc };
-      rows[p.key] = row;
+      try {
+        const row = buildSliderRow(p, current, def, (state) => {
+          const wasEnabled = ranges[p.key]?.enabled;
+          ranges[p.key] = state;
+          if (state.enabled !== wasEnabled) {
+            reorderSliderCards();
+            if (state.enabled) autoInsertSuffix(state.placeholderKey);
+            else autoRemoveSuffix(state.placeholderKey);
+          }
+          updateCount();
+        }, templateTarget);
+        if (label && label !== p.key) row.setLabel(label);
+        sliders.appendChild(row.el);
+        ranges[p.key] = { min: def.min, max: def.max, enabled: false, increment: p.defaultInc };
+        rows[p.key] = row;
+      } catch (e) {
+        console.error(`[variations] buildSliderRow(${key}) failed:`, e);
+      }
     }
     // Default-on: denoise is the most common single-axis sweep. If the
     // graph exposes it, flip it on so the user lands on a sensible starting
@@ -347,9 +351,14 @@ function openPanel(cardEl, image) {
   // whose target node exists in this image's graph. writeOnly params
   // (widget-only custom seed nodes etc.) are skipped for now — they need
   // a different UX and the user is deferring that.
+  console.log("[variations] fetching probe for", image.id);
   fetch(`/api/plugins/variations/probe/${encodeURIComponent(image.id)}`)
-    .then((r) => r.ok ? r.json() : null)
+    .then((r) => {
+      console.log("[variations] probe status:", r.status);
+      return r.ok ? r.json() : null;
+    })
     .then((data) => {
+      console.log("[variations] probe data:", JSON.stringify(data?.params ?? null));
       if (!data?.params) {
         renderSliderRows(fallbackParams(meta));
         return;
@@ -360,9 +369,11 @@ function openPanel(cardEl, image) {
         if (!info || info.writeOnly) continue;
         forGraph.push({ key, label: info.label, current: info.current });
       }
+      console.log("[variations] forGraph:", forGraph.length, "params");
       renderSliderRows(forGraph);
     })
-    .catch(() => {
+    .catch((e) => {
+      console.warn("[variations] probe failed:", e);
       renderSliderRows(fallbackParams(meta));
     });
 
@@ -435,11 +446,12 @@ function openPanel(cardEl, image) {
 //       ●──────────────●
 //                current
 //
-// Vertical alignment is STRUCTURAL, not arithmetic: the rangewrap is a
-// three-lane flex column (labels / track / current-value) and the track
-// lane uses `display: flex; align-items: center` so every element on it
-// shares the same centerline — no --track-y / --thumb-d / calc() offsets
-// anywhere in the CSS.
+// The dual-thumb slider is noUiSlider (MIT, vendored at
+// client/vendor/nouislider.min.js). It renders two draggable handles on a
+// track, with a connect band between them. Alignment is structural:
+// noUiSlider's internal layout puts thumbs and track on the same
+// centerline by construction. Drag snaps to the row's increment; keyboard
+// nudge on a focused handle uses the fine step.
 
 function buildSliderRow(param, current, defaults, onChange, templateTarget) {
   const el = document.createElement("div");
@@ -491,34 +503,19 @@ function buildSliderRow(param, current, defaults, onChange, templateTarget) {
   maxLabel.className = "vz-bound vz-max-lbl";
   laneLabels.append(minLabel, maxLabel);
 
-  // Lane 2: the track itself. The two range inputs and the marker all
-  // share one centerline via flex centering — no vertical offsets anywhere.
+  // Lane 2: the noUiSlider element. The library renders the track, both
+  // thumbs, and the connect band inside this div. We add our orange marker
+  // on top as an absolutely positioned overlay.
   const laneTrack = document.createElement("div");
   laneTrack.className = "vz-lane vz-lane-track";
 
-  const minRange = document.createElement("input");
-  minRange.type = "range";
-  minRange.className = "vz-thumb vz-thumb-min";
-  minRange.min = param.clamp[0];
-  minRange.max = param.clamp[1];
-  minRange.step = fineStep;
-  minRange.value = defaults.min;
-  minRange.disabled = true;
+  const sliderEl = document.createElement("div");
+  sliderEl.className = "vz-slider";
+  laneTrack.appendChild(sliderEl);
 
-  const maxRange = document.createElement("input");
-  maxRange.type = "range";
-  maxRange.className = "vz-thumb vz-thumb-max";
-  maxRange.min = param.clamp[0];
-  maxRange.max = param.clamp[1];
-  maxRange.step = fineStep;
-  maxRange.value = defaults.max;
-  maxRange.disabled = true;
-
-  const track = document.createElement("div");
-  track.className = "vz-track";
   const marker = document.createElement("div");
   marker.className = "vz-marker";
-  laneTrack.append(minRange, maxRange, track, marker);
+  laneTrack.appendChild(marker);
 
   // Lane 3: current-value label below the track.
   const laneCurrent = document.createElement("div");
@@ -552,7 +549,6 @@ function buildSliderRow(param, current, defaults, onChange, templateTarget) {
   incMinus.className = "vz-step-btn";
   incMinus.textContent = "−";
   incMinus.title = "smaller step";
-  incMinus.disabled = true;
 
   const incInput = document.createElement("input");
   incInput.type = "number";
@@ -560,17 +556,18 @@ function buildSliderRow(param, current, defaults, onChange, templateTarget) {
   incInput.value = String(increment);
   incInput.step = String(fineStep);
   incInput.min = String(fineStep);
-  incInput.disabled = true;
 
   const incPlus = document.createElement("button");
   incPlus.className = "vz-step-btn";
   incPlus.textContent = "+";
   incPlus.title = "larger step";
-  incPlus.disabled = true;
 
   function commitInc(v) {
     increment = Math.max(fineStep, +Number(v).toFixed(param.decimals + 3));
     incInput.value = String(increment);
+    // Don't change slider.options.step — that would break keyboard nudge
+    // (arrow keys use options.step). Drag snapping is handled in the
+    // `slide` event which only fires during pointer drag.
     fireChange();
   }
   incMinus.addEventListener("click", () => commitInc(Math.max(fineStep, increment / 2)));
@@ -579,84 +576,67 @@ function buildSliderRow(param, current, defaults, onChange, templateTarget) {
 
   incWrap.append(incMinus, incInput, incPlus);
 
-  // --- drag-vs-keyboard snapping ---
-  //
-  // On pointerdown on a thumb we enter "drag" mode: subsequent `input`
-  // events snap the value to the nearest multiple of `increment`. On
-  // pointerup we exit drag mode. Keyboard events don't touch the drag
-  // flag, so keyboard nudges keep the fine step.
+  // --- the slider ---
+  // step: fineStep — keyboard nudges use the fine step directly.
+  // Drag snapping is handled in the `slide` event: we snap to the row's
+  // increment and set the values back. This way keyboard and drag have
+  // different step sizes without fighting the library's internal step.
+  const slider = noUiSlider.create(sliderEl, {
+    start: [defaults.min, defaults.max],
+    connect: true,
+    range: { min: param.clamp[0], max: param.clamp[1] },
+    step: fineStep,           // keyboard nudges use the fine step
+    behaviour: "drag",        // allow dragging the connect band
+    keyboardSupport: true,
+  });
 
-  const dragging = { min: false, max: false };
-  const attachDrag = (thumb, which) => {
-    thumb.addEventListener("pointerdown", () => { dragging[which] = true; });
-    // pointerup can fire outside the thumb; catch it globally
-    const up = () => { dragging[which] = false; };
-    window.addEventListener("pointerup", up);
-    window.addEventListener("pointercancel", up);
-  };
-  attachDrag(minRange, "min");
-  attachDrag(maxRange, "max");
-
-  function updateTrack(silent = false) {
-    const minV = parseFloat(minRange.value);
-    const maxV = parseFloat(maxRange.value);
-    const lo = Math.min(minV, maxV);
-    const hi = Math.max(minV, maxV);
-    const range = param.clamp[1] - param.clamp[0];
-    const lpct = ((lo - param.clamp[0]) / range) * 100;
-    const rpct = ((hi - param.clamp[0]) / range) * 100;
-    track.style.left = lpct + "%";
-    track.style.width = (rpct - lpct) + "%";
+  // Wire updates: min/max labels, marker position, fireChange
+  slider.on("update", (values) => {
+    const [lo, hi] = values.map(Number);
     minLabel.textContent = fmt(lo);
     maxLabel.textContent = fmt(hi);
-    minLabel.style.left = lpct + "%";
-    maxLabel.style.left = rpct + "%";
-    if (!silent) fireChange();
-  }
+    const range = param.clamp[1] - param.clamp[0];
+    minLabel.style.left = ((lo - param.clamp[0]) / range) * 100 + "%";
+    maxLabel.style.left = ((hi - param.clamp[0]) / range) * 100 + "%";
+    fireChange();
+  });
+
+  // Drag snap: the slide event fires during pointer drag with the current
+  // (fine-stepped) values. Snap to the row's increment and set back.
+  slider.on("slide", (values) => {
+    const snapped = values.map((v) => snapTo(Number(v), increment, param.decimals));
+    if (snapped[0] !== Number(values[0]) || snapped[1] !== Number(values[1])) {
+      slider.set(snapped.map(String));
+    }
+  });
 
   function fireChange() {
-    const lo = Math.min(parseFloat(minRange.value), parseFloat(maxRange.value));
-    const hi = Math.max(parseFloat(minRange.value), parseFloat(maxRange.value));
-    onChange({ enabled: cb.checked, min: lo, max: hi, increment });
+    const values = slider.get().map(Number);
+    const lo = Math.min(values[0], values[1]);
+    const hi = Math.max(values[0], values[1]);
+    onChange({ enabled: cb.checked, min: lo, max: hi, increment, placeholderKey });
   }
 
-  minRange.addEventListener("input", () => {
-    if (dragging.min) {
-      const snapped = snapTo(parseFloat(minRange.value), increment, param.decimals);
-      minRange.value = String(snapped);
-    }
-    if (parseFloat(minRange.value) > parseFloat(maxRange.value)) {
-      minRange.value = maxRange.value;
-    }
-    updateTrack();
-  });
-  maxRange.addEventListener("input", () => {
-    if (dragging.max) {
-      const snapped = snapTo(parseFloat(maxRange.value), increment, param.decimals);
-      maxRange.value = String(snapped);
-    }
-    if (parseFloat(maxRange.value) < parseFloat(minRange.value)) {
-      maxRange.value = minRange.value;
-    }
-    updateTrack();
-  });
-
+  // Checkbox enables/disables the slider (attribute goes on the DOM element,
+  // not the API object).
   cb.addEventListener("change", () => {
     const on = cb.checked;
-    minRange.disabled = !on;
-    maxRange.disabled = !on;
+    if (on) sliderEl.removeAttribute("disabled");
+    else sliderEl.setAttribute("disabled", true);
     incInput.disabled = !on;
     incMinus.disabled = !on;
     incPlus.disabled = !on;
     el.classList.toggle("vz-off", !on);
-    updateTrack();
+    fireChange();
   });
 
-  rangeWrap.append(minLabel, maxLabel, minRange, maxRange, track, marker, curLabel);
+  // Initial state: disabled
+  sliderEl.setAttribute("disabled", true);
+
   inner.append(label, rangeWrap);
   el.append(cb, inner, incWrap);
 
-  updateTrack(true);
+  // The slider fires `update` once on create, so labels paint immediately.
 
   function setLabel(newKey) {
     placeholderKey = newKey;
@@ -682,7 +662,7 @@ function buildSliderRow(param, current, defaults, onChange, templateTarget) {
   }
 
   return {
-    el, cb, minRange, maxRange,
+    el, cb, slider,
     setLabel, setCurrent, setAbsent, setWriteOnly,
     getPlaceholderKey: () => placeholderKey,
   };
