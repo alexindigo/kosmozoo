@@ -27,7 +27,12 @@ export async function serveStatic(pathname) {
     const full = new URL(`./${name}`, import.meta.url).pathname;
     try {
       const body = await readFile(full);
-      return new Response(body, { headers: { "Content-Type": "text/javascript; charset=utf-8" } });
+      return new Response(body, {
+        headers: {
+          "Content-Type": "text/javascript; charset=utf-8",
+          "Cache-Control": "no-cache",
+        },
+      });
     } catch {
       return new Response("not found", { status: 404 });
     }
@@ -42,7 +47,12 @@ export async function serveStatic(pathname) {
     for (const tier of pluginDirs()) {
       try {
         const body = await readFile(join(tier, name, "client.js"));
-        return new Response(body, { headers: { "Content-Type": "text/javascript; charset=utf-8" } });
+        return new Response(body, {
+          headers: {
+            "Content-Type": "text/javascript; charset=utf-8",
+            "Cache-Control": "no-cache",
+          },
+        });
       } catch { /* try next tier */ }
     }
     return new Response("not found", { status: 404 });
@@ -57,6 +67,7 @@ export async function serveStatic(pathname) {
     const headers = new Headers();
     const mime = MIME[extname(full)];
     if (mime) headers.set("Content-Type", mime);
+    headers.set("Cache-Control", "no-cache");
     return new Response(body, { headers });
   } catch {
     return new Response("not found", { status: 404 });
