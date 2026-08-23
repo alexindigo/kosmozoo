@@ -402,21 +402,31 @@ main { display: flex; flex: 1; min-height: 0; }
 
 /* Lane 2: the noUiSlider element. The library renders its own internal
    structure; we just override the colors and sizes. */
-.vz-lane-track { position: relative; height: 20px; margin-bottom: 2px; }
-.vz-slider { width: 100%; height: 20px; }
+/* Lane 2: the noUiSlider element. The library's default horizontal slider
+   height is 18px — match that so the internal layout math aligns. */
+.vz-lane-track { position: relative; height: 18px; margin-bottom: 2px; }
+.vz-slider { width: 100%; height: 18px; }
 
-/* noUiSlider overrides — match our palette. */
+/* noUiSlider overrides — match our palette. Key: don't override the base's
+   dimensions (it fills the target by default). The track line is drawn by
+   a separate .vz-rail element centered on the lane, not by the base. */
 .vz-lane-track .noUi-target { background: transparent; border: none;
   box-shadow: none; }
-.vz-lane-track .noUi-base { background: var(--dim); height: 1px;
-  top: 50%; transform: translateY(-50%); }
+.vz-lane-track .noUi-base { background: transparent; }
 .vz-lane-track .noUi-connect { background: var(--accent); height: 3px;
   top: 50%; transform: translateY(-50%); border-radius: 1px; }
-.vz-lane-track .noUi-origin { height: 14px; width: 14px;
-  top: 50%; transform: translate(-50%, -50%); }
+.vz-lane-track .noUi-origin { height: 14px; width: 14px; }
 .vz-lane-track .noUi-handle { width: 14px; height: 14px;
   border-radius: 50%; background: var(--accent); border: 2px solid var(--bg);
-  cursor: pointer; box-shadow: none; }
+  cursor: pointer; box-shadow: none;
+  /* border-box so the 14px includes the 2px border ring — the browser's
+     default content-box would add the border on top, pushing the center
+     down by 2px. */
+  box-sizing: border-box;
+  /* noUiSlider's default is top: -6px for a 28px handle on an 18px lane.
+     Center our 14px handle on the lane's centerline instead:
+     (18 - 14) / 2 = 2px. */
+  top: 2px; }
 .vz-lane-track .noUi-handle::before,
 .vz-lane-track .noUi-handle::after { display: none; }
 .vz-lane-track .noUi-handle:hover { filter: brightness(1.2); }
