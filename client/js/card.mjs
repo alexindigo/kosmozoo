@@ -51,6 +51,14 @@ export function buildCard(image, imgIdx, { onOpen, onErrorClick } = {}) {
 
 // --- injected: title (filename, click-to-copy host#file) -----------------------
 
+// Prepend "<host>#" only if the filename doesn't already start with it —
+// avoids "host#host#name" when a filename was authored with the prefix
+// baked in (e.g. imports).
+function hostPrefixed(host, filename) {
+  const pfx = host + "#";
+  return filename.startsWith(pfx) ? filename : pfx + filename;
+}
+
 function buildTitle(image) {
   const name = document.createElement("span");
   name.className = "copyable";
@@ -59,7 +67,7 @@ function buildTitle(image) {
   name.addEventListener("click", async (e) => {
     e.stopPropagation();
     try {
-      await navigator.clipboard.writeText(image.id.replace(":", "#"));
+      await navigator.clipboard.writeText(hostPrefixed(image.host, image.filename));
       name.classList.add("copied");
       setTimeout(() => name.classList.remove("copied"), 800);
     } catch { /* clipboard unavailable */ }
@@ -98,20 +106,27 @@ function buildActions(image) {
   const save = document.createElement("button");
   save.className = "savebtn";
   const paint = () => {
-    const has = savedSet.has(image.filename);
+    // Save button greys when either the raw filename or the host-prefixed
+    // form is on disk — legacy saves lack the prefix, new saves have it.
+    const has = savedSet.has(image.filename)
+      || savedSet.has(hostPrefixed(image.host, image.filename));
     save.textContent = has ? "saved" : "save";
     save.title = has ? "already in ~/Downloads (click to download again)" : "download this image";
   };
   paint();
   save.addEventListener("click", (e) => {
     e.stopPropagation();
+    // Downloads land in ~/Downloads with a `<host>#<filename>` name so
+    // files from different hosts don't collide when they share a name.
+    // Skip the prefix if the filename already carries it.
+    const downloadName = hostPrefixed(image.host, image.filename);
     const a = document.createElement("a");
     a.href = api.imageBytesUrl(image.id);
-    a.download = image.filename;
+    a.download = downloadName;
     document.body.appendChild(a);
     a.click();
     a.remove();
-    savedSet.add(image.filename); // optimistic; refreshed from disk on load
+    savedSet.add(downloadName); // optimistic; refreshed from disk on load
     paint();
   });
   actions.push(save);

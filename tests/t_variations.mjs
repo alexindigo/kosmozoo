@@ -7,6 +7,7 @@ import {
   findProducingSaveImage,
   narrowToOneSaveImage,
   wrapAllSaveImagePrefixes,
+  inspectGraph,
 } from "../plugins/variations/plugin.mjs";
 
 // --- permutation engine ---------------------------------------------------
@@ -231,4 +232,71 @@ Deno.test("wrapAllSaveImagePrefixes: fallback wraps every SaveImage's own prefix
   assertEquals(touched, 2);
   assertEquals(graph["1"].inputs.filename_prefix, "pre_Alpha_suf");
   assertEquals(graph["2"].inputs.filename_prefix, "pre_Beta_suf");
+});
+
+// --- inspectGraph: graph-driven param discovery -------------------------------
+
+Deno.test("inspectGraph: KSampler flow surfaces denoise/cfg/steps/seed", () => {
+  const graph = {
+    "1": { class_type: "KSampler", inputs: {
+      seed: 12345, steps: 20, cfg: 7.5, denoise: 0.8,
+    } },
+  };
+  const params = inspectGraph(graph);
+  assertEquals(params.denoise?.current, 0.8);
+  assertEquals(params.denoise?.label, "denoise");
+  assertEquals(params.cfg?.current, 7.5);
+  assertEquals(params.steps?.current, 20);
+  assertEquals(params.seed?.current, 12345);
+  assertEquals(params.ipa_weight, null);
+  assertEquals(params.guidance, null);
+});
+
+Deno.test("inspectGraph: FluxGuidance surfaces guidance", () => {
+  const graph = {
+    "1": { class_type: "KSampler", inputs: {
+      seed: 1, steps: 20, cfg: 1.0, denoise: 1.0,
+    } },
+    "2": { class_type: "FluxGuidance", inputs: { guidance: 3.5, conditioning: ["3", 0] } },
+  };
+  const params = inspectGraph(graph);
+  assertEquals(params.guidance?.current, 3.5);
+  assertEquals(params.guidance?.label, "fluxguidance:guidance");
+});
+
+Deno.test("inspectGraph: ModelSampling surfaces shift", () => {
+  const graph = {
+    "1": { class_type: "KSampler", inputs: {
+      seed: 1, steps: 20, cfg: 1.0, denoise: 1.0,
+    } },
+    "2": { class_type: "ModelSamplingFlux", inputs: { shift: 1.15, model: ["3", 0] } },
+  };
+  const params = inspectGraph(graph);
+  assertEquals(params.shift?.current, 1.15);
+  assertEquals(params.shift?.label, "modelsampling:shift");
+});
+
+Deno.test("inspectGraph: ApplyPulid surfaces pulid_weight", () => {
+  const graph = {
+    "1": { class_type: "KSampler", inputs: {
+      seed: 1, steps: 20, cfg: 1.0, denoise: 1.0,
+    } },
+    "2": { class_type: "ApplyPulidFlux", inputs: { weight: 0.9, model: ["3", 0] } },
+  };
+  const params = inspectGraph(graph);
+  assertEquals(params.pulid_weight?.current, 0.9);
+  assertEquals(params.pulid_weight?.label, "applypulid:pulid_weight");
+});
+
+Deno.test("inspectGraph: unrelated graph yields all-null for optional params", () => {
+  const graph = {
+    "1": { class_type: "KSampler", inputs: {
+      seed: 1, steps: 20, cfg: 1.0, denoise: 1.0,
+    } },
+  };
+  const params = inspectGraph(graph);
+  assertEquals(params.guidance, null);
+  assertEquals(params.shift, null);
+  assertEquals(params.pulid_weight, null);
+  assertEquals(params.ipa_weight, null);
 });

@@ -265,7 +265,16 @@ async function loadCandidates() {
   try {
     S.images = await api.images(S.host);
     try {
-      const d = await api.downloadsCheck(S.images.map((i) => i.filename));
+      // Ask about both raw and host-prefixed filenames — new saves land
+      // as `<host>#<filename>` but legacy saves may still be raw. The
+      // card considers itself "saved" if either form exists on disk.
+      const q = new Set();
+      for (const img of S.images) {
+        q.add(img.filename);
+        const pfx = img.host + "#";
+        if (!img.filename.startsWith(pfx)) q.add(pfx + img.filename);
+      }
+      const d = await api.downloadsCheck([...q]);
       savedSet.clear();
       for (const [k, v] of Object.entries(d.exists ?? {})) if (v) savedSet.add(k);
     } catch { /* save buttons just won't pre-grey */ }

@@ -97,12 +97,42 @@ function probeIpaWeight(nodes /*, graph */) {
   return { node: carriers, key: "weight", ownerLabel: "ipadapter" };
 }
 
+// FluxGuidance.guidance — the "cfg" of Flux workflows.
+function probeGuidance(nodes /*, graph */) {
+  const g = firstNode(nodes, "fluxguidance");
+  if (g && typeof g.inputs?.guidance === "number") {
+    return { node: g, key: "guidance", ownerLabel: "fluxguidance" };
+  }
+  return { node: null };
+}
+
+// ModelSampling*.shift — Flux/SD3 time-shift parameter.
+function probeShift(nodes /*, graph */) {
+  const ms = firstNode(nodes, "modelsampling");
+  if (ms && typeof ms.inputs?.shift === "number") {
+    return { node: ms, key: "shift", ownerLabel: "modelsampling" };
+  }
+  return { node: null };
+}
+
+// ApplyPulid*.weight — PuLID identity-adapter strength.
+function probePulidWeight(nodes /*, graph */) {
+  const ap = firstNode(nodes, "applypulid");
+  if (ap && typeof ap.inputs?.weight === "number") {
+    return { node: ap, key: "weight", ownerLabel: "applypulid" };
+  }
+  return { node: null };
+}
+
 const PARAM_PROBES = {
   denoise: probeDenoise,
   cfg: probeCfg,
   steps: probeSteps,
   seed: probeSeed,
   ipa_weight: probeIpaWeight,
+  guidance: probeGuidance,
+  shift: probeShift,
+  pulid_weight: probePulidWeight,
 };
 
 // --- per-image inspection ----------------------------------------------------
@@ -113,7 +143,7 @@ const PARAM_PROBES = {
 // "scheduler:denoise" otherwise). `writeOnly: true` marks params whose
 // target node is present but doesn't expose a readable current value
 // (widget-only custom seed nodes).
-function inspectGraph(graph) {
+export function inspectGraph(graph) {
   const nodes = Object.values(graph);
   const out = {};
   for (const [param, probe] of Object.entries(PARAM_PROBES)) {
@@ -352,7 +382,13 @@ export function register(kz) {
       return Response.json({ error: "no permutations (check ranges and increment)" }, { status: 400 });
     }
 
-    const pfxTpl = prefix ?? "";
+    // "<host>#" is ALWAYS the leading prefix of the generated filename so
+    // outputs from different hosts don't collide in ~/Downloads or in the
+    // ComfyUI output folder. The user's prefix goes after it. If the user
+    // already typed a "<host>#" prefix, we don't double-prepend it.
+    const hostTag = host + "#";
+    const userPfx = String(prefix ?? "");
+    const pfxTpl = userPfx.startsWith(hostTag) ? userPfx : hostTag + userPfx;
     const sfxTpl = suffix ?? "";
 
     // Identify which SaveImage node produced the original image, so we can
