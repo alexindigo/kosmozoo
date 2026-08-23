@@ -58,7 +58,8 @@ export async function serveStatic(pathname) {
     return new Response("not found", { status: 404 });
   }
 
-  let p = pathname === "/" ? "/index.html" : pathname;
+  // / and the SPA route /diff both serve the app shell
+  let p = (pathname === "/" || pathname === "/diff") ? "/index.html" : pathname;
   // prevent traversal
   const full = normalize(join(CLIENT_ROOT, p));
   if (!full.startsWith(CLIENT_ROOT)) return new Response("forbidden", { status: 403 });

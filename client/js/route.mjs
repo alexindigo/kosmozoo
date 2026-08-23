@@ -11,13 +11,12 @@
 // already carries the host — mirror of card.mjs hostPrefixed).
 
 import { state } from "./state.mjs";
+import { api } from "./api.mjs";
 
 export function parseUrl() {
   if (typeof location === "undefined") return { view: "feed", host: null, file: null };
   if (location.pathname === "/diff") {
-    // v1: the diff view parses its pair in commit 3's diff.mjs; the feed
-    // reader only needs to know it isn't the feed
-    return { view: "diff", hash: location.hash.replace(/^#/, "") };
+    return { view: "diff", ...parseDiffHash(location.hash.replace(/^#/, "")) };
   }
   const h = location.hash.replace(/^#/, "");
   if (!h) return { view: "feed", host: null, file: null };
@@ -27,6 +26,46 @@ export function parseUrl() {
     host: host ? decodeURIComponent(host) : null,
     file: file ? decodeURIComponent(file) : null,
   };
+}
+
+// /diff#<srcL>#<fileL>:<srcR>#<fileR> — sources are configured host names
+// or "anchor" (the local feed); files are percent-encoded, so raw ":" is a
+// safe side separator. Pure: unit-testable without a location.
+export function parseDiffHash(h) {
+  const [ls, rs] = h.split(":");
+  return { left: parseSide(ls), right: parseSide(rs) };
+}
+
+function parseSide(side) {
+  if (!side) return null;
+  const i = side.indexOf("#");
+  if (i < 0) return null;
+  const source = side.slice(0, i);
+  const file = decodeURIComponent(side.slice(i + 1));
+  return source && file ? { source, file } : null;
+}
+
+export function diffUrl(left, right) {
+  return "/diff#" + left.source + "#" + encodeURIComponent(left.file)
+    + ":" + right.source + "#" + encodeURIComponent(right.file);
+}
+
+// one resolver for every source kind; new feeds plug in here
+export function resolveSide(side) {
+  if (!side) return null;
+  if (side.source === "anchor") {
+    const a = state.anchors.find((x) => x.name === side.file);
+    return a ? { name: a.name, src: a.src, meta: a.meta ?? null } : null;
+  }
+  if (state.hosts[side.source]) {
+    return {
+      name: side.file,
+      host: side.source,
+      src: api.imageBytesUrl(`${side.source}:${side.file}`),
+      meta: null,
+    };
+  }
+  return null;
 }
 
 export function stripHostPrefix(host, filename) {

@@ -75,3 +75,27 @@ Deno.test("state: three axes declared, ROI manual-first (null until set)", () =>
   assertEquals(state.roi, null);
   assert(Array.isArray(state.guides));
 });
+
+// --- diff URL grammar ------------------------------------------------------
+
+import { parseDiffHash, diffUrl } from "../client/js/route.mjs";
+
+Deno.test("diff: parseDiffHash round-trips host-vs-host sides", () => {
+  const { left, right } = parseDiffHash("fake#flux-basic.png:another#flux-lora.png");
+  assertEquals(left, { source: "fake", file: "flux-basic.png" });
+  assertEquals(right, { source: "another", file: "flux-lora.png" });
+});
+
+Deno.test("diff: anchor source and hostile filenames round-trip", () => {
+  const weird = "a b#c:d.png";
+  const hash = diffUrl({ source: "fake", file: weird }, { source: "anchor", file: "ref one.png" }).slice("/diff#".length);
+  const { left, right } = parseDiffHash(hash);
+  assertEquals(left, { source: "fake", file: weird });
+  assertEquals(right, { source: "anchor", file: "ref one.png" });
+});
+
+Deno.test("diff: malformed sides parse to null, not garbage", () => {
+  assertEquals(parseDiffHash("nosource").left, null);
+  assertEquals(parseDiffHash("fake#:anchor#x.png").left, null);
+  assertEquals(parseDiffHash("").right, null);
+});
