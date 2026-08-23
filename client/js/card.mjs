@@ -98,6 +98,8 @@ function buildActions(image) {
     }, j.vote === "up"),
     actionButton("favorite", iconSvg("star"), "favorite — interesting in itself, not project fitness", async (e) => {
       await toggleFavorite(image);
+      // No render() in toggleFavorite, so this button stays in the DOM and
+      // the .on class lands on the live element.
       e.currentTarget.classList.toggle("on", !!image.judgment?.favorite);
     }, !!j.favorite),
   ];

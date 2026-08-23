@@ -35,7 +35,9 @@ export async function toggleFavorite(image) {
   await api.setJudgment(image.id, { favorite: next || null });
   if (!image.judgment) image.judgment = {};
   if (next) image.judgment.favorite = true; else delete image.judgment.favorite;
-  render();
+  // No render() — the button's .on class updates in place. Re-rendering the
+  // feed would destroy this button element and the class would land on a
+  // stale reference (the old element), so the visual state never updates.
 }
 
 // --- notes -----------------------------------------------------------------
