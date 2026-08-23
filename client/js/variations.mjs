@@ -230,18 +230,21 @@ function openPanel(cardEl, image) {
     for (const el of items) sliders.appendChild(el);
   }
 
-  // Append `_{key}_` to the suffix if not already present.
+  // Append `_{key}` to the suffix if not already present. No trailing
+  // underscore — ComfyUI's SaveImage node writes `<prefix>_<counter>_.<ext>`
+  // and adds its own separator underscore before the counter. Trailing
+  // one here would double up.
   function autoInsertSuffix(placeholderKey) {
     if (!placeholderKey) return;
-    const token = `_{${placeholderKey}}_`;
+    const token = `_{${placeholderKey}}`;
     if (suffixInput.value.includes(token)) return;
     suffixInput.value = suffixInput.value + token;
   }
 
-  // Remove `_{key}_` from the suffix if present. Idempotent.
+  // Remove `_{key}` from the suffix if present. Idempotent.
   function autoRemoveSuffix(placeholderKey) {
     if (!placeholderKey) return;
-    const token = `_{${placeholderKey}}_`;
+    const token = `_{${placeholderKey}}`;
     if (!suffixInput.value.includes(token)) return;
     suffixInput.value = suffixInput.value.split(token).join("");
   }
