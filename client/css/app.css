@@ -367,7 +367,7 @@ main { display: flex; flex: 1; min-height: 0; }
    image's actual value is legible on every row (enabled or not). */
 .vz-slider-row.vz-off .vz-min-lbl,
 .vz-slider-row.vz-off .vz-max-lbl,
-.vz-slider-row.vz-off .vz-thumb,
+.vz-slider-row.vz-off .vz-slider,
 .vz-slider-row.vz-off .vz-track { visibility: hidden; }
 .vz-slider-row.vz-absent { opacity: 0.25; }
 .vz-slider-row.vz-absent .vz-cb { cursor: not-allowed; }
@@ -386,73 +386,48 @@ main { display: flex; flex: 1; min-height: 0; }
   cursor: pointer; align-self: flex-start; }
 .vz-label:hover { color: var(--accent); }
 
-/* Dual-thumb slider layout: three lanes, vertically stacked via flex.
-   The middle lane (.vz-lane-track) is the actual slider. It centers its
-   contents vertically, so the rail, the selected band, the marker, and
-   BOTH range thumbs all share ONE centerline — no --track-y arithmetic,
-   no top/height matching, no possibility of vertical drift. Horizontal
-   positioning inside lanes is the ONLY absolute math (left: % from JS).
+/* Dual-thumb slider layout: three stacked lanes.
+   Lane 1: min/max labels. Lane 2: noUiSlider (renders track, thumbs,
+   connect band). Lane 3: current-value label. The slider library handles
+   the internal alignment — thumbs, track, and connect band share the
+   same centerline by the library's own layout. */
+.vz-rangewrap { position: relative; margin-top: 2px; }
 
-   Layout per row:
-     [☐]  label                                       [inc stepper]
-          min-label  max-label        ← lane 1
-          ●──────────●  rail line     ← lane 2 (flex-centered)
-                 ⌄ marker + current   ← lane 3
-*/
-.vz-rangewrap { position: relative;
-  display: flex; flex-direction: column; gap: 2px;
-  margin-top: 2px; }
-
-/* Lane 1: min/max labels above the track. Height is content-driven; the
-   `left: %` on each label is the only absolute positioning. */
-.vz-lane-labels { position: relative; height: 14px; }
+/* Lane 1: min/max labels above the track. */
+.vz-lane-labels { position: relative; height: 14px; margin-bottom: 2px; }
 .vz-bound { position: absolute; top: 0; transform: translateX(-50%);
   color: var(--fg); font-size: 11px;
   font-family: ui-monospace, monospace; pointer-events: none;
   white-space: nowrap; }
 
-/* Lane 2: the actual slider. The track is full-width; thumbs, the selected
-   band, and the orange marker are flex-centered on the lane's centerline.
-   The grey rail is drawn via ::before so it's at the same centerline
-   without its own offset. */
-.vz-lane-track { position: relative;
-  display: flex; align-items: center;
-  height: 20px; }
-.vz-lane-track::before { content: ""; position: absolute; left: 0; right: 0;
-  top: 50%; height: 1px; background: var(--dim);
-  transform: translateY(-0.5px); }
+/* Lane 2: the noUiSlider element. The library renders its own internal
+   structure; we just override the colors and sizes. */
+.vz-lane-track { position: relative; height: 20px; margin-bottom: 2px; }
+.vz-slider { width: 100%; height: 20px; }
 
-/* Two overlapping range inputs. Each spans the full lane width; the thumb
-   circles are flex-centered on the lane's centerline. */
-.vz-thumb { position: absolute; inset: 0; width: 100%;
-  -webkit-appearance: none; appearance: none; background: transparent;
-  pointer-events: none; margin: 0; padding: 0; }
-.vz-thumb::-webkit-slider-thumb { -webkit-appearance: none; appearance: none;
-  width: 14px; height: 14px; border-radius: 50%;
-  background: var(--accent); border: 2px solid var(--bg);
-  cursor: pointer; pointer-events: auto; }
-.vz-thumb::-moz-range-thumb {
-  width: 14px; height: 14px; border-radius: 50%;
-  background: var(--accent); border: 2px solid var(--bg);
-  cursor: pointer; pointer-events: auto; }
-.vz-thumb::-webkit-slider-runnable-track { background: transparent; height: 2px; }
-.vz-thumb::-moz-range-track { background: transparent; height: 2px; }
+/* noUiSlider overrides — match our palette. */
+.vz-lane-track .noUi-target { background: transparent; border: none;
+  box-shadow: none; }
+.vz-lane-track .noUi-base { background: var(--dim); height: 1px;
+  top: 50%; transform: translateY(-50%); }
+.vz-lane-track .noUi-connect { background: var(--accent); height: 3px;
+  top: 50%; transform: translateY(-50%); border-radius: 1px; }
+.vz-lane-track .noUi-origin { height: 14px; width: 14px;
+  top: 50%; transform: translate(-50%, -50%); }
+.vz-lane-track .noUi-handle { width: 14px; height: 14px;
+  border-radius: 50%; background: var(--accent); border: 2px solid var(--bg);
+  cursor: pointer; box-shadow: none; }
+.vz-lane-track .noUi-handle::before,
+.vz-lane-track .noUi-handle::after { display: none; }
+.vz-lane-track .noUi-handle:hover { filter: brightness(1.2); }
 
-/* The selected band between the two thumbs. It's a flex child too, so its
-   vertical center is the lane's centerline automatically. Its left/width
-   are the JS-computed horizontal extents. */
-.vz-track { position: absolute; height: 3px;
-  top: 50%; transform: translateY(-50%);
-  background: var(--accent); border-radius: 1px; pointer-events: none; }
-
-/* Orange "current value" marker — a vertical tick centered on the lane,
-   straddling the rail line. */
+/* Orange "current value" marker — overlaid on the slider lane. */
 .vz-marker { position: absolute; width: 2px; height: 20px;
   top: 50%; transform: translate(-50%, -50%);
-  background: var(--orange); pointer-events: none; }
+  background: var(--orange); pointer-events: none; z-index: 2; }
 
-/* Lane 3: current-value label below the track. `left: %` set by JS. */
-.vz-lane-current { position: relative; height: 14px; }
+/* Lane 3: current-value label below the track. */
+.vz-lane-current { position: relative; height: 14px; margin-top: 2px; }
 .vz-current { position: absolute; top: 0; transform: translateX(-50%);
   color: var(--orange); font-size: 11px;
   font-family: ui-monospace, monospace; pointer-events: none;

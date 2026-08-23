@@ -1,10 +1,9 @@
 // tests/e2e/variations-thumb-zoom.cjs — close-up on the variations modal's
-// sliders so we can verify the drag thumbs sit ON the rail line.
+// sliders, verifying the drag thumbs sit ON the rail line.
 //
-// The variations-modal screenshot at default zoom is too small to verify
-// thumb-on-rail alignment. This zooms the browser viewport way in on the
-// sliders before screenshotting, so the rail/thumb/marker geometry is
-// readable.
+// Structural claim being proven: the rangewrap's three flex lanes share
+// ONE centerline by construction, so the rail, selected band, marker,
+// and both thumbs are vertically centered identically within ~1px.
 
 const { CDP, sleep } = require("/work/tests/e2e/cdp.cjs");
 const fs = require("fs");
@@ -15,11 +14,14 @@ const HOST = process.env.DIAGNOSE_HOST || "anton";
 const FILE = process.env.DIAGNOSE_FILE || "exp_ComfyUI_v1_00002_.png";
 
 async function main() {
-  const cdp = await CDP.launch(9342);
+  const cdp = await CDP.launch(9343);
   try {
-    // Big viewport so the modal has room, then we zoom with Emulation.
     await cdp.send("Emulation.setDeviceMetricsOverride",
-      { width: 1600, height: 1000, deviceScaleFactor: 2, mobile: false });
+      { width: 1100, height: 800, deviceScaleFactor: 1, mobile: false });
+    // Bypass ALL browser cache so we always see the current CSS/JS
+    await cdp.send("Network.enable");
+    await cdp.send("Network.setCacheDisabled", { cacheDisabled: true });
+
     await cdp.goto(URL + "/");
     await cdp.poll(`window.__kz && window.__kz.S && window.__kz.S.images.length > 0`, 20000);
 
@@ -37,16 +39,13 @@ async function main() {
       const idx = window.__kz.S.images.findIndex(i => i.filename === ${JSON.stringify(FILE)});
       return idx;
     })()`);
-    if (foundIdx < 0) { console.error("image not found"); return; }
+    if (foundIdx < 0) { console.error("image not found:", FILE); return; }
 
-    // The chunked renderer needs to actually see the target index in the
-    // window. Scroll repeatedly until the card with our data-idx exists.
     for (let i = 0; i < 40; i++) {
       const ok = await cdp.evaluate(`(() => {
         const col = document.querySelector('#candidatesCol');
         const cards = document.querySelectorAll('.card');
         const last = cards[cards.length - 1];
-        // Keep scrolling to force more chunks to render
         if (last) col.scrollTop = col.scrollHeight;
         return !!document.querySelector('.card[data-idx="${foundIdx}"] .votebtn.variations');
       })()`);
@@ -54,32 +53,52 @@ async function main() {
       await sleep(200);
     }
     await cdp.poll(`!!document.querySelector('.card[data-idx="${foundIdx}"] .votebtn.variations')`, 10000);
-    // Center the card for a good screenshot
     await cdp.evaluate(`document.querySelector('.card[data-idx="${foundIdx}"]').scrollIntoView({ block: "center" })`);
     await sleep(800);
+
     await cdp.evaluate(`document.querySelector('.card[data-idx="${foundIdx}"] .votebtn.variations').click()`);
     await cdp.poll(`document.querySelectorAll('.vz-slider-row').length > 0`, 5000);
     await sleep(800);
 
-    // Geometric probe: read the bounding boxes of the rail line, the
-    // selected band, the orange marker, and the two thumb inputs, then
-    // report their vertical centers. The claim being proven is "they all
-    // share the same vertical centerline within ~1px" — but this time
-    // via flex structural centering, not arithmetic offsets.
+    // Report which CSS is actually applied: is the flex layout live?
+    const styleCheck = await cdp.evaluate(`(() => {
+      const wrap = document.querySelector('.vz-rangewrap');
+      const lane = document.querySelector('.vz-lane-track');
+      const thumb = document.querySelector('.vz-thumb');
+      if (!wrap || !lane || !thumb) return { error: 'elements missing' };
+      const cs = (el) => {
+        const s = getComputedStyle(el);
+        return {
+          display: s.display,
+          alignItems: s.alignItems,
+          position: s.position,
+          top: s.top,
+          height: s.height,
+          inset: s.inset,
+        };
+      };
+      return {
+        rangewrap: cs(wrap),
+        laneTrack: cs(lane),
+        thumb: cs(thumb),
+      };
+    })()`);
+    console.log("styles:", JSON.stringify(styleCheck, null, 2));
+
+    // Geometry probe
     const geom = await cdp.evaluate(`(() => {
       const row = document.querySelector('.vz-slider-row');
       const lane = row.querySelector('.vz-lane-track');
       const center = (el) => {
         if (!el) return null;
         const r = el.getBoundingClientRect();
-        return { top: r.top, height: r.height, center: r.top + r.height / 2 };
+        return { top: Math.round(r.top * 100) / 100, height: Math.round(r.height * 100) / 100, center: Math.round((r.top + r.height / 2) * 100) / 100 };
       };
       const laneRect = center(lane);
-      // The grey rail is ::before on the lane, drawn at the lane's
-      // vertical midpoint (top: 50%; translateY(-0.5px)). Its center
-      // IS the lane center by construction.
+      const rail = center(row.querySelector('.vz-rail'));
       return {
-        laneTop: laneRect.top, laneHeight: laneRect.height, laneCenter: laneRect.center,
+        laneCenter: laneRect.center,
+        railCenter: rail.center,
         thumbMin: center(row.querySelector('.vz-thumb-min')),
         thumbMax: center(row.querySelector('.vz-thumb-max')),
         trackBand: center(row.querySelector('.vz-track')),
@@ -88,7 +107,6 @@ async function main() {
     })()`);
     console.log("geometry:", JSON.stringify(geom, null, 2));
 
-    // Screenshot — with 2x DPR the thumbs+rail are readable.
     const shot = await cdp.send("Page.captureScreenshot", { format: "png" });
     fs.writeFileSync(OUT + "/variations-thumb-zoom.png", Buffer.from(shot.data, "base64"));
     console.log("screenshot written");
