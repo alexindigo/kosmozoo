@@ -386,67 +386,84 @@ main { display: flex; flex: 1; min-height: 0; }
   cursor: pointer; align-self: flex-start; }
 .vz-label:hover { color: var(--accent); }
 
-/* dual-thumb slider layout.
-   All slider chrome shares a single centerline at TRACK_Y within the
-   wrapper — the grey rail, the blue selected band, the orange marker,
-   and both thumbs are all vertically centered on that Y so the drag
-   circles sit ON the line, not above/below it. */
-.vz-rangewrap { position: relative; height: 46px; padding-top: 18px;
-  margin-top: 2px;
-  --track-y: 26px;   /* the single centerline for rail + track + thumbs */
-  --thumb-d: 14px;   /* thumb diameter (excluding the 2px border ring) */
-}
-.vz-rangewrap::before { content: ""; position: absolute; left: 0; right: 0;
-  top: var(--track-y); height: 1px; background: var(--dim); }
+/* Dual-thumb slider layout: three lanes, vertically stacked via flex.
+   The middle lane (.vz-lane-track) is the actual slider. It centers its
+   contents vertically, so the rail, the selected band, the marker, and
+   BOTH range thumbs all share ONE centerline — no --track-y arithmetic,
+   no top/height matching, no possibility of vertical drift. Horizontal
+   positioning inside lanes is the ONLY absolute math (left: % from JS).
 
-/* min/max value labels above the thumbs — positioned absolutely by JS */
-.vz-bound { position: absolute; top: -2px; transform: translateX(-50%);
+   Layout per row:
+     [☐]  label                                       [inc stepper]
+          min-label  max-label        ← lane 1
+          ●──────────●  rail line     ← lane 2 (flex-centered)
+                 ⌄ marker + current   ← lane 3
+*/
+.vz-rangewrap { position: relative;
+  display: flex; flex-direction: column; gap: 2px;
+  margin-top: 2px; }
+
+/* Lane 1: min/max labels above the track. Height is content-driven; the
+   `left: %` on each label is the only absolute positioning. */
+.vz-lane-labels { position: relative; height: 14px; }
+.vz-bound { position: absolute; top: 0; transform: translateX(-50%);
   color: var(--fg); font-size: 11px;
   font-family: ui-monospace, monospace; pointer-events: none;
   white-space: nowrap; }
 
-/* orange marker + current value label below.
-   The tick straddles the rail line: half above, half below the centerline. */
-.vz-marker { position: absolute; width: 2px; height: 20px;
-  top: calc(var(--track-y) - 10px);
-  background: var(--orange); pointer-events: none;
-  transform: translateX(-50%); }
-.vz-current { position: absolute; transform: translateX(-50%);
-  top: calc(var(--track-y) + 12px);
-  color: var(--orange); font-size: 11px;
-  font-family: ui-monospace, monospace; pointer-events: none;
-  white-space: nowrap; }
+/* Lane 2: the actual slider. The track is full-width; thumbs, the selected
+   band, and the orange marker are flex-centered on the lane's centerline.
+   The grey rail is drawn via ::before so it's at the same centerline
+   without its own offset. */
+.vz-lane-track { position: relative;
+  display: flex; align-items: center;
+  height: 20px; }
+.vz-lane-track::before { content: ""; position: absolute; left: 0; right: 0;
+  top: 50%; height: 1px; background: var(--dim);
+  transform: translateY(-0.5px); }
 
-/* Two overlapping range inputs form the dual thumb. The <input type=range>
-   draws its thumb centered on its runnable-track, which itself sits
-   vertically centered inside the input's content-box. So we make the
-   input's height equal to the thumb diameter and pin its VERTICAL CENTER
-   to --track-y: top = track-y - thumb-d/2. That puts the thumb circle
-   center exactly on the rail. */
-.vz-thumb { position: absolute; left: 0; width: 100%;
-  top: calc(var(--track-y) - (var(--thumb-d) / 2));
-  height: var(--thumb-d);
-  -webkit-appearance: none; appearance: none;
-  background: transparent; pointer-events: none; margin: 0; padding: 0; }
+/* Two overlapping range inputs. Each spans the full lane width; the thumb
+   circles are flex-centered on the lane's centerline. */
+.vz-thumb { position: absolute; inset: 0; width: 100%;
+  -webkit-appearance: none; appearance: none; background: transparent;
+  pointer-events: none; margin: 0; padding: 0; }
 .vz-thumb::-webkit-slider-thumb { -webkit-appearance: none; appearance: none;
-  width: var(--thumb-d); height: var(--thumb-d); border-radius: 50%;
+  width: 14px; height: 14px; border-radius: 50%;
   background: var(--accent); border: 2px solid var(--bg);
   cursor: pointer; pointer-events: auto; }
 .vz-thumb::-moz-range-thumb {
-  width: var(--thumb-d); height: var(--thumb-d); border-radius: 50%;
+  width: 14px; height: 14px; border-radius: 50%;
   background: var(--accent); border: 2px solid var(--bg);
   cursor: pointer; pointer-events: auto; }
 .vz-thumb::-webkit-slider-runnable-track { background: transparent; height: 2px; }
 .vz-thumb::-moz-range-track { background: transparent; height: 2px; }
-/* Blue "selected" band between the two thumbs — vertically centered on the rail. */
-.vz-track { position: absolute; height: 3px; background: var(--accent);
-  border-radius: 1px; pointer-events: none;
-  top: calc(var(--track-y) - 1px); }
 
-/* per-row increment stepper (right of the slider) */
+/* The selected band between the two thumbs. It's a flex child too, so its
+   vertical center is the lane's centerline automatically. Its left/width
+   are the JS-computed horizontal extents. */
+.vz-track { position: absolute; height: 3px;
+  top: 50%; transform: translateY(-50%);
+  background: var(--accent); border-radius: 1px; pointer-events: none; }
+
+/* Orange "current value" marker — a vertical tick centered on the lane,
+   straddling the rail line. */
+.vz-marker { position: absolute; width: 2px; height: 20px;
+  top: 50%; transform: translate(-50%, -50%);
+  background: var(--orange); pointer-events: none; }
+
+/* Lane 3: current-value label below the track. `left: %` set by JS. */
+.vz-lane-current { position: relative; height: 14px; }
+.vz-current { position: absolute; top: 0; transform: translateX(-50%);
+  color: var(--orange); font-size: 11px;
+  font-family: ui-monospace, monospace; pointer-events: none;
+  white-space: nowrap; }
+
+/* per-row increment stepper (right of the slider).
+   Self-centers against the row — no top arithmetic. The checkbox still
+   top-aligns via its own alignment. */
 .vz-row-inc { display: flex; align-items: center; gap: 4px;
-  margin-top: 22px;  /* align with the slider track */
-  flex: 0 0 auto; }
+  flex: 0 0 auto;
+  align-self: center; }
 .vz-row-inc .vz-step-btn { background: transparent; color: var(--mid);
   border: 1px solid var(--dim); border-radius: 4px;
   width: 20px; height: 22px; font-size: 14px; cursor: pointer;
