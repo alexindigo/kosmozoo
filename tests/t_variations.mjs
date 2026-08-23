@@ -1,7 +1,13 @@
 // tests/t_variations.mjs — permutation engine, template substitution, graph mutation.
 
 import { assert, assertEquals } from "jsr:@std/assert";
-import { generatePermutations, templateReplace } from "../plugins/variations/plugin.mjs";
+import {
+  generatePermutations,
+  templateReplace,
+  findProducingSaveImage,
+  narrowToOneSaveImage,
+  wrapAllSaveImagePrefixes,
+} from "../plugins/variations/plugin.mjs";
 
 // --- permutation engine ---------------------------------------------------
 
@@ -162,4 +168,67 @@ Deno.test("mutateGraph: KSampler denoise", async () => {
   );
   assertEquals(perms.length, 1);
   assertEquals(perms[0].denoise, 0.70);
+});
+
+// --- SaveImage narrowing ------------------------------------------------------
+
+Deno.test("findProducingSaveImage: picks the node whose prefix leads the filename", () => {
+  const graph = {
+    "12": { class_type: "SaveImage", inputs: { filename_prefix: "Logotype Pipeline", images: ["9", 0] } },
+    "15": { class_type: "SaveImage", inputs: { filename_prefix: "ComfyUI", images: ["8", 0] } },
+    "8":  { class_type: "VAEDecode", inputs: {} },
+  };
+  const found = findProducingSaveImage(graph, "ComfyUI_00398_.png");
+  assertEquals(found?.id, "15");
+  assertEquals(found?.prefix, "ComfyUI");
+});
+
+Deno.test("findProducingSaveImage: prefers the longest matching prefix", () => {
+  // If two SaveImages share a leading prefix, the more specific one wins.
+  const graph = {
+    "1": { class_type: "SaveImage", inputs: { filename_prefix: "ComfyUI", images: [] } },
+    "2": { class_type: "SaveImage", inputs: { filename_prefix: "ComfyUI_final", images: [] } },
+  };
+  const found = findProducingSaveImage(graph, "ComfyUI_final_00042_.png");
+  assertEquals(found?.id, "2");
+});
+
+Deno.test("findProducingSaveImage: null when no SaveImage matches", () => {
+  const graph = {
+    "1": { class_type: "SaveImage", inputs: { filename_prefix: "Alpha", images: [] } },
+    "2": { class_type: "SaveImage", inputs: { filename_prefix: "Beta", images: [] } },
+  };
+  const found = findProducingSaveImage(graph, "Gamma_00001_.png");
+  assertEquals(found, null);
+});
+
+Deno.test("narrowToOneSaveImage: wraps the producing prefix, drops the others", () => {
+  const graph = {
+    "12": { class_type: "SaveImage", inputs: { filename_prefix: "Logotype Pipeline", images: ["9", 0] } },
+    "15": { class_type: "SaveImage", inputs: { filename_prefix: "ComfyUI", images: ["8", 0] } },
+    "8":  { class_type: "VAEDecode", inputs: {} },
+    "9":  { class_type: "ImageUpscaleWithModel", inputs: {} },
+  };
+  const producing = findProducingSaveImage(graph, "ComfyUI_00398_.png");
+  const result = narrowToOneSaveImage(graph, producing, "exp_", "_v1");
+  assertEquals(result.kept, 1);
+  assertEquals(result.dropped, 1);
+  assert(!("12" in graph), "node 12 should be removed");
+  assert("15" in graph, "node 15 should remain");
+  assertEquals(graph["15"].inputs.filename_prefix, "exp_ComfyUI_v1");
+  // non-SaveImage nodes untouched
+  assert("8" in graph);
+  assert("9" in graph);
+});
+
+Deno.test("wrapAllSaveImagePrefixes: fallback wraps every SaveImage's own prefix", () => {
+  const graph = {
+    "1": { class_type: "SaveImage", inputs: { filename_prefix: "Alpha", images: [] } },
+    "2": { class_type: "SaveImage", inputs: { filename_prefix: "Beta", images: [] } },
+    "3": { class_type: "VAEDecode", inputs: {} },
+  };
+  const touched = wrapAllSaveImagePrefixes(graph, "pre_", "_suf");
+  assertEquals(touched, 2);
+  assertEquals(graph["1"].inputs.filename_prefix, "pre_Alpha_suf");
+  assertEquals(graph["2"].inputs.filename_prefix, "pre_Beta_suf");
 });
