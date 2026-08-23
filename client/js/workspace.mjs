@@ -4,13 +4,13 @@
 // the current image. A narrow vertical bar on the window's right edge holds
 // one button per space (details on top, the default); the choice persists.
 //
-// The details space renders whatever the URL says the current image is
-// (route.mjs). Scroll is a writer of the current image (user-driven);
-// everything else only reads it.
+// The current image is the URL (route.mjs); this module only reads it and
+// renders. Scroll is a writer: it moves the hash and updates the ring and
+// details directly — no render(), no cached copy to drift.
 
 import { state, onRender } from "./state.mjs";
 import { buildMetaBody } from "./fields.mjs";
-import { detailsImage, setCurrentFile, stripHostPrefix } from "./route.mjs";
+import { parseUrl, findByFile, writeFeedHash, stripHostPrefix } from "./route.mjs";
 
 const LS_SPACE = "kosmozoo.workspace.v1";
 
@@ -39,7 +39,10 @@ export function initWorkspace() {
       raf = 0;
       if (state.lightbox.open) return;
       const file = topCardFile(col);
-      if (file) setCurrentFile(file);
+      if (!file || file === parseUrl().file) return;
+      writeFeedHash(file);
+      markCurrent();
+      if (state.workspace === "details") renderDetails();
     });
   });
 }
@@ -67,14 +70,25 @@ function topCardFile(col) {
 // sky-blue ring on the card the URL names (hidden/absent → no ring, URL kept)
 function markCurrent() {
   for (const el of document.querySelectorAll(".card.current")) el.classList.remove("current");
-  if (!state.currentFile) return;
-  for (const el of document.querySelectorAll(".card[data-idx][data-name]")) {
+  const file = parseUrl().file;
+  if (!file) return;
+  for (const el of document.querySelectorAll(".card[data-idx]")) {
     const img = state.images[Number(el.dataset.idx)];
-    if (img && stripHostPrefix(state.host, img.filename) === state.currentFile) {
+    if (img && stripHostPrefix(state.host, img.filename) === file) {
       el.classList.add("current");
       return;
     }
   }
+}
+
+// lightbox image while open, else the URL's file — hidden included
+function detailsImage() {
+  if (state.lightbox.open) {
+    if (state.lightbox.col === "candidate") return state.images[state.lightbox.index] ?? null;
+    return state.anchors[state.lightbox.anchorIndex ?? 0] ?? null;
+  }
+  const idx = findByFile(parseUrl().file);
+  return idx >= 0 ? state.images[idx] : null;
 }
 
 function renderDetails() {
@@ -102,7 +116,7 @@ function renderDetails() {
   body.appendChild(buildMetaBody(img.meta ?? null));
 }
 
-// card ring + details follow the current file; no hash writes here
+// ring + details follow the URL; no hash writes here
 onRender((s) => {
   if (typeof document === "undefined") return;
   markCurrent();

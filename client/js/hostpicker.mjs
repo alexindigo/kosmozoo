@@ -7,6 +7,7 @@
 // lives in the URL hash (/#host[#filename]); stored host is a no-hash fallback.
 
 import { state, render, onRender } from "./state.mjs";
+import { writeFeedHash } from "./route.mjs";
 import { api } from "./api.mjs";
 import { chrome } from "./chrome.mjs";
 import { iconSvg } from "./icons.mjs";
@@ -58,7 +59,6 @@ async function removeHost(name) {
     await api.removeHost(name);
     state.hosts = await api.hosts();
     if (state.host === name) {
-      state.currentFile = null;
       await selectHost(Object.keys(state.hosts)[0] ?? null);
     }
     statusInfo(`host ${name} removed`);
@@ -68,12 +68,15 @@ async function removeHost(name) {
   }
 }
 
-export async function selectHost(name) {
+// keepFile: boot and URL-driven switches arrive with the hash already
+// pristine; UI switches drop the file part (it named the old host's image)
+export async function selectHost(name, { keepFile } = {}) {
   state.host = name;
   state.hostMenuOpen = false;
+  if (!keepFile) writeFeedHash(null);
   api.setSettings("core.ui", { host: name }).catch(() => {});
   // switching hosts reloads the feed from that host (loadCandidates owns
-  // fetch + rebuild + scroll restore + summary + metadata poll)
+  // fetch + rebuild + recenter + summary + metadata poll)
   if (selectCallback) await selectCallback();
   else render();
 }
@@ -119,10 +122,7 @@ onRender((s) => {
       removeHost(name);
     });
     row.append(dot, nm, addr, rm);
-    row.addEventListener("click", () => {
-      state.currentFile = null; // new host: the URL's file part dies with the old one
-      selectHost(name);
-    });
+    row.addEventListener("click", () => selectHost(name));
     list.appendChild(row);
   }
 });
