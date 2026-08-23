@@ -359,6 +359,8 @@ main { display: flex; flex: 1; min-height: 0; }
 .vz-slider-row.vz-off .vz-marker { visibility: hidden; }
 .vz-slider-row.vz-absent { opacity: 0.25; }
 .vz-slider-row.vz-absent .vz-cb { cursor: not-allowed; }
+.vz-loading { color: var(--mid); font-size: 12px; padding: 20px 4px;
+  text-align: center; font-style: italic; }
 
 /* checkbox — orange square (matches the mockup) */
 .vz-cb { -webkit-appearance: none; appearance: none;

@@ -96,6 +96,13 @@ export function extractMeta(entry) {
       if (v === null) v = scalarInput(firstNode(nodes, "seed"), "seed");
       if (v !== null) meta.seed = v;
     }
+    // If we still have no seed but the KSampler input links to a node,
+    // record its class_type as the seed source so the metadata surface
+    // can show e.g. "seed: ⇒ DomovoySeed" instead of dropping the field.
+    if (meta.seed === undefined && Array.isArray(ks.inputs?.seed) && ks.inputs.seed.length) {
+      const linked = graph[String(ks.inputs.seed[0])];
+      if (linked?.class_type) meta.seed_source = String(linked.class_type);
+    }
     meta.prompt = walkText(graph, ks.inputs?.positive).trim();
     meta.negPrompt = walkText(graph, ks.inputs?.negative).trim();
   } else {
@@ -104,6 +111,12 @@ export function extractMeta(entry) {
     let v = scalarInput(firstNode(nodes, "randomnoise"), "noise_seed");
     if (v === null) v = scalarInput(firstNode(nodes, "seed"), "seed");
     if (v !== null) meta.seed = v;
+    // If no scalar seed but a seed-ish node exists, record it as the source
+    // so the metadata surface can show "seed: ⇒ <NodeType>".
+    if (meta.seed === undefined) {
+      const seedish = firstNode(nodes, "randomnoise") ?? firstNode(nodes, "seed");
+      if (seedish?.class_type) meta.seed_source = String(seedish.class_type);
+    }
     v = scalarInput(firstNode(nodes, "scheduler"), "steps");
     if (v !== null) meta.steps = v;
     const guider = firstNode(nodes, "cfgguider");
