@@ -386,11 +386,18 @@ main { display: flex; flex: 1; min-height: 0; }
   cursor: pointer; align-self: flex-start; }
 .vz-label:hover { color: var(--accent); }
 
-/* dual-thumb slider layout */
+/* dual-thumb slider layout.
+   All slider chrome shares a single centerline at TRACK_Y within the
+   wrapper — the grey rail, the blue selected band, the orange marker,
+   and both thumbs are all vertically centered on that Y so the drag
+   circles sit ON the line, not above/below it. */
 .vz-rangewrap { position: relative; height: 46px; padding-top: 18px;
-  margin-top: 2px; }
+  margin-top: 2px;
+  --track-y: 26px;   /* the single centerline for rail + track + thumbs */
+  --thumb-d: 14px;   /* thumb diameter (excluding the 2px border ring) */
+}
 .vz-rangewrap::before { content: ""; position: absolute; left: 0; right: 0;
-  top: 24px; height: 1px; background: var(--dim); }
+  top: var(--track-y); height: 1px; background: var(--dim); }
 
 /* min/max value labels above the thumbs — positioned absolutely by JS */
 .vz-bound { position: absolute; top: -2px; transform: translateX(-50%);
@@ -398,29 +405,43 @@ main { display: flex; flex: 1; min-height: 0; }
   font-family: ui-monospace, monospace; pointer-events: none;
   white-space: nowrap; }
 
-/* orange marker + current value label below */
-.vz-marker { position: absolute; top: 14px; width: 2px; height: 20px;
+/* orange marker + current value label below.
+   The tick straddles the rail line: half above, half below the centerline. */
+.vz-marker { position: absolute; width: 2px; height: 20px;
+  top: calc(var(--track-y) - 10px);
   background: var(--orange); pointer-events: none;
   transform: translateX(-50%); }
-.vz-current { position: absolute; top: 34px; transform: translateX(-50%);
+.vz-current { position: absolute; transform: translateX(-50%);
+  top: calc(var(--track-y) + 12px);
   color: var(--orange); font-size: 11px;
   font-family: ui-monospace, monospace; pointer-events: none;
   white-space: nowrap; }
 
-/* two overlapping range inputs form the dual thumb */
-.vz-thumb { position: absolute; top: 18px; left: 0; width: 100%;
-  height: 20px; -webkit-appearance: none; appearance: none;
+/* Two overlapping range inputs form the dual thumb. The <input type=range>
+   draws its thumb centered on its runnable-track, which itself sits
+   vertically centered inside the input's content-box. So we make the
+   input's height equal to the thumb diameter and pin its VERTICAL CENTER
+   to --track-y: top = track-y - thumb-d/2. That puts the thumb circle
+   center exactly on the rail. */
+.vz-thumb { position: absolute; left: 0; width: 100%;
+  top: calc(var(--track-y) - (var(--thumb-d) / 2));
+  height: var(--thumb-d);
+  -webkit-appearance: none; appearance: none;
   background: transparent; pointer-events: none; margin: 0; padding: 0; }
 .vz-thumb::-webkit-slider-thumb { -webkit-appearance: none; appearance: none;
-  width: 14px; height: 14px; border-radius: 50%; background: var(--accent);
-  border: 2px solid var(--bg); cursor: pointer; pointer-events: auto; }
-.vz-thumb::-moz-range-thumb { width: 14px; height: 14px; border-radius: 50%;
-  background: var(--accent); border: 2px solid var(--bg); cursor: pointer;
-  pointer-events: auto; }
+  width: var(--thumb-d); height: var(--thumb-d); border-radius: 50%;
+  background: var(--accent); border: 2px solid var(--bg);
+  cursor: pointer; pointer-events: auto; }
+.vz-thumb::-moz-range-thumb {
+  width: var(--thumb-d); height: var(--thumb-d); border-radius: 50%;
+  background: var(--accent); border: 2px solid var(--bg);
+  cursor: pointer; pointer-events: auto; }
 .vz-thumb::-webkit-slider-runnable-track { background: transparent; height: 2px; }
 .vz-thumb::-moz-range-track { background: transparent; height: 2px; }
-.vz-track { position: absolute; top: 23px; height: 3px; background: var(--accent);
-  border-radius: 1px; pointer-events: none; }
+/* Blue "selected" band between the two thumbs — vertically centered on the rail. */
+.vz-track { position: absolute; height: 3px; background: var(--accent);
+  border-radius: 1px; pointer-events: none;
+  top: calc(var(--track-y) - 1px); }
 
 /* per-row increment stepper (right of the slider) */
 .vz-row-inc { display: flex; align-items: center; gap: 4px;
