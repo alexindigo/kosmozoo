@@ -65,21 +65,29 @@ async function main() {
         JSON.stringify(info));
     });
 
-    // --- 5 sliders (denoise, ipa weight, steps, cfg, seed) ---
-    await attempt("panel shows 5 parameter sliders (incl. seed)", async () => {
+    // --- sliders render after the probe returns (graph-driven) ---
+    // flux-basic uses SamplerCustomAdvanced with no CfgGuider and no
+    // IPAdapter, so the panel should render denoise/steps/seed but NOT
+    // cfg or ipa_weight for this graph.
+    await attempt("panel renders only the graph's varyable params", async () => {
+      await cdp.poll(`document.querySelectorAll('.vz-slider-row').length > 0`, 5000);
       const info = await cdp.evaluate(`(() => {
         const rows = document.querySelectorAll('.vz-slider-row');
         const labels = [...rows].map((r) => r.querySelector('.vz-label')?.textContent);
         return { count: rows.length, labels };
       })()`);
-      check("panel shows 5 parameter sliders",
-        info.count === 5 && info.labels.includes("seed"),
+      check("panel renders graph-appropriate params",
+        info.count === 3
+          && info.labels.includes("denoise")
+          && info.labels.includes("steps")
+          && info.labels.includes("seed")
+          && !info.labels.includes("cfg")
+          && !info.labels.includes("ipa weight"),
         JSON.stringify(info));
     });
 
-    // --- probe refines current values from the graph ---
+    // --- probe fills in seed current value ---
     await attempt("probe fills in seed current value", async () => {
-      await sleep(300);
       const cur = await cdp.evaluate(`(() => {
         for (const r of document.querySelectorAll('.vz-slider-row')) {
           if (r.querySelector('.vz-label')?.textContent === 'seed') {
@@ -235,7 +243,8 @@ async function main() {
       await cdp.evaluate(`
         document.querySelector('.card[data-idx="0"] .votebtn.variations').click()
       `);
-      await sleep(200);
+      // Wait for the probe to populate the slider rows
+      await cdp.poll(`document.querySelectorAll('.vz-slider-row').length > 0`, 5000);
       await cdp.evaluate(`(() => {
         const row = document.querySelector('.vz-slider-row');
         const cb2 = row.querySelector('.vz-cb');

@@ -12,7 +12,12 @@ import { api } from "./api.mjs";
 
 export const META_FIELD_GROUPS = [
   ["KSampler", [
-    ["seed",     (m) => m.seed],
+    // If the graph carries no scalar seed but the sampler links to a
+    // widget-only seed node (DomovoySeed, rgthree Seed, etc.), the
+    // extractor stores its class_type as seed_source and we surface
+    // that as "⇒ <NodeType>" so the row is still informative.
+    ["seed",     (m) => m.seed != null ? m.seed
+                       : (m.seed_source ? `⇒ ${m.seed_source}` : null)],
     ["steps",    (m) => m.steps],
     ["cfg",      (m) => m.cfg],
     ["denoise",  (m) => m.denoise != null ? Number(m.denoise).toFixed(2) : null],

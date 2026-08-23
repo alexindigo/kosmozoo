@@ -23,19 +23,43 @@
 import { iconSvg } from "./icons.mjs";
 
 // --- parameter definitions ---------------------------------------------------
+//
+// Client-side UI knowledge for each supported parameter (display label,
+// value range, decimal precision, default step). The panel renders a row
+// only for parameters that the graph actually carries — the probe endpoint
+// tells us which ones apply per-image. Anything unknown to this registry
+// is skipped even if the probe reports it, so a graph can't inject an
+// unrenderable row.
 
-const PARAMS = [
-  { key: "denoise",    label: "denoise",    decimals: 2, clamp: [0, 1],          defaultInc: 0.05 },
-  { key: "ipa_weight", label: "ipa weight", decimals: 2, clamp: [0, 2],          defaultInc: 0.05 },
-  { key: "steps",      label: "steps",      decimals: 0, clamp: [1, 150],        defaultInc: 1    },
-  { key: "cfg",        label: "cfg",        decimals: 1, clamp: [0, 30],         defaultInc: 0.5  },
-  { key: "seed",       label: "seed",       decimals: 0, clamp: [0, 4294967295], defaultInc: 1    },
-];
+const PARAM_REGISTRY = {
+  denoise:    { label: "denoise",    decimals: 2, clamp: [0, 1],          defaultInc: 0.05, spread: 0.15 },
+  ipa_weight: { label: "ipa weight", decimals: 2, clamp: [0, 2],          defaultInc: 0.05, spread: 0.3  },
+  steps:      { label: "steps",      decimals: 0, clamp: [1, 150],        defaultInc: 1,    spread: 10   },
+  cfg:        { label: "cfg",        decimals: 1, clamp: [0, 30],         defaultInc: 0.5,  spread: 2    },
+  seed:       { label: "seed",       decimals: 0, clamp: [0, 4294967295], defaultInc: 1,    spread: 100  },
+};
 
-// Default range spread (added to each side of the current value)
-function spreadFor(param) {
-  // reasonable half-widths for the range around the current value
-  return { denoise: 0.15, ipa_weight: 0.3, steps: 10, cfg: 2, seed: 100 }[param.key] ?? 1;
+// Deterministic display order — matches the mockup and the extractor's
+// probe order. Parameters not in the registry are ignored.
+const PARAM_ORDER = ["denoise", "ipa_weight", "steps", "cfg", "seed"];
+
+function paramDef(key) {
+  const reg = PARAM_REGISTRY[key];
+  if (!reg) return null;
+  return { key, ...reg };
+}
+
+// Fallback list when the probe endpoint isn't available (e.g. image not
+// ingested yet). Uses the extracted metadata to guess which params the
+// graph carries — a param is presumed present if meta has a value for it.
+function fallbackParams(meta) {
+  const out = [];
+  for (const key of PARAM_ORDER) {
+    const cur = currentValue(key, meta);
+    if (cur == null) continue;
+    out.push({ key, label: key, current: cur });
+  }
+  return out;
 }
 
 // --- open modal registry (single instance) -----------------------------------
@@ -78,7 +102,7 @@ function currentValue(key, meta) {
 
 function defaultRange(param, current) {
   if (current == null) return { min: param.clamp[0], max: param.clamp[1] };
-  const spread = spreadFor(param);
+  const spread = param.spread ?? 1;
   const f = Math.pow(10, param.decimals);
   let lo = Math.round((current - spread) * f) / f;
   let hi = Math.round((current + spread) * f) / f;
@@ -139,20 +163,40 @@ function openPanel(cardEl, image) {
   const left = document.createElement("div");
   left.className = "vz-left";
 
+  // Slider rows are populated once the probe returns — the graph decides
+  // which parameters have a target node, and we render only those.
   const sliders = document.createElement("div");
   sliders.className = "vz-sliders";
-  for (const p of PARAMS) {
-    const current = currentValue(p.key, meta);
-    const def = defaultRange(p, current);
-    const row = buildSliderRow(p, current, def, (state) => {
-      ranges[p.key] = state;
-      updateCount();
-    }, templateTarget);
-    sliders.appendChild(row.el);
-    ranges[p.key] = { min: def.min, max: def.max, enabled: false, increment: p.defaultInc };
-    rows[p.key] = row;
-  }
+  const loading = document.createElement("div");
+  loading.className = "vz-loading";
+  loading.textContent = "inspecting graph…";
+  sliders.appendChild(loading);
   left.appendChild(sliders);
+
+  function renderSliderRows(paramsForGraph) {
+    sliders.textContent = "";
+    if (!paramsForGraph.length) {
+      const empty = document.createElement("div");
+      empty.className = "vz-loading";
+      empty.textContent = "this graph exposes no varyable parameters";
+      sliders.appendChild(empty);
+      return;
+    }
+    for (const { key, label, current } of paramsForGraph) {
+      const p = paramDef(key);
+      if (!p) continue; // registry doesn't know this param — skip
+      const def = defaultRange(p, current);
+      const row = buildSliderRow(p, current, def, (state) => {
+        ranges[p.key] = state;
+        updateCount();
+      }, templateTarget);
+      if (label && label !== p.key) row.setLabel(label);
+      sliders.appendChild(row.el);
+      ranges[p.key] = { min: def.min, max: def.max, enabled: false, increment: p.defaultInc };
+      rows[p.key] = row;
+    }
+    updateCount();
+  }
 
   const divider = document.createElement("div");
   divider.className = "vz-divider";
@@ -233,35 +277,39 @@ function openPanel(cardEl, image) {
 
   openModal = { root, image, cardEl, onKey };
 
-  // --- probe for per-graph labels + authoritative current values ---
+  // --- probe for the list of parameters this graph carries ---
+  // The graph is the source of truth: only render sliders for parameters
+  // whose target node exists in this image's graph. writeOnly params
+  // (widget-only custom seed nodes etc.) are skipped for now — they need
+  // a different UX and the user is deferring that.
   fetch(`/api/plugins/variations/probe/${encodeURIComponent(image.id)}`)
     .then((r) => r.ok ? r.json() : null)
     .then((data) => {
-      if (!data?.params) return;
-      for (const [key, info] of Object.entries(data.params)) {
-        const row = rows[key];
-        if (!row) continue;
-        if (!info) { row.setAbsent(); continue; }
-        if (info.label) row.setLabel(info.label);
-        if (info.current != null) row.setCurrent(info.current);
-        // writeOnly: target node exists but current value isn't readable
-        // (widget-only custom seed nodes like DomovoySeed). The row stays
-        // enabled — we can still SET a value — but the marker is hidden.
-        if (info.writeOnly) row.setWriteOnly?.();
+      if (!data?.params) {
+        renderSliderRows(fallbackParams(meta));
+        return;
       }
+      const forGraph = [];
+      for (const key of PARAM_ORDER) {
+        const info = data.params[key];
+        if (!info || info.writeOnly) continue;
+        forGraph.push({ key, label: info.label, current: info.current });
+      }
+      renderSliderRows(forGraph);
     })
-    .catch(() => {});
+    .catch(() => {
+      renderSliderRows(fallbackParams(meta));
+    });
 
   // --- helpers ---
 
   function updateCount() {
     let total = 1;
     let anyEnabled = false;
-    for (const p of PARAMS) {
-      const r = ranges[p.key];
+    for (const [key, r] of Object.entries(ranges)) {
       if (!r?.enabled) continue;
       anyEnabled = true;
-      const inc = r.increment || p.defaultInc;
+      const inc = r.increment || paramDef(key)?.defaultInc || 1;
       const count = Math.round((r.max - r.min) / inc) + 1;
       total *= Math.max(count, 1);
     }
