@@ -7,7 +7,7 @@ import { api } from "./api.mjs";
 import { initLightbox } from "./lightbox.mjs";
 import { addAnchorFiles, initAnchorsPane, initInfoOverlay, initAnchorsWidth } from "./anchors.mjs";
 import { initWorkspace } from "./workspace.mjs";
-import { parseHash, syncRoute, stripHostPrefix, findByFile } from "./route.mjs";
+import { parseUrl, writeFeedHash, stripHostPrefix, findByFile } from "./route.mjs";
 import { initRoi, setRoi } from "./roi.mjs";
 import { initClientPlugins } from "./plugins-client.mjs";
 import { axisStatus } from "./axes.mjs";
@@ -253,24 +253,25 @@ onRender((s) => {
 
 // --- load candidates -------------------------------------------------------------
 
-// pasted links / back button: the hash is truth — adopt it, then center.
+// pasted links / back button: the URL is truth — adopt it, then center.
 // A filename the list doesn't have yet (fresh variations output) triggers
 // one refetch; if it's still absent the URL is kept, not overwritten.
-async function onHashChange() {
-  const r = parseHash();
-  if (!r) return;
+async function onUrlChange() {
+  const r = parseUrl();
+  if (r.view === "diff") return; // the diff view owns /diff (commit 3)
   if (r.host && r.host !== state.host) {
     if (!state.hosts[r.host]) return;
-    state.currentFile = r.filename ?? null;
-    await selectHost(r.host); // loadCandidates re-centers from currentFile
+    await selectHost(r.host, { keepFile: true }); // hash already pristine
     return;
   }
-  if (!r.filename) return;
-  state.currentFile = r.filename;
-  const idx = findByFile(r.filename);
-  if (idx >= 0) restoreToIndex(idx);
-  else await loadCandidates();
-  render();
+  if (!r.file) return;
+  const idx = findByFile(r.file);
+  if (idx >= 0) {
+    restoreToIndex(idx);
+    render();
+  } else {
+    await loadCandidates();
+  }
 }
 
 async function loadCandidates() {
@@ -309,16 +310,18 @@ async function loadCandidates() {
     rebuildFeed();
     chrome.status.info(statusSummary());
     // the URL is truth: re-center from it after every (re)fetch. Only a
-    // first visit with no hash at all invents a current image (top card).
-    if (!state.currentFile && !parseHash()?.filename) {
+    // first visit with no hash at all invents a current image (top card);
+    // a hash the user stripped to #host stays file-less until they scroll.
+    let file = parseUrl().file;
+    if (!file && !location.hash) {
       const first = viewIndices()[0];
       if (first != null) {
-        state.currentFile = stripHostPrefix(state.host, state.images[first].filename);
+        file = stripHostPrefix(state.host, state.images[first].filename);
       }
     }
-    const target = findByFile(state.currentFile);
+    const target = findByFile(file);
     if (target >= 0) restoreToIndex(target);
-    syncRoute();
+    writeFeedHash(file);
     await pollMetadata();
     render(); // surfaces reflect the loaded host (picker label, axes, etc.)
   } catch (err) {
@@ -406,11 +409,11 @@ async function boot() {
   state.feedbackPath = (await api.settings("core").catch(() => ({})))?.feedbackPath ?? null;
   await initAnchorsWidth();
   // the URL hash outranks the stored host: /#host[#filename] is shareable state
-  const route = parseHash();
-  state.currentFile = route?.filename ?? null;
-  const host = route?.host && state.hosts[route.host] ? route.host : initialHost(state.hosts, ui.host);
-  await selectHost(host); // selects + loadCandidates via onSelect
-  window.addEventListener("hashchange", onHashChange);
+  const route = parseUrl();
+  const host = route.host && state.hosts[route.host] ? route.host : initialHost(state.hosts, ui.host);
+  await selectHost(host, { keepFile: true }); // hash pristine at boot
+  window.addEventListener("hashchange", onUrlChange);
+  window.addEventListener("popstate", onUrlChange);
 
   // scraper status chip + menu counter: poll every 2s
   setInterval(async () => {

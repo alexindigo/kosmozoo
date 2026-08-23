@@ -7,7 +7,7 @@
 // the lightbox/feed). This module doesn't know the lightbox exists.
 
 import { state } from "./state.mjs";
-import { matchesFile } from "./route.mjs";
+import { matchesFile, parseUrl } from "./route.mjs";
 import { api } from "./api.mjs";
 import { setVote, toggleFavorite, saveNotes } from "./judgment.mjs";
 import { metaStripText, fillCardMeta } from "./fields.mjs";
@@ -44,7 +44,8 @@ export function buildCard(image, imgIdx, { onOpen, onErrorClick } = {}) {
   });
   handle.el.dataset.idx = imgIdx;
   handle.el.dataset.name = image.filename;
-  if (state.currentFile && matchesFile(image, state.host, state.currentFile)) {
+  const urlFile = parseUrl().file;
+  if (urlFile && matchesFile(image, state.host, urlFile)) {
     handle.el.classList.add("current");
   }
 

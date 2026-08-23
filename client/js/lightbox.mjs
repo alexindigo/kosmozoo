@@ -13,7 +13,7 @@ import { freshView, transform, viewToPersisted, viewFromPersisted } from "./geom
 import { cycleAxis } from "./axes.mjs";
 import { zoomToRoi } from "./roi.mjs";
 import { prefetchFrom, applyWindow, restoreToIndex } from "./feed.mjs";
-import { syncRoute, setCurrentFile, stripHostPrefix, findByFile } from "./route.mjs";
+import { browseToFile, stripHostPrefix, findByFile, parseUrl } from "./route.mjs";
 import { applyComposition } from "./plugins-client.mjs";
 import { setVote, toggleFavorite } from "./judgment.mjs";
 import { getView, setView, flushViews } from "./views.mjs";
@@ -121,7 +121,12 @@ export async function lbShow() {
   el.style.transform = transform(state.lightbox.view, currentBox(img));
   await applyComp(); // visibility is the composition mode's business
   render();
-  syncRoute(); // user-driven navigation names the shown image in the URL
+  // user-driven navigation names the shown candidate in the URL; the
+  // anchor column keeps the last candidate's address
+  if (state.lightbox.col === "candidate") {
+    const img = lightboxCandidate();
+    if (img) browseToFile(stripHostPrefix(state.host, img.filename));
+  }
 }
 
 function currentBox(img) {
@@ -224,7 +229,7 @@ async function step(dir) {
   if (next < 0 || next >= state.images.length) return;
   state.lightbox.index = next;
   state.lightbox.col = "candidate";
-  setCurrentFile(stripHostPrefix(state.host, state.images[next].filename));
+  browseToFile(stripHostPrefix(state.host, state.images[next].filename));
   readBack();
   prefetchFrom(next, dir);
   applyWindow();
@@ -235,7 +240,7 @@ export async function openAt(index) {
   state.lightbox.open = true;
   state.lightbox.index = index;
   state.lightbox.col = "candidate";
-  setCurrentFile(stripHostPrefix(state.host, state.images[index].filename));
+  browseToFile(stripHostPrefix(state.host, state.images[index].filename));
   readBack();
   await lbShow();
 }
@@ -256,7 +261,8 @@ export async function close() {
   state.lightbox.open = false;
   $("lightbox").hidden = true;
   render();
-  syncRoute(); // back to the feed's current file
-  const idx = findByFile(state.currentFile);
-  if (idx >= 0) restoreToIndex(idx); // feed re-centers where browsing left off
+  // the hash already names the last candidate (step/openAt wrote it);
+  // just re-center the feed where browsing left off
+  const idx = findByFile(parseUrl().file);
+  if (idx >= 0) restoreToIndex(idx);
 }
