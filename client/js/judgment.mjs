@@ -27,7 +27,9 @@ export async function setVote(image, vote) {
   await api.setJudgment(image.id, { vote });
   if (!image.judgment) image.judgment = {};
   if (vote === null) delete image.judgment.vote; else image.judgment.vote = vote;
-  render();
+  // No render() — the card updates its own DOM via handle.setJudgment().
+  // Re-rendering would destroy the button element the click handler
+  // just updated, making the visual state inconsistent with the judgment.
 }
 
 export async function toggleFavorite(image) {
