@@ -27,7 +27,7 @@ export function imageCard({
   // --- image box: presentation + load lifecycle, owned here -----------------
   const wrap = document.createElement("div");
   wrap.className = "imgwrap ic-empty";
-  if (ar) wrap.style.setProperty("--ar", ar);
+  applyAr(wrap, ar);
 
   const img = document.createElement("img");
   img.alt = alt;
@@ -43,7 +43,7 @@ export function imageCard({
 
   img.addEventListener("load", () => {
     if (img.naturalWidth && img.naturalHeight) {
-      wrap.style.setProperty("--ar", `${img.naturalWidth} / ${img.naturalHeight}`);
+      applyAr(wrap, `${img.naturalWidth} / ${img.naturalHeight}`);
     }
     wrap.classList.remove("ic-loading", "ic-error", "ic-empty");
     state = "loaded";
@@ -110,9 +110,23 @@ export function imageCard({
       strip.style.display = text ? "block" : "none";
     },
     setAr(value) {
-      if (value) wrap.style.setProperty("--ar", value);
+      applyAr(wrap, value);
     },
   };
+}
+
+// Decompose an aspect-ratio string ("W / H") into --ar-num / --ar-den custom
+// properties on the wrap. Both are needed so CSS can derive both height
+// (aspect-ratio) AND a proportional max-width (so tall/square images that
+// would exceed the height cap shrink their width in step).
+function applyAr(wrap, value) {
+  if (!value) return;
+  const parts = String(value).split("/").map((s) => parseFloat(s.trim()));
+  if (parts.length !== 2 || !parts[0] || !parts[1]) return;
+  wrap.style.setProperty("--ar-num", String(parts[0]));
+  wrap.style.setProperty("--ar-den", String(parts[1]));
+  // keep --ar in sync for anything that still reads it (backward compat)
+  wrap.style.setProperty("--ar", `${parts[0]} / ${parts[1]}`);
 }
 
 // helper for callers: aspect string from extracted metadata
