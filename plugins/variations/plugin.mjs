@@ -204,24 +204,65 @@ export function templateReplace(template, values, currentValues, labelMap = {}) 
 
 // --- filename injection ------------------------------------------------------
 //
-// Prefix/suffix WRAP the original filename (basename without extension).
-// SaveImage's filename_prefix input receives `<prefix><basename><suffix>`.
-// ComfyUI adds its own numeric counter + ".png" downstream.
+// A workflow can have multiple SaveImage nodes (e.g. one for the raw sample,
+// one for an upscaled variant), each with its OWN filename_prefix. The
+// original image the user is varying was produced by exactly one of them.
+// We identify that node by prefix-matching against the original filename,
+// then:
+//   - wrap ONLY that node's filename_prefix with the user's pfx/sfx
+//   - remove the OTHER SaveImage nodes so the run produces one file, not N
+//
+// If no SaveImage's prefix matches the original filename (unusual — e.g.
+// the file was renamed after saving), fall back to wrapping every
+// SaveImage and leaving them all in the graph.
 
 function stripExtension(name) {
   const dot = name.lastIndexOf(".");
   return dot > 0 ? name.slice(0, dot) : name;
 }
 
-function setFilenamePrefix(graph, wrapped) {
-  const nodes = Object.values(graph);
-  let touched = false;
-  for (const n of nodes) {
-    const ct = String(n.class_type ?? "").toLowerCase();
-    if (ct === "saveimage" && n.inputs) {
-      n.inputs.filename_prefix = wrapped;
-      touched = true;
+// Find the SaveImage node whose filename_prefix is the leading segment of
+// the original filename. ComfyUI names outputs as `<prefix>_<counter>_.<ext>`,
+// so the basename starts with the exact prefix followed by "_".
+export function findProducingSaveImage(graph, originalFilename) {
+  const base = stripExtension(originalFilename);
+  let best = null;
+  for (const [nid, n] of Object.entries(graph)) {
+    if (String(n.class_type ?? "").toLowerCase() !== "saveimage") continue;
+    const pfx = n.inputs?.filename_prefix;
+    if (typeof pfx !== "string" || !pfx) continue;
+    if (base === pfx || base.startsWith(pfx + "_")) {
+      // Prefer the longest matching prefix (more specific wins over generic).
+      if (!best || pfx.length > best.prefix.length) best = { id: nid, node: n, prefix: pfx };
     }
+  }
+  return best;
+}
+
+// Wrap `prefix` around `producing.prefix` and delete every OTHER SaveImage
+// node from the graph so the run produces exactly one output file.
+// Returns { touched, kept, dropped } — how many nodes affected.
+export function narrowToOneSaveImage(graph, producing, pfx, sfx) {
+  producing.node.inputs.filename_prefix = pfx + producing.prefix + sfx;
+  let dropped = 0;
+  for (const [nid, n] of Object.entries(graph)) {
+    if (nid === producing.id) continue;
+    if (String(n.class_type ?? "").toLowerCase() !== "saveimage") continue;
+    delete graph[nid];
+    dropped++;
+  }
+  return { kept: 1, dropped };
+}
+
+// Fallback path: wrap every SaveImage's own prefix with the user's pfx/sfx.
+// Used only when no SaveImage matches the original filename.
+export function wrapAllSaveImagePrefixes(graph, pfx, sfx) {
+  let touched = 0;
+  for (const n of Object.values(graph)) {
+    if (String(n.class_type ?? "").toLowerCase() !== "saveimage") continue;
+    const orig = String(n.inputs?.filename_prefix ?? "");
+    n.inputs.filename_prefix = pfx + orig + sfx;
+    touched++;
   }
   return touched;
 }
@@ -291,9 +332,13 @@ export function register(kz) {
       return Response.json({ error: "no permutations (check ranges and increment)" }, { status: 400 });
     }
 
-    const basename = stripExtension(filename);
-    const pfx = prefix ?? "";
-    const sfx = suffix ?? "";
+    const pfxTpl = prefix ?? "";
+    const sfxTpl = suffix ?? "";
+
+    // Identify which SaveImage node produced the original image, so we can
+    // narrow the graph to one output per run instead of firing every
+    // SaveImage the workflow declares.
+    const producing = findProducingSaveImage(graph, filename);
 
     const errors = [];
     let submitted = 0;
@@ -304,14 +349,24 @@ export function register(kz) {
         continue;
       }
 
-      // Wrap the original basename with the templated prefix/suffix.
-      const wrapped =
-        templateReplace(pfx, perm, currentValues, labelMap) +
-        basename +
-        templateReplace(sfx, perm, currentValues, labelMap);
-      if (!setFilenamePrefix(mutated, wrapped)) {
-        errors.push({ permutation: perm, error: "no SaveImage node in graph" });
-        continue;
+      const pfx = templateReplace(pfxTpl, perm, currentValues, labelMap);
+      const sfx = templateReplace(sfxTpl, perm, currentValues, labelMap);
+
+      if (producing) {
+        // Re-find in the CLONED graph (structuredClone gave us fresh nodes).
+        const p = findProducingSaveImage(mutated, filename);
+        if (!p) {
+          errors.push({ permutation: perm, error: "producing SaveImage lost after clone" });
+          continue;
+        }
+        narrowToOneSaveImage(mutated, p, pfx, sfx);
+      } else {
+        // Fallback: wrap every SaveImage's own prefix. Original workflow's
+        // output count is preserved; we just add pfx/sfx around each.
+        if (!wrapAllSaveImagePrefixes(mutated, pfx, sfx)) {
+          errors.push({ permutation: perm, error: "no SaveImage node in graph" });
+          continue;
+        }
       }
 
       try {
