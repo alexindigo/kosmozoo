@@ -154,11 +154,17 @@ function cartesianProduct(arrays) {
   return out;
 }
 
-export function generatePermutations(ranges, increment, currentValues) {
+// Each enabled range now carries its own `increment`. A single global
+// `fallbackIncrement` is used for entries missing one (legacy callers).
+export function generatePermutations(ranges, fallbackIncrement, currentValues) {
   const enabled = Object.entries(ranges).filter(([, r]) => r.enabled);
   if (enabled.length === 0) return [];
   const keys = enabled.map(([k]) => k);
-  const valueArrays = enabled.map(([, r]) => rangeValues(r.min, r.max, increment));
+  const valueArrays = enabled.map(([, r]) => {
+    const inc = (typeof r.increment === "number" && r.increment > 0)
+      ? r.increment : fallbackIncrement;
+    return rangeValues(r.min, r.max, inc);
+  });
   const product = cartesianProduct(valueArrays);
   const currentKey = keys.map((k) => String(currentValues[k])).join("|");
   return product.filter((perm) => {
@@ -248,9 +254,13 @@ export function register(kz) {
     catch { return Response.json({ error: "JSON body required" }, { status: 400 }); }
 
     const { id, host, filename, ranges, increment, prefix, suffix } = body;
-    if (!id || !host || !filename || !ranges || !increment) {
+    if (!id || !host || !filename || !ranges) {
       return Response.json({ error: "missing required fields" }, { status: 400 });
     }
+    // Legacy callers may send a single global `increment`; new clients embed
+    // an `increment` per range entry. `generatePermutations` falls back to
+    // the global one for any range without its own.
+    const fallbackInc = typeof increment === "number" ? increment : 0.05;
 
     const addr = kz._hostAddr(host);
     if (!addr) return Response.json({ error: "unknown host" }, { status: 404 });
@@ -276,7 +286,7 @@ export function register(kz) {
       labelMap[param] = info.label;
     }
 
-    const permutations = generatePermutations(ranges, increment, currentValues);
+    const permutations = generatePermutations(ranges, fallbackInc, currentValues);
     if (permutations.length === 0) {
       return Response.json({ error: "no permutations (check ranges and increment)" }, { status: 400 });
     }

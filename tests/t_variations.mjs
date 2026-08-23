@@ -72,6 +72,35 @@ Deno.test("steps rounds to integer in permutation", () => {
   assertEquals(values, [20, 22]);
 });
 
+Deno.test("per-range increment overrides fallback", () => {
+  // denoise carries its own increment=0.1; fallback would be 0.05
+  const perms = generatePermutations(
+    { denoise: { min: 0.5, max: 0.7, enabled: true, increment: 0.1 } },
+    0.05, // fallback — ignored because the range has its own
+    { denoise: 0.6 },
+  );
+  // 0.5, 0.6, 0.7 = 3 values - 1 (current 0.6) = 2
+  assertEquals(perms.length, 2);
+  const values = perms.map((p) => p.denoise).sort((a, b) => a - b);
+  assertEquals(values, [0.5, 0.7]);
+});
+
+Deno.test("mixed per-range and fallback increments", () => {
+  // denoise: own increment=0.2; cfg: fallback=1.0
+  const perms = generatePermutations(
+    {
+      denoise: { min: 0.4, max: 0.8, enabled: true, increment: 0.2 },
+      cfg:     { min: 2.0, max: 4.0, enabled: true },
+    },
+    1.0,
+    { denoise: 0.6, cfg: 3.0 },
+  );
+  // denoise: 0.4, 0.6, 0.8 = 3 values
+  // cfg: 2.0, 3.0, 4.0 = 3 values (from fallback 1.0)
+  // 3×3 - 1 (current 0.6/3.0) = 8
+  assertEquals(perms.length, 8);
+});
+
 // --- template substitution -------------------------------------------------
 
 Deno.test("templateReplace substitutes varied and current values", () => {

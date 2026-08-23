@@ -1,8 +1,8 @@
-// tests/e2e/variations.e2e.cjs — e2e coverage for the variations panel.
+// tests/e2e/variations.e2e.cjs — e2e coverage for the variations modal.
 //
 // Runs against the live engine (started by run.sh) with the fake ComfyUI host.
-// Verifies: wand button presence, panel open/close, slider state, variations
-// count, and the Run submission path.
+// The variations panel is a real page-level modal (backdrop + centered panel),
+// opened by the wand button on each card.
 
 const { CDP, sleep } = require("./cdp.cjs");
 
@@ -28,7 +28,6 @@ async function main() {
   try {
     await cdp.goto(ENGINE);
     await cdp.poll(`window.__kz && window.__kz.S.images.length > 0`);
-    // Wait for at least one card to render in the DOM
     await cdp.poll(`!!document.querySelector('.card[data-idx="0"]')`);
 
     // --- wand button appears on cards ---
@@ -39,44 +38,37 @@ async function main() {
       check("wand button exists on first card", has);
     });
 
-    // --- wand button opens the panel ---
-    await attempt("wand click opens variations panel", async () => {
+    // --- wand click opens the modal ---
+    await attempt("wand click opens variations modal", async () => {
       await cdp.evaluate(`
         document.querySelector('.card[data-idx="0"] .votebtn.variations').click()
       `);
       await sleep(200);
-      const hasPanel = await cdp.evaluate(`
-        !!document.querySelector('.card[data-idx="0"] .vz-panel')
-      `);
-      check("wand click opens variations panel", hasPanel);
+      const has = await cdp.evaluate(`!!document.querySelector('.vz-root .vz-panel')`);
+      check("wand click opens variations modal", has);
     });
 
-    // --- panel overlays the image, contained within the card's imgwrap ---
-    await attempt("panel overlays image, contained in imgwrap", async () => {
+    // --- modal is a page-level fixed overlay (not clipped by any card) ---
+    await attempt("modal is a page-level fixed overlay", async () => {
       const info = await cdp.evaluate(`(() => {
-        const card = document.querySelector('.card[data-idx="0"]');
-        const imgwrap = card.querySelector('.imgwrap');
-        const panel = card.querySelector('.vz-panel');
-        if (!panel) return { error: 'no panel' };
-        const wr = imgwrap.getBoundingClientRect();
-        const pr = panel.getBoundingClientRect();
+        const root = document.querySelector('.vz-root');
+        const panel = document.querySelector('.vz-panel');
+        if (!root || !panel) return { error: 'not open' };
         return {
-          panelParent: panel.parentElement?.className,
+          rootParent: root.parentElement?.tagName,
+          rootPosition: getComputedStyle(root).position,
           panelPosition: getComputedStyle(panel).position,
-          wrapPosition: getComputedStyle(imgwrap).position,
-          contained: pr.x >= wr.x && pr.y >= wr.y && pr.right <= wr.right && pr.bottom <= wr.bottom,
-          sameSize: pr.width === wr.width && pr.height === wr.height,
         };
       })()`);
-      check("panel overlays image, contained in imgwrap",
-        info.contained === true && info.sameSize === true,
+      check("modal is fixed to body, not clipped by card",
+        info.rootParent === "BODY" && info.rootPosition === "fixed",
         JSON.stringify(info));
     });
 
-    // --- panel has sliders ---
+    // --- 5 sliders (denoise, ipa weight, steps, cfg, seed) ---
     await attempt("panel shows 5 parameter sliders (incl. seed)", async () => {
       const info = await cdp.evaluate(`(() => {
-        const rows = document.querySelectorAll('.card[data-idx="0"] .vz-slider-row');
+        const rows = document.querySelectorAll('.vz-slider-row');
         const labels = [...rows].map((r) => r.querySelector('.vz-label')?.textContent);
         return { count: rows.length, labels };
       })()`);
@@ -87,10 +79,9 @@ async function main() {
 
     // --- probe refines current values from the graph ---
     await attempt("probe fills in seed current value", async () => {
-      await sleep(300); // wait for probe
+      await sleep(300);
       const cur = await cdp.evaluate(`(() => {
-        const rows = document.querySelectorAll('.card[data-idx="0"] .vz-slider-row');
-        for (const r of rows) {
+        for (const r of document.querySelectorAll('.vz-slider-row')) {
           if (r.querySelector('.vz-label')?.textContent === 'seed') {
             return r.querySelector('.vz-current')?.textContent;
           }
@@ -102,66 +93,77 @@ async function main() {
         "current=" + cur);
     });
 
-    // --- variations count updates on enable ---
-    await attempt("enabling denoise slider updates variations count", async () => {
+    // --- enabling a slider updates variations count ---
+    await attempt("enabling denoise updates variations count", async () => {
       await cdp.evaluate(`(() => {
-        const cb1 = document.querySelector('.card[data-idx="0"] .vz-slider-row .vz-cb');
+        const cb1 = document.querySelector('.vz-slider-row .vz-cb');
         cb1.checked = true;
         cb1.dispatchEvent(new Event('change'));
       })()`);
       await sleep(100);
-      const count = await cdp.evaluate(`
-        document.querySelector('.card[data-idx="0"] .vz-count')?.textContent
-      `);
+      const count = await cdp.evaluate(`document.querySelector('.vz-count')?.textContent`);
       const n = parseInt(count, 10);
       check("enabling denoise updates count", n > 0, "count=" + count);
     });
 
-    // --- variations count updates on increment change ---
-    await attempt("changing increment updates variations count", async () => {
-      const before = parseInt(await cdp.evaluate(`
-        document.querySelector('.card[data-idx="0"] .vz-count')?.textContent
-      `), 10);
+    // --- per-slider increment updates count ---
+    await attempt("per-slider increment change updates count", async () => {
+      const before = parseInt(await cdp.evaluate(`document.querySelector('.vz-count')?.textContent`), 10);
       await cdp.evaluate(`(() => {
-        const inc = document.querySelector('.card[data-idx="0"] .vz-inc');
+        const inc = document.querySelector('.vz-slider-row .vz-row-inc-input');
         inc.value = '0.1';
-        inc.dispatchEvent(new Event('input'));
+        inc.dispatchEvent(new Event('change'));
       })()`);
       await sleep(100);
-      const after = parseInt(await cdp.evaluate(`
-        document.querySelector('.card[data-idx="0"] .vz-count')?.textContent
-      `), 10);
-      check("increment change updates count", before !== after, before + " → " + after);
+      const after = parseInt(await cdp.evaluate(`document.querySelector('.vz-count')?.textContent`), 10);
+      check("per-slider increment change updates count", before !== after, before + " → " + after);
     });
 
-    // --- dual-thumb slider updates range ---
-    await attempt("dual-thumb slider updates min/max labels", async () => {
-      const labels = await cdp.evaluate(`(() => {
-        const row = document.querySelector('.card[data-idx="0"] .vz-slider-row');
-        const minThumb = row.querySelector('.vz-thumb-min');
-        const maxThumb = row.querySelector('.vz-thumb-max');
-        minThumb.value = '0.3';
-        minThumb.dispatchEvent(new Event('input'));
-        maxThumb.value = '0.9';
-        maxThumb.dispatchEvent(new Event('input'));
-        return {
-          min: row.querySelector('.vz-min-lbl')?.textContent,
-          max: row.querySelector('.vz-max-lbl')?.textContent,
-        };
-      })()`);
-      check("dual-thumb updates labels", labels.min === "0.3" && labels.max === "0.9",
-        JSON.stringify(labels));
-    });
-
-    // --- clicking a slider label inserts {key} into focused prefix/suffix ---
-    // The placeholder key is the graph-specific label (e.g. "scheduler:denoise"
-    // for SamplerCustomAdvanced graphs; "denoise" for KSampler graphs).
-    await attempt("slider label click inserts {key} at cursor", async () => {
-      // Wait for the async probe to refine the placeholder key
-      await sleep(300);
+    // --- dragging a thumb snaps to that row's increment ---
+    await attempt("thumb drag snaps to per-slider increment", async () => {
       const result = await cdp.evaluate(`(() => {
-        const row = document.querySelector('.card[data-idx="0"] .vz-slider-row');
-        const suffix = document.querySelector('.card[data-idx="0"] .vz-suffix');
+        const row = document.querySelector('.vz-slider-row');
+        const inc = row.querySelector('.vz-row-inc-input');
+        inc.value = '0.1';
+        inc.dispatchEvent(new Event('change'));
+        const minThumb = row.querySelector('.vz-thumb-min');
+        // Simulate a drag: pointerdown sets dragging=true, then input
+        minThumb.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true, pointerId: 1 }));
+        minThumb.value = '0.37';
+        minThumb.dispatchEvent(new Event('input'));
+        const snapped = minThumb.value;
+        // release
+        window.dispatchEvent(new PointerEvent('pointerup', { bubbles: true, pointerId: 1 }));
+        return snapped;
+      })()`);
+      // 0.37 snapped to nearest 0.1 = 0.4
+      check("drag snaps to increment (0.37 -> 0.4)", result === "0.4", "got=" + result);
+    });
+
+    // --- keyboard nudge uses the native fine step, NOT the increment ---
+    await attempt("keyboard nudge uses fine step, not increment", async () => {
+      const result = await cdp.evaluate(`(() => {
+        const row = document.querySelector('.vz-slider-row');
+        const inc = row.querySelector('.vz-row-inc-input');
+        inc.value = '0.1';
+        inc.dispatchEvent(new Event('change'));
+        const minThumb = row.querySelector('.vz-thumb-min');
+        // Set to something NOT on the increment grid; keyboard should keep it fine
+        // (no pointerdown => not "dragging")
+        minThumb.value = '0.23';
+        minThumb.dispatchEvent(new Event('input'));
+        return minThumb.value;
+      })()`);
+      // Should stay at 0.23 (or wherever the input event lands it), not snapped to 0.2
+      check("keyboard-mode value is not snapped", result === "0.23", "got=" + result);
+    });
+
+    // --- label click inserts {key} into focused suffix ---
+    await attempt("slider label click inserts {key} at cursor", async () => {
+      await sleep(300); // let probe refine label
+      const result = await cdp.evaluate(`(() => {
+        const row = document.querySelector('.vz-slider-row');
+        const suffix = document.querySelector('.vz-suffix');
         suffix.value = "pre__post";
         suffix.focus();
         suffix.setSelectionRange(4, 4);
@@ -169,9 +171,8 @@ async function main() {
         suffix.dispatchEvent(new Event('mouseup'));
         const label = row.querySelector('.vz-label');
         label.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, cancelable: true }));
-        return { value: suffix.value, caret: suffix.selectionStart };
+        return { value: suffix.value };
       })()`);
-      // Accept either bare "denoise" (KSampler) or "scheduler:denoise" (SamplerCustomAdvanced)
       const okBare = result.value === "pre_{denoise}_post";
       const okPrefixed = result.value === "pre_{scheduler:denoise}_post";
       check("suffix contains graph-appropriate {denoise} at cursor",
@@ -179,57 +180,64 @@ async function main() {
         JSON.stringify(result));
     });
 
-    // --- panel blocks click-through to the image below ---
-    await attempt("clicking panel does not open lightbox", async () => {
+    // --- Esc closes the modal ---
+    await attempt("Esc closes the modal", async () => {
+      await cdp.key("Escape");
+      await sleep(200);
+      const still = await cdp.evaluate(`!!document.querySelector('.vz-root')`);
+      check("Esc closes modal", !still);
+    });
+
+    // --- backdrop click closes the modal ---
+    await attempt("backdrop click closes modal", async () => {
+      await cdp.evaluate(`
+        document.querySelector('.card[data-idx="0"] .votebtn.variations').click()
+      `);
+      await sleep(200);
       await cdp.evaluate(`(() => {
-        const panel = document.querySelector('.card[data-idx="0"] .vz-panel');
-        panel.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+        const root = document.querySelector('.vz-root');
+        // click DIRECTLY on the root (backdrop), not on the panel
+        root.dispatchEvent(new MouseEvent('click', { bubbles: true }));
       })()`);
       await sleep(200);
-      const lbOpen = await cdp.evaluate(`window.__kz.S.lightbox.open`);
-      check("clicking panel does not open lightbox", lbOpen === false);
+      const still = await cdp.evaluate(`!!document.querySelector('.vz-root')`);
+      check("backdrop click closes modal", !still);
     });
 
-    // --- panel closes on wand re-click ---
-    await attempt("wand re-click closes panel", async () => {
-      await cdp.evaluate(`
-        document.querySelector('.card[data-idx="0"] .votebtn.variations').click()
-      `);
-      await sleep(200);
-      const hasPanel = await cdp.evaluate(`
-        !!document.querySelector('.card[data-idx="0"] .vz-panel')
-      `);
-      check("wand re-click closes panel", !hasPanel);
-    });
-
-    // --- panel closes on × button ---
-    await attempt("× button closes panel", async () => {
-      // reopen
+    // --- wand re-click closes the modal ---
+    await attempt("wand re-click closes modal", async () => {
       await cdp.evaluate(`
         document.querySelector('.card[data-idx="0"] .votebtn.variations').click()
       `);
       await sleep(200);
       await cdp.evaluate(`
-        document.querySelector('.card[data-idx="0"] .vz-close')?.click()
+        document.querySelector('.card[data-idx="0"] .votebtn.variations').click()
       `);
       await sleep(200);
-      const hasPanel = await cdp.evaluate(`
-        !!document.querySelector('.card[data-idx="0"] .vz-panel')
-      `);
-      check("× button closes panel", !hasPanel);
+      const still = await cdp.evaluate(`!!document.querySelector('.vz-root')`);
+      check("wand re-click closes modal", !still);
     });
 
-    // --- Run button produces a result message ---
+    // --- × button closes the modal ---
+    await attempt("× button closes modal", async () => {
+      await cdp.evaluate(`
+        document.querySelector('.card[data-idx="0"] .votebtn.variations').click()
+      `);
+      await sleep(200);
+      await cdp.evaluate(`document.querySelector('.vz-close').click()`);
+      await sleep(200);
+      const still = await cdp.evaluate(`!!document.querySelector('.vz-root')`);
+      check("× button closes modal", !still);
+    });
+
+    // --- Run submits and produces a result message ---
     await attempt("Run produces a result message", async () => {
-      // Open panel on first card
       await cdp.evaluate(`
         document.querySelector('.card[data-idx="0"] .votebtn.variations').click()
       `);
       await sleep(200);
-
-      // Enable denoise slider and set range via dual-thumb inputs
       await cdp.evaluate(`(() => {
-        const row = document.querySelector('.card[data-idx="0"] .vz-slider-row');
+        const row = document.querySelector('.vz-slider-row');
         const cb2 = row.querySelector('.vz-cb');
         cb2.checked = true;
         cb2.dispatchEvent(new Event('change'));
@@ -241,25 +249,15 @@ async function main() {
         mx.dispatchEvent(new Event('input'));
       })()`);
       await sleep(200);
-
-      // Click Run — the fake host IS reachable, so this should succeed
-      // if the image has been ingested (has a hash). If not, we get a 404.
-      await cdp.evaluate(`
-        document.querySelector('.card[data-idx="0"] .vz-run').click()
-      `);
+      await cdp.evaluate(`document.querySelector('.vz-run').click()`);
       await sleep(2000);
-
       const errText = await cdp.evaluate(`
-        document.querySelector('.card[data-idx="0"] .vz-error')?.textContent ?? ''
+        document.querySelector('.vz-error')?.textContent ?? ''
       `);
-      // Either "submitted N/M" or an error about not ingested
       const hasResult = errText.length > 0;
       check("Run produces a result message", hasResult, errText);
-
-      // Clean up
-      await cdp.evaluate(`
-        document.querySelector('.card[data-idx="0"] .vz-close')?.click()
-      `);
+      // cleanup: close any lingering modal
+      await cdp.evaluate(`document.querySelector('.vz-close')?.click()`);
     });
 
   } finally {

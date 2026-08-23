@@ -1,58 +1,71 @@
-// client/js/variations.mjs — variations panel: overlay on a card's image
-// area for batch parameter sweeps.
+// client/js/variations.mjs — variations panel: a real page-level modal
+// for batch parameter sweeps.
 //
-// The panel is absolutely positioned within the card's .imgwrap (which has
-// position: relative), covers the image, and scrolls with the card.
-// Multiple panels can be open simultaneously (tracked in a Map by image id).
-//
-// Layout matches the mockup:
-//   - Title centered at top of the left area
-//   - Left column: 4 slider rows (checkbox + label + dual-thumb slider)
+// One modal at a time (page-level fixed overlay with backdrop). Layout:
+//   - Title centered at top
+//   - Left: parameter rows. Each row = checkbox + label + dual-thumb slider
+//     with per-slider increment stepper on the right of the slider
 //   - Vertical divider
-//   - Right column: increments (-/+ stepper), variations count (big),
-//     prefix, suffix, Run button
+//   - Right: variations count (big), prefix, suffix, Run
 //
-// The panel populates from the image's extracted metadata: each slider's
-// current value is read from image.meta and shown as the orange marker;
-// min/max bounds default to a sensible spread around that value.
+// Per-slider mechanics:
+//   - Slider drag SNAPS to the row's increment
+//   - Keyboard nudge (Arrow/PageUp/Down on focused thumb) still uses the
+//     native fine step (unaffected by the increment)
+//   - Orange tick + numeric value below marks the image's current value
+//   - Values populated from image.meta; refined by an async /probe/<id> call
+//     which also supplies per-graph labels (e.g. "scheduler:denoise")
+//
+// The label click inserts the per-graph placeholder key into whichever
+// prefix/suffix input was last focused. Prefix/suffix WRAP the original
+// filename basename in the submission (they don't replace it).
 
 import { iconSvg } from "./icons.mjs";
 
 // --- parameter definitions ---------------------------------------------------
 
 const PARAMS = [
-  { key: "denoise",    label: "denoise",    decimals: 2, clamp: [0, 1],           spread: 0.15 },
-  { key: "ipa_weight", label: "ipa weight", decimals: 2, clamp: [0, 2],           spread: 0.3  },
-  { key: "steps",      label: "steps",      decimals: 0, clamp: [1, 150],         spread: 10   },
-  { key: "cfg",        label: "cfg",        decimals: 1, clamp: [0, 30],          spread: 2    },
-  { key: "seed",       label: "seed",       decimals: 0, clamp: [0, 4294967295],  spread: 100  },
+  { key: "denoise",    label: "denoise",    decimals: 2, clamp: [0, 1],          defaultInc: 0.05 },
+  { key: "ipa_weight", label: "ipa weight", decimals: 2, clamp: [0, 2],          defaultInc: 0.05 },
+  { key: "steps",      label: "steps",      decimals: 0, clamp: [1, 150],        defaultInc: 1    },
+  { key: "cfg",        label: "cfg",        decimals: 1, clamp: [0, 30],         defaultInc: 0.5  },
+  { key: "seed",       label: "seed",       decimals: 0, clamp: [0, 4294967295], defaultInc: 1    },
 ];
 
-// --- open panels registry -----------------------------------------------------
+// Default range spread (added to each side of the current value)
+function spreadFor(param) {
+  // reasonable half-widths for the range around the current value
+  return { denoise: 0.15, ipa_weight: 0.3, steps: 10, cfg: 2, seed: 100 }[param.key] ?? 1;
+}
 
-const openPanels = new Map(); // image id → { panel, card }
+// --- open modal registry (single instance) -----------------------------------
 
-// --- public API ---------------------------------------------------------------
+let openModal = null; // { root, image, cardEl } | null
 
 export function toggleVariations(cardEl, image) {
-  const existing = openPanels.get(image.id);
-  if (existing) {
-    existing.panel.remove();
-    openPanels.delete(image.id);
+  if (openModal && openModal.image?.id === image.id) {
+    closeModal();
     return;
   }
+  if (openModal) closeModal();
   openPanel(cardEl, image);
 }
 
 export function closeAllVariations() {
-  for (const [, p] of openPanels) p.panel.remove();
-  openPanels.clear();
+  closeModal();
+}
+
+function closeModal() {
+  if (!openModal) return;
+  openModal.root.remove();
+  document.removeEventListener("keydown", openModal.onKey, true);
+  openModal = null;
 }
 
 // --- current value extraction --------------------------------------------------
 
 function currentValue(key, meta) {
-  const raw = meta[key];
+  const raw = meta?.[key];
   if (raw == null) return null;
   if (key === "ipa_weight") {
     const first = String(raw).split("+")[0];
@@ -65,130 +78,89 @@ function currentValue(key, meta) {
 
 function defaultRange(param, current) {
   if (current == null) return { min: param.clamp[0], max: param.clamp[1] };
+  const spread = spreadFor(param);
   const f = Math.pow(10, param.decimals);
-  let lo = Math.round((current - param.spread) * f) / f;
-  let hi = Math.round((current + param.spread) * f) / f;
+  let lo = Math.round((current - spread) * f) / f;
+  let hi = Math.round((current + spread) * f) / f;
   lo = Math.max(lo, param.clamp[0]);
   hi = Math.min(hi, param.clamp[1]);
   if (lo >= hi) {
-    lo = Math.max(param.clamp[0], current - param.spread * 2);
-    hi = Math.min(param.clamp[1], current + param.spread * 2);
+    lo = Math.max(param.clamp[0], current - spread * 2);
+    hi = Math.min(param.clamp[1], current + spread * 2);
     if (lo >= hi) { lo = param.clamp[0]; hi = param.clamp[1]; }
   }
   return { min: lo, max: hi };
 }
 
-// --- panel construction ---------------------------------------------------------
+// Round v to the nearest multiple of `inc`, respecting `decimals`.
+function snapTo(v, inc, decimals) {
+  if (!inc || inc <= 0) return v;
+  const f = Math.pow(10, decimals);
+  return Math.round(Math.round(v / inc) * inc * f) / f;
+}
+
+// Trim trailing zeros for display: 0.60 -> "0.6", 20.0 -> "20"
+function fmt(v) {
+  return String(parseFloat(Number(v).toFixed(10)));
+}
+
+// --- modal construction ---------------------------------------------------------
 
 function openPanel(cardEl, image) {
-  const imgwrap = cardEl.querySelector(".imgwrap");
-  if (!imgwrap) return;
-
   const meta = image.meta ?? {};
+
+  // Root: fixed backdrop + centered panel
+  const root = document.createElement("div");
+  root.className = "vz-root";
+  root.addEventListener("click", (e) => {
+    if (e.target === root) closeModal();
+  });
+
   const panel = document.createElement("div");
   panel.className = "vz-panel";
-  // Block pointer events from reaching the image below
   panel.addEventListener("click", (e) => e.stopPropagation());
-  panel.addEventListener("pointerdown", (e) => e.stopPropagation());
-  panel.addEventListener("pointerup", (e) => e.stopPropagation());
-  panel.addEventListener("wheel", (e) => e.stopPropagation());
 
-  const ranges = {};
+  const ranges = {};   // param key -> { min, max, enabled, increment }
+  const rows = {};     // param key -> row handle
 
-  // Tracks the last-focused prefix/suffix input so slider labels can insert
-  // {key} placeholders at the cursor. Held in a closure so the label
-  // mousedown handlers see the currently-focused input.
+  // Tracks last-focused prefix/suffix input so slider labels can insert
+  // {key} placeholders at the cursor.
   const templateTarget = { input: null, start: 0, end: 0 };
 
-  // --- left column: title + sliders ---
-  const left = document.createElement("div");
-  left.className = "vz-left";
-
+  // --- title ---
   const title = document.createElement("div");
   title.className = "vz-title";
   title.textContent = "Generate image variations";
-  left.appendChild(title);
+
+  // --- body (2 columns) ---
+  const body = document.createElement("div");
+  body.className = "vz-body";
+
+  const left = document.createElement("div");
+  left.className = "vz-left";
 
   const sliders = document.createElement("div");
   sliders.className = "vz-sliders";
-  const rows = {}; // param key -> { el, setLabel, setCurrent }
   for (const p of PARAMS) {
     const current = currentValue(p.key, meta);
     const def = defaultRange(p, current);
-    const row = buildSliderRow(p, current, def, (enabled, min, max) => {
-      ranges[p.key] = { min, max, enabled };
+    const row = buildSliderRow(p, current, def, (state) => {
+      ranges[p.key] = state;
       updateCount();
     }, templateTarget);
     sliders.appendChild(row.el);
-    ranges[p.key] = { min: def.min, max: def.max, enabled: false };
+    ranges[p.key] = { min: def.min, max: def.max, enabled: false, increment: p.defaultInc };
     rows[p.key] = row;
   }
   left.appendChild(sliders);
 
-  // Probe the graph asynchronously for the canonical label per param
-  // (e.g. "scheduler:denoise" vs "denoise") and current values authoritatively
-  // read from the graph itself. Panel is visible immediately with meta-based
-  // defaults; labels/currents refine when probe returns.
-  fetch(`/api/plugins/variations/probe/${encodeURIComponent(image.id)}`)
-    .then((r) => r.ok ? r.json() : null)
-    .then((data) => {
-      if (!data?.params) return;
-      for (const [param, info] of Object.entries(data.params)) {
-        const row = rows[param];
-        if (!row) continue;
-        if (!info) {
-          row.setAbsent();
-          continue;
-        }
-        if (info.label) row.setLabel(info.label);
-        if (info.current != null) row.setCurrent(info.current);
-      }
-    })
-    .catch(() => { /* probe unavailable — labels stay at PARAMS defaults */ });
-
-  // --- vertical divider ---
   const divider = document.createElement("div");
   divider.className = "vz-divider";
 
-  // --- right column: config + run ---
+  // --- right column ---
   const right = document.createElement("div");
   right.className = "vz-right";
 
-  // increments (with -/+ stepper)
-  const incLabel = document.createElement("div");
-  incLabel.className = "vz-rlabel";
-  incLabel.textContent = "increments";
-
-  const incRow = document.createElement("div");
-  incRow.className = "vz-incrow";
-  const incMinus = document.createElement("button");
-  incMinus.className = "vz-step-btn";
-  incMinus.textContent = "−";
-  incMinus.title = "decrease";
-  const incInput = document.createElement("input");
-  incInput.type = "number";
-  incInput.className = "vz-inc";
-  incInput.value = "0.05";
-  incInput.step = "0.01";
-  incInput.min = "0.001";
-  const incPlus = document.createElement("button");
-  incPlus.className = "vz-step-btn";
-  incPlus.textContent = "+";
-  incPlus.title = "increase";
-  incMinus.addEventListener("click", () => {
-    const v = parseFloat(incInput.value) || 0.05;
-    incInput.value = Math.max(0.001, +(v - 0.01).toFixed(3));
-    updateCount();
-  });
-  incPlus.addEventListener("click", () => {
-    const v = parseFloat(incInput.value) || 0.05;
-    incInput.value = +(v + 0.01).toFixed(3);
-    updateCount();
-  });
-  incInput.addEventListener("input", updateCount);
-  incRow.append(incMinus, incInput, incPlus);
-
-  // variations count
   const countLabel = document.createElement("div");
   countLabel.className = "vz-rlabel";
   countLabel.textContent = "variations";
@@ -196,16 +168,14 @@ function openPanel(cardEl, image) {
   countEl.className = "vz-count";
   countEl.textContent = "0";
 
-  // prefix
   const prefixLabel = document.createElement("div");
   prefixLabel.className = "vz-rlabel";
   prefixLabel.textContent = "prefix";
   const prefixInput = document.createElement("input");
   prefixInput.type = "text";
   prefixInput.className = "vz-tinput vz-prefix";
-  prefixInput.title = "click a slider name (denoise/ipa weight/steps/cfg) to insert its placeholder";
+  prefixInput.title = "click a slider label to insert its {placeholder}";
 
-  // suffix
   const suffixLabel = document.createElement("div");
   suffixLabel.className = "vz-rlabel";
   suffixLabel.textContent = "suffix";
@@ -213,9 +183,8 @@ function openPanel(cardEl, image) {
   suffixInput.type = "text";
   suffixInput.className = "vz-tinput vz-suffix";
   suffixInput.value = "_{denoise}_";
-  suffixInput.title = "click a slider name (denoise/ipa weight/steps/cfg) to insert its placeholder";
+  suffixInput.title = "click a slider label to insert its {placeholder}";
 
-  // Track focused template input so slider-label clicks insert into it.
   for (const inp of [prefixInput, suffixInput]) {
     const remember = () => {
       templateTarget.input = inp;
@@ -229,40 +198,67 @@ function openPanel(cardEl, image) {
     inp.addEventListener("input", remember);
   }
 
-  // Run button
   const runBtn = document.createElement("button");
   runBtn.className = "vz-run";
   runBtn.textContent = "Run";
   runBtn.addEventListener("click", () => runVariations(image));
 
-  // error area
   const errEl = document.createElement("div");
   errEl.className = "vz-error";
 
   right.append(
-    incLabel, incRow,
     countLabel, countEl,
     prefixLabel, prefixInput,
     suffixLabel, suffixInput,
     runBtn, errEl,
   );
 
-  panel.append(left, divider, right);
-  imgwrap.appendChild(panel);
+  body.append(left, divider, right);
 
-  openPanels.set(image.id, { panel, card: cardEl });
+  const closeBtn = document.createElement("button");
+  closeBtn.className = "vz-close";
+  closeBtn.innerHTML = iconSvg("x", 16);
+  closeBtn.title = "close (Esc)";
+  closeBtn.addEventListener("click", closeModal);
+
+  panel.append(title, body, closeBtn);
+  root.appendChild(panel);
+  document.body.appendChild(root);
+
+  // Esc closes
+  const onKey = (e) => {
+    if (e.key === "Escape") { e.stopPropagation(); closeModal(); }
+  };
+  document.addEventListener("keydown", onKey, true);
+
+  openModal = { root, image, cardEl, onKey };
+
+  // --- probe for per-graph labels + authoritative current values ---
+  fetch(`/api/plugins/variations/probe/${encodeURIComponent(image.id)}`)
+    .then((r) => r.ok ? r.json() : null)
+    .then((data) => {
+      if (!data?.params) return;
+      for (const [key, info] of Object.entries(data.params)) {
+        const row = rows[key];
+        if (!row) continue;
+        if (!info) { row.setAbsent(); continue; }
+        if (info.label) row.setLabel(info.label);
+        if (info.current != null) row.setCurrent(info.current);
+      }
+    })
+    .catch(() => {});
 
   // --- helpers ---
 
   function updateCount() {
-    const increment = parseFloat(incInput.value) || 0.05;
     let total = 1;
     let anyEnabled = false;
     for (const p of PARAMS) {
       const r = ranges[p.key];
       if (!r?.enabled) continue;
       anyEnabled = true;
-      const count = Math.round((r.max - r.min) / increment) + 1;
+      const inc = r.increment || p.defaultInc;
+      const count = Math.round((r.max - r.min) / inc) + 1;
       total *= Math.max(count, 1);
     }
     if (anyEnabled && total > 0) total -= 1;
@@ -276,19 +272,18 @@ function openPanel(cardEl, image) {
     runBtn.textContent = "Running…";
 
     try {
-      const body = {
+      const reqBody = {
         id: img.id,
         host: img.host,
         filename: img.filename,
-        ranges,
-        increment: parseFloat(incInput.value) || 0.05,
+        ranges,           // now includes per-param increment
         prefix: prefixInput.value,
         suffix: suffixInput.value,
       };
       const res = await fetch("/api/plugins/variations/run", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(body),
+        body: JSON.stringify(reqBody),
       });
       const text = await res.text();
       let data;
@@ -299,7 +294,7 @@ function openPanel(cardEl, image) {
       }
       errEl.textContent = `submitted ${data.submitted}/${data.total}`;
       errEl.classList.add("vz-ok");
-      setTimeout(() => closePanel(), 3000);
+      setTimeout(() => closeModal(), 3000);
     } catch (e) {
       errEl.textContent = `fetch failed: ${e.message}`;
     } finally {
@@ -308,31 +303,18 @@ function openPanel(cardEl, image) {
     }
   }
 
-  function closePanel() {
-    panel.remove();
-    openPanels.delete(image.id);
-  }
-
-  const closeBtn = document.createElement("button");
-  closeBtn.className = "vz-close";
-  closeBtn.innerHTML = iconSvg("x", 14);
-  closeBtn.title = "close";
-  closeBtn.addEventListener("click", closePanel);
-  panel.appendChild(closeBtn);
-
   updateCount();
 }
 
 // --- slider row builder --------------------------------------------------------
 //
-// Each row layout (matching the mockup):
-//   [☐]  label
-//        [min-value]        [max-value]
-//        ●─────────●
-//              [current]
+//  [☐]  label                                                    increment
+//       min                                          max         [-][0.05][+]
+//       ●──────────────●
+//                current
 //
-// Checkbox on the far left, label above the slider, dual-thumb slider with
-// numeric labels above each thumb, orange marker below with current value.
+// Dual thumbs snap to the row's increment on drag; keyboard uses native
+// fine step (1 unit at the parameter's decimal precision).
 
 function buildSliderRow(param, current, defaults, onChange, templateTarget) {
   const el = document.createElement("div");
@@ -345,19 +327,15 @@ function buildSliderRow(param, current, defaults, onChange, templateTarget) {
   const inner = document.createElement("div");
   inner.className = "vz-slider-inner";
 
-  // The label's placeholder key is mutable — updated by setLabel() after
-  // the async probe returns (e.g. "denoise" -> "scheduler:denoise").
   let placeholderKey = param.key;
 
   const label = document.createElement("div");
   label.className = "vz-label";
   label.textContent = param.label;
   label.title = "click to insert {" + placeholderKey + "} into prefix/suffix";
-  // mousedown fires before the input's blur, so the input still holds
-  // the cursor position we captured in templateTarget.
   label.addEventListener("mousedown", (e) => {
     if (!templateTarget?.input) return;
-    e.preventDefault(); // don't steal focus from the input
+    e.preventDefault();
     const inp = templateTarget.input;
     const s = templateTarget.start;
     const en = templateTarget.end;
@@ -373,24 +351,21 @@ function buildSliderRow(param, current, defaults, onChange, templateTarget) {
   const rangeWrap = document.createElement("div");
   rangeWrap.className = "vz-rangewrap";
 
-  const step = Math.pow(10, -param.decimals);
+  // Fine keyboard step: 1 at the parameter's decimal precision.
+  const fineStep = Math.pow(10, -param.decimals);
+  let increment = param.defaultInc;
 
-  // Min/max value labels above the thumbs
   const minLabel = document.createElement("div");
   minLabel.className = "vz-bound vz-min-lbl";
-  minLabel.textContent = String(defaults.min);
-
   const maxLabel = document.createElement("div");
   maxLabel.className = "vz-bound vz-max-lbl";
-  maxLabel.textContent = String(defaults.max);
 
-  // Dual-thumb range inputs
   const minRange = document.createElement("input");
   minRange.type = "range";
   minRange.className = "vz-thumb vz-thumb-min";
   minRange.min = param.clamp[0];
   minRange.max = param.clamp[1];
-  minRange.step = step;
+  minRange.step = fineStep;
   minRange.value = defaults.min;
   minRange.disabled = true;
 
@@ -399,28 +374,85 @@ function buildSliderRow(param, current, defaults, onChange, templateTarget) {
   maxRange.className = "vz-thumb vz-thumb-max";
   maxRange.min = param.clamp[0];
   maxRange.max = param.clamp[1];
-  maxRange.step = step;
+  maxRange.step = fineStep;
   maxRange.value = defaults.max;
   maxRange.disabled = true;
 
-  // The colored band between the two thumbs
   const track = document.createElement("div");
   track.className = "vz-track";
 
-  // Orange tick at current value + label below
   const marker = document.createElement("div");
   marker.className = "vz-marker";
   const curLabel = document.createElement("div");
   curLabel.className = "vz-current";
-  if (current != null) {
-    curLabel.textContent = String(current);
-    const pct = ((current - param.clamp[0]) / (param.clamp[1] - param.clamp[0])) * 100;
+
+  function paintCurrent(v) {
+    if (v == null) {
+      marker.style.display = "none";
+      curLabel.style.display = "none";
+      return;
+    }
+    marker.style.display = "";
+    curLabel.style.display = "";
+    curLabel.textContent = fmt(v);
+    const pct = ((v - param.clamp[0]) / (param.clamp[1] - param.clamp[0])) * 100;
     marker.style.left = `${pct}%`;
     curLabel.style.left = `${pct}%`;
-  } else {
-    marker.style.display = "none";
-    curLabel.style.display = "none";
   }
+  paintCurrent(current);
+
+  // --- per-slider increment stepper ---
+  const incWrap = document.createElement("div");
+  incWrap.className = "vz-row-inc";
+
+  const incMinus = document.createElement("button");
+  incMinus.className = "vz-step-btn";
+  incMinus.textContent = "−";
+  incMinus.title = "smaller step";
+  incMinus.disabled = true;
+
+  const incInput = document.createElement("input");
+  incInput.type = "number";
+  incInput.className = "vz-row-inc-input";
+  incInput.value = String(increment);
+  incInput.step = String(fineStep);
+  incInput.min = String(fineStep);
+  incInput.disabled = true;
+
+  const incPlus = document.createElement("button");
+  incPlus.className = "vz-step-btn";
+  incPlus.textContent = "+";
+  incPlus.title = "larger step";
+  incPlus.disabled = true;
+
+  function commitInc(v) {
+    increment = Math.max(fineStep, +Number(v).toFixed(param.decimals + 3));
+    incInput.value = String(increment);
+    fireChange();
+  }
+  incMinus.addEventListener("click", () => commitInc(Math.max(fineStep, increment / 2)));
+  incPlus.addEventListener("click", () => commitInc(increment * 2));
+  incInput.addEventListener("change", () => commitInc(parseFloat(incInput.value) || param.defaultInc));
+
+  incWrap.append(incMinus, incInput, incPlus);
+
+  // --- drag-vs-keyboard snapping ---
+  //
+  // On pointerdown on a thumb we enter "drag" mode: subsequent `input`
+  // events snap the value to the nearest multiple of `increment`. On
+  // pointerup we exit drag mode. Keyboard events don't touch the drag
+  // flag, so keyboard nudges keep the fine step.
+
+  const dragging = { min: false, max: false };
+  const attachDrag = (thumb, which) => {
+    thumb.addEventListener("pointerdown", () => { dragging[which] = true; });
+    // pointerup can fire outside the thumb; catch it globally
+    const up = () => { dragging[which] = false; };
+    window.addEventListener("pointerup", up);
+    window.addEventListener("pointercancel", up);
+  };
+  attachDrag(minRange, "min");
+  attachDrag(maxRange, "max");
 
   function updateTrack(silent = false) {
     const minV = parseFloat(minRange.value);
@@ -432,20 +464,34 @@ function buildSliderRow(param, current, defaults, onChange, templateTarget) {
     const rpct = ((hi - param.clamp[0]) / range) * 100;
     track.style.left = lpct + "%";
     track.style.width = (rpct - lpct) + "%";
-    minLabel.textContent = String(lo);
-    maxLabel.textContent = String(hi);
+    minLabel.textContent = fmt(lo);
+    maxLabel.textContent = fmt(hi);
     minLabel.style.left = lpct + "%";
     maxLabel.style.left = rpct + "%";
-    if (!silent) onChange(cb.checked, lo, hi);
+    if (!silent) fireChange();
+  }
+
+  function fireChange() {
+    const lo = Math.min(parseFloat(minRange.value), parseFloat(maxRange.value));
+    const hi = Math.max(parseFloat(minRange.value), parseFloat(maxRange.value));
+    onChange({ enabled: cb.checked, min: lo, max: hi, increment });
   }
 
   minRange.addEventListener("input", () => {
+    if (dragging.min) {
+      const snapped = snapTo(parseFloat(minRange.value), increment, param.decimals);
+      minRange.value = String(snapped);
+    }
     if (parseFloat(minRange.value) > parseFloat(maxRange.value)) {
       minRange.value = maxRange.value;
     }
     updateTrack();
   });
   maxRange.addEventListener("input", () => {
+    if (dragging.max) {
+      const snapped = snapTo(parseFloat(maxRange.value), increment, param.decimals);
+      maxRange.value = String(snapped);
+    }
     if (parseFloat(maxRange.value) < parseFloat(minRange.value)) {
       maxRange.value = minRange.value;
     }
@@ -456,42 +502,24 @@ function buildSliderRow(param, current, defaults, onChange, templateTarget) {
     const on = cb.checked;
     minRange.disabled = !on;
     maxRange.disabled = !on;
+    incInput.disabled = !on;
+    incMinus.disabled = !on;
+    incPlus.disabled = !on;
     el.classList.toggle("vz-off", !on);
     updateTrack();
   });
 
   rangeWrap.append(minLabel, maxLabel, minRange, maxRange, track, marker, curLabel);
   inner.append(label, rangeWrap);
-  el.append(cb, inner);
+  el.append(cb, inner, incWrap);
 
   updateTrack(true);
 
-  // Refine the placeholder key from the graph probe (e.g. "scheduler:denoise").
-  // The visible label stays the human-friendly PARAMS.label; only the
-  // insertion string and tooltip change.
   function setLabel(newKey) {
     placeholderKey = newKey;
     label.title = "click to insert {" + placeholderKey + "} into prefix/suffix";
   }
-
-  // Refresh the orange marker with the authoritative current value from the
-  // graph (may differ from meta when the extractor version is behind).
-  function setCurrent(v) {
-    if (v == null) {
-      marker.style.display = "none";
-      curLabel.style.display = "none";
-      return;
-    }
-    marker.style.display = "";
-    curLabel.style.display = "";
-    curLabel.textContent = String(v);
-    const pct = ((v - param.clamp[0]) / (param.clamp[1] - param.clamp[0])) * 100;
-    marker.style.left = `${pct}%`;
-    curLabel.style.left = `${pct}%`;
-  }
-
-  // The graph doesn't carry this parameter — grey the whole row out and keep
-  // the checkbox disabled.
+  function setCurrent(v) { paintCurrent(v); }
   function setAbsent() {
     cb.disabled = true;
     el.classList.add("vz-absent");
