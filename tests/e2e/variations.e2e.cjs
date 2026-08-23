@@ -119,12 +119,13 @@ async function main() {
     });
 
     // --- enabling a slider auto-inserts its placeholder into suffix ---
-    await attempt("enable auto-inserts _{key}_ into suffix", async () => {
+    // No trailing underscore in the token — ComfyUI's SaveImage adds its
+    // own separator before the counter, so `_{key}` (leading only) is
+    // the right shape.
+    await attempt("enable auto-inserts _{key} into suffix", async () => {
       const suffix = await cdp.evaluate(`document.querySelector('.vz-suffix')?.value`);
-      // denoise is already enabled from the previous test.
-      // For flux-basic the key is "scheduler:denoise".
-      const okBare = suffix === "_{denoise}_";
-      const okPrefixed = suffix === "_{scheduler:denoise}_";
+      const okBare = suffix === "_{denoise}";
+      const okPrefixed = suffix === "_{scheduler:denoise}";
       check("suffix auto-populated on enable",
         okBare || okPrefixed,
         "suffix=" + JSON.stringify(suffix));

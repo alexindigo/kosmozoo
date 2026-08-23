@@ -203,7 +203,7 @@ Deno.test("findProducingSaveImage: null when no SaveImage matches", () => {
   assertEquals(found, null);
 });
 
-Deno.test("narrowToOneSaveImage: wraps the producing prefix, drops the others", () => {
+Deno.test("narrowToOneSaveImage: wraps the ORIGINAL basename (with counter), drops other SaveImages", () => {
   const graph = {
     "12": { class_type: "SaveImage", inputs: { filename_prefix: "Logotype Pipeline", images: ["9", 0] } },
     "15": { class_type: "SaveImage", inputs: { filename_prefix: "ComfyUI", images: ["8", 0] } },
@@ -211,15 +211,34 @@ Deno.test("narrowToOneSaveImage: wraps the producing prefix, drops the others", 
     "9":  { class_type: "ImageUpscaleWithModel", inputs: {} },
   };
   const producing = findProducingSaveImage(graph, "ComfyUI_00398_.png");
-  const result = narrowToOneSaveImage(graph, producing, "exp_", "_v1");
+  // Simulates what the /run handler passes: original filename basename
+  // (without extension) as the middle, user pfx/sfx around it.
+  const result = narrowToOneSaveImage(graph, producing, "ComfyUI_00398_", "exp_", "_v1");
   assertEquals(result.kept, 1);
   assertEquals(result.dropped, 1);
   assert(!("12" in graph), "node 12 should be removed");
   assert("15" in graph, "node 15 should remain");
-  assertEquals(graph["15"].inputs.filename_prefix, "exp_ComfyUI_v1");
+  // The counter "_00398_" from the original filename is preserved inside
+  // the new filename_prefix so variations trace back to their source.
+  assertEquals(graph["15"].inputs.filename_prefix, "exp_ComfyUI_00398__v1");
   // non-SaveImage nodes untouched
   assert("8" in graph);
   assert("9" in graph);
+});
+
+Deno.test("narrowToOneSaveImage: preserves original counter for the user's StyleMix case", () => {
+  // Reproduces the bug where "StyleMix_01822_.png" produced
+  // "var_StyleMix_0.66__00001_.png" — the 01822 was dropped.
+  // After fix: prefix should include "StyleMix_01822_" (from basename).
+  const graph = {
+    "14": { class_type: "SaveImage", inputs: { filename_prefix: "StyleMix", images: ["13", 0] } },
+    "102": { class_type: "SaveImage", inputs: { filename_prefix: "UpsacledStyleMix", images: ["101", 0] } },
+  };
+  const producing = findProducingSaveImage(graph, "StyleMix_01822_.png");
+  narrowToOneSaveImage(graph, producing, "StyleMix_01822_", "var_", "_0.66");
+  assertEquals(graph["14"].inputs.filename_prefix, "var_StyleMix_01822__0.66");
+  // ComfyUI will append "_00001_.png" to this at run time, giving
+  // "var_StyleMix_01822__0.66_00001_.png" — 01822 preserved.
 });
 
 Deno.test("wrapAllSaveImagePrefixes: fallback wraps every SaveImage's own prefix", () => {

@@ -289,11 +289,14 @@ export function findProducingSaveImage(graph, originalFilename) {
   return best;
 }
 
-// Wrap `prefix` around `producing.prefix` and delete every OTHER SaveImage
-// node from the graph so the run produces exactly one output file.
-// Returns { touched, kept, dropped } — how many nodes affected.
-export function narrowToOneSaveImage(graph, producing, pfx, sfx) {
-  producing.node.inputs.filename_prefix = pfx + producing.prefix + sfx;
+// Set the producing SaveImage's filename_prefix to `<pfx><basename><sfx>`
+// and delete every OTHER SaveImage from the graph so the run produces
+// exactly one file. `basename` is the ORIGINAL image's filename without
+// its extension — including the ComfyUI counter (e.g. "StyleMix_01822_") —
+// so the variation's name traces back to the source image.
+// Returns { kept, dropped } — how many nodes affected.
+export function narrowToOneSaveImage(graph, producing, basename, pfx, sfx) {
+  producing.node.inputs.filename_prefix = pfx + basename + sfx;
   let dropped = 0;
   for (const [nid, n] of Object.entries(graph)) {
     if (nid === producing.id) continue;
@@ -382,19 +385,22 @@ export function register(kz) {
       return Response.json({ error: "no permutations (check ranges and increment)" }, { status: 400 });
     }
 
-    // "<host>#" is ALWAYS the leading prefix of the generated filename so
-    // outputs from different hosts don't collide in ~/Downloads or in the
-    // ComfyUI output folder. The user's prefix goes after it. If the user
-    // already typed a "<host>#" prefix, we don't double-prepend it.
-    const hostTag = host + "#";
-    const userPfx = String(prefix ?? "");
-    const pfxTpl = userPfx.startsWith(hostTag) ? userPfx : hostTag + userPfx;
-    const sfxTpl = suffix ?? "";
+    // The "<host>#" convention is a kosmozoo-local labelling scheme for
+    // clipboard/download naming — it is NOT part of the ComfyUI server's
+    // filename. The server sees only what the user typed in prefix/suffix
+    // (wrapped around the original SaveImage's own filename_prefix).
+    const pfxTpl = String(prefix ?? "");
+    const sfxTpl = String(suffix ?? "");
 
     // Identify which SaveImage node produced the original image, so we can
     // narrow the graph to one output per run instead of firing every
     // SaveImage the workflow declares.
     const producing = findProducingSaveImage(graph, filename);
+
+    // Basename of the original file (without extension) — includes ComfyUI's
+    // counter, e.g. "StyleMix_01822_". Used as the middle of the wrapped
+    // filename_prefix so variations trace back to the source image.
+    const originalBasename = stripExtension(filename);
 
     const errors = [];
     let submitted = 0;
@@ -415,7 +421,7 @@ export function register(kz) {
           errors.push({ permutation: perm, error: "producing SaveImage lost after clone" });
           continue;
         }
-        narrowToOneSaveImage(mutated, p, pfx, sfx);
+        narrowToOneSaveImage(mutated, p, originalBasename, pfx, sfx);
       } else {
         // Fallback: wrap every SaveImage's own prefix. Original workflow's
         // output count is preserved; we just add pfx/sfx around each.
