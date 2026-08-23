@@ -344,13 +344,21 @@ main { display: flex; flex: 1; min-height: 0; }
 .vz-body { display: flex; gap: 20px; align-items: stretch; }
 .vz-left { flex: 1; min-width: 0; display: flex; flex-direction: column;
   justify-content: center; }
-.vz-sliders { display: flex; flex-direction: column; gap: 26px; }
+.vz-sliders { display: flex; flex-direction: column; gap: 10px; }
 
-/* one slider row: [ck] [inner (label+slider)] [row-inc] */
+/* Each param is a little card. Enabled cards float to the top; disabled
+   ones sit below. Reordering is done by DOM manipulation (see
+   reorderSliderCards()), which triggers the transition. */
 .vz-slider-row { display: grid;
   grid-template-columns: 18px 1fr 110px;
-  gap: 12px; align-items: start; }
-.vz-slider-row.vz-off { opacity: 0.4; }
+  gap: 12px; align-items: start;
+  padding: 10px 12px;
+  background: var(--card); border: 1px solid var(--raise);
+  border-radius: 8px;
+  transition: opacity .15s ease, border-color .15s ease, background .15s ease; }
+.vz-slider-row:not(.vz-off) { border-color: var(--accent); }
+.vz-slider-row.vz-off { opacity: 0.55;
+  background: color-mix(in srgb, var(--card) 85%, transparent); }
 .vz-slider-row.vz-off .vz-min-lbl,
 .vz-slider-row.vz-off .vz-max-lbl,
 .vz-slider-row.vz-off .vz-current,

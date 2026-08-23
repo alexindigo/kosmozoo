@@ -32,16 +32,22 @@ import { iconSvg } from "./icons.mjs";
 // unrenderable row.
 
 const PARAM_REGISTRY = {
-  denoise:    { label: "denoise",    decimals: 2, clamp: [0, 1],          defaultInc: 0.05, spread: 0.15 },
-  ipa_weight: { label: "ipa weight", decimals: 2, clamp: [0, 2],          defaultInc: 0.05, spread: 0.3  },
-  steps:      { label: "steps",      decimals: 0, clamp: [1, 150],        defaultInc: 1,    spread: 10   },
-  cfg:        { label: "cfg",        decimals: 1, clamp: [0, 30],         defaultInc: 0.5,  spread: 2    },
-  seed:       { label: "seed",       decimals: 0, clamp: [0, 4294967295], defaultInc: 1,    spread: 100  },
+  denoise:      { label: "denoise",      decimals: 2, clamp: [0, 1],          defaultInc: 0.05, spread: 0.15 },
+  ipa_weight:   { label: "ipa weight",   decimals: 2, clamp: [0, 2],          defaultInc: 0.05, spread: 0.3  },
+  steps:        { label: "steps",        decimals: 0, clamp: [1, 150],        defaultInc: 1,    spread: 10   },
+  cfg:          { label: "cfg",          decimals: 1, clamp: [0, 30],         defaultInc: 0.5,  spread: 2    },
+  seed:         { label: "seed",         decimals: 0, clamp: [0, 4294967295], defaultInc: 1,    spread: 100  },
+  guidance:     { label: "guidance",     decimals: 1, clamp: [0, 30],         defaultInc: 0.5,  spread: 2    },
+  shift:        { label: "shift",        decimals: 2, clamp: [0, 10],         defaultInc: 0.5,  spread: 1    },
+  pulid_weight: { label: "pulid weight", decimals: 2, clamp: [0, 2],          defaultInc: 0.05, spread: 0.3  },
 };
 
 // Deterministic display order — matches the mockup and the extractor's
 // probe order. Parameters not in the registry are ignored.
-const PARAM_ORDER = ["denoise", "ipa_weight", "steps", "cfg", "seed"];
+const PARAM_ORDER = [
+  "denoise", "ipa_weight", "steps", "cfg", "seed",
+  "guidance", "shift", "pulid_weight",
+];
 
 function paramDef(key) {
   const reg = PARAM_REGISTRY[key];
@@ -173,6 +179,10 @@ function openPanel(cardEl, image) {
   sliders.appendChild(loading);
   left.appendChild(sliders);
 
+  // Track placeholder keys per param so the enable/disable path can
+  // auto-insert / remove them in the suffix. The key mutates after the
+  // probe returns (e.g. denoise -> scheduler:denoise) — the row exposes
+  // its current placeholderKey via getPlaceholderKey().
   function renderSliderRows(paramsForGraph) {
     sliders.textContent = "";
     if (!paramsForGraph.length) {
@@ -187,7 +197,13 @@ function openPanel(cardEl, image) {
       if (!p) continue; // registry doesn't know this param — skip
       const def = defaultRange(p, current);
       const row = buildSliderRow(p, current, def, (state) => {
+        const wasEnabled = ranges[p.key]?.enabled;
         ranges[p.key] = state;
+        if (state.enabled !== wasEnabled) {
+          reorderSliderCards();
+          if (state.enabled) autoInsertSuffix(row.getPlaceholderKey());
+          else autoRemoveSuffix(row.getPlaceholderKey());
+        }
         updateCount();
       }, templateTarget);
       if (label && label !== p.key) row.setLabel(label);
@@ -196,6 +212,38 @@ function openPanel(cardEl, image) {
       rows[p.key] = row;
     }
     updateCount();
+  }
+
+  // Move enabled cards to the top of the sliders container, keeping
+  // registry order within each group. DOM reorder — no re-render.
+  function reorderSliderCards() {
+    const items = [...sliders.children].filter((el) => el.classList.contains("vz-slider-row"));
+    // Deterministic sort key: enabled first (0), disabled second (1);
+    // within each group, PARAM_ORDER index.
+    const keyOrder = new Map(PARAM_ORDER.map((k, i) => [k, i]));
+    items.sort((a, b) => {
+      const ea = a.classList.contains("vz-off") ? 1 : 0;
+      const eb = b.classList.contains("vz-off") ? 1 : 0;
+      if (ea !== eb) return ea - eb;
+      return (keyOrder.get(a.dataset.paramKey) ?? 999) - (keyOrder.get(b.dataset.paramKey) ?? 999);
+    });
+    for (const el of items) sliders.appendChild(el);
+  }
+
+  // Append `_{key}_` to the suffix if not already present.
+  function autoInsertSuffix(placeholderKey) {
+    if (!placeholderKey) return;
+    const token = `_{${placeholderKey}}_`;
+    if (suffixInput.value.includes(token)) return;
+    suffixInput.value = suffixInput.value + token;
+  }
+
+  // Remove `_{key}_` from the suffix if present. Idempotent.
+  function autoRemoveSuffix(placeholderKey) {
+    if (!placeholderKey) return;
+    const token = `_{${placeholderKey}}_`;
+    if (!suffixInput.value.includes(token)) return;
+    suffixInput.value = suffixInput.value.split(token).join("");
   }
 
   const divider = document.createElement("div");
@@ -226,8 +274,9 @@ function openPanel(cardEl, image) {
   const suffixInput = document.createElement("input");
   suffixInput.type = "text";
   suffixInput.className = "vz-tinput vz-suffix";
-  suffixInput.value = "_{denoise}_";
-  suffixInput.title = "click a slider label to insert its {placeholder}";
+  // No default — enabling a param auto-inserts its `_{key}_` here.
+  suffixInput.value = "";
+  suffixInput.title = "click a slider label to insert its {placeholder} (enabled sliders auto-append)";
 
   for (const inp of [prefixInput, suffixInput]) {
     const remember = () => {
@@ -371,6 +420,7 @@ function openPanel(cardEl, image) {
 function buildSliderRow(param, current, defaults, onChange, templateTarget) {
   const el = document.createElement("div");
   el.className = "vz-slider-row vz-off";
+  el.dataset.paramKey = param.key;
 
   const cb = document.createElement("input");
   cb.type = "checkbox";
@@ -590,5 +640,9 @@ function buildSliderRow(param, current, defaults, onChange, templateTarget) {
       "} into prefix/suffix (current value not exposed by this graph)";
   }
 
-  return { el, cb, minRange, maxRange, setLabel, setCurrent, setAbsent, setWriteOnly };
+  return {
+    el, cb, minRange, maxRange,
+    setLabel, setCurrent, setAbsent, setWriteOnly,
+    getPlaceholderKey: () => placeholderKey,
+  };
 }

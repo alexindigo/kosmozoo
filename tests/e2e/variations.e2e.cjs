@@ -66,9 +66,10 @@ async function main() {
     });
 
     // --- sliders render after the probe returns (graph-driven) ---
-    // flux-basic uses SamplerCustomAdvanced with no CfgGuider and no
-    // IPAdapter, so the panel should render denoise/steps/seed but NOT
-    // cfg or ipa_weight for this graph.
+    // flux-basic uses SamplerCustomAdvanced (no CfgGuider) with a
+    // FluxGuidance node and no IPAdapter/PuLID/ModelSampling — the panel
+    // should render denoise/steps/seed/guidance but NOT cfg/ipa_weight/
+    // shift/pulid_weight for this graph.
     await attempt("panel renders only the graph's varyable params", async () => {
       await cdp.poll(`document.querySelectorAll('.vz-slider-row').length > 0`, 5000);
       const info = await cdp.evaluate(`(() => {
@@ -77,12 +78,15 @@ async function main() {
         return { count: rows.length, labels };
       })()`);
       check("panel renders graph-appropriate params",
-        info.count === 3
+        info.count === 4
           && info.labels.includes("denoise")
           && info.labels.includes("steps")
           && info.labels.includes("seed")
+          && info.labels.includes("guidance")
           && !info.labels.includes("cfg")
-          && !info.labels.includes("ipa weight"),
+          && !info.labels.includes("ipa weight")
+          && !info.labels.includes("shift")
+          && !info.labels.includes("pulid weight"),
         JSON.stringify(info));
     });
 
@@ -112,6 +116,70 @@ async function main() {
       const count = await cdp.evaluate(`document.querySelector('.vz-count')?.textContent`);
       const n = parseInt(count, 10);
       check("enabling denoise updates count", n > 0, "count=" + count);
+    });
+
+    // --- enabling a slider auto-inserts its placeholder into suffix ---
+    await attempt("enable auto-inserts _{key}_ into suffix", async () => {
+      const suffix = await cdp.evaluate(`document.querySelector('.vz-suffix')?.value`);
+      // denoise is already enabled from the previous test.
+      // For flux-basic the key is "scheduler:denoise".
+      const okBare = suffix === "_{denoise}_";
+      const okPrefixed = suffix === "_{scheduler:denoise}_";
+      check("suffix auto-populated on enable",
+        okBare || okPrefixed,
+        "suffix=" + JSON.stringify(suffix));
+    });
+
+    // --- enabling floats the row to the top, disabled rows sink ---
+    await attempt("enabled slider card rises to top", async () => {
+      // Enable the SECOND row too, then check ordering
+      await cdp.evaluate(`(() => {
+        const rows = document.querySelectorAll('.vz-slider-row');
+        if (rows.length < 2) return;
+        const cb = rows[rows.length - 1].querySelector('.vz-cb');
+        cb.checked = true;
+        cb.dispatchEvent(new Event('change'));
+      })()`);
+      await sleep(100);
+      const order = await cdp.evaluate(`(() => {
+        const rows = [...document.querySelectorAll('.vz-slider-row')];
+        return rows.map((r) => ({
+          key: r.dataset.paramKey,
+          enabled: !r.classList.contains('vz-off'),
+        }));
+      })()`);
+      // First N rows are enabled, last are disabled (or all enabled if N=count)
+      let seenDisabled = false;
+      let ok = true;
+      for (const r of order) {
+        if (!r.enabled) seenDisabled = true;
+        else if (seenDisabled) { ok = false; break; }
+      }
+      check("enabled cards come before disabled cards", ok, JSON.stringify(order));
+    });
+
+    // --- disabling removes the auto-inserted placeholder ---
+    await attempt("disable removes _{key}_ from suffix", async () => {
+      const before = await cdp.evaluate(`document.querySelector('.vz-suffix')?.value`);
+      // Disable the LAST enabled row (the one from the reorder test)
+      await cdp.evaluate(`(() => {
+        // Find any currently-enabled row and toggle it off
+        for (const r of document.querySelectorAll('.vz-slider-row')) {
+          if (!r.classList.contains('vz-off')) {
+            const key = r.dataset.paramKey;
+            // Skip denoise so the subsequent tests can still run against it
+            if (key === 'denoise') continue;
+            const cb = r.querySelector('.vz-cb');
+            cb.checked = false;
+            cb.dispatchEvent(new Event('change'));
+            return key;
+          }
+        }
+      })()`);
+      await sleep(100);
+      const after = await cdp.evaluate(`document.querySelector('.vz-suffix')?.value`);
+      check("suffix shrank after disable", after.length < before.length,
+        JSON.stringify({ before, after }));
     });
 
     // --- per-slider increment updates count ---
