@@ -12,7 +12,8 @@ import { api } from "./api.mjs";
 import { freshView, transform, viewToPersisted, viewFromPersisted } from "./geometry.mjs";
 import { cycleAxis } from "./axes.mjs";
 import { zoomToRoi } from "./roi.mjs";
-import { prefetchFrom, applyWindow } from "./feed.mjs";
+import { prefetchFrom, applyWindow, restoreToIndex } from "./feed.mjs";
+import { syncRoute, setCurrentFile, stripHostPrefix, findByFile } from "./route.mjs";
 import { applyComposition } from "./plugins-client.mjs";
 import { setVote, toggleFavorite } from "./judgment.mjs";
 import { getView, setView, flushViews } from "./views.mjs";
@@ -36,7 +37,7 @@ export async function initLightbox() {
   }
 }
 
-function currentImage() {
+function lightboxCandidate() {
   return S.images[S.lightbox.index] ?? null;
 }
 
@@ -49,7 +50,7 @@ function activeKey() {
     const a = anchorImage();
     return a ? `anchor:${a.name}` : null;
   }
-  const img = currentImage();
+  const img = lightboxCandidate();
   return img ? img.id : null;
 }
 
@@ -57,7 +58,7 @@ function activeSrc() {
   if (S.lightbox.col === "anchor") {
     return anchorImage()?.src ?? null;
   }
-  const img = currentImage();
+  const img = lightboxCandidate();
   return img ? api.imageBytesUrl(img.id) : null;
 }
 
@@ -120,6 +121,7 @@ export async function lbShow() {
   el.style.transform = transform(S.lightbox.view, currentBox(img));
   await applyComp(); // visibility is the composition mode's business
   render();
+  syncRoute(); // user-driven navigation names the shown image in the URL
 }
 
 function currentBox(img) {
@@ -150,15 +152,15 @@ async function onKey(e) {
       e.preventDefault(); cycleAxis("alignment"); break;
     case "u":
       e.preventDefault();
-      await setVote(currentImage(), currentImage()?.judgment?.vote === "up" ? null : "up");
+      await setVote(lightboxCandidate(), lightboxCandidate()?.judgment?.vote === "up" ? null : "up");
       break;
     case "d":
       e.preventDefault();
-      await setVote(currentImage(), currentImage()?.judgment?.vote === "down" ? null : "down");
+      await setVote(lightboxCandidate(), lightboxCandidate()?.judgment?.vote === "down" ? null : "down");
       break;
     case "f":
       e.preventDefault();
-      await toggleFavorite(currentImage());
+      await toggleFavorite(lightboxCandidate());
       break;
     case "r":
       e.preventDefault();
@@ -181,7 +183,7 @@ function applyView() {
 async function applyComp() {
   const cand = $("lbCandidate"), anch = $("lbAnchor");
   const mode = S.axes.composition;
-  const candImg = currentImage();
+  const candImg = lightboxCandidate();
   const anchImg = anchorImage();
   const candSrc = candImg ? api.imageBytesUrl(candImg.id) : null;
   const anchSrc = anchImg?.src ?? null;
@@ -222,6 +224,7 @@ async function step(dir) {
   if (next < 0 || next >= S.images.length) return;
   S.lightbox.index = next;
   S.lightbox.col = "candidate";
+  setCurrentFile(stripHostPrefix(S.host, S.images[next].filename));
   readBack();
   prefetchFrom(next, dir);
   applyWindow();
@@ -232,6 +235,7 @@ export async function openAt(index) {
   S.lightbox.open = true;
   S.lightbox.index = index;
   S.lightbox.col = "candidate";
+  setCurrentFile(stripHostPrefix(S.host, S.images[index].filename));
   readBack();
   await lbShow();
 }
@@ -252,4 +256,7 @@ export async function close() {
   S.lightbox.open = false;
   $("lightbox").hidden = true;
   render();
+  syncRoute(); // back to the feed's current file
+  const idx = findByFile(S.currentFile);
+  if (idx >= 0) restoreToIndex(idx); // feed re-centers where browsing left off
 }

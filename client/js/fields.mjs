@@ -149,6 +149,47 @@ export function fullFieldRows(meta) {
   return rows;
 }
 
+// full-metadata body, shared by the ⓘ overlay and the details workspace
+// space. Returns an element; the caller appends it to its own container.
+export function buildMetaBody(meta) {
+  const wrap = document.createElement("div");
+  const rows = meta ? fullFieldRows(meta) : [];
+  if (!rows.length && !meta?.prompt && !meta?.negPrompt) {
+    const p = document.createElement("div");
+    p.className = "info-none";
+    p.textContent = "This image has no embedded parameters.";
+    wrap.appendChild(p);
+    return wrap;
+  }
+  if (rows.length) {
+    const props = document.createElement("div");
+    props.className = "props";
+    for (const [k, v] of rows) {
+      const line = document.createElement("div");
+      const label = document.createElement("span");
+      label.className = "plabel";
+      label.textContent = `${k}: `;
+      line.append(label, document.createTextNode(v));
+      props.appendChild(line);
+    }
+    wrap.appendChild(props);
+  }
+  for (const [label, text] of [["prompt", meta.prompt], ["negative", meta.negPrompt]]) {
+    if (!text) continue;
+    const sec = document.createElement("div");
+    sec.className = "infosec";
+    const lab = document.createElement("div");
+    lab.className = "plabel";
+    lab.textContent = label;
+    const txt = document.createElement("div");
+    txt.className = "infotext";
+    txt.textContent = text;
+    sec.append(lab, txt);
+    wrap.appendChild(sec);
+  }
+  return wrap;
+}
+
 // --- the picker overlay ------------------------------------------------------------
 //
 // The overlay never touches cards. Picker changes fire the injected

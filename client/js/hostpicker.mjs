@@ -4,7 +4,7 @@
 // one row per host (per-host dot, name, mono address, inline × remove) + an
 // add row at the bottom (name + host:port + add). Click outside closes.
 // Current host is ring-highlighted; offline hosts are dimmed. Selection
-// persists; per-host scroll restores on switch.
+// lives in the URL hash (/#host[#filename]); stored host is a no-hash fallback.
 
 import { S, render, onRender } from "./state.mjs";
 import { api } from "./api.mjs";
@@ -56,9 +56,11 @@ async function addHost() {
 async function removeHost(name) {
   try {
     await api.removeHost(name);
-    await api.setSettings("core.ui", { [`scroll.${name}`]: null }).catch(() => {});
     S.hosts = await api.hosts();
-    if (S.host === name) await selectHost(Object.keys(S.hosts)[0] ?? null);
+    if (S.host === name) {
+      S.currentFile = null;
+      await selectHost(Object.keys(S.hosts)[0] ?? null);
+    }
     statusInfo(`host ${name} removed`);
     render();
   } catch (err) {
@@ -117,7 +119,10 @@ onRender((s) => {
       removeHost(name);
     });
     row.append(dot, nm, addr, rm);
-    row.addEventListener("click", () => selectHost(name));
+    row.addEventListener("click", () => {
+      S.currentFile = null; // new host: the URL's file part dies with the old one
+      selectHost(name);
+    });
     list.appendChild(row);
   }
 });

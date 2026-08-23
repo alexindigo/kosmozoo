@@ -14,7 +14,7 @@
 import { S, render, onRender } from "./state.mjs";
 import { api } from "./api.mjs";
 import { metaFromPngBytes } from "/shared/extractor.mjs";
-import { fullFieldRows } from "./fields.mjs";
+import { buildMetaBody } from "./fields.mjs";
 import { chrome } from "./chrome.mjs";
 import { iconSvg } from "./icons.mjs";
 import { imageCard, aspectFromMeta, actionButton } from "./imageCard.mjs";
@@ -121,13 +121,14 @@ export function initAnchorsPane({ onOpen } = {}) {
 
   // divider drag resizes the split between the feeds (persisted)
   const divider = document.getElementById("divider");
-  const aside = document.getElementById("anchors");
+  const aside = document.getElementById("workspace");
   divider.addEventListener("pointerdown", (e) => {
     e.preventDefault();
     divider.setPointerCapture(e.pointerId);
     document.body.classList.add("resizing");
     const move = (ev) => {
-      const w = Math.min(Math.max(window.innerWidth - ev.clientX - 12, 220), window.innerWidth * 0.7);
+      // right of the divider: workspace + the 32px workspace bar
+      const w = Math.min(Math.max(window.innerWidth - ev.clientX - 34, 220), window.innerWidth * 0.7);
       S.anchorPaneWidth = Math.round(w);
       aside.style.width = S.anchorPaneWidth + "px";
     };
@@ -147,7 +148,7 @@ export async function initAnchorsWidth() {
   const ui = await api.settings("core.ui").catch(() => ({}));
   if (ui.anchorWidth) {
     S.anchorPaneWidth = parseInt(ui.anchorWidth, 10) || S.anchorPaneWidth;
-    document.getElementById("anchors").style.width = S.anchorPaneWidth + "px";
+    document.getElementById("workspace").style.width = S.anchorPaneWidth + "px";
   }
 }
 
@@ -189,40 +190,7 @@ function showAnchorInfo(name, meta) {
   document.getElementById("infoTitle").textContent = name;
   const body = document.getElementById("infoBody");
   body.innerHTML = "";
-  const rows = meta ? fullFieldRows(meta) : [];
-  if (!rows.length && !meta?.prompt && !meta?.negPrompt) {
-    const p = document.createElement("div");
-    p.className = "info-none";
-    p.textContent = "This image has no embedded parameters.";
-    body.appendChild(p);
-  } else {
-    if (rows.length) {
-      const props = document.createElement("div");
-      props.className = "props";
-      for (const [k, v] of rows) {
-        const line = document.createElement("div");
-        const label = document.createElement("span");
-        label.className = "plabel";
-        label.textContent = `${k}: `;
-        line.append(label, document.createTextNode(v));
-        props.appendChild(line);
-      }
-      body.appendChild(props);
-    }
-    for (const [label, text] of [["prompt", meta.prompt], ["negative", meta.negPrompt]]) {
-      if (!text) continue;
-      const sec = document.createElement("div");
-      sec.className = "infosec";
-      const lab = document.createElement("div");
-      lab.className = "plabel";
-      lab.textContent = label;
-      const txt = document.createElement("div");
-      txt.className = "infotext";
-      txt.textContent = text;
-      sec.append(lab, txt);
-      body.appendChild(sec);
-    }
-  }
+  body.appendChild(buildMetaBody(meta));
   document.getElementById("infoOverlay").hidden = false;
 }
 

@@ -32,6 +32,11 @@ export const S = {
   },
   anchors: [],          // [{ name, src(dataURL), meta? }] — local drops, persisted
   anchorPaneWidth: 300, // px; divider-adjusted, persisted
+  workspace: "details", // right column space: 'details' | 'anchors', persisted
+  // current image = the URL hash, mirrored as a stripped filename string.
+  // String, not an object ref: object identity breaks on every refetch.
+  // Writers: boot/hashchange/scroll/lightbox-nav — nothing else.
+  currentFile: null,
   filter: "",
   hostMenuOpen: false,
   menuOpen: false,

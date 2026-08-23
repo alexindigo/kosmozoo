@@ -213,15 +213,14 @@ export function onScrollSafetyNet() {
   }, 120);
 }
 
-// #3: extend chunks until the stored depth exists, then jump.
-export function restoreScroll(target) {
+// #3: extend chunks until the target card exists, then center it (URL deep
+// link). The URL's current image is the only position restore.
+export function restoreToIndex(idx) {
   const col = scroller();
-  if (!target || !col) return;
+  if (!col || idx < 0) return;
   let guard = 500;
-  while (viewPos < view.length && guard-- > 0 && col.scrollHeight < target) {
-    renderChunk();
-  }
-  col.scrollTop = target;
+  while (viewPos < view.length && guard-- > 0 && !cardEls[idx]) renderChunk();
+  cardEls[idx]?.el.scrollIntoView({ block: "center" });
 }
 
 // --- lightbox-driven window ---------------------------------------------------------

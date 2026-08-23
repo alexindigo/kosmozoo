@@ -7,6 +7,7 @@
 // the lightbox/feed). This module doesn't know the lightbox exists.
 
 import { S } from "./state.mjs";
+import { matchesFile } from "./route.mjs";
 import { api } from "./api.mjs";
 import { setVote, toggleFavorite, saveNotes } from "./judgment.mjs";
 import { metaStripText, fillCardMeta } from "./fields.mjs";
@@ -43,6 +44,9 @@ export function buildCard(image, imgIdx, { onOpen, onErrorClick } = {}) {
   });
   handle.el.dataset.idx = imgIdx;
   handle.el.dataset.name = image.filename;
+  if (S.currentFile && matchesFile(image, S.host, S.currentFile)) {
+    handle.el.classList.add("current");
+  }
 
   // Judgment visual state — ONE place, derived from image.judgment at call
   // time. Never captured from a stale closure. Called at creation and after
