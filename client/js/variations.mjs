@@ -435,8 +435,11 @@ function openPanel(cardEl, image) {
 //       ●──────────────●
 //                current
 //
-// Dual thumbs snap to the row's increment on drag; keyboard uses native
-// fine step (1 unit at the parameter's decimal precision).
+// Vertical alignment is STRUCTURAL, not arithmetic: the rangewrap is a
+// three-lane flex column (labels / track / current-value) and the track
+// lane uses `display: flex; align-items: center` so every element on it
+// shares the same centerline — no --track-y / --thumb-d / calc() offsets
+// anywhere in the CSS.
 
 function buildSliderRow(param, current, defaults, onChange, templateTarget) {
   const el = document.createElement("div");
@@ -478,10 +481,20 @@ function buildSliderRow(param, current, defaults, onChange, templateTarget) {
   const fineStep = Math.pow(10, -param.decimals);
   let increment = param.defaultInc;
 
+  // Lane 1: min/max value labels above the track. Absolute `left: %` is
+  // the only positioning — horizontal only, set by JS.
+  const laneLabels = document.createElement("div");
+  laneLabels.className = "vz-lane vz-lane-labels";
   const minLabel = document.createElement("div");
   minLabel.className = "vz-bound vz-min-lbl";
   const maxLabel = document.createElement("div");
   maxLabel.className = "vz-bound vz-max-lbl";
+  laneLabels.append(minLabel, maxLabel);
+
+  // Lane 2: the track itself. The two range inputs and the marker all
+  // share one centerline via flex centering — no vertical offsets anywhere.
+  const laneTrack = document.createElement("div");
+  laneTrack.className = "vz-lane vz-lane-track";
 
   const minRange = document.createElement("input");
   minRange.type = "range";
@@ -503,11 +516,18 @@ function buildSliderRow(param, current, defaults, onChange, templateTarget) {
 
   const track = document.createElement("div");
   track.className = "vz-track";
-
   const marker = document.createElement("div");
   marker.className = "vz-marker";
+  laneTrack.append(minRange, maxRange, track, marker);
+
+  // Lane 3: current-value label below the track.
+  const laneCurrent = document.createElement("div");
+  laneCurrent.className = "vz-lane vz-lane-current";
   const curLabel = document.createElement("div");
   curLabel.className = "vz-current";
+  laneCurrent.appendChild(curLabel);
+
+  rangeWrap.append(laneLabels, laneTrack, laneCurrent);
 
   function paintCurrent(v) {
     if (v == null) {
