@@ -78,7 +78,7 @@ body { display: flex; flex-direction: column; }
    itself (no page-level scroll) ------------------------------------------- */
 main { display: flex; flex: 1; min-height: 0; }
 #candidatesCol { flex: 1; min-width: 0; overflow-y: auto;
-  scroll-snap-type: y proximity; scrollbar-width: none; }
+  scrollbar-width: none; }
 #candidatesCol::-webkit-scrollbar { display: none; }
 #divider { flex: 0 0 7px; align-self: stretch; cursor: col-resize;
   background: var(--raise); border-radius: 4px; margin: 0 -6px; position: relative;
@@ -99,7 +99,7 @@ main { display: flex; flex: 1; min-height: 0; }
 
 /* --- candidates feed: record cards --------------------------------------- */
 #grid { display: flex; flex-direction: column; gap: 16px; padding: 8px; }
-.card { scroll-snap-align: start; scroll-margin-top: 8px;
+.card { scroll-margin-top: 8px;
   background: var(--panel); border: 1px solid var(--raise); border-radius: 8px;
   padding: 12px; }
 .card[data-vote="up"] { border-color: var(--green-dim); }
@@ -314,43 +314,63 @@ main { display: flex; flex: 1; min-height: 0; }
   color: var(--mid); padding: 5px 7px; cursor: pointer; display: flex; }
 #lbKeysBtn:hover { color: var(--fg); border-color: var(--dim); }
 
-/* --- variations panel (vz-*) ------------------------------------------------ */
-.vz-panel { position: absolute; inset: 0; z-index: 15;
-  background: rgba(17,17,17,.97); padding: 20px 24px;
-  font-size: 12px; color: var(--fg); overflow: hidden;
-  display: flex; gap: 20px; }
+/* --- variations modal (vz-*) -----------------------------------------------
+ * Real page-level modal: fixed backdrop + centered panel. Not tied to a
+ * card's imgwrap — the card can scroll under the backdrop without clipping
+ * the panel. One modal at a time.
+ */
+.vz-root { position: fixed; inset: 0; z-index: 90;
+  background: rgba(0,0,0,.6);
+  display: flex; align-items: center; justify-content: center;
+  padding: 24px; }
+.vz-panel { position: relative;
+  width: min(920px, 96vw); max-height: 92vh; overflow: auto;
+  background: var(--panel); border: 1px solid var(--border);
+  border-radius: 12px; padding: 20px 24px;
+  font-size: 12px; color: var(--fg);
+  box-shadow: 0 12px 40px rgba(0,0,0,.5); }
 
-/* left column: title + sliders */
-.vz-left { flex: 1; display: flex; flex-direction: column;
-  justify-content: center; min-width: 0; }
+/* title */
 .vz-title { font-size: 15px; color: var(--white); text-align: center;
-  margin-bottom: 24px; font-weight: 500; }
-.vz-sliders { display: flex; flex-direction: column; gap: 22px; }
+  margin: 0 0 20px; font-weight: 500; }
 
-/* one slider row: checkbox on the left, inner block on the right */
-.vz-slider-row { display: flex; align-items: flex-start; gap: 12px; }
-.vz-slider-row.vz-off { opacity: 0.35; }
+/* two-column body */
+.vz-body { display: flex; gap: 20px; align-items: stretch; }
+.vz-left { flex: 1; min-width: 0; display: flex; flex-direction: column;
+  justify-content: center; }
+.vz-sliders { display: flex; flex-direction: column; gap: 26px; }
+
+/* one slider row: [ck] [inner (label+slider)] [row-inc] */
+.vz-slider-row { display: grid;
+  grid-template-columns: 18px 1fr 110px;
+  gap: 12px; align-items: start; }
+.vz-slider-row.vz-off { opacity: 0.4; }
 .vz-slider-row.vz-off .vz-min-lbl,
 .vz-slider-row.vz-off .vz-max-lbl,
 .vz-slider-row.vz-off .vz-current,
 .vz-slider-row.vz-off .vz-thumb,
 .vz-slider-row.vz-off .vz-track,
 .vz-slider-row.vz-off .vz-marker { visibility: hidden; }
-.vz-slider-row.vz-absent { opacity: 0.2; }
+.vz-slider-row.vz-absent { opacity: 0.25; }
 .vz-slider-row.vz-absent .vz-cb { cursor: not-allowed; }
+
+/* checkbox — orange square (matches the mockup) */
 .vz-cb { -webkit-appearance: none; appearance: none;
   width: 16px; height: 16px; border-radius: 3px;
   background: transparent; border: 2px solid var(--orange);
-  cursor: pointer; margin: 8px 0 0; flex: 0 0 auto; }
+  cursor: pointer; margin: 8px 0 0; }
 .vz-cb:checked { background: var(--orange); }
 
-.vz-slider-inner { flex: 1; display: flex; flex-direction: column; gap: 2px; }
+.vz-slider-inner { min-width: 0; display: flex; flex-direction: column; gap: 4px; }
 .vz-label { color: var(--fg); font-size: 13px; font-weight: 400;
-  margin-bottom: 6px; cursor: pointer; display: inline-block; }
+  cursor: pointer; align-self: flex-start; }
 .vz-label:hover { color: var(--accent); }
 
 /* dual-thumb slider layout */
-.vz-rangewrap { position: relative; height: 44px; padding-top: 16px; }
+.vz-rangewrap { position: relative; height: 46px; padding-top: 18px;
+  margin-top: 2px; }
+.vz-rangewrap::before { content: ""; position: absolute; left: 0; right: 0;
+  top: 24px; height: 1px; background: var(--dim); }
 
 /* min/max value labels above the thumbs — positioned absolutely by JS */
 .vz-bound { position: absolute; top: -2px; transform: translateX(-50%);
@@ -359,16 +379,16 @@ main { display: flex; flex: 1; min-height: 0; }
   white-space: nowrap; }
 
 /* orange marker + current value label below */
-.vz-marker { position: absolute; top: 12px; width: 2px; height: 20px;
+.vz-marker { position: absolute; top: 14px; width: 2px; height: 20px;
   background: var(--orange); pointer-events: none;
   transform: translateX(-50%); }
-.vz-current { position: absolute; top: 32px; transform: translateX(-50%);
+.vz-current { position: absolute; top: 34px; transform: translateX(-50%);
   color: var(--orange); font-size: 11px;
   font-family: ui-monospace, monospace; pointer-events: none;
   white-space: nowrap; }
 
 /* two overlapping range inputs form the dual thumb */
-.vz-thumb { position: absolute; top: 16px; left: 0; width: 100%;
+.vz-thumb { position: absolute; top: 18px; left: 0; width: 100%;
   height: 20px; -webkit-appearance: none; appearance: none;
   background: transparent; pointer-events: none; margin: 0; padding: 0; }
 .vz-thumb::-webkit-slider-thumb { -webkit-appearance: none; appearance: none;
@@ -379,34 +399,37 @@ main { display: flex; flex: 1; min-height: 0; }
   pointer-events: auto; }
 .vz-thumb::-webkit-slider-runnable-track { background: transparent; height: 2px; }
 .vz-thumb::-moz-range-track { background: transparent; height: 2px; }
-
-/* track: 1px black line across the full width, blue band between thumbs */
-.vz-rangewrap::before { content: ""; position: absolute; left: 0; right: 0;
-  top: 22px; height: 1px; background: var(--dim); }
-.vz-track { position: absolute; top: 21px; height: 3px; background: var(--accent);
+.vz-track { position: absolute; top: 23px; height: 3px; background: var(--accent);
   border-radius: 1px; pointer-events: none; }
 
-/* --- vertical divider --- */
+/* per-row increment stepper (right of the slider) */
+.vz-row-inc { display: flex; align-items: center; gap: 4px;
+  margin-top: 22px;  /* align with the slider track */
+  flex: 0 0 auto; }
+.vz-row-inc .vz-step-btn { background: transparent; color: var(--mid);
+  border: 1px solid var(--dim); border-radius: 4px;
+  width: 20px; height: 22px; font-size: 14px; cursor: pointer;
+  padding: 0; line-height: 1;
+  display: flex; align-items: center; justify-content: center; }
+.vz-row-inc .vz-step-btn:hover:not(:disabled) { color: var(--fg); border-color: var(--fg); }
+.vz-row-inc .vz-step-btn:disabled { opacity: 0.4; cursor: default; }
+.vz-row-inc-input { width: 56px; background: var(--bg); color: var(--fg);
+  border: 1px solid var(--dim); border-radius: 4px; padding: 2px 4px;
+  font-size: 11px; text-align: center;
+  font-family: ui-monospace, monospace; }
+.vz-row-inc-input:focus { outline: none; border-color: var(--accent); }
+.vz-row-inc-input:disabled { opacity: 0.5; }
+
+/* vertical divider */
 .vz-divider { width: 1px; background: var(--dim); flex: 0 0 auto; }
 
-/* --- right column --- */
-.vz-right { width: 130px; display: flex; flex-direction: column;
-  justify-content: center; gap: 4px; flex: 0 0 auto; }
+/* right column */
+.vz-right { width: 150px; display: flex; flex-direction: column;
+  justify-content: flex-start; gap: 4px; flex: 0 0 auto; }
 .vz-rlabel { color: var(--fg); font-size: 12px; font-weight: 400;
-  margin-top: 8px; }
+  margin-top: 10px; }
 .vz-rlabel:first-child { margin-top: 0; }
-.vz-incrow { display: flex; align-items: stretch; gap: 6px;
-  margin-top: 2px; }
-.vz-step-btn { background: transparent; color: var(--fg);
-  border: none; font-size: 16px; cursor: pointer; padding: 0 4px;
-  line-height: 1; }
-.vz-step-btn:hover { color: var(--accent); }
-.vz-inc { flex: 1; background: var(--bg); color: var(--fg);
-  border: 1px solid var(--dim); border-radius: 6px; padding: 3px 8px;
-  font-size: 12px; text-align: center;
-  font-family: ui-monospace, monospace; }
-.vz-inc:focus { outline: none; border-color: var(--accent); }
-.vz-count { font-size: 30px; font-weight: 700; color: var(--fg);
+.vz-count { font-size: 34px; font-weight: 700; color: var(--fg);
   line-height: 1.1; margin-top: 2px; }
 .vz-tinput { background: var(--bg); color: var(--fg);
   border: 1px solid var(--dim); border-radius: 6px; padding: 4px 8px;
@@ -414,14 +437,14 @@ main { display: flex; flex: 1; min-height: 0; }
   font-family: ui-monospace, monospace; }
 .vz-tinput:focus { outline: none; border-color: var(--accent); }
 .vz-run { background: var(--accent); color: var(--black); border: none;
-  border-radius: 8px; padding: 8px 0; font-size: 14px; font-weight: 600;
-  cursor: pointer; margin-top: 12px; }
+  border-radius: 8px; padding: 10px 0; font-size: 14px; font-weight: 600;
+  cursor: pointer; margin-top: 16px; }
 .vz-run:hover { filter: brightness(1.15); }
 .vz-run:disabled { opacity: 0.5; cursor: default; }
 .vz-error { color: var(--red); font-size: 11px; min-height: 14px;
-  margin-top: 4px; word-break: break-word; }
+  margin-top: 6px; word-break: break-word; }
 .vz-error.vz-ok { color: var(--green); }
-.vz-close { position: absolute; top: 8px; right: 8px; z-index: 16;
-  background: none; border: none; color: var(--mid); cursor: pointer;
+.vz-close { position: absolute; top: 10px; right: 12px;
+  background: none; border: none; color: var(--dim); cursor: pointer;
   padding: 4px; }
-.vz-close:hover { color: var(--white); }
+.vz-close:hover { color: var(--fg); }
