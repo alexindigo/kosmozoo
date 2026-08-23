@@ -1,15 +1,18 @@
 /* client/css/app.css — kosmozoo stylesheet */
 
 :root { color-scheme: dark;
-  /* palette: black, dark grey, light grey, white, light blue, bright orange,
-     red (errors only). Green is allowed ONLY for positive-feedback
-     affordances (pos notes, up votes, saved confirmations) — never for
-     general UI elements. */
+  /* palette: black, dark grey, light grey, white, light blue, sky blue,
+     bright orange, red (errors only), yellow (soft warnings). Green is
+     allowed ONLY for positive-feedback affordances (pos notes, up votes,
+     saved confirmations) — never for general UI elements. */
   --black: #000;
   --bg: #111; --panel: #1a1a1a; --card: #151515; --raise: #222;
   --border: #333; --dim: #666; --mid: #999; --fg: #ddd; --white: #fff;
   --accent: #7ab3ff;   /* light blue */
+  --sky: #38bdf8;      /* sky blue — primary action (Run) */
+  --sky-dim: rgba(56, 189, 248, .55);
   --orange: #ff8800;   /* bright orange */
+  --yellow: #f5c542;   /* soft warnings */
   --red: #f66;         /* errors */
   --green: #9ece6a;    /* positive feedback ONLY */
   --green-dim: rgba(158, 206, 106, .55);
@@ -359,12 +362,13 @@ main { display: flex; flex: 1; min-height: 0; }
 .vz-slider-row:not(.vz-off) { border-color: var(--accent); }
 .vz-slider-row.vz-off { opacity: 0.55;
   background: color-mix(in srgb, var(--card) 85%, transparent); }
+/* When a row is disabled the range picker chrome fades away, but the
+   orange "current value" tick and its numeric label STAY visible so the
+   image's actual value is legible on every row (enabled or not). */
 .vz-slider-row.vz-off .vz-min-lbl,
 .vz-slider-row.vz-off .vz-max-lbl,
-.vz-slider-row.vz-off .vz-current,
 .vz-slider-row.vz-off .vz-thumb,
-.vz-slider-row.vz-off .vz-track,
-.vz-slider-row.vz-off .vz-marker { visibility: hidden; }
+.vz-slider-row.vz-off .vz-track { visibility: hidden; }
 .vz-slider-row.vz-absent { opacity: 0.25; }
 .vz-slider-row.vz-absent .vz-cb { cursor: not-allowed; }
 .vz-loading { color: var(--mid); font-size: 12px; padding: 20px 4px;
@@ -446,19 +450,28 @@ main { display: flex; flex: 1; min-height: 0; }
   margin-top: 10px; }
 .vz-rlabel:first-child { margin-top: 0; }
 .vz-count { font-size: 34px; font-weight: 700; color: var(--fg);
-  line-height: 1.1; margin-top: 2px; }
+  line-height: 1.1; margin-top: 2px;
+  transition: color .15s ease; }
+/* soft warning: >100 permutations */
+.vz-count.vz-count-warn { color: var(--yellow); }
+/* hot warning: >1000 permutations — this is going to be a lot of runs */
+.vz-count.vz-count-hot { color: var(--red); }
 .vz-tinput { background: var(--bg); color: var(--fg);
   border: 1px solid var(--dim); border-radius: 6px; padding: 4px 8px;
   font-size: 12px; margin-top: 2px;
   font-family: ui-monospace, monospace; }
 .vz-tinput:focus { outline: none; border-color: var(--accent); }
-.vz-run { background: var(--accent); color: var(--black); border: none;
-  border-radius: 8px; padding: 10px 0; font-size: 14px; font-weight: 600;
-  cursor: pointer; margin-top: 16px; }
-.vz-run:hover { filter: brightness(1.15); }
+/* Full-width footer: Run centered, error text below it. */
+.vz-footer { display: flex; flex-direction: column; align-items: stretch;
+  gap: 6px; margin-top: 18px; padding-top: 16px;
+  border-top: 1px solid var(--raise); }
+.vz-run { background: var(--sky); color: var(--black); border: none;
+  border-radius: 8px; padding: 12px 0; font-size: 15px; font-weight: 600;
+  cursor: pointer; align-self: center; min-width: 240px; }
+.vz-run:hover { filter: brightness(1.1); box-shadow: 0 0 0 3px var(--sky-dim); }
 .vz-run:disabled { opacity: 0.5; cursor: default; }
-.vz-error { color: var(--red); font-size: 11px; min-height: 14px;
-  margin-top: 6px; word-break: break-word; }
+.vz-error { color: var(--red); font-size: 12px; min-height: 14px;
+  text-align: center; word-break: break-word; }
 .vz-error.vz-ok { color: var(--green); }
 .vz-close { position: absolute; top: 10px; right: 12px;
   background: none; border: none; color: var(--dim); cursor: pointer;

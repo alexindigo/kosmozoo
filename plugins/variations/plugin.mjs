@@ -385,11 +385,14 @@ export function register(kz) {
       return Response.json({ error: "no permutations (check ranges and increment)" }, { status: 400 });
     }
 
-    // The "<host>#" convention is a kosmozoo-local labelling scheme for
-    // clipboard/download naming — it is NOT part of the ComfyUI server's
-    // filename. The server sees only what the user typed in prefix/suffix
-    // (wrapped around the original SaveImage's own filename_prefix).
-    const pfxTpl = String(prefix ?? "");
+    // "<host>#" is ALWAYS the leading segment of the generated filename so
+    // outputs from different hosts don't collide when downloaded into a
+    // shared ~/Downloads folder, and so a variation traces back to the
+    // host that produced it. The user's prefix goes after it. If the
+    // user's prefix already starts with "<host>#" we don't double-prepend.
+    const hostTag = host + "#";
+    const userPfx = String(prefix ?? "");
+    const pfxTpl = userPfx.startsWith(hostTag) ? userPfx : hostTag + userPfx;
     const sfxTpl = String(suffix ?? "");
 
     // Identify which SaveImage node produced the original image, so we can

@@ -105,17 +105,22 @@ async function main() {
         "current=" + cur);
     });
 
-    // --- enabling a slider updates variations count ---
-    await attempt("enabling denoise updates variations count", async () => {
-      await cdp.evaluate(`(() => {
-        const cb1 = document.querySelector('.vz-slider-row .vz-cb');
-        cb1.checked = true;
-        cb1.dispatchEvent(new Event('change'));
-      })()`);
-      await sleep(100);
+    // --- denoise auto-enables on modal open; count is non-zero ---
+    // Opening the modal flips denoise on by default so the user lands on
+    // a sensible starting state. Verified by the count being > 0.
+    await attempt("denoise auto-enabled on open (count > 0)", async () => {
+      await sleep(200);
       const count = await cdp.evaluate(`document.querySelector('.vz-count')?.textContent`);
+      const denoiseOn = await cdp.evaluate(`(() => {
+        for (const r of document.querySelectorAll('.vz-slider-row')) {
+          if (r.dataset.paramKey === 'denoise') return !r.classList.contains('vz-off');
+        }
+        return false;
+      })()`);
       const n = parseInt(count, 10);
-      check("enabling denoise updates count", n > 0, "count=" + count);
+      check("denoise auto-enabled and count > 0",
+        denoiseOn && n > 0,
+        "denoiseOn=" + denoiseOn + " count=" + count);
     });
 
     // --- enabling a slider auto-inserts its placeholder into suffix ---
