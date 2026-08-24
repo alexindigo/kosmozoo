@@ -56,6 +56,8 @@ export const state = {
   keysPanelOpen: false,
   keysFilter: "",
   capturing: null,      // action id awaiting a keypress (rebind)
+  fieldsOverlayOpen: false,   // metadata fields picker
+  infoOverlay: { open: false, name: "", meta: null },  // anchor ⓘ params
   // axes (see docs/spec.md §1)
   axes: {
     alignment: "shared",      // 'independent' | 'shared' | 'face-anchored'

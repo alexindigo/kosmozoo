@@ -7,37 +7,6 @@
 // and never touches what legacy writes inside. Each constant is deleted the
 // phase its surface becomes a real component.
 
-export const FIELDS_INNER = `
-  <div id="fieldsPanel">
-    <button id="fieldsClose" title="close (Esc)"><svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 6l-12 12" /><path d="M6 6l12 12" /></svg></button>
-    <div id="fieldsTitle">Metadata fields</div>
-    <div id="fieldsSub"><b>under image</b> — the card's metadata panel ·
-      <b>strip</b> — a semi-transparent strip over the image bottom
-      (cards) / screen bottom (lightbox)</div>
-    <div id="fieldsTable"></div>
-  </div>
-`;
-
-export const INFO_INNER = `
-  <div id="infoPanel">
-    <button id="infoClose" title="close (Esc)"><svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 6l-12 12" /><path d="M6 6l12 12" /></svg></button>
-    <div id="infoTitle"></div>
-    <div id="infoBody" class="metabody"></div>
-  </div>
-`;
-
-export const KEYS_INNER = `
-  <div id="keysPanelInner">
-    <div id="keysPanelHead">
-      <h2>Actions & keys</h2>
-      <input id="keysSearch" type="search" placeholder="filter actions…" spellcheck="false">
-      <button id="keysReset" title="restore all default bindings">reset all</button>
-    </div>
-    <div id="keysList"></div>
-    <div id="keysFoot">click a binding to change it · right-click resets one · Esc cancels capture</div>
-  </div>
-`;
-
 export const LIGHTBOX_INNER = `
   <img id="lbCandidate" alt="">
   <img id="lbAnchor" alt="">

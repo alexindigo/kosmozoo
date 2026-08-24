@@ -10,15 +10,15 @@ import { h, Fragment, useEffect } from "../../vendor/preact/vendor.mjs";
 import { loadBootData } from "../services/bootData.mjs";
 import { startScraperPoll } from "../services/scraper.mjs";
 import {
-  FIELDS_INNER,
-  INFO_INNER,
-  KEYS_INNER,
   LIGHTBOX_INNER,
   DIFF_INNER,
 } from "../skeleton.mjs";
 import { Header } from "./Header.mjs";
 import { WorkspacePane } from "./WorkspacePane.mjs";
 import { WorkspaceBar } from "./WorkspaceBar.mjs";
+import { FieldsOverlay } from "./FieldsOverlay.mjs";
+import { InfoOverlay } from "./InfoOverlay.mjs";
+import { KeysPanel } from "./KeysPanel.mjs";
 
 export function App() {
   useEffect(() => {
@@ -37,9 +37,9 @@ export function App() {
       h(WorkspaceBar, null),
     ),
     h("div", { id: "statusStack", dangerouslySetInnerHTML: { __html: "" } }),
-    h("div", { id: "fieldsOverlay", hidden: true, dangerouslySetInnerHTML: { __html: FIELDS_INNER } }),
-    h("div", { id: "infoOverlay", hidden: true, dangerouslySetInnerHTML: { __html: INFO_INNER } }),
-    h("div", { id: "keysPanel", hidden: true, dangerouslySetInnerHTML: { __html: KEYS_INNER } }),
+    h(FieldsOverlay, null),
+    h(InfoOverlay, null),
+    h(KeysPanel, null),
     h("div", { id: "lightbox", hidden: true, dangerouslySetInnerHTML: { __html: LIGHTBOX_INNER } }),
     h("div", { id: "diff", hidden: true, dangerouslySetInnerHTML: { __html: DIFF_INNER } }),
   );
