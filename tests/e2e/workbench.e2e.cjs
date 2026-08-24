@@ -180,7 +180,7 @@ async function attempt(name, fn) {
         el.classList.contains('metabar') ? 'meta' :
         el.classList.contains('ctitle') ? 'title' : 'notes').join(',');
     })()`);
-    check("order img,meta,title,notes", order === "img,meta,title,notes", order);
+    check("order img,title,notes,meta", order === "img,title,notes,meta", order);
     const oneLine = await page.evaluate(`(() => {
       const bar = document.querySelector('.card .metabar');
       return bar.getBoundingClientRect().height < 30 && bar.querySelector('.metabar-full').hidden;

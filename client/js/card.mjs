@@ -61,8 +61,7 @@ export function buildCard(image, imgIdx, { onOpen, onErrorClick } = {}) {
     },
     title: buildTitle(image),
     titleActions: actions,
-    between: [buildMetaRow(image, facts)],
-    footer: [buildNotesRow(image, imgIdx)],
+    footer: [buildNotesRow(image, imgIdx), buildMetaRow(image, facts)],
   });
   handle.el.dataset.idx = imgIdx;
   handle.el.dataset.name = image.filename;
