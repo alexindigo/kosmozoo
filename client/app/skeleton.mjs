@@ -7,34 +7,6 @@
 // and never touches what legacy writes inside. Each constant is deleted the
 // phase its surface becomes a real component.
 
-export const CHROME_INNER = `
-  <img src="/logo-64.png" alt="kosmozoo" width="24" height="24" style="border-radius:6px">
-  <h1>Kosmozoo</h1>
-  <div id="hostPicker">
-    <button id="hostBtn" title="choose host">
-      <span class="hdot off" id="hostDot"></span><span id="hostBtnLabel">host…</span><span class="chev">▾</span>
-    </button>
-    <div id="hostDrop" hidden>
-      <div id="hostList"></div>
-      <div class="haddrow">
-        <input type="text" id="hostName" placeholder="name" spellcheck="false">
-        <input type="text" id="hostAddr" placeholder="host:port or folder:/path" spellcheck="false">
-        <button id="hostAdd">add</button>
-      </div>
-    </div>
-  </div>
-  <input id="filter" type="search" placeholder="filter filenames…" spellcheck="false">
-  <span id="headerButtons"></span>
-  <span id="status"></span>
-  <span class="flexspacer"></span>
-  <a id="dlFeedback" class="btn" href="/api/feedback" download="kosmozoo_feedback.json"
-     title="download the exact feedback.json as stored on the server">Download feedback</a>
-  <div id="menuWrap">
-    <button id="menuBtn" title="options"><svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 6h16" /><path d="M4 12h16" /><path d="M4 18h16" /></svg></button>
-    <div id="menu" hidden></div>
-  </div>
-`;
-
 export const MAIN_INNER = `
   <section id="candidatesCol"><div id="grid"></div></section>
   <div id="divider" title="drag to resize the split"></div>

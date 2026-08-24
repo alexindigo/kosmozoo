@@ -10,7 +10,6 @@ import { h, Fragment, useEffect } from "../../vendor/preact/vendor.mjs";
 import { loadBootData } from "../services/bootData.mjs";
 import { startScraperPoll } from "../services/scraper.mjs";
 import {
-  CHROME_INNER,
   MAIN_INNER,
   FIELDS_INNER,
   INFO_INNER,
@@ -18,6 +17,7 @@ import {
   LIGHTBOX_INNER,
   DIFF_INNER,
 } from "../skeleton.mjs";
+import { Header } from "./Header.mjs";
 
 export function App() {
   useEffect(() => {
@@ -28,7 +28,7 @@ export function App() {
   }, []);
 
   return h(Fragment, null,
-    h("header", { id: "chrome", dangerouslySetInnerHTML: { __html: CHROME_INNER } }),
+    h(Header, null),
     h("main", { dangerouslySetInnerHTML: { __html: MAIN_INNER } }),
     h("div", { id: "statusStack", dangerouslySetInnerHTML: { __html: "" } }),
     h("div", { id: "fieldsOverlay", hidden: true, dangerouslySetInnerHTML: { __html: FIELDS_INNER } }),
