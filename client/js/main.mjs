@@ -20,7 +20,7 @@ import { openFieldsOverlay, initFieldsOverlay } from "./fields.mjs";
 import { savedSet } from "../app/components/Card.mjs";
 import { initScrollSnap } from "../app/services/scrollSnap.mjs";
 import { initViews } from "./views.mjs";
-import { openAt, openAnchor } from "./lightbox.mjs";
+import { openAt } from "./lightbox.mjs";
 import { iconSvg } from "./icons.mjs";
 import { loadBootData } from "../app/services/bootData.mjs";
 import { wantMeta, pollMetadata, refreshAllCardMeta } from "../app/services/metadata.mjs";
@@ -275,7 +275,7 @@ async function boot() {
   onVisibilityChanged((image, visible) => { if (!visible) rebuildFeed(); });
   await initViews(); // shared per-image view store (feed zoom <-> lightbox)
   initHostPicker({ onSelect: loadCandidates });
-  initAnchorsPane({ onOpen: openAnchor });
+  initAnchorsPane();
   initWorkspace();
   initDiff();
   initInfoOverlay();

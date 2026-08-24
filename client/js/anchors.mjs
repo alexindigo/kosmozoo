@@ -11,13 +11,11 @@
 // send bytes). Reorder by drag with a marked internal type so the dropzone
 // can tell reorder from file drop.
 
-import { state, render, onRender } from "./state.mjs";
+import { state, render } from "./state.mjs";
 import { api } from "./api.mjs";
 import { metaFromPngBytes } from "/shared/extractor.mjs";
 import { buildMetaBody } from "./fields.mjs";
 import { chrome } from "./chrome.mjs";
-import { iconSvg } from "./icons.mjs";
-import { imageCard, aspectFromMeta, actionButton } from "./imageCard.mjs";
 
 const LS_KEY = "kosmozoo.anchors.v1";
 const MAX_DIM = 1200;
@@ -80,7 +78,7 @@ export function loadAnchors() {
   }
 }
 
-function persistAnchors() {
+export function persistAnchors() {
   try {
     localStorage.setItem(LS_KEY, JSON.stringify(
       state.anchors.map((a) => ({ name: a.name, src: a.src, ...(a.meta ? { meta: a.meta } : {}) }))));
@@ -89,7 +87,7 @@ function persistAnchors() {
   }
 }
 
-function removeAnchor(name) {
+export function removeAnchor(name) {
   const i = state.anchors.findIndex((a) => a.name === name);
   if (i < 0) return;
   state.anchors.splice(i, 1);
@@ -97,28 +95,9 @@ function removeAnchor(name) {
   render();
 }
 
-let onOpenAnchor = null;
-
 // --- pane setup ---------------------------------------------------------------------
 
-export function initAnchorsPane({ onOpen } = {}) {
-  onOpenAnchor = onOpen ?? null;
-  const dz = document.getElementById("dropzone");
-  const fi = document.getElementById("fileInput");
-  dz.addEventListener("click", () => fi.click());
-  fi.addEventListener("change", async () => {
-    if (fi.files.length) await addAnchorFiles([...fi.files]);
-    fi.value = "";
-  });
-  dz.addEventListener("dragover", (e) => { e.preventDefault(); dz.classList.add("over"); });
-  dz.addEventListener("dragleave", () => dz.classList.remove("over"));
-  dz.addEventListener("drop", async (e) => {
-    e.preventDefault();
-    dz.classList.remove("over");
-    if (reorderDrag) return; // was an anchor reorder, not files
-    if (e.dataTransfer?.files?.length) await addAnchorFiles([...e.dataTransfer.files]);
-  });
-
+export function initAnchorsPane() {
   // divider drag resizes the split between the feeds (persisted)
   const divider = document.getElementById("divider");
   const aside = document.getElementById("workspace");
@@ -152,32 +131,6 @@ export async function initAnchorsWidth() {
   }
 }
 
-// --- reorder (marked internal drag) ----------------------------------------------------
-
-let reorderDrag = null;
-
-function initReorder(list) {
-  list.addEventListener("dragover", (e) => {
-    if (!reorderDrag) return;
-    e.preventDefault();
-    e.dataTransfer.dropEffect = "move";
-    const over = e.target.closest(".anchor");
-    if (!over || over === reorderDrag) return;
-    const rect = over.getBoundingClientRect();
-    const before = (e.clientY - rect.top) < rect.height / 2;
-    list.insertBefore(reorderDrag, before ? over : over.nextSibling);
-  });
-  list.addEventListener("drop", (e) => {
-    if (reorderDrag) e.preventDefault();
-  });
-}
-
-function syncOrderFromDom() {
-  const order = [...document.querySelectorAll("#anchorList .anchor")].map((el) => el.dataset.name);
-  state.anchors.sort((a, b) => order.indexOf(a.name) - order.indexOf(b.name));
-  persistAnchors();
-}
-
 // --- ⓘ overlay (every field, picker-exempt) -----------------------------------------------
 
 export function initInfoOverlay() {
@@ -186,79 +139,10 @@ export function initInfoOverlay() {
   ov.addEventListener("click", (e) => { if (e.target === ov) ov.hidden = true; });
 }
 
-function showAnchorInfo(name, meta) {
+export function showAnchorInfo(name, meta) {
   document.getElementById("infoTitle").textContent = name;
   const body = document.getElementById("infoBody");
   body.innerHTML = "";
   body.appendChild(buildMetaBody(meta));
   document.getElementById("infoOverlay").hidden = false;
-}
-
-// --- renderer (the column's only DOM writer) -------------------------------------------
-// The anchor INSTANCE of the shared image card: same card, injected with
-// name / info+remove actions / meta-summary strip.
-
-onRender((s) => {
-  if (typeof document === "undefined") return;
-  const list = document.getElementById("anchorList");
-  if (!list) return;
-  if (!list.dataset.reorderInit) {
-    list.dataset.reorderInit = "1";
-    initReorder(list);
-  }
-  list.innerHTML = "";
-  for (const a of s.anchors) {
-    const idx = s.anchors.indexOf(a);
-    let cardEl = null; // assigned when the handle lands; the zoom hook skips until then
-    const card = imageCard({
-      alt: a.name,
-      ar: aspectFromMeta(a.meta),
-      stripText: anchorSummary(a.meta),
-      zoomKey: `anchor:${a.name}`,
-      onZoomChange: (zoomed) => { if (cardEl) cardEl.draggable = !zoomed; },
-      onOpen: () => onOpenAnchor?.(idx),
-      title: anchorTitle(a.name),
-      titleActions: [
-        actionButton("ainfo", iconSvg("info-circle", 14), "embedded parameters",
-          () => showAnchorInfo(a.name, a.meta)),
-        actionButton("rm", iconSvg("trash", 13), "remove anchor",
-          () => removeAnchor(a.name)),
-      ],
-    });
-    card.setSrc(a.src); // anchors carry their bytes; the component loads them
-    cardEl = card.el;
-    card.el.classList.add("anchor");
-    card.el.dataset.name = a.name;
-    card.el.draggable = true;
-    card.el.addEventListener("dragstart", (e) => {
-      e.dataTransfer.setData("text/x-anchor", "");
-      e.dataTransfer.effectAllowed = "move";
-      reorderDrag = card.el;
-      card.el.classList.add("dragging");
-    });
-    card.el.addEventListener("dragend", () => {
-      card.el.classList.remove("dragging");
-      reorderDrag = null;
-      syncOrderFromDom();
-    });
-    list.appendChild(card.el);
-  }
-});
-
-function anchorTitle(name) {
-  const el = document.createElement("span");
-  el.className = "aname";
-  el.textContent = name;
-  el.title = name;
-  return el;
-}
-
-function anchorSummary(meta) {
-  if (!meta) return "";
-  const bits = [];
-  if (meta.seed != null) bits.push(`seed ${meta.seed}`);
-  if (meta.steps != null) bits.push(`${meta.steps} steps`);
-  if (meta.guidance != null) bits.push(`g ${meta.guidance}`);
-  if (meta.model) bits.push(meta.model);
-  return bits.join(" · ");
 }

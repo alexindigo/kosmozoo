@@ -10,7 +10,6 @@ import { h, Fragment, useEffect } from "../../vendor/preact/vendor.mjs";
 import { loadBootData } from "../services/bootData.mjs";
 import { startScraperPoll } from "../services/scraper.mjs";
 import {
-  MAIN_INNER,
   FIELDS_INNER,
   INFO_INNER,
   KEYS_INNER,
@@ -18,6 +17,8 @@ import {
   DIFF_INNER,
 } from "../skeleton.mjs";
 import { Header } from "./Header.mjs";
+import { WorkspacePane } from "./WorkspacePane.mjs";
+import { WorkspaceBar } from "./WorkspaceBar.mjs";
 
 export function App() {
   useEffect(() => {
@@ -29,7 +30,12 @@ export function App() {
 
   return h(Fragment, null,
     h(Header, null),
-    h("main", { dangerouslySetInnerHTML: { __html: MAIN_INNER } }),
+    h("main", null,
+      h("section", { id: "candidatesCol" }, h("div", { id: "grid" })),
+      h("div", { id: "divider", title: "drag to resize the split" }),
+      h(WorkspacePane, null),
+      h(WorkspaceBar, null),
+    ),
     h("div", { id: "statusStack", dangerouslySetInnerHTML: { __html: "" } }),
     h("div", { id: "fieldsOverlay", hidden: true, dangerouslySetInnerHTML: { __html: FIELDS_INNER } }),
     h("div", { id: "infoOverlay", hidden: true, dangerouslySetInnerHTML: { __html: INFO_INNER } }),

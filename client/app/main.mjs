@@ -6,5 +6,8 @@
 
 import { h, render } from "../vendor/preact/vendor.mjs";
 import { App } from "./components/App.mjs";
+import { initWorkspaceSpace } from "./services/workspaceState.mjs";
 
+// the persisted workspace space must be set before the first paint of the pane
+initWorkspaceSpace();
 render(h(App, null), document.getElementById("app"));
