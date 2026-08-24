@@ -15,6 +15,7 @@
 
 import { h, render } from "../vendor/preact/vendor.mjs";
 import { Grid } from "../app/components/Grid.mjs";
+import { suppressScrollSnap } from "../app/services/scrollSnap.mjs";
 import { state } from "./state.mjs";
 import { api } from "./api.mjs";
 
@@ -113,6 +114,9 @@ export function restoreToIndex(idx) {
   let guard = 500;
   while (viewPos < view.length && guard-- > 0 && view.indexOf(idx) >= viewPos) renderChunk();
   document.querySelector(`.card[data-idx="${idx}"]`)?.scrollIntoView({ block: "center" });
+  // this is a programmatic center, not user scrolling — keep the snap from
+  // immediately pulling the centered card back to the top edge
+  suppressScrollSnap();
 }
 
 // --- lightbox-driven seams ----------------------------------------------------

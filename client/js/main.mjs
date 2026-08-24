@@ -18,6 +18,7 @@ import { initHostPicker, selectHost, initialHost } from "./hostpicker.mjs";
 import { initFeed, onScrollSafetyNet, restoreToIndex, resetFeed, viewIndices } from "./feed.mjs";
 import { openFieldsOverlay, initFieldsOverlay } from "./fields.mjs";
 import { savedSet } from "../app/components/Card.mjs";
+import { initScrollSnap } from "../app/services/scrollSnap.mjs";
 import { initViews } from "./views.mjs";
 import { openAt, openAnchor } from "./lightbox.mjs";
 import { iconSvg } from "./icons.mjs";
@@ -288,6 +289,7 @@ async function boot() {
 
   const col = $("candidatesCol");
   col.addEventListener("scroll", onScrollSafetyNet, { passive: true });
+  initScrollSnap();
   // position persists via the URL hash (current image), not a stored px —
   // a px jump races the deep-link centering and clobbers it
   $("lbKeysBtn").addEventListener("click", (e) => { e.stopPropagation(); toggleKeysPanel(); });
