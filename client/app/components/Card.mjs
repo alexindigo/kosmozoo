@@ -7,9 +7,9 @@
 // contract (el / setSrc / setMeta / setJudgment / state) until <Grid> owns the
 // list.
 
-import { h, Fragment, render } from "../../vendor/preact/vendor.mjs";
+import { h, Fragment } from "../../vendor/preact/vendor.mjs";
 import { useState, useEffect } from "../../vendor/preact/vendor.mjs";
-import { state } from "../../js/state.mjs";
+import { state, render } from "../../js/state.mjs";
 import { api } from "../../js/api.mjs";
 import { setVote, toggleFavorite, saveNotes } from "../../js/judgment.mjs";
 import { metaStripText } from "../../js/fields.mjs";
@@ -34,7 +34,7 @@ function aspectFromMeta(meta) {
   return meta?.width && meta?.height ? `${meta.width} / ${meta.height}` : null;
 }
 
-export function Card({ image, imgIdx, src, meta, onOpen, onErrorClick, onImgPhase, refresh }) {
+export function Card({ image, imgIdx, src, meta, onOpen, onErrorClick, onImgPhase }) {
   const [ar, setAr] = useState(() => aspectFromMeta(meta));
   const [facts, setFacts] = useState(() => ({
     w: meta?.width ?? null, h: meta?.height ?? null, bytes: image.size ?? null,
@@ -105,7 +105,7 @@ export function Card({ image, imgIdx, src, meta, onOpen, onErrorClick, onImgPhas
     a.click();
     a.remove();
     savedSet.add(downloadName); // optimistic; refreshed from disk on load
-    refresh();
+    render();
   };
 
   const copyName = (e) => {
@@ -135,16 +135,16 @@ export function Card({ image, imgIdx, src, meta, onOpen, onErrorClick, onImgPhas
         h(IconButton, {
           icon: iconSvg("thumb-down"), variant: "down", active: j.vote === "down",
           title: "thumbs down — hides (Unhide up top restores)",
-          onAction: async () => { await setVote(image, "down"); refresh(); },
+          onAction: async () => { await setVote(image, "down"); render(); },
         }),
         h(IconButton, {
           icon: iconSvg("thumb-up"), variant: "up", active: j.vote === "up", title: "thumbs up",
-          onAction: async () => { await setVote(image, image.judgment?.vote === "up" ? null : "up"); refresh(); },
+          onAction: async () => { await setVote(image, image.judgment?.vote === "up" ? null : "up"); render(); },
         }),
         h(IconButton, {
           icon: iconSvg("star"), variant: "favorite", active: !!j.favorite,
           title: "favorite — interesting in itself, not project fitness",
-          onAction: async () => { await toggleFavorite(image); refresh(); },
+          onAction: async () => { await toggleFavorite(image); render(); },
         }),
         h("button", {
           class: "savebtn",
@@ -165,45 +165,4 @@ export function Card({ image, imgIdx, src, meta, onOpen, onErrorClick, onImgPhas
     ),
     h(MetaBar, { facts, meta, expanded, onToggle: () => setExpanded((x) => !x) }),
   );
-}
-
-// Adapt <Card> to the legacy feed engine's handle contract. The .card element
-// is the Preact container; feed.mjs appends/observes it and drives src/meta.
-export function mountCard(image, imgIdx, { onOpen, onErrorClick } = {}) {
-  const el = document.createElement("div");
-  el.className = "card";
-  el.dataset.idx = imgIdx;
-  el.dataset.name = image.filename;
-  const urlFile = parseUrl().file;
-  if (urlFile && matchesFile(image, state.host, urlFile)) el.classList.add("current");
-
-  // data attributes drive the card's border colors via CSS
-  const paintJudgment = () => {
-    const j = image.judgment ?? {};
-    if (j.vote) el.dataset.vote = j.vote;
-    else delete el.dataset.vote;
-    if (j.favorite) el.dataset.favorite = "1";
-    else delete el.dataset.favorite;
-  };
-
-  let src = null;
-  let meta = image.meta ?? null;
-  let imgPhase = "empty";
-  const rerender = () => render(h(Card, {
-    image, imgIdx, src, meta, onOpen, onErrorClick,
-    onImgPhase: (p) => { imgPhase = p; },
-    refresh,
-  }), el);
-  const refresh = () => { paintJudgment(); rerender(); };
-
-  paintJudgment();
-  rerender();
-
-  return {
-    el,
-    get state() { return imgPhase; },
-    setSrc(v) { src = v; rerender(); },
-    setMeta(v) { meta = v; rerender(); },
-    setJudgment() { refresh(); },
-  };
 }

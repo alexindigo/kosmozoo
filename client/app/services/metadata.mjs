@@ -5,7 +5,6 @@
 import { state, render } from "../../js/state.mjs";
 import { api } from "../../js/api.mjs";
 import { chrome } from "../../js/chrome.mjs";
-import { cardAt, eachCard } from "../../js/feed.mjs";
 
 let metaVersion = 0;
 let metaPending = 0;
@@ -54,16 +53,19 @@ export async function pollMetadata() {
   if (metaPending > 0) scheduleMetaPoll();
 }
 
-// A card rendered before its metadata arrived gets patched in place —
-// through the instance's own setMeta, never by reaching into its DOM.
+// A card rendered before its metadata arrived picks it up declaratively: the
+// engine writes image.meta and re-renders; <Card>/<MetaBar> read it.
 function mergeMetadata(items) {
+  let changed = false;
   for (const [name, meta] of Object.entries(items)) {
     const idx = state.images.findIndex((i) => i.filename === name);
     if (idx < 0) continue;
-    if (!state.images[idx].meta) state.images[idx].meta = meta;
-    const card = cardAt(idx);
-    if (card) card.setMeta(meta);
+    if (!state.images[idx].meta) {
+      state.images[idx].meta = meta;
+      changed = true;
+    }
   }
+  if (changed) render();
 }
 
 function updateScanChip() {
@@ -71,9 +73,8 @@ function updateScanChip() {
   else chrome.status.clear("meta");
 }
 
-// Picker changes re-apply to every rendered card through the instances' own
-// setMeta — the parent orchestrates; nobody reaches into a card's DOM.
+// Picker changes re-apply to every card declaratively: a re-render makes each
+// <MetaBar> re-read image.meta against the new fields config.
 export function refreshAllCardMeta() {
-  eachCard((handle, idx) => handle.setMeta(state.images[idx]?.meta ?? null));
-  if (state.lightbox.open) render();
+  render();
 }

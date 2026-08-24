@@ -4,6 +4,7 @@
 
 import { h } from "../../vendor/preact/vendor.mjs";
 import { useRef, useEffect } from "../../vendor/preact/vendor.mjs";
+import { state } from "../../js/state.mjs";
 import { fillCardMeta } from "../../js/fields.mjs";
 import { iconSvg } from "../../js/icons.mjs";
 
@@ -27,7 +28,7 @@ export function MetaBar({ facts, meta, expanded, onToggle }) {
   const descRef = useRef(null);
   useEffect(() => {
     if (propsRef.current && descRef.current) fillCardMeta(propsRef.current, descRef.current, meta);
-  }, [meta]);
+  }, [meta, state.fieldsCfg]);
   const text = metaBarText(facts);
   return h("div", { class: "metabar" + (expanded ? " open" : "") },
     h("span", { class: "metabar-info", title: text }, text),
