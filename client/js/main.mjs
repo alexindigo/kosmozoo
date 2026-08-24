@@ -17,7 +17,7 @@ import { initKeysPanel, initKeysPanelDom, toggleKeysPanel } from "./keys-panel.m
 import { initHostPicker, selectHost, initialHost } from "./hostpicker.mjs";
 import { initFeed, onScrollSafetyNet, restoreToIndex, resetFeed, retryImage, viewIndices } from "./feed.mjs";
 import { openFieldsOverlay, initFieldsOverlay } from "./fields.mjs";
-import { buildCard, savedSet } from "./card.mjs";
+import { mountCard, savedSet } from "../app/components/Card.mjs";
 import { initViews } from "./views.mjs";
 import { openAt, openAnchor } from "./lightbox.mjs";
 import { iconSvg } from "./icons.mjs";
@@ -282,7 +282,7 @@ async function boot() {
   registerCoreChrome();
 
   initFeed({
-    card: (image, imgIdx) => buildCard(image, imgIdx, {
+    card: (image, imgIdx) => mountCard(image, imgIdx, {
       onOpen: () => openAt(imgIdx),          // parent wires the lightbox
       onErrorClick: () => retryImage(imgIdx), // and the feed's retry path
     }),
