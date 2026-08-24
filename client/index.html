@@ -109,8 +109,27 @@
   <button id="diffClose" title="close (Esc)"><svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path stroke="none" d="M0 0h24v24H0z" fill="none"/>
   <path d="M18 6l-12 12" />
   <path d="M6 6l12 12" /></svg></button>
-  <figure id="diffL" class="diffside"><img alt=""><figcaption class="difflabel"></figcaption></figure>
-  <figure id="diffR" class="diffside"><img alt=""><figcaption class="difflabel"></figcaption></figure>
+  <div id="diffBar">
+    <span id="diffMode" title="composition mode (c)"></span>
+    <input id="diffBlend" type="range" min="0" max="1" step="0.01" value="0.5"
+           title="top-side opacity" hidden>
+    <span id="diffAlign" title="zoom/pan linkage (a)"></span>
+    <span id="diffHint">←→ blink · ↑↓ left · shift+↑↓ right · c mode · a link · x swap · wheel zoom · drag pan · dblclick reset · esc close</span>
+  </div>
+  <div id="diffStage" data-mode="flicker">
+    <!-- right first in DOM: in overlay modes left paints on top (blend/
+         difference need one shared stacking context, so no z-index on
+         the figures); side mode reorders left-first via `order` -->
+    <figure id="diffFR" class="diffside">
+      <img id="diffR" alt="">
+      <figcaption id="diffLblR" class="difflabel"></figcaption>
+    </figure>
+    <figure id="diffFL" class="diffside">
+      <img id="diffL" alt="">
+      <figcaption id="diffLblL" class="difflabel"></figcaption>
+    </figure>
+    <div id="diffSplitLine" hidden></div>
+  </div>
 </div>
 <script src="./vendor/nouislider.min.js"></script>
 <script type="module" src="./js/main.mjs"></script>

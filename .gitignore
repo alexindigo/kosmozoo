@@ -13,3 +13,4 @@ metadata.db-shm
 TODO.md
 .envrc
 state/
+settings.json
