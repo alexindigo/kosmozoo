@@ -7,30 +7,6 @@
 // and never touches what legacy writes inside. Each constant is deleted the
 // phase its surface becomes a real component.
 
-export const MAIN_INNER = `
-  <section id="candidatesCol"><div id="grid"></div></section>
-  <div id="divider" title="drag to resize the split"></div>
-  <aside id="workspace">
-    <div id="wsDetails" class="ws-space">
-      <div id="wsDetailsBody" class="metabody"></div>
-    </div>
-    <div id="wsAnchors" class="ws-space" hidden>
-      <div id="anchorList"></div>
-      <div id="dropzone">Drop images here<br>(or click to browse)</div>
-      <input type="file" id="fileInput" accept="image/*" multiple hidden>
-    </div>
-  </aside>
-  <nav id="wsBar">
-    <button id="wsBtnDetails" data-space="details" title="image details"><svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path stroke="none" d="M0 0h24v24H0z" fill="none"/>
-  <path d="M3 12a9 9 0 1 0 18 0a9 9 0 0 0 -18 0" />
-  <path d="M12 9h.01" />
-  <path d="M11 12h1v4h1" /></svg></button>
-    <button id="wsBtnAnchors" data-space="anchors" title="anchors"><svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="5" r="3" />
-  <line x1="12" y1="22" x2="12" y2="8" />
-  <path d="M5 12H2a10 10 0 0 0 20 0h-3" /></svg></button>
-  </nav>
-`;
-
 export const FIELDS_INNER = `
   <div id="fieldsPanel">
     <button id="fieldsClose" title="close (Esc)"><svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 6l-12 12" /><path d="M6 6l12 12" /></svg></button>
