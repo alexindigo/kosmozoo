@@ -7,7 +7,7 @@ import { api } from "./api.mjs";
 import { initLightbox } from "./lightbox.mjs";
 import { addAnchorFiles, initAnchorsPane, initInfoOverlay, initAnchorsWidth } from "./anchors.mjs";
 import { initWorkspace } from "./workspace.mjs";
-import { initDiff, openDiff } from "./diff.mjs";
+import { initDiff, openDiff, hideDiff } from "./diff.mjs";
 import { parseUrl, writeFeedHash, stripHostPrefix, findByFile } from "./route.mjs";
 import { initRoi, setRoi } from "./roi.mjs";
 import { initClientPlugins } from "./plugins-client.mjs";
@@ -263,11 +263,7 @@ async function onUrlChange() {
     openDiff(r.left, r.right); // back/forward into a diff URL re-opens it
     return;
   }
-  if (state.diff.open) {
-    // back out of a diff URL: drop the view, then apply the feed URL
-    state.diff = { open: false, left: null, right: null };
-    render();
-  }
+  if (state.diff.open) hideDiff(); // back out of a diff URL, then apply feed
   if (r.host && r.host !== state.host) {
     if (!state.hosts[r.host]) return;
     await selectHost(r.host, { keepFile: true }); // hash already pristine

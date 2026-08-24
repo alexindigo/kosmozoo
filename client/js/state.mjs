@@ -35,10 +35,19 @@ export const state = {
   workspace: "details", // right column space: 'details' | 'anchors', persisted
   // the current image lives ONLY in the URL (route.mjs) — no mirror here,
   // a second representation would be a drift surface
-  diff: {                 // the /diff comparison view (grows as we go)
+  diff: {                 // the /diff comparison view
     open: false,
     left: null,           // { source, file }
     right: null,          // { source, file }
+    col: "left",          // active side: blink target, pan/zoom target
+    composition: "flicker", // flicker | blend | split | difference | side
+    alignment: "shared",  // shared | independent registration
+    blend: 0.5,           // top-side opacity in blend
+    split: 0.5,           // wipe position in split
+    view: null,           // shared box-fraction view (geometry.mjs)
+    views: { left: null, right: null }, // independent views
+    leftList: null,       // left source's file list (stepping)
+    rightList: null,
   },
   filter: "",
   hostMenuOpen: false,
