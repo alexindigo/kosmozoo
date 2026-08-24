@@ -25,6 +25,19 @@ const $ = (id) => document.getElementById(id);
 
 export async function initLightbox() {
   document.addEventListener("keydown", onKey);
+  for (const id of ["lbCandidate", "lbAnchor"]) {
+    const el = $(id);
+    el.addEventListener("load", () => {
+      el.dataset.nw = el.naturalWidth;
+      el.dataset.nh = el.naturalHeight;
+      if (state.lightbox.open) relayout();
+    });
+  }
+  let raf = 0;
+  window.addEventListener("resize", () => {
+    if (!state.lightbox.open || raf) return;
+    raf = requestAnimationFrame(() => { raf = 0; relayout(); });
+  });
   // Detector status drives the face-anchored alignment need (absent ≠ broken).
   try {
     const plugins = await api.plugins();
@@ -118,7 +131,9 @@ export async function lbShow() {
   chrome.status.clear("lb-load");
   if (gen !== state.lightbox.loadGen) return; // a newer navigation superseded us
   if (el.dataset.cur !== src) { el.src = src; el.dataset.cur = src; }
-  el.style.transform = transform(state.lightbox.view, currentBox(img));
+  el.dataset.nw = img.naturalWidth;
+  el.dataset.nh = img.naturalHeight;
+  el.style.transform = transform(state.lightbox.view, sizeTo(el));
   await applyComp(); // visibility is the composition mode's business
   render();
   // user-driven navigation names the shown candidate in the URL; the
@@ -129,11 +144,31 @@ export async function lbShow() {
   }
 }
 
+// fit-to-screen box (upscales small images too — the view transform's
+// own s multiplies on top, so s=1 always means "fitted")
 function currentBox(img) {
   const nw = img?.naturalWidth || 1, nh = img?.naturalHeight || 1;
   const winW = window.innerWidth, winH = window.innerHeight;
-  const scale = Math.min(winW / nw, winH / nh, 1) || 1;
+  const scale = Math.min(winW / nw, winH / nh) || 1;
   return { w: nw * scale, h: nh * scale };
+}
+
+// layout size IS the fit box; the transform only carries the user view.
+// Natural dims come from the load-tracked dataset (a fresh src swap has
+// naturalWidth 0 until decoded).
+function sizeTo(el) {
+  const box = currentBox({
+    naturalWidth: Number(el.dataset.nw) || el.naturalWidth,
+    naturalHeight: Number(el.dataset.nh) || el.naturalHeight,
+  });
+  el.style.width = box.w + "px";
+  el.style.height = box.h + "px";
+  return box;
+}
+
+function relayout() {
+  applyView();
+  applyComp();
 }
 
 // Blink: Left/Right alternates candidate ↔ anchor.
@@ -181,7 +216,7 @@ async function onKey(e) {
 function applyView() {
   const el = state.lightbox.col === "anchor" ? $("lbAnchor") : $("lbCandidate");
   if (el?.src) {
-    el.style.transform = transform(state.lightbox.view, currentBox(el));
+    el.style.transform = transform(state.lightbox.view, sizeTo(el));
   }
 }
 
@@ -207,7 +242,8 @@ async function applyComp() {
   if (candSrc && cand.dataset.cur !== candSrc) { cand.src = candSrc; cand.dataset.cur = candSrc; }
   anch.style.opacity = "1";
   cand.style.opacity = "1";
-  anch.style.transform = transform(state.lightbox.view, currentBox(anch));
+  anch.style.transform = transform(state.lightbox.view, sizeTo(anch));
+  cand.style.transform = transform(state.lightbox.view, sizeTo(cand));
   if (mode === "blend") {
     cand.style.mixBlendMode = "";
     cand.style.clipPath = "none";

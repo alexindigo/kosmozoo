@@ -24,6 +24,7 @@ const MODES = ["flicker", "blend", "split", "difference", "side"];
 
 export function initDiff() {
   $("diffClose").addEventListener("click", () => closeDiff());
+  $("diffSave").addEventListener("click", saveBoth);
   $("diffBlend").addEventListener("input", (e) => {
     state.diff.blend = Number(e.target.value);
     applyMode();
@@ -99,6 +100,30 @@ async function onKey(e) {
     case "f":
       e.preventDefault(); await judge("favorite"); return;
   }
+}
+
+// save both sides: host images via the bytes route (host#file names, same
+// convention as the card's save), anchors by their stored data URL
+function saveBoth() {
+  for (const side of [state.diff.left, state.diff.right]) {
+    if (!side) continue;
+    if (side.source === "anchor") {
+      const a = state.anchors.find((x) => x.name === side.file);
+      if (a) download(a.src, a.name);
+    } else {
+      download(api.imageBytesUrl(`${side.source}:${side.file}`),
+        `${side.source}#${side.file}`);
+    }
+  }
+}
+
+function download(href, name) {
+  const a = document.createElement("a");
+  a.href = href;
+  a.download = name;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
 }
 
 // --- the pair ---------------------------------------------------------
@@ -201,7 +226,7 @@ function fitBox(el) {
   const nw = Number(el.dataset.nw) || 1, nh = Number(el.dataset.nh) || 1;
   const host = state.diff.composition === "side" ? el.closest(".diffside") : $("diffStage");
   const r = host.getBoundingClientRect();
-  const scale = Math.min(r.width / nw, r.height / nh, 1) || 1;
+  const scale = Math.min(r.width / nw, r.height / nh) || 1;
   return { w: nw * scale, h: nh * scale };
 }
 
