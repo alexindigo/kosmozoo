@@ -1,13 +1,23 @@
 // client/app/components/App.mjs — the Preact root component.
 //
-// Phase 2: still a dummy shell for the visible surface (the legacy chrome in
-// client/js renders the app), but now the owner of the boot side-effects — it
-// loads the boot data and starts the scraper poll once. The legacy boot awaits
-// the same memoized boot-data promise before it picks the initial host.
+// Single-growing-tree approach: <App> owns the whole body. Surfaces that are
+// not yet components render as constant dangerouslySetInnerHTML passthrough
+// (see ../skeleton.mjs) — Preact diffs them vdom-to-vdom as "unchanged" and
+// never touches what the legacy modules write inside. Each passthrough is
+// replaced by a real component in its phase.
 
-import { h, useEffect } from "../../vendor/preact/vendor.mjs";
+import { h, Fragment, useEffect } from "../../vendor/preact/vendor.mjs";
 import { loadBootData } from "../services/bootData.mjs";
 import { startScraperPoll } from "../services/scraper.mjs";
+import {
+  CHROME_INNER,
+  MAIN_INNER,
+  FIELDS_INNER,
+  INFO_INNER,
+  KEYS_INNER,
+  LIGHTBOX_INNER,
+  DIFF_INNER,
+} from "../skeleton.mjs";
 
 export function App() {
   useEffect(() => {
@@ -16,5 +26,15 @@ export function App() {
     loadBootData().catch(() => {});
     startScraperPoll();
   }, []);
-  return h("span", { class: "preact-shell", hidden: true }, "kosmozoo preact shell");
+
+  return h(Fragment, null,
+    h("header", { id: "chrome", dangerouslySetInnerHTML: { __html: CHROME_INNER } }),
+    h("main", { dangerouslySetInnerHTML: { __html: MAIN_INNER } }),
+    h("div", { id: "statusStack", dangerouslySetInnerHTML: { __html: "" } }),
+    h("div", { id: "fieldsOverlay", hidden: true, dangerouslySetInnerHTML: { __html: FIELDS_INNER } }),
+    h("div", { id: "infoOverlay", hidden: true, dangerouslySetInnerHTML: { __html: INFO_INNER } }),
+    h("div", { id: "keysPanel", hidden: true, dangerouslySetInnerHTML: { __html: KEYS_INNER } }),
+    h("div", { id: "lightbox", hidden: true, dangerouslySetInnerHTML: { __html: LIGHTBOX_INNER } }),
+    h("div", { id: "diff", hidden: true, dangerouslySetInnerHTML: { __html: DIFF_INNER } }),
+  );
 }

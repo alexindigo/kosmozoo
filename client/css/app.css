@@ -28,6 +28,9 @@ body.resizing { cursor: col-resize; user-select: none; }
 /* --- header -------------------------------------------------------------- */
 /* --- header: in normal flow — it can never overlap content ---------------- */
 body { display: flex; flex-direction: column; }
+/* #app is the Preact root; it takes over body's flex-column role so the
+   surfaces <App> renders lay out exactly as body's direct children did. */
+#app { flex: 1; min-height: 0; display: flex; flex-direction: column; }
 #chrome { height: 37px; flex: 0 0 auto;
   display: flex; gap: 8px; align-items: center; padding: 0 8px;
   background: var(--panel); border-bottom: 1px solid var(--border); z-index: 10; }
