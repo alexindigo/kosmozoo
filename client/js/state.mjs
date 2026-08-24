@@ -69,7 +69,14 @@ export const state = {
 };
 
 // The only DOM writer. Re-renders the surfaces from state. Individual surfaces
-// subscribe to the parts they own; nothing else touches the DOM.
+// subscribe to the parts they own; nothing else touches the DOM. onRender
+// returns an unsubscribe so the Preact bridge (useVersion) can clean up.
 const renderers = [];
-export function onRender(fn) { renderers.push(fn); }
+export function onRender(fn) {
+  renderers.push(fn);
+  return () => {
+    const i = renderers.indexOf(fn);
+    if (i >= 0) renderers.splice(i, 1);
+  };
+}
 export function render() { for (const fn of renderers) fn(state); }

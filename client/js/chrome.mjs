@@ -17,7 +17,7 @@
 // Menu, header buttons, and the key dispatcher read the registries; nothing
 // else writes them.
 
-import { state, render, onRender } from "./state.mjs";
+import { state, render } from "./state.mjs";
 
 const $ = (id) => document.getElementById(id);
 
@@ -34,6 +34,12 @@ export const chrome = {
   },
   status: { info, error, active, clear },
 };
+
+// <Header> (Preact) reads the registries to render the header buttons and the
+// menu; it re-renders on the shared render() fan-out. The imperative DOM
+// writers that used to live here are gone — the header is declared now.
+export const headerButtonsList = () => headerButtons;
+export const menuItemsList = () => menuItems;
 
 // --- keymap ------------------------------------------------------------------
 
@@ -186,75 +192,6 @@ export function initKeyDispatch() {
     }
   });
 }
-
-// --- renderers (the only writers of menu + header buttons) -----------------------
-
-onRender(() => {
-  if (typeof document === "undefined") return; // headless unit tests
-  const host = $("headerButtons");
-  if (!host) return;
-  if (host.dataset.n == headerButtons.length) return;
-  host.dataset.n = headerButtons.length;
-  host.innerHTML = "";
-  for (const b of headerButtons) {
-    const el = document.createElement("button");
-    el.id = b.id;
-    el.textContent = b.label;
-    if (b.title) el.title = b.title;
-    el.addEventListener("click", b.onClick);
-    host.appendChild(el);
-  }
-});
-
-onRender(() => {
-  if (typeof document === "undefined") return;
-  const menu = $("menu");
-  if (!menu) return;
-  menu.hidden = !state.menuOpen;
-  if (!state.menuOpen) return;
-  // rebuild on every open: rows read live state
-  menu.innerHTML = "";
-  const search = document.createElement("input");
-  search.id = "menuSearch";
-  search.type = "search";
-  search.placeholder = "filter settings…";
-  search.spellcheck = false;
-  search.value = state.menuFilter ?? "";
-  search.addEventListener("input", () => { state.menuFilter = search.value; render(); });
-  menu.appendChild(search);
-  const rows = document.createElement("div");
-  rows.id = "menuRows";
-  menu.appendChild(rows);
-  const q = (state.menuFilter ?? "").toLowerCase();
-  for (const item of menuItems) {
-    const hay = (item.label ?? item.searchText ?? item.id).toLowerCase();
-    if (q && !hay.includes(q)) continue;
-    const row = document.createElement("div");
-    row.className = "menurow";
-    if (item.kind === "toggle") {
-      const label = document.createElement("label");
-      label.className = "switchwrap";
-      const box = document.createElement("input");
-      box.type = "checkbox";
-      box.checked = !!item.get();
-      box.addEventListener("change", async () => { await item.set(box.checked); render(); });
-      const track = document.createElement("span");
-      track.className = "track";
-      label.append(box, track, document.createTextNode(item.label));
-      if (item.title) label.title = item.title;
-      row.appendChild(label);
-    } else if (item.kind === "action") {
-      const b = document.createElement("button");
-      b.textContent = item.label;
-      if (b.title) b.title = item.title;
-      b.addEventListener("click", item.onClick);
-      row.appendChild(b);
-    } else if (item.kind === "custom") {
-      item.render(row);
-    }
-    rows.appendChild(row);
-  }
-});
 
 export function toggleMenu() {
   state.menuOpen = !state.menuOpen;

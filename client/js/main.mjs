@@ -2,7 +2,7 @@
 // the same registry plugins use), and the feed's orchestration (metadata
 // poll/patch, meta-want, scroll persistence, status summary).
 
-import { state, render, onRender } from "./state.mjs";
+import { state, render } from "./state.mjs";
 import { api } from "./api.mjs";
 import { initLightbox } from "./lightbox.mjs";
 import { addAnchorFiles, initAnchorsPane, initInfoOverlay, initAnchorsWidth } from "./anchors.mjs";
@@ -11,12 +11,11 @@ import { initDiff, openDiff, hideDiff } from "./diff.mjs";
 import { parseUrl, writeFeedHash, stripHostPrefix, findByFile } from "./route.mjs";
 import { initRoi, setRoi } from "./roi.mjs";
 import { initClientPlugins } from "./plugins-client.mjs";
-import { axisStatus } from "./axes.mjs";
 import { isVisible, initJudgment, onVisibilityChanged, toggleRevealThumbedDown, toggleHideUp, setDownvoteHides } from "./judgment.mjs";
-import { chrome, initKeyDispatch, toggleMenu } from "./chrome.mjs";
+import { chrome, initKeyDispatch } from "./chrome.mjs";
 import { initKeysPanel, initKeysPanelDom, toggleKeysPanel } from "./keys-panel.mjs";
 import { initHostPicker, selectHost, initialHost } from "./hostpicker.mjs";
-import { initFeed, renderFeed, onScrollSafetyNet, restoreToIndex, resetFeed, retryImage, viewIndices } from "./feed.mjs";
+import { initFeed, onScrollSafetyNet, restoreToIndex, resetFeed, retryImage, viewIndices } from "./feed.mjs";
 import { openFieldsOverlay, initFieldsOverlay } from "./fields.mjs";
 import { buildCard, savedSet } from "./card.mjs";
 import { initViews } from "./views.mjs";
@@ -25,6 +24,7 @@ import { iconSvg } from "./icons.mjs";
 import { loadBootData } from "../app/services/bootData.mjs";
 import { wantMeta, pollMetadata, refreshAllCardMeta } from "../app/services/metadata.mjs";
 import { scraperPendingText } from "../app/services/scraper.mjs";
+import { rebuildFeed, statusSummary } from "../app/services/feedView.mjs";
 
 const $ = (id) => document.getElementById(id);
 
@@ -39,32 +39,6 @@ document.addEventListener("drop", async (e) => {
 });
 
 // --- core chrome -----------------------------------------------------------------
-
-function statusSummary() {
-  const hidden = state.images.filter((i) => i.judgment?.vote === "down").length;
-  const base = state.filter
-    ? `${viewCount()} of ${state.images.length} matching “${state.filter}” from ${state.host}`
-    : `${state.images.length} images from ${state.host}`;
-  return base + (hidden ? ` (${hidden} hidden)` : "");
-}
-
-function viewCount() {
-  const q = state.filter.toLowerCase();
-  return state.images.filter((i) =>
-    (!q || i.filename.toLowerCase().includes(q)) && isVisible(i)).length;
-}
-
-function rebuildFeed() {
-  const q = state.filter.toLowerCase();
-  const view = [];
-  for (let i = 0; i < state.images.length; i++) {
-    const img = state.images[i];
-    if (q && !img.filename.toLowerCase().includes(q)) continue;
-    if (!isVisible(img)) continue;
-    view.push(i);
-  }
-  renderFeed($("grid"), view);
-}
 
 function registerCoreChrome() {
   chrome.headerButton({
@@ -169,12 +143,6 @@ function registerCoreChrome() {
     },
   });
 }
-
-// status line in the header shows the axes; the summary sentence goes through
-// the transient chip on load/vote, per the cadence
-onRender((s) => {
-  $("status").textContent = axisStatus();
-});
 
 // --- load candidates -------------------------------------------------------------
 
@@ -322,10 +290,6 @@ async function boot() {
     wantMeta: (image) => wantMeta(image),
   });
 
-  $("menuBtn").addEventListener("click", (e) => { e.stopPropagation(); toggleMenu(); });
-  document.addEventListener("click", (e) => {
-    if (state.menuOpen && !$("menuWrap").contains(e.target)) { state.menuOpen = false; render(); }
-  });
   const col = $("candidatesCol");
   col.addEventListener("scroll", onScrollSafetyNet, { passive: true });
   // position persists via the URL hash (current image), not a stored px —
@@ -346,7 +310,5 @@ async function boot() {
   window.addEventListener("hashchange", onUrlChange);
   window.addEventListener("popstate", onUrlChange);
 }
-
-$("filter").addEventListener("input", (e) => { state.filter = e.target.value; rebuildFeed(); });
 
 boot().catch((e) => chrome.status.error(`load failed: ${e.message}`));
