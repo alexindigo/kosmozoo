@@ -170,6 +170,37 @@ async function attempt(name, fn) {
     await page.evaluate("document.querySelector('.card .votebtn.up').click()");
   });
 
+  // down-vote auto-hides: the card leaves the feed immediately (not on
+  // the next manual rebuild); reset needs reveal toggled back on
+  await attempt("down-vote auto-hides the card", async () => {
+    const before = await page.evaluate("document.querySelectorAll('.card').length");
+    await page.evaluate("document.querySelector('.card .votebtn.down').click()");
+    await sleep(300);
+    const gone = !await page.evaluate("document.querySelector('.card[data-idx=\"0\"]')");
+    check("card left the feed right away", gone);
+    await page.evaluate(`(async () => {
+      const img = window.kosmozoo.state.images[0];
+      await fetch("/api/judgments/" + encodeURIComponent(img.id), { method: "DELETE" });
+      // reveal on (restores the card), then back off — reveal only filters
+      // cards still down-voted, and the reset deleted the vote
+      document.getElementById("unhideBtn").click();
+      document.getElementById("unhideBtn").click();
+    })()`);
+    // up-vote hides too when the "hide up-voted" coupling is enabled —
+    // one visibility rule covers every hidden flavor
+    await page.evaluate(`document.getElementById("hideUpBtn").click()`);
+    await page.evaluate("document.querySelector('.card .votebtn.up').click()");
+    await sleep(300);
+    const goneUp = !await page.evaluate("document.querySelector('.card[data-idx=\"0\"]')");
+    check("up-vote hides when coupling on", goneUp);
+    await page.evaluate(`(async () => {
+      const img = window.kosmozoo.state.images[0];
+      await fetch("/api/judgments/" + encodeURIComponent(img.id), { method: "DELETE" });
+      document.getElementById("hideUpBtn").click(); // coupling off -> rebuild restores
+    })()`);
+    await page.poll("document.querySelectorAll('.card').length === " + before, 3000);
+  });
+
   // card anatomy: image, then the collapsed parameters line, then the
   // filename row, then the feedback boxes
   await attempt("card order: image, parameters line, filename, feedback", async () => {

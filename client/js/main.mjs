@@ -12,7 +12,7 @@ import { parseUrl, writeFeedHash, stripHostPrefix, findByFile } from "./route.mj
 import { initRoi, setRoi } from "./roi.mjs";
 import { initClientPlugins } from "./plugins-client.mjs";
 import { axisStatus } from "./axes.mjs";
-import { isVisible, initJudgment, toggleRevealThumbedDown, toggleHideUp, setDownvoteHides } from "./judgment.mjs";
+import { isVisible, initJudgment, onVisibilityChanged, toggleRevealThumbedDown, toggleHideUp, setDownvoteHides } from "./judgment.mjs";
 import { chrome, initKeyDispatch, toggleMenu } from "./chrome.mjs";
 import { initKeysPanel, initKeysPanelDom, toggleKeysPanel } from "./keys-panel.mjs";
 import { initHostPicker, selectHost, initialHost } from "./hostpicker.mjs";
@@ -379,6 +379,7 @@ async function boot() {
   await initLightbox();
   await initRoi();
   await initJudgment();
+  onVisibilityChanged((image, visible) => { if (!visible) rebuildFeed(); });
   await initViews(); // shared per-image view store (feed zoom <-> lightbox)
   initHostPicker({ onSelect: loadCandidates });
   initAnchorsPane({ onOpen: openAnchor });
