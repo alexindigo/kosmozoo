@@ -31,6 +31,22 @@ export function buildCard(image, imgIdx, { onOpen, onErrorClick } = {}) {
   // Build the action buttons (they reference cardState for setJudgment)
   const actions = buildActions(image, cardState);
 
+  // size/dimension facts for the collapsed bar — filled as they arrive:
+  // list size now, pixels on decode, byte size via HEAD when not listed
+  const facts = {
+    w: image.meta?.width ?? null,
+    h: image.meta?.height ?? null,
+    bytes: image.size ?? null,
+  };
+
+  function paintMetaBar() {
+    const el = handle.el.querySelector(".metabar-info");
+    if (el) {
+      el.textContent = metaBarText(facts);
+      el.title = el.textContent;
+    }
+  }
+
   const handle = imageCard({
     alt: image.filename,
     ar: aspectFromMeta(image.meta),
@@ -38,9 +54,15 @@ export function buildCard(image, imgIdx, { onOpen, onErrorClick } = {}) {
     zoomKey: image.id,
     onOpen,
     onErrorClick,
+    onLoaded: (w, h) => {
+      facts.w = w;
+      facts.h = h;
+      paintMetaBar();
+    },
     title: buildTitle(image),
     titleActions: actions,
-    footer: [buildNotesRow(image, imgIdx), buildMetaRow(image)],
+    between: [buildMetaRow(image, facts)],
+    footer: [buildNotesRow(image, imgIdx)],
   });
   handle.el.dataset.idx = imgIdx;
   handle.el.dataset.name = image.filename;
@@ -71,16 +93,31 @@ export function buildCard(image, imgIdx, { onOpen, onErrorClick } = {}) {
 
   // instance-level meta updates: strip + aspect are the card's; props/desc
   // are this instance's own footer content
+  // byte size isn't in every host's listing — a HEAD on the bytes route
+  // fills it the moment the card renders
+  if (facts.bytes == null) {
+    fetch(api.imageBytesUrl(image.id), { method: "HEAD" })
+      .then((r) => {
+        const cl = r.headers.get("content-length");
+        if (r.ok && cl) {
+          facts.bytes = Number(cl);
+          image.size = facts.bytes;
+          paintMetaBar();
+        }
+      })
+      .catch(() => {});
+  }
+
   const propsEl = handle.el.querySelector(".props");
   const descEl = handle.el.querySelector(".desc");
-  const infoEl = handle.el.querySelector(".metabar-info");
   handle.setMeta = (meta) => {
     handle.setStripText(meta ? metaStripText(meta) : "");
     if (meta?.width && meta?.height) handle.setAr(`${meta.width} / ${meta.height}`);
-    if (infoEl) {
-      infoEl.textContent = metaBarText(image, meta);
-      infoEl.title = infoEl.textContent;
+    if (meta?.width && meta?.height) {
+      facts.w = meta.width;
+      facts.h = meta.height;
     }
+    paintMetaBar();
     fillCardMeta(propsEl, descEl, meta);
   };
 
@@ -253,17 +290,19 @@ function copyFrom(srcIdx, cls, dir, ta) {
 
 // collapsed by default: one line — pixel size + on-disk size left,
 // expand toggle right. The full fields-config panel lives inside, hidden.
-function buildMetaRow(image) {
+// facts fill in as they arrive: list size / HEAD size, decoded pixels,
+// then extracted metadata — the line is never "waiting" for the scan.
+function buildMetaRow(image, facts) {
   const row = document.createElement("div");
   row.className = "metabar";
   const info = document.createElement("span");
   info.className = "metabar-info";
-  info.textContent = metaBarText(image, image.meta);
+  info.textContent = metaBarText(facts);
   info.title = info.textContent;
   const btn = document.createElement("button");
   btn.className = "metabar-toggle";
   btn.innerHTML = iconSvg("chevron-down", 14);
-  btn.title = "expand metadata";
+  btn.title = "show parameters";
   const full = document.createElement("div");
   full.className = "pair metabar-full";
   full.hidden = true;
@@ -277,7 +316,7 @@ function buildMetaRow(image) {
     e.stopPropagation();
     full.hidden = !full.hidden;
     row.classList.toggle("open", !full.hidden);
-    btn.title = full.hidden ? "expand metadata" : "collapse metadata";
+    btn.title = full.hidden ? "show parameters" : "hide parameters";
   });
   row.append(info, btn, full);
   return row;
@@ -290,10 +329,10 @@ function fmtBytes(n) {
   return `${(n / 1024 / 1024).toFixed(1)} MB`;
 }
 
-function metaBarText(image, meta) {
+function metaBarText(f) {
   const bits = [];
-  if (meta?.width && meta?.height) bits.push(`${meta.width}×${meta.height}px`);
-  const sz = fmtBytes(image.size ?? null);
+  if (f.w && f.h) bits.push(`${f.w}×${f.h}px`);
+  const sz = fmtBytes(f.bytes);
   if (sz) bits.push(sz);
   return bits.length ? bits.join(" · ") : "no metadata yet";
 }
