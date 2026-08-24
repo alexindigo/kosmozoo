@@ -3,7 +3,7 @@
 // with traversal guard, and metadata extraction via the full scraper path.
 
 import { assert, assertEquals } from "jsr:@std/assert";
-import { isFolderHost, validateHost, probeHost, hostList, hostReadBytes, hostKey } from "../src/hosts.mjs";
+import { isFolderHost, validateHost, probeHost, hostList, hostReadBytes, hostKey, parseListingEntry } from "../src/hosts.mjs";
 import { makeRouter } from "../src/routes.mjs";
 import { Settings } from "../src/settings.mjs";
 import { Store } from "../src/store.mjs";
@@ -96,4 +96,12 @@ Deno.test("folder host: the scraper path extracts metadata from ComfyUI PNGs", a
   assertEquals(store.metaGet("fixtures", "flux-basic.png").seed, 999);
   assert(store.metaGet("fixtures", "flux-basic.png").prompt.includes("portrait"));
   await rm(dir, { recursive: true });
+});
+
+Deno.test("listing entries: bracket annotation never part of identity", () => {
+  assertEquals(parseListingEntry("a.png [123]"), { name: "a.png", size: 123 });
+  assertEquals(parseListingEntry("a.png [output]"), { name: "a.png", size: null });
+  assertEquals(parseListingEntry("a.png"), { name: "a.png", size: null });
+  assertEquals(parseListingEntry("a [b].png [7]"), { name: "a [b].png", size: 7 });
+  assertEquals(parseListingEntry("a [b].png"), { name: "a [b].png", size: null });
 });

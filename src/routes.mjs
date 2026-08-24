@@ -3,7 +3,7 @@
 // Resource-shaped, documented, public. Plugin routes live under
 // /api/plugins/<name>/... and are registered by the plugin host (Phase 10).
 
-import { splitHostKey, probeHost, hostList, hostReadBytes, validateHost, addHost, removeHost, EXT_MIME } from "./hosts.mjs";
+import { splitHostKey, probeHost, hostList, hostReadBytes, hostHeadSize, validateHost, addHost, removeHost, EXT_MIME } from "./hosts.mjs";
 import { cacheGet } from "./cache.mjs";
 
 export function makeRouter(ctx) {
@@ -98,6 +98,16 @@ export function makeRouter(ctx) {
       id, host, filename,
       meta: ctx.store.metaGet(host, filename),
       judgment: ctx.store.judgmentGet(host, filename),
+    });
+  });
+
+  add("HEAD", "/api/images/<id>/bytes", async (_req, { id }) => {
+    const [host, filename] = splitHostKey(id);
+    if (!ctx.hosts[host]) return new Response(null, { status: 404 });
+    const size = await hostHeadSize(ctx.hosts[host], filename);
+    return new Response(null, {
+      status: 200,
+      headers: size != null ? { "content-length": String(size) } : {},
     });
   });
 

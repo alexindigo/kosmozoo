@@ -113,10 +113,17 @@ export async function hostList(addr) {
   }
   const r = await fetch(`http://${addr}/internal/files/output`);
   const raw = await r.json();
-  return raw.map((n) => {
-    const m = /^(.*)\s+\[(\d+)\]$/.exec(String(n));
-    return m ? { name: m[1], size: Number(m[2]) } : { name: String(n), size: null };
-  });
+  return raw.map(parseListingEntry);
+}
+
+// ComfyUI listings annotate names with a trailing "[...]" — a size in some
+// versions, a subfolder marker ("[output]") in others. The annotation is
+// NEVER part of the identity; the size only when numeric. Greedy prefix so
+// "a [b].png [7]" keeps its inner brackets.
+export function parseListingEntry(n) {
+  const m = /^(.*)\s+\[([^\]]*)\]$/.exec(String(n));
+  if (!m) return { name: String(n), size: null };
+  return { name: m[1], size: /^\d+$/.test(m[2]) ? Number(m[2]) : null };
 }
 
 // Proxy image bytes from a host's /api/view. Upstream ComfyUI serves some
@@ -158,6 +165,28 @@ export async function hostReadBytes(addr, filename) {
   const cl = r.headers.get("Content-Length");
   if (cl) headers.set("Content-Length", cl);
   return { status: 200, body: r.body, headers };
+}
+
+// Byte size without the body: folder = stat; HTTP = HEAD on the host's
+// view endpoint. Feeds the bytes route's HEAD and the card's size line.
+export async function hostHeadSize(addr, filename) {
+  if (isFolderHost(addr)) {
+    if (basename(filename) !== filename || filename.includes("..")) return null;
+    try {
+      const s = await stat(join(FOLDER_RE.exec(addr)[1], filename));
+      return s.isFile() ? s.size : null;
+    } catch {
+      return null;
+    }
+  }
+  try {
+    const url = `http://${addr}/api/view?type=output&filename=${encodeURIComponent(filename)}`;
+    const r = await fetch(url, { method: "HEAD" });
+    const cl = r.headers.get("content-length");
+    return r.ok && cl ? Number(cl) : null;
+  } catch {
+    return null;
+  }
 }
 
 // Back-compat alias (the bytes proxy).
