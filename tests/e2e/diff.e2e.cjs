@@ -158,6 +158,24 @@ function check(name, ok, detail = "") {
   const postSwap = await cdp.evaluate("[window.kosmozoo.state.diff.left.source, window.kosmozoo.state.diff.right.source].join('>')");
   check("x: swaps the sides", preSwap.split(">").reverse().join(">") === postSwap, `${preSwap} -> ${postSwap}`);
 
+  // --- save both downloads one file per side, host#file names ---
+  await cdp.evaluate(`(() => {
+    window.__dl = [];
+    const orig = HTMLAnchorElement.prototype.click;
+    HTMLAnchorElement.prototype.click = function () {
+      if (this.download) window.__dl.push(this.download);
+      return orig.apply(this, arguments);
+    };
+  })()`);
+  await cdp.evaluate("document.getElementById('diffSave').click()");
+  await sleep(300);
+  const dls = await cdp.evaluate(`(() => {
+    const d = window.kosmozoo.state.diff;
+    return { got: window.__dl, want: [d.left, d.right].map(s => s.source + "#" + s.file) };
+  })()`);
+  check("save both: one download per side, host#file names",
+    JSON.stringify(dls.got) === JSON.stringify(dls.want), JSON.stringify(dls));
+
   await cdp.close();
   console.log(failures ? `DIFF E2E: ${failures} FAILURE(S)` : "DIFF E2E: ALL PASS");
   process.exit(failures ? 1 : 0);
