@@ -16,12 +16,15 @@ import { isVisible, initJudgment, onVisibilityChanged, toggleRevealThumbedDown, 
 import { chrome, initKeyDispatch, toggleMenu } from "./chrome.mjs";
 import { initKeysPanel, initKeysPanelDom, toggleKeysPanel } from "./keys-panel.mjs";
 import { initHostPicker, selectHost, initialHost } from "./hostpicker.mjs";
-import { initFeed, renderFeed, onScrollSafetyNet, cardAt, restoreToIndex, resetFeed, eachCard, retryImage, viewIndices } from "./feed.mjs";
-import { loadFieldsCfg, openFieldsOverlay, initFieldsOverlay } from "./fields.mjs";
+import { initFeed, renderFeed, onScrollSafetyNet, restoreToIndex, resetFeed, retryImage, viewIndices } from "./feed.mjs";
+import { openFieldsOverlay, initFieldsOverlay } from "./fields.mjs";
 import { buildCard, savedSet } from "./card.mjs";
 import { initViews } from "./views.mjs";
 import { openAt, openAnchor } from "./lightbox.mjs";
 import { iconSvg } from "./icons.mjs";
+import { loadBootData } from "../app/services/bootData.mjs";
+import { wantMeta, pollMetadata, refreshAllCardMeta } from "../app/services/metadata.mjs";
+import { scraperPendingText } from "../app/services/scraper.mjs";
 
 const $ = (id) => document.getElementById(id);
 
@@ -34,79 +37,6 @@ document.addEventListener("drop", async (e) => {
   e.preventDefault();
   if (e.dataTransfer?.files?.length) await addAnchorFiles([...e.dataTransfer.files]);
 });
-
-// --- metadata channel: poll + patch in place + scroll-driven wants --------------
-
-let metaVersion = 0;
-let metaPending = 0;
-let metaPollTimer = null;
-const wantSet = new Set();
-let wantTimer = null;
-
-function wantMeta(image) {
-  if (image.meta || wantSet.has(image.filename)) return;
-  wantSet.add(image.filename);
-  clearTimeout(wantTimer);
-  wantTimer = setTimeout(flushWant, 1500);
-}
-
-async function flushWant() {
-  if (!state.host) return;
-  const files = [...wantSet];
-  wantSet.clear();
-  if (!files.length) return;
-  try {
-    const r = await api.metaWant(state.host, files);
-    if (typeof r.pending === "number") {
-      metaPending = r.pending;
-      updateScanChip();
-      if (metaPending > 0) scheduleMetaPoll();
-    }
-  } catch { /* next render re-wants */ }
-}
-
-function scheduleMetaPoll(delay = 5000) {
-  clearTimeout(metaPollTimer);
-  metaPollTimer = setTimeout(pollMetadata, delay);
-}
-
-async function pollMetadata() {
-  if (!state.host) return;
-  try {
-    const r = await api.metadata(state.host);
-    metaPending = r.pending ?? 0;
-    updateScanChip();
-    if (r.v !== metaVersion) {
-      metaVersion = r.v;
-      mergeMetadata(r.items ?? {});
-    }
-  } catch { /* transient; next poll retries */ }
-  if (metaPending > 0) scheduleMetaPoll();
-}
-
-// A card rendered before its metadata arrived gets patched in place —
-// through the instance's own setMeta, never by reaching into its DOM.
-function mergeMetadata(items) {
-  for (const [name, meta] of Object.entries(items)) {
-    const idx = state.images.findIndex((i) => i.filename === name);
-    if (idx < 0) continue;
-    if (!state.images[idx].meta) state.images[idx].meta = meta;
-    const card = cardAt(idx);
-    if (card) card.setMeta(meta);
-  }
-}
-
-function updateScanChip() {
-  if (metaPending > 0) chrome.status.active("meta", `metadata scan — ${metaPending} left`);
-  else chrome.status.clear("meta");
-}
-
-// Picker changes re-apply to every rendered card through the instances' own
-// setMeta — the parent orchestrates; nobody reaches into a card's DOM.
-function refreshAllCardMeta() {
-  eachCard((handle, idx) => handle.setMeta(state.images[idx]?.meta ?? null));
-  if (state.lightbox.open) render();
-}
 
 // --- core chrome -----------------------------------------------------------------
 
@@ -238,12 +168,6 @@ function registerCoreChrome() {
       row.append(lab, wrap);
     },
   });
-}
-
-function scraperPendingText() {
-  const p = state.scraper?.pending ?? {};
-  const total = Object.values(p).reduce((a, b) => a + b, 0);
-  return total > 0 ? `${total} left` : "";
 }
 
 // status line in the header shows the axes; the summary sentence goes through
@@ -408,12 +332,10 @@ async function boot() {
   // a px jump races the deep-link centering and clobbers it
   $("lbKeysBtn").addEventListener("click", (e) => { e.stopPropagation(); toggleKeysPanel(); });
 
-  state.hosts = await api.hosts();
-  const ui = await api.settings("core.ui").catch(() => ({}));
-  const fieldsStored = await api.settings("core.fields").catch(() => ({}));
-  state.fieldsCfg = loadFieldsCfg(fieldsStored.cfg);
-  state.scraper = await api.scraper().catch(() => null);
-  state.feedbackPath = (await api.settings("core").catch(() => ({})))?.feedbackPath ?? null;
+  // Boot data (hosts / ui+fields settings / scraper / feedback path) loads
+  // once through the memoized service; <App>'s init effect awaits the same
+  // promise, so the network work happens exactly once.
+  const { ui } = await loadBootData();
   await initAnchorsWidth();
   // the URL hash outranks the stored host: /#host[#filename] is shareable state
   const route = parseUrl();
@@ -423,13 +345,6 @@ async function boot() {
   if (route.view === "diff") openDiff(route.left, route.right);
   window.addEventListener("hashchange", onUrlChange);
   window.addEventListener("popstate", onUrlChange);
-
-  // scraper status chip + menu counter: poll every 2s
-  setInterval(async () => {
-    state.scraper = await api.scraper().catch(() => state.scraper);
-    const counter = $("scraperPending");
-    if (counter) counter.textContent = scraperPendingText();
-  }, 2000);
 }
 
 $("filter").addEventListener("input", (e) => { state.filter = e.target.value; rebuildFeed(); });
