@@ -22,11 +22,17 @@ export async function initJudgment() {
 
 // --- vote ------------------------------------------------------------------
 
+// feed removal on hide-coupled votes is a VISIBILITY change — the box-free
+// hook lets the feed rebuild without re-rendering buttons (see below)
+const visibilityHooks = [];
+export function onVisibilityChanged(fn) { visibilityHooks.push(fn); }
+
 export async function setVote(image, vote) {
   // vote: 'up' | 'down' | null
   await api.setJudgment(image.id, { vote });
   if (!image.judgment) image.judgment = {};
   if (vote === null) delete image.judgment.vote; else image.judgment.vote = vote;
+  for (const fn of visibilityHooks) fn(image, isVisible(image));
   // No render() — the card updates its own DOM via handle.setJudgment().
   // Re-rendering would destroy the button element the click handler
   // just updated, making the visual state inconsistent with the judgment.
