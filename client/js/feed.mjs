@@ -1,204 +1,97 @@
 // client/js/feed.mjs — the list engine for the candidates feed.
 //
-// The feed renders the shared list model (state.images) as full-width record
-// cards, CHUNK at a time, with image bytes loaded only inside the active
-// window. Design contracts:
+// The DOM is declared by <Grid> (client/app/components); this engine owns the
+// view (filtered + visible display order), the chunked render position, the
+// scroll/restore progress mechanisms, and the lightbox seams. The image
+// window — which cards carry src — lives in useWindow, so there is no manual
+// load/unload here.
 //
-// - Chunked render: a sentinel WINDOW_PAD cards before the rendered end
-//   triggers the next chunk (fast path).
-// - Windowed bytes: images load inside viewport ∪ lightbox position,
-//   ± WINDOW_PAD; leaving the window removes src — aborts the fetch AND
-//   releases decoded bytes. The card keeps its height via the aspect-true
-//   box, so virtualization never jumps the feed.
-// - Three independent progress mechanisms — any single one stalling must
-//   not stall the list: (1) the sentinel observer, (2) the scroll-distance
-//   safety net, (3) extend-then-jump scroll restore.
-// - Errors: auto-retry every 8s while in the window; manual retry
-//   cache-busts (a partial cached response must not be reused).
-// - The lightbox walks the VIEW (filtered + judgment-visible set), extending
-//   chunks when stepping past the rendered end; its position drives the
-//   window (keyboard walking must not freeze image loading).
+// Design contracts kept from the outgoing engine:
+// - Chunked render: the sentinel WINDOW_PAD cards before the rendered end
+//   triggers the next chunk; a scroll-distance safety net backs it up.
+// - Restore extends chunks until the target card exists, then centers it.
+// - The lightbox walks the VIEW, extending chunks when stepping past the
+//   rendered end; its position joins the window (see useWindow).
 
+import { h, render } from "../vendor/preact/vendor.mjs";
+import { Grid } from "../app/components/Grid.mjs";
 import { state } from "./state.mjs";
 import { api } from "./api.mjs";
 
 const CHUNK = 20;
-const WINDOW_PAD = 10;
-const ERROR_RETRY_MS = 8000;
 const PREFETCH = 4;
 
-let buildCard = null;   // (image, imageIndex) -> element
-let wantHook = null;    // (image) -> void  (meta-want reporting)
-let visibleHook = null; // (image) -> bool  (judgment visibility)
+let openHook = null;   // (imgIdx) -> void   opens the lightbox
+let wantHook = null;   // (image) -> void    meta-want reporting
 
-export function initFeed({ card, onScreen, wantMeta }) {
-  buildCard = card;
-  visibleHook = onScreen;
-  wantHook = wantMeta;
+// view = display order of image indices (filtered + visible).
+let view = [];
+let viewPos = 0;       // how much of the view is rendered (chunked)
+let container = null;
+let windowApi = null;  // registered by <Grid> (useWindow)
+let scrollChunkPending = false;
+
+export function initFeed({ onOpen, wantMeta } = {}) {
+  openHook = onOpen ?? null;
+  wantHook = wantMeta ?? null;
 }
 
-// view = display order of image indices (filtered + visible); cardEls is
-// indexed by IMAGE index (sparse under filtering).
-const cardEls = [];
-const loadedSet = new Set();
-const visibleSet = new Set();
-let view = [];
-let viewPos = 0;
-let container = null;
-let listObserver = null;
-let sentinelObserver = null;
-let sentinelEl = null;
-let errorRetryTimer = null;
+function wantRange(start, end) {
+  if (!wantHook) return;
+  for (let i = start; i < end; i++) {
+    const image = state.images[view[i]];
+    if (image) wantHook(image);
+  }
+}
+
+function drawGrid() {
+  if (!container) return;
+  render(h(Grid, {
+    view,
+    count: viewPos,
+    onOpen: openHook,
+    onSentinel: renderChunk,
+    registerApi: (w) => { windowApi = w; },
+  }), container);
+}
 
 export function resetFeed() {
-  listObserver?.disconnect();
-  sentinelObserver?.disconnect();
-  cardEls.length = 0;
-  loadedSet.clear();
-  visibleSet.clear();
   view = [];
   viewPos = 0;
-  sentinelEl = null;
-  container = null;
+  windowApi = null;
+  if (container) render(null, container);
 }
 
 export function renderFeed(el, indices) {
   container = el;
   view = indices;
-  viewPos = 0;
-  container.innerHTML = "";
-  setupObservers();
-  renderChunk();
-}
-
-function setupObservers() {
-  listObserver?.disconnect();
-  sentinelObserver?.disconnect();
-  listObserver = new IntersectionObserver((entries) => {
-    let changed = false;
-    for (const en of entries) {
-      const idx = Number(en.target.dataset.idx);
-      if (en.isIntersecting) {
-        if (!visibleSet.has(idx)) { visibleSet.add(idx); changed = true; }
-      } else if (visibleSet.delete(idx)) changed = true;
-    }
-    if (changed) applyWindow();
-  });
-  sentinelObserver = new IntersectionObserver((entries) => {
-    if (entries.some((en) => en.isIntersecting)) renderChunk();
-  });
+  viewPos = Math.min(CHUNK, view.length);
+  wantRange(0, viewPos);
+  drawGrid();
 }
 
 export function renderChunk() {
-  if (!container) return;
-  let added = 0;
-  const frag = document.createDocumentFragment();
-  while (viewPos < view.length && added < CHUNK) {
-    const imgIdx = view[viewPos++];
-    const image = state.images[imgIdx];
-    wantHook?.(image);
-    const handle = buildCard(image, imgIdx); // a card handle, not an element
-    cardEls[imgIdx] = handle;
-    frag.appendChild(handle.el);
-    listObserver.observe(handle.el);
-    added++;
-  }
-  container.appendChild(frag);
-
-  if (sentinelEl) sentinelEl.remove();
-  if (viewPos < view.length) {
-    if (!sentinelEl) {
-      sentinelEl = document.createElement("div");
-      sentinelEl.className = "sentinel";
-      sentinelEl.textContent = "loading more…";
-      sentinelObserver.observe(sentinelEl);
-    }
-    const rendered = cardEls.filter(Boolean).map((h) => h.el);
-    const trigger = rendered[Math.max(0, rendered.length - WINDOW_PAD)];
-    if (trigger) container.insertBefore(sentinelEl, trigger);
-    else container.appendChild(sentinelEl);
-  } else {
-    const done = document.createElement("div");
-    done.className = "endoflist";
-    done.textContent = state.filter
-      ? `— all ${view.length} matching “${state.filter}” —`
-      : `— all ${state.images.length} images —`;
-    container.appendChild(done);
-  }
-  // newly rendered cards inside the window may not get an observer event
-  applyWindow();
+  if (!container || viewPos >= view.length) return;
+  const start = viewPos;
+  viewPos = Math.min(viewPos + CHUNK, view.length);
+  wantRange(start, viewPos);
+  drawGrid();
 }
 
-// --- the window -----------------------------------------------------------------
+// --- window seams (the lightbox reaches the window through these) -----------
 
-export function applyWindow() {
-  const base = [...visibleSet];
-  if (state.lightbox.open && state.lightbox.index >= 0) base.push(state.lightbox.index);
-  if (!base.length) return;
-  const min = Math.min(...base) - WINDOW_PAD;
-  const max = Math.max(...base) + WINDOW_PAD;
-  for (const idx of [...loadedSet]) {
-    if (idx < min || idx > max) unloadImage(idx);
-  }
-  for (let i = Math.max(0, min); i <= Math.min(state.images.length - 1, max); i++) {
-    if (!loadedSet.has(i)) loadImage(i);
-  }
-  scheduleErrorRetry();
-}
+export function applyWindow() { windowApi?.recompute(); }
+export function retryImage(idx) { windowApi?.retry(idx); }
 
-function loadImage(idx) {
-  const card = cardEls[idx];
-  if (!card) return;
-  card.setSrc(api.imageBytesUrl(state.images[idx].id));
-  loadedSet.add(idx);
-}
-
-export function retryImage(idx) {
-  const card = cardEls[idx];
-  if (!card) return;
-  card.setSrc(null);
-  card.setSrc(api.imageBytesUrl(state.images[idx].id) + "?_r=" + Date.now());
-  loadedSet.add(idx);
-}
-
-function unloadImage(idx) {
-  const card = cardEls[idx];
-  if (!card) return;
-  card.setSrc(null); // aborts fetch, releases decoded bytes — inside the card
-  loadedSet.delete(idx);
-}
-
-function scheduleErrorRetry() {
-  if (errorRetryTimer) return;
-  errorRetryTimer = setTimeout(() => {
-    errorRetryTimer = null;
-    const base = [...visibleSet];
-    if (state.lightbox.open && state.lightbox.index >= 0) base.push(state.lightbox.index);
-    if (!base.length) return;
-    const min = Math.min(...base) - WINDOW_PAD;
-    const max = Math.max(...base) + WINDOW_PAD;
-    let any = false;
-    for (const idx of [...loadedSet]) {
-      if (idx < min || idx > max) continue;
-      if (cardEls[idx]?.state === "error") {
-        retryImage(idx);
-        any = true;
-      }
-    }
-    if (any) scheduleErrorRetry();
-  }, ERROR_RETRY_MS);
-}
-
-// --- progress mechanisms #2 and #3 ------------------------------------------------
+// --- progress mechanisms -----------------------------------------------------
 
 // The candidates column scrolls itself (no page-level scroll).
 function scroller() {
   return document.getElementById("candidatesCol");
 }
 
-// #2: scroll-distance safety net — the sentinel can be stranded above the
+// scroll-distance safety net — the sentinel can be stranded above the
 // viewport after a restore jump.
-let scrollChunkPending = false;
 export function onScrollSafetyNet() {
   if (scrollChunkPending) return;
   scrollChunkPending = true;
@@ -213,17 +106,16 @@ export function onScrollSafetyNet() {
   }, 120);
 }
 
-// #3: extend chunks until the target card exists, then center it (URL deep
-// link). The URL's current image is the only position restore.
+// extend chunks until the target card exists, then center it (URL deep link).
 export function restoreToIndex(idx) {
   const col = scroller();
   if (!col || idx < 0) return;
   let guard = 500;
-  while (viewPos < view.length && guard-- > 0 && !cardEls[idx]) renderChunk();
-  cardEls[idx]?.el.scrollIntoView({ block: "center" });
+  while (viewPos < view.length && guard-- > 0 && view.indexOf(idx) >= viewPos) renderChunk();
+  document.querySelector(`.card[data-idx="${idx}"]`)?.scrollIntoView({ block: "center" });
 }
 
-// --- lightbox-driven window ---------------------------------------------------------
+// --- lightbox-driven seams ----------------------------------------------------
 
 // Direction-aware prefetch for Up/Down traversal (fetch seam: DOM-free).
 export function prefetchFrom(imgIdx, dir, fetcher = globalThis.fetch) {
@@ -253,10 +145,6 @@ export function viewStep(imgIdx, dir) {
   return view[n];
 }
 
-export function cardAt(idx) { return cardEls[idx]; }
-export function eachCard(fn) {
-  for (const [idx, h] of cardEls.entries()) if (h) fn(h, idx);
-}
 export function viewIndices() { return view; }
 
 // test seam (Deno has no DOM): drive viewStep without renderFeed

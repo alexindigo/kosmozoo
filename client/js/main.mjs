@@ -11,13 +11,13 @@ import { initDiff, openDiff, hideDiff } from "./diff.mjs";
 import { parseUrl, writeFeedHash, stripHostPrefix, findByFile } from "./route.mjs";
 import { initRoi, setRoi } from "./roi.mjs";
 import { initClientPlugins } from "./plugins-client.mjs";
-import { isVisible, initJudgment, onVisibilityChanged, toggleRevealThumbedDown, toggleHideUp, setDownvoteHides } from "./judgment.mjs";
+import { initJudgment, onVisibilityChanged, toggleRevealThumbedDown, toggleHideUp, setDownvoteHides } from "./judgment.mjs";
 import { chrome, initKeyDispatch } from "./chrome.mjs";
 import { initKeysPanel, initKeysPanelDom, toggleKeysPanel } from "./keys-panel.mjs";
 import { initHostPicker, selectHost, initialHost } from "./hostpicker.mjs";
-import { initFeed, onScrollSafetyNet, restoreToIndex, resetFeed, retryImage, viewIndices } from "./feed.mjs";
+import { initFeed, onScrollSafetyNet, restoreToIndex, resetFeed, viewIndices } from "./feed.mjs";
 import { openFieldsOverlay, initFieldsOverlay } from "./fields.mjs";
-import { mountCard, savedSet } from "../app/components/Card.mjs";
+import { savedSet } from "../app/components/Card.mjs";
 import { initViews } from "./views.mjs";
 import { openAt, openAnchor } from "./lightbox.mjs";
 import { iconSvg } from "./icons.mjs";
@@ -282,11 +282,7 @@ async function boot() {
   registerCoreChrome();
 
   initFeed({
-    card: (image, imgIdx) => mountCard(image, imgIdx, {
-      onOpen: () => openAt(imgIdx),          // parent wires the lightbox
-      onErrorClick: () => retryImage(imgIdx), // and the feed's retry path
-    }),
-    onScreen: (image) => isVisible(image),
+    onOpen: (imgIdx) => openAt(imgIdx), // parent wires the lightbox
     wantMeta: (image) => wantMeta(image),
   });
 
