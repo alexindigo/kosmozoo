@@ -90,8 +90,9 @@ export async function probeHost(addr) {
   }
 }
 
-// File listing for the candidates feed. HTTP: /internal/files/output with the
-// " [size]" suffix stripped. Folder: renderable files, newest first by mtime.
+// File listing for the candidates feed: [{ name, size }], newest first.
+// HTTP: /internal/files/output's " [size]" suffix parsed, not stripped.
+// Folder: renderable files by mtime, size from stat.
 export async function hostList(addr) {
   if (isFolderHost(addr)) {
     const dir = FOLDER_RE.exec(addr)[1];
@@ -104,15 +105,18 @@ export async function hostList(addr) {
       if (basename(n) !== n) continue;
       try {
         const s = await stat(join(dir, n));
-        if (s.isFile()) files.push({ n, mtime: s.mtimeMs });
+        if (s.isFile()) files.push({ n, mtime: s.mtimeMs, size: s.size });
       } catch { /* vanished */ }
     }
     files.sort((a, b) => b.mtime - a.mtime || a.n.localeCompare(b.n));
-    return files.map((f) => f.n);
+    return files.map((f) => ({ name: f.n, size: f.size }));
   }
   const r = await fetch(`http://${addr}/internal/files/output`);
   const raw = await r.json();
-  return raw.map((n) => String(n).replace(/\s+\[[^\]]+\]$/, ""));
+  return raw.map((n) => {
+    const m = /^(.*)\s+\[(\d+)\]$/.exec(String(n));
+    return m ? { name: m[1], size: Number(m[2]) } : { name: String(n), size: null };
+  });
 }
 
 // Proxy image bytes from a host's /api/view. Upstream ComfyUI serves some

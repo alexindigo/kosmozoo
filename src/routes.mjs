@@ -75,14 +75,17 @@ export function makeRouter(ctx) {
     if (!host || !ctx.hosts[host]) return Response.json({ error: "unknown host" }, { status: 400 });
     // File listing comes from the host (HTTP or folder adapter); metadata
     // is overlaid from the store.
-    const names = await hostList(ctx.hosts[host]);
+    const list = await hostList(ctx.hosts[host]);
+    const names = list.map((f) => f.name);
     // The listing feeds the background walk (deduped + meta_fresh-filtered
     // inside feed()); on-screen names would use feed(host, names, true).
     ctx.scraper?.feed(host, names);
+    const size = new Map(list.map((f) => [f.name, f.size]));
     return Response.json(names.map((filename) => ({
       id: `${host}:${filename}`,
       host,
       filename,
+      size: size.get(filename) ?? null,
       meta: ctx.store.metaGet(host, filename),
       judgment: ctx.store.judgmentGet(host, filename),
     })));

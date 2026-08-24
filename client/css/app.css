@@ -185,6 +185,20 @@ main { display: flex; flex: 1; min-height: 0; }
 
 /* metadata row: props left, description right (grid halves, old metrics) */
 .pair { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-top: 6px; }
+
+/* collapsed metadata: single line — sizes left, expand toggle right */
+.metabar { display: grid; grid-template-columns: 1fr auto; align-items: center;
+  gap: 2px 6px; margin-top: 6px; color: var(--dim);
+  font: 11px ui-monospace, monospace; }
+.metabar-info { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.metabar-toggle { background: none; border: none; color: var(--dim);
+  cursor: pointer; padding: 2px; display: flex; border-radius: 4px; }
+.metabar-toggle:hover { color: var(--fg); background: var(--raise); }
+.metabar-toggle svg { transition: transform .15s; }
+.metabar.open .metabar-toggle svg { transform: rotate(180deg); }
+.metabar-full { grid-column: 1 / -1; }
+/* .pair's display:grid out-cascades the hidden attribute — kill it here */
+.metabar-full[hidden] { display: none; }
 .props { color: var(--dim); font-size: 12px; overflow-wrap: anywhere; }
 .props .plabel { color: var(--fg); opacity: .55; }
 .props .nometa { color: var(--red); }
