@@ -74,7 +74,7 @@ export function loadFieldsCfg(stored) {
   return out;
 }
 
-async function persist() {
+export async function persist() {
   await api.setSettings("core.fields", { cfg: state.fieldsCfg }).catch(() => {});
 }
 
@@ -192,100 +192,21 @@ export function buildMetaBody(meta) {
 
 // --- the picker overlay ------------------------------------------------------------
 //
-// The overlay never touches cards. Picker changes fire the injected
-// onChanged callback; the parent decides what re-renders.
+// The overlay never touches cards. <FieldsOverlay> renders the table from
+// state.fieldsCfg; picker changes fire the injected onChanged callback (via
+// notifyFieldsChanged) and the parent decides what re-renders.
 
 let onChangedHook = null;
 
 export function initFieldsOverlay({ onChanged } = {}) {
   onChangedHook = onChanged ?? null;
-  const overlay = document.getElementById("fieldsOverlay");
-  document.getElementById("fieldsClose").addEventListener("click", () => { overlay.hidden = true; });
-  overlay.addEventListener("click", (e) => { if (e.target === overlay) overlay.hidden = true; });
+}
+
+export function notifyFieldsChanged() {
+  onChangedHook?.();
 }
 
 export function openFieldsOverlay() {
-  buildFieldsPanel();
-  document.getElementById("fieldsOverlay").hidden = false;
-}
-
-function buildFieldsPanel() {
-  const tbl = document.getElementById("fieldsTable");
-  tbl.innerHTML = "";
-  const head = document.createElement("div");
-  head.className = "frow head";
-  head.innerHTML = `<span class="fname2">field (grouped by node)</span><span>under image</span><span>strip</span>`;
-  tbl.appendChild(head);
-
-  for (const [gname, fields] of META_FIELD_GROUPS) {
-    const group = document.createElement("div");
-    group.className = "fgroup";
-    const ghead = document.createElement("div");
-    ghead.className = "fgrouphead";
-    const glabel = document.createElement("span");
-    glabel.className = "gname";
-    glabel.textContent = gname;
-    ghead.appendChild(glabel);
-    const gbody = document.createElement("div");
-    gbody.className = "fgroupbody";
-    gbody.dataset.group = gname;
-
-    for (const col of ["card", "strip"]) {
-      const master = document.createElement("label");
-      master.className = "switchwrap mini";
-      master.title = `toggle all ${gname} (${col === "card" ? "under image" : "strip"})`;
-      const mcb = document.createElement("input");
-      mcb.type = "checkbox";
-      mcb.dataset.col = col;
-      mcb.checked = fields.some(([n]) => state.fieldsCfg[n][col]);
-      const mtrack = document.createElement("span");
-      mtrack.className = "track";
-      mcb.addEventListener("change", async () => {
-        for (const [n] of fields) state.fieldsCfg[n][col] = mcb.checked;
-        await persist();
-        onChangedHook?.();
-        gbody.querySelectorAll(`input[data-col="${col}"]`).forEach((cb) => { cb.checked = mcb.checked; });
-      });
-      master.append(mcb, mtrack);
-      ghead.appendChild(master);
-    }
-
-    for (const [name] of fields) {
-      const row = document.createElement("div");
-      row.className = "frow";
-      const n = document.createElement("span");
-      n.className = "fname2";
-      n.textContent = name;
-      row.append(n, fieldToggle(name, "card", gbody), fieldToggle(name, "strip", gbody));
-      gbody.appendChild(row);
-    }
-    group.append(ghead, gbody);
-    tbl.appendChild(group);
-  }
-}
-
-function fieldToggle(field, col, gbody) {
-  const lab = document.createElement("label");
-  lab.className = "switchwrap mini";
-  const cb = document.createElement("input");
-  cb.type = "checkbox";
-  cb.checked = !!state.fieldsCfg[field][col];
-  cb.dataset.field = field;
-  cb.dataset.col = col;
-  const track = document.createElement("span");
-  track.className = "track";
-  cb.addEventListener("change", async () => {
-    state.fieldsCfg[field][col] = cb.checked;
-    await persist();
-    onChangedHook?.();
-    // sync the group masters
-    const gname = gbody.dataset.group;
-    const fields = META_FIELD_GROUPS.find((g) => g[0] === gname)[1];
-    const group = gbody.closest(".fgroup");
-    group.querySelectorAll(".fgrouphead input").forEach((m) => {
-      m.checked = fields.some(([n]) => state.fieldsCfg[n][m.dataset.col]);
-    });
-  });
-  lab.append(cb, track);
-  return lab;
+  state.fieldsOverlayOpen = true;
+  render();
 }

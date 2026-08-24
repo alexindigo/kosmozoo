@@ -14,7 +14,6 @@
 import { state, render } from "./state.mjs";
 import { api } from "./api.mjs";
 import { metaFromPngBytes } from "/shared/extractor.mjs";
-import { buildMetaBody } from "./fields.mjs";
 import { chrome } from "./chrome.mjs";
 
 const LS_KEY = "kosmozoo.anchors.v1";
@@ -132,17 +131,11 @@ export async function initAnchorsWidth() {
 }
 
 // --- ⓘ overlay (every field, picker-exempt) -----------------------------------------------
-
-export function initInfoOverlay() {
-  const ov = document.getElementById("infoOverlay");
-  document.getElementById("infoClose").addEventListener("click", () => { ov.hidden = true; });
-  ov.addEventListener("click", (e) => { if (e.target === ov) ov.hidden = true; });
-}
+// <InfoOverlay> owns the panel; this just hands it the anchor's name + meta.
 
 export function showAnchorInfo(name, meta) {
-  document.getElementById("infoTitle").textContent = name;
-  const body = document.getElementById("infoBody");
-  body.innerHTML = "";
-  body.appendChild(buildMetaBody(meta));
-  document.getElementById("infoOverlay").hidden = false;
+  state.infoOverlay.open = true;
+  state.infoOverlay.name = name;
+  state.infoOverlay.meta = meta;
+  render();
 }

@@ -1,11 +1,11 @@
 // client/js/main.mjs — SPA entry: boot, core chrome registration (through
-// the same registry plugins use), and the feed's orchestration (metadata
-// poll/patch, meta-want, scroll persistence, status summary).
+// the same registry plugins use), and the feed's orchestration (candidate
+// loads, URL-as-truth centering, load-failure surface).
 
 import { state, render } from "./state.mjs";
 import { api } from "./api.mjs";
 import { initLightbox } from "./lightbox.mjs";
-import { addAnchorFiles, initAnchorsPane, initInfoOverlay, initAnchorsWidth } from "./anchors.mjs";
+import { addAnchorFiles, initAnchorsPane, initAnchorsWidth } from "./anchors.mjs";
 import { initWorkspace } from "./workspace.mjs";
 import { initDiff, openDiff, hideDiff } from "./diff.mjs";
 import { parseUrl, writeFeedHash, stripHostPrefix, findByFile } from "./route.mjs";
@@ -13,7 +13,7 @@ import { initRoi, setRoi } from "./roi.mjs";
 import { initClientPlugins } from "./plugins-client.mjs";
 import { initJudgment, onVisibilityChanged, toggleRevealThumbedDown, toggleHideUp, setDownvoteHides } from "./judgment.mjs";
 import { chrome, initKeyDispatch } from "./chrome.mjs";
-import { initKeysPanel, initKeysPanelDom, toggleKeysPanel } from "./keys-panel.mjs";
+import { initKeysPanel, toggleKeysPanel } from "./keys-panel.mjs";
 import { initHostPicker, selectHost, initialHost } from "./hostpicker.mjs";
 import { initFeed, onScrollSafetyNet, restoreToIndex, resetFeed, viewIndices } from "./feed.mjs";
 import { openFieldsOverlay, initFieldsOverlay } from "./fields.mjs";
@@ -268,7 +268,6 @@ async function boot() {
   await initClientPlugins(); // before axes so plugin modes are registered
   initKeyDispatch();
   await initKeysPanel(); // BEFORE lightbox keys: the panel outranks on Escape
-  initKeysPanelDom();
   await initLightbox();
   await initRoi();
   await initJudgment();
@@ -278,7 +277,6 @@ async function boot() {
   initAnchorsPane();
   initWorkspace();
   initDiff();
-  initInfoOverlay();
   initFieldsOverlay({ onChanged: refreshAllCardMeta });
   registerCoreChrome();
 
