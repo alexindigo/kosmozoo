@@ -32,14 +32,16 @@ Deno.test("folder host: validation, probe, list newest-first, traversal guard", 
   await utimes(join(dir, "a.png"), new Date(now - 3000), new Date(now - 3000));
   await utimes(join(dir, "c.svg"), new Date(now - 1000), new Date(now - 1000));
   const list = await hostList("folder:" + dir);
-  const pos = { a: list.indexOf("a.png"), b: list.indexOf("b.png"), c: list.indexOf("c.svg") };
+  const names = list.map((f) => f.name);
+  const pos = { a: names.indexOf("a.png"), b: names.indexOf("b.png"), c: names.indexOf("c.svg") };
   assert(pos.b < pos.c && pos.c < pos.a, "newest first");
+  assert(list.every((f) => typeof f.size === "number" && f.size > 0), "sizes reported");
   // hidden files skipped, non-renderables skipped
   await writeFile(join(dir, "not-an-image.txt"), "x");
   await writeFile(join(dir, ".hidden.png"), "x");
-  const list2 = await hostList("folder:" + dir);
-  assert(!list2.includes("not-an-image.txt"));
-  assert(!list2.includes(".hidden.png"));
+  const names2 = (await hostList("folder:" + dir)).map((f) => f.name);
+  assert(!names2.includes("not-an-image.txt"));
+  assert(!names2.includes(".hidden.png"));
   await rm(dir, { recursive: true });
 
   // traversal guard: basename only, no ".."

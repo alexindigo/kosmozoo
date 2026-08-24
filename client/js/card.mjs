@@ -73,9 +73,14 @@ export function buildCard(image, imgIdx, { onOpen, onErrorClick } = {}) {
   // are this instance's own footer content
   const propsEl = handle.el.querySelector(".props");
   const descEl = handle.el.querySelector(".desc");
+  const infoEl = handle.el.querySelector(".metabar-info");
   handle.setMeta = (meta) => {
     handle.setStripText(meta ? metaStripText(meta) : "");
     if (meta?.width && meta?.height) handle.setAr(`${meta.width} / ${meta.height}`);
+    if (infoEl) {
+      infoEl.textContent = metaBarText(image, meta);
+      infoEl.title = infoEl.textContent;
+    }
     fillCardMeta(propsEl, descEl, meta);
   };
 
@@ -246,15 +251,50 @@ function copyFrom(srcIdx, cls, dir, ta) {
 
 // --- injected: params + prompt (props left, description right) ------------------
 
+// collapsed by default: one line — pixel size + on-disk size left,
+// expand toggle right. The full fields-config panel lives inside, hidden.
 function buildMetaRow(image) {
   const row = document.createElement("div");
-  row.className = "pair";
+  row.className = "metabar";
+  const info = document.createElement("span");
+  info.className = "metabar-info";
+  info.textContent = metaBarText(image, image.meta);
+  info.title = info.textContent;
+  const btn = document.createElement("button");
+  btn.className = "metabar-toggle";
+  btn.innerHTML = iconSvg("chevron-down", 14);
+  btn.title = "expand metadata";
+  const full = document.createElement("div");
+  full.className = "pair metabar-full";
+  full.hidden = true;
   const props = document.createElement("div");
   props.className = "props";
   const desc = document.createElement("div");
   desc.className = "desc";
   fillCardMeta(props, desc, image.meta);
-  row.append(props, desc);
+  full.append(props, desc);
+  btn.addEventListener("click", (e) => {
+    e.stopPropagation();
+    full.hidden = !full.hidden;
+    row.classList.toggle("open", !full.hidden);
+    btn.title = full.hidden ? "expand metadata" : "collapse metadata";
+  });
+  row.append(info, btn, full);
   return row;
+}
+
+function fmtBytes(n) {
+  if (n == null) return null;
+  if (n < 1024) return `${n} B`;
+  if (n < 1024 * 1024) return `${Math.round(n / 1024)} KB`;
+  return `${(n / 1024 / 1024).toFixed(1)} MB`;
+}
+
+function metaBarText(image, meta) {
+  const bits = [];
+  if (meta?.width && meta?.height) bits.push(`${meta.width}×${meta.height}px`);
+  const sz = fmtBytes(image.size ?? null);
+  if (sz) bits.push(sz);
+  return bits.length ? bits.join(" · ") : "no metadata yet";
 }
 
