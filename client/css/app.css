@@ -172,16 +172,18 @@ main { display: flex; flex: 1; min-height: 0; }
   border-radius: 4px; cursor: pointer; }
 .votebtn svg { vertical-align: -1px; }
 .votebtn:hover, .savebtn:hover { border-color: var(--dim); color: var(--mid); }
-/* identity colors, muted until active/hover: down=red, up=green (feedback) */
-.votebtn.down { color: rgba(247, 118, 142, .55); }
-.votebtn.up { color: var(--green-dim); }
-.votebtn.down:hover, .votebtn.down.on { color: var(--red); border-color: var(--red); }
-.votebtn.up:hover, .votebtn.up.on { color: var(--green); border-color: var(--green); }
-.votebtn.favorite { color: rgba(255, 136, 0, .55); }
-.votebtn.favorite:hover { color: var(--orange); border-color: var(--orange); }
-/* favorited: the star itself fills in — no standing border (hover-only) */
-.votebtn.favorite.on { color: var(--orange); }
-.votebtn.favorite.on svg path:not([stroke="none"]) { fill: currentColor; }
+/* one pattern for every action button under the image: the button
+   contributes ONLY an accent token. Base color is the muted accent,
+   the border is hover-only, and the active state is the icon itself —
+   full color plus fill. No per-button rules beyond the token. */
+.votebtn { --btn-c: var(--mid);
+  color: color-mix(in srgb, var(--btn-c) 55%, transparent); }
+.votebtn.down { --btn-c: var(--red); }
+.votebtn.up { --btn-c: var(--green); }
+.votebtn.favorite { --btn-c: var(--orange); }
+.votebtn:hover { color: var(--btn-c); border-color: var(--btn-c); }
+.votebtn.on { color: var(--btn-c); }
+.votebtn.on svg path:not([stroke="none"]) { fill: currentColor; }
 
 /* metadata row: props left, description right (grid halves, old metrics) */
 .pair { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-top: 6px; }
@@ -373,6 +375,11 @@ main { display: flex; flex: 1; min-height: 0; }
 #diffAlign { color: var(--mid); }
 #diffHint { margin-left: auto; }
 #diffBlend { width: 140px; accent-color: var(--accent); }
+#diffSave { display: flex; align-items: center; gap: 5px;
+  background: var(--raise); color: var(--mid); border: 1px solid var(--border);
+  border-radius: 4px; cursor: pointer; font: 11px ui-monospace, monospace;
+  padding: 3px 8px; }
+#diffSave:hover { color: var(--fg); border-color: var(--dim); }
 #diffStage { position: relative; flex: 1; min-height: 0; }
 #diffStage[data-mode="side"] { display: flex; gap: 2px; }
 #diffStage[data-mode="side"] .diffside { flex: 1; min-width: 0; margin: 0;

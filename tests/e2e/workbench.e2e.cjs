@@ -150,6 +150,44 @@ async function attempt(name, fn) {
     await page.poll("!window.kosmozoo.state.images[window.kosmozoo.state.lightbox.index]?.judgment?.vote", 5000);
   });
 
+  // action buttons: ONE pattern — active = filled icon in the accent,
+  // border hover-only; never a standing border
+  await attempt("active buttons fill their icon, no standing border", async () => {
+    const r = await page.evaluate(`(() => new Promise((res) => {
+      const up = document.querySelector('.card .votebtn.up');
+      up.click();
+      setTimeout(() => {
+        const path = up.querySelector("svg path:not([stroke='none'])");
+        res({
+          on: up.classList.contains('on'),
+          fill: getComputedStyle(path).fill,
+          border: getComputedStyle(up).borderColor,
+        });
+      }, 300);
+    }))()`);
+    check("up active: icon filled green", r.on && r.fill === "rgb(158, 206, 106)", JSON.stringify(r));
+    check("up active: border stays default", r.border === "rgb(51, 51, 51)", r.border);
+    await page.evaluate("document.querySelector('.card .votebtn.up').click()");
+  });
+
+  // card anatomy: image, then the collapsed parameters line, then the
+  // filename row, then the feedback boxes
+  await attempt("card order: image, parameters line, filename, feedback", async () => {
+    const order = await page.evaluate(`(() => {
+      const card = document.querySelector('.card');
+      return [...card.children].map((el) =>
+        el.classList.contains('imgwrap') ? 'img' :
+        el.classList.contains('metabar') ? 'meta' :
+        el.classList.contains('ctitle') ? 'title' : 'notes').join(',');
+    })()`);
+    check("order img,meta,title,notes", order === "img,meta,title,notes", order);
+    const oneLine = await page.evaluate(`(() => {
+      const bar = document.querySelector('.card .metabar');
+      return bar.getBoundingClientRect().height < 30 && bar.querySelector('.metabar-full').hidden;
+    })()`);
+    check("parameters line collapsed to one row", oneLine);
+  });
+
   // host management through the real API (the + / − chrome calls these)
   await attempt("host add/remove via API", async () => {
     await page.evaluate(`(async () => {

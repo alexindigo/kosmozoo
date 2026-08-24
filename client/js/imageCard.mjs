@@ -2,7 +2,8 @@
 // feed. Pure presentation + pure inputs:
 //
 //   Inputs at construction: alt, ar, stripText, zoomKey, onZoomChange,
-//                           onOpen, onErrorClick, title, titleActions, footer
+//                           onOpen, onErrorClick, onLoaded, title,
+//                           titleActions, between (image and title), footer
 //   Input after construction: setSrc(url | null)  — the ONLY one
 //   Read-only outputs: el, state
 //
@@ -18,8 +19,8 @@ import { makeZoomable } from "./zoomable.mjs";
 export function imageCard({
   alt, ar = null, stripText = "",
   zoomKey, onZoomChange,
-  onOpen, onErrorClick,
-  title, titleActions = [], footer = [],
+  onOpen, onErrorClick, onLoaded,
+  title, titleActions = [], between = [], footer = [],
 }) {
   const card = document.createElement("div");
   card.className = "card";
@@ -44,6 +45,7 @@ export function imageCard({
   img.addEventListener("load", () => {
     if (img.naturalWidth && img.naturalHeight) {
       applyAr(wrap, `${img.naturalWidth} / ${img.naturalHeight}`);
+      onLoaded?.(img.naturalWidth, img.naturalHeight);
     }
     wrap.classList.remove("ic-loading", "ic-error", "ic-empty");
     state = "loaded";
@@ -66,6 +68,9 @@ export function imageCard({
   });
 
   card.appendChild(wrap);
+
+  // --- between slot (image and title): the collapsed meta line ----------
+  for (const el of [].concat(between)) card.appendChild(el);
 
   // --- title row -------------------------------------------------------------
   if (title) {
