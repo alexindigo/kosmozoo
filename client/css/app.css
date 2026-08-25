@@ -614,6 +614,8 @@ main { display: flex; flex: 1; min-height: 0; }
 .vz-count.vz-count-warn { color: var(--yellow); }
 /* hot warning: >1000 permutations — this is going to be a lot of runs */
 .vz-count.vz-count-hot { color: var(--red); }
+/* batch breakdown under the big total: "<variants> variants × <N> images" */
+.vz-count-sub { font-size: 11px; color: var(--mid); margin-top: 2px; }
 .vz-tinput { background: var(--bg); color: var(--fg);
   border: 1px solid var(--dim); border-radius: 6px; padding: 4px 8px;
   font-size: 12px; margin-top: 2px;

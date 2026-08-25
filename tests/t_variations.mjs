@@ -8,9 +8,35 @@ import {
   narrowToOneSaveImage,
   wrapAllSaveImagePrefixes,
   inspectGraph,
+  resolveRelativeRanges,
 } from "../plugins/variations/plugin.mjs";
 
 // --- permutation engine ---------------------------------------------------
+
+// --- relative ranges (batch mode) -------------------------------------------
+
+Deno.test("relative ranges: offsets resolve against the image's current value, clamped", () => {
+  const ranges = {
+    denoise: { enabled: true, min: -0.15, max: 0.15, increment: 0.05, clamp: [0, 1] },
+    steps: { enabled: true, min: -5, max: 5, increment: 1, clamp: [1, 150] },
+    cfg: { enabled: true, min: -1, max: 1, increment: 0.5, clamp: [0, 30] },
+  };
+  resolveRelativeRanges(ranges, { denoise: 0.8, steps: 3 }); // cfg absent from this graph
+  assertEquals(ranges.denoise.min, 0.65);
+  assertEquals(ranges.denoise.max, 0.95);
+  assertEquals(ranges.steps.min, 1); // 3 - 5 = -2, clamped to the param floor
+  assertEquals(ranges.steps.max, 8);
+  assertEquals("cfg" in ranges, false); // params the graph lacks drop out
+});
+
+Deno.test("relative ranges: both offsets on one side of the current value", () => {
+  const ranges = {
+    denoise: { enabled: true, min: -2.5, max: -0.5, increment: 0.05, clamp: [0, 1] },
+  };
+  resolveRelativeRanges(ranges, { denoise: 0.9 });
+  assertEquals(ranges.denoise.min, 0);   // 0.9 - 2.5 clamps at 0
+  assertEquals(ranges.denoise.max, 0.4); // 0.9 - 0.5
+});
 
 Deno.test("rangeValues: edges inclusive, floating-point safe", () => {
   // internal — not exported, but exercised through generatePermutations

@@ -11,18 +11,33 @@
 // keyboard nudge on a focused thumb uses the fine step (options.step).
 // Alignment is structural: rail, connect band, thumbs and the orange
 // current-value marker share one lane centerline by construction.
+//
+// Two modes:
+//   absolute — thumbs are min/max values; the marker sits at the image's
+//              current value and its label shows it.
+//   relative — batch sweeps: thumbs are signed OFFSETS from the current
+//              value (both may sit on the same side of it); the marker is
+//              pinned to the center and labeled "X" because every image in
+//              the batch has its own current value.
 
 import { h, useEffect, useRef } from "../../vendor/preact/vendor.mjs";
 import { snapTo, fmt } from "../../js/variations.mjs";
 
+const fmtSigned = (v) => (v > 0 ? "+" : "") + fmt(v);
+
 export function SliderRow({
-  param, current, defaults, enabled, increment, placeholderKey,
+  param, current, defaults, enabled, increment, placeholderKey, relative,
   onToggle, onRange, onIncrement, templateTarget,
 }) {
   const sliderRef = useRef(null);
   const minLblRef = useRef(null);
   const maxLblRef = useRef(null);
   const fineStep = Math.pow(10, -param.decimals);
+
+  // absolute: the param's clamp; relative: ±(spread×10) around the current
+  const lo = relative ? -(param.spread ?? 1) * 10 : param.clamp[0];
+  const hi = relative ? (param.spread ?? 1) * 10 : param.clamp[1];
+  const span = hi - lo;
 
   // the slide handler must snap to the CURRENT increment; the effect's
   // closure is mount-once, so it reads through a ref
@@ -35,18 +50,17 @@ export function SliderRow({
     const slider = noUiSlider.create(sliderRef.current, {
       start: [defaults.min, defaults.max],
       connect: true,
-      range: { min: param.clamp[0], max: param.clamp[1] },
+      range: { min: lo, max: hi },
       step: fineStep,
       behaviour: "drag",
       keyboardSupport: true,
     });
     slider.on("update", (values) => {
-      const [lo, hi] = values.map(Number);
-      const range = param.clamp[1] - param.clamp[0];
-      minLblRef.current.textContent = fmt(lo);
-      maxLblRef.current.textContent = fmt(hi);
-      minLblRef.current.style.left = ((lo - param.clamp[0]) / range) * 100 + "%";
-      maxLblRef.current.style.left = ((hi - param.clamp[0]) / range) * 100 + "%";
+      const [a, b] = values.map(Number);
+      minLblRef.current.textContent = relative ? fmtSigned(a) : fmt(a);
+      maxLblRef.current.textContent = relative ? fmtSigned(b) : fmt(b);
+      minLblRef.current.style.left = ((a - lo) / span) * 100 + "%";
+      maxLblRef.current.style.left = ((b - lo) / span) * 100 + "%";
       const vals = slider.get().map(Number);
       onRange(param.key, { min: Math.min(vals[0], vals[1]), max: Math.max(vals[0], vals[1]) });
     });
@@ -63,9 +77,10 @@ export function SliderRow({
     onIncrement(param.key, Math.max(fineStep, +Number(v).toFixed(param.decimals + 3)));
   };
 
-  const markerPct = current != null
-    ? ((current - param.clamp[0]) / (param.clamp[1] - param.clamp[0])) * 100
-    : null;
+  // absolute: marker at the current value; relative: pinned to the center
+  const markerPct = relative
+    ? 50
+    : (current != null ? ((current - param.clamp[0]) / (param.clamp[1] - param.clamp[0])) * 100 : null);
 
   return h("div", {
     class: "vz-slider-row" + (enabled ? "" : " vz-off"),
@@ -113,7 +128,7 @@ export function SliderRow({
           h("div", {
             class: "vz-current",
             style: markerPct != null ? { left: markerPct + "%" } : { display: "none" },
-          }, markerPct != null ? fmt(current) : ""),
+          }, markerPct != null ? (relative ? "X" : fmt(current)) : ""),
         ),
       ),
     ),

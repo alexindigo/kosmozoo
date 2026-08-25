@@ -20,7 +20,12 @@ import { iconSvg } from "../../js/icons.mjs";
 import { PARAM_ORDER, paramDef, defaultRange, fallbackParams } from "../../js/variations.mjs";
 import { SliderRow } from "./SliderRow.mjs";
 
-export function VariationsModal({ image, onClose }) {
+export function VariationsModal({ images, onClose }) {
+  const image = images[0];
+  // batch = more than one image: ranges become RELATIVE offsets from each
+  // image's own current value (resolved by the plugin at run time), and the
+  // count shows the total across the whole selection.
+  const batch = images.length > 1;
   const [params, setParams] = useState(null); // null = probing; [] = none
   const [rows, setRows] = useState({});       // key -> { enabled, min, max, increment, placeholderKey }
   const [running, setRunning] = useState(false);
@@ -48,7 +53,9 @@ export function VariationsModal({ image, onClose }) {
       for (const { key, label, current } of forGraph) {
         const p = paramDef(key);
         if (!p) continue; // registry doesn't know this param — skip
-        const def = defaultRange(p, current);
+        // absolute: a value window around the current value; relative
+        // (batch): signed offsets around it, default ±spread
+        const def = batch ? { min: -p.spread, max: p.spread } : defaultRange(p, current);
         init[key] = {
           enabled: false, min: def.min, max: def.max, increment: p.defaultInc,
           // the placeholder key mutates after the probe returns
@@ -138,47 +145,73 @@ export function VariationsModal({ image, onClose }) {
     return (keyOrder.get(a) ?? 999) - (keyOrder.get(b) ?? 999);
   });
 
-  // variations count: product of per-param steps, minus the current value
-  let total = 1;
+  // variations count: product of per-param steps. Absolute mode subtracts
+  // the current combo; batch subtracts it only when every enabled range
+  // actually contains the current value (offset 0).
+  let perImage = 1;
   let anyEnabled = false;
+  let allContainCurrent = true;
   for (const [key, r] of Object.entries(rows)) {
     if (!r.enabled) continue;
     anyEnabled = true;
     const inc = r.increment || paramDef(key)?.defaultInc || 1;
-    total *= Math.max(Math.round((r.max - r.min) / inc) + 1, 1);
+    perImage *= Math.max(Math.round((r.max - r.min) / inc) + 1, 1);
+    if (batch && !(r.min <= 0 && r.max >= 0)) allContainCurrent = false;
   }
-  if (anyEnabled && total > 0) total -= 1;
-  const n = anyEnabled ? total : 0;
+  if (anyEnabled && allContainCurrent && perImage > 0) perImage -= 1;
+  const n = anyEnabled ? perImage * images.length : 0;
 
   async function runVariations() {
     setResult(null);
     setRunning(true);
     try {
-      const ranges = {};
+      const baseRanges = {};
       for (const [key, r] of Object.entries(rowsRef.current)) {
-        ranges[key] = {
+        baseRanges[key] = {
           enabled: r.enabled, min: r.min, max: r.max,
           increment: r.increment, placeholderKey: r.placeholderKey,
+          // batch ranges are offsets; the plugin clamps them per image
+          ...(batch ? { clamp: paramDef(key)?.clamp } : {}),
         };
       }
-      const res = await fetch("/api/plugins/variations/run", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          id: image.id, host: image.host, filename: image.filename,
-          ranges,
-          prefix: prefixRef.current?.value ?? "",
-          suffix: suffixRef.current?.value ?? "",
-        }),
-      });
-      const text = await res.text();
-      let data;
-      try { data = JSON.parse(text); } catch { data = null; }
-      if (!res.ok) {
-        setResult({ text: data?.error ?? text ?? `error ${res.status}`, ok: false });
+      const prefix = prefixRef.current?.value ?? "";
+      const suffix = suffixRef.current?.value ?? "";
+      let submitted = 0, totalJobs = 0;
+      const failed = [];
+      await Promise.all(images.map(async (img) => {
+        try {
+          const res = await fetch("/api/plugins/variations/run", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              id: img.id, host: img.host, filename: img.filename,
+              ranges: structuredClone(baseRanges),
+              prefix, suffix,
+              ...(batch ? { relative: true } : {}),
+            }),
+          });
+          const text = await res.text();
+          let data;
+          try { data = JSON.parse(text); } catch { data = null; }
+          if (!res.ok) {
+            failed.push(`${img.filename}: ${data?.error ?? text ?? `error ${res.status}`}`);
+            return;
+          }
+          submitted += data.submitted ?? 0;
+          totalJobs += data.total ?? 0;
+        } catch (e) {
+          failed.push(`${img.filename}: ${e.message}`);
+        }
+      }));
+      if (submitted === 0 && totalJobs === 0) {
+        setResult({ text: failed.slice(0, 3).join(" · ") || "nothing submitted", ok: false });
         return;
       }
-      setResult({ text: `submitted ${data.submitted}/${data.total}`, ok: true });
+      const summary = batch
+        ? `submitted ${submitted}/${totalJobs} across ${images.length} images` +
+          (failed.length ? ` (${failed.length} failed)` : "")
+        : `submitted ${submitted}/${totalJobs}`;
+      setResult({ text: summary, ok: true });
       setTimeout(onClose, 3000);
     } catch (e) {
       setResult({ text: `fetch failed: ${e.message}`, ok: false });
@@ -188,7 +221,9 @@ export function VariationsModal({ image, onClose }) {
   }
 
   return h("div", { class: "vz-panel", onClick: (e) => e.stopPropagation() },
-      h("div", { class: "vz-title" }, "Generate image variations"),
+      h("div", { class: "vz-title" }, batch
+        ? `Generate image variations · applying to ${images.length} images`
+        : "Generate image variations"),
       h("div", { class: "vz-body" },
         h("div", { class: "vz-left" },
           h("div", { class: "vz-sliders" },
@@ -203,10 +238,11 @@ export function VariationsModal({ image, onClose }) {
                       key,
                       param: p,
                       current: cur,
-                      defaults: defaultRange(p, cur),
+                      defaults: batch ? { min: -p.spread, max: p.spread } : defaultRange(p, cur),
                       enabled: rows[key].enabled,
                       increment: rows[key].increment,
                       placeholderKey: rows[key].placeholderKey,
+                      relative: batch,
                       onToggle, onRange, onIncrement,
                       templateTarget: templateTarget.current,
                     });
@@ -219,6 +255,8 @@ export function VariationsModal({ image, onClose }) {
           h("div", {
             class: "vz-count" + (n > 1000 ? " vz-count-hot" : n > 100 ? " vz-count-warn" : ""),
           }, String(n)),
+          batch && anyEnabled ? h("div", { class: "vz-count-sub" },
+            `${perImage} variants × ${images.length} images`) : null,
           h("div", { class: "vz-rlabel" }, "prefix"),
           h("input", {
             type: "text", class: "vz-tinput vz-prefix", ref: prefixRef,
@@ -255,13 +293,9 @@ export function VariationsModal({ image, onClose }) {
 // would eat #app.) The contract holds: .vz-root directly under BODY, gone
 // on close.
 
-let mounted = null; // { root, imageId }
+let mounted = null; // { root, key }
 
-export function toggleVariations(_cardEl, image) {
-  if (mounted && mounted.imageId === image.id) {
-    closeAllVariations();
-    return;
-  }
+function openModal(images, key) {
   closeAllVariations();
   const root = document.createElement("div");
   root.className = "vz-root";
@@ -269,8 +303,30 @@ export function toggleVariations(_cardEl, image) {
     if (e.target === root) closeAllVariations(); // backdrop closes
   });
   document.body.appendChild(root);
-  preactRender(h(VariationsModal, { image, onClose: closeAllVariations }), root);
-  mounted = { root, imageId: image.id };
+  preactRender(h(VariationsModal, { images, onClose: closeAllVariations }), root);
+  mounted = { root, key };
+}
+
+// Single-image entry (the card's wand): absolute ranges around that image's
+// current value.
+export function toggleVariations(_cardEl, image) {
+  if (mounted && mounted.key === image.id) {
+    closeAllVariations();
+    return;
+  }
+  openModal([image], image.id);
+}
+
+// Bulk entry (the bulk bar's wand): RELATIVE sweeps applied to every
+// selected image around its own current value — even for a single image,
+// since that's the batch affordance.
+export function toggleVariationsBulk(images) {
+  const key = "batch:" + images.map((i) => i.id).join("|");
+  if (mounted && mounted.key === key) {
+    closeAllVariations();
+    return;
+  }
+  openModal(images, key);
 }
 
 export function closeAllVariations() {
