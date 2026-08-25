@@ -19,6 +19,7 @@ import { openDiff } from "../../js/diff.mjs";
 import { loadBootData } from "../services/bootData.mjs";
 import { startScraperPoll } from "../services/scraper.mjs";
 import { Header } from "./Header.mjs";
+import { BulkBar } from "./BulkBar.mjs";
 import { WorkspacePane } from "./WorkspacePane.mjs";
 import { WorkspaceBar } from "./WorkspaceBar.mjs";
 import { FieldsOverlay } from "./FieldsOverlay.mjs";
@@ -44,6 +45,7 @@ export function App() {
 
   return h(Fragment, null,
     h(Header, null),
+    h(BulkBar, null),
     h("main", null,
       h("section", { id: "candidatesCol" }, h("div", { id: "grid" })),
       h("div", { id: "divider", title: "drag to resize the split" }),

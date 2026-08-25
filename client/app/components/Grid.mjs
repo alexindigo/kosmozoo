@@ -14,16 +14,17 @@ import { subscribe } from "../services/notify.mjs";
 import { useWindow, WINDOW_PAD } from "../hooks/useWindow.mjs";
 import { Card } from "./Card.mjs";
 
-// A feed can hold thousands of cards; a window/judgment change must re-render
-// only the cards it touches, not the whole list. The memo gate compares the
-// card's real inputs (image, position, src, meta, vote, favorite) and skips
-// the rest. Callbacks are intentionally not compared — they are stable in
-// behavior (they capture the card's index).
+// A feed can hold thousands of cards; a window/judgment/selection change must
+// re-render only the cards it touches, not the whole list. The memo gate
+// compares the card's real inputs (image, position, src, meta, vote,
+// favorite, selected) and skips the rest. Callbacks are intentionally not
+// compared — they are stable in behavior (they capture the card's index).
 class MemoCard extends Component {
   shouldComponentUpdate(n) {
     const p = this.props;
     return p.image !== n.image || p.imgIdx !== n.imgIdx || p.src !== n.src
-      || p.meta !== n.meta || p.vote !== n.vote || p.fav !== n.fav;
+      || p.meta !== n.meta || p.vote !== n.vote || p.fav !== n.fav
+      || p.selected !== n.selected;
   }
   render() { return h(Card, this.props); }
 }
@@ -75,6 +76,7 @@ export function Grid({ view, count, onOpen, onSentinel, registerApi }) {
       meta: image.meta ?? null,
       vote: j.vote ?? null,
       fav: !!j.favorite,
+      selected: state.selected.has(image.id),
       onOpen: () => onOpen?.(idx),
       onErrorClick: () => win.retry(idx),
       onImgPhase: (p) => {

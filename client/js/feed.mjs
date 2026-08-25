@@ -60,6 +60,7 @@ export function resetFeed() {
   view = [];
   viewPos = 0;
   windowApi = null;
+  state.selected.clear(); // selections belong to the feed they were made in
   if (container) render(null, container);
 }
 
