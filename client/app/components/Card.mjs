@@ -14,7 +14,7 @@ import { api } from "../../js/api.mjs";
 import { setVote, toggleFavorite, saveNotes } from "../../js/judgment.mjs";
 import { metaStripText } from "../../js/fields.mjs";
 import { iconSvg } from "../../js/icons.mjs";
-import { toggleVariations } from "../../js/variations.mjs";
+import { toggleVariations } from "./VariationsModal.mjs";
 import { matchesFile, parseUrl } from "../../js/route.mjs";
 import { Zoomable } from "./Zoomable.mjs";
 import { IconButton } from "./IconButton.mjs";
