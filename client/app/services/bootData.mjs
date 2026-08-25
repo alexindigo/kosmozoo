@@ -18,6 +18,8 @@ export function loadBootData() {
     const ui = await api.settings("core.ui").catch(() => ({}));
     const fieldsStored = await api.settings("core.fields").catch(() => ({}));
     state.fieldsCfg = loadFieldsCfg(fieldsStored.cfg);
+    const del = await api.settings("core.delete").catch(() => ({}));
+    state.deletePrefs = { useAssetsPlus: del.useAssetsPlus ?? true };
     state.scraper = await api.scraper().catch(() => null);
     state.feedbackPath = (await api.settings("core").catch(() => ({})))?.feedbackPath ?? null;
     return { ui };

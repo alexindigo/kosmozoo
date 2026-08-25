@@ -19,6 +19,7 @@ export const api = {
   removeHost: (name) => req("DELETE", `/api/hosts/${encodeURIComponent(name)}`),
   images: (host) => req("GET", `/api/images?host=${encodeURIComponent(host)}`),
   image: (id) => req("GET", `/api/images/${encodeURIComponent(id)}`),
+  deleteImage: (id) => req("DELETE", `/api/images/${encodeURIComponent(id)}`),
   imageBytesUrl: (id) => `${BASE}/api/images/${encodeURIComponent(id)}/bytes`,
   judgment: (id) => req("GET", `/api/judgments/${encodeURIComponent(id)}`),
   setJudgment: (id, fields) => req("PUT", `/api/judgments/${encodeURIComponent(id)}`, fields),

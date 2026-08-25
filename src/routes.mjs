@@ -3,7 +3,7 @@
 // Resource-shaped, documented, public. Plugin routes live under
 // /api/plugins/<name>/... and are registered by the plugin host (Phase 10).
 
-import { splitHostKey, probeHost, hostList, hostReadBytes, hostHeadSize, validateHost, addHost, removeHost, EXT_MIME } from "./hosts.mjs";
+import { splitHostKey, probeHost, hostList, hostReadBytes, hostHeadSize, validateHost, addHost, removeHost, isFolderHost, hostHasAssetsPlus, hostDelete, comfyHistoryDelete, EXT_MIME } from "./hosts.mjs";
 import { cacheGet } from "./cache.mjs";
 
 export function makeRouter(ctx) {
@@ -37,9 +37,17 @@ export function makeRouter(ctx) {
   // --- core resources -----------------------------------------------------
 
   add("GET", "/api/hosts", async () => {
+    const useAssetsPlus = ctx.settings.get("core.delete", "useAssetsPlus", true);
     const out = {};
     for (const [name, addr] of Object.entries(ctx.hosts)) {
-      out[name] = { address: addr, online: await probeHost(addr) };
+      const online = await probeHost(addr);
+      // deleteMode drives the card's delete affordance: folder hosts unlink
+      // (permanent); Comfy hosts trash via assets_plus when allowed and
+      // available; everything else can only be hidden from kosmozoo.
+      let deleteMode = "hide";
+      if (isFolderHost(addr)) deleteMode = "unlink";
+      else if (online && useAssetsPlus && await hostHasAssetsPlus(addr)) deleteMode = "trash";
+      out[name] = { address: addr, online, deleteMode };
     }
     return Response.json(out);
   });
@@ -76,11 +84,15 @@ export function makeRouter(ctx) {
     // File listing comes from the host (HTTP or folder adapter); metadata
     // is overlaid from the store.
     const list = await hostList(ctx.hosts[host]);
-    const names = list.map((f) => f.name);
+    // Hidden images (the delete fallback on hosts that can't delete files)
+    // stay out of every listing — feed, lightbox and diff all walk this.
+    const hidden = new Set(ctx.settings.get("core.delete", "hidden", {})?.[host] ?? []);
+    const visible = hidden.size ? list.filter((f) => !hidden.has(f.name)) : list;
+    const names = visible.map((f) => f.name);
     // The listing feeds the background walk (deduped + meta_fresh-filtered
     // inside feed()); on-screen names would use feed(host, names, true).
     ctx.scraper?.feed(host, names);
-    const size = new Map(list.map((f) => [f.name, f.size]));
+    const size = new Map(visible.map((f) => [f.name, f.size]));
     return Response.json(names.map((filename) => ({
       id: `${host}:${filename}`,
       host,
@@ -99,6 +111,31 @@ export function makeRouter(ctx) {
       meta: ctx.store.metaGet(host, filename),
       judgment: ctx.store.judgmentGet(host, filename),
     });
+  });
+
+  // Delete an image from its source. folder -> unlink (permanent);
+  // Comfy + assets_plus (toggle permitting) -> trash (recoverable);
+  // anything else -> hide from kosmozoo + best-effort Comfy history cleanup
+  // (the file stays on the host — ComfyUI core has no file-delete API).
+  add("DELETE", "/api/images/<id>", async (_req, { id }) => {
+    const [host, filename] = splitHostKey(id);
+    const addr = ctx.hosts[host];
+    if (!addr) return Response.json({ error: "unknown host" }, { status: 404 });
+    const useAssetsPlus = ctx.settings.get("core.delete", "useAssetsPlus", true);
+
+    if (isFolderHost(addr) || (useAssetsPlus && await hostHasAssetsPlus(addr))) {
+      const res = await hostDelete(addr, filename);
+      if (!res.ok) return Response.json({ error: res.detail }, { status: 409 });
+      return Response.json({ deleted: true, mode: res.mode });
+    }
+
+    const hiddenMap = ctx.settings.get("core.delete", "hidden", {}) ?? {};
+    const list = new Set(hiddenMap[host] ?? []);
+    list.add(filename);
+    hiddenMap[host] = [...list];
+    await ctx.settings.set("core.delete", "hidden", hiddenMap);
+    const historyCleared = isFolderHost(addr) ? false : await comfyHistoryDelete(addr, filename);
+    return Response.json({ deleted: true, mode: "hide", historyCleared });
   });
 
   add("HEAD", "/api/images/<id>/bytes", async (_req, { id }) => {

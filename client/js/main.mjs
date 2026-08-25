@@ -114,6 +114,18 @@ function registerCoreChrome() {
   });
 
   chrome.menuItem({
+    id: "delete-assets-plus", kind: "toggle",
+    label: "trash-delete via assets_plus",
+    title: "delete from Comfy hosts through the assets_plus extension (recoverable trash); off falls back to hiding the image",
+    get: () => state.deletePrefs?.useAssetsPlus ?? true,
+    set: async (v) => {
+      await api.setSettings("core.delete", { useAssetsPlus: v }).catch(() => {});
+      state.deletePrefs = { ...state.deletePrefs, useAssetsPlus: v };
+      state.hosts = await api.hosts(); // deleteMode depends on the toggle
+    },
+  });
+
+  chrome.menuItem({
     id: "feedback-path", kind: "custom", searchText: "feedback.json path",
     render(row) {
       const lab = document.createElement("div");

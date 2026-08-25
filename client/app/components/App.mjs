@@ -26,6 +26,7 @@ import { InfoOverlay } from "./InfoOverlay.mjs";
 import { KeysPanel } from "./KeysPanel.mjs";
 import { Lightbox } from "./Lightbox.mjs";
 import { DiffStage } from "./DiffStage.mjs";
+import { ConfirmDelete } from "./ConfirmDelete.mjs";
 
 // public namespace: e2e (and the console) drive the same state the keys do
 window.kosmozoo = { state, render, setRoi, addAnchorFiles, chrome, openDiff };
@@ -55,5 +56,6 @@ export function App() {
     h(KeysPanel, null),
     h(Lightbox, null),
     h(DiffStage, null),
+    h(ConfirmDelete, null),
   );
 }
