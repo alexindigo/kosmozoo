@@ -2,7 +2,7 @@
 // box-fraction (unit-free), persistence is default-absent, state has one
 // render path.
 
-import { assert, assertEquals, assertNotEquals } from "jsr:@std/assert";
+import { assert, assertEquals } from "jsr:@std/assert";
 import { freshView, viewToPersisted, viewFromPersisted, transform, mapFrac, pivotScreen, panFrac } from "../client/js/geometry.mjs";
 import { state } from "../client/js/state.mjs";
 import { render, subscribe } from "../client/app/services/notify.mjs";
@@ -68,16 +68,12 @@ Deno.test("state: single render path — render() fans out to all subscribers", 
   assertEquals(a, 1); // unsubscribed listeners stay quiet
 });
 
-Deno.test("state: the workbench carries pair + view state, closed by default", () => {
+Deno.test("state: workbench closed by default, current-image pointer null", () => {
   assertEquals(state.diff.open, false);
-  assertEquals(state.diff.left, null);
-  assertEquals(state.diff.right, null);
-  assertEquals(state.diff.col, "left");
+  assertEquals(state.current, null);
 });
 
-Deno.test("state: three axes declared, ROI manual-first (null until set)", () => {
-  assertEquals(state.axes.alignment, "shared");
-  assertEquals(state.axes.composition, "flicker"); // manual blink is the default mode
+Deno.test("state: ROI manual-first (null until set), guides a list", () => {
   assertEquals(state.roi, null);
   assert(Array.isArray(state.guides));
 });

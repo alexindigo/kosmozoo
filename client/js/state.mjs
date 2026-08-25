@@ -17,22 +17,13 @@ export const state = {
   anchors: [],          // [{ name, src(dataURL), meta? }] — local drops, persisted
   anchorPaneWidth: 300, // px; divider-adjusted, persisted
   workspace: "details", // right column space: 'details' | 'anchors', persisted
-  // the current image lives ONLY in the URL (route.mjs) — no mirror here,
-  // a second representation would be a drift surface
-  diff: {                 // the workbench: /diff pairs AND the feed browser
+  // The single "current image" pointer — the one source of truth for which
+  // image is current. `remote` is the source (a configured host/folder name,
+  // or "anchor"); `image` is the filename (or anchor name). The URL hash
+  // MIRRORS it (route.mjs) for shareable deep-links; it does not outrank it.
+  current: null,        // { remote, image } | null
+  diff: {               // the workbench: a single-image viewer of state.current
     open: false,
-    left: null,           // { source, file }
-    right: null,          // { source, file } | null (single image)
-    col: "left",          // active side: blink target, pan/zoom target
-    fromFeed: false,      // opened from the feed (URL stays the feed hash)
-    anchorIndex: 0,       // last-used anchor (the feed-side blink partner)
-    candidateIdx: -1,     // last left-side feed image index
-    blend: 0.5,           // top-side opacity in blend
-    split: 0.5,           // wipe position in split
-    view: null,           // shared box-fraction view (geometry.mjs)
-    views: { left: null, right: null }, // independent views
-    leftList: null,       // left source's file list (stepping)
-    rightList: null,
   },
   filter: "",
   hostMenuOpen: false,
@@ -46,13 +37,6 @@ export const state = {
   confirmDelete: null,        // { image } | { images } while the delete confirmation is open
   deletePrefs: { useAssetsPlus: true },  // core.delete settings mirror
   selected: new Set(),        // selected image ids (bulk actions); session-only
-  // axes (see docs/spec.md §1)
-  axes: {
-    alignment: "shared",      // 'independent' | 'shared' | 'face-anchored'
-    composition: "flicker",   // 'flicker' | 'blend' | 'split' | 'difference'
-  },
-  axisReason: null,           // why a just-cycled-past value is unavailable
-  detector: null,             // detector plugin status, when present
   roi: null,            // { fx, fy, fw, fh } box-fractions, manual-first
   guides: [],           // [{ axis, pos }] — persist globally (harvest #12)
   dragGuide: null,      // in-progress guide drag from an edge { axis, pos }

@@ -9,7 +9,7 @@
 import { h, Fragment, Component } from "../../vendor/preact/vendor.mjs";
 import { useEffect, useRef, useState } from "../../vendor/preact/vendor.mjs";
 import { state } from "../../js/state.mjs";
-import { matchesFile, parseUrl } from "../../js/route.mjs";
+import { matchesFile } from "../../js/route.mjs";
 import { subscribe } from "../services/notify.mjs";
 import { useWindow, WINDOW_PAD } from "../hooks/useWindow.mjs";
 import { Card } from "./Card.mjs";
@@ -51,7 +51,7 @@ export function Grid({ view, count, onOpen, onSentinel, registerApi }) {
     return () => obs.disconnect();
   }, [count, onSentinel]);
 
-  const urlFile = parseUrl().file;
+  const cur = state.current;
   const hasMore = count < view.length;
   const trigger = hasMore ? Math.max(0, count - WINDOW_PAD) : -1;
 
@@ -60,7 +60,7 @@ export function Grid({ view, count, onOpen, onSentinel, registerApi }) {
     const image = state.images[idx];
     if (!image) return null;
     const j = image.judgment ?? {};
-    const isCurrent = urlFile && matchesFile(image, state.host, urlFile);
+    const isCurrent = cur && cur.remote === state.host && matchesFile(image, state.host, cur.image);
     return h("div", {
       key: image.id ?? idx,
       class: "card" + (isCurrent ? " current" : ""),

@@ -1,15 +1,14 @@
 // client/app/components/Header.mjs — the top chrome, declared.
 //
-// Composes <HostPicker>, the registry-driven header buttons, the axes status,
-// and the options menu. Reads the chrome registries (js/chrome.mjs) and
-// re-renders when <App> re-renders on the shared render() signal.
+// Composes <HostPicker>, the registry-driven header buttons, and the options
+// menu. Reads the chrome registries (js/chrome.mjs) and re-renders when <App>
+// re-renders on the shared render() signal.
 
 import { h } from "../../vendor/preact/vendor.mjs";
 import { useRef, useEffect } from "../../vendor/preact/vendor.mjs";
 import { state } from "../../js/state.mjs";
 import { render } from "../services/notify.mjs";
 import { headerButtonsList, menuItemsList, toggleMenu } from "../../js/chrome.mjs";
-import { axisStatus } from "../../js/axes.mjs";
 import { rebuildFeed } from "../services/feedView.mjs";
 import { HostPicker } from "./HostPicker.mjs";
 
@@ -109,7 +108,6 @@ export function Header() {
         h("button", { key: b.id, id: b.id, title: b.title, onClick: b.onClick }, b.label)
       ),
     ),
-    h("span", { id: "status" }, axisStatus()),
     h("span", { class: "flexspacer" }),
     h("a", {
       id: "dlFeedback",

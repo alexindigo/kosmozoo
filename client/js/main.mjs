@@ -8,7 +8,7 @@ import { api } from "./api.mjs";
 import { addAnchorFiles, initAnchorsPane, initAnchorsWidth } from "./anchors.mjs";
 import { initWorkspace } from "./workspace.mjs";
 import { initDiff, openDiff, openFromFeed, hideDiff } from "./diff.mjs";
-import { parseUrl, writeFeedHash, stripHostPrefix, findByFile } from "./route.mjs";
+import { parseUrl, setCurrent, mirrorCurrentHash, findByFile } from "./route.mjs";
 import { initRoi } from "./roi.mjs";
 import { initClientPlugins } from "./plugins-client.mjs";
 import { initJudgment, onVisibilityChanged, toggleRevealThumbedDown, toggleHideUp, setDownvoteHides } from "./judgment.mjs";
@@ -155,16 +155,17 @@ function registerCoreChrome() {
 
 // --- load candidates -------------------------------------------------------------
 
-// pasted links / back button: the URL is truth — adopt it, then center.
-// A filename the list doesn't have yet (fresh variations output) triggers
-// one refetch; if it's still absent the URL is kept, not overwritten.
+// pasted links / back button: the URL is adopted into state.current, then
+// the feed centers on it. A filename the list doesn't have yet (fresh
+// variations output) triggers one refetch; if it's still absent the URL is
+// kept, not overwritten.
 async function onUrlChange() {
   const r = parseUrl();
   if (r.view === "diff") {
     openDiff(r.left, r.right); // back/forward into a diff URL re-opens it
     return;
   }
-  if (state.diff.open) hideDiff(); // back out of a diff URL, then apply feed
+  if (state.diff.open) hideDiff(); // navigating away closes the workbench
   if (r.host && r.host !== state.host) {
     if (!state.hosts[r.host]) return;
     await selectHost(r.host, { keepFile: true }); // hash already pristine
@@ -173,6 +174,7 @@ async function onUrlChange() {
   if (!r.file) return;
   const idx = findByFile(r.file);
   if (idx >= 0) {
+    setCurrent(state.host, state.images[idx].filename);
     restoreToIndex(idx);
     render();
   } else {
@@ -215,19 +217,24 @@ async function loadCandidates() {
     }
     rebuildFeed();
     chrome.status.info(statusSummary());
-    // the URL is truth: re-center from it after every (re)fetch. Only a
-    // first visit with no hash at all invents a current image (top card);
-    // a hash the user stripped to #host stays file-less until they scroll.
+    // the URL is adopted into state.current after every (re)fetch, then the
+    // feed centers on it. Only a first visit with no hash at all invents a
+    // current image (top card); a hash the user stripped to #host stays
+    // file-less until they scroll.
     let file = parseUrl().file;
-    if (!file && !location.hash) {
+    let idx = file ? findByFile(file) : -1;
+    if (idx < 0 && !location.hash) {
       const first = viewIndices()[0];
-      if (first != null) {
-        file = stripHostPrefix(state.host, state.images[first].filename);
-      }
+      if (first != null) idx = first;
     }
-    const target = findByFile(file);
-    if (target >= 0) restoreToIndex(target);
-    writeFeedHash(file);
+    if (idx >= 0) {
+      setCurrent(state.host, state.images[idx].filename);
+      restoreToIndex(idx);
+    } else {
+      // URL names a file the list doesn't have (yet) — keep it, no center
+      state.current = file ? { remote: state.host, image: file } : null;
+      mirrorCurrentHash();
+    }
     await pollMetadata();
     render(); // surfaces reflect the loaded host (picker label, axes, etc.)
   } catch (err) {
