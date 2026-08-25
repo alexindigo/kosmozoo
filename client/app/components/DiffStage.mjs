@@ -36,7 +36,6 @@ export function DiffStage() {
         id: "diffSave", title: "download both images", onClick: () => saveBoth(),
         dangerouslySetInnerHTML: { __html: SAVE_SVG + " save both" },
       }),
-      h("span", { id: "diffHint" }, "←→ blink · ↑↓ left · shift+↑↓ right · c mode · a link · x swap · wheel zoom · drag pan · dblclick reset · esc close"),
     ),
     h("div", { id: "diffStage", "data-mode": "flicker" },
       // right first in DOM: in overlay modes left paints on top (blend/

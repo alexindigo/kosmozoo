@@ -403,7 +403,6 @@ main { display: flex; flex: 1; min-height: 0; }
   font: 11px ui-monospace, monospace; }
 #diffMode { color: var(--accent); }
 #diffAlign { color: var(--mid); }
-#diffHint { margin-left: auto; }
 #diffBlend { width: 140px; accent-color: var(--accent); }
 #diffSave { display: flex; align-items: center; gap: 5px;
   background: var(--raise); color: var(--mid); border: 1px solid var(--border);
