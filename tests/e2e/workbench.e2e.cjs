@@ -46,125 +46,15 @@ async function attempt(name, fn) {
     check("anchor dropped locally (blob, never uploaded)", n === 1);
   });
 
-  // --- row 10 ---------------------------------------------------------------
-  await attempt("workbench opens from a card click", async () => {
+  // --- workbench: single-image viewer (opens on card click, Esc closes) ----
+  await attempt("workbench opens on a card click, shows the image, Esc closes", async () => {
     await page.evaluate("document.querySelector('.card .imgwrap').click(), true");
-    await page.poll("window.kosmozoo.state.diff.open === true && window.kosmozoo.state.diff.fromFeed === true", 5000);
-  });
-
-  await attempt("blink candidate->anchor is instant", async () => {
-    const ms = await page.evaluate(`(async () => {
-      const t0 = performance.now();
-      document.dispatchEvent(new KeyboardEvent("keydown", { key: "ArrowRight", bubbles: true }));
-      await new Promise((res, rej) => {
-        const t1 = t0 + 5000;
-        const tick = () => {
-          const a = document.getElementById("diffR");
-          const S = window.kosmozoo.state;
-          if (S.diff.col === "right" && a.getAttribute("src") && a.style.opacity === "1") return res();
-          if (performance.now() > t1) return rej(new Error("blink timeout"));
-          setTimeout(tick, 4);
-        };
-        tick();
-      });
-      return performance.now() - t0;
-    })()`);
-    check("blink candidate->anchor is instant", ms < 250, `${ms.toFixed(1)}ms`);
-  });
-  check("blink landed on the anchor side",
-    await page.evaluate("window.kosmozoo.state.diff.col") === "right");
-
-  await page.key("ArrowLeft");
-  await page.poll("window.kosmozoo.state.diff.col === 'left'", 5000);
-
-  await attempt("axes switch by key", async () => {
-    await page.key("c");
-    const b = await page.evaluate("window.kosmozoo.state.axes.composition");
-    await page.key("c");
-    const sp = await page.evaluate("window.kosmozoo.state.axes.composition");
-    await page.key("c");
-    const d = await page.evaluate("window.kosmozoo.state.axes.composition");
-    check("c cycles flicker->blend->split->difference",
-      b === "blend" && sp === "split" && d === "difference", `${b}/${sp}/${d}`);
-  });
-
-  await attempt("row 11: unmet face-anchored skipped, reason shown", async () => {
-    await page.key("a"); // shared -> (face-anchored unmet) -> independent
-    const align = await page.evaluate("window.kosmozoo.state.axes.alignment");
-    const reason = await page.evaluate("window.kosmozoo.state.axisReason");
-    const status = await page.evaluate("document.getElementById('status').textContent");
-    check("face-anchored skipped (inert)", align === "independent", `landed ${align}`);
-    check("reason names missing config", !!reason && reason.includes("serviceUrl"), reason ?? "none");
-    check("reason visible in chrome", status.includes("serviceUrl"), status.slice(-60));
-  });
-
-  await attempt("ROI persists across navigation; r frames it", async () => {
-    await page.evaluate("window.kosmozoo.setRoi(0.2, 0.2, 0.3, 0.3), true");
-    await page.key("ArrowDown");
-    await page.poll(`(() => {
-      const d = window.kosmozoo.state.diff, i = window.kosmozoo.state.images[1];
-      return i && d.left && d.left.source === i.host &&
-        (d.left.file === i.filename || d.left.file === i.filename.slice(i.host.length + 1));
-    })()`, 5000);
-    const roi = await page.evaluate("window.kosmozoo.state.roi");
-    check("ROI persists across navigation", !!roi && Math.abs(roi.fw - 0.3) < 1e-9);
-    await page.key("r");
-    const s = await page.evaluate(`(() => {
-      const d = window.kosmozoo.state.diff;
-      const v = window.kosmozoo.state.axes.alignment === 'independent' ? d.views[d.col] : d.view;
-      return v?.s ?? 1;
-    })()`);
-    check("r frames the ROI (zoom in)", s > 1, `scale=${Number(s).toFixed(2)}`);
-  });
-
-  // --- row 16 ---------------------------------------------------------------
-  await attempt("row 16: difference on identical pair -> near-black", async () => {
-    await page.key("ArrowUp");
-    await page.poll(`(() => {
-      const d = window.kosmozoo.state.diff, i = window.kosmozoo.state.images[0];
-      return i && d.left && d.left.source === i.host &&
-        (d.left.file === i.filename || d.left.file === i.filename.slice(i.host.length + 1));
-    })()`, 5000);
-    const blend = await page.evaluate(
-      "getComputedStyle(document.getElementById('diffL')).mixBlendMode");
-    check("difference sets mix-blend-mode", blend === "difference", blend);
-    const mean = await page.evaluate(`(async () => {
-      const load = (src) => new Promise((res, rej) => {
-        const i = new Image(); i.onload = () => res(i); i.onerror = rej; i.src = src;
-      });
-      const a = await load(document.getElementById("diffL").src);
-      const b = await load(document.getElementById("diffR").src);
-      const c = document.createElement("canvas");
-      c.width = a.naturalWidth; c.height = a.naturalHeight;
-      const ctx = c.getContext("2d");
-      ctx.drawImage(b, 0, 0);
-      ctx.globalCompositeOperation = "difference";
-      ctx.drawImage(a, 0, 0);
-      const d = ctx.getImageData(0, 0, c.width, c.height).data;
-      let sum = 0;
-      for (let i = 0; i < d.length; i += 4) sum += d[i] + d[i + 1] + d[i + 2];
-      return sum / (d.length / 4 * 3);
-    })()`);
-    check("identical pair composites near-black", mean < 2, `mean=${mean.toFixed(2)}`);
-  });
-
-  // vote keys persist to the engine and survive the reveal
-  await attempt("vote keys persist (u/d/f)", async () => {
-    const leftImage = `(() => {
-      const d = window.kosmozoo.state.diff;
-      return window.kosmozoo.state.images.find((i) => i.host === d.left.source &&
-        (i.filename === d.left.file || i.filename === d.left.source + '#' + d.left.file));
-    })()`;
-    await page.key("u");
-    await page.poll(`(${leftImage})?.judgment?.vote === 'up'`, 5000);
-    const id = await page.evaluate(`(${leftImage}).id`);
-    const serverSide = await page.evaluate(
-      `(async () => (await fetch("/api/judgments/" + encodeURIComponent(${JSON.stringify(id)}))).json())()`);
-    check("vote reached the engine", serverSide.vote === "up", JSON.stringify(serverSide));
-    await page.key("f");
-    await page.poll(`(${leftImage})?.judgment?.favorite === true`, 5000);
-    await page.key("u"); // toggle back off
-    await page.poll(`!(${leftImage})?.judgment?.vote`, 5000);
+    await page.poll("window.kosmozoo.state.diff.open === true", 5000);
+    await page.poll("!!document.getElementById('diffImg').src", 10000);
+    check("workbench shows the current image", true);
+    await page.key("Escape");
+    await page.poll("window.kosmozoo.state.diff.open === false", 5000);
+    check("Esc closes the workbench", true);
   });
 
   // action buttons: ONE pattern — active = filled icon in the accent,
@@ -357,10 +247,11 @@ async function attempt(name, fn) {
   });
 
   // --- row 12 ---------------------------------------------------------------
+  // Feed volume: chunked render reaches the end under scrolling. (The old
+  // 50-keyboard-step workbench walk was removed with the workbench strip.)
   await attempt("row 12: volume", async () => {
     await page.key("Escape");
     await page.poll("window.kosmozoo.state.diff.open === false", 5000);
-    await page.evaluate("window.kosmozoo.setRoi(0, 0, 0, 0), true");
 
     // chunked feed: renders on approach (sentinel + scroll net). Scroll-step
     // until the end-of-list marker shows.
@@ -378,27 +269,6 @@ async function attempt(name, fn) {
       return !!(el && el.getAttribute("src"));
     })()`, 15000);
     check("scroll to end loads tail images", true);
-
-    await page.evaluate("document.querySelector('.card .imgwrap').click(), true");
-    await page.poll("window.kosmozoo.state.diff.open === true", 5000);
-    const t0 = Date.now();
-    for (let i = 0; i < 50; i++) await page.key("ArrowDown");
-    await page.poll(`(() => {
-      const d = window.kosmozoo.state.diff, i = window.kosmozoo.state.images[50];
-      return i && d.left && d.left.source === i.host &&
-        (d.left.file === i.filename || d.left.file === i.filename.slice(i.host.length + 1));
-    })()`, 25000);
-    const walkMs = Date.now() - t0;
-    const follows = await page.evaluate(`(() => {
-      const idx = 50;
-      for (let i = Math.max(0, idx - 4); i <= idx; i++) {
-        const el = document.querySelector('.card[data-idx="' + i + '"] img');
-        if (el && el.getAttribute("src")) return true;
-      }
-      return false;
-    })()`);
-    check("50 keyboard steps complete without stall", true, `${walkMs}ms total`);
-    check("window follows the keyboard", follows);
   });
 
   check("no uncaught page errors", pageErrors.length === 0, pageErrors[0] ?? "");

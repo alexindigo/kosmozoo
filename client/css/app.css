@@ -391,46 +391,15 @@ main { display: flex; flex: 1; min-height: 0; }
   color: var(--mid); padding: 5px 7px; cursor: pointer; display: flex; }
 #diffKeysBtn:hover { color: var(--fg); border-color: var(--dim); }
 
-/* --- workbench: one stage, five compositions -------------------------------
-   side  — two fitted figures in a row
-   flicker/blend/split/difference — both figures stacked in the stage,
-   left over right; the mode decides opacity/clip/blend */
-#diff { position: fixed; inset: 0; background: var(--black); z-index: 40;
-  display: flex; flex-direction: column; }
+/* --- workbench: single-image viewer -----------------------------------------
+   The current image, fitted to the stage. Stripped to the studs: no
+   composition modes, no blink, no zoom/pan — those are being rebuilt. */
+#diff { position: fixed; inset: 0; background: var(--black); z-index: 40; }
 #diff[hidden] { display: none; }
-#diffBar { display: flex; align-items: center; gap: 12px;
-  padding: 6px 48px 6px 12px; color: var(--dim);
-  font: 11px ui-monospace, monospace; }
-#diffMode { color: var(--accent); }
-#diffAlign { color: var(--mid); }
-#diffBlend { width: 140px; accent-color: var(--accent); }
-#diffSave { display: flex; align-items: center; gap: 5px;
-  background: var(--raise); color: var(--mid); border: 1px solid var(--border);
-  border-radius: 4px; cursor: pointer; font: 11px ui-monospace, monospace;
-  padding: 3px 8px; }
-#diffSave:hover { color: var(--fg); border-color: var(--dim); }
-#diffStage { position: relative; flex: 1; min-height: 0; }
-#diffStage[data-mode="side"] { display: flex; gap: 2px; }
-#diffStage[data-mode="side"] .diffside { flex: 1; min-width: 0; margin: 0;
-  display: flex; flex-direction: column; }
-#diffStage[data-mode="side"] .diffside img { flex: 1; min-height: 0;
-  width: 100%; object-fit: contain; background: #0a0a0c; }
-#diffStage:not([data-mode="side"]) .diffside { position: absolute; inset: 0;
-  margin: 0; }
-#diffStage[data-mode="side"] #diffFL { order: -1; }
-#diffStage:not([data-mode="side"]) .diffside img { position: absolute;
-  left: 50%; top: 50%; max-width: none; transform-origin: center;
+#diffStage { position: absolute; inset: 0; display: flex;
+  align-items: center; justify-content: center; }
+#diffImg { max-width: 100%; max-height: 100%; object-fit: contain;
   user-select: none; -webkit-user-drag: none; }
-.difflabel { color: var(--dim); font: 11px ui-monospace, monospace;
-  padding: 4px 2px 0; overflow: hidden; text-overflow: ellipsis;
-  white-space: nowrap; }
-#diffStage:not([data-mode="side"]) .difflabel { position: absolute;
-  bottom: 0; padding: 2px 6px; background: rgba(0,0,0,.55); z-index: 3; }
-#diffStage:not([data-mode="side"]) #diffFL .difflabel { left: 0; }
-#diffStage:not([data-mode="side"]) #diffFR .difflabel { right: 0; }
-.diffside.on .difflabel { color: var(--accent); }
-#diffSplitLine { position: absolute; top: 0; bottom: 0; width: 2px;
-  background: var(--orange); z-index: 4; cursor: col-resize; }
 #diffClose { position: absolute; top: 6px; right: 8px; z-index: 45;
   background: rgba(20,20,28,.65); border: 1px solid var(--border);
   border-radius: 6px; color: var(--mid); padding: 5px 7px; cursor: pointer;

@@ -2,29 +2,23 @@
 //
 // Two spaces share the pane: the metadata details of the current image and the
 // anchors feed. state.workspace picks which is shown. The details body reads
-// the current image (workbench image while open, else the URL's file).
+// state.current (the single current-image pointer) — hidden included.
 
 import { h } from "../../vendor/preact/vendor.mjs";
 import { useRef, useEffect } from "../../vendor/preact/vendor.mjs";
 import { state } from "../../js/state.mjs";
 import { buildMetaBody } from "../../js/fields.mjs";
-import { parseUrl, findByFile } from "../../js/route.mjs";
 import { AnchorSpace } from "./AnchorSpace.mjs";
 
-// workbench image while open, else the URL's file — hidden included
+// the current image (host/folder image or anchor)
 function detailsImage() {
-  const d = state.diff;
-  if (d.open) {
-    const side = (d.col === "left" ? d.left : d.right) ?? d.left ?? d.right;
-    if (!side) return null;
-    if (side.source === "anchor") {
-      return state.anchors.find((a) => a.name === side.file) ?? null;
-    }
-    return state.images.find((i) => i.host === side.source &&
-      (i.filename === side.file || i.filename === side.source + "#" + side.file)) ?? null;
+  const c = state.current;
+  if (!c) return null;
+  if (c.remote === "anchor") {
+    return state.anchors.find((a) => a.name === c.image) ?? null;
   }
-  const idx = findByFile(parseUrl().file);
-  return idx >= 0 ? state.images[idx] : null;
+  return state.images.find((i) => i.host === c.remote &&
+    (i.filename === c.image || i.filename === c.remote + "#" + c.image)) ?? null;
 }
 
 function DetailsBody() {

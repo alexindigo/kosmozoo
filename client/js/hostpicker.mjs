@@ -11,7 +11,7 @@
 
 import { state } from "./state.mjs";
 import { render } from "../app/services/notify.mjs";
-import { writeFeedHash } from "./route.mjs";
+import { mirrorCurrentHash } from "./route.mjs";
 import { api } from "./api.mjs";
 import { chrome } from "./chrome.mjs";
 
@@ -59,7 +59,10 @@ export async function removeHost(name) {
 export async function selectHost(name, { keepFile } = {}) {
   state.host = name;
   state.hostMenuOpen = false;
-  if (!keepFile) writeFeedHash(null);
+  if (!keepFile) {
+    state.current = { remote: name, image: null }; // file named the old host
+    mirrorCurrentHash();
+  }
   api.setSettings("core.ui", { host: name }).catch(() => {});
   // switching hosts reloads the feed from that host (loadCandidates owns
   // fetch + rebuild + recenter + summary + metadata poll)

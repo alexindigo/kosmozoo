@@ -1,14 +1,17 @@
-// client/js/route.mjs — the URL is the store for the current image.
+// client/js/route.mjs — the current image lives in state.current; the URL
+// MIRRORS it.
 //
-//   /#<host>            current host selection
-//   /#<host>#<file>     host + current image
+//   state.current = { remote, image }
+//     remote — a configured host/folder name, or "anchor"
+//     image  — the filename (or anchor name)
 //
-// location is the single source of truth: parseUrl() is the only reader,
-// the writers below the only writers. Nothing else caches the current
-// image — a second representation would be a drift surface.
-//
-// Files in the hash are stripped of any "<host>#" save prefix (the hash
-// already carries the host — mirror of card.mjs hostPrefixed).
+// state.current is the single source of truth (the "current image" pointer).
+// The URL hash mirrors it for shareable deep-links:
+//   /#<remote>          current remote selection
+//   /#<remote>#<image>  remote + current image
+// Anchors are not feed URLs, so a current anchor is NOT mirrored to the hash.
+// Files in the hash are stripped of any "<remote>#" save prefix (the hash
+// already carries the remote — mirror of card.mjs hostPrefixed).
 
 import { state } from "./state.mjs";
 import { api } from "./api.mjs";
@@ -28,9 +31,10 @@ export function parseUrl() {
   };
 }
 
-// /diff#<srcL>#<fileL>:<srcR>#<fileR> — sources are configured host names
-// or "anchor" (the local feed); files are percent-encoded, so raw ":" is a
-// safe side separator. Pure: unit-testable without a location.
+// /diff#<srcL>#<fileL>:<srcR>#<fileR> — the pair view is gone (the workbench
+// is a single-image viewer now), but the grammar is kept so /diff deep links
+// still resolve (they open the workbench on the left side) and the pure
+// parsers stay unit-testable.
 export function parseDiffHash(h) {
   const [ls, rs] = h.split(":");
   return { left: parseSide(ls), right: parseSide(rs) };
@@ -50,18 +54,21 @@ export function diffUrl(left, right) {
     + ":" + right.source + "#" + encodeURIComponent(right.file);
 }
 
-// one resolver for every source kind; new feeds plug in here
+// one resolver for every source kind; new feeds plug in here. Accepts either
+// a {source,file} side or a state.current {remote,image}.
 export function resolveSide(side) {
   if (!side) return null;
-  if (side.source === "anchor") {
-    const a = state.anchors.find((x) => x.name === side.file);
+  const source = side.source ?? side.remote;
+  const file = side.file ?? side.image;
+  if (source === "anchor") {
+    const a = state.anchors.find((x) => x.name === file);
     return a ? { name: a.name, src: a.src, meta: a.meta ?? null } : null;
   }
-  if (state.hosts[side.source]) {
+  if (state.hosts[source]) {
     return {
-      name: side.file,
-      host: side.source,
-      src: api.imageBytesUrl(`${side.source}:${side.file}`),
+      name: file,
+      host: source,
+      src: api.imageBytesUrl(`${source}:${file}`),
       meta: null,
     };
   }
@@ -87,15 +94,19 @@ export function findByFile(file) {
 
 // --- writers -------------------------------------------------------------
 
-// feed view: #host[#file]
-export function writeFeedHash(file) {
-  const want = "#" + encodeURIComponent(state.host)
-    + (file ? "#" + encodeURIComponent(file) : "");
-  if (location.hash !== want) history.replaceState(history.state, "", want);
+// Set the single "current image" pointer, then mirror it to the URL hash.
+export function setCurrent(remote, image) {
+  state.current = { remote, image };
+  mirrorCurrentHash();
 }
 
-// user-driven change of the current image while browsing the feed
-export function browseToFile(file) {
-  if (parseUrl().file === file) return;
-  writeFeedHash(file);
+// Mirror state.current to the URL hash (replaceState → no hashchange loop).
+// Anchors are not feed URLs, so they are not mirrored.
+export function mirrorCurrentHash() {
+  const c = state.current;
+  if (!c || c.remote === "anchor") return;
+  const file = c.image ? stripHostPrefix(c.remote, c.image) : null;
+  const want = "#" + encodeURIComponent(c.remote)
+    + (file ? "#" + encodeURIComponent(file) : "");
+  if (location.hash !== want) history.replaceState(history.state, "", want);
 }
