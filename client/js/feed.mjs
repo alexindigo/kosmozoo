@@ -2,7 +2,7 @@
 //
 // The DOM is declared by <Grid> (client/app/components); this engine owns the
 // view (filtered + visible display order), the chunked render position, the
-// scroll/restore progress mechanisms, and the lightbox seams. The image
+// scroll/restore progress mechanisms, and the workbench seams. The image
 // window — which cards carry src — lives in useWindow, so there is no manual
 // load/unload here.
 //
@@ -10,7 +10,7 @@
 // - Chunked render: the sentinel WINDOW_PAD cards before the rendered end
 //   triggers the next chunk; a scroll-distance safety net backs it up.
 // - Restore extends chunks until the target card exists, then centers it.
-// - The lightbox walks the VIEW, extending chunks when stepping past the
+// - The workbench walks the VIEW, extending chunks when stepping past the
 //   rendered end; its position joins the window (see useWindow).
 
 import { h, render } from "../vendor/preact/vendor.mjs";
@@ -22,7 +22,7 @@ import { api } from "./api.mjs";
 const CHUNK = 20;
 const PREFETCH = 4;
 
-let openHook = null;   // (imgIdx) -> void   opens the lightbox
+let openHook = null;   // (imgIdx) -> void   opens the workbench
 let wantHook = null;   // (image) -> void    meta-want reporting
 
 // view = display order of image indices (filtered + visible).
@@ -80,7 +80,7 @@ export function renderChunk() {
   drawGrid();
 }
 
-// --- window seams (the lightbox reaches the window through these) -----------
+// --- window seams (the workbench reaches the window through these) ----------
 
 export function applyWindow() { windowApi?.recompute(); }
 export function retryImage(idx) { windowApi?.retry(idx); }
@@ -120,7 +120,7 @@ export function restoreToIndex(idx) {
   suppressScrollSnap();
 }
 
-// --- lightbox-driven seams ----------------------------------------------------
+// --- workbench-driven seams ---------------------------------------------------
 
 // Direction-aware prefetch for Up/Down traversal (fetch seam: DOM-free).
 export function prefetchFrom(imgIdx, dir, fetcher = globalThis.fetch) {

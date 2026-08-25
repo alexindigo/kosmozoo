@@ -4,8 +4,6 @@
 // Preact side (app/services/notify.mjs) — <App> subscribes for the tree.
 // Box-fraction view state: see geometry.mjs.
 
-import { freshView } from "./geometry.mjs";
-
 // The single application state object.
 export const state = {
   // server-driven data
@@ -16,28 +14,19 @@ export const state = {
   feedbackPath: null,   // where judgments live (engine-side)
   fieldsCfg: null,      // metadata fields picker config (core.fields.cfg)
   // session UI state (dies with the page)
-  lightbox: {
-    open: false,
-    index: -1,          // index into images
-    col: "candidate",   // 'candidate' | 'anchor'
-    view: freshView(),
-    loadGen: 0,         // load-generation guard (harvest #1)
-    splitX: null,       // split-wipe line, viewport px; null = centered
-    blendOpacity: 0.5,
-    anchorIndex: 0,
-  },
   anchors: [],          // [{ name, src(dataURL), meta? }] — local drops, persisted
   anchorPaneWidth: 300, // px; divider-adjusted, persisted
   workspace: "details", // right column space: 'details' | 'anchors', persisted
   // the current image lives ONLY in the URL (route.mjs) — no mirror here,
   // a second representation would be a drift surface
-  diff: {                 // the /diff comparison view
+  diff: {                 // the workbench: /diff pairs AND the feed browser
     open: false,
     left: null,           // { source, file }
-    right: null,          // { source, file }
+    right: null,          // { source, file } | null (single image)
     col: "left",          // active side: blink target, pan/zoom target
-    composition: "flicker", // flicker | blend | split | difference | side
-    alignment: "shared",  // shared | independent registration
+    fromFeed: false,      // opened from the feed (URL stays the feed hash)
+    anchorIndex: 0,       // last-used anchor (the feed-side blink partner)
+    candidateIdx: -1,     // last left-side feed image index
     blend: 0.5,           // top-side opacity in blend
     split: 0.5,           // wipe position in split
     view: null,           // shared box-fraction view (geometry.mjs)

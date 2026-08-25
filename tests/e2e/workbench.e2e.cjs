@@ -47,9 +47,9 @@ async function attempt(name, fn) {
   });
 
   // --- row 10 ---------------------------------------------------------------
-  await attempt("lightbox opens", async () => {
+  await attempt("workbench opens from a card click", async () => {
     await page.evaluate("document.querySelector('.card .imgwrap').click(), true");
-    await page.poll("window.kosmozoo.state.lightbox.open === true", 5000);
+    await page.poll("window.kosmozoo.state.diff.open === true && window.kosmozoo.state.diff.fromFeed === true", 5000);
   });
 
   await attempt("blink candidate->anchor is instant", async () => {
@@ -59,9 +59,9 @@ async function attempt(name, fn) {
       await new Promise((res, rej) => {
         const t1 = t0 + 5000;
         const tick = () => {
-          const a = document.getElementById("lbAnchor");
+          const a = document.getElementById("diffR");
           const S = window.kosmozoo.state;
-          if (S.lightbox.col === "anchor" && a.getAttribute("src") && a.style.opacity === "1") return res();
+          if (S.diff.col === "right" && a.getAttribute("src") && a.style.opacity === "1") return res();
           if (performance.now() > t1) return rej(new Error("blink timeout"));
           setTimeout(tick, 4);
         };
@@ -71,11 +71,11 @@ async function attempt(name, fn) {
     })()`);
     check("blink candidate->anchor is instant", ms < 250, `${ms.toFixed(1)}ms`);
   });
-  check("blink landed on anchor column",
-    await page.evaluate("window.kosmozoo.state.lightbox.col") === "anchor");
+  check("blink landed on the anchor side",
+    await page.evaluate("window.kosmozoo.state.diff.col") === "right");
 
   await page.key("ArrowLeft");
-  await page.poll("window.kosmozoo.state.lightbox.col === 'candidate'", 5000);
+  await page.poll("window.kosmozoo.state.diff.col === 'left'", 5000);
 
   await attempt("axes switch by key", async () => {
     await page.key("c");
@@ -101,27 +101,39 @@ async function attempt(name, fn) {
   await attempt("ROI persists across navigation; r frames it", async () => {
     await page.evaluate("window.kosmozoo.setRoi(0.2, 0.2, 0.3, 0.3), true");
     await page.key("ArrowDown");
-    await page.poll("window.kosmozoo.state.lightbox.index === 1", 5000);
+    await page.poll(`(() => {
+      const d = window.kosmozoo.state.diff, i = window.kosmozoo.state.images[1];
+      return i && d.left && d.left.source === i.host &&
+        (d.left.file === i.filename || d.left.file === i.filename.slice(i.host.length + 1));
+    })()`, 5000);
     const roi = await page.evaluate("window.kosmozoo.state.roi");
     check("ROI persists across navigation", !!roi && Math.abs(roi.fw - 0.3) < 1e-9);
     await page.key("r");
-    const s = await page.evaluate("window.kosmozoo.state.lightbox.view.s");
-    check("r frames the ROI (zoom in)", s > 1, `scale=${s.toFixed(2)}`);
+    const s = await page.evaluate(`(() => {
+      const d = window.kosmozoo.state.diff;
+      const v = window.kosmozoo.state.axes.alignment === 'independent' ? d.views[d.col] : d.view;
+      return v?.s ?? 1;
+    })()`);
+    check("r frames the ROI (zoom in)", s > 1, `scale=${Number(s).toFixed(2)}`);
   });
 
   // --- row 16 ---------------------------------------------------------------
   await attempt("row 16: difference on identical pair -> near-black", async () => {
     await page.key("ArrowUp");
-    await page.poll("window.kosmozoo.state.lightbox.index === 0", 5000);
+    await page.poll(`(() => {
+      const d = window.kosmozoo.state.diff, i = window.kosmozoo.state.images[0];
+      return i && d.left && d.left.source === i.host &&
+        (d.left.file === i.filename || d.left.file === i.filename.slice(i.host.length + 1));
+    })()`, 5000);
     const blend = await page.evaluate(
-      "getComputedStyle(document.getElementById('lbCandidate')).mixBlendMode");
+      "getComputedStyle(document.getElementById('diffL')).mixBlendMode");
     check("difference sets mix-blend-mode", blend === "difference", blend);
     const mean = await page.evaluate(`(async () => {
       const load = (src) => new Promise((res, rej) => {
         const i = new Image(); i.onload = () => res(i); i.onerror = rej; i.src = src;
       });
-      const a = await load(document.getElementById("lbCandidate").src);
-      const b = await load(document.getElementById("lbAnchor").src);
+      const a = await load(document.getElementById("diffL").src);
+      const b = await load(document.getElementById("diffR").src);
       const c = document.createElement("canvas");
       c.width = a.naturalWidth; c.height = a.naturalHeight;
       const ctx = c.getContext("2d");
@@ -138,16 +150,21 @@ async function attempt(name, fn) {
 
   // vote keys persist to the engine and survive the reveal
   await attempt("vote keys persist (u/d/f)", async () => {
+    const leftImage = `(() => {
+      const d = window.kosmozoo.state.diff;
+      return window.kosmozoo.state.images.find((i) => i.host === d.left.source &&
+        (i.filename === d.left.file || i.filename === d.left.source + '#' + d.left.file));
+    })()`;
     await page.key("u");
-    await page.poll("window.kosmozoo.state.images[window.kosmozoo.state.lightbox.index]?.judgment?.vote === 'up'", 5000);
-    const id = await page.evaluate("window.kosmozoo.state.images[window.kosmozoo.state.lightbox.index].id");
+    await page.poll(`(${leftImage})?.judgment?.vote === 'up'`, 5000);
+    const id = await page.evaluate(`(${leftImage}).id`);
     const serverSide = await page.evaluate(
       `(async () => (await fetch("/api/judgments/" + encodeURIComponent(${JSON.stringify(id)}))).json())()`);
     check("vote reached the engine", serverSide.vote === "up", JSON.stringify(serverSide));
     await page.key("f");
-    await page.poll("window.kosmozoo.state.images[window.kosmozoo.state.lightbox.index]?.judgment?.favorite === true", 5000);
+    await page.poll(`(${leftImage})?.judgment?.favorite === true`, 5000);
     await page.key("u"); // toggle back off
-    await page.poll("!window.kosmozoo.state.images[window.kosmozoo.state.lightbox.index]?.judgment?.vote", 5000);
+    await page.poll(`!(${leftImage})?.judgment?.vote`, 5000);
   });
 
   // action buttons: ONE pattern — active = filled icon in the accent,
@@ -241,9 +258,9 @@ async function attempt(name, fn) {
 
   // --- candidate in-feed zoom (parity with anchor thumbs) ------------------
   await attempt("in-feed zoom: candidate card zooms + persists; emoji-free UI", async () => {
-    // the lightbox overlays the feed — close it so the wheel hits the card
+    // the workbench overlays the feed — close it so the wheel hits the card
     await page.key("Escape");
-    await page.poll("window.kosmozoo.state.lightbox.open === false", 3000);
+    await page.poll("window.kosmozoo.state.diff.open === false", 3000);
     // Ctrl+wheel on a card image zooms it in place
     const box = await page.evaluate(`(() => {
       const img = document.querySelector('.card .imgwrap img');
@@ -342,7 +359,7 @@ async function attempt(name, fn) {
   // --- row 12 ---------------------------------------------------------------
   await attempt("row 12: volume", async () => {
     await page.key("Escape");
-    await page.poll("window.kosmozoo.state.lightbox.open === false", 5000);
+    await page.poll("window.kosmozoo.state.diff.open === false", 5000);
     await page.evaluate("window.kosmozoo.setRoi(0, 0, 0, 0), true");
 
     // chunked feed: renders on approach (sentinel + scroll net). Scroll-step
@@ -363,13 +380,17 @@ async function attempt(name, fn) {
     check("scroll to end loads tail images", true);
 
     await page.evaluate("document.querySelector('.card .imgwrap').click(), true");
-    await page.poll("window.kosmozoo.state.lightbox.open === true", 5000);
+    await page.poll("window.kosmozoo.state.diff.open === true", 5000);
     const t0 = Date.now();
     for (let i = 0; i < 50; i++) await page.key("ArrowDown");
-    await page.poll("window.kosmozoo.state.lightbox.index === 50", 25000);
+    await page.poll(`(() => {
+      const d = window.kosmozoo.state.diff, i = window.kosmozoo.state.images[50];
+      return i && d.left && d.left.source === i.host &&
+        (d.left.file === i.filename || d.left.file === i.filename.slice(i.host.length + 1));
+    })()`, 25000);
     const walkMs = Date.now() - t0;
     const follows = await page.evaluate(`(() => {
-      const idx = window.kosmozoo.state.lightbox.index;
+      const idx = 50;
       for (let i = Math.max(0, idx - 4); i <= idx; i++) {
         const el = document.querySelector('.card[data-idx="' + i + '"] img');
         if (el && el.getAttribute("src")) return true;

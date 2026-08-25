@@ -2,9 +2,9 @@
 //
 // Replaces the feed's two chunked IntersectionObservers + the manual
 // load/unload pair. Visibility is observed here; the window is
-// visible ∪ lightbox-position ± WINDOW_PAD. A card's src is DERIVED from the
-// window (in-window -> bytes url, out -> null), so there is no manual unload
-// and no artificial error class — removing src simply renders no src.
+// visible ∪ workbench-position ± WINDOW_PAD. A card's src is DERIVED from
+// the window (in-window -> bytes url, out -> null), so there is no manual
+// unload and no artificial error class — removing src simply renders no src.
 
 import { useState, useEffect, useRef, useCallback } from "../../vendor/preact/vendor.mjs";
 import { state } from "../../js/state.mjs";
@@ -12,6 +12,18 @@ import { api } from "../../js/api.mjs";
 
 export const WINDOW_PAD = 10;
 const ERROR_RETRY_MS = 8000;
+
+// The workbench's left side, when it names the loaded feed host, keeps its
+// card (and neighbors) in the window while browsing.
+function workbenchFeedIdx() {
+  const d = state.diff;
+  if (!d.open || !d.left || d.left.source !== state.host) return -1;
+  for (let i = 0; i < state.images.length; i++) {
+    const f = state.images[i].filename;
+    if (f === d.left.file || f === d.left.source + "#" + d.left.file) return i;
+  }
+  return -1;
+}
 
 export function useWindow() {
   const [, bump] = useState(0);
@@ -29,7 +41,8 @@ export function useWindow() {
       let any = false;
       for (const idx of [...errored.current]) {
         // only retry cards still in the window
-        if (visible.current.has(idx) || (state.lightbox.open && Math.abs(state.lightbox.index - idx) <= WINDOW_PAD)) {
+        const wbIdx = workbenchFeedIdx();
+        if (visible.current.has(idx) || (wbIdx >= 0 && Math.abs(wbIdx - idx) <= WINDOW_PAD)) {
           retryNonce.current.set(idx, Date.now());
           errored.current.delete(idx);
           any = true;
@@ -81,9 +94,10 @@ export function useWindow() {
     return fn;
   }, []);
 
-  // window bounds from visibility ∪ lightbox position
+  // window bounds from visibility ∪ workbench position
   const base = [...visible.current];
-  if (state.lightbox.open && state.lightbox.index >= 0) base.push(state.lightbox.index);
+  const wbIdx = workbenchFeedIdx();
+  if (wbIdx >= 0) base.push(wbIdx);
   let lo = Infinity, hi = -Infinity;
   if (base.length) {
     lo = Math.min(...base) - WINDOW_PAD;
@@ -112,7 +126,7 @@ export function useWindow() {
     bump((v) => v + 1);
   }, []);
 
-  // force a window recompute (the lightbox calls this after stepping)
+  // force a window recompute (the workbench calls this after stepping)
   const recompute = useCallback(() => { bump((v) => v + 1); }, []);
 
   return { register, getSrc, inWindow, markLoaded, markError, retry, recompute };

@@ -35,7 +35,8 @@ function compositionNeeds(id) {
 
 export const AXES = {
   alignment: ["independent", "shared", "face-anchored"],
-  composition: ["flicker", "blend", "split", "difference"],
+  // side lays the pair out as two fitted figures; the rest overlay them.
+  composition: ["flicker", "blend", "split", "difference", "side"],
 };
 
 function needsFor(axis, id) {

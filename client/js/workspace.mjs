@@ -16,7 +16,7 @@ export function initWorkspace() {
     if (raf) return;
     raf = requestAnimationFrame(() => {
       raf = 0;
-      if (state.lightbox.open) return;
+      if (state.diff.open) return;
       const file = topCardFile(col);
       if (!file || file === parseUrl().file) return;
       writeFeedHash(file);

@@ -12,7 +12,7 @@ import { render } from "../services/notify.mjs";
 import { iconSvg } from "../../js/icons.mjs";
 import { aspectFromMeta } from "./Zoomable.mjs";
 import { addAnchorFiles, removeAnchor, showAnchorInfo, persistAnchors } from "../../js/anchors.mjs";
-import { openAnchor } from "../../js/lightbox.mjs";
+import { openFromAnchor } from "../../js/diff.mjs";
 import { Zoomable } from "./Zoomable.mjs";
 import { IconButton } from "./IconButton.mjs";
 
@@ -68,7 +68,7 @@ function AnchorCard({ anchor, idx }) {
       stripText: anchorSummary(anchor.meta),
       zoomKey: `anchor:${anchor.name}`,
       onZoomChange: setZoomed,
-      onOpen: () => openAnchor(idx),
+      onOpen: () => openFromAnchor(idx),
     }),
     h("div", { class: "ctitle" },
       h("span", { class: "aname", title: anchor.name }, anchor.name),

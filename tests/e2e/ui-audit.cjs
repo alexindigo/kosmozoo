@@ -36,8 +36,8 @@ const INVENTORY_JS = `(() => {
     .forEach((el) => add("header", el));
   document.querySelectorAll("#menu *, #hostDrop *")
     .forEach((el) => { if (/^(button|input|select|a|label)$/.test(el.tagName.toLowerCase())) add("menu", el); });
-  document.querySelectorAll("#lightbox button, #lightbox input, #lightbox select, #lightbox [id]")
-    .forEach((el) => add("lightbox", el));
+  document.querySelectorAll("#diff button, #diff input, #diff select, #diff [id]")
+    .forEach((el) => add("workbench", el));
   return items;
 })()`;
 
@@ -69,15 +69,15 @@ const INVENTORY_JS = `(() => {
   const invMenu = await page.evaluate(INVENTORY_JS);
   require("node:fs").writeFileSync(`${OUT}/inventory-menu.json`, JSON.stringify(invMenu, null, 2));
 
-  // close menu, open the lightbox on the first card
+  // close menu, open the workbench on the first card
   await page.evaluate("document.body.click(), true");
   await sleep(200);
-  await page.evaluate("document.querySelector('.card').click(), true");
+  await page.evaluate("document.querySelector('.card .imgwrap').click(), true");
   await sleep(1200);
-  await shot(page, "04-lightbox");
+  await shot(page, "04-workbench");
 
-  const invLb = await page.evaluate(INVENTORY_JS);
-  require("node:fs").writeFileSync(`${OUT}/inventory-lightbox.json`, JSON.stringify(invLb, null, 2));
+  const invWb = await page.evaluate(INVENTORY_JS);
+  require("node:fs").writeFileSync(`${OUT}/inventory-workbench.json`, JSON.stringify(invWb, null, 2));
 
   await page.close();
   console.log("audit done");
