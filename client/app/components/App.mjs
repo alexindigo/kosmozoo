@@ -1,17 +1,13 @@
 // client/app/components/App.mjs — the Preact root component.
 //
-// Single-growing-tree approach: <App> owns the whole body. Surfaces that are
-// not yet components render as constant dangerouslySetInnerHTML passthrough
-// (see ../skeleton.mjs) — Preact diffs them vdom-to-vdom as "unchanged" and
-// never touches what the legacy modules write inside. Each passthrough is
-// replaced by a real component in its phase.
+// <App> owns the whole body: every surface is a component. The imperative
+// engines (feed, lightbox, diff) keep their async image work and write
+// src/style/dataset directly on elements the components render — never
+// attributes the vdom declares, so re-renders and engines don't collide.
 
 import { h, Fragment, useEffect } from "../../vendor/preact/vendor.mjs";
 import { loadBootData } from "../services/bootData.mjs";
 import { startScraperPoll } from "../services/scraper.mjs";
-import {
-  DIFF_INNER,
-} from "../skeleton.mjs";
 import { Header } from "./Header.mjs";
 import { WorkspacePane } from "./WorkspacePane.mjs";
 import { WorkspaceBar } from "./WorkspaceBar.mjs";
@@ -19,6 +15,7 @@ import { FieldsOverlay } from "./FieldsOverlay.mjs";
 import { InfoOverlay } from "./InfoOverlay.mjs";
 import { KeysPanel } from "./KeysPanel.mjs";
 import { Lightbox } from "./Lightbox.mjs";
+import { DiffStage } from "./DiffStage.mjs";
 
 export function App() {
   useEffect(() => {
@@ -41,6 +38,6 @@ export function App() {
     h(InfoOverlay, null),
     h(KeysPanel, null),
     h(Lightbox, null),
-    h("div", { id: "diff", hidden: true, dangerouslySetInnerHTML: { __html: DIFF_INNER } }),
+    h(DiffStage, null),
   );
 }

@@ -11,7 +11,7 @@
 // box-fraction view state (geometry.mjs) makes identical registration
 // work across differing dimensions.
 
-import { state, render, onRender } from "./state.mjs";
+import { state, render } from "./state.mjs";
 import { diffUrl, resolveSide } from "./route.mjs";
 import { setVote, toggleFavorite } from "./judgment.mjs";
 import { freshView, transform, panFrac, viewToPersisted, viewFromPersisted } from "./geometry.mjs";
@@ -23,12 +23,6 @@ const $ = (id) => document.getElementById(id);
 const MODES = ["flicker", "blend", "split", "difference", "side"];
 
 export function initDiff() {
-  $("diffClose").addEventListener("click", () => closeDiff());
-  $("diffSave").addEventListener("click", saveBoth);
-  $("diffBlend").addEventListener("input", (e) => {
-    state.diff.blend = Number(e.target.value);
-    applyMode();
-  });
   document.addEventListener("keydown", onKey);
 
   const stage = $("diffStage");
@@ -104,7 +98,7 @@ async function onKey(e) {
 
 // save both sides: host images via the bytes route (host#file names, same
 // convention as the card's save), anchors by their stored data URL
-function saveBoth() {
+export function saveBoth() {
   for (const side of [state.diff.left, state.diff.right]) {
     if (!side) continue;
     if (side.source === "anchor") {
@@ -124,6 +118,12 @@ function download(href, name) {
   document.body.appendChild(a);
   a.click();
   a.remove();
+}
+
+// the blend slider's input, forwarded by <DiffStage>
+export function setBlend(value) {
+  state.diff.blend = Number(value);
+  applyMode();
 }
 
 // --- the pair ---------------------------------------------------------
@@ -151,6 +151,7 @@ export function openDiff(left, right, { push } = {}) {
     history.replaceState(history.state, "", url);
   }
   render();
+  applyMode();
   loadSide("left");
   loadSide("right");
   warmList("left");
@@ -335,6 +336,7 @@ async function step(which, dir) {
   else d.views[which] = v ?? freshView();
   prefetch(which, next, dir);
   render();
+  applyMode();
   await loadSide(which);
 }
 
@@ -359,6 +361,7 @@ async function swapSides() {
   [d.views.left, d.views.right] = [d.views.right, d.views.left];
   history.replaceState(history.state, "", diffUrl(d.left, d.right));
   render();
+  applyMode();
   await Promise.all([loadSide("left"), loadSide("right")]);
 }
 
@@ -445,11 +448,8 @@ document.addEventListener("pointerup", () => {
 });
 
 // --- renderer -----------------------------------------------------------
-
-onRender((s) => {
-  if (typeof document === "undefined") return;
-  const ov = $("diff");
-  ov.hidden = !s.diff.open;
-  if (!s.diff.open) return;
-  applyMode();
-});
+//
+// <DiffStage> owns the #diff hidden flag from state.diff.open. The old
+// onRender writer re-applied the mode styling on every render while open;
+// that styling is idempotent, so the renders that happen while open
+// (openDiff, step, swapSides) call applyMode() explicitly instead.
