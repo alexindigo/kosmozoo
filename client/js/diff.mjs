@@ -27,7 +27,7 @@ import { chrome } from "./chrome.mjs";
 const $ = (id) => document.getElementById(id);
 
 export async function initDiff() {
-  document.addEventListener("keydown", onKey);
+  registerWorkbenchKeys();
 
   // the window resizes under a fitted pair — re-fit (rAF-debounced)
   let raf = 0;
@@ -76,56 +76,40 @@ export async function initDiff() {
   });
 }
 
-async function onKey(e) {
-  if (!state.diff.open) return;
-  if (state.keysPanelOpen || state.capturing) return; // panel outranks
-  const d = state.diff;
-  switch (e.key) {
-    case "Escape":
-      e.preventDefault(); closeDiff(); return;
-    case "ArrowLeft":
-    case "ArrowRight":
-      e.preventDefault();
-      if (!d.left || !d.right) return; // single image — nothing to blink
-      d.col = d.col === "left" ? "right" : "left";
-      applyMode();
-      return;
-    case "c":
-      e.preventDefault();
-      cycleAxis("composition");
-      applyMode();
-      return;
-    case "a":
-      e.preventDefault();
-      writeBackViews();
-      cycleAxis("alignment");
-      applyMode();
-      applyView();
-      return;
-    case "x":
-      e.preventDefault();
-      await swapSides();
-      return;
-    case "ArrowUp":
-      e.preventDefault(); await step(e.shiftKey ? "right" : "left", -1); return;
-    case "ArrowDown":
-      e.preventDefault(); await step(e.shiftKey ? "right" : "left", 1); return;
-    case "u":
-      e.preventDefault(); await judge("up"); return;
-    case "d":
-      e.preventDefault(); await judge("down"); return;
-    case "f":
-      e.preventDefault(); await judge("favorite"); return;
-    case "r":
-      e.preventDefault();
-      if (state.roi) {
-        const v = zoomToRoi(viewFor(d.col) ?? freshView());
-        if (state.axes.alignment === "independent") d.views[d.col] = v;
-        else d.view = v;
-        applyView();
-      }
-      return;
-  }
+// Workbench shortcuts are registered actions (ctx "workbench"), so the keys
+// panel lists them — the bar itself stays free of shortcut hints. Each fires
+// only while the workbench is open and no overlay outranks it.
+function registerWorkbenchKeys() {
+  const when = () => state.diff.open && !state.keysPanelOpen;
+  const blink = () => {
+    const d = state.diff;
+    if (!d.left || !d.right) return; // single image — nothing to blink
+    d.col = d.col === "left" ? "right" : "left";
+    applyMode();
+  };
+  const frameRoi = () => {
+    const d = state.diff;
+    if (!state.roi) return;
+    const v = zoomToRoi(viewFor(d.col) ?? freshView());
+    if (state.axes.alignment === "independent") d.views[d.col] = v;
+    else d.view = v;
+    applyView();
+  };
+  const o = { when, ctx: "workbench" };
+  chrome.bind("wb.close", "Escape", () => closeDiff(), { ...o, desc: "close the workbench" });
+  chrome.bind("wb.blink.left", "ArrowLeft", blink, { ...o, desc: "blink candidate ↔ anchor" });
+  chrome.bind("wb.blink.right", "ArrowRight", blink, { ...o, desc: "blink candidate ↔ anchor" });
+  chrome.bind("wb.prev", "ArrowUp", () => step("left", -1), { ...o, desc: "previous candidate" });
+  chrome.bind("wb.next", "ArrowDown", () => step("left", 1), { ...o, desc: "next candidate" });
+  chrome.bind("wb.prev.right", "Shift+ArrowUp", () => step("right", -1), { ...o, desc: "previous right-side image" });
+  chrome.bind("wb.next.right", "Shift+ArrowDown", () => step("right", 1), { ...o, desc: "next right-side image" });
+  chrome.bind("wb.comp", "c", () => { cycleAxis("composition"); applyMode(); }, { ...o, desc: "cycle composition mode" });
+  chrome.bind("wb.align", "a", () => { writeBackViews(); cycleAxis("alignment"); applyMode(); applyView(); }, { ...o, desc: "cycle alignment" });
+  chrome.bind("wb.swap", "x", () => swapSides(), { ...o, desc: "swap the two sides" });
+  chrome.bind("wb.vote.up", "u", () => judge("up"), { ...o, desc: "thumbs-up the left image" });
+  chrome.bind("wb.vote.down", "d", () => judge("down"), { ...o, desc: "thumbs-down the left image" });
+  chrome.bind("wb.fav", "f", () => judge("favorite"), { ...o, desc: "favorite the left image" });
+  chrome.bind("wb.roi", "r", frameRoi, { ...o, desc: "zoom to the ROI" });
 }
 
 // save both sides: host images via the bytes route (host#file names, same
