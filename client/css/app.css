@@ -80,6 +80,17 @@ body { display: flex; flex-direction: column; }
 .haddrow input:focus { outline: none; border-color: var(--accent); }
 .haddrow button { font-size: 11px; padding: 4px 8px; }
 
+/* --- bulk bar: fixed under the header while images are selected ---------- */
+#bulkBar { position: fixed; top: 37px; left: 0; right: 0; z-index: 60;
+  display: flex; gap: 6px; align-items: center; padding: 5px 12px;
+  background: rgba(26, 26, 26, .95); border-bottom: 1px solid var(--border); }
+#bulkCount { font-size: 12px; font-weight: 600; color: var(--accent);
+  margin-right: 6px; white-space: nowrap; }
+#bulkClear { background: transparent; border: 1px solid var(--border);
+  border-radius: 4px; color: var(--mid); font-size: 13px; line-height: 1;
+  padding: 3px 8px; cursor: pointer; margin-left: auto; }
+#bulkClear:hover { color: var(--fg); border-color: var(--dim); }
+
 /* --- main: two feeds share the window; divider splits; each column scrolls
    itself (no page-level scroll) ------------------------------------------- */
 main { display: flex; flex: 1; min-height: 0; }
@@ -156,6 +167,17 @@ main { display: flex; flex: 1; min-height: 0; }
 .ctitle { display: flex; justify-content: space-between; align-items: flex-start;
   gap: 8px; margin: 8px 0 2px; font-weight: 600; color: var(--mid); }
 .ctitle .btnwrap { white-space: nowrap; display: flex; gap: 4px; align-items: center; }
+.ctitle-left { display: flex; gap: 6px; align-items: center; min-width: 0; }
+/* bulk-select checkbox, left of the filename */
+.selcb { -webkit-appearance: none; appearance: none; flex: 0 0 auto;
+  width: 13px; height: 13px; border-radius: 3px;
+  background: transparent; border: 1.5px solid var(--dim);
+  cursor: pointer; position: relative; }
+.selcb:hover { border-color: var(--accent); }
+.selcb:checked { background: var(--accent); border-color: var(--accent); }
+.selcb:checked::after { content: ""; position: absolute; left: 3.5px; top: 1px;
+  width: 3px; height: 7px; border: solid var(--bg); border-width: 0 1.5px 1.5px 0;
+  transform: rotate(45deg); }
 
 /* anchor cards get the same chrome; column-specific bits: */
 .anchor .aname { font: 11px ui-monospace, monospace; color: var(--mid);

@@ -35,7 +35,7 @@ function aspectFromMeta(meta) {
   return meta?.width && meta?.height ? `${meta.width} / ${meta.height}` : null;
 }
 
-export function Card({ image, imgIdx, src, meta, onOpen, onErrorClick, onImgPhase }) {
+export function Card({ image, imgIdx, src, meta, selected, onOpen, onErrorClick, onImgPhase }) {
   const [ar, setAr] = useState(() => aspectFromMeta(meta));
   const [facts, setFacts] = useState(() => ({
     w: meta?.width ?? null, h: meta?.height ?? null, bytes: image.size ?? null,
@@ -126,7 +126,19 @@ export function Card({ image, imgIdx, src, meta, onOpen, onErrorClick, onImgPhas
       onLoaded, onOpen, onErrorClick, onImgPhase,
     }),
     h("div", { class: "ctitle" },
-      h("span", { class: "copyable", title: "click to copy host#filename", onClick: copyName }, image.filename),
+      h("span", { class: "ctitle-left" },
+        h("input", {
+          type: "checkbox", class: "selcb", checked: selected,
+          title: "select for bulk actions",
+          onClick: (e) => {
+            e.stopPropagation();
+            if (e.target.checked) state.selected.add(image.id);
+            else state.selected.delete(image.id);
+            render();
+          },
+        }),
+        h("span", { class: "copyable", title: "click to copy host#filename", onClick: copyName }, image.filename),
+      ),
       h("span", { class: "btnwrap" },
         h("span", { class: "saved" + (flash ? " show" : "") }, "Feedback saved"),
         h(IconButton, {

@@ -54,8 +54,9 @@ export const state = {
   capturing: null,      // action id awaiting a keypress (rebind)
   fieldsOverlayOpen: false,   // metadata fields picker
   infoOverlay: { open: false, name: "", meta: null },  // anchor ⓘ params
-  confirmDelete: null,        // { image } while the delete confirmation is open
+  confirmDelete: null,        // { image } | { images } while the delete confirmation is open
   deletePrefs: { useAssetsPlus: true },  // core.delete settings mirror
+  selected: new Set(),        // selected image ids (bulk actions); session-only
   // axes (see docs/spec.md §1)
   axes: {
     alignment: "shared",      // 'independent' | 'shared' | 'face-anchored'
