@@ -10,12 +10,10 @@ import { h } from "../../vendor/preact/vendor.mjs";
 import { state } from "../../js/state.mjs";
 import { noteImgLoad } from "../../js/lightbox.mjs";
 import { toggleKeysPanel } from "../../js/keys-panel.mjs";
-import { useVersion } from "../hooks/useVersion.mjs";
 
 const KEYS_BTN_SVG = '<svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.6"><rect x="2" y="6" width="20" height="12" rx="2"/><path d="M6 10h.01M10 10h.01M14 10h.01M18 10h.01M6 14h.01M18 14h.01M9 14h6"/></svg>';
 
 export function Lightbox() {
-  useVersion();
   return h("div", { id: "lightbox", hidden: !state.lightbox.open },
     h("img", { id: "lbCandidate", alt: "", onLoad: (e) => noteImgLoad(e.target) }),
     h("img", { id: "lbAnchor", alt: "", onLoad: (e) => noteImgLoad(e.target) }),

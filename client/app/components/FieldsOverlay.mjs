@@ -4,9 +4,9 @@
 // (the cards' meta refresh). Master↔per-field sync falls out of re-render.
 
 import { h } from "../../vendor/preact/vendor.mjs";
-import { state, render } from "../../js/state.mjs";
+import { state } from "../../js/state.mjs";
+import { render } from "../services/notify.mjs";
 import { META_FIELD_GROUPS, persist, notifyFieldsChanged } from "../../js/fields.mjs";
-import { useVersion } from "../hooks/useVersion.mjs";
 import { Modal } from "./Modal.mjs";
 
 const CLOSE_SVG = '<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 6l-12 12" /><path d="M6 6l12 12" /></svg>';
@@ -54,7 +54,6 @@ function masterToggle(gname, fields, col) {
 }
 
 export function FieldsOverlay() {
-  useVersion();
   const close = () => { state.fieldsOverlayOpen = false; render(); };
 
   const tbl = [];

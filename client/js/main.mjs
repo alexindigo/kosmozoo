@@ -2,14 +2,15 @@
 // the same registry plugins use), and the feed's orchestration (candidate
 // loads, URL-as-truth centering, load-failure surface).
 
-import { state, render } from "./state.mjs";
+import { state } from "./state.mjs";
+import { render } from "../app/services/notify.mjs";
 import { api } from "./api.mjs";
 import { initLightbox } from "./lightbox.mjs";
 import { addAnchorFiles, initAnchorsPane, initAnchorsWidth } from "./anchors.mjs";
 import { initWorkspace } from "./workspace.mjs";
 import { initDiff, openDiff, hideDiff } from "./diff.mjs";
 import { parseUrl, writeFeedHash, stripHostPrefix, findByFile } from "./route.mjs";
-import { initRoi, setRoi } from "./roi.mjs";
+import { initRoi } from "./roi.mjs";
 import { initClientPlugins } from "./plugins-client.mjs";
 import { initJudgment, onVisibilityChanged, toggleRevealThumbedDown, toggleHideUp, setDownvoteHides } from "./judgment.mjs";
 import { chrome, initKeyDispatch } from "./chrome.mjs";
@@ -28,9 +29,6 @@ import { scraperPendingText } from "../app/services/scraper.mjs";
 import { rebuildFeed, statusSummary } from "../app/services/feedView.mjs";
 
 const $ = (id) => document.getElementById(id);
-
-// public namespace: e2e (and the console) drives the same state the keys do
-window.kosmozoo = { state, render, setRoi, addAnchorFiles, chrome, openDiff };
 
 // drag-and-drop anywhere drops anchors (local files, never uploaded)
 document.addEventListener("dragover", (e) => e.preventDefault());

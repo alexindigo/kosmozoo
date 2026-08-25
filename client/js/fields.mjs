@@ -7,7 +7,8 @@
 //   ⓘ overlay — ALL fields, picker-exempt by design (the full-details view)
 // The picker overlay has per-field card/strip toggles and per-group masters.
 
-import { state, render } from "./state.mjs";
+import { state } from "./state.mjs";
+import { render } from "../app/services/notify.mjs";
 import { api } from "./api.mjs";
 
 export const META_FIELD_GROUPS = [

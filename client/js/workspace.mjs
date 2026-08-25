@@ -5,7 +5,8 @@
 // so they follow. The workspace bar and the pane itself are components
 // (<WorkspaceBar>, <WorkspacePane>).
 
-import { state, render } from "./state.mjs";
+import { state } from "./state.mjs";
+import { render } from "../app/services/notify.mjs";
 import { parseUrl, writeFeedHash, stripHostPrefix } from "./route.mjs";
 
 export function initWorkspace() {

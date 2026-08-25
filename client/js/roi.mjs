@@ -6,7 +6,8 @@
 // as a persistent ROI marker. ROI is in box-fractions, so once the pair is
 // registered an ROI applies to both images automatically.
 
-import { state, render } from "./state.mjs";
+import { state } from "./state.mjs";
+import { render } from "../app/services/notify.mjs";
 import { api } from "./api.mjs";
 
 const GUIDES_KEY = "core.guides";

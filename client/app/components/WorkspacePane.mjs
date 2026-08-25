@@ -4,12 +4,11 @@
 // anchors feed. state.workspace picks which is shown. The details body reads
 // the current image (lightbox image while open, else the URL's file).
 
-import { h, Fragment } from "../../vendor/preact/vendor.mjs";
+import { h } from "../../vendor/preact/vendor.mjs";
 import { useRef, useEffect } from "../../vendor/preact/vendor.mjs";
 import { state } from "../../js/state.mjs";
 import { buildMetaBody } from "../../js/fields.mjs";
 import { parseUrl, findByFile } from "../../js/route.mjs";
-import { useVersion } from "../hooks/useVersion.mjs";
 import { AnchorSpace } from "./AnchorSpace.mjs";
 
 // lightbox image while open, else the URL's file — hidden included
@@ -23,7 +22,6 @@ function detailsImage() {
 }
 
 function DetailsBody() {
-  useVersion();
   const ref = useRef(null);
   const img = detailsImage();
   useEffect(() => {
@@ -54,7 +52,6 @@ function DetailsBody() {
 }
 
 export function WorkspacePane() {
-  useVersion();
   return h("aside", { id: "workspace" },
     h("div", { id: "wsDetails", class: "ws-space", hidden: state.workspace !== "details" },
       h(DetailsBody, null),

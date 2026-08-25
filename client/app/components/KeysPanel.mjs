@@ -4,14 +4,13 @@
 // right-click resets it; overrides persist in settings core.keys.
 
 import { h } from "../../vendor/preact/vendor.mjs";
-import { state, render } from "../../js/state.mjs";
+import { state } from "../../js/state.mjs";
+import { render } from "../services/notify.mjs";
 import { api } from "../../js/api.mjs";
 import { chrome, actionsList, resetKey, resetAllKeys } from "../../js/chrome.mjs";
-import { useVersion } from "../hooks/useVersion.mjs";
 import { Modal } from "./Modal.mjs";
 
 export function KeysPanel() {
-  useVersion();
   const close = () => { state.keysPanelOpen = false; state.capturing = null; render(); };
 
   const q = (state.keysFilter ?? "").toLowerCase();

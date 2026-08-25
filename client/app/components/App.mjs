@@ -4,8 +4,18 @@
 // engines (feed, lightbox, diff) keep their async image work and write
 // src/style/dataset directly on elements the components render — never
 // attributes the vdom declares, so re-renders and engines don't collide.
+//
+// The bridge snapshot lives here: render() (app/services/notify.mjs) bumps
+// one version, and the whole tree re-renders. <Grid> — a root of its own
+// inside #grid — subscribes separately.
 
-import { h, Fragment, useEffect } from "../../vendor/preact/vendor.mjs";
+import { h, Fragment, useEffect, useState } from "../../vendor/preact/vendor.mjs";
+import { state } from "../../js/state.mjs";
+import { render, subscribe } from "../services/notify.mjs";
+import { setRoi } from "../../js/roi.mjs";
+import { addAnchorFiles } from "../../js/anchors.mjs";
+import { chrome } from "../../js/chrome.mjs";
+import { openDiff } from "../../js/diff.mjs";
 import { loadBootData } from "../services/bootData.mjs";
 import { startScraperPoll } from "../services/scraper.mjs";
 import { Header } from "./Header.mjs";
@@ -17,7 +27,13 @@ import { KeysPanel } from "./KeysPanel.mjs";
 import { Lightbox } from "./Lightbox.mjs";
 import { DiffStage } from "./DiffStage.mjs";
 
+// public namespace: e2e (and the console) drive the same state the keys do
+window.kosmozoo = { state, render, setRoi, addAnchorFiles, chrome, openDiff };
+
 export function App() {
+  const [, setVersion] = useState(0);
+  useEffect(() => subscribe(() => setVersion((v) => v + 1)), []);
+
   useEffect(() => {
     // The legacy boot surfaces a load failure in the status line; swallow it
     // here so this effect never leaves an unhandled rejection.

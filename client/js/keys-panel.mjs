@@ -2,7 +2,8 @@
 // bindings, the capture hook and the persisted keymap. <KeysPanel> renders
 // the panel itself; this module keeps only what has no DOM.
 
-import { state, render } from "./state.mjs";
+import { state } from "./state.mjs";
+import { render } from "../app/services/notify.mjs";
 import { api } from "./api.mjs";
 import {
   chrome, rebind,

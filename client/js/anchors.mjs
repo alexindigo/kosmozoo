@@ -11,7 +11,8 @@
 // send bytes). Reorder by drag with a marked internal type so the dropzone
 // can tell reorder from file drop.
 
-import { state, render } from "./state.mjs";
+import { state } from "./state.mjs";
+import { render } from "../app/services/notify.mjs";
 import { api } from "./api.mjs";
 import { metaFromPngBytes } from "/shared/extractor.mjs";
 import { chrome } from "./chrome.mjs";

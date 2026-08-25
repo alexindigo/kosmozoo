@@ -9,7 +9,8 @@
 // The DOM itself is declared by <HostPicker> (client/app/components); this
 // module owns selection, add/remove, and the boot select callback.
 
-import { state, render } from "./state.mjs";
+import { state } from "./state.mjs";
+import { render } from "../app/services/notify.mjs";
 import { writeFeedHash } from "./route.mjs";
 import { api } from "./api.mjs";
 import { chrome } from "./chrome.mjs";

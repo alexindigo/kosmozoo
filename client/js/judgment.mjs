@@ -6,7 +6,8 @@
 // setting. "Show thumbed-down" is a temporary reveal — never a data deletion
 // (the outgoing code deleted every down-vote to achieve the same effect).
 
-import { state, render } from "./state.mjs";
+import { state } from "./state.mjs";
+import { render } from "../app/services/notify.mjs";
 import { api } from "./api.mjs";
 
 const COUPLING_KEY = "core.judgment";

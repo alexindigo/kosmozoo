@@ -2,7 +2,8 @@
 // place + scroll-driven wants. (Moved verbatim from main.mjs; the legacy feed
 // still drives it through wantMeta/pollMetadata/refreshAllCardMeta.)
 
-import { state, render } from "../../js/state.mjs";
+import { state } from "../../js/state.mjs";
+import { render } from "./notify.mjs";
 import { api } from "../../js/api.mjs";
 import { chrome } from "../../js/chrome.mjs";
 

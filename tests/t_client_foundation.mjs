@@ -4,7 +4,8 @@
 
 import { assert, assertEquals, assertNotEquals } from "jsr:@std/assert";
 import { freshView, viewToPersisted, viewFromPersisted, transform, mapFrac, pivotScreen, panFrac } from "../client/js/geometry.mjs";
-import { state, render, onRender } from "../client/js/state.mjs";
+import { state } from "../client/js/state.mjs";
+import { render, subscribe } from "../client/app/services/notify.mjs";
 
 const BOX = { w: 1000, h: 500 };
 
@@ -54,13 +55,17 @@ Deno.test("geometry: pivotScreen is window centre for identity view", () => {
   assertEquals([x, y], [800, 450]);
 });
 
-Deno.test("state: single render path — render() fans out to all surfaces", () => {
+Deno.test("state: single render path — render() fans out to all subscribers", () => {
   let a = 0, b = 0;
-  onRender(() => a++);
-  onRender(() => b++);
+  const unsubA = subscribe(() => a++);
+  const unsubB = subscribe(() => b++);
   render();
   assertEquals(a, 1);
   assertEquals(b, 1); // every subscriber ran from the single render call
+  unsubA();
+  unsubB();
+  render();
+  assertEquals(a, 1); // unsubscribed listeners stay quiet
 });
 
 Deno.test("state: lightbox carries a load-generation guard (harvest #1)", () => {
