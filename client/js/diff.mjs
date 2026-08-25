@@ -507,8 +507,10 @@ function writeBackViews() {
 // Wheel input: two-finger scroll / mouse wheel PANS; pinch (which browsers
 // report as ctrl+wheel) zooms toward the cursor. Zoom is proportional to the
 // gesture's deltaY with a low intensity — the old fixed ±20% per event made
-// pinching wildly oversensitive.
+// pinching wildly oversensitive. Pan is scaled down too: touchpad deltas
+// (with inertia) arrive hot, so full 1:1 tracking feels skittish.
 const PINCH_ZOOM = 0.005;
+const PAN_SPEED = 0.5;
 
 function onWheel(e) {
   if (!state.diff.open || state.axes.composition === "side") return;
@@ -527,8 +529,8 @@ function onWheel(e) {
     v.tyf += (py / box.h) * (1 / s2 - 1 / v.s);
     v.s = s2;
   } else {
-    // scroll pans like a drag would (content follows the fingers)
-    const [fx, fy] = panFrac(v, box, -e.deltaX, -e.deltaY);
+    // scroll pans like a drag would (content follows the fingers), calmed
+    const [fx, fy] = panFrac(v, box, -e.deltaX * PAN_SPEED, -e.deltaY * PAN_SPEED);
     v.txf += fx;
     v.tyf += fy;
   }
