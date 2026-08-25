@@ -395,6 +395,36 @@ async function main() {
       await cdp.evaluate(`document.querySelector('.vz-close')?.click()`);
     });
 
+    // --- relative ranges (batch mode) ----------------------------------------
+    // Offsets resolve against each image's own current value at run time;
+    // params the graph lacks drop out instead of erroring.
+    await attempt("relative run resolves offsets per image", async () => {
+      const res = await cdp.evaluate(`(async () => {
+        const r = await fetch("/api/plugins/variations/run", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            id: "fake:flux-basic.png", host: "fake", filename: "flux-basic.png",
+            relative: true,
+            ranges: {
+              steps: { enabled: true, min: -5, max: 5, increment: 1, clamp: [1, 150] },
+              guidance: { enabled: true, min: -1, max: 1, increment: 0.5, clamp: [0, 30] },
+              cfg: { enabled: true, min: -1, max: 1, increment: 0.5, clamp: [0, 30] },
+            },
+            prefix: "", suffix: "",
+          }),
+        });
+        return { status: r.status, body: await r.json() };
+      })()`);
+      // flux-basic graph: steps=20, guidance=3.5, no cfg node (SamplerCustom
+      // Advanced, no CfgGuider). steps 20±5 → 11 values; guidance 3.5±1 →
+      // 5 values; cartesian 55 minus the current combo → 54. cfg drops out
+      // silently — had it stayed in, the total would differ.
+      check("relative run resolves offsets per image",
+        res.status === 200 && res.body.total === 54,
+        JSON.stringify(res.body).slice(0, 140));
+    });
+
   } finally {
     await cdp.close();
   }

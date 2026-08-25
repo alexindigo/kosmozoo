@@ -13,6 +13,7 @@ import { chrome } from "../../js/chrome.mjs";
 import { iconSvg } from "../../js/icons.mjs";
 import { rebuildFeed } from "../services/feedView.mjs";
 import { IconButton } from "./IconButton.mjs";
+import { toggleVariationsBulk } from "./VariationsModal.mjs";
 
 function selectedImages() {
   return state.images.filter((i) => state.selected.has(i.id));
@@ -63,6 +64,11 @@ export function BulkBar() {
 
   return h("div", { id: "bulkBar" },
     h("span", { id: "bulkCount" }, `${n} selected`),
+    h(IconButton, {
+      icon: iconSvg("wand", 16), variant: "variations",
+      title: "generate variations of all selected (one relative sweep, applied to each)",
+      onAction: () => toggleVariationsBulk(images),
+    }),
     h(IconButton, {
       icon: iconSvg("thumb-down"), variant: "down",
       title: "thumbs-down all selected (hides, if down-vote hides is on)",

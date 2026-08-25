@@ -180,6 +180,27 @@ function mutateGraph(graph, permutation) {
   return { graph: clone, applied };
 }
 
+// --- relative ranges (batch mode) ---------------------------------------------
+//
+// Batch sweeps specify offsets from each image's OWN current value, not
+// absolutes — the client can't know every image's current value, but this
+// handler just inspected the graph and does. Resolve offsets to clamped
+// absolutes here; params this graph doesn't have drop out entirely.
+// Mutates + returns the per-request ranges object.
+export function resolveRelativeRanges(ranges, currentValues) {
+  const round = (v) => Math.round(v * 1e10) / 1e10;
+  for (const [key, r] of Object.entries(ranges)) {
+    const cur = currentValues[key];
+    if (cur == null || !Array.isArray(r.clamp)) { delete ranges[key]; continue; }
+    const [clo, chi] = r.clamp;
+    const lo = Math.min(Math.max(cur + r.min, clo), chi);
+    const hi = Math.min(Math.max(cur + r.max, clo), chi);
+    r.min = round(Math.min(lo, hi));
+    r.max = round(Math.max(lo, hi));
+  }
+  return ranges;
+}
+
 // --- permutation engine ------------------------------------------------------
 
 function rangeValues(min, max, step) {
@@ -347,7 +368,7 @@ export function register(kz) {
     try { body = await req.json(); }
     catch { return Response.json({ error: "JSON body required" }, { status: 400 }); }
 
-    const { id, host, filename, ranges, increment, prefix, suffix } = body;
+    const { id, host, filename, ranges, increment, prefix, suffix, relative } = body;
     if (!id || !host || !filename || !ranges) {
       return Response.json({ error: "missing required fields" }, { status: 400 });
     }
@@ -379,6 +400,10 @@ export function register(kz) {
       currentValues[param] = info.current;
       labelMap[param] = info.label;
     }
+
+    // Batch sweeps arrive as offsets from each image's own current value;
+    // resolve them now that this graph's current values are known.
+    if (relative) resolveRelativeRanges(ranges, currentValues);
 
     const permutations = generatePermutations(ranges, fallbackInc, currentValues);
     if (permutations.length === 0) {
