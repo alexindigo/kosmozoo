@@ -14,9 +14,13 @@ import { state } from "../../js/state.mjs";
 import { render } from "../services/notify.mjs";
 import { api } from "../../js/api.mjs";
 import { chrome } from "../../js/chrome.mjs";
-import { close as closeLightbox } from "../../js/lightbox.mjs";
+import { closeDiff } from "../../js/diff.mjs";
 import { rebuildFeed } from "../services/feedView.mjs";
 import { Modal } from "./Modal.mjs";
+
+// does either workbench side show this image?
+const sideMatches = (side, img) => !!side && side.source === img.host &&
+  (side.file === img.filename || side.file === img.host + "#" + img.filename);
 
 const COPY = {
   trash: {
@@ -64,9 +68,9 @@ export function ConfirmDelete() {
     if (busy) return;
     setBusy(true);
     try {
-      // the lightbox may be sitting on one of these images
-      if (state.lightbox.open && images.some((i) => i.id === state.images[state.lightbox.index]?.id)) {
-        await closeLightbox();
+      // the workbench may be sitting on one of these images
+      if (state.diff.open && images.some((i) => sideMatches(state.diff.left, i) || sideMatches(state.diff.right, i))) {
+        closeDiff();
       }
       const results = await Promise.allSettled(images.map((img) => api.deleteImage(img.id)));
       const okIds = new Set();

@@ -68,10 +68,11 @@ Deno.test("state: single render path — render() fans out to all subscribers", 
   assertEquals(a, 1); // unsubscribed listeners stay quiet
 });
 
-Deno.test("state: lightbox carries a load-generation guard (harvest #1)", () => {
-  assertEquals(typeof state.lightbox.loadGen, "number");
-  const g = ++state.lightbox.loadGen;
-  assertNotEquals(g, state.lightbox.loadGen - 0 === g ? g + 1 : g); // monotonic
+Deno.test("state: the workbench carries pair + view state, closed by default", () => {
+  assertEquals(state.diff.open, false);
+  assertEquals(state.diff.left, null);
+  assertEquals(state.diff.right, null);
+  assertEquals(state.diff.col, "left");
 });
 
 Deno.test("state: three axes declared, ROI manual-first (null until set)", () => {

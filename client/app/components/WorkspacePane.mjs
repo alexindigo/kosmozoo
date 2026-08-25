@@ -2,7 +2,7 @@
 //
 // Two spaces share the pane: the metadata details of the current image and the
 // anchors feed. state.workspace picks which is shown. The details body reads
-// the current image (lightbox image while open, else the URL's file).
+// the current image (workbench image while open, else the URL's file).
 
 import { h } from "../../vendor/preact/vendor.mjs";
 import { useRef, useEffect } from "../../vendor/preact/vendor.mjs";
@@ -11,11 +11,17 @@ import { buildMetaBody } from "../../js/fields.mjs";
 import { parseUrl, findByFile } from "../../js/route.mjs";
 import { AnchorSpace } from "./AnchorSpace.mjs";
 
-// lightbox image while open, else the URL's file — hidden included
+// workbench image while open, else the URL's file — hidden included
 function detailsImage() {
-  if (state.lightbox.open) {
-    if (state.lightbox.col === "candidate") return state.images[state.lightbox.index] ?? null;
-    return state.anchors[state.lightbox.anchorIndex ?? 0] ?? null;
+  const d = state.diff;
+  if (d.open) {
+    const side = (d.col === "left" ? d.left : d.right) ?? d.left ?? d.right;
+    if (!side) return null;
+    if (side.source === "anchor") {
+      return state.anchors.find((a) => a.name === side.file) ?? null;
+    }
+    return state.images.find((i) => i.host === side.source &&
+      (i.filename === side.file || i.filename === side.source + "#" + side.file)) ?? null;
   }
   const idx = findByFile(parseUrl().file);
   return idx >= 0 ? state.images[idx] : null;

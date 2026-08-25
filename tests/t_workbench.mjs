@@ -5,7 +5,7 @@ import { assert, assertEquals, assertNotEquals } from "jsr:@std/assert";
 import { state } from "../client/js/state.mjs";
 import { freshView, viewToPersisted, viewFromPersisted } from "../client/js/geometry.mjs";
 
-// The lightbox module touches the DOM; contract tests target the *mechanism*
+// The workbench module touches the DOM; contract tests target the *mechanism*
 // level (state + ordering), not pixels — charter invariant 6: pixel/timing
 // claims need a real browser and live in the dogfood gate instead.
 
@@ -13,13 +13,13 @@ Deno.test("blink: shared alignment keeps the view object across a column switch"
   // mechanism #1: with shared alignment the view carries over unchanged —
   // identical registration is what makes blink comparison work.
   state.axes.alignment = "shared";
-  state.lightbox.view = { s: 2, txf: 0.1, tyf: 0, fh: false, fv: false, rot: 0 };
-  const before = state.lightbox.view;
-  // simulate the switchColumn shared path (no writeBack/readBack)
+  state.diff.view = { s: 2, txf: 0.1, tyf: 0, fh: false, fv: false, rot: 0 };
+  const before = state.diff.view;
+  // simulate the column switch shared path (no writeBack/readBack)
   const shared = state.axes.alignment !== "independent";
   if (!shared) throw new Error("test misconfigured");
   // view must be the SAME reference — untouched
-  assertEquals(state.lightbox.view, before);
+  assertEquals(state.diff.view, before);
 });
 
 Deno.test("blink: write-back happens before incoming read (harvest #2)", () => {

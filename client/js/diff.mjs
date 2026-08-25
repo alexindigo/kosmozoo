@@ -1,38 +1,59 @@
-// client/js/diff.mjs — the /diff comparison workbench.
+// client/js/diff.mjs — the workbench: ONE full-screen viewer.
 //
-// The URL /diff#<srcL>#<fileL>:<srcR>#<fileR> names the pair; everything
-// else here is view state: composition mode, alignment, blink column,
-// zoom/pan registrations. Sources resolve through route.resolveSide
+// Comparison view and feed browser in a single surface. The URL
+// /diff#<srcL>#<fileL>:<srcR>#<fileR> names an explicit pair; opened from
+// the feed (card click / anchor card) the left side is the candidate and
+// the right side the last-used anchor, and the viewer doubles as the
+// feed's full-screen browser: Up/Down walk the filtered feed view (window
+// + prefetch + feed hash), Esc re-centers the feed where browsing left off.
+//
+// Composition + alignment are the app-wide axes (state.axes, js/axes.mjs):
+// flicker, blend, split, difference, side; shared / independent /
+// face-anchored registration. Sources resolve through route.resolveSide
 // (configured hosts, local anchors — more feeds plug in later).
-//
-// Compositions: side (two figures), flicker (blink), blend (top
-// opacity), split (draggable wipe), difference (mix-blend-mode).
-// Alignment: shared registration vs independent per side — the
-// box-fraction view state (geometry.mjs) makes identical registration
-// work across differing dimensions.
 
 import { state } from "./state.mjs";
 import { render } from "../app/services/notify.mjs";
-import { diffUrl, resolveSide } from "./route.mjs";
+import { diffUrl, resolveSide, browseToFile, findByFile, parseUrl, stripHostPrefix } from "./route.mjs";
 import { setVote, toggleFavorite } from "./judgment.mjs";
 import { freshView, transform, panFrac, viewToPersisted, viewFromPersisted } from "./geometry.mjs";
 import { getView, setView, flushViews } from "./views.mjs";
 import { api } from "./api.mjs";
+import { cycleAxis } from "./axes.mjs";
+import { zoomToRoi } from "./roi.mjs";
+import { viewStep, prefetchFrom, applyWindow, restoreToIndex } from "./feed.mjs";
+import { chrome } from "./chrome.mjs";
 
 const $ = (id) => document.getElementById(id);
 
-const MODES = ["flicker", "blend", "split", "difference", "side"];
-
-export function initDiff() {
+export async function initDiff() {
   document.addEventListener("keydown", onKey);
+
+  // the window resizes under a fitted pair — re-fit (rAF-debounced)
+  let raf = 0;
+  window.addEventListener("resize", () => {
+    if (!state.diff.open || raf) return;
+    raf = requestAnimationFrame(() => { raf = 0; applyMode(); });
+  });
+
+  // Detector status drives the face-anchored alignment need (absent ≠ broken).
+  try {
+    const plugins = await api.plugins();
+    if (plugins.some((p) => p.name === "detector")) {
+      const r = await fetch("/api/plugins/detector/status");
+      state.detector = await r.json();
+    }
+  } catch {
+    state.detector = { state: "absent" };
+  }
 
   const stage = $("diffStage");
   stage.addEventListener("wheel", onWheel, { passive: false });
   stage.addEventListener("pointerdown", onPointerDown);
   stage.addEventListener("dblclick", () => {
     writeBackViews();
-    if (state.diff.alignment === "shared") state.diff.view = freshView();
-    else state.diff.views[state.diff.col] = freshView();
+    if (state.axes.alignment === "independent") state.diff.views[state.diff.col] = freshView();
+    else state.diff.view = freshView();
     applyView();
     writeBackViews();
   });
@@ -65,18 +86,19 @@ async function onKey(e) {
     case "ArrowLeft":
     case "ArrowRight":
       e.preventDefault();
+      if (!d.left || !d.right) return; // single image — nothing to blink
       d.col = d.col === "left" ? "right" : "left";
       applyMode();
       return;
     case "c":
       e.preventDefault();
-      d.composition = MODES[(MODES.indexOf(d.composition) + 1) % MODES.length];
+      cycleAxis("composition");
       applyMode();
       return;
     case "a":
       e.preventDefault();
       writeBackViews();
-      d.alignment = d.alignment === "shared" ? "independent" : "shared";
+      cycleAxis("alignment");
       applyMode();
       applyView();
       return;
@@ -94,6 +116,15 @@ async function onKey(e) {
       e.preventDefault(); await judge("down"); return;
     case "f":
       e.preventDefault(); await judge("favorite"); return;
+    case "r":
+      e.preventDefault();
+      if (state.roi) {
+        const v = zoomToRoi(viewFor(d.col) ?? freshView());
+        if (state.axes.alignment === "independent") d.views[d.col] = v;
+        else d.view = v;
+        applyView();
+      }
+      return;
   }
 }
 
@@ -127,37 +158,98 @@ export function setBlend(value) {
   applyMode();
 }
 
-// --- the pair ---------------------------------------------------------
+// --- opening ----------------------------------------------------------------
 
-export function openDiff(left, right, { push } = {}) {
-  if (!resolveSide(left) || !resolveSide(right)) return false;
+function sameSide(a, b) {
+  return a?.source === b?.source && a?.file === b?.file;
+}
+
+export function sideKey(side) {
+  return side.source === "anchor" ? `anchor:${side.file}` : `${side.source}:${side.file}`;
+}
+
+const keyOf = (side) => (side ? sideKey(side) : null);
+
+// The left side is "the feed's" when it names the currently loaded host —
+// then Up/Down walk the filtered feed view and the URL stays the feed hash.
+function isFeedSide(side) {
+  return !!side && side.source === state.host;
+}
+
+function feedImageFor(side) {
+  if (!isFeedSide(side)) return null;
+  return state.images.find((i) =>
+    i.filename === side.file || i.filename === side.source + "#" + side.file) ?? null;
+}
+
+function openWorkbench(left, right, { fromFeed = false, push = false } = {}) {
+  if (!resolveSide(left) && !resolveSide(right)) return false;
   const d = state.diff;
   const reopen = d.open && sameSide(d.left, left) && sameSide(d.right, right);
   d.open = true;
+  d.fromFeed = fromFeed;
   d.left = left;
   d.right = right;
   if (!reopen) {
-    d.col = "left";
-    d.view = viewFromPersisted(getView(sideKey(left))) ?? freshView();
+    d.col = left ? "left" : "right";
+    d.view = viewFromPersisted(getView(keyOf(left ?? right))) ?? freshView();
     d.views = {
-      left: viewFromPersisted(getView(sideKey(left))) ?? freshView(),
-      right: viewFromPersisted(getView(sideKey(right))) ?? freshView(),
+      left: viewFromPersisted(getView(keyOf(left))) ?? freshView(),
+      right: viewFromPersisted(getView(keyOf(right))) ?? freshView(),
     };
     d.leftList = null;
     d.rightList = null;
   }
-  const url = diffUrl(left, right);
-  if (push) history.pushState({ kz: 1 }, "", url);
-  else if (location.pathname + location.hash !== url) {
-    history.replaceState(history.state, "", url);
+  if (!fromFeed) {
+    const url = diffUrl(left, right);
+    if (push) history.pushState({ kz: 1 }, "", url);
+    else if (location.pathname + location.hash !== url) {
+      history.replaceState(history.state, "", url);
+    }
   }
   render();
-  applyMode();
   loadSide("left");
   loadSide("right");
   warmList("left");
   warmList("right");
   return true;
+}
+
+// /diff URL entry: an explicit pair, both sides required.
+export function openDiff(left, right, { push } = {}) {
+  if (!resolveSide(left) || !resolveSide(right)) return false;
+  return openWorkbench(left, right, { fromFeed: false, push });
+}
+
+// Feed card click: left = that candidate, right = the last-used anchor
+// (single image when there are no anchors). The URL stays the feed hash.
+// side.file keeps the filename EXACTLY: `source:file` must reconstruct the
+// image id, and some hosts' filenames carry the host prefix.
+export function openFromFeed(imgIdx) {
+  const image = state.images[imgIdx];
+  if (!image) return;
+  const d = state.diff;
+  d.candidateIdx = imgIdx;
+  const anchor = state.anchors[d.anchorIndex ?? 0] ?? null;
+  openWorkbench(
+    { source: image.host, file: image.filename },
+    anchor ? { source: "anchor", file: anchor.name } : null,
+    { fromFeed: true },
+  );
+}
+
+// Anchor card click: right = that anchor, left = the last candidate.
+export function openFromAnchor(anchorIdx) {
+  const anchor = state.anchors[anchorIdx];
+  if (!anchor) return;
+  const d = state.diff;
+  d.anchorIndex = anchorIdx;
+  const cand = d.candidateIdx >= 0 ? state.images[d.candidateIdx] : null;
+  openWorkbench(
+    cand ? { source: cand.host, file: cand.filename } : null,
+    { source: "anchor", file: anchor.name },
+    { fromFeed: true },
+  );
 }
 
 // URL already moved (popstate/hashchange): drop the view, no history writes
@@ -166,6 +258,7 @@ export function hideDiff() {
   if (!d.open) return;
   writeBackViews();
   d.open = false;
+  d.fromFeed = false;
   d.left = null;
   d.right = null;
   d.leftList = null;
@@ -175,11 +268,18 @@ export function hideDiff() {
 
 export function closeDiff() {
   if (!state.diff.open) return;
-  const left = state.diff.left;
+  const d = state.diff;
+  const left = d.left;
+  const fromFeed = d.fromFeed;
   writeBackViews();
   flushViews();
   hideDiff();
-  if (history.state?.kz) {
+  if (fromFeed) {
+    // the hash already names the last browsed candidate — re-center the
+    // feed where browsing left off
+    const idx = findByFile(parseUrl().file);
+    if (idx >= 0) restoreToIndex(idx);
+  } else if (history.state?.kz) {
     history.back(); // popstate lands on the feed URL; onUrlChange applies it
   } else {
     const feed = left && state.hosts[left.source]
@@ -189,14 +289,6 @@ export function closeDiff() {
     window.dispatchEvent(new PopStateEvent("popstate"));
   }
   render();
-}
-
-function sameSide(a, b) {
-  return a?.source === b?.source && a?.file === b?.file;
-}
-
-export function sideKey(side) {
-  return side.source === "anchor" ? `anchor:${side.file}` : `${side.source}:${side.file}`;
 }
 
 // --- loading (harvest #1 + #3: generation guard; hold the outgoing
@@ -213,9 +305,11 @@ async function loadSide(which) {
   lbl.textContent = side ? `${side.source}#${side.file}` : "";
   if (!r) { el.removeAttribute("src"); el.dataset.cur = ""; return; }
   const gen = ++gens[which];
+  chrome.status.active("wb-load", "loading image…");
   const img = new Image();
   img.src = r.src;
-  try { await img.decode(); } catch { return; }
+  try { await img.decode(); } catch { chrome.status.clear("wb-load"); return; }
+  chrome.status.clear("wb-load");
   if (gen !== gens[which] || !d.open) return;
   if (el.dataset.cur !== r.src) { el.src = r.src; el.dataset.cur = r.src; }
   el.dataset.nw = img.naturalWidth;
@@ -226,7 +320,7 @@ async function loadSide(which) {
 // fit box for an el inside the stage (or its half, in side mode)
 function fitBox(el) {
   const nw = Number(el.dataset.nw) || 1, nh = Number(el.dataset.nh) || 1;
-  const host = state.diff.composition === "side" ? el.closest(".diffside") : $("diffStage");
+  const host = state.axes.composition === "side" ? el.closest(".diffside") : $("diffStage");
   const r = host.getBoundingClientRect();
   const scale = Math.min(r.width / nw, r.height / nh) || 1;
   return { w: nw * scale, h: nh * scale };
@@ -234,12 +328,12 @@ function fitBox(el) {
 
 function viewFor(which) {
   const d = state.diff;
-  if (d.alignment === "shared") return d.view;
-  return d.views[which];
+  if (state.axes.alignment === "independent") return d.views[which];
+  return d.view;
 }
 
 function applyView() {
-  const sbs = state.diff.composition === "side";
+  const sbs = state.axes.composition === "side";
   for (const which of ["left", "right"]) {
     const el = which === "left" ? $("diffL") : $("diffR");
     if (sbs) {
@@ -257,34 +351,35 @@ function applyView() {
   }
 }
 
-// --- compositions ------------------------------------------------------
+// --- compositions (the app-wide composition axis) --------------------------
 
 function applyMode() {
   const d = state.diff;
+  const mode = state.axes.composition;
   const stage = $("diffStage");
-  stage.dataset.mode = d.composition;
+  stage.dataset.mode = mode;
   const L = $("diffL"), R = $("diffR");
   L.style.mixBlendMode = "";
   L.style.clipPath = "";
   L.style.opacity = "";
   R.style.opacity = "";
-  $("diffBlend").hidden = d.composition !== "blend";
-  if (d.composition === "blend") $("diffBlend").value = String(d.blend);
-  $("diffSplitLine").hidden = d.composition !== "split";
-  if (d.composition === "split") $("diffSplitLine").style.left = `${d.split * 100}%`;
-  if (d.composition === "flicker") {
+  $("diffBlend").hidden = mode !== "blend";
+  if (mode === "blend") $("diffBlend").value = String(d.blend);
+  $("diffSplitLine").hidden = mode !== "split";
+  if (mode === "split") $("diffSplitLine").style.left = `${d.split * 100}%`;
+  if (mode === "flicker") {
     L.style.opacity = d.col === "left" ? "1" : "0";
     R.style.opacity = d.col === "right" ? "1" : "0";
-  } else if (d.composition === "blend") {
+  } else if (mode === "blend") {
     L.style.opacity = String(d.blend);
-  } else if (d.composition === "split") {
+  } else if (mode === "split") {
     // left image left of the wipe, right image right of it
     L.style.clipPath = `inset(0 ${100 - d.split * 100}% 0 0)`;
-  } else if (d.composition === "difference") {
+  } else if (mode === "difference") {
     L.style.mixBlendMode = "difference";
   }
-  $("diffMode").textContent = d.composition;
-  $("diffAlign").textContent = d.alignment === "shared" ? "linked" : "unlinked";
+  $("diffMode").textContent = mode;
+  $("diffAlign").textContent = state.axes.alignment === "independent" ? "unlinked" : "linked";
   $("diffFL").classList.toggle("on", d.col === "left");
   $("diffFR").classList.toggle("on", d.col === "right");
   applyView();
@@ -295,7 +390,8 @@ function applyMode() {
 async function warmList(which) {
   const d = state.diff;
   const side = which === "left" ? d.left : d.right;
-  if (!side || side.source === "anchor") {
+  if (!side) return;
+  if (side.source === "anchor") {
     if (which === "left") d.leftList = state.anchors.map((a) => a.name);
     else d.rightList = state.anchors.map((a) => a.name);
     return;
@@ -319,9 +415,12 @@ function stripFor(side, filename) {
 
 async function step(which, dir) {
   const d = state.diff;
+  // the feed's own host steps through the FILTERED view (the browser role);
+  // every other source walks its raw file list
+  if (which === "left" && isFeedSide(d.left)) return stepFeed(dir);
   const side = which === "left" ? d.left : d.right;
   let list = listFor(which);
-  if (!list) { await warmList(which); list = listFor(which); } // warm may have raced a booting host
+  if (!list) { await warmList(which); list = listFor(which); }
   if (!side || !list) return;
   const pos = list.findIndex((f) => f === side.file || f === side.source + "#" + side.file);
   if (pos < 0) return;
@@ -330,15 +429,38 @@ async function step(which, dir) {
   writeBackViews();
   const nextSide = { source: side.source, file: side.source === "anchor" ? list[next] : stripFor(side, list[next]) };
   if (which === "left") d.left = nextSide; else d.right = nextSide;
-  history.replaceState(history.state, "", diffUrl(d.left, d.right));
-  // the next view arrives with its image (readBack inside loadSide path)
+  if (!d.fromFeed) history.replaceState(history.state, "", diffUrl(d.left, d.right));
+  // the next view arrives with its image
   const v = viewFromPersisted(getView(sideKey(nextSide)));
-  if (d.alignment === "shared") d.view = v ?? freshView();
-  else d.views[which] = v ?? freshView();
+  if (state.axes.alignment === "independent") d.views[which] = v ?? freshView();
+  else d.view = v ?? freshView();
   prefetch(which, next, dir);
   render();
-  applyMode();
   await loadSide(which);
+}
+
+// Feed browsing: walk the filtered view, move the feed's image window,
+// write the feed hash — exactly what the outgoing lightbox did.
+async function stepFeed(dir) {
+  const d = state.diff;
+  const img = feedImageFor(d.left);
+  if (!img) return;
+  const curIdx = state.images.indexOf(img);
+  const nextIdx = viewStep(curIdx, dir);
+  if (nextIdx === curIdx) return; // at the view's edge
+  const next = state.images[nextIdx];
+  writeBackViews();
+  d.candidateIdx = nextIdx;
+  d.left = { source: next.host, file: next.filename };
+  d.col = "left";
+  browseToFile(stripHostPrefix(next.host, next.filename));
+  const v = viewFromPersisted(getView(sideKey(d.left)));
+  if (state.axes.alignment === "independent") d.views.left = v ?? freshView();
+  else d.view = v ?? freshView();
+  prefetchFrom(nextIdx, dir);
+  applyWindow();
+  render();
+  await loadSide("left");
 }
 
 function prefetch(which, pos, dir) {
@@ -356,13 +478,13 @@ function prefetch(which, pos, dir) {
 
 async function swapSides() {
   const d = state.diff;
+  if (!d.left || !d.right) return;
   writeBackViews();
   [d.left, d.right] = [d.right, d.left];
   [d.leftList, d.rightList] = [d.rightList, d.leftList];
   [d.views.left, d.views.right] = [d.views.right, d.views.left];
-  history.replaceState(history.state, "", diffUrl(d.left, d.right));
+  if (!d.fromFeed) history.replaceState(history.state, "", diffUrl(d.left, d.right));
   render();
-  applyMode();
   await Promise.all([loadSide("left"), loadSide("right")]);
 }
 
@@ -388,17 +510,18 @@ async function judge(kind) {
 function writeBackViews() {
   const d = state.diff;
   if (!d.left) return;
-  if (d.alignment === "shared") setView(sideKey(d.left), viewToPersisted(d.view));
-  else {
+  if (state.axes.alignment === "independent") {
     setView(sideKey(d.left), viewToPersisted(d.views.left));
     if (d.right) setView(sideKey(d.right), viewToPersisted(d.views.right));
+  } else {
+    setView(sideKey(d.left), viewToPersisted(d.view));
   }
 }
 
 // --- pointer: wheel zoom + drag pan -------------------------------------
 
 function onWheel(e) {
-  if (!state.diff.open || state.diff.composition === "side") return;
+  if (!state.diff.open || state.axes.composition === "side") return;
   e.preventDefault();
   const d = state.diff;
   const el = d.col === "left" ? $("diffL") : $("diffR");
@@ -418,7 +541,7 @@ function onWheel(e) {
 let panning = null;
 
 function onPointerDown(e) {
-  if (!state.diff.open || state.diff.composition === "side") return;
+  if (!state.diff.open || state.axes.composition === "side") return;
   if (e.target.closest("#diffSplitLine, #diffClose, #diffBlend")) return;
   const stage = $("diffStage");
   panning = { x: e.clientX, y: e.clientY, id: e.pointerId };
@@ -447,10 +570,3 @@ document.addEventListener("pointerup", () => {
   $("diffStage").classList.remove("dragging");
   writeBackViews();
 });
-
-// --- renderer -----------------------------------------------------------
-//
-// <DiffStage> owns the #diff hidden flag from state.diff.open. The old
-// onRender writer re-applied the mode styling on every render while open;
-// that styling is idempotent, so the renders that happen while open
-// (openDiff, step, swapSides) call applyMode() explicitly instead.

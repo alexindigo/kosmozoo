@@ -25,7 +25,6 @@ import { WorkspaceBar } from "./WorkspaceBar.mjs";
 import { FieldsOverlay } from "./FieldsOverlay.mjs";
 import { InfoOverlay } from "./InfoOverlay.mjs";
 import { KeysPanel } from "./KeysPanel.mjs";
-import { Lightbox } from "./Lightbox.mjs";
 import { DiffStage } from "./DiffStage.mjs";
 import { ConfirmDelete } from "./ConfirmDelete.mjs";
 
@@ -56,7 +55,6 @@ export function App() {
     h(FieldsOverlay, null),
     h(InfoOverlay, null),
     h(KeysPanel, null),
-    h(Lightbox, null),
     h(DiffStage, null),
     h(ConfirmDelete, null),
   );

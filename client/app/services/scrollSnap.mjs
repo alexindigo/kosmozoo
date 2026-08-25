@@ -29,7 +29,7 @@ export function initScrollSnap() {
 
   const snap = () => {
     // don't fight an open overlay
-    if (state.lightbox.open || state.diff.open) return;
+    if (state.diff.open) return;
     const colTop = col.getBoundingClientRect().top;
     let best = null;
     let bestDist = Infinity;

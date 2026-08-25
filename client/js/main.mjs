@@ -5,10 +5,9 @@
 import { state } from "./state.mjs";
 import { render } from "../app/services/notify.mjs";
 import { api } from "./api.mjs";
-import { initLightbox } from "./lightbox.mjs";
 import { addAnchorFiles, initAnchorsPane, initAnchorsWidth } from "./anchors.mjs";
 import { initWorkspace } from "./workspace.mjs";
-import { initDiff, openDiff, hideDiff } from "./diff.mjs";
+import { initDiff, openDiff, openFromFeed, hideDiff } from "./diff.mjs";
 import { parseUrl, writeFeedHash, stripHostPrefix, findByFile } from "./route.mjs";
 import { initRoi } from "./roi.mjs";
 import { initClientPlugins } from "./plugins-client.mjs";
@@ -21,7 +20,6 @@ import { openFieldsOverlay, initFieldsOverlay } from "./fields.mjs";
 import { savedSet } from "../app/components/Card.mjs";
 import { initScrollSnap } from "../app/services/scrollSnap.mjs";
 import { initViews } from "./views.mjs";
-import { openAt } from "./lightbox.mjs";
 import { iconSvg } from "./icons.mjs";
 import { loadBootData } from "../app/services/bootData.mjs";
 import { wantMeta, pollMetadata, refreshAllCardMeta } from "../app/services/metadata.mjs";
@@ -277,21 +275,20 @@ function showLoadError(err) {
 async function boot() {
   await initClientPlugins(); // before axes so plugin modes are registered
   initKeyDispatch();
-  await initKeysPanel(); // BEFORE lightbox keys: the panel outranks on Escape
-  await initLightbox();
+  await initKeysPanel(); // BEFORE workbench keys: the panel outranks on Escape
   await initRoi();
   await initJudgment();
   onVisibilityChanged((image, visible) => { if (!visible) rebuildFeed(); });
-  await initViews(); // shared per-image view store (feed zoom <-> lightbox)
+  await initViews(); // shared per-image view store (feed zoom <-> workbench)
   initHostPicker({ onSelect: loadCandidates });
   initAnchorsPane();
   initWorkspace();
-  initDiff();
+  await initDiff();
   initFieldsOverlay({ onChanged: refreshAllCardMeta });
   registerCoreChrome();
 
   initFeed({
-    onOpen: (imgIdx) => openAt(imgIdx), // parent wires the lightbox
+    onOpen: (imgIdx) => openFromFeed(imgIdx), // card click opens the workbench
     wantMeta: (image) => wantMeta(image),
   });
 
