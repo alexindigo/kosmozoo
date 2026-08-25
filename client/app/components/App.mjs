@@ -10,7 +10,6 @@ import { h, Fragment, useEffect } from "../../vendor/preact/vendor.mjs";
 import { loadBootData } from "../services/bootData.mjs";
 import { startScraperPoll } from "../services/scraper.mjs";
 import {
-  LIGHTBOX_INNER,
   DIFF_INNER,
 } from "../skeleton.mjs";
 import { Header } from "./Header.mjs";
@@ -19,6 +18,7 @@ import { WorkspaceBar } from "./WorkspaceBar.mjs";
 import { FieldsOverlay } from "./FieldsOverlay.mjs";
 import { InfoOverlay } from "./InfoOverlay.mjs";
 import { KeysPanel } from "./KeysPanel.mjs";
+import { Lightbox } from "./Lightbox.mjs";
 
 export function App() {
   useEffect(() => {
@@ -40,7 +40,7 @@ export function App() {
     h(FieldsOverlay, null),
     h(InfoOverlay, null),
     h(KeysPanel, null),
-    h("div", { id: "lightbox", hidden: true, dangerouslySetInnerHTML: { __html: LIGHTBOX_INNER } }),
+    h(Lightbox, null),
     h("div", { id: "diff", hidden: true, dangerouslySetInnerHTML: { __html: DIFF_INNER } }),
   );
 }

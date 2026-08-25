@@ -7,24 +7,6 @@
 // and never touches what legacy writes inside. Each constant is deleted the
 // phase its surface becomes a real component.
 
-export const LIGHTBOX_INNER = `
-  <img id="lbCandidate" alt="">
-  <img id="lbAnchor" alt="">
-  <div id="lbSplitLine" hidden></div>
-  <div id="lbGuides"></div>
-  <div id="lbRoi"></div>
-  <div id="lbChrome">
-    <input id="lbBlend" type="range" min="0" max="1" step="0.01" value="0.5"
-           title="blend opacity (candidate over anchor)" hidden>
-  </div>
-  <button id="lbKeysBtn" title="actions & keys (?)">
-    <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.6">
-      <rect x="2" y="6" width="20" height="12" rx="2"/>
-      <path d="M6 10h.01M10 10h.01M14 10h.01M18 10h.01M6 14h.01M18 14h.01M9 14h6"/>
-    </svg>
-  </button>
-`;
-
 export const DIFF_INNER = `
   <button id="diffClose" title="close (Esc)"><svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path stroke="none" d="M0 0h24v24H0z" fill="none"/>
   <path d="M18 6l-12 12" />
