@@ -13,7 +13,7 @@ import { initRoi, setRoi } from "./roi.mjs";
 import { initClientPlugins } from "./plugins-client.mjs";
 import { initJudgment, onVisibilityChanged, toggleRevealThumbedDown, toggleHideUp, setDownvoteHides } from "./judgment.mjs";
 import { chrome, initKeyDispatch } from "./chrome.mjs";
-import { initKeysPanel, toggleKeysPanel } from "./keys-panel.mjs";
+import { initKeysPanel } from "./keys-panel.mjs";
 import { initHostPicker, selectHost, initialHost } from "./hostpicker.mjs";
 import { initFeed, onScrollSafetyNet, restoreToIndex, resetFeed, viewIndices } from "./feed.mjs";
 import { openFieldsOverlay, initFieldsOverlay } from "./fields.mjs";
@@ -287,10 +287,9 @@ async function boot() {
 
   const col = $("candidatesCol");
   col.addEventListener("scroll", onScrollSafetyNet, { passive: true });
-  initScrollSnap();
   // position persists via the URL hash (current image), not a stored px —
   // a px jump races the deep-link centering and clobbers it
-  $("lbKeysBtn").addEventListener("click", (e) => { e.stopPropagation(); toggleKeysPanel(); });
+  initScrollSnap();
 
   // Boot data (hosts / ui+fields settings / scraper / feedback path) loads
   // once through the memoized service; <App>'s init effect awaits the same

@@ -25,14 +25,6 @@ const $ = (id) => document.getElementById(id);
 
 export async function initLightbox() {
   document.addEventListener("keydown", onKey);
-  for (const id of ["lbCandidate", "lbAnchor"]) {
-    const el = $(id);
-    el.addEventListener("load", () => {
-      el.dataset.nw = el.naturalWidth;
-      el.dataset.nh = el.naturalHeight;
-      if (state.lightbox.open) relayout();
-    });
-  }
   let raf = 0;
   window.addEventListener("resize", () => {
     if (!state.lightbox.open || raf) return;
@@ -52,6 +44,14 @@ export async function initLightbox() {
 
 function lightboxCandidate() {
   return state.images[state.lightbox.index] ?? null;
+}
+
+// The imgs' load event, forwarded by <Lightbox>. Tracks natural dims in the
+// dataset (a fresh src swap has naturalWidth 0 until decoded) and re-fits.
+export function noteImgLoad(el) {
+  el.dataset.nw = el.naturalWidth;
+  el.dataset.nh = el.naturalHeight;
+  if (state.lightbox.open) relayout();
 }
 
 function anchorImage() {
@@ -113,7 +113,7 @@ export async function lbShow() {
   const lb = $("lightbox");
   const gen = ++state.lightbox.loadGen;
   const src = activeSrc();
-  if (!src) { lb.hidden = true; return; }
+  if (!src) { state.lightbox.open = false; lb.hidden = true; return; }
   lb.hidden = false;
 
   const el = state.lightbox.col === "anchor" ? $("lbAnchor") : $("lbCandidate");
