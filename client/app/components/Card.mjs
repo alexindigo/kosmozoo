@@ -152,6 +152,16 @@ export function Card({ image, imgIdx, src, meta, onOpen, onErrorClick, onImgPhas
           title: saved ? "already in ~/Downloads (click to download again)" : "download this image",
           onClick: download,
         }, saved ? "saved" : "save"),
+        state.hosts[image.host]?.deleteMode && h(IconButton, {
+          icon: iconSvg(state.hosts[image.host].deleteMode === "hide" ? "eye-off" : "trash", 16),
+          variant: "delete",
+          title: state.hosts[image.host].deleteMode === "trash"
+            ? "move to trash on the host (recoverable)"
+            : state.hosts[image.host].deleteMode === "unlink"
+              ? "delete the file from the host folder (permanent)"
+              : "hide from kosmozoo (this host can't delete files)",
+          onAction: () => { state.confirmDelete = { image }; render(); },
+        }),
       ),
     ),
     h("div", { class: "pair" },

@@ -184,6 +184,7 @@ main { display: flex; flex: 1; min-height: 0; }
 .votebtn.down { --btn-c: var(--red); }
 .votebtn.up { --btn-c: var(--green); }
 .votebtn.favorite { --btn-c: var(--orange); }
+.votebtn.delete { --btn-c: var(--red); }
 .votebtn:hover { color: var(--btn-c); border-color: var(--btn-c); }
 .votebtn.on { color: var(--btn-c); }
 .votebtn.on svg path:not([stroke="none"]) { fill: currentColor; }
@@ -344,6 +345,23 @@ main { display: flex; flex: 1; min-height: 0; }
 .keyrow .kbd.overridden { border-color: var(--accent); color: var(--accent); }
 #keysFoot { padding: 8px 16px; border-top: 1px solid var(--raise); color: var(--dim);
   font-size: 10px; }
+
+/* --- delete confirmation ---------------------------------------------------- */
+#confirmOverlay { position: fixed; inset: 0; z-index: 95; background: rgba(0,0,0,.6); }
+#confirmPanel { position: absolute; top: 30vh; left: 50%; transform: translateX(-50%);
+  width: min(460px, 92vw); background: var(--panel); border: 1px solid var(--border);
+  border-radius: 10px; padding: 16px 18px; }
+.confirm-title { font-size: 14px; font-weight: 600; margin-bottom: 8px; }
+.confirm-body { color: var(--mid); font-size: 12px; line-height: 1.5;
+  overflow-wrap: anywhere; }
+.confirm-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 14px; }
+.confirm-actions button { border-radius: 6px; padding: 5px 14px; font-size: 12px;
+  cursor: pointer; }
+.confirm-cancel { background: var(--raise); color: var(--fg); border: 1px solid var(--border); }
+.confirm-cancel:hover { border-color: var(--dim); }
+.confirm-ok { border: 1px solid var(--red); background: transparent; color: var(--red); }
+.confirm-ok:hover { background: color-mix(in srgb, var(--red) 18%, transparent); }
+.confirm-ok:disabled, .confirm-cancel:disabled { opacity: .5; cursor: default; }
 
 /* --- lightbox ----------------------------------------------------------------- */
 #lightbox { position: fixed; inset: 0; background: #000; z-index: 20; }

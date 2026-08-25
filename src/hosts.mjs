@@ -4,7 +4,7 @@
 // stays part of image identity: keys are `host:filename`. A local folder is
 // just another host whose "API" is the filesystem: name=folder:/abs/path.
 
-import { readdir, readFile, stat } from "node:fs/promises";
+import { readdir, readFile, stat, unlink } from "node:fs/promises";
 import { basename, join } from "node:path";
 
 // Hosts are user config and change over time (spec §5): env seeds the map
@@ -191,6 +191,103 @@ export async function hostHeadSize(addr, filename) {
 
 // Back-compat alias (the bytes proxy).
 export const proxyImage = hostReadBytes;
+
+// --- deletion ------------------------------------------------------------------
+//
+// ComfyUI core has no file-delete API. The assets_plus extension adds one
+// (POST /api/assets_plus/output/delete, mode "trash" = recoverable). Delete
+// a file without it is impossible — the engine then only hides the image
+// (routes.mjs) and tidies Comfy's history on a best-effort basis.
+
+// Capability probe cache: addr -> boolean. Detection calls the delete
+// endpoint with a name that can never exist — side-effect-free, and the
+// response shape is authoritative (hosts without the extension answer the
+// generic 405 / non-JSON).
+const assetsPlusCache = new Map();
+
+export async function hostHasAssetsPlus(addr) {
+  if (isFolderHost(addr)) return false;
+  if (assetsPlusCache.has(addr)) return assetsPlusCache.get(addr);
+  let ok = false;
+  try {
+    const r = await fetch(`http://${addr}/api/assets_plus/output/delete`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ relpaths: ["__kosmozoo_capability_probe__"], mode: "trash" }),
+      signal: AbortSignal.timeout(5000),
+    });
+    if (r.ok) {
+      const d = await r.json();
+      ok = Array.isArray(d?.removed) && Array.isArray(d?.failed);
+    }
+  } catch { /* unreachable or no extension */ }
+  assetsPlusCache.set(addr, ok);
+  return ok;
+}
+
+// Delete one image from its source. folder -> unlink (permanent);
+// comfy -> assets_plus trash (recoverable). { ok, mode, detail }.
+export async function hostDelete(addr, filename) {
+  if (basename(filename) !== filename || filename.includes("..")) {
+    return { ok: false, mode: null, detail: "bad filename" };
+  }
+  if (isFolderHost(addr)) {
+    try {
+      await unlink(join(FOLDER_RE.exec(addr)[1], filename));
+      return { ok: true, mode: "unlink" };
+    } catch (e) {
+      return { ok: false, mode: null, detail: e?.code === "ENOENT" ? "already gone" : String(e?.message ?? e) };
+    }
+  }
+  let r;
+  try {
+    r = await fetch(`http://${addr}/api/assets_plus/output/delete`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ relpaths: [filename], mode: "trash" }),
+      signal: AbortSignal.timeout(10000),
+    });
+  } catch (e) {
+    return { ok: false, mode: null, detail: `host unreachable: ${e?.message ?? e}` };
+  }
+  if (!r.ok) return { ok: false, mode: null, detail: `host returned ${r.status}` };
+  let d;
+  try { d = await r.json(); } catch { return { ok: false, mode: null, detail: "host returned no JSON" }; }
+  if (!Array.isArray(d?.removed) || !Array.isArray(d?.failed)) {
+    return { ok: false, mode: null, detail: "host has no assets_plus delete" };
+  }
+  if (d.removed.includes(filename)) return { ok: true, mode: "trash" };
+  return { ok: false, mode: null, detail: d.failed.includes(filename) ? "not found on host" : "delete failed on host" };
+}
+
+// Best-effort Comfy history cleanup for the hide path: find the prompt that
+// produced the file and delete its history entry. The file itself is
+// untouched — this only tidies Comfy's own history panel.
+export async function comfyHistoryDelete(addr, filename) {
+  try {
+    const r = await fetch(`http://${addr}/api/history`, { signal: AbortSignal.timeout(8000) });
+    if (!r.ok) return false;
+    const history = await r.json();
+    let promptId = null;
+    for (const [pid, entry] of Object.entries(history)) {
+      for (const nodeOut of Object.values(entry?.outputs ?? {})) {
+        const items = [...(nodeOut?.images ?? []), ...(nodeOut?.gifs ?? [])];
+        if (items.some((o) => o?.filename === filename)) { promptId = pid; break; }
+      }
+      if (promptId) break;
+    }
+    if (!promptId) return false;
+    const dr = await fetch(`http://${addr}/api/history`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ delete: [promptId] }),
+      signal: AbortSignal.timeout(5000),
+    });
+    return dr.ok;
+  } catch {
+    return false;
+  }
+}
 
 // Hosts are user config and change over time (spec §5): env seeds the map
 // on first boot, then it is user-managed and persisted in settings

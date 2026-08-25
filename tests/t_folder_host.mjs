@@ -3,7 +3,7 @@
 // with traversal guard, and metadata extraction via the full scraper path.
 
 import { assert, assertEquals } from "jsr:@std/assert";
-import { isFolderHost, validateHost, probeHost, hostList, hostReadBytes, hostKey, parseListingEntry } from "../src/hosts.mjs";
+import { isFolderHost, validateHost, probeHost, hostList, hostReadBytes, hostDelete, hostKey, parseListingEntry } from "../src/hosts.mjs";
 import { makeRouter } from "../src/routes.mjs";
 import { Settings } from "../src/settings.mjs";
 import { Store } from "../src/store.mjs";
@@ -104,4 +104,21 @@ Deno.test("listing entries: bracket annotation never part of identity", () => {
   assertEquals(parseListingEntry("a.png"), { name: "a.png", size: null });
   assertEquals(parseListingEntry("a [b].png [7]"), { name: "a [b].png", size: 7 });
   assertEquals(parseListingEntry("a [b].png"), { name: "a [b].png", size: null });
+});
+
+Deno.test("folder host: delete unlinks the file, guarded like every other path", async () => {
+  const dir = await mkdtemp(join(tmpdir(), "kz-del-"));
+  await writeFile(join(dir, "gone.png"), "junk");
+
+  const ok = await hostDelete("folder:" + dir, "gone.png");
+  assertEquals(ok, { ok: true, mode: "unlink" });
+  assertEquals(await hostList("folder:" + dir), []);
+
+  const again = await hostDelete("folder:" + dir, "gone.png");
+  assertEquals(again.ok, false);
+  assertEquals(again.detail, "already gone");
+
+  assertEquals((await hostDelete("folder:" + dir, "../outside.png")).detail, "bad filename");
+  assertEquals((await hostDelete("folder:" + dir, "a/b.png")).detail, "bad filename");
+  await rm(dir, { recursive: true });
 });
