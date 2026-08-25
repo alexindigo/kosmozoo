@@ -90,16 +90,23 @@ function check(name, ok, detail = "") {
   check("blink: arrows swap the visible side", blink1 === "1,0" && blink2 === "0,1", `${blink1} -> ${blink2}`);
   await key("ArrowLeft");
 
-  // --- wheel zoom applies a registration; dblclick resets it ---
+  // --- wheel: pinch (ctrl+wheel) zooms, plain scroll pans; dblclick resets ---
   await cdp.evaluate(`(() => {
     const st = document.getElementById("diffStage").getBoundingClientRect();
-    document.getElementById("diffStage").dispatchEvent(new WheelEvent("wheel", { clientX: st.x + st.width / 2, clientY: st.y + st.height / 2, deltaY: -240, bubbles: true, cancelable: true }));
+    document.getElementById("diffStage").dispatchEvent(new WheelEvent("wheel", { clientX: st.x + st.width / 2, clientY: st.y + st.height / 2, deltaY: -240, ctrlKey: true, bubbles: true, cancelable: true }));
   })()`);
   const zoomed = await cdp.evaluate("({ s: window.kosmozoo.state.diff.view.s, t: document.getElementById('diffL').style.transform })");
-  check("wheel: zooms the shared view", zoomed.s > 1 && zoomed.t !== "", JSON.stringify(zoomed));
+  check("pinch (ctrl+wheel): zooms the shared view", zoomed.s > 1 && zoomed.t !== "", JSON.stringify(zoomed));
   await cdp.evaluate("document.getElementById('diffStage').dispatchEvent(new MouseEvent('dblclick', { bubbles: true }))");
   const reset = await cdp.evaluate("window.kosmozoo.state.diff.view.s");
   check("dblclick: resets the view", reset === 1, `s=${reset}`);
+  await cdp.evaluate(`(() => {
+    const st = document.getElementById("diffStage").getBoundingClientRect();
+    document.getElementById("diffStage").dispatchEvent(new WheelEvent("wheel", { clientX: st.x + st.width / 2, clientY: st.y + st.height / 2, deltaY: -120, bubbles: true, cancelable: true }));
+  })()`);
+  const panned = await cdp.evaluate("({ s: window.kosmozoo.state.diff.view.s, tyf: window.kosmozoo.state.diff.view.tyf })");
+  check("plain scroll: pans without zooming", panned.s === 1 && panned.tyf !== 0, JSON.stringify(panned));
+  await cdp.evaluate("document.getElementById('diffStage').dispatchEvent(new MouseEvent('dblclick', { bubbles: true }))");
 
   // --- stepping: Up/Down moves the left side (URL follows), Shift moves right ---
   const before = await cdp.evaluate("location.hash");

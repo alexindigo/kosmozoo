@@ -504,6 +504,12 @@ function writeBackViews() {
 
 // --- pointer: wheel zoom + drag pan -------------------------------------
 
+// Wheel input: two-finger scroll / mouse wheel PANS; pinch (which browsers
+// report as ctrl+wheel) zooms toward the cursor. Zoom is proportional to the
+// gesture's deltaY with a low intensity — the old fixed ±20% per event made
+// pinching wildly oversensitive.
+const PINCH_ZOOM = 0.005;
+
 function onWheel(e) {
   if (!state.diff.open || state.axes.composition === "side") return;
   e.preventDefault();
@@ -512,13 +518,20 @@ function onWheel(e) {
   if (!el.dataset.nw) return;
   const box = fitBox(el);
   const v = viewFor(d.col);
-  const s2 = Math.min(Math.max(v.s * (e.deltaY < 0 ? 1.2 : 1 / 1.2), 0.2), 40);
-  const r = $("diffStage").getBoundingClientRect();
-  const px = e.clientX - (r.left + r.width / 2);
-  const py = e.clientY - (r.top + r.height / 2);
-  v.txf += (px / box.w) * (1 / s2 - 1 / v.s);
-  v.tyf += (py / box.h) * (1 / s2 - 1 / v.s);
-  v.s = s2;
+  if (e.ctrlKey) {
+    const s2 = Math.min(Math.max(v.s * Math.exp(-e.deltaY * PINCH_ZOOM), 0.2), 40);
+    const r = $("diffStage").getBoundingClientRect();
+    const px = e.clientX - (r.left + r.width / 2);
+    const py = e.clientY - (r.top + r.height / 2);
+    v.txf += (px / box.w) * (1 / s2 - 1 / v.s);
+    v.tyf += (py / box.h) * (1 / s2 - 1 / v.s);
+    v.s = s2;
+  } else {
+    // scroll pans like a drag would (content follows the fingers)
+    const [fx, fy] = panFrac(v, box, -e.deltaX, -e.deltaY);
+    v.txf += fx;
+    v.tyf += fy;
+  }
   applyView();
 }
 
