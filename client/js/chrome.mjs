@@ -17,7 +17,8 @@
 // Menu, header buttons, and the key dispatcher read the registries; nothing
 // else writes them.
 
-import { state, render } from "./state.mjs";
+import { state } from "./state.mjs";
+import { render } from "../app/services/notify.mjs";
 
 const $ = (id) => document.getElementById(id);
 

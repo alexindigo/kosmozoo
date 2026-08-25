@@ -6,13 +6,12 @@
 
 import { h } from "../../vendor/preact/vendor.mjs";
 import { useRef, useEffect } from "../../vendor/preact/vendor.mjs";
-import { state, render } from "../../js/state.mjs";
+import { state } from "../../js/state.mjs";
+import { render } from "../services/notify.mjs";
 import { selectHost, addHost, removeHost } from "../../js/hostpicker.mjs";
 import { iconSvg } from "../../js/icons.mjs";
-import { useVersion } from "../hooks/useVersion.mjs";
 
 export function HostPicker() {
-  useVersion();
   const rootRef = useRef(null);
   const nameRef = useRef(null);
   const addrRef = useRef(null);

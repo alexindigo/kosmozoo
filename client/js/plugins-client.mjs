@@ -5,7 +5,7 @@
 // already proven in the outgoing code. The composition registry is what the
 // difference plugin hangs off.
 
-import { state, render } from "./state.mjs";
+import { render } from "../app/services/notify.mjs";
 import { api } from "./api.mjs";
 
 const compositionModes = new Map(); // id -> { label, apply, clear, amplify? }

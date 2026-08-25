@@ -57,3 +57,8 @@ export function Zoomable({ src, alt, ar, stripText, zoomKey, onZoomChange, onLoa
     h("div", { class: "mstrip", style: { display: stripText ? "block" : "none" } }, stripText ?? ""),
   );
 }
+
+// helper for callers: aspect string from extracted metadata
+export function aspectFromMeta(meta) {
+  return meta?.width && meta?.height ? `${meta.width} / ${meta.height}` : null;
+}

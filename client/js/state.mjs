@@ -1,12 +1,8 @@
-// client/js/state.mjs — one state object, one render path.
+// client/js/state.mjs — one shared state object. The snapshot only.
 //
-// The two things worth carrying from the outgoing design:
-//  - One state object; render() is the ONLY DOM writer.
-//  - Box-fraction view state (see geometry.mjs).
-//
-// Left behind: 210 top-level declarations in one scope, two import cycles,
-// the lightbox reading the grid's DOM as its data model — here the list
-// model is shared and explicit.
+// Mutations happen here; the DOM reads it. The re-render signal lives on the
+// Preact side (app/services/notify.mjs) — <App> subscribes for the tree.
+// Box-fraction view state: see geometry.mjs.
 
 import { freshView } from "./geometry.mjs";
 
@@ -69,16 +65,3 @@ export const state = {
   guides: [],           // [{ axis, pos }] — persist globally (harvest #12)
   dragGuide: null,      // in-progress guide drag from an edge { axis, pos }
 };
-
-// The only DOM writer. Re-renders the surfaces from state. Individual surfaces
-// subscribe to the parts they own; nothing else touches the DOM. onRender
-// returns an unsubscribe so the Preact bridge (useVersion) can clean up.
-const renderers = [];
-export function onRender(fn) {
-  renderers.push(fn);
-  return () => {
-    const i = renderers.indexOf(fn);
-    if (i >= 0) renderers.splice(i, 1);
-  };
-}
-export function render() { for (const fn of renderers) fn(state); }

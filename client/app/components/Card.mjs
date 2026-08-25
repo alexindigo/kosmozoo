@@ -9,7 +9,8 @@
 
 import { h, Fragment } from "../../vendor/preact/vendor.mjs";
 import { useState, useEffect } from "../../vendor/preact/vendor.mjs";
-import { state, render } from "../../js/state.mjs";
+import { state } from "../../js/state.mjs";
+import { render } from "../services/notify.mjs";
 import { api } from "../../js/api.mjs";
 import { setVote, toggleFavorite, saveNotes } from "../../js/judgment.mjs";
 import { metaStripText } from "../../js/fields.mjs";

@@ -9,7 +9,8 @@
 // split, difference (plugin). Alignment: independent / shared /
 // face-anchored (plugin, needs a configured detector service).
 
-import { state, render } from "./state.mjs";
+import { state } from "./state.mjs";
+import { render } from "../app/services/notify.mjs";
 import { compositionModesList } from "./plugins-client.mjs";
 
 // What each axis value needs to be live. need.ok is computed at cycle time;

@@ -7,11 +7,11 @@
 // marker takes its place.
 
 import { h, Fragment, Component } from "../../vendor/preact/vendor.mjs";
-import { useEffect, useRef } from "../../vendor/preact/vendor.mjs";
+import { useEffect, useRef, useState } from "../../vendor/preact/vendor.mjs";
 import { state } from "../../js/state.mjs";
 import { matchesFile, parseUrl } from "../../js/route.mjs";
+import { subscribe } from "../services/notify.mjs";
 import { useWindow, WINDOW_PAD } from "../hooks/useWindow.mjs";
-import { useVersion } from "../hooks/useVersion.mjs";
 import { Card } from "./Card.mjs";
 
 // A feed can hold thousands of cards; a window/judgment change must re-render
@@ -29,8 +29,10 @@ class MemoCard extends Component {
 }
 
 export function Grid({ view, count, onOpen, onSentinel, registerApi }) {
-  // re-render on the shared render() fan-out (metadata, judgment, chunking)
-  useVersion();
+  // <Grid> is a root of its own (the feed engine renders it into #grid), so
+  // it subscribes to the re-render signal itself instead of riding <App>.
+  const [, setVersion] = useState(0);
+  useEffect(() => subscribe(() => setVersion((v) => v + 1)), []);
   const win = useWindow();
   const sentinelRef = useRef(null);
 

@@ -7,12 +7,12 @@
 
 import { h, Fragment } from "../../vendor/preact/vendor.mjs";
 import { useState, useRef } from "../../vendor/preact/vendor.mjs";
-import { state, render } from "../../js/state.mjs";
+import { state } from "../../js/state.mjs";
+import { render } from "../services/notify.mjs";
 import { iconSvg } from "../../js/icons.mjs";
-import { aspectFromMeta } from "../../js/imageCard.mjs";
+import { aspectFromMeta } from "./Zoomable.mjs";
 import { addAnchorFiles, removeAnchor, showAnchorInfo, persistAnchors } from "../../js/anchors.mjs";
 import { openAnchor } from "../../js/lightbox.mjs";
-import { useVersion } from "../hooks/useVersion.mjs";
 import { Zoomable } from "./Zoomable.mjs";
 import { IconButton } from "./IconButton.mjs";
 
@@ -42,7 +42,6 @@ function reorder(overName, before) {
 }
 
 function AnchorCard({ anchor, idx }) {
-  useVersion();
   const [zoomed, setZoomed] = useState(false);
   return h("div", {
     class: "card anchor",
@@ -88,7 +87,6 @@ function AnchorCard({ anchor, idx }) {
 }
 
 export function AnchorSpace() {
-  useVersion();
   const fileRef = useRef(null);
   return h(Fragment, null,
     h("div", { id: "anchorList" },

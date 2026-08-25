@@ -2,15 +2,15 @@
 //
 // Composes <HostPicker>, the registry-driven header buttons, the axes status,
 // and the options menu. Reads the chrome registries (js/chrome.mjs) and
-// re-renders on the shared render() fan-out via useVersion.
+// re-renders when <App> re-renders on the shared render() signal.
 
 import { h } from "../../vendor/preact/vendor.mjs";
 import { useRef, useEffect } from "../../vendor/preact/vendor.mjs";
-import { state, render } from "../../js/state.mjs";
+import { state } from "../../js/state.mjs";
+import { render } from "../services/notify.mjs";
 import { headerButtonsList, menuItemsList, toggleMenu } from "../../js/chrome.mjs";
 import { axisStatus } from "../../js/axes.mjs";
 import { rebuildFeed } from "../services/feedView.mjs";
-import { useVersion } from "../hooks/useVersion.mjs";
 import { HostPicker } from "./HostPicker.mjs";
 
 const MENU_BTN_SVG = '<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 6h16" /><path d="M4 12h16" /><path d="M4 18h16" /></svg>';
@@ -79,7 +79,6 @@ function Menu() {
 }
 
 export function Header() {
-  useVersion();
   const menuWrapRef = useRef(null);
 
   // click outside the menu closes it (menuBtn's own click stops propagation)

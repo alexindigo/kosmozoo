@@ -4,7 +4,8 @@
 // anchors feed. The choice persists. state.workspace is the source of truth;
 // <WorkspaceBar> and <WorkspacePane> both read it.
 
-import { state, render } from "../../js/state.mjs";
+import { state } from "../../js/state.mjs";
+import { render } from "./notify.mjs";
 
 const LS_SPACE = "kosmozoo.workspace.v1";
 

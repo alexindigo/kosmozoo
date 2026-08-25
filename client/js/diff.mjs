@@ -11,7 +11,8 @@
 // box-fraction view state (geometry.mjs) makes identical registration
 // work across differing dimensions.
 
-import { state, render } from "./state.mjs";
+import { state } from "./state.mjs";
+import { render } from "../app/services/notify.mjs";
 import { diffUrl, resolveSide } from "./route.mjs";
 import { setVote, toggleFavorite } from "./judgment.mjs";
 import { freshView, transform, panFrac, viewToPersisted, viewFromPersisted } from "./geometry.mjs";

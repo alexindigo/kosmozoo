@@ -7,7 +7,8 @@
 //   #3 hold the outgoing frame until the incoming image has loaded
 //   #4 derived state (face-aligned view) never persists over its source
 
-import { state, render } from "./state.mjs";
+import { state } from "./state.mjs";
+import { render } from "../app/services/notify.mjs";
 import { api } from "./api.mjs";
 import { freshView, transform, viewToPersisted, viewFromPersisted } from "./geometry.mjs";
 import { cycleAxis } from "./axes.mjs";
