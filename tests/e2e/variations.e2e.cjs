@@ -425,6 +425,63 @@ async function main() {
         JSON.stringify(res.body).slice(0, 140));
     });
 
+    // --- lora strength rows ----------------------------------------------------
+    // flux-lora.png carries two LoraLoader nodes (model 0.8/clip 0.8 and
+    // model 0.5/clip 0.5): the panel must surface both strength params with
+    // the first carrier's current values.
+    await attempt("lora strength rows surface on a lora graph", async () => {
+      // make sure the fixture's bytes (and embedded graph) are ingested
+      await cdp.evaluate(`fetch("/api/images/fake%3Aflux-lora.png/bytes"), true`);
+      await cdp.evaluate(`
+        document.querySelector('.card[data-name="flux-lora.png"] .votebtn.variations').click()
+      `);
+      await cdp.poll(`document.querySelectorAll('.vz-slider-row').length > 0`, 5000);
+      const info = await cdp.evaluate(`(() => {
+        const out = {};
+        for (const r of document.querySelectorAll('.vz-slider-row')) {
+          const label = r.querySelector('.vz-label')?.textContent;
+          out[label] = r.querySelector('.vz-current')?.textContent ?? null;
+        }
+        return out;
+      })()`);
+      check("lora strength row with first-carrier current",
+        info["lora strength"] != null && parseFloat(info["lora strength"]) === 0.8,
+        JSON.stringify(info));
+      check("lora clip strength row with first-carrier current",
+        info["lora clip strength"] != null && parseFloat(info["lora clip strength"]) === 0.8,
+        JSON.stringify(info));
+      await cdp.evaluate(`document.querySelector('.vz-close')?.click()`);
+      await sleep(200);
+    });
+
+    // --- lora strength run mutates both carriers -------------------------------
+    // Both LoraLoader nodes get the swept strength_model; the filename suffix
+    // resolves {lora_strength} from the permutation.
+    await attempt("lora strength sweep hits every loader", async () => {
+      const res = await cdp.evaluate(`(async () => {
+        const r = await fetch("/api/plugins/variations/run", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            id: "fake:flux-lora.png", host: "fake", filename: "flux-lora.png",
+            ranges: {
+              lora_strength: { enabled: true, min: 0.5, max: 1.0, increment: 0.5 },
+            },
+            prefix: "", suffix: "_{lora_strength}",
+          }),
+        });
+        return { status: r.status, body: await r.json() };
+      })()`);
+      // 0.5..1.0 step 0.5 → 0.5, 1.0 (current 0.8 excluded) → 2 permutations;
+      // the fake host 404s each /api/prompt, but the permutation list must
+      // carry lora_strength with the swept values.
+      const perms = (res.body.errors ?? []).map((e) => e.permutation?.lora_strength);
+      check("lora strength sweep produces the swept permutations",
+        res.status === 200 && res.body.total === 2
+          && perms.includes(0.5) && perms.includes(1.0),
+        JSON.stringify(res.body).slice(0, 160));
+    });
+
   } finally {
     await cdp.close();
   }

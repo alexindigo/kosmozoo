@@ -333,6 +333,65 @@ Deno.test("inspectGraph: ApplyPulid surfaces pulid_weight", () => {
   assertEquals(params.pulid_weight?.label, "applypulid:pulid_weight");
 });
 
+Deno.test("inspectGraph: LoraLoaderModelOnly surfaces lora_strength only", () => {
+  const graph = {
+    "1": { class_type: "KSampler", inputs: {
+      seed: 1, steps: 20, cfg: 1.0, denoise: 1.0,
+    } },
+    "2": { class_type: "LoraLoaderModelOnly", inputs: {
+      lora_name: "athena_film_v1.safetensors", strength_model: 1.2, model: ["1", 0],
+    } },
+  };
+  const params = inspectGraph(graph);
+  assertEquals(params.lora_strength?.current, 1.2);
+  assertEquals(params.lora_strength?.label, "lora_strength");
+  assertEquals(params.lora_clip_strength, null); // ModelOnly has no clip side
+});
+
+Deno.test("inspectGraph: full LoraLoader surfaces both model and clip strength", () => {
+  const graph = {
+    "1": { class_type: "KSampler", inputs: {
+      seed: 1, steps: 20, cfg: 1.0, denoise: 1.0,
+    } },
+    "2": { class_type: "LoraLoader", inputs: {
+      lora_name: "detail.safetensors", strength_model: 0.8, strength_clip: 0.5,
+      model: ["1", 0], clip: ["3", 0],
+    } },
+  };
+  const params = inspectGraph(graph);
+  assertEquals(params.lora_strength?.current, 0.8);
+  assertEquals(params.lora_clip_strength?.current, 0.5);
+});
+
+Deno.test("inspectGraph: multiple lora loaders — current reads from the first carrier", () => {
+  const graph = {
+    "1": { class_type: "KSampler", inputs: {
+      seed: 1, steps: 20, cfg: 1.0, denoise: 1.0,
+    } },
+    "2": { class_type: "LoraLoader", inputs: {
+      lora_name: "detail.safetensors", strength_model: 0.8, strength_clip: 0.8,
+      model: ["1", 0], clip: ["3", 0],
+    } },
+    "3": { class_type: "LoraLoader", inputs: {
+      lora_name: "style.safetensors", strength_model: 0.5, strength_clip: 0.5,
+      model: ["2", 0], clip: ["2", 1],
+    } },
+  };
+  const params = inspectGraph(graph);
+  assertEquals(params.lora_strength?.current, 0.8);
+});
+
+Deno.test("inspectGraph: lora-less graph yields null for lora params", () => {
+  const graph = {
+    "1": { class_type: "KSampler", inputs: {
+      seed: 1, steps: 20, cfg: 1.0, denoise: 1.0,
+    } },
+  };
+  const params = inspectGraph(graph);
+  assertEquals(params.lora_strength, null);
+  assertEquals(params.lora_clip_strength, null);
+});
+
 Deno.test("inspectGraph: unrelated graph yields all-null for optional params", () => {
   const graph = {
     "1": { class_type: "KSampler", inputs: {

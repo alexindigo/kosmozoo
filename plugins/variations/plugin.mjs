@@ -97,6 +97,33 @@ function probeIpaWeight(nodes /*, graph */) {
   return { node: carriers, key: "weight", ownerLabel: "ipadapter" };
 }
 
+// lora_strength: potentially many LoRA loader nodes, all get the same model
+// strength (same multi-carrier rule as ipa_weight). LoraLoaderModelOnly
+// carries only this one; LoraLoader carries it alongside strength_clip.
+function probeLoraStrength(nodes /*, graph */) {
+  const carriers = loraLoaders(nodes).filter((n) => typeof n.inputs?.strength_model === "number");
+  if (!carriers.length) return { node: null };
+  return { node: carriers, key: "strength_model", ownerLabel: "" };
+}
+
+// lora_clip_strength: the CLIP-side strength, present only on full
+// LoraLoader nodes (ModelOnly graphs surface just lora_strength).
+function probeLoraClipStrength(nodes /*, graph */) {
+  const carriers = loraLoaders(nodes).filter((n) => typeof n.inputs?.strength_clip === "number");
+  if (!carriers.length) return { node: null };
+  return { node: carriers, key: "strength_clip", ownerLabel: "" };
+}
+
+// Shared LoRA-loader matcher — mirrors the extractor's lora scan.
+function loraLoaders(nodes) {
+  const out = [];
+  for (const n of nodes) {
+    const ct = String(n.class_type ?? "").toLowerCase();
+    if (ct.includes("lora") && ct.includes("load")) out.push(n);
+  }
+  return out;
+}
+
 // FluxGuidance.guidance — the "cfg" of Flux workflows.
 function probeGuidance(nodes /*, graph */) {
   const g = firstNode(nodes, "fluxguidance");
@@ -133,6 +160,8 @@ const PARAM_PROBES = {
   guidance: probeGuidance,
   shift: probeShift,
   pulid_weight: probePulidWeight,
+  lora_strength: probeLoraStrength,
+  lora_clip_strength: probeLoraClipStrength,
 };
 
 // --- per-image inspection ----------------------------------------------------
