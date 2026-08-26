@@ -5,6 +5,7 @@
 
 import { splitHostKey, probeHost, hostList, hostReadBytes, hostHeadSize, validateHost, addHost, removeHost, isFolderHost, hostHasAssetsPlus, hostDelete, comfyHistoryDelete, EXT_MIME } from "./hosts.mjs";
 import { cacheGet } from "./cache.mjs";
+import { scheduleRevalidate } from "./revalidate.mjs";
 
 export function makeRouter(ctx) {
   // ctx: { hosts, store, settings, plugins } — `router.ctx` is settable so
@@ -161,11 +162,16 @@ export function makeRouter(ctx) {
       return new Response(bytes, { headers: h });
     };
 
-    // Cache-first: resolve address → hash, serve from cache.
+    // Cache-first: resolve address → hash, serve from cache. A hit also
+    // fires a debounced async revalidation for non-durable remotes — the
+    // source may have changed in place; the NEXT request gets fresh bytes.
     const hash = ctx.store.hashFor(host, filename);
     if (hash) {
       const cached = await cacheGet(hash);
-      if (cached) return makeResponse(cached);
+      if (cached) {
+        scheduleRevalidate(ctx, host, filename);
+        return makeResponse(cached);
+      }
     }
 
     // Not in cache: read through ingestion (read → hash → cache → index).

@@ -27,6 +27,30 @@ export function isFolderHost(addr) {
   return FOLDER_RE.test(addr ?? "");
 }
 
+// Durability flag: can files on this remote change in place? The cache
+// revalidates non-durable remotes (src/revalidate.mjs); durable ones are
+// trusted forever once ingested. ComfyUI output is durable — a file is
+// generated once and never rewritten. Folder remotes are NOT: external
+// tools edit files in place. Every new remote kind added here must decide
+// this flag explicitly.
+export function hostDurable(addr) {
+  if (isFolderHost(addr)) return false;
+  return true; // ComfyUI (and future HTTP kinds until decided otherwise)
+}
+
+// Source mtime (ms) for revalidation, or null when the remote can't/needn't
+// report one (durable kinds). Folder = stat; nothing else today.
+export async function hostModified(addr, filename) {
+  if (!isFolderHost(addr)) return null;
+  if (basename(filename) !== filename || filename.includes("..")) return null;
+  try {
+    const s = await stat(join(FOLDER_RE.exec(addr)[1], filename));
+    return s.isFile() ? s.mtimeMs : null;
+  } catch {
+    return null;
+  }
+}
+
 export function validateHost(name, address) {
   if (!name || !NAME_RE.test(name)) return "bad name (word chars, dots, hyphens)";
   if (address?.startsWith("folder:")) {

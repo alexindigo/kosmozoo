@@ -5,7 +5,7 @@
 // before anything else sees them.
 
 import { sha256, cachePut, cacheGet } from "./cache.mjs";
-import { hostReadBytes } from "./hosts.mjs";
+import { hostReadBytes, hostModified } from "./hosts.mjs";
 
 export class Ingest {
   #store;
@@ -30,7 +30,7 @@ export class Ingest {
     const r = await hostReadBytes(addr, filename);
     if (r.status !== 200) return null;
     const bytes = new Uint8Array(await new Response(r.body).arrayBuffer());
-    return this.#ingestBytes(host, filename, bytes);
+    return this.#ingestBytes(host, filename, bytes, await hostModified(addr, filename));
   }
 
   // Raw bytes path — the caller already has the bytes (folder host, direct read).
@@ -38,10 +38,10 @@ export class Ingest {
     return this.#ingestBytes(host, filename, bytes);
   }
 
-  async #ingestBytes(host, filename, bytes) {
+  async #ingestBytes(host, filename, bytes, mtime = null) {
     const hash = await sha256(bytes);
     await cachePut(hash, bytes);
-    await this.#store.ingestFile(host, filename, hash, bytes.length);
+    await this.#store.ingestFile(host, filename, hash, bytes.length, { mtime });
     return hash;
   }
 }

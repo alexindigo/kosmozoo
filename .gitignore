@@ -14,3 +14,4 @@ TODO.md
 .envrc
 state/
 settings.json
+tests/.tmp-mutable/
