@@ -27,6 +27,7 @@ import { InfoOverlay } from "./InfoOverlay.mjs";
 import { KeysPanel } from "./KeysPanel.mjs";
 import { DiffStage } from "./DiffStage.mjs";
 import { ConfirmDelete } from "./ConfirmDelete.mjs";
+import { ScrollTopButton } from "./ScrollTopButton.mjs";
 
 // public namespace: e2e (and the console) drive the same state the keys do
 window.kosmozoo = { state, render, setRoi, addAnchorFiles, chrome, openDiff };
@@ -52,6 +53,7 @@ export function App() {
       h(WorkspaceBar, null),
     ),
     h("div", { id: "statusStack", dangerouslySetInnerHTML: { __html: "" } }),
+    h(ScrollTopButton, null),
     h(FieldsOverlay, null),
     h(InfoOverlay, null),
     h(KeysPanel, null),

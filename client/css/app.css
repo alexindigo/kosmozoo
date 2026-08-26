@@ -300,6 +300,14 @@ main { display: flex; flex: 1; min-height: 0; }
 .switchwrap.mini .track::after { width: 9px; height: 9px; }
 .switchwrap.mini input:checked + .track::after { transform: translateX(9px); }
 
+/* --- scroll-to-top floating button (bottom-left, above the status stack) --- */
+#scrollTopBtn { position: fixed; left: 12px; bottom: 56px; z-index: 71;
+  width: 32px; height: 32px; display: grid; place-items: center;
+  background: var(--panel); border: 1px solid var(--raise); border-radius: 8px;
+  color: var(--dim); cursor: pointer; padding: 0;
+  transition: color .15s, border-color .15s; }
+#scrollTopBtn:hover { color: var(--fg); border-color: var(--mid); }
+
 /* --- status stack (transient fades 6s, active pinned, errors sticky) ------- */
 #statusStack { position: fixed; left: 12px; bottom: 10px; z-index: 70;
   display: flex; flex-direction: column; gap: 6px; align-items: flex-start;
