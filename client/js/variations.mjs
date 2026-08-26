@@ -23,13 +23,15 @@ const PARAM_REGISTRY = {
   guidance:     { label: "guidance",     decimals: 1, clamp: [0, 30],         defaultInc: 0.5,  spread: 2    },
   shift:        { label: "shift",        decimals: 2, clamp: [0, 10],         defaultInc: 0.5,  spread: 1    },
   pulid_weight: { label: "pulid weight", decimals: 2, clamp: [0, 2],          defaultInc: 0.05, spread: 0.3  },
+  lora_strength:      { label: "lora strength",       decimals: 2, clamp: [-2, 2], defaultInc: 0.1, spread: 0.3 },
+  lora_clip_strength: { label: "lora clip strength",  decimals: 2, clamp: [-2, 2], defaultInc: 0.1, spread: 0.3 },
 };
 
 // Deterministic display order — matches the mockup and the extractor's
 // probe order. Parameters not in the registry are ignored.
 export const PARAM_ORDER = [
   "denoise", "ipa_weight", "steps", "cfg", "seed",
-  "guidance", "shift", "pulid_weight",
+  "guidance", "lora_strength", "lora_clip_strength", "shift", "pulid_weight",
 ];
 
 export function paramDef(key) {
@@ -40,6 +42,14 @@ export function paramDef(key) {
 
 export function currentValue(key, meta) {
   const raw = meta?.[key];
+  if (key === "lora_strength" || key === "lora_clip_strength") {
+    // meta.loras is a list of loaders; the fallback current is the first
+    // one's model strength (clip strength isn't extracted — the probe
+    // endpoint is the authority for that row).
+    const first = (meta?.loras ?? [])[0];
+    const v = parseFloat(first?.strength);
+    return isNaN(v) ? null : v;
+  }
   if (raw == null) return null;
   if (key === "ipa_weight") {
     const first = String(raw).split("+")[0];
