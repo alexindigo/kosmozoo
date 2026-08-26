@@ -101,3 +101,46 @@ Deno.test("diff: malformed sides parse to null, not garbage", () => {
   assertEquals(parseDiffHash("fake#:anchor#x.png").left, null);
   assertEquals(parseDiffHash("").right, null);
 });
+
+// --- metadata fields: loras as individual rows ---------------------------------
+
+import { fullFieldRows, metaStripText } from "../client/js/fields.mjs";
+
+Deno.test("fields: multiple loras render one row per lora, labeled lora", () => {
+  const rows = fullFieldRows({
+    seed: 7,
+    loras: [
+      { name: "detail.safetensors", strength: 0.8 },
+      { name: "style.safetensors", strength: 0.5 },
+    ],
+  });
+  const loraRows = rows.filter(([label]) => label === "lora");
+  assertEquals(loraRows, [["lora", "detail.safetensors@0.8"], ["lora", "style.safetensors@0.5"]]);
+  // no concatenated "loras" row remains
+  assertEquals(rows.filter(([label]) => label === "loras"), []);
+  // other fields still one row each
+  assertEquals(rows.filter(([label]) => label === "seed"), [["seed", 7]]);
+});
+
+Deno.test("fields: single lora is its own row; missing strength has no @", () => {
+  const rows = fullFieldRows({ loras: [{ name: "athena_film_v1.safetensors", strength: 1.2 }] });
+  assertEquals(rows, [["lora", "athena_film_v1.safetensors@1.2"]]);
+  assertEquals(fullFieldRows({ loras: [{ name: "bare.safetensors" }] }), [["lora", "bare.safetensors"]]);
+});
+
+Deno.test("fields: the one-line strip joins loras back into one bit", () => {
+  const prev = state.fieldsCfg;
+  state.fieldsCfg = { loras: { strip: true }, seed: { strip: true } };
+  try {
+    const strip = metaStripText({
+      seed: 3,
+      loras: [
+        { name: "a.safetensors", strength: 0.8 },
+        { name: "b.safetensors", strength: 0.5 },
+      ],
+    });
+    assertEquals(strip, "seed 3 · loras a.safetensors@0.8, b.safetensors@0.5");
+  } finally {
+    state.fieldsCfg = prev;
+  }
+});

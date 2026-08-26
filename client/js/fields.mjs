@@ -27,8 +27,10 @@ export const META_FIELD_GROUPS = [
       : null],
   ]],
   ["LoRA loaders", [
+    // One field per lora, not a concatenation: the surfaces expand an
+    // array-valued getter into one row per entry (see fieldValueToRows).
     ["loras", (m) => (m.loras || []).map((l) =>
-      l.name + (l.strength != null ? "@" + l.strength : "")).join(", ") || null],
+      l.name + (l.strength != null ? "@" + l.strength : ""))],
   ]],
   ["FluxGuidance", [["guidance", (m) => m.guidance]]],
   ["Model loaders", [
@@ -81,6 +83,15 @@ export async function persist() {
 
 // --- surfaces -------------------------------------------------------------------
 
+// Expand a field's value into [label, text] display rows. Most fields yield
+// one row labeled by the field name; an ARRAY-valued getter (loras) yields
+// one row per entry, labeled singular (lora) — each lora is its own field.
+function fieldValueToRows(name, v) {
+  if (Array.isArray(v)) return v.filter((s) => s !== "").map((s) => ["lora", s]);
+  if (v == null || v === "") return [];
+  return [[name, v]];
+}
+
 export function fillCardMeta(props, desc, meta) {
   const cfg = state.fieldsCfg;
   props.textContent = "";
@@ -97,8 +108,7 @@ export function fillCardMeta(props, desc, meta) {
   for (const [name, get] of META_FIELDS) {
     if (name === "prompt" || name === "negative") continue;
     if (!cfg[name]?.card) continue;
-    const v = get(meta);
-    if (v != null && v !== "") rows.push([name, v]);
+    rows.push(...fieldValueToRows(name, get(meta)));
   }
   if (rows.length) {
     for (const [k, v] of rows) {
@@ -122,14 +132,15 @@ export function fillCardMeta(props, desc, meta) {
   }
 }
 
-// one-line strip: "seed 1 · 20 steps · …"
+// one-line strip: "seed 1 · 20 steps · …" (list-valued fields join back)
 export function metaStripText(meta) {
   const bits = [];
   for (const [name, get] of META_FIELDS) {
     if (!state.fieldsCfg[name]?.strip) continue;
     const v = get(meta);
-    if (v == null || v === "") continue;
-    bits.push(name === "prompt" || name === "negative" ? String(v) : `${name} ${v}`);
+    const txt = Array.isArray(v) ? v.join(", ") : v;
+    if (txt == null || txt === "") continue;
+    bits.push(name === "prompt" || name === "negative" ? String(txt) : `${name} ${txt}`);
   }
   return bits.join(" · ");
 }
@@ -144,8 +155,7 @@ export function fullFieldRows(meta) {
   const rows = [];
   for (const [name, get] of META_FIELDS) {
     if (name === "prompt" || name === "negative") continue;
-    const v = get(meta);
-    if (v != null && v !== "") rows.push([name, v]);
+    rows.push(...fieldValueToRows(name, get(meta)));
   }
   return rows;
 }
