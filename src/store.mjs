@@ -3,6 +3,7 @@
 // Metadata lives in sqlite via jsr:@db/sqlite@0.13.0.  Schema evolution:
 //   v1 — metadata table keyed (host, filename)
 //   v2 — files + images tables, hash identity
+//   v3 — files.mtime: source mtime at ingestion (cache revalidation)
 // Judgments stay in the portable feedback.json (re-keyed to hash later).
 
 import { join } from "node:path";
@@ -10,7 +11,7 @@ import { Database } from "@db/sqlite";
 import { loadVersioned, atomicWrite } from "./state.mjs";
 import { hostKey, splitHostKey } from "./hosts.mjs";
 
-const SCHEMA_VERSION = 2;
+const SCHEMA_VERSION = 3;
 
 const MIGRATIONS = [
   // v0 → v1: create the single-table metadata store.
@@ -58,6 +59,11 @@ const MIGRATIONS = [
       for (const r of rs) ins.run(r.host, r.filename);
     });
     txn(rows);
+  },
+  // v2 → v3: record the source mtime at ingestion so the cache can
+  // revalidate non-durable remotes (src/revalidate.mjs).
+  (db) => {
+    db.exec(`ALTER TABLE files ADD COLUMN mtime REAL`);
   },
 ];
 
@@ -142,24 +148,49 @@ export class Store {
     return row ? row[0] : null;
   }
 
-  // Called when bytes are ingested: record the hash and move metadata.
-  async ingestFile(host, filename, hash, size) {
-    this.#db.prepare(
-      "INSERT INTO files (host, filename, hash, size) VALUES (?, ?, ?, ?) ON CONFLICT(host, filename) DO UPDATE SET hash = excluded.hash, size = excluded.size"
-    ).run(host, filename, hash, size);
-
-    // Move existing metadata from the legacy table to the images table.
-    const metaRow = this.#db.prepare(
-      "SELECT meta, source, has_workflow, nopng, ext, updated_at FROM metadata WHERE host = ? AND filename = ?"
+  // Hash + source mtime as recorded at ingestion (revalidation input).
+  fileInfo(host, filename) {
+    const row = this.#db.prepare(
+      "SELECT hash, mtime FROM files WHERE host = ? AND filename = ?"
     ).value(host, filename);
-    if (metaRow) {
+    return row ? { hash: row[0], mtime: row[1] } : null;
+  }
+
+  // Called when bytes are ingested: record the hash and move metadata.
+  // opts.mtime — the source mtime at ingestion (null when unknown/durable).
+  // opts.changed — this is a RE-ingest of a file whose content changed:
+  // legacy metadata belongs to the OLD bytes, so it must not ride along.
+  async ingestFile(host, filename, hash, size, { mtime = null, changed = false } = {}) {
+    this.#db.prepare(
+      "INSERT INTO files (host, filename, hash, size, mtime) VALUES (?, ?, ?, ?, ?) ON CONFLICT(host, filename) DO UPDATE SET hash = excluded.hash, size = excluded.size, mtime = excluded.mtime"
+    ).run(host, filename, hash, size, mtime);
+
+    if (changed) {
+      // Drop the legacy row; metaGet must not fall back to old-bytes meta.
       this.#db.prepare(
-        `INSERT OR IGNORE INTO images (hash, meta, source, has_workflow, nopng, ext, updated_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?)`
-      ).run(hash, metaRow[0], metaRow[1], metaRow[2], metaRow[3], metaRow[4], metaRow[5]);
+        "DELETE FROM metadata WHERE host = ? AND filename = ?"
+      ).run(host, filename);
+    } else {
+      // Move existing metadata from the legacy table to the images table.
+      const metaRow = this.#db.prepare(
+        "SELECT meta, source, has_workflow, nopng, ext, updated_at FROM metadata WHERE host = ? AND filename = ?"
+      ).value(host, filename);
+      if (metaRow) {
+        this.#db.prepare(
+          `INSERT OR IGNORE INTO images (hash, meta, source, has_workflow, nopng, ext, updated_at)
+           VALUES (?, ?, ?, ?, ?, ?, ?)`
+        ).run(hash, metaRow[0], metaRow[1], metaRow[2], metaRow[3], metaRow[4], metaRow[5]);
+      }
     }
 
     this.#metaVersion++;
+  }
+
+  // Same content, newer source mtime (a touch): refresh the stamp only.
+  touchFileMtime(host, filename, mtime) {
+    this.#db.prepare(
+      "UPDATE files SET mtime = ? WHERE host = ? AND filename = ?"
+    ).run(mtime, host, filename);
   }
 
   // --- metadata (sqlite-backed, re-derivable) ----------------------------

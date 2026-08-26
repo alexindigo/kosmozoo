@@ -16,9 +16,15 @@ PW_IMAGE="${PW_IMAGE:-mcr.microsoft.com/playwright:v1.49.1-noble}"
 
 cleanup() {
   docker rm -f kz-e2e-fake kz-e2e-fake2 kz-e2e-engine >/dev/null 2>&1 || true
+  rm -rf "$WORK/tests/.tmp-mutable"
 }
 trap cleanup EXIT
 cleanup
+
+# 0. mutable folder host for the cache-revalidation e2e: a writable copy of a
+#    fixture that the spec rewrites in place while the engine is running
+mkdir -p "$WORK/tests/.tmp-mutable"
+cp "$WORK/tests/fixtures/flux-basic.png" "$WORK/tests/.tmp-mutable/flux-basic.png"
 
 # 1. fake ComfyUI host: fixtures + 3000 synthetic bulk images
 docker run -d --name kz-e2e-fake --network host -v "$WORK":/work -w /work \
@@ -33,12 +39,14 @@ docker run -d --name kz-e2e-fake2 --network host -v "$WORK":/work -w /work \
   tests/fake-comfy.mjs --port "$FAKE2_PORT" --bulk 40 >/dev/null
 
 # 2. engine against both fake hosts + a folder host, plugins from the repo tier
+#    (revalidate interval shortened so the cache e2e can observe it)
 docker run -d --name kz-e2e-engine --network host -v "$WORK":/work -w /work \
-  -e KOZMOZOO_HOSTS="fake=127.0.0.1:$FAKE_PORT,another=127.0.0.1:$FAKE2_PORT,fixture-dir=folder:/work/tests/fixtures" \
+  -e KOZMOZOO_HOSTS="fake=127.0.0.1:$FAKE_PORT,another=127.0.0.1:$FAKE2_PORT,fixture-dir=folder:/work/tests/fixtures,mut=folder:/work/tests/.tmp-mutable" \
   -e KOZMOZOO_PORT="$ENGINE_PORT" \
   -e KOZMOZOO_STATE=/tmp/kz-e2e-state \
   -e KOZMOZOO_FEEDBACK=/tmp/kz-e2e-state/feedback.json \
   -e KOZMOZOO_PLUGINS=/work/plugins \
+  -e KOZMOZOO_REVALIDATE_MS=1500 \
   denoland/deno:latest run --allow-all src/main.mjs >/dev/null
 
 # wait for both
@@ -71,3 +79,9 @@ docker run --rm --network host -v "$WORK":/work -w /work \
   -e E2E_FAKE="http://127.0.0.1:$FAKE_PORT" \
   --entrypoint node "$PW_IMAGE" \
   /work/tests/e2e/diff.e2e.cjs
+
+# 6. cache revalidation e2e (pure HTTP — no browser involved)
+docker run --rm --network host -v "$WORK":/work -w /work \
+  -e E2E_ENGINE="http://127.0.0.1:$ENGINE_PORT" \
+  --entrypoint node "$PW_IMAGE" \
+  /work/tests/e2e/cache.e2e.cjs
