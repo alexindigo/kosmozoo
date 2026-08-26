@@ -12,6 +12,11 @@ let metaPending = 0;
 let metaPollTimer = null;
 const wantSet = new Set();
 let wantTimer = null;
+// The scan chip appears on load and when the pending count jumps UP
+// (non-monotone); once the user clicks it away it stays dismissed until the
+// next such jump (or the scan finishes and a new one starts).
+let prevMetaPending = null; // null = never polled yet
+let metaChipDismissed = false;
 
 export function wantMeta(image) {
   if (image.meta || wantSet.has(image.filename)) return;
@@ -70,8 +75,21 @@ function mergeMetadata(items) {
 }
 
 function updateScanChip() {
-  if (metaPending > 0) chrome.status.active("meta", `metadata scan — ${metaPending} left`);
-  else chrome.status.clear("meta");
+  if (metaPending <= 0) {
+    chrome.status.clear("meta");
+    prevMetaPending = metaPending;
+    metaChipDismissed = false; // a finished scan arms the chip for next time
+    return;
+  }
+  const isFirst = prevMetaPending === null;   // load (first poll)
+  const jumped = metaPending > prevMetaPending; // non-monotone (count grew)
+  if (isFirst || jumped) metaChipDismissed = false;
+  if (!metaChipDismissed) {
+    chrome.status.active("meta", `metadata scan — ${metaPending} left`, () => {
+      metaChipDismissed = true;
+    });
+  }
+  prevMetaPending = metaPending;
 }
 
 // Picker changes re-apply to every card declaratively: a re-render makes each

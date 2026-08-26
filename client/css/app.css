@@ -307,10 +307,10 @@ main { display: flex; flex: 1; min-height: 0; }
 .statuschip { background: rgba(26, 26, 26, 0.88); border: 1px solid var(--border);
   border-radius: 6px; padding: 4px 10px; font-size: 12px; color: var(--mid);
   max-width: calc(100vw - 24px); white-space: normal; overflow-wrap: anywhere;
-  opacity: 1; transition: opacity .6s ease; }
-.statuschip.active { color: var(--fg); border-left: 3px solid var(--accent); }
-.statuschip.error { color: var(--red); border-left: 3px solid #a33;
+  opacity: 1; transition: opacity .6s ease;
   pointer-events: auto; cursor: pointer; }
+.statuschip.active { color: var(--fg); border-left: 3px solid var(--accent); }
+.statuschip.error { color: var(--red); border-left: 3px solid #a33; }
 .statuschip.fade { opacity: 0; }
 
 /* --- overlays (fields picker, ⓘ info) -------------------------------------- */

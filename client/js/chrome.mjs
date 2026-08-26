@@ -114,8 +114,9 @@ export function actionsList() {
 
 // --- status stack --------------------------------------------------------------
 // transient: one shared chip, fades 6s after its last update. active: pinned
-// chips keyed by id, visible for the activity's duration. error: sticky,
-// click to dismiss.
+// chips keyed by id, visible for the activity's duration. error: sticky.
+// ALL chips dismiss on click (common behavior); active chips may pass an
+// onDismiss callback to learn they were dismissed.
 
 let transientChip = null;
 let transientTimer = null;
@@ -127,6 +128,12 @@ function info(msg) {
   if (!transientChip || !transientChip.parentElement) {
     transientChip = document.createElement("div");
     transientChip.className = "statuschip";
+    transientChip.title = "click to dismiss";
+    transientChip.addEventListener("click", () => {
+      clearTimeout(transientTimer);
+      transientChip?.remove();
+      transientChip = null;
+    });
     stack.appendChild(transientChip);
   }
   transientChip.textContent = msg;
@@ -138,16 +145,23 @@ function info(msg) {
   }, 6000);
 }
 
-function active(id, msg) {
+function active(id, msg, onDismiss) {
   const stack = $("statusStack");
   if (!stack) return;
   let el = activeChips.get(id);
   if (!el) {
     el = document.createElement("div");
     el.className = "statuschip active";
+    el.title = "click to dismiss";
+    el.addEventListener("click", () => {
+      el.remove();
+      activeChips.delete(id);
+      if (el._onDismiss) el._onDismiss();
+    });
     activeChips.set(id, el);
     stack.appendChild(el);
   }
+  el._onDismiss = onDismiss;
   el.textContent = msg;
 }
 
