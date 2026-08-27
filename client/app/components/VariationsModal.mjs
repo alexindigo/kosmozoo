@@ -143,17 +143,37 @@ export function VariationsModal({ images, onClose }) {
   // variations count: product of per-param steps. Absolute mode subtracts
   // the current combo; batch subtracts it only when every enabled range
   // actually contains the current value (offset 0).
+  // variations count: product of per-param steps. The engine excludes the
+  // exact current combo — subtract it ONLY when that combo is actually in
+  // the product: every enabled range must contain its current value AND the
+  // value must land on a step of the range's increment. (In batch mode the
+  // "current" is offset 0, which is in a range only when it spans 0.)
   let perImage = 1;
   let anyEnabled = false;
-  let allContainCurrent = true;
+  let currentComboInProduct = true;
   for (const [key, r] of Object.entries(rows)) {
     if (!r.enabled) continue;
     anyEnabled = true;
     const inc = r.increment || paramDef(key, r.current, r.integer)?.defaultInc || 1;
     perImage *= Math.max(Math.round((r.max - r.min) / inc) + 1, 1);
-    if (batch && !(r.min <= 0 && r.max >= 0)) allContainCurrent = false;
+    if (batch) {
+      // offsets around the image's own value: combo 0 is in the product iff
+      // every enabled offset range spans 0 on a step boundary
+      if (!(r.min <= 0 && r.max >= 0)) currentComboInProduct = false;
+      else {
+        const steps = (0 - r.min) / inc;
+        if (Math.abs(steps - Math.round(steps)) > 1e-6) currentComboInProduct = false;
+      }
+    } else {
+      const cur = r.current;
+      if (cur == null || cur < r.min || cur > r.max) currentComboInProduct = false;
+      else {
+        const steps = (cur - r.min) / inc;
+        if (Math.abs(steps - Math.round(steps)) > 1e-6) currentComboInProduct = false;
+      }
+    }
   }
-  if (anyEnabled && allContainCurrent && perImage > 0) perImage -= 1;
+  if (anyEnabled && currentComboInProduct && perImage > 0) perImage -= 1;
   const n = anyEnabled ? perImage * images.length : 0;
 
   async function runVariations() {

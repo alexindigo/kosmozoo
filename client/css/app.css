@@ -424,7 +424,7 @@ main { display: flex; flex: 1; min-height: 0; }
   display: flex; align-items: center; justify-content: center;
   padding: 24px; }
 .vz-panel { position: relative;
-  width: min(920px, 96vw); max-height: 92vh; overflow: auto;
+  width: min(920px, 96vw); max-height: 92vh; display: flex; flex-direction: column;
   background: var(--panel); border: 1px solid var(--border);
   border-radius: 12px; padding: 20px 24px;
   font-size: 12px; color: var(--fg);
@@ -435,10 +435,12 @@ main { display: flex; flex: 1; min-height: 0; }
   margin: 0 0 20px; font-weight: 500; }
 
 /* two-column body */
-.vz-body { display: flex; gap: 20px; align-items: stretch; }
+.vz-body { display: flex; gap: 20px; align-items: stretch; flex: 1; min-height: 0; }
 .vz-left { flex: 1; min-width: 0; display: flex; flex-direction: column;
-  justify-content: center; }
-.vz-sliders { display: flex; flex-direction: column; gap: 10px; }
+  min-height: 0; }
+/* only the field list scrolls; the panel itself stays put */
+.vz-sliders { display: flex; flex-direction: column; gap: 10px;
+  overflow-y: auto; min-height: 0; flex: 1; padding-right: 4px; }
 
 /* Each param is a little card. Enabled cards float to the top; disabled
    ones sit below. Reordering is done by DOM manipulation (see
