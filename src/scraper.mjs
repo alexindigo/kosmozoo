@@ -12,7 +12,10 @@ import { hostReadBytes } from "./hosts.mjs";
 
 const INTER_FILE_DELAY = 100;   // ms between file fetches
 const MAX_BACKOFF = 30_000;     // backoff cap
-const EXTRACTOR_VERSION = 3;
+// Feed()-freshness gate version: bump when the extraction shape changes so
+// listings only requeuethe files extracted with an older version. (This gate
+// was dropped in the async port and restored — see the commit message.)
+export const EXTRACTOR_VERSION = 3;
 
 export class Scraper {
   // hosts: { name: "host:port" }; store: Store; enabled/paused come from settings
@@ -38,13 +41,15 @@ export class Scraper {
     return w.prio.length + w.walk.length + (w.inflight ? 1 : 0);
   }
 
-  // Queue names that are unknown or stale. priority=true promotes to the
-  // prio queue (drains even when the background walk is disabled).
+  // Queue names that are unknown or stale (older extractor version).
+  // priority=true promotes to the prio queue (drains even when the
+  // background walk is disabled).
   feed(host, names, priority = false) {
     if (!names?.length) return this.pending(host);
+    const fresh = this.store.metaFresh(host, EXTRACTOR_VERSION);
     const w = this.#w(host);
     for (const name of names) {
-      if (w.prioSet.has(name) || w.walkSet.has(name)) continue;
+      if (fresh.has(name) || w.prioSet.has(name) || w.walkSet.has(name)) continue;
       if (priority) {
         if (w.walkSet.has(name)) {
           w.walkSet.delete(name);
