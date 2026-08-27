@@ -28,6 +28,7 @@ export const api = {
   setSettings: (ns, kv) => req("PATCH", `/api/settings/${encodeURIComponent(ns)}`, kv),
   plugins: () => req("GET", "/api/plugins"),
   scraper: () => req("GET", "/api/scraper"),
+  nodes: () => req("GET", "/api/nodes"),
   setScraper: (kv) => req("POST", "/api/scraper", kv),
   metadata: (host) => req("GET", `/api/metadata?host=${encodeURIComponent(host)}`),
   metaWant: (host, files) => req("POST", "/api/meta-want", { host, files }),

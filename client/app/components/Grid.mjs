@@ -19,12 +19,15 @@ import { Card } from "./Card.mjs";
 // compares the card's real inputs (image, position, src, meta, vote,
 // favorite, selected) and skips the rest. Callbacks are intentionally not
 // compared — they are stable in behavior (they capture the card's index).
+// Fields config must invalidate the memo gate too: a picker toggle changes
+// which getters render, so the version marker below flips and cards re-render
+// their props (see MemoCard.shouldComponentUpdate).
 class MemoCard extends Component {
   shouldComponentUpdate(n) {
     const p = this.props;
     return p.image !== n.image || p.imgIdx !== n.imgIdx || p.src !== n.src
       || p.meta !== n.meta || p.vote !== n.vote || p.fav !== n.fav
-      || p.selected !== n.selected;
+      || p.selected !== n.selected || p.fieldsVersion !== n.fieldsVersion;
   }
   render() { return h(Card, this.props); }
 }
@@ -61,6 +64,7 @@ export function Grid({ view, count, onOpen, onSentinel, registerApi }) {
     if (!image) return null;
     const j = image.judgment ?? {};
     const isCurrent = cur && cur.remote === state.host && matchesFile(image, state.host, cur.image);
+  const fieldsVersion = JSON.stringify(state.fieldsCfg ?? {});
     return h("div", {
       key: image.id ?? idx,
       class: "card" + (isCurrent ? " current" : ""),
@@ -77,6 +81,7 @@ export function Grid({ view, count, onOpen, onSentinel, registerApi }) {
       vote: j.vote ?? null,
       fav: !!j.favorite,
       selected: state.selected.has(image.id),
+      fieldsVersion,
       onOpen: () => onOpen?.(idx),
       onErrorClick: () => win.retry(idx),
       onImgPhase: (p) => {

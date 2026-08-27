@@ -6,7 +6,7 @@
 import { h } from "../../vendor/preact/vendor.mjs";
 import { state } from "../../js/state.mjs";
 import { render } from "../services/notify.mjs";
-import { META_FIELD_GROUPS, persist, notifyFieldsChanged } from "../../js/fields.mjs";
+import { fieldGroups, persist, notifyFieldsChanged } from "../../js/fields.mjs";
 import { Modal } from "./Modal.mjs";
 
 const CLOSE_SVG = '<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 6l-12 12" /><path d="M6 6l12 12" /></svg>';
@@ -62,7 +62,7 @@ export function FieldsOverlay() {
       class: "frow head", key: "head",
       dangerouslySetInnerHTML: { __html: '<span class="fname2">field (grouped by node)</span><span>under image</span><span>strip</span>' },
     }));
-    for (const [gname, fields] of META_FIELD_GROUPS) {
+    for (const [gname, fields] of fieldGroups()) {
       tbl.push(h("div", { class: "fgroup", key: gname },
         h("div", { class: "fgrouphead" },
           h("span", { class: "gname" }, gname),
@@ -70,10 +70,10 @@ export function FieldsOverlay() {
           masterToggle(gname, fields, "strip"),
         ),
         h("div", { class: "fgroupbody", "data-group": gname },
-          fields.map(([name]) => h("div", { class: "frow", key: name },
-            h("span", { class: "fname2" }, name),
-            fieldToggle(name, "card"),
-            fieldToggle(name, "strip"),
+          fields.map(([id]) => h("div", { class: "frow", key: id },
+            h("span", { class: "fname2" }, id),
+            fieldToggle(id, "card"),
+            fieldToggle(id, "strip"),
           )),
         ),
       ));
