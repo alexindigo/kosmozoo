@@ -66,10 +66,9 @@ async function main() {
     });
 
     // --- sliders render after the probe returns (graph-driven) ---
-    // flux-basic uses SamplerCustomAdvanced (no CfgGuider) with a
-    // FluxGuidance node and no IPAdapter/PuLID/ModelSampling — the panel
-    // should render denoise/steps/seed/guidance but NOT cfg/ipa_weight/
-    // shift/pulid_weight for this graph.
+    // flux-basic (SamplerCustomAdvanced): the panel now lists every numeric
+    // input of every node. Assert the graph-appropriate params are present —
+    // exact-set assertions died with the hardcoded probe table.
     await attempt("panel renders only the graph's varyable params", async () => {
       await cdp.poll(`document.querySelectorAll('.vz-slider-row').length > 0`, 5000);
       const info = await cdp.evaluate(`(() => {
@@ -78,15 +77,11 @@ async function main() {
         return { count: rows.length, labels };
       })()`);
       check("panel renders graph-appropriate params",
-        info.count === 4
-          && info.labels.includes("denoise")
-          && info.labels.includes("steps")
-          && info.labels.includes("seed")
-          && info.labels.includes("guidance")
-          && !info.labels.includes("cfg")
-          && !info.labels.includes("ipa weight")
-          && !info.labels.includes("shift")
-          && !info.labels.includes("pulid weight"),
+        info.count >= 4
+          && info.labels.some((l) => l.endsWith("denoise"))
+          && info.labels.some((l) => l.endsWith("steps"))
+          && info.labels.some((l) => l.endsWith("seed") || l.endsWith("noise_seed"))
+          && info.labels.some((l) => l.endsWith("guidance")),
         JSON.stringify(info));
     });
 
@@ -94,7 +89,7 @@ async function main() {
     await attempt("probe fills in seed current value", async () => {
       const cur = await cdp.evaluate(`(() => {
         for (const r of document.querySelectorAll('.vz-slider-row')) {
-          if (r.querySelector('.vz-label')?.textContent === 'seed') {
+          if (/seed$/.test(r.querySelector('.vz-label')?.textContent ?? "")) {
             return r.querySelector('.vz-current')?.textContent;
           }
         }
@@ -104,16 +99,12 @@ async function main() {
         cur != null && cur !== "",
         "current=" + cur);
     });
-
-    // --- denoise auto-enables on modal open; count is non-zero ---
-    // Opening the modal flips denoise on by default so the user lands on
-    // a sensible starting state. Verified by the count being > 0.
     await attempt("denoise auto-enabled on open (count > 0)", async () => {
       await sleep(200);
       const count = await cdp.evaluate(`document.querySelector('.vz-count')?.textContent`);
       const denoiseOn = await cdp.evaluate(`(() => {
         for (const r of document.querySelectorAll('.vz-slider-row')) {
-          if (r.dataset.paramKey === 'denoise') return !r.classList.contains('vz-off');
+          if (/denoise$/.test(r.dataset.paramKey ?? "")) return !r.classList.contains('vz-off');
         }
         return false;
       })()`);
@@ -126,13 +117,11 @@ async function main() {
     // --- enabling a slider auto-inserts its placeholder into suffix ---
     // No trailing underscore in the token — ComfyUI's SaveImage adds its
     // own separator before the counter, so `_{key}` (leading only) is
-    // the right shape.
+    // the right shape. The key is the full field id (ClassType.input).
     await attempt("enable auto-inserts _{key} into suffix", async () => {
       const suffix = await cdp.evaluate(`document.querySelector('.vz-suffix')?.value`);
-      const okBare = suffix === "_{denoise}";
-      const okPrefixed = suffix === "_{scheduler:denoise}";
       check("suffix auto-populated on enable",
-        okBare || okPrefixed,
+        /^_\{[\w.]*denoise\}$/.test(suffix ?? ""),
         "suffix=" + JSON.stringify(suffix));
     });
 
@@ -174,7 +163,7 @@ async function main() {
           if (!r.classList.contains('vz-off')) {
             const key = r.dataset.paramKey;
             // Skip denoise so the subsequent tests can still run against it
-            if (key === 'denoise') continue;
+            if (key?.endsWith('denoise')) continue;
             const cb = r.querySelector('.vz-cb');
             cb.checked = false;
             cb.dispatchEvent(new Event('change'));
@@ -207,7 +196,7 @@ async function main() {
     // registered and the increment is correctly tracked.
     await attempt("slide handler snaps to per-slider increment", async () => {
       const result = await cdp.evaluate(`(() => {
-        const row = document.querySelector('.vz-slider-row[data-param-key="denoise"]');
+        const row = document.querySelector('.vz-slider-row[data-param-key$="denoise"]');
         const slider = row.querySelector('.vz-slider');
         if (!slider?.noUiSlider) return { error: 'no slider' };
         const inc = row.querySelector('.vz-row-inc-input');
@@ -232,7 +221,7 @@ async function main() {
     // real user's arrow keys will use.
     await attempt("slider configured for keyboard with fine step", async () => {
       const result = await cdp.evaluate(`(() => {
-        const row = document.querySelector('.vz-slider-row[data-param-key="denoise"]');
+        const row = document.querySelector('.vz-slider-row[data-param-key$="denoise"]');
         const slider = row.querySelector('.vz-slider');
         if (!slider?.noUiSlider) return { error: 'no slider' };
         // Reset increment to default so we can check the fine step
@@ -255,7 +244,7 @@ async function main() {
     // --- track rail exists and shares one centerline with everything ---
     await attempt("rail spans the lane; rail/connect/thumbs/marker share a centerline", async () => {
       const g = await cdp.evaluate(`(() => {
-        const row = document.querySelector('.vz-slider-row[data-param-key="denoise"]');
+        const row = document.querySelector('.vz-slider-row[data-param-key$="denoise"]');
         const c = (el) => {
           const r = el.getBoundingClientRect();
           return { top: r.top, h: r.height, w: r.width, center: r.top + r.height / 2 };
@@ -309,10 +298,11 @@ async function main() {
         label.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, cancelable: true }));
         return { value: suffix.value };
       })()`);
-      const okBare = result.value === "pre_{denoise}_post";
-      const okPrefixed = result.value === "pre_{scheduler:denoise}_post";
+      // the label click inserts the row's own placeholder — the auto-enabled
+      // denoise row floats to the top, so the first row's key ends in denoise
+      const ok = /^pre_\{[\w.]*denoise\}_post$/.test(result.value);
       check("suffix contains graph-appropriate {denoise} at cursor",
-        okBare || okPrefixed,
+        ok,
         JSON.stringify(result));
     });
 
@@ -407,9 +397,9 @@ async function main() {
             id: "fake:flux-basic.png", host: "fake", filename: "flux-basic.png",
             relative: true,
             ranges: {
-              steps: { enabled: true, min: -5, max: 5, increment: 1, clamp: [1, 150] },
-              guidance: { enabled: true, min: -1, max: 1, increment: 0.5, clamp: [0, 30] },
-              cfg: { enabled: true, min: -1, max: 1, increment: 0.5, clamp: [0, 30] },
+              "BasicScheduler.steps": { enabled: true, min: -5, max: 5, increment: 1, clamp: [1, 150] },
+              "FluxGuidance.guidance": { enabled: true, min: -1, max: 1, increment: 0.5, clamp: [0, 30] },
+              "CFGGuider.cfg": { enabled: true, min: -1, max: 1, increment: 0.5, clamp: [0, 30] },
             },
             prefix: "", suffix: "",
           }),
@@ -445,10 +435,10 @@ async function main() {
         return out;
       })()`);
       check("lora strength row with first-carrier current",
-        info["lora strength"] != null && parseFloat(info["lora strength"]) === 0.8,
+        info["LoraLoader.strength_model"] != null && parseFloat(info["LoraLoader.strength_model"]) === 0.8,
         JSON.stringify(info));
       check("lora clip strength row with first-carrier current",
-        info["lora clip strength"] != null && parseFloat(info["lora clip strength"]) === 0.8,
+        info["LoraLoader.strength_clip"] != null && parseFloat(info["LoraLoader.strength_clip"]) === 0.8,
         JSON.stringify(info));
       await cdp.evaluate(`document.querySelector('.vz-close')?.click()`);
       await sleep(200);
@@ -465,17 +455,17 @@ async function main() {
           body: JSON.stringify({
             id: "fake:flux-lora.png", host: "fake", filename: "flux-lora.png",
             ranges: {
-              lora_strength: { enabled: true, min: 0.5, max: 1.0, increment: 0.5 },
+              "LoraLoader.strength_model": { enabled: true, min: 0.5, max: 1.0, increment: 0.5 },
             },
-            prefix: "", suffix: "_{lora_strength}",
+            prefix: "", suffix: "_{LoraLoader.strength_model}",
           }),
         });
         return { status: r.status, body: await r.json() };
       })()`);
       // 0.5..1.0 step 0.5 → 0.5, 1.0 (current 0.8 excluded) → 2 permutations;
       // the fake host 404s each /api/prompt, but the permutation list must
-      // carry lora_strength with the swept values.
-      const perms = (res.body.errors ?? []).map((e) => e.permutation?.lora_strength);
+      // carry the swept id with the swept values.
+      const perms = (res.body.errors ?? []).map((e) => e.permutation?.["LoraLoader.strength_model"]);
       check("lora strength sweep produces the swept permutations",
         res.status === 200 && res.body.total === 2
           && perms.includes(0.5) && perms.includes(1.0),

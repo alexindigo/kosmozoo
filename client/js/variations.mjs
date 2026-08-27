@@ -1,89 +1,81 @@
 // client/js/variations.mjs — variations knowledge service.
 //
-// The parameter registry (display labels, ranges, precision, steps), the
-// current-value extraction and the range/snap math. The surfaces live in
-// <VariationsModal>/<SliderRow> (client/app/components/); the engine-side
-// endpoints are the variations plugin's /probe and /run.
-
-// --- parameter definitions ---------------------------------------------------
+// The variations panel is probe-driven: the engine's /probe enumerates every
+// numeric scalar input of every node instance in the image's graph; the
+// client renders one row per probe entry. Defaults (decimals, step, spread)
+// infer from the observed value; the OVERRIDES map below is the ONLY
+// per-param knowledge left — and it's just slider tuning, not discovery.
 //
-// Client-side UI knowledge for each supported parameter (display label,
-// value range, decimal precision, default step). The panel renders a row
-// only for parameters that the graph actually carries — the probe endpoint
-// tells us which ones apply per-image. Anything unknown to this registry
-// is skipped even if the probe reports it, so a graph can't inject an
-// unrenderable row.
+// The slider row component is <SliderRow> (client/app/components); the
+// engine-side endpoints are the variations plugin's /probe and /run.
 
-const PARAM_REGISTRY = {
-  denoise:      { label: "denoise",      decimals: 2, clamp: [0, 1],          defaultInc: 0.05, spread: 0.15 },
-  ipa_weight:   { label: "ipa weight",   decimals: 2, clamp: [0, 2],          defaultInc: 0.05, spread: 0.3  },
-  steps:        { label: "steps",        decimals: 0, clamp: [1, 150],        defaultInc: 1,    spread: 10   },
-  cfg:          { label: "cfg",          decimals: 1, clamp: [0, 30],         defaultInc: 0.5,  spread: 2    },
-  seed:         { label: "seed",         decimals: 0, clamp: [0, 4294967295], defaultInc: 1,    spread: 100  },
-  guidance:     { label: "guidance",     decimals: 1, clamp: [0, 30],         defaultInc: 0.5,  spread: 2    },
-  shift:        { label: "shift",        decimals: 2, clamp: [0, 10],         defaultInc: 0.5,  spread: 1    },
-  pulid_weight: { label: "pulid weight", decimals: 2, clamp: [0, 2],          defaultInc: 0.05, spread: 0.3  },
-  lora_strength:      { label: "lora strength",       decimals: 2, clamp: [-2, 2], defaultInc: 0.1, spread: 0.3 },
-  lora_clip_strength: { label: "lora clip strength",  decimals: 2, clamp: [-2, 2], defaultInc: 0.1, spread: 0.3 },
+// --- slider tuning overrides ---------------------------------------------------
+//
+// id = "<class_type>.<input>" — the same identity the fields registry uses.
+// Everything is inferred from the observed value when not listed here.
+const OVERRIDES = {
+  "KSampler.denoise":               { clamp: [0, 1], decimals: 2, defaultInc: 0.05, spread: 0.15 },
+  "BasicScheduler.denoise":         { clamp: [0, 1], decimals: 2, defaultInc: 0.05, spread: 0.15 },
+  "KSampler.steps":                 { clamp: [1, 150], decimals: 0, defaultInc: 1, spread: 10 },
+  "BasicScheduler.steps":           { clamp: [1, 150], decimals: 0, defaultInc: 1, spread: 10 },
+  "KSampler.cfg":                   { clamp: [0, 30], decimals: 1, defaultInc: 0.5, spread: 2 },
+  "CFGGuider.cfg":                  { clamp: [0, 30], decimals: 1, defaultInc: 0.5, spread: 2 },
+  "FluxGuidance.guidance":          { clamp: [0, 30], decimals: 1, defaultInc: 0.5, spread: 2 },
+  "KSampler.seed":                  { clamp: [0, 4294967295], decimals: 0, defaultInc: 1, spread: 100 },
+  "RandomNoise.noise_seed":         { clamp: [0, 4294967295], decimals: 0, defaultInc: 1, spread: 100 },
+  "LoraLoaderModelOnly.strength_model": { clamp: [-2, 2], decimals: 2, defaultInc: 0.1, spread: 0.3 },
+  "LoraLoader.strength_model":          { clamp: [-2, 2], decimals: 2, defaultInc: 0.1, spread: 0.3 },
+  "LoraLoader.strength_clip":           { clamp: [-2, 2], decimals: 2, defaultInc: 0.1, spread: 0.3 },
 };
 
-// Deterministic display order — matches the mockup and the extractor's
-// probe order. Parameters not in the registry are ignored.
-export const PARAM_ORDER = [
-  "denoise", "ipa_weight", "steps", "cfg", "seed",
-  "guidance", "lora_strength", "lora_clip_strength", "shift", "pulid_weight",
-];
-
-export function paramDef(key) {
-  const reg = PARAM_REGISTRY[key];
-  if (!reg) return null;
-  return { key, ...reg };
+// Infer tuning from the observed current value. Floats get decimals from the
+// value's own precision (capped at 3); integers are exact. Spread is a
+// sensible share of the magnitude (20% for floats, 20 steps for integers).
+export function paramDef(id, current, integer) {
+  const ov = OVERRIDES[id] ?? {};
+  const decimals = ov.decimals ?? (integer ? 0 : defaultDecimals(current));
+  const spread = ov.spread ?? defaultSpread(current, integer, decimals);
+  const defaultInc = ov.defaultInc ?? defaultIncrement(decimals);
+  const clamp = ov.clamp ?? defaultClamp(current, decimals);
+  return { key: id, label: ov.label ?? id, decimals, spread, defaultInc, clamp };
 }
 
-export function currentValue(key, meta) {
-  const raw = meta?.[key];
-  if (key === "lora_strength" || key === "lora_clip_strength") {
-    // meta.loras is a list of loaders; the fallback current is the first
-    // one's model strength (clip strength isn't extracted — the probe
-    // endpoint is the authority for that row).
-    const first = (meta?.loras ?? [])[0];
-    const v = parseFloat(first?.strength);
-    return isNaN(v) ? null : v;
-  }
-  if (raw == null) return null;
-  if (key === "ipa_weight") {
-    const first = String(raw).split("+")[0];
-    const v = parseFloat(first);
-    return isNaN(v) ? null : v;
-  }
-  const v = parseFloat(raw);
-  return isNaN(v) ? null : v;
+function defaultDecimals(current) {
+  if (typeof current !== "number") return 2;
+  const s = String(current);
+  const i = s.indexOf(".");
+  if (i < 0) return 0;
+  return Math.min(s.length - i - 1, 3);
 }
 
-// Fallback list when the probe endpoint isn't available (e.g. image not
-// ingested yet). Uses the extracted metadata to guess which params the
-// graph carries — a param is presumed present if meta has a value for it.
-export function fallbackParams(meta) {
-  const out = [];
-  for (const key of PARAM_ORDER) {
-    const cur = currentValue(key, meta);
-    if (cur == null) continue;
-    out.push({ key, label: key, current: cur });
-  }
-  return out;
+function defaultSpread(current, integer, decimals) {
+  if (typeof current !== "number" || current === 0) return integer ? 5 : 1;
+  const mag = Math.abs(current);
+  return integer ? Math.max(Math.round(mag * 0.2), 5) : Math.max(mag * 0.2, 5 * Math.pow(10, -decimals));
+}
+
+function defaultIncrement(decimals) {
+  return decimals === 0 ? 1 : Math.pow(10, -decimals) * 5;
+}
+
+function defaultClamp(current, decimals) {
+  if (typeof current !== "number") return [0, 1];
+  const f = Math.pow(10, decimals);
+  const lo = Math.min(0, Math.floor(current * 2 * f) / f);
+  const hi = Math.max(current * 2, current + Math.pow(10, -decimals) * 10);
+  return [lo, hi];
 }
 
 export function defaultRange(param, current) {
   if (current == null) return { min: param.clamp[0], max: param.clamp[1] };
-  const spread = param.spread ?? 1;
   const f = Math.pow(10, param.decimals);
-  let lo = Math.round((current - spread) * f) / f;
-  let hi = Math.round((current + spread) * f) / f;
+  let lo = Math.round((current - param.spread) * f) / f;
+  let hi = Math.round((current + param.spread) * f) / f;
   lo = Math.max(lo, param.clamp[0]);
   hi = Math.min(hi, param.clamp[1]);
   if (lo >= hi) {
-    lo = Math.max(param.clamp[0], current - spread * 2);
-    hi = Math.min(param.clamp[1], current + spread * 2);
+    lo = Math.max(param.clamp[0], current - param.spread * 2);
+    hi = Math.min(param.clamp[1], current + param.spread * 2);
     if (lo >= hi) { lo = param.clamp[0]; hi = param.clamp[1]; }
   }
   return { min: lo, max: hi };
@@ -99,4 +91,26 @@ export function snapTo(v, inc, decimals) {
 // Trim trailing zeros for display: 0.60 -> "0.6", 20.0 -> "20"
 export function fmt(v) {
   return String(parseFloat(Number(v).toFixed(10)));
+}
+
+// Fallback list when the probe endpoint isn't available (e.g. image not
+// ingested yet): build entries from the image's own meta.nodes — same shape
+// the probe returns.
+export function fallbackParams(meta) {
+  const out = [];
+  for (const n of meta?.nodes ?? []) {
+    for (const [key, v] of Object.entries(n.inputs ?? {})) {
+      if (typeof v !== "number") continue;
+      out.push({
+        id: `${n.type}.${key}`,
+        nodeId: n.id,
+        key,
+        type: n.type,
+        title: n.title ?? null,
+        current: v,
+        integer: Number.isInteger(v),
+      });
+    }
+  }
+  return out;
 }
