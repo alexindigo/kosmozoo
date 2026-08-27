@@ -182,7 +182,7 @@ async function main() {
       const before = parseInt(await cdp.evaluate(`document.querySelector('.vz-count')?.textContent`), 10);
       await cdp.evaluate(`(() => {
         const inc = document.querySelector('.vz-slider-row .vz-row-inc-input');
-        inc.value = '0.1';
+        inc.value = '0.025';
         inc.dispatchEvent(new Event('change'));
       })()`);
       await sleep(100);
