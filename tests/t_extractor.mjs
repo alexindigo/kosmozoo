@@ -3,7 +3,7 @@
 // A/B against the Python engine is handled separately by tests/ab/.
 
 import { assert, assertEquals } from "jsr:@std/assert";
-import { extractMeta, metaFromPngBytes, historyOutputMetas } from "../src/extractor.mjs";
+import { extractMeta, metaFromPngBytes, historyOutputMetas, collectNodes } from "../src/extractor.mjs";
 import { readFile } from "node:fs/promises";
 import { join } from "node:path";
 
@@ -122,4 +122,50 @@ Deno.test("extractor: historyOutputMetas maps output images to metas", () => {
   const out = historyOutputMetas(history);
   assertEquals(Object.keys(out), ["x.png"]); // type:"temp" excluded
   assertEquals(out["x.png"].seed, 999);
+});
+
+// --- collectNodes: the generic scan behind the registry ----------------------
+
+Deno.test("collectNodes: scalar inputs only, links skipped, title kept when it differs", () => {
+  const graph = {
+    "1": { class_type: "KSampler", inputs: { steps: 20, seed: ["5", 0], sampler_name: "euler" }, _meta: { title: "KSampler" } },
+    "2": { class_type: "LoraLoaderModelOnly", inputs: { lora_name: "a.safetensors", strength_model: 0.7, model: ["1", 1] }, _meta: { title: "Load LoRA" } },
+    "3": { class_type: "CLIPTextEncode", inputs: { text: "fish", title: ["1", 0] } },
+    "4": { class_type: "SaveImage", inputs: {}, _meta: { title: "Save Image" } }, // no scalar inputs → dropped
+  };
+  const nodes = collectNodes(graph);
+  assertEquals(nodes.length, 3);
+  const ks = nodes.find((n) => n.type === "KSampler");
+  assertEquals(ks.inputs.steps, 20);
+  assertEquals(ks.inputs.sampler_name, "euler");
+  assertEquals(ks.inputs.seed, undefined); // link skipped
+  assertEquals("title" in ks, false); // title echoing class_type is dropped
+  const lora = nodes.find((n) => n.type === "LoraLoaderModelOnly");
+  assertEquals(lora.title, "Load LoRA");
+  assertEquals(lora.inputs.strength_model, 0.7);
+  const clip = nodes.find((n) => n.type === "CLIPTextEncode");
+  assertEquals(clip.inputs.text, "fish");
+  // non-ISO id ordering is preserved as original graph order
+  assertEquals(nodes.map((n) => n.id), ["1", "2", "3"]);
+});
+
+Deno.test("collectNodes: long strings capped with ellipsis marker", () => {
+  const graph = { "1": { class_type: "X", inputs: { text: "y".repeat(5000) } } };
+  const [x] = collectNodes(graph);
+  assertEquals(x.inputs.text.length, 4097);
+  assert(x.inputs.text.endsWith("…"));
+});
+
+Deno.test("extractMeta: meta.nodes rides along with the curated fields", () => {
+  const entry = {
+    prompt: [1, 1, {
+      "1": { class_type: "KSampler", inputs: { steps: 20, seed: 1, sampler_name: "euler" } },
+      "2": { class_type: "LoraLoaderModelOnly", inputs: { lora_name: "a.safetensors", strength_model: 1.2, model: ["1", 0] }, _meta: { title: "Load LoRA" } },
+    }],
+  };
+  const meta = extractMeta(entry);
+  assertEquals(meta.steps, 20);
+  const lora = meta.nodes.find((n) => n.type === "LoraLoaderModelOnly");
+  assertEquals(lora.inputs.strength_model, 1.2);
+  assertEquals(lora.title, "Load LoRA");
 });

@@ -15,7 +15,7 @@ const MAX_BACKOFF = 30_000;     // backoff cap
 // Feed()-freshness gate version: bump when the extraction shape changes so
 // listings only requeuethe files extracted with an older version. (This gate
 // was dropped in the async port and restored — see the commit message.)
-export const EXTRACTOR_VERSION = 3;
+export const EXTRACTOR_VERSION = 4;
 
 export class Scraper {
   // hosts: { name: "host:port" }; store: Store; enabled/paused come from settings

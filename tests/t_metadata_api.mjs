@@ -8,9 +8,7 @@ import { Store } from "../src/store.mjs";
 import { Scraper } from "../src/scraper.mjs";
 import { mkdtemp, rm, writeFile, mkdir } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
-
-async function ctx(dir, { downloadsDir } = {}) {
+import { join } from "node:path";async function ctx(dir, { downloadsDir } = {}) {
   const settings = await Settings.open(dir);
   const store = await Store.open(dir, join(dir, "feedback.json"));
   const hosts = { local: "127.0.0.1:1" };
@@ -52,6 +50,26 @@ Deno.test("meta-want: files jump to the priority lane; pending reported", async 
   assertEquals(w.prio.length, 2);
   assertEquals(w.walk.length, 0);
   await rm(dir, { recursive: true });
+});
+
+Deno.test("nodes registry: extraction populates /api/nodes with type→fields", async () => {
+  const dir = await mkdtemp(join(tmpdir(), "kz-nodes-reg-"));
+  const { store, router, scraper } = await ctx(dir);
+  // one walk extraction of a fixture with a whole graph
+  const { readFile } = await import("node:fs/promises");
+  const FIXTURES = new URL("./fixtures", import.meta.url).pathname;
+  const hosts = { local: `folder:${FIXTURES}` };
+  const sc = new Scraper({ hosts, store, settings: await Settings.open(dir) });
+  sc.feed("local", ["flux-lora.png"], true);
+  sc.start();
+  for (let i = 0; i < 40 && store.nodeRegistry().LoraLoader === undefined; i++) {
+    await new Promise((r) => setTimeout(r, 100));
+  }
+  sc.stop();
+  const reg = await (await router.handle(new Request("http://x/api/nodes"))).json();
+  assert(reg.LoraLoader.inputs.strength_model === "number");
+  assert(reg.SaveImage.inputs.filename_prefix === "string");
+  await rm(dir, { recursive: true, force: true });
 });
 
 Deno.test("downloads-check: reports which filenames exist in the downloads dir", async () => {
