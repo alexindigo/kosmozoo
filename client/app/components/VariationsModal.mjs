@@ -198,15 +198,49 @@ export function VariationsModal({ images, onClose }) {
           failed.push(`${img.filename}: ${e.message}`);
         }
       }));
-      if (submitted === 0 && totalJobs === 0) {
-        setResult({ text: failed.slice(0, 3).join(" · ") || "nothing submitted", ok: false });
+      // surface the underlying engine errors when anything failed — a green
+      // "submitted 0/N" with no detail is how this bug went unnoticed
+      const engineErrors = [];
+      await Promise.all(images.map(async (img) => {
+        try {
+          const res = await fetch("/api/plugins/variations/run", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              id: img.id, host: img.host, filename: img.filename,
+              ranges: structuredClone(baseRanges),
+              prefix, suffix,
+              ...(batch ? { relative: true } : {}),
+            }),
+          });
+          const text = await res.text();
+          let data;
+          try { data = JSON.parse(text); } catch { data = null; }
+          if (!res.ok) {
+            failed.push(`${img.filename}: ${data?.error ?? text ?? `error ${res.status}`}`);
+            return;
+          }
+          submitted += data.submitted ?? 0;
+          totalJobs += data.total ?? 0;
+          for (const e of data.errors ?? []) {
+            engineErrors.push(e?.error ?? String(e));
+          }
+        } catch (e) {
+          failed.push(`${img.filename}: ${e.message}`);
+        }
+      }));
+      const allFailed = submitted === 0 && totalJobs > 0;
+      if ((submitted === 0 && totalJobs === 0) || allFailed) {
+        const detail = failed[0] ?? engineErrors[0] ?? "nothing submitted";
+        setResult({ text: detail, ok: false });
         return;
       }
-      const summary = batch
-        ? `submitted ${submitted}/${totalJobs} across ${images.length} images` +
-          (failed.length ? ` (${failed.length} failed)` : "")
-        : `submitted ${submitted}/${totalJobs}`;
-      setResult({ text: summary, ok: true });
+      const summary = (batch
+        ? `submitted ${submitted}/${totalJobs} across ${images.length} images`
+        : `submitted ${submitted}/${totalJobs}`)
+        + (failed.length ? ` (${failed.length} failed)` : "")
+        + (engineErrors.length ? ` — ${engineErrors[0]}` : "");
+      setResult({ text: summary, ok: !allFailed && submitted > 0 });
       setTimeout(onClose, 3000);
     } catch (e) {
       setResult({ text: `fetch failed: ${e.message}`, ok: false });
