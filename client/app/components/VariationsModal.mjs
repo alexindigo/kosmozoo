@@ -17,7 +17,7 @@
 
 import { h, render as preactRender, useState, useEffect, useRef } from "../../vendor/preact/vendor.mjs";
 import { iconSvg } from "../../js/icons.mjs";
-import { PARAM_ORDER, paramDef, defaultRange, fallbackParams } from "../../js/variations.mjs";
+import { paramDef, defaultRange, fallbackParams } from "../../js/variations.mjs";
 import { SliderRow } from "./SliderRow.mjs";
 
 export function VariationsModal({ images, onClose }) {
@@ -48,30 +48,30 @@ export function VariationsModal({ images, onClose }) {
     // (widget-only custom seed nodes etc.) are skipped for now — they need
     // a different UX and the user is deferring that.
     const resolve = (forGraph) => {
-      console.log("[variations] forGraph:", forGraph.length, "params");
       const init = {};
-      for (const { key, label, current } of forGraph) {
-        const p = paramDef(key);
-        if (!p) continue; // registry doesn't know this param — skip
+      for (const { id, key, current, integer, type, title } of forGraph) {
+        const p = paramDef(id, current, integer);
         // absolute: a value window around the current value; relative
         // (batch): signed offsets around it, default ±spread
         const def = batch ? { min: -p.spread, max: p.spread } : defaultRange(p, current);
-        init[key] = {
+        init[id] = {
           enabled: false, min: def.min, max: def.max, increment: p.defaultInc,
-          // the placeholder key mutates after the probe returns
-          // (e.g. denoise -> scheduler:denoise)
-          placeholderKey: (label && label !== key) ? label : key,
+          placeholderKey: id,
+          current, integer,
+          label: title ?? type, // node display title else class_type
+          input: key,
         };
-      }
-      // Default-on: denoise is the most common single-axis sweep. The
-      // user lands on a sensible starting state; its placeholder token
-      // auto-populates the suffix exactly like a manual enable would.
-      if (init.denoise) {
-        init.denoise.enabled = true;
-        if (suffixRef.current) suffixRef.current.value = `_{${init.denoise.placeholderKey}}`;
       }
       setRows(init);
       setParams(forGraph);
+      // Presentation nicety: auto-enable the denoise row when the graph has
+      // one — the user lands on the most common single-axis sweep. Matches
+      // any node type; "denoise" is the input name, not a node name.
+      const denoiseKey = Object.keys(init).find((k) => init[k].input === "denoise");
+      if (denoiseKey) {
+        init[denoiseKey].enabled = true;
+        if (suffixRef.current) suffixRef.current.value = `_{${denoiseKey}}`;
+      }
     };
     console.log("[variations] fetching probe for", image.id);
     fetch(`/api/plugins/variations/probe/${encodeURIComponent(image.id)}`)
@@ -81,13 +81,7 @@ export function VariationsModal({ images, onClose }) {
       })
       .then((data) => {
         if (!data?.params) return resolve(fallbackParams(meta));
-        const forGraph = [];
-        for (const key of PARAM_ORDER) {
-          const info = data.params[key];
-          if (!info || info.writeOnly) continue;
-          forGraph.push({ key, label: info.label, current: info.current });
-        }
-        resolve(forGraph);
+        resolve(data.params);
       })
       .catch((e) => {
         console.warn("[variations] probe failed:", e);
@@ -136,13 +130,14 @@ export function VariationsModal({ images, onClose }) {
     templateTarget.current.end = inp.selectionEnd ?? inp.value.length;
   };
 
-  // enabled cards first, registry order within each group
-  const keyOrder = new Map(PARAM_ORDER.map((k, i) => [k, i]));
+  // enabled cards first, then by node label + input name
   const ordered = Object.keys(rows).sort((a, b) => {
     const ea = rows[a].enabled ? 0 : 1;
     const eb = rows[b].enabled ? 0 : 1;
     if (ea !== eb) return ea - eb;
-    return (keyOrder.get(a) ?? 999) - (keyOrder.get(b) ?? 999);
+    const la = `${rows[a].label}.${rows[a].input}`;
+    const lb = `${rows[b].label}.${rows[b].input}`;
+    return la.localeCompare(lb);
   });
 
   // variations count: product of per-param steps. Absolute mode subtracts
@@ -154,7 +149,7 @@ export function VariationsModal({ images, onClose }) {
   for (const [key, r] of Object.entries(rows)) {
     if (!r.enabled) continue;
     anyEnabled = true;
-    const inc = r.increment || paramDef(key)?.defaultInc || 1;
+    const inc = r.increment || paramDef(key, r.current, r.integer)?.defaultInc || 1;
     perImage *= Math.max(Math.round((r.max - r.min) / inc) + 1, 1);
     if (batch && !(r.min <= 0 && r.max >= 0)) allContainCurrent = false;
   }
@@ -171,7 +166,7 @@ export function VariationsModal({ images, onClose }) {
           enabled: r.enabled, min: r.min, max: r.max,
           increment: r.increment, placeholderKey: r.placeholderKey,
           // batch ranges are offsets; the plugin clamps them per image
-          ...(batch ? { clamp: paramDef(key)?.clamp } : {}),
+          ...(batch ? { clamp: paramDef(key, r.current, r.integer)?.clamp } : {}),
         };
       }
       const prefix = prefixRef.current?.value ?? "";
@@ -232,16 +227,17 @@ export function VariationsModal({ images, onClose }) {
               : params.length === 0
                 ? h("div", { class: "vz-loading" }, "this graph exposes no varyable parameters")
                 : ordered.map((key) => {
-                    const p = paramDef(key);
-                    const cur = params.find((x) => x.key === key)?.current ?? null;
+                    const r = rows[key];
+                    const p = paramDef(key, r.current, r.integer);
+                    const cur = r.current ?? null;
                     return h(SliderRow, {
                       key,
-                      param: p,
+                      param: { ...p, label: r.label ? `${r.label}.${r.input}` : p.label },
                       current: cur,
                       defaults: batch ? { min: -p.spread, max: p.spread } : defaultRange(p, cur),
-                      enabled: rows[key].enabled,
-                      increment: rows[key].increment,
-                      placeholderKey: rows[key].placeholderKey,
+                      enabled: r.enabled,
+                      increment: r.increment,
+                      placeholderKey: r.placeholderKey,
                       relative: batch,
                       onToggle, onRange, onIncrement,
                       templateTarget: templateTarget.current,

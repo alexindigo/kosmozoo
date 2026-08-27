@@ -2,9 +2,7 @@
 //
 // Routes:
 //   GET  /probe/:id   — inspect a graph, return per-param node labels and
-//                       current values (client uses this to render the panel
-//                       with correct `<node>:<param>` labels for the graph
-//                       it's looking at; KSampler nodes drop the prefix).
+//                       current values (client uses this to render the panel).
 //   POST /run         — read the cached PNG's embedded graph, generate
 //                       permutations (cartesian × enabled ranges, edges
 //                       inclusive, current excluded), clone + mutate the
@@ -13,198 +11,71 @@
 //                       <prefix><basename><suffix> — prefix/suffix wrap the
 //                       original name; they do NOT replace it.
 
-import { parsePngTextChunks, firstNode, scalarInput } from "../../src/extractor.mjs";
+import { parsePngTextChunks } from "../../src/extractor.mjs";
 
-// --- parameter probes: locate the node that carries each param --------------
+// --- parameter discovery: generic, node-instance based -----------------------
 //
-// Each probe returns { node, key, ownerLabel } where:
-//   node        — the graph node object (or null if absent)
-//   key         — the input key on that node
-//   ownerLabel  — user-facing label prefix; "" for KSampler-carrier,
-//                 "<lowercased-node>" otherwise (e.g. "scheduler", "cfgguider").
+// No hardcoded node names. Every numeric scalar input of every node instance
+// in the graph is a varyable parameter. Param id = `<class_type>.<input>`,
+// shared with the fields registry (client/js/fields.mjs) so one id means the
+// same field everywhere. Each INSTANCE of a node type is its own target —
+// two Load LoRA nodes in one graph sweep independently.
 
-function probeDenoise(nodes /*, graph */) {
-  const ks = nodes.find((n) => n.class_type === "KSampler");
-  if (ks) return { node: ks, key: "denoise", ownerLabel: "" };
-  const sched = firstNode(nodes, "scheduler");
-  if (sched && typeof sched.inputs?.denoise === "number") {
-    return { node: sched, key: "denoise", ownerLabel: "scheduler" };
-  }
-  return { node: null };
+export function paramId(classType, input) {
+  return `${classType}.${input}`;
 }
 
-function probeCfg(nodes /*, graph */) {
-  const ks = nodes.find((n) => n.class_type === "KSampler");
-  if (ks) return { node: ks, key: "cfg", ownerLabel: "" };
-  const guider = firstNode(nodes, "cfgguider");
-  if (guider && typeof guider.inputs?.cfg === "number") {
-    return { node: guider, key: "cfg", ownerLabel: "cfgguider" };
-  }
-  return { node: null };
-}
-
-function probeSteps(nodes /*, graph */) {
-  const ks = nodes.find((n) => n.class_type === "KSampler");
-  if (ks) return { node: ks, key: "steps", ownerLabel: "" };
-  const sched = firstNode(nodes, "scheduler");
-  if (sched && typeof sched.inputs?.steps === "number") {
-    return { node: sched, key: "steps", ownerLabel: "scheduler" };
-  }
-  return { node: null };
-}
-
-function probeSeed(nodes, graph) {
-  const ks = nodes.find((n) => n.class_type === "KSampler");
-  if (ks && typeof ks.inputs?.seed === "number") {
-    return { node: ks, key: "seed", ownerLabel: "" };
-  }
-  // SamplerCustomAdvanced flow: RandomNoise.noise_seed
-  const rn = firstNode(nodes, "randomnoise");
-  if (rn && typeof rn.inputs?.noise_seed === "number") {
-    return { node: rn, key: "noise_seed", ownerLabel: "randomnoise" };
-  }
-  // rgthree Seed node with a scalar seed input
-  const s = firstNode(nodes, "seed");
-  if (s && typeof s.inputs?.seed === "number") {
-    return { node: s, key: "seed", ownerLabel: "seed" };
-  }
-  // Fallback: KSampler.seed links to a widget-only seed node (DomovoySeed,
-  // rgthree Seed variants, etc.) whose current value isn't exposed as a
-  // scalar in the API graph. We can still WRITE to it by setting
-  // `inputs.seed` on that node — ComfyUI treats unknown input keys as
-  // widget overrides for many custom nodes. Current value stays null so
-  // the row shows enabled but without a marker.
-  if (ks && Array.isArray(ks.inputs?.seed) && ks.inputs.seed.length && graph) {
-    const linkedId = String(ks.inputs.seed[0]);
-    const target = graph[linkedId];
-    if (target) {
-      const label = String(target.class_type ?? "seed").toLowerCase();
-      return { node: target, key: "seed", ownerLabel: label, writeOnly: true };
+// Everything a numeric input needs: where it lives (node ids — ALL instances
+// of a same-type same-input pair share one param and sweep together, the
+// multi-carrier rule), what it is (integer/float — integer params round on
+// write), and its current value (the first carrier's).
+export function inspectGraph(graph) {
+  const out = new Map(); // id -> entry
+  for (const [id, n] of Object.entries(graph ?? {})) {
+    const type = String(n.class_type ?? "");
+    if (!type) continue;
+    const title = n._meta?.title && n._meta.title !== type ? String(n._meta.title) : null;
+    for (const [key, v] of Object.entries(n.inputs ?? {})) {
+      if (typeof v !== "number") continue;
+      const pid = paramId(type, key);
+      const existing = out.get(pid);
+      if (existing) {
+        existing.nodeIds.push(id);
+      } else {
+        out.set(pid, {
+          id: pid,
+          nodeIds: [id],
+          key,
+          type,
+          title,
+          current: v,
+          integer: Number.isInteger(v),
+        });
+      }
     }
   }
-  return { node: null };
-}
-
-// ipa_weight: potentially many IPAdapter nodes, all get the same value.
-function probeIpaWeight(nodes /*, graph */) {
-  const carriers = [];
-  for (const n of nodes) {
-    if (!String(n.class_type ?? "").toLowerCase().includes("ipadapter")) continue;
-    if (typeof n.inputs?.weight === "number") carriers.push(n);
-  }
-  if (!carriers.length) return { node: null };
-  // ipa_weight is never on KSampler; always prefix with "ipadapter"
-  return { node: carriers, key: "weight", ownerLabel: "ipadapter" };
-}
-
-// lora_strength: potentially many LoRA loader nodes, all get the same model
-// strength (same multi-carrier rule as ipa_weight). LoraLoaderModelOnly
-// carries only this one; LoraLoader carries it alongside strength_clip.
-function probeLoraStrength(nodes /*, graph */) {
-  const carriers = loraLoaders(nodes).filter((n) => typeof n.inputs?.strength_model === "number");
-  if (!carriers.length) return { node: null };
-  return { node: carriers, key: "strength_model", ownerLabel: "" };
-}
-
-// lora_clip_strength: the CLIP-side strength, present only on full
-// LoraLoader nodes (ModelOnly graphs surface just lora_strength).
-function probeLoraClipStrength(nodes /*, graph */) {
-  const carriers = loraLoaders(nodes).filter((n) => typeof n.inputs?.strength_clip === "number");
-  if (!carriers.length) return { node: null };
-  return { node: carriers, key: "strength_clip", ownerLabel: "" };
-}
-
-// Shared LoRA-loader matcher — mirrors the extractor's lora scan.
-function loraLoaders(nodes) {
-  const out = [];
-  for (const n of nodes) {
-    const ct = String(n.class_type ?? "").toLowerCase();
-    if (ct.includes("lora") && ct.includes("load")) out.push(n);
-  }
-  return out;
-}
-
-// FluxGuidance.guidance — the "cfg" of Flux workflows.
-function probeGuidance(nodes /*, graph */) {
-  const g = firstNode(nodes, "fluxguidance");
-  if (g && typeof g.inputs?.guidance === "number") {
-    return { node: g, key: "guidance", ownerLabel: "fluxguidance" };
-  }
-  return { node: null };
-}
-
-// ModelSampling*.shift — Flux/SD3 time-shift parameter.
-function probeShift(nodes /*, graph */) {
-  const ms = firstNode(nodes, "modelsampling");
-  if (ms && typeof ms.inputs?.shift === "number") {
-    return { node: ms, key: "shift", ownerLabel: "modelsampling" };
-  }
-  return { node: null };
-}
-
-// ApplyPulid*.weight — PuLID identity-adapter strength.
-function probePulidWeight(nodes /*, graph */) {
-  const ap = firstNode(nodes, "applypulid");
-  if (ap && typeof ap.inputs?.weight === "number") {
-    return { node: ap, key: "weight", ownerLabel: "applypulid" };
-  }
-  return { node: null };
-}
-
-const PARAM_PROBES = {
-  denoise: probeDenoise,
-  cfg: probeCfg,
-  steps: probeSteps,
-  seed: probeSeed,
-  ipa_weight: probeIpaWeight,
-  guidance: probeGuidance,
-  shift: probeShift,
-  pulid_weight: probePulidWeight,
-  lora_strength: probeLoraStrength,
-  lora_clip_strength: probeLoraClipStrength,
-};
-
-// --- per-image inspection ----------------------------------------------------
-
-// Return { <param>: { label, current, writeOnly? } | null } for every
-// param, given the graph parsed from the image's PNG. `label` is the
-// user-facing template key (e.g. "denoise" for KSampler-carriers,
-// "scheduler:denoise" otherwise). `writeOnly: true` marks params whose
-// target node is present but doesn't expose a readable current value
-// (widget-only custom seed nodes).
-export function inspectGraph(graph) {
-  const nodes = Object.values(graph);
-  const out = {};
-  for (const [param, probe] of Object.entries(PARAM_PROBES)) {
-    const r = probe(nodes, graph);
-    if (!r.node) { out[param] = null; continue; }
-    const node = Array.isArray(r.node) ? r.node[0] : r.node;
-    const rawCurrent = node.inputs?.[r.key];
-    const current = typeof rawCurrent === "number" ? rawCurrent : null;
-    const label = r.ownerLabel ? `${r.ownerLabel}:${param}` : param;
-    const info = { label, current };
-    if (r.writeOnly) info.writeOnly = true;
-    out[param] = info;
-  }
-  return out;
+  return [...out.values()];
 }
 
 // --- graph mutation ----------------------------------------------------------
 
-function mutateGraph(graph, permutation) {
+// permutation: { "<class_type>.<input>": value }. Targets are resolved by
+// node id, and a param that shows on several instances sweeps ALL of them.
+export function mutateGraph(graph, permutation, params) {
   const clone = structuredClone(graph);
-  const nodes = Object.values(clone);
+  const byId = new Map();
+  for (const p of params ?? inspectGraph(clone)) byId.set(p.id, p);
   const applied = [];
-  for (const [param, value] of Object.entries(permutation)) {
-    const probe = PARAM_PROBES[param];
-    if (!probe) continue;
-    const r = probe(nodes, clone);
-    if (!r.node) continue;
-    const targets = Array.isArray(r.node) ? r.node : [r.node];
-    // integer-typed params round; floats pass through
-    const v = (param === "steps" || param === "seed") ? Math.round(value) : value;
-    for (const t of targets) t.inputs[r.key] = v;
-    applied.push(param);
+  for (const [id, value] of Object.entries(permutation)) {
+    const p = byId.get(id);
+    if (!p) continue;
+    const v = p.integer ? Math.round(value) : value;
+    for (const nodeId of p.nodeIds) {
+      const node = clone[nodeId];
+      if (!node?.inputs) continue;
+      node.inputs[p.key] = v;
+    }
+    applied.push(id);
   }
   return { graph: clone, applied };
 }
@@ -296,7 +167,7 @@ export function templateReplace(template, values, currentValues, labelMap = {}) 
     const lbl = labelMap[param];
     if (lbl && lbl !== param) lookup[lbl] = val;
   }
-  return template.replace(/\{([\w:]+)\}/g, (_, key) => {
+  return template.replace(/\{([\w.:]+)\}/g, (_, key) => {
     if (key in lookup) return formatValue(lookup[key]);
     return `{${key}}`;
   });
@@ -424,10 +295,9 @@ export function register(kz) {
     const inspection = inspectGraph(graph);
     const currentValues = {};
     const labelMap = {};
-    for (const [param, info] of Object.entries(inspection)) {
-      if (!info) continue;
-      currentValues[param] = info.current;
-      labelMap[param] = info.label;
+    for (const p of inspection) {
+      currentValues[p.id] = p.current;
+      labelMap[p.id] = p.title ?? p.type;
     }
 
     // Batch sweeps arrive as offsets from each image's own current value;
@@ -462,7 +332,7 @@ export function register(kz) {
     const errors = [];
     let submitted = 0;
     for (const perm of permutations) {
-      const { graph: mutated, applied } = mutateGraph(graph, perm);
+      const { graph: mutated, applied } = mutateGraph(graph, perm, inspection);
       if (applied.length === 0) {
         errors.push({ permutation: perm, error: "no applicable nodes found" });
         continue;

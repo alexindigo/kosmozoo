@@ -8,6 +8,7 @@ import {
   narrowToOneSaveImage,
   wrapAllSaveImagePrefixes,
   inspectGraph,
+  mutateGraph,
   resolveRelativeRanges,
 } from "../plugins/variations/plugin.mjs";
 
@@ -280,6 +281,10 @@ Deno.test("wrapAllSaveImagePrefixes: fallback wraps every SaveImage's own prefix
 });
 
 // --- inspectGraph: graph-driven param discovery -------------------------------
+// Generic: every numeric scalar input of every node instance is a param,
+// id = <class_type>.<input>, shared with the fields registry.
+
+const byId = (params, id) => params.find((p) => p.id === id) ?? null;
 
 Deno.test("inspectGraph: KSampler flow surfaces denoise/cfg/steps/seed", () => {
   const graph = {
@@ -288,25 +293,24 @@ Deno.test("inspectGraph: KSampler flow surfaces denoise/cfg/steps/seed", () => {
     } },
   };
   const params = inspectGraph(graph);
-  assertEquals(params.denoise?.current, 0.8);
-  assertEquals(params.denoise?.label, "denoise");
-  assertEquals(params.cfg?.current, 7.5);
-  assertEquals(params.steps?.current, 20);
-  assertEquals(params.seed?.current, 12345);
-  assertEquals(params.ipa_weight, null);
-  assertEquals(params.guidance, null);
+  assertEquals(byId(params, "KSampler.denoise")?.current, 0.8);
+  assertEquals(byId(params, "KSampler.cfg")?.current, 7.5);
+  assertEquals(byId(params, "KSampler.steps")?.current, 20);
+  assertEquals(byId(params, "KSampler.seed")?.current, 12345);
+  assertEquals(byId(params, "KSampler.steps")?.integer, true);
+  assertEquals(byId(params, "KSampler.denoise")?.integer, false);
 });
 
-Deno.test("inspectGraph: FluxGuidance surfaces guidance", () => {
+Deno.test("inspectGraph: FluxGuidance surfaces guidance with the node's title", () => {
   const graph = {
     "1": { class_type: "KSampler", inputs: {
       seed: 1, steps: 20, cfg: 1.0, denoise: 1.0,
     } },
-    "2": { class_type: "FluxGuidance", inputs: { guidance: 3.5, conditioning: ["3", 0] } },
+    "2": { class_type: "FluxGuidance", inputs: { guidance: 3.5, conditioning: ["3", 0] }, _meta: { title: "FluxGuidance 3.5" } },
   };
   const params = inspectGraph(graph);
-  assertEquals(params.guidance?.current, 3.5);
-  assertEquals(params.guidance?.label, "fluxguidance:guidance");
+  assertEquals(byId(params, "FluxGuidance.guidance")?.current, 3.5);
+  assertEquals(byId(params, "FluxGuidance.guidance")?.title, "FluxGuidance 3.5");
 });
 
 Deno.test("inspectGraph: ModelSampling surfaces shift", () => {
@@ -317,11 +321,10 @@ Deno.test("inspectGraph: ModelSampling surfaces shift", () => {
     "2": { class_type: "ModelSamplingFlux", inputs: { shift: 1.15, model: ["3", 0] } },
   };
   const params = inspectGraph(graph);
-  assertEquals(params.shift?.current, 1.15);
-  assertEquals(params.shift?.label, "modelsampling:shift");
+  assertEquals(byId(params, "ModelSamplingFlux.shift")?.current, 1.15);
 });
 
-Deno.test("inspectGraph: ApplyPulid surfaces pulid_weight", () => {
+Deno.test("inspectGraph: ApplyPulid surfaces pulid weight", () => {
   const graph = {
     "1": { class_type: "KSampler", inputs: {
       seed: 1, steps: 20, cfg: 1.0, denoise: 1.0,
@@ -329,11 +332,10 @@ Deno.test("inspectGraph: ApplyPulid surfaces pulid_weight", () => {
     "2": { class_type: "ApplyPulidFlux", inputs: { weight: 0.9, model: ["3", 0] } },
   };
   const params = inspectGraph(graph);
-  assertEquals(params.pulid_weight?.current, 0.9);
-  assertEquals(params.pulid_weight?.label, "applypulid:pulid_weight");
+  assertEquals(byId(params, "ApplyPulidFlux.weight")?.current, 0.9);
 });
 
-Deno.test("inspectGraph: LoraLoaderModelOnly surfaces lora_strength only", () => {
+Deno.test("inspectGraph: LoraLoaderModelOnly surfaces strength_model", () => {
   const graph = {
     "1": { class_type: "KSampler", inputs: {
       seed: 1, steps: 20, cfg: 1.0, denoise: 1.0,
@@ -343,9 +345,8 @@ Deno.test("inspectGraph: LoraLoaderModelOnly surfaces lora_strength only", () =>
     } },
   };
   const params = inspectGraph(graph);
-  assertEquals(params.lora_strength?.current, 1.2);
-  assertEquals(params.lora_strength?.label, "lora_strength");
-  assertEquals(params.lora_clip_strength, null); // ModelOnly has no clip side
+  assertEquals(byId(params, "LoraLoaderModelOnly.strength_model")?.current, 1.2);
+  assertEquals(byId(params, "LoraLoaderModelOnly.strength_clip"), null); // ModelOnly has no clip side
 });
 
 Deno.test("inspectGraph: full LoraLoader surfaces both model and clip strength", () => {
@@ -359,11 +360,11 @@ Deno.test("inspectGraph: full LoraLoader surfaces both model and clip strength",
     } },
   };
   const params = inspectGraph(graph);
-  assertEquals(params.lora_strength?.current, 0.8);
-  assertEquals(params.lora_clip_strength?.current, 0.5);
+  assertEquals(byId(params, "LoraLoader.strength_model")?.current, 0.8);
+  assertEquals(byId(params, "LoraLoader.strength_clip")?.current, 0.5);
 });
 
-Deno.test("inspectGraph: multiple lora loaders — current reads from the first carrier", () => {
+Deno.test("inspectGraph: multiple lora loaders — one param, all node ids, first-carrier current", () => {
   const graph = {
     "1": { class_type: "KSampler", inputs: {
       seed: 1, steps: 20, cfg: 1.0, denoise: 1.0,
@@ -378,29 +379,45 @@ Deno.test("inspectGraph: multiple lora loaders — current reads from the first 
     } },
   };
   const params = inspectGraph(graph);
-  assertEquals(params.lora_strength?.current, 0.8);
+  const p = byId(params, "LoraLoader.strength_model");
+  assertEquals(p?.current, 0.8); // first carrier's value
+  assertEquals(p?.nodeIds, ["2", "3"]); // both carriers sweep together
 });
 
-Deno.test("inspectGraph: lora-less graph yields null for lora params", () => {
+Deno.test("inspectGraph: mutateGraph sweeps every carrier of a multi-instance param", () => {
+  const graph = {
+    "1": { class_type: "KSampler", inputs: {
+      seed: 1, steps: 20, cfg: 1.0, denoise: 1.0,
+    } },
+    "2": { class_type: "LoraLoader", inputs: {
+      lora_name: "detail.safetensors", strength_model: 0.8,
+      model: ["1", 0], clip: ["3", 0],
+    } },
+    "3": { class_type: "LoraLoader", inputs: {
+      lora_name: "style.safetensors", strength_model: 0.5,
+      model: ["2", 0], clip: ["2", 1],
+    } },
+  };
+  const { graph: mutated, applied } = mutateGraph(graph, { "LoraLoader.strength_model": 0.1 });
+  assertEquals(applied, ["LoraLoader.strength_model"]);
+  assertEquals(mutated["2"].inputs.strength_model, 0.1);
+  assertEquals(mutated["3"].inputs.strength_model, 0.1);
+});
+
+Deno.test("inspectGraph: integer params round on write", () => {
   const graph = {
     "1": { class_type: "KSampler", inputs: {
       seed: 1, steps: 20, cfg: 1.0, denoise: 1.0,
     } },
   };
-  const params = inspectGraph(graph);
-  assertEquals(params.lora_strength, null);
-  assertEquals(params.lora_clip_strength, null);
+  const { graph: mutated } = mutateGraph(graph, { "KSampler.steps": 20.7 });
+  assertEquals(mutated["1"].inputs.steps, 21); // integer-typed → rounded
 });
 
-Deno.test("inspectGraph: unrelated graph yields all-null for optional params", () => {
+Deno.test("inspectGraph: string inputs are not varyable", () => {
   const graph = {
-    "1": { class_type: "KSampler", inputs: {
-      seed: 1, steps: 20, cfg: 1.0, denoise: 1.0,
-    } },
+    "1": { class_type: "CLIPTextEncode", inputs: { text: "fish" } },
   };
   const params = inspectGraph(graph);
-  assertEquals(params.guidance, null);
-  assertEquals(params.shift, null);
-  assertEquals(params.pulid_weight, null);
-  assertEquals(params.ipa_weight, null);
+  assertEquals(params.length, 0);
 });
