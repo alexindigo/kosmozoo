@@ -49,6 +49,27 @@ export function basename(v) {
   return v ? String(v).replace(/\\/g, "/").split("/").pop() : v;
 }
 
+// Generic scan of a prompt graph: every node's scalar inputs, no node names
+// involved. Links (arrays) are skipped; strings are capped; class_type is the
+// node name, _meta.title (when present) is its display title. This feeds the
+// registry: node types and their fields are discovered, never hardcoded.
+export function collectNodes(graph, { stringCap = 4096 } = {}) {
+  const out = [];
+  for (const [id, n] of Object.entries(graph ?? {})) {
+    const inputs = {};
+    for (const [k, v] of Object.entries(n.inputs ?? {})) {
+      if (typeof v === "number" || typeof v === "boolean") inputs[k] = v;
+      else if (typeof v === "string") inputs[k] = v.length > stringCap ? v.slice(0, stringCap) + "…" : v;
+    }
+    if (!Object.keys(inputs).length) continue;
+    const title = n._meta?.title;
+    out.push(title && title !== n.class_type
+      ? { id, type: String(n.class_type ?? ""), title: String(title), inputs }
+      : { id, type: String(n.class_type ?? ""), inputs });
+  }
+  return out;
+}
+
 // Linked seed input [node_id, slot] -> the target node's scalar seed, when
 // it has one (rgthree 'Seed' does; widget-only custom nodes don't).
 export function followSeed(graph, link) {
@@ -232,6 +253,10 @@ export function extractMeta(entry) {
   const cs = firstNode(nodes, "clipsetlastlayer");
   v = scalarInput(cs, "stop_at_clip_layer");
   if (typeof v === "number") meta.clip_skip = Math.abs(Math.trunc(v));
+
+  // Generic scan: every node's scalar fields ride along. The whole point of
+  // the registry — nothing about nodes is hardcoded anywhere.
+  meta.nodes = collectNodes(graph);
 
   return meta;
 }

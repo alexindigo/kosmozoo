@@ -11,7 +11,7 @@ import { Database } from "@db/sqlite";
 import { loadVersioned, atomicWrite } from "./state.mjs";
 import { hostKey, splitHostKey } from "./hosts.mjs";
 
-const SCHEMA_VERSION = 3;
+const SCHEMA_VERSION = 4;
 
 const MIGRATIONS = [
   // v0 → v1: create the single-table metadata store.
@@ -64,6 +64,18 @@ const MIGRATIONS = [
   // revalidate non-durable remotes (src/revalidate.mjs).
   (db) => {
     db.exec(`ALTER TABLE files ADD COLUMN mtime REAL`);
+  },
+  // v3 → v4: the node registry — node types and their scalar input fields,
+  // discovered from extracted graphs (merged from each meta.nodes).
+  (db) => {
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS node_registry (
+        class_type TEXT PRIMARY KEY,
+        title      TEXT,
+        inputs     TEXT NOT NULL,
+        updated_at REAL NOT NULL
+      );
+    `);
   },
 ];
 
@@ -137,6 +149,37 @@ export class Store {
     this.#metaVersion = count;
     // Seed files table too.
     this.#runMigrations();
+  }
+
+  // --- node registry (discovered node types → their scalar input fields) ----
+
+  // Merge one image's nodes into the registry. Keys accumulate over time;
+  // the latest type for a key wins (numbers and strings collide rarely, and
+  // the newest observation is the fairest one). Title likewise.
+  #mergeNodeRegistry(nodes) {
+    if (!Array.isArray(nodes)) return;
+    const get = this.#db.prepare("SELECT title, inputs FROM node_registry WHERE class_type = ?");
+    const put = this.#db.prepare(
+      "INSERT INTO node_registry (class_type, title, inputs, updated_at) VALUES (?, ?, ?, ?) ON CONFLICT(class_type) DO UPDATE SET title = excluded.title, inputs = excluded.inputs, updated_at = excluded.updated_at"
+    );
+    for (const n of nodes) {
+      if (!n?.type || !n.inputs) continue;
+      const row = get.value(n.type);
+      let existing = {};
+      try { existing = JSON.parse(row?.[1] ?? "{}") ?? {}; } catch { existing = {}; }
+      const inputs = { ...existing };
+      for (const [k, v] of Object.entries(n.inputs)) inputs[k] = typeof v;
+      const title = n.title ?? row?.[0] ?? null; // instance title wins, else keep
+      put.run(n.type, title, JSON.stringify(inputs), Date.now());
+    }
+  }
+
+  nodeRegistry() {
+    const out = {};
+    for (const row of this.#db.prepare("SELECT class_type, title, inputs FROM node_registry").all()) {
+      try { out[row.class_type] = { title: row.title ?? null, inputs: JSON.parse(row.inputs) }; } catch { /* corrupt row skipped */ }
+    }
+    return out;
   }
 
   // --- hash identity -------------------------------------------------------
@@ -215,6 +258,7 @@ export class Store {
 
   async metaPut(host, filename, meta, { source = "history", hasWorkflow = false, nopng = false, ext = 1 } = {}) {
     const metaJson = meta ? JSON.stringify(meta) : null;
+    if (meta) this.#mergeNodeRegistry(meta.nodes);
 
     // If the file has been hashed, write to images; otherwise to metadata.
     const hash = this.hashFor(host, filename);

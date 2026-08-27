@@ -237,6 +237,11 @@ export function makeRouter(ctx) {
   });
 
   // --- scraper control (the menu's "metadata scan" row) ---------------------
+  // The discovered node registry: class_type → { title, inputs→types }.
+  add("GET", "/api/nodes", async () => {
+    return Response.json(ctx.store.nodeRegistry());
+  });
+
   add("GET", "/api/scraper", async () => {
     const pending = {};
     for (const name of Object.keys(ctx.hosts)) {
