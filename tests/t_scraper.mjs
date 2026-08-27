@@ -3,7 +3,7 @@
 // pending strictly decreases, headless operation.
 
 import { assert, assertEquals } from "jsr:@std/assert";
-import { Scraper } from "../src/scraper.mjs";
+import { Scraper, EXTRACTOR_VERSION } from "../src/scraper.mjs";
 import { Settings } from "../src/settings.mjs";
 import { Store } from "../src/store.mjs";
 import { mkdtemp, rm } from "node:fs/promises";
@@ -92,6 +92,36 @@ Deno.test("scraper: priority feed drains before walk", async () => {
   // priority item landed
   assert(store.metaGet("local", "flux-pulid.png"));
   assert(store.metaGet("local", "flux-controlnet.png"));
+  await rm(dir, { recursive: true });
+});
+
+Deno.test("scraper: feed skips files already extracted at the current version", async () => {
+  const { dir, settings, store } = await mkStore();
+  // Mark one file as extracted at EXTRACTOR_VERSION; the other stays unknown.
+  await store.metaPut("local", "flux-basic.png", { seed: 1 }, { ext: EXTRACTOR_VERSION });
+  const s = new Scraper({ hosts: { local: FAKE }, store, settings });
+  const pending = s.feed("local", ["flux-basic.png", "flux-lora.png"]);
+  assertEquals(pending, 1); // only the unknown one queues
+  assert(queued(s, "local", "flux-lora.png"));
+  assert(!queued(s, "local", "flux-basic.png"));
+  // A later listing load must not requeue the extracted file again.
+  assertEquals(s.pending("local"), 1);
+  await rm(dir, { recursive: true });
+});
+
+// queue-membership helper (observes the freshness decision, not the drain)
+function queued(s, host, name) {
+  const w = s.workers.get(host);
+  return !!w && (w.walk.includes(name) || w.prio.includes(name));
+}
+
+Deno.test("scraper: stale extractor version requeues for re-extraction", async () => {
+  const { dir, settings, store } = await mkStore();
+  // extracted at an OLDER version than the gate expects
+  await store.metaPut("local", "flux-basic.png", { seed: 1 }, { ext: EXTRACTOR_VERSION - 1 });
+  const s = new Scraper({ hosts: { local: FAKE }, store, settings });
+  const pending = s.feed("local", ["flux-basic.png"]);
+  assertEquals(pending, 1); // older version is stale → requeue
   await rm(dir, { recursive: true });
 });
 
