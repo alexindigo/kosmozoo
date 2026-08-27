@@ -1,6 +1,6 @@
-// tests/t_extractor.mjs — golden tests for the ported extractor, in the
-// t_nodefields style: synthetic class_type graph literals in, meta out.
-// A/B against the Python engine is handled separately by tests/ab/.
+// tests/t_extractor.mjs — golden tests for the extractor: synthetic class_type
+// graph literals in, meta out. (The retired A/B rig against the frozen Python
+// engine was removed: generic capture makes port-parity comparisons moot.)
 
 import { assert, assertEquals } from "jsr:@std/assert";
 import { extractMeta, metaFromPngBytes, historyOutputMetas, collectNodes } from "../src/extractor.mjs";
