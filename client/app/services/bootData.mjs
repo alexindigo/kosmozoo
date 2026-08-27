@@ -16,6 +16,7 @@ export function loadBootData() {
   return (bootDataPromise ??= (async () => {
     state.hosts = await api.hosts();
     const ui = await api.settings("core.ui").catch(() => ({}));
+    state.nodesRegistry = await api.nodes().catch(() => ({}));
     const fieldsStored = await api.settings("core.fields").catch(() => ({}));
     state.fieldsCfg = loadFieldsCfg(fieldsStored.cfg);
     const del = await api.settings("core.delete").catch(() => ({}));

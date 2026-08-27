@@ -12,6 +12,7 @@ export const state = {
   images: [],           // [{ id, host, filename, meta, judgment }] — shared list model
   scraper: null,        // { enabled, paused, pending: {host: n} }
   feedbackPath: null,   // where judgments live (engine-side)
+  nodesRegistry: null,  // discovered node types: { class_type: { title, inputs→kind } } (/api/nodes)
   fieldsCfg: null,      // metadata fields picker config (core.fields.cfg)
   // session UI state (dies with the page)
   anchors: [],          // [{ name, src(dataURL), meta? }] — local drops, persisted

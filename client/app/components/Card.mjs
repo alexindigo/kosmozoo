@@ -16,7 +16,7 @@ import { setVote, toggleFavorite, saveNotes } from "../../js/judgment.mjs";
 import { metaStripText } from "../../js/fields.mjs";
 import { iconSvg } from "../../js/icons.mjs";
 import { toggleVariations } from "./VariationsModal.mjs";
-import { matchesFile, parseUrl } from "../../js/route.mjs";
+import { matchesFile } from "../../js/route.mjs";
 import { Zoomable } from "./Zoomable.mjs";
 import { IconButton } from "./IconButton.mjs";
 import { MetaBar } from "./MetaBar.mjs";
@@ -35,7 +35,7 @@ function aspectFromMeta(meta) {
   return meta?.width && meta?.height ? `${meta.width} / ${meta.height}` : null;
 }
 
-export function Card({ image, imgIdx, src, meta, selected, onOpen, onErrorClick, onImgPhase }) {
+export function Card({ image, imgIdx, src, meta, selected, fieldsVersion, onOpen, onErrorClick, onImgPhase }) {
   const [ar, setAr] = useState(() => aspectFromMeta(meta));
   const [facts, setFacts] = useState(() => ({
     w: meta?.width ?? null, h: meta?.height ?? null, bytes: image.size ?? null,
@@ -186,6 +186,6 @@ export function Card({ image, imgIdx, src, meta, selected, onOpen, onErrorClick,
         onSave: saveNote("pos"), getNeighborText: neighborText("pos"),
       }),
     ),
-    h(MetaBar, { facts, meta, expanded, onToggle: () => setExpanded((x) => !x) }),
+    h(MetaBar, { facts, meta, fieldsVersion, expanded, onToggle: () => setExpanded((x) => !x) }),
   );
 }

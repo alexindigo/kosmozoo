@@ -1,78 +1,92 @@
 // client/js/fields.mjs — the metadata fields registry and its surfaces.
 //
-// The registry itself (groups, extractors, defaults) is empirical field
-// knowledge ported per plan decision #7. The surfaces are fresh:
-//   card panel ("under image") + image strip — picker-governed
-//   lightbox strip — picker-governed (strip column)
-//   ⓘ overlay — ALL fields, picker-exempt by design (the full-details view)
-// The picker overlay has per-field card/strip toggles and per-group masters.
+// NOTHING is hardcoded about nodes. The field list derives from the engine's
+// node registry (see /api/nodes): node types accumulate as the scraper walks,
+// and each image's meta.nodes carries the actual values. A registry field id
+// is `<class_type>.<input>`; value kinds stay with the id. The picker's
+// card/strip toggle state persists in core.fields.cfg; surfaces render only
+// fields the image actually carries.
+//   card panel ("under image") — picker-governed
+//   strip — picker-governed (strip column)
+//   details pane / ⓘ overlay — ALL registry fields, picker-exempt by design
 
 import { state } from "./state.mjs";
 import { render } from "../app/services/notify.mjs";
 import { api } from "./api.mjs";
 
-export const META_FIELD_GROUPS = [
-  ["KSampler", [
-    // If the graph carries no scalar seed but the sampler links to a
-    // widget-only seed node (DomovoySeed, rgthree Seed, etc.), the
-    // extractor stores its class_type as seed_source and we surface
-    // that as "⇒ <NodeType>" so the row is still informative.
-    ["seed",     (m) => m.seed != null ? m.seed
-                       : (m.seed_source ? `⇒ ${m.seed_source}` : null)],
-    ["steps",    (m) => m.steps],
-    ["cfg",      (m) => m.cfg],
-    ["denoise",  (m) => m.denoise != null ? Number(m.denoise).toFixed(2) : null],
-    ["sampler",  (m) => m.sampler_name
-      ? (m.scheduler ? `${m.sampler_name}/${m.scheduler}` : m.sampler_name)
-      : null],
-  ]],
-  ["LoRA loaders", [
-    // One field per lora, not a concatenation: the surfaces expand an
-    // array-valued getter into one row per entry (see fieldValueToRows).
-    ["loras", (m) => (m.loras || []).map((l) =>
-      l.name + (l.strength != null ? "@" + l.strength : ""))],
-  ]],
-  ["FluxGuidance", [["guidance", (m) => m.guidance]]],
-  ["Model loaders", [
-    ["model", (m) => m.model],
-    ["vae",   (m) => m.vae],
-  ]],
-  ["IPAdapter", [
-    ["ipa_model",    (m) => m.ipa_model],
-    ["ipa_weight",   (m) => m.ipa_weight],
-    ["ipa_type",     (m) => m.ipa_type],
-    ["ipa_range",    (m) => m.ipa_range],
-    ["clip_vision",  (m) => m.clip_vision],
-  ]],
-  ["ControlNet", [["controlnet", (m) => m.controlnet]]],
-  ["PuLID", [
-    ["pulid",        (m) => m.pulid],
-    ["pulid_weight", (m) => m.pulid_weight],
-    ["pulid_range",  (m) => m.pulid_range],
-  ]],
-  ["ModelSampling", [["shift", (m) => m.shift]]],
-  ["CLIP", [
-    ["clip_skip", (m) => m.clip_skip],
-    ["prompt",    (m) => m.prompt],
-    ["negative",  (m) => m.negPrompt],
-  ]],
-  ["Latent", [["size", (m) => (m.width && m.height) ? `${m.width}×${m.height}` : null]]],
-];
+const LONG_TEXT = 120; // chars: full-text fields render in the desc area
 
-export const META_FIELDS = META_FIELD_GROUPS.flatMap(([, fields]) => fields);
+export function fieldId(classType, input) { return `${classType}.${input}`; }
 
-const DEFAULT_CFG = {
-  seed: { card: true, strip: false }, steps: { card: true, strip: false },
-  cfg: { card: true, strip: false }, denoise: { card: true, strip: false },
-  sampler: { card: true, strip: false }, loras: { card: true, strip: false },
-  size: { card: true, strip: false }, prompt: { card: true, strip: false },
-  // everything else off by default
-};
+export function parseFieldId(id) {
+  const i = id.lastIndexOf(".");
+  return [id.slice(0, i), id.slice(i + 1)];
+}
+
+// --- the dynamic registry → groups -------------------------------------------
+
+// Instances of a node type in one meta, sorted by their (numeric-ish) node id.
+function instancesOf(meta, classType) {
+  const nodes = (meta?.nodes ?? []).filter((n) => n.type === classType);
+  nodes.sort((a, b) => {
+    const na = +a.id, nb = +b.id;
+    if (!isNaN(na) && !isNaN(nb)) return na - nb;
+    return String(a.id).localeCompare(String(b.id));
+  });
+  return nodes;
+}
+
+// Group title for a node type: its own display title when the registry kept
+// one, else the class_type itself.
+function groupTitle(classType) {
+  return state.nodesRegistry?.[classType]?.title || classType;
+}
+
+// One getter per registry field id: reads the value from every instance of
+// the type, skipping empty slots. Returns them as an array (multi-instance)
+// or a scalar (single instance).
+function fieldGetter(classType, input) {
+  return (m) => {
+    const inst = instancesOf(m, classType);
+    const vals = [];
+    for (const n of inst) {
+      const v = n.inputs?.[input];
+      if (v == null || v === "") continue;
+      vals.push(typeof v === "boolean" ? String(v) : v);
+    }
+    return vals.length > 1 ? vals : (vals[0] ?? null);
+  };
+}
+
+// [groupTitle, [[id, getter]]], sorted by group title, fields sorted by input
+export function fieldGroups() {
+  const reg = state.nodesRegistry ?? {};
+  const entries = Object.entries(reg)
+    .map(([classType, info]) => [classType, info])
+    .sort(([a, aInfo], [b, bInfo]) => (aInfo.title || a).localeCompare(bInfo.title || b));
+  return entries.map(([classType, info]) => [
+    groupTitle(classType),
+    Object.keys(info.inputs ?? {})
+      .sort()
+      .map((input) => [fieldId(classType, input), fieldGetter(classType, input)]),
+  ]);
+}
+
+export function currentFieldList() {
+  return fieldGroups().flatMap(([, fields]) => fields);
+}
+
+// --- picker config ------------------------------------------------------------
 
 export function loadFieldsCfg(stored) {
   const out = {};
-  for (const [name] of META_FIELDS) {
-    out[name] = { card: false, strip: false, ...DEFAULT_CFG[name], ...(stored?.[name] ?? {}) };
+  for (const [id] of currentFieldList()) {
+    out[id] = { card: false, strip: false, ...(stored?.[id] ?? {}) };
+  }
+  // Fields may come and go with the registry; preserved toggles for ids not
+  // yet discovered still apply when they appear.
+  for (const [id, cfg] of Object.entries(stored ?? {})) {
+    if (!(id in out)) out[id] = { card: cfg.card ?? false, strip: cfg.strip ?? false };
   }
   return out;
 }
@@ -81,19 +95,32 @@ export async function persist() {
   await api.setSettings("core.fields", { cfg: state.fieldsCfg }).catch(() => {});
 }
 
-// --- surfaces -------------------------------------------------------------------
+// --- surfaces ------------------------------------------------------------------
 
-// Expand a field's value into [label, text] display rows. Most fields yield
-// one row labeled by the field name; an ARRAY-valued getter (loras) yields
-// one row per entry, labeled singular (lora) — each lora is its own field.
-function fieldValueToRows(name, v) {
-  if (Array.isArray(v)) return v.filter((s) => s !== "").map((s) => ["lora", s]);
-  if (v == null || v === "") return [];
-  return [[name, v]];
+// [label, text, long?] rows from meta, gated by cfg (card) when gated=true.
+function materializeRows(meta, { gated }) {
+  const rows = [];
+  for (const [id, getter] of currentFieldList()) {
+    if (gated && !state.fieldsCfg[id]?.card) continue;
+    const v = getter(meta);
+    if (v == null) continue;
+    const [classType, input] = parseFieldId(id);
+    const vals = Array.isArray(v) ? v : [v];
+    const label = `${groupTitle(classType)} — ${input}`;
+    for (const text of vals) {
+      const long = String(text).length > LONG_TEXT;
+      rows.push([label, long ? String(text) : formatScalar(text), long]);
+    }
+  }
+  return rows;
+}
+
+function formatScalar(v) {
+  if (typeof v === "number") return String(parseFloat(v.toFixed(10)));
+  return String(v);
 }
 
 export function fillCardMeta(props, desc, meta) {
-  const cfg = state.fieldsCfg;
   props.textContent = "";
   desc.textContent = "";
   desc.title = "";
@@ -104,60 +131,48 @@ export function fillCardMeta(props, desc, meta) {
     props.appendChild(span);
     return;
   }
-  const rows = [];
-  for (const [name, get] of META_FIELDS) {
-    if (name === "prompt" || name === "negative") continue;
-    if (!cfg[name]?.card) continue;
-    rows.push(...fieldValueToRows(name, get(meta)));
-  }
+  const rows = materializeRows(meta, { gated: true });
   if (rows.length) {
-    for (const [k, v] of rows) {
+    // long-text fields go to desc (truncated at 300 so the whole card stays
+    // compact); the first one also lands in desc.title for hover
+    let firstLong = true;
+    for (const [label, v, long] of rows) {
+      if (long) {
+        desc.textContent = String(v).length > 300 ? String(v).slice(0, 300) + "…" : v;
+        if (firstLong) desc.title = label + " — " + String(v);
+        firstLong = false;
+        continue;
+      }
       const line = document.createElement("div");
-      const label = document.createElement("span");
-      label.className = "plabel";
-      label.textContent = `${k}: `;
-      line.append(label, document.createTextNode(v));
+      const lab = document.createElement("span");
+      lab.className = "plabel";
+      lab.textContent = `${label}: `;
+      line.append(lab, document.createTextNode(v));
       props.appendChild(line);
     }
   } else {
-    props.textContent = "(no sampler metadata)";
-  }
-  if (meta.prompt && cfg.prompt?.card) {
-    const excerpt = meta.prompt.length > 300 ? meta.prompt.slice(0, 300) + "…" : meta.prompt;
-    const negBit = (cfg.negative?.card && meta.negPrompt)
-      ? `\n\nneg: ${meta.negPrompt.length > 140 ? meta.negPrompt.slice(0, 140) + "…" : meta.negPrompt}`
-      : "";
-    desc.textContent = excerpt + negBit;
-    desc.title = meta.prompt;
+    props.textContent = "(no fields toggled on this image)";
   }
 }
 
-// one-line strip: "seed 1 · 20 steps · …" (list-valued fields join back)
+// one-line strip: short fields joined by " · " (long-field texts clipped)
 export function metaStripText(meta) {
   const bits = [];
-  for (const [name, get] of META_FIELDS) {
-    if (!state.fieldsCfg[name]?.strip) continue;
-    const v = get(meta);
-    const txt = Array.isArray(v) ? v.join(", ") : v;
-    if (txt == null || txt === "") continue;
-    bits.push(name === "prompt" || name === "negative" ? String(txt) : `${name} ${txt}`);
+  for (const [id, getter] of currentFieldList()) {
+    if (!state.fieldsCfg[id]?.strip) continue;
+    const v = getter(meta);
+    if (v == null) continue;
+    const [classType, input] = parseFieldId(id);
+    const vals = Array.isArray(v) ? v : [v];
+    const label = `${groupTitle(classType)} — ${input}`;
+    bits.push(`${label} ${vals.map((x) => formatScalar(x)).join(", ")}`);
   }
   return bits.join(" · ");
 }
 
-// lightbox strip content
-export function lightboxStripText(meta) {
-  return meta ? metaStripText(meta) : "";
-}
-
-// the ⓘ overlay: every field the image carries, regardless of the picker
+// full rows (details pane / ⓘ overlay): every field the image carries
 export function fullFieldRows(meta) {
-  const rows = [];
-  for (const [name, get] of META_FIELDS) {
-    if (name === "prompt" || name === "negative") continue;
-    rows.push(...fieldValueToRows(name, get(meta)));
-  }
-  return rows;
+  return materializeRows(meta, { gated: false });
 }
 
 // full-metadata body, shared by the ⓘ overlay and the details workspace
@@ -165,47 +180,43 @@ export function fullFieldRows(meta) {
 export function buildMetaBody(meta) {
   const wrap = document.createElement("div");
   const rows = meta ? fullFieldRows(meta) : [];
-  if (!rows.length && !meta?.prompt && !meta?.negPrompt) {
+  if (!rows.length) {
     const p = document.createElement("div");
     p.className = "info-none";
-    p.textContent = "This image has no embedded parameters.";
+    p.textContent = meta?.nodes?.length
+      ? "This image has no scalar node fields."
+      : "This image has no embedded parameters.";
     wrap.appendChild(p);
     return wrap;
   }
-  if (rows.length) {
-    const props = document.createElement("div");
-    props.className = "props";
-    for (const [k, v] of rows) {
+  const props = document.createElement("div");
+  props.className = "props";
+  for (const [label, v, long] of rows) {
+    if (long) {
+      const sec = document.createElement("div");
+      sec.className = "infosec";
+      const lab = document.createElement("div");
+      lab.className = "plabel";
+      lab.textContent = label;
+      const txt = document.createElement("div");
+      txt.className = "infotext";
+      txt.textContent = v;
+      sec.append(lab, txt);
+      wrap.appendChild(sec);
+    } else {
       const line = document.createElement("div");
-      const label = document.createElement("span");
-      label.className = "plabel";
-      label.textContent = `${k}: `;
-      line.append(label, document.createTextNode(v));
+      const lab = document.createElement("span");
+      lab.className = "plabel";
+      lab.textContent = `${label}: `;
+      line.append(lab, document.createTextNode(v));
       props.appendChild(line);
     }
-    wrap.appendChild(props);
   }
-  for (const [label, text] of [["prompt", meta.prompt], ["negative", meta.negPrompt]]) {
-    if (!text) continue;
-    const sec = document.createElement("div");
-    sec.className = "infosec";
-    const lab = document.createElement("div");
-    lab.className = "plabel";
-    lab.textContent = label;
-    const txt = document.createElement("div");
-    txt.className = "infotext";
-    txt.textContent = text;
-    sec.append(lab, txt);
-    wrap.appendChild(sec);
-  }
+  wrap.appendChild(props);
   return wrap;
 }
 
 // --- the picker overlay ------------------------------------------------------------
-//
-// The overlay never touches cards. <FieldsOverlay> renders the table from
-// state.fieldsCfg; picker changes fire the injected onChanged callback (via
-// notifyFieldsChanged) and the parent decides what re-renders.
 
 let onChangedHook = null;
 

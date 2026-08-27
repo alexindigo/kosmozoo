@@ -4,7 +4,6 @@
 
 import { h } from "../../vendor/preact/vendor.mjs";
 import { useRef, useEffect } from "../../vendor/preact/vendor.mjs";
-import { state } from "../../js/state.mjs";
 import { fillCardMeta } from "../../js/fields.mjs";
 import { iconSvg } from "../../js/icons.mjs";
 
@@ -23,12 +22,12 @@ export function metaBarText(f) {
   return bits.length ? bits.join(" · ") : "no metadata yet";
 }
 
-export function MetaBar({ facts, meta, expanded, onToggle }) {
+export function MetaBar({ facts, meta, fieldsVersion, expanded, onToggle }) {
   const propsRef = useRef(null);
   const descRef = useRef(null);
   useEffect(() => {
     if (propsRef.current && descRef.current) fillCardMeta(propsRef.current, descRef.current, meta);
-  }, [meta, state.fieldsCfg]);
+  }, [meta, fieldsVersion]);
   const text = metaBarText(facts);
   return h("div", { class: "metabar" + (expanded ? " open" : "") },
     h("span", { class: "metabar-info", title: text }, text),

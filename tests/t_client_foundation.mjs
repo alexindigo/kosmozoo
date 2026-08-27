@@ -102,45 +102,72 @@ Deno.test("diff: malformed sides parse to null, not garbage", () => {
   assertEquals(parseDiffHash("").right, null);
 });
 
-// --- metadata fields: loras as individual rows ---------------------------------
+// --- metadata fields: registry-driven ---------------------------------------
 
 import { fullFieldRows, metaStripText } from "../client/js/fields.mjs";
 
-Deno.test("fields: multiple loras render one row per lora, labeled lora", () => {
-  const rows = fullFieldRows({
-    seed: 7,
-    loras: [
-      { name: "detail.safetensors", strength: 0.8 },
-      { name: "style.safetensors", strength: 0.5 },
-    ],
-  });
-  const loraRows = rows.filter(([label]) => label === "lora");
-  assertEquals(loraRows, [["lora", "detail.safetensors@0.8"], ["lora", "style.safetensors@0.5"]]);
-  // no concatenated "loras" row remains
-  assertEquals(rows.filter(([label]) => label === "loras"), []);
-  // other fields still one row each
-  assertEquals(rows.filter(([label]) => label === "seed"), [["seed", 7]]);
-});
+const REGISTRY = {
+  KSampler: { title: null, inputs: { steps: "number", seed: "number", sampler_name: "string" } },
+  LoraLoaderModelOnly: { title: "Load LoRA", inputs: { lora_name: "string", strength_model: "number" } },
+  CLIPTextEncode: { title: null, inputs: { text: "string" } },
+};
 
-Deno.test("fields: single lora is its own row; missing strength has no @", () => {
-  const rows = fullFieldRows({ loras: [{ name: "athena_film_v1.safetensors", strength: 1.2 }] });
-  assertEquals(rows, [["lora", "athena_film_v1.safetensors@1.2"]]);
-  assertEquals(fullFieldRows({ loras: [{ name: "bare.safetensors" }] }), [["lora", "bare.safetensors"]]);
-});
-
-Deno.test("fields: the one-line strip joins loras back into one bit", () => {
-  const prev = state.fieldsCfg;
-  state.fieldsCfg = { loras: { strip: true }, seed: { strip: true } };
+Deno.test("fields: every node input is a field; instances each get a row", () => {
+  const prev = state.nodesRegistry;
+  state.nodesRegistry = REGISTRY;
   try {
-    const strip = metaStripText({
-      seed: 3,
-      loras: [
-        { name: "a.safetensors", strength: 0.8 },
-        { name: "b.safetensors", strength: 0.5 },
+    const rows = fullFieldRows({
+      nodes: [
+        { id: "1", type: "KSampler", inputs: { steps: 20, seed: 7, sampler_name: "euler" } },
+        { id: "2", type: "LoraLoaderModelOnly", inputs: { lora_name: "a.safetensors", strength_model: 0.8 } },
+        { id: "3", type: "LoraLoaderModelOnly", inputs: { lora_name: "b.safetensors", strength_model: 0.5 } },
       ],
     });
-    assertEquals(strip, "seed 3 · loras a.safetensors@0.8, b.safetensors@0.5");
+    assert(rows.some(([l, v]) => l === "Load LoRA — lora_name" && v === "a.safetensors"), "lora name row");
+    assert(rows.some(([l, v]) => l === "Load LoRA — lora_name" && v === "b.safetensors"), "second lora name row");
+    assert(rows.some(([l, v]) => l === "Load LoRA — strength_model" && v === "0.8"));
+    assert(rows.some(([l, v]) => l === "Load LoRA — strength_model" && v === "0.5"));
+    assert(rows.some(([l, v]) => l === "KSampler — steps" && v === "20"));
+    assert(rows.some(([l, v]) => l === "KSampler — seed" && v === "7"));
+    assert(rows.some(([l, v]) => l === "KSampler — sampler_name" && v === "euler"));
   } finally {
-    state.fieldsCfg = prev;
+    state.nodesRegistry = prev;
+  }
+});
+
+Deno.test("fields: unknown node types on the image simply don't render", () => {
+  const prev = state.nodesRegistry;
+  state.nodesRegistry = REGISTRY;
+  try {
+    const rows = fullFieldRows({
+      nodes: [{ id: "1", type: "FluxGuidance", inputs: { guidance: 3.5 } }],
+    });
+    assertEquals(rows, []); // FluxGuidance is not in the registry yet
+  } finally {
+    state.nodesRegistry = prev;
+  }
+});
+
+Deno.test("fields: the one-line strip respects toggles and joins short values", () => {
+  const prevReg = state.nodesRegistry;
+  const prevCfg = state.fieldsCfg;
+  state.nodesRegistry = REGISTRY;
+  state.fieldsCfg = {
+    "KSampler.seed": { strip: true, card: false },
+    "KSampler.steps": { strip: true, card: false },
+    "LoraLoaderModelOnly.lora_name": { strip: true, card: false },
+    "LoraLoaderModelOnly.strength_model": { strip: false, card: false },
+  };
+  try {
+    const strip = metaStripText({
+      nodes: [
+        { id: "1", type: "KSampler", inputs: { steps: 20, seed: 7 } },
+        { id: "2", type: "LoraLoaderModelOnly", inputs: { lora_name: "a.safetensors", strength_model: 0.8 } },
+      ],
+    });
+    assertEquals(strip, "KSampler — seed 7 · KSampler — steps 20 · Load LoRA — lora_name a.safetensors");
+  } finally {
+    state.nodesRegistry = prevReg;
+    state.fieldsCfg = prevCfg;
   }
 });
