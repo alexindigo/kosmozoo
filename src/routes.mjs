@@ -3,7 +3,7 @@
 // Resource-shaped, documented, public. Plugin routes live under
 // /api/plugins/<name>/... and are registered by the plugin host (Phase 10).
 
-import { splitHostKey, probeHost, hostList, hostReadBytes, hostHeadSize, validateHost, addHost, removeHost, isFolderHost, hostHasAssetsPlus, hostDelete, comfyHistoryDelete, EXT_MIME } from "./hosts.mjs";
+import { splitHostKey, probeHost, hostList, hostReadBytes, hostHeadSize, hostInputBytes, validateHost, addHost, removeHost, isFolderHost, hostHasAssetsPlus, hostDelete, comfyHistoryDelete, EXT_MIME } from "./hosts.mjs";
 import { cacheGet } from "./cache.mjs";
 import { scheduleRevalidate } from "./revalidate.mjs";
 
@@ -147,6 +147,16 @@ export function makeRouter(ctx) {
       status: 200,
       headers: size != null ? { "content-length": String(size) } : {},
     });
+  });
+
+  // Input-dir image bytes for node references (LoadImage-style): folder
+  // hosts read from the directory; ComfyUI hosts proxy /api/view?type=input.
+  add("GET", "/api/input-bytes/<host>/<filename>", async (_req, { host, filename }) => {
+    if (!ctx.hosts[host]) return new Response("unknown host", { status: 404 });
+    const r = await hostInputBytes(ctx.hosts[host], filename);
+    if (r.status === 400) return new Response("bad filename", { status: 400 });
+    if (r.status !== 200) return new Response("not found", { status: r.status });
+    return new Response(r.body, { headers: r.headers });
   });
 
   add("GET", "/api/images/<id>/bytes", async (_req, { id }) => {
