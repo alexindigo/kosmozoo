@@ -588,6 +588,12 @@ main { display: flex; flex: 1; min-height: 0; }
 .infoimg .plabel { margin-bottom: 4px; }
 .infoimg img { display: block; max-width: 100%; max-height: 260px;
   border-radius: 4px; border: 1px solid var(--raise); background: #0a0a0c; }
+/* a flashed image is the one a filename link pointed at */
+.infoimg.flash img { border-color: var(--accent); box-shadow: 0 0 0 2px var(--accent); }
+
+/* filename links in the text column focus the images column */
+.ws-txtcol .imgref { color: var(--accent); cursor: pointer; }
+.ws-txtcol .imgref:hover { text-decoration: underline; }
 
 /* details split: discovered images and the text fields arranged by the
    header's layout switcher (state.infoLayout) */

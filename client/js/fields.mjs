@@ -232,26 +232,21 @@ export function buildMetaBody(meta, host, { skipImages = false } = {}) {
       const lab = document.createElement("span");
       lab.className = "plabel";
       lab.textContent = `${label}: `;
-      line.append(lab, document.createTextNode(v));
+      // image-file values (LoadImage-style refs, host known) render as links:
+      // the consumer (details pane) focuses the images column on that image
+      if (host && typeof v === "string" && NODE_IMG_EXT.test(v)) {
+        const ref = document.createElement("span");
+        ref.className = "imgref";
+        ref.dataset.file = v;
+        ref.textContent = v;
+        line.append(lab, ref);
+      } else {
+        line.append(lab, document.createTextNode(v));
+      }
       props.appendChild(line);
     }
   }
   wrap.appendChild(props);
-  if (host && !skipImages) {
-    for (const img of nodeImages(meta, host)) {
-      const sec = document.createElement("div");
-      sec.className = "infoimg";
-      const lab = document.createElement("div");
-      lab.className = "plabel";
-      lab.textContent = img.label;
-      const im = document.createElement("img");
-      im.src = img.src;
-      im.loading = "lazy";
-      im.alt = img.file;
-      sec.append(lab, im);
-      wrap.appendChild(sec);
-    }
-  }
   return wrap;
 }
 
