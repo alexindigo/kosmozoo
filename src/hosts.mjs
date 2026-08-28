@@ -213,6 +213,40 @@ export async function hostHeadSize(addr, filename) {
   }
 }
 
+// Input-dir image bytes (LoadImage-style node references): folder hosts read
+// the file straight from the directory; ComfyUI serves them via /api/view
+// with type=input. Output-dir files are NOT reachable here — that's what the
+// regular bytes route is for.
+export async function hostInputBytes(addr, filename) {
+  if (basename(filename) !== filename || filename.includes("..")) {
+    return { status: 400 };
+  }
+  const mime = EXT_MIME[filename.split(".").pop().toLowerCase()];
+  if (isFolderHost(addr)) {
+    try {
+      const bytes = await readFile(join(FOLDER_RE.exec(addr)[1], filename));
+      const headers = new Headers();
+      if (mime) headers.set("Content-Type", mime);
+      headers.set("Content-Length", String(bytes.length));
+      return { status: 200, body: bytes, headers };
+    } catch {
+      return { status: 404 };
+    }
+  }
+  try {
+    const url = `http://${addr}/api/view?type=input&filename=${encodeURIComponent(filename)}`;
+    const r = await fetch(url, { signal: AbortSignal.timeout(10000) });
+    if (!r.ok) return { status: r.status };
+    const headers = new Headers();
+    const ct = r.headers.get("Content-Type");
+    if (mime && (!ct || /octet-stream/i.test(ct))) headers.set("Content-Type", mime);
+    else if (ct) headers.set("Content-Type", ct);
+    return { status: 200, body: r.body, headers };
+  } catch {
+    return { status: 502 };
+  }
+}
+
 // Back-compat alias (the bytes proxy).
 export const proxyImage = hostReadBytes;
 

@@ -46,7 +46,7 @@ function DetailsBody() {
     sub.textContent = img.host ? `host ${img.host}` : "local anchor";
     head.append(name, sub);
     el.appendChild(head);
-    el.appendChild(buildMetaBody(img.meta ?? null));
+    el.appendChild(buildMetaBody(img.meta ?? null, img.host));
   }, [img]);
   return h("div", { id: "wsDetailsBody", class: "metabody", ref });
 }

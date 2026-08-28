@@ -583,6 +583,12 @@ main { display: flex; flex: 1; min-height: 0; }
 .vz-row-inc-input:focus { outline: none; border-color: var(--accent); }
 .vz-row-inc-input:disabled { opacity: 0.5; }
 
+/* node-referenced images (LoadImage-style) rendered inline in the info panel */
+.infoimg { margin-top: 10px; }
+.infoimg .plabel { margin-bottom: 4px; }
+.infoimg img { display: block; max-width: 100%; max-height: 260px;
+  border-radius: 4px; border: 1px solid var(--raise); background: #0a0a0c; }
+
 /* vertical divider */
 .vz-divider { width: 1px; background: var(--dim); flex: 0 0 auto; }
 

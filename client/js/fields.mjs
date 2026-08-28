@@ -175,9 +175,27 @@ export function fullFieldRows(meta) {
   return materializeRows(meta, { gated: false });
 }
 
+// node inputs whose value names an image file (LoadImage-style references).
+// Deduped: two nodes referencing the same file render one image.
+const NODE_IMG_EXT = /\.(png|jpe?g|webp|gif|avif|bmp|svg)$/i;
+
+export function nodeImages(meta) {
+  const out = [];
+  const seen = new Set();
+  for (const n of meta?.nodes ?? []) {
+    for (const [k, v] of Object.entries(n.inputs ?? {})) {
+      if (typeof v !== "string" || !NODE_IMG_EXT.test(v) || seen.has(v)) continue;
+      seen.add(v);
+      out.push({ label: `${n.title ?? n.type} — ${k}`, file: v });
+    }
+  }
+  return out;
+}
+
 // full-metadata body, shared by the ⓘ overlay and the details workspace
 // space. Returns an element; the caller appends it to its own container.
-export function buildMetaBody(meta) {
+// `host` (when known) enables inline rendering of node-referenced images.
+export function buildMetaBody(meta, host) {
   const wrap = document.createElement("div");
   const rows = meta ? fullFieldRows(meta) : [];
   if (!rows.length) {
@@ -213,6 +231,21 @@ export function buildMetaBody(meta) {
     }
   }
   wrap.appendChild(props);
+  if (host) {
+    for (const img of nodeImages(meta)) {
+      const sec = document.createElement("div");
+      sec.className = "infoimg";
+      const lab = document.createElement("div");
+      lab.className = "plabel";
+      lab.textContent = img.label;
+      const im = document.createElement("img");
+      im.src = `/api/input-bytes/${encodeURIComponent(host)}/${encodeURIComponent(img.file)}`;
+      im.loading = "lazy";
+      im.alt = img.file;
+      sec.append(lab, im);
+      wrap.appendChild(sec);
+    }
+  }
   return wrap;
 }
 
