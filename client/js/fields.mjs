@@ -176,17 +176,22 @@ export function fullFieldRows(meta) {
 }
 
 // node inputs whose value names an image file (LoadImage-style references).
-// Deduped: two nodes referencing the same file render one image.
+// Deduped: two nodes referencing the same file render one image. With a
+// host, each entry carries its input-bytes src.
 const NODE_IMG_EXT = /\.(png|jpe?g|webp|gif|avif|bmp|svg)$/i;
 
-export function nodeImages(meta) {
+export function nodeImages(meta, host) {
   const out = [];
   const seen = new Set();
   for (const n of meta?.nodes ?? []) {
     for (const [k, v] of Object.entries(n.inputs ?? {})) {
       if (typeof v !== "string" || !NODE_IMG_EXT.test(v) || seen.has(v)) continue;
       seen.add(v);
-      out.push({ label: `${n.title ?? n.type} — ${k}`, file: v });
+      out.push({
+        label: `${n.title ?? n.type} — ${k}`,
+        file: v,
+        src: host ? `/api/input-bytes/${encodeURIComponent(host)}/${encodeURIComponent(v)}` : null,
+      });
     }
   }
   return out;
@@ -194,8 +199,9 @@ export function nodeImages(meta) {
 
 // full-metadata body, shared by the ⓘ overlay and the details workspace
 // space. Returns an element; the caller appends it to its own container.
-// `host` (when known) enables inline rendering of node-referenced images.
-export function buildMetaBody(meta, host) {
+// `host` (when known) enables inline rendering of node-referenced images;
+// `opts.skipImages` leaves those to a caller-drawn column instead.
+export function buildMetaBody(meta, host, { skipImages = false } = {}) {
   const wrap = document.createElement("div");
   const rows = meta ? fullFieldRows(meta) : [];
   if (!rows.length) {
@@ -231,15 +237,15 @@ export function buildMetaBody(meta, host) {
     }
   }
   wrap.appendChild(props);
-  if (host) {
-    for (const img of nodeImages(meta)) {
+  if (host && !skipImages) {
+    for (const img of nodeImages(meta, host)) {
       const sec = document.createElement("div");
       sec.className = "infoimg";
       const lab = document.createElement("div");
       lab.className = "plabel";
       lab.textContent = img.label;
       const im = document.createElement("img");
-      im.src = `/api/input-bytes/${encodeURIComponent(host)}/${encodeURIComponent(img.file)}`;
+      im.src = img.src;
       im.loading = "lazy";
       im.alt = img.file;
       sec.append(lab, im);

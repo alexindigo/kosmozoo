@@ -7,7 +7,7 @@
 import { h } from "../../vendor/preact/vendor.mjs";
 import { useRef, useEffect } from "../../vendor/preact/vendor.mjs";
 import { state } from "../../js/state.mjs";
-import { buildMetaBody } from "../../js/fields.mjs";
+import { buildMetaBody, nodeImages } from "../../js/fields.mjs";
 import { AnchorSpace } from "./AnchorSpace.mjs";
 
 // the current image (host/folder image or anchor)
@@ -46,7 +46,37 @@ function DetailsBody() {
     sub.textContent = img.host ? `host ${img.host}` : "local anchor";
     head.append(name, sub);
     el.appendChild(head);
-    el.appendChild(buildMetaBody(img.meta ?? null, img.host));
+
+    // discovered node images get their own column (66%) beside the text
+    // fields (33%) — the images are the inspectable half of the pane.
+    // Anchors carry no host, so their refs can't resolve — single column.
+    const images = img.host ? nodeImages(img.meta ?? null, img.host) : [];
+    if (images.length) {
+      const cols = document.createElement("div");
+      cols.className = "ws-cols";
+      const imgCol = document.createElement("div");
+      imgCol.className = "ws-imgcol";
+      for (const image of images) {
+        const sec = document.createElement("div");
+        sec.className = "infoimg";
+        const lab = document.createElement("div");
+        lab.className = "plabel";
+        lab.textContent = image.label;
+        const im = document.createElement("img");
+        im.src = image.src;
+        im.loading = "lazy";
+        im.alt = image.file;
+        sec.append(lab, im);
+        imgCol.appendChild(sec);
+      }
+      const txtCol = document.createElement("div");
+      txtCol.className = "ws-txtcol";
+      txtCol.appendChild(buildMetaBody(img.meta ?? null, img.host, { skipImages: true }));
+      cols.append(imgCol, txtCol);
+      el.appendChild(cols);
+    } else {
+      el.appendChild(buildMetaBody(img.meta ?? null, img.host));
+    }
   }, [img]);
   return h("div", { id: "wsDetailsBody", class: "metabody", ref });
 }
