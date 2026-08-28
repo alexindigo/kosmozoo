@@ -47,13 +47,14 @@ function DetailsBody() {
     head.append(name, sub);
     el.appendChild(head);
 
-    // discovered node images get their own column (66%) beside the text
-    // fields (33%) — the images are the inspectable half of the pane.
+    // discovered node images get their own column beside the text fields —
+    // the layout (side-by-side / mirrored / stacked) follows state.infoLayout.
     // Anchors carry no host, so their refs can't resolve — single column.
     const images = img.host ? nodeImages(img.meta ?? null, img.host) : [];
     if (images.length) {
       const cols = document.createElement("div");
-      cols.className = "ws-cols";
+      cols.className = "ws-cols " + (state.infoLayout === "rev" ? "rev"
+        : state.infoLayout === "stacked" ? "stacked" : "split");
       const imgCol = document.createElement("div");
       imgCol.className = "ws-imgcol";
       for (const image of images) {
@@ -77,7 +78,7 @@ function DetailsBody() {
     } else {
       el.appendChild(buildMetaBody(img.meta ?? null, img.host));
     }
-  }, [img]);
+  }, [img, state.infoLayout]);
   return h("div", { id: "wsDetailsBody", class: "metabody", ref });
 }
 

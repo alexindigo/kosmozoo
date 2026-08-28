@@ -18,6 +18,7 @@ export const state = {
   anchors: [],          // [{ name, src(dataURL), meta? }] — local drops, persisted
   anchorPaneWidth: 300, // px; divider-adjusted, persisted
   workspace: "details", // right column space: 'details' | 'anchors', persisted
+  infoLayout: "split",  // details pane layout: 'split' | 'rev' | 'stacked', persisted
   // The single "current image" pointer — the one source of truth for which
   // image is current. `remote` is the source (a configured host/folder name,
   // or "anchor"); `image` is the filename (or anchor name). The URL hash
