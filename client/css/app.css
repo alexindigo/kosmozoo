@@ -94,7 +94,7 @@ body { display: flex; flex-direction: column; }
 /* --- main: two feeds share the window; divider splits; each column scrolls
    itself (no page-level scroll) ------------------------------------------- */
 main { display: flex; flex: 1; min-height: 0; }
-#candidatesCol { flex: 1; min-width: 0; overflow-y: auto;
+#candidatesCol { flex: 1; min-width: 0; overflow-y: auto; overflow-x: hidden;
   scrollbar-width: none; }
 #candidatesCol::-webkit-scrollbar { display: none; }
 #divider { flex: 0 0 7px; align-self: stretch; cursor: col-resize;
@@ -166,8 +166,12 @@ main { display: flex; flex: 1; min-height: 0; }
 /* the shared title row under the image: title left, actions right */
 .ctitle { display: flex; justify-content: space-between; align-items: flex-start;
   gap: 8px; margin: 8px 0 2px; font-weight: 600; color: var(--mid); }
-.ctitle .btnwrap { white-space: nowrap; display: flex; gap: 4px; align-items: center; }
+.ctitle .btnwrap { white-space: nowrap; display: flex; gap: 4px; align-items: center;
+  position: relative; flex: 0 0 auto; }
 .ctitle-left { display: flex; gap: 6px; align-items: center; min-width: 0; }
+/* the filename never pushes the row wide: it truncates instead */
+.ctitle-left .copyable { min-width: 0; overflow: hidden;
+  text-overflow: ellipsis; white-space: nowrap; }
 /* bulk-select checkbox, left of the filename */
 .selcb { -webkit-appearance: none; appearance: none; flex: 0 0 auto;
   width: 13px; height: 13px; border-radius: 3px;
@@ -188,8 +192,11 @@ main { display: flex; flex: 1; min-height: 0; }
 .fname .copyable, .copyable { cursor: copy; }
 .copyable:hover { color: var(--accent); }
 .copyable.copied { color: var(--accent); }
-.saved { color: var(--green); font-size: 11px; opacity: 0; transition: opacity .3s;
-  margin-right: 8px; align-self: center; white-space: nowrap; }
+/* the save-confirmation flash overlays the row (anchored left of the action
+   buttons) instead of occupying width in every card's title row */
+.saved { position: absolute; right: calc(100% + 8px); top: 50%;
+  transform: translateY(-50%); color: var(--green); font-size: 11px;
+  opacity: 0; transition: opacity .3s; white-space: nowrap; pointer-events: none; }
 .saved.show { opacity: 1; }
 .btnwrap { white-space: nowrap; display: flex; gap: 4px; }
 .votebtn, .savebtn { flex: 0 0 auto; padding: 2px 8px; font-size: 11px;
