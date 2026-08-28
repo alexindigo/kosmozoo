@@ -241,8 +241,8 @@ async function main() {
         JSON.stringify(result));
     });
 
-    // --- track rail exists and shares one centerline with everything ---
-    await attempt("rail spans the lane; rail/connect/thumbs/marker share a centerline", async () => {
+    // --- track rail spans the thumb-travel span; everything shares a centerline ---
+    await attempt("rail spans the thumb-travel span; rail/connect/thumbs/marker share a centerline", async () => {
       const g = await cdp.evaluate(`(() => {
         const row = document.querySelector('.vz-slider-row[data-param-key$="denoise"]');
         const c = (el) => {
@@ -258,13 +258,37 @@ async function main() {
         return { lane, rail, connect, h0, h1, marker };
       })()`);
       const near = (a, b) => Math.abs(a - b) < 0.75;
-      check("rail spans the full lane width", g.rail.w >= g.lane.w - 1, `rail=${g.rail.w} lane=${g.lane.w}`);
+      // the rail is inset by half the thumb width on each side — that's the
+      // span thumb centers travel, and the thumbs' outer edges attach to the
+      // rail ends at min/max
+      check("rail is inset by half the thumb width on each side",
+        near(g.rail.w, g.lane.w - 14), `rail=${g.rail.w} lane=${g.lane.w}`);
       check("rail centered on the lane", near(g.rail.center, g.lane.center), `rail=${g.rail.center} lane=${g.lane.center}`);
       check("connect band on the rail centerline", near(g.connect.center, g.rail.center), `connect=${g.connect.center} rail=${g.rail.center}`);
       check("both thumbs on the rail centerline",
         near(g.h0.center, g.rail.center) && near(g.h1.center, g.rail.center),
         `h0=${g.h0.center} h1=${g.h1.center} rail=${g.rail.center}`);
       check("current-value marker on the rail centerline", near(g.marker.center, g.rail.center), `marker=${g.marker.center} rail=${g.rail.center}`);
+    });
+
+    // --- thumbs attach to the rail ends at min/max ---
+    await attempt("thumbs attach to the rail ends at min/max", async () => {
+      const v = await cdp.evaluate(`(async () => {
+        const row = document.querySelector('.vz-slider-row[data-param-key$="denoise"]');
+        const slider = row.querySelector('.vz-slider');
+        const ns = slider.noUiSlider;
+        ns.set([ns.options.range.min, ns.options.range.max]);
+        await new Promise(r => setTimeout(r, 500)); // let the tap transition settle
+        const rail = row.querySelector('.vz-rail').getBoundingClientRect();
+        const h0 = row.querySelector('.noUi-handle[data-handle="0"]').getBoundingClientRect();
+        const h1 = row.querySelector('.noUi-handle[data-handle="1"]').getBoundingClientRect();
+        return { railL: rail.left, railR: rail.right, h0l: h0.left, h0r: h0.right, h1l: h1.left, h1r: h1.right };
+      })()`);
+      const near = (a, b) => Math.abs(a - b) < 1.2;
+      check("min thumb attaches to the rail's left end",
+        near(v.h0l, v.railL), `thumbLeft=${v.h0l} railLeft=${v.railL}`);
+      check("max thumb attaches to the rail's right end",
+        near(v.h1r, v.railR), `thumbRight=${v.h1r} railRight=${v.railR}`);
     });
 
     // --- disabled rows keep rail + marker (context for the current value) ---

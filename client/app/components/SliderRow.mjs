@@ -115,14 +115,20 @@ export function SliderRow({
           h("div", { class: "vz-bound vz-max-lbl", ref: maxLblRef }),
         ),
         h("div", { class: "vz-lane vz-lane-track" },
-          // the full-range track line: a visual sibling centered on the lane,
-          // so rail, connect band, thumbs and marker share one centerline
+          // the full-range track line spans the inset span, so its ends are
+          // exactly where the thumbs land at min/max
           h("div", { class: "vz-rail" }),
+          // the marker's reference box shares the slider's inset span, so the
+          // marker stays centered on the value point
+          h("div", { class: "vz-marker-inset" },
+            h("div", {
+              class: "vz-marker",
+              style: markerPct != null ? { left: markerPct + "%" } : { display: "none" },
+            }),
+          ),
+          // the slider insets itself within the lane; the library's base
+          // fills it, so thumb centers travel exactly the inset span
           h("div", { class: "vz-slider", ref: sliderRef, disabled: !enabled || undefined }),
-          h("div", {
-            class: "vz-marker",
-            style: markerPct != null ? { left: markerPct + "%" } : { display: "none" },
-          }),
         ),
         h("div", { class: "vz-lane vz-lane-current" },
           h("div", {
