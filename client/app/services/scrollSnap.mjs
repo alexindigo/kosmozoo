@@ -16,6 +16,12 @@
 // Nothing happens until scrolling has been quiet for SETTLE_MS — the tail
 // must fully drain first.
 //
+// A proximity gate bounds the snap itself: it only tidies a NEARBY boundary
+// (within SNAP_WINDOW_FRAC of the smaller of the column or the card). Deep
+// inside a long image the nearest card top is far away, so a flick that
+// lands there keeps the exact position instead of yanking the view up to
+// half the card's height.
+//
 // Fallback: when no measurable tail exists (scroll applies instantly — e.g.
 // headless browsers), peak windowed velocity carries the intent instead
 // (fast + far = inertia). Programmatic scrolls (deep-link centering, the
@@ -23,7 +29,7 @@
 
 import { state } from "../../js/state.mjs";
 
-// scrolling must be quiet this long before anything fires
+// nothing happens until scrolling has been quiet this long
 const SETTLE_MS = 150;
 // ignore scroll events caused by our own snap animation
 const SNAP_QUIET_MS = 500;
@@ -36,6 +42,10 @@ const MIN_DIST = 200;
 // no-tail fallback: peak windowed velocity (px/ms) and its sample window
 const VEL_THRESHOLD = 0.8;
 const WINDOW_MS = 100;
+// proximity gate: the snap only tidies a NEARBY boundary. If the nearest
+// card top is farther than this fraction of the smaller of the column or
+// the card, we're deep inside content (a long image) — keep the position.
+const SNAP_WINDOW_FRAC = 0.35;
 
 let quietUntil = 0;
 // current gesture; gestureStart === null means idle
@@ -77,6 +87,11 @@ export function initScrollSnap() {
     if (!best) return;
     const delta = best.getBoundingClientRect().top - colTop;
     if (Math.abs(delta) < 1) return; // already snapped
+    // proximity gate: only tidy a nearby boundary. Deep inside a long card
+    // the nearest top is far away — the user's position stays untouched.
+    const cardH = best.getBoundingClientRect().height;
+    const window = Math.min(col.clientHeight, cardH) * SNAP_WINDOW_FRAC;
+    if (Math.abs(delta) > window) return;
     quietUntil = Date.now() + SNAP_QUIET_MS;
     col.scrollTo({ top: col.scrollTop + delta, behavior: "smooth" });
   };
