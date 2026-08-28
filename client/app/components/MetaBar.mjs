@@ -7,7 +7,7 @@ import { useRef, useEffect } from "../../vendor/preact/vendor.mjs";
 import { fillCardMeta } from "../../js/fields.mjs";
 import { iconSvg } from "../../js/icons.mjs";
 
-function fmtBytes(n) {
+export function fmtBytes(n) {
   if (n == null) return null;
   if (n < 1024) return `${n} B`;
   if (n < 1024 * 1024) return `${Math.round(n / 1024)} KB`;
