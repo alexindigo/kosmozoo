@@ -4,11 +4,12 @@
 // anchors feed. state.workspace picks which is shown. The details body reads
 // state.current (the single current-image pointer) — hidden included.
 
-import { h } from "../../vendor/preact/vendor.mjs";
+import { h, render as preactRender } from "../../vendor/preact/vendor.mjs";
 import { useRef, useEffect } from "../../vendor/preact/vendor.mjs";
 import { state } from "../../js/state.mjs";
 import { buildMetaBody, nodeImages } from "../../js/fields.mjs";
 import { AnchorSpace } from "./AnchorSpace.mjs";
+import { Zoomable } from "./Zoomable.mjs";
 
 // the current image (host/folder image or anchor)
 function detailsImage() {
@@ -61,11 +62,17 @@ function DetailsBody() {
         const sec = document.createElement("div");
         sec.className = "infoimg";
         sec.dataset.file = image.file;
-        const im = document.createElement("img");
-        im.src = image.src;
-        im.loading = "lazy";
-        im.alt = image.file;
-        sec.append(im);
+        // same treatment as feed and anchor images: Ctrl+wheel zoom toward
+        // the cursor, drag pans while zoomed, double-click resets; the view
+        // persists per input file. Imperative render — this block builds
+        // its DOM by hand; the boxes die with the effect's innerHTML wipe.
+        const box = document.createElement("div");
+        preactRender(h(Zoomable, {
+          src: image.src,
+          alt: image.file,
+          zoomKey: `input:${img.host}:${image.file}`,
+        }), box);
+        sec.append(box);
         imgCol.appendChild(sec);
       }
       const txtCol = document.createElement("div");
