@@ -10,6 +10,7 @@ import { state } from "../../js/state.mjs";
 import { buildMetaBody, nodeImages } from "../../js/fields.mjs";
 import { AnchorSpace } from "./AnchorSpace.mjs";
 import { Zoomable } from "./Zoomable.mjs";
+import { openFromInput } from "../../js/diff.mjs";
 import { fmtBytes } from "./MetaBar.mjs";
 import { api } from "../../js/api.mjs";
 
@@ -91,6 +92,7 @@ function DetailsBody() {
           src: image.src,
           alt: image.file,
           zoomKey: `input:${img.host}:${image.file}`,
+          onOpen: () => openFromInput(img.host, image.file),
         }), box);
         sec.append(box);
         imgCol.appendChild(sec);
