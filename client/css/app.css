@@ -595,6 +595,22 @@ main { display: flex; flex: 1; min-height: 0; }
 .ws-txtcol .imgref { color: var(--accent); cursor: pointer; }
 .ws-txtcol .imgref:hover { text-decoration: underline; }
 
+/* info panel: collapsible per-node sections */
+.infogroup { margin-top: 10px; border: 1px solid var(--raise); border-radius: 6px;
+  overflow: hidden; }
+.infogroup:first-of-type { margin-top: 0; }
+.infogroup-head { display: flex; width: 100%; align-items: center;
+  justify-content: space-between; gap: 8px; padding: 6px 10px;
+  background: var(--card); border: none; color: var(--fg);
+  font-size: 11px; font-weight: 600; cursor: pointer; text-align: left; }
+.infogroup-head:hover { color: var(--accent); }
+.infogroup-head .chev { transition: transform .15s ease; }
+.infogroup.collapsed .infogroup-head .chev { transform: rotate(-90deg); }
+.infogroup-body { padding: 6px 10px 8px; }
+.infogroup.collapsed .infogroup-body { display: none; }
+.infogroup-body .props div { padding: 1px 0; }
+.infogroup-body .infosec { margin-top: 8px; }
+
 /* details split: discovered images and the text fields arranged by the
    header's layout switcher (state.infoLayout) */
 .ws-cols { display: flex; gap: 12px; align-items: flex-start; }
