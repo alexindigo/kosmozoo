@@ -49,11 +49,13 @@ const TAIL_FLOOR_MS = 40;
 const MIN_DIST = 200;
 // input-rate gate: px/ms of the wheel delta stream in a trailing window —
 // the primary signal on instant-application platforms (Linux Chromium,
-// headless), where no coast tail exists. A careful drag runs ~0.2–0.5; a
-// flick runs 1+.
-const RATE_THRESHOLD = 0.8;
-// the trailing window for the input-rate samples
-const WINDOW_MS = 100;
+// headless), where no coast tail exists. A deliberate mouse-wheel scroll
+// runs ~1–1.5 (100px notches at ~140ms, jitter included); a flick sustains
+// 2.5+ over the window. The bar sits above deliberate scrolling.
+const RATE_THRESHOLD = 2.5;
+// the trailing window for the input-rate samples — long enough that a
+// 2-notch burst averages out instead of spiking over the bar
+const WINDOW_MS = 200;
 // proximity gate: the snap only tidies a NEARBY boundary. If the nearest
 // card top is farther than this fraction of the smaller of the column or
 // the card, we're deep inside content (a long image) — keep the position.
@@ -65,8 +67,34 @@ let gestureStart = null;  // scrollTop at the gesture's origin
 let gestureStartT = 0;    // time of the gesture's first scroll event
 let wheelSamples = [];    // [time, |deltaY|] of non-momentum wheel events
 let peakRate = 0;         // peak wheel-stream rate this gesture, px/ms
+let wheelCount = 0;       // wheel events seen in this gesture
 let lastInputT = 0;       // FINGERS: last non-momentum wheel / touchmove
 let lastScrollT = 0;      // MOVEMENT: last scroll event
+
+// Opt-in debug: localStorage.snapdebug = "1" (or load with ?snapdebug) logs
+// one line per settled gesture — the gate's inputs and the verdict — so the
+// thresholds can be calibrated against the real browser's input stream.
+const DEBUG_SNAP = (() => {
+  try {
+    if (new URLSearchParams(location.search).has("snapdebug")) {
+      localStorage.setItem("snapdebug", "1");
+      return true;
+    }
+    return localStorage.getItem("snapdebug") === "1";
+  } catch {
+    return false;
+  }
+})();
+
+function dbgGesture(net, tail, rate, wheels, verdict) {
+  if (!DEBUG_SNAP) return;
+  console.log(
+    `[snap] ${verdict}: net=${Math.round(net)} tail=${Math.round(tail)} ` +
+    `rate=${rate.toFixed(2)} wheels=${wheels}`
+  );
+}
+
+if (DEBUG_SNAP) console.log("[snap] debug enabled (localStorage.snapdebug)");
 
 // Call after a programmatic scroll (e.g. restoreToIndex) so the snap doesn't
 // immediately fight it — and so the programmatic movement doesn't count as
@@ -76,6 +104,7 @@ export function suppressScrollSnap(ms = SNAP_QUIET_MS) {
   gestureStart = null;
   wheelSamples = [];
   peakRate = 0;
+  wheelCount = 0;
   lastInputT = 0;
   lastScrollT = 0;
 }
@@ -108,12 +137,14 @@ export function initScrollSnap() {
     col.scrollTo({ top: col.scrollTop + delta, behavior: "smooth" });
   };
 
-  // track the wheel stream's rate (px/ms of deltas in the trailing window)
+  // track the wheel stream's rate (px/ms of deltas in the trailing window).
+  // dt floors at ~60ms: a real flick's wheel stream is short (a few notches
+  // in ~100ms), and requiring the full window would miss it entirely.
   const trackWheel = (now, dy) => {
     wheelSamples.push([now, Math.abs(dy)]);
     while (wheelSamples.length > 2 && now - wheelSamples[1][0] > WINDOW_MS) wheelSamples.shift();
     const dt = now - wheelSamples[0][0];
-    if (dt >= WINDOW_MS * 0.8) {
+    if (dt >= 60) {
       const rate = wheelSamples.reduce((s, [, d]) => s + d, 0) / dt;
       if (rate > peakRate) peakRate = rate;
     }
@@ -123,7 +154,7 @@ export function initScrollSnap() {
   // (WheelEvent.momentum, where the browser exposes it), plus touch moves.
   const finger = (dy) => {
     lastInputT = performance.now();
-    if (dy != null) trackWheel(performance.now(), dy);
+    if (dy != null) { wheelCount += 1; trackWheel(lastInputT, dy); }
   };
   col.addEventListener("wheel", (e) => { if (!e.momentum) finger(e.deltaY); }, { passive: true });
   col.addEventListener("touchmove", () => finger(), { passive: true });
@@ -140,16 +171,25 @@ export function initScrollSnap() {
       // tail = how long the feed outlived the fingers (−1: no finger events
       // inside this gesture — keyboard/unknown source)
       const tail = lastInputT >= gestureStartT ? lastScrollT - lastInputT : -1;
-      let inertia;
+      let inertia, gate;
       if (tail > TAIL_FLOOR_MS) {
+        gate = "tail";
         inertia = tail > GAP_THRESHOLD_MS && net > MIN_DIST;
       } else {
+        gate = "rate";
         inertia = peakRate > RATE_THRESHOLD && net > MIN_DIST;
       }
-      if (inertia) snap();
+      let verdict = "skip";
+      if (inertia) {
+        const before = col.scrollTop;
+        snap();
+        verdict = col.scrollTop !== before ? "snap" : "blocked";
+      }
+      dbgGesture(net, tail, peakRate, wheelCount, `${verdict} gate=${gate}`);
       gestureStart = null;
       wheelSamples = [];
       peakRate = 0;
+      wheelCount = 0;
       lastInputT = 0;
     }, SETTLE_MS);
   }, { passive: true });
