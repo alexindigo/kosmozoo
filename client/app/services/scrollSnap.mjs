@@ -22,6 +22,14 @@
 // lands there keeps the exact position instead of yanking the view up to
 // half the card's height.
 //
+// Intent is read from the INPUT stream's own rate (px/ms of wheel deltas in
+// a trailing window), not the feed's velocity — a careful drag and a flick
+// differ hugely in input rate on every platform that emits wheel events,
+// while the feed's velocity is flat wherever scroll applies instantly. The
+// coast tail is a secondary signal for platforms with real momentum
+// (macOS/Windows, WheelEvent.momentum); on instant-application platforms it
+// is absent and the input rate carries the whole decision.
+//
 // Fallback: when no measurable tail exists (scroll applies instantly — e.g.
 // headless browsers), peak windowed velocity carries the intent instead
 // (fast + far = inertia). Programmatic scrolls (deep-link centering, the
@@ -39,8 +47,12 @@ const GAP_THRESHOLD_MS = 300;
 const TAIL_FLOOR_MS = 40;
 // a coast that barely moved is still an adjustment
 const MIN_DIST = 200;
-// no-tail fallback: peak windowed velocity (px/ms) and its sample window
-const VEL_THRESHOLD = 0.8;
+// input-rate gate: px/ms of the wheel delta stream in a trailing window —
+// the primary signal on instant-application platforms (Linux Chromium,
+// headless), where no coast tail exists. A careful drag runs ~0.2–0.5; a
+// flick runs 1+.
+const RATE_THRESHOLD = 0.8;
+// the trailing window for the input-rate samples
 const WINDOW_MS = 100;
 // proximity gate: the snap only tidies a NEARBY boundary. If the nearest
 // card top is farther than this fraction of the smaller of the column or
@@ -51,8 +63,8 @@ let quietUntil = 0;
 // current gesture; gestureStart === null means idle
 let gestureStart = null;  // scrollTop at the gesture's origin
 let gestureStartT = 0;    // time of the gesture's first scroll event
-let samples = [];         // [time, scrollTop] trailing window for velocity
-let peakV = 0;            // peak windowed velocity this gesture, px/ms
+let wheelSamples = [];    // [time, |deltaY|] of non-momentum wheel events
+let peakRate = 0;         // peak wheel-stream rate this gesture, px/ms
 let lastInputT = 0;       // FINGERS: last non-momentum wheel / touchmove
 let lastScrollT = 0;      // MOVEMENT: last scroll event
 
@@ -62,8 +74,8 @@ let lastScrollT = 0;      // MOVEMENT: last scroll event
 export function suppressScrollSnap(ms = SNAP_QUIET_MS) {
   quietUntil = Math.max(quietUntil, Date.now() + ms);
   gestureStart = null;
-  samples = [];
-  peakV = 0;
+  wheelSamples = [];
+  peakRate = 0;
   lastInputT = 0;
   lastScrollT = 0;
 }
@@ -96,31 +108,32 @@ export function initScrollSnap() {
     col.scrollTo({ top: col.scrollTop + delta, behavior: "smooth" });
   };
 
-  const track = (now, top) => {
-    samples.push([now, top]);
-    while (samples.length > 2 && now - samples[1][0] > WINDOW_MS) samples.shift();
-    const [t0, top0] = samples[0];
-    const dt = now - t0;
+  // track the wheel stream's rate (px/ms of deltas in the trailing window)
+  const trackWheel = (now, dy) => {
+    wheelSamples.push([now, Math.abs(dy)]);
+    while (wheelSamples.length > 2 && now - wheelSamples[1][0] > WINDOW_MS) wheelSamples.shift();
+    const dt = now - wheelSamples[0][0];
     if (dt >= WINDOW_MS * 0.8) {
-      const v = Math.abs(top - top0) / dt;
-      if (v > peakV) peakV = v;
+      const rate = wheelSamples.reduce((s, [, d]) => s + d, 0) / dt;
+      if (rate > peakRate) peakRate = rate;
     }
   };
 
   // FINGERS — wheel events that are not platform-synthesized momentum
   // (WheelEvent.momentum, where the browser exposes it), plus touch moves.
-  const finger = () => { lastInputT = performance.now(); };
-  col.addEventListener("wheel", (e) => { if (!e.momentum) finger(); }, { passive: true });
-  col.addEventListener("touchmove", finger, { passive: true });
+  const finger = (dy) => {
+    lastInputT = performance.now();
+    if (dy != null) trackWheel(performance.now(), dy);
+  };
+  col.addEventListener("wheel", (e) => { if (!e.momentum) finger(e.deltaY); }, { passive: true });
+  col.addEventListener("touchmove", () => finger(), { passive: true });
 
   // MOVEMENT — scroll events from any cause.
   col.addEventListener("scroll", () => {
     if (Date.now() < quietUntil) return; // programmatic/own snap still animating
     const now = performance.now();
-    const top = col.scrollTop;
     lastScrollT = now;
-    if (gestureStart === null) { gestureStart = top; gestureStartT = now; } // gesture begins
-    track(now, top);
+    if (gestureStart === null) { gestureStart = col.scrollTop; gestureStartT = now; } // gesture begins
     clearTimeout(settleTimer);
     settleTimer = setTimeout(() => {
       const net = Math.abs(col.scrollTop - gestureStart);
@@ -129,17 +142,15 @@ export function initScrollSnap() {
       const tail = lastInputT >= gestureStartT ? lastScrollT - lastInputT : -1;
       let inertia;
       if (tail > TAIL_FLOOR_MS) {
-        // a real coast: the gap decides
         inertia = tail > GAP_THRESHOLD_MS && net > MIN_DIST;
       } else {
-        // no measurable tail (instant scroll application): velocity decides
-        inertia = peakV > VEL_THRESHOLD && net > MIN_DIST;
+        inertia = peakRate > RATE_THRESHOLD && net > MIN_DIST;
       }
-      gestureStart = null;
-      samples = [];
-      peakV = 0;
-      lastInputT = 0;
       if (inertia) snap();
+      gestureStart = null;
+      wheelSamples = [];
+      peakRate = 0;
+      lastInputT = 0;
     }, SETTLE_MS);
   }, { passive: true });
 }
