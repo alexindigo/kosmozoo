@@ -50,6 +50,13 @@ export function openFromAnchor(anchorIdx) {
   openWorkbench();
 }
 
+// Info-panel discovered image click: the current image is that input file.
+export function openFromInput(host, file) {
+  if (!host || !file) return;
+  setCurrent(`input:${host}`, file);
+  openWorkbench();
+}
+
 // Kept for the window.kosmozoo seam and /diff deep links. The pair view is
 // gone — the workbench is a single-image viewer — so this opens the workbench
 // on the left side and ignores the right. A push entry keeps the /diff URL so

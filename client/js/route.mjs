@@ -64,6 +64,18 @@ export function resolveSide(side) {
     const a = state.anchors.find((x) => x.name === file);
     return a ? { name: a.name, src: a.src, meta: a.meta ?? null } : null;
   }
+  // input-dir images (node references from the info panel): remote carries
+  // the source as "input:<host>"
+  if (source.startsWith("input:")) {
+    const host = source.slice("input:".length);
+    if (!state.hosts[host]) return null;
+    return {
+      name: file,
+      host,
+      src: `/api/input-bytes/${encodeURIComponent(host)}/${encodeURIComponent(file)}`,
+      meta: null,
+    };
+  }
   if (state.hosts[source]) {
     return {
       name: file,
