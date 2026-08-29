@@ -589,13 +589,24 @@ main { display: flex; flex: 1; min-height: 0; }
 .infoimg img { display: block; max-width: 100%; max-height: 260px;
   border-radius: 4px; border: 1px solid var(--raise); background: #0a0a0c; }
 
-/* details split: discovered images take the inspectable 66% left column,
-   the text fields share the 33% right column */
+/* details split: discovered images and the text fields arranged by the
+   header's layout switcher (state.infoLayout) */
 .ws-cols { display: flex; gap: 12px; align-items: flex-start; }
+.ws-cols.rev { flex-direction: row-reverse; }
+.ws-cols.stacked { flex-direction: column; }
 .ws-imgcol { flex: 0 0 66%; max-width: 66%; min-width: 0; }
 .ws-txtcol { flex: 1; min-width: 0; }
+.ws-cols.stacked .ws-imgcol, .ws-cols.stacked .ws-txtcol { flex: none; max-width: 100%; width: 100%; }
 /* the image column is for inspection — no small-cap height here */
 .ws-imgcol .infoimg img { max-height: none; }
+
+/* header layout switcher for the info panel (left of Download feedback) */
+#infoLayout { display: flex; gap: 4px; align-items: center; }
+#infoLayout button { width: 24px; height: 24px; display: grid; place-items: center;
+  background: transparent; border: 1px solid transparent; border-radius: 5px;
+  color: var(--dim); cursor: pointer; padding: 0; }
+#infoLayout button:hover { color: var(--fg); }
+#infoLayout button.on { color: var(--accent); border-color: var(--accent); }
 
 /* vertical divider */
 .vz-divider { width: 1px; background: var(--dim); flex: 0 0 auto; }
