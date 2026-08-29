@@ -605,6 +605,8 @@ main { display: flex; flex: 1; min-height: 0; }
 .ws-cols.stacked .ws-imgcol, .ws-cols.stacked .ws-txtcol { flex: none; max-width: 100%; width: 100%; }
 /* the image column is for inspection — no small-cap height here */
 .ws-imgcol .infoimg img { max-height: none; }
+/* input images have no known dimensions — the box hugs the image */
+.ws-imgcol .imgwrap { aspect-ratio: auto; }
 
 /* header layout switcher for the info panel (left of Download feedback) */
 #infoLayout { display: flex; gap: 4px; align-items: center; }
