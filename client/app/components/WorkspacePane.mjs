@@ -45,11 +45,11 @@ function DetailsBody() {
     sub.className = "ws-sub";
     sub.textContent = img.host ? `host ${img.host}` : "local anchor";
     head.append(name, sub);
-    el.appendChild(head);
 
     // discovered node images get their own column beside the text fields —
     // the layout (side-by-side / mirrored / stacked) follows state.infoLayout.
     // Anchors carry no host, so their refs can't resolve — single column.
+    // The name/host header belongs to the text half of the split.
     const images = img.host ? nodeImages(img.meta ?? null, img.host) : [];
     if (images.length) {
       const cols = document.createElement("div");
@@ -72,10 +72,12 @@ function DetailsBody() {
       }
       const txtCol = document.createElement("div");
       txtCol.className = "ws-txtcol";
+      txtCol.appendChild(head);
       txtCol.appendChild(buildMetaBody(img.meta ?? null, img.host, { skipImages: true }));
       cols.append(imgCol, txtCol);
       el.appendChild(cols);
     } else {
+      el.appendChild(head);
       el.appendChild(buildMetaBody(img.meta ?? null, img.host));
     }
   }, [img, state.infoLayout]);
