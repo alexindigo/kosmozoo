@@ -60,20 +60,28 @@ function DetailsBody() {
       for (const image of images) {
         const sec = document.createElement("div");
         sec.className = "infoimg";
-        const lab = document.createElement("div");
-        lab.className = "plabel";
-        lab.textContent = image.label;
+        sec.dataset.file = image.file;
         const im = document.createElement("img");
         im.src = image.src;
         im.loading = "lazy";
         im.alt = image.file;
-        sec.append(lab, im);
+        sec.append(im);
         imgCol.appendChild(sec);
       }
       const txtCol = document.createElement("div");
       txtCol.className = "ws-txtcol";
       txtCol.appendChild(head);
       txtCol.appendChild(buildMetaBody(img.meta ?? null, img.host, { skipImages: true }));
+      // filename links in the text re-focus the images column on that image
+      txtCol.addEventListener("click", (e) => {
+        const ref = e.target.closest(".imgref[data-file]");
+        if (!ref) return;
+        const target = imgCol.querySelector(`.infoimg[data-file="${CSS.escape(ref.dataset.file)}"]`);
+        if (!target) return;
+        target.scrollIntoView({ behavior: "smooth", block: "nearest" });
+        target.classList.add("flash");
+        setTimeout(() => target.classList.remove("flash"), 1200);
+      });
       cols.append(imgCol, txtCol);
       el.appendChild(cols);
     } else {
