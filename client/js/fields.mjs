@@ -197,10 +197,27 @@ export function nodeImages(meta, host) {
   return out;
 }
 
+// collapse state for the info panel's per-node sections, in localStorage
+const LS_INFOGROUPS = "kosmozoo.infoGroups.v1";
+
+function infoGroupState() {
+  try { return JSON.parse(localStorage.getItem(LS_INFOGROUPS)) ?? {}; }
+  catch { return {}; }
+}
+
+function setInfoGroupCollapsed(group, collapsed) {
+  const s = infoGroupState();
+  if (collapsed) s[group] = true;
+  else delete s[group];
+  try { localStorage.setItem(LS_INFOGROUPS, JSON.stringify(s)); } catch { /* ignore */ }
+}
+
 // full-metadata body, shared by the ⓘ overlay and the details workspace
 // space. Returns an element; the caller appends it to its own container.
 // `host` (when known) enables inline rendering of node-referenced images;
 // `opts.skipImages` leaves those to a caller-drawn column instead.
+// Fields group into collapsible per-node sections ("Load " prefixes strip
+// off the group name; collapse state persists in localStorage).
 export function buildMetaBody(meta, host, { skipImages = false } = {}) {
   const wrap = document.createElement("div");
   const rows = meta ? fullFieldRows(meta) : [];
@@ -213,28 +230,50 @@ export function buildMetaBody(meta, host, { skipImages = false } = {}) {
     wrap.appendChild(p);
     return wrap;
   }
-  const props = document.createElement("div");
-  props.className = "props";
+  // group rows by their node (the part before " — "), first-appearance order
+  const groups = new Map();
   for (const [label, v, long] of rows) {
-    if (long) {
-      const sec = document.createElement("div");
-      sec.className = "infosec";
-      const lab = document.createElement("div");
-      lab.className = "plabel";
-      lab.textContent = label;
-      const txt = document.createElement("div");
-      txt.className = "infotext";
-      txt.textContent = v;
-      sec.append(lab, txt);
-      wrap.appendChild(sec);
-    } else {
+    const i = label.indexOf(" — ");
+    const g = i > 0 ? label.slice(0, i) : label;
+    const key = g.replace(/^Load /, "");
+    if (!groups.has(key)) groups.set(key, []);
+    groups.get(key).push([label.slice(i + 3), v, long]);
+  }
+  const groupState = infoGroupState();
+  for (const [group, grows] of groups) {
+    const collapsed = groupState[group] === true;
+    const sec = document.createElement("div");
+    sec.className = "infogroup" + (collapsed ? " collapsed" : "");
+    sec.dataset.group = group;
+    const headBtn = document.createElement("button");
+    headBtn.className = "infogroup-head";
+    headBtn.title = collapsed ? "expand" : "collapse";
+    headBtn.append(
+      document.createTextNode(group),
+      Object.assign(document.createElement("span"), { className: "chev", textContent: "▾" }),
+    );
+    headBtn.addEventListener("click", () => {
+      const nowCollapsed = !sec.classList.contains("collapsed");
+      sec.classList.toggle("collapsed", nowCollapsed);
+      headBtn.title = nowCollapsed ? "expand" : "collapse";
+      setInfoGroupCollapsed(group, nowCollapsed);
+    });
+    sec.appendChild(headBtn);
+    const body = document.createElement("div");
+    body.className = "infogroup-body";
+    const props = document.createElement("div");
+    props.className = "props";
+    const longs = [];
+    // short values first; text prompts (long values) render below them
+    for (const [input, v, long] of grows) {
+      if (long) { longs.push([input, v]); continue; }
       const line = document.createElement("div");
       const lab = document.createElement("span");
       lab.className = "plabel";
-      lab.textContent = `${label}: `;
+      lab.textContent = `${input}: `;
       // image-file values (LoadImage-style refs, host known) render as links:
       // the consumer (details pane) focuses the images column on that image
-      if (host && typeof v === "string" && NODE_IMG_EXT.test(v)) {
+      if (host && NODE_IMG_EXT.test(v)) {
         const ref = document.createElement("span");
         ref.className = "imgref";
         ref.dataset.file = v;
@@ -245,8 +284,37 @@ export function buildMetaBody(meta, host, { skipImages = false } = {}) {
       }
       props.appendChild(line);
     }
+    body.appendChild(props);
+    for (const [input, v] of longs) {
+      const sec2 = document.createElement("div");
+      sec2.className = "infosec";
+      const lab = document.createElement("div");
+      lab.className = "plabel";
+      lab.textContent = input;
+      const txt = document.createElement("div");
+      txt.className = "infotext";
+      txt.textContent = v;
+      sec2.append(lab, txt);
+      body.appendChild(sec2);
+    }
+    sec.appendChild(body);
+    wrap.appendChild(sec);
   }
-  wrap.appendChild(props);
+  if (host && !skipImages) {
+    for (const img of nodeImages(meta, host)) {
+      const sec = document.createElement("div");
+      sec.className = "infoimg";
+      const lab = document.createElement("div");
+      lab.className = "plabel";
+      lab.textContent = img.label;
+      const im = document.createElement("img");
+      im.src = img.src;
+      im.loading = "lazy";
+      im.alt = img.file;
+      sec.append(lab, im);
+      wrap.appendChild(sec);
+    }
+  }
   return wrap;
 }
 

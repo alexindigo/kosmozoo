@@ -10,6 +10,8 @@ import { state } from "../../js/state.mjs";
 import { buildMetaBody, nodeImages } from "../../js/fields.mjs";
 import { AnchorSpace } from "./AnchorSpace.mjs";
 import { Zoomable } from "./Zoomable.mjs";
+import { fmtBytes } from "./MetaBar.mjs";
+import { api } from "../../js/api.mjs";
 
 // the current image (host/folder image or anchor)
 function detailsImage() {
@@ -44,8 +46,26 @@ function DetailsBody() {
     name.title = img.filename ?? img.name ?? "";
     const sub = document.createElement("div");
     sub.className = "ws-sub";
-    sub.textContent = img.host ? `host ${img.host}` : "local anchor";
+    // dimensions + file size — the host identity is noise here
+    const subText = () => {
+      const bits = [];
+      if (img.meta?.width && img.meta?.height) bits.push(`${img.meta.width}×${img.meta.height}px`);
+      const sz = img.size != null ? fmtBytes(img.size) : null;
+      if (sz) bits.push(sz);
+      return bits.length ? bits.join(" · ") : (img.host ? "" : "local anchor");
+    };
+    sub.textContent = subText();
     head.append(name, sub);
+    if (img.host && img.size == null) {
+      // the card's HEAD fetch may not have run — fill the size in place
+      fetch(api.imageBytesUrl(img.id), { method: "HEAD" }).then((r) => {
+        const cl = r.headers.get("content-length");
+        if (r.ok && cl) {
+          img.size = Number(cl);
+          sub.textContent = subText();
+        }
+      }).catch(() => {});
+    }
 
     // discovered node images get their own column beside the text fields —
     // the layout (side-by-side / mirrored / stacked) follows state.infoLayout.
