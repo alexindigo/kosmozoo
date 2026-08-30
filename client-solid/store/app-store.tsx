@@ -19,6 +19,7 @@ import {
   stripHostPrefix,
   matchesFile,
   planDeleteCurrent,
+  diffUrl,
 } from "/js/route-parse.mjs";
 import { fieldList, fieldsCfgFrom } from "./fields.js";
 import { makeImageWindow } from "./image-window.js";
@@ -44,7 +45,8 @@ export function makeAppStore() {
     images: [],           // [{ id, host, filename, size, meta, judgment }]
     selected: {},         // id -> true (bulk actions; session-only)
     saved: {},            // filename -> true (downloads-dir mirror for save buttons)
-    diff: { open: false },                  // workbench — phase 4 expands it
+    anchors: [],          // [{ name, src(dataURL), meta? }] — phase 6 fills it
+    diff: { open: false },                  // workbench: single-image viewer
     variations: { open: false, image: null }, // modal — phase 5 expands it
     metaPending: 0,
   });
@@ -57,6 +59,7 @@ export function makeAppStore() {
   const [hostMenuOpen, setHostMenuOpen] = createSignal(false);
   const [menuOpen, setMenuOpen] = createSignal(false);
   const [confirmDelete, setConfirmDelete] = createSignal(null); // { image } | { images }
+  const [keysPanelOpen, setKeysPanelOpen] = createSignal(false);
 
   // right-column space + details layout — persisted (workspaceState contract).
   // Read once at construction: the persisted space must be set before the
@@ -143,6 +146,39 @@ export function makeAppStore() {
   function findByFile(file) {
     if (!file) return -1;
     return st.images.findIndex((i) => matchesFile(i, host(), file));
+  }
+
+  // one resolver for every source kind; new feeds plug in here. Accepts
+  // either a {source,file} side or a current {remote,image} pointer.
+  function resolveSide(side) {
+    if (!side) return null;
+    const source = side.source ?? side.remote;
+    const file = side.file ?? side.image;
+    if (source === "anchor") {
+      const a = st.anchors.find((x) => x.name === file);
+      return a ? { name: a.name, src: a.src, meta: a.meta ?? null } : null;
+    }
+    // input-dir images (node references from the info panel): remote carries
+    // the source as "input:<host>"
+    if (source.startsWith("input:")) {
+      const h = source.slice("input:".length);
+      if (!st.hosts[h]) return null;
+      return {
+        name: file,
+        host: h,
+        src: `/api/input-bytes/${encodeURIComponent(h)}/${encodeURIComponent(file)}`,
+        meta: null,
+      };
+    }
+    if (st.hosts[source]) {
+      return {
+        name: file,
+        host: source,
+        src: api.imageBytesUrl(`${source}:${file}`),
+        meta: null,
+      };
+    }
+    return null;
   }
 
   // --- feed seams (the Grid registers its handles here) -------------------------
@@ -493,6 +529,8 @@ export function makeAppStore() {
         setInfoLayoutSig(mode);
         try { localStorage.setItem("kosmozoo.infoLayout.v1", mode); } catch { /* private mode */ }
       },
+      // the panel itself lands in phase 6; the flag is live already
+      toggleKeysPanel() { setKeysPanelOpen(!keysPanelOpen()); },
     },
 
     current: {
@@ -531,11 +569,63 @@ export function makeAppStore() {
     },
 
     diff: {
-      close() { setSt("diff", "open", false); }, // phase 4 expands
-      // workbench seams — phase 4 wires them; the details pane's input-image
-      // and card clicks already target these
-      openInput(_host, _file, _fromOutput) {},
-      openFromFeed(_imgIdx) {},
+      // read-only model query the workbench surface derives its src from
+      resolve: resolveSide,
+      // open the workbench on the current pointer
+      open() {
+        if (!current() || !resolveSide(current())) return false;
+        setSt("diff", "open", true);
+        return true;
+      },
+      hide() { setSt("diff", "open", false); },
+      close() {
+        if (!st.diff.open) return;
+        const c = current();
+        setSt("diff", "open", false);
+        if (location.pathname === "/diff") {
+          // opened from a /diff URL: land back on the feed
+          if (history.state?.kz) {
+            history.back(); // a pushed entry: popstate lands on the feed URL
+          } else {
+            const feed = c && c.remote !== "anchor" && st.hosts[c.remote]
+              ? `/#${encodeURIComponent(c.remote)}#${encodeURIComponent(stripHostPrefix(c.remote, c.image))}`
+              : `/#${encodeURIComponent(host())}`;
+            history.replaceState(null, "", feed);
+            window.dispatchEvent(new PopStateEvent("popstate"));
+          }
+        } else if (c && c.remote !== "anchor" && c.remote === host()) {
+          // opened from the feed: re-center it on the current image
+          const idx = findByFile(stripHostPrefix(c.remote, c.image));
+          if (idx >= 0) restoreToIndex(idx);
+        }
+      },
+      // feed card click: the current image is that candidate
+      openFromFeed(imgIdx) {
+        const im = st.images[imgIdx];
+        if (!im) return;
+        assignCurrent({ remote: im.host, image: im.filename });
+        mirrorCurrentHash();
+        actions.diff.open();
+      },
+      // discovered image click: fromOutput refs (LoadImage-from-output) are
+      // ordinary output images — open them via the feed-image path, not the
+      // input-bytes route
+      openInput(h, file, fromOutput = false) {
+        if (!h || !file) return;
+        assignCurrent({ remote: fromOutput ? h : `input:${h}`, image: file });
+        mirrorCurrentHash();
+        actions.diff.open();
+      },
+      // /diff deep links (the pair view is gone — the workbench opens on the
+      // left side and ignores the right). A push entry keeps the /diff URL so
+      // browser back/forward close/re-open via the route.
+      openDiff(left, right, { push } = {}) {
+        if (!left || !resolveSide(left)) return false;
+        assignCurrent({ remote: left.source ?? left.remote, image: left.file ?? left.image });
+        mirrorCurrentHash();
+        if (push && right) history.pushState({ kz: 1 }, "", diffUrl(left, right));
+        return actions.diff.open();
+      },
     },
 
     feed: {
@@ -544,6 +634,33 @@ export function makeAppStore() {
       safetyNet,
       wantRangeNow,
       retryImage(idx) { window_.retry(idx); },
+    },
+
+    // URL-as-mirror routing: hashchange/popstate land here. The hash adopts
+    // host + file into the store; navigating away closes the workbench.
+    route: {
+      async changed() {
+        const r = parseUrl();
+        if (r.view === "diff") {
+          actions.diff.openDiff(r.left, r.right); // back/forward into a diff URL re-opens it
+          return;
+        }
+        if (st.diff.open) setSt("diff", "open", false); // navigating away closes the workbench
+        if (r.host && r.host !== host()) {
+          if (!st.hosts[r.host]) return;
+          await actions.hosts.select(r.host, { keepFile: true }); // hash already pristine
+          return;
+        }
+        if (!r.file) return;
+        const idx = findByFile(r.file);
+        if (idx >= 0) {
+          assignCurrent({ remote: host(), image: st.images[idx].filename });
+          mirrorCurrentHash();
+          restoreToIndex(idx);
+        } else {
+          await loadImages(host());
+        }
+      },
     },
   };
 
@@ -561,6 +678,7 @@ export function makeAppStore() {
       get images() { return st.images; },
       get selected() { return st.selected; },
       get saved() { return st.saved; },
+      get anchors() { return st.anchors; },
       get diff() { return st.diff; },
       get variations() { return st.variations; },
       get metaPending() { return st.metaPending; },
@@ -578,6 +696,7 @@ export function makeAppStore() {
       hostMenuOpen,
       menuOpen,
       confirmDelete,
+      keysPanelOpen,
       workspace,
       infoLayout,
     },

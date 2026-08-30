@@ -99,7 +99,7 @@ export function Card(props) {
         stripText={stripText()}
         zoomKey={image()?.id}
         onLoaded={(w, hp) => setLoadedAr(`${w} / ${hp}`)}
-        onOpen={() => { const im = image(); if (im) store.actions.current.set(store.state.host(), im.filename); }}
+        onOpen={() => store.actions.diff.openFromFeed(props.imgIdx())}
         onErrorClick={() => store.state.window.retry(props.imgIdx())}
         onPhase={(p) => {
           if (p === "loaded") store.state.window.markLoaded(props.imgIdx());
