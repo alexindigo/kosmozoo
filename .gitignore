@@ -15,3 +15,4 @@ TODO.md
 state/
 settings.json
 tests/.tmp-mutable/
+client-solid-dist/

@@ -6,6 +6,9 @@ import { readFile } from "node:fs/promises";
 import { pluginDirs } from "./plugins.mjs";
 
 const CLIENT_ROOT = new URL("../client", import.meta.url).pathname;
+// Solid migration: the built Solid client (client-solid-dist/) is served at
+// /solid until cutover; the preact app at / stays live.
+const SOLID_ROOT = new URL("../client-solid-dist", import.meta.url).pathname;
 
 const MIME = {
   ".html": "text/html; charset=utf-8",
@@ -56,6 +59,27 @@ export async function serveStatic(pathname) {
       } catch { /* try next tier */ }
     }
     return new Response("not found", { status: 404 });
+  }
+
+  // /solid serves the built Solid client during migration. /solid redirects to
+  // /solid/ so the shell's relative URLs resolve inside the sub-app.
+  if (pathname === "/solid") {
+    return new Response(null, { status: 302, headers: { Location: "/solid/" } });
+  }
+  if (pathname.startsWith("/solid/")) {
+    const p = pathname === "/solid/" ? "/index.html" : pathname.slice("/solid".length);
+    const full = normalize(join(SOLID_ROOT, p));
+    if (!full.startsWith(SOLID_ROOT)) return new Response("forbidden", { status: 403 });
+    try {
+      const body = await readFile(full);
+      const headers = new Headers();
+      const mime = MIME[extname(full)];
+      if (mime) headers.set("Content-Type", mime);
+      headers.set("Cache-Control", "no-cache");
+      return new Response(body, { headers });
+    } catch {
+      return new Response("not found", { status: 404 });
+    }
   }
 
   // / and the SPA route /diff both serve the app shell

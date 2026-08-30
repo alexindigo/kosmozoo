@@ -10,5 +10,9 @@
   },
   "env": {
     "DENO_SQLITE_PATH": "/usr/lib/libsqlite3.so"
+  },
+  "compilerOptions": {
+    "jsx": "react-jsx",
+    "jsxImportSource": "solid-js"
   }
 }
