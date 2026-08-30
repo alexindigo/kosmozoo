@@ -480,6 +480,28 @@ main { display: flex; flex: 1; min-height: 0; }
 .vz-loading { color: var(--mid); font-size: 12px; padding: 20px 4px;
   text-align: center; font-style: italic; }
 
+/* LoadImage sweep row: same card treatment as the slider rows */
+.vz-imgrow { padding: 10px 12px; background: var(--card);
+  border: 1px solid var(--raise); border-radius: 8px;
+  transition: border-color .15s ease, opacity .15s ease; }
+.vz-imgrow.on { border-color: var(--accent); }
+.vz-imgrow:not(.on) { opacity: 0.55; }
+.vz-imgrow-head { display: flex; align-items: center; gap: 10px; cursor: pointer; }
+.vz-imgrow-head .vz-cb { margin: 0; }
+.vz-imgrow-label { color: var(--fg); font-size: 13px; }
+.vz-imgrow-cur { color: var(--dim); font-size: 11px; margin-left: auto;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 45%; }
+.vz-imgrow-body { display: flex; gap: 8px; margin-top: 8px; padding-left: 26px; }
+.vz-imgrow-body select { background: var(--raise); color: var(--fg);
+  border: 1px solid #3a3a3a; border-radius: 4px; font-size: 12px;
+  padding: 3px 6px; max-width: 100%; }
+.vz-imgrow-body .vz-imgfile { flex: 1; min-width: 0; }
+.vz-imgrow-body .vz-imglocal { flex: 1; min-width: 0; display: flex; }
+.vz-imgrow-body .vz-imgdirbtn { background: var(--raise); color: var(--fg);
+  border: 1px solid #3a3a3a; border-radius: 4px; font-size: 12px;
+  padding: 3px 10px; cursor: pointer; }
+.vz-imgrow-body .vz-imgdirbtn:hover { border-color: var(--dim); }
+
 /* checkbox — orange square (matches the mockup) */
 .vz-cb { -webkit-appearance: none; appearance: none;
   width: 16px; height: 16px; border-radius: 3px;

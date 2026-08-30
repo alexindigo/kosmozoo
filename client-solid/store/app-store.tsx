@@ -565,7 +565,15 @@ export function makeAppStore() {
     },
 
     variations: {
-      open(image) { setSt("variations", { open: true, image }); }, // phase 5
+      // wand toggle: re-clicking the same image's wand closes the modal
+      open(image) {
+        if (st.variations.open && st.variations.image?.id === image?.id) {
+          setSt("variations", { open: false, image: null });
+          return;
+        }
+        setSt("variations", { open: true, image });
+      },
+      close() { setSt("variations", { open: false, image: null }); },
     },
 
     diff: {

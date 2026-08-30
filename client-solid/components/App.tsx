@@ -1,15 +1,16 @@
 // client-solid/components/App.tsx — the Solid root component.
 //
-// Phase 4 shell: header + the main split (candidates column with the
+// Phase 5 shell: header + the main split (candidates column with the
 // virtualized feed, divider, workspace pane + bar) + the status stack, the
-// workbench stage and the delete confirmation. Overlays and the rest land
-// with their phases.
+// workbench stage, the variations portal and the delete confirmation.
+// Overlays and the rest land with their phases.
 
 import { Header } from "./Header.js";
 import { Grid } from "./Grid.js";
 import { WorkspacePane } from "./WorkspacePane.js";
 import { WorkspaceBar } from "./WorkspaceBar.js";
 import { DiffStage } from "./DiffStage.js";
+import { VariationsModal } from "./VariationsModal.js";
 import { ConfirmDelete } from "./ConfirmDelete.js";
 
 export function App() {
@@ -28,6 +29,7 @@ export function App() {
       </main>
       <div id="statusStack" />
       <DiffStage />
+      <VariationsModal />
       <ConfirmDelete />
     </>
   );
