@@ -7,6 +7,10 @@ import { App } from "./components/App.js";
 
 const store = makeAppStore();
 
+// public namespace: e2e (and the console) drive the same state the UI does.
+// Grows with the phases; the preact app's shape is the cutover contract.
+window.kosmozoo = { state: store.state, actions: store.actions };
+
 render(
   () => (
     <AppStoreContext.Provider value={store}>

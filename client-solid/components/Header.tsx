@@ -34,7 +34,20 @@ export function Header() {
         spellcheck={false}
         onInput={(e) => store.actions.ui.setFilter(e.target.value)}
       />
-      <span id="headerButtons" />
+      <span id="headerButtons">
+        <button
+          id="refreshBtn" title="re-fetch hosts and image list"
+          onClick={() => store.actions.ui.refresh()}
+        >Refresh</button>
+        <button
+          id="unhideBtn" title="temporarily show thumbed-down images (votes are kept)"
+          onClick={() => store.actions.judgments.toggleReveal()}
+        >Unhide</button>
+        <button
+          id="hideUpBtn" title="hide thumbed-up images for this session (reload restores)"
+          onClick={() => store.actions.judgments.toggleHideUp()}
+        >Hide up-voted</button>
+      </span>
       <span class="flexspacer" />
       <a
         id="dlFeedback"
