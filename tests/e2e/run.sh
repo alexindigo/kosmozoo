@@ -8,7 +8,7 @@
 
 set -euo pipefail
 cd "$(dirname "$0")/../.."
-WORK=/home/user/Projects/kosmozoo.dev
+WORK="$(pwd)"
 
 FAKE_PORT="${E2E_FAKE_PORT:-18261}"
 ENGINE_PORT="${E2E_ENGINE_PORT:-18260}"
