@@ -1,23 +1,20 @@
-// client-solid/main.tsx — phase 0 runtime spike. Proves the toolchain end to
-// end: babel-preset-solid output + vendored solid-js dists, in a real browser.
-// A signal counter (fine-grained text update) and a <Show> toggle (conditional
-// mount/unmount) — the two primitives every later phase builds on.
-import { createSignal } from "solid-js";
-import { render, Show } from "solid-js/web";
+// client-solid/main.tsx — the Solid entrypoint. Mounts <App> under the global
+// store's context, then boots (boot data + initial host selection).
 
-function App() {
-  const [count, setCount] = createSignal(0);
-  const [on, setOn] = createSignal(false);
-  return (
-    <div id="spike">
-      <button id="inc" onClick={() => setCount(count() + 1)}>increment</button>
-      <p id="count">{count()}</p>
-      <button id="toggle" onClick={() => setOn(!on())}>toggle</button>
-      <Show when={on()}>
-        <div id="shown">shown</div>
-      </Show>
-    </div>
-  );
-}
+import { render } from "solid-js/web";
+import { makeAppStore, AppStoreContext } from "./store/app-store.js";
+import { App } from "./components/App.js";
 
-render(() => <App />, document.getElementById("app"));
+const store = makeAppStore();
+
+render(
+  () => (
+    <AppStoreContext.Provider value={store}>
+      <App />
+    </AppStoreContext.Provider>
+  ),
+  document.getElementById("app"),
+);
+
+// boot failures surface on the console until the status chrome lands
+store.actions.boot().catch((e) => console.error(`load failed: ${e?.message ?? e}`));
