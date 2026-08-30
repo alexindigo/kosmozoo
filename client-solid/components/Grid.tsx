@@ -42,6 +42,22 @@ export function Grid() {
     const onScroll = () => store.actions.feed.safetyNet();
     col?.addEventListener("scroll", onScroll, { passive: true });
     onCleanup(() => col?.removeEventListener("scroll", onScroll));
+    // scrolling IS browsing: the settled scroll makes the midpoint card
+    // current (debounced — a fast scroll must not render per frame)
+    let settleTimer = 0;
+    const onSettle = () => {
+      clearTimeout(settleTimer);
+      settleTimer = setTimeout(() => {
+        settleTimer = 0;
+        const c = scrollEl();
+        if (c) store.actions.current.settleFromScroll(c);
+      }, 150);
+    };
+    col?.addEventListener("scroll", onSettle, { passive: true });
+    onCleanup(() => {
+      col?.removeEventListener("scroll", onSettle);
+      clearTimeout(settleTimer);
+    });
   });
 
   // meta-want sweep when the view turns over (load/filter/judgment)

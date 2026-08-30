@@ -102,3 +102,59 @@ export function metaStripText(meta, { list, cfg }) {
   }
   return bits.join(" · ");
 }
+
+// full rows (details pane / ⓘ overlay): every field the image carries
+export function fullFieldRows(meta, { list, cfg }) {
+  return materializeRows(meta, { gated: false, list, cfg });
+}
+
+// The "changed vs the previous image" highlight: builds the previous meta's
+// keyspace; the returned predicate marks a current row whose (label, value)
+// isn't in it — a changed value, or a field the previous image didn't carry.
+// Values compare through the same formatting both sides (materializeRows).
+export function valueDiffer(compareMeta, { list, cfg }) {
+  if (!compareMeta) return () => false;
+  const seen = new Map(); // label -> Set of values (multi-instance: any match is "unchanged")
+  for (const [label, v] of fullFieldRows(compareMeta, { list, cfg })) {
+    if (!seen.has(label)) seen.set(label, new Set());
+    seen.get(label).add(v);
+  }
+  return (label, v) => !seen.get(label)?.has(v);
+}
+
+// node inputs that reference an image FILE — only a LoadImage-type node's
+// `image` input qualifies. Sweeping every node input for a ".png" string
+// catches SaveImage's filename_prefix (a generated output name, not an input
+// file). ComfyUI annotates a LoadImage-from-output value as
+// "<filename> [output]": strip the annotation for the real filename, and
+// serve it from the OUTPUT bytes route (it is not in the input dir — the
+// input-bytes route would 404). Input-dir refs use input-bytes.
+// Deduped: two nodes referencing the same file render one image. With a
+// host, each entry carries its src.
+export const NODE_IMG_EXT = /\.(png|jpe?g|webp|gif|avif|bmp|svg)$/i;
+const OUTPUT_TAG = /\s+\[output\]$/i;
+
+export function nodeImages(meta, host) {
+  const out = [];
+  const seen = new Set();
+  for (const n of meta?.nodes ?? []) {
+    if (!/loadimage$/i.test(String(n.type ?? ""))) continue;
+    const raw = n.inputs?.image;
+    if (typeof raw !== "string") continue;
+    const fromOutput = OUTPUT_TAG.test(raw);
+    const file = fromOutput ? raw.replace(OUTPUT_TAG, "") : raw;
+    if (!NODE_IMG_EXT.test(file) || seen.has(file)) continue;
+    seen.add(file);
+    out.push({
+      label: `${n.title ?? n.type} — image`,
+      file,
+      fromOutput, // LoadImage-from-output: served by the output bytes route
+      src: host
+        ? (fromOutput
+          ? `/api/images/${encodeURIComponent(host + ":" + file)}/bytes`
+          : `/api/input-bytes/${encodeURIComponent(host)}/${encodeURIComponent(file)}`)
+        : null,
+    });
+  }
+  return out;
+}

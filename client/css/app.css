@@ -354,6 +354,13 @@ main { display: flex; flex: 1; min-height: 0; }
   overflow-wrap: anywhere; }
 .metabody .info-none { color: var(--dim); font-style: italic; }
 .metabody .plabel { color: var(--dim); }
+/* a field value that differs from the previous current image's */
+.metabody .pdiff { color: var(--white); }
+/* variation lineage: which image this one came from */
+.metabody .ws-lineage { margin-top: 2px; }
+.metabody .ws-lineage-src { color: var(--accent); font-size: 11px; }
+.metabody a.ws-lineage-src { cursor: pointer; text-decoration: none; }
+.metabody a.ws-lineage-src:hover { text-decoration: underline; }
 
 /* --- keys panel ------------------------------------------------------------- */
 #keysPanel { position: fixed; inset: 0; z-index: 80; background: rgba(0,0,0,.55); }
@@ -594,6 +601,8 @@ main { display: flex; flex: 1; min-height: 0; }
 /* filename links in the text column focus the images column */
 .ws-txtcol .imgref { color: var(--accent); cursor: pointer; }
 .ws-txtcol .imgref:hover { text-decoration: underline; }
+/* a differing image-file ref still reads as a value change, not a link */
+.ws-txtcol .imgref.pdiff { color: var(--white); }
 
 /* info panel: collapsible per-node sections */
 .infogroup { margin-top: 10px; border: 1px solid var(--raise); border-radius: 6px;
@@ -601,7 +610,7 @@ main { display: flex; flex: 1; min-height: 0; }
 .infogroup:first-of-type { margin-top: 0; }
 .infogroup-head { display: flex; width: 100%; align-items: center;
   justify-content: space-between; gap: 8px; padding: 6px 10px;
-  background: var(--card); border: none; color: var(--fg);
+  background: var(--card); border: none; color: var(--dim);
   font-size: 11px; font-weight: 600; cursor: pointer; text-align: left; }
 .infogroup-head:hover { color: var(--accent); }
 .infogroup-head .chev { transition: transform .15s ease; }

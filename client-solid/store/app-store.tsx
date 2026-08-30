@@ -58,6 +58,21 @@ export function makeAppStore() {
   const [menuOpen, setMenuOpen] = createSignal(false);
   const [confirmDelete, setConfirmDelete] = createSignal(null); // { image } | { images }
 
+  // right-column space + details layout — persisted (workspaceState contract).
+  // Read once at construction: the persisted space must be set before the
+  // first paint of the pane.
+  const [workspace, setWorkspaceSig] = createSignal((() => {
+    try {
+      return localStorage.getItem("kosmozoo.workspace.v1") === "anchors" ? "anchors" : "details";
+    } catch { return "details"; }
+  })());
+  const [infoLayout, setInfoLayoutSig] = createSignal((() => {
+    try {
+      const l = localStorage.getItem("kosmozoo.infoLayout.v1");
+      return l === "rev" || l === "stacked" ? l : "split";
+    } catch { return "split"; }
+  })());
+
   // --- fields derivation (registry + stored cfg) ------------------------------
   const fieldsList = createMemo(() => fieldList(st.nodesRegistry));
   const fieldsCfg = createMemo(() => fieldsCfgFrom(fieldsList(), st.fieldsStored));
@@ -201,6 +216,10 @@ export function makeAppStore() {
           if (idx < 0 || st.images[idx].meta) continue;
           setSt("images", idx, "meta", meta);
         }
+        // the node registry grows as the engine extracts — refresh it
+        // alongside so newly discovered node types materialize without a
+        // reload (a fresh engine boots with an empty registry)
+        api.nodes().then((reg) => setSt("nodesRegistry", reg)).catch(() => {});
       }
     } catch { /* transient; next poll retries */ }
     if (st.metaPending > 0) scheduleMetaPoll();
@@ -464,6 +483,16 @@ export function makeAppStore() {
         setSt("hosts", await api.hosts());
         if (host()) await loadImages(host());
       },
+      setWorkspace(space) {
+        if (workspace() === space) return;
+        setWorkspaceSig(space);
+        try { localStorage.setItem("kosmozoo.workspace.v1", space); } catch { /* private mode */ }
+      },
+      setInfoLayout(mode) {
+        if (!(mode === "split" || mode === "rev" || mode === "stacked") || infoLayout() === mode) return;
+        setInfoLayoutSig(mode);
+        try { localStorage.setItem("kosmozoo.infoLayout.v1", mode); } catch { /* private mode */ }
+      },
     },
 
     current: {
@@ -474,6 +503,22 @@ export function makeAppStore() {
       assign: assignCurrent,
       pop: popCurrent,
       mirror: mirrorCurrentHash,
+      // scrolling IS browsing: once the scroll SETTLES, the last card whose
+      // top crossed the feed's vertical midpoint becomes current (debounced
+      // by the caller — a fast scroll must not spend a render per frame)
+      settleFromScroll(col) {
+        if (st.diff.open) return;
+        const mid = col.getBoundingClientRect().top + col.clientHeight / 2;
+        let file = null;
+        for (const el of col.querySelectorAll(".card[data-idx]")) {
+          if (el.getBoundingClientRect().top > mid) break;
+          const im = st.images[Number(el.dataset.idx)];
+          if (im) file = im.filename;
+        }
+        if (!file || file === current()?.image) return;
+        assignCurrent({ remote: host(), image: file });
+        mirrorCurrentHash();
+      },
     },
 
     confirm: {
@@ -487,6 +532,10 @@ export function makeAppStore() {
 
     diff: {
       close() { setSt("diff", "open", false); }, // phase 4 expands
+      // workbench seams — phase 4 wires them; the details pane's input-image
+      // and card clicks already target these
+      openInput(_host, _file, _fromOutput) {},
+      openFromFeed(_imgIdx) {},
     },
 
     feed: {
@@ -529,6 +578,8 @@ export function makeAppStore() {
       hostMenuOpen,
       menuOpen,
       confirmDelete,
+      workspace,
+      infoLayout,
     },
     actions,
   };
