@@ -15,6 +15,8 @@ import { render } from "../services/notify.mjs";
 import { api } from "../../js/api.mjs";
 import { chrome } from "../../js/chrome.mjs";
 import { closeDiff } from "../../js/diff.mjs";
+import { planDeleteCurrent, popCurrent, assignCurrent, mirrorCurrentHash, stripHostPrefix, findByFile } from "../../js/route.mjs";
+import { restoreToIndex } from "../../js/feed.mjs";
 import { rebuildFeed } from "../services/feedView.mjs";
 import { Modal } from "./Modal.mjs";
 
@@ -84,8 +86,33 @@ export function ConfirmDelete() {
       });
       if (okIds.size === 0) { setBusy(false); return; } // nothing succeeded — stay open
       const mode = state.hosts[images[0].host]?.deleteMode ?? "hide";
+
+      // where does the current pointer go when its image is among the
+      // deleted? Computed against the PRE-delete list (adjacency needs the
+      // original indices), executed after it.
+      const host = images[0].host;
+      const deletedFiles = new Set(images.filter((i) => okIds.has(i.id)).map((i) => i.filename));
+      const plan = planDeleteCurrent(
+        state.images, deletedFiles, host, state.current, state.currentStack.at(-1) ?? null);
+      // deleted images are dead ends — scrub them from the back-trail
+      const deletedStripped = new Set([...deletedFiles].map((f) => stripHostPrefix(host, f)));
+      state.currentStack = state.currentStack.filter((p) =>
+        p.remote !== host || p.image == null || !deletedStripped.has(stripHostPrefix(host, p.image)));
+
       state.images = state.images.filter((i) => !okIds.has(i.id));
+      if (plan) {
+        if (plan.kind === "pop") popCurrent();
+        else if (plan.kind === "set") assignCurrent({ remote: host, image: plan.image }, { push: false });
+        else assignCurrent(null, { push: false });
+        mirrorCurrentHash();
+      }
       rebuildFeed();
+      if (plan && plan.kind !== "clear") {
+        // the pointer moved — the feed follows it (scrolling IS browsing:
+        // an off-viewport pointer is overridden by the next scroll settle)
+        const idx = findByFile(state.current?.image);
+        if (idx >= 0) restoreToIndex(idx);
+      }
       chrome.status.info(mode === "hide"
         ? `${okIds.size} image${okIds.size > 1 ? "s" : ""} hidden (${images[0].host})`
         : `${okIds.size} image${okIds.size > 1 ? "s" : ""} deleted (${images[0].host})`);

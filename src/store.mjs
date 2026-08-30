@@ -4,6 +4,10 @@
 //   v1 — metadata table keyed (host, filename)
 //   v2 — files + images tables, hash identity
 //   v3 — files.mtime: source mtime at ingestion (cache revalidation)
+//   v4 — node_registry (discovered node types → scalar input fields)
+//   v5 — input_cache: (host, filename) → content hash + source stamp
+//   v6 — files.stamp: opaque source-content stamp (folder mtime / ComfyUI
+//        ETag) — revalidation for every host kind, durable is gone
 // Judgments stay in the portable feedback.json (re-keyed to hash later).
 
 import { join } from "node:path";
@@ -11,7 +15,7 @@ import { Database } from "@db/sqlite";
 import { loadVersioned, atomicWrite } from "./state.mjs";
 import { hostKey, splitHostKey } from "./hosts.mjs";
 
-const SCHEMA_VERSION = 4;
+const SCHEMA_VERSION = 6;
 
 const MIGRATIONS = [
   // v0 → v1: create the single-table metadata store.
@@ -76,6 +80,47 @@ const MIGRATIONS = [
         updated_at REAL NOT NULL
       );
     `);
+  },
+  // v4 → v5: the input-file cache index — (host, filename) → content hash +
+  // source stamp, so input-dir images serve from the hash-addressed cache.
+  (db) => {
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS input_cache (
+        host     TEXT NOT NULL,
+        filename TEXT NOT NULL,
+        hash     TEXT NOT NULL,
+        stamp    TEXT,
+        PRIMARY KEY (host, filename)
+      );
+    `);
+  },
+  // v5 → v6: files.stamp — an opaque source-content stamp (folder mtime
+  // string / ComfyUI ETag), so a filename whose content was REWRITTEN
+  // revalidates on every host kind. Backfilled from mtime; the mtime column
+  // stays (history) but revalidation reads only the stamp.
+  (db) => {
+    db.exec(`ALTER TABLE files ADD COLUMN stamp TEXT`);
+    db.exec(`UPDATE files SET stamp = CAST(mtime AS TEXT) WHERE mtime IS NOT NULL`);
+    // A DB that ran the pre-stamp flavor of v5 (never shipped — dev state
+    // only) has input_cache.mtime instead of .stamp. Rebuild the table and
+    // backfill the stamp the same way (comfy rows had NULL mtime — they
+    // re-warm on next access, like a cache miss).
+    const cols = db.prepare("PRAGMA table_info(input_cache)").all().map((c) => c.name);
+    if (cols.includes("mtime") && !cols.includes("stamp")) {
+      db.exec(`
+        CREATE TABLE input_cache_new (
+          host     TEXT NOT NULL,
+          filename TEXT NOT NULL,
+          hash     TEXT NOT NULL,
+          stamp    TEXT,
+          PRIMARY KEY (host, filename)
+        );
+        INSERT INTO input_cache_new (host, filename, hash, stamp)
+          SELECT host, filename, hash, CAST(mtime AS TEXT) FROM input_cache;
+        DROP TABLE input_cache;
+        ALTER TABLE input_cache_new RENAME TO input_cache;
+      `);
+    }
   },
 ];
 
@@ -182,6 +227,26 @@ export class Store {
     return out;
   }
 
+  // --- input-file cache index -----------------------------------------------
+  //
+  // Maps (host, filename) → content hash + source stamp for input-dir files,
+  // so the input-bytes route serves from the hash-addressed cache. Folder
+  // hosts compare the stamp inline (local stat is cheap); ComfyUI rows
+  // revalidate by debounced async stamp check (src/revalidate.mjs).
+
+  inputCacheGet(host, filename) {
+    const row = this.#db.prepare(
+      "SELECT hash, stamp FROM input_cache WHERE host = ? AND filename = ?"
+    ).value(host, filename);
+    return row ? { hash: row[0], stamp: row[1] } : null;
+  }
+
+  inputCachePut(host, filename, hash, stamp) {
+    this.#db.prepare(
+      "INSERT INTO input_cache (host, filename, hash, stamp) VALUES (?, ?, ?, ?) ON CONFLICT(host, filename) DO UPDATE SET hash = excluded.hash, stamp = excluded.stamp"
+    ).run(host, filename, hash, stamp);
+  }
+
   // --- hash identity -------------------------------------------------------
 
   hashFor(host, filename) {
@@ -191,22 +256,23 @@ export class Store {
     return row ? row[0] : null;
   }
 
-  // Hash + source mtime as recorded at ingestion (revalidation input).
+  // Hash + source-content stamp as recorded at ingestion (revalidation input).
   fileInfo(host, filename) {
     const row = this.#db.prepare(
-      "SELECT hash, mtime FROM files WHERE host = ? AND filename = ?"
+      "SELECT hash, stamp FROM files WHERE host = ? AND filename = ?"
     ).value(host, filename);
-    return row ? { hash: row[0], mtime: row[1] } : null;
+    return row ? { hash: row[0], stamp: row[1] } : null;
   }
 
   // Called when bytes are ingested: record the hash and move metadata.
-  // opts.mtime — the source mtime at ingestion (null when unknown/durable).
+  // opts.stamp — the source-content stamp at ingestion (null when unknown;
+  // the next revalidation self-heals it).
   // opts.changed — this is a RE-ingest of a file whose content changed:
   // legacy metadata belongs to the OLD bytes, so it must not ride along.
-  async ingestFile(host, filename, hash, size, { mtime = null, changed = false } = {}) {
+  async ingestFile(host, filename, hash, size, { stamp = null, changed = false } = {}) {
     this.#db.prepare(
-      "INSERT INTO files (host, filename, hash, size, mtime) VALUES (?, ?, ?, ?, ?) ON CONFLICT(host, filename) DO UPDATE SET hash = excluded.hash, size = excluded.size, mtime = excluded.mtime"
-    ).run(host, filename, hash, size, mtime);
+      "INSERT INTO files (host, filename, hash, size, stamp) VALUES (?, ?, ?, ?, ?) ON CONFLICT(host, filename) DO UPDATE SET hash = excluded.hash, size = excluded.size, stamp = excluded.stamp"
+    ).run(host, filename, hash, size, stamp);
 
     if (changed) {
       // Drop the legacy row; metaGet must not fall back to old-bytes meta.
@@ -229,14 +295,32 @@ export class Store {
     this.#metaVersion++;
   }
 
-  // Same content, newer source mtime (a touch): refresh the stamp only.
-  touchFileMtime(host, filename, mtime) {
+  // Same content, newer source stamp (a touch, or a new ETag over identical
+  // bytes): refresh the stamp only.
+  touchFileStamp(host, filename, stamp) {
     this.#db.prepare(
-      "UPDATE files SET mtime = ? WHERE host = ? AND filename = ?"
-    ).run(mtime, host, filename);
+      "UPDATE files SET stamp = ? WHERE host = ? AND filename = ?"
+    ).run(stamp, host, filename);
   }
 
   // --- metadata (sqlite-backed, re-derivable) ----------------------------
+
+  // extraction state for one image: pending (not walked yet) vs done — done
+  // splits into has-meta and none (nopng marker: no PNG chunk embedded)
+  metaState(host, filename) {
+    const hash = this.hashFor(host, filename);
+    if (hash) {
+      const row = this.#db.prepare("SELECT meta, nopng FROM images WHERE hash = ?").value(hash);
+      if (row) {
+        return { extracted: true, nopng: !!row[1], meta: row[0] ? JSON.parse(row[0]) : null };
+      }
+    }
+    const row = this.#db.prepare("SELECT meta, nopng FROM metadata WHERE host = ? AND filename = ?").value(host, filename);
+    if (row) {
+      return { extracted: true, nopng: !!row[1], meta: row[0] ? JSON.parse(row[0]) : null };
+    }
+    return { extracted: false, nopng: false, meta: null };
+  }
 
   metaGet(host, filename) {
     // Prefer images via hash if ingested; fall back to metadata table.

@@ -16,20 +16,23 @@ PW_IMAGE="${PW_IMAGE:-mcr.microsoft.com/playwright:v1.49.1-noble}"
 
 cleanup() {
   docker rm -f kz-e2e-fake kz-e2e-fake2 kz-e2e-engine >/dev/null 2>&1 || true
-  rm -rf "$WORK/tests/.tmp-mutable"
+  rm -rf "$WORK/tests/.tmp-mutable" "$WORK/tests/.tmp-comfy"
 }
 trap cleanup EXIT
 cleanup
 
 # 0. mutable folder host for the cache-revalidation e2e: a writable copy of a
-#    fixture that the spec rewrites in place while the engine is running
-mkdir -p "$WORK/tests/.tmp-mutable"
+#    fixture that the spec rewrites in place while the engine is running —
+#    plus a writable file served BY THE FAKE COMFYUI host (reused filename,
+#    stat-derived ETag)
+mkdir -p "$WORK/tests/.tmp-mutable" "$WORK/tests/.tmp-comfy"
 cp "$WORK/tests/fixtures/flux-basic.png" "$WORK/tests/.tmp-mutable/flux-basic.png"
 
 # 1. fake ComfyUI host: fixtures + 3000 synthetic bulk images
 docker run -d --name kz-e2e-fake --network host -v "$WORK":/work -w /work \
   denoland/deno:latest run --allow-net --allow-read \
-  tests/fake-comfy.mjs --port "$FAKE_PORT" --bulk 3000 >/dev/null
+  tests/fake-comfy.mjs --port "$FAKE_PORT" --bulk 3000 \
+  --mutable-dir /work/tests/.tmp-comfy >/dev/null
 
 # 1b. a second fake host (different fixtures dir? same fixtures is fine — the
 # point is the host switch reloads the feed from ITS list)

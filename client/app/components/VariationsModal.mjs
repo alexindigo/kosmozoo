@@ -27,6 +27,8 @@ export function VariationsModal({ images, onClose }) {
   // count shows the total across the whole selection.
   const batch = images.length > 1;
   const [params, setParams] = useState(null); // null = probing; [] = none
+  const [strParams, setStrParams] = useState([]); // LoadImage sweep axes
+  const [imgRows, setImgRows] = useState({});   // id -> { enabled, mode, file, files, current, label }
   const [rows, setRows] = useState({});       // key -> { enabled, min, max, increment, placeholderKey }
   const [running, setRunning] = useState(false);
   const [result, setResult] = useState(null); // { text, ok }
@@ -40,6 +42,8 @@ export function VariationsModal({ images, onClose }) {
   // read live state through a ref instead of a stale closure
   const rowsRef = useRef(rows);
   rowsRef.current = rows;
+  const imgRowsRef = useRef(imgRows);
+  imgRowsRef.current = imgRows;
 
   useEffect(() => {
     const meta = image.meta ?? {};
@@ -82,6 +86,26 @@ export function VariationsModal({ images, onClose }) {
       .then((data) => {
         if (!data?.params) return resolve(fallbackParams(meta));
         resolve(data.params);
+        // LoadImage sweep axes: one row per string param, files listed from
+        // the host's input dir
+        const sp = data.stringParams ?? [];
+        setStrParams(sp);
+        if (sp.length && image.host) {
+          fetch(`/api/input-list/${encodeURIComponent(image.host)}`)
+            .then((r) => (r.ok ? r.json() : []))
+            .then((files) => {
+              const init = {};
+              for (const p of sp) {
+                init[p.id] = {
+                  enabled: false, mode: "new", file: files[0] ?? null,
+                  files, current: p.current, label: p.title ?? p.type,
+                  localFiles: null,   // File[] picked from a local directory
+                };
+              }
+              setImgRows(init);
+            })
+            .catch(() => {});
+        }
       })
       .catch((e) => {
         console.warn("[variations] probe failed:", e);
@@ -118,6 +142,24 @@ export function VariationsModal({ images, onClose }) {
     setRows((rs) => (rs[key] ? { ...rs, [key]: { ...rs[key], min, max } } : rs));
   };
 
+  // LoadImage sweep: enabling auto-inserts the {LoadImage.image} token into
+  // the suffix (the output name must encode WHICH input image produced it);
+  // disabling removes it. Same grammar as the numeric placeholder tokens.
+  const onImgToggle = (id, checked) => {
+    setImgRows((rs) => ({ ...rs, [id]: { ...rs[id], enabled: checked } }));
+    const inp = suffixRef.current;
+    if (!inp) return;
+    const token = `_{${id}}`;
+    if (checked) {
+      if (!inp.value.includes(token)) inp.value = inp.value + token;
+    } else {
+      if (inp.value.includes(token)) inp.value = inp.value.split(token).join("");
+    }
+  };
+  const onImgField = (id, field, value) => {
+    setImgRows((rs) => ({ ...rs, [id]: { ...rs[id], [field]: value } }));
+  };
+
   const onIncrement = (key, inc) => {
     setRows((rs) => ({ ...rs, [key]: { ...rs[key], increment: inc } }));
   };
@@ -148,9 +190,14 @@ export function VariationsModal({ images, onClose }) {
   // the product: every enabled range must contain its current value AND the
   // value must land on a step of the range's increment. (In batch mode the
   // "current" is offset 0, which is in a range only when it spans 0.)
+  // variations count: product of per-param steps. The engine excludes the
+  // exact current combo — subtract it ONLY when EVERY enabled axis sits at
+  // its current value. A swept LoadImage axis whose values exclude the
+  // current filename makes every numeric combo novel, so nothing is
+  // subtracted then.
   let perImage = 1;
   let anyEnabled = false;
-  let currentComboInProduct = true;
+  let numericCurrentInRange = true;
   for (const [key, r] of Object.entries(rows)) {
     if (!r.enabled) continue;
     anyEnabled = true;
@@ -159,21 +206,35 @@ export function VariationsModal({ images, onClose }) {
     if (batch) {
       // offsets around the image's own value: combo 0 is in the product iff
       // every enabled offset range spans 0 on a step boundary
-      if (!(r.min <= 0 && r.max >= 0)) currentComboInProduct = false;
+      if (!(r.min <= 0 && r.max >= 0)) numericCurrentInRange = false;
       else {
         const steps = (0 - r.min) / inc;
-        if (Math.abs(steps - Math.round(steps)) > 1e-6) currentComboInProduct = false;
+        if (Math.abs(steps - Math.round(steps)) > 1e-6) numericCurrentInRange = false;
       }
     } else {
       const cur = r.current;
-      if (cur == null || cur < r.min || cur > r.max) currentComboInProduct = false;
+      if (cur == null || cur < r.min || cur > r.max) numericCurrentInRange = false;
       else {
         const steps = (cur - r.min) / inc;
-        if (Math.abs(steps - Math.round(steps)) > 1e-6) currentComboInProduct = false;
+        if (Math.abs(steps - Math.round(steps)) > 1e-6) numericCurrentInRange = false;
       }
     }
   }
-  if (anyEnabled && currentComboInProduct && perImage > 0) perImage -= 1;
+  // LoadImage sweep axes multiply the count; an enabled-but-empty row (a
+  // local mode with nothing picked yet) is inert.
+  let imagesAtCurrent = true;
+  for (const r of Object.values(imgRows)) {
+    if (!r.enabled) continue;
+    const vals = r.mode === "new" ? (r.file ? [r.file] : []) : (r.localFiles ?? []);
+    if (!vals.length) continue;
+    anyEnabled = true;
+    perImage *= vals.length;
+    if (!(r.current && vals.includes(r.current))) imagesAtCurrent = false;
+  }
+  // subtract the current combo only when numeric axes are at current AND
+  // every swept image axis includes the current filename
+  const excludeCurrent = anyEnabled && numericCurrentInRange && imagesAtCurrent;
+  if (excludeCurrent && perImage > 0) perImage -= 1;
   const n = anyEnabled ? perImage * images.length : 0;
 
   async function runVariations() {
@@ -191,60 +252,71 @@ export function VariationsModal({ images, onClose }) {
       }
       const prefix = prefixRef.current?.value ?? "";
       const suffix = suffixRef.current?.value ?? "";
+      // LoadImage sweep axes: enabled rows become enum imageParams. A
+      // "local directory" row uploads its picked files to the host's input
+      // dir first (ComfyUI's LoadImage only reads that dir), then sweeps
+      // over the uploaded names.
+      const imageParams = {};
+      const uploadErrors = [];
+      for (const [id, r] of Object.entries(imgRowsRef.current)) {
+        if (!r.enabled) continue;
+        let values = [];
+        if (r.mode === "new") {
+          values = r.file ? [r.file] : [];
+        } else {
+          // local directory / local files: upload the picked files to the
+          // host's input dir (ComfyUI's LoadImage only reads that dir),
+          // then sweep over the names they land under
+          for (const f of r.localFiles ?? []) {
+            try {
+              const form = new FormData();
+              form.append("image", f, f.name);
+              const res = await fetch(`/api/upload-input/${encodeURIComponent(image.host)}`, {
+                method: "POST", body: form,
+              });
+              const d = res.ok ? await res.json() : null;
+              if (d?.name) values.push(d.name);
+              else uploadErrors.push(`${f.name}: upload failed`);
+            } catch (e) {
+              uploadErrors.push(`${f.name}: ${e.message}`);
+            }
+          }
+        }
+        if (values.length) imageParams[id] = { enabled: true, values };
+      }
       let submitted = 0, totalJobs = 0;
       const failed = [];
-      await Promise.all(images.map(async (img) => {
-        try {
-          const res = await fetch("/api/plugins/variations/run", {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({
-              id: img.id, host: img.host, filename: img.filename,
-              ranges: structuredClone(baseRanges),
-              prefix, suffix,
-              ...(batch ? { relative: true } : {}),
-            }),
-          });
-          const text = await res.text();
-          let data;
-          try { data = JSON.parse(text); } catch { data = null; }
-          if (!res.ok) {
-            failed.push(`${img.filename}: ${data?.error ?? text ?? `error ${res.status}`}`);
-            return;
-          }
-          submitted += data.submitted ?? 0;
-          totalJobs += data.total ?? 0;
-        } catch (e) {
-          failed.push(`${img.filename}: ${e.message}`);
+      const engineErrors = uploadErrors.slice();
+      const submit = async (img) => {
+        const res = await fetch("/api/plugins/variations/run", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            id: img.id, host: img.host, filename: img.filename,
+            ranges: structuredClone(baseRanges),
+            prefix, suffix,
+            ...(batch ? { relative: true } : {}),
+            ...(Object.keys(imageParams).length ? { imageParams } : {}),
+          }),
+        });
+        const text = await res.text();
+        let data;
+        try { data = JSON.parse(text); } catch { data = null; }
+        if (!res.ok) {
+          failed.push(`${img.filename}: ${data?.error ?? text ?? `error ${res.status}`}`);
+          return;
         }
-      }));
-      // surface the underlying engine errors when anything failed — a green
-      // "submitted 0/N" with no detail is how this bug went unnoticed
-      const engineErrors = [];
+        submitted += data.submitted ?? 0;
+        totalJobs += data.total ?? 0;
+        // the engine reports per-permutation failures inline — collect the
+        // detail from the SAME response (a second POST would double-submit)
+        for (const e of data.errors ?? []) {
+          engineErrors.push(e?.error ?? String(e));
+        }
+      };
       await Promise.all(images.map(async (img) => {
         try {
-          const res = await fetch("/api/plugins/variations/run", {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({
-              id: img.id, host: img.host, filename: img.filename,
-              ranges: structuredClone(baseRanges),
-              prefix, suffix,
-              ...(batch ? { relative: true } : {}),
-            }),
-          });
-          const text = await res.text();
-          let data;
-          try { data = JSON.parse(text); } catch { data = null; }
-          if (!res.ok) {
-            failed.push(`${img.filename}: ${data?.error ?? text ?? `error ${res.status}`}`);
-            return;
-          }
-          submitted += data.submitted ?? 0;
-          totalJobs += data.total ?? 0;
-          for (const e of data.errors ?? []) {
-            engineErrors.push(e?.error ?? String(e));
-          }
+          await submit(img);
         } catch (e) {
           failed.push(`${img.filename}: ${e.message}`);
         }
@@ -276,6 +348,68 @@ export function VariationsModal({ images, onClose }) {
       h("div", { class: "vz-body" },
         h("div", { class: "vz-left" },
           h("div", { class: "vz-sliders" },
+            // LoadImage sweep axes: pick a new image or the full input dir
+            strParams.map((p) => {
+              const r = imgRows[p.id];
+              if (!r) return null;
+              return h("div", { key: p.id, class: "vz-imgrow" + (r.enabled ? " on" : "") },
+                h("label", { class: "vz-imgrow-head" },
+                  h("input", {
+                    type: "checkbox", class: "vz-cb", checked: r.enabled,
+                    onChange: (e) => onImgToggle(p.id, e.target.checked),
+                  }),
+                  h("span", { class: "vz-imgrow-label" }, `${r.label}.image`),
+                  h("span", { class: "vz-imgrow-cur", title: r.current }, r.current),
+                ),
+                r.enabled && h("div", { class: "vz-imgrow-body" },
+                  h("select", {
+                    class: "vz-imgmode", value: r.mode,
+                    onChange: (e) => onImgField(p.id, "mode", e.target.value),
+                  },
+                    h("option", { value: "new" }, "new image…"),
+                    h("option", { value: "local" }, "local directory…"),
+                    h("option", { value: "files" }, "local files…"),
+                  ),
+                  r.mode === "new" && h("select", {
+                    class: "vz-imgfile", value: r.file ?? "",
+                    onChange: (e) => onImgField(p.id, "file", e.target.value),
+                  },
+                    r.files.map((f) => h("option", { key: f, value: f }, f)),
+                  ),
+                  // local directory: whole picked folder; local files: a
+                  // multi-picked subset. Both read into r.localFiles.
+                  r.mode === "local" && h("span", { class: "vz-imglocal" },
+                    h("input", {
+                      type: "file", class: "vz-imgdirpick", style: "display:none",
+                      // @ts-ignore nonstandard but universal folder picker
+                      webkitdirectory: "", multiple: true,
+                      onChange: (e) => {
+                        const fl = [...(e.target.files ?? [])].filter((f) => /\.(png|jpe?g|webp|gif|avif|bmp)$/i.test(f.name));
+                        onImgField(p.id, "localFiles", fl);
+                      },
+                    }),
+                    h("button", {
+                      class: "vz-imgdirbtn",
+                      onClick: (e) => e.currentTarget.parentElement.querySelector(".vz-imgdirpick").click(),
+                    }, r.localFiles?.length ? `${r.localFiles.length} files picked` : "pick a folder…"),
+                  ),
+                  r.mode === "files" && h("span", { class: "vz-imglocal" },
+                    h("input", {
+                      type: "file", class: "vz-imgfilespick", style: "display:none",
+                      multiple: true, accept: "image/*",
+                      onChange: (e) => {
+                        const fl = [...(e.target.files ?? [])].filter((f) => /\.(png|jpe?g|webp|gif|avif|bmp)$/i.test(f.name));
+                        onImgField(p.id, "localFiles", fl);
+                      },
+                    }),
+                    h("button", {
+                      class: "vz-imgdirbtn",
+                      onClick: (e) => e.currentTarget.parentElement.querySelector(".vz-imgfilespick").click(),
+                    }, r.localFiles?.length ? `${r.localFiles.length} files picked` : "pick files…"),
+                  ),
+                ),
+              );
+            }),
             params === null
               ? h("div", { class: "vz-loading" }, "inspecting graph…")
               : params.length === 0

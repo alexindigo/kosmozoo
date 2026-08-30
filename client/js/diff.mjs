@@ -50,10 +50,12 @@ export function openFromAnchor(anchorIdx) {
   openWorkbench();
 }
 
-// Info-panel discovered image click: the current image is that input file.
-export function openFromInput(host, file) {
+// Info-panel discovered image click: the current image is that referenced
+// file. fromOutput refs (LoadImage-from-output) are ordinary output images —
+// open them via the feed-image path, not the input-bytes route.
+export function openFromInput(host, file, fromOutput = false) {
   if (!host || !file) return;
-  setCurrent(`input:${host}`, file);
+  setCurrent(fromOutput ? host : `input:${host}`, file);
   openWorkbench();
 }
 

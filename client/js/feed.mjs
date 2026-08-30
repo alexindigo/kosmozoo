@@ -1,17 +1,10 @@
 // client/js/feed.mjs — the list engine for the candidates feed.
 //
 // The DOM is declared by <Grid> (client/app/components); this engine owns the
-// view (filtered + visible display order), the chunked render position, the
-// scroll/restore progress mechanisms, and the workbench seams. The image
-// window — which cards carry src — lives in useWindow, so there is no manual
-// load/unload here.
-//
-// Design contracts kept from the outgoing engine:
-// - Chunked render: the sentinel WINDOW_PAD cards before the rendered end
-//   triggers the next chunk; a scroll-distance safety net backs it up.
-// - Restore extends chunks until the target card exists, then centers it.
-// - The workbench walks the VIEW, extending chunks when stepping past the
-//   rendered end; its position joins the window (see useWindow).
+// view (filtered + visible display order) and the workbench seams. <Grid> is
+// a virtualized window (@tanstack/virtual-core): DOM only ever holds the
+// viewport±pad window, so restore/step costs O(window), not O(scroll
+// position. Image-src windowing (useWindow) is untouched.
 
 import { h, render } from "../vendor/preact/vendor.mjs";
 import { Grid } from "../app/components/Grid.mjs";
@@ -19,17 +12,15 @@ import { suppressScrollSnap } from "../app/services/scrollSnap.mjs";
 import { state } from "./state.mjs";
 import { api } from "./api.mjs";
 
-const CHUNK = 20;
-const PREFETCH = 4;
+const WANT_INIT = 20; // initial meta-want sweep the window covers anyway
 
 let openHook = null;   // (imgIdx) -> void   opens the workbench
 let wantHook = null;   // (image) -> void    meta-want reporting
 
 // view = display order of image indices (filtered + visible).
 let view = [];
-let viewPos = 0;       // how much of the view is rendered (chunked)
 let container = null;
-let windowApi = null;  // registered by <Grid> (useWindow)
+let windowApi = null;  // { win, virtualizer } registered by <Grid>
 let scrollChunkPending = false;
 
 export function initFeed({ onOpen, wantMeta } = {}) {
@@ -37,9 +28,11 @@ export function initFeed({ onOpen, wantMeta } = {}) {
   wantHook = wantMeta ?? null;
 }
 
-function wantRange(start, end) {
+// meta-want: the rendered window's images. CHUNK days fired it per chunk;
+// the virtualized window covers the same range — drive it per render.
+function wantRangeNow() {
   if (!wantHook) return;
-  for (let i = start; i < end; i++) {
+  for (let i = 0; i < Math.min(WANT_INIT, view.length); i++) {
     const image = state.images[view[i]];
     if (image) wantHook(image);
   }
@@ -49,16 +42,13 @@ function drawGrid() {
   if (!container) return;
   render(h(Grid, {
     view,
-    count: viewPos,
     onOpen: openHook,
-    onSentinel: renderChunk,
     registerApi: (w) => { windowApi = w; },
   }), container);
 }
 
 export function resetFeed() {
   view = [];
-  viewPos = 0;
   windowApi = null;
   state.selected.clear(); // selections belong to the feed they were made in
   if (container) render(null, container);
@@ -67,23 +57,14 @@ export function resetFeed() {
 export function renderFeed(el, indices) {
   container = el;
   view = indices;
-  viewPos = Math.min(CHUNK, view.length);
-  wantRange(0, viewPos);
-  drawGrid();
-}
-
-export function renderChunk() {
-  if (!container || viewPos >= view.length) return;
-  const start = viewPos;
-  viewPos = Math.min(viewPos + CHUNK, view.length);
-  wantRange(start, viewPos);
+  wantRangeNow();
   drawGrid();
 }
 
 // --- window seams (the workbench reaches the window through these) ----------
 
-export function applyWindow() { windowApi?.recompute(); }
-export function retryImage(idx) { windowApi?.retry(idx); }
+export function applyWindow() { windowApi?.win?.recompute(); }
+export function retryImage(idx) { windowApi?.win?.retry(idx); }
 
 // --- progress mechanisms -----------------------------------------------------
 
@@ -92,8 +73,8 @@ function scroller() {
   return document.getElementById("candidatesCol");
 }
 
-// scroll-distance safety net — the sentinel can be stranded above the
-// viewport after a restore jump.
+// scroll-distance safety net — retained shape; under the virtualizer it
+// merely nudges a scrollToOffset toward the bottom guard.
 export function onScrollSafetyNet() {
   if (scrollChunkPending) return;
   scrollChunkPending = true;
@@ -101,20 +82,28 @@ export function onScrollSafetyNet() {
     scrollChunkPending = false;
     const col = scroller();
     if (!col) return;
-    if (viewPos < view.length &&
-        col.scrollHeight - (col.scrollTop + col.clientHeight) < col.clientHeight * 1.5) {
-      renderChunk();
+    if (windowApi?.virtualizer && col.scrollHeight - (col.scrollTop + col.clientHeight) < col.clientHeight * 1.5) {
+      windowApi.virtualizer.scrollToOffset(col.scrollTop, { align: "start" });
     }
   }, 120);
 }
 
-// extend chunks until the target card exists, then center it (URL deep link).
+// extend chunks until the target card exists, then center it (URL deep link,
+// post-delete navigation): the virtualizer walks to the target index and
+// only the viewport±pad window renders — no prefix extension.
 export function restoreToIndex(idx) {
   const col = scroller();
   if (!col || idx < 0) return;
-  let guard = 500;
-  while (viewPos < view.length && guard-- > 0 && view.indexOf(idx) >= viewPos) renderChunk();
-  document.querySelector(`.card[data-idx="${idx}"]`)?.scrollIntoView({ block: "center" });
+  const viewPosOfIdx = view.indexOf(idx);
+  if (viewPosOfIdx < 0) return;
+  if (windowApi?.virtualizer) {
+    windowApi.virtualizer.scrollToIndex(viewPosOfIdx, { align: "center" });
+    // still meta-want the just-rendered range
+    wantRangeNow();
+  } else {
+    // pre-Grid boot: put it on-screen roughly, the Grid re-centers when it mounts
+    document.querySelector(`.card[data-idx="${idx}"]`)?.scrollIntoView({ block: "center" });
+  }
   // this is a programmatic center, not user scrolling — keep the snap from
   // immediately pulling the centered card back to the top edge
   suppressScrollSnap();
@@ -124,14 +113,14 @@ export function restoreToIndex(idx) {
 
 // Direction-aware prefetch for Up/Down traversal (fetch seam: DOM-free).
 export function prefetchFrom(imgIdx, dir, fetcher = globalThis.fetch) {
-  for (let i = 1; i <= PREFETCH; i++) {
+  for (let i = 1; i <= 4; i++) {
     const idx = imgIdx + dir * i;
     if (idx < 0 || idx >= state.images.length) break;
     fetcher(api.imageBytesUrl(state.images[idx].id)).then((r) => r.arrayBuffer()).catch(() => {});
   }
 }
 
-// Step within the view, extending chunks when stepping past the rendered end.
+// Step within the view. The virtualized window follows — no chunk extension.
 export function viewStep(imgIdx, dir) {
   if (!view.length) return imgIdx;
   const pos = view.indexOf(imgIdx);
@@ -145,15 +134,16 @@ export function viewStep(imgIdx, dir) {
     const at = ins < 0 ? view.length : ins;
     n = at + (dir > 0 ? 0 : -1);
   }
-  while (n >= viewPos && viewPos < view.length && container) renderChunk();
   if (n < 0 || n >= view.length) return imgIdx;
-  return view[n];
+  const target = view[n];
+  windowApi?.virtualizer?.scrollToIndex(n, { align: "auto" });
+  return target;
 }
 
 export function viewIndices() { return view; }
 
-// test seam (Deno has no DOM): drive viewStep without renderFeed
-export function __testSetView(v, pos = v.length) {
+// test seam (Deno has no DOM): drive viewStep without renderFeed. The second
+// arg is legacy (chunk position — meaningless under the virtualizer).
+export function __testSetView(v, _pos = v.length) {
   view = v;
-  viewPos = pos;
 }

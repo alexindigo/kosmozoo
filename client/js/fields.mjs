@@ -106,7 +106,9 @@ function materializeRows(meta, { gated }) {
     if (v == null) continue;
     const [classType, input] = parseFieldId(id);
     const vals = Array.isArray(v) ? v : [v];
-    const label = `${groupTitle(classType)} — ${input}`;
+    // rows are labeled by the actual node name (class_type) — never the
+    // registry title, which any workflow renames per instance
+    const label = `${classType} — ${input}`;
     for (const text of vals) {
       const long = String(text).length > LONG_TEXT;
       rows.push([label, long ? String(text) : formatScalar(text), long]);
@@ -164,7 +166,7 @@ export function metaStripText(meta) {
     if (v == null) continue;
     const [classType, input] = parseFieldId(id);
     const vals = Array.isArray(v) ? v : [v];
-    const label = `${groupTitle(classType)} — ${input}`;
+    const label = `${classType} — ${input}`;
     bits.push(`${label} ${vals.map((x) => formatScalar(x)).join(", ")}`);
   }
   return bits.join(" · ");
@@ -175,24 +177,53 @@ export function fullFieldRows(meta) {
   return materializeRows(meta, { gated: false });
 }
 
-// node inputs whose value names an image file (LoadImage-style references).
+// The "changed vs the previous image" highlight: builds the previous meta's
+// keyspace; the returned predicate marks a current row whose (label, value)
+// isn't in it — a changed value, or a field the previous image didn't carry.
+// Values compare through the same formatting both sides (materializeRows).
+export function valueDiffer(compareMeta) {
+  if (!compareMeta) return () => false;
+  const seen = new Map(); // label -> Set of values (multi-instance: any match is "unchanged")
+  for (const [label, v] of fullFieldRows(compareMeta)) {
+    if (!seen.has(label)) seen.set(label, new Set());
+    seen.get(label).add(v);
+  }
+  return (label, v) => !seen.get(label)?.has(v);
+}
+
+// node inputs that reference an image FILE — only a LoadImage-type node's
+// `image` input qualifies. Sweeping every node input for a ".png" string
+// catches SaveImage's filename_prefix (a generated output name, not an input
+// file). ComfyUI annotates a LoadImage-from-output value as
+// "<filename> [output]": strip the annotation for the real filename, and
+// serve it from the OUTPUT bytes route (it is not in the input dir — the
+// input-bytes route would 404). Input-dir refs use input-bytes.
 // Deduped: two nodes referencing the same file render one image. With a
-// host, each entry carries its input-bytes src.
+// host, each entry carries its src.
 const NODE_IMG_EXT = /\.(png|jpe?g|webp|gif|avif|bmp|svg)$/i;
+const OUTPUT_TAG = /\s+\[output\]$/i;
 
 export function nodeImages(meta, host) {
   const out = [];
   const seen = new Set();
   for (const n of meta?.nodes ?? []) {
-    for (const [k, v] of Object.entries(n.inputs ?? {})) {
-      if (typeof v !== "string" || !NODE_IMG_EXT.test(v) || seen.has(v)) continue;
-      seen.add(v);
-      out.push({
-        label: `${n.title ?? n.type} — ${k}`,
-        file: v,
-        src: host ? `/api/input-bytes/${encodeURIComponent(host)}/${encodeURIComponent(v)}` : null,
-      });
-    }
+    if (!/loadimage$/i.test(String(n.type ?? ""))) continue;
+    const raw = n.inputs?.image;
+    if (typeof raw !== "string") continue;
+    const fromOutput = OUTPUT_TAG.test(raw);
+    const file = fromOutput ? raw.replace(OUTPUT_TAG, "") : raw;
+    if (!NODE_IMG_EXT.test(file) || seen.has(file)) continue;
+    seen.add(file);
+    out.push({
+      label: `${n.title ?? n.type} — image`,
+      file,
+      fromOutput, // LoadImage-from-output: served by the output bytes route
+      src: host
+        ? (fromOutput
+          ? `/api/images/${encodeURIComponent(host + ":" + file)}/bytes`
+          : `/api/input-bytes/${encodeURIComponent(host)}/${encodeURIComponent(file)}`)
+        : null,
+    });
   }
   return out;
 }
@@ -216,9 +247,14 @@ function setInfoGroupCollapsed(group, collapsed) {
 // space. Returns an element; the caller appends it to its own container.
 // `host` (when known) enables inline rendering of node-referenced images;
 // `opts.skipImages` leaves those to a caller-drawn column instead.
-// Fields group into collapsible per-node sections ("Load " prefixes strip
-// off the group name; collapse state persists in localStorage).
-export function buildMetaBody(meta, host, { skipImages = false } = {}) {
+// `opts.compareMeta` (the previous image's meta) marks field VALUES that
+// differ from it with .pdiff (white).
+// Fields group into collapsible per-node sections named by the actual node
+// type (class_type — stable, never a per-instance rename; collapse state
+// persists in localStorage). Prompt groups (CLIPTextEncode) sink to the
+// bottom.
+export function buildMetaBody(meta, host, { skipImages = false, compareMeta = null } = {}) {
+  const differs = valueDiffer(compareMeta);
   const wrap = document.createElement("div");
   const rows = meta ? fullFieldRows(meta) : [];
   if (!rows.length) {
@@ -230,17 +266,19 @@ export function buildMetaBody(meta, host, { skipImages = false } = {}) {
     wrap.appendChild(p);
     return wrap;
   }
-  // group rows by their node (the part before " — "), first-appearance order
+  // group rows by their node type (the part before " — "), first-appearance
+  // order
   const groups = new Map();
   for (const [label, v, long] of rows) {
     const i = label.indexOf(" — ");
-    const g = i > 0 ? label.slice(0, i) : label;
-    const key = g.replace(/^Load /, "");
+    const key = i > 0 ? label.slice(0, i) : label;
     if (!groups.has(key)) groups.set(key, []);
     groups.get(key).push([label.slice(i + 3), v, long]);
   }
+  // prompt groups (CLIPTextEncode) sink to the bottom of the section list
+  const ordered = [...groups].sort((a, b) => +/clip\s*text\s*encode/i.test(a[0]) - +/clip\s*text\s*encode/i.test(b[0]));
   const groupState = infoGroupState();
-  for (const [group, grows] of groups) {
+  for (const [group, grows] of ordered) {
     const collapsed = groupState[group] === true;
     const sec = document.createElement("div");
     sec.className = "infogroup" + (collapsed ? " collapsed" : "");
@@ -267,6 +305,7 @@ export function buildMetaBody(meta, host, { skipImages = false } = {}) {
     // short values first; text prompts (long values) render below them
     for (const [input, v, long] of grows) {
       if (long) { longs.push([input, v]); continue; }
+      const changed = differs(`${group} — ${input}`, v);
       const line = document.createElement("div");
       const lab = document.createElement("span");
       lab.className = "plabel";
@@ -275,10 +314,15 @@ export function buildMetaBody(meta, host, { skipImages = false } = {}) {
       // the consumer (details pane) focuses the images column on that image
       if (host && NODE_IMG_EXT.test(v)) {
         const ref = document.createElement("span");
-        ref.className = "imgref";
+        ref.className = "imgref" + (changed ? " pdiff" : "");
         ref.dataset.file = v;
         ref.textContent = v;
         line.append(lab, ref);
+      } else if (changed) {
+        const val = document.createElement("span");
+        val.className = "pdiff";
+        val.textContent = v;
+        line.append(lab, val);
       } else {
         line.append(lab, document.createTextNode(v));
       }
@@ -292,7 +336,7 @@ export function buildMetaBody(meta, host, { skipImages = false } = {}) {
       lab.className = "plabel";
       lab.textContent = input;
       const txt = document.createElement("div");
-      txt.className = "infotext";
+      txt.className = "infotext" + (differs(`${group} — ${input}`, v) ? " pdiff" : "");
       txt.textContent = v;
       sec2.append(lab, txt);
       body.appendChild(sec2);

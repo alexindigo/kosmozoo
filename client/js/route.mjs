@@ -106,9 +106,70 @@ export function findByFile(file) {
 
 // --- writers -------------------------------------------------------------
 
+// Trail bound: a scroll-through-the-feed session turns over the pointer
+// constantly — the stack is a bounded window, not a full history.
+const STACK_CAP = 200;
+
+// The single writer for state.current. On an actual change the replaced
+// pointer goes onto state.currentStack (oldest first) unless push is false
+// (deletion navigation: the outgoing pointer is dead, it must not linger
+// on the trail). next === null clears the pointer (still pushed when
+// push is on). Browser history cannot be this stack: the URL mirrors via
+// replaceState, and scroll-driven updates would flood pushState entries —
+// so we maintain our own.
+export function assignCurrent(next, { push = true } = {}) {
+  const prev = state.current;
+  if (push && prev && (prev.remote !== next?.remote || prev.image !== next?.image)) {
+    state.currentStack.push(prev);
+    if (state.currentStack.length > STACK_CAP) state.currentStack.shift();
+  }
+  state.current = next;
+}
+
+// Walk the trail back: make the most recent previous pointer current. The
+// popped entry leaves the stack (a back-navigation, not a change — the
+// outgoing pointer is NOT pushed). Returns the popped pointer, or null when
+// the trail is empty (current untouched then). Does not mirror the hash —
+// a navigating caller calls mirrorCurrentHash() itself, like any other
+// assignCurrent caller.
+export function popCurrent() {
+  const prev = state.currentStack.pop() ?? null;
+  if (!prev) return null;
+  state.current = prev;
+  return prev;
+}
+
+// --- deletion ---------------------------------------------------------------
+
+// Where the current pointer goes when the current image is deleted:
+//   1. the previous current (stack top) — iff it sits NEXT TO the deleted
+//      one in the feed and survives the delete itself
+//   2. else the nearest surviving image above the deleted one in the feed
+//   3. else (the deleted image had nothing above it) the new topmost;
+//      nothing left at all → clear
+// images is the PRE-delete list. Returns { kind: "pop" } | { kind: "set",
+// image } | { kind: "clear" } | null (the current image was not deleted).
+export function planDeleteCurrent(images, deletedFiles, host, current, prev) {
+  if (!current || current.remote !== host) return null;
+  const sameFile = (img, f) => matchesFile(img, host, f);
+  const delIdx = images.findIndex((img) => sameFile(img, current.image));
+  if (delIdx < 0 || !deletedFiles.has(images[delIdx].filename)) return null;
+  if (prev && prev.remote === host) {
+    const pIdx = images.findIndex((img) => sameFile(img, prev.image));
+    if (pIdx >= 0 && !deletedFiles.has(images[pIdx].filename) && Math.abs(pIdx - delIdx) === 1) {
+      return { kind: "pop" };
+    }
+  }
+  for (let i = delIdx - 1; i >= 0; i--) {
+    if (!deletedFiles.has(images[i].filename)) return { kind: "set", image: images[i].filename };
+  }
+  const top = images.find((img) => !deletedFiles.has(img.filename));
+  return top ? { kind: "set", image: top.filename } : { kind: "clear" };
+}
+
 // Set the single "current image" pointer, then mirror it to the URL hash.
 export function setCurrent(remote, image) {
-  state.current = { remote, image };
+  assignCurrent({ remote, image });
   mirrorCurrentHash();
 }
 

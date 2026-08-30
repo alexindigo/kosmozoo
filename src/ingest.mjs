@@ -5,7 +5,7 @@
 // before anything else sees them.
 
 import { sha256, cachePut, cacheGet } from "./cache.mjs";
-import { hostReadBytes, hostModified } from "./hosts.mjs";
+import { hostReadBytes, hostStamp } from "./hosts.mjs";
 
 export class Ingest {
   #store;
@@ -26,11 +26,12 @@ export class Ingest {
     const existing = this.#store.hashFor(host, filename);
     if (existing && await cacheGet(existing) !== null) return existing;
 
-    // Read from host.
+    // Read from host; the stamp (folder stat / one HEAD for ComfyUI) lets a
+    // later revalidation notice the same filename carrying new content.
     const r = await hostReadBytes(addr, filename);
     if (r.status !== 200) return null;
     const bytes = new Uint8Array(await new Response(r.body).arrayBuffer());
-    return this.#ingestBytes(host, filename, bytes, await hostModified(addr, filename));
+    return this.#ingestBytes(host, filename, bytes, await hostStamp(addr, filename));
   }
 
   // Raw bytes path — the caller already has the bytes (folder host, direct read).
@@ -38,10 +39,10 @@ export class Ingest {
     return this.#ingestBytes(host, filename, bytes);
   }
 
-  async #ingestBytes(host, filename, bytes, mtime = null) {
+  async #ingestBytes(host, filename, bytes, stamp = null) {
     const hash = await sha256(bytes);
     await cachePut(hash, bytes);
-    await this.#store.ingestFile(host, filename, hash, bytes.length, { mtime });
+    await this.#store.ingestFile(host, filename, hash, bytes.length, { stamp });
     return hash;
   }
 }

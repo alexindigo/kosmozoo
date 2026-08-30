@@ -1,9 +1,9 @@
 // client/js/zoomable.mjs — in-feed zoom for ANY image. One code path for
 // candidate cards and anchor thumbs alike: same functionality, same code.
-// Ctrl+wheel zooms toward the cursor; drag pans while zoomed; double-click
-// resets. A drag suppresses its trailing click (a pan must not open the
-// lightbox). Views persist via views.mjs, so a crop made here carries into
-// the lightbox and back — and reloads restore it.
+// Ctrl+wheel zooms toward the cursor; drag pans while zoomed. A drag
+// suppresses its trailing click (a pan must not open the lightbox). Views
+// persist via views.mjs, so a crop made here carries into the lightbox and
+// back — and reloads restore it.
 
 import { getView, setView } from "./views.mjs";
 
@@ -80,11 +80,5 @@ export function makeZoomable(img, { key, onZoomChange } = {}) {
     }
   }, true);
 
-  img.addEventListener("dblclick", (e) => {
-    e.preventDefault();
-    e.stopPropagation();
-    scale = 1; txf = 0; tyf = 0;
-    apply();
-  });
   img.draggable = false;
 }

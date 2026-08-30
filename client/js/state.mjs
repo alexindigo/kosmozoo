@@ -24,6 +24,7 @@ export const state = {
   // or "anchor"); `image` is the filename (or anchor name). The URL hash
   // MIRRORS it (route.mjs) for shareable deep-links; it does not outrank it.
   current: null,        // { remote, image } | null
+  currentStack: [],     // trail of replaced pointers (oldest first, capped) — session-only
   diff: {               // the workbench: a single-image viewer of state.current
     open: false,
   },

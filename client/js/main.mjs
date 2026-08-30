@@ -8,7 +8,7 @@ import { api } from "./api.mjs";
 import { addAnchorFiles, initAnchorsPane, initAnchorsWidth } from "./anchors.mjs";
 import { initWorkspace } from "./workspace.mjs";
 import { initDiff, openDiff, openFromFeed, hideDiff } from "./diff.mjs";
-import { parseUrl, setCurrent, mirrorCurrentHash, findByFile } from "./route.mjs";
+import { parseUrl, setCurrent, assignCurrent, mirrorCurrentHash, findByFile } from "./route.mjs";
 import { initRoi } from "./roi.mjs";
 import { initClientPlugins } from "./plugins-client.mjs";
 import { initJudgment, onVisibilityChanged, toggleRevealThumbedDown, toggleHideUp, setDownvoteHides } from "./judgment.mjs";
@@ -19,6 +19,7 @@ import { initFeed, onScrollSafetyNet, restoreToIndex, resetFeed, viewIndices } f
 import { openFieldsOverlay, initFieldsOverlay } from "./fields.mjs";
 import { savedSet } from "../app/components/Card.mjs";
 import { initScrollSnap } from "../app/services/scrollSnap.mjs";
+import { initFeedRail } from "./feedrail.mjs";
 import { initViews } from "./views.mjs";
 import { iconSvg } from "./icons.mjs";
 import { loadBootData } from "../app/services/bootData.mjs";
@@ -232,7 +233,7 @@ async function loadCandidates() {
       restoreToIndex(idx);
     } else {
       // URL names a file the list doesn't have (yet) — keep it, no center
-      state.current = file ? { remote: state.host, image: file } : null;
+      assignCurrent(file ? { remote: state.host, image: file } : null);
       mirrorCurrentHash();
     }
     await pollMetadata();
@@ -304,6 +305,7 @@ async function boot() {
   // position persists via the URL hash (current image), not a stored px —
   // a px jump races the deep-link centering and clobbers it
   initScrollSnap();
+  initFeedRail(); // the left-edge position rail (tape + wave)
 
   // Boot data (hosts / ui+fields settings / scraper / feedback path) loads
   // once through the memoized service; <App>'s init effect awaits the same

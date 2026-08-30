@@ -1,27 +1,24 @@
-// client/app/components/Grid.mjs — the candidates feed, declared.
+// client/app/components/Grid.mjs — the candidates feed as a virtualized window.
 //
-// Renders the view's rendered prefix as <Card>s and owns the image window via
-// useWindow (visibility -> src). The chunk sentinel sits WINDOW_PAD cards
-// before the rendered end (the outgoing feed's buffer) and asks the engine for
-// the next chunk when it is seen; at the end of the list the end-of-list
-// marker takes its place.
-
+// @tanstack/virtual-core (vendored) owns the window math: which view indices
+// render at the current scroll offset, measured-element corrections,
+// top/bottom spacers, and scrollToIndex for deep jumps. The DOM only ever
+// holds the window — restore/step costs O(window), not O(scroll position).
+//
+// The image-src window (visible ∪ workbench ± WINDOW_PAD) stays with
+// useWindow — that's independent of the DOM window.
 import { h, Fragment, Component } from "../../vendor/preact/vendor.mjs";
-import { useEffect, useRef, useState } from "../../vendor/preact/vendor.mjs";
+import { useEffect, useState } from "../../vendor/preact/vendor.mjs";
+import { Virtualizer, elementScroll, observeElementRect, observeElementOffset, measureElement } from "../../vendor/tanstack/virtual-core.mjs";
 import { state } from "../../js/state.mjs";
 import { matchesFile } from "../../js/route.mjs";
 import { subscribe } from "../services/notify.mjs";
 import { useWindow, WINDOW_PAD } from "../hooks/useWindow.mjs";
 import { Card } from "./Card.mjs";
 
-// A feed can hold thousands of cards; a window/judgment/selection change must
-// re-render only the cards it touches, not the whole list. The memo gate
-// compares the card's real inputs (image, position, src, meta, vote,
-// favorite, selected) and skips the rest. Callbacks are intentionally not
-// compared — they are stable in behavior (they capture the card's index).
-// Fields config must invalidate the memo gate too: a picker toggle changes
-// which getters render, so the version marker below flips and cards re-render
-// their props (see MemoCard.shouldComponentUpdate).
+// measured chrome under the image box (title row + notes + meta bar)
+const CHROME_PX = 178;
+
 class MemoCard extends Component {
   shouldComponentUpdate(n) {
     const p = this.props;
@@ -32,47 +29,64 @@ class MemoCard extends Component {
   render() { return h(Card, this.props); }
 }
 
-export function Grid({ view, count, onOpen, onSentinel, registerApi }) {
+export function Grid({ view, onOpen, registerApi }) {
   // <Grid> is a root of its own (the feed engine renders it into #grid), so
   // it subscribes to the re-render signal itself instead of riding <App>.
   const [, setVersion] = useState(0);
   useEffect(() => subscribe(() => setVersion((v) => v + 1)), []);
   const win = useWindow();
-  const sentinelRef = useRef(null);
+  const scrollEl = document.getElementById("candidatesCol");
+  const count = view.length;
+  const [virtualizer] = useState(() => new Virtualizer({ count: 0, getScrollElement: () => scrollEl, estimateSize: () => 800 }));
 
-  // the feed engine reaches the window through this (applyWindow / retryImage)
-  useEffect(() => { registerApi?.(win); });
+  // framework-agnostic lifecycle mirrors the react wrapper: options sync on
+  // every render; _willUpdate every render; _didMount once on mount.
+  virtualizer.setOptions({
+    count,
+    getScrollElement: () => scrollEl,
+    getItemKey: (i) => view[i] ?? i,
+    estimateSize: (i) => {
+      const img = state.images[view[i]];
+      const ar = img?.meta?.width && img?.meta?.height ? img.meta.width / img.meta.height : 1.5;
+      return Math.round((scrollEl?.clientWidth ?? 800) / ar + CHROME_PX);
+    },
+    scrollToFn: (offset, options, inst) => elementScroll(offset, options, inst),
+    observeElementRect,
+    observeElementOffset,
+    measureElement: (el, entry, inst) => measureElement(el, entry, inst),
+    overscan: WINDOW_PAD,
+    onChange: () => setVersion((v) => v + 1),
+  });
+  virtualizer._willUpdate();
 
-  // sentinel -> next chunk
   useEffect(() => {
-    const el = sentinelRef.current;
-    if (!el) return;
-    const obs = new IntersectionObserver((entries) => {
-      if (entries.some((e) => e.isIntersecting)) onSentinel?.();
-    });
-    obs.observe(el);
-    return () => obs.disconnect();
-  }, [count, onSentinel]);
+    const cleanup = virtualizer._didMount();
+    return () => cleanup?.();
+  }, [virtualizer]);
 
+  useEffect(() => { registerApi?.({ win, virtualizer }); });
+
+  const items = virtualizer.getVirtualItems();
+  const totalSize = virtualizer.getTotalSize();
   const cur = state.current;
-  const hasMore = count < view.length;
-  const trigger = hasMore ? Math.max(0, count - WINDOW_PAD) : -1;
+  const endIdx = items[items.length - 1]?.index ?? -1;
+  const hasMore = count > 0 && endIdx < count - 1;
 
-  const cardAt = (i) => {
-    const idx = view[i];
+  const cardAt = (vi) => {
+    const idx = view[vi.index];
     const image = state.images[idx];
     if (!image) return null;
     const j = image.judgment ?? {};
     const isCurrent = cur && cur.remote === state.host && matchesFile(image, state.host, cur.image);
-  const fieldsVersion = JSON.stringify(state.fieldsCfg ?? {});
+    const fieldsVersion = JSON.stringify(state.fieldsCfg ?? {});
     return h("div", {
       key: image.id ?? idx,
-      class: "card" + (isCurrent ? " current" : ""),
+      class: "card",
       "data-idx": idx,
       "data-name": image.filename,
       "data-vote": j.vote || undefined,
       "data-favorite": j.favorite ? "1" : undefined,
-      ref: win.register(idx),
+      ref: (el) => { win.register(idx)(el); if (el) virtualizer.measureElement(el); },
     }, h(MemoCard, {
       image,
       imgIdx: idx,
@@ -82,6 +96,7 @@ export function Grid({ view, count, onOpen, onSentinel, registerApi }) {
       fav: !!j.favorite,
       selected: state.selected.has(image.id),
       fieldsVersion,
+      current: !!isCurrent,
       onOpen: () => onOpen?.(idx),
       onErrorClick: () => win.retry(idx),
       onImgPhase: (p) => {
@@ -91,21 +106,16 @@ export function Grid({ view, count, onOpen, onSentinel, registerApi }) {
     }));
   };
 
-  const children = [];
-  for (let i = 0; i < count; i++) {
-    if (i === trigger) children.push(h("div", { key: "__sentinel", class: "sentinel", ref: sentinelRef }, "loading more…"));
-    children.push(cardAt(i));
-  }
-  if (hasMore) {
-    if (trigger >= count) children.push(h("div", { key: "__sentinel", class: "sentinel", ref: sentinelRef }, "loading more…"));
-  } else {
-    children.push(h("div", {
-      key: "__end",
-      class: "endoflist",
-    }, state.filter
-      ? `— all ${view.length} matching “${state.filter}” —`
-      : `— all ${state.images.length} images —`));
-  }
+  const padStart = items[0]?.start ?? 0;
+  const padEnd = hasMore ? 0 : totalSize - (items[items.length - 1]?.end ?? 0);
 
-  return h(Fragment, null, children);
+  return h(Fragment, null,
+    h("div", { style: `height:${padStart}px` }),
+    items.map(cardAt),
+    hasMore ? h("div", { class: "sentinel" }, "loading more…")
+      : h("div", { style: `height:${padEnd}px` },
+          h("div", { class: "endoflist" }, state.filter
+            ? `— all ${view.length} matching “${state.filter}” —`
+            : `— all ${state.images.length} images —`)),
+  );
 }

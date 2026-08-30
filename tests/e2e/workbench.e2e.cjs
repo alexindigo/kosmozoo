@@ -162,11 +162,6 @@ async function attempt(name, fn) {
     check("Ctrl+wheel zooms a candidate card in place", true);
     const tf = await page.evaluate("document.querySelector('.card .imgwrap img').style.transform");
     check("zoom applies a transform", tf.includes("scale("), tf.slice(0, 40));
-    // double-click resets
-    await page.mouse("mousePressed", box.x, box.y, { clickCount: 2 });
-    await page.mouse("mouseReleased", box.x, box.y, { clickCount: 2 });
-    await page.poll("!document.querySelector('.card .imgwrap img').classList.contains('zoomed')", 3000);
-    check("double-click resets the zoom", true);
     // no emoji anywhere in the UI
     const emojiFound = await page.evaluate(`(() => {
       const re = /[\\u{1F300}-\\u{1FAFF}\\u{2600}-\\u{27BF}\\u{2190}-\\u{21FF}\\u{2B00}-\\u{2BFF}]/u;

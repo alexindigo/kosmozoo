@@ -3,8 +3,8 @@
 // Resource-shaped, documented, public. Plugin routes live under
 // /api/plugins/<name>/... and are registered by the plugin host (Phase 10).
 
-import { splitHostKey, probeHost, hostList, hostReadBytes, hostHeadSize, hostInputBytes, validateHost, addHost, removeHost, isFolderHost, hostHasAssetsPlus, hostDelete, comfyHistoryDelete, EXT_MIME } from "./hosts.mjs";
-import { cacheGet } from "./cache.mjs";
+import { splitHostKey, probeHost, hostList, hostReadBytes, hostHeadSize, hostInputBytes, hostInputList, hostUploadInput, hostStamp, validateHost, addHost, removeHost, isFolderHost, hostHasAssetsPlus, hostDelete, comfyHistoryDelete, EXT_MIME } from "./hosts.mjs";
+import { cacheGet, cachePut, sha256 } from "./cache.mjs";
 import { scheduleRevalidate } from "./revalidate.mjs";
 
 export function makeRouter(ctx) {
@@ -94,22 +94,28 @@ export function makeRouter(ctx) {
     // inside feed()); on-screen names would use feed(host, names, true).
     ctx.scraper?.feed(host, names);
     const size = new Map(visible.map((f) => [f.name, f.size]));
-    return Response.json(names.map((filename) => ({
-      id: `${host}:${filename}`,
-      host,
-      filename,
-      size: size.get(filename) ?? null,
-      meta: ctx.store.metaGet(host, filename),
-      judgment: ctx.store.judgmentGet(host, filename),
-    })));
+    return Response.json(names.map((filename) => {
+      const st = ctx.store.metaState(host, filename);
+      return {
+        id: `${host}:${filename}`,
+        host,
+        filename,
+        size: size.get(filename) ?? null,
+        meta: st.meta,
+        extracted: st.extracted,
+        judgment: ctx.store.judgmentGet(host, filename),
+      };
+    }));
   });
 
   add("GET", "/api/images/<id>", async (_req, { id }) => {
     const [host, filename] = splitHostKey(id);
     if (!ctx.hosts[host]) return Response.json({ error: "unknown host" }, { status: 404 });
+    const st = ctx.store.metaState(host, filename);
     return Response.json({
       id, host, filename,
-      meta: ctx.store.metaGet(host, filename),
+      meta: st.meta,
+      extracted: st.extracted,
       judgment: ctx.store.judgmentGet(host, filename),
     });
   });
@@ -149,38 +155,116 @@ export function makeRouter(ctx) {
     });
   });
 
-  // Input-dir image bytes for node references (LoadImage-style): folder
-  // hosts read from the directory; ComfyUI hosts proxy /api/view?type=input.
-  add("GET", "/api/input-bytes/<host>/<filename>", async (_req, { host, filename }) => {
-    if (!ctx.hosts[host]) return new Response("unknown host", { status: 404 });
-    const r = await hostInputBytes(ctx.hosts[host], filename);
-    if (r.status === 400) return new Response("bad filename", { status: 400 });
-    if (r.status !== 200) return new Response("not found", { status: r.status });
-    return new Response(r.body, { headers: r.headers });
+  // Input-dir image listing (LoadImage sweep sources).
+  add("GET", "/api/input-list/<host>", async (_req, { host }) => {
+    if (!ctx.hosts[host]) return Response.json({ error: "unknown host" }, { status: 404 });
+    try {
+      return Response.json(await hostInputList(ctx.hosts[host]));
+    } catch {
+      return Response.json([]);
+    }
   });
 
-  add("GET", "/api/images/<id>/bytes", async (_req, { id }) => {
+  // Upload one image into a ComfyUI host's input dir (multipart field
+  // "image") — the browser picked a local file; the engine forwards it to
+  // the host (browser→ComfyUI is cross-origin, so it can't post directly).
+  add("POST", "/api/upload-input/<host>", async (req, { host }) => {
+    const addr = ctx.hosts[host];
+    if (!addr) return Response.json({ error: "unknown host" }, { status: 404 });
+    let form;
+    try { form = await req.formData(); }
+    catch { return Response.json({ error: "multipart form required" }, { status: 400 }); }
+    const file = form.get("image");
+    if (!file || typeof file === "string") {
+      return Response.json({ error: "no image file in form" }, { status: 400 });
+    }
+    const bytes = new Uint8Array(await file.arrayBuffer());
+    const r = await hostUploadInput(addr, file.name, bytes);
+    if (!r.ok) return Response.json({ error: r.error }, { status: r.status });
+    return Response.json({ name: r.name });
+  });
+
+  // Input-dir image bytes for node references (LoadImage-style): folder
+  // hosts read from the directory; ComfyUI hosts proxy /api/view?type=input.
+  // Served through the hash-addressed cache, tracked by a source stamp:
+  // folder hosts compare the stamp inline (local stat is cheap); ComfyUI
+  // serves stale-while-revalidate — a debounced async stamp check.
+  // The URL never changes when the content is remapped, so the response
+  // carries validators: no-cache forces revalidation per render; the ETag
+  // (the content hash) answers If-None-Match with a cheap 304.
+  add("GET", "/api/input-bytes/<host>/<filename>", async (req, { host, filename }) => {
+    if (!ctx.hosts[host]) return new Response("unknown host", { status: 404 });
+    const addr = ctx.hosts[host];
+    const mime = EXT_MIME[filename.split(".").pop().toLowerCase()];
+    const inm = req.headers.get("If-None-Match");
+    const makeResponse = (bytes, hash) => {
+      const etag = `"${hash}"`;
+      if (inm === etag) return new Response(null, { status: 304, headers: { ETag: etag, "Cache-Control": "no-cache" } });
+      const h = new Headers();
+      if (mime) h.set("Content-Type", mime);
+      h.set("Content-Length", String(bytes.length));
+      h.set("ETag", etag);
+      h.set("Cache-Control", "no-cache");
+      return new Response(bytes, { headers: h });
+    };
+
+    const row = ctx.store.inputCacheGet(host, filename);
+    if (row) {
+      if (isFolderHost(addr)) {
+        const stamp = await hostStamp(addr, filename, "input");
+        if (stamp != null && row.stamp === stamp) {
+          const bytes = await cacheGet(row.hash);
+          if (bytes) return makeResponse(bytes, row.hash);
+        }
+      } else {
+        const bytes = await cacheGet(row.hash);
+        if (bytes) {
+          scheduleRevalidate(ctx, host, filename, { input: true });
+          return makeResponse(bytes, row.hash);
+        }
+      }
+    }
+
+    const r = await hostInputBytes(addr, filename);
+    if (r.status === 400) return new Response("bad filename", { status: 400 });
+    if (r.status !== 200) return new Response("not found", { status: r.status });
+    const bytes = new Uint8Array(await new Response(r.body).arrayBuffer());
+    const hash = await sha256(bytes);
+    await cachePut(hash, bytes);
+    ctx.store.inputCachePut(host, filename, hash, await hostStamp(addr, filename, "input"));
+    return makeResponse(bytes, hash);
+  });
+
+  add("GET", "/api/images/<id>/bytes", async (req, { id }) => {
     const [host, filename] = splitHostKey(id);
     if (!ctx.hosts[host]) return new Response("unknown host", { status: 404 });
 
     const ext = filename.split(".").pop().toLowerCase();
     const mime = EXT_MIME[ext];
-    const makeResponse = (bytes) => {
+    const inm = req.headers.get("If-None-Match");
+    // The URL never changes when the content is remapped, so the response
+    // carries validators: no-cache forces revalidation per render; the
+    // ETag (the content hash) answers If-None-Match with a cheap 304.
+    const makeResponse = (bytes, hash) => {
+      const etag = `"${hash}"`;
+      if (inm === etag) return new Response(null, { status: 304, headers: { ETag: etag, "Cache-Control": "no-cache" } });
       const h = new Headers();
       if (mime) h.set("Content-Type", mime);
       h.set("Content-Length", String(bytes.length));
+      h.set("ETag", etag);
+      h.set("Cache-Control", "no-cache");
       return new Response(bytes, { headers: h });
     };
 
     // Cache-first: resolve address → hash, serve from cache. A hit also
-    // fires a debounced async revalidation for non-durable remotes — the
-    // source may have changed in place; the NEXT request gets fresh bytes.
+    // fires a debounced async revalidation — the source may have been
+    // rewritten under the same filename; the NEXT request gets fresh bytes.
     const hash = ctx.store.hashFor(host, filename);
     if (hash) {
       const cached = await cacheGet(hash);
       if (cached) {
         scheduleRevalidate(ctx, host, filename);
-        return makeResponse(cached);
+        return makeResponse(cached, hash);
       }
     }
 
@@ -189,7 +273,7 @@ export function makeRouter(ctx) {
       const ingested = await ctx.ingest.ensure(host, filename);
       if (ingested) {
         const cached = await cacheGet(ingested);
-        if (cached) return makeResponse(cached);
+        if (cached) return makeResponse(cached, ingested);
       }
     }
 
@@ -201,11 +285,14 @@ export function makeRouter(ctx) {
     // Ingest in the background for next time.
     if (ctx.ingest && r.body) {
       const bytes = new Uint8Array(await new Response(r.body).arrayBuffer());
-      const h = makeResponse(bytes);
+      const h = makeResponse(bytes, await sha256(bytes));
       ctx.ingest.ensureBytes(host, filename, bytes).catch(() => {});
       return h;
     }
-    return new Response(r.body, { headers: r.headers });
+    // No ingestion wired (tests): the body streams once — hash it so the
+    // response still carries validators.
+    const bytes = new Uint8Array(await new Response(r.body).arrayBuffer());
+    return makeResponse(bytes, await sha256(bytes));
   });
 
   add("GET", "/api/judgments/<id>", async (_req, { id }) => {

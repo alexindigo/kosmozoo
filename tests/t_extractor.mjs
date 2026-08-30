@@ -115,6 +115,48 @@ Deno.test("extractor: PNG with no prompt chunk yields null meta", async () => {
   assertEquals(meta, null);
 });
 
+Deno.test("extractor: a kz text chunk surfaces as meta.lineage", async () => {
+  // minimal PNG: signature + prompt tEXt + kz tEXt + IDAT header (the
+  // parser stops at IDAT; chunks before it are read)
+  const crcTable = new Int32Array(256).map((_, n) => {
+    let c = n;
+    for (let k = 0; k < 8; k++) c = c & 1 ? 0xedb88320 ^ (c >>> 1) : c >>> 1;
+    return c;
+  });
+  const crc32 = (buf) => {
+    let c = -1;
+    for (const b of buf) c = crcTable[(c ^ b) & 0xff] ^ (c >>> 8);
+    return (c ^ -1) >>> 0;
+  };
+  const textChunk = (key, value) => {
+    const payload = new TextEncoder().encode(key + "\0" + value);
+    const out = new Uint8Array(12 + payload.length);
+    const dv = new DataView(out.buffer);
+    dv.setUint32(0, payload.length);
+    out.set(new TextEncoder().encode("tEXt"), 4);
+    out.set(payload, 8);
+    dv.setUint32(8 + payload.length, crc32(out.subarray(4, 8 + payload.length)));
+    return out;
+  };
+  const sig = new Uint8Array([137, 80, 78, 71, 13, 10, 26, 10]);
+  const idat = new Uint8Array(4); // zero-length IDAT header prefix — parser stops here
+  idat.set([0, 0, 0, 0]);
+  const parts = [
+    sig,
+    textChunk("prompt", JSON.stringify(fluxGraph)),
+    textChunk("kz", JSON.stringify({ v: 1, source: "ark:src_00001_.png", params: { "KSampler.denoise": 0.55 } })),
+    idat,
+  ];
+  const buf = new Uint8Array(parts.reduce((n, p) => n + p.length, 0));
+  let off = 0;
+  for (const p of parts) { buf.set(p, off); off += p.length; }
+
+  const [meta] = await metaFromPngBytes(buf);
+  assertEquals(meta.seed, 999);
+  assertEquals(meta.lineage?.source, "ark:src_00001_.png");
+  assertEquals(meta.lineage?.params, { "KSampler.denoise": 0.55 });
+});
+
 Deno.test("extractor: historyOutputMetas maps output images to metas", () => {
   const history = {
     a: { prompt: [1, "a", fluxGraph], outputs: { "9": { images: [{ filename: "x.png", type: "output" }, { filename: "tmp.png", type: "temp" }] } } },

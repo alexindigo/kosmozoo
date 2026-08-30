@@ -11,18 +11,24 @@ import { buildMetaBody, nodeImages } from "../../js/fields.mjs";
 import { AnchorSpace } from "./AnchorSpace.mjs";
 import { Zoomable } from "./Zoomable.mjs";
 import { openFromInput } from "../../js/diff.mjs";
+import { setCurrent } from "../../js/route.mjs";
+import { restoreToIndex } from "../../js/feed.mjs";
 import { fmtBytes } from "./MetaBar.mjs";
 import { api } from "../../js/api.mjs";
 
-// the current image (host/folder image or anchor)
-function detailsImage() {
-  const c = state.current;
+// a { remote, image } pointer → its feed entry / anchor object
+function imageFor(c) {
   if (!c) return null;
   if (c.remote === "anchor") {
     return state.anchors.find((a) => a.name === c.image) ?? null;
   }
   return state.images.find((i) => i.host === c.remote &&
     (i.filename === c.image || i.filename === c.remote + "#" + c.image)) ?? null;
+}
+
+// the current image (host/folder image or anchor)
+function detailsImage() {
+  return imageFor(state.current);
 }
 
 function DetailsBody() {
@@ -39,8 +45,18 @@ function DetailsBody() {
       el.appendChild(p);
       return;
     }
+    if (!img.meta && img.extracted === false) {
+      // the extractor hasn't reached this file yet — meta may still arrive
+      const p = document.createElement("div");
+      p.className = "info-none";
+      p.textContent = "loading metadata…";
+      el.appendChild(p);
+      return;
+    }
     const head = document.createElement("div");
     head.className = "ws-head";
+    // field values that differ from the previous current image render white
+    const compareMeta = imageFor(state.currentStack.at(-1) ?? null)?.meta ?? null;
     const name = document.createElement("div");
     name.className = "ws-name";
     name.textContent = img.filename ?? img.name ?? "";
@@ -57,6 +73,29 @@ function DetailsBody() {
     };
     sub.textContent = subText();
     head.append(name, sub);
+    // variation lineage (the kz chunk): which image this one came from.
+    // Click jumps to the source when it's in the loaded feed.
+    const lineage = img.meta?.lineage;
+    if (lineage?.source) {
+      const [srcHost, srcFile] = lineage.source.split(/:(.*)/).slice(0, 2);
+      const row = document.createElement("div");
+      row.className = "ws-lineage";
+      const srcIdx = state.images.findIndex((i) => i.host === srcHost && i.filename === srcFile);
+      const tag = document.createElement(srcIdx >= 0 ? "a" : "span");
+      tag.className = "ws-lineage-src";
+      tag.textContent = `variation of ${srcFile}`;
+      if (srcIdx >= 0) {
+        tag.href = "";
+        tag.addEventListener("click", (e) => {
+          e.preventDefault();
+          setCurrent(srcHost, srcFile);
+          restoreToIndex(srcIdx);
+          render();
+        });
+      }
+      row.appendChild(tag);
+      head.appendChild(row);
+    }
     if (img.host && img.size == null) {
       // the card's HEAD fetch may not have run — fill the size in place
       fetch(api.imageBytesUrl(img.id), { method: "HEAD" }).then((r) => {
@@ -92,7 +131,7 @@ function DetailsBody() {
           src: image.src,
           alt: image.file,
           zoomKey: `input:${img.host}:${image.file}`,
-          onOpen: () => openFromInput(img.host, image.file),
+          onOpen: () => openFromInput(img.host, image.file, image.fromOutput),
         }), box);
         sec.append(box);
         imgCol.appendChild(sec);
@@ -100,7 +139,7 @@ function DetailsBody() {
       const txtCol = document.createElement("div");
       txtCol.className = "ws-txtcol";
       txtCol.appendChild(head);
-      txtCol.appendChild(buildMetaBody(img.meta ?? null, img.host, { skipImages: true }));
+      txtCol.appendChild(buildMetaBody(img.meta ?? null, img.host, { skipImages: true, compareMeta }));
       // filename links in the text re-focus the images column on that image
       txtCol.addEventListener("click", (e) => {
         const ref = e.target.closest(".imgref[data-file]");
@@ -115,9 +154,9 @@ function DetailsBody() {
       el.appendChild(cols);
     } else {
       el.appendChild(head);
-      el.appendChild(buildMetaBody(img.meta ?? null, img.host));
+      el.appendChild(buildMetaBody(img.meta ?? null, img.host, { compareMeta }));
     }
-  }, [img, state.infoLayout]);
+  }, [img, img?.meta, img?.extracted, state.infoLayout]);
   return h("div", { id: "wsDetailsBody", class: "metabody", ref });
 }
 
