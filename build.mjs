@@ -52,9 +52,12 @@ await Deno.mkdir(DIST, { recursive: true });
 let compiled = 0, copied = 0;
 for await (const full of walk(SRC)) {
   const rel = relative(SRC, full);
-  const dest = join(DIST, rel.endsWith(".tsx") ? rel.slice(0, -4) + ".js" : rel);
+  // .tsx compiles; .js copies — bare imports get rewritten either way
+  const isJsx = rel.endsWith(".tsx");
+  const isJs = rel.endsWith(".js");
+  const dest = join(DIST, isJsx ? rel.slice(0, -4) + ".js" : rel);
   await Deno.mkdir(dirname(dest), { recursive: true });
-  if (rel.endsWith(".tsx")) {
+  if (isJsx) {
     const source = await Deno.readTextFile(full);
     const out = Babel.transformSync(source, {
       filename: rel,
@@ -65,6 +68,10 @@ for await (const full of walk(SRC)) {
     });
     await Deno.writeTextFile(dest, rewriteSpecifiers(out.code));
     compiled++;
+  } else if (isJs) {
+    const source = await Deno.readTextFile(full);
+    await Deno.writeTextFile(dest, rewriteSpecifiers(source));
+    copied++;
   } else {
     await Deno.copyFile(full, dest);
     copied++;

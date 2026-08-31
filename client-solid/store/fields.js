@@ -42,7 +42,8 @@ function fieldGetter(classType, input) {
 // [[id, getter]] flat, sorted by group title then input — the registry shape
 export function fieldList(registry) {
   const reg = registry ?? {};
-  return Object.entries(reg)
+  const entries = Object.entries(reg);
+  return entries
     .sort(([a, aInfo], [b, bInfo]) => (aInfo.title || a).localeCompare(bInfo.title || b))
     .flatMap(([classType, info]) =>
       Object.keys(info.inputs ?? {}).sort()
@@ -57,7 +58,8 @@ export function fieldsCfgFrom(list, stored) {
   for (const [id] of list) {
     out[id] = { card: false, strip: false, ...(stored?.[id] ?? {}) };
   }
-  for (const [id, cfg] of Object.entries(stored ?? {})) {
+  const storedEntries = Object.entries(stored ?? {});
+  for (const [id, cfg] of storedEntries) {
     if (!(id in out)) out[id] = { card: cfg.card ?? false, strip: cfg.strip ?? false };
   }
   return out;
@@ -112,7 +114,8 @@ export function fullFieldRows(meta, { list, cfg }) {
 // input — the picker's table shape (groups derive from the registry).
 export function fieldGroupsOf(registry) {
   const reg = registry ?? {};
-  return Object.entries(reg)
+  const entries = Object.entries(reg);
+  return entries
     .sort(([a, aInfo], [b, bInfo]) => (aInfo.title || a).localeCompare(bInfo.title || b))
     .map(([classType, info]) => [
       reg[classType]?.title || classType,

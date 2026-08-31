@@ -9,13 +9,17 @@ const URL = process.env.DIAGNOSE_URL || "http://127.0.0.1:2085";
 const HOST = process.env.DIAGNOSE_HOST || "anton";
 const FILE = process.env.DIAGNOSE_FILE || "exp_ComfyUI_v1_00002_.png";
 
+// the app store is a plain ES-module singleton — importing the served URL
+// returns THE instance the app booted (no window global)
+const KZ = `(await import("/store/instance.js")).appStore`;
+
 async function main() {
   const cdp = await CDP.launch(9341);
   try {
     await cdp.send("Emulation.setDeviceMetricsOverride",
       { width: 1400, height: 900, deviceScaleFactor: 1, mobile: false });
     await cdp.goto(URL + "/");
-    await cdp.poll(`window.kosmozoo && window.kosmozoo.state && window.kosmozoo.state.images.length > 0`, 20000);
+    await cdp.poll(`(async () => ${KZ}.state.images.length > 0)()`, 20000);
 
     await cdp.evaluate(`(async () => {
       document.getElementById('hostBtn').click();
@@ -26,9 +30,8 @@ async function main() {
     })()`);
     await sleep(2000);
 
-    const foundIdx = await cdp.evaluate(`(() => {
-      const idx = window.kosmozoo.state.images.findIndex(i => i.filename === ${JSON.stringify(FILE)});
-      return idx;
+    const foundIdx = await cdp.evaluate(`(async () => {
+      return ${KZ}.state.images.findIndex(i => i.filename === ${JSON.stringify(FILE)});
     })()`);
     if (foundIdx < 0) { console.error("image not found"); return; }
 

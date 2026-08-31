@@ -9,6 +9,10 @@ const { CDP, sleep } = require("./cdp.cjs");
 const ENGINE = process.env.E2E_ENGINE ?? "http://127.0.0.1:18260";
 const FAKE = process.env.E2E_FAKE ?? "http://127.0.0.1:18261";
 
+// the app store is a plain ES-module singleton — importing the served URL
+// returns THE instance the app booted (no window global)
+const KZ = `(await import("/store/instance.js")).appStore`;
+
 let failures = 0;
 function check(name, ok, detail) {
   const tag = ok ? " ok " : "FAIL";
@@ -27,7 +31,7 @@ async function main() {
   const cdp = await CDP.launch(9334);
   try {
     await cdp.goto(ENGINE);
-    await cdp.poll(`window.kosmozoo && window.kosmozoo.state.images.length > 0`);
+    await cdp.poll(`(async () => ${KZ}.state.images.length > 0)()`);
     await cdp.poll(`!!document.querySelector('.card[data-idx="0"]')`);
 
     // --- wand button appears on cards ---

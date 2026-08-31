@@ -1,6 +1,20 @@
 {
   "imports": {
-    "@db/sqlite": "jsr:@db/sqlite@0.13.0"
+    "@db/sqlite": "jsr:@db/sqlite@0.13.0",
+    "solid-js": "./client/vendor/solid/solid.mjs",
+    "solid-js/store": "./client/vendor/solid/store.mjs",
+    "solid-js/web": "./client/vendor/solid/web.mjs",
+    "solid-js/jsx-runtime": "./client/vendor/solid/solid.mjs",
+    "/js/api.mjs": "./client/js/api.mjs",
+    "/js/route-parse.mjs": "./client/js/route-parse.mjs",
+    "/js/variations.mjs": "./client/js/variations.mjs",
+    "/js/views.mjs": "./client/js/views.mjs",
+    "/js/icons.mjs": "./client/js/icons.mjs",
+    "/js/zoomable.mjs": "./client/js/zoomable.mjs",
+    "/js/rail.mjs": "./client/js/rail.mjs",
+    "/js/keys.mjs": "./client/js/keys.mjs",
+    "/js/feedview.mjs": "./client/js/feedview.mjs",
+    "/shared/extractor.mjs": "./src/extractor.mjs"
   },
   "tasks": {
     "setup": "deno eval 'import { Database } from \"@db/sqlite\"; new Database(\":memory:\").close();'",
@@ -13,6 +27,8 @@
   },
   "compilerOptions": {
     "jsx": "react-jsx",
-    "jsxImportSource": "solid-js"
+    "jsxImportSource": "solid-js",
+    "strict": false,
+    "lib": ["DOM", "DOM.Iterable", "ESNext"]
   }
 }

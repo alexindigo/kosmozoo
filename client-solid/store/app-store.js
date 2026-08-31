@@ -16,6 +16,7 @@ import { createStore, reconcile } from "solid-js/store";
 import { api } from "/js/api.mjs";
 import { metaFromPngBytes } from "/shared/extractor.mjs";
 import { initViews } from "/js/views.mjs";
+import { makeKeymap, comboFromEvent } from "/js/keys.mjs";
 import {
   parseUrl,
   stripHostPrefix,
@@ -36,7 +37,7 @@ function initialHost(hosts, stored) {
 
 export function makeAppStore() {
   // tree structures — path-level updates
-  const [st, setSt] = createStore({
+    const [st, setSt] = createStore({
     hosts: {},            // name -> { address, online, deleteMode }
     nodesRegistry: {},    // discovered node types (/api/nodes)
     fieldsStored: null,   // raw core.fields cfg — fieldsCfg derives below
@@ -70,9 +71,6 @@ export function makeAppStore() {
   const [menuFilter, setMenuFilter] = createSignal("");
   const [fieldsOverlayOpen, setFieldsOverlayOpen] = createSignal(false);
   const [anchorPaneWidth, setAnchorPaneWidth] = createSignal(300); // px, divider-adjusted, persisted
-  // key bindings: { id, defaultKey, key, desc, ctx, fn, when } — the panel
-  // and the dispatcher read this; rebinds persist in settings core.keys
-  const [bindings, setBindings] = createSignal([]);
 
   // right-column space + details layout — persisted (workspaceState contract).
   // Read once at construction: the persisted space must be set before the
@@ -404,44 +402,12 @@ export function makeAppStore() {
   const chipTimers = { transient: 0 };
   let errSeq = 0;
 
-  // --- keymap helpers ------------------------------------------------------------
-  // A binding is a combo string: "Ctrl+Alt+Shift+Key" (canonical modifier
-  // order). Bare single printable characters ("h", "?", "=") ignore Shift —
-  // e.key already carries the shifted glyph — and require the other
-  // modifiers off. Anything with a modifier matches the exact combo.
-  const [keyOverrides, setKeyOverrides] = createSignal({});
-
-  function comboFromEvent(e) {
-    const mods = [];
-    if (e.ctrlKey) mods.push("Ctrl");
-    if (e.altKey) mods.push("Alt");
-    if (e.metaKey) mods.push("Meta");
-    if (e.shiftKey) mods.push("Shift");
-    return [...mods, e.key].join("+");
-  }
-
-  function bindingMatches(binding, e) {
-    if (binding.length === 1 && !binding.includes("+")) {
-      return !e.ctrlKey && !e.altKey && !e.metaKey
-        && e.key.toLowerCase() === binding.toLowerCase();
-    }
-    return comboFromEvent(e) === binding;
-  }
-
-  // Conflict domain: same effective key in the same ctx ("" = global). Bare
-  // letters conflict case-insensitively ("h" and "H" are one key here).
-  function signature(key) {
-    return /^[a-z]$/i.test(key) && !key.includes("+") ? `letter:${key.toLowerCase()}` : key;
-  }
-
-  function findConflict(id, combo) {
-    const me = bindings().find((a) => a.id === id);
-    if (!me) return null;
-    const sig = signature(combo);
-    const clash = bindings().find((a) =>
-      a.id !== id && (a.ctx ?? "") === (me.ctx ?? "") && signature(a.key) === sig);
-    return clash?.id ?? null;
-  }
+  // --- keymap ------------------------------------------------------------------------
+  // The registry itself is framework-free (client/js/keys.mjs); the version
+  // signal fans mutations out to the keys panel.
+  const keymap = makeKeymap();
+  const [keysVersion, setKeysVersion] = createSignal(0);
+  const bumpKeys = () => setKeysVersion((v) => v + 1);
 
   // --- anchor helpers --------------------------------------------------------------
   const ANCHORS_LS_KEY = "kosmozoo.anchors.v1";
@@ -512,6 +478,8 @@ export function makeAppStore() {
       const urlHost = route.view === "diff" ? route.left?.source : route.host;
       const h = urlHost && st.hosts[urlHost] ? urlHost : initialHost(st.hosts, st.ui.host);
       if (h) await actions.hosts.select(h, { keepFile: true }); // hash pristine at boot
+      // a /diff URL boots into the workbench on the left side
+      if (route.view === "diff") actions.diff.openDiff(route.left, route.right);
     },
 
     hosts: {
@@ -853,10 +821,9 @@ export function makeAppStore() {
     // --- keys: bindings, capture, persisted keymap ------------------------------
     keys: {
       setFilter(v) { setKeysFilter(v); },
-      register(id, defaultKey, fn, { when, desc, ctx } = {}) {
-        const overrides = keyOverrides();
-        setBindings((bs) => [...bs.filter((b) => b.id !== id),
-          { id, defaultKey, key: overrides[id] ?? defaultKey, fn, when, desc: desc ?? id, ctx: ctx ?? "global" }]);
+      register(id, defaultKey, fn, opts = {}) {
+        keymap.bind(id, defaultKey, fn, opts);
+        bumpKeys();
       },
       togglePanel() {
         setKeysPanelOpen(!keysPanelOpen());
@@ -877,39 +844,34 @@ export function makeAppStore() {
           return;
         }
         const combo = comboFromEvent(e);
-        const conflict = findConflict(id, combo);
-        if (conflict) {
-          actions.status.error(`${combo} already bound to ${conflict}`);
+        const res = keymap.rebind(id, combo);
+        if (res.conflict) {
+          actions.status.error(`${combo} already bound to ${res.conflict}`);
         } else {
-          setBindings((bs) => bs.map((b) => (b.id === id ? { ...b, key: combo } : b)));
-          setKeyOverrides((o) => ({ ...o, [id]: combo }));
           api.setSettings("core.keys", { [id]: combo }).catch(() => {});
           actions.status.info(`${id} → ${combo}`);
         }
+        bumpKeys();
         setCapturing(null);
       },
       resetOne(id) {
-        setBindings((bs) => bs.map((b) => (b.id === id ? { ...b, key: b.defaultKey } : b)));
-        setKeyOverrides((o) => {
-          const next = { ...o };
-          delete next[id];
-          return next;
-        });
+        keymap.resetKey(id);
         api.setSettings("core.keys", { [id]: null }).catch(() => {});
+        bumpKeys();
       },
       async resetAll() {
         const saved = await api.settings("core.keys").catch(() => ({}));
-        setBindings((bs) => bs.map((b) => ({ ...b, key: b.defaultKey })));
-        setKeyOverrides({});
+        keymap.resetAll();
         for (const id of Object.keys(saved)) {
           api.setSettings("core.keys", { [id]: null }).catch(() => {});
         }
         actions.status.info("keys reset to defaults");
+        bumpKeys();
       },
       async loadSaved() {
         const saved = await api.settings("core.keys").catch(() => ({}));
-        setKeyOverrides(saved ?? {});
-        setBindings((bs) => bs.map((b) => ({ ...b, key: saved?.[b.id] ?? b.defaultKey })));
+        keymap.setKeymap(saved ?? {});
+        bumpKeys();
       },
       // dispatch a keydown through the bindings (first match wins, in
       // registration order — the panel registers before the workbench so
@@ -923,13 +885,7 @@ export function makeAppStore() {
         }
         if (typeof e.target?.matches === "function"
           && e.target.matches("input, textarea, select")) return;
-        for (const b of bindings()) {
-          if (!bindingMatches(b.key, e)) continue;
-          if (b.when && !b.when(e)) continue;
-          e.preventDefault();
-          b.fn(e);
-          return;
-        }
+        if (keymap.dispatch(e)) e.preventDefault();
       },
     },
 
@@ -1083,52 +1039,52 @@ export function makeAppStore() {
     },
   };
 
-  return {
-    state: {
-      // trees — getters keep reads subscribed to the live store paths
-      get hosts() { return st.hosts; },
-      get nodesRegistry() { return st.nodesRegistry; },
-      get fieldsStored() { return st.fieldsStored; },
-      get scraper() { return st.scraper; },
-      get feedbackPath() { return st.feedbackPath; },
-      get deletePrefs() { return st.deletePrefs; },
-      get ui() { return st.ui; },
-      get judgmentPrefs() { return st.judgmentPrefs; },
-      get images() { return st.images; },
-      get selected() { return st.selected; },
-      get saved() { return st.saved; },
-      get anchors() { return st.anchors; },
-      get diff() { return st.diff; },
-      get variations() { return st.variations; },
-      get infoOverlay() { return st.infoOverlay; },
-      get chips() { return st.chips; },
-      get metaPending() { return st.metaPending; },
-      // derived
-      view,
-      fieldsList,
-      fieldsCfg,
-      // the image-src window (a capability, not data)
-      window: window_,
-      // scalar atoms
-      host,
-      current,
-      currentStack,
-      filter,
-      hostMenuOpen,
-      menuOpen,
-      menuFilter,
-      keysFilter,
-      capturing,
-      bindings,
-      fieldsOverlayOpen,
-      anchorPaneWidth,
-      confirmDelete,
-      keysPanelOpen,
-      workspace,
-      infoLayout,
-    },
-    actions,
+  const stateObj = {
+    // trees — getters keep reads subscribed to the live store paths
+    get hosts() { return st.hosts; },
+    get nodesRegistry() { return st.nodesRegistry; },
+    get fieldsStored() { return st.fieldsStored; },
+    get scraper() { return st.scraper; },
+    get feedbackPath() { return st.feedbackPath; },
+    get deletePrefs() { return st.deletePrefs; },
+    get ui() { return st.ui; },
+    get judgmentPrefs() { return st.judgmentPrefs; },
+    get images() { return st.images; },
+    get selected() { return st.selected; },
+    get saved() { return st.saved; },
+    get anchors() { return st.anchors; },
+    get diff() { return st.diff; },
+    get variations() { return st.variations; },
+    get infoOverlay() { return st.infoOverlay; },
+    get chips() { return st.chips; },
+    get metaPending() { return st.metaPending; },
+    // derived
+    view,
+    fieldsList,
+    fieldsCfg,
+    // the image-src window (a capability, not data)
+    window: window_,
+    // scalar atoms
+    host,
+    current,
+    currentStack,
+    filter,
+    hostMenuOpen,
+    menuOpen,
+    menuFilter,
+    keysFilter,
+    capturing,
+    // the keymap's action list, fanned out by the version signal
+    bindings: () => { keysVersion(); return keymap.list(); },
+    fieldsOverlayOpen,
+    anchorPaneWidth,
+    confirmDelete,
+    keysPanelOpen,
+    workspace,
+    infoLayout,
   };
+
+  return { state: stateObj, actions };
 }
 
 export const AppStoreContext = createContext(null);

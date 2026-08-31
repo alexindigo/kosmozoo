@@ -2,7 +2,7 @@
 // conflicts, reset. Pure logic (no DOM).
 
 import { assert, assertEquals } from "jsr:@std/assert";
-import { chrome, bindingMatches, comboFromEvent, setKeymap, rebind, resetAllKeys, actionsList, findConflict } from "../client/js/chrome.mjs";
+import { bindingMatches, comboFromEvent, makeKeymap } from "../client/js/keys.mjs";
 
 const ev = (key, mods = {}) => ({
   key,
@@ -31,27 +31,31 @@ Deno.test("keys: combo bindings match exactly (Shift+ArrowRight ≠ ArrowRight)"
 
 Deno.test("keys: overrides apply, rebind detects conflicts, reset restores", () => {
   let fired = 0;
-  chrome.bind("t.action.a", "a", () => fired++, { desc: "A", ctx: "t" });
-  chrome.bind("t.action.b", "b", () => {}, { desc: "B", ctx: "t" });
+  const km = makeKeymap();
+  km.bind("t.action.a", "a", () => fired++, { desc: "A", ctx: "t" });
+  km.bind("t.action.b", "b", () => {}, { desc: "B", ctx: "t" });
 
-  setKeymap({ "t.action.a": "Shift+F1" });
-  assertEquals(actionsList().find((a) => a.id === "t.action.a").key, "Shift+F1");
-  assert(actionsList().find((a) => a.id === "t.action.a").overridden);
+  km.setKeymap({ "t.action.a": "Shift+F1" });
+  assertEquals(km.list().find((a) => a.id === "t.action.a").key, "Shift+F1");
+  assert(km.list().find((a) => a.id === "t.action.a").overridden);
 
   // conflict: same key, same ctx
-  const c = rebind("t.action.b", "Shift+F1");
+  const c = km.rebind("t.action.b", "Shift+F1");
   assertEquals(c.conflict, "t.action.a");
   // no conflict across different ctx
-  chrome.bind("other.action", "x", () => {}, { desc: "X", ctx: "other" });
-  assertEquals(rebind("other.action", "Shift+F1").ok, true);
+  km.bind("other.action", "x", () => {}, { desc: "X", ctx: "other" });
+  assertEquals(km.rebind("other.action", "Shift+F1").ok, true);
 
   // rebind then dispatch
-  assertEquals(rebind("t.action.a", "F2").ok, true);
+  assertEquals(km.rebind("t.action.a", "F2").ok, true);
   assert(bindingMatches("F2", ev("F2")));
+  assertEquals(fired, 0);
+  assert(km.dispatch(ev("F2")));
+  assertEquals(fired, 1);
 
-  resetAllKeys();
-  assertEquals(actionsList().find((a) => a.id === "t.action.a").key, "a");
-  assert(!actionsList().find((a) => a.id === "t.action.a").overridden);
+  km.resetAll();
+  assertEquals(km.list().find((a) => a.id === "t.action.a").key, "a");
+  assert(!km.list().find((a) => a.id === "t.action.a").overridden);
 });
 
 Deno.test("keys: comboFromEvent orders modifiers canonically", () => {
@@ -60,9 +64,9 @@ Deno.test("keys: comboFromEvent orders modifiers canonically", () => {
 });
 
 Deno.test("keys: findConflict treats bare letters case-insensitively", () => {
-  chrome.bind("c.a", "h", () => {}, { ctx: "c" });
-  chrome.bind("c.b", "j", () => {}, { ctx: "c" });
-  assertEquals(findConflict("c.b", "H"), "c.a"); // "H" conflicts with "h"
-  assertEquals(findConflict("c.b", "F9"), null);
-  resetAllKeys();
+  const km = makeKeymap();
+  km.bind("c.a", "h", () => {}, { ctx: "c" });
+  km.bind("c.b", "j", () => {}, { ctx: "c" });
+  assertEquals(km.findConflict("c.b", "H"), "c.a"); // "H" conflicts with "h"
+  assertEquals(km.findConflict("c.b", "F9"), null);
 });

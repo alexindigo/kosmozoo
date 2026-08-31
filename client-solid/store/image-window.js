@@ -25,7 +25,11 @@ export function makeImageWindow(store) {
   const [version, setVersion] = createSignal(0);
   const bump = () => setVersion((v) => v + 1);
 
-  const observer = new IntersectionObserver((entries) => {
+  // headless (unit tests): a no-op observer when there's no DOM
+  const IO = typeof IntersectionObserver !== "undefined"
+    ? IntersectionObserver
+    : class { observe() {} unobserve() {} disconnect() {} };
+  const observer = new IO((entries) => {
     let changed = false;
     for (const en of entries) {
       const idx = Number(en.target.dataset.idx);

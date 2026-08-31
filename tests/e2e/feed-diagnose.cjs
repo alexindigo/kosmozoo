@@ -36,7 +36,7 @@ async function shot(page, name) {
 // Snapshot: bounding rects of the feed column, viewport, and every rendered
 // card (idx, top, bottom, height, aspect variables, image dimensions,
 // whether image src is set, whether image is fully in-viewport).
-const LAYOUT_JS = `(() => {
+const LAYOUT_JS = `(async () => {
   const rect = (el) => {
     if (!el) return null;
     const r = el.getBoundingClientRect();
@@ -78,7 +78,7 @@ const LAYOUT_JS = `(() => {
     colRect: rect(col),
     scrollTop: col ? col.scrollTop : null,
     scrollHeight: col ? col.scrollHeight : null,
-    imagesInState: window.kosmozoo && window.kosmozoo.state ? window.kosmozoo.state.images.length : null,
+    imagesInState: (await import("/store/instance.js")).appStore.state.images.length,
     cards,
   };
 })()`;
@@ -90,7 +90,7 @@ const LAYOUT_JS = `(() => {
       await page.send("Emulation.setDeviceMetricsOverride",
         { width: vp.w, height: vp.h, deviceScaleFactor: 1, mobile: false });
       await page.goto(BASE + "/");
-      await page.poll("window.kosmozoo && window.kosmozoo.state && window.kosmozoo.state.images.length > 0", 30000);
+      await page.poll("(async () => (await import(\"/store/instance.js\")).appStore.state.images.length > 0)()", 30000);
       await page.poll("!!document.querySelector('.card[data-idx=\"0\"]')", 15000);
       // let images load
       await sleep(2500);

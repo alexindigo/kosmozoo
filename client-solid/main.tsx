@@ -2,14 +2,11 @@
 // store's context, then boots (boot data + initial host selection).
 
 import { render } from "solid-js/web";
-import { makeAppStore, AppStoreContext } from "./store/app-store.js";
+import { AppStoreContext } from "./store/app-store.js";
+import { appStore } from "./store/instance.js";
 import { App } from "./components/App.js";
 
-const store = makeAppStore();
-
-// public namespace: e2e (and the console) drive the same state the UI does.
-// Grows with the phases; the preact app's shape is the cutover contract.
-window.kosmozoo = { state: store.state, actions: store.actions };
+const store = appStore;
 
 render(
   () => (

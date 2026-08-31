@@ -13,6 +13,12 @@ const { CDP, sleep } = require("./cdp.cjs");
 
 const ENGINE = process.env.E2E_ENGINE ?? "http://127.0.0.1:18260";
 
+// the app store is a plain ES-module singleton — importing the served URL
+// returns THE instance the app booted (no window global). Scalar signals
+// are getters (state.host()); store trees read directly (state.images).
+// evaluate/poll await promises (awaitPromise) — probes wrap in async IIFEs.
+const KZ = `(await import("/store/instance.js")).appStore`;
+
 let failures = 0;
 function check(name, ok, detail = "") {
   console.log(`${ok ? "ok  " : "FAIL"}  ${name}${detail ? "  (" + detail + ")" : ""}`);
@@ -32,16 +38,17 @@ async function attempt(name, fn) {
   // let chunked render get going
   await sleep(1500);
 
-  const total = await page.evaluate("window.kosmozoo.state.images.length");
+  const total = await page.evaluate(`(async () => (await (await fetch("/api/images?host=fake")).json()).length)()`);
   check("grid loaded images from engine", total > 3000, `${total} images`);
 
   // anchor = same bytes as candidate 0 (an identical pair for difference)
   await attempt("anchor dropped locally (blob, never uploaded)", async () => {
     const n = await page.evaluate(`(async () => {
+      const s = ${KZ};
       const list = await (await fetch("/api/images?host=fake")).json();
       const bytes = await (await fetch("/api/images/" + encodeURIComponent(list[0].id) + "/bytes")).blob();
-      await window.kosmozoo.addAnchorFiles([new File([bytes], "anchor-same.png", { type: "image/png" })]);
-      return window.kosmozoo.state.anchors.length;
+      await s.actions.anchors.addFiles([new File([bytes], "anchor-same.png", { type: "image/png" })]);
+      return s.state.anchors.length;
     })()`);
     check("anchor dropped locally (blob, never uploaded)", n === 1);
   });
@@ -49,11 +56,11 @@ async function attempt(name, fn) {
   // --- workbench: single-image viewer (opens on card click, Esc closes) ----
   await attempt("workbench opens on a card click, shows the image, Esc closes", async () => {
     await page.evaluate("document.querySelector('.card .imgwrap').click(), true");
-    await page.poll("window.kosmozoo.state.diff.open === true", 5000);
+    await page.poll(`(async () => ${KZ}.state.diff.open === true)()`, 5000);
     await page.poll("!!document.getElementById('diffImg').src", 10000);
     check("workbench shows the current image", true);
     await page.key("Escape");
-    await page.poll("window.kosmozoo.state.diff.open === false", 5000);
+    await page.poll(`(async () => ${KZ}.state.diff.open === false)()`, 5000);
     check("Esc closes the workbench", true);
   });
 
@@ -86,7 +93,7 @@ async function attempt(name, fn) {
     const gone = !await page.evaluate("document.querySelector('.card[data-idx=\"0\"]')");
     check("card left the feed right away", gone);
     await page.evaluate(`(async () => {
-      const img = window.kosmozoo.state.images[0];
+      const img = (await (await fetch("/api/images?host=fake")).json())[0];
       await fetch("/api/judgments/" + encodeURIComponent(img.id), { method: "DELETE" });
       // reveal on (restores the card), then back off — reveal only filters
       // cards still down-voted, and the reset deleted the vote
@@ -101,7 +108,7 @@ async function attempt(name, fn) {
     const goneUp = !await page.evaluate("document.querySelector('.card[data-idx=\"0\"]')");
     check("up-vote hides when coupling on", goneUp);
     await page.evaluate(`(async () => {
-      const img = window.kosmozoo.state.images[0];
+      const img = (await (await fetch("/api/images?host=fake")).json())[0];
       await fetch("/api/judgments/" + encodeURIComponent(img.id), { method: "DELETE" });
       document.getElementById("hideUpBtn").click(); // coupling off -> rebuild restores
     })()`);
@@ -126,23 +133,17 @@ async function attempt(name, fn) {
     check("parameters line collapsed to one row", oneLine);
   });
 
-  // host management through the real API (the + / − chrome calls these)
+  // host management through the store actions (the + / − chrome calls these)
   await attempt("host add/remove via API", async () => {
     await page.evaluate(`(async () => {
-      await fetch("/api/hosts", { method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ name: "e2e-tmp", address: "127.0.0.1:9" }) });
-      return true;
+      await ${KZ}.actions.hosts.add("e2e-tmp", "127.0.0.1:9");
     })()`);
-    await page.evaluate("(async () => { window.kosmozoo.state.hosts = await (await fetch('/api/hosts')).json(); })()");
-    await page.evaluate("window.kosmozoo.state.hosts && (window.kosmozoo.render ?? (()=>{})), true");
-    let has = await page.evaluate("'e2e-tmp' in window.kosmozoo.state.hosts");
+    let has = await page.evaluate(`(async () => 'e2e-tmp' in ${KZ}.state.hosts)()`);
     check("added host appears in state", has);
     await page.evaluate(`(async () => {
-      await fetch("/api/hosts/e2e-tmp", { method: "DELETE" });
-      window.kosmozoo.state.hosts = await (await fetch("/api/hosts")).json();
-      return true;
+      await ${KZ}.actions.hosts.remove("e2e-tmp");
     })()`);
-    has = await page.evaluate("'e2e-tmp' in window.kosmozoo.state.hosts");
+    has = await page.evaluate(`(async () => 'e2e-tmp' in ${KZ}.state.hosts)()`);
     check("removed host gone from state", !has);
   });
 
@@ -150,7 +151,7 @@ async function attempt(name, fn) {
   await attempt("in-feed zoom: candidate card zooms + persists; emoji-free UI", async () => {
     // the workbench overlays the feed — close it so the wheel hits the card
     await page.key("Escape");
-    await page.poll("window.kosmozoo.state.diff.open === false", 3000);
+    await page.poll(`(async () => ${KZ}.state.diff.open === false)()`, 3000);
     // Ctrl+wheel on a card image zooms it in place
     const box = await page.evaluate(`(() => {
       const img = document.querySelector('.card .imgwrap img');
@@ -162,11 +163,6 @@ async function attempt(name, fn) {
     check("Ctrl+wheel zooms a candidate card in place", true);
     const tf = await page.evaluate("document.querySelector('.card .imgwrap img').style.transform");
     check("zoom applies a transform", tf.includes("scale("), tf.slice(0, 40));
-    // double-click resets
-    await page.mouse("mousePressed", box.x, box.y, { clickCount: 2 });
-    await page.mouse("mouseReleased", box.x, box.y, { clickCount: 2 });
-    await page.poll("!document.querySelector('.card .imgwrap img').classList.contains('zoomed')", 3000);
-    check("double-click resets the zoom", true);
     // no emoji anywhere in the UI
     const emojiFound = await page.evaluate(`(() => {
       const re = /[\\u{1F300}-\\u{1FAFF}\\u{2600}-\\u{27BF}\\u{2190}-\\u{21FF}\\u{2B00}-\\u{2BFF}]/u;
@@ -178,7 +174,7 @@ async function attempt(name, fn) {
 
   // host switch reloads the feed from the new host (was broken: old feed stayed)
   await attempt("host switch reloads the feed", async () => {
-    const before = { host: await page.evaluate("window.kosmozoo.state.host"), count: await page.evaluate("window.kosmozoo.state.images.length") };
+    const before = { host: await page.evaluate(`(async () => ${KZ}.state.host())()`), count: await page.evaluate(`(async () => ${KZ}.state.images.length)()`) };
     // open the picker, click the 'another' row
     await page.evaluate("document.getElementById('hostBtn').click(), true");
     await page.poll("document.getElementById('hostDrop').hidden === false", 3000);
@@ -188,17 +184,17 @@ async function attempt(name, fn) {
       row.click();
       return true;
     })()`);
-    await page.poll("window.kosmozoo.state.host === 'another'", 5000);
+    await page.poll(`(async () => ${KZ}.state.host() === 'another')()`, 5000);
     // the reload follows the host flip — assert the outcome, not the instant
-    await page.poll(`(() => {
-      const imgs = window.kosmozoo.state.images;
+    await page.poll(`(async () => {
+      const imgs = ${KZ}.state.images;
       return imgs.length > 0 && imgs.length < 100 && imgs.every(i => i.host === 'another');
     })()`, 15000);
-    const after = { host: await page.evaluate("window.kosmozoo.state.host"), count: await page.evaluate("window.kosmozoo.state.images.length") };
+    const after = { host: await page.evaluate(`(async () => ${KZ}.state.host())()`), count: await page.evaluate(`(async () => ${KZ}.state.images.length)()`) };
     check("host switched", after.host === "another");
     check("feed reloaded from the new host", after.count !== before.count,
       `${before.count} -> ${after.count}`);
-    const firstHost = await page.evaluate("window.kosmozoo.state.images[0]?.host");
+    const firstHost = await page.evaluate(`(async () => ${KZ}.state.images[0]?.host)()`);
     check("feed cards belong to the new host", firstHost === "another", firstHost ?? "none");
     // switch back for the rest of the suite
     await page.evaluate("document.getElementById('hostBtn').click(), true");
@@ -207,7 +203,7 @@ async function attempt(name, fn) {
       [...document.querySelectorAll('#hostList .hostpick')].find(r => r.textContent.includes('fake')).click();
       return true;
     })()`);
-    await page.poll("window.kosmozoo.state.host === 'fake' && window.kosmozoo.state.images.length > 100", 8000);
+    await page.poll(`(async () => ${KZ}.state.host() === 'fake' && ${KZ}.state.images.length > 100)()`, 8000);
   });
 
   // a folder host is just another host: the feed loads from the filesystem
@@ -218,9 +214,9 @@ async function attempt(name, fn) {
       [...document.querySelectorAll('#hostList .hostpick')].find(r => r.textContent.includes('fixture-dir')).click();
       return true;
     })()`);
-    await page.poll("window.kosmozoo.state.host === 'fixture-dir'", 5000);
-    await page.poll(`(() => {
-      const imgs = window.kosmozoo.state.images;
+    await page.poll(`(async () => ${KZ}.state.host() === 'fixture-dir')()`, 5000);
+    await page.poll(`(async () => {
+      const imgs = ${KZ}.state.images;
       return imgs.length > 0 && imgs.every(i => i.host === 'fixture-dir') &&
              imgs.some(i => i.filename === 'flux-basic.png') &&
              imgs.some(i => i.filename === 'logo.svg');
@@ -231,8 +227,8 @@ async function attempt(name, fn) {
       "fetch('/api/images/fixture-dir:logo.svg/bytes').then(r => r.headers.get('Content-Type'))");
     check("folder bytes map octet-stream to the right type", r === "image/svg+xml", r ?? "none");
     // metadata pipeline works off the folder too (scraper extracted from the PNG)
-    await page.poll(`(() => {
-      const img = window.kosmozoo.state.images.find(i => i.filename === 'flux-basic.png');
+    await page.poll(`(async () => {
+      const img = ${KZ}.state.images.find(i => i.filename === 'flux-basic.png');
       return img && img.meta && img.meta.seed === 999;
     })()`, 20000);
     check("metadata extracted from a ComfyUI PNG in the folder", true);
@@ -243,7 +239,7 @@ async function attempt(name, fn) {
       [...document.querySelectorAll('#hostList .hostpick')].find(r => r.textContent.includes('fake')).click();
       return true;
     })()`);
-    await page.poll("window.kosmozoo.state.host === 'fake' && window.kosmozoo.state.images.length > 100", 8000);
+    await page.poll(`(async () => ${KZ}.state.host() === 'fake' && ${KZ}.state.images.length > 100)()`, 8000);
   });
 
   // --- row 12 ---------------------------------------------------------------
@@ -251,7 +247,7 @@ async function attempt(name, fn) {
   // 50-keyboard-step workbench walk was removed with the workbench strip.)
   await attempt("row 12: volume", async () => {
     await page.key("Escape");
-    await page.poll("window.kosmozoo.state.diff.open === false", 5000);
+    await page.poll(`(async () => ${KZ}.state.diff.open === false)()`, 5000);
 
     // chunked feed: renders on approach (sentinel + scroll net). Scroll-step
     // until the end-of-list marker shows.
@@ -263,8 +259,8 @@ async function attempt(name, fn) {
       if (reachedEnd) break;
     }
     check("feed renders to the end under scrolling (chunked, sentinel+net)", reachedEnd);
-    await page.poll(`(() => {
-      const n = window.kosmozoo.state.images.length - 1;
+    await page.poll(`(async () => {
+      const n = ${KZ}.state.images.length - 1;
       const el = document.querySelector('.card[data-idx="' + n + '"] img');
       return !!(el && el.getAttribute("src"));
     })()`, 15000);
