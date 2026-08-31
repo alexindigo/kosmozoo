@@ -8,8 +8,11 @@ import {
   narrowToOneSaveImage,
   wrapAllSaveImagePrefixes,
   inspectGraph,
+  stringParams,
   mutateGraph,
   resolveRelativeRanges,
+  dedupHostTag,
+  lineageTag,
 } from "../plugins/variations/plugin.mjs";
 
 // --- permutation engine ---------------------------------------------------
@@ -420,4 +423,166 @@ Deno.test("inspectGraph: string inputs are not varyable", () => {
   };
   const params = inspectGraph(graph);
   assertEquals(params.length, 0);
+});
+
+// --- LoadImage sweep axes ------------------------------------------------------
+
+Deno.test("stringParams: LoadImage image inputs surface, other strings don't", () => {
+  const graph = {
+    "1": { class_type: "LoadImage", inputs: { image: "a.png", upload: true } },
+    "2": { class_type: "CLIPTextEncode", inputs: { text: "fish" } },
+    "3": { class_type: "ImageOnlyLoadImage", inputs: { image: "m.png" } },
+    "4": { class_type: "LoadImage", inputs: { image: "notanimage.txt" } },
+    "5": { class_type: "KSampler", inputs: { seed: 1, steps: 20 } },
+  };
+  const sp = stringParams(graph);
+  assertEquals(sp.length, 2);
+  assertEquals(sp[0].id, "LoadImage.image");
+  assertEquals(sp[0].current, "a.png");
+  assertEquals(sp[1].id, "ImageOnlyLoadImage.image");
+  assertEquals(sp[1].current, "m.png");
+});
+
+Deno.test("generatePermutations: image axes multiply the numeric cartesian", () => {
+  const perms = generatePermutations(
+    { "KSampler.denoise": { enabled: true, min: 0.5, max: 1, increment: 0.5 } },
+    0.05,
+    { "KSampler.denoise": 0.7, "LoadImage.image": "orig.png" },
+    { "LoadImage.image": { enabled: true, values: ["x.png", "y.png"] } },
+  );
+  // 2 denoise values × 2 images = 4; current combo (0.7 not in range) not
+  // excluded → all 4 survive
+  assertEquals(perms.length, 4);
+  assert(perms.some((p) => p["LoadImage.image"] === "x.png" && p["KSampler.denoise"] === 0.5));
+  assert(perms.some((p) => p["LoadImage.image"] === "y.png" && p["KSampler.denoise"] === 1));
+});
+
+Deno.test("generatePermutations: the current combo (current filename) is excluded", () => {
+  const perms = generatePermutations(
+    {},
+    0.05,
+    { "LoadImage.image": "orig.png" },
+    { "LoadImage.image": { enabled: true, values: ["orig.png", "x.png", "y.png"] } },
+  );
+  assertEquals(perms.length, 2);
+  assert(!perms.some((p) => p["LoadImage.image"] === "orig.png"));
+});
+
+Deno.test("generatePermutations: current numeric value is NOT skipped at a different source image", () => {
+  // denoise range includes the current 0.7; the image axis sweeps to x.png —
+  // (denoise 0.7, x.png) is novel, only (denoise 0.7, orig.png) is redundant
+  const perms = generatePermutations(
+    { "KSampler.denoise": { enabled: true, min: 0.5, max: 1, increment: 0.5 } },
+    0.05,
+    { "KSampler.denoise": 0.7, "LoadImage.image": "orig.png" },
+    { "LoadImage.image": { enabled: true, values: ["orig.png", "x.png"] } },
+  );
+  // values 0.5/1 × {orig, x} = 4, plus 0.7 is not a range step → only
+  // (0.5..1 don't include 0.7) — assert by the count and the key combos
+  assert(perms.some((p) => p["LoadImage.image"] === "x.png" && p["KSampler.denoise"] === 0.5));
+  assert(perms.some((p) => p["LoadImage.image"] === "x.png" && p["KSampler.denoise"] === 1));
+  assert(perms.some((p) => p["LoadImage.image"] === "orig.png" && p["KSampler.denoise"] === 0.5));
+});
+
+Deno.test("generatePermutations: a range step equal to the current value is kept when the image changes", () => {
+  const perms = generatePermutations(
+    { "KSampler.denoise": { enabled: true, min: 0.5, max: 1.5, increment: 0.5 } }, // steps 0.5,1.0,1.5 — current 1.0 IS a step
+    0.05,
+    { "KSampler.denoise": 1, "LoadImage.image": "orig.png" },
+    { "LoadImage.image": { enabled: true, values: ["orig.png", "x.png"] } },
+  );
+  // 3 denoise steps × 2 images = 6; only (1.0, orig.png) excluded → 5
+  assertEquals(perms.length, 5);
+  assert(perms.some((p) => p["LoadImage.image"] === "x.png" && p["KSampler.denoise"] === 1),
+    "current denoise at a DIFFERENT image must be kept");
+  assert(!perms.some((p) => p["LoadImage.image"] === "orig.png" && p["KSampler.denoise"] === 1),
+    "current denoise at the SAME image is redundant → dropped");
+});
+
+Deno.test("generatePermutations: image-only sweep (no numeric ranges)", () => {
+  const perms = generatePermutations(
+    {},
+    0.05,
+    { "LoadImage.image": "orig.png" },
+    { "LoadImage.image": { enabled: true, values: ["x.png", "y.png"] } },
+  );
+  assertEquals(perms.length, 2);
+});
+
+Deno.test("mutateGraph: a string param writes verbatim (no rounding)", () => {
+  const graph = {
+    "1": { class_type: "LoadImage", inputs: { image: "a.png" } },
+    "2": { class_type: "KSampler", inputs: { seed: 1, steps: 20 } },
+  };
+  const params = [...inspectGraph(graph), ...stringParams(graph)];
+  const { graph: mutated, applied } = mutateGraph(graph, { "LoadImage.image": "chosen.png" }, params);
+  assertEquals(mutated["1"].inputs.image, "chosen.png");
+  assert(applied.includes("LoadImage.image"));
+});
+
+Deno.test("templateReplace: the chosen filename fills {LoadImage.image} and {image}", () => {
+  const out = templateReplace(
+    "run_{LoadImage.image}_vs_{image}",
+    { "LoadImage.image": "chosen.png", image: "chosen.png" },
+    { "LoadImage.image": "orig.png" },
+    {},
+  );
+  assertEquals(out, "run_chosen.png_vs_chosen.png");
+});
+
+// --- host-tag dedup -----------------------------------------------------------
+
+Deno.test("dedupHostTag: variation sources keep exactly one <host># tag", () => {
+  assertEquals(dedupHostTag("plain_name_", "ark#"), "plain_name_");
+  assertEquals(dedupHostTag("ark#alisa_00291_", "ark#"), "alisa_00291_");
+  assertEquals(dedupHostTag("ark#ark#alisa_00341__0.8_", "ark#"), "alisa_00341__0.8_");
+  assertEquals(dedupHostTag("ark#ark#ark#deep_", "ark#"), "deep_");
+  // a different host's tag is not stripped (cross-host vary)
+  assertEquals(dedupHostTag("anton#x_", "ark#"), "anton#x_");
+  // degenerate: the basename IS the tag — kept, not emptied
+  assertEquals(dedupHostTag("ark#", "ark#"), "ark#");
+});
+
+Deno.test("lineageTag: the extra_pnginfo payload carries source + params", () => {
+  const tag = lineageTag("ark:src_00001_.png", { "KSampler.denoise": 0.55, "LoadImage.image": "x.png" });
+  assertEquals(tag.kz.v, 1);
+  assertEquals(tag.kz.source, "ark:src_00001_.png");
+  assertEquals(tag.kz.params["KSampler.denoise"], 0.55);
+  assertEquals(tag.kz.params["LoadImage.image"], "x.png");
+  // JSON-safe (ComfyUI json.dumps each extra_pnginfo value)
+  assertEquals(JSON.parse(JSON.stringify(tag)), tag);
+});
+
+// --- integer detection: the host's declared type, not the current value ---------
+
+Deno.test("inspectGraph: declared FLOAT wins over an integer-looking current value", () => {
+  // a lora strength currently at 1 must NOT be treated as integer
+  const graph = {
+    "1": { class_type: "LoraLoaderModelOnly", inputs: { strength_model: 1, model: ["9", 0] } },
+    "9": { class_type: "KSampler", inputs: { seed: 1, steps: 20, denoise: 1 } },
+  };
+  const types = new Map([
+    ["LoraLoaderModelOnly.strength_model", "FLOAT"],
+    ["KSampler.seed", "INT"],
+    ["KSampler.steps", "INT"],
+    ["KSampler.denoise", "FLOAT"],
+  ]);
+  const params = inspectGraph(graph, types);
+  const byId = (id) => params.find((p) => p.id === id);
+  assertEquals(byId("LoraLoaderModelOnly.strength_model").integer, false);
+  assertEquals(byId("KSampler.denoise").integer, false); // FLOAT, value 1 notwithstanding
+  assertEquals(byId("KSampler.steps").integer, true);
+  // no types map → the old value-inference fallback
+  const fallback = inspectGraph(graph);
+  assertEquals(fallback.find((p) => p.id === "KSampler.steps").integer, true);
+});
+
+Deno.test("mutateGraph: a declared-FLOAT strength sweeps in floats, not rounded to int", () => {
+  const graph = {
+    "1": { class_type: "LoraLoaderModelOnly", inputs: { strength_model: 1, model: ["9", 0] } },
+  };
+  const types = new Map([["LoraLoaderModelOnly.strength_model", "FLOAT"]]);
+  const params = inspectGraph(graph, types);
+  const { graph: mutated } = mutateGraph(graph, { "LoraLoaderModelOnly.strength_model": 0.55 }, params);
+  assertEquals(mutated["1"].inputs.strength_model, 0.55);
 });

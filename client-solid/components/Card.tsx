@@ -31,12 +31,6 @@ export function Card(props) {
   const [expanded, setExpanded] = createSignal(false);
   const [flash, setFlash] = createSignal(false);
 
-  const facts = () => ({
-    w: meta()?.width ?? null,
-    h: meta()?.height ?? null,
-    bytes: image()?.size ?? null,
-  });
-
   onMount(() => {
     if (image()?.size == null) store.actions.images.fillSize(image().id);
   });
@@ -170,7 +164,12 @@ export function Card(props) {
           onSave={saveNote("pos")} getNeighborText={neighborText("pos")}
         />
       </div>
-      <MetaBar facts={facts} meta={meta} expanded={expanded} onToggle={() => setExpanded(!expanded())} />
+      <MetaBar
+        facts={{ w: meta()?.width ?? null, h: meta()?.height ?? null, bytes: image()?.size ?? null }}
+        meta={image()?.meta ?? null}
+        expanded={expanded()}
+        onToggle={() => setExpanded(!expanded())}
+      />
     </>
   );
 }

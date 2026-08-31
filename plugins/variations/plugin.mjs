@@ -13,6 +13,31 @@
 
 import { parsePngTextChunks } from "../../src/extractor.mjs";
 
+// --- LoadImage sweep axes ------------------------------------------------------
+//
+// A LoadImage node's `image` input is a STRING (a filename in the host's
+// input dir) — not a numeric range. Sweeping it is an enum axis: the user
+// picks one file (new image) or every file in the input dir, and the engine
+// iterates over them. Multi-instance: two LoadImage nodes sweep
+// independently, so stringParams keeps node titles to tell them apart.
+
+const IMG_FILE = /\.(png|jpe?g|webp|gif|avif|bmp)$/i;
+
+// string-valued image inputs: every node whose type ends in "LoadImage",
+// whose `image` input names an image file. id = paramId(type, "image").
+export function stringParams(graph) {
+  const out = [];
+  for (const [id, n] of Object.entries(graph ?? {})) {
+    const type = String(n.class_type ?? "");
+    if (!/loadimage$/i.test(type)) continue;
+    const v = n.inputs?.image;
+    if (typeof v !== "string" || !IMG_FILE.test(v)) continue;
+    const title = n._meta?.title && n._meta.title !== type ? String(n._meta.title) : null;
+    out.push({ id: paramId(type, "image"), nodeIds: [id], key: "image", type, title, current: v });
+  }
+  return out;
+}
+
 // --- parameter discovery: generic, node-instance based -----------------------
 //
 // No hardcoded node names. Every numeric scalar input of every node instance
@@ -25,11 +50,41 @@ export function paramId(classType, input) {
   return `${classType}.${input}`;
 }
 
+// Host-declared input types: ComfyUI's /api/object_info says INT or FLOAT per
+// input. That is the ONLY honest integer source — the current value lies (a
+// float strength currently at 1 looks like an integer and would get rounded
+// on write). Cached per host address for the process's life.
+const typeCache = new Map(); // addr -> Map<paramId, "INT"|"FLOAT"> | null
+
+async function inputTypes(addr) {
+  if (addr.startsWith("folder:")) return null;
+  if (typeCache.has(addr)) return typeCache.get(addr);
+  let map = null;
+  try {
+    const r = await fetch(`http://${addr}/api/object_info`, { signal: AbortSignal.timeout(8000) });
+    if (r.ok) {
+      const info = await r.json();
+      map = new Map();
+      for (const [type, def] of Object.entries(info)) {
+        for (const section of ["required", "optional"]) {
+          for (const [key, spec] of Object.entries(def?.input?.[section] ?? {})) {
+            const t = Array.isArray(spec) ? spec[0] : spec;
+            if (t === "INT" || t === "FLOAT") map.set(paramId(type, key), t);
+          }
+        }
+      }
+    }
+  } catch { /* offline or no object_info — value inference below */ }
+  typeCache.set(addr, map);
+  return map;
+}
+
 // Everything a numeric input needs: where it lives (node ids — ALL instances
 // of a same-type same-input pair share one param and sweep together, the
-// multi-carrier rule), what it is (integer/float — integer params round on
-// write), and its current value (the first carrier's).
-export function inspectGraph(graph) {
+// multi-carrier rule), what it is (integer/float — the host's declared type
+// wins, the current value is only a fallback), and its current value (the
+// first carrier's).
+export function inspectGraph(graph, types = null) {
   const out = new Map(); // id -> entry
   for (const [id, n] of Object.entries(graph ?? {})) {
     const type = String(n.class_type ?? "");
@@ -42,6 +97,7 @@ export function inspectGraph(graph) {
       if (existing) {
         existing.nodeIds.push(id);
       } else {
+        const declared = types?.get(pid);
         out.set(pid, {
           id: pid,
           nodeIds: [id],
@@ -49,7 +105,7 @@ export function inspectGraph(graph) {
           type,
           title,
           current: v,
-          integer: Number.isInteger(v),
+          integer: declared ? declared === "INT" : Number.isInteger(v),
         });
       }
     }
@@ -61,6 +117,8 @@ export function inspectGraph(graph) {
 
 // permutation: { "<class_type>.<input>": value }. Targets are resolved by
 // node id, and a param that shows on several instances sweeps ALL of them.
+// Numeric params round when integer; string params (LoadImage.image) write
+// verbatim.
 export function mutateGraph(graph, permutation, params) {
   const clone = structuredClone(graph);
   const byId = new Map();
@@ -69,7 +127,7 @@ export function mutateGraph(graph, permutation, params) {
   for (const [id, value] of Object.entries(permutation)) {
     const p = byId.get(id);
     if (!p) continue;
-    const v = p.integer ? Math.round(value) : value;
+    const v = typeof value === "string" ? value : (p.integer ? Math.round(value) : value);
     for (const nodeId of p.nodeIds) {
       const node = clone[nodeId];
       if (!node?.inputs) continue;
@@ -127,27 +185,45 @@ function cartesianProduct(arrays) {
 
 // Each enabled range now carries its own `increment`. A single global
 // `fallbackIncrement` is used for entries missing one (legacy callers).
-export function generatePermutations(ranges, fallbackIncrement, currentValues) {
+// `imageParams` (LoadImage sweep) adds enum axes: permutations are the
+// numeric cartesian product × the image cartesian product, image axes
+// outermost. The current-combo exclusion compares FORMATTED values so a
+// string filename and a numeric current compare honestly.
+export function generatePermutations(ranges, fallbackIncrement, currentValues, imageParams = {}) {
   const enabled = Object.entries(ranges).filter(([, r]) => r.enabled);
-  if (enabled.length === 0) return [];
+  const imgEnabled = Object.entries(imageParams).filter(([, p]) => p.enabled && Array.isArray(p.values) && p.values.length);
+  if (enabled.length === 0 && imgEnabled.length === 0) return [];
+
   const keys = enabled.map(([k]) => k);
   const valueArrays = enabled.map(([, r]) => {
     const inc = (typeof r.increment === "number" && r.increment > 0)
       ? r.increment : fallbackIncrement;
     return rangeValues(r.min, r.max, inc);
   });
-  const product = cartesianProduct(valueArrays);
-  const currentKey = keys.map((k) => String(currentValues[k])).join("|");
+  const imgKeys = imgEnabled.map(([k]) => k);
+  const imgArrays = imgEnabled.map(([, p]) => p.values);
+
+  const fmt = (v) => (typeof v === "string" ? v : formatValue(v));
+  const currentKey = [...keys, ...imgKeys].map((k) => fmt(currentValues[k])).join("|");
+
+  const product = cartesianProduct([...valueArrays, ...imgArrays]);
   return product.filter((perm) => {
-    const key = keys.map((k, i) => String(perm[i])).join("|");
-    return key !== currentKey;
-  }).map((perm) => Object.fromEntries(keys.map((k, i) => [k, perm[i]])));
+    // the current combo is redundant only when EVERY axis sits at its
+    // current value — a swept LoadImage axis at a DIFFERENT file makes the
+    // combination novel, so the current denoise/cfg/… value must NOT be
+    // skipped there
+    if (keys.length === 0) return perm.map(fmt).join("|") !== currentKey;
+    const imgOffset = keys.length;
+    const numericsCurrent = keys.every((k, i) => fmt(perm[i]) === fmt(currentValues[k]));
+    const imagesCurrent = imgKeys.every((k, j) => fmt(perm[imgOffset + j]) === fmt(currentValues[k]));
+    return !(numericsCurrent && imagesCurrent);
+  }).map((perm) => Object.fromEntries([...keys, ...imgKeys].map((k, i) => [k, perm[i]])));
 }
 
 // --- filename template -------------------------------------------------------
 
 function formatValue(v) {
-  return String(parseFloat(Number(v).toFixed(10)));
+  return typeof v === "string" ? v : String(parseFloat(Number(v).toFixed(10)));
 }
 
 // Substitute both bare keys ({denoise}) and node-prefixed keys
@@ -171,6 +247,25 @@ export function templateReplace(template, values, currentValues, labelMap = {}) 
     if (key in lookup) return formatValue(lookup[key]);
     return `{${key}}`;
   });
+}
+
+// The source image may itself be a variation whose name already carries the
+// "<host>#" tag — possibly several generations deep (ark#ark#…). The output
+// name keeps ONE tag: strip every leading repetition before wrapping.
+export function dedupHostTag(basename, hostTag) {
+  let b = basename;
+  while (b.startsWith(hostTag) && b.length > hostTag.length) b = b.slice(hostTag.length);
+  return b;
+}
+
+// The lineage tag: ComfyUI writes every extra_pnginfo key as a JSON-encoded
+// PNG text chunk, so a variation's output PNG carries where it came from —
+// rename-proof, host-move-proof. `source` is the image varied on
+// ("host:filename"); `params` is this permutation's mutation map. A
+// re-varied variation tags its immediate parent; the chain walks via
+// repeated jumps.
+export function lineageTag(source, params) {
+  return { kz: JSON.parse(JSON.stringify({ v: 1, source, params })) };
 }
 
 // --- filename injection ------------------------------------------------------
@@ -260,7 +355,9 @@ export function register(kz) {
     let graph;
     try { graph = JSON.parse(chunks.prompt); }
     catch { return Response.json({ error: "embedded graph is not valid JSON" }, { status: 422 }); }
-    return Response.json({ params: inspectGraph(graph) });
+    const addr = kz._hostAddr(host);
+    const types = addr ? await inputTypes(addr) : null;
+    return Response.json({ params: inspectGraph(graph, types), stringParams: stringParams(graph) });
   });
 
   kz.route("POST", "/run", async (req) => {
@@ -268,7 +365,7 @@ export function register(kz) {
     try { body = await req.json(); }
     catch { return Response.json({ error: "JSON body required" }, { status: 400 }); }
 
-    const { id, host, filename, ranges, increment, prefix, suffix, relative } = body;
+    const { id, host, filename, ranges, increment, prefix, suffix, relative, imageParams } = body;
     if (!id || !host || !filename || !ranges) {
       return Response.json({ error: "missing required fields" }, { status: 400 });
     }
@@ -291,20 +388,31 @@ export function register(kz) {
     try { graph = JSON.parse(chunks.prompt); }
     catch { return Response.json({ error: "embedded graph is not valid JSON" }, { status: 422 }); }
 
-    // Inspect once for current values + labels.
-    const inspection = inspectGraph(graph);
+    // Inspect once for current values + labels. Types come from the host's
+    // object_info — the current value is not a reliable integer signal.
+    const types = await inputTypes(addr);
+    const inspection = inspectGraph(graph, types);
     const currentValues = {};
     const labelMap = {};
     for (const p of inspection) {
       currentValues[p.id] = p.current;
       labelMap[p.id] = p.title ?? p.type;
     }
+    // LoadImage sweep axes: string params join the inspection so
+    // mutateGraph can target them; their current filename is a current
+    // value (drives the current-combo exclusion and the {image} token).
+    const strParams = stringParams(graph);
+    for (const p of strParams) {
+      currentValues[p.id] = p.current;
+      labelMap[p.id] = p.title ?? p.type;
+    }
+    const fullInspection = [...inspection, ...strParams];
 
     // Batch sweeps arrive as offsets from each image's own current value;
     // resolve them now that this graph's current values are known.
     if (relative) resolveRelativeRanges(ranges, currentValues);
 
-    const permutations = generatePermutations(ranges, fallbackInc, currentValues);
+    const permutations = generatePermutations(ranges, fallbackInc, currentValues, imageParams ?? {});
     if (permutations.length === 0) {
       return Response.json({ error: "no permutations (check ranges and increment)" }, { status: 400 });
     }
@@ -326,20 +434,27 @@ export function register(kz) {
 
     // Basename of the original file (without extension) — includes ComfyUI's
     // counter, e.g. "StyleMix_01822_". Used as the middle of the wrapped
-    // filename_prefix so variations trace back to the source image.
-    const originalBasename = stripExtension(filename);
+    // filename_prefix so variations trace back to the source image. A source
+    // that is itself a variation already carries "<host>#" (maybe several
+    // deep) — dedup so the output carries exactly one.
+    const originalBasename = dedupHostTag(stripExtension(filename), hostTag);
 
     const errors = [];
     let submitted = 0;
     for (const perm of permutations) {
-      const { graph: mutated, applied } = mutateGraph(graph, perm, inspection);
+      const { graph: mutated, applied } = mutateGraph(graph, perm, fullInspection);
       if (applied.length === 0) {
         errors.push({ permutation: perm, error: "no applicable nodes found" });
         continue;
       }
 
-      const pfx = templateReplace(pfxTpl, perm, currentValues, labelMap);
-      const sfx = templateReplace(sfxTpl, perm, currentValues, labelMap);
+      // {image} = the LoadImage filename chosen for this permutation (the
+      // prefixed {LoadImage.image} token resolves via currentValues too)
+      const imgAxes = Object.fromEntries(Object.entries(perm).filter(([k]) => k.endsWith(".image")));
+      const rawImage = Object.values(imgAxes)[0];
+      const tokenValues = rawImage != null ? { ...perm, image: rawImage } : perm;
+      const pfx = templateReplace(pfxTpl, tokenValues, currentValues, labelMap);
+      const sfx = templateReplace(sfxTpl, tokenValues, currentValues, labelMap);
 
       if (producing) {
         // Re-find in the CLONED graph (structuredClone gave us fresh nodes).
@@ -362,7 +477,10 @@ export function register(kz) {
         const resp = await fetch(`http://${addr}/api/prompt`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ prompt: mutated }),
+          body: JSON.stringify({
+            prompt: mutated,
+            extra_data: { extra_pnginfo: lineageTag(`${host}:${filename}`, perm) },
+          }),
         });
         if (!resp.ok) {
           const text = await resp.text();

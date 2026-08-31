@@ -8,17 +8,24 @@
 // how the real system behaves.
 //
 // Modes:
-//   --fixtures <dir>   serve the PNG fixtures found in <dir> (default tests/fixtures)
-//   --bulk <N>         additionally serve N synthetic 1x1 images
-//   --port <n>         listen port (default 8188)
+//   --fixtures <dir>     serve the PNG fixtures found in <dir> (default tests/fixtures)
+//   --bulk <N>           additionally serve N synthetic 1x1 images
+//   --port <n>           listen port (default 8188)
+//   --mutable-dir <dir>  serve any file found in <dir> straight from disk,
+//                        with a stat-derived ETag — the reused-filename
+//                        revalidation e2e rewrites one in place
 //
 // Quirk reproduced on purpose: the real /internal/files/output listing
 // appends " [123]" (a size suffix) to each entry; the engine strips it via
 // clean_file_name. If the fake omitted the suffix the port would never
 // exercise the stripping and a real fleet would break it.
+//
+// Another real-ComfyUI trait: /api/view always carries an aiohttp-style
+// ETag ("<mtime_ns_hex>-<size_hex>") — the engine's revalidation stamp.
 
 import { parseArgs } from "node:util";
 import { readdir, readFile } from "node:fs/promises";
+import { statSync } from "node:fs";
 import { join, basename } from "node:path";
 
 // ---------------------------------------------------------------------------
@@ -66,12 +73,14 @@ const { values } = parseArgs({
     fixtures: { type: "string", default: new URL("./fixtures", import.meta.url).pathname },
     bulk: { type: "string", default: "0" },
     port: { type: "string", default: "8188" },
+    "mutable-dir": { type: "string", default: "" },
   },
 });
 
 const fixtureDir = values.fixtures;
 const bulkCount = parseInt(values.bulk, 10);
 const port = parseInt(values.port, 10);
+const mutableDir = values["mutable-dir"];
 
 // Load fixtures once at startup: filename -> { bytes, promptGraph|null }
 const fixtures = new Map();
@@ -126,13 +135,30 @@ function history() {
   return out;
 }
 
-export const server = Deno.serve({ port }, (req) => {
+export const server = Deno.serve({ port }, async (req) => {
   const url = new URL(req.url);
   const p = url.pathname;
 
   if (p === "/api/system_stats") {
     // Only the status code is inspected (drives the online/offline dot).
     return Response.json({ system: { os: "fake" }, devices: [] });
+  }
+
+  // Declared input types (INT/FLOAT) for the fixture graph node classes —
+  // the variations plugin reads these so float params at integer-looking
+  // values (denoise=1, strength=1) are not mistaken for integers.
+  if (p === "/api/object_info") {
+    const INT = ["INT", {}], FLOAT = ["FLOAT", {}];
+    const def = (inputs) => ({ input: { required: inputs } });
+    return Response.json({
+      FluxGuidance: def({ guidance: FLOAT }),
+      RandomNoise: def({ noise_seed: INT }),
+      BasicScheduler: def({ steps: INT, denoise: FLOAT }),
+      EmptyLatentImage: def({ width: INT, height: INT, batch_size: INT }),
+      LoraLoader: def({ strength_model: FLOAT, strength_clip: FLOAT }),
+      LoraLoaderModelOnly: def({ strength_model: FLOAT }),
+      KSampler: def({ seed: INT, steps: INT, cfg: FLOAT, denoise: FLOAT }),
+    });
   }
 
   if (p === "/internal/files/output") {
@@ -143,17 +169,45 @@ export const server = Deno.serve({ port }, (req) => {
     const filename = url.searchParams.get("filename") ?? "";
     const name = basename(filename);
     if (name === MISSING) return new Response("not found", { status: 404 });
+    const head = req.method === "HEAD";
+    // aiohttp-style ETag: "<mtime_ns_hex>-<size_hex>" (the engine's stamp).
+    const etag = (mtimeNs, size) => `"${mtimeNs.toString(16)}-${size.toString(16)}"`;
+    if (mutableDir) {
+      let st = null;
+      try {
+        st = statSync(join(mutableDir, name), { bigint: true });
+      } catch { /* not the mutable file */ }
+      if (st?.isFile()) {
+        const bytes = head ? null : await readFile(join(mutableDir, name));
+        return new Response(bytes, {
+          headers: {
+            "Content-Type": "image/png",
+            "Content-Length": String(st.size),
+            ETag: etag(st.mtimeNs, st.size),
+            "Last-Modified": new Date(Number(st.mtimeNs / 1000000n)).toUTCString(),
+          },
+        });
+      }
+    }
     if (fixtures.has(name)) {
       const bytes = fixtures.get(name).bytes;
       // Real ComfyUI serves SVG (and sometimes everything) as octet-stream.
       const type = name.endsWith(".svg") ? "application/octet-stream" : "image/png";
-      return new Response(bytes, {
-        headers: { "Content-Type": type, "Content-Length": String(bytes.length) },
+      return new Response(head ? null : bytes, {
+        headers: {
+          "Content-Type": type,
+          "Content-Length": String(bytes.length),
+          ETag: etag(0n, BigInt(bytes.length)),
+        },
       });
     }
     if (/^bulk-\d{5}\.png$/.test(name)) {
-      return new Response(BULK_PNG, {
-        headers: { "Content-Type": "image/png", "Content-Length": String(BULK_PNG.length) },
+      return new Response(head ? null : BULK_PNG, {
+        headers: {
+          "Content-Type": "image/png",
+          "Content-Length": String(BULK_PNG.length),
+          ETag: etag(0n, BigInt(BULK_PNG.length)),
+        },
       });
     }
     return new Response("not found", { status: 404 });

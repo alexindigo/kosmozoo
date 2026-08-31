@@ -122,6 +122,44 @@ Deno.test("ingestion: same bytes on two hosts → same hash → one identity", a
 
 // --- serve path: cache-first ----------------------------------------------
 
+Deno.test("serve path: bytes carry validators — ETag (content hash) + no-cache; If-None-Match → 304", async () => {
+  const dir = await mkdtemp(join(tmpdir(), "kz-val-"));
+  Deno.env.set("KOZMOZOO_CACHE", join(dir, "cache"));
+
+  const bytes = new TextEncoder().encode("validator content");
+  const folder = join(dir, "images");
+  await mkdir(folder);
+  await writeFile(join(folder, "img.png"), bytes);
+
+  const settings = await Settings.open(dir);
+  const store = await Store.open(dir, join(dir, "fb.json"));
+  const hosts = { h: `folder:${folder}` };
+  const ingest = new Ingest(store, hosts);
+  const router = makeRouter({ hosts, store, settings, plugins: null, ingest });
+  router.ctx = { hosts, store, settings, plugins: null, ingest };
+
+  const hash = await ingest.ensure("h", "img.png");
+  const r1 = await router.handle(new Request("http://x/api/images/h:img.png/bytes"));
+  assertEquals(r1.status, 200);
+  assertEquals(r1.headers.get("ETag"), `"${hash}"`);
+  assertEquals(r1.headers.get("Cache-Control"), "no-cache");
+  await r1.arrayBuffer();
+
+  const r2 = await router.handle(new Request("http://x/api/images/h:img.png/bytes", {
+    headers: { "If-None-Match": `"${hash}"` },
+  }));
+  assertEquals(r2.status, 304);
+  await r2.arrayBuffer();
+
+  const r3 = await router.handle(new Request("http://x/api/images/h:img.png/bytes", {
+    headers: { "If-None-Match": `"${"0".repeat(64)}"` },
+  }));
+  assertEquals(r3.status, 200);
+  await r3.arrayBuffer();
+
+  await rm(dir, { recursive: true });
+});
+
 Deno.test("serve path: cache hit serves directly, no host needed", async () => {
   const dir = await mkdtemp(join(tmpdir(), "kz-svc-"));
   Deno.env.set("KOZMOZOO_CACHE", join(dir, "cache"));

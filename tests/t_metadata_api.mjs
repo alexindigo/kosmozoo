@@ -86,3 +86,33 @@ Deno.test("downloads-check: reports which filenames exist in the downloads dir",
   assertEquals(body.exists, { "saved.png": true, "nope.png": false });
   await rm(dir, { recursive: true, force: true });
 });
+
+Deno.test("metaState: pending vs extracted vs none", async () => {
+  const dir = await mkdtemp(join(tmpdir(), "kz-mstate-"));
+  const store = await Store.open(dir, join(dir, "fb.json"));
+  const folder = join(dir, "images");
+  await mkdir(folder);
+  // never touched: pending
+  assertEquals(store.metaState("local", "nope.png").extracted, false);
+  // walked with meta: extracted + meta
+  store.metaPut("local", "has.png", { seed: 1 }, { ext: 1 });
+  const has = store.metaState("local", "has.png");
+  assertEquals(has.extracted, true);
+  assertEquals(has.meta.seed, 1);
+  // walked with nopng marker: extracted + none
+  store.metaPut("local", "bare.png", null, { nopng: true, ext: 1 });
+  const bare = store.metaState("local", "bare.png");
+  assertEquals(bare.extracted, true);
+  assertEquals(bare.meta, null);
+  // the listing carries the extracted flag
+  await writeFile(join(folder, "bare.png"), "x");
+  const settings = await Settings.open(dir);
+  const hosts = { local: `folder:${folder}` };
+  const router = makeRouter({ hosts, store, settings, plugins: null });
+  router.ctx = { hosts, store, settings, plugins: null };
+  const list = await (await router.handle(new Request("http://x/api/images?host=local"))).json();
+  const bareEntry = list.find((i) => i.filename === "bare.png");
+  assertEquals(bareEntry.extracted, true);
+  assertEquals(bareEntry.meta, null);
+  await rm(dir, { recursive: true });
+});

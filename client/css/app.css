@@ -94,6 +94,29 @@ body { display: flex; flex-direction: column; }
 /* --- main: two feeds share the window; divider splits; each column scrolls
    itself (no page-level scroll) ------------------------------------------- */
 main { display: flex; flex: 1; min-height: 0; }
+
+/* feed position rail: a tape of small grey ticks spanning the view, the
+   viewport-visible images as a wave of wider/brighter ticks over it.
+   Left-aligned — Grok's edge indicator mirrored to the left edge. The rail
+   is a static flex child of <main> (declared in App.mjs) that pushes the
+   feed column right, like the right rail pushes the workspace panels;
+   js/feedrail.mjs owns only its inner ticks/labels. */
+#feedRail { position: relative; flex: 0 0 22px; align-self: stretch;
+  margin-left: 6px;
+  cursor: pointer; user-select: none; touch-action: none; }
+#feedRail .fr-tape { position: absolute; left: 2px; top: 14px; bottom: 28px; }
+/* tape: dim (not the near-black --raise) so the grey scale reads */
+#feedRail .fr-tick { width: 10px; height: 2px; margin-bottom: 3px;
+  background: var(--dim); }
+/* the wave must read as a BRIGHT clump over the grey tape, not one more
+   grey tick — light foreground, longer than the tape ticks */
+#feedRail .fr-tick.wave { width: 18px; background: var(--fg);
+  box-shadow: 0 0 3px rgba(221, 221, 221, 0.35); }
+#feedRail .fr-num { position: absolute; left: 2px; font-size: 8px;
+  color: var(--dim); font-family: ui-monospace, monospace; }
+#feedRail .fr-top { top: 2px; }
+#feedRail .fr-bottom { bottom: 14px; }
+#feedRail .fr-total { bottom: 2px; color: var(--dim); }
 #candidatesCol { flex: 1; min-width: 0; overflow-y: auto; overflow-x: hidden;
   scrollbar-width: none; }
 #candidatesCol::-webkit-scrollbar { display: none; }
@@ -353,7 +376,7 @@ main { display: flex; flex: 1; min-height: 0; }
 .metabody .infotext { color: var(--mid); font-size: 12px; white-space: pre-wrap;
   overflow-wrap: anywhere; }
 .metabody .info-none { color: var(--dim); font-style: italic; }
-.metabody .plabel { color: var(--dim); }
+.metabody .plabel { color: var(--mid); }
 /* a field value that differs from the previous current image's */
 .metabody .pdiff { color: var(--white); }
 /* variation lineage: which image this one came from */

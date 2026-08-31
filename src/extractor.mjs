@@ -325,7 +325,8 @@ export async function parsePngTextChunks(buf) {
 }
 
 // (meta, hasWorkflow) from PNG bytes; meta is null when the file carries no
-// prompt chunk (e.g. edited/re-exported PNGs).
+// prompt chunk (e.g. edited/re-exported PNGs). A `kz` text chunk (written by
+// the variations plugin via extra_pnginfo) survives as meta.lineage.
 export async function metaFromPngBytes(buf) {
   const chunks = await parsePngTextChunks(buf);
   if (chunks === null) return [null, false];
@@ -341,7 +342,14 @@ export async function metaFromPngBytes(buf) {
   }
   // the prompt chunk IS the executed API-format graph — the same shape
   // extractMeta consumes from history entries
-  return [extractMeta({ prompt: [0, 0, graph] }), hasWorkflow];
+  const meta = extractMeta({ prompt: [0, 0, graph] });
+  if (meta && typeof chunks.kz === "string") {
+    try {
+      const tag = JSON.parse(chunks.kz);
+      if (tag && typeof tag.source === "string") meta.lineage = tag;
+    } catch { /* a foreign kz chunk is not ours — ignore */ }
+  }
+  return [meta, hasWorkflow];
 }
 
 // --- directory convenience (engine side; A/B rig calls this) ---------------

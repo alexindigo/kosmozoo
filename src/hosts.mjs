@@ -27,25 +27,31 @@ export function isFolderHost(addr) {
   return FOLDER_RE.test(addr ?? "");
 }
 
-// Durability flag: can files on this remote change in place? The cache
-// revalidates non-durable remotes (src/revalidate.mjs); durable ones are
-// trusted forever once ingested. ComfyUI output is durable — a file is
-// generated once and never rewritten. Folder remotes are NOT: external
-// tools edit files in place. Every new remote kind added here must decide
-// this flag explicitly.
-export function hostDurable(addr) {
-  if (isFolderHost(addr)) return false;
-  return true; // ComfyUI (and future HTTP kinds until decided otherwise)
-}
-
-// Source mtime (ms) for revalidation, or null when the remote can't/needn't
-// report one (durable kinds). Folder = stat; nothing else today.
-export async function hostModified(addr, filename) {
-  if (!isFolderHost(addr)) return null;
+// Source-content stamp: an OPAQUE string that changes when a file's content
+// is rewritten under the same name — the revalidation signal. Folder = mtime
+// (ms, stringified); ComfyUI = the ETag aiohttp derives from the file's
+// mtime_ns+size (fallback: Last-Modified|Content-Length). Compare for
+// equality only — stamps are never ordered. type is "output" or "input"
+// (ComfyUI serves the two dirs from different endpoints; folders ignore it).
+export async function hostStamp(addr, filename, type = "output") {
   if (basename(filename) !== filename || filename.includes("..")) return null;
+  if (isFolderHost(addr)) {
+    try {
+      const s = await stat(join(FOLDER_RE.exec(addr)[1], filename));
+      return s.isFile() ? String(s.mtimeMs) : null;
+    } catch {
+      return null;
+    }
+  }
   try {
-    const s = await stat(join(FOLDER_RE.exec(addr)[1], filename));
-    return s.isFile() ? s.mtimeMs : null;
+    const url = `http://${addr}/api/view?type=${type}&filename=${encodeURIComponent(filename)}`;
+    const r = await fetch(url, { method: "HEAD", signal: AbortSignal.timeout(5000) });
+    if (!r.ok) return null;
+    const etag = r.headers.get("ETag");
+    if (etag) return etag;
+    const lm = r.headers.get("Last-Modified");
+    const cl = r.headers.get("Content-Length");
+    return lm || cl ? `${lm}|${cl}` : null;
   } catch {
     return null;
   }
@@ -140,6 +146,35 @@ export async function hostList(addr) {
   return raw.map(parseListingEntry);
 }
 
+// Input-dir image listing (LoadImage sweep sources): folder hosts readdir;
+// ComfyUI hosts read /internal/files/input. Returns bare filenames,
+// renderable images only, newest-first where the source reports an order.
+export async function hostInputList(addr) {
+  if (isFolderHost(addr)) {
+    const dir = FOLDER_RE.exec(addr)[1];
+    const names = await readdir(dir);
+    const files = [];
+    for (const n of names) {
+      if (n.startsWith(".")) continue;
+      const ext = n.split(".").pop().toLowerCase();
+      if (!RENDERABLE.has(ext)) continue;
+      if (basename(n) !== n) continue;
+      try {
+        const s = await stat(join(dir, n));
+        if (s.isFile()) files.push({ n, mtime: s.mtimeMs });
+      } catch { /* vanished */ }
+    }
+    files.sort((a, b) => b.mtime - a.mtime || a.n.localeCompare(b.n));
+    return files.map((f) => f.n);
+  }
+  const r = await fetch(`http://${addr}/internal/files/input`, { signal: AbortSignal.timeout(10000) });
+  if (!r.ok) return [];
+  const raw = await r.json();
+  return raw
+    .map((n) => parseListingEntry(n).name)
+    .filter((n) => RENDERABLE.has(n.split(".").pop().toLowerCase()) && basename(n) === n);
+}
+
 // ComfyUI listings annotate names with a trailing "[...]" — a size in some
 // versions, a subfolder marker ("[output]") in others. The annotation is
 // NEVER part of the identity; the size only when numeric. Greedy prefix so
@@ -210,6 +245,30 @@ export async function hostHeadSize(addr, filename) {
     return r.ok && cl ? Number(cl) : null;
   } catch {
     return null;
+  }
+}
+
+// Upload one image into a ComfyUI host's input dir (the same mechanism the
+// ComfyUI web UI uses: POST /api/upload/image, multipart field "image").
+// `bytes` is the file body, `filename` the name it lands under. Folder hosts
+// have no upload concept — their input dir is local already.
+export async function hostUploadInput(addr, filename, bytes) {
+  if (isFolderHost(addr)) return { ok: false, status: 400, error: "folder hosts need no upload" };
+  if (basename(filename) !== filename || filename.includes("..")) {
+    return { ok: false, status: 400, error: "bad filename" };
+  }
+  const form = new FormData();
+  form.append("image", new Blob([bytes]), filename);
+  form.append("overwrite", "true");
+  try {
+    const r = await fetch(`http://${addr}/api/upload/image`, {
+      method: "POST", body: form, signal: AbortSignal.timeout(30000),
+    });
+    if (!r.ok) return { ok: false, status: r.status, error: `ComfyUI ${r.status}` };
+    const d = await r.json().catch(() => ({}));
+    return { ok: true, name: d.name ?? filename };
+  } catch (e) {
+    return { ok: false, status: 502, error: `upload failed: ${e.message}` };
   }
 }
 
