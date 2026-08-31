@@ -15,6 +15,7 @@ import { createSignal, createMemo, createContext, useContext } from "solid-js";
 import { createStore, reconcile } from "solid-js/store";
 import { api } from "/js/api.mjs";
 import { metaFromPngBytes } from "/shared/extractor.mjs";
+import { initViews } from "/js/views.mjs";
 import {
   parseUrl,
   stripHostPrefix,
@@ -500,6 +501,8 @@ export function makeAppStore() {
       actions.anchors.load();
       await actions.keys.loadSaved();
       await actions.anchors.loadPaneWidth();
+      // persisted per-image zoom views (feed zoom carries across reloads)
+      await initViews().catch(() => {});
       // scraper status poll (the menu row reads it; the counter derives)
       setInterval(async () => {
         setSt("scraper", reconcile(await api.scraper().catch(() => st.scraper)));

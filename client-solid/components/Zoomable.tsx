@@ -24,7 +24,10 @@ export function Zoomable(props) {
 
   let imgEl;
   onMount(() => {
-    if (imgEl) makeZoomable(imgEl, { key: typeof props.zoomKey === "function" ? props.zoomKey() : props.zoomKey });
+    if (imgEl) makeZoomable(imgEl, {
+      key: typeof props.zoomKey === "function" ? props.zoomKey() : props.zoomKey,
+      onZoomChange: props.onZoomChange,
+    });
   });
 
   createEffect(() => props.onPhase?.(phase()));

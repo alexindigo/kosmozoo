@@ -6,8 +6,9 @@ import { readFile } from "node:fs/promises";
 import { pluginDirs } from "./plugins.mjs";
 
 const CLIENT_ROOT = new URL("../client", import.meta.url).pathname;
-// Solid migration: the built Solid client (client-solid-dist/) is served at
-// /solid until cutover; the preact app at / stays live.
+// The built Solid client (client-solid-dist/) is the app: it owns the shell
+// (/ and /diff) and the compiled modules; shared assets (css, vendor, the
+// framework-free /js modules, logos) still live in the client tree.
 const SOLID_ROOT = new URL("../client-solid-dist", import.meta.url).pathname;
 
 const MIME = {
@@ -61,31 +62,24 @@ export async function serveStatic(pathname) {
     return new Response("not found", { status: 404 });
   }
 
-  // /solid serves the built Solid client during migration. /solid redirects to
-  // /solid/ so the shell's relative URLs resolve inside the sub-app.
-  if (pathname === "/solid") {
-    return new Response(null, { status: 302, headers: { Location: "/solid/" } });
-  }
-  if (pathname.startsWith("/solid/")) {
-    const p = pathname === "/solid/" ? "/index.html" : pathname.slice("/solid".length);
-    const full = normalize(join(SOLID_ROOT, p));
-    if (!full.startsWith(SOLID_ROOT)) return new Response("forbidden", { status: 403 });
+  // / and the SPA route /diff serve the Solid app shell; compiled app
+  // modules resolve from the dist tree too. Everything the dist doesn't
+  // have falls through to the client tree (css, vendor, /js, logos).
+  const p = (pathname === "/" || pathname === "/diff") ? "/index.html" : pathname;
+  const solidFull = normalize(join(SOLID_ROOT, p));
+  if (solidFull.startsWith(SOLID_ROOT)) {
     try {
-      const body = await readFile(full);
+      const body = await readFile(solidFull);
       const headers = new Headers();
-      const mime = MIME[extname(full)];
+      const mime = MIME[extname(solidFull)];
       if (mime) headers.set("Content-Type", mime);
       headers.set("Cache-Control", "no-cache");
       return new Response(body, { headers });
-    } catch {
-      return new Response("not found", { status: 404 });
-    }
+    } catch { /* fall through to the client tree */ }
   }
 
-  // / and the SPA route /diff both serve the app shell
-  let p = (pathname === "/" || pathname === "/diff") ? "/index.html" : pathname;
-  // prevent traversal
   const full = normalize(join(CLIENT_ROOT, p));
+  // prevent traversal
   if (!full.startsWith(CLIENT_ROOT)) return new Response("forbidden", { status: 403 });
   try {
     const body = await readFile(full);
