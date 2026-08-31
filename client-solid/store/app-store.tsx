@@ -12,8 +12,9 @@
 // root-level replacement goes through setSt("x", v); nested paths assign.
 
 import { createSignal, createMemo, createContext, useContext } from "solid-js";
-import { createStore } from "solid-js/store";
+import { createStore, reconcile } from "solid-js/store";
 import { api } from "/js/api.mjs";
+import { metaFromPngBytes } from "/shared/extractor.mjs";
 import {
   parseUrl,
   stripHostPrefix,
@@ -23,6 +24,7 @@ import {
 } from "/js/route-parse.mjs";
 import { fieldList, fieldsCfgFrom } from "./fields.js";
 import { makeImageWindow } from "./image-window.js";
+import { suppressScrollSnap, snapQuiet } from "./scroll-snap.js";
 
 // stored host if still present, else first online, else first
 function initialHost(hosts, stored) {
@@ -45,9 +47,11 @@ export function makeAppStore() {
     images: [],           // [{ id, host, filename, size, meta, judgment }]
     selected: {},         // id -> true (bulk actions; session-only)
     saved: {},            // filename -> true (downloads-dir mirror for save buttons)
-    anchors: [],          // [{ name, src(dataURL), meta? }] — phase 6 fills it
+    anchors: [],          // [{ name, src(dataURL), meta? }] — local drops, persisted
     diff: { open: false },                  // workbench: single-image viewer
-    variations: { open: false, image: null }, // modal — phase 5 expands it
+    variations: { open: false, images: [], key: null }, // modal session
+    infoOverlay: { open: false, name: "", meta: null }, // anchor ⓘ params
+    chips: [],            // status stack: { slot, kind, msg }
     metaPending: 0,
   });
 
@@ -60,6 +64,14 @@ export function makeAppStore() {
   const [menuOpen, setMenuOpen] = createSignal(false);
   const [confirmDelete, setConfirmDelete] = createSignal(null); // { image } | { images }
   const [keysPanelOpen, setKeysPanelOpen] = createSignal(false);
+  const [capturing, setCapturing] = createSignal(null); // action id awaiting a keypress
+  const [keysFilter, setKeysFilter] = createSignal("");
+  const [menuFilter, setMenuFilter] = createSignal("");
+  const [fieldsOverlayOpen, setFieldsOverlayOpen] = createSignal(false);
+  const [anchorPaneWidth, setAnchorPaneWidth] = createSignal(300); // px, divider-adjusted, persisted
+  // key bindings: { id, defaultKey, key, desc, ctx, fn, when } — the panel
+  // and the dispatcher read this; rebinds persist in settings core.keys
+  const [bindings, setBindings] = createSignal([]);
 
   // right-column space + details layout — persisted (workspaceState contract).
   // Read once at construction: the persisted space must be set before the
@@ -190,13 +202,18 @@ export function makeAppStore() {
     const viewPos = view().indexOf(idx);
     if (viewPos < 0) return;
     seams.virtualizer?.scrollToIndex(viewPos, { align: "center" });
+    // a programmatic center, not user scrolling — keep the snap from
+    // immediately pulling the centered card back to the top edge
+    suppressScrollSnap();
     wantRangeNow();
   }
 
   // scroll-distance safety net (retained shape): near the bottom guard, nudge
-  // a scrollToOffset so the virtualizer re-checks its range
+  // a scrollToOffset so the virtualizer re-checks its range. Never fires
+  // while a programmatic scroll is in flight — it would pin a smooth scroll
+  // passing through the near-bottom zone.
   function safetyNet() {
-    if (scrollGuardPending) return;
+    if (scrollGuardPending || snapQuiet()) return;
     scrollGuardPending = true;
     setTimeout(() => {
       scrollGuardPending = false;
@@ -273,11 +290,12 @@ export function makeAppStore() {
   // --- image list load -----------------------------------------------------------
   async function loadImages(name) {
     // a host switch must not leave the previous host's feed on screen
-    setSt("images", []);
-    setSt("selected", {});
+    setSt("images", reconcile([]));
+    setSt("selected", reconcile({}));
     if (!name) return;
+    actions.status.active("load", `loading image list from ${name}…`);
     try {
-      setSt("images", await api.images(name));
+      setSt("images", reconcile(await api.images(name)));
       try {
         // Ask about both raw and host-prefixed filenames — new saves land
         // as `<host>#<filename>` but legacy saves may still be raw.
@@ -290,7 +308,7 @@ export function makeAppStore() {
         const d = await api.downloadsCheck([...q]);
         const saved = {};
         for (const [k, v] of Object.entries(d.exists ?? {})) if (v) saved[k] = true;
-        setSt("saved", saved);
+        setSt("saved", reconcile(saved));
       } catch { /* save buttons just won't pre-grey */ }
       // the URL is adopted into current after every (re)fetch, then the feed
       // centers on it. Only a first visit with no hash at all invents a
@@ -312,10 +330,19 @@ export function makeAppStore() {
       }
       wantRangeNow();
       await pollMetadata();
+      actions.status.clear("load");
+      if (st.images.length === 0) {
+        actions.status.info(`no output images on ${name}`);
+      } else {
+        const hidden = st.images.filter((i) => i.judgment?.vote === "down").length;
+        const base = filter()
+          ? `${view().length} of ${st.images.length} matching “${filter()}” from ${name}`
+          : `${st.images.length} images from ${name}`;
+        actions.status.info(base + (hidden ? ` (${hidden} hidden)` : ""));
+      }
     } catch (err) {
-      // the load-failure surface (grid body + retry) lands with the status
-      // chrome; until then the console carries it
-      console.error(`couldn't load images from ${name}: ${err?.message ?? err}`);
+      actions.status.clear("load");
+      actions.status.error(`couldn't load images from ${name}: ${err?.message ?? err}`);
     }
   }
 
@@ -372,12 +399,95 @@ export function makeAppStore() {
   // the image-src window (visible ∪ workbench ± pad)
   const window_ = makeImageWindow({ state: { get images() { return st.images; }, get diff() { return st.diff; }, host } });
 
+  // --- status-stack helpers ------------------------------------------------------
+  const chipTimers = { transient: 0 };
+  let errSeq = 0;
+
+  // --- keymap helpers ------------------------------------------------------------
+  // A binding is a combo string: "Ctrl+Alt+Shift+Key" (canonical modifier
+  // order). Bare single printable characters ("h", "?", "=") ignore Shift —
+  // e.key already carries the shifted glyph — and require the other
+  // modifiers off. Anything with a modifier matches the exact combo.
+  const [keyOverrides, setKeyOverrides] = createSignal({});
+
+  function comboFromEvent(e) {
+    const mods = [];
+    if (e.ctrlKey) mods.push("Ctrl");
+    if (e.altKey) mods.push("Alt");
+    if (e.metaKey) mods.push("Meta");
+    if (e.shiftKey) mods.push("Shift");
+    return [...mods, e.key].join("+");
+  }
+
+  function bindingMatches(binding, e) {
+    if (binding.length === 1 && !binding.includes("+")) {
+      return !e.ctrlKey && !e.altKey && !e.metaKey
+        && e.key.toLowerCase() === binding.toLowerCase();
+    }
+    return comboFromEvent(e) === binding;
+  }
+
+  // Conflict domain: same effective key in the same ctx ("" = global). Bare
+  // letters conflict case-insensitively ("h" and "H" are one key here).
+  function signature(key) {
+    return /^[a-z]$/i.test(key) && !key.includes("+") ? `letter:${key.toLowerCase()}` : key;
+  }
+
+  function findConflict(id, combo) {
+    const me = bindings().find((a) => a.id === id);
+    if (!me) return null;
+    const sig = signature(combo);
+    const clash = bindings().find((a) =>
+      a.id !== id && (a.ctx ?? "") === (me.ctx ?? "") && signature(a.key) === sig);
+    return clash?.id ?? null;
+  }
+
+  // --- anchor helpers --------------------------------------------------------------
+  const ANCHORS_LS_KEY = "kosmozoo.anchors.v1";
+  const ANCHOR_MAX_DIM = 1200;
+
+  function persistAnchors() {
+    try {
+      localStorage.setItem(ANCHORS_LS_KEY, JSON.stringify(
+        st.anchors.map((a) => ({ name: a.name, src: a.src, ...(a.meta ? { meta: a.meta } : {}) }))));
+    } catch {
+      actions.status.error("anchors not saved: browser storage full");
+    }
+  }
+
+  function readAsDataUrl(file) {
+    return new Promise((resolve) => {
+      const reader = new FileReader();
+      reader.onload = () => resolve(reader.result);
+      reader.onerror = () => resolve(null);
+      reader.readAsDataURL(file);
+    });
+  }
+
+  // Downscale via canvas so persisted anchors fit the storage quota.
+  function shrinkToStore(src, fileName) {
+    return new Promise((resolve) => {
+      const img = new Image();
+      img.onload = () => {
+        if (Math.max(img.width, img.height) <= ANCHOR_MAX_DIM) return resolve(src);
+        const k = ANCHOR_MAX_DIM / Math.max(img.width, img.height);
+        const c = document.createElement("canvas");
+        c.width = Math.round(img.width * k);
+        c.height = Math.round(img.height * k);
+        c.getContext("2d").drawImage(img, 0, 0, c.width, c.height);
+        resolve(/\.png$/i.test(fileName) ? c.toDataURL("image/png") : c.toDataURL("image/jpeg", 0.85));
+      };
+      img.onerror = () => resolve(src);
+      img.src = src;
+    });
+  }
+
   const actions = {
     // boot-time data, loaded exactly once (the bootData.mjs contract).
     // api.hosts() is deliberately not caught — a failed host list fails the
     // whole boot (the caller surfaces it).
     async boot() {
-      setSt("hosts", await api.hosts());
+      setSt("hosts", reconcile(await api.hosts()));
       setSt("ui", await api.settings("core.ui").catch(() => ({})));
       setSt("nodesRegistry", await api.nodes().catch(() => ({})));
       setSt("fieldsStored", (await api.settings("core.fields").catch(() => ({})))?.cfg ?? null);
@@ -385,8 +495,15 @@ export function makeAppStore() {
       setSt("deletePrefs", { useAssetsPlus: del.useAssetsPlus ?? true });
       const jns = await api.settings("core.judgment").catch(() => ({}));
       setSt("judgmentPrefs", "downvoteHides", jns.downvoteHides ?? true);
-      setSt("scraper", await api.scraper().catch(() => null));
+      setSt("scraper", reconcile(await api.scraper().catch(() => null)));
       setSt("feedbackPath", (await api.settings("core").catch(() => ({})))?.feedbackPath ?? null);
+      actions.anchors.load();
+      await actions.keys.loadSaved();
+      await actions.anchors.loadPaneWidth();
+      // scraper status poll (the menu row reads it; the counter derives)
+      setInterval(async () => {
+        setSt("scraper", reconcile(await api.scraper().catch(() => st.scraper)));
+      }, 2000);
       // the URL hash outranks the stored host: /#host[#filename] is shareable state
       const route = parseUrl();
       const urlHost = route.view === "diff" ? route.left?.source : route.host;
@@ -413,7 +530,7 @@ export function makeAppStore() {
         if (!name || !addr) return { ok: false };
         try {
           await api.addHost(name, addr);
-          setSt("hosts", await api.hosts());
+          setSt("hosts", reconcile(await api.hosts()));
           return { ok: true };
         } catch {
           return { ok: false };
@@ -422,7 +539,7 @@ export function makeAppStore() {
       async remove(name) {
         try {
           await api.removeHost(name);
-          setSt("hosts", await api.hosts());
+          setSt("hosts", reconcile(await api.hosts()));
           if (host() === name) {
             await actions.hosts.select(Object.keys(st.hosts)[0] ?? null);
           }
@@ -516,7 +633,7 @@ export function makeAppStore() {
       toggleMenu() { setMenuOpen(!menuOpen()); },
       closeMenu() { setMenuOpen(false); },
       async refresh() {
-        setSt("hosts", await api.hosts());
+        setSt("hosts", reconcile(await api.hosts()));
         if (host()) await loadImages(host());
       },
       setWorkspace(space) {
@@ -567,13 +684,25 @@ export function makeAppStore() {
     variations: {
       // wand toggle: re-clicking the same image's wand closes the modal
       open(image) {
-        if (st.variations.open && st.variations.image?.id === image?.id) {
-          setSt("variations", { open: false, image: null });
+        const key = image?.id ?? null;
+        if (st.variations.open && st.variations.key === key) {
+          actions.variations.close();
           return;
         }
-        setSt("variations", { open: true, image });
+        setSt("variations", reconcile({ open: true, images: [image], key }));
       },
-      close() { setSt("variations", { open: false, image: null }); },
+      // bulk bar's wand: RELATIVE sweeps applied to every selected image
+      // around its own current value — even for a single image, since
+      // that's the batch affordance
+      openBulk(images) {
+        const key = "batch:" + images.map((i) => i.id).join("|");
+        if (st.variations.open && st.variations.key === key) {
+          actions.variations.close();
+          return;
+        }
+        setSt("variations", reconcile({ open: true, images, key }));
+      },
+      close() { setSt("variations", reconcile({ open: false, images: [], key: null })); },
     },
 
     diff: {
@@ -624,6 +753,14 @@ export function makeAppStore() {
         mirrorCurrentHash();
         actions.diff.open();
       },
+      // anchor card click: the current image is that anchor
+      openFromAnchor(anchorIdx) {
+        const anchor = st.anchors[anchorIdx];
+        if (!anchor) return;
+        assignCurrent({ remote: "anchor", image: anchor.name });
+        // anchors are not feed URLs — no hash mirror
+        actions.diff.open();
+      },
       // /diff deep links (the pair view is gone — the workbench opens on the
       // left side and ignores the right). A push entry keeps the /diff URL so
       // browser back/forward close/re-open via the route.
@@ -642,6 +779,13 @@ export function makeAppStore() {
       safetyNet,
       wantRangeNow,
       retryImage(idx) { window_.retry(idx); },
+      // floating button: back to the top of the feed
+      scrollTop() {
+        const col = document.getElementById("candidatesCol");
+        if (!col) return;
+        suppressScrollSnap();
+        col.scrollTo({ top: 0, behavior: "smooth" });
+      },
     },
 
     // URL-as-mirror routing: hashchange/popstate land here. The hash adopts
@@ -670,6 +814,270 @@ export function makeAppStore() {
         }
       },
     },
+
+    // --- status stack ----------------------------------------------------------
+    // transient: one shared chip, fades 6s after its last update. active:
+    // pinned chips keyed by slot, visible for the activity's duration.
+    // error: sticky. ALL chips dismiss on click.
+    status: {
+      info(msg) {
+        setSt("chips", (chips) => {
+          const rest = chips.filter((c) => c.slot !== "transient");
+          return [...rest, { slot: "transient", kind: "info", msg }];
+        });
+        clearTimeout(chipTimers.transient);
+        chipTimers.transient = setTimeout(() => actions.status.dismiss("transient"), 6000);
+      },
+      active(slot, msg) {
+        setSt("chips", (chips) => {
+          const rest = chips.filter((c) => c.slot !== slot);
+          return [...rest, { slot, kind: "active", msg }];
+        });
+      },
+      error(msg) {
+        setSt("chips", (chips) => [...chips, { slot: `err-${++errSeq}`, kind: "error", msg }]);
+      },
+      clear(slot) {
+        setSt("chips", (chips) => chips.filter((c) => c.slot !== slot));
+        if (slot === "transient") clearTimeout(chipTimers.transient);
+      },
+      dismiss(slot) {
+        setSt("chips", (chips) => chips.filter((c) => c.slot !== slot));
+        if (slot === "transient") clearTimeout(chipTimers.transient);
+      },
+    },
+
+    // --- keys: bindings, capture, persisted keymap ------------------------------
+    keys: {
+      setFilter(v) { setKeysFilter(v); },
+      register(id, defaultKey, fn, { when, desc, ctx } = {}) {
+        const overrides = keyOverrides();
+        setBindings((bs) => [...bs.filter((b) => b.id !== id),
+          { id, defaultKey, key: overrides[id] ?? defaultKey, fn, when, desc: desc ?? id, ctx: ctx ?? "global" }]);
+      },
+      togglePanel() {
+        setKeysPanelOpen(!keysPanelOpen());
+        setCapturing(null);
+      },
+      closePanel() {
+        setKeysPanelOpen(false);
+        setCapturing(null);
+      },
+      startCapture(id) { setCapturing(id); },
+      // the capture hook: a pressed key rebinds the capturing action.
+      // Plain Escape cancels the capture.
+      captureEvent(e) {
+        const id = capturing();
+        if (!id) return;
+        if (e.key === "Escape" && !e.ctrlKey && !e.altKey && !e.shiftKey && !e.metaKey) {
+          setCapturing(null);
+          return;
+        }
+        const combo = comboFromEvent(e);
+        const conflict = findConflict(id, combo);
+        if (conflict) {
+          actions.status.error(`${combo} already bound to ${conflict}`);
+        } else {
+          setBindings((bs) => bs.map((b) => (b.id === id ? { ...b, key: combo } : b)));
+          setKeyOverrides((o) => ({ ...o, [id]: combo }));
+          api.setSettings("core.keys", { [id]: combo }).catch(() => {});
+          actions.status.info(`${id} → ${combo}`);
+        }
+        setCapturing(null);
+      },
+      resetOne(id) {
+        setBindings((bs) => bs.map((b) => (b.id === id ? { ...b, key: b.defaultKey } : b)));
+        setKeyOverrides((o) => {
+          const next = { ...o };
+          delete next[id];
+          return next;
+        });
+        api.setSettings("core.keys", { [id]: null }).catch(() => {});
+      },
+      async resetAll() {
+        const saved = await api.settings("core.keys").catch(() => ({}));
+        setBindings((bs) => bs.map((b) => ({ ...b, key: b.defaultKey })));
+        setKeyOverrides({});
+        for (const id of Object.keys(saved)) {
+          api.setSettings("core.keys", { [id]: null }).catch(() => {});
+        }
+        actions.status.info("keys reset to defaults");
+      },
+      async loadSaved() {
+        const saved = await api.settings("core.keys").catch(() => ({}));
+        setKeyOverrides(saved ?? {});
+        setBindings((bs) => bs.map((b) => ({ ...b, key: saved?.[b.id] ?? b.defaultKey })));
+      },
+      // dispatch a keydown through the bindings (first match wins, in
+      // registration order — the panel registers before the workbench so
+      // its Escape outranks wb.close)
+      dispatch(e) {
+        if (capturing()) {
+          e.preventDefault();
+          e.stopPropagation();
+          actions.keys.captureEvent(e);
+          return;
+        }
+        if (typeof e.target?.matches === "function"
+          && e.target.matches("input, textarea, select")) return;
+        for (const b of bindings()) {
+          if (!bindingMatches(b.key, e)) continue;
+          if (b.when && !b.when(e)) continue;
+          e.preventDefault();
+          b.fn(e);
+          return;
+        }
+      },
+    },
+
+    // --- fields picker overlay ---------------------------------------------------
+    fieldsOverlay: {
+      open() { setFieldsOverlayOpen(true); },
+      close() { setFieldsOverlayOpen(false); },
+      // a per-field card/strip toggle: applied to the stored cfg (the cfg
+      // memo derives from it, so cards refresh by construction), persisted
+      setField(id, col, on) {
+        const merged = { ...(st.fieldsStored ?? {}) };
+        merged[id] = { card: false, strip: false, ...merged[id], [col]: on };
+        setSt("fieldsStored", merged);
+        api.setSettings("core.fields", { cfg: merged }).catch(() => {});
+      },
+      setGroup(ids, col, on) {
+        const merged = { ...(st.fieldsStored ?? {}) };
+        for (const id of ids) {
+          merged[id] = { card: false, strip: false, ...merged[id], [col]: on };
+        }
+        setSt("fieldsStored", merged);
+        api.setSettings("core.fields", { cfg: merged }).catch(() => {});
+      },
+    },
+
+    // --- anchors: local reference images, persisted as data URLs ----------------
+    anchors: {
+      load() {
+        try {
+          const list = (JSON.parse(localStorage.getItem("kosmozoo.anchors.v1")) || [])
+            .filter((a) => a && a.name && a.src);
+          setSt("anchors", reconcile(list));
+        } catch {
+          setSt("anchors", []);
+        }
+      },
+      async addFiles(files) {
+        for (const file of files) {
+          if (!file.type.startsWith("image/")) continue;
+          const [dataUrl, buf] = await Promise.all([
+            readAsDataUrl(file),
+            file.arrayBuffer(),
+          ]);
+          if (!dataUrl) continue;
+          let meta = null;
+          try {
+            [meta] = await metaFromPngBytes(new Uint8Array(buf));
+          } catch { /* metadata optional */ }
+          const src = await shrinkToStore(dataUrl, file.name);
+          setSt("anchors", (as) => [...as, { name: file.name, src, meta }]);
+        }
+        persistAnchors();
+      },
+      remove(name) {
+        setSt("anchors", (as) => as.filter((a) => a.name !== name));
+        persistAnchors();
+      },
+      // drag reorder: move the dragged anchor before/after the hovered one
+      reorder(draggedName, overName, before) {
+        if (!draggedName || draggedName === overName) return;
+        const arr = [...st.anchors];
+        const from = arr.findIndex((a) => a.name === draggedName);
+        if (from < 0 || arr.findIndex((a) => a.name === overName) < 0) return;
+        const [item] = arr.splice(from, 1);
+        const to = arr.findIndex((a) => a.name === overName);
+        arr.splice(before ? to : to + 1, 0, item);
+        setSt("anchors", reconcile(arr));
+        persistAnchors();
+      },
+      showInfo(name, meta) { setSt("infoOverlay", { open: true, name, meta }); },
+      closeInfo() { setSt("infoOverlay", "open", false); },
+      setPaneWidth(w) {
+        setAnchorPaneWidth(w);
+        api.setSettings("core.ui", { anchorWidth: w + "px" }).catch(() => {});
+      },
+      async loadPaneWidth() {
+        const ui = await api.settings("core.ui").catch(() => ({}));
+        if (ui.anchorWidth) {
+          const w = parseInt(ui.anchorWidth, 10);
+          if (w) setAnchorPaneWidth(w);
+        }
+      },
+    },
+
+    // --- bulk actions on the selection -------------------------------------------
+    bulk: {
+      images() { return st.images.filter((i) => st.selected[i.id]); },
+      clear() { setSt("selected", reconcile({})); },
+      async vote(vote) {
+        const images = actions.bulk.images();
+        await Promise.all(images.map((img) =>
+          api.setJudgment(img.id, { vote }).then(() => {
+            const idx = imageIdx(img.id);
+            if (idx < 0) return;
+            if (!st.images[idx].judgment) setSt("images", idx, "judgment", {});
+            setSt("images", idx, "judgment", "vote", vote);
+          }).catch((e) => actions.status.error(`vote failed: ${img.filename}: ${e.message}`))));
+        actions.status.info(`${images.length} image${images.length > 1 ? "s" : ""} ${vote === "up" ? "up-voted" : "down-voted"}`);
+      },
+      async favorite() {
+        const images = actions.bulk.images();
+        await Promise.all(images.map((img) =>
+          api.setJudgment(img.id, { favorite: true }).then(() => {
+            const idx = imageIdx(img.id);
+            if (idx < 0) return;
+            if (!st.images[idx].judgment) setSt("images", idx, "judgment", {});
+            setSt("images", idx, "judgment", "favorite", true);
+          }).catch((e) => actions.status.error(`favorite failed: ${img.filename}: ${e.message}`))));
+        actions.status.info(`${images.length} image${images.length > 1 ? "s" : ""} favorited`);
+      },
+      save() {
+        const images = actions.bulk.images();
+        for (const img of images) {
+          const a = document.createElement("a");
+          a.href = api.imageBytesUrl(img.id);
+          a.download = img.filename.startsWith(img.host + "#") ? img.filename : img.host + "#" + img.filename;
+          document.body.appendChild(a);
+          a.click();
+          a.remove();
+        }
+        actions.status.info(`saving ${images.length} image${images.length > 1 ? "s" : ""}`);
+      },
+    },
+
+    // --- menu / settings rows -----------------------------------------------------
+    menu: {
+      setFilter(v) { setMenuFilter(v); },
+      async scraperToggle(on) {
+        await api.setScraper({ enabled: on });
+        setSt("scraper", reconcile(await api.scraper().catch(() => st.scraper)));
+      },
+      async scraperPause() {
+        await api.setScraper({ paused: !st.scraper?.paused });
+        setSt("scraper", reconcile(await api.scraper().catch(() => st.scraper)));
+      },
+      async deleteAssetsPlus(on) {
+        await api.setSettings("core.delete", { useAssetsPlus: on }).catch(() => {});
+        setSt("deletePrefs", { ...st.deletePrefs, useAssetsPlus: on });
+        setSt("hosts", reconcile(await api.hosts())); // deleteMode depends on the toggle
+      },
+      async applyFeedbackPath(path) {
+        try {
+          const r = await api.feedbackPath(path);
+          setSt("feedbackPath", r.feedbackPath);
+          actions.status.info(`feedback path → ${r.feedbackPath}`);
+          if (host()) await loadImages(host());
+        } catch (err) {
+          actions.status.error(`feedback path failed: ${err.message}`);
+        }
+      },
+    },
   };
 
   return {
@@ -689,6 +1097,8 @@ export function makeAppStore() {
       get anchors() { return st.anchors; },
       get diff() { return st.diff; },
       get variations() { return st.variations; },
+      get infoOverlay() { return st.infoOverlay; },
+      get chips() { return st.chips; },
       get metaPending() { return st.metaPending; },
       // derived
       view,
@@ -703,6 +1113,12 @@ export function makeAppStore() {
       filter,
       hostMenuOpen,
       menuOpen,
+      menuFilter,
+      keysFilter,
+      capturing,
+      bindings,
+      fieldsOverlayOpen,
+      anchorPaneWidth,
       confirmDelete,
       keysPanelOpen,
       workspace,

@@ -6,7 +6,7 @@
 // stays visible until it is ready — a stale load never clobbers a newer one.
 // The image fits the stage via object-fit.
 
-import { createSignal, createEffect, onCleanup } from "solid-js";
+import { createSignal, createEffect } from "solid-js";
 import { useAppStore } from "../store/app-store.js";
 
 const CLOSE_SVG = '<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path stroke="none" d="M0 0h24v24H0z" fill="none"/><path d="M18 6l-12 12" /><path d="M6 6l12 12" /></svg>';
@@ -32,16 +32,9 @@ export function DiffStage() {
       .catch(() => { /* failed decode keeps whatever is on screen */ });
   });
 
-  // Escape closes. Capture-outranking listeners (the delete confirmation)
-  // stop propagation before this bubble handler sees the key; the keys panel
-  // (phase 6) will outrank it too.
-  const onKey = (e) => {
-    if (e.key === "Escape" && store.state.diff.open && !store.state.keysPanelOpen()) {
-      store.actions.diff.close();
-    }
-  };
-  document.addEventListener("keydown", onKey);
-  onCleanup(() => document.removeEventListener("keydown", onKey));
+  // Escape closes via the keys system (the "wb.close" binding registered at
+  // boot — the keys panel's Escape outranks it by registration order, and
+  // the delete confirmation's capture-phase listener beats both).
 
   return (
     <div id="diff" hidden={!store.state.diff.open}>

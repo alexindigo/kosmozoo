@@ -108,6 +108,18 @@ export function fullFieldRows(meta, { list, cfg }) {
   return materializeRows(meta, { gated: false, list, cfg });
 }
 
+// [groupTitle, [[id, input]]], sorted by group title, fields sorted by
+// input — the picker's table shape (groups derive from the registry).
+export function fieldGroupsOf(registry) {
+  const reg = registry ?? {};
+  return Object.entries(reg)
+    .sort(([a, aInfo], [b, bInfo]) => (aInfo.title || a).localeCompare(bInfo.title || b))
+    .map(([classType, info]) => [
+      reg[classType]?.title || classType,
+      Object.keys(info.inputs ?? {}).sort().map((input) => [fieldId(classType, input), input]),
+    ]);
+}
+
 // The "changed vs the previous image" highlight: builds the previous meta's
 // keyspace; the returned predicate marks a current row whose (label, value)
 // isn't in it — a changed value, or a field the previous image didn't carry.

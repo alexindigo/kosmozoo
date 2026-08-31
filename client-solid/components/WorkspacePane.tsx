@@ -1,20 +1,50 @@
 // client-solid/components/WorkspacePane.tsx — the right-column workspace.
 //
 // Two spaces share the pane: the metadata details of the current image and
-// the anchors feed (phase 6). store.state.workspace picks which is shown.
+// the anchors feed. store.state.workspace picks which is shown. The divider
+// drag resizes the split (persisted via core.ui.anchorWidth).
 
+import { onMount, onCleanup } from "solid-js";
 import { useAppStore } from "../store/app-store.js";
 import { DetailsBody } from "./DetailsBody.js";
+import { AnchorSpace } from "./AnchorSpace.js";
 
 export function WorkspacePane() {
   const store = useAppStore();
+  let asideEl;
+
+  onMount(() => {
+    // divider drag resizes the split between the feeds (persisted)
+    const divider = document.getElementById("divider");
+    if (!divider) return;
+    const move = (ev) => {
+      // right of the divider: workspace + the 32px workspace bar
+      const w = Math.min(Math.max(window.innerWidth - ev.clientX - 34, 220), window.innerWidth * 0.7);
+      store.actions.anchors.setPaneWidth(Math.round(w));
+    };
+    const up = () => {
+      document.body.classList.remove("resizing");
+      divider.removeEventListener("pointermove", move);
+      divider.removeEventListener("pointerup", up);
+    };
+    const down = (e) => {
+      e.preventDefault();
+      divider.setPointerCapture(e.pointerId);
+      document.body.classList.add("resizing");
+      divider.addEventListener("pointermove", move);
+      divider.addEventListener("pointerup", up);
+    };
+    divider.addEventListener("pointerdown", down);
+    onCleanup(() => divider.removeEventListener("pointerdown", down));
+  });
+
   return (
-    <aside id="workspace">
+    <aside id="workspace" ref={asideEl} style={() => `width:${store.state.anchorPaneWidth()}px`}>
       <div id="wsDetails" class="ws-space" hidden={store.state.workspace() !== "details"}>
         <DetailsBody />
       </div>
       <div id="wsAnchors" class="ws-space" hidden={store.state.workspace() !== "anchors"}>
-        {/* AnchorSpace lands in phase 6 */}
+        <AnchorSpace />
       </div>
     </aside>
   );

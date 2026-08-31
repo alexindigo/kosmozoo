@@ -20,14 +20,14 @@ import { SliderRow } from "./SliderRow.js";
 
 export function VariationsModal() {
   const store = useAppStore();
-  // keyed on the image identity: switching the wand to another image (or
-  // closing and re-opening) rebuilds the session from scratch
+  // keyed on the session object: switching the wand to another image (or
+  // the bulk bar's batch) rebuilds the session from scratch
   return (
     <Show
-      when={store.state.variations.open ? store.state.variations.image : null}
+      when={store.state.variations.open ? store.state.variations : null}
       keyed
     >
-      {(im) => <BodyPortal images={[im]} onClose={() => store.actions.variations.close()} />}
+      {(v) => <BodyPortal images={[...v.images]} onClose={() => store.actions.variations.close()} />}
     </Show>
   );
 }

@@ -14,6 +14,7 @@ import { createVirtualizer, measureElement } from "@tanstack/solid-virtual";
 import { matchesFile } from "/js/route-parse.mjs";
 import { useAppStore } from "../store/app-store.js";
 import { WINDOW_PAD } from "../store/image-window.js";
+import { initScrollSnap } from "../store/scroll-snap.js";
 import { Card } from "./Card.js";
 
 // measured chrome under the image box (title row + notes + meta bar)
@@ -58,6 +59,14 @@ export function Grid() {
       col?.removeEventListener("scroll", onSettle);
       clearTimeout(settleTimer);
     });
+    // flick snap with intent (the guard keeps it from fighting the
+    // workbench; programmatic scrolls suppress it)
+    if (col) {
+      const disposeSnap = initScrollSnap(col, {
+        isDiffOpen: () => store.state.diff.open,
+      });
+      onCleanup(disposeSnap);
+    }
   });
 
   // meta-want sweep when the view turns over (load/filter/judgment)

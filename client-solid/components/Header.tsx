@@ -7,6 +7,7 @@
 
 import { onCleanup } from "solid-js";
 import { For, Show } from "solid-js/web";
+import { iconSvg } from "/js/icons.mjs";
 import { useAppStore } from "../store/app-store.js";
 import { nodeImages } from "../store/fields.js";
 import { HostPicker } from "./HostPicker.js";
@@ -52,6 +53,94 @@ function InfoLayoutSwitcher() {
         </For>
       </span>
     </Show>
+  );
+}
+
+// The options menu, declarative: scraper toggle + pause, the fields picker,
+// the judgment coupling, the delete mode, and the feedback path. The filter
+// input narrows the rows (label/search text).
+function Menu() {
+  const store = useAppStore();
+  const open = () => store.state.menuOpen();
+  const q = () => (store.state.menuFilter() ?? "").toLowerCase();
+  const matches = (hay) => !q() || hay.toLowerCase().includes(q());
+  const scraperPending = () => {
+    const p = store.state.scraper?.pending ?? {};
+    const total = Object.values(p).reduce((a, b) => a + b, 0);
+    return total > 0 ? `${total} left` : "";
+  };
+  let fbPathEl;
+  return (
+    <div id="menu" hidden={!open()}>
+      <Show when={open()}>
+        <input
+          id="menuSearch" type="search" placeholder="filter settings…" spellcheck={false}
+          value={store.state.menuFilter()}
+          onInput={(e) => store.actions.menu.setFilter(e.target.value)}
+        />
+        <div id="menuRows">
+          <Show when={matches("metadata scan")}>
+            <div class="menurow">
+              <label class="switchwrap" title="walk the host's image list and extract PNG-embedded metadata in the background">
+                <input
+                  type="checkbox" checked={!!store.state.scraper?.enabled}
+                  onChange={(e) => store.actions.menu.scraperToggle(e.target.checked)}
+                />
+                <span class="track" />
+                metadata scan
+              </label>
+              <button
+                id="scraperPause" title="pause/resume the background scan (laptop mode)"
+                onClick={() => store.actions.menu.scraperPause()}
+                innerHTML={iconSvg(store.state.scraper?.paused ? "player-play" : "player-pause", 12)}
+              />
+              <span id="scraperPending" class="menuextra">{scraperPending()}</span>
+            </div>
+          </Show>
+          <Show when={matches("metadata fields card strip picker")}>
+            <div class="menurow">
+              <button onClick={() => store.actions.fieldsOverlay.open()}>metadata fields…</button>
+            </div>
+          </Show>
+          <Show when={matches("down-vote hides")}>
+            <div class="menurow">
+              <label class="switchwrap" title="thumbs-down removes an image from view (reveal with the Unhide button)">
+                <input
+                  type="checkbox" checked={store.state.judgmentPrefs.downvoteHides}
+                  onChange={(e) => store.actions.judgments.setDownvoteHides(e.target.checked)}
+                />
+                <span class="track" />
+                down-vote hides
+              </label>
+            </div>
+          </Show>
+          <Show when={matches("trash-delete via assets_plus")}>
+            <div class="menurow">
+              <label class="switchwrap" title="delete from Comfy hosts through the assets_plus extension (recoverable trash); off falls back to hiding the image">
+                <input
+                  type="checkbox" checked={store.state.deletePrefs.useAssetsPlus}
+                  onChange={(e) => store.actions.menu.deleteAssetsPlus(e.target.checked)}
+                />
+                <span class="track" />
+                trash-delete via assets_plus
+              </label>
+            </div>
+          </Show>
+          <Show when={matches("feedback.json path")}>
+            <div class="menurow">
+              <div class="menulabel">feedback.json path</div>
+              <div class="fbpathrow">
+                <input
+                  type="text" spellcheck={false} ref={fbPathEl}
+                  value={store.state.feedbackPath ?? ""}
+                />
+                <button onClick={() => store.actions.menu.applyFeedbackPath(fbPathEl?.value?.trim() ?? "")}>apply</button>
+              </div>
+            </div>
+          </Show>
+        </div>
+      </Show>
+    </div>
   );
 }
 
@@ -103,20 +192,20 @@ export function Header() {
         download="kosmozoo_feedback.json"
         title="download the exact feedback.json as stored on the server"
       >Download feedback</a>
-      <div id="menuWrap" ref={menuWrapRef}>
-        <button
-          id="menuBtn"
-          title="options"
-          onClick={(e) => { e.stopPropagation(); store.actions.ui.toggleMenu(); }}
-        >
-          <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-            <path d="M4 6h16" />
-            <path d="M4 12h16" />
-            <path d="M4 18h16" />
-          </svg>
-        </button>
-        <div id="menu" hidden={!store.state.menuOpen()} />
-      </div>
+        <div id="menuWrap" ref={menuWrapRef}>
+          <button
+            id="menuBtn"
+            title="options"
+            onClick={(e) => { e.stopPropagation(); store.actions.ui.toggleMenu(); }}
+          >
+            <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <path d="M4 6h16" />
+              <path d="M4 12h16" />
+              <path d="M4 18h16" />
+            </svg>
+          </button>
+          <Menu />
+        </div>
     </header>
   );
 }
