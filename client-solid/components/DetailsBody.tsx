@@ -32,7 +32,7 @@ export function DetailsBody() {
   };
   const colsClass = () => {
     const l = store.state.infoLayout();
-    return "ws-cols " + (l === "rev" ? "rev" : l === "stacked" ? "stacked" : "split");
+    return "info " + (l === "rev" ? "rev" : l === "stacked" ? "stacked" : "split");
   };
 
   // the card's HEAD fetch may not have run — fill the size in place
@@ -45,7 +45,7 @@ export function DetailsBody() {
   const onTxtClick = (e) => {
     const refEl = e.target.closest?.(".imgref[data-file]");
     if (!refEl) return;
-    const cols = refEl.closest(".ws-cols");
+    const cols = refEl.closest(".info");
     const target = cols?.querySelector(`.infoimg[data-file="${CSS.escape(refEl.dataset.file)}"]`);
     if (!target) return;
     target.scrollIntoView({ behavior: "smooth", block: "nearest" });
@@ -54,7 +54,7 @@ export function DetailsBody() {
   };
 
   return (
-    <div id="wsDetailsBody" class="metabody">
+    <div class="info-body">
       <Show when={img()} keyed fallback={<div class="info-none">No image selected.</div>}>
         {(im) => (
           <Show
@@ -71,7 +71,7 @@ export function DetailsBody() {
               }
             >
               <div class={colsClass()}>
-                <div class="ws-imgcol">
+                <div class="info-source-images">
                   <For each={images()}>
                     {(image) => (
                       <div class="infoimg" data-file={image.file}>
@@ -85,7 +85,8 @@ export function DetailsBody() {
                     )}
                   </For>
                 </div>
-                <div class="ws-txtcol" onClick={onTxtClick}>
+                <div class="separator" />
+                <div class="info-source-nodes" onClick={onTxtClick}>
                   <Head im={im} />
                   <MetaBody meta={im.meta ?? null} host={im.host} compareMeta={compareMeta()} skipImages />
                 </div>

@@ -71,6 +71,7 @@ export function makeAppStore() {
   const [menuFilter, setMenuFilter] = createSignal("");
   const [fieldsOverlayOpen, setFieldsOverlayOpen] = createSignal(false);
   const [anchorPaneWidth, setAnchorPaneWidth] = createSignal(300); // px, divider-adjusted, persisted
+  const [infoSplit, setInfoSplit] = createSignal(0.66); // info panel: images/nodes split, divider-adjusted, persisted
 
   // right-column space + details layout — persisted (workspaceState contract).
   // Read once at construction: the persisted space must be set before the
@@ -617,6 +618,17 @@ export function makeAppStore() {
         setInfoLayoutSig(mode);
         try { localStorage.setItem("kosmozoo.infoLayout.v1", mode); } catch { /* private mode */ }
       },
+      info: {
+        split: {
+          set(ratio) {
+            const r = Math.max(0, Math.min(1, ratio));
+            if (infoSplit() === r) return;
+            setInfoSplit(r);
+            // TODO: handle persistence failure (optimistic UI, TODO comment per design)
+            api.setSettings("core.ui", { infoSplit: r }).catch(() => {});
+          },
+        },
+      },
       // the panel itself lands in phase 6; the flag is live already
       toggleKeysPanel() { setKeysPanelOpen(!keysPanelOpen()); },
     },
@@ -1082,6 +1094,7 @@ export function makeAppStore() {
     keysPanelOpen,
     workspace,
     infoLayout,
+    infoSplit,
   };
 
   return { state: stateObj, actions };

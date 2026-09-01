@@ -141,8 +141,8 @@ main { display: flex; flex: 1; min-height: 0; }
 #wsBar button.on { color: var(--accent); border-color: var(--accent); }
 
 /* details space: current image's full metadata */
-#wsDetailsBody { flex: 1; overflow-y: auto; scrollbar-width: none; }
-#wsDetailsBody::-webkit-scrollbar { display: none; }
+.info-body { flex: 1; overflow-y: auto; scrollbar-width: none; }
+.info-body::-webkit-scrollbar { display: none; }
 .ws-head { margin-bottom: 10px; }
 .ws-name { font-size: 12px; overflow-wrap: anywhere; }
 .ws-sub { color: var(--dim); font-size: 11px; margin-top: 2px; }
@@ -257,7 +257,7 @@ main { display: flex; flex: 1; min-height: 0; }
 .metabar-full { grid-column: 1 / -1; }
 /* .pair's display:grid out-cascades the hidden attribute — kill it here */
 .metabar-full[hidden] { display: none; }
-.props { color: var(--dim); font-size: 12px; overflow-wrap: anywhere; }
+.props { color: var(--dim); font-size: 12px; }
 .props .plabel { color: var(--fg); opacity: .55; }
 .props .nometa { color: var(--red); }
 .desc { color: var(--dim); font-size: 12px; font-style: italic;
@@ -644,10 +644,10 @@ main { display: flex; flex: 1; min-height: 0; }
 .infoimg.flash img { border-color: var(--accent); box-shadow: 0 0 0 2px var(--accent); }
 
 /* filename links in the text column focus the images column */
-.ws-txtcol .imgref { color: var(--accent); cursor: pointer; }
-.ws-txtcol .imgref:hover { text-decoration: underline; }
+.info-source-nodes .imgref { color: var(--accent); cursor: pointer; }
+.info-source-nodes .imgref:hover { text-decoration: underline; }
 /* a differing image-file ref still reads as a value change, not a link */
-.ws-txtcol .imgref.pdiff { color: var(--white); }
+.info-source-nodes .imgref.pdiff { color: var(--white); }
 
 /* info panel: collapsible per-node sections */
 .infogroup { margin-top: 10px; border: 1px solid var(--raise); border-radius: 6px;
@@ -665,18 +665,24 @@ main { display: flex; flex: 1; min-height: 0; }
 .infogroup-body .props div { padding: 1px 0; }
 .infogroup-body .infosec { margin-top: 8px; }
 
-/* details split: discovered images and the text fields arranged by the
+/* details split: source images and node metadata arranged by the
    header's layout switcher (state.infoLayout) */
-.ws-cols { display: flex; gap: 12px; align-items: flex-start; }
-.ws-cols.rev { flex-direction: row-reverse; }
-.ws-cols.stacked { flex-direction: column; }
-.ws-imgcol { flex: 0 0 66%; max-width: 66%; min-width: 0; }
-.ws-txtcol { flex: 1; min-width: 0; }
-.ws-cols.stacked .ws-imgcol, .ws-cols.stacked .ws-txtcol { flex: none; max-width: 100%; width: 100%; }
+.info { display: flex; gap: 12px; align-items: flex-start; flex: 1; min-height: 0; }
+.info.rev { flex-direction: row-reverse; }
+.info.stacked { flex-direction: column; }
+.info-source-images { flex: 0 0 66%; max-width: 66%; min-width: 0; }
+.info-source-nodes { flex: 1; min-width: 0; }
+.info.stacked .info-source-images, .info.stacked .info-source-nodes { flex: none; max-width: 100%; width: 100%; }
 /* the image column is for inspection — no small-cap height here */
-.ws-imgcol .infoimg img { max-height: none; }
+.info-source-images .infoimg img { max-height: none; }
 /* input images have no known dimensions — the box hugs the image */
-.ws-imgcol .imgwrap { aspect-ratio: auto; }
+.info-source-images .imgwrap { aspect-ratio: auto; }
+/* draggable divider between the two sections */
+.separator { flex: 0 0 1px; background: var(--raise); cursor: col-resize;
+  align-self: stretch; transition: background .15s; }
+.info.stacked .separator { flex: 0 0 auto; height: 1px; width: 100%;
+  cursor: row-resize; }
+.separator:hover { background: var(--mid); }
 
 /* header layout switcher for the info panel (left of Download feedback) */
 #infoLayout { display: flex; gap: 4px; align-items: center; }
