@@ -24,10 +24,10 @@ function imageFor(store, c) {
 
 export function DetailsBody() {
   const store = useAppStore();
-  const img = createMemo(() => imageFor(store, store.state.current()));
+  const current = () => store.state.current();
   const compareMeta = createMemo(() => imageFor(store, store.state.currentStack().at(-1) ?? null)?.meta ?? null);
   const images = () => {
-    const im = img();
+    const im = imageFor(store, current());
     return im?.host ? nodeImages(im.meta ?? null, im.host) : [];
   };
   const colsClass = () => {
@@ -35,9 +35,8 @@ export function DetailsBody() {
     return "info " + (l === "rev" ? "rev" : l === "stacked" ? "stacked" : "split");
   };
 
-  // the card's HEAD fetch may not have run — fill the size in place
   createEffect(() => {
-    const im = img();
+    const im = imageFor(store, current());
     if (im?.host && im.size == null) store.actions.images.fillSize(im.id);
   });
 
@@ -75,7 +74,7 @@ export function DetailsBody() {
 
   return (
     <div class="info-body">
-      <Show when={img()} fallback={<div class="info-none">No image selected.</div>}>
+      <Show when={() => imageFor(store, store.state.current())} fallback={<div class="info-none">No image selected.</div>}>
         {(im) => (
           <Show
             when={im.meta || im.extracted !== false}
