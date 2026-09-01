@@ -677,15 +677,16 @@ main { display: flex; flex: 1; min-height: 0; }
 .info-source-images .infoimg img { max-height: none; }
 /* input images have no known dimensions — the box hugs the image */
 .info-source-images .imgwrap { aspect-ratio: auto; }
-/* draggable divider between the two sections */
-.separator { flex: 0 0 6px; background: transparent; cursor: col-resize;
-  align-self: stretch; position: relative; transition: background .15s; }
-.separator::before { content: ""; position: absolute; inset: 0 2.5px;
+/* draggable divider between the two sections — the line itself is the
+   hit-resting visual; the hover "gaps" widen the grab zone without
+   enlarging the line */
+.separator { flex: 0 0 13px; background: transparent; cursor: col-resize;
+  align-self: stretch; position: relative; }
+.separator::before { content: ""; position: absolute; inset: 0 6px;
   background: var(--raise); }
-.info.stacked .separator { flex: 0 0 auto; height: 6px; width: 100%;
+.info.stacked .separator { flex: 0 0 auto; height: 13px; width: 100%;
   cursor: row-resize; }
-.info.stacked .separator::before { inset: 2.5px 0; }
-.separator:hover { background: var(--mid); }
+.info.stacked .separator::before { inset: 6px 0; }
 .separator:hover::before { background: var(--fg); }
 
 /* header layout switcher for the info panel (left of Download feedback) */

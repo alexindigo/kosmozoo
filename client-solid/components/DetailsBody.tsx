@@ -53,6 +53,27 @@ export function DetailsBody() {
     setTimeout(() => target.classList.remove("flash"), 1200);
   };
 
+  // the separator drag: pointer capture, ratio from the pointer's position
+  // within the .info box (clamped 0..1 by the action)
+  const onSplitDown = (e) => {
+    e.preventDefault();
+    const sep = e.currentTarget;
+    sep.setPointerCapture(e.pointerId);
+    const box = sep.parentElement.getBoundingClientRect();
+    const vertical = sep.parentElement.classList.contains("stacked");
+    const move = (ev) => {
+      const pos = vertical ? (ev.clientY - box.top) / box.height
+        : (ev.clientX - box.left) / box.width;
+      store.actions.ui.info.split.set(pos);
+    };
+    const up = () => {
+      sep.removeEventListener("pointermove", move);
+      sep.removeEventListener("pointerup", up);
+    };
+    sep.addEventListener("pointermove", move);
+    sep.addEventListener("pointerup", up);
+  };
+
   return (
     <div class="info-body">
       <Show when={img()} keyed fallback={<div class="info-none">No image selected.</div>}>
@@ -71,7 +92,7 @@ export function DetailsBody() {
               }
             >
               <div class={colsClass()}>
-                <div class="info-source-images">
+                <div class="info-source-images" style={{ "flex-basis": `${store.ui.info.split() * 100}%` }}>
                   <For each={images()}>
                     {(image) => (
                       <div class="infoimg" data-file={image.file}>
@@ -85,7 +106,7 @@ export function DetailsBody() {
                     )}
                   </For>
                 </div>
-                <div class="separator" />
+                <div class="separator" onPointerDown={onSplitDown} />
                 <div class="info-source-nodes" onClick={onTxtClick}>
                   <Head im={im} />
                   <MetaBody meta={im.meta ?? null} host={im.host} compareMeta={compareMeta()} skipImages />
