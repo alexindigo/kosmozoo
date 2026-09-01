@@ -53,8 +53,7 @@ export function DetailsBody() {
     setTimeout(() => target.classList.remove("flash"), 1200);
   };
 
-  // the separator drag: pointer capture, ratio from the pointer's position
-  // within the .info box (clamped 0..1 by the action)
+  const split = () => store.ui.info?.split ?? 0.66;
   const onSplitDown = (e) => {
     e.preventDefault();
     const sep = e.currentTarget;
@@ -92,7 +91,7 @@ export function DetailsBody() {
               }
             >
               <div class={colsClass()}>
-                <div class="info-source-images" style={{ "flex-basis": `${store.ui.info.split() * 100}%` }}>
+                <div class="info-source-images" style={{ "flex-basis": `${split() * 100}%` }}>
                   <For each={images()}>
                     {(image) => (
                       <div class="infoimg" data-file={image.file}>
