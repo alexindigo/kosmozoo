@@ -455,8 +455,11 @@ export function makeAppStore() {
     // api.hosts() is deliberately not caught — a failed host list fails the
     // whole boot (the caller surfaces it).
     async boot() {
+      window.__BOOT_STEP = "start";
       setSt("hosts", reconcile(await api.hosts()));
+      window.__BOOT_STEP = "hosts";
       setSt("ui", await api.settings("core.ui").catch(() => ({})));
+      window.__BOOT_STEP = "ui";
       setSt("nodesRegistry", await api.nodes().catch(() => ({})));
       setSt("fieldsStored", (await api.settings("core.fields").catch(() => ({})))?.cfg ?? null);
       const del = await api.settings("core.delete").catch(() => ({}));

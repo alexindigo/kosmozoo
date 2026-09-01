@@ -24,11 +24,12 @@ function imageFor(store, c) {
 
 export function DetailsBody() {
   const store = useAppStore();
-  const current = () => store.state.current();
+  const im = () => imageFor(store, store.state.current());
+  const hasImages = () => images().length > 0;
   const compareMeta = createMemo(() => imageFor(store, store.state.currentStack().at(-1) ?? null)?.meta ?? null);
   const images = () => {
-    const im = imageFor(store, current());
-    return im?.host ? nodeImages(im.meta ?? null, im.host) : [];
+    const resolved = im();
+    return resolved?.host ? nodeImages(resolved.meta ?? null, resolved.host) : [];
   };
   const colsClass = () => {
     const l = store.state.infoLayout();
@@ -36,8 +37,8 @@ export function DetailsBody() {
   };
 
   createEffect(() => {
-    const im = imageFor(store, current());
-    if (im?.host && im.size == null) store.actions.images.fillSize(im.id);
+    const resolved = im();
+    if (resolved?.host && resolved.size == null) store.actions.images.fillSize(resolved.id);
   });
 
   // filename links in the text column focus the images column on that image
@@ -52,7 +53,7 @@ export function DetailsBody() {
     setTimeout(() => target.classList.remove("flash"), 1200);
   };
 
-  const split = () => store.ui.info?.split ?? 0.66;
+  const split = () => store.state.ui.info?.split ?? 0.66;
   const onSplitDown = (e) => {
     e.preventDefault();
     const sep = e.currentTarget;
@@ -74,18 +75,18 @@ export function DetailsBody() {
 
   return (
     <div class="info-body">
-      <Show when={() => imageFor(store, store.state.current())} fallback={<div class="info-none">No image selected.</div>}>
-        {(im) => (
+      <Show when={im} fallback={<div class="info-none">No image selected.</div>}>
+        {(resolved) => (
           <Show
-            when={im.meta || im.extracted !== false}
+            when={im}
             fallback={<div class="info-none">loading metadata…</div>}
           >
             <Show
-              when={images().length > 0}
+              when={hasImages}
               fallback={
                 <>
-                  <Head im={im} />
-                  <MetaBody meta={im.meta ?? null} host={im.host} compareMeta={compareMeta()} />
+                  <Head im={resolved} />
+                  <MetaBody meta={resolved.meta ?? null} host={resolved.host} compareMeta={compareMeta()} />
                 </>
               }
             >
@@ -97,8 +98,8 @@ export function DetailsBody() {
                         <Zoomable
                           src={image.src}
                           alt={image.file}
-                          zoomKey={`input:${im.host}:${image.file}`}
-                          onOpen={() => store.actions.diff.openInput(im.host, image.file, image.fromOutput)}
+                          zoomKey={`input:${resolved.host}:${image.file}`}
+                          onOpen={() => store.actions.diff.openInput(resolved.host, image.file, image.fromOutput)}
                         />
                       </div>
                     )}
@@ -106,8 +107,8 @@ export function DetailsBody() {
                 </div>
                 <div class="separator" onPointerDown={onSplitDown} />
                 <div class="info-source-nodes" onClick={onTxtClick}>
-                  <Head im={im} />
-                  <MetaBody meta={im.meta ?? null} host={im.host} compareMeta={compareMeta()} skipImages />
+                  <Head im={resolved} />
+                  <MetaBody meta={resolved.meta ?? null} host={resolved.host} compareMeta={compareMeta()} skipImages />
                 </div>
               </div>
             </Show>
