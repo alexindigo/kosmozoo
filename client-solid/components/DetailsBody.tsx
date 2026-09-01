@@ -54,23 +54,20 @@ export function DetailsBody() {
   };
 
   const split = () => store.ui.info.split;
+  // drag via window listeners (works even at 0 px)
   const onSplitDown = (e) => {
     e.preventDefault();
-    const sep = e.currentTarget;
-    sep.setPointerCapture(e.pointerId);
-    const box = sep.parentElement.getBoundingClientRect();
-    const vertical = sep.parentElement.classList.contains("stacked");
+    const box = e.currentTarget.parentElement.getBoundingClientRect();
+    const vertical = e.currentTarget.parentElement.classList.contains("stacked");
     const move = (ev) => {
       const pos = vertical ? (ev.clientY - box.top) / box.height
         : (ev.clientX - box.left) / box.width;
       store.actions.ui.info.split.set(pos);
     };
-    const up = () => {
-      sep.removeEventListener("pointermove", move);
-      sep.removeEventListener("pointerup", up);
-    };
-    sep.addEventListener("pointermove", move);
-    sep.addEventListener("pointerup", up);
+    const up = () => window.removeEventListener("pointermove", move);
+    window.addEventListener("pointermove", move);
+    window.addEventListener("pointerup", up, { once: true });
+    window.__SEP_DBG = "hit";
   };
 
   return (

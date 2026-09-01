@@ -667,7 +667,7 @@ main { display: flex; flex: 1; min-height: 0; }
 
 /* details split: source images and node metadata arranged by the
    header's layout switcher (state.infoLayout) */
-.info { display: flex; gap: 12px; align-items: flex-start; flex: 1; min-height: 0; }
+.info { display: flex; gap: 12px; align-items: stretch; flex: 1; min-height: 0; }
 .info.rev { flex-direction: row-reverse; }
 .info.stacked { flex-direction: column; }
 .info-source-images { flex: 0 0 66%; max-width: 66%; min-width: 0; }
@@ -677,11 +677,13 @@ main { display: flex; flex: 1; min-height: 0; }
 .info-source-images .infoimg img { max-height: none; }
 /* input images have no known dimensions — the box hugs the image */
 .info-source-images .imgwrap { aspect-ratio: auto; }
+/* image elements only render — clicks/drag hits target the imgwrap above them */
+.info-source-images .infoimg img { pointer-events: none; }
 /* draggable divider between the two sections — the line itself is the
    hit-resting visual; the hover "gaps" widen the grab zone without
    enlarging the line */
 .separator { flex: 0 0 13px; background: transparent; cursor: col-resize;
-  align-self: stretch; position: relative; }
+  align-self: stretch; position: relative; z-index: 2; }
 .separator::before { content: ""; position: absolute; inset: 0 6px;
   background: var(--raise); }
 .info.stacked .separator { flex: 0 0 auto; height: 13px; width: 100%;

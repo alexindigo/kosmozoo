@@ -630,8 +630,7 @@ export function makeAppStore() {
         split: {
           set(ratio) {
             const r = Math.max(0, Math.min(1, ratio));
-            if (infoSplit() === r) return;
-            setInfoSplit(r);
+            setUiSt("info", "split", r);
             // TODO: handle persistence failure (optimistic UI, TODO comment per design)
             api.setSettings("core.ui", { infoSplit: r }).catch(() => {});
           },
