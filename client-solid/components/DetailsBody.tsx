@@ -25,12 +25,12 @@ function imageFor(store, c) {
 export function DetailsBody() {
   const store = useAppStore();
   const im = () => imageFor(store, store.state.current());
-  const hasImages = () => images().length > 0;
   const compareMeta = createMemo(() => imageFor(store, store.state.currentStack().at(-1) ?? null)?.meta ?? null);
   const images = () => {
     const resolved = im();
     return resolved?.host ? nodeImages(resolved.meta ?? null, resolved.host) : [];
   };
+  const hasImages = () => images().length > 0;
   const colsClass = () => {
     const l = store.state.infoLayout();
     return "info " + (l === "rev" ? "rev" : l === "stacked" ? "stacked" : "split");

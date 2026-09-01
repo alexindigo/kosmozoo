@@ -173,3 +173,6 @@ export function nodeImages(meta, host) {
   }
   return out;
 }
+
+// validatedNodeImages intentionally removed — nodeImages returns refs it
+// resolves; validation lives wherever the component can re-validate.

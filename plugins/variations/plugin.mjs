@@ -258,31 +258,6 @@ export function dedupHostTag(basename, hostTag) {
   return b;
 }
 
-// Basename clamp: lineage chains re-embed the PRIOR filename prefix at every
-// generation (source chain nests oldest-first), so the middle of
-// `<pfx><basename><sfx>` grows ~1 full-prefix per variation hop until it
-// hits the filesystem NAME_MAX (255) — every run then fails at SaveImage
-// with Errno 36 "File name too long". Clamp the MIDDLE to 200 chars from
-// the LEFT (newest lineage stays readable), marking the fold with "~".
-// 200 = 255 minus the ComfyUI " _NNNNN_.png" counter/extension suffix and
-// minus headroom for the user's own pfx/sfx.
-export const MAX_BASENAME = 200;
-
-export function clampBasename(basename, max = MAX_BASENAME) {
-  if (basename.length <= max) return basename;
-  return "~" + basename.slice(basename.length - (max - 1));
-}
-
-// Sources previously-varied sometimes have the `<host>#` tag repeated as
-// parts of lineage (e.g. "ark#athena_impl_..._ark#var_..._.png"): each
-// generation added the tag, so a re-hopped chain has N tags. dedupHostTag
-// strips ONLY the leading run. This strips every re-occurrence anywhere —
-// the basename then contains lineage only, and clampBasename bounds the
-// length of that lineage.
-export function stripWideHostTag(basename, hostTag) {
-  return basename.split(hostTag).join("");
-}
-
 // The lineage tag: ComfyUI writes every extra_pnginfo key as a JSON-encoded
 // PNG text chunk, so a variation's output PNG carries where it came from —
 // rename-proof, host-move-proof. `source` is the image varied on
@@ -334,13 +309,10 @@ export function findProducingSaveImage(graph, originalFilename) {
 // and delete every OTHER SaveImage from the graph so the run produces
 // exactly one file. `basename` is the ORIGINAL image's filename without
 // its extension — including the ComfyUI counter (e.g. "StyleMix_01822_") —
-// so the variation's name traces back to the source image. The basename is
-// clamped left-side to MAX_BASENAME (see clampBasename) so successive
-// variation hops cannot hit the filesystem NAME_MAX / Errno 36.
+// so the variation's name traces back to the source image.
 // Returns { kept, dropped } — how many nodes affected.
 export function narrowToOneSaveImage(graph, producing, basename, pfx, sfx) {
-  const middle = clampBasename(basename);
-  producing.node.inputs.filename_prefix = pfx + middle + sfx;
+  producing.node.inputs.filename_prefix = pfx + basename + sfx;
   let dropped = 0;
   for (const [nid, n] of Object.entries(graph)) {
     if (nid === producing.id) continue;
@@ -351,15 +323,14 @@ export function narrowToOneSaveImage(graph, producing, basename, pfx, sfx) {
   return { kept: 1, dropped };
 }
 
-// Fallback path: wrap every SaveImage's own prefix with the user's pfx/sfx,
-// clamped the same way to avoid Errno 36 on runaway lineage chains.
+// Fallback path: wrap every SaveImage's own prefix with the user's pfx/sfx.
+// Used only when no SaveImage matches the original filename.
 export function wrapAllSaveImagePrefixes(graph, pfx, sfx) {
   let touched = 0;
   for (const n of Object.values(graph)) {
     if (String(n.class_type ?? "").toLowerCase() !== "saveimage") continue;
     const orig = String(n.inputs?.filename_prefix ?? "");
-    const middle = clampBasename(orig);
-    n.inputs.filename_prefix = pfx + middle + sfx;
+    n.inputs.filename_prefix = pfx + orig + sfx;
     touched++;
   }
   return touched;
@@ -463,12 +434,10 @@ export function register(kz) {
 
     // Basename of the original file (without extension) — includes ComfyUI's
     // counter, e.g. "StyleMix_01822_". Used as the middle of the wrapped
-    // filename_prefix so variations trace back to the source image. ALSO
-    // removes any legacy multi-level `<host>#` nesting the client's
-    // previous-generation chain accumulated, then dedupHostTag takes the
-    // leading tag — clampBasename in narrowToOneSaveImage handles the rest.
-    const originalBasenameRaw = stripExtension(filename);
-    const originalBasename = stripWideHostTag(dedupHostTag(originalBasenameRaw, hostTag), hostTag);
+    // filename_prefix so variations trace back to the source image. A source
+    // that is itself a variation already carries "<host>#" (maybe several
+    // deep) — dedup so the output carries exactly one.
+    const originalBasename = dedupHostTag(stripExtension(filename), hostTag);
 
     const errors = [];
     let submitted = 0;
