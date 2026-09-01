@@ -8,7 +8,7 @@
 // layout follows store.state.infoLayout. Filename links in the text column
 // re-focus the images column on that image.
 
-import { createEffect, For, Show } from "solid-js";
+import { createEffect, createMemo, For, Show } from "solid-js";
 import { useAppStore } from "../store/app-store.js";
 import { nodeImages } from "../store/fields.js";
 import { fmtBytes } from "./MetaBar.js";
@@ -24,8 +24,8 @@ function imageFor(store, c) {
 
 export function DetailsBody() {
   const store = useAppStore();
-  const img = () => imageFor(store, store.state.current());
-  const compareMeta = () => imageFor(store, store.state.currentStack().at(-1) ?? null)?.meta ?? null;
+  const img = createMemo(() => imageFor(store, store.state.current()));
+  const compareMeta = createMemo(() => imageFor(store, store.state.currentStack().at(-1) ?? null)?.meta ?? null);
   const images = () => {
     const im = img();
     return im?.host ? nodeImages(im.meta ?? null, im.host) : [];
