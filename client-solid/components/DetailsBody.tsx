@@ -53,7 +53,7 @@ export function DetailsBody() {
     setTimeout(() => target.classList.remove("flash"), 1200);
   };
 
-  const split = () => store.state.ui.info?.split ?? 0.66;
+  const split = () => store.ui.info.split;
   const onSplitDown = (e) => {
     e.preventDefault();
     const sep = e.currentTarget;

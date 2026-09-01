@@ -36,8 +36,8 @@ function initialHost(hosts, stored) {
 }
 
 export function makeAppStore() {
-  // tree structures — path-level updates
-    const [st, setSt] = createStore({
+  // app data tree — engine-side state
+  const [st, setSt] = createStore({
     hosts: {},            // name -> { address, online, deleteMode }
     nodesRegistry: {},    // discovered node types (/api/nodes)
     fieldsStored: null,   // raw core.fields cfg — fieldsCfg derives below
@@ -55,6 +55,11 @@ export function makeAppStore() {
     infoOverlay: { open: false, name: "", meta: null }, // anchor ⓘ params
     chips: [],            // status stack: { slot, kind, msg }
     metaPending: 0,
+  });
+
+  // UI state tree — separate reactive graph, moves here as directed
+  const [uiSt, setUiSt] = createStore({
+    info: { split: 0.66 }, // info panel: images/nodes split, divider-adjusted
   });
 
   // scalar atoms
@@ -1100,7 +1105,12 @@ export function makeAppStore() {
     infoSplit,
   };
 
-  return { state: stateObj, actions };
+  // UI state accessor — separate reactive graph
+  const uiStateObj = {
+    get info() { return uiSt.info; },
+  };
+
+  return { state: stateObj, actions, ui: uiStateObj };
 }
 
 export const AppStoreContext = createContext(null);
