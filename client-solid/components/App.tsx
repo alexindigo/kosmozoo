@@ -29,7 +29,6 @@ export function App() {
       <main>
         <FeedRail />
         <Grid />
-        <div id="divider" title="drag to resize the split" />
         <WorkspacePane />
         <WorkspaceBar />
       </main>

@@ -12,10 +12,11 @@ import { AnchorSpace } from "./AnchorSpace.js";
 export function WorkspacePane() {
   const store = useAppStore();
   let asideEl;
+  let dividerEl;
 
   onMount(() => {
     // divider drag resizes the split between the feeds (persisted)
-    const divider = document.getElementById("divider");
+    const divider = dividerEl;
     if (!divider) return;
     const move = (ev) => {
       // right of the divider: workspace + the 32px workspace bar
@@ -39,13 +40,16 @@ export function WorkspacePane() {
   });
 
   return (
-    <aside id="workspace" ref={asideEl} style={() => `width:${store.state.anchorPaneWidth()}px`}>
-      <div id="wsDetails" class="ws-space" hidden={store.state.workspace() !== "details"}>
-        <DetailsBody />
-      </div>
-      <div id="wsAnchors" class="ws-space" hidden={store.state.workspace() !== "anchors"}>
-        <AnchorSpace />
-      </div>
-    </aside>
+    <>
+      <div id="divider" title="drag to resize the split" ref={(el) => { dividerEl = el; }} />
+      <aside id="workspace" ref={asideEl} style={() => `width:${store.state.anchorPaneWidth()}px`}>
+        <div id="wsDetails" class="ws-space" hidden={store.state.workspace() !== "details"}>
+          <DetailsBody />
+        </div>
+        <div id="wsAnchors" class="ws-space" hidden={store.state.workspace() !== "anchors"}>
+          <AnchorSpace />
+        </div>
+      </aside>
+    </>
   );
 }
