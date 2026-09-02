@@ -58,31 +58,35 @@ export function snapQuiet() {
   return Date.now() < quietUntil;
 }
 
-// isDiffOpen: the snap never fights an open workbench
-export function initScrollSnap(col, { isDiffOpen }) {
+// isDiffOpen: the snap never fights an open workbench. virtualizer: the
+// feed's registered virtualizer — snap geometry derives from its visible
+// range ({ index, start, size }), never a DOM walk.
+export function initScrollSnap(col, { isDiffOpen, virtualizer }) {
   if (!col) return () => {};
 
   let settleTimer = null;
 
   const snap = () => {
-    if (isDiffOpen()) return;
-    const colTop = col.getBoundingClientRect().top;
+    if (isDiffOpen() || !virtualizer) return;
+    const items = virtualizer.getVirtualItems();
+    if (!items.length) return;
+    const top = col.scrollTop;
+    // the card top nearest the column's top edge (item start = content
+    // offset; rendered rect.top - colTop is the same quantity)
     let best = null;
     let bestDist = Infinity;
-    for (const el of col.querySelectorAll(".card[data-idx]")) {
-      const d = Math.abs(el.getBoundingClientRect().top - colTop);
-      if (d < bestDist) { bestDist = d; best = el; }
+    for (const it of items) {
+      const d = Math.abs(it.start - top);
+      if (d < bestDist) { bestDist = d; best = it; }
     }
-    if (!best) return;
-    const delta = best.getBoundingClientRect().top - colTop;
+    const delta = best.start - top;
     if (Math.abs(delta) < 1) return; // already snapped
     // proximity gate: only tidy a nearby boundary. Deep inside a long card
     // the nearest top is far away — the user's position stays untouched.
-    const cardH = best.getBoundingClientRect().height;
-    const window = Math.min(col.clientHeight, cardH) * SNAP_WINDOW_FRAC;
+    const window = Math.min(col.clientHeight, best.size) * SNAP_WINDOW_FRAC;
     if (Math.abs(delta) > window) return;
     quietUntil = Date.now() + SNAP_QUIET_MS;
-    col.scrollTo({ top: col.scrollTop + delta, behavior: "smooth" });
+    col.scrollTo({ top: top + delta, behavior: "smooth" });
   };
 
   // track the wheel stream's rate (px/ms of deltas in the trailing window).

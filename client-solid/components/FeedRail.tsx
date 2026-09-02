@@ -9,8 +9,9 @@
 // Click/drag scrubs: the tick under the cursor becomes the centered card.
 //
 // The component owns the rail div's lifecycle; the tick/wave paint stays
-// the measured imperative loop (rAF-coalesced) — reactivity funnels view
-// turnovers into the same paint.
+// the measured imperative loop (rAF-coalesced) — the wave BOUNDS derive
+// from the store-registered virtualizer's visible range (index math), and
+// reactivity funnels view turnovers into the same paint.
 
 import { onCleanup, createEffect } from "solid-js";
 import { useAppStore } from "../store/app-store.js";
@@ -23,12 +24,13 @@ export function FeedRail() {
   const store = useAppStore();
   let rail;
 
-  // the feed scroll element arrives via the store seam (Grid registers it,
-  // after this component mounts) — the signal read re-runs this effect when
-  // registration lands
+  // the feed scroll element + virtualizer arrive via the store seam (Grid
+  // registers them, after this component mounts) — the signal reads re-run
+  // this effect when registration lands
   createEffect(() => {
     const col = store.state.feedScrollEl();
-    if (!rail || !col) return;
+    const vz = store.state.feedVirtualizer();
+    if (!rail || !col || !vz) return;
 
     let raf = 0;
     let tapeStart = 0;
@@ -39,14 +41,17 @@ export function FeedRail() {
     const viewLength = () => store.state.view().length;
     const capacity = () => Math.max(0, Math.floor((rail.clientHeight - LABEL_TOP - LABEL_BOTTOM) / TICK_PX));
 
-    // viewport-visible cards → view positions (DOM order = view order)
+    // viewport-visible cards → view positions, derived from the virtualizer's
+    // visible range (items outside the viewport are overscan — filtered by
+    // the same intersection test the old rect walk applied). Index math, no
+    // DOM walk.
     const waveBounds = () => {
-      const r = col.getBoundingClientRect();
-      let first = -1, last = -1, i = 0;
-      for (const el of col.querySelectorAll(".card[data-idx]")) {
-        const b = el.getBoundingClientRect();
-        if (b.bottom > r.top && b.top < r.bottom) { if (first < 0) first = i; last = i; }
-        i++;
+      const top = col.scrollTop, bottom = top + col.clientHeight;
+      let first = -1, last = -1;
+      for (const it of vz.getVirtualItems()) {
+        if (it.end <= top || it.start >= bottom) continue;
+        if (first < 0 || it.index < first) first = it.index;
+        if (it.index > last) last = it.index;
       }
       return first < 0 ? null : [first, last];
     };

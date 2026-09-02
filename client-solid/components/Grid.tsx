@@ -46,13 +46,17 @@ export function Grid() {
     col?.addEventListener("scroll", onScroll, { passive: true });
     onCleanup(() => col?.removeEventListener("scroll", onScroll));
     // scrolling IS browsing: the settled scroll makes the midpoint card
-    // current (debounced — a fast scroll must not render per frame)
+    // current (debounced — a fast scroll must not render per frame). The
+    // virtualizer's visible range is the data source — no DOM walk.
     let settleTimer = 0;
     const onSettle = () => {
       clearTimeout(settleTimer);
       settleTimer = setTimeout(() => {
         settleTimer = 0;
-        if (col) store.actions.current.settleFromScroll(col);
+        if (col) {
+          store.actions.current.settleFromRange(
+            virtualizer.getVirtualItems(), col.scrollTop, col.clientHeight);
+        }
       }, 150);
     };
     col?.addEventListener("scroll", onSettle, { passive: true });
@@ -61,10 +65,12 @@ export function Grid() {
       clearTimeout(settleTimer);
     });
     // flick snap with intent (the guard keeps it from fighting the
-    // workbench; programmatic scrolls suppress it)
+    // workbench; programmatic scrolls suppress it) — snap geometry derives
+    // from the virtualizer's visible range
     if (col) {
       const disposeSnap = initScrollSnap(col, {
         isDiffOpen: () => store.state.diff.open,
+        virtualizer,
       });
       onCleanup(disposeSnap);
     }
@@ -136,11 +142,11 @@ function CardSlot(props) {
 
   let el;
   // (re-)register with the src window whenever the slot's image index changes;
-  // re-measure too — the new image's aspect changes the slot size
+  // re-measure too — the new image's aspect changes the slot size. (data-idx
+  // needs no imperative write: the JSX attribute is reactive.)
   createEffect(() => {
     const i = idx();
     if (el) {
-      el.setAttribute("data-idx", String(i));
       store.state.window.register(i)(el);
       props.virtualizer.measureElement(el);
     }

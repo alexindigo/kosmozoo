@@ -86,6 +86,9 @@ export function makeAppStore() {
   // the feed's scroll container — Grid hands it over via feed.register; a
   // signal so late registration still lands
   const [feedScrollEl, setFeedScrollEl] = createSignal(null);
+  // the feed's virtualizer — the scroll-state data source (visible range,
+  // total size); components derive from it instead of walking the DOM
+  const [feedVirtualizer, setFeedVirtualizer] = createSignal(null);
 
   // right-column space + details layout — persisted (workspaceState contract).
   // Read once at construction: the persisted space must be set before the
@@ -228,13 +231,17 @@ export function makeAppStore() {
   // passing through the near-bottom zone.
   function safetyNet() {
     if (scrollGuardPending || snapQuiet()) return;
+    const vz = seams.virtualizer;
+    if (!vz) return;
     scrollGuardPending = true;
     setTimeout(() => {
       scrollGuardPending = false;
       const col = feedScrollEl();
       if (!col) return;
-      if (seams.virtualizer && col.scrollHeight - (col.scrollTop + col.clientHeight) < col.clientHeight * 1.5) {
-        seams.virtualizer.scrollToOffset(col.scrollTop, { align: "start" });
+      // near-bottom guard — geometry from the virtualizer's total size (the
+      // DOM reserves exactly it) + the seamed element's scroll position
+      if (vz.getTotalSize() - (col.scrollTop + col.clientHeight) < col.clientHeight * 1.5) {
+        vz.scrollToOffset(col.scrollTop, { align: "start" });
       }
     }, 120);
   }
@@ -672,14 +679,17 @@ export function makeAppStore() {
       mirror: mirrorCurrentHash,
       // scrolling IS browsing: once the scroll SETTLES, the last card whose
       // top crossed the feed's vertical midpoint becomes current (debounced
-      // by the caller — a fast scroll must not spend a render per frame)
-      settleFromScroll(col) {
+      // by the caller — a fast scroll must not spend a render per frame).
+      // items: the virtualizer's visible range — [{ index (view position),
+      // start, size }] in scroll order; viewport geometry comes from the
+      // seamed scroll element. Index math, never the DOM.
+      settleFromRange(items, viewportTop, clientHeight) {
         if (st.diff.open) return;
-        const mid = col.getBoundingClientRect().top + col.clientHeight / 2;
+        const mid = viewportTop + clientHeight / 2;
         let file = null;
-        for (const el of col.querySelectorAll(".card[data-idx]")) {
-          if (el.getBoundingClientRect().top > mid) break;
-          const im = st.images[Number(el.dataset.idx)];
+        for (const it of items) {
+          if (it.start > mid) break;
+          const im = st.images[view()[it.index]];
           if (im) file = im.filename;
         }
         if (!file || file === current()?.image) return;
@@ -817,6 +827,7 @@ export function makeAppStore() {
       register(seamsIn) {
         seams.virtualizer = seamsIn?.virtualizer ?? null;
         setFeedScrollEl(seamsIn?.scrollEl ?? null);
+        setFeedVirtualizer(seamsIn?.virtualizer ?? null);
       },
       restoreToIndex,
       safetyNet,
@@ -1157,6 +1168,7 @@ export function makeAppStore() {
     infoLayout,
     infoSplit,
     feedScrollEl,
+    feedVirtualizer,
   };
 
   // UI state accessor — separate reactive graph
