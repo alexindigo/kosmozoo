@@ -71,45 +71,43 @@ export function DetailsBody() {
 
   return (
     <div class="info-body">
-      <Show when={im} fallback={<div class="info-none">No image selected.</div>}>
-        {(resolved) => (
+      <Show when={im()} fallback={<div class="info-none">No image selected.</div>}>
+        <Show
+          when={im()?.meta || im()?.extracted !== false}
+          fallback={<div class="info-none">loading metadata…</div>}
+        >
           <Show
-            when={im}
-            fallback={<div class="info-none">loading metadata…</div>}
+            when={hasImages()}
+            fallback={
+              <>
+                <Head im={im()} />
+                <MetaBody meta={im()?.meta ?? null} host={im()?.host} compareMeta={compareMeta()} />
+              </>
+            }
           >
-            <Show
-              when={hasImages}
-              fallback={
-                <>
-                  <Head im={resolved} />
-                  <MetaBody meta={resolved.meta ?? null} host={resolved.host} compareMeta={compareMeta()} />
-                </>
-              }
-            >
-              <div class={colsClass()}>
-                <div class="info-source-images" style={{ "flex-basis": `${split() * 100}%` }}>
-                  <For each={images()}>
-                    {(image) => (
-                      <div class="infoimg" data-file={image.file}>
-                        <Zoomable
-                          src={image.src}
-                          alt={image.file}
-                          zoomKey={`input:${resolved.host}:${image.file}`}
-                          onOpen={() => store.actions.diff.openInput(resolved.host, image.file, image.fromOutput)}
-                        />
-                      </div>
-                    )}
-                  </For>
-                </div>
-                <div class="separator" onPointerDown={onSplitDown} />
-                <div class="info-source-nodes" onClick={onTxtClick}>
-                  <Head im={resolved} />
-                  <MetaBody meta={resolved.meta ?? null} host={resolved.host} compareMeta={compareMeta()} skipImages />
-                </div>
+            <div class={colsClass()}>
+              <div class="info-source-images" style={{ "flex-basis": `${split() * 100}%` }}>
+                <For each={images()}>
+                  {(image) => (
+                    <div class="infoimg" data-file={image.file}>
+                      <Zoomable
+                        src={image.src}
+                        alt={image.file}
+                        zoomKey={`input:${im()?.host}:${image.file}`}
+                        onOpen={() => store.actions.diff.openInput(im()?.host, image.file, image.fromOutput)}
+                      />
+                    </div>
+                  )}
+                </For>
               </div>
-            </Show>
+              <div class="separator" onPointerDown={onSplitDown} />
+              <div class="info-source-nodes" onClick={onTxtClick}>
+                <Head im={im()} />
+                <MetaBody meta={im()?.meta ?? null} host={im()?.host} compareMeta={compareMeta()} skipImages />
+              </div>
+            </div>
           </Show>
-        )}
+        </Show>
       </Show>
     </div>
   );
