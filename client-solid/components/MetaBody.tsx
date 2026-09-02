@@ -2,29 +2,15 @@
 //
 // Shared by the details body and (phase 6) the ⓘ overlay. Fields group into
 // collapsible per-node sections named by the actual node type (class_type —
-// stable, never a per-instance rename; collapse state persists in
-// localStorage). Prompt groups (CLIPTextEncode) sink to the bottom.
+// stable, never a per-instance rename; collapse state persists in the
+// store's uiSt). Prompt groups (CLIPTextEncode) sink to the bottom.
 // `compareMeta` (the previous image's meta) marks field VALUES that differ
 // from it with .pdiff. `host` enables inline node-referenced images;
 // `skipImages` leaves those to a caller-drawn column instead.
 
-import { createSignal, For, Show } from "solid-js";
+import { For, Show } from "solid-js";
 import { useAppStore } from "../store/app-store.js";
 import { fullFieldRows, valueDiffer, nodeImages, NODE_IMG_EXT } from "../store/fields.js";
-
-const LS_INFOGROUPS = "kosmozoo.infoGroups.v1";
-
-function infoGroupState() {
-  try { return JSON.parse(localStorage.getItem(LS_INFOGROUPS)) ?? {}; }
-  catch { return {}; }
-}
-
-function persistInfoGroup(group, collapsed) {
-  const s = infoGroupState();
-  if (collapsed) s[group] = true;
-  else delete s[group];
-  try { localStorage.setItem(LS_INFOGROUPS, JSON.stringify(s)); } catch { /* ignore */ }
-}
 
 export function MetaBody(props) {
   const store = useAppStore();
@@ -46,12 +32,9 @@ export function MetaBody(props) {
       +/clip\s*text\s*encode/i.test(a[0]) - +/clip\s*text\s*encode/i.test(b[0]));
   };
 
-  const [collapsed, setCollapsed] = createSignal(infoGroupState());
-  const toggleGroup = (group) => {
-    const now = !collapsed()[group];
-    setCollapsed({ ...collapsed(), [group]: now || undefined });
-    persistInfoGroup(group, now);
-  };
+  // collapse state lives in the store (persisted under the same
+  // kosmozoo.infoGroups.v1 key as before)
+  const toggleGroup = (group) => store.actions.ui.infoGroup.toggle(group);
 
   return (
     <div>
@@ -72,7 +55,7 @@ export function MetaBody(props) {
               grows={grows}
               host={props.host}
               differs={differs}
-              isCollapsed={() => !!collapsed()[group]}
+              isCollapsed={() => !!store.ui.infoGroups[group]}
               onToggle={() => toggleGroup(group)}
             />
           )}

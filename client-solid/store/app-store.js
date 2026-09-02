@@ -61,6 +61,11 @@ export function makeAppStore() {
   // UI state tree — separate reactive graph, moves here as directed
   const [uiSt, setUiSt] = createStore({
     info: { split: 0.66 }, // info panel: images/nodes split, divider-adjusted
+    // collapsed metadata groups: { [group]: true } — persisted
+    infoGroups: (() => {
+      try { return JSON.parse(localStorage.getItem("kosmozoo.infoGroups.v1")) ?? {}; }
+      catch { return {}; }
+    })(),
   });
 
   // scalar atoms
@@ -644,6 +649,15 @@ export function makeAppStore() {
           },
         },
       },
+      // collapsed metadata groups; the whole map persists under the same key
+      infoGroup: {
+        toggle(group) {
+          const now = !uiSt.infoGroups[group];
+          setUiSt("infoGroups", group, now ? true : undefined);
+          try { localStorage.setItem("kosmozoo.infoGroups.v1", JSON.stringify(uiSt.infoGroups)); }
+          catch { /* private mode */ }
+        },
+      },
       // the panel itself lands in phase 6; the flag is live already
       toggleKeysPanel() { setKeysPanelOpen(!keysPanelOpen()); },
     },
@@ -1148,6 +1162,7 @@ export function makeAppStore() {
   // UI state accessor — separate reactive graph
   const uiStateObj = {
     get info() { return uiSt.info; },
+    get infoGroups() { return uiSt.infoGroups; },
   };
 
   return { state: stateObj, actions, ui: uiStateObj };
