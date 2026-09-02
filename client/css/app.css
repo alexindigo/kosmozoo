@@ -691,6 +691,11 @@ main { display: flex; flex: 1; min-height: 0; }
 .info.stacked .separator::before { inset: 6px 0; }
 .separator:hover::before { background: var(--fg); }
 
+/* error state: proper box, no alt-text collision */
+.imgwrap.ic-error { min-height: 120px; display: grid; place-items: center; }
+.imgwrap.ic-error img { display: none; }
+.imgwrap.ic-error::after { position: static; display: block; text-align: center; }
+
 /* header layout switcher for the info panel (left of Download feedback) */
 #infoLayout { display: flex; gap: 4px; align-items: center; }
 #infoLayout button { width: 24px; height: 24px; display: grid; place-items: center;

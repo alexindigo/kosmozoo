@@ -67,7 +67,6 @@ export function DetailsBody() {
     const up = () => window.removeEventListener("pointermove", move);
     window.addEventListener("pointermove", move);
     window.addEventListener("pointerup", up, { once: true });
-    window.__SEP_DBG = "hit";
   };
 
   return (
