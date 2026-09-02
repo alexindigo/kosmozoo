@@ -167,9 +167,9 @@ export function Card(props) {
         />
       </div>
       <MetaBar
-        facts={{ w: meta()?.width ?? null, h: meta()?.height ?? null, bytes: image()?.size ?? null }}
-        meta={image()?.meta ?? null}
-        expanded={expanded()}
+        facts={() => ({ w: meta()?.width ?? null, h: meta()?.height ?? null, bytes: image()?.size ?? null })}
+        meta={() => image()?.meta ?? null}
+        expanded={expanded}
         onToggle={() => setExpanded(!expanded())}
       />
     </>
