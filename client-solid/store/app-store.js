@@ -55,6 +55,7 @@ export function makeAppStore() {
     infoOverlay: { open: false, name: "", meta: null }, // anchor ⓘ params
     chips: [],            // status stack: { slot, kind, msg }
     metaPending: 0,
+    drafts: {},           // unsaved note text: { "<id>:<cls>": text } — session-only, NOT persisted
   });
 
   // UI state tree — separate reactive graph, moves here as directed
@@ -608,6 +609,13 @@ export function makeAppStore() {
       set(id, on) { setSt("selected", id, on ? true : undefined); },
     },
 
+    // unsaved note text — lives here so neighbors read drafts without
+    // walking the DOM for a rendered textarea
+    notes: {
+      setDraft(id, cls, text) { setSt("drafts", `${id}:${cls}`, text); },
+      clearDraft(id, cls) { setSt("drafts", `${id}:${cls}`, undefined); },
+    },
+
     ui: {
       setFilter(v) { setFilter(v); }, // the view memo consumes it
       toggleMenu() { setMenuOpen(!menuOpen()); },
@@ -1080,6 +1088,7 @@ export function makeAppStore() {
     get infoOverlay() { return st.infoOverlay; },
     get chips() { return st.chips; },
     get metaPending() { return st.metaPending; },
+    get drafts() { return st.drafts; },
     // derived
     view,
     fieldsList,

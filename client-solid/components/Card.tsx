@@ -49,13 +49,13 @@ export function Card(props) {
     store.actions.judgments.saveNotes(image(), notes).then(() => flashSaved());
   };
 
-  // First neighbor WITH CONTENT in that direction; a rendered neighbor's live
-  // textarea wins (it may hold unsaved edits).
+  // First neighbor WITH CONTENT in that direction; an unsaved draft wins
+  // over the saved judgment note (it may hold newer edits).
   const neighborText = (cls) => (dir) => {
     const images = store.state.images;
     for (let i = props.imgIdx() + dir; i >= 0 && i < images.length; i += dir) {
-      const rendered = document.querySelector(`.card[data-idx="${i}"] textarea.${cls}`);
-      const text = rendered ? rendered.value : (images[i]?.judgment?.notes?.[cls] ?? "");
+      const im = images[i];
+      const text = store.state.drafts[`${im?.id}:${cls}`] ?? im?.judgment?.notes?.[cls] ?? "";
       if (text) return text;
     }
     return "";
@@ -156,11 +156,13 @@ export function Card(props) {
       </div>
       <div class="pair">
         <NoteBox
-          sign="neg" placeholder="negatives…" initialValue={() => image()?.judgment?.notes?.neg ?? ""}
+          sign="neg" placeholder="negatives…" noteId={image()?.id}
+          initialValue={() => image()?.judgment?.notes?.neg ?? ""}
           onSave={saveNote("neg")} getNeighborText={neighborText("neg")}
         />
         <NoteBox
-          sign="pos" placeholder="positives…" initialValue={() => image()?.judgment?.notes?.pos ?? ""}
+          sign="pos" placeholder="positives…" noteId={image()?.id}
+          initialValue={() => image()?.judgment?.notes?.pos ?? ""}
           onSave={saveNote("pos")} getNeighborText={neighborText("pos")}
         />
       </div>
