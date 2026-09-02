@@ -28,11 +28,7 @@ export function App() {
       <BulkBar />
       <main>
         <FeedRail />
-        <section id="candidatesCol">
-          <div id="grid">
-            <Grid />
-          </div>
-        </section>
+        <Grid />
         <div id="divider" title="drag to resize the split" />
         <WorkspacePane />
         <WorkspaceBar />

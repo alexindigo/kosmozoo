@@ -77,6 +77,9 @@ export function makeAppStore() {
   const [fieldsOverlayOpen, setFieldsOverlayOpen] = createSignal(false);
   const [anchorPaneWidth, setAnchorPaneWidth] = createSignal(300); // px, divider-adjusted, persisted
   const [infoSplit, setInfoSplit] = createSignal(0.66); // info panel: images/nodes split, divider-adjusted, persisted
+  // the feed's scroll container — Grid hands it over via feed.register; a
+  // signal so late registration still lands
+  const [feedScrollEl, setFeedScrollEl] = createSignal(null);
 
   // right-column space + details layout — persisted (workspaceState contract).
   // Read once at construction: the persisted space must be set before the
@@ -222,7 +225,7 @@ export function makeAppStore() {
     scrollGuardPending = true;
     setTimeout(() => {
       scrollGuardPending = false;
-      const col = document.getElementById("candidatesCol");
+      const col = feedScrollEl();
       if (!col) return;
       if (seams.virtualizer && col.scrollHeight - (col.scrollTop + col.clientHeight) < col.clientHeight * 1.5) {
         seams.virtualizer.scrollToOffset(col.scrollTop, { align: "start" });
@@ -460,11 +463,8 @@ export function makeAppStore() {
     // api.hosts() is deliberately not caught — a failed host list fails the
     // whole boot (the caller surfaces it).
     async boot() {
-      window.__BOOT_STEP = "start";
       setSt("hosts", reconcile(await api.hosts()));
-      window.__BOOT_STEP = "hosts";
       setSt("ui", await api.settings("core.ui").catch(() => ({})));
-      window.__BOOT_STEP = "ui";
       setSt("nodesRegistry", await api.nodes().catch(() => ({})));
       setSt("fieldsStored", (await api.settings("core.fields").catch(() => ({})))?.cfg ?? null);
       const del = await api.settings("core.delete").catch(() => ({}));
@@ -764,14 +764,17 @@ export function makeAppStore() {
     },
 
     feed: {
-      register(seamsIn) { seams.virtualizer = seamsIn?.virtualizer ?? null; },
+      register(seamsIn) {
+        seams.virtualizer = seamsIn?.virtualizer ?? null;
+        setFeedScrollEl(seamsIn?.scrollEl ?? null);
+      },
       restoreToIndex,
       safetyNet,
       wantRangeNow,
       retryImage(idx) { window_.retry(idx); },
       // floating button: back to the top of the feed
       scrollTop() {
-        const col = document.getElementById("candidatesCol");
+        const col = feedScrollEl();
         if (!col) return;
         suppressScrollSnap();
         col.scrollTo({ top: 0, behavior: "smooth" });
@@ -1102,6 +1105,7 @@ export function makeAppStore() {
     workspace,
     infoLayout,
     infoSplit,
+    feedScrollEl,
   };
 
   // UI state accessor — separate reactive graph

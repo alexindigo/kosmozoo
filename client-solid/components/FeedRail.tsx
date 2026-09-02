@@ -12,7 +12,7 @@
 // the measured imperative loop (rAF-coalesced) — reactivity funnels view
 // turnovers into the same paint.
 
-import { onMount, onCleanup, createEffect } from "solid-js";
+import { onCleanup, createEffect } from "solid-js";
 import { useAppStore } from "../store/app-store.js";
 import { tapeWindow } from "/js/rail.mjs";
 
@@ -23,8 +23,11 @@ export function FeedRail() {
   const store = useAppStore();
   let rail;
 
-  onMount(() => {
-    const col = document.getElementById("candidatesCol");
+  // the feed scroll element arrives via the store seam (Grid registers it,
+  // after this component mounts) — the signal read re-runs this effect when
+  // registration lands
+  createEffect(() => {
+    const col = store.state.feedScrollEl();
     if (!rail || !col) return;
 
     let raf = 0;

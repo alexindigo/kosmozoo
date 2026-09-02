@@ -22,7 +22,10 @@ const CHROME_PX = 178;
 
 export function Grid() {
   const store = useAppStore();
-  const scrollEl = () => document.getElementById("candidatesCol");
+  // the feed's scroll container — Grid owns it and hands it to the store via
+  // feed.register (the seam), so nothing walks the DOM by id
+  let col;
+  const scrollEl = () => col;
 
   const virtualizer = createVirtualizer({
     get count() { return store.state.view().length; },
@@ -31,15 +34,14 @@ export function Grid() {
     estimateSize: (i) => {
       const img = store.state.images[store.state.view()[i]];
       const ar = img?.meta?.width && img?.meta?.height ? img.meta.width / img.meta.height : 1.5;
-      return Math.round((scrollEl()?.clientWidth ?? 800) / ar + CHROME_PX);
+      return Math.round((col?.clientWidth ?? 800) / ar + CHROME_PX);
     },
     measureElement: (el, entry, inst) => measureElement(el, entry, inst),
     overscan: WINDOW_PAD,
   });
 
   onMount(() => {
-    store.actions.feed.register({ virtualizer });
-    const col = scrollEl();
+    store.actions.feed.register({ virtualizer, scrollEl: col });
     const onScroll = () => store.actions.feed.safetyNet();
     col?.addEventListener("scroll", onScroll, { passive: true });
     onCleanup(() => col?.removeEventListener("scroll", onScroll));
@@ -50,8 +52,7 @@ export function Grid() {
       clearTimeout(settleTimer);
       settleTimer = setTimeout(() => {
         settleTimer = 0;
-        const c = scrollEl();
-        if (c) store.actions.current.settleFromScroll(c);
+        if (col) store.actions.current.settleFromScroll(col);
       }, 150);
     };
     col?.addEventListener("scroll", onSettle, { passive: true });
@@ -92,24 +93,29 @@ export function Grid() {
   };
 
   return (
-    <>
-      <div style={`height:${padStart()}px`} />
-      <For each={items()}>
-        {(vi) => <CardSlot vi={vi} virtualizer={virtualizer} />}
-      </For>
-      <div style={`height:${padEnd()}px`}>
-        <Show when={hasMore()}>
-          <div class="sentinel">loading more…</div>
-        </Show>
-        <Show when={!hasMore()}>
-          <div class="endoflist">
-            {store.state.filter()
-              ? `— all ${count()} matching “${store.state.filter()}” —`
-              : `— all ${store.state.images.length} images —`}
-          </div>
-        </Show>
+    <section
+      id="candidatesCol"
+      ref={(el) => { col = el; }}
+    >
+      <div id="grid">
+        <div style={`height:${padStart()}px`} />
+        <For each={items()}>
+          {(vi) => <CardSlot vi={vi} virtualizer={virtualizer} />}
+        </For>
+        <div style={`height:${padEnd()}px`}>
+          <Show when={hasMore()}>
+            <div class="sentinel">loading more…</div>
+          </Show>
+          <Show when={!hasMore()}>
+            <div class="endoflist">
+              {store.state.filter()
+                ? `— all ${count()} matching “${store.state.filter()}” —`
+                : `— all ${store.state.images.length} images —`}
+            </div>
+          </Show>
+        </div>
       </div>
-    </>
+    </section>
   );
 }
 
