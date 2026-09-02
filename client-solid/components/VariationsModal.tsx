@@ -12,7 +12,7 @@
 // submission (they don't replace it).
 
 import { createSignal, onMount, onCleanup, For, Show } from "solid-js";
-import { render } from "solid-js/web";
+import { Portal } from "solid-js/web";
 import { iconSvg } from "/js/icons.mjs";
 import { paramDef, defaultRange, fallbackParams } from "/js/variations.mjs";
 import { useAppStore } from "../store/app-store.js";
@@ -21,44 +21,34 @@ import { SliderRow } from "./SliderRow.js";
 export function VariationsModal() {
   const store = useAppStore();
   // keyed on the session object: switching the wand to another image (or
-  // the bulk bar's batch) rebuilds the session from scratch
+  // the bulk bar's batch) rebuilds the session from scratch. The Portal
+  // mounts a .vz-root directly under document.body (the e2e asserts the
+  // parent); the session lives and dies with the Show above.
   return (
     <Show
       when={store.state.variations.open ? store.state.variations : null}
       keyed
     >
-      {(v) => <BodyPortal images={[...v.images]} onClose={() => store.actions.variations.close()} />}
+      {(v) => (
+        <Portal
+          mount={document.body}
+          ref={(el) => {
+            el.className = "vz-root";
+            // backdrop click closes (the panel stops propagation)
+            el.addEventListener("click", (e) => {
+              if (e.target === el) store.actions.variations.close();
+            });
+          }}
+        >
+          <ModalBody images={[...v.images]} onClose={() => store.actions.variations.close()} />
+        </Portal>
+      )}
     </Show>
   );
 }
 
-// The modal is a page citizen: .vz-root sits DIRECTLY under document.body
-// (the e2e asserts the parent). Solid's <Portal> wraps its content in a
-// container div, and render()-into-body would let the dispose wipe the whole
-// body — so the session renders into a dedicated body-appended .vz-root,
-// exactly the outgoing structure. Still declarative from the app tree's
-// side: the session lives and dies with the Show above, no mounted-tracker.
-function BodyPortal(props) {
-  let host;
-  let dispose;
-  onMount(() => {
-    host = document.createElement("div");
-    host.className = "vz-root";
-    // backdrop click closes (the panel stops propagation)
-    host.addEventListener("click", (e) => {
-      if (e.target === host) props.onClose();
-    });
-    document.body.appendChild(host);
-    dispose = render(() => <ModalBody images={props.images} onClose={props.onClose} />, host);
-  });
-  onCleanup(() => {
-    dispose?.();
-    host?.remove();
-  });
-  return null;
-}
-
 function ModalBody(props) {
+  const store = useAppStore();
   const image = props.images[0];
   // batch = more than one image: ranges become RELATIVE offsets from each
   // image's own current value (resolved by the plugin at run time), and the
@@ -106,8 +96,7 @@ function ModalBody(props) {
       setRows(init);
       setParams(forGraph);
     };
-    fetch(`/api/plugins/variations/probe/${encodeURIComponent(image.id)}`)
-      .then((r) => (r.ok ? r.json() : null))
+    store.actions.variations.probe(image)
       .then((data) => {
         if (!data?.params) return resolve(fallbackParams(meta));
         resolve(data.params);
@@ -116,8 +105,7 @@ function ModalBody(props) {
         const sp = data.stringParams ?? [];
         setStrParams(sp);
         if (sp.length && image.host) {
-          fetch(`/api/input-list/${encodeURIComponent(image.host)}`)
-            .then((r) => (r.ok ? r.json() : []))
+          store.actions.variations.inputList(image.host)
             .then((files) => {
               const init = {};
               for (const p of sp) {
@@ -285,10 +273,7 @@ function ModalBody(props) {
             try {
               const form = new FormData();
               form.append("image", f, f.name);
-              const res = await fetch(`/api/upload-input/${encodeURIComponent(image.host)}`, {
-                method: "POST", body: form,
-              });
-              const d = res.ok ? await res.json() : null;
+              const d = await store.actions.variations.uploadInput(image.host, form);
               if (d?.name) values.push(d.name);
               else uploadErrors.push(`${f.name}: upload failed`);
             } catch (e) {
@@ -302,29 +287,23 @@ function ModalBody(props) {
       const failed = [];
       const engineErrors = uploadErrors.slice();
       const submit = async (img) => {
-        const res = await fetch("/api/plugins/variations/run", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            id: img.id, host: img.host, filename: img.filename,
-            ranges: structuredClone(baseRanges),
-            prefix, suffix,
-            ...(batch ? { relative: true } : {}),
-            ...(Object.keys(imageParams).length ? { imageParams } : {}),
-          }),
+        const res = await store.actions.variations.run({
+          id: img.id, host: img.host, filename: img.filename,
+          ranges: structuredClone(baseRanges),
+          prefix, suffix,
+          ...(batch ? { relative: true } : {}),
+          ...(Object.keys(imageParams).length ? { imageParams } : {}),
         });
-        const text = await res.text();
-        let data;
-        try { data = JSON.parse(text); } catch { data = null; }
+        const data = res.data;
         if (!res.ok) {
-          failed.push(`${img.filename}: ${data?.error ?? text ?? `error ${res.status}`}`);
+          failed.push(`${img.filename}: ${data?.error ?? res.text ?? `error ${res.status}`}`);
           return;
         }
-        submitted += data.submitted ?? 0;
-        totalJobs += data.total ?? 0;
+        submitted += data?.submitted ?? 0;
+        totalJobs += data?.total ?? 0;
         // the engine reports per-permutation failures inline — collect the
         // detail from the SAME response (a second POST would double-submit)
-        for (const e of data.errors ?? []) {
+        for (const e of data?.errors ?? []) {
           engineErrors.push(e?.error ?? String(e));
         }
       };
@@ -369,6 +348,7 @@ function ModalBody(props) {
               <For each={strParams()}>
                 {(p) => {
                   const r = () => imgRows()[p.id];
+                  let dirPickEl, filesPickEl;
                   return (
                     <Show when={r()}>
                       <div class={"vz-imgrow" + (r().enabled ? " on" : "")}>
@@ -406,6 +386,7 @@ function ModalBody(props) {
                                 <input
                                   type="file" class="vz-imgdirpick" style="display:none"
                                   webkitdirectory multiple
+                                  ref={(el) => { dirPickEl = el; }}
                                   onChange={(e) => {
                                     const fl = [...(e.target.files ?? [])].filter((f) => /\.(png|jpe?g|webp|gif|avif|bmp)$/i.test(f.name));
                                     onImgField(p.id, "localFiles", fl);
@@ -413,7 +394,7 @@ function ModalBody(props) {
                                 />
                                 <button
                                   class="vz-imgdirbtn"
-                                  onClick={(e) => e.currentTarget.parentElement.querySelector(".vz-imgdirpick").click()}
+                                  onClick={() => dirPickEl?.click()}
                                 >{r().localFiles?.length ? `${r().localFiles.length} files picked` : "pick a folder…"}</button>
                               </span>
                             </Show>
@@ -422,6 +403,7 @@ function ModalBody(props) {
                                 <input
                                   type="file" class="vz-imgfilespick" style="display:none"
                                   multiple accept="image/*"
+                                  ref={(el) => { filesPickEl = el; }}
                                   onChange={(e) => {
                                     const fl = [...(e.target.files ?? [])].filter((f) => /\.(png|jpe?g|webp|gif|avif|bmp)$/i.test(f.name));
                                     onImgField(p.id, "localFiles", fl);
@@ -429,7 +411,7 @@ function ModalBody(props) {
                                 />
                                 <button
                                   class="vz-imgdirbtn"
-                                  onClick={(e) => e.currentTarget.parentElement.querySelector(".vz-imgfilespick").click()}
+                                  onClick={() => filesPickEl?.click()}
                                 >{r().localFiles?.length ? `${r().localFiles.length} files picked` : "pick files…"}</button>
                               </span>
                             </Show>

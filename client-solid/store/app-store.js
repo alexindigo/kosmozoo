@@ -701,6 +701,34 @@ export function makeAppStore() {
         setSt("variations", reconcile({ open: true, images, key }));
       },
       close() { setSt("variations", reconcile({ open: false, images: [], key: null })); },
+
+      // modal I/O — the transport lives here; the modal keeps session-scoped
+      // results (probe params, file lists) in local signals
+      async probe(image) {
+        const r = await fetch(`/api/plugins/variations/probe/${encodeURIComponent(image.id)}`);
+        return r.ok ? r.json() : null;
+      },
+      async inputList(hostName) {
+        const r = await fetch(`/api/input-list/${encodeURIComponent(hostName)}`);
+        return r.ok ? r.json() : [];
+      },
+      async uploadInput(hostName, form) {
+        const r = await fetch(`/api/upload-input/${encodeURIComponent(hostName)}`, {
+          method: "POST", body: form,
+        });
+        return r.ok ? r.json() : null;
+      },
+      async run(payload) {
+        const r = await fetch("/api/plugins/variations/run", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(payload),
+        });
+        const text = await r.text();
+        let data = null;
+        try { data = JSON.parse(text); } catch { /* non-JSON error body */ }
+        return { ok: r.ok, status: r.status, data, text };
+      },
     },
 
     diff: {
