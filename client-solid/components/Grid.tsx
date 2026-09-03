@@ -14,7 +14,6 @@ import { createVirtualizer, measureElement } from "@tanstack/solid-virtual";
 import { matchesFile } from "/js/route-parse.mjs";
 import { useAppStore } from "../store/app-store.js";
 import { WINDOW_PAD } from "../store/image-window.js";
-import { initScrollSnap } from "../store/scroll-snap.js";
 import { Card } from "./Card.js";
 
 // initial estimate of the chrome under the image box (title row + notes +
@@ -44,38 +43,11 @@ export function Grid() {
 
   onMount(() => {
     store.actions.feed.register({ virtualizer, scrollEl: col });
-    const onScroll = () => store.actions.feed.safetyNet();
+    // scrolling is render + rail tracking only; the model (current selection,
+    // snap tidy, bottom guard) moves at settle — the store owns the debounce
+    const onScroll = () => store.actions.feed.scrolled();
     col?.addEventListener("scroll", onScroll, { passive: true });
     onCleanup(() => col?.removeEventListener("scroll", onScroll));
-    // scrolling IS browsing: the settled scroll makes the midpoint card
-    // current (debounced — a fast scroll must not render per frame). The
-    // virtualizer's visible range is the data source — no DOM walk.
-    let settleTimer = 0;
-    const onSettle = () => {
-      clearTimeout(settleTimer);
-      settleTimer = setTimeout(() => {
-        settleTimer = 0;
-        if (col) {
-          store.actions.current.settleFromRange(
-            virtualizer.getVirtualItems(), col.scrollTop, col.clientHeight);
-        }
-      }, 150);
-    };
-    col?.addEventListener("scroll", onSettle, { passive: true });
-    onCleanup(() => {
-      col?.removeEventListener("scroll", onSettle);
-      clearTimeout(settleTimer);
-    });
-    // flick snap with intent (the guard keeps it from fighting the
-    // workbench; programmatic scrolls suppress it) — snap geometry derives
-    // from the virtualizer's visible range
-    if (col) {
-      const disposeSnap = initScrollSnap(col, {
-        isDiffOpen: () => store.state.diff.open,
-        virtualizer,
-      });
-      onCleanup(disposeSnap);
-    }
   });
 
   // meta-want sweep when the view turns over (load/filter/judgment)

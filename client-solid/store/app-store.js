@@ -26,7 +26,7 @@ import {
 } from "/js/route-parse.mjs";
 import { fieldList, fieldsCfgFrom } from "./fields.js";
 import { makeImageWindow } from "./image-window.js";
-import { suppressScrollSnap, snapQuiet } from "./scroll-snap.js";
+import { suppressScrollSnap, snapQuiet, snapTidy } from "./scroll-snap.js";
 
 // stored host if still present, else first online, else first
 function initialHost(hosts, stored) {
@@ -216,7 +216,41 @@ export function makeAppStore() {
 
   // --- feed seams (the Grid registers its handles here) -------------------------
   const seams = { virtualizer: null };
-  let scrollGuardPending = false;
+  // the scroll-activity seam: while a gesture is active the feed renders and
+  // the rail tracks — the model (current selection, snap tidy, bottom guard)
+  // moves only at settle. One debounce, owned here; Grid just calls
+  // feed.scrolled() per scroll event.
+  const [feedActivity, setFeedActivity] = createSignal("settled");
+  let feedSettleTimer = 0;
+  let gestureStart = null; // scrollTop at the gesture's origin
+  const FEED_SETTLE_MS = 150;
+
+  function feedScrolled() {
+    if (feedActivity() !== "scrolling") {
+      setFeedActivity("scrolling");
+      gestureStart = feedScrollEl()?.scrollTop ?? 0;
+    }
+    clearTimeout(feedSettleTimer);
+    feedSettleTimer = setTimeout(feedSettle, FEED_SETTLE_MS);
+  }
+
+  // the settle pipeline — order matters: selection from the stopped position,
+  // then the snap may ease it to a nearby boundary, then the bottom guard
+  function feedSettle() {
+    feedSettleTimer = 0;
+    setFeedActivity("settled");
+    const col = feedScrollEl();
+    const vz = feedVirtualizer();
+    if (!col || !vz) { gestureStart = null; return; }
+    // 1. current selection — a consequence of a STOPPED scroll
+    actions.current.settleFromRange(vz.getVirtualItems(), col.scrollTop, col.clientHeight);
+    // 2. snap tidy — small, directional, capped (scroll-snap.js)
+    const net = gestureStart == null ? 0 : col.scrollTop - gestureStart;
+    snapTidy(col, vz, { isDiffOpen: () => st.diff.open, direction: Math.sign(net), net });
+    gestureStart = null;
+    // 3. bottom guard — settle-time, never mid-gesture
+    safetyNet();
+  }
 
   function restoreToIndex(idx) {
     if (idx < 0) return;
@@ -229,25 +263,20 @@ export function makeAppStore() {
     wantRangeNow();
   }
 
-  // scroll-distance safety net (retained shape): near the bottom guard, nudge
-  // a scrollToOffset so the virtualizer re-checks its range. Never fires
-  // while a programmatic scroll is in flight — it would pin a smooth scroll
-  // passing through the near-bottom zone.
+  // bottom guard: near the bottom, nudge a scrollToOffset so the virtualizer
+  // re-checks its range. Settle-time only (the settle pipeline calls it);
+  // never while a programmatic scroll is in flight — it would pin a smooth
+  // scroll passing through the near-bottom zone.
   function safetyNet() {
-    if (scrollGuardPending || snapQuiet()) return;
+    if (snapQuiet()) return;
     const vz = seams.virtualizer;
-    if (!vz) return;
-    scrollGuardPending = true;
-    setTimeout(() => {
-      scrollGuardPending = false;
-      const col = feedScrollEl();
-      if (!col) return;
-      // near-bottom guard — geometry from the virtualizer's total size (the
-      // DOM reserves exactly it) + the seamed element's scroll position
-      if (vz.getTotalSize() - (col.scrollTop + col.clientHeight) < col.clientHeight * 1.5) {
-        vz.scrollToOffset(col.scrollTop, { align: "start" });
-      }
-    }, 120);
+    const col = feedScrollEl();
+    if (!vz || !col) return;
+    // geometry from the virtualizer's total size (the DOM reserves exactly
+    // it) + the seamed element's scroll position
+    if (vz.getTotalSize() - (col.scrollTop + col.clientHeight) < col.clientHeight * 1.5) {
+      vz.scrollToOffset(col.scrollTop, { align: "start" });
+    }
   }
 
   // --- metadata channel: want + poll + patch in place ---------------------------
@@ -822,7 +851,9 @@ export function makeAppStore() {
         setFeedVirtualizer(seamsIn?.virtualizer ?? null);
       },
       restoreToIndex,
-      safetyNet,
+      // the single scroll entry point — the store owns the activity state
+      // and the settle pipeline; the model never moves mid-gesture
+      scrolled: feedScrolled,
       wantRangeNow,
       retryImage(idx) { window_.retry(idx); },
       // floating button: back to the top of the feed
@@ -1160,6 +1191,7 @@ export function makeAppStore() {
     infoLayout,
     feedScrollEl,
     feedVirtualizer,
+    feedActivity,
   };
 
   // UI state accessor — separate reactive graph
