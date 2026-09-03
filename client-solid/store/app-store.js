@@ -35,6 +35,11 @@ function initialHost(hosts, stored) {
   return names.find((n) => hosts[n].online) ?? names[0] ?? null;
 }
 
+// the info-panel split is bounded — a readable text column needs the floor,
+// and the images column the ceiling; every write site (drag, boot hydration)
+// routes through this
+const clampSplit = (v) => Math.min(0.8, Math.max(0.2, v));
+
 export function makeAppStore() {
   // app data tree — engine-side state
   const [st, setSt] = createStore({
@@ -477,7 +482,15 @@ export function makeAppStore() {
     // whole boot (the caller surfaces it).
     async boot() {
       setSt("hosts", reconcile(await api.hosts()));
-      setSt("ui", await api.settings("core.ui").catch(() => ({})));
+      const ui = await api.settings("core.ui").catch(() => ({}));
+      setSt("ui", ui);
+      // persisted info-panel split hydrates the uiSt tree the details pane
+      // renders from (clamped — a wild stored value must not poison the
+      // layout); infoLayout hydrates from its localStorage key at signal
+      // construction
+      if (typeof ui.infoSplit === "number" && ui.infoSplit > 0) {
+        setUiSt("info", "split", clampSplit(ui.infoSplit));
+      }
       setSt("nodesRegistry", await api.nodes().catch(() => ({})));
       setSt("fieldsStored", (await api.settings("core.fields").catch(() => ({})))?.cfg ?? null);
       const del = await api.settings("core.delete").catch(() => ({}));
@@ -649,7 +662,7 @@ export function makeAppStore() {
       info: {
         split: {
           set(ratio) {
-            const r = Math.max(0, Math.min(1, ratio));
+            const r = clampSplit(ratio);
             setUiSt("info", "split", r);
             // TODO: handle persistence failure (optimistic UI, TODO comment per design)
             api.setSettings("core.ui", { infoSplit: r }).catch(() => {});

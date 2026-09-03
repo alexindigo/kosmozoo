@@ -25,6 +25,7 @@ export function WorkspacePane() {
     };
     const up = () => {
       document.body.classList.remove("resizing");
+      divider.classList.remove("dragging");
       divider.removeEventListener("pointermove", move);
       divider.removeEventListener("pointerup", up);
     };
@@ -32,6 +33,7 @@ export function WorkspacePane() {
       e.preventDefault();
       divider.setPointerCapture(e.pointerId);
       document.body.classList.add("resizing");
+      divider.classList.add("dragging");
       divider.addEventListener("pointermove", move);
       divider.addEventListener("pointerup", up);
     };
@@ -42,7 +44,7 @@ export function WorkspacePane() {
   return (
     <>
       <div id="divider" title="drag to resize the split" ref={(el) => { dividerEl = el; }} />
-      <aside id="workspace" ref={asideEl} style={() => `width:${store.state.anchorPaneWidth()}px`}>
+      <aside id="workspace" ref={asideEl} style={{ width: `${store.state.anchorPaneWidth()}px` }}>
         <div id="wsDetails" class="ws-space" hidden={store.state.workspace() !== "details"}>
           <DetailsBody />
         </div>

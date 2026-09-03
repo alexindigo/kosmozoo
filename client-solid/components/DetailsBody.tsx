@@ -15,6 +15,10 @@ import { fmtBytes } from "./MetaBar.js";
 import { MetaBody } from "./MetaBody.js";
 import { Zoomable } from "./Zoomable.js";
 
+// drag ratios clamp before they reach the store — a wild pointer swing must
+// not poison the persisted split (same bounds as the store's clampSplit)
+const clampSplit = (v) => Math.min(0.8, Math.max(0.2, v));
+
 // a { remote, image } pointer → its feed entry (anchors land in phase 6)
 function imageFor(store, c) {
   if (!c || c.remote === "anchor") return null;
@@ -57,14 +61,23 @@ export function DetailsBody() {
   // drag via window listeners (works even at 0 px)
   const onSplitDown = (e) => {
     e.preventDefault();
-    const box = e.currentTarget.parentElement.getBoundingClientRect();
-    const vertical = e.currentTarget.parentElement.classList.contains("stacked");
+    const el = e.currentTarget;
+    // the highlight persists for the whole drag (a class — the pointer
+    // roams free of the strip), plus the shared resizing cursor
+    el.classList.add("dragging");
+    document.body.classList.add("resizing");
+    const box = el.parentElement.getBoundingClientRect();
+    const vertical = el.parentElement.classList.contains("stacked");
     const move = (ev) => {
       const pos = vertical ? (ev.clientY - box.top) / box.height
         : (ev.clientX - box.left) / box.width;
-      store.actions.ui.info.split.set(pos);
+      store.actions.ui.info.split.set(clampSplit(pos));
     };
-    const up = () => window.removeEventListener("pointermove", move);
+    const up = () => {
+      window.removeEventListener("pointermove", move);
+      el.classList.remove("dragging");
+      document.body.classList.remove("resizing");
+    };
     window.addEventListener("pointermove", move);
     window.addEventListener("pointerup", up, { once: true });
   };
