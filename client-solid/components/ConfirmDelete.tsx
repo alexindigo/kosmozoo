@@ -7,7 +7,7 @@
 //   unlink — permanent removal from a folder host
 //   hide   — the files stay on the host; the images are hidden from kosmozoo
 
-import { createSignal, onCleanup, Show } from "solid-js";
+import { createSignal, Show } from "solid-js";
 import { useAppStore } from "../store/app-store.js";
 import { Modal } from "./Modal.js";
 
@@ -49,15 +49,7 @@ export function ConfirmDelete() {
     setBusy(false);
   };
 
-  // Esc cancels (capture: the confirmation outranks what's under it)
-  const onKey = (e) => {
-    if (n() && e.key === "Escape") {
-      e.stopPropagation();
-      close();
-    }
-  };
-  document.addEventListener("keydown", onKey, true);
-  onCleanup(() => document.removeEventListener("keydown", onKey, true));
+  // Esc comes from the Modal (capture phase — it outranks what's under it)
 
   const confirm = async () => {
     if (busy()) return;

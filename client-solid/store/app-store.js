@@ -561,11 +561,8 @@ export function makeAppStore() {
       async fillSize(id) {
         const idx = imageIdx(id);
         if (idx < 0 || st.images[idx].size != null) return;
-        try {
-          const r = await fetch(api.imageBytesUrl(id), { method: "HEAD" });
-          const cl = r.headers.get("content-length");
-          if (r.ok && cl) setSt("images", idx, "size", Number(cl));
-        } catch { /* no size then */ }
+        const size = await api.imageSizeProbe(id);
+        if (size != null) setSt("images", idx, "size", size);
       },
       // download via a transient anchor; optimistic saved mark, refreshed from
       // disk on the next load
@@ -737,32 +734,16 @@ export function makeAppStore() {
       },
       close() { setSt("variations", reconcile({ open: false, images: [], key: null })); },
 
-      // modal I/O — the transport lives here; the modal keeps session-scoped
+      // modal I/O — api.mjs owns the transport; the modal keeps session-scoped
       // results (probe params, file lists) in local signals
-      async probe(image) {
-        const r = await fetch(`/api/plugins/variations/probe/${encodeURIComponent(image.id)}`);
-        return r.ok ? r.json() : null;
-      },
-      async inputList(hostName) {
-        const r = await fetch(`/api/input-list/${encodeURIComponent(hostName)}`);
-        return r.ok ? r.json() : [];
-      },
-      async uploadInput(hostName, form) {
-        const r = await fetch(`/api/upload-input/${encodeURIComponent(hostName)}`, {
-          method: "POST", body: form,
-        });
-        return r.ok ? r.json() : null;
-      },
+      probe(image) { return api.variationsProbe(image.id).catch(() => null); },
+      inputList(hostName) { return api.inputList(hostName).catch(() => []); },
+      uploadInput(hostName, form) { return api.uploadInput(hostName, form); },
       async run(payload) {
-        const r = await fetch("/api/plugins/variations/run", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify(payload),
-        });
-        const text = await r.text();
+        const { ok, status, text } = await api.variationsRun(payload);
         let data = null;
         try { data = JSON.parse(text); } catch { /* non-JSON error body */ }
-        return { ok: r.ok, status: r.status, data, text };
+        return { ok, status, data, text };
       },
     },
 

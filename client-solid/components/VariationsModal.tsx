@@ -1,5 +1,5 @@
 // client-solid/components/VariationsModal.tsx — the variations panel,
-// declarative: one <Portal> citizen on document.body, no mounted-tracker.
+// declarative: the shared Modal's portal mode puts it under document.body.
 //
 // Layout: title centered at top; left: parameter rows (<SliderRow>), enabled
 // cards float to the top, LoadImage sweep rows above them; vertical divider;
@@ -12,37 +12,29 @@
 // submission (they don't replace it).
 
 import { createSignal, onMount, onCleanup, For, Show } from "solid-js";
-import { Portal } from "solid-js/web";
 import { iconSvg } from "/js/icons.mjs";
 import { paramDef, defaultRange, fallbackParams } from "/js/variations.mjs";
 import { useAppStore } from "../store/app-store.js";
 import { UPLOAD_IMG_EXT } from "../store/fields.js";
 import { SliderRow } from "./SliderRow.js";
+import { Modal } from "./Modal.js";
 
 export function VariationsModal() {
   const store = useAppStore();
   // keyed on the session object: switching the wand to another image (or
-  // the bulk bar's batch) rebuilds the session from scratch. The Portal
-  // mounts a .vz-root directly under document.body (the e2e asserts the
-  // parent); the session lives and dies with the Show above.
+  // the bulk bar's batch) rebuilds the session from scratch. The Modal's
+  // portal mode puts .vz-root directly under document.body (the e2e
+  // asserts the parent); the session lives and dies with the Show above;
+  // backdrop and Esc close come from the Modal.
   return (
     <Show
       when={store.state.variations.open ? store.state.variations : null}
       keyed
     >
       {(v) => (
-        <Portal
-          mount={document.body}
-          ref={(el) => {
-            el.className = "vz-root";
-            // backdrop click closes (the panel stops propagation)
-            el.addEventListener("click", (e) => {
-              if (e.target === el) store.actions.variations.close();
-            });
-          }}
-        >
+        <Modal portal class="vz-root" open onClose={() => store.actions.variations.close()}>
           <ModalBody images={[...v.images]} onClose={() => store.actions.variations.close()} />
-        </Portal>
+        </Modal>
       )}
     </Show>
   );
@@ -152,16 +144,6 @@ function ModalBody(props) {
       })
       .catch(() => resolve(fallbackParams(meta)));
   });
-
-  // Esc closes (capture phase: the modal outranks everything under it)
-  const onKey = (e) => {
-    if (e.key === "Escape") {
-      e.stopPropagation();
-      props.onClose();
-    }
-  };
-  document.addEventListener("keydown", onKey, true);
-  onCleanup(() => document.removeEventListener("keydown", onKey, true));
 
   const onToggle = (key, checked) => {
     setRows((rs) => ({ ...rs, [key]: { ...rs[key], enabled: checked } }));
@@ -345,7 +327,7 @@ function ModalBody(props) {
   }
 
   return (
-    <div class="vz-panel" onClick={(e) => e.stopPropagation()}>
+    <div class="vz-panel">
         <div class="vz-title">
           {batch
             ? `Generate image variations · applying to ${props.images.length} images`
