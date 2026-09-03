@@ -61,9 +61,39 @@ function ModalBody(props) {
   const [rows, setRows] = createSignal({}); // key -> { enabled, min, max, increment, placeholderKey, ... }
   const [running, setRunning] = createSignal(false);
   const [result, setResult] = createSignal(null); // { text, ok }
+  // prefix/suffix are controlled state — the ONLY writers are the signal
+  // setters; token ops are pure text transforms owned here, never surgery
+  // on a rendered input's .value
+  const [prefix, setPrefix] = createSignal("");
+  const [suffix, setSuffix] = createSignal("");
+  const tokenFor = (key) => `_{${key}}`;
+  const addToken = (text, key) => text.includes(tokenFor(key)) ? text : text + tokenFor(key);
+  const removeToken = (text, key) => text.split(tokenFor(key)).join("");
+  // refs exist solely to restore focus/selection after a label-click insert
   let prefixEl, suffixEl;
-  // last-focused prefix/suffix input remembers its selection for label clicks
-  const templateTarget = { input: null, start: 0, end: 0 };
+  // last-focused prefix/suffix input — tracked so label clicks know which
+  // input to insert into; the selection is read live at click time
+  let lastInput = null;
+  const trackSel = (e) => { lastInput = e.currentTarget; };
+  // a slider label click inserts its {placeholder} at the input's selection.
+  // The tracked input's live value+selection are read at click time — direct
+  // programmatic sets bypass onInput, so the signal adopts the buffer here,
+  // then the write goes through the signal (the only writer) and the caret
+  // is restored
+  const onInsertPlaceholder = (key) => {
+    if (!lastInput) return;
+    const cur = lastInput.value;
+    const start = lastInput.selectionStart ?? cur.length;
+    const end = lastInput.selectionEnd ?? cur.length;
+    const placeholder = `{${key}}`;
+    const next = cur.slice(0, start) + placeholder + cur.slice(end);
+    const caret = start + placeholder.length;
+    if (lastInput === prefixEl) setPrefix(next); else setSuffix(next);
+    queueMicrotask(() => {
+      lastInput.focus();
+      lastInput.setSelectionRange(caret, caret);
+    });
+  };
 
   onMount(() => {
     const meta = image.meta ?? {};
@@ -91,7 +121,7 @@ function ModalBody(props) {
       const denoiseKey = Object.keys(init).find((k) => init[k].input === "denoise");
       if (denoiseKey) {
         init[denoiseKey].enabled = true;
-        if (suffixEl) suffixEl.value = `_{${denoiseKey}}`;
+        setSuffix((s) => addToken(s, denoiseKey));
       }
       setRows(init);
       setParams(forGraph);
@@ -139,14 +169,8 @@ function ModalBody(props) {
     // disabling removes it. No trailing underscore — ComfyUI's SaveImage
     // node adds its own separator before the counter.
     const ph = rows()[key]?.placeholderKey;
-    const inp = suffixEl;
-    if (!ph || !inp) return;
-    const token = `_{${ph}}`;
-    if (checked) {
-      if (!inp.value.includes(token)) inp.value = inp.value + token;
-    } else {
-      if (inp.value.includes(token)) inp.value = inp.value.split(token).join("");
-    }
+    if (!ph) return;
+    setSuffix((s) => checked ? addToken(s, ph) : removeToken(s, ph));
   };
 
   const onRange = (key, { min, max }) => {
@@ -162,24 +186,10 @@ function ModalBody(props) {
   // disabling removes it. Same grammar as the numeric placeholder tokens.
   const onImgToggle = (id, checked) => {
     setImgRows((rs) => ({ ...rs, [id]: { ...rs[id], enabled: checked } }));
-    const inp = suffixEl;
-    if (!inp) return;
-    const token = `_{${id}}`;
-    if (checked) {
-      if (!inp.value.includes(token)) inp.value = inp.value + token;
-    } else {
-      if (inp.value.includes(token)) inp.value = inp.value.split(token).join("");
-    }
+    setSuffix((s) => checked ? addToken(s, id) : removeToken(s, id));
   };
   const onImgField = (id, field, value) => {
     setImgRows((rs) => ({ ...rs, [id]: { ...rs[id], [field]: value } }));
-  };
-
-  const remember = (e) => {
-    const inp = e.target;
-    templateTarget.input = inp;
-    templateTarget.start = inp.selectionStart ?? inp.value.length;
-    templateTarget.end = inp.selectionEnd ?? inp.value.length;
   };
 
   // enabled cards first, then by node label + input name
@@ -255,8 +265,8 @@ function ModalBody(props) {
           ...(batch ? { clamp: paramDef(key, r.current, r.integer)?.clamp } : {}),
         };
       }
-      const prefix = prefixEl?.value ?? "";
-      const suffix = suffixEl?.value ?? "";
+      const pfx = prefix();
+      const sfx = suffix();
       // LoadImage sweep axes: enabled rows become enum imageParams. A
       // "local directory" row uploads its picked files to the host's input
       // dir first (ComfyUI's LoadImage only reads that dir), then sweeps
@@ -290,7 +300,7 @@ function ModalBody(props) {
         const res = await store.actions.variations.run({
           id: img.id, host: img.host, filename: img.filename,
           ranges: structuredClone(baseRanges),
-          prefix, suffix,
+          prefix: pfx, suffix: sfx,
           ...(batch ? { relative: true } : {}),
           ...(Object.keys(imageParams).length ? { imageParams } : {}),
         });
@@ -446,7 +456,7 @@ function ModalBody(props) {
                           onToggle={onToggle}
                           onRange={onRange}
                           onIncrement={onIncrement}
-                          templateTarget={templateTarget}
+                          onInsertPlaceholder={onInsertPlaceholder}
                         />
                       );
                     }}
@@ -465,14 +475,18 @@ function ModalBody(props) {
             <div class="vz-rlabel">prefix</div>
             <input
               type="text" class="vz-tinput vz-prefix" ref={prefixEl}
+              value={prefix()}
               title="click a slider label to insert its {placeholder}"
-              onFocus={remember} onSelect={remember} onKeyUp={remember} onMouseUp={remember} onInput={remember}
+              onFocus={trackSel} onSelect={trackSel} onKeyUp={trackSel} onMouseUp={trackSel}
+              onInput={(e) => { setPrefix(e.currentTarget.value); trackSel(e); }}
             />
             <div class="vz-rlabel">suffix</div>
             <input
               type="text" class="vz-tinput vz-suffix" ref={suffixEl}
+              value={suffix()}
               title="click a slider label to insert its {placeholder} (enabled sliders auto-append)"
-              onFocus={remember} onSelect={remember} onKeyUp={remember} onMouseUp={remember} onInput={remember}
+              onFocus={trackSel} onSelect={trackSel} onKeyUp={trackSel} onMouseUp={trackSel}
+              onInput={(e) => { setSuffix(e.currentTarget.value); trackSel(e); }}
             />
             {/* spacer pushes Run + error to the BOTTOM of the right column, so
                 the primary action sits opposite the tallest content on the left */}

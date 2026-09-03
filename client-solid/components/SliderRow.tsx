@@ -21,6 +21,8 @@
 // Props convention: enabled/increment/current are GETTERS (the parent's rows
 // state outlives this row — <For> keeps it mounted across toggles); the rest
 // (param, defaults, placeholderKey, relative, callbacks) are stable per row.
+// The row never reaches into its parent — label clicks report through
+// onInsertPlaceholder and the parent owns the form.
 
 import { onMount, onCleanup } from "solid-js";
 import { snapTo, fmt } from "/js/variations.mjs";
@@ -93,19 +95,11 @@ export function SliderRow(props) {
           class="vz-label"
           title={"click to insert {" + props.placeholderKey + "} into prefix/suffix"}
           onMouseDown={(e) => {
-            const t = props.templateTarget;
-            if (!t?.input) return;
-            e.preventDefault();
-            const inp = t.input;
-            const s = t.start;
-            const en = t.end;
-            const placeholder = "{" + props.placeholderKey + "}";
-            inp.value = inp.value.slice(0, s) + placeholder + inp.value.slice(en);
-            const caret = s + placeholder.length;
-            inp.setSelectionRange(caret, caret);
-            t.start = caret;
-            t.end = caret;
-            inp.focus();
+            // the label never touches the parent's inputs — it emits and
+            // the parent inserts (it owns prefix/suffix state)
+            if (!props.onInsertPlaceholder) return;
+            e.preventDefault(); // keep the input's focus/selection
+            props.onInsertPlaceholder(props.placeholderKey);
           }}
         >{props.param.label}</div>
         <div class="vz-rangewrap">
