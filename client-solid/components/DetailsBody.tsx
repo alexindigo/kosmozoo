@@ -83,7 +83,7 @@ export function DetailsBody() {
   };
 
   return (
-    <div class="info-body">
+    <div class="info-body metabody">
       <Show when={im()} fallback={<div class="info-none">No image selected.</div>}>
         <Show
           when={im()?.meta || im()?.extracted !== false}
