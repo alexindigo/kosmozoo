@@ -9,6 +9,7 @@
 import { createSignal, For } from "solid-js";
 import { iconSvg } from "/js/icons.mjs";
 import { useAppStore } from "../store/app-store.js";
+import { aspectFromMeta } from "../store/fields.js";
 import { Zoomable } from "./Zoomable.js";
 import { IconButton } from "./IconButton.js";
 
@@ -20,10 +21,6 @@ function anchorSummary(meta) {
   if (meta.guidance != null) bits.push(`g ${meta.guidance}`);
   if (meta.model) bits.push(meta.model);
   return bits.join(" · ");
-}
-
-function aspectFromMeta(meta) {
-  return meta?.width && meta?.height ? `${meta.width} / ${meta.height}` : null;
 }
 
 // name of the anchor currently being drag-reordered (module-level: it

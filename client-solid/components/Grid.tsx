@@ -17,7 +17,9 @@ import { WINDOW_PAD } from "../store/image-window.js";
 import { initScrollSnap } from "../store/scroll-snap.js";
 import { Card } from "./Card.js";
 
-// measured chrome under the image box (title row + notes + meta bar)
+// initial estimate of the chrome under the image box (title row + notes +
+// meta bar) for the virtualizer's estimateSize — measureElement corrects
+// every row to its real height, so this only shapes the first frame
 const CHROME_PX = 178;
 
 export function Grid() {
@@ -157,9 +159,10 @@ function CardSlot(props) {
       ref={(node) => {
         el = node;
         if (node) {
-          // the index attrs must exist before the first measureElement call
+          // data-index must exist before the first measureElement call — the
+          // virtualizer reads it in the same callback. (data-idx needs no
+          // imperative write: the JSX attribute is reactive.)
           node.setAttribute("data-index", String(props.vi.index));
-          node.setAttribute("data-idx", String(idx()));
           props.virtualizer.measureElement(node);
         }
       }}

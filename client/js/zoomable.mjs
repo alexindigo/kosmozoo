@@ -18,6 +18,7 @@ export function makeZoomable(img, { key, onZoomChange } = {}) {
       img.style.transform =
         `translate(${txf * img.offsetWidth}px, ${tyf * img.offsetHeight}px) scale(${scale})`;
     }
+    // test-hook contract: the workbench e2e probe reads this class
     img.classList.toggle("zoomed", scale > 1);
     if (key) {
       setView(key, scale > 1 || txf || tyf

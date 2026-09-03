@@ -19,31 +19,11 @@ const PATHS = {
   "x": `<path stroke="none" d="M0 0h24v24H0z" fill="none"/>
   <path d="M18 6l-12 12" />
   <path d="M6 6l12 12" />`,
-  "menu-2": `<path stroke="none" d="M0 0h24v24H0z" fill="none"/>
-  <path d="M4 6l16 0" />
-  <path d="M4 12l16 0" />
-  <path d="M4 18l16 0" />`,
   "player-pause": `<path stroke="none" d="M0 0h24v24H0z" fill="none"/>
   <path d="M6 5m0 1a1 1 0 0 1 1 -1h2a1 1 0 0 1 1 1v12a1 1 0 0 1 -1 1h-2a1 1 0 0 1 -1 -1z" />
   <path d="M14 5m0 1a1 1 0 0 1 1 -1h2a1 1 0 0 1 1 1v12a1 1 0 0 1 -1 1h-2a1 1 0 0 1 -1 -1z" />`,
   "player-play": `<path stroke="none" d="M0 0h24v24H0z" fill="none"/>
   <path d="M7 4v16l13 -8z" />`,
-  "keyboard": `<path stroke="none" d="M0 0h24v24H0z" fill="none"/>
-  <path d="M2 6m0 2a2 2 0 0 1 2 -2h16a2 2 0 0 1 2 2v8a2 2 0 0 1 -2 2h-16a2 2 0 0 1 -2 -2z" />
-  <path d="M6 10l0 .01" />
-  <path d="M10 10l0 .01" />
-  <path d="M14 10l0 .01" />
-  <path d="M18 10l0 .01" />
-  <path d="M6 14l0 .01" />
-  <path d="M18 14l0 .01" />
-  <path d="M10 14l4 .01" />`,
-  "refresh": `<path stroke="none" d="M0 0h24v24H0z" fill="none"/>
-  <path d="M20 11a8.1 8.1 0 0 0 -15.5 -2m-.5 -4v4h4" />
-  <path d="M4 13a8.1 8.1 0 0 0 15.5 2m.5 4v-4h-4" />`,
-  "download": `<path stroke="none" d="M0 0h24v24H0z" fill="none"/>
-  <path d="M4 17v2a2 2 0 0 0 2 2h12a2 2 0 0 0 2 -2v-2" />
-  <path d="M7 11l5 5l5 -5" />
-  <path d="M12 4l0 12" />`,
   "trash": `<path stroke="none" d="M0 0h24v24H0z" fill="none"/>
   <path d="M4 7l16 0" />
   <path d="M10 11l0 6" />
@@ -54,31 +34,14 @@ const PATHS = {
   <path d="M10.585 10.587a2 2 0 0 0 2.829 2.828" />
   <path d="M16.681 16.673a8.717 8.717 0 0 1 -4.681 1.327c-3.6 0 -6.6 -2 -9 -6c1.272 -2.12 2.712 -3.678 4.32 -4.674m2.86 -1.146a9.055 9.055 0 0 1 1.82 -.18c3.6 0 6.6 2 9 6c-.666 1.11 -1.379 2.067 -2.138 2.87" />
   <path d="M3 3l18 18" />`,
-  "alert-triangle": `<path stroke="none" d="M0 0h24v24H0z" fill="none"/>
-  <path d="M12 9v4" />
-  <path d="M10.363 3.591l-8.106 13.534a1.914 1.914 0 0 0 1.636 2.871h16.214a1.914 1.914 0 0 0 1.636 -2.87l-8.106-13.536a1.914 1.914 0 0 0 -3.274 0z" />
-  <path d="M12 16h.01" />`,
   "wand": `<path stroke="none" d="M0 0h24v24H0z" fill="none"/>
   <path d="M6 21l15 -15l-3 -3l-15 15l3 3" />
   <path d="M14 7l3 3" />
   <path d="M9 5l1.5 1.5" />
   <path d="M8.5 8.5l1.5 1.5" />
   <path d="M5 9l1.5 1.5" />`,
-  // Feather "anchor" (feathericons.com), MIT — same stroke grammar as Tabler.
-  "anchor": `<circle cx="12" cy="5" r="3" />
-  <line x1="12" y1="22" x2="12" y2="8" />
-  <path d="M5 12H2a10 10 0 0 0 20 0h-3" />`,
   "chevron-down": `<path d="M6 9l6 6l6 -6" />`,
 };
-
-export function icon(name, size = 14) {
-  const d = PATHS[name];
-  if (!d) return document.createTextNode(name);
-  const span = document.createElement("span");
-  span.className = "icon";
-  span.innerHTML = `<svg viewBox="0 0 24 24" width="${size}" height="${size}" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">${d}</svg>`;
-  return span.firstChild;
-}
 
 export function iconSvg(name, size = 14) {
   return `<svg viewBox="0 0 24 24" width="${size}" height="${size}" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">${PATHS[name] ?? ""}</svg>`;

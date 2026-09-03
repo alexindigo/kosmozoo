@@ -1,6 +1,6 @@
 // client-solid/components/MetaBody.tsx — the full-metadata body, declarative.
 //
-// Shared by the details body and (phase 6) the ⓘ overlay. Fields group into
+// Shared by the details body and the ⓘ overlay. Fields group into
 // collapsible per-node sections named by the actual node type (class_type —
 // stable, never a per-instance rename; collapse state persists in the
 // store's uiSt). Prompt groups (CLIPTextEncode) sink to the bottom.

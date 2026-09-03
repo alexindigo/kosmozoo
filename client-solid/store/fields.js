@@ -1,10 +1,14 @@
-// client-solid/store/fields.tsx — the metadata fields machinery, parameterized
-// over the store's node registry + stored picker cfg (plan §2: kept logic,
-// rewired to the store). NOTHING is hardcoded about nodes: the field list
-// derives from the engine's node registry; a field id is `<class_type>.<input>`.
-// The legacy fields.mjs keeps its state-bound copy until cutover.
+// client-solid/store/fields.js — the metadata fields machinery, parameterized
+// over the store's node registry + stored picker cfg. NOTHING is hardcoded
+// about nodes: the field list derives from the engine's node registry; a
+// field id is `<class_type>.<input>`.
 
 const LONG_TEXT = 120; // chars: full-text fields render in the desc area
+
+// image aspect from metadata — shared by the feed card and the anchors space
+export function aspectFromMeta(meta) {
+  return meta?.width && meta?.height ? `${meta.width} / ${meta.height}` : null;
+}
 
 export function fieldId(classType, input) { return `${classType}.${input}`; }
 
@@ -147,6 +151,8 @@ export function valueDiffer(compareMeta, { list, cfg }) {
 // Deduped: two nodes referencing the same file render one image. With a
 // host, each entry carries its src.
 export const NODE_IMG_EXT = /\.(png|jpe?g|webp|gif|avif|bmp|svg)$/i;
+// uploads to a host's input dir are raster-only (no svg)
+export const UPLOAD_IMG_EXT = /\.(png|jpe?g|webp|gif|avif|bmp)$/i;
 const OUTPUT_TAG = /\s+\[output\]$/i;
 
 export function nodeImages(meta, host) {

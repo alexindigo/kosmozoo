@@ -1,4 +1,4 @@
-// client-solid/store/scroll-snap.tsx — feed scroll snap with intent.
+// client-solid/store/scroll-snap.js — feed scroll snap with intent.
 //
 // Intent is read from the WHEEL STREAM's own rate (px/ms of deltas in a
 // trailing window). Measured on real Brave/Linux input: a careful scroll

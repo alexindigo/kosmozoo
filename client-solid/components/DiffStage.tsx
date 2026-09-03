@@ -8,8 +8,7 @@
 
 import { createSignal, createEffect } from "solid-js";
 import { useAppStore } from "../store/app-store.js";
-
-const CLOSE_SVG = '<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path stroke="none" d="M0 0h24v24H0z" fill="none"/><path d="M18 6l-12 12" /><path d="M6 6l12 12" /></svg>';
+import { iconSvg } from "/js/icons.mjs";
 
 const KEYS_BTN_SVG = '<svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.6"><rect x="2" y="6" width="20" height="12" rx="2"/><path d="M6 10h.01M10 10h.01M14 10h.01M18 10h.01M6 14h.01M18 14h.01M9 14h6"/></svg>';
 
@@ -41,7 +40,7 @@ export function DiffStage() {
       <button
         id="diffClose" title="close (Esc)"
         onClick={() => store.actions.diff.close()}
-        innerHTML={CLOSE_SVG}
+        innerHTML={iconSvg("x", 16)}
       />
       <div id="diffStage">
         <img id="diffImg" alt="" src={src() ?? undefined} />

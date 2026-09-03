@@ -9,15 +9,11 @@ import { createSignal, createEffect, onMount } from "solid-js";
 import { Show } from "solid-js/web";
 import { iconSvg } from "/js/icons.mjs";
 import { useAppStore } from "../store/app-store.js";
-import { metaStripText } from "../store/fields.js";
+import { metaStripText, aspectFromMeta } from "../store/fields.js";
 import { Zoomable } from "./Zoomable.js";
 import { IconButton } from "./IconButton.js";
 import { MetaBar } from "./MetaBar.js";
 import { NoteBox } from "./NoteBox.js";
-
-function aspectFromMeta(meta) {
-  return meta?.width && meta?.height ? `${meta.width} / ${meta.height}` : null;
-}
 
 export function Card(props) {
   const store = useAppStore();

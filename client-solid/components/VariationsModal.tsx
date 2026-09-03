@@ -16,6 +16,7 @@ import { Portal } from "solid-js/web";
 import { iconSvg } from "/js/icons.mjs";
 import { paramDef, defaultRange, fallbackParams } from "/js/variations.mjs";
 import { useAppStore } from "../store/app-store.js";
+import { UPLOAD_IMG_EXT } from "../store/fields.js";
 import { SliderRow } from "./SliderRow.js";
 
 export function VariationsModal() {
@@ -52,8 +53,7 @@ function ModalBody(props) {
   const image = props.images[0];
   // batch = more than one image: ranges become RELATIVE offsets from each
   // image's own current value (resolved by the plugin at run time), and the
-  // count shows the total across the whole selection. (The bulk bar's entry
-  // lands in phase 6; the machinery is live already.)
+  // count shows the total across the whole selection.
   const batch = props.images.length > 1;
   const [params, setParams] = createSignal(null); // null = probing; [] = none
   const [strParams, setStrParams] = createSignal([]); // LoadImage sweep axes
@@ -388,7 +388,7 @@ function ModalBody(props) {
                                   webkitdirectory multiple
                                   ref={(el) => { dirPickEl = el; }}
                                   onChange={(e) => {
-                                    const fl = [...(e.target.files ?? [])].filter((f) => /\.(png|jpe?g|webp|gif|avif|bmp)$/i.test(f.name));
+                                    const fl = [...(e.target.files ?? [])].filter((f) => UPLOAD_IMG_EXT.test(f.name));
                                     onImgField(p.id, "localFiles", fl);
                                   }}
                                 />
@@ -405,7 +405,7 @@ function ModalBody(props) {
                                   multiple accept="image/*"
                                   ref={(el) => { filesPickEl = el; }}
                                   onChange={(e) => {
-                                    const fl = [...(e.target.files ?? [])].filter((f) => /\.(png|jpe?g|webp|gif|avif|bmp)$/i.test(f.name));
+                                    const fl = [...(e.target.files ?? [])].filter((f) => UPLOAD_IMG_EXT.test(f.name));
                                     onImgField(p.id, "localFiles", fl);
                                   }}
                                 />

@@ -9,21 +9,17 @@
 // re-focus the images column on that image.
 
 import { createEffect, createMemo, For, Show } from "solid-js";
-import { useAppStore } from "../store/app-store.js";
+import { useAppStore, clampSplit } from "../store/app-store.js";
+import { matchesFile } from "/js/route-parse.mjs";
 import { nodeImages } from "../store/fields.js";
 import { fmtBytes } from "./MetaBar.js";
 import { MetaBody } from "./MetaBody.js";
 import { Zoomable } from "./Zoomable.js";
 
-// drag ratios clamp before they reach the store — a wild pointer swing must
-// not poison the persisted split (same bounds as the store's clampSplit)
-const clampSplit = (v) => Math.min(0.8, Math.max(0.2, v));
-
-// a { remote, image } pointer → its feed entry (anchors land in phase 6)
+// a { remote, image } pointer → its feed entry (anchors are not feed entries)
 function imageFor(store, c) {
   if (!c || c.remote === "anchor") return null;
-  return store.state.images.find((i) => i.host === c.remote &&
-    (i.filename === c.image || i.filename === c.remote + "#" + c.image)) ?? null;
+  return store.state.images.find((i) => i.host === c.remote && matchesFile(i, c.remote, c.image)) ?? null;
 }
 
 export function DetailsBody() {

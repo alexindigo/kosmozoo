@@ -42,7 +42,7 @@ body.resizing { cursor: col-resize; user-select: none; }
 /* --- header -------------------------------------------------------------- */
 /* --- header: in normal flow — it can never overlap content ---------------- */
 body { display: flex; flex-direction: column; }
-/* #app is the Preact root; it takes over body's flex-column role so the
+/* #app is the Solid root; it takes over body's flex-column role so the
    surfaces <App> renders lay out exactly as body's direct children did. */
 #app { flex: 1; min-height: 0; display: flex; flex-direction: column; }
 #chrome { height: var(--chrome-h); flex: 0 0 auto;
@@ -60,7 +60,6 @@ body { display: flex; flex-direction: column; }
   font-size: 12px; }
 #chrome .btn:hover { border-color: var(--foreground-dim) }
 #headerButtons { display: flex; gap: 6px; }
-#status { opacity: 0.7; font-size: 12px; padding: 0 6px; }
 
 /* host picker (dropdown panel) */
 #hostPicker { position: relative; }
@@ -112,7 +111,7 @@ main { display: flex; flex: 1; min-height: 0; }
 /* feed position rail: a tape of small grey ticks spanning the view, the
    viewport-visible images as a wave of wider/brighter ticks over it.
    Left-aligned — Grok's edge indicator mirrored to the left edge. The rail
-   is a static flex child of <main> (declared in App.mjs) that pushes the
+   is a static flex child of <main> (declared in App.tsx) that pushes the
    feed column right, like the right rail pushes the workspace panels;
    js/feedrail.mjs owns only its inner ticks/labels. */
 #feedRail { position: relative; flex: 0 0 22px; align-self: stretch;
@@ -231,9 +230,8 @@ main { display: flex; flex: 1; min-height: 0; }
 .imgwrap img { width: 100%; height: 100%; object-fit: contain; display: block;
   cursor: zoom-in; }
 .imgwrap.ic-empty img { cursor: default; }
-.imgwrap.ic-error img { cursor: pointer; }
 .imgwrap.ic-error::after { content: "load failed — click to retry";
-  position: absolute; inset: 0; display: grid; place-items: center;
+  position: static; display: block; text-align: center;
   color: var(--negative); font-size: 12px; }
 .mstrip { position: absolute; left: 0; right: 0; bottom: 0; padding: 2px 7px;
   font-size: 10.5px; color: color-mix(in srgb, var(--foreground-bright) 88%, transparent);
@@ -263,10 +261,9 @@ main { display: flex; flex: 1; min-height: 0; }
 /* anchor cards get the same chrome; column-specific bits: */
 .anchor .aname { font: 11px ui-monospace, monospace; color: var(--foreground-mid);
   overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.anchor.dragging { opacity: .4; }
 
 /* candidate title specifics */
-.fname .copyable, .copyable { cursor: copy; }
+.copyable { cursor: copy; }
 .copyable:hover { color: var(--secondary); }
 .copyable.copied { color: var(--secondary); }
 /* the save-confirmation flash overlays the row (anchored left of the action
@@ -275,7 +272,6 @@ main { display: flex; flex: 1; min-height: 0; }
   transform: translateY(-50%); color: var(--positive); font-size: 11px;
   opacity: 0; transition: opacity .3s; white-space: nowrap; pointer-events: none; }
 .saved.show { opacity: 1; }
-.btnwrap { white-space: nowrap; display: flex; gap: 4px; }
 .votebtn, .savebtn { flex: 0 0 auto; padding: 2px 8px; font-size: 11px;
   background: var(--lifted); color: var(--foreground-dim); border: 1px solid var(--border);
   border-radius: 4px; cursor: pointer; }
@@ -335,19 +331,7 @@ main { display: flex; flex: 1; min-height: 0; }
 /* list progress affordances */
 .sentinel { color: var(--foreground-dim); text-align: center; padding: 18px 0; font-size: 12px; }
 .endoflist { color: var(--foreground-dim); text-align: center; padding: 18px 0; font-size: 12px; }
-.feedempty { color: var(--foreground-dim); text-align: center; padding: 30px 0; }
 
-/* load failure panel */
-.loadfail { max-width: 640px; margin: 60px auto; background: var(--focused-background);
-  border: 1px solid #633; border-radius: 10px; padding: 20px; }
-.loadfail-title { color: var(--negative); font-size: 15px; font-weight: 600; }
-.loadfail-detail { color: var(--foreground-mid); font: 12px ui-monospace, monospace;
-  margin: 8px 0; overflow-wrap: anywhere; }
-.loadfail-steps { color: var(--foreground-mid); font-size: 12px; padding-left: 20px; }
-.loadfail-steps li { margin: 4px 0; }
-.loadfail-retry { margin-top: 10px; background: var(--lifted); color: var(--foreground);
-  border: 1px solid var(--border-strong); border-radius: 6px; padding: 6px 12px;
-  cursor: pointer; }
 
 /* --- ☰ menu panel ---------------------------------------------------------- */
 #menuWrap { position: relative; }
@@ -406,7 +390,6 @@ main { display: flex; flex: 1; min-height: 0; }
   pointer-events: auto; cursor: pointer; }
 .statuschip.active { color: var(--foreground); border-left-color: var(--secondary); }
 .statuschip.error { color: var(--negative); border-left-color: var(--error); }
-.statuschip.fade { opacity: 0; }
 
 /* --- overlays (fields picker, ⓘ info) -------------------------------------- */
 #fieldsOverlay, #infoOverlay { position: fixed; inset: 0; z-index: 90;
@@ -555,8 +538,6 @@ main { display: flex; flex: 1; min-height: 0; }
 .vz-slider-row.vz-off .vz-min-lbl,
 .vz-slider-row.vz-off .vz-max-lbl,
 .vz-slider-row.vz-off .vz-slider { visibility: hidden; }
-.vz-slider-row.vz-absent { opacity: 0.25; }
-.vz-slider-row.vz-absent .vz-cb { cursor: not-allowed; }
 .vz-loading { color: var(--foreground-mid); font-size: 12px; padding: 20px 4px;
   text-align: center; font-style: italic; }
 
@@ -759,7 +740,6 @@ main { display: flex; flex: 1; min-height: 0; }
 /* error state: proper box, no alt-text collision */
 .imgwrap.ic-error { min-height: 120px; display: grid; place-items: center; }
 .imgwrap.ic-error img { display: none; }
-.imgwrap.ic-error::after { position: static; display: block; text-align: center; }
 
 /* header layout switcher for the info panel (left of Download feedback) */
 #infoLayout { display: flex; gap: 4px; align-items: center; }

@@ -8,8 +8,7 @@ import { For, Show } from "solid-js";
 import { useAppStore } from "../store/app-store.js";
 import { fieldGroupsOf } from "../store/fields.js";
 import { Modal } from "./Modal.js";
-
-const CLOSE_SVG = '<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 6l-12 12" /><path d="M6 6l12 12" /></svg>';
+import { iconSvg } from "/js/icons.mjs";
 
 export function FieldsOverlay() {
   const store = useAppStore();
@@ -19,7 +18,7 @@ export function FieldsOverlay() {
 
   return (
     <Modal overlayId="fieldsOverlay" panelId="fieldsPanel" open={store.state.fieldsOverlayOpen()} onClose={close}>
-      <button id="fieldsClose" title="close (Esc)" onClick={close} innerHTML={CLOSE_SVG} />
+      <button id="fieldsClose" title="close (Esc)" onClick={close} innerHTML={iconSvg("x", 16)} />
       <div id="fieldsTitle">Metadata fields</div>
       <div id="fieldsSub">
         <b>under image</b> — the card's metadata panel · <b>strip</b> — a semi-transparent strip over the image bottom (cards) / screen bottom (lightbox)
@@ -42,7 +41,6 @@ export function FieldsOverlay() {
                       <input
                         type="checkbox"
                         checked={fields.some(([id]) => !!cfg()[id]?.[col])}
-                        data-col={col}
                         onChange={(e) => store.actions.fieldsOverlay.setGroup(
                           fields.map(([id]) => id), col, e.target.checked)}
                       />
@@ -60,8 +58,6 @@ export function FieldsOverlay() {
                             <input
                               type="checkbox"
                               checked={!!cfg()[id]?.[col]}
-                              data-field={id}
-                              data-col={col}
                               onChange={(e) => store.actions.fieldsOverlay.setField(id, col, e.target.checked)}
                             />
                             <span class="track" />

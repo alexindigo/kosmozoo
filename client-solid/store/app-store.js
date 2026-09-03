@@ -1,4 +1,4 @@
-// client-solid/store/app-store.tsx — the single global store (plan §3.2).
+// client-solid/store/app-store.js — the single global store.
 //
 // One makeAppStore() created at boot, provided via context at the app root.
 // Views read store.state.* and call store.actions.* — nothing else. The store
@@ -38,7 +38,7 @@ function initialHost(hosts, stored) {
 // the info-panel split is bounded — a readable text column needs the floor,
 // and the images column the ceiling; every write site (drag, boot hydration)
 // routes through this
-const clampSplit = (v) => Math.min(0.8, Math.max(0.2, v));
+export const clampSplit = (v) => Math.min(0.8, Math.max(0.2, v));
 
 export function makeAppStore() {
   // app data tree — engine-side state
@@ -87,7 +87,6 @@ export function makeAppStore() {
   const [menuFilter, setMenuFilter] = createSignal("");
   const [fieldsOverlayOpen, setFieldsOverlayOpen] = createSignal(false);
   const [anchorPaneWidth, setAnchorPaneWidth] = createSignal(300); // px, divider-adjusted, persisted
-  const [infoSplit, setInfoSplit] = createSignal(0.66); // info panel: images/nodes split, divider-adjusted, persisted
   // the feed's scroll container — Grid hands it over via feed.register; a
   // signal so late registration still lands
   const [feedScrollEl, setFeedScrollEl] = createSignal(null);
@@ -377,7 +376,7 @@ export function makeAppStore() {
   // trail, patch the list, then navigate. Computed against the PRE-delete list
   // (adjacency needs the original indices), executed after it.
   async function deleteImages(images) {
-    // the workbench may be sitting on one of these images (phase 4 wires diff)
+    // the workbench may be sitting on one of these images
     if (st.diff.open) {
       const sideMatches = (side, img) => !!side && side.source === img.host &&
         (side.file === img.filename || side.file === img.host + "#" + img.filename);
@@ -678,8 +677,7 @@ export function makeAppStore() {
           catch { /* private mode */ }
         },
       },
-      // the panel itself lands in phase 6; the flag is live already
-      toggleKeysPanel() { setKeysPanelOpen(!keysPanelOpen()); },
+      toggleKeysPanel() { actions.keys.togglePanel(); },
     },
 
     current: {
@@ -1179,7 +1177,6 @@ export function makeAppStore() {
     keysPanelOpen,
     workspace,
     infoLayout,
-    infoSplit,
     feedScrollEl,
     feedVirtualizer,
   };

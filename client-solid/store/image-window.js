@@ -1,4 +1,4 @@
-// client-solid/store/image-window.tsx — the feed's image-src window.
+// client-solid/store/image-window.js — the feed's image-src window.
 //
 // Port of useWindow: visibility is observed here; the window is
 // visible ∪ workbench-position ± WINDOW_PAD. A card's src is DERIVED from

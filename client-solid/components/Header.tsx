@@ -1,13 +1,12 @@
 // client-solid/components/Header.tsx — the top chrome, declarative.
 //
-// Phase 1 shape: logo/title, host picker, filter box, download-feedback link,
-// options button. #headerButtons and the menu rows fill in as their features
-// land (feed/judgment buttons phase 2, menu items with the settings surfaces).
-// The layout switcher appears with the details pane (phase 3).
+// Logo/title, host picker, filter box, download-feedback link, options
+// button, the menu with its settings rows, and the layout switcher.
 
 import { onCleanup } from "solid-js";
 import { For, Show } from "solid-js/web";
 import { iconSvg } from "/js/icons.mjs";
+import { matchesFile } from "/js/route-parse.mjs";
 import { useAppStore } from "../store/app-store.js";
 import { nodeImages } from "../store/fields.js";
 import { HostPicker } from "./HostPicker.js";
@@ -34,8 +33,7 @@ function InfoLayoutSwitcher() {
     if (store.state.workspace() !== "details") return false;
     const c = store.state.current();
     if (!c || c.remote === "anchor") return false;
-    const img = store.state.images.find((i) => i.host === c.remote &&
-      (i.filename === c.image || i.filename === c.remote + "#" + c.image));
+    const img = store.state.images.find((i) => i.host === c.remote && matchesFile(i, c.remote, c.image));
     return !!(img?.host && nodeImages(img.meta ?? null, img.host).length);
   };
   return (

@@ -43,7 +43,6 @@ export function KeysPanel() {
               <span class="kctx">{a.ctx}</span>
               <button
                 class={"kbd" + (a.overridden ? " overridden" : "")}
-                data-action={a.id}
                 title={a.overridden
                   ? `default: ${a.defaultKey} — click to rebind, right-click resets`
                   : "click to rebind"}
