@@ -6,7 +6,9 @@
 // store's uiSt). Prompt groups (CLIPTextEncode) sink to the bottom.
 // `compareMeta` (the previous image's meta) marks field VALUES that differ
 // from it with .pdiff. `host` enables inline node-referenced images;
-// `skipImages` leaves those to a caller-drawn column instead.
+// `skipImages` leaves those to a caller-drawn column instead. Image-filename
+// spans (.imgref) report clicks through the optional onImageRef(file)
+// callback — the component never leaks its internals to a parent.
 
 import { For, Show } from "solid-js";
 import { useAppStore } from "../store/app-store.js";
@@ -57,6 +59,7 @@ export function MetaBody(props) {
               differs={differs}
               isCollapsed={() => !!store.ui.infoGroups[group]}
               onToggle={() => toggleGroup(group)}
+              onImageRef={props.onImageRef}
             />
           )}
         </For>
@@ -106,7 +109,10 @@ function InfoGroup(props) {
                       </Show>
                     }
                   >
-                    <span class={"imgref" + (changed() ? " pdiff" : "")} data-file={v}>{v}</span>
+                    <span
+                      class={"imgref" + (changed() ? " pdiff" : "")}
+                      onClick={() => props.onImageRef?.(v)}
+                    >{v}</span>
                   </Show>
                 </div>
               );

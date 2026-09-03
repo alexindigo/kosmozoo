@@ -45,12 +45,11 @@ export function DetailsBody() {
     if (resolved?.host && resolved.size == null) store.actions.images.fillSize(resolved.id);
   });
 
-  // filename links in the text column focus the images column on that image
-  const onTxtClick = (e) => {
-    const refEl = e.target.closest?.(".imgref[data-file]");
-    if (!refEl) return;
-    const cols = refEl.closest(".info");
-    const target = cols?.querySelector(`.infoimg[data-file="${CSS.escape(refEl.dataset.file)}"]`);
+  // filename links in the text column focus the images column on that image —
+  // MetaBody reports the click via onImageRef; the images column is ours
+  let infoEl;
+  const focusImage = (file) => {
+    const target = infoEl?.querySelector(`.infoimg[data-file="${CSS.escape(file)}"]`);
     if (!target) return;
     target.scrollIntoView({ behavior: "smooth", block: "nearest" });
     target.classList.add("flash");
@@ -67,7 +66,8 @@ export function DetailsBody() {
     el.classList.add("dragging");
     document.body.classList.add("resizing");
     const box = el.parentElement.getBoundingClientRect();
-    const vertical = el.parentElement.classList.contains("stacked");
+    // the drag axis comes from the layout model, not the DOM class
+    const vertical = store.state.infoLayout() === "stacked";
     const move = (ev) => {
       const pos = vertical ? (ev.clientY - box.top) / box.height
         : (ev.clientX - box.left) / box.width;
@@ -98,7 +98,7 @@ export function DetailsBody() {
               </>
             }
           >
-            <div class={colsClass()}>
+            <div class={colsClass()} ref={(el) => { infoEl = el; }}>
               <div class="info-source-images" style={{ "flex-basis": `${split() * 100}%` }}>
                 <For each={images()}>
                   {(image) => (
@@ -114,9 +114,9 @@ export function DetailsBody() {
                 </For>
               </div>
               <div class="separator" onPointerDown={onSplitDown} />
-              <div class="info-source-nodes" onClick={onTxtClick}>
+              <div class="info-source-nodes">
                 <Head im={im()} />
-                <MetaBody meta={im()?.meta ?? null} host={im()?.host} compareMeta={compareMeta()} skipImages />
+                <MetaBody meta={im()?.meta ?? null} host={im()?.host} compareMeta={compareMeta()} skipImages onImageRef={focusImage} />
               </div>
             </div>
           </Show>
