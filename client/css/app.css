@@ -1,25 +1,35 @@
 /* client/css/app.css — kosmozoo stylesheet */
 
 :root { color-scheme: dark;
-  /* palette: black, dark grey, light grey, white, light blue, sky blue,
-     bright orange, red (errors only), yellow (soft warnings). Green is
-     allowed ONLY for positive-feedback affordances (pos notes, up votes,
-     saved confirmations) — never for general UI elements. */
+  /* The app's semantic palette — the ONLY place colors are defined.
+     Component rules reference roles, never raw values. Derived tones are
+     computed from the roles, so a future color scheme swaps this block
+     and nothing else. Positive (green) is reserved for positive-feedback
+     affordances — never for general UI elements. */
   --black: #000;
-  --bg: #111; --panel: #1a1a1a; --card: #151515; --raise: #222;
-  --border: #333; --dim: #666; --mid: #999; --fg: #ddd; --white: #fff;
-  --accent: #7ab3ff;   /* light blue */
-  --sky: #38bdf8;      /* sky blue — primary action (Run) */
-  --sky-dim: rgba(56, 189, 248, .55);
-  --orange: #ff8800;   /* bright orange */
-  --yellow: #f5c542;   /* soft warnings */
-  --red: #f66;         /* errors */
-  --green: #9ece6a;    /* positive feedback ONLY */
-  --green-dim: rgba(158, 206, 106, .55);
+  --background: #111;            /* app background */
+  --surface: #151515;            /* card/workbox surfaces */
+  --focused-background: #1a1a1a; /* panels */
+  --lifted: #222;                /* raised controls */
+  --border: #333;
+  --foreground: #ddd;
+  --foreground-mid: #999;
+  --foreground-dim: #666;
+  --foreground-bright: #fff;
+  --primary: #38bdf8;            /* primary action, current pointer */
+  --secondary: #7ab3ff;          /* interactive accent: hover, links, active */
+  --positive: #9ece6a;           /* up-vote, success */
+  --negative: #f66;              /* down-vote, delete */
+  --error: var(--negative);      /* error states */
+  --attention: #ff8800;          /* favorite, attention markers */
+  --warning: #f5c542;            /* soft warnings */
+  /* derived tones — computed from the roles, never raw */
+  --positive-dim: color-mix(in srgb, var(--positive) 55%, transparent);
+  --primary-dim: color-mix(in srgb, var(--primary) 55%, transparent);
 }
 * { box-sizing: border-box; }
 html, body { height: 100%; }
-body { margin: 0; background: var(--bg); color: var(--fg);
+body { margin: 0; background: var(--background); color: var(--foreground);
   font: 13px/1.4 system-ui, sans-serif; overflow: hidden;
   scrollbar-width: none; }
 body::-webkit-scrollbar { display: none; }
@@ -33,63 +43,63 @@ body { display: flex; flex-direction: column; }
 #app { flex: 1; min-height: 0; display: flex; flex-direction: column; }
 #chrome { height: 37px; flex: 0 0 auto;
   display: flex; gap: 8px; align-items: center; padding: 0 8px;
-  background: var(--panel); border-bottom: 1px solid var(--border); z-index: 10; }
+  background: var(--focused-background); border-bottom: 1px solid var(--border); z-index: 10; }
 #chrome h1 { font-size: 15px; margin: 0 4px 0 2px; font-weight: 600; }
 #chrome .flexspacer { flex: 1; }
-#chrome select, #chrome input { background: var(--raise); color: var(--fg);
+#chrome select, #chrome input { background: var(--lifted); color: var(--foreground);
   border: 1px solid #3a3a3a; border-radius: 4px; padding: 3px 6px; }
-#chrome button { background: var(--raise); color: var(--fg); border: 1px solid #3a3a3a;
+#chrome button { background: var(--lifted); color: var(--foreground); border: 1px solid #3a3a3a;
   border-radius: 4px; padding: 2px 9px; cursor: pointer; font-size: 13px; }
-#chrome button:hover { border-color: var(--dim) }
-#chrome .btn { text-decoration: none; display: inline-block; background: var(--raise);
-  color: var(--fg); border: 1px solid #3a3a3a; border-radius: 4px; padding: 3px 8px;
+#chrome button:hover { border-color: var(--foreground-dim) }
+#chrome .btn { text-decoration: none; display: inline-block; background: var(--lifted);
+  color: var(--foreground); border: 1px solid #3a3a3a; border-radius: 4px; padding: 3px 8px;
   font-size: 12px; }
-#chrome .btn:hover { border-color: var(--dim) }
+#chrome .btn:hover { border-color: var(--foreground-dim) }
 #headerButtons { display: flex; gap: 6px; }
 #status { opacity: 0.7; font-size: 12px; padding: 0 6px; }
 
 /* host picker (dropdown panel) */
 #hostPicker { position: relative; }
 #hostBtn { display: flex; align-items: center; gap: 7px; }
-#hostBtn .chev { font-size: 14px; line-height: 1; color: var(--dim) }
-.hdot { width: 7px; height: 7px; border-radius: 50%; background: var(--accent);
+#hostBtn .chev { font-size: 14px; line-height: 1; color: var(--foreground-dim) }
+.hdot { width: 7px; height: 7px; border-radius: 50%; background: var(--secondary);
   flex: 0 0 auto; }
-.hdot.off { background: var(--dim); }
+.hdot.off { background: var(--foreground-dim); }
 #hostDrop { position: absolute; top: calc(100% + 8px); left: 0; z-index: 50;
-  background: var(--panel); border: 1px solid var(--border); border-radius: 8px;
+  background: var(--focused-background); border: 1px solid var(--border); border-radius: 8px;
   padding: 8px; min-width: 280px; display: flex; flex-direction: column;
   gap: 2px; }
 #hostDrop[hidden] { display: none; }
 .hostpick { display: flex; align-items: center; gap: 8px; padding: 6px 8px;
   border-radius: 6px; cursor: pointer; font-size: 13px; }
 .hostpick:hover { background: #1c1c1c; }
-.hostpick.current { box-shadow: inset 0 0 0 1px var(--accent); }
+.hostpick.current { box-shadow: inset 0 0 0 1px var(--secondary); }
 .hostpick.off > .hname, .hostpick.off > .haddr { opacity: .5; }
 .hostpick .hname { flex: 0 0 auto; font-weight: 600; }
-.hostpick .haddr { flex: 1; color: var(--dim) font-size: 11px;
+.hostpick .haddr { flex: 1; color: var(--foreground-dim) font-size: 11px;
   font-family: ui-monospace, monospace;
   overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .hostpick .rm { padding: 0 6px; font-size: 11px; color: #a33; flex: 0 0 auto;
   background: none; border: none; cursor: pointer; }
-.hostpick .rm:hover { color: var(--red); }
+.hostpick .rm:hover { color: var(--negative); }
 .haddrow { display: flex; gap: 6px; margin-top: 4px;
   border-top: 1px solid var(--border); padding-top: 8px; }
-.haddrow input { min-width: 0; flex: 1; background: var(--bg); color: var(--fg);
+.haddrow input { min-width: 0; flex: 1; background: var(--background); color: var(--foreground);
   border: 1px solid var(--border); border-radius: 6px; padding: 5px 7px;
   font: 11px ui-monospace, monospace; }
-.haddrow input:focus { outline: none; border-color: var(--accent); }
+.haddrow input:focus { outline: none; border-color: var(--secondary); }
 .haddrow button { font-size: 11px; padding: 4px 8px; }
 
 /* --- bulk bar: fixed under the header while images are selected ---------- */
 #bulkBar { position: fixed; top: 37px; left: 0; right: 0; z-index: 60;
   display: flex; gap: 6px; align-items: center; padding: 5px 12px;
   background: rgba(26, 26, 26, .95); border-bottom: 1px solid var(--border); }
-#bulkCount { font-size: 12px; font-weight: 600; color: var(--accent);
+#bulkCount { font-size: 12px; font-weight: 600; color: var(--secondary);
   margin-right: 6px; white-space: nowrap; }
 #bulkClear { background: transparent; border: 1px solid var(--border);
-  border-radius: 4px; color: var(--mid); font-size: 13px; line-height: 1;
+  border-radius: 4px; color: var(--foreground-mid); font-size: 13px; line-height: 1;
   padding: 3px 8px; cursor: pointer; margin-left: auto; }
-#bulkClear:hover { color: var(--fg); border-color: var(--dim); }
+#bulkClear:hover { color: var(--foreground); border-color: var(--foreground-dim); }
 
 /* --- main: two feeds share the window; divider splits; each column scrolls
    itself (no page-level scroll) ------------------------------------------- */
@@ -107,24 +117,30 @@ main { display: flex; flex: 1; min-height: 0; }
 #feedRail .fr-tape { position: absolute; left: 2px; top: 14px; bottom: 28px; }
 /* tape: dim (not the near-black --raise) so the grey scale reads */
 #feedRail .fr-tick { width: 10px; height: 2px; margin-bottom: 3px;
-  background: var(--dim); }
+  background: var(--foreground-dim); }
 /* the wave must read as a BRIGHT clump over the grey tape, not one more
    grey tick — light foreground, longer than the tape ticks */
-#feedRail .fr-tick.wave { width: 18px; background: var(--fg);
+#feedRail .fr-tick.wave { width: 18px; background: var(--foreground);
   box-shadow: 0 0 3px rgba(221, 221, 221, 0.35); }
 #feedRail .fr-num { position: absolute; left: 2px; font-size: 8px;
-  color: var(--dim); font-family: ui-monospace, monospace; }
+  color: var(--foreground-dim); font-family: ui-monospace, monospace; }
 #feedRail .fr-top { top: 2px; }
 #feedRail .fr-bottom { bottom: 14px; }
-#feedRail .fr-total { bottom: 2px; color: var(--dim); }
+#feedRail .fr-total { bottom: 2px; color: var(--foreground-dim); }
 #candidatesCol { flex: 1; min-width: 0; overflow-y: auto; overflow-x: hidden;
   scrollbar-width: none; }
 #candidatesCol::-webkit-scrollbar { display: none; }
+/* divider between feed and workspace — the 1px line is the resting
+   visual; the negative margins widen the grab zone without enlarging
+   the line; dragging keeps the highlight on (a class, not :hover — the
+   captured pointer can leave the strip mid-drag) */
 #divider { flex: 0 0 7px; align-self: stretch; cursor: col-resize;
-  background: var(--raise); border-radius: 4px; margin: 0 -6px; position: relative;
-  z-index: 5; transition: background .15s; }
-#divider:hover { background: var(--mid); }
-#workspace { flex: 0 0 auto; background: var(--card); border: 1px solid var(--raise);
+  background: transparent; border-radius: 4px; margin: 0 -6px; position: relative;
+  z-index: 5; }
+#divider::before { content: ""; position: absolute; inset: 0 3px;
+  background: var(--border); border-radius: 1px; transition: background .15s; }
+#divider:hover::before, #divider.dragging::before { background: var(--foreground-mid); }
+#workspace { flex: 0 0 auto; background: var(--surface); border: 1px solid var(--lifted);
   border-radius: 8px; margin: 8px 0; padding: 8px;
   display: flex; flex-direction: column; overflow: hidden;
   width: 300px; min-width: 220px; max-width: 70vw; }
@@ -135,34 +151,54 @@ main { display: flex; flex: 1; min-height: 0; }
 #wsBar { flex: 0 0 32px; display: flex; flex-direction: column; align-items: center;
   gap: 6px; padding: 8px 6px 8px 0; }
 #wsBar button { width: 26px; height: 26px; display: grid; place-items: center;
-  background: var(--panel); border: 1px solid var(--raise); border-radius: 6px;
-  color: var(--dim); cursor: pointer; padding: 0; }
-#wsBar button:hover { color: var(--fg); border-color: var(--mid); }
-#wsBar button.on { color: var(--accent); border-color: var(--accent); }
+  background: var(--focused-background); border: 1px solid var(--lifted); border-radius: 6px;
+  color: var(--foreground-dim); cursor: pointer; padding: 0; }
+#wsBar button:hover { color: var(--foreground); border-color: var(--foreground-mid); }
+#wsBar button.on { color: var(--secondary); border-color: var(--secondary); }
 
 /* details space: current image's full metadata */
-.info-body { flex: 1; overflow-y: auto; scrollbar-width: none; }
+/* overflow-x hidden: an x-shift (e.g. scrollIntoView from a filename link)
+   must never clip the images box's left edge invisibly */
+.info-body { flex: 1; overflow-y: auto; overflow-x: hidden; scrollbar-width: none; }
 .info-body::-webkit-scrollbar { display: none; }
 .ws-head { margin-bottom: 10px; }
 .ws-name { font-size: 12px; overflow-wrap: anywhere; }
-.ws-sub { color: var(--dim); font-size: 11px; margin-top: 2px; }
+.ws-sub { color: var(--foreground-dim); font-size: 11px; margin-top: 2px; }
 #anchorList { flex: 1; overflow-y: auto; display: flex; flex-direction: column;
   gap: 10px; scrollbar-width: none; }
 #anchorList::-webkit-scrollbar { display: none; }
 
 #dropzone { margin: 8px 0 0; border: 1px dashed #3a3a3a; border-radius: 8px;
-  padding: 18px 8px; text-align: center; color: var(--dim) font-size: 12px;
+  padding: 18px 8px; text-align: center; color: var(--foreground-dim) font-size: 12px;
   cursor: pointer; }
-#dropzone:hover, #dropzone.over { border-color: var(--accent); color: var(--accent); }
+#dropzone:hover, #dropzone.over { border-color: var(--secondary); color: var(--secondary); }
 
 /* --- candidates feed: record cards --------------------------------------- */
 #grid { display: flex; flex-direction: column; gap: 16px; padding: 8px; }
+/* Static decoration architecture: every box carries its border in all
+   states, at constant size; state changes border-color only. No outward
+   decorations (outline, outer box-shadow) near scroll/clip boundaries —
+   nothing paints outside a border box, so nothing can be clipped.
+
+   Decoration layers: base < state < status < activity — the layer above
+   overrides the layer below (cascade-layer order, not selector
+   specificity); items within a layer are mutually exclusive by data
+   construction (vote is one value; favorite is a boolean; current is a
+   single pointer). The resting border matches the card's own background
+   — present in structure, quiet in tone. Future items: ranked (status
+   layer), being-saved (activity layer — a second activity item needs an
+   explicit intra-layer precedence rule when it lands). */
+@layer card-base, card-state, card-status, card-activity;
+
 .card { scroll-margin-top: 8px;
-  background: var(--panel); border: 1px solid var(--raise); border-radius: 8px;
-  padding: 12px; }
-.card[data-vote="up"] { border-color: var(--green-dim); }
-.card.current { box-shadow: 0 0 0 1px var(--sky); }
-.card[data-favorite="1"] { box-shadow: 0 0 0 1px var(--orange); }
+  background: var(--focused-background); border-radius: 8px; padding: 12px;
+  border-width: 1px; border-style: solid; }
+@layer card-base     { .card { border-color: var(--focused-background); } }
+@layer card-state    { .card[data-vote="up"]   { border-color: var(--positive-dim); }
+                       .card[data-vote="down"] { border-color: var(--negative); } }
+@layer card-status   { .card[data-favorite="1"] { border-color: var(--attention); }
+                       /* ranked (future) */ }
+@layer card-activity { .card.current { border-color: var(--primary); } }
 
 /* image box: aspect-true, reserved before pixels land.
    Default rule: image width = column width, height = derived from
@@ -172,15 +208,23 @@ main { display: flex; flex: 1; min-height: 0; }
    height even before the natural size is known. */
 .imgwrap { position: relative;
   width: 100%; aspect-ratio: var(--ar-num, 1) / var(--ar-den, 1);
-  background: #0a0a0c; border-radius: 4px; overflow: hidden; }
+  background: #0a0a0c; border-width: 1px; border-style: solid; border-radius: 4px;
+  overflow: hidden; }
+/* the image box's own layer stack (same model as the card's): base is
+   transparent; error is the load-lifecycle state; the link-target flash
+   is activity and outranks during its window */
+@layer box-base, box-state, box-activity;
+@layer box-base     { .imgwrap { border-color: transparent; } }
+@layer box-state    { .imgwrap.ic-error { border-color: var(--error); } }
+@layer box-activity { .infoimg.flash .imgwrap { border-color: var(--secondary); }
+                      .infoimg.flash img { border-color: var(--secondary); } }
 .imgwrap img { width: 100%; height: 100%; object-fit: contain; display: block;
   cursor: zoom-in; }
 .imgwrap.ic-empty img { cursor: default; }
-.imgwrap.ic-error { outline: 1px solid #a33; }
 .imgwrap.ic-error img { cursor: pointer; }
 .imgwrap.ic-error::after { content: "load failed — click to retry";
   position: absolute; inset: 0; display: grid; place-items: center;
-  color: var(--red); font-size: 12px; }
+  color: var(--negative); font-size: 12px; }
 .mstrip { position: absolute; left: 0; right: 0; bottom: 0; padding: 2px 7px;
   font-size: 10.5px; color: rgba(255,255,255,.88);
   background: rgba(20, 20, 28, .55); white-space: nowrap; overflow: hidden;
@@ -188,7 +232,7 @@ main { display: flex; flex: 1; min-height: 0; }
 
 /* the shared title row under the image: title left, actions right */
 .ctitle { display: flex; justify-content: space-between; align-items: flex-start;
-  gap: 8px; margin: 8px 0 2px; font-weight: 600; color: var(--mid); }
+  gap: 8px; margin: 8px 0 2px; font-weight: 600; color: var(--foreground-mid); }
 .ctitle .btnwrap { white-space: nowrap; display: flex; gap: 4px; align-items: center;
   position: relative; flex: 0 0 auto; }
 .ctitle-left { display: flex; gap: 6px; align-items: center; min-width: 0; }
@@ -198,45 +242,45 @@ main { display: flex; flex: 1; min-height: 0; }
 /* bulk-select checkbox, left of the filename */
 .selcb { -webkit-appearance: none; appearance: none; flex: 0 0 auto;
   width: 13px; height: 13px; border-radius: 3px;
-  background: transparent; border: 1.5px solid var(--dim);
+  background: transparent; border: 1.5px solid var(--foreground-dim);
   cursor: pointer; position: relative; }
-.selcb:hover { border-color: var(--accent); }
-.selcb:checked { background: var(--accent); border-color: var(--accent); }
+.selcb:hover { border-color: var(--secondary); }
+.selcb:checked { background: var(--secondary); border-color: var(--secondary); }
 .selcb:checked::after { content: ""; position: absolute; left: 3.5px; top: 1px;
-  width: 3px; height: 7px; border: solid var(--bg); border-width: 0 1.5px 1.5px 0;
+  width: 3px; height: 7px; border: solid var(--background); border-width: 0 1.5px 1.5px 0;
   transform: rotate(45deg); }
 
 /* anchor cards get the same chrome; column-specific bits: */
-.anchor .aname { font: 11px ui-monospace, monospace; color: var(--mid);
+.anchor .aname { font: 11px ui-monospace, monospace; color: var(--foreground-mid);
   overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .anchor.dragging { opacity: .4; }
 
 /* candidate title specifics */
 .fname .copyable, .copyable { cursor: copy; }
-.copyable:hover { color: var(--accent); }
-.copyable.copied { color: var(--accent); }
+.copyable:hover { color: var(--secondary); }
+.copyable.copied { color: var(--secondary); }
 /* the save-confirmation flash overlays the row (anchored left of the action
    buttons) instead of occupying width in every card's title row */
 .saved { position: absolute; right: calc(100% + 8px); top: 50%;
-  transform: translateY(-50%); color: var(--green); font-size: 11px;
+  transform: translateY(-50%); color: var(--positive); font-size: 11px;
   opacity: 0; transition: opacity .3s; white-space: nowrap; pointer-events: none; }
 .saved.show { opacity: 1; }
 .btnwrap { white-space: nowrap; display: flex; gap: 4px; }
 .votebtn, .savebtn { flex: 0 0 auto; padding: 2px 8px; font-size: 11px;
-  background: var(--raise); color: var(--dim); border: 1px solid var(--border);
+  background: var(--lifted); color: var(--foreground-dim); border: 1px solid var(--border);
   border-radius: 4px; cursor: pointer; }
 .votebtn svg { vertical-align: -1px; }
-.votebtn:hover, .savebtn:hover { border-color: var(--dim); color: var(--mid); }
+.votebtn:hover, .savebtn:hover { border-color: var(--foreground-dim); color: var(--foreground-mid); }
 /* one pattern for every action button under the image: the button
    contributes ONLY an accent token. Base color is the muted accent,
    the border is hover-only, and the active state is the icon itself —
    full color plus fill. No per-button rules beyond the token. */
-.votebtn { --btn-c: var(--mid);
+.votebtn { --btn-c: var(--foreground-mid);
   color: color-mix(in srgb, var(--btn-c) 55%, transparent); }
-.votebtn.down { --btn-c: var(--red); }
-.votebtn.up { --btn-c: var(--green); }
-.votebtn.favorite { --btn-c: var(--orange); }
-.votebtn.delete { --btn-c: var(--red); }
+.votebtn.down { --btn-c: var(--negative); }
+.votebtn.up { --btn-c: var(--positive); }
+.votebtn.favorite { --btn-c: var(--attention); }
+.votebtn.delete { --btn-c: var(--negative); }
 .votebtn:hover { color: var(--btn-c); border-color: var(--btn-c); }
 .votebtn.on { color: var(--btn-c); }
 .votebtn.on svg path:not([stroke="none"]) { fill: currentColor; }
@@ -246,74 +290,74 @@ main { display: flex; flex: 1; min-height: 0; }
 
 /* collapsed metadata: single line — sizes left, expand toggle right */
 .metabar { display: grid; grid-template-columns: 1fr auto; align-items: center;
-  gap: 2px 6px; margin-top: 6px; color: var(--dim);
+  gap: 2px 6px; margin-top: 6px; color: var(--foreground-dim);
   font: 11px ui-monospace, monospace; }
 .metabar-info { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.metabar-toggle { background: none; border: none; color: var(--dim);
+.metabar-toggle { background: none; border: none; color: var(--foreground-dim);
   cursor: pointer; padding: 2px; display: flex; border-radius: 4px; }
-.metabar-toggle:hover { color: var(--fg); background: var(--raise); }
+.metabar-toggle:hover { color: var(--foreground); background: var(--lifted); }
 .metabar-toggle svg { transition: transform .15s; }
 .metabar.open .metabar-toggle svg { transform: rotate(180deg); }
 .metabar-full { grid-column: 1 / -1; }
 /* .pair's display:grid out-cascades the hidden attribute — kill it here */
 .metabar-full[hidden] { display: none; }
-.props { color: var(--dim); font-size: 12px; }
-.props .plabel { color: var(--fg); opacity: .55; }
-.props .nometa { color: var(--red); }
-.desc { color: var(--dim); font-size: 12px; font-style: italic;
+.props { color: var(--foreground-dim); font-size: 12px; }
+.props .plabel { color: var(--foreground); opacity: .55; }
+.props .nometa { color: var(--negative); }
+.desc { color: var(--foreground-dim); font-size: 12px; font-style: italic;
   overflow-wrap: anywhere; }
 
 /* notes row: negatives red, positives light-blue — full borders (old style) */
 .boxcol { display: flex; flex-direction: column; gap: 4px; }
 .boxcol textarea { width: 100%; min-height: 44px; resize: vertical;
-  background: var(--bg); border: 1px solid var(--border); border-radius: 6px;
-  color: var(--fg); font: inherit; padding: 6px 8px; }
-.boxcol textarea.neg { border-color: var(--red); }
-.boxcol textarea.pos { border-color: var(--green); }
+  background: var(--background); border: 1px solid var(--border); border-radius: 6px;
+  color: var(--foreground); font: inherit; padding: 6px 8px; }
+.boxcol textarea.neg { border-color: var(--negative); }
+.boxcol textarea.pos { border-color: var(--positive); }
 .boxcol textarea:focus { outline: none; }
-.boxcol textarea.neg:focus { border-color: var(--red); }
-.boxcol textarea.pos:focus { border-color: var(--accent); }
+.boxcol textarea.neg:focus { border-color: var(--negative); }
+.boxcol textarea.pos:focus { border-color: var(--secondary); }
 .btnrow { display: flex; gap: 6px; }
-.btnrow button { flex: 1; padding: 2px 4px; font-size: 11px; color: var(--dim);
-  background: none; border: 1px solid var(--raise); border-radius: 4px; cursor: pointer; }
-.btnrow button:hover { color: var(--mid); border-color: var(--dim) }
+.btnrow button { flex: 1; padding: 2px 4px; font-size: 11px; color: var(--foreground-dim);
+  background: none; border: 1px solid var(--lifted); border-radius: 4px; cursor: pointer; }
+.btnrow button:hover { color: var(--foreground-mid); border-color: var(--foreground-dim) }
 
 /* list progress affordances */
-.sentinel { color: var(--dim); text-align: center; padding: 18px 0; font-size: 12px; }
-.endoflist { color: var(--dim) text-align: center; padding: 18px 0; font-size: 12px; }
-.feedempty { color: var(--dim); text-align: center; padding: 30px 0; }
+.sentinel { color: var(--foreground-dim); text-align: center; padding: 18px 0; font-size: 12px; }
+.endoflist { color: var(--foreground-dim) text-align: center; padding: 18px 0; font-size: 12px; }
+.feedempty { color: var(--foreground-dim); text-align: center; padding: 30px 0; }
 
 /* load failure panel */
-.loadfail { max-width: 640px; margin: 60px auto; background: var(--panel);
+.loadfail { max-width: 640px; margin: 60px auto; background: var(--focused-background);
   border: 1px solid #633; border-radius: 10px; padding: 20px; }
-.loadfail-title { color: var(--red); font-size: 15px; font-weight: 600; }
-.loadfail-detail { color: var(--mid) font: 12px ui-monospace, monospace;
+.loadfail-title { color: var(--negative); font-size: 15px; font-weight: 600; }
+.loadfail-detail { color: var(--foreground-mid) font: 12px ui-monospace, monospace;
   margin: 8px 0; overflow-wrap: anywhere; }
-.loadfail-steps { color: var(--mid); font-size: 12px; padding-left: 20px; }
+.loadfail-steps { color: var(--foreground-mid); font-size: 12px; padding-left: 20px; }
 .loadfail-steps li { margin: 4px 0; }
-.loadfail-retry { margin-top: 10px; background: var(--raise); color: var(--fg);
+.loadfail-retry { margin-top: 10px; background: var(--lifted); color: var(--foreground);
   border: 1px solid #3a3a3a; border-radius: 6px; padding: 6px 12px;
   cursor: pointer; }
 
 /* --- ☰ menu panel ---------------------------------------------------------- */
 #menuWrap { position: relative; }
 #menu { position: absolute; top: calc(100% + 8px); right: 0; z-index: 60;
-  background: var(--panel); border: 1px solid var(--border); border-radius: 8px;
+  background: var(--focused-background); border: 1px solid var(--border); border-radius: 8px;
   padding: 10px; min-width: 300px; display: flex; flex-direction: column;
   gap: 8px; }
 #menu[hidden] { display: none; }
-#menuSearch { background: var(--bg); color: var(--fg); border: 1px solid var(--border);
+#menuSearch { background: var(--background); color: var(--foreground); border: 1px solid var(--border);
   border-radius: 6px; padding: 5px 8px; font-size: 12px; width: 100%; }
-#menuSearch:focus { outline: none; border-color: var(--accent); }
+#menuSearch:focus { outline: none; border-color: var(--secondary); }
 #menuRows { display: flex; flex-direction: column; gap: 8px; }
 .menurow { display: flex; align-items: center; gap: 8px; font-size: 13px; }
-.menulabel { color: var(--dim) font-size: 11px; }
-.menuextra { color: var(--dim) font-size: 11px; margin-left: auto; }
+.menulabel { color: var(--foreground-dim) font-size: 11px; }
+.menuextra { color: var(--foreground-dim) font-size: 11px; margin-left: auto; }
 .fbpathrow { display: flex; gap: 6px; width: 100%; }
-.fbpathrow input { flex: 1; min-width: 0; background: var(--bg); color: var(--fg);
+.fbpathrow input { flex: 1; min-width: 0; background: var(--background); color: var(--foreground);
   border: 1px solid var(--border); border-radius: 6px; padding: 5px 7px;
   font: 11px ui-monospace, monospace; }
-.fbpathrow input:focus { outline: none; border-color: var(--accent); }
+.fbpathrow input:focus { outline: none; border-color: var(--secondary); }
 
 /* switches */
 .switchwrap { display: flex; align-items: center; gap: 8px; cursor: pointer; }
@@ -321,11 +365,11 @@ main { display: flex; flex: 1; min-height: 0; }
 .switchwrap .track { width: 28px; height: 16px; border-radius: 8px;
   background: var(--border); position: relative; transition: background .15s; }
 .switchwrap .track::after { content: ""; position: absolute; left: 2px;
-  top: 2px; width: 12px; height: 12px; border-radius: 50%; background: var(--dim)
+  top: 2px; width: 12px; height: 12px; border-radius: 50%; background: var(--foreground-dim)
   transition: transform .15s, background .15s; }
-.switchwrap input:checked + .track { background: color-mix(in srgb, var(--accent) 55%, transparent); }
+.switchwrap input:checked + .track { background: color-mix(in srgb, var(--secondary) 55%, transparent); }
 .switchwrap input:checked + .track::after { transform: translateX(12px);
-  background: var(--white); }
+  background: var(--foreground-bright); }
 .switchwrap.mini .track { width: 22px; height: 13px; }
 .switchwrap.mini .track::after { width: 9px; height: 9px; }
 .switchwrap.mini input:checked + .track::after { transform: translateX(9px); }
@@ -333,22 +377,22 @@ main { display: flex; flex: 1; min-height: 0; }
 /* --- scroll-to-top floating button (bottom-left, above the status stack) --- */
 #scrollTopBtn { position: fixed; left: 12px; bottom: 56px; z-index: 71;
   width: 32px; height: 32px; display: grid; place-items: center;
-  background: var(--panel); border: 1px solid var(--raise); border-radius: 8px;
-  color: var(--dim); cursor: pointer; padding: 0;
+  background: var(--focused-background); border: 1px solid var(--lifted); border-radius: 8px;
+  color: var(--foreground-dim); cursor: pointer; padding: 0;
   transition: color .15s, border-color .15s; }
-#scrollTopBtn:hover { color: var(--fg); border-color: var(--mid); }
+#scrollTopBtn:hover { color: var(--foreground); border-color: var(--foreground-mid); }
 
 /* --- status stack (transient fades 6s, active pinned, errors sticky) ------- */
 #statusStack { position: fixed; left: 12px; bottom: 10px; z-index: 70;
   display: flex; flex-direction: column; gap: 6px; align-items: flex-start;
   max-width: calc(100vw - 24px); pointer-events: none; }
 .statuschip { background: rgba(26, 26, 26, 0.88); border: 1px solid var(--border);
-  border-radius: 6px; padding: 4px 10px; font-size: 12px; color: var(--mid);
+  border-radius: 6px; padding: 4px 10px; font-size: 12px; color: var(--foreground-mid);
   max-width: calc(100vw - 24px); white-space: normal; overflow-wrap: anywhere;
   opacity: 1; transition: opacity .6s ease;
   pointer-events: auto; cursor: pointer; }
-.statuschip.active { color: var(--fg); border-left: 3px solid var(--accent); }
-.statuschip.error { color: var(--red); border-left: 3px solid #a33; }
+.statuschip.active { color: var(--foreground); border-left: 3px solid var(--secondary); }
+.statuschip.error { color: var(--negative); border-left: 3px solid #a33; }
 .statuschip.fade { opacity: 0; }
 
 /* --- overlays (fields picker, ⓘ info) -------------------------------------- */
@@ -357,31 +401,31 @@ main { display: flex; flex: 1; min-height: 0; }
 #fieldsOverlay[hidden], #infoOverlay[hidden] { display: none; }
 #fieldsPanel, #infoPanel { position: absolute; top: 6vh; left: 50%;
   transform: translateX(-50%); width: min(720px, 92vw); max-height: 84vh;
-  overflow-y: auto; background: var(--panel); border: 1px solid var(--border);
+  overflow-y: auto; background: var(--focused-background); border: 1px solid var(--border);
   border-radius: 10px; padding: 16px 18px; }
 #fieldsTitle, #infoTitle { font-size: 14px; font-weight: 600; margin-bottom: 4px; }
-#fieldsSub { color: var(--dim) font-size: 11px; margin-bottom: 12px; }
+#fieldsSub { color: var(--foreground-dim) font-size: 11px; margin-bottom: 12px; }
 #fieldsClose, #infoClose { position: absolute; top: 10px; right: 12px;
-  background: none; border: none; color: var(--dim) font-size: 18px; cursor: pointer; }
+  background: none; border: none; color: var(--foreground-dim) font-size: 18px; cursor: pointer; }
 .frow { display: grid; grid-template-columns: 1fr 70px 60px; gap: 8px;
-  align-items: center; padding: 2px 4px; font-size: 12px; color: var(--mid); }
-.frow.head { color: var(--dim); font-size: 10px; text-transform: uppercase;
+  align-items: center; padding: 2px 4px; font-size: 12px; color: var(--foreground-mid); }
+.frow.head { color: var(--foreground-dim); font-size: 10px; text-transform: uppercase;
   letter-spacing: .04em; }
 .fgrouphead { display: grid; grid-template-columns: 1fr 70px 60px; gap: 8px;
-  align-items: center; padding: 8px 4px 2px; border-top: 1px solid var(--raise);
+  align-items: center; padding: 8px 4px 2px; border-top: 1px solid var(--lifted);
   margin-top: 6px; }
-.fgrouphead .gname { color: var(--fg); font-size: 12px; font-weight: 600; }
-.metabody .props { font: 12px ui-monospace, monospace; color: var(--mid); }
+.fgrouphead .gname { color: var(--foreground); font-size: 12px; font-weight: 600; }
+.metabody .props { font: 12px ui-monospace, monospace; color: var(--foreground-mid); }
 .metabody .infosec { margin-top: 10px; }
-.metabody .infotext { color: var(--mid); font-size: 12px; white-space: pre-wrap;
+.metabody .infotext { color: var(--foreground-mid); font-size: 12px; white-space: pre-wrap;
   overflow-wrap: anywhere; }
-.metabody .info-none { color: var(--dim); font-style: italic; }
-.metabody .plabel { color: var(--mid); }
+.metabody .info-none { color: var(--foreground-dim); font-style: italic; }
+.metabody .plabel { color: var(--foreground-mid); }
 /* a field value that differs from the previous current image's */
-.metabody .pdiff { color: var(--white); }
+.metabody .pdiff { color: var(--foreground-bright); }
 /* variation lineage: which image this one came from */
 .metabody .ws-lineage { margin-top: 2px; }
-.metabody .ws-lineage-src { color: var(--accent); font-size: 11px; }
+.metabody .ws-lineage-src { color: var(--secondary); font-size: 11px; }
 .metabody a.ws-lineage-src { cursor: pointer; text-decoration: none; }
 .metabody a.ws-lineage-src:hover { text-decoration: underline; }
 
@@ -391,50 +435,50 @@ main { display: flex; flex: 1; min-height: 0; }
 #keysPanelInner { position: absolute; top: 8vh; left: 50%;
   transform: translateX(-50%); min-width: 520px; max-width: 86vw;
   max-height: 80vh; display: flex; flex-direction: column;
-  background: var(--panel); border: 1px solid var(--border); border-radius: 10px; }
+  background: var(--focused-background); border: 1px solid var(--border); border-radius: 10px; }
 #keysPanelHead { display: flex; gap: 10px; align-items: center;
-  padding: 12px 16px; border-bottom: 1px solid var(--raise); }
+  padding: 12px 16px; border-bottom: 1px solid var(--lifted); }
 #keysPanelHead h2 { margin: 0; font-size: 14px; flex: 0 0 auto; }
-#keysSearch { flex: 1; background: var(--bg); color: var(--fg); border: 1px solid var(--border);
+#keysSearch { flex: 1; background: var(--background); color: var(--foreground); border: 1px solid var(--border);
   border-radius: 6px; padding: 5px 8px; font-size: 12px; }
-#keysSearch:focus { outline: none; border-color: var(--accent); }
-#keysReset { background: var(--raise); color: var(--fg); border: 1px solid #3a3a3a;
+#keysSearch:focus { outline: none; border-color: var(--secondary); }
+#keysReset { background: var(--lifted); color: var(--foreground); border: 1px solid #3a3a3a;
   border-radius: 4px; padding: 3px 8px; font-size: 11px; cursor: pointer; }
 #keysList { overflow-y: auto; padding: 8px 16px; }
 .keyrow { display: flex; gap: 10px; align-items: baseline; padding: 3px 0;
-  font-size: 12px; color: var(--mid) }
+  font-size: 12px; color: var(--foreground-mid) }
 .keyrow .kdesc { flex: 1; }
-.keyrow .kctx { color: var(--dim); font-size: 10px; flex: 0 0 auto; }
-.keyrow .kbd { background: var(--bg); border: 1px solid #3a3a3a; border-radius: 4px;
-  padding: 1px 8px; font: 11px ui-monospace, monospace; color: var(--fg);
+.keyrow .kctx { color: var(--foreground-dim); font-size: 10px; flex: 0 0 auto; }
+.keyrow .kbd { background: var(--background); border: 1px solid #3a3a3a; border-radius: 4px;
+  padding: 1px 8px; font: 11px ui-monospace, monospace; color: var(--foreground);
   min-width: 74px; text-align: center; cursor: pointer; flex: 0 0 auto; }
-.keyrow .kbd:hover { border-color: var(--dim) }
-.keyrow .kbd.overridden { border-color: var(--accent); color: var(--accent); }
-#keysFoot { padding: 8px 16px; border-top: 1px solid var(--raise); color: var(--dim);
+.keyrow .kbd:hover { border-color: var(--foreground-dim) }
+.keyrow .kbd.overridden { border-color: var(--secondary); color: var(--secondary); }
+#keysFoot { padding: 8px 16px; border-top: 1px solid var(--lifted); color: var(--foreground-dim);
   font-size: 10px; }
 
 /* --- delete confirmation ---------------------------------------------------- */
 #confirmOverlay { position: fixed; inset: 0; z-index: 95; background: rgba(0,0,0,.6); }
 #confirmPanel { position: absolute; top: 30vh; left: 50%; transform: translateX(-50%);
-  width: min(460px, 92vw); background: var(--panel); border: 1px solid var(--border);
+  width: min(460px, 92vw); background: var(--focused-background); border: 1px solid var(--border);
   border-radius: 10px; padding: 16px 18px; }
 .confirm-title { font-size: 14px; font-weight: 600; margin-bottom: 8px; }
-.confirm-body { color: var(--mid); font-size: 12px; line-height: 1.5;
+.confirm-body { color: var(--foreground-mid); font-size: 12px; line-height: 1.5;
   overflow-wrap: anywhere; }
 .confirm-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 14px; }
 .confirm-actions button { border-radius: 6px; padding: 5px 14px; font-size: 12px;
   cursor: pointer; }
-.confirm-cancel { background: var(--raise); color: var(--fg); border: 1px solid var(--border); }
-.confirm-cancel:hover { border-color: var(--dim); }
-.confirm-ok { border: 1px solid var(--red); background: transparent; color: var(--red); }
-.confirm-ok:hover { background: color-mix(in srgb, var(--red) 18%, transparent); }
+.confirm-cancel { background: var(--lifted); color: var(--foreground); border: 1px solid var(--border); }
+.confirm-cancel:hover { border-color: var(--foreground-dim); }
+.confirm-ok { border: 1px solid var(--negative); background: transparent; color: var(--negative); }
+.confirm-ok:hover { background: color-mix(in srgb, var(--negative) 18%, transparent); }
 .confirm-ok:disabled, .confirm-cancel:disabled { opacity: .5; cursor: default; }
 
 /* --- workbench chrome -------------------------------------------------------- */
 #diffKeysBtn { position: absolute; right: 14px; bottom: 12px; z-index: 45;
   background: rgba(20,20,28,.65); border: 1px solid var(--border); border-radius: 6px;
-  color: var(--mid); padding: 5px 7px; cursor: pointer; display: flex; }
-#diffKeysBtn:hover { color: var(--fg); border-color: var(--dim); }
+  color: var(--foreground-mid); padding: 5px 7px; cursor: pointer; display: flex; }
+#diffKeysBtn:hover { color: var(--foreground); border-color: var(--foreground-dim); }
 
 /* --- workbench: single-image viewer -----------------------------------------
    The current image, fitted to the stage. Stripped to the studs: no
@@ -447,9 +491,9 @@ main { display: flex; flex: 1; min-height: 0; }
   user-select: none; -webkit-user-drag: none; }
 #diffClose { position: absolute; top: 6px; right: 8px; z-index: 45;
   background: rgba(20,20,28,.65); border: 1px solid var(--border);
-  border-radius: 6px; color: var(--mid); padding: 5px 7px; cursor: pointer;
+  border-radius: 6px; color: var(--foreground-mid); padding: 5px 7px; cursor: pointer;
   display: flex; }
-#diffClose:hover { color: var(--fg); border-color: var(--dim); }
+#diffClose:hover { color: var(--foreground); border-color: var(--foreground-dim); }
 
 /* --- variations modal (vz-*) -----------------------------------------------
  * Real page-level modal: fixed backdrop + centered panel. Not tied to a
@@ -462,13 +506,13 @@ main { display: flex; flex: 1; min-height: 0; }
   padding: 24px; }
 .vz-panel { position: relative;
   width: min(920px, 96vw); max-height: 92vh; display: flex; flex-direction: column;
-  background: var(--panel); border: 1px solid var(--border);
+  background: var(--focused-background); border: 1px solid var(--border);
   border-radius: 12px; padding: 20px 24px;
-  font-size: 12px; color: var(--fg);
+  font-size: 12px; color: var(--foreground);
   box-shadow: 0 12px 40px rgba(0,0,0,.5); }
 
 /* title */
-.vz-title { font-size: 15px; color: var(--white); text-align: center;
+.vz-title { font-size: 15px; color: var(--foreground-bright); text-align: center;
   margin: 0 0 20px; font-weight: 500; }
 
 /* two-column body */
@@ -486,12 +530,12 @@ main { display: flex; flex: 1; min-height: 0; }
   grid-template-columns: 18px 1fr 110px;
   gap: 12px; align-items: start;
   padding: 10px 12px;
-  background: var(--card); border: 1px solid var(--raise);
+  background: var(--surface); border: 1px solid var(--lifted);
   border-radius: 8px;
   transition: opacity .15s ease, border-color .15s ease, background .15s ease; }
-.vz-slider-row:not(.vz-off) { border-color: var(--accent); }
+.vz-slider-row:not(.vz-off) { border-color: var(--secondary); }
 .vz-slider-row.vz-off { opacity: 0.55;
-  background: color-mix(in srgb, var(--card) 85%, transparent); }
+  background: color-mix(in srgb, var(--surface) 85%, transparent); }
 /* When a row is disabled the range picker chrome fades away, but the
    orange "current value" tick and its numeric label STAY visible so the
    image's actual value is legible on every row (enabled or not). */
@@ -500,42 +544,42 @@ main { display: flex; flex: 1; min-height: 0; }
 .vz-slider-row.vz-off .vz-slider { visibility: hidden; }
 .vz-slider-row.vz-absent { opacity: 0.25; }
 .vz-slider-row.vz-absent .vz-cb { cursor: not-allowed; }
-.vz-loading { color: var(--mid); font-size: 12px; padding: 20px 4px;
+.vz-loading { color: var(--foreground-mid); font-size: 12px; padding: 20px 4px;
   text-align: center; font-style: italic; }
 
 /* LoadImage sweep row: same card treatment as the slider rows */
-.vz-imgrow { padding: 10px 12px; background: var(--card);
-  border: 1px solid var(--raise); border-radius: 8px;
+.vz-imgrow { padding: 10px 12px; background: var(--surface);
+  border: 1px solid var(--lifted); border-radius: 8px;
   transition: border-color .15s ease, opacity .15s ease; }
-.vz-imgrow.on { border-color: var(--accent); }
+.vz-imgrow.on { border-color: var(--secondary); }
 .vz-imgrow:not(.on) { opacity: 0.55; }
 .vz-imgrow-head { display: flex; align-items: center; gap: 10px; cursor: pointer; }
 .vz-imgrow-head .vz-cb { margin: 0; }
-.vz-imgrow-label { color: var(--fg); font-size: 13px; }
-.vz-imgrow-cur { color: var(--dim); font-size: 11px; margin-left: auto;
+.vz-imgrow-label { color: var(--foreground); font-size: 13px; }
+.vz-imgrow-cur { color: var(--foreground-dim); font-size: 11px; margin-left: auto;
   overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 45%; }
 .vz-imgrow-body { display: flex; gap: 8px; margin-top: 8px; padding-left: 26px; }
-.vz-imgrow-body select { background: var(--raise); color: var(--fg);
+.vz-imgrow-body select { background: var(--lifted); color: var(--foreground);
   border: 1px solid #3a3a3a; border-radius: 4px; font-size: 12px;
   padding: 3px 6px; max-width: 100%; }
 .vz-imgrow-body .vz-imgfile { flex: 1; min-width: 0; }
 .vz-imgrow-body .vz-imglocal { flex: 1; min-width: 0; display: flex; }
-.vz-imgrow-body .vz-imgdirbtn { background: var(--raise); color: var(--fg);
+.vz-imgrow-body .vz-imgdirbtn { background: var(--lifted); color: var(--foreground);
   border: 1px solid #3a3a3a; border-radius: 4px; font-size: 12px;
   padding: 3px 10px; cursor: pointer; }
-.vz-imgrow-body .vz-imgdirbtn:hover { border-color: var(--dim); }
+.vz-imgrow-body .vz-imgdirbtn:hover { border-color: var(--foreground-dim); }
 
 /* checkbox — orange square (matches the mockup) */
 .vz-cb { -webkit-appearance: none; appearance: none;
   width: 16px; height: 16px; border-radius: 3px;
-  background: transparent; border: 2px solid var(--orange);
+  background: transparent; border: 2px solid var(--attention);
   cursor: pointer; margin: 8px 0 0; }
-.vz-cb:checked { background: var(--orange); }
+.vz-cb:checked { background: var(--attention); }
 
 .vz-slider-inner { min-width: 0; display: flex; flex-direction: column; gap: 4px; }
-.vz-label { color: var(--fg); font-size: 13px; font-weight: 400;
+.vz-label { color: var(--foreground); font-size: 13px; font-weight: 400;
   cursor: pointer; align-self: flex-start; }
-.vz-label:hover { color: var(--accent); }
+.vz-label:hover { color: var(--secondary); }
 
 /* Dual-thumb slider layout: three stacked lanes.
    Lane 1: min/max labels. Lane 2: noUiSlider (renders track, thumbs,
@@ -548,7 +592,7 @@ main { display: flex; flex: 1; min-height: 0; }
    track's, so a bound at 0%/100% centers on the thumb at that end. */
 .vz-lane-labels { position: relative; height: 14px; margin: 0 var(--thumb-inset) 2px; }
 .vz-bound { position: absolute; top: 0; transform: translateX(-50%);
-  color: var(--fg); font-size: 11px;
+  color: var(--foreground); font-size: 11px;
   font-family: ui-monospace, monospace; pointer-events: none;
   white-space: nowrap; }
 
@@ -580,12 +624,12 @@ main { display: flex; flex: 1; min-height: 0; }
 /* the library owns `transform` on connects (inline positioning), so
    centering goes through a margin tied to the band's own height var */
 .vz-lane-track .noUi-connect { --band-h: 3px;
-  background: var(--accent); height: var(--band-h);
+  background: var(--secondary); height: var(--band-h);
   top: 50%; margin-top: calc(var(--band-h) / -2); border-radius: 1px; }
 /* noUiSlider's origin is full-width/zero-height by design — the library's
    translate math depends on it; don't shrink it to the thumb size. */
 .vz-lane-track .noUi-handle { width: var(--thumb-w); height: var(--thumb-w);
-  border-radius: 50%; background: var(--accent); border: 2px solid var(--bg);
+  border-radius: 50%; background: var(--secondary); border: 2px solid var(--background);
   cursor: pointer; box-shadow: none;
   /* right offset is half the handle width so the handle's CENTER sits on the
      value point (the vendored default -17px assumes the library's 34px
@@ -606,12 +650,12 @@ main { display: flex; flex: 1; min-height: 0; }
 /* Orange "current value" marker — overlaid on the slider lane. */
 .vz-marker { position: absolute; width: 2px; height: 20px;
   top: 50%; transform: translate(-50%, -50%);
-  background: var(--orange); pointer-events: none; z-index: 2; }
+  background: var(--attention); pointer-events: none; z-index: 2; }
 
 /* Lane 3: current-value label below the track — same horizontal inset. */
 .vz-lane-current { position: relative; height: 14px; margin: 2px var(--thumb-inset) 0; }
 .vz-current { position: absolute; top: 0; transform: translateX(-50%);
-  color: var(--orange); font-size: 11px;
+  color: var(--attention); font-size: 11px;
   font-family: ui-monospace, monospace; pointer-events: none;
   white-space: nowrap; }
 
@@ -621,43 +665,41 @@ main { display: flex; flex: 1; min-height: 0; }
 .vz-row-inc { display: flex; align-items: center; gap: 4px;
   flex: 0 0 auto;
   align-self: center; }
-.vz-row-inc .vz-step-btn { background: transparent; color: var(--mid);
-  border: 1px solid var(--dim); border-radius: 4px;
+.vz-row-inc .vz-step-btn { background: transparent; color: var(--foreground-mid);
+  border: 1px solid var(--foreground-dim); border-radius: 4px;
   width: 20px; height: 22px; font-size: 14px; cursor: pointer;
   padding: 0; line-height: 1;
   display: flex; align-items: center; justify-content: center; }
-.vz-row-inc .vz-step-btn:hover:not(:disabled) { color: var(--fg); border-color: var(--fg); }
+.vz-row-inc .vz-step-btn:hover:not(:disabled) { color: var(--foreground); border-color: var(--foreground); }
 .vz-row-inc .vz-step-btn:disabled { opacity: 0.4; cursor: default; }
-.vz-row-inc-input { width: 56px; background: var(--bg); color: var(--fg);
-  border: 1px solid var(--dim); border-radius: 4px; padding: 2px 4px;
+.vz-row-inc-input { width: 56px; background: var(--background); color: var(--foreground);
+  border: 1px solid var(--foreground-dim); border-radius: 4px; padding: 2px 4px;
   font-size: 11px; text-align: center;
   font-family: ui-monospace, monospace; }
-.vz-row-inc-input:focus { outline: none; border-color: var(--accent); }
+.vz-row-inc-input:focus { outline: none; border-color: var(--secondary); }
 .vz-row-inc-input:disabled { opacity: 0.5; }
 
 /* node-referenced images (LoadImage-style) rendered inline in the info panel */
 .infoimg { margin-top: 10px; }
 .infoimg .plabel { margin-bottom: 4px; }
 .infoimg img { display: block; max-width: 100%; max-height: 260px;
-  border-radius: 4px; border: 1px solid var(--raise); background: #0a0a0c; }
-/* a flashed image is the one a filename link pointed at */
-.infoimg.flash img { border-color: var(--accent); box-shadow: 0 0 0 2px var(--accent); }
+  border-radius: 4px; border: 1px solid var(--lifted); background: #0a0a0c; }
 
 /* filename links in the text column focus the images column */
-.info-source-nodes .imgref { color: var(--accent); cursor: pointer; }
+.info-source-nodes .imgref { color: var(--secondary); cursor: pointer; }
 .info-source-nodes .imgref:hover { text-decoration: underline; }
 /* a differing image-file ref still reads as a value change, not a link */
-.info-source-nodes .imgref.pdiff { color: var(--white); }
+.info-source-nodes .imgref.pdiff { color: var(--foreground-bright); }
 
 /* info panel: collapsible per-node sections */
-.infogroup { margin-top: 10px; border: 1px solid var(--raise); border-radius: 6px;
+.infogroup { margin-top: 10px; border: 1px solid var(--lifted); border-radius: 6px;
   overflow: hidden; }
 .infogroup:first-of-type { margin-top: 0; }
 .infogroup-head { display: flex; width: 100%; align-items: center;
   justify-content: space-between; gap: 8px; padding: 6px 10px;
-  background: var(--card); border: none; color: var(--dim);
+  background: var(--surface); border: none; color: var(--foreground-dim);
   font-size: 11px; font-weight: 600; cursor: pointer; text-align: left; }
-.infogroup-head:hover { color: var(--accent); }
+.infogroup-head:hover { color: var(--secondary); }
 .infogroup-head .chev { transition: transform .15s ease; }
 .infogroup.collapsed .infogroup-head .chev { transform: rotate(-90deg); }
 .infogroup-body { padding: 6px 10px 8px; }
@@ -666,12 +708,19 @@ main { display: flex; flex: 1; min-height: 0; }
 .infogroup-body .infosec { margin-top: 8px; }
 
 /* details split: source images and node metadata arranged by the
-   header's layout switcher (state.infoLayout) */
-.info { display: flex; gap: 12px; align-items: stretch; flex: 1; min-height: 0; }
+   header's layout switcher (state.infoLayout). The separator lane (13px,
+   line centered) owns the inter-column separation — 6.5px of air on each
+   side, symmetric across split/rev/stacked; no flex gap is paid on top. */
+.info { display: flex; gap: 0; align-items: stretch; flex: 1; min-height: 0; }
 .info.rev { flex-direction: row-reverse; }
 .info.stacked { flex-direction: column; }
-.info-source-images { flex: 0 0 66%; max-width: 66%; min-width: 0; }
-.info-source-nodes { flex: 1; min-width: 0; }
+/* images column: the inline flex-basis carries the split ratio; shrink
+   allowed so the row yields space to the text column instead of
+   overflowing the body when the pane is narrow */
+.info-source-images { flex: 0 1 auto; min-width: 0; }
+/* text floor: the metadata column stays readable, the images column
+   shrinks below its split first */
+.info-source-nodes { flex: 1; min-width: 120px; }
 .info.stacked .info-source-images, .info.stacked .info-source-nodes { flex: none; max-width: 100%; width: 100%; }
 /* the image column is for inspection — no small-cap height here */
 .info-source-images .infoimg img { max-height: none; }
@@ -685,11 +734,14 @@ main { display: flex; flex: 1; min-height: 0; }
 .separator { flex: 0 0 13px; background: transparent; cursor: col-resize;
   align-self: stretch; position: relative; z-index: 2; }
 .separator::before { content: ""; position: absolute; inset: 0 6px;
-  background: var(--raise); }
+  background: var(--lifted); }
 .info.stacked .separator { flex: 0 0 auto; height: 13px; width: 100%;
   cursor: row-resize; }
 .info.stacked .separator::before { inset: 6px 0; }
-.separator:hover::before { background: var(--fg); }
+.separator:hover::before { background: var(--foreground); }
+/* the highlight must persist for the whole drag — the pointer is free to
+   leave the 13px strip while the window listeners track it */
+.separator.dragging::before { background: var(--foreground); }
 
 /* error state: proper box, no alt-text collision */
 .imgwrap.ic-error { min-height: 120px; display: grid; place-items: center; }
@@ -700,12 +752,12 @@ main { display: flex; flex: 1; min-height: 0; }
 #infoLayout { display: flex; gap: 4px; align-items: center; }
 #infoLayout button { width: 24px; height: 24px; display: grid; place-items: center;
   background: transparent; border: 1px solid transparent; border-radius: 5px;
-  color: var(--dim); cursor: pointer; padding: 0; }
-#infoLayout button:hover { color: var(--fg); }
-#infoLayout button.on { color: var(--accent); border-color: var(--accent); }
+  color: var(--foreground-dim); cursor: pointer; padding: 0; }
+#infoLayout button:hover { color: var(--foreground); }
+#infoLayout button.on { color: var(--secondary); border-color: var(--secondary); }
 
 /* vertical divider */
-.vz-divider { width: 1px; background: var(--dim); flex: 0 0 auto; }
+.vz-divider { width: 1px; background: var(--foreground-dim); flex: 0 0 auto; }
 
 /* right column — stretches full body height so the spacer can shove Run
    to the bottom of the column. */
@@ -713,34 +765,34 @@ main { display: flex; flex: 1; min-height: 0; }
   justify-content: flex-start; gap: 4px; flex: 0 0 auto;
   align-self: stretch; }
 .vz-rspacer { flex: 1 1 auto; min-height: 8px; }
-.vz-rlabel { color: var(--fg); font-size: 12px; font-weight: 400;
+.vz-rlabel { color: var(--foreground); font-size: 12px; font-weight: 400;
   margin-top: 10px; }
 .vz-rlabel:first-child { margin-top: 0; }
-.vz-count { font-size: 34px; font-weight: 700; color: var(--fg);
+.vz-count { font-size: 34px; font-weight: 700; color: var(--foreground);
   line-height: 1.1; margin-top: 2px;
   transition: color .15s ease; }
 /* soft warning: >100 permutations */
-.vz-count.vz-count-warn { color: var(--yellow); }
+.vz-count.vz-count-warn { color: var(--warning); }
 /* hot warning: >1000 permutations — this is going to be a lot of runs */
-.vz-count.vz-count-hot { color: var(--red); }
+.vz-count.vz-count-hot { color: var(--negative); }
 /* batch breakdown under the big total: "<variants> variants × <N> images" */
-.vz-count-sub { font-size: 11px; color: var(--mid); margin-top: 2px; }
-.vz-tinput { background: var(--bg); color: var(--fg);
-  border: 1px solid var(--dim); border-radius: 6px; padding: 4px 8px;
+.vz-count-sub { font-size: 11px; color: var(--foreground-mid); margin-top: 2px; }
+.vz-tinput { background: var(--background); color: var(--foreground);
+  border: 1px solid var(--foreground-dim); border-radius: 6px; padding: 4px 8px;
   font-size: 12px; margin-top: 2px;
   font-family: ui-monospace, monospace; }
-.vz-tinput:focus { outline: none; border-color: var(--accent); }
+.vz-tinput:focus { outline: none; border-color: var(--secondary); }
 /* Run button — sky blue, sits at the bottom of the right column via the
    spacer above it. Fills the column width for a solid primary-action target. */
-.vz-run { background: var(--sky); color: var(--black); border: none;
+.vz-run { background: var(--primary); color: var(--black); border: none;
   border-radius: 8px; padding: 10px 0; font-size: 14px; font-weight: 600;
   cursor: pointer; width: 100%; }
-.vz-run:hover { filter: brightness(1.1); box-shadow: 0 0 0 3px var(--sky-dim); }
+.vz-run:hover { filter: brightness(1.1); box-shadow: 0 0 0 3px var(--primary-dim); }
 .vz-run:disabled { opacity: 0.5; cursor: default; }
-.vz-error { color: var(--red); font-size: 11px; min-height: 14px;
+.vz-error { color: var(--negative); font-size: 11px; min-height: 14px;
   margin-top: 6px; word-break: break-word; }
-.vz-error.vz-ok { color: var(--green); }
+.vz-error.vz-ok { color: var(--positive); }
 .vz-close { position: absolute; top: 10px; right: 12px;
-  background: none; border: none; color: var(--dim); cursor: pointer;
+  background: none; border: none; color: var(--foreground-dim); cursor: pointer;
   padding: 4px; }
-.vz-close:hover { color: var(--fg); }
+.vz-close:hover { color: var(--foreground); }
