@@ -18,9 +18,11 @@ export function WorkspacePane() {
     // divider drag resizes the split between the feeds (persisted)
     const divider = dividerEl;
     if (!divider) return;
+    // the pane's right edge is fixed by the workspace bar during a drag —
+    // the width derives from it, no hand-synced constant
+    let dragRight = 0;
     const move = (ev) => {
-      // right of the divider: workspace + the 32px workspace bar
-      const w = Math.min(Math.max(window.innerWidth - ev.clientX - 34, 220), window.innerWidth * 0.7);
+      const w = Math.min(Math.max(dragRight - ev.clientX, 220), window.innerWidth * 0.7);
       store.actions.anchors.setPaneWidth(Math.round(w));
     };
     const up = () => {
@@ -34,6 +36,7 @@ export function WorkspacePane() {
       divider.setPointerCapture(e.pointerId);
       document.body.classList.add("resizing");
       divider.classList.add("dragging");
+      dragRight = asideEl.getBoundingClientRect().right;
       divider.addEventListener("pointermove", move);
       divider.addEventListener("pointerup", up);
     };

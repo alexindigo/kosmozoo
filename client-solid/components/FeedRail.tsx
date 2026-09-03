@@ -17,8 +17,20 @@ import { onCleanup, createEffect } from "solid-js";
 import { useAppStore } from "../store/app-store.js";
 import { tapeWindow } from "/js/rail.mjs";
 
-const TICK_PX = 5;                 // 2px tick + 3px gap
-const LABEL_TOP = 14, LABEL_BOTTOM = 28; // px reserved for the numbers
+// rail geometry is owned by the CSS (#feedRail's --fr-* custom properties) —
+// read once at setup so the capacity/scrub math can never silently desync
+function railGeometry(rail) {
+  const cs = getComputedStyle(rail);
+  const px = (name, fallback) => {
+    const v = parseFloat(cs.getPropertyValue(name));
+    return Number.isFinite(v) ? v : fallback;
+  };
+  return {
+    tickPx: px("--fr-tick-step", 5),
+    labelTop: px("--fr-label-top", 14),
+    labelBottom: px("--fr-label-bottom", 28),
+  };
+}
 
 export function FeedRail() {
   const store = useAppStore();
@@ -32,6 +44,8 @@ export function FeedRail() {
     const vz = store.state.feedVirtualizer();
     if (!rail || !col || !vz) return;
 
+    const { tickPx, labelTop, labelBottom } = railGeometry(rail);
+
     let raf = 0;
     let tapeStart = 0;
     let tickEls = [];
@@ -39,7 +53,7 @@ export function FeedRail() {
     let lastViewLen = -1;
 
     const viewLength = () => store.state.view().length;
-    const capacity = () => Math.max(0, Math.floor((rail.clientHeight - LABEL_TOP - LABEL_BOTTOM) / TICK_PX));
+    const capacity = () => Math.max(0, Math.floor((rail.clientHeight - labelTop - labelBottom) / tickPx));
 
     // viewport-visible cards → view positions, derived from the virtualizer's
     // visible range (items outside the viewport are overscan — filtered by
@@ -119,7 +133,7 @@ export function FeedRail() {
       const tape = rail.querySelector(".fr-tape");
       if (!tape) return;
       const r = tape.getBoundingClientRect();
-      const k = Math.floor((e.clientY - r.top) / TICK_PX);
+      const k = Math.floor((e.clientY - r.top) / tickPx);
       const viewPos = Math.max(0, Math.min(N - 1, tapeStart + k));
       const imgIdx = store.state.view()[viewPos];
       if (imgIdx != null) store.actions.feed.restoreToIndex(imgIdx);
