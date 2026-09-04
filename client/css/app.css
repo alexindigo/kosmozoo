@@ -210,13 +210,13 @@ main { display: flex; flex: 1; min-height: 0; }
 @layer card-activity { .card.current { border-color: var(--primary); } }
 
 /* image box: aspect-true, reserved before pixels land.
-   Default rule: image width = column width (capped at natural width by
-   Zoomable's max-width), height = derived from aspect-ratio. No caps — scrolling
-   handles cards taller than the viewport. More sizing controls can be layered on later.
-   --ar-num/--ar-den default to 3:2 so a meta-less box renders at the same
+   Default rule: image width = column width, height = derived from aspect-ratio
+   with a 16:9 floor (taller for tall images). The image inside is scale-down
+   + centered — never upscaled, never rendered in a corner.
+   --ar-num/--ar-den default to 16:9 so a meta-less box renders at the same
    aspect the virtualizer's estimateSize assumes (no first-measure jump). */
 .imgwrap { position: relative;
-  width: 100%; aspect-ratio: var(--ar-num, 3) / var(--ar-den, 2);
+  width: 100%; aspect-ratio: var(--ar-num, 16) / var(--ar-den, 9);
   background: var(--background-stage); border-width: 1px; border-style: solid; border-radius: 4px;
   overflow: hidden; }
 /* the image box's own layer stack (same model as the card's): base is
@@ -227,7 +227,7 @@ main { display: flex; flex: 1; min-height: 0; }
 @layer box-state    { .imgwrap.ic-error { border-color: var(--error); } }
 @layer box-activity { .infoimg.flash .imgwrap { border-color: var(--secondary); }
                       .infoimg.flash img { border-color: var(--secondary); } }
-.imgwrap img { width: 100%; height: 100%; object-fit: contain; display: block;
+.imgwrap img { width: 100%; height: 100%; object-fit: scale-down; display: block;
   cursor: zoom-in; }
 .imgwrap.ic-empty img { cursor: default; }
 .imgwrap.ic-error::after { content: "load failed — click to retry";

@@ -36,12 +36,10 @@ export function Grid() {
     estimateSize: (i) => {
       const img = store.state.images[store.state.view()[i]];
       const w = col?.clientWidth ?? 800;
-      // with meta, the rendered box is the column's aspect-fit capped at the
-      // natural size (the box never upscales) — the estimate must match
-      if (img?.meta?.width && img?.meta?.height) {
-        return Math.round(Math.min(w / (img.meta.width / img.meta.height), img.meta.height) + CHROME_PX);
-      }
-      return Math.round(w / 1.5 + CHROME_PX);
+      // the box renders aspect with a 16:9 floor (taller for tall images) —
+      // the estimate must match the rendered formula (no first-measure jump)
+      const ar = img?.meta?.width && img?.meta?.height ? img.meta.width / img.meta.height : 16 / 9;
+      return Math.round(w / Math.min(ar, 16 / 9) + CHROME_PX);
     },
     measureElement: (el, entry, inst) => measureElement(el, entry, inst),
     overscan: WINDOW_PAD,
