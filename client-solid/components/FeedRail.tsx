@@ -58,9 +58,11 @@ export function FeedRail() {
     // viewport-visible cards → view positions, derived from the virtualizer's
     // visible range (items outside the viewport are overscan — filtered by
     // the same intersection test the old rect walk applied). Index math, no
-    // DOM walk.
+    // DOM walk. A hard ±8 px hysteresis band: meta-decode corrections move
+    // tops by a few px each frame, and we must not flicker a boundary tick
+    // on and off the wave
     const waveBounds = () => {
-      const top = col.scrollTop, bottom = top + col.clientHeight;
+      const top = col.scrollTop + 8, bottom = top + col.clientHeight - 16;
       let first = -1, last = -1;
       for (const it of vz.getVirtualItems()) {
         if (it.end <= top || it.start >= bottom) continue;
