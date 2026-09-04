@@ -242,6 +242,14 @@ export function makeAppStore() {
     const col = feedScrollEl();
     const vz = feedVirtualizer();
     if (!col || !vz) { gestureStart = null; return; }
+    // 0. flush buffered model updates — geometry moves only between
+    //    gestures; corrections re-trigger the settle loop and converge
+    if (pendingMeta.size) {
+      for (const [idx, meta] of pendingMeta) setSt("images", idx, "meta", meta);
+      pendingMeta.clear();
+    }
+    // prefetch metas for the settled window's neighborhood (before they render)
+    wantRangeNow();
     // 1. current selection — a consequence of a STOPPED scroll
     actions.current.settleFromRange(vz.getVirtualItems(), col.scrollTop, col.clientHeight);
     // 2. snap tidy — small, directional, capped (scroll-snap.js)
@@ -283,6 +291,9 @@ export function makeAppStore() {
   let metaVersion = 0;
   const wantSet = new Set();
   let wantTimer = null;
+  // meta patches that landed mid-gesture — applied at settle (feedSettle),
+  // so card geometry never changes under the user's scroll
+  const pendingMeta = new Map();
   let metaPollTimer = null;
 
   function wantMeta(image) {
@@ -318,10 +329,14 @@ export function makeAppStore() {
       setSt("metaPending", r.pending ?? 0);
       if (r.v !== metaVersion) {
         metaVersion = r.v;
+        const scrolling = feedActivity() === "scrolling";
         for (const [name, meta] of Object.entries(r.items ?? {})) {
           const idx = st.images.findIndex((i) => i.filename === name);
           if (idx < 0 || st.images[idx].meta) continue;
-          setSt("images", idx, "meta", meta);
+          // geometry only moves between gestures: while the user scrolls,
+          // meta patches buffer and flush at settle (the feedSettle pipeline)
+          if (scrolling) pendingMeta.set(idx, meta);
+          else setSt("images", idx, "meta", meta);
         }
         // the node registry grows as the engine extracts — refresh it
         // alongside so newly discovered node types materialize without a
@@ -332,10 +347,15 @@ export function makeAppStore() {
     if (st.metaPending > 0) scheduleMetaPoll();
   }
 
-  // meta-want: the window's worth of images, swept on (re)load/restore
+  // meta-want follows the viewport: from the current window's first visible
+  // item forward, so metas land BEFORE those cards render — a card's aspect
+  // is correct at first paint and never changes on-screen. (Swept on
+  // (re)load/restore, view turnover, and each scroll settle.)
   function wantRangeNow() {
     const v = view();
-    for (let i = 0; i < Math.min(20, v.length); i++) {
+    const vz = feedVirtualizer();
+    const startIdx = vz?.getVirtualItems()[0]?.index ?? 0;
+    for (let i = startIdx; i < Math.min(startIdx + 40, v.length); i++) {
       const image = st.images[v[i]];
       if (image) wantMeta(image);
     }
