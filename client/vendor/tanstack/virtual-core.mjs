@@ -857,22 +857,14 @@ class Virtualizer {
         const wasAtEnd = this.options.anchorTo === "end" && ((_a = this.scrollState) == null ? void 0 : _a.behavior) !== "smooth" && this.getVirtualDistanceFromEnd() <= this.options.scrollEndThreshold;
         const prevTotalSize = wasAtEnd ? this.getTotalSize() : 0;
         const scrollOffsetWithAdj = this.getScrollOffset() + this.scrollAdjustments;
-        const isFirstMeasure = !this.itemSizeCache.has(key);
-        const defaultShouldAdjust = isFirstMeasure ? (
-          // First measurement: compensate any item whose top sits above the
-          // fold — the estimate→actual delta must be corrected regardless of
-          // scroll direction, since the whole estimated block was above it.
-          itemStart < scrollOffsetWithAdj
-        ) : (
-          // Re-measurement: only compensate an item that is ENTIRELY above the
-          // fold. An item that merely *spans* the fold (top above, bottom
-          // below — e.g. a streaming chat message growing at its bottom)
-          // changes size *below* the anchor point, so shifting scrollTop by the
-          // delta would drag the viewport downward on every growth (#1218).
-          // Also skip during backward scroll to avoid the "items jump while
-          // scrolling up" cascade.
-          itemStart + itemSize <= scrollOffsetWithAdj && this.scrollDirection !== "backward"
-        );
+        // the current card's top is immovable: only an item ENTIRELY above
+        // the viewport is compensated (its growth drags the feed down by
+        // the delta, and the offset restores the viewport content). A card
+        // straddling the fold IS the current card — its growth stays put
+        // (top pinned), it is never scrolled off-screen by a correction.
+        // Corrections also skip during backward scroll.
+        const defaultShouldAdjust = itemStart + itemSize <= scrollOffsetWithAdj
+          && this.scrollDirection !== "backward";
         const shouldAdjustScroll = ((_b = this.scrollState) == null ? void 0 : _b.behavior) !== "smooth" && (this.shouldAdjustScrollPositionOnItemSizeChange !== void 0 ? this.shouldAdjustScrollPositionOnItemSizeChange(
           // The callback expects a VirtualItem; build one lazily only
           // when the consumer actually supplied a custom predicate.
