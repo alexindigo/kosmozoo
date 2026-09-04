@@ -230,6 +230,10 @@ export function makeAppStore() {
       setFeedActivity("scrolling");
       gestureStart = feedScrollEl()?.scrollTop ?? 0;
     }
+    // meta-want is a fetch, not a geometry write — safe mid-gesture; the
+    // resulting patches buffer to settle (the geometry still moves only at
+    // settle). Throttled so a fling doesn't queue wants per frame.
+    wantRangeThrottled(500);
     clearTimeout(feedSettleTimer);
     feedSettleTimer = setTimeout(feedSettle, FEED_SETTLE_MS);
   }
@@ -300,7 +304,7 @@ export function makeAppStore() {
     if (image.meta || wantSet.has(image.filename)) return;
     wantSet.add(image.filename);
     clearTimeout(wantTimer);
-    wantTimer = setTimeout(flushWant, 1500);
+    wantTimer = setTimeout(flushWant, 500);
   }
 
   async function flushWant() {
@@ -347,18 +351,27 @@ export function makeAppStore() {
     if (st.metaPending > 0) scheduleMetaPoll();
   }
 
-  // meta-want follows the viewport: from the current window's first visible
-  // item forward, so metas land BEFORE those cards render — a card's aspect
-  // is correct at first paint and never changes on-screen. (Swept on
-  // (re)load/restore, view turnover, and each scroll settle.)
+  // meta-want follows the viewport: from a little behind the current window
+  // to a few screens ahead of it, so most sizes resolve BEFORE those cards
+  // render — the offset has less to absorb. Throttled into the scroll path
+  // (a fetch, not a geometry write — the resulting patches buffer to settle).
+  const WANT_LOOKAHEAD = 60, WANT_BEHIND = 10;
+
   function wantRangeNow() {
     const v = view();
     const vz = feedVirtualizer();
     const startIdx = vz?.getVirtualItems()[0]?.index ?? 0;
-    for (let i = startIdx; i < Math.min(startIdx + 40, v.length); i++) {
+    const from = Math.max(0, startIdx - WANT_BEHIND);
+    for (let i = from; i < Math.min(startIdx + WANT_LOOKAHEAD, v.length); i++) {
       const image = st.images[v[i]];
       if (image) wantMeta(image);
     }
+  }
+  let wantThrottleT = 0;
+  function wantRangeThrottled(ms = 500) {
+    if (Date.now() < wantThrottleT) return;
+    wantThrottleT = Date.now() + ms;
+    wantRangeNow();
   }
 
   // --- image list load -----------------------------------------------------------
