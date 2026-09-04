@@ -13,16 +13,6 @@ import { aspectFromMeta } from "../store/fields.js";
 import { Zoomable } from "./Zoomable.js";
 import { IconButton } from "./IconButton.js";
 
-function anchorSummary(meta) {
-  if (!meta) return "";
-  const bits = [];
-  if (meta.seed != null) bits.push(`seed ${meta.seed}`);
-  if (meta.steps != null) bits.push(`${meta.steps} steps`);
-  if (meta.guidance != null) bits.push(`g ${meta.guidance}`);
-  if (meta.model) bits.push(meta.model);
-  return bits.join(" · ");
-}
-
 // name of the anchor currently being drag-reordered (module-level: it
 // survives the reactive updates the reorder itself triggers)
 let dragged = null;
@@ -54,7 +44,6 @@ function AnchorCard(props) {
         src={props.anchor.src}
         alt={props.anchor.name}
         ar={aspectFromMeta(props.anchor.meta)}
-        stripText={anchorSummary(props.anchor.meta)}
         zoomKey={`anchor:${props.anchor.name}`}
         onZoomChange={setZoomed}
         onOpen={() => store.actions.diff.openFromAnchor(props.idx)}

@@ -1003,14 +1003,14 @@ export function makeAppStore() {
       // memo derives from it, so cards refresh by construction), persisted
       setField(id, col, on) {
         const merged = { ...(st.fieldsStored ?? {}) };
-        merged[id] = { card: false, strip: false, ...merged[id], [col]: on };
+        merged[id] = { card: false, ...merged[id], [col]: on };
         setSt("fieldsStored", merged);
         api.setSettings("core.fields", { cfg: merged }).catch(() => {});
       },
       setGroup(ids, col, on) {
         const merged = { ...(st.fieldsStored ?? {}) };
         for (const id of ids) {
-          merged[id] = { card: false, strip: false, ...merged[id], [col]: on };
+          merged[id] = { card: false, ...merged[id], [col]: on };
         }
         setSt("fieldsStored", merged);
         api.setSettings("core.fields", { cfg: merged }).catch(() => {});

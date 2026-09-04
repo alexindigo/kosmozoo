@@ -1,4 +1,4 @@
-// client-solid/components/Zoomable.tsx — the image box: imgwrap + img + strip,
+// client-solid/components/Zoomable.tsx — the image box: imgwrap + img,
 // with in-feed zoom and the load lifecycle.
 //
 // The unload→error artificial-broken class dies by construction: the img src
@@ -53,9 +53,6 @@ export function Zoomable(props) {
           setPhase("error");
         }}
       />
-      <div class="mstrip" style={{ display: props.stripText ? "block" : "none" }}>
-        {props.stripText ?? ""}
-      </div>
     </div>
   );
 }

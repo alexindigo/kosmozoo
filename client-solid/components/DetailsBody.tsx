@@ -11,8 +11,7 @@
 import { createEffect, createMemo, For, Show } from "solid-js";
 import { useAppStore, clampSplit } from "../store/app-store.js";
 import { matchesFile } from "/js/route-parse.mjs";
-import { nodeImages } from "../store/fields.js";
-import { fmtBytes } from "./MetaBar.js";
+import { nodeImages, fmtBytes } from "../store/fields.js";
 import { MetaBody } from "./MetaBody.js";
 import { Zoomable } from "./Zoomable.js";
 

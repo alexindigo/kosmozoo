@@ -1,18 +1,18 @@
 // client-solid/components/Card.tsx — the CANDIDATE image card, declarative.
 //
 // Composes <Zoomable> (image box), the title row (filename + icon-button
-// actions + save), the notes pair (<NoteBox>), and the <MetaBar>. Judgment
-// lives in the store's images tree (the source of truth); vote/favorite are
+// actions + save), and the notes pair (<NoteBox>). Full metadata lives in
+// the details pane — the card carries no meta section. Judgment lives in
+// the store's images tree (the source of truth); vote/favorite are
 // path-level updates the card's bindings follow by construction.
 
 import { createSignal, createEffect, onMount } from "solid-js";
 import { Show } from "solid-js/web";
 import { iconSvg } from "/js/icons.mjs";
 import { useAppStore } from "../store/app-store.js";
-import { metaStripText, aspectFromMeta } from "../store/fields.js";
+import { aspectFromMeta } from "../store/fields.js";
 import { Zoomable } from "./Zoomable.js";
 import { IconButton } from "./IconButton.js";
-import { MetaBar } from "./MetaBar.js";
 import { NoteBox } from "./NoteBox.js";
 
 export function Card(props) {
@@ -24,16 +24,11 @@ export function Card(props) {
   // aspect: metadata until the image itself reports its natural size
   const [loadedAr, setLoadedAr] = createSignal(null);
   const ar = () => loadedAr() ?? aspectFromMeta(meta());
-  const [expanded, setExpanded] = createSignal(false);
   const [flash, setFlash] = createSignal(false);
 
   onMount(() => {
     if (image()?.size == null) store.actions.images.fillSize(image().id);
   });
-
-  const stripText = () => meta()
-    ? metaStripText(meta(), { list: store.state.fieldsList(), cfg: store.state.fieldsCfg() })
-    : "";
 
   const flashSaved = () => {
     setFlash(true);
@@ -86,7 +81,6 @@ export function Card(props) {
         src={store.state.window.getSrc(props.imgIdx(), image()?.id)}
         alt={image()?.filename}
         ar={ar}
-        stripText={stripText()}
         zoomKey={image()?.id}
         onLoaded={(w, hp) => setLoadedAr(`${w} / ${hp}`)}
         onOpen={() => store.actions.diff.openFromFeed(props.imgIdx())}
@@ -162,12 +156,6 @@ export function Card(props) {
           onSave={saveNote("pos")} getNeighborText={neighborText("pos")}
         />
       </div>
-      <MetaBar
-        facts={() => ({ w: meta()?.width ?? null, h: meta()?.height ?? null, bytes: image()?.size ?? null })}
-        meta={() => image()?.meta ?? null}
-        expanded={expanded}
-        onToggle={() => setExpanded(!expanded())}
-      />
     </>
   );
 }

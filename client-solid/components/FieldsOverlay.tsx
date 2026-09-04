@@ -1,8 +1,7 @@
 // client-solid/components/FieldsOverlay.tsx — the metadata fields picker.
-// Per-field card/strip toggles plus per-group masters, all derived from the
-// store's stored cfg; a change persists and the cards refresh by
-// construction (their strip/meta rows derive from the same cfg).
-// Master↔per-field sync falls out of reactivity.
+// Per-field toggles plus per-group masters, all derived from the store's
+// stored cfg; a change persists and the cards' under-image rows refresh by
+// construction. Master↔per-field sync falls out of reactivity.
 
 import { For, Show } from "solid-js";
 import { useAppStore } from "../store/app-store.js";
@@ -21,22 +20,22 @@ export function FieldsOverlay() {
       <button id="fieldsClose" title="close (Esc)" onClick={close} innerHTML={iconSvg("x", 16)} />
       <div id="fieldsTitle">Metadata fields</div>
       <div id="fieldsSub">
-        <b>under image</b> — the card's metadata panel · <b>strip</b> — a semi-transparent strip over the image bottom (cards) / screen bottom (lightbox)
+        <b>under image</b> — the card's metadata panel
       </div>
       <div id="fieldsTable">
         <Show when={cfg()}>
           <div class="frow head">
-            <span class="fname2">field (grouped by node)</span><span>under image</span><span>strip</span>
+            <span class="fname2">field (grouped by node)</span><span>under image</span>
           </div>
           <For each={groups()}>
             {([gname, fields]) => (
               <div class="fgroup">
                 <div class="fgrouphead">
                   <span class="gname">{gname}</span>
-                  {["card", "strip"].map((col) => (
+                  {["card"].map((col) => (
                     <label
                       class="switchwrap mini"
-                      title={`toggle all ${gname} (${col === "card" ? "under image" : "strip"})`}
+                      title={`toggle all ${gname} (under image)`}
                     >
                       <input
                         type="checkbox"
@@ -53,7 +52,7 @@ export function FieldsOverlay() {
                     {([id, input]) => (
                       <div class="frow">
                         <span class="fname2">{id}</span>
-                        {["card", "strip"].map((col) => (
+                        {["card"].map((col) => (
                           <label class="switchwrap mini">
                             <input
                               type="checkbox"

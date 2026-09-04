@@ -16,10 +16,11 @@ import { useAppStore } from "../store/app-store.js";
 import { WINDOW_PAD } from "../store/image-window.js";
 import { Card } from "./Card.js";
 
-// initial estimate of the chrome under the image box (title row + notes +
-// meta bar) for the virtualizer's estimateSize — measureElement corrects
-// every row to its real height, so this only shapes the first frame
-const CHROME_PX = 178;
+// initial estimate of the chrome under the image box (card padding + title
+// row + notes pair — measured 147 on a live card) for the virtualizer's
+// estimateSize — measureElement corrects every row to its real height, so
+// this only shapes the first frame
+const CHROME_PX = 148;
 
 export function Grid() {
   const store = useAppStore();

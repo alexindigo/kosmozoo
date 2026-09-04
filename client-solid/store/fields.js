@@ -10,6 +10,14 @@ export function aspectFromMeta(meta) {
   return meta?.width && meta?.height ? `${meta.width} / ${meta.height}` : null;
 }
 
+// byte size for display (card details header etc.)
+export function fmtBytes(n) {
+  if (n == null) return null;
+  if (n < 1024) return `${n} B`;
+  if (n < 1024 * 1024) return `${Math.round(n / 1024)} KB`;
+  return `${(n / 1024 / 1024).toFixed(1)} MB`;
+}
+
 export function fieldId(classType, input) { return `${classType}.${input}`; }
 
 export function parseFieldId(id) {
@@ -60,11 +68,11 @@ export function fieldList(registry) {
 export function fieldsCfgFrom(list, stored) {
   const out = {};
   for (const [id] of list) {
-    out[id] = { card: false, strip: false, ...(stored?.[id] ?? {}) };
+    out[id] = { card: stored?.[id]?.card ?? false };
   }
   const storedEntries = Object.entries(stored ?? {});
   for (const [id, cfg] of storedEntries) {
-    if (!(id in out)) out[id] = { card: cfg.card ?? false, strip: cfg.strip ?? false };
+    if (!(id in out)) out[id] = { card: cfg.card ?? false };
   }
   return out;
 }
@@ -92,21 +100,6 @@ export function materializeRows(meta, { gated, list, cfg }) {
     }
   }
   return rows;
-}
-
-// one-line strip: short fields joined by " · " (long-field texts clipped)
-export function metaStripText(meta, { list, cfg }) {
-  const bits = [];
-  for (const [id, getter] of list) {
-    if (!cfg[id]?.strip) continue;
-    const v = getter(meta);
-    if (v == null) continue;
-    const [classType, input] = parseFieldId(id);
-    const vals = Array.isArray(v) ? v : [v];
-    const label = `${classType} — ${input}`;
-    bits.push(`${label} ${vals.map((x) => formatScalar(x)).join(", ")}`);
-  }
-  return bits.join(" · ");
 }
 
 // full rows (details pane / ⓘ overlay): every field the image carries

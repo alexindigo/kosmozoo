@@ -115,22 +115,16 @@ async function attempt(name, fn) {
     await page.poll("document.querySelectorAll('.card').length === " + before, 3000);
   });
 
-  // card anatomy: image, then the collapsed parameters line, then the
-  // filename row, then the feedback boxes
-  await attempt("card order: image, parameters line, filename, feedback", async () => {
+  // card anatomy: image, then the filename row, then the feedback boxes —
+  // full metadata lives in the details pane (the card carries no meta section)
+  await attempt("card order: image, filename, feedback", async () => {
     const order = await page.evaluate(`(() => {
       const card = document.querySelector('.card');
       return [...card.children].map((el) =>
         el.classList.contains('imgwrap') ? 'img' :
-        el.classList.contains('metabar') ? 'meta' :
         el.classList.contains('ctitle') ? 'title' : 'notes').join(',');
     })()`);
-    check("order img,title,notes,meta", order === "img,title,notes,meta", order);
-    const oneLine = await page.evaluate(`(() => {
-      const bar = document.querySelector('.card .metabar');
-      return bar.getBoundingClientRect().height < 30 && bar.querySelector('.metabar-full').hidden;
-    })()`);
-    check("parameters line collapsed to one row", oneLine);
+    check("order img,title,notes", order === "img,title,notes", order);
   });
 
   // host management through the store actions (the + / − chrome calls these)

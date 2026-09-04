@@ -94,7 +94,6 @@ import {
   fieldList,
   fieldsCfgFrom,
   fullFieldRows,
-  metaStripText,
 } from "../client-solid/store/fields.js";
 
 const REGISTRY = {
@@ -127,22 +126,6 @@ Deno.test("fields: unknown node types on the image simply don't render", () => {
     nodes: [{ id: "1", type: "FluxGuidance", inputs: { guidance: 3.5 } }],
   }, { list: LIST, cfg: CFG });
   assertEquals(rows, []); // FluxGuidance is not in the registry yet
-});
-
-Deno.test("fields: the one-line strip respects toggles and joins short values", () => {
-  const cfg = fieldsCfgFrom(LIST, {
-    "KSampler.seed": { strip: true, card: false },
-    "KSampler.steps": { strip: true, card: false },
-    "LoraLoaderModelOnly.lora_name": { strip: true, card: false },
-    "LoraLoaderModelOnly.strength_model": { strip: false, card: false },
-  });
-  const strip = metaStripText({
-    nodes: [
-      { id: "1", type: "KSampler", inputs: { steps: 20, seed: 7 } },
-      { id: "2", type: "LoraLoaderModelOnly", inputs: { lora_name: "a.safetensors", strength_model: 0.8 } },
-    ],
-  }, { list: LIST, cfg });
-  assertEquals(strip, "KSampler — seed 7 · KSampler — steps 20 · LoraLoaderModelOnly — lora_name a.safetensors");
 });
 
 Deno.test("valueDiffer: values that differ from the previous meta are marked", async () => {
