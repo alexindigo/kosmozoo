@@ -21,7 +21,9 @@ export function makeImageWindow(store) {
   let retryTimer = null;
 
   // window changes bump one version signal; every src derivation reads it,
-  // so a membership change re-evaluates exactly the bound srcs
+  // so a membership change re-evaluates exactly the bound srcs. The loader
+  // (off-DOM Image) is driven from the same bump — it resolves meta-less
+  // sizes off-card with 0 layout effect.
   const [version, setVersion] = createSignal(0);
   const bump = () => setVersion((v) => v + 1);
 
@@ -40,8 +42,48 @@ export function makeImageWindow(store) {
     if (changed) {
       bump();
       scheduleRetry();
+      stageSizes();
     }
   });
+
+  // off-DOM loader: for meta-less images in the window, measure their real
+  // size off-card (off-DOM Image — 0 layout effect, not in the DOM) and
+  // report it. The card placeholders insert only when a size is known.
+  const sizes = new Map(); // image id -> { w, h }
+  const inFlight = new Set();
+  // ids the loader could not resolve (broken bytes, 404): the card falls
+  // back to the in-card img, whose error phase + retry machinery owns them
+  const failed = new Set();
+
+  function stageSizes() {
+    if (typeof Image === "undefined") return; // headless (unit tests)
+    const b = bounds();
+    if (!b) return;
+    const images = store.state.images;
+    for (let idx = b[0]; idx <= b[1]; idx++) {
+      const image = images[idx];
+      if (!image || image.meta?.width && image.meta?.height) continue;
+      if (sizes.has(image.id) || inFlight.has(image.id) || failed.has(image.id)) continue;
+      const src = getSrc(idx, image.id);
+      if (!src) continue;
+      inFlight.add(image.id);
+      const img = new Image();
+      img.onload = () => {
+        inFlight.delete(image.id);
+        sizes.set(image.id, { w: img.naturalWidth, h: img.naturalHeight });
+        bump();
+      };
+      img.onerror = () => {
+        inFlight.delete(image.id);
+        failed.add(image.id);
+        bump();
+      };
+      img.src = src;
+    }
+  }
+  // version() subscribes callers: a landed size re-evaluates every cardSize
+  const sizeOf = (imageId) => { version(); return sizes.get(imageId) ?? null; };
+  const loadFailed = (imageId) => { version(); return failed.has(imageId); };
 
   // The workbench side, when it names the loaded feed host, keeps its card
   // (and neighbors) in the window while browsing (phase 4 exercises this).
@@ -126,5 +168,5 @@ export function makeImageWindow(store) {
     bump();
   };
 
-  return { register, getSrc, markLoaded, markError, retry, recompute: bump };
+  return { register, getSrc, markLoaded, markError, retry, recompute: bump, stageSizes, sizeOf, loadFailed };
 }

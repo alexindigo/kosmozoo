@@ -34,11 +34,11 @@ export function Grid() {
     getScrollElement: scrollEl,
     getItemKey: (i) => store.state.view()[i] ?? i,
     estimateSize: (i) => {
-      const img = store.state.images[store.state.view()[i]];
       const w = col?.clientWidth ?? 800;
-      // the box renders aspect with a 16:9 floor (taller for tall images) —
-      // the estimate must match the rendered formula (no first-measure jump)
-      const ar = img?.meta?.width && img?.meta?.height ? img.meta.width / img.meta.height : 16 / 9;
+      // the box renders from the store's resolved size (meta ?? off-DOM
+      // loader ?? 16:9 floor) — the estimate must match the same source
+      const s = store.state.cardSize(store.state.view()[i]);
+      const ar = s ? s.w / s.h : 16 / 9;
       return Math.round(w / Math.min(ar, 16 / 9) + CHROME_PX);
     },
     measureElement: (el, entry, inst) => measureElement(el, entry, inst),

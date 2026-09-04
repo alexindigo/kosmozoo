@@ -10,7 +10,6 @@ import { createSignal, createEffect, onMount } from "solid-js";
 import { Show } from "solid-js/web";
 import { iconSvg } from "/js/icons.mjs";
 import { useAppStore } from "../store/app-store.js";
-import { aspectFromMeta } from "../store/fields.js";
 import { Zoomable } from "./Zoomable.js";
 import { IconButton } from "./IconButton.js";
 import { NoteBox } from "./NoteBox.js";
@@ -21,9 +20,25 @@ export function Card(props) {
   const meta = () => image()?.meta ?? null;
   const j = () => image()?.judgment ?? {};
 
-  // aspect: metadata until the image itself reports its natural size
-  const [loadedAr, setLoadedAr] = createSignal(null);
-  const ar = () => loadedAr() ?? aspectFromMeta(meta());
+  // the box's aspect is DATA — the store's resolved size (meta, else the
+  // off-DOM loader's natural measurement), never the in-card img's load.
+  // An unknown size renders the 16:9 floor placeholder; the img inserts
+  // only once the size is known (off-card resolution keeps it out of view
+  // until then)
+  const sizeInfo = () => store.state.cardSize(props.imgIdx());
+  const ar = () => {
+    const s = sizeInfo();
+    return s ? `${s.w} / ${s.h}` : null;
+  };
+  const src = () => {
+    const img = image();
+    if (!img) return null;
+    // gate: the img inserts once the size is known (meta or off-card loader);
+    // a size the loader cannot resolve (broken bytes) falls back to the
+    // in-card error path, which owns error display + retry
+    if (!sizeInfo() && !store.state.window.loadFailed(img.id)) return null;
+    return store.state.window.getSrc(props.imgIdx(), img.id);
+  };
   const [flash, setFlash] = createSignal(false);
 
   onMount(() => {
@@ -78,11 +93,10 @@ export function Card(props) {
   return (
     <>
       <Zoomable
-        src={store.state.window.getSrc(props.imgIdx(), image()?.id)}
+        src={src()}
         alt={image()?.filename}
         ar={ar}
         zoomKey={image()?.id}
-        onLoaded={(w, hp) => setLoadedAr(`${w} / ${hp}`)}
         onOpen={() => store.actions.diff.openFromFeed(props.imgIdx())}
         onErrorClick={() => store.state.window.retry(props.imgIdx())}
         onPhase={(p) => {

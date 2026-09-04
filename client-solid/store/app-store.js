@@ -1225,6 +1225,14 @@ export function makeAppStore() {
     feedScrollEl,
     feedVirtualizer,
     feedActivity,
+    // a card's image size: meta's dims when extracted, else the off-DOM
+    // loader's natural measurement (0 layout effect) — null = unknown
+    cardSize(idx) {
+      const img = st.images[idx];
+      if (!img) return null;
+      if (img.meta?.width && img.meta?.height) return { w: img.meta.width, h: img.meta.height };
+      return window_.sizeOf(img.id);
+    },
   };
 
   // UI state accessor — separate reactive graph

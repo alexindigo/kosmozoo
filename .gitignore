@@ -21,4 +21,7 @@ TODO.md
 state/
 settings.json
 tests/.tmp-mutable/
+tests/.tmp-comfy/
+tests/.tmp-race/
+tests/e2e/kz-*.probe.cjs
 client-solid-dist/
