@@ -1,6 +1,12 @@
 server.log
 __pycache__/
+# vendor/ holds downloaded/build artifacts in most projects; ours are
+# tracked regardless. Vendored libraries are pinned and carried
+# (reproducible builds, no supply-chain drift), so the two library dirs
+# are un-ignored while every other vendor path stays ignored.
 vendor/
+!client/vendor/solid/
+!client/vendor/tanstack/
 .venv/
 faceboxes_cache.json
 feedback.json

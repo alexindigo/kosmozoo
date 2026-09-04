@@ -36,10 +36,19 @@ sed -i \
   -e 's|from "solid-js"|from "../solid/solid.mjs"|g' \
   client/vendor/tanstack/solid-virtual.mjs
 
+# @tanstack/virtual-core and its helpers — the pinned upstream copy the
+# Solid wrapper really depends on; any of our fixes and comments on top of
+# these are maintained by us.
+curl -fSL "https://cdn.jsdelivr.net/npm/@tanstack/virtual-core@3.17.8/dist/esm/index.js" -o client/vendor/tanstack/virtual-core.mjs
+curl -fSL "https://cdn.jsdelivr.net/npm/@tanstack/virtual-core@3.17.8/dist/esm/lazy-measurements.js" -o client/vendor/tanstack/lazy-measurements.js
+curl -fSL "https://cdn.jsdelivr.net/npm/@tanstack/virtual-core@3.17.8/dist/esm/utils.js" -o client/vendor/tanstack/utils.js
+
 # no bare specifiers may survive vendoring
 if grep -nE "(from|import)[[:space:]]+['\"][^.]" \
   client/vendor/solid/solid.mjs client/vendor/solid/web.mjs \
-  client/vendor/solid/store.mjs client/vendor/tanstack/solid-virtual.mjs; then
+  client/vendor/solid/store.mjs client/vendor/tanstack/solid-virtual.mjs \
+  client/vendor/tanstack/virtual-core.mjs client/vendor/tanstack/lazy-measurements.js \
+  client/vendor/tanstack/utils.js; then
   echo "fetch-vendor-solid: bare specifier survived the path fix" >&2
   exit 1
 fi
