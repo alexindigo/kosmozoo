@@ -137,11 +137,12 @@ function CardSlot(props) {
       ref={(node) => {
         el = node;
         if (node) {
-          // data-index must exist before the first measureElement call — the
-          // virtualizer reads it in the same callback. (data-idx needs no
-          // imperative write: the JSX attribute is reactive.)
+          // the virtualizer reads data-index via indexFromElement
           node.setAttribute("data-index", String(props.vi.index));
-          props.virtualizer.measureElement(node);
+          // measure AFTER the element is in the document — measuring in the
+          // ref reads a detached node's zero height and poisons the size
+          // cache (the vendored ResizeObserver then owns corrections)
+          queueMicrotask(() => { if (el?.isConnected) props.virtualizer.measureElement(el); });
         }
       }}
       class={"card" + (isCurrent() ? " current" : "")}
