@@ -35,8 +35,13 @@ export function Grid() {
     getItemKey: (i) => store.state.view()[i] ?? i,
     estimateSize: (i) => {
       const img = store.state.images[store.state.view()[i]];
-      const ar = img?.meta?.width && img?.meta?.height ? img.meta.width / img.meta.height : 1.5;
-      return Math.round((col?.clientWidth ?? 800) / ar + CHROME_PX);
+      const w = col?.clientWidth ?? 800;
+      // with meta, the rendered box is the column's aspect-fit capped at the
+      // natural size (the box never upscales) — the estimate must match
+      if (img?.meta?.width && img?.meta?.height) {
+        return Math.round(Math.min(w / (img.meta.width / img.meta.height), img.meta.height) + CHROME_PX);
+      }
+      return Math.round(w / 1.5 + CHROME_PX);
     },
     measureElement: (el, entry, inst) => measureElement(el, entry, inst),
     overscan: WINDOW_PAD,

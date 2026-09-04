@@ -1,7 +1,8 @@
 // tests/make-synthetic-fixtures.mjs — generate a small set of synthetic
 // fixture PNGs with embedded ComfyUI prompt graphs, so the test substrate is
-// runnable before the user supplies real asset PNGs. Each fixture is a 1x1
-// PNG with a tEXt "prompt" chunk.
+// runnable before the user supplies real asset PNGs. Each fixture is a real
+// 1024×1024 PNG (matching the graph's EmptyLatentImage claims — the client's
+// natural-size cap renders at pixel size) with a tEXt "prompt" chunk.
 //
 // Coverage mirrors the priority list in the plan: FLUX/FluxGuidance, a LoRA
 // stack, IPAdapter, ControlNet, PuLID, SamplerCustomAdvanced, plus two
@@ -42,11 +43,15 @@ function chunk(type, data) {
   return out;
 }
 
-function pngWithPrompt(promptObj) {
+import { deflateSync } from "node:zlib";
+
+// a real W×H solid RGBA image — the fixtures' pixels must match their
+// embedded graphs' claims (the client never upscales past natural size)
+function pngWithPrompt(promptObj, w = 1024, h = 1024) {
   const ihdr = new Uint8Array(13);
   const idv = new DataView(ihdr.buffer);
-  idv.setUint32(0, 1); // width
-  idv.setUint32(4, 1); // height
+  idv.setUint32(0, w);
+  idv.setUint32(4, h);
   ihdr[8] = 8; // bit depth
   ihdr[9] = 6; // RGBA
   const parts = [PNG_SIG, chunk("IHDR", ihdr)];
@@ -59,8 +64,12 @@ function pngWithPrompt(promptObj) {
     data.set(val, key.length + 1);
     parts.push(chunk("tEXt", data));
   }
-  const idatData = Uint8Array.from([0x78, 0x9c, 0x63, 0x60, 0x60, 0x60, 0x60, 0x00, 0x00, 0x00, 0x04, 0x00, 0x01]);
-  parts.push(chunk("IDAT", idatData));
+  // scanlines: filter byte 0 + RGBA pixels per row (solid dark slate)
+  const row = new Uint8Array(1 + w * 4);
+  for (let x = 0; x < w; x++) row.set([0x24, 0x28, 0x30, 0xff], 1 + x * 4);
+  const raw = new Uint8Array((1 + w * 4) * h);
+  for (let y = 0; y < h; y++) raw.set(row, y * (1 + w * 4));
+  parts.push(chunk("IDAT", deflateSync(raw)));
   parts.push(chunk("IEND", new Uint8Array(0)));
   const total = parts.reduce((s, p) => s + p.length, 0);
   const out = new Uint8Array(total);

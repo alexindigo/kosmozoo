@@ -81,6 +81,7 @@ export function Card(props) {
         src={store.state.window.getSrc(props.imgIdx(), image()?.id)}
         alt={image()?.filename}
         ar={ar}
+        maxWidth={meta()?.width ?? null}
         zoomKey={image()?.id}
         onLoaded={(w, hp) => setLoadedAr(`${w} / ${hp}`)}
         onOpen={() => store.actions.diff.openFromFeed(props.imgIdx())}

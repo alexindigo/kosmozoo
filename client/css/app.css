@@ -210,13 +210,13 @@ main { display: flex; flex: 1; min-height: 0; }
 @layer card-activity { .card.current { border-color: var(--primary); } }
 
 /* image box: aspect-true, reserved before pixels land.
-   Default rule: image width = column width, height = derived from
-   aspect-ratio. No caps — scrolling handles cards taller than the
-   viewport. More sizing controls can be layered on later.
-   --ar-num/--ar-den default to a 1:1 fallback so the wrap has a
-   height even before the natural size is known. */
+   Default rule: image width = column width (capped at natural width by
+   Zoomable's max-width), height = derived from aspect-ratio. No caps — scrolling
+   handles cards taller than the viewport. More sizing controls can be layered on later.
+   --ar-num/--ar-den default to 3:2 so a meta-less box renders at the same
+   aspect the virtualizer's estimateSize assumes (no first-measure jump). */
 .imgwrap { position: relative;
-  width: 100%; aspect-ratio: var(--ar-num, 1) / var(--ar-den, 1);
+  width: 100%; aspect-ratio: var(--ar-num, 3) / var(--ar-den, 2);
   background: var(--background-stage); border-width: 1px; border-style: solid; border-radius: 4px;
   overflow: hidden; }
 /* the image box's own layer stack (same model as the card's): base is
