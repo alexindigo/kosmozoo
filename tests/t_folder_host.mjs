@@ -64,7 +64,7 @@ Deno.test("folder host: routes serve the folder's files and bytes", async () => 
   const dir = await mkdtemp(join(tmpdir(), "kz-fr-"));
   const settings = await Settings.open(dir);
   const store = await Store.open(dir, join(dir, "feedback.json"));
-  const router = makeRouter({ hosts: { fixtures: "folder:" + FIXTURES }, store, settings, plugins: null });
+  const router = makeRouter({ hosts: { fixtures: "folder:" + FIXTURES }, store, settings, plugins: null, ingest: new Ingest(store, { fixtures: "folder:" + FIXTURES }) });
 
   const r = await router.handle(new Request("http://x/api/collections/fixtures/entries"));
   assertEquals(r.status, 200);
@@ -96,8 +96,8 @@ Deno.test("folder host: the scraper path extracts metadata from ComfyUI PNGs", a
   }
   s.stop();
   assertEquals(s.pending("fixtures"), 0);
-  assertEquals(store.metaGet("fixtures", "flux-basic.png").seed, 999);
-  assert(store.metaGet("fixtures", "flux-basic.png").prompt.includes("portrait"));
+  assertEquals(store.metaState("fixtures", "flux-basic.png").meta.seed, 999);
+  assert(store.metaState("fixtures", "flux-basic.png").meta.prompt.includes("portrait"));
   await rm(dir, { recursive: true });
 });
 

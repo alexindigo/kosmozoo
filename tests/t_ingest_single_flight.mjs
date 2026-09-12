@@ -64,12 +64,12 @@ Deno.test("ingest: extraction is decided by content.ext — stale re-extracts, c
   await store.ingestFile("c", "img.png", hash, 9, {});
   await store.metaPut("c", "img.png", { seed: 7 }, { ext: EXTRACTOR_VERSION });
   await ingest.ensure("c", "img.png");
-  assertEquals(store.metaGet("c", "img.png"), { seed: 7 }); // untouched
+  assertEquals(store.metaState("c", "img.png").meta, { seed: 7 }); // untouched
 
   // a STALE row (older ext) re-extracts: not-a-png yields no meta (NULL)
   await store.metaPut("c", "img.png", { seed: 7 }, { ext: EXTRACTOR_VERSION - 1 });
   await ingest.ingest("c", "img.png", "output", { bytes: new TextEncoder().encode("not-a-png") });
-  assertEquals(store.metaGet("c", "img.png"), null);
+  assertEquals(store.metaState("c", "img.png").meta, null);
   assertEquals(store.contentGet(store.hashFor("c", "img.png")).ext, EXTRACTOR_VERSION);
 
   await server.shutdown();

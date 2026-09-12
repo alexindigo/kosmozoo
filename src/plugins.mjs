@@ -13,6 +13,7 @@
 import { readdir, stat } from "node:fs/promises";
 import { join } from "node:path";
 import { backingFor } from "./backings/index.mjs";
+import { cacheGet } from "./cache.mjs";
 
 export function pluginDirs(env = Deno.env.toObject()) {
   const dirs = [];
@@ -55,14 +56,19 @@ export class PluginHost {
     } catch { /* no client half */ }
 
     for (const entry of ["plugin.ts", "plugin.mjs", "plugin.js"]) {
+      const candidate = join(dir, entry);
       try {
-        const mod = await import(join(dir, entry));
+        if (!(await stat(candidate)).isFile()) continue;
+      } catch { continue; }
+      try {
+        const mod = await import(candidate);
         if (typeof mod.register === "function") await mod.register(kz);
-        break;
       } catch (e) {
-        if (e.code === "ERR_MODULE_NOT_FOUND" || /Cannot find/.test(String(e))) continue;
         console.error(`plugin ${name}: register failed —`, e.message);
+        this.#plugins.set(name, { name, dir, capabilities: caps, hasClient, error: String(e?.message ?? e) });
+        return;
       }
+      break;
     }
     this.#plugins.set(name, { name, dir, capabilities: caps, hasClient });
   }
@@ -75,13 +81,13 @@ export class PluginHost {
       // as capabilities and picked up by the client half
       mode: (id, def) => caps.push({ kind: "mode", id, ...def }),
       alignment: (id, def) => caps.push({ kind: "alignment", id, ...def }),
+      // exporter stays until the export plugin is deleted (cruft-cleanup §3.4)
+      exporter: (def) => caps.push({ kind: "exporter", ...def }),
       // server route under /api/plugins/<name>/...
       route: (method, path, handler) => {
         router.add(method, `/api/plugins/${name}${path}`, handler);
         caps.push({ kind: "route", method, path: `/api/plugins/${name}${path}` });
       },
-      probe: (def) => caps.push({ kind: "probe", ...def }),
-      exporter: (def) => caps.push({ kind: "exporter", ...def }),
       // plugin-scoped persistence, namespaced so core need not know it exists
       settings: {
         get: (k, fb) => settings.get(`plugins.${name}`, k, fb),
@@ -111,10 +117,7 @@ export class PluginHost {
       },
       // hash + cache access for plugins that need the ingested bytes
       _hashFor: (host, filename) => store.hashFor(host, filename),
-      _cacheGet: async (hash) => {
-        const { cacheGet } = await import("./cache.mjs");
-        return cacheGet(hash);
-      },
+      _cacheGet: (hash) => cacheGet(hash),
       _hostAddr: (host) => this.ctx.hosts[host] ?? null,
     };
   }
@@ -125,8 +128,4 @@ export class PluginHost {
     }));
   }
 
-  clientUrl(name) {
-    const p = this.#plugins.get(name);
-    return p?.hasClient ? `/plugins/${name}/client.js` : null;
-  }
 }

@@ -153,10 +153,80 @@ const MIGRATIONS = [
   },
 ];
 
+
+// Every recurring statement is prepared ONCE (audit D9: a prepare per call
+// is a compile per call — a 3000-file listing compiled ~10k statements).
+// The registry is prepared eagerly in open() right after the migrations.
+const STATEMENTS = {
+  kvGet: "SELECT v FROM kv WHERE k = ?",
+  kvSet: "INSERT INTO kv (k, v) VALUES (?, ?) ON CONFLICT(k) DO UPDATE SET v = excluded.v",
+  bumpMeta: "UPDATE kv SET v = CAST(CAST(v AS INTEGER) + 1 AS TEXT) WHERE k = 'meta_version'",
+  collectionsAll: "SELECT id, kind, address, link, created_at FROM collection ORDER BY id",
+  collectionGet: "SELECT id, kind, address, link, created_at FROM collection WHERE id = ?",
+  collectionAdd: "INSERT INTO collection (id, kind, address, created_at) VALUES (?, ?, ?, ?) ON CONFLICT(id) DO UPDATE SET kind = excluded.kind, address = excluded.address",
+  collectionRemove: "DELETE FROM collection WHERE id = ?",
+  ensureCollection: "INSERT OR IGNORE INTO collection (id, kind, address, created_at) VALUES (?, 'comfy', NULL, ?)",
+  nodeRegGet: "SELECT title, inputs FROM node_registry WHERE class_type = ?",
+  nodeRegPut: "INSERT INTO node_registry (class_type, title, inputs, updated_at) VALUES (?, ?, ?, ?) ON CONFLICT(class_type) DO UPDATE SET title = excluded.title, inputs = excluded.inputs, updated_at = excluded.updated_at",
+  nodeRegAll: "SELECT class_type, title, inputs FROM node_registry",
+  inputCacheGet: "SELECT hash, stamp FROM entry WHERE collection = ? AND name = ? AND kind = 'input'",
+  contentPlaceholder: "INSERT OR IGNORE INTO content (hash, updated_at) VALUES (?, ?)",
+  inputCachePut: `INSERT INTO entry (collection, name, kind, hash, stamp, state, first_seen, last_seen)
+       VALUES (?, ?, 'input', ?, ?, 'ingested', ?, ?)
+       ON CONFLICT(collection, name, kind) DO UPDATE SET hash = excluded.hash, stamp = excluded.stamp, state = 'ingested', last_seen = excluded.last_seen`,
+  hashFor: "SELECT hash FROM entry WHERE collection = ? AND name = ? AND kind = 'output'",
+  fileInfo: "SELECT hash, stamp FROM entry WHERE collection = ? AND name = ? AND kind = 'output'",
+  entryGet: "SELECT collection, name, kind, hash, stamp, state, vote, favorite, notes, hidden, plugin_fields, first_seen, last_seen FROM entry WHERE collection = ? AND name = ? AND kind = ?",
+  entryInsertSeen: "INSERT OR IGNORE INTO entry (collection, name, kind, state, first_seen, last_seen) VALUES (?, ?, 'output', 'seen', ?, ?)",
+  entryGone: "UPDATE entry SET state = 'gone', last_seen = ? WHERE collection = ? AND name = ? AND kind = 'output'",
+  entryHide: "UPDATE entry SET hidden = 1, last_seen = ? WHERE collection = ? AND name = ? AND kind = 'output'",
+  hiddenNames: "SELECT name FROM entry WHERE collection = ? AND kind = 'output' AND hidden = 1",
+  contentGet: "SELECT hash, width, height, meta, has_workflow, ext, bytes, updated_at FROM content WHERE hash = ?",
+  contentIngest: `INSERT INTO content (hash, bytes, width, height, updated_at) VALUES (?, ?, ?, ?, ?)
+       ON CONFLICT(hash) DO UPDATE SET bytes = excluded.bytes,
+         width = COALESCE(excluded.width, content.width),
+         height = COALESCE(excluded.height, content.height)`,
+  contentRefs: "SELECT COUNT(*) FROM entry WHERE hash = ?",
+  contentDelete: "DELETE FROM content WHERE hash = ?",
+  entriesByHash: "SELECT collection, name FROM entry WHERE hash = ? AND kind = 'output'",
+  entryOutputIngest: `INSERT INTO entry (collection, name, kind, hash, stamp, state, first_seen, last_seen)
+       VALUES (?, ?, 'output', ?, ?, 'ingested', ?, ?)
+       ON CONFLICT(collection, name, kind) DO UPDATE SET hash = excluded.hash, stamp = excluded.stamp, state = 'ingested', last_seen = excluded.last_seen`,
+  touchFileStamp: "UPDATE entry SET stamp = ? WHERE collection = ? AND name = ? AND kind = 'output'",
+  metaStateJoin: `SELECT c.meta FROM entry e JOIN content c ON c.hash = e.hash
+       WHERE e.collection = ? AND e.name = ? AND e.kind = 'output'`,
+  metaPut: `INSERT INTO content (hash, meta, has_workflow, ext, updated_at)
+       VALUES (?, ?, ?, ?, ?)
+       ON CONFLICT(hash) DO UPDATE SET meta = excluded.meta, has_workflow = excluded.has_workflow,
+         ext = excluded.ext, updated_at = excluded.updated_at`,
+  metaForHost: `SELECT e.name, c.meta FROM entry e JOIN content c ON c.hash = e.hash
+       WHERE e.collection = ? AND e.kind = 'output' AND c.meta IS NOT NULL`,
+  metaFresh: `SELECT e.name FROM entry e JOIN content c ON c.hash = e.hash
+       WHERE e.collection = ? AND e.kind = 'output' AND c.ext >= ?`,
+  judgmentRead: "SELECT vote, favorite, notes, plugin_fields FROM entry WHERE collection = ? AND name = ? AND kind = 'output'",
+  judgmentUpdate: `UPDATE entry SET vote = ?, favorite = ?, notes = ?, plugin_fields = ?, last_seen = ?
+       WHERE collection = ? AND name = ? AND kind = 'output'`,
+  judgmentApply: `INSERT INTO entry (collection, name, kind, vote, favorite, notes, plugin_fields, state, first_seen, last_seen)
+       VALUES (?, ?, 'output', ?, ?, ?, ?, 'seen', ?, ?)
+       ON CONFLICT(collection, name, kind) DO UPDATE SET
+         vote = COALESCE(excluded.vote, entry.vote),
+         favorite = COALESCE(excluded.favorite, entry.favorite),
+         notes = COALESCE(excluded.notes, entry.notes),
+         plugin_fields = COALESCE(excluded.plugin_fields, entry.plugin_fields)`,
+  entryInsertGone: "INSERT OR IGNORE INTO entry (collection, name, kind, state, first_seen, last_seen) VALUES (?, ?, 'output', 'gone', ?, ?)",
+  judgmentsAll: `SELECT collection, name, hash, vote, favorite, notes, plugin_fields FROM entry
+       WHERE kind = 'output' AND (vote IS NOT NULL OR favorite IS NOT NULL OR notes IS NOT NULL OR plugin_fields IS NOT NULL)`,
+  feedbackExport: `SELECT name, hash, vote, favorite, notes, plugin_fields FROM entry
+       WHERE collection = ? AND kind = 'output' AND (vote IS NOT NULL OR favorite IS NOT NULL OR notes IS NOT NULL OR plugin_fields IS NOT NULL)
+       ORDER BY name`,
+  instancesOf: "SELECT collection, name FROM entry WHERE hash = ? AND kind = 'output' ORDER BY collection, name",
+};
+
 const kindFor = (address) => address?.startsWith("folder:") ? "folder" : "comfy";
 
 export class Store {
   #db;
+  #q; // prepared statement registry (see STATEMENTS)
 
   static async open(stateDir, { settings, feedbackPath } = {}) {
     const s = new Store();
@@ -164,6 +234,9 @@ export class Store {
     s.#db = new Database(dbPath);
     s.#db.exec("PRAGMA journal_mode = WAL");
     s.#runMigrations();
+    s.#q = Object.fromEntries(
+      Object.entries(STATEMENTS).map(([k, sql]) => [k, s.#db.prepare(sql)]),
+    );
     await s.#foldV7(settings);
     await s.#importFeedbackV1(feedbackPath, settings);
     return s;
@@ -197,15 +270,13 @@ export class Store {
           for (const [key, j] of Object.entries(doc.data ?? {})) {
             if (!key.includes(":")) {
               // hash key: fan out to EVERY entry row with that hash
-              for (const t of this.#db.prepare("SELECT collection, name FROM entry WHERE hash = ? AND kind = 'output'").all(key)) {
+              for (const t of this.#q.entriesByHash.all(key)) {
                 this.#applyJudgment(t.collection, t.name, j, now);
               }
             } else {
               const [collection, name] = splitHostKey(key);
               this.#ensureCollection(collection);
-              this.#db.prepare(
-                "INSERT OR IGNORE INTO entry (collection, name, kind, state, first_seen, last_seen) VALUES (?, ?, 'output', 'gone', ?, ?)",
-              ).run(collection, name, now, now);
+              this.#q.entryInsertGone.run(collection, name, now, now);
               this.#applyJudgment(collection, name, j, now);
             }
           }
@@ -232,15 +303,7 @@ export class Store {
       notes: j.notes ?? null,
       plugins: j.plugins ?? null,
     });
-    this.#db.prepare(
-      `INSERT INTO entry (collection, name, kind, vote, favorite, notes, plugin_fields, state, first_seen, last_seen)
-       VALUES (?, ?, 'output', ?, ?, ?, ?, 'seen', ?, ?)
-       ON CONFLICT(collection, name, kind) DO UPDATE SET
-         vote = COALESCE(excluded.vote, entry.vote),
-         favorite = COALESCE(excluded.favorite, entry.favorite),
-         notes = COALESCE(excluded.notes, entry.notes),
-         plugin_fields = COALESCE(excluded.plugin_fields, entry.plugin_fields)`,
-    ).run(
+    this.#q.judgmentApply.run(
       collection, name,
       vote, favorite,
       notes == null ? null : JSON.stringify(notes),
@@ -330,11 +393,11 @@ export class Store {
   // --- kv -------------------------------------------------------------------
 
   #kvGet(k) {
-    return this.#db.prepare("SELECT v FROM kv WHERE k = ?").value(k)?.[0] ?? null;
+    return this.#q.kvGet.value(k)?.[0] ?? null;
   }
 
   #kvSet(k, v) {
-    this.#db.prepare("INSERT INTO kv (k, v) VALUES (?, ?) ON CONFLICT(k) DO UPDATE SET v = excluded.v").run(k, v);
+    this.#q.kvSet.run(k, v);
   }
 
   get metaVersion() {
@@ -343,17 +406,17 @@ export class Store {
 
   // bumped in the same transaction style as the meta write it versions
   #bumpMeta() {
-    this.#db.exec("UPDATE kv SET v = CAST(CAST(v AS INTEGER) + 1 AS TEXT) WHERE k = 'meta_version'");
+    this.#q.bumpMeta.run();
   }
 
   // --- collections ------------------------------------------------------------
 
   collections() {
-    return this.#db.prepare("SELECT id, kind, address, link, created_at FROM collection ORDER BY id").all();
+    return this.#q.collectionsAll.all();
   }
 
   collectionGet(id) {
-    return this.#db.prepare("SELECT id, kind, address, link, created_at FROM collection WHERE id = ?").get(id) ?? null;
+    return this.#q.collectionGet.get(id) ?? null;
   }
 
   // { id: address } — the shape the old hosts map had (runtime adapter).
@@ -364,23 +427,19 @@ export class Store {
   }
 
   collectionAdd(id, address) {
-    this.#db.prepare(
-      "INSERT INTO collection (id, kind, address, created_at) VALUES (?, ?, ?, ?) ON CONFLICT(id) DO UPDATE SET kind = excluded.kind, address = excluded.address",
-    ).run(id, kindFor(address), address, Date.now());
+    this.#q.collectionAdd.run(id, kindFor(address), address, Date.now());
   }
 
   collectionRemove(id) {
-    this.#db.prepare("DELETE FROM collection WHERE id = ?").run(id);
+    this.#q.collectionRemove.run(id);
   }
 
   // --- node registry (discovered node types → their scalar input fields) ----
 
   #mergeNodeRegistry(nodes) {
     if (!Array.isArray(nodes)) return;
-    const get = this.#db.prepare("SELECT title, inputs FROM node_registry WHERE class_type = ?");
-    const put = this.#db.prepare(
-      "INSERT INTO node_registry (class_type, title, inputs, updated_at) VALUES (?, ?, ?, ?) ON CONFLICT(class_type) DO UPDATE SET title = excluded.title, inputs = excluded.inputs, updated_at = excluded.updated_at",
-    );
+    const get = this.#q.nodeRegGet;
+    const put = this.#q.nodeRegPut;
     for (const n of nodes) {
       if (!n?.type || !n.inputs) continue;
       const row = get.value(n.type);
@@ -395,7 +454,7 @@ export class Store {
 
   nodeRegistry() {
     const out = {};
-    for (const row of this.#db.prepare("SELECT class_type, title, inputs FROM node_registry").all()) {
+    for (const row of this.#q.nodeRegAll.all()) {
       try { out[row.class_type] = { title: row.title ?? null, inputs: JSON.parse(row.inputs) }; } catch { /* corrupt row skipped */ }
     }
     return out;
@@ -405,17 +464,13 @@ export class Store {
   // first: an unregistered collection gets an offline placeholder row, which
   // collectionAdd later corrects (kind/address ON CONFLICT update).
   #ensureCollection(id) {
-    this.#db.prepare(
-      "INSERT OR IGNORE INTO collection (id, kind, address, created_at) VALUES (?, 'comfy', NULL, ?)",
-    ).run(id, Date.now());
+    this.#q.ensureCollection.run(id, Date.now());
   }
 
   // --- input-file cache index (entry kind='input' adapter) -------------------
 
   inputCacheGet(host, filename) {
-    const row = this.#db.prepare(
-      "SELECT hash, stamp FROM entry WHERE collection = ? AND name = ? AND kind = 'input'",
-    ).value(host, filename);
+    const row = this.#q.inputCacheGet.value(host, filename);
     return row ? { hash: row[0], stamp: row[1] } : null;
   }
 
@@ -424,30 +479,20 @@ export class Store {
     const now = Date.now();
     // the entry's hash must reference a content row (FK) — placeholder
     // (ext=0, no meta) is fine: input files have no extractor output here
-    this.#db.prepare(
-      "INSERT OR IGNORE INTO content (hash, updated_at) VALUES (?, ?)",
-    ).run(hash, now);
-    this.#db.prepare(
-      `INSERT INTO entry (collection, name, kind, hash, stamp, state, first_seen, last_seen)
-       VALUES (?, ?, 'input', ?, ?, 'ingested', ?, ?)
-       ON CONFLICT(collection, name, kind) DO UPDATE SET hash = excluded.hash, stamp = excluded.stamp, state = 'ingested', last_seen = excluded.last_seen`,
-    ).run(host, filename, hash, stamp, now, now);
+    this.#q.contentPlaceholder.run(hash, now);
+    this.#q.inputCachePut.run(host, filename, hash, stamp, now, now);
   }
 
   // --- hash identity (entry kind='output' adapters) -------------------------
 
   hashFor(host, filename) {
-    const row = this.#db.prepare(
-      "SELECT hash FROM entry WHERE collection = ? AND name = ? AND kind = 'output'",
-    ).value(host, filename);
+    const row = this.#q.hashFor.value(host, filename);
     return row ? row[0] : null;
   }
 
   // Hash + source-content stamp as recorded at ingestion (revalidation input).
   fileInfo(host, filename) {
-    const row = this.#db.prepare(
-      "SELECT hash, stamp FROM entry WHERE collection = ? AND name = ? AND kind = 'output'",
-    ).value(host, filename);
+    const row = this.#q.fileInfo.value(host, filename);
     return row ? { hash: row[0], stamp: row[1] } : null;
   }
 
@@ -459,29 +504,18 @@ export class Store {
   async ingestFile(host, filename, hash, size, { stamp = null, changed = false, dims = null } = {}) {
     this.#ensureCollection(host);
     const now = Date.now();
-    const old = this.#db.prepare(
-      "SELECT hash FROM entry WHERE collection = ? AND name = ? AND kind = 'output'",
-    ).value(host, filename)?.[0] ?? null;
+    const old = this.#q.hashFor.value(host, filename)?.[0] ?? null;
 
     // the content row exists as soon as the bytes do (meta filled by metaPut;
     // inserted BEFORE the entry — entry.hash references content.hash). Dims
     // land when the bytes yield them; never wiped by a dimless re-ingest.
-    this.#db.prepare(
-      `INSERT INTO content (hash, bytes, width, height, updated_at) VALUES (?, ?, ?, ?, ?)
-       ON CONFLICT(hash) DO UPDATE SET bytes = excluded.bytes,
-         width = COALESCE(excluded.width, content.width),
-         height = COALESCE(excluded.height, content.height)`,
-    ).run(hash, size, dims?.width ?? null, dims?.height ?? null, now);
+    this.#q.contentIngest.run(hash, size, dims?.width ?? null, dims?.height ?? null, now);
 
-    this.#db.prepare(
-      `INSERT INTO entry (collection, name, kind, hash, stamp, state, first_seen, last_seen)
-       VALUES (?, ?, 'output', ?, ?, 'ingested', ?, ?)
-       ON CONFLICT(collection, name, kind) DO UPDATE SET hash = excluded.hash, stamp = excluded.stamp, state = 'ingested', last_seen = excluded.last_seen`,
-    ).run(host, filename, hash, stamp, now, now);
+    this.#q.entryOutputIngest.run(host, filename, hash, stamp, now, now);
 
     if (changed && old && old !== hash) {
-      const refs = this.#db.prepare("SELECT COUNT(*) FROM entry WHERE hash = ?").value(old)[0];
-      if (refs === 0) this.#db.prepare("DELETE FROM content WHERE hash = ?").run(old);
+      const refs = this.#q.contentRefs.value(old)[0];
+      if (refs === 0) this.#q.contentDelete.run(old);
     }
     this.#bumpMeta();
   }
@@ -489,9 +523,7 @@ export class Store {
   // Same content, newer source stamp (a touch, or a new ETag over identical
   // bytes): refresh the stamp only.
   touchFileStamp(host, filename, stamp) {
-    this.#db.prepare(
-      "UPDATE entry SET stamp = ? WHERE collection = ? AND name = ? AND kind = 'output'",
-    ).run(stamp, host, filename);
+    this.#q.touchFileStamp.run(stamp, host, filename);
   }
 
   // --- hidden (delete fallback on hosts that can't delete) ----------------
@@ -499,9 +531,7 @@ export class Store {
   // Names hidden from every listing of one collection.
   hiddenNames(collection) {
     return new Set(
-      this.#db.prepare(
-        "SELECT name FROM entry WHERE collection = ? AND kind = 'output' AND hidden = 1",
-      ).all(collection).map((r) => r.name),
+      this.#q.hiddenNames.all(collection).map((r) => r.name),
     );
   }
 
@@ -509,32 +539,22 @@ export class Store {
   entryHide(collection, name) {
     this.#ensureCollection(collection);
     const now = Date.now();
-    this.#db.prepare(
-      "INSERT OR IGNORE INTO entry (collection, name, kind, state, first_seen, last_seen) VALUES (?, ?, 'output', 'seen', ?, ?)",
-    ).run(collection, name, now, now);
-    this.#db.prepare(
-      "UPDATE entry SET hidden = 1, last_seen = ? WHERE collection = ? AND name = ? AND kind = 'output'",
-    ).run(now, collection, name);
+    this.#q.entryInsertSeen.run(collection, name, now, now);
+    this.#q.entryHide.run(now, collection, name);
   }
 
   // The source lost the file: an entry state, never content state (C5).
   entryGone(host, filename) {
     this.#ensureCollection(host);
     const now = Date.now();
-    this.#db.prepare(
-      "INSERT OR IGNORE INTO entry (collection, name, kind, state, first_seen, last_seen) VALUES (?, ?, 'output', 'seen', ?, ?)",
-    ).run(host, filename, now, now);
-    this.#db.prepare(
-      "UPDATE entry SET state = 'gone', last_seen = ? WHERE collection = ? AND name = ? AND kind = 'output'",
-    ).run(now, host, filename);
+    this.#q.entryInsertSeen.run(host, filename, now, now);
+    this.#q.entryGone.run(now, host, filename);
   }
 
   // --- content + entry records ------------------------------------------------
 
   contentGet(hash) {
-    const row = this.#db.prepare(
-      "SELECT hash, width, height, meta, has_workflow, ext, bytes, updated_at FROM content WHERE hash = ?",
-    ).get(hash) ?? null;
+    const row = this.#q.contentGet.get(hash) ?? null;
     if (!row) return null;
     let meta = null;
     try { meta = row.meta ? JSON.parse(row.meta) : null; } catch { /* corrupt meta */ }
@@ -542,9 +562,7 @@ export class Store {
   }
 
   entryGet(collection, name, kind = "output") {
-    return this.#db.prepare(
-      "SELECT collection, name, kind, hash, stamp, state, vote, favorite, notes, hidden, plugin_fields, first_seen, last_seen FROM entry WHERE collection = ? AND name = ? AND kind = ?",
-    ).get(collection, name, kind) ?? null;
+    return this.#q.entryGet.get(collection, name, kind) ?? null;
   }
 
   // --- metadata (sqlite-backed, re-derivable) ----------------------------
@@ -552,23 +570,11 @@ export class Store {
   // extraction state for one image: pending (not walked yet) vs done — done
   // splits into has-meta and none (content row with NULL meta ≈ old nopng)
   metaState(host, filename) {
-    const row = this.#db.prepare(
-      `SELECT c.meta FROM entry e JOIN content c ON c.hash = e.hash
-       WHERE e.collection = ? AND e.name = ? AND e.kind = 'output'`,
-    ).value(host, filename);
+    const row = this.#q.metaStateJoin.value(host, filename);
     if (row) {
       return { extracted: true, nopng: row[0] === null, meta: row[0] ? JSON.parse(row[0]) : null };
     }
     return { extracted: false, nopng: false, meta: null };
-  }
-
-  metaGet(host, filename) {
-    const row = this.#db.prepare(
-      `SELECT c.meta FROM entry e JOIN content c ON c.hash = e.hash
-       WHERE e.collection = ? AND e.name = ? AND e.kind = 'output'`,
-    ).value(host, filename);
-    if (!row || row[0] === null) return null;
-    try { return JSON.parse(row[0]); } catch { return null; }
   }
 
   // Writes extractor output for an already-ingested file. The walk ingests
@@ -577,25 +583,13 @@ export class Store {
     const hash = this.hashFor(host, filename);
     if (!hash) return;
     if (meta) this.#mergeNodeRegistry(meta.nodes);
-    this.#db.prepare(
-      `INSERT INTO content (hash, meta, has_workflow, ext, updated_at)
-       VALUES (?, ?, ?, ?, ?)
-       ON CONFLICT(hash) DO UPDATE SET meta = excluded.meta, has_workflow = excluded.has_workflow,
-         ext = excluded.ext, updated_at = excluded.updated_at`,
-    ).run(hash, meta ? JSON.stringify(meta) : null, hasWorkflow ? 1 : 0, ext, Date.now());
+    this.#q.metaPut.run(hash, meta ? JSON.stringify(meta) : null, hasWorkflow ? 1 : 0, ext, Date.now());
     this.#bumpMeta();
-  }
-
-  metaCount() {
-    return this.#db.prepare("SELECT COUNT(*) FROM content").value()[0];
   }
 
   metaForHost(host) {
     const out = {};
-    for (const row of this.#db.prepare(
-      `SELECT e.name, c.meta FROM entry e JOIN content c ON c.hash = e.hash
-       WHERE e.collection = ? AND e.kind = 'output' AND c.meta IS NOT NULL`,
-    ).all(host)) {
+    for (const row of this.#q.metaForHost.all(host)) {
       try { out[row.name] = JSON.parse(row.meta); } catch { /* skip corrupt */ }
     }
     return out;
@@ -603,10 +597,7 @@ export class Store {
 
   metaFresh(host, minExt) {
     const out = new Set();
-    for (const row of this.#db.prepare(
-      `SELECT e.name FROM entry e JOIN content c ON c.hash = e.hash
-       WHERE e.collection = ? AND e.kind = 'output' AND c.ext >= ?`,
-    ).all(host, minExt)) {
+    for (const row of this.#q.metaFresh.all(host, minExt)) {
       out.add(row.name);
     }
     return out;
@@ -639,9 +630,7 @@ export class Store {
   }
 
   #readJudgment(host, filename) {
-    const row = this.#db.prepare(
-      "SELECT vote, favorite, notes, plugin_fields FROM entry WHERE collection = ? AND name = ? AND kind = 'output'",
-    ).get(host, filename);
+    const row = this.#q.judgmentRead.get(host, filename);
     if (!row) return null;
     const j = {};
     if (row.vote != null) j.vote = row.vote;
@@ -685,12 +674,9 @@ export class Store {
     const pruned = this.#pruneJudgment(next);
     this.#ensureCollection(host);
     const now = Date.now();
-    this.#db.prepare("INSERT OR IGNORE INTO entry (collection, name, kind, state, first_seen, last_seen) VALUES (?, ?, 'output', 'seen', ?, ?)")
+    this.#q.entryInsertSeen
       .run(host, filename, now, now);
-    this.#db.prepare(
-      `UPDATE entry SET vote = ?, favorite = ?, notes = ?, plugin_fields = ?, last_seen = ?
-       WHERE collection = ? AND name = ? AND kind = 'output'`,
-    ).run(
+    this.#q.judgmentUpdate.run(
       pruned.vote, pruned.favorite,
       pruned.notes == null ? null : JSON.stringify(pruned.notes),
       pruned.plugins == null ? null : JSON.stringify(pruned.plugins),
@@ -706,9 +692,7 @@ export class Store {
   // Everywhere this content lives: [{ collection, name }] (the "what did I
   // think elsewhere" query).
   instancesOf(hash) {
-    return this.#db.prepare(
-      "SELECT collection, name FROM entry WHERE hash = ? AND kind = 'output' ORDER BY collection, name",
-    ).all(hash);
+    return this.#q.instancesOf.all(hash);
   }
 
   // Every judgment row, keyed for the plugin host's _all adapter (interim
@@ -716,10 +700,7 @@ export class Store {
   // a shared hash — per-entry reads are the real API).
   judgmentsAll() {
     const out = {};
-    for (const row of this.#db.prepare(
-      `SELECT collection, name, hash, vote, favorite, notes, plugin_fields FROM entry
-       WHERE kind = 'output' AND (vote IS NOT NULL OR favorite IS NOT NULL OR notes IS NOT NULL OR plugin_fields IS NOT NULL)`,
-    ).all()) {
+    for (const row of this.#q.judgmentsAll.all()) {
       const key = row.hash ?? `${row.collection}:${row.name}`;
       if (out[key]) continue;
       const j = { ref: `${row.collection}:${row.name}` };
@@ -736,11 +717,7 @@ export class Store {
   feedbackExport(collection) {
     if (!this.collectionGet(collection)) return null;
     const entries = {};
-    for (const row of this.#db.prepare(
-      `SELECT name, hash, vote, favorite, notes, plugin_fields FROM entry
-       WHERE collection = ? AND kind = 'output' AND (vote IS NOT NULL OR favorite IS NOT NULL OR notes IS NOT NULL OR plugin_fields IS NOT NULL)
-       ORDER BY name`,
-    ).all(collection)) {
+    for (const row of this.#q.feedbackExport.all(collection)) {
       const e = {};
       if (row.hash != null) e.hash = row.hash;
       if (row.vote != null) e.vote = row.vote;

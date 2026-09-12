@@ -37,6 +37,21 @@ export function makeRouter(ctx) {
 
   const useAssetsPlus = () => ctx.settings.get("core.delete", "useAssetsPlus", true);
 
+  // One bytes response builder for every bytes route (E4): validators are
+  // the content hash + no-cache (the URL never changes on a remap).
+  const bytesResponse = (req, bytes, hash, mime) => {
+    const etag = `"${hash}"`;
+    if (req.headers.get("If-None-Match") === etag) {
+      return new Response(null, { status: 304, headers: { ETag: etag, "Cache-Control": "no-cache" } });
+    }
+    const h = new Headers();
+    if (mime) h.set("Content-Type", mime);
+    h.set("Content-Length", String(bytes.length));
+    h.set("ETag", etag);
+    h.set("Cache-Control", "no-cache");
+    return new Response(bytes, { headers: h });
+  };
+
   const entryShape = (collection, name, size) => {
     const e = ctx.store.entryGet(collection, name);
     const st = ctx.store.metaState(collection, name);
@@ -123,15 +138,14 @@ export function makeRouter(ctx) {
     if (kind === "input") {
       try {
         return Response.json(await backingFor(addr).list(addr, "input"));
-      } catch {
-        return Response.json([]);
+      } catch (e) {
+        return Response.json({ error: `collection unreachable: ${e.message}` }, { status: 502 });
       }
     }
     // The listing comes from the backing; the store overlays judgment + dims.
     const list = await backingFor(addr).list(addr);
     const hidden = ctx.store.hiddenNames(id);
     const visible = hidden.size ? list.filter((f) => !hidden.has(f.name)) : list;
-    ctx.prefetch?.feed(id, visible.map((f) => f.name));
     const size = new Map(visible.map((f) => [f.name, f.size]));
     return Response.json(visible.map((f) => entryShape(id, f.name, size.get(f.name))));
   });
@@ -202,17 +216,7 @@ export function makeRouter(ctx) {
     if (!ctx.hosts[id]) return new Response("unknown collection", { status: 404 });
     const kind = url.searchParams.get("kind") === "input" ? "input" : "output";
     const mime = EXT_MIME[name.split(".").pop().toLowerCase()];
-    const inm = req.headers.get("If-None-Match");
-    const makeResponse = (bytes, hash) => {
-      const etag = `"${hash}"`;
-      if (inm === etag) return new Response(null, { status: 304, headers: { ETag: etag, "Cache-Control": "no-cache" } });
-      const h = new Headers();
-      if (mime) h.set("Content-Type", mime);
-      h.set("Content-Length", String(bytes.length));
-      h.set("ETag", etag);
-      h.set("Cache-Control", "no-cache");
-      return new Response(bytes, { headers: h });
-    };
+    const makeResponse = (bytes, hash) => bytesResponse(req, bytes, hash, mime);
 
     // Cache hit: serve + debounced revalidation (the NEXT request gets fresh
     // bytes if the source was rewritten under the same name).
@@ -222,17 +226,15 @@ export function makeRouter(ctx) {
     if (info?.hash) {
       const cached = await cacheGet(info.hash);
       if (cached) {
-        ctx.ingest?.scheduleRevalidate(id, name, { input: kind === "input" });
+        ctx.ingest.scheduleRevalidate(id, name, { input: kind === "input" });
         return makeResponse(cached, info.hash);
       }
     }
 
     // Read through ingestion.
-    if (ctx.ingest) {
-      const got = await ctx.ingest.ensure(id, name, kind);
-      if (got.status === 200) return makeResponse(got.bytes, got.hash);
-      if (got.status === 400) return new Response("bad filename", { status: 400 });
-    }
+    const got = await ctx.ingest.ensure(id, name, kind);
+    if (got.status === 200) return makeResponse(got.bytes, got.hash);
+    if (got.status === 400) return new Response("bad filename", { status: 400 });
 
     // Last resort: proxy from the backing (+ ingest in the background for
     // the next request).
@@ -241,7 +243,7 @@ export function makeRouter(ctx) {
     if (r.status !== 200) return new Response("not found", { status: r.status });
     const bytes = new Uint8Array(await new Response(r.body).arrayBuffer());
     const hash = await sha256(bytes);
-    if (ctx.ingest) ctx.ingest.ensureBytes(id, name, bytes, { kind }).catch(() => {});
+    ctx.ingest.ensureBytes(id, name, bytes, { kind }).catch(() => {});
     return makeResponse(bytes, hash);
   });
 
@@ -308,7 +310,7 @@ export function makeRouter(ctx) {
   add("GET", "/api/prefetch", async () => {
     const pending = {};
     for (const name of Object.keys(ctx.hosts)) {
-      pending[name] = ctx.prefetch ? ctx.prefetch.pending(name) : 0;
+      pending[name] = ctx.prefetch.pending(name);
     }
     return Response.json({
       enabled: ctx.settings.get("core.scraper", "enabled", true),
@@ -346,7 +348,7 @@ export function makeRouter(ctx) {
       v,
       changed: true,
       items: ctx.store.metaForHost(id),
-      pending: ctx.prefetch ? ctx.prefetch.pending(id) : 0,
+      pending: ctx.prefetch.pending(id),
     });
   });
 
@@ -356,7 +358,7 @@ export function makeRouter(ctx) {
     if (!ctx.hosts[id]) return Response.json({ error: "unknown collection" }, { status: 400 });
     const { files } = await req.json();
     if (!Array.isArray(files)) return Response.json({ error: "files must be an array" }, { status: 400 });
-    const pending = ctx.prefetch?.feed(id, files, true) ?? 0;
+    const pending = ctx.prefetch.feed(id, files, true);
     return Response.json({ pending });
   });
 

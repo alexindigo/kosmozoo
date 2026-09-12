@@ -1,7 +1,7 @@
 // src/static.mjs — serve the client SPA and static assets.
 // Zero-build: the client is plain ES modules served as-is.
 
-import { join, normalize, extname } from "node:path";
+import { join, normalize, extname, relative } from "node:path";
 import { readFile } from "node:fs/promises";
 import { pluginDirs } from "./plugins.mjs";
 
@@ -10,6 +10,11 @@ const CLIENT_ROOT = new URL("../client", import.meta.url).pathname;
 // (/ and /diff) and the compiled modules; shared assets (css, vendor, the
 // framework-free /js modules, logos) still live in the client tree.
 const SOLID_ROOT = new URL("../client-solid-dist", import.meta.url).pathname;
+
+// /shared/<name> exposes SELECTED src modules to the browser — one
+// implementation, engine and client. Allow-listed, never the whole dir.
+const SHARED_ALLOW = new Set(["extractor.mjs"]);
+const SRC_ROOT = new URL("./", import.meta.url).pathname;
 
 const MIME = {
   ".html": "text/html; charset=utf-8",
@@ -22,65 +27,11 @@ const MIME = {
   ".ico": "image/x-icon",
 };
 
-export async function serveStatic(pathname) {
-  // /shared/<file> exposes selected src/ modules (the extractor) to the
-  // browser — one implementation, engine and client.
-  if (pathname.startsWith("/shared/")) {
-    const name = pathname.slice("/shared/".length);
-    if (!/^[a-z0-9_-]+\.mjs$/.test(name)) return new Response("forbidden", { status: 403 });
-    const full = new URL(`./${name}`, import.meta.url).pathname;
-    try {
-      const body = await readFile(full);
-      return new Response(body, {
-        headers: {
-          "Content-Type": "text/javascript; charset=utf-8",
-          "Cache-Control": "no-cache",
-        },
-      });
-    } catch {
-      return new Response("not found", { status: 404 });
-    }
-  }
-
-  // /plugins/<name>/client.js serves a plugin's client half from its
-  // discovery directory. No traversal; name must be a bare identifier.
-  if (pathname.startsWith("/plugins/")) {
-    const rest = pathname.slice("/plugins/".length);
-    if (!/^[a-z0-9_-]+\/client\.js$/.test(rest)) return new Response("forbidden", { status: 403 });
-    const name = rest.split("/")[0];
-    for (const tier of pluginDirs()) {
-      try {
-        const body = await readFile(join(tier, name, "client.js"));
-        return new Response(body, {
-          headers: {
-            "Content-Type": "text/javascript; charset=utf-8",
-            "Cache-Control": "no-cache",
-          },
-        });
-      } catch { /* try next tier */ }
-    }
-    return new Response("not found", { status: 404 });
-  }
-
-  // / and the SPA route /diff serve the Solid app shell; compiled app
-  // modules resolve from the dist tree too. Everything the dist doesn't
-  // have falls through to the client tree (css, vendor, /js, logos).
-  const p = (pathname === "/" || pathname === "/diff") ? "/index.html" : pathname;
-  const solidFull = normalize(join(SOLID_ROOT, p));
-  if (solidFull.startsWith(SOLID_ROOT)) {
-    try {
-      const body = await readFile(solidFull);
-      const headers = new Headers();
-      const mime = MIME[extname(solidFull)];
-      if (mime) headers.set("Content-Type", mime);
-      headers.set("Cache-Control", "no-cache");
-      return new Response(body, { headers });
-    } catch { /* fall through to the client tree */ }
-  }
-
-  const full = normalize(join(CLIENT_ROOT, p));
-  // prevent traversal
-  if (!full.startsWith(CLIENT_ROOT)) return new Response("forbidden", { status: 403 });
+// one serve-from-root helper: containment by path computation, never prefix
+// strings; js/css/etc content types; no-cache for dev.
+async function serveFrom(root, name) {
+  const full = normalize(join(root, name));
+  if (relative(root, full).startsWith("..")) return new Response("forbidden", { status: 403 });
   try {
     const body = await readFile(full);
     const headers = new Headers();
@@ -91,4 +42,34 @@ export async function serveStatic(pathname) {
   } catch {
     return new Response("not found", { status: 404 });
   }
+}
+
+export async function serveStatic(pathname) {
+  // /shared/<file> exposes allow-listed src/ modules to the browser — one
+  // implementation, engine and client.
+  if (pathname.startsWith("/shared/")) {
+    const name = pathname.slice("/shared/".length);
+    if (!SHARED_ALLOW.has(name)) return new Response("not found", { status: 404 });
+    return serveFrom(SRC_ROOT, name);
+  }
+
+  // /plugins/<name>/client.js serves a plugin's client half from its
+  // discovery directory. No traversal; name must be a bare identifier.
+  if (pathname.startsWith("/plugins/")) {
+    const rest = pathname.slice("/plugins/".length);
+    if (!/^[a-z0-9_-]+\/client\.js$/.test(rest)) return new Response("forbidden", { status: 403 });
+    for (const tier of pluginDirs()) {
+      const r = await serveFrom(tier, rest);
+      if (r.status !== 404) return r;
+    }
+    return new Response("not found", { status: 404 });
+  }
+
+  // / and the SPA route /diff serve the Solid app shell; compiled app
+  // modules resolve from the dist tree too. Everything the dist doesn't
+  // have falls through to the client tree (css, vendor, /js, logos).
+  const p = (pathname === "/" || pathname === "/diff") ? "/index.html" : pathname;
+  const fromDist = await serveFrom(SOLID_ROOT, p);
+  if (fromDist.status !== 404) return fromDist;
+  return serveFrom(CLIENT_ROOT, p);
 }

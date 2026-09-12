@@ -9,22 +9,28 @@
 // Must run headless — ingestion never requires an open browser.
 
 import { EXTRACTOR_VERSION } from "./extractor.mjs";
+import { backingFor } from "./backings/index.mjs";
 
 const INTER_FILE_DELAY = 100;   // ms between file fetches
 const MAX_BACKOFF = 30_000;     // backoff cap
+const LIST_REFRESH_MS = 60_000; // re-list each collection at most this often
 
 export class Prefetch {
   // hosts: { name: "host:port" }; enabled/paused come from settings.
-  constructor({ hosts, store, settings, ingest, interFileDelayMs = INTER_FILE_DELAY }) {
+  constructor({ hosts, store, settings, ingest, interFileDelayMs = INTER_FILE_DELAY, listRefreshMs = LIST_REFRESH_MS }) {
     this.hosts = hosts;
     this.store = store;
     this.settings = settings;
     this.ingest = ingest;
     this.interFileDelayMs = interFileDelayMs;
+    this.listRefreshMs = listRefreshMs;
     // collection -> { prio: [], prioSet: Set, walk: [], walkSet: Set, inflight, errors }
     this.workers = new Map();
+    this.#lastList = new Map(); // collection -> ts
     this.running = false;
   }
+
+  #lastList;
 
   #w(collection) {
     if (!this.workers.has(collection)) {
@@ -69,6 +75,17 @@ export class Prefetch {
         let didWork = false;
 
         for (const collection of Object.keys(self.hosts)) {
+          // the walk lane is fed by this loop listing each collection (the
+          // listing route has no side effects — E3) at most once per refresh
+          const last = self.#lastList.get(collection) ?? 0;
+          if (Date.now() - last > self.listRefreshMs) {
+            self.#lastList.set(collection, Date.now());
+            try {
+              const listing = await backingFor(self.hosts[collection]).list(self.hosts[collection]);
+              self.feed(collection, listing.map((f) => f.name ?? f));
+            } catch { /* listing failed this round — the walk retries next tick */ }
+          }
+
           const w = self.workers.get(collection);
           if (!w || w.inflight) continue;
 

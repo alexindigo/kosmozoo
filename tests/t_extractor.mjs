@@ -3,7 +3,8 @@
 // engine was removed: generic capture makes port-parity comparisons moot.)
 
 import { assert, assertEquals } from "jsr:@std/assert";
-import { extractMeta, metaFromPngBytes, historyOutputMetas, collectNodes } from "../src/extractor.mjs";
+import { extractMeta, metaFromPngBytes, collectNodes } from "../src/extractor.mjs";
+import { historyOutputMetas } from "./tools/extract-tools.mjs";
 import { readFile } from "node:fs/promises";
 import { join } from "node:path";
 

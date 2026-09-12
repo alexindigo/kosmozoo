@@ -39,31 +39,28 @@ async function mkStore() {
   return { dir, settings, store };
 }
 
-Deno.test("prefetch: headless walk drains the fake host, pending strictly decreases", async () => {
+Deno.test("prefetch: headless walk drains the fed queue and the listing", async () => {
   const { dir, settings, store } = await mkStore();
   const s = new Prefetch({ hosts: { local: FAKE }, store, settings, ingest: new Ingest(store, { local: FAKE }) });
   s.feed("local", ["flux-basic.png", "flux-lora.png", "flux-ipadapter.png"]);
-  const initial = s.pending("local");
-  assertEquals(initial, 3);
+  assertEquals(s.pending("local"), 3);
   s.start();
-  // poll until drained
-  let prev = initial;
-  for (let i = 0; i < 100 && s.pending("local") > 0; i++) {
-    await new Promise((r) => setTimeout(r, 150));
-    const p = s.pending("local");
-    assert(p <= prev, "pending must strictly decrease");
-    prev = p;
+  // the loop also lists the collection (E3): pending may grow as listed
+  // names queue, then everything drains to zero
+  for (let i = 0; i < 200 && s.pending("local") > 0; i++) {
+    await new Promise((r) => setTimeout(r, 100));
   }
   s.stop();
   assertEquals(s.pending("local"), 0);
-  assertEquals(store.metaGet("local", "flux-basic.png").seed, 999);
-  assertEquals(store.metaGet("local", "flux-lora.png").loras.length, 2);
+  assertEquals(store.metaState("local", "flux-basic.png").meta.seed, 999);
+  assertEquals(store.metaState("local", "flux-lora.png").meta.loras.length, 2);
+  assert(store.metaState("local", "flux-controlnet.png").extracted, "the listing was walked too");
   await rm(dir, { recursive: true });
 });
 
-Deno.test("prefetch: 404 is permanent — marked nopng, never retried", async () => {
+Deno.test("prefetch: 404 is permanent — entry state gone, never retried", async () => {
   const { dir, settings, store } = await mkStore();
-  const s = new Prefetch({ hosts: { local: FAKE }, store, settings, ingest: new Ingest(store, { local: FAKE }) });
+  const s = new Prefetch({ hosts: { local: FAKE }, store, settings, ingest: new Ingest(store, { local: FAKE }), listRefreshMs: 3_600_000 });
   s.feed("local", ["missing-404.png"]);
   s.start();
   for (let i = 0; i < 60 && s.pending("local") > 0; i++) {
@@ -71,14 +68,14 @@ Deno.test("prefetch: 404 is permanent — marked nopng, never retried", async ()
   }
   s.stop();
   assertEquals(s.pending("local"), 0);
-  assertEquals(store.metaGet("local", "missing-404.png"), null); // no meta
+  assertEquals(store.metaState("local", "missing-404.png").meta, null); // no meta
   assertEquals(store.entryGet("local", "missing-404.png")?.state, "gone"); // 404 ⇒ entry state, not content
   await rm(dir, { recursive: true });
 });
 
 Deno.test("prefetch: priority feed drains before walk", async () => {
   const { dir, settings, store } = await mkStore();
-  const s = new Prefetch({ hosts: { local: FAKE }, store, settings, ingest: new Ingest(store, { local: FAKE }) });
+  const s = new Prefetch({ hosts: { local: FAKE }, store, settings, ingest: new Ingest(store, { local: FAKE }), listRefreshMs: 3_600_000 });
   // pause so nothing drains before both queues are populated
   await settings.set("core.scraper", "paused", true);
   s.feed("local", ["flux-controlnet.png"]);            // walk
@@ -93,8 +90,8 @@ Deno.test("prefetch: priority feed drains before walk", async () => {
   s.stop();
   assertEquals(s.pending("local"), 0);
   // priority item landed
-  assert(store.metaGet("local", "flux-pulid.png"));
-  assert(store.metaGet("local", "flux-controlnet.png"));
+  assert(store.metaState("local", "flux-pulid.png").meta);
+  assert(store.metaState("local", "flux-controlnet.png").meta);
   await rm(dir, { recursive: true });
 });
 
@@ -104,7 +101,7 @@ Deno.test("prefetch: feed skips files already extracted at the current version",
   // (meta is content state: ingest first, then write at the current version)
   await store.ingestFile("local", "flux-basic.png", "aa".repeat(32), 100);
   await store.metaPut("local", "flux-basic.png", { seed: 1 }, { ext: EXTRACTOR_VERSION });
-  const s = new Prefetch({ hosts: { local: FAKE }, store, settings, ingest: new Ingest(store, { local: FAKE }) });
+  const s = new Prefetch({ hosts: { local: FAKE }, store, settings, ingest: new Ingest(store, { local: FAKE }), listRefreshMs: 3_600_000 });
   const pending = s.feed("local", ["flux-basic.png", "flux-lora.png"]);
   assertEquals(pending, 1); // only the unknown one queues
   assert(queued(s, "local", "flux-lora.png"));
@@ -124,10 +121,27 @@ Deno.test("prefetch: stale extractor version requeues for re-extraction", async 
   const { dir, settings, store } = await mkStore();
   // extracted at an OLDER version than the gate expects
   await store.metaPut("local", "flux-basic.png", { seed: 1 }, { ext: EXTRACTOR_VERSION - 1 });
-  const s = new Prefetch({ hosts: { local: FAKE }, store, settings, ingest: new Ingest(store, { local: FAKE }) });
+  const s = new Prefetch({ hosts: { local: FAKE }, store, settings, ingest: new Ingest(store, { local: FAKE }), listRefreshMs: 3_600_000 });
   const pending = s.feed("local", ["flux-basic.png"]);
   assertEquals(pending, 1); // older version is stale → requeue
   await rm(dir, { recursive: true });
 });
 
 addEventListener("unload", () => { try { child.kill("SIGTERM"); } catch {} });
+
+Deno.test("prefetch: the loop self-feeds the walk lane from the collection listing (E3)", async () => {
+  const { dir, settings, store } = await mkStore();
+  // nothing fed by hand — the loop lists the collection and walks what it finds
+  const pf = new Prefetch({
+    hosts: { local: FAKE }, store, settings,
+    ingest: new Ingest(store, { local: FAKE }),
+    listRefreshMs: 1,
+  });
+  pf.start();
+  for (let i = 0; i < 200 && !store.metaState("local", "flux-basic.png").extracted; i++) {
+    await new Promise((r) => setTimeout(r, 100));
+  }
+  pf.stop();
+  assert(store.metaState("local", "flux-basic.png").extracted, "the listing was walked without any feed() call");
+  await rm(dir, { recursive: true });
+});

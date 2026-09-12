@@ -3,6 +3,7 @@
 
 import { assertEquals } from "jsr:@std/assert";
 import { makeRouter } from "../src/routes.mjs";
+import { Ingest } from "../src/ingest.mjs";
 import { Settings } from "../src/settings.mjs";
 import { Store } from "../src/store.mjs";
 import { mkdtemp, rm } from "node:fs/promises";
@@ -30,7 +31,7 @@ Deno.test("proxy: SVG upstream (octet-stream) is served as image/svg+xml", async
   const dir = await mkdtemp(join(tmpdir(), "kz-proxy-"));
   const settings = await Settings.open(dir);
   const store = await Store.open(dir, join(dir, "feedback.json"));
-  const router = makeRouter({ hosts: { fake: FAKE }, store, settings, plugins: null });
+  const router = makeRouter({ hosts: { fake: FAKE }, store, settings, plugins: null, ingest: new Ingest(store, { fake: FAKE }) });
 
   const r = await router.handle(new Request("http://x/api/collections/fake/entries/logo.svg/bytes"));
   assertEquals(r.status, 200);
@@ -44,7 +45,7 @@ Deno.test("proxy: PNG keeps its upstream Content-Type", async () => {
   const dir = await mkdtemp(join(tmpdir(), "kz-proxy2-"));
   const settings = await Settings.open(dir);
   const store = await Store.open(dir, join(dir, "feedback.json"));
-  const router = makeRouter({ hosts: { fake: FAKE }, store, settings, plugins: null });
+  const router = makeRouter({ hosts: { fake: FAKE }, store, settings, plugins: null, ingest: new Ingest(store, { fake: FAKE }) });
   const r = await router.handle(new Request("http://x/api/collections/fake/entries/flux-basic.png/bytes"));
   assertEquals(r.status, 200);
   assertEquals(r.headers.get("Content-Type"), "image/png");

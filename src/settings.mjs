@@ -35,7 +35,9 @@ export class Settings {
 
   get(ns, key, fallback = null) {
     const n = this.#doc.data[ns];
-    return n && key in n ? n[key] : fallback;
+    if (!n || !(key in n)) return fallback;
+    const v = n[key];
+    return v !== null && typeof v === "object" ? structuredClone(v) : v;
   }
 
   getNs(ns) {
@@ -46,10 +48,6 @@ export class Settings {
     const n = this.#ns(ns);
     if (value === null || value === undefined) delete n[key];
     else n[key] = value;
-    await this.#save();
-  }
-
-  async save() {
     await this.#save();
   }
 

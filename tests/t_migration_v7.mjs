@@ -39,17 +39,21 @@ Deno.test("migration v7: tables folded, old tables dropped, idempotent", async (
     // hash identity: two entries, one content row (shared bytes)
     assertEquals(store.hashFor("a", "shared.png"), H1);
     assertEquals(store.hashFor("b", "shared.png"), H1);
-    assertEquals(store.metaCount(), 7); // H1-H6 + H9 placeholder (ext=0, re-walked)
+    // dropped nopng marker → placeholder content row (ext=0 → re-walked);
+    // input rows hold hashes too
+    assertEquals(store.contentGet(H9)?.ext, 0);
+    assertEquals(store.contentGet(H9)?.meta, null);
+    assertEquals(store.contentGet(H5)?.hash, H5);
 
     // images row beat the older duplicate metadata row
-    assertEquals(store.metaGet("a", "shared.png"), { seed: 1, steps: 20 });
-    assertEquals(store.metaGet("b", "shared.png"), { seed: 1, steps: 20 });
+    assertEquals(store.metaState("a", "shared.png").meta, { seed: 1, steps: 20 });
+    assertEquals(store.metaState("b", "shared.png").meta, { seed: 1, steps: 20 });
     // metadata-only rows folded via files.hash
-    assertEquals(store.metaGet("a", "legacy.png"), { seed: 4 });
-    assertEquals(store.metaGet("b", "meta-only.png"), { seed: 3 });
+    assertEquals(store.metaState("a", "legacy.png").meta, { seed: 4 });
+    assertEquals(store.metaState("b", "meta-only.png").meta, { seed: 3 });
     // discarded classes
-    assertEquals(store.metaGet("a", "unhashed.png"), null);
-    assertEquals(store.metaGet("a", "nopng.png"), null); // marker gone; ext=0 row re-walks
+    assertEquals(store.metaState("a", "unhashed.png").meta, null);
+    assertEquals(store.metaState("a", "nopng.png").meta, null); // marker gone; ext=0 row re-walks
 
     // entry states + stamps
     assertEquals(store.fileInfo("a", "shared.png"), { hash: H1, stamp: "st-a-shared" });
@@ -102,7 +106,7 @@ Deno.test("migration v7: tables folded, old tables dropped, idempotent", async (
       settings: await Settings.open(dir),
       feedbackPath: join(dir, "feedback.json"),
     });
-    assertEquals(store2.metaGet("a", "shared.png"), { seed: 1, steps: 20 });
+    assertEquals(store2.metaState("a", "shared.png").meta, { seed: 1, steps: 20 });
     assertEquals(store2.metaVersion, meta1);
     store2.close();
   } finally {

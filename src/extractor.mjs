@@ -57,7 +57,9 @@ export function basename(v) {
 // Generic scan of a prompt graph: every node's scalar inputs, no node names
 // involved. Links (arrays) are skipped; strings are capped; class_type is the
 // node name, _meta.title (when present) is its display title. This feeds the
-// registry: node types and their fields are discovered, never hardcoded.
+// registry: node types and their fields are discovered from graphs.
+// (The class_type probes BELOW, by contrast, are empirical field data ported
+// verbatim from real fleets — spec §4 #15. Different rule on purpose.)
 export function collectNodes(graph, { stringCap = 4096 } = {}) {
   const out = [];
   for (const [id, n] of Object.entries(graph ?? {})) {
@@ -369,35 +371,6 @@ export async function metaFromPngBytes(buf) {
     } catch { /* a foreign kz chunk is not ours — ignore */ }
   }
   return [meta, hasWorkflow];
-}
-
-// --- directory convenience (engine side; A/B rig calls this) ---------------
-
-export async function extractDir(dir) {
-  const { readdir, readFile } = await import("node:fs/promises");
-  const { join } = await import("node:path");
-  const out = {};
-  for (const name of (await readdir(dir)).sort()) {
-    if (!name.endsWith(".png")) continue;
-    const [meta] = await metaFromPngBytes(new Uint8Array(await readFile(join(dir, name))));
-    out[name] = meta ?? { nopng: true };
-  }
-  return out;
-}
-
-// filename -> meta for every output image in a /api/history response.
-export function historyOutputMetas(history) {
-  const out = {};
-  for (const entry of Object.values(history ?? {})) {
-    const meta = extractMeta(entry);
-    if (!meta) continue;
-    for (const output of Object.values(entry.outputs ?? {})) {
-      for (const img of output.images ?? []) {
-        if (img.type === "output" && img.filename) out[img.filename] = meta;
-      }
-    }
-  }
-  return out;
 }
 
 // --- image dimensions from encoded bytes -------------------------------------

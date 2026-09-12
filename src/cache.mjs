@@ -9,7 +9,7 @@
 // Writes:   atomic (tmp → rename) — a corrupt write never poisons an image.
 
 import { join, dirname } from "node:path";
-import { mkdir, rename, writeFile, readFile } from "node:fs/promises";
+import { mkdir, rename, writeFile, readFile, stat } from "node:fs/promises";
 
 const DEFAULT_ROOT = join(
   Deno.env.get("HOME") ?? "/tmp",
@@ -48,7 +48,6 @@ export async function cacheGet(hash) {
 
 export async function cacheHas(hash) {
   try {
-    const { stat } = await import("node:fs/promises");
     const s = await stat(cachePath(hash));
     return s.isFile();
   } catch {

@@ -156,14 +156,14 @@ Deno.test("changed re-ingest drops legacy metadata (belongs to old bytes)", asyn
   await writeFile(join(folder, "legacy.png"), "legacy v1");
   await ingest.ensure("h", "legacy.png");
   await store.metaPut("h", "legacy.png", { seed: 111 }, { ext: 1 });
-  assertEquals(store.metaGet("h", "legacy.png").seed, 111);
+  assertEquals(store.metaState("h", "legacy.png").meta.seed, 111);
   await writeFile(join(folder, "legacy.png"), "legacy v2 — different");
   const future = new Date(Date.now() + 7000);
   await utimes(join(folder, "legacy.png"), future, future);
   await ingest.revalidateNow("h", "legacy.png");
 
   // new hash has no meta
-  assertEquals(store.metaGet("h", "legacy.png"), null);
+  assertEquals(store.metaState("h", "legacy.png").meta, null);
   await rm(dir, { recursive: true });
 });
 

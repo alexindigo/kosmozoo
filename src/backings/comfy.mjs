@@ -33,7 +33,7 @@ export function parseListingEntry(n) {
 // (LoadImage sweep sources, renderable only).
 export async function list(addr, kind = "output") {
   const r = await fetch(`http://${addr}/internal/files/${kind}`, { signal: AbortSignal.timeout(HOST_TIMEOUT_MS) });
-  if (!r.ok) return [];
+  if (!r.ok) throw new Error(`ComfyUI listing: ${r.status}`); // E8: a down host is not an empty dir
   const raw = await r.json();
   if (kind === "input") {
     return raw
