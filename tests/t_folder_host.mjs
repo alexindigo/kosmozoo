@@ -3,7 +3,9 @@
 // with traversal guard, and metadata extraction via the full scraper path.
 
 import { assert, assertEquals } from "jsr:@std/assert";
-import { isFolderHost, validateHost, probeHost, hostList, hostReadBytes, hostDelete, hostKey, parseListingEntry } from "../src/hosts.mjs";
+import { isFolderHost, backingFor } from "../src/backings/index.mjs";
+import { validateCollection, hostKey } from "../src/collections.mjs";
+import { parseListingEntry } from "../src/backings/comfy.mjs";
 import { makeRouter } from "../src/routes.mjs";
 import { Settings } from "../src/settings.mjs";
 import { Store } from "../src/store.mjs";
@@ -17,10 +19,10 @@ const FIXTURES = new URL("./fixtures", import.meta.url).pathname;
 
 Deno.test("folder host: validation, probe, list newest-first, traversal guard", async () => {
   assert(isFolderHost("folder:/tmp"));
-  assertEquals(validateHost("fixtures", "folder:" + FIXTURES), null);
-  assertEquals(validateHost("fixtures", "folder:"), "folder: needs a path");
-  assertEquals(await probeHost("folder:" + FIXTURES), true);
-  assertEquals(await probeHost("folder:/definitely/not/here"), false);
+  assertEquals(await validateCollection("fixtures", "folder:" + FIXTURES), null);
+  assertEquals(await validateCollection("fixtures", "folder:"), "folder: needs a path");
+  assertEquals(await backingFor("folder:" + FIXTURES).probe("folder:" + FIXTURES), true);
+  assertEquals(await backingFor("folder:/definitely/not/here").probe("folder:/definitely/not/here"), false);
 
   // list: newest first by mtime
   const dir = await mkdtemp(join(tmpdir(), "kz-fold-"));
@@ -32,7 +34,7 @@ Deno.test("folder host: validation, probe, list newest-first, traversal guard", 
   // a is oldest (3s back), c is middle (1s back), b is newest (now)
   await utimes(join(dir, "a.png"), new Date(now - 3000), new Date(now - 3000));
   await utimes(join(dir, "c.svg"), new Date(now - 1000), new Date(now - 1000));
-  const list = await hostList("folder:" + dir);
+  const list = await backingFor("folder:" + dir).list("folder:" + dir);
   const names = list.map((f) => f.name);
   const pos = { a: names.indexOf("a.png"), b: names.indexOf("b.png"), c: names.indexOf("c.svg") };
   assert(pos.b < pos.c && pos.c < pos.a, "newest first");
@@ -40,21 +42,21 @@ Deno.test("folder host: validation, probe, list newest-first, traversal guard", 
   // hidden files skipped, non-renderables skipped
   await writeFile(join(dir, "not-an-image.txt"), "x");
   await writeFile(join(dir, ".hidden.png"), "x");
-  const names2 = (await hostList("folder:" + dir)).map((f) => f.name);
+  const names2 = (await backingFor("folder:" + dir).list("folder:" + dir)).map((f) => f.name);
   assert(!names2.includes("not-an-image.txt"));
   assert(!names2.includes(".hidden.png"));
   await rm(dir, { recursive: true });
 
   // traversal guard: basename only, no ".."
-  const t1 = await hostReadBytes("folder:" + FIXTURES, "../state.mjs");
+  const t1 = await backingFor("folder:" + FIXTURES).read("folder:" + FIXTURES, "../state.mjs");
   assertEquals(t1.status, 400);
-  const t2 = await hostReadBytes("folder:" + FIXTURES, "logo.svg");
+  const t2 = await backingFor("folder:" + FIXTURES).read("folder:" + FIXTURES, "logo.svg");
   assertEquals(t2.status, 200);
   assertEquals(t2.headers.get("Content-Type"), "image/svg+xml");
-  const t3 = await hostReadBytes("folder:" + FIXTURES, "flux-basic.png");
+  const t3 = await backingFor("folder:" + FIXTURES).read("folder:" + FIXTURES, "flux-basic.png");
   assertEquals(t3.status, 200);
   assertEquals(t3.headers.get("Content-Type"), "image/png");
-  const t4 = await hostReadBytes("folder:" + FIXTURES, "nope.png");
+  const t4 = await backingFor("folder:" + FIXTURES).read("folder:" + FIXTURES, "nope.png");
   assertEquals(t4.status, 404);
 });
 
@@ -111,15 +113,15 @@ Deno.test("folder host: delete unlinks the file, guarded like every other path",
   const dir = await mkdtemp(join(tmpdir(), "kz-del-"));
   await writeFile(join(dir, "gone.png"), "junk");
 
-  const ok = await hostDelete("folder:" + dir, "gone.png");
+  const ok = await backingFor("folder:" + dir).remove("folder:" + dir, "gone.png");
   assertEquals(ok, { ok: true, mode: "unlink" });
-  assertEquals(await hostList("folder:" + dir), []);
+  assertEquals(await backingFor("folder:" + dir).list("folder:" + dir), []);
 
-  const again = await hostDelete("folder:" + dir, "gone.png");
+  const again = await backingFor("folder:" + dir).remove("folder:" + dir, "gone.png");
   assertEquals(again.ok, false);
   assertEquals(again.detail, "already gone");
 
-  assertEquals((await hostDelete("folder:" + dir, "../outside.png")).detail, "bad filename");
-  assertEquals((await hostDelete("folder:" + dir, "a/b.png")).detail, "bad filename");
+  assertEquals((await backingFor("folder:" + dir).remove("folder:" + dir, "../outside.png")).detail, "bad filename");
+  assertEquals((await backingFor("folder:" + dir).remove("folder:" + dir, "a/b.png")).detail, "bad filename");
   await rm(dir, { recursive: true });
 });

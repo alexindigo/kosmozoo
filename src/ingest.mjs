@@ -6,7 +6,7 @@
 // demand. Revalidation is a method here (instance clock, no module globals).
 
 import { sha256, cachePut, cacheGet, cacheHas } from "./cache.mjs";
-import { hostReadBytes, hostInputBytes, hostStamp } from "./hosts.mjs";
+import { backingFor } from "./backings/index.mjs";
 import { metaFromPngBytes, imageDims, EXTRACTOR_VERSION } from "./extractor.mjs";
 
 const DEFAULT_REVALIDATE_MS = 60_000;
@@ -76,12 +76,10 @@ export class Ingest {
       const bytes = await cacheGet(info.hash);
       if (bytes) return { hash: info.hash, bytes, status: 200 };
     }
-    const r = kind === "input"
-      ? await hostInputBytes(addr, name)
-      : await hostReadBytes(addr, name);
+    const r = await backingFor(addr).read(addr, name, kind);
     if (r.status !== 200) return { status: r.status };
     const bytes = new Uint8Array(await new Response(r.body).arrayBuffer());
-    const stamp = await hostStamp(addr, name, kind);
+    const stamp = (await backingFor(addr).stat(addr, name, kind))?.stamp ?? null;
     const hash = await this.ingest(collection, name, kind, { bytes, stamp });
     return { hash, bytes, status: 200 };
   }
@@ -114,7 +112,7 @@ export class Ingest {
   async revalidateNow(collection, name, { input = false } = {}) {
     const addr = this.#hosts[collection];
     if (!addr) return;
-    const stamp = await hostStamp(addr, name, input ? "input" : "output");
+    const stamp = (await backingFor(addr).stat(addr, name, input ? "input" : "output"))?.stamp ?? null;
     if (stamp == null) return; // gone/unreachable — keep what we have
 
     const info = input
@@ -123,9 +121,7 @@ export class Ingest {
     if (!info) return;
     if (info.stamp != null && stamp === info.stamp) return; // unchanged
 
-    const r = input
-      ? await hostInputBytes(addr, name)
-      : await hostReadBytes(addr, name);
+    const r = await backingFor(addr).read(addr, name, input ? "input" : "output");
     if (r.status !== 200) return; // unreadable right now — keep what we have
     const bytes = new Uint8Array(await new Response(r.body).arrayBuffer());
     const hash = await sha256(bytes);

@@ -15,7 +15,7 @@ import { Database } from "@db/sqlite";
 import { join } from "node:path";
 import { readFile, rename } from "node:fs/promises";
 import { CorruptStateError } from "./state.mjs";
-import { splitHostKey } from "./hosts.mjs";
+import { splitHostKey } from "./collections.mjs";
 
 const SCHEMA_VERSION = 7;
 const CORE_JUDGMENT_FIELDS = new Set(["vote", "favorite", "notes"]);

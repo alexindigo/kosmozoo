@@ -3,9 +3,9 @@
 // Collections + entries are the resources (spec §2). Plugin routes live
 // under /api/plugins/<name>/... and are registered by the plugin host.
 
-import { probeHost, hostList, hostInputList, hostInputBytes, hostUploadInput, hostReadBytes, validateHost, addHost, removeHost, isFolderHost, hostDelete, comfyHistoryDelete, EXT_MIME } from "./hosts.mjs";
+import { backingFor, isFolderHost, EXT_MIME } from "./backings/index.mjs";
 import { cacheGet, sha256 } from "./cache.mjs";
-import { capabilities } from "./collections.mjs";
+import { capabilities, validateCollection, addCollection, removeCollection } from "./collections.mjs";
 
 export function makeRouter(ctx) {
   // ctx: { hosts, store, settings, plugins, ingest, prefetch } — `router.ctx`
@@ -59,7 +59,7 @@ export function makeRouter(ctx) {
   add("GET", "/api/collections", async () => {
     const out = {};
     for (const [id, address] of Object.entries(ctx.hosts)) {
-      const online = await probeHost(address);
+      const online = await backingFor(address).probe(address);
       const c = ctx.store.collectionGet(id) ?? { id, kind: isFolderHost(address) ? "folder" : "comfy", address };
       out[id] = {
         address,
@@ -79,15 +79,15 @@ export function makeRouter(ctx) {
     } catch {
       return Response.json({ error: "JSON body: {name, address}" }, { status: 400 });
     }
-    const err = validateHost(body.name, body.address);
+    const err = await validateCollection(body.name, body.address);
     if (err) return Response.json({ error: err }, { status: 400 });
-    addHost(ctx.store, ctx.hosts, body.name, body.address);
+    addCollection(ctx.store, ctx.hosts, body.name, body.address);
     const c = ctx.store.collectionGet(body.name);
     return Response.json({
       name: body.name,
       address: body.address,
       kind: c.kind,
-      online: await probeHost(body.address),
+      online: await backingFor(body.address).probe(body.address),
     });
   });
 
@@ -96,7 +96,7 @@ export function makeRouter(ctx) {
     if (Object.keys(ctx.hosts).length === 1) {
       return Response.json({ error: "cannot remove the last collection" }, { status: 400 });
     }
-    removeHost(ctx.store, ctx.hosts, id);
+    removeCollection(ctx.store, ctx.hosts, id);
     return Response.json({ removed: id });
   });
 
@@ -122,13 +122,13 @@ export function makeRouter(ctx) {
     const kind = url.searchParams.get("kind") ?? "output";
     if (kind === "input") {
       try {
-        return Response.json(await hostInputList(addr));
+        return Response.json(await backingFor(addr).list(addr, "input"));
       } catch {
         return Response.json([]);
       }
     }
     // The listing comes from the backing; the store overlays judgment + dims.
-    const list = await hostList(addr);
+    const list = await backingFor(addr).list(addr);
     const hidden = ctx.store.hiddenNames(id);
     const visible = hidden.size ? list.filter((f) => !hidden.has(f.name)) : list;
     ctx.prefetch?.feed(id, visible.map((f) => f.name));
@@ -153,8 +153,10 @@ export function makeRouter(ctx) {
     if (!file || typeof file === "string") {
       return Response.json({ error: "no image file in form" }, { status: 400 });
     }
+    const backing = backingFor(addr);
+    if (!backing.write) return Response.json({ error: "this collection has no upload" }, { status: 400 });
     const bytes = new Uint8Array(await file.arrayBuffer());
-    const r = await hostUploadInput(addr, file.name, bytes);
+    const r = await backing.write(addr, file.name, bytes);
     if (!r.ok) {
       // 409: the name already exists in the input dir — say WHICH name
       return Response.json(
@@ -172,13 +174,14 @@ export function makeRouter(ctx) {
     if (!addr) return Response.json({ error: "unknown collection" }, { status: 404 });
     const c = ctx.store.collectionGet(id) ?? { id, kind: isFolderHost(addr) ? "folder" : "comfy", address: addr };
     const caps = await capabilities(c, { useAssetsPlus: useAssetsPlus() });
+    const backing = backingFor(addr);
     if (caps.delete === "unlink" || caps.delete === "trash") {
-      const res = await hostDelete(addr, name);
+      const res = await backing.remove(addr, name);
       if (!res.ok) return Response.json({ error: res.detail }, { status: 409 });
       return Response.json({ deleted: true, mode: res.mode });
     }
     ctx.store.entryHide(id, name);
-    const historyCleared = isFolderHost(addr) ? false : await comfyHistoryDelete(addr, name);
+    const historyCleared = (await backing.historyDelete?.(addr, name)) ?? false;
     return Response.json({ deleted: true, mode: "hide", historyCleared });
   });
 
@@ -233,9 +236,7 @@ export function makeRouter(ctx) {
 
     // Last resort: proxy from the backing (+ ingest in the background for
     // the next request).
-    const r = kind === "input"
-      ? await hostInputBytes(ctx.hosts[id], name)
-      : await hostReadBytes(ctx.hosts[id], name);
+    const r = await backingFor(ctx.hosts[id]).read(ctx.hosts[id], name, kind);
     if (r.status === 400) return new Response("bad filename", { status: 400 });
     if (r.status !== 200) return new Response("not found", { status: r.status });
     const bytes = new Uint8Array(await new Response(r.body).arrayBuffer());

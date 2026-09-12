@@ -5,7 +5,7 @@ import { assert, assertEquals } from "jsr:@std/assert";
 import { ensureStateDir, loadVersioned, atomicWrite } from "../src/state.mjs";
 import { Settings } from "../src/settings.mjs";
 import { Store } from "../src/store.mjs";
-import { parseHosts, hostKey, splitHostKey } from "../src/hosts.mjs";
+import { parseHosts, hostKey, splitHostKey } from "../src/collections.mjs";
 import { makeRouter } from "../src/routes.mjs";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";

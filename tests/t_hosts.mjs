@@ -3,7 +3,8 @@
 // last-host guard hold.
 
 import { assert, assertEquals } from "jsr:@std/assert";
-import { hostHasAssetsPlus, hostUploadInput, loadHosts, validateHost } from "../src/hosts.mjs";
+import { loadCollections, validateCollection } from "../src/collections.mjs";
+import { backingFor } from "../src/backings/index.mjs";
 import { makeRouter } from "../src/routes.mjs";
 import { Settings } from "../src/settings.mjs";
 import { Store } from "../src/store.mjs";
@@ -21,10 +22,10 @@ Deno.test("hosts: env seeds first boot; collections win after that", async () =>
   const dir = await mkdtemp(join(tmpdir(), "kz-hosts-"));
   const settings = await Settings.open(dir);
   const store = await Store.open(dir, join(dir, "feedback.json"), { settings });
-  const h1 = await loadHosts(store, { KOZMOZOO_HOSTS: "a=1.1.1.1:8188,b=2.2.2.2:8188" });
+  const h1 = await loadCollections(store, { KOZMOZOO_HOSTS: "a=1.1.1.1:8188,b=2.2.2.2:8188" });
   assertEquals(h1, { a: "1.1.1.1:8188", b: "2.2.2.2:8188" });
   // a later boot with a DIFFERENT env must not clobber the user-managed map
-  const h2 = await loadHosts(store, { KOZMOZOO_HOSTS: "zzz=9.9.9.9:1" });
+  const h2 = await loadCollections(store, { KOZMOZOO_HOSTS: "zzz=9.9.9.9:1" });
   assertEquals(Object.keys(h2).sort(), ["a", "b"]);
   // and the collection table (not a settings namespace) carries them
   assertEquals(store.collectionGet("b").address, "2.2.2.2:8188");
@@ -32,19 +33,19 @@ Deno.test("hosts: env seeds first boot; collections win after that", async () =>
   await rm(dir, { recursive: true });
 });
 
-Deno.test("hosts: validation rejects malformed name/address", () => {
-  assert(validateHost("", "x:8188"));
-  assert(validateHost("a b", "x:8188"));
-  assert(validateHost("ok", "no-port"));
-  assert(validateHost("ok", ""));
-  assertEquals(validateHost("ms-01", "comfyui.home:8188"), null);
+Deno.test("hosts: validation rejects malformed name/address", async () => {
+  assert(await validateCollection("", "x:8188"));
+  assert(await validateCollection("a b", "x:8188"));
+  assert(await validateCollection("ok", "no-port"));
+  assert(await validateCollection("ok", ""));
+  assertEquals(await validateCollection("ms-01", "comfyui.home:8188"), null);
 });
 
 Deno.test("hosts: POST adds + persists + probes; DELETE removes; last host guarded", async () => {
   const dir = await mkdtemp(join(tmpdir(), "kz-hosts2-"));
   const settings = await Settings.open(dir);
   const store = await Store.open(dir, join(dir, "feedback.json"), { settings });
-  const hosts = await loadHosts(store, { KOZMOZOO_HOSTS: "a=127.0.0.1:1" });
+  const hosts = await loadCollections(store, { KOZMOZOO_HOSTS: "a=127.0.0.1:1" });
   const router = makeRouter({ hosts, store, settings, plugins: null });
 
   // add
@@ -89,7 +90,7 @@ Deno.test("hosts: upload never sends overwrite; 409 surfaces the conflicting nam
   });
   try {
     // the host function passes the 409 through, without an overwrite flag
-    const r = await hostUploadInput(addr, "taken.png", new Uint8Array([1]));
+    const r = await backingFor(addr).write(addr, "taken.png", new Uint8Array([1]));
     assertEquals(r.ok, false);
     assertEquals(r.status, 409);
     assertEquals(sawOverwrite, null);
@@ -106,7 +107,7 @@ Deno.test("hosts: upload never sends overwrite; 409 surfaces the conflicting nam
     assertEquals((await res.json()).name, "taken.png");
 
     // a free name still uploads fine
-    const ok = await hostUploadInput(addr, "free.png", new Uint8Array([2]));
+    const ok = await backingFor(addr).write(addr, "free.png", new Uint8Array([2]));
     assertEquals(ok, { ok: true, name: "free.png" });
     await rm(dir, { recursive: true });
   } finally {
@@ -127,16 +128,16 @@ Deno.test("hosts: assets-plus probe caches only definitive answers", async () =>
   });
   try {
     // non-definitive answers (500) are NOT cached: every call re-probes
-    assertEquals(await hostHasAssetsPlus(addr), false);
+    assertEquals(await backingFor(addr).hasAssetsPlus(addr), false);
     assertEquals(probeCalls, 1);
-    assertEquals(await hostHasAssetsPlus(addr), false);
+    assertEquals(await backingFor(addr).hasAssetsPlus(addr), false);
     assertEquals(probeCalls, 2);
 
     // a definitive 404 (no extension) IS cached within the TTL
     mode = "404";
-    assertEquals(await hostHasAssetsPlus(addr), false);
+    assertEquals(await backingFor(addr).hasAssetsPlus(addr), false);
     assertEquals(probeCalls, 3);
-    assertEquals(await hostHasAssetsPlus(addr), false);
+    assertEquals(await backingFor(addr).hasAssetsPlus(addr), false);
     assertEquals(probeCalls, 3);
 
     // a real probe (200 with the delete-shaped body) is definitive: cached
@@ -150,8 +151,8 @@ Deno.test("hosts: assets-plus probe caches only definitive answers", async () =>
       return new Response("nf", { status: 404 });
     });
     try {
-      assertEquals(await hostHasAssetsPlus(addr2), true);
-      assertEquals(await hostHasAssetsPlus(addr2), true);
+      assertEquals(await backingFor(addr2).hasAssetsPlus(addr2), true);
+      assertEquals(await backingFor(addr2).hasAssetsPlus(addr2), true);
       assertEquals(probeCalls2, 1);
     } finally {
       await close2();

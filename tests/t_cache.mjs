@@ -7,7 +7,7 @@ import { Ingest } from "../src/ingest.mjs";
 import { Settings } from "../src/settings.mjs";
 import { Store } from "../src/store.mjs";
 import { makeRouter } from "../src/routes.mjs";
-import { isFolderHost, validateHost } from "../src/hosts.mjs";
+import { isFolderHost } from "../src/backings/index.mjs";
 import { mkdtemp, rm, writeFile, mkdir } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";

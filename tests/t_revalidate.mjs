@@ -7,7 +7,7 @@
 // and the debounce clock is instance state — no module globals, no env seam.
 
 import { assert, assertEquals, assertExists } from "jsr:@std/assert";
-import { hostStamp } from "../src/hosts.mjs";
+import { backingFor } from "../src/backings/index.mjs";
 import { cacheGet } from "../src/cache.mjs";
 import { Ingest } from "../src/ingest.mjs";
 import { Settings } from "../src/settings.mjs";
@@ -57,22 +57,23 @@ function comfyStub(initial) {
 
 // --- the stamp seam -----------------------------------------------------------
 
-Deno.test("hostStamp: folder reports the mtime string; guards hold", async () => {
+Deno.test("backing stat: folder reports the mtime string; guards hold", async () => {
   const dir = await mkdtemp(join(tmpdir(), "kz-rev-seam-"));
   await writeFile(join(dir, "a.png"), "x");
-  const m = await hostStamp(`folder:${dir}`, "a.png");
+  const addr = `folder:${dir}`;
+  const m = await backingFor(addr).stat(addr, "a.png");
   assertExists(m);
-  assert(typeof m === "string" && Number(m) > 0);
-  assertEquals(await hostStamp(`folder:${dir}`, "../a.png"), null); // guard
-  assertEquals(await hostStamp(`folder:${dir}`, "gone.png"), null);
+  assert(typeof m.stamp === "string" && Number(m.stamp) > 0);
+  assertEquals(await backingFor(addr).stat(addr, "../a.png"), null); // guard
+  assertEquals(await backingFor(addr).stat(addr, "gone.png"), null);
   await rm(dir, { recursive: true });
 });
 
-Deno.test("hostStamp: ComfyUI reports the upstream ETag; unreachable reports null", async () => {
+Deno.test("backing stat: ComfyUI reports the upstream ETag; unreachable reports null", async () => {
   const stub = comfyStub({ etag: '"abc-def"', body: "x" });
-  assertEquals(await hostStamp(stub.addr, "a.png"), '"abc-def"');
+  assertEquals((await backingFor(stub.addr).stat(stub.addr, "a.png")).stamp, '"abc-def"');
   await stub.server.shutdown();
-  assertEquals(await hostStamp("127.0.0.1:1", "a.png"), null); // no throw
+  assertEquals(await backingFor("127.0.0.1:1").stat("127.0.0.1:1", "a.png"), null); // no throw
 });
 
 // --- ingestion records the stamp ----------------------------------------------

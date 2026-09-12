@@ -12,6 +12,7 @@
 
 import { readdir, stat } from "node:fs/promises";
 import { join } from "node:path";
+import { backingFor } from "./backings/index.mjs";
 
 export function pluginDirs(env = Deno.env.toObject()) {
   const dirs = [];
@@ -102,8 +103,9 @@ export class PluginHost {
       _fetchImageBytes: async (hostFilenameKey) => {
         const i = hostFilenameKey.indexOf(":");
         const host = hostFilenameKey.slice(0, i), filename = hostFilenameKey.slice(i + 1);
-        const { proxyImage } = await import("./hosts.mjs");
-        const r = await proxyImage(this.ctx.hosts[host], filename);
+        const addr = this.ctx.hosts[host];
+        if (!addr) return null;
+        const r = await backingFor(addr).read(addr, filename, "output");
         if (r.status !== 200) return null;
         return new Uint8Array(await new Response(r.body).arrayBuffer());
       },

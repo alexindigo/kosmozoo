@@ -6,31 +6,17 @@
 // Environment overrides: KOZMOZOO_PORT (default 2084), KOZMOZOO_HOSTS,
 // KOZMOZOO_STATE, KOZMOZOO_FEEDBACK (migration import only — sqlite is canonical).
 
-import { resolveStateDir, ensureStateDir, CorruptStateError } from "./state.mjs";
-import { Settings } from "./settings.mjs";
-import { Store } from "./store.mjs";
-import { loadHosts } from "./hosts.mjs";
-import { makeRouter } from "./routes.mjs";
+import { CorruptStateError } from "./state.mjs";
+import { buildContext } from "./context.mjs";
 import { serveStatic } from "./static.mjs";
-import { Prefetch } from "./prefetch.mjs";
-import { PluginHost } from "./plugins.mjs";
-import { Ingest } from "./ingest.mjs";
 
 const PORT = parseInt(Deno.env.get("KOZMOZOO_PORT") ?? "2084", 10);
 
-// A corrupt state file stops the boot: the bytes were quarantined by
-// loadVersioned; the human repairs or removes them and starts again.
-let stateDir, settings, store;
+// A corrupt state file stops the boot: the bytes were quarantined by the
+// state layer; the human repairs or removes them and starts again.
+let ctx, router, discovered;
 try {
-  stateDir = await ensureStateDir(resolveStateDir());
-  settings = await Settings.open(stateDir);
-  // the feedback path is read ONCE, for the v1→v2 import; never written again
-  store = await Store.open(stateDir, {
-    settings,
-    feedbackPath: settings.get("core", "feedbackPath", null)
-      ?? Deno.env.get("KOZMOZOO_FEEDBACK")
-      ?? `${Deno.env.get("HOME")}/Documents/kosmozoo_feedback.json`,
-  });
+  ({ ctx, router, discovered } = await buildContext({ env: Deno.env.toObject() }));
 } catch (e) {
   if (e instanceof CorruptStateError) {
     console.error(`kosmozoo: corrupt state file: ${e.path}`);
@@ -40,23 +26,6 @@ try {
   }
   throw e;
 }
-const hosts = await loadHosts(store); // env seeds first boot, then user-managed
-
-const router = makeRouter({ hosts, store, settings, plugins: null });
-const plugins = new PluginHost({ store, settings, router, hosts });
-const discovered = await plugins.discover();
-router.ctx = { hosts, store, settings, plugins };
-
-// Image ingestion — every served byte flows through here (revalidation
-// included; the interval is read ONCE, at construction).
-const revalidateMs = Number(Deno.env.get("KOZMOZOO_REVALIDATE_MS") ?? 60_000);
-const ingest = new Ingest(store, hosts, { revalidateMs });
-router.ctx.ingest = ingest;
-
-// The ingestion path running ahead of the user — headless, politeness set intact.
-const prefetch = new Prefetch({ hosts, store, settings, ingest });
-prefetch.start();
-router.ctx.prefetch = prefetch;
 
 Deno.serve({ port: PORT }, async (req) => {
   const url = new URL(req.url);
@@ -67,15 +36,12 @@ Deno.serve({ port: PORT }, async (req) => {
       return Response.json({ error: String(e?.message ?? e) }, { status: 500 });
     }
   }
-  // plugin client halves: /plugins/<name>/client.js
-  if (url.pathname.startsWith("/plugins/")) {
-    return serveStatic(url.pathname); // static.mjs maps this tier
-  }
+  // static.mjs maps the SPA, /shared/*, and /plugins/<name>/client.js
   return serveStatic(url.pathname);
 });
 
-console.log(`kosmozoo engine on http://127.0.0.1:${PORT}  (state: ${stateDir})`);
-console.log(`hosts: ${Object.keys(hosts).join(", ")}`);
+console.log(`kosmozoo engine on http://127.0.0.1:${PORT}  (state: ${ctx.paths.state})`);
+console.log(`collections: ${Object.keys(ctx.hosts).join(", ")}`);
 if (discovered.length) {
   console.log(`plugins: ${discovered.map((p) => p.name).join(", ")}`);
 }
