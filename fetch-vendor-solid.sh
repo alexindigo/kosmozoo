@@ -37,11 +37,20 @@ sed -i \
   client/vendor/tanstack/solid-virtual.mjs
 
 # @tanstack/virtual-core and its helpers — the pinned upstream copy the
-# Solid wrapper really depends on; any of our fixes and comments on top of
-# these are maintained by us.
+# Solid wrapper really depends on. Pristine upstream only: a hand edit to
+# any vendored file fails tests/t_vendor_pristine.mjs against CHECKSUMS.
 curl -fSL "https://cdn.jsdelivr.net/npm/@tanstack/virtual-core@3.17.8/dist/esm/index.js" -o client/vendor/tanstack/virtual-core.mjs
 curl -fSL "https://cdn.jsdelivr.net/npm/@tanstack/virtual-core@3.17.8/dist/esm/lazy-measurements.js" -o client/vendor/tanstack/lazy-measurements.js
 curl -fSL "https://cdn.jsdelivr.net/npm/@tanstack/virtual-core@3.17.8/dist/esm/utils.js" -o client/vendor/tanstack/utils.js
+
+# checksum manifest — tests/t_vendor_pristine.mjs recomputes and compares;
+# regenerated here so the files and their guard always move together.
+# Repo-root-relative paths so `sha256sum -c client/vendor/CHECKSUMS` works.
+sha256sum \
+  client/vendor/solid/solid.mjs client/vendor/solid/web.mjs client/vendor/solid/store.mjs \
+  client/vendor/tanstack/solid-virtual.mjs client/vendor/tanstack/virtual-core.mjs \
+  client/vendor/tanstack/lazy-measurements.js client/vendor/tanstack/utils.js \
+  > client/vendor/CHECKSUMS
 
 # no bare specifiers may survive vendoring
 if grep -nE "(from|import)[[:space:]]+['\"][^.]" \
@@ -53,5 +62,5 @@ if grep -nE "(from|import)[[:space:]]+['\"][^.]" \
   exit 1
 fi
 
-echo "vendored OK:"
+echo "vendored OK ($(wc -l < client/vendor/CHECKSUMS) files checksummed):"
 du -sh client/vendor/solid client/vendor/tanstack

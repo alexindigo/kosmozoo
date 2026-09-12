@@ -5,8 +5,11 @@ __pycache__/
 # (reproducible builds, no supply-chain drift), so the two library dirs
 # are un-ignored while every other vendor path stays ignored.
 vendor/
+!client/vendor/
+client/vendor/*
 !client/vendor/solid/
 !client/vendor/tanstack/
+!client/vendor/CHECKSUMS
 .venv/
 faceboxes_cache.json
 feedback.json

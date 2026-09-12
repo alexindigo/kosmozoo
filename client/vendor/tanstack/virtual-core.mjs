@@ -360,7 +360,7 @@ class Virtualizer {
         this.notify(isScrolling);
       },
       {
-        key: true && "maybeNotify",
+        key: process.env.NODE_ENV !== "production" && "maybeNotify",
         debug: () => this.options.debug,
         initialDeps: [
           this.isScrolling,
@@ -714,7 +714,7 @@ class Virtualizer {
         return measurements;
       },
       {
-        key: true && "getMeasurements",
+        key: process.env.NODE_ENV !== "production" && "getMeasurements",
         debug: () => this.options.debug
       }
     );
@@ -742,7 +742,7 @@ class Virtualizer {
         return this.range;
       },
       {
-        key: true && "calculateRange",
+        key: process.env.NODE_ENV !== "production" && "calculateRange",
         debug: () => this.options.debug
       }
     );
@@ -773,7 +773,7 @@ class Virtualizer {
         });
       },
       {
-        key: true && "getVirtualIndexes",
+        key: process.env.NODE_ENV !== "production" && "getVirtualIndexes",
         debug: () => this.options.debug
       }
     );
@@ -857,14 +857,22 @@ class Virtualizer {
         const wasAtEnd = this.options.anchorTo === "end" && ((_a = this.scrollState) == null ? void 0 : _a.behavior) !== "smooth" && this.getVirtualDistanceFromEnd() <= this.options.scrollEndThreshold;
         const prevTotalSize = wasAtEnd ? this.getTotalSize() : 0;
         const scrollOffsetWithAdj = this.getScrollOffset() + this.scrollAdjustments;
-        // the current card's top is immovable: only an item ENTIRELY above
-        // the viewport is compensated (its growth drags the feed down by
-        // the delta, and the offset restores the viewport content). A card
-        // straddling the fold IS the current card — its growth stays put
-        // (top pinned), it is never scrolled off-screen by a correction.
-        // Corrections also skip during backward scroll.
-        const defaultShouldAdjust = itemStart + itemSize <= scrollOffsetWithAdj
-          && this.scrollDirection !== "backward";
+        const isFirstMeasure = !this.itemSizeCache.has(key);
+        const defaultShouldAdjust = isFirstMeasure ? (
+          // First measurement: compensate any item whose top sits above the
+          // fold — the estimate→actual delta must be corrected regardless of
+          // scroll direction, since the whole estimated block was above it.
+          itemStart < scrollOffsetWithAdj
+        ) : (
+          // Re-measurement: only compensate an item that is ENTIRELY above the
+          // fold. An item that merely *spans* the fold (top above, bottom
+          // below — e.g. a streaming chat message growing at its bottom)
+          // changes size *below* the anchor point, so shifting scrollTop by the
+          // delta would drag the viewport downward on every growth (#1218).
+          // Also skip during backward scroll to avoid the "items jump while
+          // scrolling up" cascade.
+          itemStart + itemSize <= scrollOffsetWithAdj && this.scrollDirection !== "backward"
+        );
         const shouldAdjustScroll = ((_b = this.scrollState) == null ? void 0 : _b.behavior) !== "smooth" && (this.shouldAdjustScrollPositionOnItemSizeChange !== void 0 ? this.shouldAdjustScrollPositionOnItemSizeChange(
           // The callback expects a VirtualItem; build one lazily only
           // when the consumer actually supplied a custom predicate.
@@ -898,31 +906,16 @@ class Virtualizer {
     this.getVirtualItems = memo(
       () => [this.getVirtualIndexes(), this.getMeasurements()],
       (indexes, measurements) => {
-        // item identity persists across measurement regenerations: an item
-        // is the same object until its content actually changes (key, start,
-        // or size), so downstream <For> rows are reused, not remounted
-        const cache = (this._itemCache ??= new Map());
         const virtualItems = [];
         for (let k = 0, len = indexes.length; k < len; k++) {
           const i = indexes[k];
           const measurement = measurements[i];
-          const cached = cache.get(i);
-          if (cached && cached.key === measurement.key && cached.start === measurement.start && cached.size === measurement.size) {
-            virtualItems.push(cached);
-          } else {
-            cache.set(i, measurement);
-            virtualItems.push(measurement);
-          }
-        }
-        // prune items that left the window so the cache stays window-sized
-        if (cache.size > indexes.length * 2) {
-          const live = new Set(indexes);
-          for (const k of cache.keys()) if (!live.has(k)) cache.delete(k);
+          virtualItems.push(measurement);
         }
         return virtualItems;
       },
       {
-        key: true && "getVirtualItems",
+        key: process.env.NODE_ENV !== "production" && "getVirtualItems",
         debug: () => this.options.debug
       }
     );
@@ -1136,7 +1129,7 @@ class Virtualizer {
   // synchronous so the grown transforms commit in the same paint (#1227).
   applyScrollAdjustment(delta, behavior) {
     if (delta === 0) return false;
-    if (true && this.options.debug) {
+    if (process.env.NODE_ENV !== "production" && this.options.debug) {
       console.info("correction", delta);
     }
     if (isIOSWebKit() && (this.isScrolling || this._iosTouching || this._iosJustTouchEnded)) {
