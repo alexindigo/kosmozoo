@@ -122,8 +122,14 @@ export class PluginHost {
   }
 
   list() {
-    return [...this.#plugins.values()].map(({ name, capabilities, hasClient }) => ({
-      name, capabilities, hasClient,
+    return [...this.#plugins.values()].map(({ name, capabilities, hasClient, error }) => ({
+      name, hasClient, ...(error ? { error } : {}),
+      // needs.ok may be a function — evaluated HERE, per request, never
+      // frozen at register (F13)
+      capabilities: capabilities.map((c) => ({
+        ...c,
+        needs: c.needs?.map((n) => ({ ...n, ok: typeof n.ok === "function" ? !!n.ok() : !!n.ok })),
+      })),
     }));
   }
 

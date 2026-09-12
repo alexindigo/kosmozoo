@@ -33,10 +33,18 @@ export function eyeAnchors(detection) {
 export function register(client) {
   client.alignment?.("face-anchored", {
     label: "Face-anchored",
-    async detect(imageBytesUrl) {
-      const blob = await (await fetch(imageBytesUrl)).blob();
-      const r = await fetch("/api/plugins/detector/detect", { method: "POST", body: blob });
-      if (!r.ok) return null; // absent, not broken — never cache a null (#7)
+    async detect(collection, name) {
+      const r = await fetch("/api/plugins/detector/detect", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ collection, name }),
+      });
+      if (!r.ok) {
+        // surface the plugin's reason to the alignment axis (F14) — never
+        // cache a null detection (harvest #7)
+        const d = await r.json().catch(() => ({}));
+        throw new Error(d.reason ?? `detector ${r.status}`);
+      }
       return eyeAnchors(await r.json());
     },
   });
