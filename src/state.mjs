@@ -9,6 +9,7 @@
 import { dirname, join } from "node:path";
 import { mkdir, rename, writeFile, readFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
+import { writeSerialized } from "./writer.mjs";
 
 const BASE_DIR = new URL("..", import.meta.url).pathname;
 
@@ -71,7 +72,7 @@ export async function loadVersioned(path, { current, migrations = {}, empty }) {
     }
     if (e.code === "ENOENT") {
       doc = { version: current, data: empty() };
-      await atomicWrite(path, new TextEncoder().encode(JSON.stringify(doc, null, 2)));
+      await writeSerialized(path, new TextEncoder().encode(JSON.stringify(doc, null, 2)));
       return doc;
     }
     throw e;

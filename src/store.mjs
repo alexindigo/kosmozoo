@@ -12,7 +12,8 @@
 
 import { join } from "node:path";
 import { Database } from "@db/sqlite";
-import { loadVersioned, atomicWrite } from "./state.mjs";
+import { loadVersioned } from "./state.mjs";
+import { writeSerialized } from "./writer.mjs";
 import { hostKey, splitHostKey } from "./hosts.mjs";
 
 const SCHEMA_VERSION = 6;
@@ -151,7 +152,7 @@ export class Store {
     });
     // Migrate legacy host:filename judgment keys to hash keys.
     if (s.#migrateJudgments()) {
-      await atomicWrite(s.#feedbackPath, new TextEncoder().encode(JSON.stringify(s.#feedback, null, 2)));
+      await writeSerialized(s.#feedbackPath, new TextEncoder().encode(JSON.stringify(s.#feedback, null, 2)));
     }
     return s;
   }
@@ -522,7 +523,7 @@ export class Store {
   }
 
   async #saveFeedback() {
-    await atomicWrite(this.#feedbackPath, new TextEncoder().encode(JSON.stringify(this.#feedback, null, 2)));
+    await writeSerialized(this.#feedbackPath, new TextEncoder().encode(JSON.stringify(this.#feedback, null, 2)));
   }
 
   close() {

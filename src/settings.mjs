@@ -6,7 +6,8 @@
 // settings without core knowing it exists.
 
 import { join } from "node:path";
-import { loadVersioned, atomicWrite } from "./state.mjs";
+import { loadVersioned } from "./state.mjs";
+import { writeSerialized } from "./writer.mjs";
 
 const CURRENT = 1;
 
@@ -53,6 +54,6 @@ export class Settings {
   }
 
   async #save() {
-    await atomicWrite(this.#path, new TextEncoder().encode(JSON.stringify(this.#doc, null, 2)));
+    await writeSerialized(this.#path, new TextEncoder().encode(JSON.stringify(this.#doc, null, 2)));
   }
 }
