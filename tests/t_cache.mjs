@@ -2,7 +2,7 @@
 // ingestion flow, cache-first serve, hash identity across hosts.
 
 import { assert, assertEquals, assertExists, assertFalse } from "jsr:@std/assert";
-import { sha256, cachePut, cacheGet, cachePath } from "../src/cache.mjs";
+import { sha256, Cache } from "../src/cache.mjs";
 import { Ingest } from "../src/ingest.mjs";
 import { Settings } from "../src/settings.mjs";
 import { Store } from "../src/store.mjs";
@@ -30,22 +30,22 @@ Deno.test("sha256 is content-specific — different bytes, different hash", asyn
 
 Deno.test("cache put + get round-trip with atomic writes", async () => {
   const dir = await mkdtemp(join(tmpdir(), "kz-cache-"));
-  Deno.env.set("KOZMOZOO_CACHE", dir);
   const bytes = new TextEncoder().encode("test payload");
   const hash = await sha256(bytes);
+  const cache = new Cache(dir);
 
-  await cachePut(hash, bytes);
-  const loaded = await cacheGet(hash);
+  await cache.put(hash, bytes);
+  const loaded = await cache.get(hash);
   // Deno node:fs readFile returns a Buffer; compare lengths and content.
   assertEquals(loaded.length, bytes.length);
   assertEquals(new TextDecoder().decode(loaded), new TextDecoder().decode(bytes));
 
-  // Cache path is two-char prefix + hash.
-  const path = cachePath(hash);
-  assertEquals(path, join(dir, hash.slice(0, 2), `${hash}.png`));
+  // Cache path is two-char prefix + hash, extension-less (mime is sniffed
+  // at serve time, never trusted from a filename)
+  assertEquals(cache.path(hash), join(dir, hash.slice(0, 2), hash));
 
   // Unknown hash returns null, not an error.
-  const miss = await cacheGet("f" + "0".repeat(63));
+  const miss = await cache.get("f" + "0".repeat(63));
   assertEquals(miss, null);
 
   await rm(dir, { recursive: true });
@@ -55,7 +55,6 @@ Deno.test("cache put + get round-trip with atomic writes", async () => {
 
 Deno.test("ingestion: folder host → sha256 → cache → files table → images table", async () => {
   const dir = await mkdtemp(join(tmpdir(), "kz-ing-"));
-  Deno.env.set("KOZMOZOO_CACHE", join(dir, "cache"));
 
   // Create a folder with one test PNG.
   const folder = join(dir, "images");
@@ -65,7 +64,7 @@ Deno.test("ingestion: folder host → sha256 → cache → files table → image
 
   const store = await Store.open(dir, join(dir, "fb.json"));
   const hosts = { fixtures: `folder:${folder}` };
-  const ingest = new Ingest(store, hosts);
+  const ingest = new Ingest(store, hosts, { cache: new Cache(join(dir, "cache")) });
 
   // Before ingestion: no hash, no cache.
   assertEquals(store.hashFor("fixtures", "test.png"), null);
@@ -79,7 +78,7 @@ Deno.test("ingestion: folder host → sha256 → cache → files table → image
   assertEquals(store.hashFor("fixtures", "test.png"), hash);
 
   // Cache file exists.
-  const cached = await cacheGet(hash);
+  const cached = await new Cache(join(dir, "cache")).get(hash);
   assertEquals(cached.length, bytes.length);
 
   await rm(dir, { recursive: true });
@@ -87,7 +86,6 @@ Deno.test("ingestion: folder host → sha256 → cache → files table → image
 
 Deno.test("ingestion: same bytes on two hosts → same hash → one identity", async () => {
   const dir = await mkdtemp(join(tmpdir(), "kz-oneid-"));
-  Deno.env.set("KOZMOZOO_CACHE", join(dir, "cache"));
 
   const bytes = new TextEncoder().encode("shared image content");
 
@@ -100,7 +98,7 @@ Deno.test("ingestion: same bytes on two hosts → same hash → one identity", a
 
   const store = await Store.open(dir, join(dir, "fb.json"));
   const hosts = { host1: `folder:${folder1}`, host2: `folder:${folder2}` };
-  const ingest = new Ingest(store, hosts);
+  const ingest = new Ingest(store, hosts, { cache: new Cache(join(dir, "cache")) });
 
   const { hash: h1 } = await ingest.ensure("host1", "img.png");
   const { hash: h2 } = await ingest.ensure("host2", "img.png");
@@ -125,7 +123,6 @@ Deno.test("ingestion: same bytes on two hosts → same hash → one identity", a
 
 Deno.test("serve path: bytes carry validators — ETag (content hash) + no-cache; If-None-Match → 304", async () => {
   const dir = await mkdtemp(join(tmpdir(), "kz-val-"));
-  Deno.env.set("KOZMOZOO_CACHE", join(dir, "cache"));
 
   const bytes = new TextEncoder().encode("validator content");
   const folder = join(dir, "images");
@@ -135,9 +132,9 @@ Deno.test("serve path: bytes carry validators — ETag (content hash) + no-cache
   const settings = await Settings.open(dir);
   const store = await Store.open(dir, join(dir, "fb.json"));
   const hosts = { h: `folder:${folder}` };
-  const ingest = new Ingest(store, hosts);
-  const router = makeRouter({ hosts, store, settings, plugins: null, ingest });
-  router.ctx = { hosts, store, settings, plugins: null, ingest };
+  const ingest = new Ingest(store, hosts, { cache: new Cache(join(dir, "cache")) });
+  const router = makeRouter({ hosts, store, settings, plugins: null, cache: new Cache(join(dir, "cache")), ingest });
+  router.ctx = { hosts, store, settings, plugins: null, cache: new Cache(join(dir, "cache")), ingest };
 
   const { hash } = await ingest.ensure("h", "img.png");
   const r1 = await router.handle(new Request("http://x/api/collections/h/entries/img.png/bytes"));
@@ -163,7 +160,6 @@ Deno.test("serve path: bytes carry validators — ETag (content hash) + no-cache
 
 Deno.test("serve path: cache hit serves directly, no host needed", async () => {
   const dir = await mkdtemp(join(tmpdir(), "kz-svc-"));
-  Deno.env.set("KOZMOZOO_CACHE", join(dir, "cache"));
 
   const bytes = new TextEncoder().encode("served-from-cache");
   const folder = join(dir, "images");
@@ -173,9 +169,9 @@ Deno.test("serve path: cache hit serves directly, no host needed", async () => {
   const settings = await Settings.open(dir);
   const store = await Store.open(dir, join(dir, "fb.json"));
   const hosts = { host: `folder:${folder}` };
-  const ingest = new Ingest(store, hosts);
-  const router = makeRouter({ hosts, store, settings, plugins: null, ingest });
-  router.ctx = { hosts, store, settings, plugins: null, ingest };
+  const ingest = new Ingest(store, hosts, { cache: new Cache(join(dir, "cache")) });
+  const router = makeRouter({ hosts, store, settings, plugins: null, cache: new Cache(join(dir, "cache")), ingest });
+  router.ctx = { hosts, store, settings, plugins: null, cache: new Cache(join(dir, "cache")), ingest };
 
   // First request: ingestion populates cache.
   const r1 = await router.handle(new Request("http://x/api/collections/host/entries/img.png/bytes"));
@@ -197,7 +193,6 @@ Deno.test("serve path: cache hit serves directly, no host needed", async () => {
 
 Deno.test("serve path: round-trip preserves Content-Type", async () => {
   const dir = await mkdtemp(join(tmpdir(), "kz-ct-"));
-  Deno.env.set("KOZMOZOO_CACHE", join(dir, "cache"));
 
   // Valid PNG header bytes so the extension mapping picks up.
   const png = new Uint8Array([137, 80, 78, 71, 13, 10, 26, 10, 0]);
@@ -208,9 +203,9 @@ Deno.test("serve path: round-trip preserves Content-Type", async () => {
   const settings = await Settings.open(dir);
   const store = await Store.open(dir, join(dir, "fb.json"));
   const hosts = { h: `folder:${folder}` };
-  const ingest = new Ingest(store, hosts);
-  const router = makeRouter({ hosts, store, settings, plugins: null, ingest });
-  router.ctx = { hosts, store, settings, plugins: null, ingest };
+  const ingest = new Ingest(store, hosts, { cache: new Cache(join(dir, "cache")) });
+  const router = makeRouter({ hosts, store, settings, plugins: null, cache: new Cache(join(dir, "cache")), ingest });
+  router.ctx = { hosts, store, settings, plugins: null, cache: new Cache(join(dir, "cache")), ingest };
 
   const r = await router.handle(new Request("http://x/api/collections/h/entries/img.png/bytes"));
   assertEquals(r.status, 200);
@@ -224,7 +219,6 @@ Deno.test("serve path: round-trip preserves Content-Type", async () => {
 
 Deno.test("judgment migration: v1 feedback fans out to entry columns, file backed up", async () => {
   const dir = await mkdtemp(join(tmpdir(), "kz-jmig-"));
-  Deno.env.set("KOZMOZOO_CACHE", join(dir, "cache"));
 
   const bytes = new TextEncoder().encode("judgment test content");
   const folder = join(dir, "images");
@@ -235,7 +229,7 @@ Deno.test("judgment migration: v1 feedback fans out to entry columns, file backe
   const fbPath = join(dir, "fb.json");
   const store = await Store.open(dir);
   const hosts = { h: `folder:${folder}` };
-  const ingest = new Ingest(store, hosts);
+  const ingest = new Ingest(store, hosts, { cache: new Cache(join(dir, "cache")) });
   const { hash } = await ingest.ensure("h", "judge.png");
   assertExists(hash);
   store.close();
@@ -263,7 +257,6 @@ Deno.test("judgment migration: v1 feedback fans out to entry columns, file backe
 
 Deno.test("judgments: judgmentsAll returns hash-keyed entries with ref; per-collection export", async () => {
   const dir = await mkdtemp(join(tmpdir(), "kz-fball-"));
-  Deno.env.set("KOZMOZOO_CACHE", join(dir, "cache"));
 
   const bytes = new TextEncoder().encode("feedback all test");
   const folder = join(dir, "images");
@@ -272,7 +265,7 @@ Deno.test("judgments: judgmentsAll returns hash-keyed entries with ref; per-coll
 
   const store = await Store.open(dir);
   const hosts = { h: `folder:${folder}` };
-  const ingest = new Ingest(store, hosts);
+  const ingest = new Ingest(store, hosts, { cache: new Cache(join(dir, "cache")) });
   const { hash } = await ingest.ensure("h", "fb.png");
 
   await store.judgmentSet("h", "fb.png", "vote", "up");

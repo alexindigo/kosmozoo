@@ -6,6 +6,7 @@ import { Settings } from "../src/settings.mjs";
 import { Store } from "../src/store.mjs";
 import { Prefetch } from "../src/prefetch.mjs";
 import { Ingest } from "../src/ingest.mjs";
+import { Cache } from "../src/cache.mjs";
 import { mkdtemp, rm, readFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -15,7 +16,7 @@ async function ctx(dir) {
   const store = await Store.open(dir);
   const hosts = { local: "127.0.0.1:1" };
   const router = makeRouter({ hosts, store, settings, plugins: null });
-  const scraper = new Prefetch({ hosts, store, settings, ingest: new Ingest(store, hosts) });
+  const scraper = new Prefetch({ hosts, store, settings, ingest: new Ingest(store, hosts, { cache: new Cache(join(dir, "cache")) }) });
   router.ctx = { hosts, store, settings, plugins: null, prefetch: scraper };
   return { settings, store, router, scraper };
 }

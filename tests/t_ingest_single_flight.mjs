@@ -4,6 +4,7 @@
 
 import { assert, assertEquals } from "jsr:@std/assert";
 import { Ingest } from "../src/ingest.mjs";
+import { Cache } from "../src/cache.mjs";
 import { Store } from "../src/store.mjs";
 import { Settings } from "../src/settings.mjs";
 import { EXTRACTOR_VERSION } from "../src/extractor.mjs";
@@ -28,10 +29,9 @@ function countingComfy(body = "counting v1") {
 
 Deno.test("ingest: concurrent ensure() is single-flight — one backing read", async () => {
   const dir = await mkdtemp(join(tmpdir(), "kz-sf-"));
-  Deno.env.set("KOZMOZOO_CACHE", join(dir, "cache"));
   const { state, server, addr } = countingComfy();
   const store = await Store.open(dir, join(dir, "fb.json"));
-  const ingest = new Ingest(store, { c: addr });
+  const ingest = new Ingest(store, { c: addr }, { cache: new Cache(join(dir, "cache")) });
 
   const [r1, r2, r3] = await Promise.all([
     ingest.ensure("c", "img.png"),
@@ -53,10 +53,9 @@ Deno.test("ingest: concurrent ensure() is single-flight — one backing read", a
 
 Deno.test("ingest: extraction is decided by content.ext — stale re-extracts, current skips", async () => {
   const dir = await mkdtemp(join(tmpdir(), "kz-ext-"));
-  Deno.env.set("KOZMOZOO_CACHE", join(dir, "cache"));
   const { server, addr } = countingComfy("not-a-png");
   const store = await Store.open(dir, join(dir, "fb.json"));
-  const ingest = new Ingest(store, { c: addr });
+  const ingest = new Ingest(store, { c: addr }, { cache: new Cache(join(dir, "cache")) });
 
   // pre-seed a CURRENT content row: the ensure must NOT re-extract
   const { createHash } = await import("node:crypto");

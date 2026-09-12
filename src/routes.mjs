@@ -4,8 +4,9 @@
 // under /api/plugins/<name>/... and are registered by the plugin host.
 
 import { backingFor, isFolderHost, EXT_MIME } from "./backings/index.mjs";
-import { cacheGet, sha256 } from "./cache.mjs";
+import { sha256 } from "./cache.mjs";
 import { capabilities, validateCollection, addCollection, removeCollection } from "./collections.mjs";
+import { sniffMime } from "./extractor.mjs";
 
 export function makeRouter(ctx) {
   // ctx: { hosts, store, settings, plugins, ingest, prefetch } — `router.ctx`
@@ -224,7 +225,7 @@ export function makeRouter(ctx) {
       ? ctx.store.inputCacheGet(id, name)
       : ctx.store.fileInfo(id, name);
     if (info?.hash) {
-      const cached = await cacheGet(info.hash);
+      const cached = await ctx.cache.get(info.hash);
       if (cached) {
         ctx.ingest.scheduleRevalidate(id, name, { input: kind === "input" });
         return makeResponse(cached, info.hash);
@@ -267,7 +268,7 @@ export function makeRouter(ctx) {
   });
 
   add("GET", "/api/content/<hash>/bytes", async (req, { hash }) => {
-    const bytes = await cacheGet(hash);
+    const bytes = await ctx.cache.get(hash);
     if (!bytes) return new Response("not found", { status: 404 });
     const etag = `"${hash}"`;
     if (req.headers.get("If-None-Match") === etag) {
@@ -275,7 +276,7 @@ export function makeRouter(ctx) {
     }
     const c = ctx.store.contentGet(hash);
     const h = new Headers({ "Content-Length": String(bytes.length), ETag: etag, "Cache-Control": "no-cache" });
-    if (c?.meta?.mime) h.set("Content-Type", c.meta.mime);
+    h.set("Content-Type", sniffMime(bytes) ?? "application/octet-stream");
     return new Response(bytes, { headers: h });
   });
 

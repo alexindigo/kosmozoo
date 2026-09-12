@@ -15,6 +15,7 @@ import { Ingest } from "./ingest.mjs";
 import { Prefetch } from "./prefetch.mjs";
 import { PluginHost } from "./plugins.mjs";
 import { makeRouter } from "./routes.mjs";
+import { Cache } from "./cache.mjs";
 
 export async function buildContext({ env = Deno.env.toObject(), fakes = {}, start = true } = {}) {
   const stateDir = fakes.stateDir ?? await ensureStateDir(resolveStateDir(env));
@@ -26,18 +27,21 @@ export async function buildContext({ env = Deno.env.toObject(), fakes = {}, star
       ?? `${env.HOME}/Documents/kosmozoo_feedback.json`,
   });
   const hosts = fakes.hosts ?? await loadCollections(store, env);
+  const cache = fakes.cache ?? new Cache(
+    env.KOZMOZOO_CACHE ?? `${env.HOME ?? "/tmp"}/.local/share/kosmozoo/cache`,
+  );
   const revalidateMs = Number(env.KOZMOZOO_REVALIDATE_MS ?? 60_000);
-  const ingest = fakes.ingest ?? new Ingest(store, hosts, { revalidateMs });
+  const ingest = fakes.ingest ?? new Ingest(store, hosts, { cache, revalidateMs });
   const prefetch = fakes.prefetch ?? new Prefetch({ hosts, store, settings, ingest });
 
   // one object, fields known up front; plugins fill before serving
   const ctx = {
-    settings, store, hosts, backings, ingest, prefetch,
+    settings, store, hosts, backings, cache, ingest, prefetch,
     plugins: null, features: [],
     paths: { state: stateDir },
   };
   const router = makeRouter(ctx);
-  const plugins = fakes.plugins ?? new PluginHost({ store, settings, router, hosts });
+  const plugins = fakes.plugins ?? new PluginHost({ store, settings, router, hosts, cache });
   const discovered = plugins === fakes.plugins ? [] : await plugins.discover();
   ctx.plugins = plugins;
   if (start) prefetch.start();

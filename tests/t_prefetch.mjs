@@ -5,6 +5,7 @@
 import { assert, assertEquals } from "jsr:@std/assert";
 import { Prefetch } from "../src/prefetch.mjs";
 import { Ingest } from "../src/ingest.mjs";
+import { Cache } from "../src/cache.mjs";
 import { EXTRACTOR_VERSION } from "../src/extractor.mjs";
 import { Settings } from "../src/settings.mjs";
 import { Store } from "../src/store.mjs";
@@ -41,7 +42,7 @@ async function mkStore() {
 
 Deno.test("prefetch: headless walk drains the fed queue and the listing", async () => {
   const { dir, settings, store } = await mkStore();
-  const s = new Prefetch({ hosts: { local: FAKE }, store, settings, ingest: new Ingest(store, { local: FAKE }) });
+  const s = new Prefetch({ hosts: { local: FAKE }, store, settings, ingest: new Ingest(store, { local: FAKE }, { cache: new Cache(join(dir, "cache")) }) });
   s.feed("local", ["flux-basic.png", "flux-lora.png", "flux-ipadapter.png"]);
   assertEquals(s.pending("local"), 3);
   s.start();
@@ -60,7 +61,7 @@ Deno.test("prefetch: headless walk drains the fed queue and the listing", async 
 
 Deno.test("prefetch: 404 is permanent — entry state gone, never retried", async () => {
   const { dir, settings, store } = await mkStore();
-  const s = new Prefetch({ hosts: { local: FAKE }, store, settings, ingest: new Ingest(store, { local: FAKE }), listRefreshMs: 3_600_000 });
+  const s = new Prefetch({ hosts: { local: FAKE }, store, settings, ingest: new Ingest(store, { local: FAKE }, { cache: new Cache(join(dir, "cache")) }), listRefreshMs: 3_600_000 });
   s.feed("local", ["missing-404.png"]);
   s.start();
   for (let i = 0; i < 60 && s.pending("local") > 0; i++) {
@@ -75,7 +76,7 @@ Deno.test("prefetch: 404 is permanent — entry state gone, never retried", asyn
 
 Deno.test("prefetch: priority feed drains before walk", async () => {
   const { dir, settings, store } = await mkStore();
-  const s = new Prefetch({ hosts: { local: FAKE }, store, settings, ingest: new Ingest(store, { local: FAKE }), listRefreshMs: 3_600_000 });
+  const s = new Prefetch({ hosts: { local: FAKE }, store, settings, ingest: new Ingest(store, { local: FAKE }, { cache: new Cache(join(dir, "cache")) }), listRefreshMs: 3_600_000 });
   // pause so nothing drains before both queues are populated
   await settings.set("core.scraper", "paused", true);
   s.feed("local", ["flux-controlnet.png"]);            // walk
@@ -101,7 +102,7 @@ Deno.test("prefetch: feed skips files already extracted at the current version",
   // (meta is content state: ingest first, then write at the current version)
   await store.ingestFile("local", "flux-basic.png", "aa".repeat(32), 100);
   await store.metaPut("local", "flux-basic.png", { seed: 1 }, { ext: EXTRACTOR_VERSION });
-  const s = new Prefetch({ hosts: { local: FAKE }, store, settings, ingest: new Ingest(store, { local: FAKE }), listRefreshMs: 3_600_000 });
+  const s = new Prefetch({ hosts: { local: FAKE }, store, settings, ingest: new Ingest(store, { local: FAKE }, { cache: new Cache(join(dir, "cache")) }), listRefreshMs: 3_600_000 });
   const pending = s.feed("local", ["flux-basic.png", "flux-lora.png"]);
   assertEquals(pending, 1); // only the unknown one queues
   assert(queued(s, "local", "flux-lora.png"));
@@ -121,7 +122,7 @@ Deno.test("prefetch: stale extractor version requeues for re-extraction", async 
   const { dir, settings, store } = await mkStore();
   // extracted at an OLDER version than the gate expects
   await store.metaPut("local", "flux-basic.png", { seed: 1 }, { ext: EXTRACTOR_VERSION - 1 });
-  const s = new Prefetch({ hosts: { local: FAKE }, store, settings, ingest: new Ingest(store, { local: FAKE }), listRefreshMs: 3_600_000 });
+  const s = new Prefetch({ hosts: { local: FAKE }, store, settings, ingest: new Ingest(store, { local: FAKE }, { cache: new Cache(join(dir, "cache")) }), listRefreshMs: 3_600_000 });
   const pending = s.feed("local", ["flux-basic.png"]);
   assertEquals(pending, 1); // older version is stale → requeue
   await rm(dir, { recursive: true });
@@ -134,7 +135,7 @@ Deno.test("prefetch: the loop self-feeds the walk lane from the collection listi
   // nothing fed by hand — the loop lists the collection and walks what it finds
   const pf = new Prefetch({
     hosts: { local: FAKE }, store, settings,
-    ingest: new Ingest(store, { local: FAKE }),
+    ingest: new Ingest(store, { local: FAKE }, { cache: new Cache(join(dir, "cache")) }),
     listRefreshMs: 1,
   });
   pf.start();

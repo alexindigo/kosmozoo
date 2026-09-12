@@ -5,7 +5,7 @@
 // running ahead of the user; the bytes routes are this path running on
 // demand. Revalidation is a method here (instance clock, no module globals).
 
-import { sha256, cachePut, cacheGet, cacheHas } from "./cache.mjs";
+import { sha256 } from "./cache.mjs";
 import { backingFor } from "./backings/index.mjs";
 import { metaFromPngBytes, imageDims, EXTRACTOR_VERSION } from "./extractor.mjs";
 
@@ -14,13 +14,15 @@ const DEFAULT_REVALIDATE_MS = 60_000;
 export class Ingest {
   #store;
   #hosts;
+  #cache;
   #revalidateMs;
   #inflight = new Map(); // "collection:name:kind" -> Promise (single-flight)
   #lastCheck = new Map(); // "in:?collection:name" -> ts (revalidation debounce)
 
-  constructor(store, hosts, { revalidateMs = DEFAULT_REVALIDATE_MS } = {}) {
+  constructor(store, hosts, { cache, revalidateMs = DEFAULT_REVALIDATE_MS }) {
     this.#store = store;
     this.#hosts = hosts;
+    this.#cache = cache;
     this.#revalidateMs = revalidateMs;
   }
 
@@ -28,7 +30,7 @@ export class Ingest {
   // the hash. `kind` is 'output' (extracted) or 'input' (never extracted).
   async ingest(collection, name, kind, { bytes, stamp = null }) {
     const hash = await sha256(bytes);
-    await cachePut(hash, bytes);
+    await this.#cache.put(hash, bytes);
     if (kind === "input") {
       this.#store.inputCachePut(collection, name, hash, stamp);
       return hash;
@@ -72,8 +74,8 @@ export class Ingest {
     const info = kind === "input"
       ? this.#store.inputCacheGet(collection, name)
       : this.#store.fileInfo(collection, name);
-    if (info?.hash && await cacheHas(info.hash)) {
-      const bytes = await cacheGet(info.hash);
+    if (info?.hash && await this.#cache.has(info.hash)) {
+      const bytes = await this.#cache.get(info.hash);
       if (bytes) return { hash: info.hash, bytes, status: 200 };
     }
     const r = await backingFor(addr).read(addr, name, kind);

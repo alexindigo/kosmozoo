@@ -11,6 +11,7 @@ import { Settings } from "../src/settings.mjs";
 import { Store } from "../src/store.mjs";
 import { Prefetch } from "../src/prefetch.mjs";
 import { Ingest } from "../src/ingest.mjs";
+import { Cache } from "../src/cache.mjs";
 import { mkdtemp, rm, writeFile, mkdir, utimes } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -64,7 +65,7 @@ Deno.test("folder host: routes serve the folder's files and bytes", async () => 
   const dir = await mkdtemp(join(tmpdir(), "kz-fr-"));
   const settings = await Settings.open(dir);
   const store = await Store.open(dir, join(dir, "feedback.json"));
-  const router = makeRouter({ hosts: { fixtures: "folder:" + FIXTURES }, store, settings, plugins: null, ingest: new Ingest(store, { fixtures: "folder:" + FIXTURES }) });
+  const router = makeRouter({ hosts: { fixtures: "folder:" + FIXTURES }, store, settings, plugins: null, cache: new Cache(join(dir, "cache")), ingest: new Ingest(store, { fixtures: "folder:" + FIXTURES }, { cache: new Cache(join(dir, "cache")) }) });
 
   const r = await router.handle(new Request("http://x/api/collections/fixtures/entries"));
   assertEquals(r.status, 200);
@@ -88,7 +89,7 @@ Deno.test("folder host: the scraper path extracts metadata from ComfyUI PNGs", a
   const settings = await Settings.open(dir);
   const store = await Store.open(dir, join(dir, "feedback.json"));
   const hosts = { fixtures: "folder:" + FIXTURES };
-  const s = new Prefetch({ hosts, store, settings, ingest: new Ingest(store, hosts) });
+  const s = new Prefetch({ hosts, store, settings, ingest: new Ingest(store, hosts, { cache: new Cache(join(dir, "cache")) }) });
   s.feed("fixtures", ["flux-basic.png", "flux-lora.png"]);
   s.start();
   for (let i = 0; i < 100 && s.pending("fixtures") > 0; i++) {

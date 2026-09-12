@@ -1,41 +1,32 @@
 // src/state.mjs — state directory resolution and versioned JSON documents.
 //
-// Pattern kept from the outgoing implementation: env override → app dir →
-// XDG fallback when the app dir is read-only. Engine state is stored as
-// versioned JSON documents (no third-party storage dependency; the same
-// discipline feedback.json already proved). Migrations run at load; a rename
-// or shape change carries a migration — never silent loss.
+// State lives in the XDG state dir by default ($XDG_STATE_HOME/kosmozoo or
+// ~/.local/state/kosmozoo); KOZMOZOO_STATE overrides (dev/e2e). Documents
+// are versioned JSON; migrations run at load; a rename or shape change
+// carries a migration — never silent loss (and corrupt bytes are quarantined,
+// never overwritten).
 
 import { dirname, join } from "node:path";
 import { mkdir, rename, writeFile, readFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { writeSerialized } from "./writer.mjs";
 
-const BASE_DIR = new URL("..", import.meta.url).pathname;
-
 export function resolveStateDir(env = Deno.env.toObject()) {
   if (env.KOZMOZOO_STATE) return env.KOZMOZOO_STATE;
-  // If the app dir is writable (dev checkout), use it; else XDG state.
-  // The writability check is done by attempting to create a probe file.
-  return BASE_DIR; // caller falls back to XDG on EACCES
-}
-
-export async function ensureStateDir(preferred) {
-  const xdg = join(
-    Deno.env.get("XDG_STATE_HOME") ?? join(Deno.env.get("HOME") ?? tmpdir(), ".local", "state"),
+  return join(
+    env.XDG_STATE_HOME ?? join(env.HOME ?? tmpdir(), ".local", "state"),
     "kosmozoo",
   );
-  try {
-    await mkdir(preferred, { recursive: true });
-    // probe writability
-    const probe = join(preferred, ".write-probe");
-    await writeFile(probe, "");
-    await Deno.remove(probe);
-    return preferred;
-  } catch {
-    await mkdir(xdg, { recursive: true });
-    return xdg;
-  }
+}
+
+// Create the state dir and prove it writable; an unwritable state dir is a
+// boot error, never a silent fallback to somewhere else.
+export async function ensureStateDir(dir) {
+  await mkdir(dir, { recursive: true });
+  const probe = join(dir, ".write-probe");
+  await writeFile(probe, "");
+  await Deno.remove(probe);
+  return dir;
 }
 
 // Atomic write: tmp file in the same directory, then rename over the target.

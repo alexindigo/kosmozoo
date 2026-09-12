@@ -7,6 +7,7 @@ import { Settings } from "../src/settings.mjs";
 import { Store } from "../src/store.mjs";
 import { Prefetch } from "../src/prefetch.mjs";
 import { Ingest } from "../src/ingest.mjs";
+import { Cache } from "../src/cache.mjs";
 import { mkdtemp, rm, writeFile, mkdir } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";async function ctx(dir, { downloadsDir } = {}) {
@@ -14,7 +15,7 @@ import { join } from "node:path";async function ctx(dir, { downloadsDir } = {}) 
   const store = await Store.open(dir, join(dir, "feedback.json"));
   const hosts = { local: "127.0.0.1:1" };
   const router = makeRouter({ hosts, store, settings, plugins: null, downloadsDir });
-  const scraper = new Prefetch({ hosts, store, settings, ingest: new Ingest(store, hosts) });
+  const scraper = new Prefetch({ hosts, store, settings, ingest: new Ingest(store, hosts, { cache: new Cache(join(dir, "cache")) }) });
   router.ctx = { hosts, store, settings, plugins: null, prefetch: scraper, downloadsDir };
   return { settings, store, router, scraper };
 }
@@ -63,7 +64,7 @@ Deno.test("nodes registry: extraction populates /api/nodes with type→fields", 
   const { readFile } = await import("node:fs/promises");
   const FIXTURES = new URL("./fixtures", import.meta.url).pathname;
   const hosts = { local: `folder:${FIXTURES}` };
-  const sc = new Prefetch({ hosts, store, settings: await Settings.open(dir), ingest: new Ingest(store, hosts) });
+  const sc = new Prefetch({ hosts, store, settings: await Settings.open(dir), ingest: new Ingest(store, hosts, { cache: new Cache(join(dir, "cache")) }) });
   sc.feed("local", ["flux-lora.png"], true);
   sc.start();
   for (let i = 0; i < 40 && store.nodeRegistry().LoraLoader === undefined; i++) {

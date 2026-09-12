@@ -2,7 +2,7 @@
 // host proxy, API surface. Runs the engine in-process against the fake host.
 
 import { assert, assertEquals } from "jsr:@std/assert";
-import { ensureStateDir, loadVersioned, atomicWrite } from "../src/state.mjs";
+import { ensureStateDir, resolveStateDir, loadVersioned, atomicWrite } from "../src/state.mjs";
 import { Settings } from "../src/settings.mjs";
 import { Store } from "../src/store.mjs";
 import { parseHosts, hostKey, splitHostKey } from "../src/collections.mjs";
@@ -27,9 +27,17 @@ Deno.test("state: versioned doc round-trips and migrates", async () => {
   await rm(dir, { recursive: true });
 });
 
-Deno.test("state: ensureStateDir falls back to XDG when preferred is read-only", async () => {
-  const dir = await ensureStateDir("/proc/definitely-not-writable");
-  assert(dir.includes(".local/state/kosmozoo") || dir.includes("kosmozoo"));
+Deno.test("state: XDG by default, KOZMOZOO_STATE wins, ensureStateDir probes writability", async () => {
+  // XDG state dir by default — never the repo working tree
+  assert(resolveStateDir({ HOME: "/home/u" }).endsWith(".local/state/kosmozoo"));
+  assertEquals(resolveStateDir({ XDG_STATE_HOME: "/xdg" }), "/xdg/kosmozoo");
+  assertEquals(resolveStateDir({ KOZMOZOO_STATE: "/elsewhere" }), "/elsewhere");
+  // ensureStateDir creates + probes; an unwritable dir is an error, no fallback
+  const dir = await mkdtemp(join(tmpdir(), "kz-statedir-"));
+  assertEquals(await ensureStateDir(dir), dir);
+  let failed = false;
+  try { await ensureStateDir("/proc/definitely-not-writable"); } catch { failed = true; }
+  assert(failed, "unwritable state dir must fail the boot, not silently reroute");
 });
 
 // --- hosts ---------------------------------------------------------------

@@ -13,7 +13,6 @@
 import { readdir, stat } from "node:fs/promises";
 import { join } from "node:path";
 import { backingFor } from "./backings/index.mjs";
-import { cacheGet } from "./cache.mjs";
 
 export function pluginDirs(env = Deno.env.toObject()) {
   const dirs = [];
@@ -117,7 +116,7 @@ export class PluginHost {
       },
       // hash + cache access for plugins that need the ingested bytes
       _hashFor: (host, filename) => store.hashFor(host, filename),
-      _cacheGet: (hash) => cacheGet(hash),
+      _cacheGet: (hash) => this.ctx.cache.get(hash),
       _hostAddr: (host) => this.ctx.hosts[host] ?? null,
     };
   }

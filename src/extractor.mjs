@@ -378,6 +378,19 @@ export async function metaFromPngBytes(buf) {
 // (VP8/VP8L/VP8X), SVG (viewBox or width/height attrs). Null when the shape
 // is unknown — the caller treats that as "measure by decode".
 
+// Content sniffed mime from the magic bytes — never trusted from a filename.
+export function sniffMime(buf) {
+  if (buf.length < 12) return null;
+  if (buf[0] === 0x89 && buf[1] === 0x50 && buf[2] === 0x4e && buf[3] === 0x47) return "image/png";
+  if (buf[0] === 0xff && buf[1] === 0xd8) return "image/jpeg";
+  if (buf[0] === 0x47 && buf[1] === 0x49 && buf[2] === 0x46) return "image/gif";
+  if (buf[0] === 0x42 && buf[1] === 0x4d) return "image/bmp";
+  if (ascii(buf, 0, 4) === "RIFF" && ascii(buf, 8, 4) === "WEBP") return "image/webp";
+  const head = new TextDecoder().decode(buf.subarray(0, 256));
+  if (head.includes("<svg")) return "image/svg+xml";
+  return null;
+}
+
 const ascii = (buf, off, n) => String.fromCharCode(...buf.subarray(off, off + n));
 
 export function imageDims(buf) {

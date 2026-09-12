@@ -37,6 +37,11 @@ const rewrite = async (file, tag) => {
   if (!v1.subarray(1, 4).equals(Buffer.from("PNG"))) fail("first serve is not the fixture PNG");
   ok("first request ingests and serves the source file");
 
+  // The prefetch walk (E3) ingests everything at boot, so r1 is already a
+  // cache hit that fires a revalidation. Let its debounce window pass —
+  // otherwise the check from step 2 is suppressed inside it.
+  await sleep(1700);
+
   // 2. rewrite in place; the next request still serves the cache (stale),
   //    and fires the async check
   await rewrite(FILE, "v2");
@@ -76,6 +81,9 @@ const rewrite = async (file, tag) => {
   const c1 = await getBytes(CID);
   if (!c1.toString().startsWith("MUTATED c1")) fail(`comfy first serve wrong: ${c1.subarray(0, 24)}`);
   ok("comfy: first request ingests and serves the source file");
+
+  // same debounce settle as the folder half: this first serve fired a check
+  await sleep(1700);
 
   // 7. same filename, new content → new ETag; the triggering request is
   //    stale, the next one is fresh

@@ -8,7 +8,7 @@
 
 import { assert, assertEquals, assertExists } from "jsr:@std/assert";
 import { backingFor } from "../src/backings/index.mjs";
-import { cacheGet } from "../src/cache.mjs";
+import { Cache } from "../src/cache.mjs";
 import { Ingest } from "../src/ingest.mjs";
 import { Settings } from "../src/settings.mjs";
 import { Store } from "../src/store.mjs";
@@ -21,15 +21,14 @@ import { join } from "node:path";
 // debounce tests pass their own.
 async function rig(name, { revalidateMs = 3_600_000 } = {}) {
   const dir = await mkdtemp(join(tmpdir(), `kz-rev-${name}-`));
-  Deno.env.set("KOZMOZOO_CACHE", join(dir, "cache"));
   const folder = join(dir, "images");
   await mkdir(folder);
   const settings = await Settings.open(dir);
   const store = await Store.open(dir, join(dir, "fb.json"));
   const hosts = { h: `folder:${folder}` };
-  const ingest = new Ingest(store, hosts, { revalidateMs });
-  const router = makeRouter({ hosts, store, settings, plugins: null, ingest });
-  router.ctx = { hosts, store, settings, plugins: null, ingest };
+  const ingest = new Ingest(store, hosts, { cache: new Cache(join(dir, "cache")), revalidateMs });
+  const router = makeRouter({ hosts, store, settings, plugins: null, cache: new Cache(join(dir, "cache")), ingest });
+  router.ctx = { hosts, store, settings, plugins: null, cache: new Cache(join(dir, "cache")), ingest };
   return { dir, folder, store, ingest, router, hosts };
 }
 
@@ -121,8 +120,8 @@ Deno.test("changed file: remaps to the new hash; old bytes stay cached", async (
   assert(after.hash !== before.hash, "hash must change with content");
   assertEquals(after.stamp, String(future.getTime()));
   // old bytes are still in the cache (immutable, hash-addressed)
-  assertExists(await cacheGet(before.hash));
-  assertExists(await cacheGet(after.hash));
+  assertExists(await new Cache(join(dir, "cache")).get(before.hash));
+  assertExists(await new Cache(join(dir, "cache")).get(after.hash));
   await rm(dir, { recursive: true });
 });
 
@@ -232,7 +231,7 @@ Deno.test("unreachable host: stamp check fails quietly, the row is kept", async 
   const store = await Store.open(dir, join(dir, "fb.json"));
   const hosts = { c: "127.0.0.1:1" }; // comfy-style, unreachable
   await store.ingestFile("c", "img.png", "deadbeef", 3, { stamp: "s1" });
-  const ingest = new Ingest(store, hosts);
+  const ingest = new Ingest(store, hosts, { cache: new Cache(join(dir, "cache")) });
   // connection refused must be a quiet no-op, and the recorded row survives
   ingest.scheduleRevalidate("c", "img.png");
   await new Promise((r) => setTimeout(r, 150));
@@ -244,14 +243,13 @@ Deno.test("unreachable host: stamp check fails quietly, the row is kept", async 
 
 Deno.test("comfy host: a changed ETag remaps the same filename to new content", async () => {
   const dir = await mkdtemp(join(tmpdir(), "kz-rev-comfy-"));
-  Deno.env.set("KOZMOZOO_CACHE", join(dir, "cache"));
   const stub = comfyStub({ etag: '"e1"', body: "comfy v1" });
   const settings = await Settings.open(dir);
   const store = await Store.open(dir, join(dir, "fb.json"));
   const hosts = { c: stub.addr };
-  const ingest = new Ingest(store, hosts);
-  const router = makeRouter({ hosts, store, settings, plugins: null, ingest });
-  router.ctx = { hosts, store, settings, plugins: null, ingest };
+  const ingest = new Ingest(store, hosts, { cache: new Cache(join(dir, "cache")) });
+  const router = makeRouter({ hosts, store, settings, plugins: null, cache: new Cache(join(dir, "cache")), ingest });
+  router.ctx = { hosts, store, settings, plugins: null, cache: new Cache(join(dir, "cache")), ingest };
 
   await ingest.ensure("c", "img.png");
   const v1 = store.fileInfo("c", "img.png");
@@ -291,7 +289,7 @@ Deno.test("input branch: a changed folder file updates the input row", async () 
   const v2 = store.inputCacheGet("h", "in.png");
   assert(v2.hash !== v1.hash, "input row must remap to the new content");
   assertEquals(v2.stamp, String(future.getTime()));
-  assertExists(await cacheGet(v2.hash));
+  assertExists(await new Cache(join(dir, "cache")).get(v2.hash));
   await rm(dir, { recursive: true });
 });
 

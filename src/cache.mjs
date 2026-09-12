@@ -1,57 +1,57 @@
-// src/cache.mjs — hash-addressed local cache of rendered image bytes.
+// src/cache.mjs — the hash-addressed local cache of image bytes.
 //
 // Every image the engine serves gets its bytes stored here, keyed by
-// SHA-256.  Once cached, a host being busy training is no longer a read
-// outage — bytes serve from the local disk.
+// SHA-256. Once cached, a busy host is no longer a read outage — bytes
+// serve from local disk.
 //
-// Layout:  ~/.local/share/kosmozoo/cache/<ab>/<hash>.png
-// Override: KOZMOZOO_CACHE
-// Writes:   atomic (tmp → rename) — a corrupt write never poisons an image.
+// Layout: <root>/<ab>/<hash> — extension-less; the mime is content-sniffed
+// at serve time, never trusted from a filename. Writes: atomic (tmp →
+// rename) — a corrupt write never poisons an image.
+//
+// The root is INJECTED (context owns it); there are no module globals.
 
 import { join, dirname } from "node:path";
 import { mkdir, rename, writeFile, readFile, stat } from "node:fs/promises";
 
-const DEFAULT_ROOT = join(
-  Deno.env.get("HOME") ?? "/tmp",
-  ".local", "share", "kosmozoo", "cache",
-);
+export class Cache {
+  #root;
 
-let root;
-
-export function cacheRoot() {
-  if (root) return root;
-  root = Deno.env.get("KOZMOZOO_CACHE") ?? DEFAULT_ROOT;
-  return root;
-}
-
-export function cachePath(hash) {
-  const ab = hash.slice(0, 2);
-  return join(cacheRoot(), ab, `${hash}.png`);
-}
-
-export async function cachePut(hash, bytes) {
-  const path = cachePath(hash);
-  await mkdir(dirname(path), { recursive: true });
-  const tmp = path + ".tmp." + crypto.randomUUID();
-  await writeFile(tmp, bytes);
-  await rename(tmp, path);
-}
-
-export async function cacheGet(hash) {
-  try {
-    return await readFile(cachePath(hash));
-  } catch (e) {
-    if (e.code === "ENOENT") return null;
-    throw e;
+  constructor(root) {
+    this.#root = root;
   }
-}
 
-export async function cacheHas(hash) {
-  try {
-    const s = await stat(cachePath(hash));
-    return s.isFile();
-  } catch {
-    return false;
+  get root() {
+    return this.#root;
+  }
+
+  path(hash) {
+    return join(this.#root, hash.slice(0, 2), hash);
+  }
+
+  async put(hash, bytes) {
+    const path = this.path(hash);
+    await mkdir(dirname(path), { recursive: true });
+    const tmp = path + ".tmp." + crypto.randomUUID();
+    await writeFile(tmp, bytes);
+    await rename(tmp, path);
+  }
+
+  async get(hash) {
+    try {
+      return await readFile(this.path(hash));
+    } catch (e) {
+      if (e.code === "ENOENT") return null;
+      throw e;
+    }
+  }
+
+  async has(hash) {
+    try {
+      const s = await stat(this.path(hash));
+      return s.isFile();
+    } catch {
+      return false;
+    }
   }
 }
 

@@ -6,6 +6,7 @@
 import { assert, assertEquals } from "jsr:@std/assert";
 import { Prefetch } from "../src/prefetch.mjs";
 import { Ingest } from "../src/ingest.mjs";
+import { Cache } from "../src/cache.mjs";
 import { Store } from "../src/store.mjs";
 import { Settings } from "../src/settings.mjs";
 import { mkdtemp, rm } from "node:fs/promises";
@@ -14,7 +15,6 @@ import { join } from "node:path";
 
 Deno.test("prefetch: enqueue a.png in walk, then want(['a.png']) — a.png is next", async () => {
   const dir = await mkdtemp(join(tmpdir(), "kz-promo-"));
-  Deno.env.set("KOZMOZOO_CACHE", join(dir, "cache"));
   const processed = [];
   // a backing that answers slowly enough to observe the queue order
   const server = Deno.serve({ port: 0, hostname: "127.0.0.1" }, async (req) => {
@@ -30,7 +30,7 @@ Deno.test("prefetch: enqueue a.png in walk, then want(['a.png']) — a.png is ne
 
   const settings = await Settings.open(dir);
   const store = await Store.open(dir, join(dir, "fb.json"));
-  const ingest = new Ingest(store, { local: addr });
+  const ingest = new Ingest(store, { local: addr }, { cache: new Cache(join(dir, "cache")) });
   const pf = new Prefetch({ hosts: { local: addr }, store, settings, ingest, interFileDelayMs: 5 });
 
   pf.feed("local", ["b.png", "a.png"]);   // the walk: b first, a second
