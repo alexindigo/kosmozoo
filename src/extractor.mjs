@@ -84,7 +84,15 @@ export function followSeed(graph, link) {
 export function extractMeta(entry) {
   const prompt = entry?.prompt;
   if (!Array.isArray(prompt) || prompt.length < 3) return null;
-  const graph = prompt[2];
+  const meta = extractMetaFromGraph(prompt[2]);
+  if (meta && typeof prompt[0] === "number") meta.q = prompt[0]; // queue order
+  return meta;
+}
+
+// The core: per-image metadata from an API-format prompt graph. PNG text
+// chunks carry exactly this shape, so the PNG path calls this directly —
+// no history entry is faked and no queue index is invented.
+export function extractMetaFromGraph(graph) {
   if (graph === null || typeof graph !== "object" || Array.isArray(graph)) return null;
   const nodes = Object.values(graph);
 
@@ -102,7 +110,6 @@ export function extractMeta(entry) {
   }
 
   const meta = { loras: [] };
-  if (typeof prompt[0] === "number") meta.q = prompt[0]; // queue order
 
   if (ks) {
     for (const k of ["seed", "steps", "cfg", "sampler_name", "scheduler", "denoise"]) {
@@ -290,13 +297,16 @@ export async function parsePngTextChunks(buf) {
     const type = String.fromCharCode(buf[off + 4], buf[off + 5], buf[off + 6], buf[off + 7]);
     if (type === "IDAT") break;
     const payload = buf.subarray(off + 8, off + 8 + length);
+    off += 12 + length; // advance BEFORE parsing — a bad chunk must not loop
     try {
       if (type === "tEXt") {
         const nul = payload.indexOf(0);
+        if (nul < 0) continue; // malformed: no keyword terminator
         const key = new TextDecoder("latin1").decode(payload.subarray(0, nul));
         out[key] = new TextDecoder("latin1").decode(payload.subarray(nul + 1));
       } else if (type === "zTXt") {
         const nul = payload.indexOf(0);
+        if (nul < 0) continue;
         const key = new TextDecoder("latin1").decode(payload.subarray(0, nul));
         const rest = payload.subarray(nul + 1);
         if (rest[0] === 0) { // method 0 = zlib
@@ -305,21 +315,25 @@ export async function parsePngTextChunks(buf) {
         }
       } else if (type === "iTXt") {
         const nul = payload.indexOf(0);
+        if (nul < 0) continue; // malformed: no keyword terminator
         const key = new TextDecoder("latin1").decode(payload.subarray(0, nul));
         let rest = payload.subarray(nul + 1);
         if (rest.length >= 2) {
           const compressed = rest[0];
           rest = rest.subarray(2); // flag + method bytes
-          let n2 = rest.indexOf(0); rest = rest.subarray(n2 + 1); // lang
-          n2 = rest.indexOf(0); let text = rest.subarray(n2 + 1); // translated
+          let n2 = rest.indexOf(0);
+          if (n2 < 0) continue; // malformed: no lang terminator
+          rest = rest.subarray(n2 + 1); // lang
+          n2 = rest.indexOf(0);
+          if (n2 < 0) continue; // malformed: no translated-keyword terminator
+          let text = rest.subarray(n2 + 1); // translated
           if (compressed) text = await inflateRaw(text);
           out[key] = new TextDecoder("utf-8", { fatal: false }).decode(text);
         }
       }
     } catch {
-      continue; // ValueError/zlib.error/UnicodeDecodeError -> skip chunk
+      continue; // zlib.error/UnicodeDecodeError -> skip chunk
     }
-    off += 12 + length;
   }
   return out;
 }
@@ -340,9 +354,9 @@ export async function metaFromPngBytes(buf) {
   if (graph === null || typeof graph !== "object" || Array.isArray(graph)) {
     return [null, hasWorkflow];
   }
-  // the prompt chunk IS the executed API-format graph — the same shape
-  // extractMeta consumes from history entries
-  const meta = extractMeta({ prompt: [0, 0, graph] });
+  // the prompt chunk IS the executed API-format graph — extract straight
+  // from it (a PNG has no queue order, so no q is invented here)
+  const meta = extractMetaFromGraph(graph);
   if (meta && typeof chunks.kz === "string") {
     try {
       const tag = JSON.parse(chunks.kz);
