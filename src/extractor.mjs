@@ -7,6 +7,11 @@
 //
 // Shared between engine (Deno) and client (browser) — no node: imports here.
 
+// Bump when the extraction shape changes; content rows with an older ext
+// are stale and re-extract on their next ingest (decided in src/ingest.mjs,
+// the one place staleness lives).
+export const EXTRACTOR_VERSION = 4;
+
 // --- graph walking helpers -------------------------------------------------
 
 // Follow positive/negative input links until a node with string text.
@@ -393,4 +398,78 @@ export function historyOutputMetas(history) {
     }
   }
   return out;
+}
+
+// --- image dimensions from encoded bytes -------------------------------------
+// Pure bytes, no DOM: PNG (IHDR), JPEG (SOF scan), GIF (LSD), WebP
+// (VP8/VP8L/VP8X), SVG (viewBox or width/height attrs). Null when the shape
+// is unknown — the caller treats that as "measure by decode".
+
+const ascii = (buf, off, n) => String.fromCharCode(...buf.subarray(off, off + n));
+
+export function imageDims(buf) {
+  if (buf.length < 10) return null;
+  const dv = new DataView(buf.buffer, buf.byteOffset, buf.byteLength);
+
+  // PNG: 8-byte signature, IHDR is the first chunk
+  if (buf[0] === 0x89 && buf[1] === 0x50 && buf[2] === 0x4e && buf[3] === 0x47 && buf.length >= 24) {
+    return { width: dv.getUint32(16), height: dv.getUint32(20) };
+  }
+
+  // GIF87a/89a: logical screen descriptor right after the header
+  if (buf[0] === 0x47 && buf[1] === 0x49 && buf[2] === 0x46) {
+    return { width: dv.getUint16(6, true), height: dv.getUint16(8, true) };
+  }
+
+  // JPEG: walk segments to the first SOF marker
+  if (buf[0] === 0xff && buf[1] === 0xd8) {
+    let off = 2;
+    while (off + 9 < buf.length) {
+      if (buf[off] !== 0xff) { off++; continue; }
+      const marker = buf[off + 1];
+      if (marker === 0xd8 || marker === 0x01 || (marker >= 0xd0 && marker <= 0xd7)) { off += 2; continue; }
+      if (off + 4 > buf.length) return null;
+      const len = dv.getUint16(off + 2);
+      if (marker >= 0xc0 && marker <= 0xcf && marker !== 0xc4 && marker !== 0xc8 && marker !== 0xcc) {
+        return { width: dv.getUint16(off + 7), height: dv.getUint16(off + 5) };
+      }
+      off += 2 + len;
+    }
+    return null;
+  }
+
+  // WebP: RIFF container, then VP8 (lossy) / VP8L (lossless) / VP8X (extended)
+  if (buf.length >= 30 && ascii(buf, 0, 4) === "RIFF" && ascii(buf, 8, 4) === "WEBP") {
+    const fourcc = ascii(buf, 12, 4);
+    if (fourcc === "VP8X") {
+      return { width: 1 + (buf[24] | (buf[25] << 8) | (buf[26] << 16)), height: 1 + (buf[27] | (buf[28] << 8) | (buf[29] << 16)) };
+    }
+    if (fourcc === "VP8 " && buf.length >= 30) {
+      // frame tag 3 bytes + start code 3 bytes, then 14-bit dims
+      const w = dv.getUint16(26, true) & 0x3fff;
+      const h = dv.getUint16(28, true) & 0x3fff;
+      return w && h ? { width: w, height: h } : null;
+    }
+    if (fourcc === "VP8L" && buf.length >= 25) {
+      const b0 = buf[21], b1 = buf[22], b2 = buf[23], b3 = buf[24];
+      const w = 1 + (((b1 & 0x3f) << 8) | b0);
+      const h = 1 + (((b3 & 0xf) << 10) | (b2 << 2) | ((b1 & 0xc0) >> 6));
+      return { width: w, height: h };
+    }
+    return null;
+  }
+
+  // SVG: viewBox preferred, else width/height attributes
+  if (buf[0] === 0x3c) { // "<"
+    const head = new TextDecoder().decode(buf.subarray(0, Math.min(buf.length, 4096)));
+    if (!head.includes("<svg")) return null;
+    const vb = /viewBox\s*=\s*["']\s*[\d.+-]+[ ,]+[\d.+-]+[ ,]+([\d.]+)[ ,]+([\d.]+)\s*["']/.exec(head);
+    if (vb) return { width: Math.round(Number(vb[1])), height: Math.round(Number(vb[2])) };
+    const w = /width\s*=\s*"([\d.]+)(?:px)?"/.exec(head);
+    const h = /height\s*=\s*"([\d.]+)(?:px)?"/.exec(head);
+    if (w && h) return { width: Math.round(Number(w[1])), height: Math.round(Number(h[1])) };
+    return null;
+  }
+
+  return null;
 }

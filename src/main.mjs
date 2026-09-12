@@ -12,7 +12,7 @@ import { Store } from "./store.mjs";
 import { loadHosts } from "./hosts.mjs";
 import { makeRouter } from "./routes.mjs";
 import { serveStatic } from "./static.mjs";
-import { Scraper } from "./scraper.mjs";
+import { Prefetch } from "./prefetch.mjs";
 import { PluginHost } from "./plugins.mjs";
 import { Ingest } from "./ingest.mjs";
 
@@ -49,14 +49,16 @@ const plugins = new PluginHost({ store, settings, router, hosts });
 const discovered = await plugins.discover();
 router.ctx = { hosts, store, settings, plugins, downloadsDir };
 
-// Background metadata walker — headless, politeness set intact.
-const scraper = new Scraper({ hosts, store, settings });
-scraper.start();
-router.ctx.scraper = scraper;
-
-// Image ingestion — every served byte flows through here.
-const ingest = new Ingest(store, hosts);
+// Image ingestion — every served byte flows through here (revalidation
+// included; the interval is read ONCE, at construction).
+const revalidateMs = Number(Deno.env.get("KOZMOZOO_REVALIDATE_MS") ?? 60_000);
+const ingest = new Ingest(store, hosts, { revalidateMs });
 router.ctx.ingest = ingest;
+
+// The ingestion path running ahead of the user — headless, politeness set intact.
+const prefetch = new Prefetch({ hosts, store, settings, ingest });
+prefetch.start();
+router.ctx.prefetch = prefetch;
 
 Deno.serve({ port: PORT }, async (req) => {
   const url = new URL(req.url);

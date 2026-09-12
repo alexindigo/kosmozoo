@@ -387,7 +387,7 @@ export class Store {
   // opts.changed — this is a RE-ingest of a file whose content changed:
   // the OLD hash's meta belongs to the old bytes; it is dropped only when
   // no other entry still references it (shared content keeps its meta).
-  async ingestFile(host, filename, hash, size, { stamp = null, changed = false } = {}) {
+  async ingestFile(host, filename, hash, size, { stamp = null, changed = false, dims = null } = {}) {
     this.#ensureCollection(host);
     const now = Date.now();
     const old = this.#db.prepare(
@@ -395,11 +395,14 @@ export class Store {
     ).value(host, filename)?.[0] ?? null;
 
     // the content row exists as soon as the bytes do (meta filled by metaPut;
-    // inserted BEFORE the entry — entry.hash references content.hash)
+    // inserted BEFORE the entry — entry.hash references content.hash). Dims
+    // land when the bytes yield them; never wiped by a dimless re-ingest.
     this.#db.prepare(
-      `INSERT INTO content (hash, bytes, updated_at) VALUES (?, ?, ?)
-       ON CONFLICT(hash) DO UPDATE SET bytes = excluded.bytes`,
-    ).run(hash, size, now);
+      `INSERT INTO content (hash, bytes, width, height, updated_at) VALUES (?, ?, ?, ?, ?)
+       ON CONFLICT(hash) DO UPDATE SET bytes = excluded.bytes,
+         width = COALESCE(excluded.width, content.width),
+         height = COALESCE(excluded.height, content.height)`,
+    ).run(hash, size, dims?.width ?? null, dims?.height ?? null, now);
 
     this.#db.prepare(
       `INSERT INTO entry (collection, name, kind, hash, stamp, state, first_seen, last_seen)
@@ -455,6 +458,24 @@ export class Store {
     this.#db.prepare(
       "UPDATE entry SET state = 'gone', last_seen = ? WHERE collection = ? AND name = ? AND kind = 'output'",
     ).run(now, host, filename);
+  }
+
+  // --- content + entry records ------------------------------------------------
+
+  contentGet(hash) {
+    const row = this.#db.prepare(
+      "SELECT hash, width, height, meta, has_workflow, ext, bytes, updated_at FROM content WHERE hash = ?",
+    ).get(hash) ?? null;
+    if (!row) return null;
+    let meta = null;
+    try { meta = row.meta ? JSON.parse(row.meta) : null; } catch { /* corrupt meta */ }
+    return { ...row, meta };
+  }
+
+  entryGet(collection, name, kind = "output") {
+    return this.#db.prepare(
+      "SELECT collection, name, kind, hash, stamp, state, vote, favorite, notes, hidden, plugin_fields, first_seen, last_seen FROM entry WHERE collection = ? AND name = ? AND kind = ?",
+    ).get(collection, name, kind) ?? null;
   }
 
   // --- metadata (sqlite-backed, re-derivable) ----------------------------

@@ -4,7 +4,8 @@ import { assert, assertEquals } from "jsr:@std/assert";
 import { makeRouter } from "../src/routes.mjs";
 import { Settings } from "../src/settings.mjs";
 import { Store } from "../src/store.mjs";
-import { Scraper } from "../src/scraper.mjs";
+import { Prefetch } from "../src/prefetch.mjs";
+import { Ingest } from "../src/ingest.mjs";
 import { mkdtemp, rm, readFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -14,7 +15,7 @@ async function ctx(dir) {
   const store = await Store.open(dir, join(dir, "feedback.json"));
   const hosts = { local: "127.0.0.1:1" };
   const router = makeRouter({ hosts, store, settings, plugins: null });
-  const scraper = new Scraper({ hosts, store, settings });
+  const scraper = new Prefetch({ hosts, store, settings, ingest: new Ingest(store, hosts) });
   router.ctx = { hosts, store, settings, plugins: null, scraper };
   return { settings, store, router, scraper };
 }

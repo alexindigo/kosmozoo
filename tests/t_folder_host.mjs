@@ -7,7 +7,8 @@ import { isFolderHost, validateHost, probeHost, hostList, hostReadBytes, hostDel
 import { makeRouter } from "../src/routes.mjs";
 import { Settings } from "../src/settings.mjs";
 import { Store } from "../src/store.mjs";
-import { Scraper } from "../src/scraper.mjs";
+import { Prefetch } from "../src/prefetch.mjs";
+import { Ingest } from "../src/ingest.mjs";
 import { mkdtemp, rm, writeFile, mkdir, utimes } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -85,7 +86,7 @@ Deno.test("folder host: the scraper path extracts metadata from ComfyUI PNGs", a
   const settings = await Settings.open(dir);
   const store = await Store.open(dir, join(dir, "feedback.json"));
   const hosts = { fixtures: "folder:" + FIXTURES };
-  const s = new Scraper({ hosts, store, settings });
+  const s = new Prefetch({ hosts, store, settings, ingest: new Ingest(store, hosts) });
   s.feed("fixtures", ["flux-basic.png", "flux-lora.png"]);
   s.start();
   for (let i = 0; i < 100 && s.pending("fixtures") > 0; i++) {

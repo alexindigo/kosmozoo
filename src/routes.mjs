@@ -5,7 +5,6 @@
 
 import { splitHostKey, probeHost, hostList, hostReadBytes, hostHeadSize, hostInputBytes, hostInputList, hostUploadInput, hostStamp, validateHost, addHost, removeHost, isFolderHost, hostHasAssetsPlus, hostDelete, comfyHistoryDelete, EXT_MIME } from "./hosts.mjs";
 import { cacheGet, cachePut, sha256 } from "./cache.mjs";
-import { scheduleRevalidate } from "./revalidate.mjs";
 
 export function makeRouter(ctx) {
   // ctx: { hosts, store, settings, plugins } — `router.ctx` is settable so
@@ -90,7 +89,7 @@ export function makeRouter(ctx) {
     const names = visible.map((f) => f.name);
     // The listing feeds the background walk (deduped + meta_fresh-filtered
     // inside feed()); on-screen names would use feed(host, names, true).
-    ctx.scraper?.feed(host, names);
+    ctx.prefetch?.feed(host, names);
     const size = new Map(visible.map((f) => [f.name, f.size]));
     return Response.json(names.map((filename) => {
       const st = ctx.store.metaState(host, filename);
@@ -220,7 +219,7 @@ export function makeRouter(ctx) {
       } else {
         const bytes = await cacheGet(row.hash);
         if (bytes) {
-          scheduleRevalidate(ctx, host, filename, { input: true });
+          ctx.ingest.scheduleRevalidate(host, filename, { input: true });
           return makeResponse(bytes, row.hash);
         }
       }
@@ -264,18 +263,15 @@ export function makeRouter(ctx) {
     if (hash) {
       const cached = await cacheGet(hash);
       if (cached) {
-        scheduleRevalidate(ctx, host, filename);
+        ctx.ingest.scheduleRevalidate(host, filename);
         return makeResponse(cached, hash);
       }
     }
 
     // Not in cache: read through ingestion (read → hash → cache → index).
     if (ctx.ingest) {
-      const ingested = await ctx.ingest.ensure(host, filename);
-      if (ingested) {
-        const cached = await cacheGet(ingested);
-        if (cached) return makeResponse(cached, ingested);
-      }
+      const got = await ctx.ingest.ensure(host, filename);
+      if (got.status === 200) return makeResponse(got.bytes, got.hash);
     }
 
     // Ingestion failed (host down, bad filename): proxy as last resort.
@@ -343,7 +339,7 @@ export function makeRouter(ctx) {
   add("GET", "/api/scraper", async () => {
     const pending = {};
     for (const name of Object.keys(ctx.hosts)) {
-      pending[name] = ctx.scraper ? ctx.scraper.pending(name) : 0;
+      pending[name] = ctx.prefetch ? ctx.prefetch.pending(name) : 0;
     }
     return Response.json({
       enabled: ctx.settings.get("core.scraper", "enabled", true),
@@ -402,7 +398,7 @@ export function makeRouter(ctx) {
     if (!host || !ctx.hosts[host]) return Response.json({ error: "unknown host" }, { status: 400 });
     return Response.json({
       items: ctx.store.metaForHost(host),
-      pending: ctx.scraper ? ctx.scraper.pending(host) : 0,
+      pending: ctx.prefetch ? ctx.prefetch.pending(host) : 0,
       v: ctx.store.metaVersion,
     });
   });
@@ -413,7 +409,7 @@ export function makeRouter(ctx) {
     const { host, files } = await req.json();
     if (!host || !ctx.hosts[host]) return Response.json({ error: "unknown host" }, { status: 400 });
     if (!Array.isArray(files)) return Response.json({ error: "files must be an array" }, { status: 400 });
-    const pending = ctx.scraper?.feed(host, files, true) ?? 0;
+    const pending = ctx.prefetch?.feed(host, files, true) ?? 0;
     return Response.json({ pending });
   });
 

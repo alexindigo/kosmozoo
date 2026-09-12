@@ -71,7 +71,7 @@ Deno.test("ingestion: folder host → sha256 → cache → files table → image
   assertEquals(store.hashFor("fixtures", "test.png"), null);
 
   // Ingest.
-  const hash = await ingest.ensure("fixtures", "test.png");
+  const { hash } = await ingest.ensure("fixtures", "test.png");
   assertExists(hash);
   assertEquals(hash.length, 64);
 
@@ -102,8 +102,8 @@ Deno.test("ingestion: same bytes on two hosts → same hash → one identity", a
   const hosts = { host1: `folder:${folder1}`, host2: `folder:${folder2}` };
   const ingest = new Ingest(store, hosts);
 
-  const h1 = await ingest.ensure("host1", "img.png");
-  const h2 = await ingest.ensure("host2", "img.png");
+  const { hash: h1 } = await ingest.ensure("host1", "img.png");
+  const { hash: h2 } = await ingest.ensure("host2", "img.png");
 
   // Same content → same hash.
   assertEquals(h1, h2);
@@ -138,7 +138,7 @@ Deno.test("serve path: bytes carry validators — ETag (content hash) + no-cache
   const router = makeRouter({ hosts, store, settings, plugins: null, ingest });
   router.ctx = { hosts, store, settings, plugins: null, ingest };
 
-  const hash = await ingest.ensure("h", "img.png");
+  const { hash } = await ingest.ensure("h", "img.png");
   const r1 = await router.handle(new Request("http://x/api/images/h:img.png/bytes"));
   assertEquals(r1.status, 200);
   assertEquals(r1.headers.get("ETag"), `"${hash}"`);
@@ -244,7 +244,7 @@ Deno.test("judgment migration: legacy host:filename keys → hash keys", async (
   }, null, 2));
 
   // Ingest the file (gives it a hash).
-  const hash = await ingest.ensure("h", "judge.png");
+  const { hash } = await ingest.ensure("h", "judge.png");
   assertExists(hash);
 
   // Re-open the store: migration should re-key to hash.
@@ -276,7 +276,7 @@ Deno.test("judgments: feedbackAll returns hash-keyed entries with ref", async ()
   const store = await Store.open(dir, join(dir, "fb.json"));
   const hosts = { h: `folder:${folder}` };
   const ingest = new Ingest(store, hosts);
-  const hash = await ingest.ensure("h", "fb.png");
+  const { hash } = await ingest.ensure("h", "fb.png");
 
   await store.judgmentSet("h", "fb.png", "vote", "up");
   await store.judgmentSet("h", "fb.png", "favorite", true);

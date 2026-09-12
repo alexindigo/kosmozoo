@@ -1,48 +1,138 @@
-// src/ingest.mjs — image ingestion: read → hash → cache → index.
+// src/ingest.mjs — the ONLY module that turns bytes into rows.
 //
-// Every image the engine touches flows through ingestion.  There is no
-// "miss" path — bytes enter the local cache and the store is indexed
-// before anything else sees them.
+// One ingestion path: bytes → hash → cache → content (+extract when the
+// content row's ext is stale) → entry. The prefetch walk is this path
+// running ahead of the user; the bytes routes are this path running on
+// demand. Revalidation is a method here (instance clock, no module globals).
 
-import { sha256, cachePut, cacheGet } from "./cache.mjs";
-import { hostReadBytes, hostStamp } from "./hosts.mjs";
+import { sha256, cachePut, cacheGet, cacheHas } from "./cache.mjs";
+import { hostReadBytes, hostInputBytes, hostStamp } from "./hosts.mjs";
+import { metaFromPngBytes, imageDims, EXTRACTOR_VERSION } from "./extractor.mjs";
+
+const DEFAULT_REVALIDATE_MS = 60_000;
 
 export class Ingest {
   #store;
   #hosts;
+  #revalidateMs;
+  #inflight = new Map(); // "collection:name:kind" -> Promise (single-flight)
+  #lastCheck = new Map(); // "in:?collection:name" -> ts (revalidation debounce)
 
-  constructor(store, hosts) {
+  constructor(store, hosts, { revalidateMs = DEFAULT_REVALIDATE_MS } = {}) {
     this.#store = store;
     this.#hosts = hosts;
+    this.#revalidateMs = revalidateMs;
   }
 
-  // Ensure an image is cached and indexed.  Returns the hash on success,
-  // or null if the host is unreachable.
-  async ensure(host, filename) {
-    const addr = this.#hosts[host];
-    if (!addr) return null;
-
-    // If already hashed and cached, skip the fetch.
-    const existing = this.#store.hashFor(host, filename);
-    if (existing && await cacheGet(existing) !== null) return existing;
-
-    // Read from host; the stamp (folder stat / one HEAD for ComfyUI) lets a
-    // later revalidation notice the same filename carrying new content.
-    const r = await hostReadBytes(addr, filename);
-    if (r.status !== 200) return null;
-    const bytes = new Uint8Array(await new Response(r.body).arrayBuffer());
-    return this.#ingestBytes(host, filename, bytes, await hostStamp(addr, filename));
-  }
-
-  // Raw bytes path — the caller already has the bytes (folder host, direct read).
-  async ensureBytes(host, filename, bytes) {
-    return this.#ingestBytes(host, filename, bytes);
-  }
-
-  async #ingestBytes(host, filename, bytes, stamp = null) {
+  // bytes → hash → cache → content (+extract when stale) → entry. Returns
+  // the hash. `kind` is 'output' (extracted) or 'input' (never extracted).
+  async ingest(collection, name, kind, { bytes, stamp = null }) {
     const hash = await sha256(bytes);
     await cachePut(hash, bytes);
-    await this.#store.ingestFile(host, filename, hash, bytes.length, { stamp });
+    if (kind === "input") {
+      this.#store.inputCachePut(collection, name, hash, stamp);
+      return hash;
+    }
+    const before = this.#store.fileInfo(collection, name);
+    const dims = imageDims(bytes);
+    await this.#store.ingestFile(collection, name, hash, bytes.length, {
+      stamp,
+      changed: !!before?.hash && before.hash !== hash,
+      dims,
+    });
+    await this.#extractIfStale(collection, name, bytes);
     return hash;
+  }
+
+  // Extraction staleness is decided HERE and only here.
+  async #extractIfStale(collection, name, bytes) {
+    const hash = this.#store.hashFor(collection, name);
+    const cur = hash ? this.#store.contentGet(hash) : null;
+    if (cur && cur.ext >= EXTRACTOR_VERSION) return;
+    const [meta, hasWorkflow] = await metaFromPngBytes(bytes);
+    await this.#store.metaPut(collection, name, meta, { hasWorkflow, ext: EXTRACTOR_VERSION });
+  }
+
+  // Read-through: entry has a hash and the cache has the bytes → serve;
+  // else read from the backing → ingest → serve. Single-flight per
+  // (collection, name, kind): concurrent callers share one backing read.
+  // Resolves { hash, bytes, status: 200 } or { status } (backing said no).
+  async ensure(collection, name, kind = "output") {
+    const key = `${collection}${name}${kind}`;
+    if (this.#inflight.has(key)) return this.#inflight.get(key);
+    const p = this.#ensureInner(collection, name, kind)
+      .finally(() => this.#inflight.delete(key));
+    this.#inflight.set(key, p);
+    return p;
+  }
+
+  async #ensureInner(collection, name, kind) {
+    const addr = this.#hosts[collection];
+    if (!addr) return { status: 404 };
+    const info = kind === "input"
+      ? this.#store.inputCacheGet(collection, name)
+      : this.#store.fileInfo(collection, name);
+    if (info?.hash && await cacheHas(info.hash)) {
+      const bytes = await cacheGet(info.hash);
+      if (bytes) return { hash: info.hash, bytes, status: 200 };
+    }
+    const r = kind === "input"
+      ? await hostInputBytes(addr, name)
+      : await hostReadBytes(addr, name);
+    if (r.status !== 200) return { status: r.status };
+    const bytes = new Uint8Array(await new Response(r.body).arrayBuffer());
+    const stamp = await hostStamp(addr, name, kind);
+    const hash = await this.ingest(collection, name, kind, { bytes, stamp });
+    return { hash, bytes, status: 200 };
+  }
+
+  // Raw-bytes path — the caller already has them (upload proxy, tests).
+  async ensureBytes(collection, name, bytes, { kind = "output", stamp = null } = {}) {
+    return this.ingest(collection, name, kind, { bytes, stamp });
+  }
+
+  // --- revalidation (stale-while-revalidate over every backing kind) ---------
+  //
+  // Bytes ALWAYS serve from the cache — a request never waits on the source.
+  // At most once per revalidateMs per file a request fires an async stamp
+  // check; a change remaps the entry to the new content's hash (meta and
+  // judgments follow the hash, so the new content starts clean and the old
+  // keeps its history).
+
+  scheduleRevalidate(collection, name, { input = false } = {}) {
+    if (!this.#hosts[collection]) return;
+    const key = `${input ? "in:" : ""}${collection}:${name}`;
+    const now = Date.now();
+    if (now - (this.#lastCheck.get(key) ?? 0) < this.#revalidateMs) return;
+    this.#lastCheck.set(key, now);
+    this.revalidateNow(collection, name, { input }).catch(() => {});
+  }
+
+  // Exported for tests and the scheduler: compare the source stamp against
+  // the recorded one; on mismatch re-read and remap. Same content with a
+  // newer stamp (a touch) only refreshes the stamp.
+  async revalidateNow(collection, name, { input = false } = {}) {
+    const addr = this.#hosts[collection];
+    if (!addr) return;
+    const stamp = await hostStamp(addr, name, input ? "input" : "output");
+    if (stamp == null) return; // gone/unreachable — keep what we have
+
+    const info = input
+      ? this.#store.inputCacheGet(collection, name)
+      : this.#store.fileInfo(collection, name);
+    if (!info) return;
+    if (info.stamp != null && stamp === info.stamp) return; // unchanged
+
+    const r = input
+      ? await hostInputBytes(addr, name)
+      : await hostReadBytes(addr, name);
+    if (r.status !== 200) return; // unreadable right now — keep what we have
+    const bytes = new Uint8Array(await new Response(r.body).arrayBuffer());
+    const hash = await sha256(bytes);
+    if (!input && info.hash === hash) {
+      this.#store.touchFileStamp(collection, name, stamp); // touch only
+      return;
+    }
+    await this.ingest(collection, name, input ? "input" : "output", { bytes, stamp });
   }
 }
