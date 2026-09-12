@@ -13,11 +13,11 @@
 
 import { createSignal, onMount, onCleanup, For, Show } from "solid-js";
 import { iconSvg } from "/js/icons.mjs";
-import { paramDef, defaultRange, fallbackParams } from "/js/variations.mjs";
-import { useAppStore } from "../store/app-store.js";
-import { UPLOAD_IMG_EXT } from "../store/fields.js";
+import { paramDef, defaultRange, fallbackParams } from "./graph.mjs";
+import { useAppStore } from "../../store/app-store.js";
+import { UPLOAD_IMG_EXT } from "../../store/fields.js";
 import { SliderRow } from "./SliderRow.js";
-import { Modal } from "./Modal.js";
+import { Modal } from "../../components/Modal.js";
 
 export function VariationsModal() {
   const store = useAppStore();

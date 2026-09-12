@@ -16,6 +16,7 @@ import { join } from "node:path";
 import { readFile, rename } from "node:fs/promises";
 import { CorruptStateError } from "./state.mjs";
 import { splitHostKey } from "./collections.mjs";
+import { parsePngTextChunks } from "./extractor.mjs";
 
 const SCHEMA_VERSION = 7;
 const CORE_JUDGMENT_FIELDS = new Set(["vote", "favorite", "notes"]);
@@ -552,6 +553,16 @@ export class Store {
   }
 
   // --- content + entry records ------------------------------------------------
+
+  // the parsed embedded ComfyUI graph for cached bytes (null when absent or
+  // invalid) — engine-side only (the variations feature's probe/run).
+  async contentGraph(cache, hash) {
+    const bytes = await cache.get(hash);
+    if (!bytes) return null;
+    const chunks = await parsePngTextChunks(bytes);
+    if (!chunks?.prompt) return null;
+    try { return JSON.parse(chunks.prompt); } catch { return null; }
+  }
 
   contentGet(hash) {
     const row = this.#q.contentGet.get(hash) ?? null;

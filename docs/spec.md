@@ -57,11 +57,13 @@ Entry identity on the wire is the plain name under a collection; the
 `collection:name` string survives only inside the client as a derived
 accessor. Underneath it, identity is the content hash (§6).
 
+Feature routes mount under `/api/features/<name><path>`: `variations`
+serves `GET /probe/<id>` + `POST /run` (a core feature module, not a plugin).
+
 Plugin routes mount under `/api/plugins/<name><path>`:
 
 | Plugin | Routes |
 |---|---|
-| `variations` | `GET /probe/<id>`, `POST /run` (→ becomes a core feature §3.4) |
 | `export` | `PUT /assign`, `POST /run`, `GET /assignments` (→ removed §3.4) |
 | `detector` | `POST /detect`, `GET /status` |
 | `critic` | `GET /status`, `POST /describe`, `POST /diff-describe`, `POST /caption` |

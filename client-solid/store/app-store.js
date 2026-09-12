@@ -54,6 +54,8 @@ export function makeAppStore() {
     selected: {},         // id -> true (bulk actions; session-only)
     anchors: [],          // [{ name, src(dataURL), meta? }] — local drops, persisted
     diff: { open: false },                  // workbench: single-image viewer
+    diff: { open: false },                  // workbench: single-image viewer
+    features: [],       // registered at boot by main.tsx from features/index.tsx
     variations: { open: false, images: [], key: null }, // modal session
     infoOverlay: { open: false, name: "", meta: null }, // anchor ⓘ params
     chips: [],            // status stack: { slot, kind, msg }
@@ -535,6 +537,18 @@ export function makeAppStore() {
   }]));
 
   const actions = {
+    features: {
+      // a feature module { name, actions?, cardAction?, bulkAction?, Modal? }
+      // installs its store actions under its name + joins the affordance list
+      register(f) {
+        if (st.features.some((x) => x.name === f.name)) return;
+        if (f.actions) {
+          actions[f.name] = f.actions({ get state() { return stateObj; }, actions, setSt, reconcile });
+        }
+        setSt("features", st.features.concat([f]));
+      },
+    },
+
     // boot-time data, loaded exactly once (the bootData.mjs contract).
     // api.hosts() is deliberately not caught — a failed host list fails the
     // whole boot (the caller surfaces it).
@@ -1165,6 +1179,10 @@ export function makeAppStore() {
 
   const stateObj = {
     // trees — getters keep reads subscribed to the live store paths
+    featureCardActions: (image) => st.features.flatMap((f) =>
+      (f.cardAction ? [{ ...f.cardAction, onAction: () => f.cardAction.onAction({ state: stateObj, actions }, image) }] : [])),
+    featureBulkActions: () => st.features.flatMap((f) =>
+      (f.bulkAction ? [{ ...f.bulkAction, onAction: () => f.bulkAction.onAction({ state: stateObj, actions }) }] : [])),
     get hosts() { return st.hosts; },
     get nodesRegistry() { return st.nodesRegistry; },
     get fieldsStored() { return st.fieldsStored; },

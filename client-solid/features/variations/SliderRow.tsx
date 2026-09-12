@@ -25,7 +25,7 @@
 // onInsertPlaceholder and the parent owns the form.
 
 import { onMount, onCleanup } from "solid-js";
-import { snapTo, fmt } from "/js/variations.mjs";
+import { snapTo, fmt } from "./graph.mjs";
 
 const fmtSigned = (v) => (v > 0 ? "+" : "") + fmt(v);
 

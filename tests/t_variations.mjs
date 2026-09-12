@@ -1,19 +1,23 @@
 // tests/t_variations.mjs — permutation engine, template substitution, graph mutation.
 
-import { assert, assertEquals } from "jsr:@std/assert";
+import { assert, assertEquals, assertThrows } from "jsr:@std/assert";
 import {
   generatePermutations,
   templateReplace,
-  findProducingSaveImage,
-  narrowToOneSaveImage,
-  wrapAllSaveImagePrefixes,
+  resolveRelativeRanges,
+} from "../src/features/variations/shared.mjs";
+import {
+  findProducingOutputNode,
+  narrowToOneOutputNode,
+  wrapAllOutputPrefixes,
   inspectGraph,
   stringParams,
   mutateGraph,
-  resolveRelativeRanges,
-  dedupHostTag,
   lineageTag,
-} from "../plugins/variations/plugin.mjs";
+} from "../src/features/variations/server.mjs";
+
+// object_info's output_node flag, faked for these graphs
+const OUT = new Set(["SaveImage"]);
 
 // --- permutation engine ---------------------------------------------------
 
@@ -25,29 +29,27 @@ Deno.test("relative ranges: offsets resolve against the image's current value, c
     steps: { enabled: true, min: -5, max: 5, increment: 1, clamp: [1, 150] },
     cfg: { enabled: true, min: -1, max: 1, increment: 0.5, clamp: [0, 30] },
   };
-  resolveRelativeRanges(ranges, { denoise: 0.8, steps: 3 }); // cfg absent from this graph
-  assertEquals(ranges.denoise.min, 0.65);
-  assertEquals(ranges.denoise.max, 0.95);
-  assertEquals(ranges.steps.min, 1); // 3 - 5 = -2, clamped to the param floor
-  assertEquals(ranges.steps.max, 8);
-  assertEquals("cfg" in ranges, false); // params the graph lacks drop out
+  const resolved = resolveRelativeRanges(ranges, { denoise: 0.8, steps: 3 }); // cfg absent from this graph
+  assertEquals(resolved.denoise.min, 0.65);
+  assertEquals(resolved.denoise.max, 0.95);
+  assertEquals(resolved.steps.min, 1); // 3 - 5 = -2, clamped to the param floor
+  assertEquals(resolved.steps.max, 8);
+  assertEquals("cfg" in resolved, false); // params the graph lacks drop out
+  assertEquals(ranges.denoise.min, -0.15); // the argument is NOT mutated (F6)
 });
 
 Deno.test("relative ranges: both offsets on one side of the current value", () => {
   const ranges = {
     denoise: { enabled: true, min: -2.5, max: -0.5, increment: 0.05, clamp: [0, 1] },
   };
-  resolveRelativeRanges(ranges, { denoise: 0.9 });
-  assertEquals(ranges.denoise.min, 0);   // 0.9 - 2.5 clamps at 0
-  assertEquals(ranges.denoise.max, 0.4); // 0.9 - 0.5
+  const resolved = resolveRelativeRanges(ranges, { denoise: 0.9 });
+  assertEquals(resolved.denoise.min, 0);   // 0.9 - 2.5 clamps at 0
+  assertEquals(resolved.denoise.max, 0.4); // 0.9 - 0.5
 });
 
 Deno.test("rangeValues: edges inclusive, floating-point safe", () => {
   // internal — not exported, but exercised through generatePermutations
-  const perms = generatePermutations(
-    { denoise: { min: 0.65, max: 0.95, enabled: true } },
-    0.05,
-    { denoise: 0.80 },
+  const perms = generatePermutations({ denoise: { min: 0.65, max: 0.95, enabled: true, increment: 0.05 } }, { denoise: 0.80 },
   );
   // 0.65, 0.70, 0.75, 0.80, 0.85, 0.90, 0.95 → 7 values
   // minus current (0.80) → 6
@@ -57,13 +59,10 @@ Deno.test("rangeValues: edges inclusive, floating-point safe", () => {
 });
 
 Deno.test("cartesian product: 2 params × 3 values each = 9 - 1 = 8", () => {
-  const perms = generatePermutations(
-    {
-      denoise: { min: 0.5, max: 0.7, enabled: true },
-      cfg: { min: 2.0, max: 4.0, enabled: true },
-    },
-    0.1,
-    { denoise: 0.6, cfg: 3.0 },
+  const perms = generatePermutations({
+      denoise: { min: 0.5, max: 0.7, enabled: true, increment: 0.1 },
+      cfg: { min: 2.0, max: 4.0, enabled: true, increment: 0.1 },
+    }, { denoise: 0.6, cfg: 3.0 },
   );
   // denoise: 0.5, 0.6, 0.7 → 3 values; cfg: 2.0, 2.1, ..., 4.0 → 21 values
   // 3 × 21 = 63 - 1 (current excluded) = 62
@@ -74,13 +73,10 @@ Deno.test("cartesian product: 2 params × 3 values each = 9 - 1 = 8", () => {
 });
 
 Deno.test("disabled params are excluded from permutation", () => {
-  const perms = generatePermutations(
-    {
-      denoise: { min: 0.5, max: 0.7, enabled: true },
+  const perms = generatePermutations({
+      denoise: { min: 0.5, max: 0.7, enabled: true, increment: 0.1 },
       cfg: { min: 2, max: 4, enabled: false },
-    },
-    0.1,
-    { denoise: 0.6, cfg: 3 },
+    }, { denoise: 0.6, cfg: 3 },
   );
   // only denoise varies: 3 values - 1 current = 2
   assertEquals(perms.length, 2);
@@ -90,50 +86,39 @@ Deno.test("disabled params are excluded from permutation", () => {
 });
 
 Deno.test("no enabled params → empty array", () => {
-  const perms = generatePermutations(
-    { denoise: { min: 0.5, max: 0.7, enabled: false } },
-    0.1,
-    { denoise: 0.6 },
+  const perms = generatePermutations({ denoise: { min: 0.5, max: 0.7, enabled: false } }, { denoise: 0.6 },
   );
   assertEquals(perms.length, 0);
 });
 
 Deno.test("steps rounds to integer in permutation", () => {
-  const perms = generatePermutations(
-    { steps: { min: 20, max: 22, enabled: true } },
-    1,
-    { steps: 21 },
+  const perms = generatePermutations({ steps: { min: 20, max: 22, enabled: true, increment: 1 } }, { steps: 21 },
   );
   assertEquals(perms.length, 2); // 20, 22 (21 excluded)
   const values = perms.map((p) => p.steps).sort();
   assertEquals(values, [20, 22]);
 });
 
-Deno.test("per-range increment overrides fallback", () => {
-  // denoise carries its own increment=0.1; fallback would be 0.05
-  const perms = generatePermutations(
-    { denoise: { min: 0.5, max: 0.7, enabled: true, increment: 0.1 } },
-    0.05, // fallback — ignored because the range has its own
+Deno.test("per-range increment is required (no global fallback anymore)", () => {
+  assertThrows(() =>
+    generatePermutations({ denoise: { min: 0.5, max: 0.7, enabled: true } }, { denoise: 0.6 }));
+  // with its own increment the same range produces the expected values
+  const perms = generatePermutations({ denoise: { min: 0.5, max: 0.7, enabled: true, increment: 0.1 } },
     { denoise: 0.6 },
   );
-  // 0.5, 0.6, 0.7 = 3 values - 1 (current 0.6) = 2
   assertEquals(perms.length, 2);
   const values = perms.map((p) => p.denoise).sort((a, b) => a - b);
   assertEquals(values, [0.5, 0.7]);
 });
 
-Deno.test("mixed per-range and fallback increments", () => {
-  // denoise: own increment=0.2; cfg: fallback=1.0
+Deno.test("mixed per-range increments", () => {
   const perms = generatePermutations(
     {
       denoise: { min: 0.4, max: 0.8, enabled: true, increment: 0.2 },
-      cfg:     { min: 2.0, max: 4.0, enabled: true },
-    },
-    1.0,
-    { denoise: 0.6, cfg: 3.0 },
+      cfg:     { min: 2.0, max: 4.0, enabled: true, increment: 1.0 },
+    }, { denoise: 0.6, cfg: 3.0 },
   );
-  // denoise: 0.4, 0.6, 0.8 = 3 values
-  // cfg: 2.0, 3.0, 4.0 = 3 values (from fallback 1.0)
+  // denoise: 0.4, 0.6, 0.8 = 3 values; cfg: 2.0, 3.0, 4.0 = 3 values
   // 3×3 - 1 (current 0.6/3.0) = 8
   assertEquals(perms.length, 8);
 });
@@ -192,10 +177,7 @@ Deno.test("mutateGraph: KSampler denoise", async () => {
   // that the permutation generates and the graph has the right shape.
   // Direct mutation test needs the module to export mutateGraph.
   // For now, verify the permutation engine produces the right values.
-  const perms = generatePermutations(
-    { denoise: { min: 0.65, max: 0.70, enabled: true } },
-    0.05,
-    { denoise: 0.65 },
+  const perms = generatePermutations({ denoise: { min: 0.65, max: 0.70, enabled: true, increment: 0.05 } }, { denoise: 0.65 },
   );
   assertEquals(perms.length, 1);
   assertEquals(perms[0].denoise, 0.70);
@@ -203,47 +185,47 @@ Deno.test("mutateGraph: KSampler denoise", async () => {
 
 // --- SaveImage narrowing ------------------------------------------------------
 
-Deno.test("findProducingSaveImage: picks the node whose prefix leads the filename", () => {
+Deno.test("findProducingOutputNode: picks the node whose prefix leads the filename", () => {
   const graph = {
     "12": { class_type: "SaveImage", inputs: { filename_prefix: "Logotype Pipeline", images: ["9", 0] } },
     "15": { class_type: "SaveImage", inputs: { filename_prefix: "ComfyUI", images: ["8", 0] } },
     "8":  { class_type: "VAEDecode", inputs: {} },
   };
-  const found = findProducingSaveImage(graph, "ComfyUI_00398_.png");
+  const found = findProducingOutputNode(graph, "ComfyUI_00398_.png", OUT);
   assertEquals(found?.id, "15");
   assertEquals(found?.prefix, "ComfyUI");
 });
 
-Deno.test("findProducingSaveImage: prefers the longest matching prefix", () => {
+Deno.test("findProducingOutputNode: prefers the longest matching prefix", () => {
   // If two SaveImages share a leading prefix, the more specific one wins.
   const graph = {
     "1": { class_type: "SaveImage", inputs: { filename_prefix: "ComfyUI", images: [] } },
     "2": { class_type: "SaveImage", inputs: { filename_prefix: "ComfyUI_final", images: [] } },
   };
-  const found = findProducingSaveImage(graph, "ComfyUI_final_00042_.png");
+  const found = findProducingOutputNode(graph, "ComfyUI_final_00042_.png", OUT);
   assertEquals(found?.id, "2");
 });
 
-Deno.test("findProducingSaveImage: null when no SaveImage matches", () => {
+Deno.test("findProducingOutputNode: null when no SaveImage matches", () => {
   const graph = {
     "1": { class_type: "SaveImage", inputs: { filename_prefix: "Alpha", images: [] } },
     "2": { class_type: "SaveImage", inputs: { filename_prefix: "Beta", images: [] } },
   };
-  const found = findProducingSaveImage(graph, "Gamma_00001_.png");
+  const found = findProducingOutputNode(graph, "Gamma_00001_.png", OUT);
   assertEquals(found, null);
 });
 
-Deno.test("narrowToOneSaveImage: wraps the ORIGINAL basename (with counter), drops other SaveImages", () => {
+Deno.test("narrowToOneOutputNode: wraps the ORIGINAL basename (with counter), drops other SaveImages", () => {
   const graph = {
     "12": { class_type: "SaveImage", inputs: { filename_prefix: "Logotype Pipeline", images: ["9", 0] } },
     "15": { class_type: "SaveImage", inputs: { filename_prefix: "ComfyUI", images: ["8", 0] } },
     "8":  { class_type: "VAEDecode", inputs: {} },
     "9":  { class_type: "ImageUpscaleWithModel", inputs: {} },
   };
-  const producing = findProducingSaveImage(graph, "ComfyUI_00398_.png");
+  const producing = findProducingOutputNode(graph, "ComfyUI_00398_.png", OUT);
   // Simulates what the /run handler passes: original filename basename
   // (without extension) as the middle, user pfx/sfx around it.
-  const result = narrowToOneSaveImage(graph, producing, "ComfyUI_00398_", "exp_", "_v1");
+  const result = narrowToOneOutputNode(graph, producing.id, "ComfyUI_00398_", "exp_", "_v1", OUT);
   assertEquals(result.kept, 1);
   assertEquals(result.dropped, 1);
   assert(!("12" in graph), "node 12 should be removed");
@@ -256,7 +238,7 @@ Deno.test("narrowToOneSaveImage: wraps the ORIGINAL basename (with counter), dro
   assert("9" in graph);
 });
 
-Deno.test("narrowToOneSaveImage: preserves original counter for the user's StyleMix case", () => {
+Deno.test("narrowToOneOutputNode: preserves original counter for the user's StyleMix case", () => {
   // Reproduces the bug where "StyleMix_01822_.png" produced
   // "var_StyleMix_0.66__00001_.png" — the 01822 was dropped.
   // After fix: prefix should include "StyleMix_01822_" (from basename).
@@ -264,20 +246,20 @@ Deno.test("narrowToOneSaveImage: preserves original counter for the user's Style
     "14": { class_type: "SaveImage", inputs: { filename_prefix: "StyleMix", images: ["13", 0] } },
     "102": { class_type: "SaveImage", inputs: { filename_prefix: "UpsacledStyleMix", images: ["101", 0] } },
   };
-  const producing = findProducingSaveImage(graph, "StyleMix_01822_.png");
-  narrowToOneSaveImage(graph, producing, "StyleMix_01822_", "var_", "_0.66");
+  const producing = findProducingOutputNode(graph, "StyleMix_01822_.png", OUT);
+  narrowToOneOutputNode(graph, producing.id, "StyleMix_01822_", "var_", "_0.66", OUT);
   assertEquals(graph["14"].inputs.filename_prefix, "var_StyleMix_01822__0.66");
   // ComfyUI will append "_00001_.png" to this at run time, giving
   // "var_StyleMix_01822__0.66_00001_.png" — 01822 preserved.
 });
 
-Deno.test("wrapAllSaveImagePrefixes: fallback wraps every SaveImage's own prefix", () => {
+Deno.test("wrapAllOutputPrefixes: fallback wraps every SaveImage's own prefix", () => {
   const graph = {
     "1": { class_type: "SaveImage", inputs: { filename_prefix: "Alpha", images: [] } },
     "2": { class_type: "SaveImage", inputs: { filename_prefix: "Beta", images: [] } },
     "3": { class_type: "VAEDecode", inputs: {} },
   };
-  const touched = wrapAllSaveImagePrefixes(graph, "pre_", "_suf");
+  const touched = wrapAllOutputPrefixes(graph, "pre_", "_suf", OUT);
   assertEquals(touched, 2);
   assertEquals(graph["1"].inputs.filename_prefix, "pre_Alpha_suf");
   assertEquals(graph["2"].inputs.filename_prefix, "pre_Beta_suf");
@@ -444,10 +426,7 @@ Deno.test("stringParams: LoadImage image inputs surface, other strings don't", (
 });
 
 Deno.test("generatePermutations: image axes multiply the numeric cartesian", () => {
-  const perms = generatePermutations(
-    { "KSampler.denoise": { enabled: true, min: 0.5, max: 1, increment: 0.5 } },
-    0.05,
-    { "KSampler.denoise": 0.7, "LoadImage.image": "orig.png" },
+  const perms = generatePermutations({ "KSampler.denoise": { enabled: true, min: 0.5, max: 1, increment: 0.5 } }, { "KSampler.denoise": 0.7, "LoadImage.image": "orig.png" },
     { "LoadImage.image": { enabled: true, values: ["x.png", "y.png"] } },
   );
   // 2 denoise values × 2 images = 4; current combo (0.7 not in range) not
@@ -458,10 +437,7 @@ Deno.test("generatePermutations: image axes multiply the numeric cartesian", () 
 });
 
 Deno.test("generatePermutations: the current combo (current filename) is excluded", () => {
-  const perms = generatePermutations(
-    {},
-    0.05,
-    { "LoadImage.image": "orig.png" },
+  const perms = generatePermutations({}, { "LoadImage.image": "orig.png" },
     { "LoadImage.image": { enabled: true, values: ["orig.png", "x.png", "y.png"] } },
   );
   assertEquals(perms.length, 2);
@@ -471,10 +447,7 @@ Deno.test("generatePermutations: the current combo (current filename) is exclude
 Deno.test("generatePermutations: current numeric value is NOT skipped at a different source image", () => {
   // denoise range includes the current 0.7; the image axis sweeps to x.png —
   // (denoise 0.7, x.png) is novel, only (denoise 0.7, orig.png) is redundant
-  const perms = generatePermutations(
-    { "KSampler.denoise": { enabled: true, min: 0.5, max: 1, increment: 0.5 } },
-    0.05,
-    { "KSampler.denoise": 0.7, "LoadImage.image": "orig.png" },
+  const perms = generatePermutations({ "KSampler.denoise": { enabled: true, min: 0.5, max: 1, increment: 0.5 } }, { "KSampler.denoise": 0.7, "LoadImage.image": "orig.png" },
     { "LoadImage.image": { enabled: true, values: ["orig.png", "x.png"] } },
   );
   // values 0.5/1 × {orig, x} = 4, plus 0.7 is not a range step → only
@@ -485,9 +458,7 @@ Deno.test("generatePermutations: current numeric value is NOT skipped at a diffe
 });
 
 Deno.test("generatePermutations: a range step equal to the current value is kept when the image changes", () => {
-  const perms = generatePermutations(
-    { "KSampler.denoise": { enabled: true, min: 0.5, max: 1.5, increment: 0.5 } }, // steps 0.5,1.0,1.5 — current 1.0 IS a step
-    0.05,
+  const perms = generatePermutations({ "KSampler.denoise": { enabled: true, min: 0.5, max: 1.5, increment: 0.5 } }, // steps 0.5,1.0,1.5 — current 1.0 IS a step
     { "KSampler.denoise": 1, "LoadImage.image": "orig.png" },
     { "LoadImage.image": { enabled: true, values: ["orig.png", "x.png"] } },
   );
@@ -501,9 +472,7 @@ Deno.test("generatePermutations: a range step equal to the current value is kept
 
 Deno.test("generatePermutations: image-only sweep (no numeric ranges)", () => {
   const perms = generatePermutations(
-    {},
-    0.05,
-    { "LoadImage.image": "orig.png" },
+    {}, { "LoadImage.image": "orig.png" },
     { "LoadImage.image": { enabled: true, values: ["x.png", "y.png"] } },
   );
   assertEquals(perms.length, 2);
@@ -530,17 +499,21 @@ Deno.test("templateReplace: the chosen filename fills {LoadImage.image} and {ima
   assertEquals(out, "run_chosen.png_vs_chosen.png");
 });
 
-// --- host-tag dedup -----------------------------------------------------------
-
-Deno.test("dedupHostTag: variation sources keep exactly one <host># tag", () => {
-  assertEquals(dedupHostTag("plain_name_", "ark#"), "plain_name_");
-  assertEquals(dedupHostTag("ark#alisa_00291_", "ark#"), "alisa_00291_");
-  assertEquals(dedupHostTag("ark#ark#alisa_00341__0.8_", "ark#"), "alisa_00341__0.8_");
-  assertEquals(dedupHostTag("ark#ark#ark#deep_", "ark#"), "deep_");
-  // a different host's tag is not stripped (cross-host vary)
-  assertEquals(dedupHostTag("anton#x_", "ark#"), "anton#x_");
-  // degenerate: the basename IS the tag — kept, not emptied
-  assertEquals(dedupHostTag("ark#", "ark#"), "ark#");
+Deno.test("stringParams: a LoadImage axis survives ComfyUI's [output] annotation", () => {
+  // newer ComfyUI stores output-sourced widget values as "name.png [output]" —
+  // the extension test must see the STRIPPED name, and fromOutput rides along
+  const graph = {
+    "9": { class_type: "LoadImage", inputs: { image: "ark#var_alisa_impl_00014_.png [output]" } },
+    "10": { class_type: "LoadImage", inputs: { image: "a [b].png [output]" } },
+    "11": { class_type: "LoadImage", inputs: { image: "bare.png" } },
+  };
+  const rows = stringParams(graph);
+  assertEquals(rows.length, 3);
+  const byNode = Object.fromEntries(rows.map((r) => [r.nodeIds[0], r]));
+  assertEquals(byNode["9"].current, "ark#var_alisa_impl_00014_.png");
+  assertEquals(byNode["9"].fromOutput, true);
+  assertEquals(byNode["10"].current, "a [b].png"); // greedy prefix keeps inner brackets
+  assertEquals(byNode["11"].fromOutput, false);
 });
 
 Deno.test("lineageTag: the extra_pnginfo payload carries source + params", () => {

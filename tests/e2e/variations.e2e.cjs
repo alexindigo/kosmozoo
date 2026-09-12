@@ -418,7 +418,7 @@ async function main() {
     // params the graph lacks drop out instead of erroring.
     await attempt("relative run resolves offsets per image", async () => {
       const res = await cdp.evaluate(`(async () => {
-        const r = await fetch("/api/plugins/variations/run", {
+        const r = await fetch("/api/features/variations/run", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
@@ -477,7 +477,7 @@ async function main() {
     // resolves {lora_strength} from the permutation.
     await attempt("lora strength sweep hits every loader", async () => {
       const res = await cdp.evaluate(`(async () => {
-        const r = await fetch("/api/plugins/variations/run", {
+        const r = await fetch("/api/features/variations/run", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({

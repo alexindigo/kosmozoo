@@ -44,24 +44,9 @@ export const api = {
   setPrefetch: (kv) => req("POST", "/api/prefetch", kv),
   meta: (collection, since) => req("GET", `/api/collections/${enc(collection)}/meta?since=${since}`),
   want: (collection, files) => req("POST", `/api/collections/${enc(collection)}/want`, { files }),
-  inputList: (collection) => req("GET", `/api/collections/${enc(collection)}/entries?kind=input`),
+  // variations transport + input list live in client-solid/features/variations/api.js
   // per-collection judgment export (generated on demand)
   feedbackExportUrl: (collection) => `${BASE}/api/collections/${enc(collection)}/feedback.json`,
-  // variations plugin
-  variationsProbe: (id) => req("GET", `/api/plugins/variations/probe/${enc(id)}`),
-  // multipart upload — not the JSON helper: the browser sets the boundary.
-  // Throws on !ok; the modal's per-file catch turns that into the error line.
-  // A 409 carries the conflicting name — the upload refused to overwrite it.
-  uploadInput: (collection, form) => fetch(BASE + `/api/collections/${enc(collection)}/entries`, { method: "POST", body: form })
-    .then(async (r) => {
-      if (r.ok) return r.json();
-      if (r.status === 409) {
-        const d = await r.json().catch(() => ({}));
-        throw new Error(`already exists on the host: ${d.name ?? "name conflict"}`);
-      }
-      throw new Error(`POST entries/${collection}: ${r.status}`);
-    }),
-  variationsRun: (payload) => postRaw("/api/plugins/variations/run", payload),
   // byte size isn't in every listing — a HEAD on the bytes route fills it;
   // resolves null when the entry is unknown
   entrySizeProbe: (collection, name) => fetch(`${BASE}${entryUrl(collection, name)}/bytes`, { method: "HEAD" })

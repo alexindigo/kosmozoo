@@ -15,11 +15,11 @@ import { WorkspaceBar } from "./WorkspaceBar.js";
 import { StatusStack } from "./StatusStack.js";
 import { ScrollTopButton } from "./ScrollTopButton.js";
 import { DiffStage } from "./DiffStage.js";
-import { VariationsModal } from "./VariationsModal.js";
 import { ConfirmDelete } from "./ConfirmDelete.js";
 import { FieldsOverlay } from "./FieldsOverlay.js";
 import { InfoOverlay } from "./InfoOverlay.js";
 import { KeysPanel } from "./KeysPanel.js";
+import { FeatureModals } from "../features/index.js";
 
 export function App() {
   return (
@@ -35,7 +35,7 @@ export function App() {
       <StatusStack />
       <ScrollTopButton />
       <DiffStage />
-      <VariationsModal />
+      <FeatureModals />
       <ConfirmDelete />
       <FieldsOverlay />
       <InfoOverlay />

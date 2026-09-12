@@ -5,7 +5,7 @@
 // selected image up-voted. The selection survives vote/favorite/save so
 // actions chain; only delete drops the affected images from it.
 
-import { Show } from "solid-js";
+import { For, Show } from "solid-js";
 import { iconSvg } from "/js/icons.mjs";
 import { useAppStore } from "../store/app-store.js";
 import { IconButton } from "./IconButton.js";
@@ -19,11 +19,9 @@ export function BulkBar() {
     <Show when={n() > 0}>
       <div id="bulkBar">
         <span id="bulkCount">{`${n()} selected`}</span>
-        <IconButton
-          icon={iconSvg("wand", 16)} variant="variations"
-          title="generate variations of all selected (one relative sweep, applied to each)"
-          onAction={() => store.actions.variations.openBulk(store.actions.bulk.images())}
-        />
+        <For each={store.featureBulkActions()}>
+          {(a) => <IconButton icon={a.icon} variant={a.variant} title={a.title} onAction={a.onAction} />}
+        </For>
         <IconButton
           icon={iconSvg("thumb-down")} variant="down"
           title="thumbs-down all selected (hides, if down-vote hides is on)"

@@ -160,6 +160,8 @@ export const server = Deno.serve({ port }, async (req) => {
       LoraLoader: def({ strength_model: FLOAT, strength_clip: FLOAT }),
       LoraLoaderModelOnly: def({ strength_model: FLOAT }),
       KSampler: def({ seed: INT, steps: INT, cfg: FLOAT, denoise: FLOAT }),
+      // the feature identifies output nodes by this flag (F4)
+      SaveImage: { output_node: true, input: { required: { filename_prefix: ["STRING", {}] } } },
     });
   }
 

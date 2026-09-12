@@ -5,8 +5,13 @@ import { render } from "solid-js/web";
 import { AppStoreContext } from "./store/app-store.js";
 import { appStore } from "./store/instance.js";
 import { App } from "./components/App.js";
+import { FEATURES } from "./features/index.js";
 
 const store = appStore;
+
+// features register into the store before anything renders (the store never
+// imports a feature by name — the registry is the only place that knows them)
+for (const f of FEATURES) store.actions.features.register(f);
 
 render(
   () => (

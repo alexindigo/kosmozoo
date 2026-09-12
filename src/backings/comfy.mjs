@@ -191,3 +191,55 @@ export async function historyDelete(addr, name) {
     return false;
   }
 }
+
+// --- the prompt/graph surface (variations feature) ----------------------------
+
+// object_info cache: addr -> { types: Map<paramId,"INT"|"FLOAT"> | null,
+// outputClasses: Set<class_type> | null, t }. TTL'd (a host's node set is
+// stable per version); misses are not cached forever.
+const OBJECT_INFO_TTL_MS = 60_000;
+const objectInfoCache = new Map();
+
+export async function objectInfo(addr) {
+  const c = objectInfoCache.get(addr);
+  if (c && Date.now() - c.t < OBJECT_INFO_TTL_MS) return c;
+  let out = { types: null, outputClasses: null };
+  try {
+    const r = await fetch(`http://${addr}/api/object_info`, { signal: AbortSignal.timeout(HOST_TIMEOUT_MS) });
+    if (r.ok) {
+      const info = await r.json();
+      out = { types: new Map(), outputClasses: new Set() };
+      for (const [type, def] of Object.entries(info)) {
+        if (def?.output_node) out.outputClasses.add(type);
+        for (const section of ["required", "optional"]) {
+          for (const [key, spec] of Object.entries(def?.input?.[section] ?? {})) {
+            const t = Array.isArray(spec) ? spec[0] : spec;
+            if (t === "INT" || t === "FLOAT") out.types.set(`${type}.${key}`, t);
+          }
+        }
+      }
+    }
+  } catch { /* offline — the null maps stand */ }
+  objectInfoCache.set(addr, { ...out, t: Date.now() });
+  return out;
+}
+
+// Queue a prompt graph. Returns { ok, status, error? } — the caller owns
+// permutation-level error reporting.
+export async function enqueue(addr, prompt) {
+  try {
+    const resp = await fetch(`http://${addr}/api/prompt`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(prompt),
+      signal: AbortSignal.timeout(HOST_TIMEOUT_MS),
+    });
+    if (!resp.ok) {
+      const text = await resp.text();
+      return { ok: false, status: resp.status, error: `ComfyUI ${resp.status}: ${text.slice(0, 200)}` };
+    }
+    return { ok: true, status: resp.status };
+  } catch (e) {
+    return { ok: false, status: 502, error: `fetch failed: ${e.message}` };
+  }
+}

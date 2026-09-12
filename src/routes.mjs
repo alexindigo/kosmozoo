@@ -303,7 +303,7 @@ export function makeRouter(ctx) {
   });
 
   add("GET", "/api/features", async () => {
-    return Response.json([]); // feature modules land with the variations move
+    return Response.json(ctx.features);
   });
 
   // --- prefetch control (the menu's "metadata scan" row) --------------------------

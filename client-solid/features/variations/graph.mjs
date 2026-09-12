@@ -6,8 +6,10 @@
 // infer from the observed value; the OVERRIDES map below is the ONLY
 // per-param knowledge left — and it's just slider tuning, not discovery.
 //
-// The slider row component is <SliderRow> (client/app/components); the
-// engine-side endpoints are the variations plugin's /probe and /run.
+// The slider row component is ./SliderRow.tsx beside this module; the
+// engine-side endpoints are the variations feature's /probe and /run.
+
+import { paramId, formatValue } from "/shared/features/variations/shared.mjs";
 
 // --- slider tuning overrides ---------------------------------------------------
 //
@@ -88,10 +90,8 @@ export function snapTo(v, inc, decimals) {
   return Math.round(Math.round(v / inc) * inc * f) / f;
 }
 
-// Trim trailing zeros for display: 0.60 -> "0.6", 20.0 -> "20"
-export function fmt(v) {
-  return String(parseFloat(Number(v).toFixed(10)));
-}
+// Trim trailing zeros for display: the shared module's formatValue (F5)
+export const fmt = formatValue;
 
 // Fallback list when the probe endpoint isn't available (e.g. image not
 // ingested yet): build entries from the image's own meta.nodes — same shape
@@ -102,7 +102,7 @@ export function fallbackParams(meta) {
     for (const [key, v] of Object.entries(n.inputs ?? {})) {
       if (typeof v !== "number") continue;
       out.push({
-        id: `${n.type}.${key}`,
+        id: paramId(n.type, key),
         nodeId: n.id,
         key,
         type: n.type,

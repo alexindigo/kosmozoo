@@ -7,7 +7,7 @@
 // path-level updates the card's bindings follow by construction.
 
 import { createSignal, createEffect, onMount } from "solid-js";
-import { Show } from "solid-js/web";
+import { For, Show } from "solid-js/web";
 import { iconSvg } from "/js/icons.mjs";
 import { useAppStore } from "../store/app-store.js";
 import { Zoomable } from "./Zoomable.js";
@@ -113,10 +113,9 @@ export function Card(props) {
         </span>
         <span class="btnwrap">
           <span class={"saved" + (flash() ? " show" : "")}>Feedback saved</span>
-          <IconButton
-            icon={iconSvg("wand", 16)} variant="variations" title="generate variations"
-            onAction={() => store.actions.variations.open(image())}
-          />
+          <For each={store.featureCardActions(image())}>
+            {(a) => <IconButton icon={a.icon} variant={a.variant} title={a.title} onAction={a.onAction} />}
+          </For>
           <IconButton
             icon={iconSvg("thumb-down")} variant="down" active={j().vote === "down"}
             title="thumbs down — hides (Unhide up top restores)"
