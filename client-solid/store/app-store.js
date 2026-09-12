@@ -52,7 +52,6 @@ export function makeAppStore() {
     judgmentPrefs: { downvoteHides: true, revealThumbedDown: false, hideUp: false },
     images: [],           // [{ id, host, filename, size, meta, judgment }]
     selected: {},         // id -> true (bulk actions; session-only)
-    saved: {},            // filename -> true (downloads-dir mirror for save buttons)
     anchors: [],          // [{ name, src(dataURL), meta? }] — local drops, persisted
     diff: { open: false },                  // workbench: single-image viewer
     variations: { open: false, images: [], key: null }, // modal session
@@ -198,7 +197,7 @@ export function makeAppStore() {
       return {
         name: file,
         host: h,
-        src: `/api/input-bytes/${encodeURIComponent(h)}/${encodeURIComponent(file)}`,
+        src: api.inputBytesUrl(h, file),
         meta: null,
       };
     }
@@ -206,7 +205,7 @@ export function makeAppStore() {
       return {
         name: file,
         host: source,
-        src: api.imageBytesUrl(`${source}:${file}`),
+        src: api.entryBytesUrl(source, file),
         meta: null,
       };
     }
@@ -312,7 +311,7 @@ export function makeAppStore() {
     wantSet.clear();
     if (!files.length) return;
     try {
-      const r = await api.metaWant(host(), files);
+      const r = await api.want(host(), files);
       if (typeof r.pending === "number") {
         setSt("metaPending", r.pending);
         if (r.pending > 0) scheduleMetaPoll();
@@ -328,9 +327,9 @@ export function makeAppStore() {
   async function pollMetadata() {
     if (!host()) return;
     try {
-      const r = await api.metadata(host());
-      setSt("metaPending", r.pending ?? 0);
-      if (r.v !== metaVersion) {
+      const r = await api.meta(host(), metaVersion);
+      if (r.pending !== undefined) setSt("metaPending", r.pending);
+      if (r.changed) {
         metaVersion = r.v;
         const scrolling = feedActivity() === "scrolling";
         for (const [name, meta] of Object.entries(r.items ?? {})) {
@@ -381,21 +380,13 @@ export function makeAppStore() {
     if (!name) return;
     actions.status.active("load", `loading image list from ${name}…`);
     try {
-      setSt("images", reconcile(await api.images(name)));
-      try {
-        // Ask about both raw and host-prefixed filenames — new saves land
-        // as `<host>#<filename>` but legacy saves may still be raw.
-        const q = new Set();
-        for (const img of st.images) {
-          q.add(img.filename);
-          const pfx = img.host + "#";
-          if (!img.filename.startsWith(pfx)) q.add(pfx + img.filename);
-        }
-        const d = await api.downloadsCheck([...q]);
-        const saved = {};
-        for (const [k, v] of Object.entries(d.exists ?? {})) if (v) saved[k] = true;
-        setSt("saved", reconcile(saved));
-      } catch { /* save buttons just won't pre-grey */ }
+      setSt("images", reconcile((await api.entries(name)).map((e) => ({
+        // collection:name string keys exist only here, derived (plan §3.2)
+        id: `${name}:${e.name}`, host: name, filename: e.name,
+        size: e.size, hash: e.hash, state: e.state,
+        meta: e.meta, extracted: e.extracted, judgment: e.judgment,
+        width: e.width, height: e.height,
+      }))));
       // the URL is adopted into current after every (re)fetch, then the feed
       // centers on it. Only a first visit with no hash at all invents a
       // current image (top card); a hash stripped to #host stays file-less.
@@ -445,7 +436,7 @@ export function makeAppStore() {
         setSt("diff", "open", false);
       }
     }
-    const results = await Promise.allSettled(images.map((img) => api.deleteImage(img.id)));
+    const results = await Promise.allSettled(images.map((img) => api.deleteEntry(img.host, img.filename)));
     const okIds = new Set();
     results.forEach((r, i) => {
       if (r.status === "fulfilled") {
@@ -536,12 +527,19 @@ export function makeAppStore() {
     });
   }
 
+  // wire shape → store shape; capabilities.delete drives the affordances
+  // (deleteMode reads flip to capabilities in §3.6)
+  const toHosts = (colls) => Object.fromEntries(Object.entries(colls ?? {}).map(([n, c]) => [n, {
+    address: c.address, kind: c.kind, online: c.online,
+    capabilities: c.capabilities ?? null, deleteMode: c.capabilities?.delete ?? "hide",
+  }]));
+
   const actions = {
     // boot-time data, loaded exactly once (the bootData.mjs contract).
     // api.hosts() is deliberately not caught — a failed host list fails the
     // whole boot (the caller surfaces it).
     async boot() {
-      setSt("hosts", reconcile(await api.hosts()));
+      setSt("hosts", reconcile(toHosts(await api.collections())));
       const ui = await api.settings("core.ui").catch(() => ({}));
       setSt("ui", ui);
       // persisted info-panel split hydrates the uiSt tree the details pane
@@ -557,7 +555,7 @@ export function makeAppStore() {
       setSt("deletePrefs", { useAssetsPlus: del.useAssetsPlus ?? true });
       const jns = await api.settings("core.judgment").catch(() => ({}));
       setSt("judgmentPrefs", "downvoteHides", jns.downvoteHides ?? true);
-      setSt("scraper", reconcile(await api.scraper().catch(() => null)));
+      setSt("scraper", reconcile(await api.prefetch().catch(() => null)));
       actions.anchors.load();
       await actions.keys.loadSaved();
       await actions.anchors.loadPaneWidth();
@@ -565,7 +563,7 @@ export function makeAppStore() {
       await initViews().catch(() => {});
       // scraper status poll (the menu row reads it; the counter derives)
       setInterval(async () => {
-        setSt("scraper", reconcile(await api.scraper().catch(() => st.scraper)));
+        setSt("scraper", reconcile(await api.prefetch().catch(() => st.scraper)));
       }, 2000);
       // the URL hash outranks the stored host: /#host[#filename] is shareable state
       const route = parseUrl();
@@ -594,8 +592,8 @@ export function makeAppStore() {
         addr = (addr ?? "").trim();
         if (!name || !addr) return { ok: false };
         try {
-          await api.addHost(name, addr);
-          setSt("hosts", reconcile(await api.hosts()));
+          await api.addCollection(name, addr);
+          setSt("hosts", reconcile(toHosts(await api.collections())));
           return { ok: true };
         } catch {
           return { ok: false };
@@ -603,8 +601,8 @@ export function makeAppStore() {
       },
       async remove(name) {
         try {
-          await api.removeHost(name);
-          setSt("hosts", reconcile(await api.hosts()));
+          await api.removeCollection(name);
+          setSt("hosts", reconcile(toHosts(await api.collections())));
           if (host() === name) {
             await actions.hosts.select(Object.keys(st.hosts)[0] ?? null);
           }
@@ -621,11 +619,11 @@ export function makeAppStore() {
       async fillSize(id) {
         const idx = imageIdx(id);
         if (idx < 0 || st.images[idx].size != null) return;
-        const size = await api.imageSizeProbe(id);
+        const size = await api.entrySizeProbe(img.host, img.filename);
         if (size != null) setSt("images", idx, "size", size);
       },
-      // download via a transient anchor; optimistic saved mark, refreshed from
-      // disk on the next load
+      // download via a transient anchor (plain download — the "saved"
+      // indicator was removed with the feature, §9 Q3)
       download(id) {
         const idx = imageIdx(id);
         if (idx < 0) return;
@@ -633,12 +631,11 @@ export function makeAppStore() {
         const pfx = img.host + "#";
         const name = img.filename.startsWith(pfx) ? img.filename : pfx + img.filename;
         const a = document.createElement("a");
-        a.href = api.imageBytesUrl(id);
+        a.href = api.entryBytesUrl(img.host, img.filename);
         a.download = name;
         document.body.appendChild(a);
         a.click();
         a.remove();
-        setSt("saved", name, true);
       },
     },
 
@@ -646,7 +643,7 @@ export function makeAppStore() {
       // vote: 'up' | 'down' | null — path-level update; the view memo and
       // the card's data attrs follow by construction
       async setVote(image, vote) {
-        await api.setJudgment(image.id, { vote });
+        await api.setJudgment(image.host, image.filename, { vote });
         const idx = imageIdx(image.id);
         if (idx < 0) return;
         // the engine lists images with judgment: null — the path set needs an
@@ -656,14 +653,14 @@ export function makeAppStore() {
       },
       async toggleFavorite(image) {
         const next = !(image.judgment?.favorite);
-        await api.setJudgment(image.id, { favorite: next || null });
+        await api.setJudgment(image.host, image.filename, { favorite: next || null });
         const idx = imageIdx(image.id);
         if (idx < 0) return;
         if (!st.images[idx].judgment) setSt("images", idx, "judgment", {});
         setSt("images", idx, "judgment", "favorite", next ? true : undefined);
       },
       async saveNotes(image, notes) {
-        await api.setJudgment(image.id, { notes }).catch(() => {});
+        await api.setJudgment(image.host, image.filename, { notes }).catch(() => {});
         const idx = imageIdx(image.id);
         if (idx < 0) return;
         if (!st.images[idx].judgment) setSt("images", idx, "judgment", {});
@@ -702,7 +699,7 @@ export function makeAppStore() {
       toggleMenu() { setMenuOpen(!menuOpen()); },
       closeMenu() { setMenuOpen(false); },
       async refresh() {
-        setSt("hosts", reconcile(await api.hosts()));
+        setSt("hosts", reconcile(toHosts(await api.collections())));
         if (host()) await loadImages(host());
       },
       setWorkspace(space) {
@@ -1114,7 +1111,7 @@ export function makeAppStore() {
       async vote(vote) {
         const images = actions.bulk.images();
         await Promise.all(images.map((img) =>
-          api.setJudgment(img.id, { vote }).then(() => {
+          api.setJudgment(img.host, img.filename, { vote }).then(() => {
             const idx = imageIdx(img.id);
             if (idx < 0) return;
             if (!st.images[idx].judgment) setSt("images", idx, "judgment", {});
@@ -1125,7 +1122,7 @@ export function makeAppStore() {
       async favorite() {
         const images = actions.bulk.images();
         await Promise.all(images.map((img) =>
-          api.setJudgment(img.id, { favorite: true }).then(() => {
+          api.setJudgment(img.host, img.filename, { favorite: true }).then(() => {
             const idx = imageIdx(img.id);
             if (idx < 0) return;
             if (!st.images[idx].judgment) setSt("images", idx, "judgment", {});
@@ -1137,7 +1134,7 @@ export function makeAppStore() {
         const images = actions.bulk.images();
         for (const img of images) {
           const a = document.createElement("a");
-          a.href = api.imageBytesUrl(img.id);
+          a.href = api.entryBytesUrl(img.host, img.filename);
           a.download = img.filename.startsWith(img.host + "#") ? img.filename : img.host + "#" + img.filename;
           document.body.appendChild(a);
           a.click();
@@ -1151,17 +1148,17 @@ export function makeAppStore() {
     menu: {
       setFilter(v) { setMenuFilter(v); },
       async scraperToggle(on) {
-        await api.setScraper({ enabled: on });
-        setSt("scraper", reconcile(await api.scraper().catch(() => st.scraper)));
+        await api.setPrefetch({ enabled: on });
+        setSt("scraper", reconcile(await api.prefetch().catch(() => st.scraper)));
       },
       async scraperPause() {
-        await api.setScraper({ paused: !st.scraper?.paused });
-        setSt("scraper", reconcile(await api.scraper().catch(() => st.scraper)));
+        await api.setPrefetch({ paused: !st.scraper?.paused });
+        setSt("scraper", reconcile(await api.prefetch().catch(() => st.scraper)));
       },
       async deleteAssetsPlus(on) {
         await api.setSettings("core.delete", { useAssetsPlus: on }).catch(() => {});
         setSt("deletePrefs", { ...st.deletePrefs, useAssetsPlus: on });
-        setSt("hosts", reconcile(await api.hosts())); // deleteMode depends on the toggle
+        setSt("hosts", reconcile(toHosts(await api.collections()))); // deleteMode depends on the toggle
       },
     },
   };
@@ -1177,7 +1174,6 @@ export function makeAppStore() {
     get judgmentPrefs() { return st.judgmentPrefs; },
     get images() { return st.images; },
     get selected() { return st.selected; },
-    get saved() { return st.saved; },
     get anchors() { return st.anchors; },
     get diff() { return st.diff; },
     get variations() { return st.variations; },

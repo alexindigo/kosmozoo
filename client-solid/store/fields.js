@@ -165,8 +165,8 @@ export function nodeImages(meta, host) {
       fromOutput, // LoadImage-from-output: served by the output bytes route
       src: host
         ? (fromOutput
-          ? `/api/images/${encodeURIComponent(host + ":" + file)}/bytes`
-          : `/api/input-bytes/${encodeURIComponent(host)}/${encodeURIComponent(file)}`)
+          ? `/api/collections/${encodeURIComponent(host)}/entries/${encodeURIComponent(file)}/bytes`
+          : `/api/collections/${encodeURIComponent(host)}/entries/${encodeURIComponent(file)}/bytes?kind=input`)
         : null,
     });
   }

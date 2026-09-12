@@ -79,12 +79,12 @@ Deno.test("store: judgment defaults stored absent, entry prunes when empty", asy
 
 // --- API surface ---------------------------------------------------------
 
-Deno.test("api: /api/hosts probes online status; unknown routes 404", async () => {
+Deno.test("api: /api/collections probes online status; unknown routes 404", async () => {
   const dir = await mkdtemp(join(tmpdir(), "kz-api-"));
   const settings = await Settings.open(dir);
   const store = await Store.open(dir, join(dir, "feedback.json"));
   const router = makeRouter({ hosts: { local: "127.0.0.1:1" }, store, settings, plugins: null });
-  const res = await router.handle(new Request("http://x/api/hosts"));
+  const res = await router.handle(new Request("http://x/api/collections"));
   assertEquals(res.status, 200);
   const body = await res.json();
   assertEquals(body.local.online, false); // nothing on port 1

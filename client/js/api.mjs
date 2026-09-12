@@ -24,47 +24,47 @@ async function postRaw(path, body) {
   return { ok: r.ok, status: r.status, text: await r.text() };
 }
 
+const enc = encodeURIComponent;
+const entryUrl = (c, name) => `/api/collections/${enc(c)}/entries/${enc(name)}`;
+
 export const api = {
-  hosts: () => req("GET", "/api/hosts"),
-  addHost: (name, address) => req("POST", "/api/hosts", { name, address }),
-  removeHost: (name) => req("DELETE", `/api/hosts/${encodeURIComponent(name)}`),
-  images: (host) => req("GET", `/api/images?host=${encodeURIComponent(host)}`),
-  image: (id) => req("GET", `/api/images/${encodeURIComponent(id)}`),
-  deleteImage: (id) => req("DELETE", `/api/images/${encodeURIComponent(id)}`),
-  imageBytesUrl: (id) => `${BASE}/api/images/${encodeURIComponent(id)}/bytes`,
-  judgment: (id) => req("GET", `/api/judgments/${encodeURIComponent(id)}`),
-  setJudgment: (id, fields) => req("PUT", `/api/judgments/${encodeURIComponent(id)}`, fields),
-  clearJudgment: (id) => req("DELETE", `/api/judgments/${encodeURIComponent(id)}`),
-  settings: (ns) => req("GET", `/api/settings/${encodeURIComponent(ns)}`),
-  setSettings: (ns, kv) => req("PATCH", `/api/settings/${encodeURIComponent(ns)}`, kv),
+  collections: () => req("GET", "/api/collections"),
+  addCollection: (name, address) => req("POST", "/api/collections", { name, address }),
+  removeCollection: (name) => req("DELETE", `/api/collections/${enc(name)}`),
+  entries: (collection) => req("GET", `/api/collections/${enc(collection)}/entries`),
+  entryBytesUrl: (collection, name) => `${BASE}${entryUrl(collection, name)}/bytes`,
+  inputBytesUrl: (collection, name) => `${BASE}${entryUrl(collection, name)}/bytes?kind=input`,
+  setJudgment: (collection, name, fields) => req("PATCH", `${entryUrl(collection, name)}/judgment`, fields),
+  deleteEntry: (collection, name) => req("DELETE", entryUrl(collection, name)),
+  settings: (ns) => req("GET", `/api/settings/${enc(ns)}`),
+  setSettings: (ns, kv) => req("PATCH", `/api/settings/${enc(ns)}`, kv),
   plugins: () => req("GET", "/api/plugins"),
-  scraper: () => req("GET", "/api/scraper"),
+  prefetch: () => req("GET", "/api/prefetch"),
   nodes: () => req("GET", "/api/nodes"),
-  setScraper: (kv) => req("POST", "/api/scraper", kv),
-  metadata: (host) => req("GET", `/api/metadata?host=${encodeURIComponent(host)}`),
-  metaWant: (host, files) => req("POST", "/api/meta-want", { host, files }),
-  downloadsCheck: (files) => req("POST", "/api/downloads-check", { files }),
+  setPrefetch: (kv) => req("POST", "/api/prefetch", kv),
+  meta: (collection, since) => req("GET", `/api/collections/${enc(collection)}/meta?since=${since}`),
+  want: (collection, files) => req("POST", `/api/collections/${enc(collection)}/want`, { files }),
+  inputList: (collection) => req("GET", `/api/collections/${enc(collection)}/entries?kind=input`),
   // per-collection judgment export (generated on demand)
-  feedbackExportUrl: (collection) => `${BASE}/api/collections/${encodeURIComponent(collection)}/feedback.json`,
+  feedbackExportUrl: (collection) => `${BASE}/api/collections/${enc(collection)}/feedback.json`,
   // variations plugin
-  variationsProbe: (id) => req("GET", `/api/plugins/variations/probe/${encodeURIComponent(id)}`),
-  inputList: (host) => req("GET", `/api/input-list/${encodeURIComponent(host)}`),
+  variationsProbe: (id) => req("GET", `/api/plugins/variations/probe/${enc(id)}`),
   // multipart upload — not the JSON helper: the browser sets the boundary.
   // Throws on !ok; the modal's per-file catch turns that into the error line.
   // A 409 carries the conflicting name — the upload refused to overwrite it.
-  uploadInput: (host, form) => fetch(BASE + `/api/upload-input/${encodeURIComponent(host)}`, { method: "POST", body: form })
+  uploadInput: (collection, form) => fetch(BASE + `/api/collections/${enc(collection)}/entries`, { method: "POST", body: form })
     .then(async (r) => {
       if (r.ok) return r.json();
       if (r.status === 409) {
         const d = await r.json().catch(() => ({}));
         throw new Error(`already exists on the host: ${d.name ?? "name conflict"}`);
       }
-      throw new Error(`POST upload-input/${host}: ${r.status}`);
+      throw new Error(`POST entries/${collection}: ${r.status}`);
     }),
   variationsRun: (payload) => postRaw("/api/plugins/variations/run", payload),
-  // byte size isn't in every host's listing — a HEAD on the bytes route
-  // fills it; resolves null when the host can't say
-  imageSizeProbe: (id) => fetch(`${BASE}/api/images/${encodeURIComponent(id)}/bytes`, { method: "HEAD" })
+  // byte size isn't in every listing — a HEAD on the bytes route fills it;
+  // resolves null when the entry is unknown
+  entrySizeProbe: (collection, name) => fetch(`${BASE}${entryUrl(collection, name)}/bytes`, { method: "HEAD" })
     .then((r) => (r.ok ? Number(r.headers.get("content-length")) || null : null))
     .catch(() => null),
 };

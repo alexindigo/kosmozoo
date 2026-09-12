@@ -22,7 +22,7 @@ import { join } from "node:path";async function ctx(dir, { downloadsDir } = {}) 
 Deno.test("metadata: version bumps on write; items are per-host, nulls skipped", async () => {
   const dir = await mkdtemp(join(tmpdir(), "kz-meta-"));
   const { store, router } = await ctx(dir);
-  const r0 = await router.handle(new Request("http://x/api/metadata?host=local"));
+  const r0 = await router.handle(new Request("http://x/api/collections/local/meta"));
   const b0 = await r0.json();
   assert(b0.v > 0); // kv-seeded monotonic version
   assertEquals(b0.items, {});
@@ -32,7 +32,7 @@ Deno.test("metadata: version bumps on write; items are per-host, nulls skipped",
   await store.ingestFile("local", "b.png", "bb".repeat(32), 10);
   await store.metaPut("local", "a.png", { seed: 1 }, { ext: 1 });
   await store.metaPut("local", "b.png", null, { ext: 1 }); // no meta (was: nopng)
-  const b1 = await (await router.handle(new Request("http://x/api/metadata?host=local"))).json();
+  const b1 = await (await router.handle(new Request("http://x/api/collections/local/meta"))).json();
   assertEquals(b1.v, b0.v + 4); // one bump per write (2 ingests + 2 puts)
   assertEquals(b1.items["a.png"].seed, 1);
   assertEquals(b1.items["b.png"], undefined); // no-meta rows don't leak
@@ -42,7 +42,7 @@ Deno.test("metadata: version bumps on write; items are per-host, nulls skipped",
 Deno.test("meta-want: files jump to the priority lane; pending reported", async () => {
   const dir = await mkdtemp(join(tmpdir(), "kz-want-"));
   const { router, scraper } = await ctx(dir);
-  const r = await router.handle(new Request("http://x/api/meta-want", {
+  const r = await router.handle(new Request("http://x/api/collections/local/want", {
     method: "POST", headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ host: "local", files: ["x.png", "y.png"] }),
   }));
@@ -76,21 +76,6 @@ Deno.test("nodes registry: extraction populates /api/nodes with type→fields", 
   await rm(dir, { recursive: true, force: true });
 });
 
-Deno.test("downloads-check: reports which filenames exist in the downloads dir", async () => {
-  const dir = await mkdtemp(join(tmpdir(), "kz-dl-"));
-  const dl = join(dir, "Downloads");
-  await mkdir(dl);
-  await writeFile(join(dl, "saved.png"), "");
-  const { router } = await ctx(dir, { downloadsDir: dl });
-  const r = await router.handle(new Request("http://x/api/downloads-check", {
-    method: "POST", headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ files: ["saved.png", "nope.png"] }),
-  }));
-  const body = await r.json();
-  assertEquals(body.exists, { "saved.png": true, "nope.png": false });
-  await rm(dir, { recursive: true, force: true });
-});
-
 Deno.test("metaState: pending vs extracted vs none", async () => {
   const dir = await mkdtemp(join(tmpdir(), "kz-mstate-"));
   const store = await Store.open(dir, join(dir, "fb.json"));
@@ -116,8 +101,8 @@ Deno.test("metaState: pending vs extracted vs none", async () => {
   const hosts = { local: `folder:${folder}` };
   const router = makeRouter({ hosts, store, settings, plugins: null });
   router.ctx = { hosts, store, settings, plugins: null };
-  const list = await (await router.handle(new Request("http://x/api/images?host=local"))).json();
-  const bareEntry = list.find((i) => i.filename === "bare.png");
+  const list = await (await router.handle(new Request("http://x/api/collections/local/entries"))).json();
+  const bareEntry = list.find((i) => (i.name ?? i.filename) === "bare.png");
   assertEquals(bareEntry.extracted, true);
   assertEquals(bareEntry.meta, null);
   await rm(dir, { recursive: true });

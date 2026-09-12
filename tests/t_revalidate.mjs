@@ -34,7 +34,7 @@ async function rig(name, { revalidateMs = 3_600_000 } = {}) {
 }
 
 const bytesRoute = (router) =>
-  router.handle(new Request("http://x/api/images/h:img.png/bytes"));
+  router.handle(new Request("http://x/api/collections/h/entries/img.png/bytes"));
 
 // A minimal ComfyUI stand-in: /api/view with a caller-controlled ETag and
 // body, HEAD handled explicitly (no dependence on serve internals).
@@ -264,7 +264,7 @@ Deno.test("comfy host: a changed ETag remaps the same filename to new content", 
   const v2 = store.fileInfo("c", "img.png");
   assert(v2.hash !== v1.hash, "hash must change with content");
   assertEquals(v2.stamp, '"e2"');
-  const r = await router.handle(new Request("http://x/api/images/c:img.png/bytes"));
+  const r = await router.handle(new Request("http://x/api/collections/c/entries/img.png/bytes"));
   assertEquals(new TextDecoder().decode(await r.arrayBuffer()), "comfy v2 — rewritten");
 
   await stub.server.shutdown();
@@ -276,7 +276,7 @@ Deno.test("comfy host: a changed ETag remaps the same filename to new content", 
 Deno.test("input branch: a changed folder file updates the input row", async () => {
   const { dir, folder, store, ingest, router } = await rig("input");
   await writeFile(join(folder, "in.png"), "input v1");
-  const fill = await router.handle(new Request("http://x/api/input-bytes/h/in.png"));
+  const fill = await router.handle(new Request("http://x/api/collections/h/entries/in.png/bytes?kind=input"));
   assertEquals(new TextDecoder().decode(await fill.arrayBuffer()), "input v1");
   const v1 = store.inputCacheGet("h", "in.png");
   assertExists(v1.stamp);

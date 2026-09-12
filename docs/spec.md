@@ -27,34 +27,35 @@ Keys are the primary input; the keys panel (`?`) lists the live bindings.
 
 ## 2. Engine API (public)
 
-Resource-shaped, documented, treated as public. **→ the host-shaped routes
-are replaced by collections/entries in cruft-cleanup §3.2.**
+Resource-shaped, documented, treated as public. Collections + entries are
+the resources; a collection's `capabilities` answer what its backing can do.
 
 | Route | Methods | Notes |
 |---|---|---|
-| `/api/hosts` | GET | configured hosts (ComfyUI `host:port` + `folder:<path>`), online probe, `deleteMode` (`hide`/`trash`/`unlink`) |
-| `/api/hosts` | POST | add a host `{name, address}`; persists `core.hosts.map` |
-| `/api/hosts/<name>` | DELETE | remove; refuses the last host |
-| `/api/images?host=<name>` | GET | full listing for one host: id, size, meta, extraction state, judgment. Feeds the background walk as a side effect (→ §3.3) |
-| `/api/images/<id>` | GET | one image: meta + judgment |
-| `/api/images/<id>` | DELETE | folder → unlink; ComfyUI + assets_plus (toggle permitting) → trash; otherwise → hide (persisted, §3) + best-effort history cleanup |
-| `/api/images/<id>/bytes` | GET | cache-first bytes; ETag is the content hash, `Cache-Control: no-cache`; falls back to proxy + background ingest |
-| `/api/images/<id>/bytes` | HEAD | size probe: 200 when the host is known, `content-length` when the size is known |
-| `/api/input-list/<host>` | GET | ComfyUI input-dir listing (folder host: the directory itself); `[]` on host error |
-| `/api/upload-input/<host>` | POST | multipart forward into a ComfyUI input dir; **overwrites on name clash today** (→ §3.1) |
-| `/api/input-bytes/<host>/<filename>` | GET | input-dir bytes via the hash cache: folder stamps inline, ComfyUI stale-while-revalidate |
-| `/api/judgments/<id>` | GET, PUT, DELETE | notes/vote/favorite + namespaced plugin fields; PUT has no field whitelist today (→ §3.3) |
+| `/api/collections` | GET | configured collections, online probe, `kind`, `capabilities` (`list`/`read`/`add`/`delete` ∈ `trash`/`unlink`/`hide`, `rename`) |
+| `/api/collections` | POST | add a source-backed collection `{name, address}` |
+| `/api/collections/<id>` | DELETE | remove; refuses the last collection |
+| `/api/collections/<id>/entries` | GET | the feed listing: size, hash, state, meta, judgment, content dims. `?kind=input` lists the input dir instead |
+| `/api/collections/<id>/entries/<name>` | GET | one entry |
+| `/api/collections/<id>/entries` | POST | multipart upload into the input dir; **409 with the conflicting name, never an overwrite** |
+| `/api/collections/<id>/entries/<name>` | DELETE | per capability: folder → unlink; comfy + assets_plus → trash; otherwise → hide + history cleanup |
+| `/api/collections/<id>/entries/<name>/bytes` | GET | cache-first bytes (`?kind=input` for input-dir files); ETag is the content hash, `Cache-Control: no-cache` |
+| `/api/collections/<id>/entries/<name>/bytes` | HEAD | 404 when the entry's bytes are unknown, else `content-length` |
+| `/api/collections/<id>/entries/<name>/judgment` | PATCH | whitelisted fields (`vote`/`favorite`/`notes`/`plugins.<ns>.*`), defaults deep-pruned, one statement |
+| `/api/collections/<id>/feedback.json` | GET | the collection's judgments as a portable v2 document, generated on demand |
+| `/api/collections/<id>/meta` | GET | versioned meta poll `?since=<v>` → `{v, changed, items?, pending}` |
+| `/api/collections/<id>/want` | POST | `{files}` — on-screen names jump the extraction queue |
+| `/api/content/<hash>` | GET | the content record + `instances: [{collection, name}]` |
+| `/api/content/<hash>/bytes` | GET | cache bytes by hash (plugins, workbench) |
+| `/api/prefetch` | GET, POST | background ingestion: `enabled`/`paused` toggles + per-collection pending |
 | `/api/settings/<ns>` | GET, PATCH | namespaced settings (`core.*`, `plugins.<name>.*`) |
 | `/api/plugins` | GET | discovered plugins + their declared capabilities |
 | `/api/nodes` | GET | `class_type` registry discovered from extracted graphs |
-| `/api/scraper` | GET, POST | metadata scan: `enabled`/`paused` toggles + per-host pending counts |
-| `/api/collections/<id>/feedback.json` | GET | the collection's judgments as a portable v2 document, generated on demand |
-| `/api/metadata?host=<name>` | GET | versioned meta poll `{items, pending, v}`; the client merges when `v` moves |
-| `/api/meta-want` | POST | `{host, files}` — on-screen names jump the extraction queue (the priority lane is broken today — audit E12; → §3.2) |
-| `/api/downloads-check` | POST | which filenames exist in the downloads dir (→ removed §3.2) |
+| `/api/features` | GET | feature modules (→ variations moves here §3.4) |
 
-Image identity on the wire is `host:filename` (→ §3.2: plain entry names
-under collections). Underneath it, identity is the content hash (§6).
+Entry identity on the wire is the plain name under a collection; the
+`collection:name` string survives only inside the client as a derived
+accessor. Underneath it, identity is the content hash (§6).
 
 Plugin routes mount under `/api/plugins/<name><path>`:
 
@@ -147,61 +148,67 @@ writable, else `$XDG_STATE_HOME/kosmozoo` — so a dev checkout carries
 `KOZMOZOO_DOWNLOADS` (→ removed §3.2), `KOZMOZOO_PLUGINS`,
 `KOZMOZOO_REVALIDATE_MS`.
 
-### Schema (`metadata.db`, `PRAGMA user_version = 6`, ordered migrations)
+### Schema (`metadata.db`, `PRAGMA user_version = 7`, ordered migrations)
+
+Content is what the bytes are; a collection is a namespace of names backed
+by a host or folder; an entry is one instance's state in one collection.
 
 ```sql
-CREATE TABLE metadata (           -- v1: address-keyed, pre-hash rows
-  host TEXT NOT NULL, filename TEXT NOT NULL,
-  meta TEXT, source TEXT,
+CREATE TABLE content (
+  hash TEXT PRIMARY KEY,          -- sha256 of the bytes
+  width INTEGER, height INTEGER,  -- dims, resolved at ingestion
+  meta TEXT,                      -- extractor JSON (params, nodes)
   has_workflow INTEGER NOT NULL DEFAULT 0,
-  nopng INTEGER NOT NULL DEFAULT 0,
-  ext INTEGER NOT NULL DEFAULT 0,
-  updated_at REAL NOT NULL,
-  PRIMARY KEY (host, filename)
-);
-CREATE TABLE files (              -- v2: address → hash
-  host TEXT NOT NULL, filename TEXT NOT NULL,
-  hash TEXT,                      -- sha256; null until ingested
-  size INTEGER,
-  mtime REAL,                     -- v3; superseded by stamp
-  stamp TEXT,                     -- v6: opaque source stamp (folder mtime / ComfyUI ETag)
-  PRIMARY KEY (host, filename)
-);
-CREATE INDEX files_by_hash ON files(hash);
-CREATE TABLE images (             -- v2: hash-keyed extractor output
-  hash TEXT PRIMARY KEY,
-  meta TEXT, source TEXT,
-  has_workflow INTEGER NOT NULL DEFAULT 0,
-  nopng INTEGER NOT NULL DEFAULT 0,
-  ext INTEGER NOT NULL DEFAULT 0,
+  ext INTEGER NOT NULL DEFAULT 0, -- extractor version (staleness lives here)
+  bytes INTEGER,
   updated_at REAL NOT NULL
 );
-CREATE TABLE node_registry (      -- v4: class_type → {title, inputs}
+CREATE TABLE collection (
+  id TEXT PRIMARY KEY,            -- user-facing name ("anton", "fixtures")
+  kind TEXT NOT NULL,             -- 'comfy' | 'folder' | 'virtual'
+  address TEXT,                   -- host:port | folder:/abs/path | null
+  link TEXT,                      -- virtual → backing collection (future)
+  created_at REAL NOT NULL
+);
+CREATE TABLE entry (
+  collection TEXT NOT NULL REFERENCES collection(id) ON DELETE CASCADE,
+  name TEXT NOT NULL,
+  kind TEXT NOT NULL DEFAULT 'output',  -- 'output' | 'input' (comfy dirs)
+  hash TEXT REFERENCES content(hash),   -- null until ingested
+  stamp TEXT,                           -- opaque source stamp (revalidation)
+  state TEXT NOT NULL DEFAULT 'seen',   -- seen | ingested | gone
+  vote TEXT, favorite INTEGER, notes TEXT, hidden INTEGER,
+  plugin_fields TEXT,                   -- JSON, namespaced plugins.<name>
+  first_seen REAL NOT NULL, last_seen REAL NOT NULL,
+  PRIMARY KEY (collection, name, kind)
+);
+CREATE INDEX entry_by_hash ON entry(hash);
+CREATE TABLE node_registry (      -- class_type → {title, inputs}
   class_type TEXT PRIMARY KEY,
   title TEXT, inputs TEXT NOT NULL, updated_at REAL NOT NULL
 );
-CREATE TABLE input_cache (        -- v5/v6: input-dir address → hash + stamp
-  host TEXT NOT NULL, filename TEXT NOT NULL,
-  hash TEXT NOT NULL, stamp TEXT,
-  PRIMARY KEY (host, filename)
-);
+CREATE TABLE kv (k TEXT PRIMARY KEY, v TEXT);   -- meta_version etc.
 ```
 
-Migrations are ordered and idempotent; a boot-time `#migrateFromJson` folds
-a legacy `metadata.json` into sqlite when `metadata` is empty.
-(→ all of this folds into content/collection/entry §3.2.)
+Migrations are ordered and idempotent. v6→v7 folds `metadata`/`files`/
+`images`/`input_cache` into `content`+`entry`, the settings hosts map into
+`collection`, the per-host hidden lists onto entries, and drops the old
+tables. A separate one-shot import folds `feedback.json` v1 into entry
+judgment columns (§Judgments below).
 
 ### Cache (`~/.local/share/kosmozoo/cache/`, override `KOZMOZOO_CACHE`)
 
 Layout `<ab>/<hash>.png` regardless of real type (→ extension-less §3.3).
 Atomic writes only (tmp → rename). Unbounded.
 
-### Ingestion (read → hash → cache → index)
+### Ingestion (read → hash → cache → content → entry)
 
-Bytes flow: read from host → SHA-256 → cache (atomic) → `files.hash/size/
-stamp` → extractor output into `images`. The address-keyed `metadata` row
-is **copied**, not moved — both tables stay live and reads de-dup across
-them (→ one ingestion path, one table set §3.2).
+`src/ingest.mjs` is the ONLY module that turns bytes into rows: read from
+the backing → SHA-256 → cache (atomic) → content row (+ dims, + extractor
+output when the row's `ext` is stale) → entry (`hash`, `stamp`,
+`state='ingested'`). The prefetch walk is this path running ahead of the
+user; the bytes routes are this path running on demand. Revalidation is an
+`Ingest` method (stale-while-revalidate over every backing kind).
 
 ### Serve path (cache-first)
 

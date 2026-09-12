@@ -159,7 +159,7 @@ Deno.test("nodeImages: only LoadImage image inputs surface — SaveImage's filen
   assertEquals(imgs.length, 1);
   assertEquals(imgs[0].file, "source.png");
   assertEquals(imgs[0].fromOutput, false);
-  assert(imgs[0].src.includes("/api/input-bytes/"), "input ref uses input-bytes");
+  assert(imgs[0].src.includes("?kind=input"), "input ref uses input-bytes");
   // dedup: two LoadImage nodes on the same file render once
   const dup = nodeImages({ nodes: [
     { id: "1", type: "LoadImage", inputs: { image: "source.png" } },
@@ -179,7 +179,7 @@ Deno.test("nodeImages: a LoadImage-from-output value is stripped of [output] and
   assertEquals(imgs.length, 1);
   assertEquals(imgs[0].file, "ark#ark#alisa_impl_00291__0.55_00001_.png");
   assertEquals(imgs[0].fromOutput, true);
-  assert(imgs[0].src.includes("/api/images/"), "output ref uses the feed bytes route");
+  assert(imgs[0].src.includes("/api/collections/"), "output ref uses the feed bytes route");
   assert(!imgs[0].src.includes("[output]"), "annotation stripped from the URL");
 });
 

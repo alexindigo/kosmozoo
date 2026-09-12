@@ -449,7 +449,7 @@ async function main() {
     // the first carrier's current values.
     await attempt("lora strength rows surface on a lora graph", async () => {
       // make sure the fixture's bytes (and embedded graph) are ingested
-      await cdp.evaluate(`fetch("/api/images/fake%3Aflux-lora.png/bytes"), true`);
+      await cdp.evaluate(`fetch("/api/collections/fake/entries/flux-lora.png/bytes"), true`);
       await cdp.evaluate(`
         document.querySelector('.card[data-name="flux-lora.png"] .votebtn.variations').click()
       `);

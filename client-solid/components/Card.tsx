@@ -67,14 +67,6 @@ export function Card(props) {
     return "";
   };
 
-  const saved = () => {
-    const im = image();
-    if (!im) return false;
-    const pfx = im.host + "#";
-    const prefixed = im.filename.startsWith(pfx) ? im.filename : pfx + im.filename;
-    return !!(store.state.saved[im.filename] || store.state.saved[prefixed]);
-  };
-
   const copyName = (e) => {
     e.stopPropagation();
     const el = e.currentTarget;
@@ -141,9 +133,9 @@ export function Card(props) {
           />
           <button
             class="savebtn"
-            title={saved() ? "already in ~/Downloads (click to download again)" : "download this image"}
+            title="download this image"
             onClick={(e) => { e.stopPropagation(); store.actions.images.download(image()?.id); }}
-          >{saved() ? "saved" : "save"}</button>
+          >save</button>
           <Show when={deleteMode()}>
             <IconButton
               icon={iconSvg(deleteMode() === "hide" ? "eye-off" : "trash", 16)}

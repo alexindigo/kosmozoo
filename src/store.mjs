@@ -703,6 +703,14 @@ export class Store {
     return this.judgmentPatch(host, filename, { [field]: value });
   }
 
+  // Everywhere this content lives: [{ collection, name }] (the "what did I
+  // think elsewhere" query).
+  instancesOf(hash) {
+    return this.#db.prepare(
+      "SELECT collection, name FROM entry WHERE hash = ? AND kind = 'output' ORDER BY collection, name",
+    ).all(hash);
+  }
+
   // Every judgment row, keyed for the plugin host's _all adapter (interim
   // shape: by hash when ingested, collection:name otherwise; first wins on
   // a shared hash — per-entry reads are the real API).

@@ -32,7 +32,7 @@ Deno.test("proxy: SVG upstream (octet-stream) is served as image/svg+xml", async
   const store = await Store.open(dir, join(dir, "feedback.json"));
   const router = makeRouter({ hosts: { fake: FAKE }, store, settings, plugins: null });
 
-  const r = await router.handle(new Request("http://x/api/images/fake:logo.svg/bytes"));
+  const r = await router.handle(new Request("http://x/api/collections/fake/entries/logo.svg/bytes"));
   assertEquals(r.status, 200);
   assertEquals(r.headers.get("Content-Type"), "image/svg+xml");
   const body = await r.text();
@@ -45,7 +45,7 @@ Deno.test("proxy: PNG keeps its upstream Content-Type", async () => {
   const settings = await Settings.open(dir);
   const store = await Store.open(dir, join(dir, "feedback.json"));
   const router = makeRouter({ hosts: { fake: FAKE }, store, settings, plugins: null });
-  const r = await router.handle(new Request("http://x/api/images/fake:flux-basic.png/bytes"));
+  const r = await router.handle(new Request("http://x/api/collections/fake/entries/flux-basic.png/bytes"));
   assertEquals(r.status, 200);
   assertEquals(r.headers.get("Content-Type"), "image/png");
   await r.arrayBuffer();

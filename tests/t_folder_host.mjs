@@ -64,18 +64,18 @@ Deno.test("folder host: routes serve the folder's files and bytes", async () => 
   const store = await Store.open(dir, join(dir, "feedback.json"));
   const router = makeRouter({ hosts: { fixtures: "folder:" + FIXTURES }, store, settings, plugins: null });
 
-  const r = await router.handle(new Request("http://x/api/images?host=fixtures"));
+  const r = await router.handle(new Request("http://x/api/collections/fixtures/entries"));
   assertEquals(r.status, 200);
-  const names = (await r.json()).map((i) => i.filename ?? i);
+  const names = (await r.json()).map((i) => i.name ?? i.filename ?? i);
   assert(names.includes("flux-basic.png"));
   assert(names.includes("logo.svg"));
 
-  const b = await router.handle(new Request("http://x/api/images/fixtures:logo.svg/bytes"));
+  const b = await router.handle(new Request("http://x/api/collections/fixtures/entries/logo.svg/bytes"));
   assertEquals(b.status, 200);
   assertEquals(b.headers.get("Content-Type"), "image/svg+xml");
   await b.arrayBuffer();
 
-  const guard = await router.handle(new Request("http://x/api/images/fixtures:..%2fstate.mjs/bytes"));
+  const guard = await router.handle(new Request("http://x/api/collections/fixtures/entries/..%2fstate.mjs/bytes"));
   assertEquals(guard.status, 400);
   await guard.arrayBuffer();
   await rm(dir, { recursive: true });

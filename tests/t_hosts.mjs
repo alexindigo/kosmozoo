@@ -48,7 +48,7 @@ Deno.test("hosts: POST adds + persists + probes; DELETE removes; last host guard
   const router = makeRouter({ hosts, store, settings, plugins: null });
 
   // add
-  const r = await router.handle(new Request("http://x/api/hosts", {
+  const r = await router.handle(new Request("http://x/api/collections", {
     method: "POST", headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ name: "b", address: "127.0.0.1:2" }),
   }));
@@ -60,17 +60,17 @@ Deno.test("hosts: POST adds + persists + probes; DELETE removes; last host guard
   assertEquals(store.collectionGet("b").address, "127.0.0.1:2");
 
   // bad input rejected
-  const bad = await router.handle(new Request("http://x/api/hosts", {
+  const bad = await router.handle(new Request("http://x/api/collections", {
     method: "POST", headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ name: "b ad", address: "x" }),
   }));
   assertEquals(bad.status, 400);
 
   // remove b, then the guard on the last host
-  const d = await router.handle(new Request("http://x/api/hosts/b", { method: "DELETE" }));
+  const d = await router.handle(new Request("http://x/api/collections/b", { method: "DELETE" }));
   assertEquals(d.status, 200);
   assert(!("b" in hosts));
-  const guard = await router.handle(new Request("http://x/api/hosts/a", { method: "DELETE" }));
+  const guard = await router.handle(new Request("http://x/api/collections/a", { method: "DELETE" }));
   assertEquals(guard.status, 400); // last host
   await rm(dir, { recursive: true });
 });
@@ -101,7 +101,7 @@ Deno.test("hosts: upload never sends overwrite; 409 surfaces the conflicting nam
     const router = makeRouter({ hosts: { c: addr }, store, settings, plugins: null });
     const form = new FormData();
     form.append("image", new Blob([new Uint8Array([1])], { type: "image/png" }), "taken.png");
-    const res = await router.handle(new Request("http://x/api/upload-input/c", { method: "POST", body: form }));
+    const res = await router.handle(new Request("http://x/api/collections/c/entries", { method: "POST", body: form }));
     assertEquals(res.status, 409);
     assertEquals((await res.json()).name, "taken.png");
 

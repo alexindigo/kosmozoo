@@ -28,6 +28,6 @@ export function prefetchFrom(images, imgIdx, dir, fetcher = globalThis.fetch) {
   for (let i = 1; i <= 4; i++) {
     const idx = imgIdx + dir * i;
     if (idx < 0 || idx >= images.length) break;
-    fetcher(api.imageBytesUrl(images[idx].id)).then((r) => r.arrayBuffer()).catch(() => {});
+    fetcher(api.entryBytesUrl(images[idx].host, images[idx].filename)).then((r) => r.arrayBuffer()).catch(() => {});
   }
 }

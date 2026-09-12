@@ -52,7 +52,7 @@ docker run -d --name kz-e2e-engine --network host -v "$WORK":/work -w /work \
   denoland/deno:latest run --allow-all src/main.mjs >/dev/null
 
 # wait for both
-for url in "http://127.0.0.1:$FAKE_PORT/api/system_stats" "http://127.0.0.1:$ENGINE_PORT/api/hosts"; do
+for url in "http://127.0.0.1:$FAKE_PORT/api/system_stats" "http://127.0.0.1:$ENGINE_PORT/api/collections"; do
   for i in $(seq 1 60); do
     curl -sf "$url" >/dev/null 2>&1 && break
     sleep 0.5

@@ -38,15 +38,15 @@ async function attempt(name, fn) {
   // let chunked render get going
   await sleep(1500);
 
-  const total = await page.evaluate(`(async () => (await (await fetch("/api/images?host=fake")).json()).length)()`);
+  const total = await page.evaluate(`(async () => (await (await fetch("/api/collections/fake/entries")).json()).length)()`);
   check("grid loaded images from engine", total > 3000, `${total} images`);
 
   // anchor = same bytes as candidate 0 (an identical pair for difference)
   await attempt("anchor dropped locally (blob, never uploaded)", async () => {
     const n = await page.evaluate(`(async () => {
       const s = ${KZ};
-      const list = await (await fetch("/api/images?host=fake")).json();
-      const bytes = await (await fetch("/api/images/" + encodeURIComponent(list[0].id) + "/bytes")).blob();
+      const list = await (await fetch("/api/collections/fake/entries")).json();
+      const bytes = await (await fetch("/api/collections/fake/entries/" + encodeURIComponent(list[0].name) + "/bytes")).blob();
       await s.actions.anchors.addFiles([new File([bytes], "anchor-same.png", { type: "image/png" })]);
       return s.state.anchors.length;
     })()`);
@@ -93,8 +93,8 @@ async function attempt(name, fn) {
     const gone = !await page.evaluate("document.querySelector('.card[data-idx=\"0\"]')");
     check("card left the feed right away", gone);
     await page.evaluate(`(async () => {
-      const img = (await (await fetch("/api/images?host=fake")).json())[0];
-      await fetch("/api/judgments/" + encodeURIComponent(img.id), { method: "DELETE" });
+      const img = (await (await fetch("/api/collections/fake/entries")).json())[0];
+      await fetch("/api/collections/fake/entries/" + encodeURIComponent(img.name) + "/judgment, { method: "DELETE" });
       // reveal on (restores the card), then back off — reveal only filters
       // cards still down-voted, and the reset deleted the vote
       document.getElementById("unhideBtn").click();
@@ -108,8 +108,8 @@ async function attempt(name, fn) {
     const goneUp = !await page.evaluate("document.querySelector('.card[data-idx=\"0\"]')");
     check("up-vote hides when coupling on", goneUp);
     await page.evaluate(`(async () => {
-      const img = (await (await fetch("/api/images?host=fake")).json())[0];
-      await fetch("/api/judgments/" + encodeURIComponent(img.id), { method: "DELETE" });
+      const img = (await (await fetch("/api/collections/fake/entries")).json())[0];
+      await fetch("/api/collections/fake/entries/" + encodeURIComponent(img.name) + "/judgment, { method: "DELETE" });
       document.getElementById("hideUpBtn").click(); // coupling off -> rebuild restores
     })()`);
     await page.poll("document.querySelectorAll('.card').length === " + before, 3000);
@@ -218,7 +218,7 @@ async function attempt(name, fn) {
     check("folder host loads its files into the feed", true);
     // its bytes come from disk: the SVG renders (extension mapping applies)
     const r = await page.evaluate(
-      "fetch('/api/images/fixture-dir:logo.svg/bytes').then(r => r.headers.get('Content-Type'))");
+      "fetch('/api/collections/fixture-dir/entries/logo.svg/bytes').then(r => r.headers.get('Content-Type'))");
     check("folder bytes map octet-stream to the right type", r === "image/svg+xml", r ?? "none");
     // metadata pipeline works off the folder too (scraper extracted from the PNG)
     await page.poll(`(async () => {

@@ -8,15 +8,17 @@
 // here are visible to the engine immediately.
 const ENGINE = process.env.E2E_ENGINE;
 const FILE = "/work/tests/.tmp-mutable/flux-basic.png";
-const ID = encodeURIComponent("mut:flux-basic.png");
+const ID = "mut/flux-basic.png";
 const CFILE = "/work/tests/.tmp-comfy/mut.png";
-const CID = encodeURIComponent("fake:mut.png");
+const CID = "fake/mut.png";
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const ok = (m) => console.log("  [ ok ] " + m);
 const fail = (m) => { console.error("  [fail] " + m); process.exit(1); };
 
+// id = "<collection>/<name>" — the collections API shape
 const getBytes = async (id) => {
-  const r = await fetch(`${ENGINE}/api/images/${id}/bytes`);
+  const [c, name] = id.split("/");
+  const r = await fetch(`${ENGINE}/api/collections/${c}/entries/${name}/bytes`);
   if (r.status !== 200) fail(`bytes route returned ${r.status}`);
   return Buffer.from(await r.arrayBuffer());
 };

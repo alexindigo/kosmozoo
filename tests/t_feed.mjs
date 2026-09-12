@@ -8,7 +8,7 @@ import { viewStep, prefetchFrom } from "../client/js/feedview.mjs";
 
 function fakeImages(n) {
   return Array.from({ length: n }, (_, i) => ({
-    id: `h:bulk-${String(i).padStart(5, "0")}.png`, host: "h", filename: `bulk-${i}.png`,
+    id: `h:bulk-${String(i).padStart(5, "0")}.png`, host: "h", filename: `bulk-${String(i).padStart(5, "0")}.png`,
   }));
 }
 

@@ -1,18 +1,19 @@
 // src/routes.mjs — dispatch table for the public engine API.
 //
-// Resource-shaped, documented, public. Plugin routes live under
-// /api/plugins/<name>/... and are registered by the plugin host (Phase 10).
+// Collections + entries are the resources (spec §2). Plugin routes live
+// under /api/plugins/<name>/... and are registered by the plugin host.
 
-import { splitHostKey, probeHost, hostList, hostReadBytes, hostHeadSize, hostInputBytes, hostInputList, hostUploadInput, hostStamp, validateHost, addHost, removeHost, isFolderHost, hostHasAssetsPlus, hostDelete, comfyHistoryDelete, EXT_MIME } from "./hosts.mjs";
-import { cacheGet, cachePut, sha256 } from "./cache.mjs";
+import { probeHost, hostList, hostInputList, hostInputBytes, hostUploadInput, hostReadBytes, validateHost, addHost, removeHost, isFolderHost, hostDelete, comfyHistoryDelete, EXT_MIME } from "./hosts.mjs";
+import { cacheGet, sha256 } from "./cache.mjs";
+import { capabilities } from "./collections.mjs";
 
 export function makeRouter(ctx) {
-  // ctx: { hosts, store, settings, plugins } — `router.ctx` is settable so
-  // main.mjs can hand the plugin host back in after construction.
+  // ctx: { hosts, store, settings, plugins, ingest, prefetch } — `router.ctx`
+  // is settable so main.mjs can hand the plugin host back in after construction.
   const routes = [];
 
   const add = (method, pattern, handler) => {
-    // pattern: "/api/images/<id>/bytes" — segments, "<x>" captures one segment
+    // pattern: "/api/collections/<id>/entries/<name>" — segments, "<x>" captures one segment
     const parts = pattern.split("/").filter(Boolean);
     routes.push({ method, parts, handler });
   };
@@ -34,27 +35,44 @@ export function makeRouter(ctx) {
     return null;
   };
 
-  // --- core resources -----------------------------------------------------
+  const useAssetsPlus = () => ctx.settings.get("core.delete", "useAssetsPlus", true);
 
-  add("GET", "/api/hosts", async () => {
-    const useAssetsPlus = ctx.settings.get("core.delete", "useAssetsPlus", true);
+  const entryShape = (collection, name, size) => {
+    const e = ctx.store.entryGet(collection, name);
+    const st = ctx.store.metaState(collection, name);
+    const c = e?.hash ? ctx.store.contentGet(e.hash) : null;
+    return {
+      name,
+      size: size ?? c?.bytes ?? null,
+      hash: e?.hash ?? null,
+      state: e?.state ?? "seen",
+      meta: st.meta,
+      extracted: st.extracted,
+      judgment: ctx.store.judgmentGet(collection, name),
+      width: c?.width ?? null,
+      height: c?.height ?? null,
+    };
+  };
+
+  // --- collections -----------------------------------------------------------
+
+  add("GET", "/api/collections", async () => {
     const out = {};
-    for (const [name, addr] of Object.entries(ctx.hosts)) {
-      const online = await probeHost(addr);
-      // deleteMode drives the card's delete affordance: folder hosts unlink
-      // (permanent); Comfy hosts trash via assets_plus when allowed and
-      // available; everything else can only be hidden from kosmozoo.
-      let deleteMode = "hide";
-      if (isFolderHost(addr)) deleteMode = "unlink";
-      else if (online && useAssetsPlus && await hostHasAssetsPlus(addr)) deleteMode = "trash";
-      out[name] = { address: addr, online, deleteMode };
+    for (const [id, address] of Object.entries(ctx.hosts)) {
+      const online = await probeHost(address);
+      const c = ctx.store.collectionGet(id) ?? { id, kind: isFolderHost(address) ? "folder" : "comfy", address };
+      out[id] = {
+        address,
+        kind: c.kind,
+        online,
+        capabilities: await capabilities(c, { online, useAssetsPlus: useAssetsPlus() }),
+      };
     }
     return Response.json(out);
   });
 
-  // Hosts are user-managed at runtime (the outgoing app's menu add/remove).
-  // Persisted to settings core.hosts.map; env only seeds the first boot.
-  add("POST", "/api/hosts", async (req) => {
+  // Collections are user-managed at runtime (source-backed only in this plan).
+  add("POST", "/api/collections", async (req) => {
     let body;
     try {
       body = await req.json();
@@ -64,251 +82,22 @@ export function makeRouter(ctx) {
     const err = validateHost(body.name, body.address);
     if (err) return Response.json({ error: err }, { status: 400 });
     addHost(ctx.store, ctx.hosts, body.name, body.address);
-    return Response.json({ name: body.name, address: body.address, online: await probeHost(body.address) });
-  });
-
-  add("DELETE", "/api/hosts/<name>", async (_req, { name }) => {
-    if (!(name in ctx.hosts)) return Response.json({ error: "unknown host" }, { status: 404 });
-    if (Object.keys(ctx.hosts).length === 1) {
-      return Response.json({ error: "cannot remove the last host" }, { status: 400 });
-    }
-    removeHost(ctx.store, ctx.hosts, name);
-    return Response.json({ removed: name });
-  });
-
-  add("GET", "/api/images", async (req, _params, url) => {
-    const host = url.searchParams.get("host");
-    if (!host || !ctx.hosts[host]) return Response.json({ error: "unknown host" }, { status: 400 });
-    // File listing comes from the host (HTTP or folder adapter); metadata
-    // is overlaid from the store.
-    const list = await hostList(ctx.hosts[host]);
-    // Hidden images (the delete fallback on hosts that can't delete files)
-    // stay out of every listing — feed, lightbox and diff all walk this.
-    const hidden = ctx.store.hiddenNames(host);
-    const visible = hidden.size ? list.filter((f) => !hidden.has(f.name)) : list;
-    const names = visible.map((f) => f.name);
-    // The listing feeds the background walk (deduped + meta_fresh-filtered
-    // inside feed()); on-screen names would use feed(host, names, true).
-    ctx.prefetch?.feed(host, names);
-    const size = new Map(visible.map((f) => [f.name, f.size]));
-    return Response.json(names.map((filename) => {
-      const st = ctx.store.metaState(host, filename);
-      return {
-        id: `${host}:${filename}`,
-        host,
-        filename,
-        size: size.get(filename) ?? null,
-        meta: st.meta,
-        extracted: st.extracted,
-        judgment: ctx.store.judgmentGet(host, filename),
-      };
-    }));
-  });
-
-  add("GET", "/api/images/<id>", async (_req, { id }) => {
-    const [host, filename] = splitHostKey(id);
-    if (!ctx.hosts[host]) return Response.json({ error: "unknown host" }, { status: 404 });
-    const st = ctx.store.metaState(host, filename);
+    const c = ctx.store.collectionGet(body.name);
     return Response.json({
-      id, host, filename,
-      meta: st.meta,
-      extracted: st.extracted,
-      judgment: ctx.store.judgmentGet(host, filename),
+      name: body.name,
+      address: body.address,
+      kind: c.kind,
+      online: await probeHost(body.address),
     });
   });
 
-  // Delete an image from its source. folder -> unlink (permanent);
-  // Comfy + assets_plus (toggle permitting) -> trash (recoverable);
-  // anything else -> hide from kosmozoo + best-effort Comfy history cleanup
-  // (the file stays on the host — ComfyUI core has no file-delete API).
-  add("DELETE", "/api/images/<id>", async (_req, { id }) => {
-    const [host, filename] = splitHostKey(id);
-    const addr = ctx.hosts[host];
-    if (!addr) return Response.json({ error: "unknown host" }, { status: 404 });
-    const useAssetsPlus = ctx.settings.get("core.delete", "useAssetsPlus", true);
-
-    if (isFolderHost(addr) || (useAssetsPlus && await hostHasAssetsPlus(addr))) {
-      const res = await hostDelete(addr, filename);
-      if (!res.ok) return Response.json({ error: res.detail }, { status: 409 });
-      return Response.json({ deleted: true, mode: res.mode });
+  add("DELETE", "/api/collections/<id>", async (_req, { id }) => {
+    if (!(id in ctx.hosts)) return Response.json({ error: "unknown collection" }, { status: 404 });
+    if (Object.keys(ctx.hosts).length === 1) {
+      return Response.json({ error: "cannot remove the last collection" }, { status: 400 });
     }
-
-    ctx.store.entryHide(host, filename);
-    const historyCleared = isFolderHost(addr) ? false : await comfyHistoryDelete(addr, filename);
-    return Response.json({ deleted: true, mode: "hide", historyCleared });
-  });
-
-  add("HEAD", "/api/images/<id>/bytes", async (_req, { id }) => {
-    const [host, filename] = splitHostKey(id);
-    if (!ctx.hosts[host]) return new Response(null, { status: 404 });
-    const size = await hostHeadSize(ctx.hosts[host], filename);
-    return new Response(null, {
-      status: 200,
-      headers: size != null ? { "content-length": String(size) } : {},
-    });
-  });
-
-  // Input-dir image listing (LoadImage sweep sources).
-  add("GET", "/api/input-list/<host>", async (_req, { host }) => {
-    if (!ctx.hosts[host]) return Response.json({ error: "unknown host" }, { status: 404 });
-    try {
-      return Response.json(await hostInputList(ctx.hosts[host]));
-    } catch {
-      return Response.json([]);
-    }
-  });
-
-  // Upload one image into a ComfyUI host's input dir (multipart field
-  // "image") — the browser picked a local file; the engine forwards it to
-  // the host (browser→ComfyUI is cross-origin, so it can't post directly).
-  add("POST", "/api/upload-input/<host>", async (req, { host }) => {
-    const addr = ctx.hosts[host];
-    if (!addr) return Response.json({ error: "unknown host" }, { status: 404 });
-    let form;
-    try { form = await req.formData(); }
-    catch { return Response.json({ error: "multipart form required" }, { status: 400 }); }
-    const file = form.get("image");
-    if (!file || typeof file === "string") {
-      return Response.json({ error: "no image file in form" }, { status: 400 });
-    }
-    const bytes = new Uint8Array(await file.arrayBuffer());
-    const r = await hostUploadInput(addr, file.name, bytes);
-    if (!r.ok) {
-      // 409: the name already exists in the host's input dir — tell the
-      // caller WHICH name so the UI can show the conflict
-      return Response.json(
-        { error: r.error, ...(r.status === 409 ? { name: file.name } : {}) },
-        { status: r.status },
-      );
-    }
-    return Response.json({ name: r.name });
-  });
-
-  // Input-dir image bytes for node references (LoadImage-style): folder
-  // hosts read from the directory; ComfyUI hosts proxy /api/view?type=input.
-  // Served through the hash-addressed cache, tracked by a source stamp:
-  // folder hosts compare the stamp inline (local stat is cheap); ComfyUI
-  // serves stale-while-revalidate — a debounced async stamp check.
-  // The URL never changes when the content is remapped, so the response
-  // carries validators: no-cache forces revalidation per render; the ETag
-  // (the content hash) answers If-None-Match with a cheap 304.
-  add("GET", "/api/input-bytes/<host>/<filename>", async (req, { host, filename }) => {
-    if (!ctx.hosts[host]) return new Response("unknown host", { status: 404 });
-    const addr = ctx.hosts[host];
-    const mime = EXT_MIME[filename.split(".").pop().toLowerCase()];
-    const inm = req.headers.get("If-None-Match");
-    const makeResponse = (bytes, hash) => {
-      const etag = `"${hash}"`;
-      if (inm === etag) return new Response(null, { status: 304, headers: { ETag: etag, "Cache-Control": "no-cache" } });
-      const h = new Headers();
-      if (mime) h.set("Content-Type", mime);
-      h.set("Content-Length", String(bytes.length));
-      h.set("ETag", etag);
-      h.set("Cache-Control", "no-cache");
-      return new Response(bytes, { headers: h });
-    };
-
-    const row = ctx.store.inputCacheGet(host, filename);
-    if (row) {
-      if (isFolderHost(addr)) {
-        const stamp = await hostStamp(addr, filename, "input");
-        if (stamp != null && row.stamp === stamp) {
-          const bytes = await cacheGet(row.hash);
-          if (bytes) return makeResponse(bytes, row.hash);
-        }
-      } else {
-        const bytes = await cacheGet(row.hash);
-        if (bytes) {
-          ctx.ingest.scheduleRevalidate(host, filename, { input: true });
-          return makeResponse(bytes, row.hash);
-        }
-      }
-    }
-
-    const r = await hostInputBytes(addr, filename);
-    if (r.status === 400) return new Response("bad filename", { status: 400 });
-    if (r.status !== 200) return new Response("not found", { status: r.status });
-    const bytes = new Uint8Array(await new Response(r.body).arrayBuffer());
-    const hash = await sha256(bytes);
-    await cachePut(hash, bytes);
-    ctx.store.inputCachePut(host, filename, hash, await hostStamp(addr, filename, "input"));
-    return makeResponse(bytes, hash);
-  });
-
-  add("GET", "/api/images/<id>/bytes", async (req, { id }) => {
-    const [host, filename] = splitHostKey(id);
-    if (!ctx.hosts[host]) return new Response("unknown host", { status: 404 });
-
-    const ext = filename.split(".").pop().toLowerCase();
-    const mime = EXT_MIME[ext];
-    const inm = req.headers.get("If-None-Match");
-    // The URL never changes when the content is remapped, so the response
-    // carries validators: no-cache forces revalidation per render; the
-    // ETag (the content hash) answers If-None-Match with a cheap 304.
-    const makeResponse = (bytes, hash) => {
-      const etag = `"${hash}"`;
-      if (inm === etag) return new Response(null, { status: 304, headers: { ETag: etag, "Cache-Control": "no-cache" } });
-      const h = new Headers();
-      if (mime) h.set("Content-Type", mime);
-      h.set("Content-Length", String(bytes.length));
-      h.set("ETag", etag);
-      h.set("Cache-Control", "no-cache");
-      return new Response(bytes, { headers: h });
-    };
-
-    // Cache-first: resolve address → hash, serve from cache. A hit also
-    // fires a debounced async revalidation — the source may have been
-    // rewritten under the same filename; the NEXT request gets fresh bytes.
-    const hash = ctx.store.hashFor(host, filename);
-    if (hash) {
-      const cached = await cacheGet(hash);
-      if (cached) {
-        ctx.ingest.scheduleRevalidate(host, filename);
-        return makeResponse(cached, hash);
-      }
-    }
-
-    // Not in cache: read through ingestion (read → hash → cache → index).
-    if (ctx.ingest) {
-      const got = await ctx.ingest.ensure(host, filename);
-      if (got.status === 200) return makeResponse(got.bytes, got.hash);
-    }
-
-    // Ingestion failed (host down, bad filename): proxy as last resort.
-    const r = await hostReadBytes(ctx.hosts[host], filename);
-    if (r.status === 400) return new Response("bad filename", { status: 400 });
-    if (r.status !== 200) return new Response("upstream error", { status: r.status });
-
-    // Ingest in the background for next time.
-    if (ctx.ingest && r.body) {
-      const bytes = new Uint8Array(await new Response(r.body).arrayBuffer());
-      const h = makeResponse(bytes, await sha256(bytes));
-      ctx.ingest.ensureBytes(host, filename, bytes).catch(() => {});
-      return h;
-    }
-    // No ingestion wired (tests): the body streams once — hash it so the
-    // response still carries validators.
-    const bytes = new Uint8Array(await new Response(r.body).arrayBuffer());
-    return makeResponse(bytes, await sha256(bytes));
-  });
-
-  add("GET", "/api/judgments/<id>", async (_req, { id }) => {
-    const [host, filename] = splitHostKey(id);
-    return Response.json(ctx.store.judgmentGet(host, filename) ?? {});
-  });
-
-  add("PUT", "/api/judgments/<id>", async (req, { id }) => {
-    const [host, filename] = splitHostKey(id);
-    const body = await req.json();
-    const r = ctx.store.judgmentPatch(host, filename, body);
-    if (!r.ok) return Response.json({ error: r.error }, { status: 400 });
-    return Response.json(r.judgment ?? {});
-  });
-
-  add("DELETE", "/api/judgments/<id>", async (_req, { id }) => {
-    const [host, filename] = splitHostKey(id);
-    ctx.store.judgmentPatch(host, filename, { notes: null, vote: null, favorite: null });
-    return Response.json({});
+    removeHost(ctx.store, ctx.hosts, id);
+    return Response.json({ removed: id });
   });
 
   // The portable judgment document, generated on demand per collection.
@@ -322,6 +111,172 @@ export function makeRouter(ctx) {
       },
     });
   });
+
+  // --- entries ----------------------------------------------------------------
+
+  // The feed listing (kind=output, the default) or the input-dir listing
+  // (kind=input). Hidden entries stay out of every output listing.
+  add("GET", "/api/collections/<id>/entries", async (req, { id }, url) => {
+    const addr = ctx.hosts[id];
+    if (!addr) return Response.json({ error: "unknown collection" }, { status: 404 });
+    const kind = url.searchParams.get("kind") ?? "output";
+    if (kind === "input") {
+      try {
+        return Response.json(await hostInputList(addr));
+      } catch {
+        return Response.json([]);
+      }
+    }
+    // The listing comes from the backing; the store overlays judgment + dims.
+    const list = await hostList(addr);
+    const hidden = ctx.store.hiddenNames(id);
+    const visible = hidden.size ? list.filter((f) => !hidden.has(f.name)) : list;
+    ctx.prefetch?.feed(id, visible.map((f) => f.name));
+    const size = new Map(visible.map((f) => [f.name, f.size]));
+    return Response.json(visible.map((f) => entryShape(id, f.name, size.get(f.name))));
+  });
+
+  add("GET", "/api/collections/<id>/entries/<name>", async (_req, { id, name }) => {
+    if (!ctx.hosts[id]) return Response.json({ error: "unknown collection" }, { status: 404 });
+    return Response.json(entryShape(id, name));
+  });
+
+  // Upload one image into a comfy collection's input dir (multipart field
+  // "image") — the browser can't post to ComfyUI directly (cross-origin).
+  add("POST", "/api/collections/<id>/entries", async (req, { id }) => {
+    const addr = ctx.hosts[id];
+    if (!addr) return Response.json({ error: "unknown collection" }, { status: 404 });
+    let form;
+    try { form = await req.formData(); }
+    catch { return Response.json({ error: "multipart form required" }, { status: 400 }); }
+    const file = form.get("image");
+    if (!file || typeof file === "string") {
+      return Response.json({ error: "no image file in form" }, { status: 400 });
+    }
+    const bytes = new Uint8Array(await file.arrayBuffer());
+    const r = await hostUploadInput(addr, file.name, bytes);
+    if (!r.ok) {
+      // 409: the name already exists in the input dir — say WHICH name
+      return Response.json(
+        { error: r.error, ...(r.status === 409 ? { name: file.name } : {}) },
+        { status: r.status },
+      );
+    }
+    return Response.json({ name: r.name });
+  });
+
+  // Delete an entry from its source, per the collection's delete capability:
+  // folder → unlink; comfy + assets_plus → trash; else hide + history cleanup.
+  add("DELETE", "/api/collections/<id>/entries/<name>", async (_req, { id, name }) => {
+    const addr = ctx.hosts[id];
+    if (!addr) return Response.json({ error: "unknown collection" }, { status: 404 });
+    const c = ctx.store.collectionGet(id) ?? { id, kind: isFolderHost(addr) ? "folder" : "comfy", address: addr };
+    const caps = await capabilities(c, { useAssetsPlus: useAssetsPlus() });
+    if (caps.delete === "unlink" || caps.delete === "trash") {
+      const res = await hostDelete(addr, name);
+      if (!res.ok) return Response.json({ error: res.detail }, { status: 409 });
+      return Response.json({ deleted: true, mode: res.mode });
+    }
+    ctx.store.entryHide(id, name);
+    const historyCleared = isFolderHost(addr) ? false : await comfyHistoryDelete(addr, name);
+    return Response.json({ deleted: true, mode: "hide", historyCleared });
+  });
+
+  add("HEAD", "/api/collections/<id>/entries/<name>/bytes", async (_req, { id, name }) => {
+    if (!ctx.hosts[id]) return new Response(null, { status: 404 });
+    const e = ctx.store.entryGet(id, name);
+    if (!e?.hash) return new Response(null, { status: 404 }); // E7: unknown says so
+    const c = ctx.store.contentGet(e.hash);
+    return new Response(null, {
+      status: 200,
+      headers: c?.bytes != null ? { "content-length": String(c.bytes) } : {},
+    });
+  });
+
+  // Bytes, cache-first, with validators (the URL never changes when content
+  // is remapped: no-cache + ETag = the content hash).
+  add("GET", "/api/collections/<id>/entries/<name>/bytes", async (req, { id, name }, url) => {
+    if (!ctx.hosts[id]) return new Response("unknown collection", { status: 404 });
+    const kind = url.searchParams.get("kind") === "input" ? "input" : "output";
+    const mime = EXT_MIME[name.split(".").pop().toLowerCase()];
+    const inm = req.headers.get("If-None-Match");
+    const makeResponse = (bytes, hash) => {
+      const etag = `"${hash}"`;
+      if (inm === etag) return new Response(null, { status: 304, headers: { ETag: etag, "Cache-Control": "no-cache" } });
+      const h = new Headers();
+      if (mime) h.set("Content-Type", mime);
+      h.set("Content-Length", String(bytes.length));
+      h.set("ETag", etag);
+      h.set("Cache-Control", "no-cache");
+      return new Response(bytes, { headers: h });
+    };
+
+    // Cache hit: serve + debounced revalidation (the NEXT request gets fresh
+    // bytes if the source was rewritten under the same name).
+    const info = kind === "input"
+      ? ctx.store.inputCacheGet(id, name)
+      : ctx.store.fileInfo(id, name);
+    if (info?.hash) {
+      const cached = await cacheGet(info.hash);
+      if (cached) {
+        ctx.ingest?.scheduleRevalidate(id, name, { input: kind === "input" });
+        return makeResponse(cached, info.hash);
+      }
+    }
+
+    // Read through ingestion.
+    if (ctx.ingest) {
+      const got = await ctx.ingest.ensure(id, name, kind);
+      if (got.status === 200) return makeResponse(got.bytes, got.hash);
+      if (got.status === 400) return new Response("bad filename", { status: 400 });
+    }
+
+    // Last resort: proxy from the backing (+ ingest in the background for
+    // the next request).
+    const r = kind === "input"
+      ? await hostInputBytes(ctx.hosts[id], name)
+      : await hostReadBytes(ctx.hosts[id], name);
+    if (r.status === 400) return new Response("bad filename", { status: 400 });
+    if (r.status !== 200) return new Response("not found", { status: r.status });
+    const bytes = new Uint8Array(await new Response(r.body).arrayBuffer());
+    const hash = await sha256(bytes);
+    if (ctx.ingest) ctx.ingest.ensureBytes(id, name, bytes, { kind }).catch(() => {});
+    return makeResponse(bytes, hash);
+  });
+
+  // --- judgments (entry columns) ------------------------------------------------
+
+  add("PATCH", "/api/collections/<id>/entries/<name>/judgment", async (req, { id, name }) => {
+    if (!ctx.hosts[id]) return Response.json({ error: "unknown collection" }, { status: 404 });
+    const body = await req.json();
+    const r = ctx.store.judgmentPatch(id, name, body);
+    if (!r.ok) return Response.json({ error: r.error }, { status: 400 });
+    return Response.json(r.judgment ?? {});
+  });
+
+  // --- content by hash -----------------------------------------------------------
+
+  add("GET", "/api/content/<hash>", async (_req, { hash }) => {
+    const c = ctx.store.contentGet(hash);
+    if (!c) return Response.json({ error: "unknown content" }, { status: 404 });
+    const instances = ctx.store.instancesOf(hash);
+    return Response.json({ ...c, instances });
+  });
+
+  add("GET", "/api/content/<hash>/bytes", async (req, { hash }) => {
+    const bytes = await cacheGet(hash);
+    if (!bytes) return new Response("not found", { status: 404 });
+    const etag = `"${hash}"`;
+    if (req.headers.get("If-None-Match") === etag) {
+      return new Response(null, { status: 304, headers: { ETag: etag, "Cache-Control": "no-cache" } });
+    }
+    const c = ctx.store.contentGet(hash);
+    const h = new Headers({ "Content-Length": String(bytes.length), ETag: etag, "Cache-Control": "no-cache" });
+    if (c?.meta?.mime) h.set("Content-Type", c.meta.mime);
+    return new Response(bytes, { headers: h });
+  });
+
+  // --- settings + nodes + plugins -------------------------------------------------
 
   add("GET", "/api/settings/<ns>", async (_req, { ns }) => {
     return Response.json(ctx.settings.getNs(ns));
@@ -339,13 +294,17 @@ export function makeRouter(ctx) {
     return Response.json(ctx.plugins ? ctx.plugins.list() : []);
   });
 
-  // --- scraper control (the menu's "metadata scan" row) ---------------------
-  // The discovered node registry: class_type → { title, inputs→types }.
   add("GET", "/api/nodes", async () => {
     return Response.json(ctx.store.nodeRegistry());
   });
 
-  add("GET", "/api/scraper", async () => {
+  add("GET", "/api/features", async () => {
+    return Response.json([]); // feature modules land with the variations move
+  });
+
+  // --- prefetch control (the menu's "metadata scan" row) --------------------------
+
+  add("GET", "/api/prefetch", async () => {
     const pending = {};
     for (const name of Object.keys(ctx.hosts)) {
       pending[name] = ctx.prefetch ? ctx.prefetch.pending(name) : 0;
@@ -357,7 +316,7 @@ export function makeRouter(ctx) {
     });
   });
 
-  add("POST", "/api/scraper", async (req) => {
+  add("POST", "/api/prefetch", async (req) => {
     const body = await req.json();
     if (typeof body.enabled === "boolean") {
       await ctx.settings.set("core.scraper", "enabled", body.enabled);
@@ -371,41 +330,33 @@ export function makeRouter(ctx) {
     });
   });
 
-  // --- metadata channel -------------------------------------------------------
-  // Versioned poll: the client merges when v moves (in-place card patching),
-  // and drives the scan chip off pending.
-  add("GET", "/api/metadata", async (_req, _params, url) => {
-    const host = url.searchParams.get("host");
-    if (!host || !ctx.hosts[host]) return Response.json({ error: "unknown host" }, { status: 400 });
+  // --- metadata channel -------------------------------------------------------------
+
+  // Versioned poll: `since` replaces the client's version compare — the
+  // answer says whether anything moved; items ship only when it did.
+  add("GET", "/api/collections/<id>/meta", async (_req, { id }, url) => {
+    if (!ctx.hosts[id]) return Response.json({ error: "unknown collection" }, { status: 404 });
+    const v = ctx.store.metaVersion;
+    const since = url.searchParams.get("since");
+    if (since !== null && Number(since) === v) {
+      return Response.json({ v, changed: false });
+    }
     return Response.json({
-      items: ctx.store.metaForHost(host),
-      pending: ctx.prefetch ? ctx.prefetch.pending(host) : 0,
-      v: ctx.store.metaVersion,
+      v,
+      changed: true,
+      items: ctx.store.metaForHost(id),
+      pending: ctx.prefetch ? ctx.prefetch.pending(id) : 0,
     });
   });
 
   // Scroll-driven extraction: the client reports rendered-but-meta-less
-  // filenames; they jump the queue (priority lane drains before the walk).
-  add("POST", "/api/meta-want", async (req) => {
-    const { host, files } = await req.json();
-    if (!host || !ctx.hosts[host]) return Response.json({ error: "unknown host" }, { status: 400 });
-    if (!Array.isArray(files)) return Response.json({ error: "files must be an array" }, { status: 400 });
-    const pending = ctx.prefetch?.feed(host, files, true) ?? 0;
-    return Response.json({ pending });
-  });
-
-  // Save-button greying: which filenames already exist in the downloads dir.
-  add("POST", "/api/downloads-check", async (req) => {
+  // names; they jump the queue (the prio lane drains first).
+  add("POST", "/api/collections/<id>/want", async (req, { id }) => {
+    if (!ctx.hosts[id]) return Response.json({ error: "unknown collection" }, { status: 400 });
     const { files } = await req.json();
     if (!Array.isArray(files)) return Response.json({ error: "files must be an array" }, { status: 400 });
-    const { readdir } = await import("node:fs/promises");
-    let present = new Set();
-    try {
-      present = new Set(await readdir(ctx.downloadsDir));
-    } catch { /* dir missing -> nothing exists */ }
-    const exists = {};
-    for (const f of files) exists[f] = present.has(f);
-    return Response.json({ exists });
+    const pending = ctx.prefetch?.feed(id, files, true) ?? 0;
+    return Response.json({ pending });
   });
 
   return {

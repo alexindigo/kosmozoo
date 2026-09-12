@@ -24,13 +24,13 @@ Deno.test("scraper API: GET status, POST toggles enabled/paused persist", async 
   const dir = await mkdtemp(join(tmpdir(), "kz-scrapi-"));
   const { settings, router } = await ctx(dir);
 
-  let r = await router.handle(new Request("http://x/api/scraper"));
+  let r = await router.handle(new Request("http://x/api/prefetch"));
   let body = await r.json();
   assertEquals(body.enabled, true);
   assertEquals(body.paused, false);
   assert("local" in body.pending);
 
-  r = await router.handle(new Request("http://x/api/scraper", {
+  r = await router.handle(new Request("http://x/api/prefetch", {
     method: "POST", headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ enabled: false, paused: true }),
   }));

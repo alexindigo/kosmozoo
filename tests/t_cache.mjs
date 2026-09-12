@@ -140,19 +140,19 @@ Deno.test("serve path: bytes carry validators — ETag (content hash) + no-cache
   router.ctx = { hosts, store, settings, plugins: null, ingest };
 
   const { hash } = await ingest.ensure("h", "img.png");
-  const r1 = await router.handle(new Request("http://x/api/images/h:img.png/bytes"));
+  const r1 = await router.handle(new Request("http://x/api/collections/h/entries/img.png/bytes"));
   assertEquals(r1.status, 200);
   assertEquals(r1.headers.get("ETag"), `"${hash}"`);
   assertEquals(r1.headers.get("Cache-Control"), "no-cache");
   await r1.arrayBuffer();
 
-  const r2 = await router.handle(new Request("http://x/api/images/h:img.png/bytes", {
+  const r2 = await router.handle(new Request("http://x/api/collections/h/entries/img.png/bytes", {
     headers: { "If-None-Match": `"${hash}"` },
   }));
   assertEquals(r2.status, 304);
   await r2.arrayBuffer();
 
-  const r3 = await router.handle(new Request("http://x/api/images/h:img.png/bytes", {
+  const r3 = await router.handle(new Request("http://x/api/collections/h/entries/img.png/bytes", {
     headers: { "If-None-Match": `"${"0".repeat(64)}"` },
   }));
   assertEquals(r3.status, 200);
@@ -178,7 +178,7 @@ Deno.test("serve path: cache hit serves directly, no host needed", async () => {
   router.ctx = { hosts, store, settings, plugins: null, ingest };
 
   // First request: ingestion populates cache.
-  const r1 = await router.handle(new Request("http://x/api/images/host:img.png/bytes"));
+  const r1 = await router.handle(new Request("http://x/api/collections/host/entries/img.png/bytes"));
   assertEquals(r1.status, 200);
   const b1 = new Uint8Array(await r1.arrayBuffer());
   assertEquals(b1, bytes);
@@ -187,7 +187,7 @@ Deno.test("serve path: cache hit serves directly, no host needed", async () => {
   await rm(folder, { recursive: true });
 
   // Second request: cache hit, no host needed.
-  const r2 = await router.handle(new Request("http://x/api/images/host:img.png/bytes"));
+  const r2 = await router.handle(new Request("http://x/api/collections/host/entries/img.png/bytes"));
   assertEquals(r2.status, 200);
   const b2 = new Uint8Array(await r2.arrayBuffer());
   assertEquals(b2, bytes);
@@ -212,7 +212,7 @@ Deno.test("serve path: round-trip preserves Content-Type", async () => {
   const router = makeRouter({ hosts, store, settings, plugins: null, ingest });
   router.ctx = { hosts, store, settings, plugins: null, ingest };
 
-  const r = await router.handle(new Request("http://x/api/images/h:img.png/bytes"));
+  const r = await router.handle(new Request("http://x/api/collections/h/entries/img.png/bytes"));
   assertEquals(r.status, 200);
   assertEquals(r.headers.get("Content-Type"), "image/png");
   assertExists(r.headers.get("Content-Length"));

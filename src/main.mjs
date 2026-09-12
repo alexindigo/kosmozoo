@@ -41,13 +41,11 @@ try {
   throw e;
 }
 const hosts = await loadHosts(store); // env seeds first boot, then user-managed
-const downloadsDir = Deno.env.get("KOZMOZOO_DOWNLOADS")
-  ?? `${Deno.env.get("HOME")}/Downloads`;
 
-const router = makeRouter({ hosts, store, settings, plugins: null, downloadsDir });
+const router = makeRouter({ hosts, store, settings, plugins: null });
 const plugins = new PluginHost({ store, settings, router, hosts });
 const discovered = await plugins.discover();
-router.ctx = { hosts, store, settings, plugins, downloadsDir };
+router.ctx = { hosts, store, settings, plugins };
 
 // Image ingestion — every served byte flows through here (revalidation
 // included; the interval is read ONCE, at construction).
