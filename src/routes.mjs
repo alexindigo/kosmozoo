@@ -180,7 +180,14 @@ export function makeRouter(ctx) {
     }
     const bytes = new Uint8Array(await file.arrayBuffer());
     const r = await hostUploadInput(addr, file.name, bytes);
-    if (!r.ok) return Response.json({ error: r.error }, { status: r.status });
+    if (!r.ok) {
+      // 409: the name already exists in the host's input dir — tell the
+      // caller WHICH name so the UI can show the conflict
+      return Response.json(
+        { error: r.error, ...(r.status === 409 ? { name: file.name } : {}) },
+        { status: r.status },
+      );
+    }
     return Response.json({ name: r.name });
   });
 

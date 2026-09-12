@@ -50,10 +50,15 @@ export const api = {
   inputList: (host) => req("GET", `/api/input-list/${encodeURIComponent(host)}`),
   // multipart upload — not the JSON helper: the browser sets the boundary.
   // Throws on !ok; the modal's per-file catch turns that into the error line.
+  // A 409 carries the conflicting name — the upload refused to overwrite it.
   uploadInput: (host, form) => fetch(BASE + `/api/upload-input/${encodeURIComponent(host)}`, { method: "POST", body: form })
-    .then((r) => {
-      if (!r.ok) throw new Error(`POST upload-input/${host}: ${r.status}`);
-      return r.json();
+    .then(async (r) => {
+      if (r.ok) return r.json();
+      if (r.status === 409) {
+        const d = await r.json().catch(() => ({}));
+        throw new Error(`already exists on the host: ${d.name ?? "name conflict"}`);
+      }
+      throw new Error(`POST upload-input/${host}: ${r.status}`);
     }),
   variationsRun: (payload) => postRaw("/api/plugins/variations/run", payload),
   // byte size isn't in every host's listing — a HEAD on the bytes route

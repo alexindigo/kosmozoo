@@ -257,9 +257,10 @@ export async function hostUploadInput(addr, filename, bytes) {
   if (basename(filename) !== filename || filename.includes("..")) {
     return { ok: false, status: 400, error: "bad filename" };
   }
+  // No overwrite flag: ComfyUI answers 409 when the name exists — an
+  // upload must never silently clobber the host's input dir.
   const form = new FormData();
   form.append("image", new Blob([bytes]), filename);
-  form.append("overwrite", "true");
   try {
     const r = await fetch(`http://${addr}/api/upload/image`, {
       method: "POST", body: form, signal: AbortSignal.timeout(30000),
@@ -316,16 +317,19 @@ export const proxyImage = hostReadBytes;
 // a file without it is impossible — the engine then only hides the image
 // (routes.mjs) and tidies Comfy's history on a best-effort basis.
 
-// Capability probe cache: addr -> boolean. Detection calls the delete
+// Capability probe cache: addr -> { v, t }. Detection calls the delete
 // endpoint with a name that can never exist — side-effect-free, and the
-// response shape is authoritative (hosts without the extension answer the
-// generic 405 / non-JSON).
+// response shape is authoritative. Only DEFINITIVE answers are cached
+// (true, or an HTTP 404 from the extension endpoint) for a 60 s TTL;
+// network errors and odd shapes fall through uncached, so a transient
+// outage no longer degrades deletes to "hide" for the process life.
+const ASSETS_PLUS_TTL_MS = 60_000;
 const assetsPlusCache = new Map();
 
 export async function hostHasAssetsPlus(addr) {
   if (isFolderHost(addr)) return false;
-  if (assetsPlusCache.has(addr)) return assetsPlusCache.get(addr);
-  let ok = false;
+  const c = assetsPlusCache.get(addr);
+  if (c && Date.now() - c.t < ASSETS_PLUS_TTL_MS) return c.v;
   try {
     const r = await fetch(`http://${addr}/api/assets_plus/output/delete`, {
       method: "POST",
@@ -335,11 +339,15 @@ export async function hostHasAssetsPlus(addr) {
     });
     if (r.ok) {
       const d = await r.json();
-      ok = Array.isArray(d?.removed) && Array.isArray(d?.failed);
+      if (Array.isArray(d?.removed) && Array.isArray(d?.failed)) {
+        assetsPlusCache.set(addr, { v: true, t: Date.now() });
+        return true;
+      }
+    } else if (r.status === 404) {
+      assetsPlusCache.set(addr, { v: false, t: Date.now() }); // no extension
     }
-  } catch { /* unreachable or no extension */ }
-  assetsPlusCache.set(addr, ok);
-  return ok;
+  } catch { /* unreachable — not definitive, not cached */ }
+  return false;
 }
 
 // Delete one image from its source. folder -> unlink (permanent);

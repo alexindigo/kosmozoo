@@ -3,13 +3,19 @@
 // last-host guard hold.
 
 import { assert, assertEquals } from "jsr:@std/assert";
-import { loadHosts, validateHost } from "../src/hosts.mjs";
+import { hostHasAssetsPlus, hostUploadInput, loadHosts, validateHost } from "../src/hosts.mjs";
 import { makeRouter } from "../src/routes.mjs";
 import { Settings } from "../src/settings.mjs";
 import { Store } from "../src/store.mjs";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+
+// Minimal fake ComfyUI on an ephemeral port (the t_revalidate pattern).
+function fakeComfy(handler) {
+  const srv = Deno.serve({ port: 0, hostname: "127.0.0.1" }, handler);
+  return { addr: `127.0.0.1:${srv.addr.port}`, close: () => srv.shutdown() };
+}
 
 Deno.test("hosts: env seeds first boot; settings win after that", async () => {
   const dir = await mkdtemp(join(tmpdir(), "kz-hosts-"));
@@ -63,4 +69,90 @@ Deno.test("hosts: POST adds + persists + probes; DELETE removes; last host guard
   const guard = await router.handle(new Request("http://x/api/hosts/a", { method: "DELETE" }));
   assertEquals(guard.status, 400); // last host
   await rm(dir, { recursive: true });
+});
+
+Deno.test("hosts: upload never sends overwrite; 409 surfaces the conflicting name", async () => {
+  let sawOverwrite = "unset";
+  const { addr, close } = fakeComfy(async (req) => {
+    if (new URL(req.url).pathname === "/api/upload/image") {
+      const form = await req.formData();
+      sawOverwrite = form.get("overwrite");
+      const name = form.get("image")?.name;
+      if (name === "taken.png") return new Response("exists", { status: 409 });
+      return Response.json({ name });
+    }
+    return new Response("nf", { status: 404 });
+  });
+  try {
+    // the host function passes the 409 through, without an overwrite flag
+    const r = await hostUploadInput(addr, "taken.png", new Uint8Array([1]));
+    assertEquals(r.ok, false);
+    assertEquals(r.status, 409);
+    assertEquals(sawOverwrite, null);
+
+    // the route answers 409 carrying the conflicting name
+    const dir = await mkdtemp(join(tmpdir(), "kz-upload-"));
+    const settings = await Settings.open(dir);
+    const store = await Store.open(dir, join(dir, "feedback.json"));
+    const router = makeRouter({ hosts: { c: addr }, store, settings, plugins: null });
+    const form = new FormData();
+    form.append("image", new Blob([new Uint8Array([1])], { type: "image/png" }), "taken.png");
+    const res = await router.handle(new Request("http://x/api/upload-input/c", { method: "POST", body: form }));
+    assertEquals(res.status, 409);
+    assertEquals((await res.json()).name, "taken.png");
+
+    // a free name still uploads fine
+    const ok = await hostUploadInput(addr, "free.png", new Uint8Array([2]));
+    assertEquals(ok, { ok: true, name: "free.png" });
+    await rm(dir, { recursive: true });
+  } finally {
+    await close();
+  }
+});
+
+Deno.test("hosts: assets-plus probe caches only definitive answers", async () => {
+  let probeCalls = 0;
+  let mode = "500";
+  const { addr, close } = fakeComfy((req) => {
+    if (new URL(req.url).pathname === "/api/assets_plus/output/delete") {
+      probeCalls++;
+      if (mode === "ok") return Response.json({ removed: [], failed: [] });
+      return new Response("no", { status: mode === "500" ? 500 : 404 });
+    }
+    return new Response("nf", { status: 404 });
+  });
+  try {
+    // non-definitive answers (500) are NOT cached: every call re-probes
+    assertEquals(await hostHasAssetsPlus(addr), false);
+    assertEquals(probeCalls, 1);
+    assertEquals(await hostHasAssetsPlus(addr), false);
+    assertEquals(probeCalls, 2);
+
+    // a definitive 404 (no extension) IS cached within the TTL
+    mode = "404";
+    assertEquals(await hostHasAssetsPlus(addr), false);
+    assertEquals(probeCalls, 3);
+    assertEquals(await hostHasAssetsPlus(addr), false);
+    assertEquals(probeCalls, 3);
+
+    // a real probe (200 with the delete-shaped body) is definitive: cached
+    // (fresh addr — the module-level cache is keyed by address)
+    let probeCalls2 = 0;
+    const { addr: addr2, close: close2 } = fakeComfy((req) => {
+      if (new URL(req.url).pathname === "/api/assets_plus/output/delete") {
+        probeCalls2++;
+        return Response.json({ removed: [], failed: [] });
+      }
+      return new Response("nf", { status: 404 });
+    });
+    try {
+      assertEquals(await hostHasAssetsPlus(addr2), true);
+      assertEquals(await hostHasAssetsPlus(addr2), true);
+      assertEquals(probeCalls2, 1);
+    } finally {
+      await close2();
+    }
+  } finally {
+    await close();
+  }
 });
