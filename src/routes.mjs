@@ -64,8 +64,7 @@ export function makeRouter(ctx) {
     }
     const err = validateHost(body.name, body.address);
     if (err) return Response.json({ error: err }, { status: 400 });
-    addHost(ctx.hosts, body.name, body.address);
-    await ctx.settings.set("core.hosts", "map", ctx.hosts);
+    addHost(ctx.store, ctx.hosts, body.name, body.address);
     return Response.json({ name: body.name, address: body.address, online: await probeHost(body.address) });
   });
 
@@ -74,8 +73,7 @@ export function makeRouter(ctx) {
     if (Object.keys(ctx.hosts).length === 1) {
       return Response.json({ error: "cannot remove the last host" }, { status: 400 });
     }
-    removeHost(ctx.hosts, name);
-    await ctx.settings.set("core.hosts", "map", ctx.hosts);
+    removeHost(ctx.store, ctx.hosts, name);
     return Response.json({ removed: name });
   });
 
@@ -87,7 +85,7 @@ export function makeRouter(ctx) {
     const list = await hostList(ctx.hosts[host]);
     // Hidden images (the delete fallback on hosts that can't delete files)
     // stay out of every listing — feed, lightbox and diff all walk this.
-    const hidden = new Set(ctx.settings.get("core.delete", "hidden", {})?.[host] ?? []);
+    const hidden = ctx.store.hiddenNames(host);
     const visible = hidden.size ? list.filter((f) => !hidden.has(f.name)) : list;
     const names = visible.map((f) => f.name);
     // The listing feeds the background walk (deduped + meta_fresh-filtered
@@ -136,11 +134,7 @@ export function makeRouter(ctx) {
       return Response.json({ deleted: true, mode: res.mode });
     }
 
-    const hiddenMap = ctx.settings.get("core.delete", "hidden", {}) ?? {};
-    const list = new Set(hiddenMap[host] ?? []);
-    list.add(filename);
-    hiddenMap[host] = [...list];
-    await ctx.settings.set("core.delete", "hidden", hiddenMap);
+    ctx.store.entryHide(host, filename);
     const historyCleared = isFolderHost(addr) ? false : await comfyHistoryDelete(addr, filename);
     return Response.json({ deleted: true, mode: "hide", historyCleared });
   });

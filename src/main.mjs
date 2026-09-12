@@ -9,7 +9,7 @@
 import { resolveStateDir, ensureStateDir, CorruptStateError } from "./state.mjs";
 import { Settings } from "./settings.mjs";
 import { Store } from "./store.mjs";
-import { parseHosts, loadHosts } from "./hosts.mjs";
+import { loadHosts } from "./hosts.mjs";
 import { makeRouter } from "./routes.mjs";
 import { serveStatic } from "./static.mjs";
 import { Scraper } from "./scraper.mjs";
@@ -29,6 +29,7 @@ try {
     settings.get("core", "feedbackPath", null)
       ?? Deno.env.get("KOZMOZOO_FEEDBACK")
       ?? `${Deno.env.get("HOME")}/Documents/kosmozoo_feedback.json`,
+    { settings },
   );
 } catch (e) {
   if (e instanceof CorruptStateError) {
@@ -39,7 +40,7 @@ try {
   }
   throw e;
 }
-const hosts = await loadHosts(settings); // env seeds first boot, then user-managed
+const hosts = await loadHosts(store); // env seeds first boot, then user-managed
 const downloadsDir = Deno.env.get("KOZMOZOO_DOWNLOADS")
   ?? `${Deno.env.get("HOME")}/Downloads`;
 

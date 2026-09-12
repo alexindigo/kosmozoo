@@ -23,15 +23,18 @@ Deno.test("metadata: version bumps on write; items are per-host, nulls skipped",
   const { store, router } = await ctx(dir);
   const r0 = await router.handle(new Request("http://x/api/metadata?host=local"));
   const b0 = await r0.json();
-  assertEquals(b0.v, 0);
+  assert(b0.v > 0); // kv-seeded monotonic version
   assertEquals(b0.items, {});
 
+  // meta is content state: the file is ingested (hashed) first, then written
+  await store.ingestFile("local", "a.png", "aa".repeat(32), 10);
+  await store.ingestFile("local", "b.png", "bb".repeat(32), 10);
   await store.metaPut("local", "a.png", { seed: 1 }, { ext: 1 });
-  await store.metaPut("local", "b.png", null, { nopng: true, ext: 1 }); // negative marker
+  await store.metaPut("local", "b.png", null, { ext: 1 }); // no meta (was: nopng)
   const b1 = await (await router.handle(new Request("http://x/api/metadata?host=local"))).json();
-  assertEquals(b1.v, 2); // one bump per write
+  assertEquals(b1.v, b0.v + 4); // one bump per write (2 ingests + 2 puts)
   assertEquals(b1.items["a.png"].seed, 1);
-  assertEquals(b1.items["b.png"], undefined); // nopng not leaked as meta
+  assertEquals(b1.items["b.png"], undefined); // no-meta rows don't leak
   await rm(dir, { recursive: true });
 });
 
@@ -94,13 +97,15 @@ Deno.test("metaState: pending vs extracted vs none", async () => {
   await mkdir(folder);
   // never touched: pending
   assertEquals(store.metaState("local", "nope.png").extracted, false);
-  // walked with meta: extracted + meta
-  store.metaPut("local", "has.png", { seed: 1 }, { ext: 1 });
+  // ingested + walked with meta: extracted + meta
+  await store.ingestFile("local", "has.png", "aa".repeat(32), 10);
+  await store.metaPut("local", "has.png", { seed: 1 }, { ext: 1 });
   const has = store.metaState("local", "has.png");
   assertEquals(has.extracted, true);
   assertEquals(has.meta.seed, 1);
-  // walked with nopng marker: extracted + none
-  store.metaPut("local", "bare.png", null, { nopng: true, ext: 1 });
+  // ingested + walked with no meta: extracted + none (was: nopng marker)
+  await store.ingestFile("local", "bare.png", "bb".repeat(32), 10);
+  await store.metaPut("local", "bare.png", null, { ext: 1 });
   const bare = store.metaState("local", "bare.png");
   assertEquals(bare.extracted, true);
   assertEquals(bare.meta, null);

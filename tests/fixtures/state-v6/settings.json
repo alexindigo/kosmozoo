@@ -1,0 +1,20 @@
+{
+  "version": 1,
+  "data": {
+    "core.hosts": {
+      "map": {
+        "a": "1.2.3.4:8188",
+        "b": "folder:/var/images"
+      }
+    },
+    "core.delete": {
+      "useAssetsPlus": true,
+      "hidden": {
+        "a": [
+          "ghost.png",
+          "shared.png"
+        ]
+      }
+    }
+  }
+}

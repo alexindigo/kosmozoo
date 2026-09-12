@@ -1,0 +1,18 @@
+{
+  "version": 1,
+  "data": {
+    "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa": {
+      "vote": "up",
+      "ref": "a:shared.png"
+    },
+    "a:old-key.png": {
+      "vote": "down",
+      "notes": {
+        "pos": "keep"
+      }
+    },
+    "orphan:gone.png": {
+      "favorite": true
+    }
+  }
+}

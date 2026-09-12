@@ -1,22 +1,23 @@
-// src/store.mjs — image metadata (sqlite) + judgment store (JSON).
+// src/store.mjs — the engine store: content / collection / entry (schema v7)
+// + the discovered-node registry + (until the judgments commit) the
+// feedback.json judgment document.
 //
-// Metadata lives in sqlite via jsr:@db/sqlite@0.13.0.  Schema evolution:
-//   v1 — metadata table keyed (host, filename)
-//   v2 — files + images tables, hash identity
-//   v3 — files.mtime: source mtime at ingestion (cache revalidation)
-//   v4 — node_registry (discovered node types → scalar input fields)
-//   v5 — input_cache: (host, filename) → content hash + source stamp
-//   v6 — files.stamp: opaque source-content stamp (folder mtime / ComfyUI
-//        ETag) — revalidation for every host kind, durable is gone
-// Judgments stay in the portable feedback.json (re-keyed to hash later).
+//   content    — what the bytes ARE: hash → meta, dims, workflow flag
+//   collection — a namespace of names: a ComfyUI host, a local folder
+//   entry      — collection:name → hash; carries the per-instance state
+//                (stamp, seen/ingested/gone) and judgment columns
+//
+// This module still exposes the old host-shaped surface (metaState/hashFor/
+// inputCache*/judgment*) — routes keep their shape until the collections
+// API lands; the methods below are the adapters over the three tables.
 
-import { join } from "node:path";
 import { Database } from "@db/sqlite";
+import { join } from "node:path";
 import { loadVersioned } from "./state.mjs";
 import { writeSerialized } from "./writer.mjs";
 import { hostKey, splitHostKey } from "./hosts.mjs";
 
-const SCHEMA_VERSION = 6;
+const SCHEMA_VERSION = 7;
 
 const MIGRATIONS = [
   // v0 → v1: create the single-table metadata store.
@@ -57,7 +58,6 @@ const MIGRATIONS = [
         updated_at   REAL NOT NULL
       );
     `);
-    // Seed files from existing metadata — hash still null until ingestion.
     const rows = db.prepare("SELECT host, filename FROM metadata").all();
     const ins = db.prepare("INSERT OR IGNORE INTO files (host, filename) VALUES (?, ?)");
     const txn = db.transaction((rs) => {
@@ -65,13 +65,11 @@ const MIGRATIONS = [
     });
     txn(rows);
   },
-  // v2 → v3: record the source mtime at ingestion so the cache can
-  // revalidate non-durable remotes (src/revalidate.mjs).
+  // v2 → v3: files.mtime for cache revalidation.
   (db) => {
     db.exec(`ALTER TABLE files ADD COLUMN mtime REAL`);
   },
-  // v3 → v4: the node registry — node types and their scalar input fields,
-  // discovered from extracted graphs (merged from each meta.nodes).
+  // v3 → v4: the node registry.
   (db) => {
     db.exec(`
       CREATE TABLE IF NOT EXISTS node_registry (
@@ -82,8 +80,7 @@ const MIGRATIONS = [
       );
     `);
   },
-  // v4 → v5: the input-file cache index — (host, filename) → content hash +
-  // source stamp, so input-dir images serve from the hash-addressed cache.
+  // v4 → v5: the input-file cache index.
   (db) => {
     db.exec(`
       CREATE TABLE IF NOT EXISTS input_cache (
@@ -95,17 +92,10 @@ const MIGRATIONS = [
       );
     `);
   },
-  // v5 → v6: files.stamp — an opaque source-content stamp (folder mtime
-  // string / ComfyUI ETag), so a filename whose content was REWRITTEN
-  // revalidates on every host kind. Backfilled from mtime; the mtime column
-  // stays (history) but revalidation reads only the stamp.
+  // v5 → v6: files.stamp (+ input_cache.stamp rebuild for the dev-state flavor).
   (db) => {
     db.exec(`ALTER TABLE files ADD COLUMN stamp TEXT`);
     db.exec(`UPDATE files SET stamp = CAST(mtime AS TEXT) WHERE mtime IS NOT NULL`);
-    // A DB that ran the pre-stamp flavor of v5 (never shipped — dev state
-    // only) has input_cache.mtime instead of .stamp. Rebuild the table and
-    // backfill the stamp the same way (comfy rows had NULL mtime — they
-    // re-warm on next access, like a cache miss).
     const cols = db.prepare("PRAGMA table_info(input_cache)").all().map((c) => c.name);
     if (cols.includes("mtime") && !cols.includes("stamp")) {
       db.exec(`
@@ -123,26 +113,59 @@ const MIGRATIONS = [
       `);
     }
   },
+  // v6 → v7: content / collection / entry. The DATA fold lives in
+  // Store.#foldV7 (it needs the settings document for hosts + hidden).
+  (db) => {
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS content (
+        hash          TEXT PRIMARY KEY,
+        width         INTEGER,
+        height        INTEGER,
+        meta          TEXT,
+        has_workflow  INTEGER NOT NULL DEFAULT 0,
+        ext           INTEGER NOT NULL DEFAULT 0,
+        bytes         INTEGER,
+        updated_at    REAL NOT NULL
+      );
+      CREATE TABLE IF NOT EXISTS collection (
+        id            TEXT PRIMARY KEY,
+        kind          TEXT NOT NULL,        -- 'comfy' | 'folder' | 'virtual'
+        address       TEXT,                 -- host:port | /abs/path | null
+        link          TEXT,                 -- virtual → backing collection (future)
+        created_at    REAL NOT NULL
+      );
+      CREATE TABLE IF NOT EXISTS entry (
+        collection    TEXT NOT NULL REFERENCES collection(id) ON DELETE CASCADE,
+        name          TEXT NOT NULL,
+        kind          TEXT NOT NULL DEFAULT 'output',  -- 'output' | 'input'
+        hash          TEXT REFERENCES content(hash),   -- null until ingested
+        stamp         TEXT,
+        state         TEXT NOT NULL DEFAULT 'seen',    -- seen | ingested | gone
+        vote          TEXT, favorite INTEGER, notes TEXT, hidden INTEGER,
+        plugin_fields TEXT,
+        first_seen    REAL NOT NULL, last_seen REAL NOT NULL,
+        PRIMARY KEY (collection, name, kind)
+      );
+      CREATE INDEX IF NOT EXISTS entry_by_hash ON entry(hash);
+      CREATE TABLE IF NOT EXISTS kv (k TEXT PRIMARY KEY, v TEXT);
+    `);
+  },
 ];
+
+const kindFor = (address) => address?.startsWith("folder:") ? "folder" : "comfy";
 
 export class Store {
   #db;
   #feedbackPath;
   #feedback;
-  #metaVersion = 0;
 
-  static async open(stateDir, feedbackPath) {
+  static async open(stateDir, feedbackPath, { settings } = {}) {
     const s = new Store();
     const dbPath = join(stateDir, "metadata.db");
     s.#db = new Database(dbPath);
     s.#db.exec("PRAGMA journal_mode = WAL");
     s.#runMigrations();
-
-    // One-time migration from the old JSON metadata store if metadata is empty.
-    const count = s.#db.prepare("SELECT COUNT(*) FROM metadata").value()[0];
-    if (count === 0) {
-      await s.#migrateFromJson(join(stateDir, "metadata.json"));
-    }
+    await s.#foldV7(settings);
 
     s.#feedbackPath = feedbackPath;
     s.#feedback = await loadVersioned(feedbackPath, {
@@ -165,48 +188,129 @@ export class Store {
     }
   }
 
-  // One-shot: read old metadata.json versioned document, insert into sqlite.
-  async #migrateFromJson(jsonPath) {
-    const { readFile } = await import("node:fs/promises");
-    let doc;
-    try {
-      doc = JSON.parse(await readFile(jsonPath, "utf-8"));
-    } catch {
-      return; // no old store
-    }
-    const insert = this.#db.prepare(
-      "INSERT OR REPLACE INTO metadata (host, filename, meta, source, has_workflow, nopng, ext, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)"
-    );
-    const txn = this.#db.transaction((rows) => {
-      for (const [key, v] of rows) {
-        const [host, filename] = splitHostKey(key);
-        insert.run(
-          host, filename,
-          v.meta ? JSON.stringify(v.meta) : null,
-          v.source ?? null,
-          v.hasWorkflow ? 1 : 0,
-          v.nopng ? 1 : 0,
-          v.ext ?? 0,
-          v.updatedAt ?? Date.now()
-        );
+  // --- the v6→v7 data fold -------------------------------------------------
+  // metadata/files/images/input_cache rows fold into content+entry; the
+  // settings hosts map folds into collection; the hidden lists fold onto
+  // entries. Old tables are dropped at the end. Idempotent via kv flag, so
+  // a crash mid-fold re-runs safely (all steps are INSERT OR IGNORE/UPDATE).
+  async #foldV7(settings) {
+    if (this.#kvGet("fold.v7") === "done") return;
+    const now = Date.now();
+    const txn = this.#db.transaction(() => {
+      const d = this.#db;
+      // collections from the settings hosts map
+      const map = settings?.get("core.hosts", "map", {}) ?? {};
+      for (const [name, address] of Object.entries(map)) {
+        d.prepare("INSERT OR IGNORE INTO collection (id, kind, address, created_at) VALUES (?, ?, ?, ?)")
+          .run(name, kindFor(address), address, now);
       }
+      // any files-table host the map doesn't know gets an offline placeholder
+      d.exec(`
+        INSERT OR IGNORE INTO collection (id, kind, address, created_at)
+          SELECT DISTINCT host, 'comfy', NULL, ${now} FROM files;
+      `);
+      // content: ingested rows win; address-keyed rows only fill gaps via
+      // their files.hash. nopng rows become nothing (a fresh scrape decides).
+      d.exec(`
+        INSERT OR IGNORE INTO content (hash, meta, has_workflow, ext, updated_at)
+          SELECT hash, meta, has_workflow, ext, updated_at FROM images WHERE nopng = 0;
+        INSERT OR IGNORE INTO content (hash, meta, has_workflow, ext, updated_at)
+          SELECT f.hash, m.meta, m.has_workflow, m.ext, m.updated_at
+          FROM metadata m JOIN files f ON f.host = m.host AND f.filename = m.filename
+          WHERE m.nopng = 0 AND f.hash IS NOT NULL;
+        UPDATE content SET bytes = (SELECT MAX(size) FROM files WHERE files.hash = content.hash);
+        -- every entry.hash must reference a content row (FK): placeholder
+        -- rows (ext=0 → stale → re-walked) for hashes whose meta was dropped
+        INSERT OR IGNORE INTO content (hash, updated_at)
+          SELECT hash, ${now} FROM files WHERE hash IS NOT NULL;
+        INSERT OR IGNORE INTO content (hash, updated_at)
+          SELECT hash, ${now} FROM input_cache;
+        INSERT OR IGNORE INTO entry (collection, name, kind, hash, stamp, state, first_seen, last_seen)
+          SELECT host, filename, 'output', hash, stamp,
+                 CASE WHEN hash IS NULL THEN 'seen' ELSE 'ingested' END, ${now}, ${now} FROM files;
+        INSERT OR IGNORE INTO entry (collection, name, kind, hash, stamp, state, first_seen, last_seen)
+          SELECT host, filename, 'input', hash, stamp, 'ingested', ${now}, ${now} FROM input_cache;
+        DROP TABLE metadata; DROP TABLE files; DROP TABLE images; DROP TABLE input_cache;
+      `);
+      // the hidden lists land on entries (created when the name is new)
+      const hidden = settings?.get("core.delete", "hidden", {}) ?? {};
+      for (const [host, names] of Object.entries(hidden)) {
+        for (const name of names) {
+          d.prepare("INSERT OR IGNORE INTO entry (collection, name, kind, state, first_seen, last_seen) VALUES (?, ?, 'output', 'seen', ?, ?)")
+            .run(host, name, now, now);
+          d.prepare("UPDATE entry SET hidden = 1 WHERE collection = ? AND name = ? AND kind = 'output'")
+            .run(host, name);
+        }
+      }
+      this.#kvSet("meta_version", String(Math.floor(now)));
+      this.#kvSet("fold.v7", "done");
     });
-    txn(Object.entries(doc.data ?? {}));
-    this.#metaVersion = count;
-    // Seed files table too.
-    this.#runMigrations();
+    txn();
+    // settings namespaces die with the fold
+    if (settings?.get("core.hosts", "map", null)) {
+      // no bulk-delete API: drop the keys one by one
+      for (const k of Object.keys(settings.getNs("core.hosts"))) {
+        await settings.set("core.hosts", k, null);
+      }
+    }
+    if (settings?.get("core.delete", "hidden", null)) {
+      await settings.set("core.delete", "hidden", null);
+    }
+  }
+
+  // --- kv -------------------------------------------------------------------
+
+  #kvGet(k) {
+    return this.#db.prepare("SELECT v FROM kv WHERE k = ?").value(k)?.[0] ?? null;
+  }
+
+  #kvSet(k, v) {
+    this.#db.prepare("INSERT INTO kv (k, v) VALUES (?, ?) ON CONFLICT(k) DO UPDATE SET v = excluded.v").run(k, v);
+  }
+
+  get metaVersion() {
+    return Number(this.#kvGet("meta_version") ?? 0);
+  }
+
+  // bumped in the same transaction style as the meta write it versions
+  #bumpMeta() {
+    this.#db.exec("UPDATE kv SET v = CAST(CAST(v AS INTEGER) + 1 AS TEXT) WHERE k = 'meta_version'");
+  }
+
+  // --- collections ------------------------------------------------------------
+
+  collections() {
+    return this.#db.prepare("SELECT id, kind, address, link, created_at FROM collection ORDER BY id").all();
+  }
+
+  collectionGet(id) {
+    return this.#db.prepare("SELECT id, kind, address, link, created_at FROM collection WHERE id = ?").get(id) ?? null;
+  }
+
+  // { id: address } — the shape the old hosts map had (runtime adapter).
+  collectionMap() {
+    const out = {};
+    for (const r of this.collections()) if (r.address) out[r.id] = r.address;
+    return out;
+  }
+
+  collectionAdd(id, address) {
+    this.#db.prepare(
+      "INSERT INTO collection (id, kind, address, created_at) VALUES (?, ?, ?, ?) ON CONFLICT(id) DO UPDATE SET kind = excluded.kind, address = excluded.address",
+    ).run(id, kindFor(address), address, Date.now());
+  }
+
+  collectionRemove(id) {
+    this.#db.prepare("DELETE FROM collection WHERE id = ?").run(id);
   }
 
   // --- node registry (discovered node types → their scalar input fields) ----
 
-  // Merge one image's nodes into the registry. Keys accumulate over time;
-  // the latest type for a key wins (numbers and strings collide rarely, and
-  // the newest observation is the fairest one). Title likewise.
   #mergeNodeRegistry(nodes) {
     if (!Array.isArray(nodes)) return;
     const get = this.#db.prepare("SELECT title, inputs FROM node_registry WHERE class_type = ?");
     const put = this.#db.prepare(
-      "INSERT INTO node_registry (class_type, title, inputs, updated_at) VALUES (?, ?, ?, ?) ON CONFLICT(class_type) DO UPDATE SET title = excluded.title, inputs = excluded.inputs, updated_at = excluded.updated_at"
+      "INSERT INTO node_registry (class_type, title, inputs, updated_at) VALUES (?, ?, ?, ?) ON CONFLICT(class_type) DO UPDATE SET title = excluded.title, inputs = excluded.inputs, updated_at = excluded.updated_at",
     );
     for (const n of nodes) {
       if (!n?.type || !n.inputs) continue;
@@ -215,7 +319,7 @@ export class Store {
       try { existing = JSON.parse(row?.[1] ?? "{}") ?? {}; } catch { existing = {}; }
       const inputs = { ...existing };
       for (const [k, v] of Object.entries(n.inputs)) inputs[k] = typeof v;
-      const title = n.title ?? row?.[0] ?? null; // instance title wins, else keep
+      const title = n.title ?? row?.[0] ?? null;
       put.run(n.type, title, JSON.stringify(inputs), Date.now());
     }
   }
@@ -228,31 +332,44 @@ export class Store {
     return out;
   }
 
-  // --- input-file cache index -----------------------------------------------
-  //
-  // Maps (host, filename) → content hash + source stamp for input-dir files,
-  // so the input-bytes route serves from the hash-addressed cache. Folder
-  // hosts compare the stamp inline (local stat is cheap); ComfyUI rows
-  // revalidate by debounced async stamp check (src/revalidate.mjs).
+  // Entries can only exist under a real collection (FK). Writers call this
+  // first: an unregistered collection gets an offline placeholder row, which
+  // collectionAdd later corrects (kind/address ON CONFLICT update).
+  #ensureCollection(id) {
+    this.#db.prepare(
+      "INSERT OR IGNORE INTO collection (id, kind, address, created_at) VALUES (?, 'comfy', NULL, ?)",
+    ).run(id, Date.now());
+  }
+
+  // --- input-file cache index (entry kind='input' adapter) -------------------
 
   inputCacheGet(host, filename) {
     const row = this.#db.prepare(
-      "SELECT hash, stamp FROM input_cache WHERE host = ? AND filename = ?"
+      "SELECT hash, stamp FROM entry WHERE collection = ? AND name = ? AND kind = 'input'",
     ).value(host, filename);
     return row ? { hash: row[0], stamp: row[1] } : null;
   }
 
   inputCachePut(host, filename, hash, stamp) {
+    this.#ensureCollection(host);
+    const now = Date.now();
+    // the entry's hash must reference a content row (FK) — placeholder
+    // (ext=0, no meta) is fine: input files have no extractor output here
     this.#db.prepare(
-      "INSERT INTO input_cache (host, filename, hash, stamp) VALUES (?, ?, ?, ?) ON CONFLICT(host, filename) DO UPDATE SET hash = excluded.hash, stamp = excluded.stamp"
-    ).run(host, filename, hash, stamp);
+      "INSERT OR IGNORE INTO content (hash, updated_at) VALUES (?, ?)",
+    ).run(hash, now);
+    this.#db.prepare(
+      `INSERT INTO entry (collection, name, kind, hash, stamp, state, first_seen, last_seen)
+       VALUES (?, ?, 'input', ?, ?, 'ingested', ?, ?)
+       ON CONFLICT(collection, name, kind) DO UPDATE SET hash = excluded.hash, stamp = excluded.stamp, state = 'ingested', last_seen = excluded.last_seen`,
+    ).run(host, filename, hash, stamp, now, now);
   }
 
-  // --- hash identity -------------------------------------------------------
+  // --- hash identity (entry kind='output' adapters) -------------------------
 
   hashFor(host, filename) {
     const row = this.#db.prepare(
-      "SELECT hash FROM files WHERE host = ? AND filename = ?"
+      "SELECT hash FROM entry WHERE collection = ? AND name = ? AND kind = 'output'",
     ).value(host, filename);
     return row ? row[0] : null;
   }
@@ -260,161 +377,155 @@ export class Store {
   // Hash + source-content stamp as recorded at ingestion (revalidation input).
   fileInfo(host, filename) {
     const row = this.#db.prepare(
-      "SELECT hash, stamp FROM files WHERE host = ? AND filename = ?"
+      "SELECT hash, stamp FROM entry WHERE collection = ? AND name = ? AND kind = 'output'",
     ).value(host, filename);
     return row ? { hash: row[0], stamp: row[1] } : null;
   }
 
-  // Called when bytes are ingested: record the hash and move metadata.
-  // opts.stamp — the source-content stamp at ingestion (null when unknown;
-  // the next revalidation self-heals it).
+  // Called when bytes are ingested: the entry points at the (new) hash.
+  // opts.stamp — the source-content stamp at ingestion (null when unknown).
   // opts.changed — this is a RE-ingest of a file whose content changed:
-  // legacy metadata belongs to the OLD bytes, so it must not ride along.
+  // the OLD hash's meta belongs to the old bytes; it is dropped only when
+  // no other entry still references it (shared content keeps its meta).
   async ingestFile(host, filename, hash, size, { stamp = null, changed = false } = {}) {
+    this.#ensureCollection(host);
+    const now = Date.now();
+    const old = this.#db.prepare(
+      "SELECT hash FROM entry WHERE collection = ? AND name = ? AND kind = 'output'",
+    ).value(host, filename)?.[0] ?? null;
+
+    // the content row exists as soon as the bytes do (meta filled by metaPut;
+    // inserted BEFORE the entry — entry.hash references content.hash)
     this.#db.prepare(
-      "INSERT INTO files (host, filename, hash, size, stamp) VALUES (?, ?, ?, ?, ?) ON CONFLICT(host, filename) DO UPDATE SET hash = excluded.hash, size = excluded.size, stamp = excluded.stamp"
-    ).run(host, filename, hash, size, stamp);
+      `INSERT INTO content (hash, bytes, updated_at) VALUES (?, ?, ?)
+       ON CONFLICT(hash) DO UPDATE SET bytes = excluded.bytes`,
+    ).run(hash, size, now);
 
-    if (changed) {
-      // Drop the legacy row; metaGet must not fall back to old-bytes meta.
-      this.#db.prepare(
-        "DELETE FROM metadata WHERE host = ? AND filename = ?"
-      ).run(host, filename);
-    } else {
-      // Move existing metadata from the legacy table to the images table.
-      const metaRow = this.#db.prepare(
-        "SELECT meta, source, has_workflow, nopng, ext, updated_at FROM metadata WHERE host = ? AND filename = ?"
-      ).value(host, filename);
-      if (metaRow) {
-        this.#db.prepare(
-          `INSERT OR IGNORE INTO images (hash, meta, source, has_workflow, nopng, ext, updated_at)
-           VALUES (?, ?, ?, ?, ?, ?, ?)`
-        ).run(hash, metaRow[0], metaRow[1], metaRow[2], metaRow[3], metaRow[4], metaRow[5]);
-      }
+    this.#db.prepare(
+      `INSERT INTO entry (collection, name, kind, hash, stamp, state, first_seen, last_seen)
+       VALUES (?, ?, 'output', ?, ?, 'ingested', ?, ?)
+       ON CONFLICT(collection, name, kind) DO UPDATE SET hash = excluded.hash, stamp = excluded.stamp, state = 'ingested', last_seen = excluded.last_seen`,
+    ).run(host, filename, hash, stamp, now, now);
+
+    if (changed && old && old !== hash) {
+      const refs = this.#db.prepare("SELECT COUNT(*) FROM entry WHERE hash = ?").value(old)[0];
+      if (refs === 0) this.#db.prepare("DELETE FROM content WHERE hash = ?").run(old);
     }
-
-    this.#metaVersion++;
+    this.#bumpMeta();
   }
 
   // Same content, newer source stamp (a touch, or a new ETag over identical
   // bytes): refresh the stamp only.
   touchFileStamp(host, filename, stamp) {
     this.#db.prepare(
-      "UPDATE files SET stamp = ? WHERE host = ? AND filename = ?"
+      "UPDATE entry SET stamp = ? WHERE collection = ? AND name = ? AND kind = 'output'",
     ).run(stamp, host, filename);
+  }
+
+  // --- hidden (delete fallback on hosts that can't delete) ----------------
+
+  // Names hidden from every listing of one collection.
+  hiddenNames(collection) {
+    return new Set(
+      this.#db.prepare(
+        "SELECT name FROM entry WHERE collection = ? AND kind = 'output' AND hidden = 1",
+      ).all(collection).map((r) => r.name),
+    );
+  }
+
+  // Hide one entry (the fallback delete on no-delete hosts).
+  entryHide(collection, name) {
+    this.#ensureCollection(collection);
+    const now = Date.now();
+    this.#db.prepare(
+      "INSERT OR IGNORE INTO entry (collection, name, kind, state, first_seen, last_seen) VALUES (?, ?, 'output', 'seen', ?, ?)",
+    ).run(collection, name, now, now);
+    this.#db.prepare(
+      "UPDATE entry SET hidden = 1, last_seen = ? WHERE collection = ? AND name = ? AND kind = 'output'",
+    ).run(now, collection, name);
+  }
+
+  // The source lost the file: an entry state, never content state (C5).
+  entryGone(host, filename) {
+    this.#ensureCollection(host);
+    const now = Date.now();
+    this.#db.prepare(
+      "INSERT OR IGNORE INTO entry (collection, name, kind, state, first_seen, last_seen) VALUES (?, ?, 'output', 'seen', ?, ?)",
+    ).run(host, filename, now, now);
+    this.#db.prepare(
+      "UPDATE entry SET state = 'gone', last_seen = ? WHERE collection = ? AND name = ? AND kind = 'output'",
+    ).run(now, host, filename);
   }
 
   // --- metadata (sqlite-backed, re-derivable) ----------------------------
 
   // extraction state for one image: pending (not walked yet) vs done — done
-  // splits into has-meta and none (nopng marker: no PNG chunk embedded)
+  // splits into has-meta and none (content row with NULL meta ≈ old nopng)
   metaState(host, filename) {
-    const hash = this.hashFor(host, filename);
-    if (hash) {
-      const row = this.#db.prepare("SELECT meta, nopng FROM images WHERE hash = ?").value(hash);
-      if (row) {
-        return { extracted: true, nopng: !!row[1], meta: row[0] ? JSON.parse(row[0]) : null };
-      }
-    }
-    const row = this.#db.prepare("SELECT meta, nopng FROM metadata WHERE host = ? AND filename = ?").value(host, filename);
+    const row = this.#db.prepare(
+      `SELECT c.meta FROM entry e JOIN content c ON c.hash = e.hash
+       WHERE e.collection = ? AND e.name = ? AND e.kind = 'output'`,
+    ).value(host, filename);
     if (row) {
-      return { extracted: true, nopng: !!row[1], meta: row[0] ? JSON.parse(row[0]) : null };
+      return { extracted: true, nopng: row[0] === null, meta: row[0] ? JSON.parse(row[0]) : null };
     }
     return { extracted: false, nopng: false, meta: null };
   }
 
   metaGet(host, filename) {
-    // Prefer images via hash if ingested; fall back to metadata table.
-    const hash = this.hashFor(host, filename);
-    if (hash) {
-      const row = this.#db.prepare(
-        "SELECT meta FROM images WHERE hash = ?"
-      ).value(hash);
-      if (row && row[0] !== null) {
-        try { return JSON.parse(row[0]); } catch { return null; }
-      }
-    }
     const row = this.#db.prepare(
-      "SELECT meta FROM metadata WHERE host = ? AND filename = ?"
+      `SELECT c.meta FROM entry e JOIN content c ON c.hash = e.hash
+       WHERE e.collection = ? AND e.name = ? AND e.kind = 'output'`,
     ).value(host, filename);
     if (!row || row[0] === null) return null;
     try { return JSON.parse(row[0]); } catch { return null; }
   }
 
-  async metaPut(host, filename, meta, { source = "history", hasWorkflow = false, nopng = false, ext = 1 } = {}) {
-    const metaJson = meta ? JSON.stringify(meta) : null;
-    if (meta) this.#mergeNodeRegistry(meta.nodes);
-
-    // If the file has been hashed, write to images; otherwise to metadata.
+  // Writes extractor output for an already-ingested file. The walk ingests
+  // first (D2), so there is always a hash — meta is content state.
+  async metaPut(host, filename, meta, { hasWorkflow = false, ext = 1 } = {}) {
     const hash = this.hashFor(host, filename);
-    if (hash) {
-      this.#db.prepare(
-        `INSERT OR REPLACE INTO images (hash, meta, source, has_workflow, nopng, ext, updated_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?)`
-      ).run(hash, metaJson, source, hasWorkflow ? 1 : 0, nopng ? 1 : 0, ext, Date.now());
-    } else {
-      this.#db.prepare(
-        `INSERT OR REPLACE INTO metadata (host, filename, meta, source, has_workflow, nopng, ext, updated_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
-      ).run(host, filename, metaJson, source, hasWorkflow ? 1 : 0, nopng ? 1 : 0, ext, Date.now());
-    }
-    this.#metaVersion++;
+    if (!hash) return;
+    if (meta) this.#mergeNodeRegistry(meta.nodes);
+    this.#db.prepare(
+      `INSERT INTO content (hash, meta, has_workflow, ext, updated_at)
+       VALUES (?, ?, ?, ?, ?)
+       ON CONFLICT(hash) DO UPDATE SET meta = excluded.meta, has_workflow = excluded.has_workflow,
+         ext = excluded.ext, updated_at = excluded.updated_at`,
+    ).run(hash, meta ? JSON.stringify(meta) : null, hasWorkflow ? 1 : 0, ext, Date.now());
+    this.#bumpMeta();
   }
 
   metaCount() {
-    return this.#db.prepare("SELECT COUNT(*) FROM metadata").value()[0];
+    return this.#db.prepare("SELECT COUNT(*) FROM content").value()[0];
   }
-
-  get metaVersion() { return this.#metaVersion; }
 
   metaForHost(host) {
     const out = {};
-    // Collect from images via files where hash is known.
-    const ing = this.#db.prepare(
-      `SELECT i.meta, f.filename FROM images i
-       JOIN files f ON f.hash = i.hash
-       WHERE f.host = ? AND i.meta IS NOT NULL`
-    ).all(host);
-    for (const row of ing) {
-      try { out[row.filename] = JSON.parse(row.meta); } catch { /* skip corrupt */ }
-    }
-    // Collect remaining from metadata where hash is still null.
-    const leg = this.#db.prepare(
-      `SELECT m.filename, m.meta FROM metadata m
-       LEFT JOIN files f ON f.host = m.host AND f.filename = m.filename
-       WHERE m.host = ? AND m.meta IS NOT NULL AND f.hash IS NULL`
-    ).all(host);
-    for (const row of leg) {
-      try { out[row.filename] = JSON.parse(row.meta); } catch { /* skip corrupt */ }
+    for (const row of this.#db.prepare(
+      `SELECT e.name, c.meta FROM entry e JOIN content c ON c.hash = e.hash
+       WHERE e.collection = ? AND e.kind = 'output' AND c.meta IS NOT NULL`,
+    ).all(host)) {
+      try { out[row.name] = JSON.parse(row.meta); } catch { /* skip corrupt */ }
     }
     return out;
   }
 
   metaFresh(host, minExt) {
     const out = new Set();
-    // From images (hashed).
-    const ing = this.#db.prepare(
-      `SELECT f.filename FROM images i
-       JOIN files f ON f.hash = i.hash
-       WHERE f.host = ? AND (i.nopng = 1 OR i.ext >= ?)`
-    ).all(host, minExt);
-    for (const row of ing) out.add(row.filename);
-    // From metadata (unhashed).
-    const leg = this.#db.prepare(
-      `SELECT m.filename FROM metadata m
-       LEFT JOIN files f ON f.host = m.host AND f.filename = m.filename
-       WHERE m.host = ? AND (m.nopng = 1 OR m.ext >= ?) AND f.hash IS NULL`
-    ).all(host, minExt);
-    for (const row of leg) out.add(row.filename);
+    for (const row of this.#db.prepare(
+      `SELECT e.name FROM entry e JOIN content c ON c.hash = e.hash
+       WHERE e.collection = ? AND e.kind = 'output' AND c.ext >= ?`,
+    ).all(host, minExt)) {
+      out.add(row.name);
+    }
     return out;
   }
 
-  // --- judgments (JSON-backed, irreplaceable — keyed by hash) ---
+  // --- judgments (JSON-backed, keyed by hash — entry columns land next) ----
 
-  // Resolve (host, filename) to the best judgment key.  If the file has been
-  // hashed and an entry exists under that hash, use the hash.  If not, but
-  // an entry exists under the legacy host:filename key, use that.  Otherwise
-  // prefer the hash key for writes and fall back to the legacy key for reads.
+  // Resolve (host, filename) to the best judgment key: the content hash when
+  // known, else the legacy host:filename key when an entry exists under it.
   #judgmentKey(host, filename) {
     const hash = this.hashFor(host, filename);
     if (hash && this.#feedback.data[hash]) return [hash, true];
@@ -444,14 +555,11 @@ export class Store {
       if (value === null || value === undefined || value === "") delete entry[field];
       else entry[field] = value;
     }
-    // If we just created an entry under a hash key and there was a legacy
-    // entry, remove the legacy one (migration happens lazily on first write).
     if (isHash) {
       const legacy = hostKey(host, filename);
       if (this.#feedback.data[legacy] && key !== legacy) {
         delete this.#feedback.data[legacy];
       }
-      // Stamp the ref field so the portable file is human-readable.
       entry.ref = legacy;
     }
     if (Object.keys(entry).length === 0) delete this.#feedback.data[key];
@@ -468,19 +576,17 @@ export class Store {
 
     for (const [key, entry] of Object.entries(this.#feedback.data)) {
       if (!key.includes(":")) {
-        // Already a hash key (or other non-host:filename key) — keep.
         newData[key] = entry;
         continue;
       }
-      // Looks like a legacy "host:filename" key.  Try to resolve a hash.
       const [host, filename] = splitHostKey(key);
-      // Build a cache of host lookups so we only query files once per host.
+      // Resolve via the entry table once per collection.
       if (!hashes.has(host)) {
         const rows = this.#db.prepare(
-          "SELECT filename, hash FROM files WHERE host = ? AND hash IS NOT NULL"
+          "SELECT name, hash FROM entry WHERE collection = ? AND kind = 'output' AND hash IS NOT NULL",
         ).all(host);
         const m = new Map();
-        for (const row of rows) m.set(row.filename, row.hash);
+        for (const row of rows) m.set(row.name, row.hash);
         hashes.set(host, m);
       }
       const hash = hashes.get(host).get(filename);
@@ -489,8 +595,7 @@ export class Store {
         newData[hash] = entry;
         changed = true;
       } else {
-        // File gone — keep as orphan under the legacy key.
-        newData[key] = entry;
+        newData[key] = entry; // file gone — orphan under the legacy key
       }
     }
 

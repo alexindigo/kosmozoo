@@ -155,10 +155,10 @@ Deno.test("changed re-ingest drops legacy metadata (belongs to old bytes)", asyn
   await writeFile(join(folder, "img.png"), "v1 bytes");
   await ingest.ensure("h", "img.png");
 
-  // A legacy-table row: metaPut writes to the metadata table while the file
-  // has no hash. First ingestion moves it onto the hash; a later CHANGE must
-  // drop it, not carry old-bytes meta onto the new hash.
+  // Meta lives on content (hash): a later CHANGE remaps the entry to a new
+  // hash whose content row carries no meta — old-bytes meta must not leak.
   await writeFile(join(folder, "legacy.png"), "legacy v1");
+  await ingest.ensure("h", "legacy.png");
   await store.metaPut("h", "legacy.png", { seed: 111 }, { ext: 1 });
   assertEquals(store.metaGet("h", "legacy.png").seed, 111);
   await ingest.ensure("h", "legacy.png");

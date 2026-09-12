@@ -28,3 +28,4 @@ tests/.tmp-comfy/
 tests/.tmp-race/
 tests/e2e/kz-*.probe.cjs
 client-solid-dist/
+!tests/fixtures/state-v6/*

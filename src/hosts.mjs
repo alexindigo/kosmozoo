@@ -7,16 +7,16 @@
 import { readdir, readFile, stat, unlink } from "node:fs/promises";
 import { basename, join } from "node:path";
 
-// Hosts are user config and change over time (spec §5): env seeds the map
-// on first boot, then it is user-managed and persisted in settings
-// (core.hosts.map). The returned object is mutated in place so every holder
-// of the reference (router ctx, scraper) sees changes.
-export async function loadHosts(settings, env = Deno.env.toObject()) {
-  const existing = settings.get("core.hosts", "map", null);
-  if (existing && Object.keys(existing).length) return existing;
+// Hosts are user config and change over time (spec §5): env seeds the
+// collection table on first boot, then it is user-managed (POST/DELETE
+// /api/hosts). The returned object is the live { name: address } map —
+// mutated in place so every holder (router ctx, scraper) sees changes.
+export async function loadHosts(store, env = Deno.env.toObject()) {
+  const existing = store.collectionMap();
+  if (Object.keys(existing).length) return existing;
   const seed = parseHosts(env);
-  await settings.set("core.hosts", "map", seed);
-  return seed;
+  for (const [name, address] of Object.entries(seed)) store.collectionAdd(name, address);
+  return store.collectionMap();
 }
 
 const NAME_RE = /^[\w][\w.-]*$/;
@@ -67,11 +67,15 @@ export function validateHost(name, address) {
   return null;
 }
 
-export function addHost(map, name, address) {
+// Registry mutations persist to the collection table AND patch the live map
+// (the two callers' contract: routes mutate ctx.hosts in place).
+export function addHost(store, map, name, address) {
+  store.collectionAdd(name, address);
   map[name] = address;
 }
 
-export function removeHost(map, name) {
+export function removeHost(store, map, name) {
+  store.collectionRemove(name);
   delete map[name];
 }
 

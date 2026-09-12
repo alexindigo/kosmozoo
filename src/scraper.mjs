@@ -8,7 +8,8 @@
 // Must run headless — extraction never requires an open browser.
 
 import { metaFromPngBytes } from "./extractor.mjs";
-import { hostReadBytes } from "./hosts.mjs";
+import { hostReadBytes, hostStamp } from "./hosts.mjs";
+import { sha256, cachePut } from "./cache.mjs";
 
 const INTER_FILE_DELAY = 100;   // ms between file fetches
 const MAX_BACKOFF = 30_000;     // backoff cap
@@ -69,6 +70,13 @@ export class Scraper {
     if (r.status === 404) return { permanent: true }; // gone from the host — never retry
     if (r.status !== 200) throw new Error(`status ${r.status}`);
     const buf = new Uint8Array(await new Response(r.body).arrayBuffer());
+    // D2: the walk already reads full bytes — hash + cache + index them, so
+    // meta lands on content (keyed by hash), never on an address-keyed row.
+    const hash = await sha256(buf);
+    await cachePut(hash, buf);
+    await this.store.ingestFile(host, name, hash, buf.length, {
+      stamp: await hostStamp(addr, name),
+    });
     const [meta, hasWorkflow] = await metaFromPngBytes(buf);
     return { meta, hasWorkflow };
   }
@@ -106,11 +114,13 @@ export class Scraper {
             const { meta, hasWorkflow, permanent } = await self.#fetchMeta(host, name);
             errors.set(host, 0);
             if (permanent) {
-              await self.store.metaPut(host, name, null, { source: "png", nopng: true, ext: EXTRACTOR_VERSION });
+              // 404 ⇒ entry state 'gone', never a content marker (C5)
+              await self.store.entryGone(host, name);
             } else if (meta) {
-              await self.store.metaPut(host, name, meta, { source: "png", hasWorkflow, ext: EXTRACTOR_VERSION });
+              await self.store.metaPut(host, name, meta, { hasWorkflow, ext: EXTRACTOR_VERSION });
             } else {
-              await self.store.metaPut(host, name, null, { source: "png", nopng: true, ext: EXTRACTOR_VERSION });
+              // no PNG chunk: a content row with NULL meta ≈ old nopng
+              await self.store.metaPut(host, name, null, { ext: EXTRACTOR_VERSION });
             }
             await new Promise((r) => setTimeout(r, INTER_FILE_DELAY));
           } catch {

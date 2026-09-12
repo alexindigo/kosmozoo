@@ -98,6 +98,8 @@ Deno.test("scraper: priority feed drains before walk", async () => {
 Deno.test("scraper: feed skips files already extracted at the current version", async () => {
   const { dir, settings, store } = await mkStore();
   // Mark one file as extracted at EXTRACTOR_VERSION; the other stays unknown.
+  // (meta is content state: ingest first, then write at the current version)
+  await store.ingestFile("local", "flux-basic.png", "aa".repeat(32), 100);
   await store.metaPut("local", "flux-basic.png", { seed: 1 }, { ext: EXTRACTOR_VERSION });
   const s = new Scraper({ hosts: { local: FAKE }, store, settings });
   const pending = s.feed("local", ["flux-basic.png", "flux-lora.png"]);

@@ -221,7 +221,8 @@ per-collection export §3.2.)
 ### Legacy import
 
 `deno task import-legacy` merges the frozen Python `metadata.db` into the
-local store (idempotent).
+local store (idempotent). (→ removed §3.2: its rows are hash-less metas,
+which the v7 model discards by design — a fresh scrape re-derives them)
 
 ## 7. Plugin surfaces
 
