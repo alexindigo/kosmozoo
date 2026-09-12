@@ -1,7 +1,7 @@
 // client-solid/components/Header.tsx — the top chrome, declarative.
 //
-// Logo/title, host picker, filter box, download-feedback link, options
-// button, the menu with its settings rows, and the layout switcher.
+// Logo/title, host picker, filter box, options button, the menu with its
+// settings rows, and the layout switcher.
 
 import { onCleanup } from "solid-js";
 import { For, Show } from "solid-js/web";
@@ -55,8 +55,8 @@ function InfoLayoutSwitcher() {
 }
 
 // The options menu, declarative: scraper toggle + pause, the fields picker,
-// the judgment coupling, the delete mode, and the feedback path. The filter
-// input narrows the rows (label/search text).
+// the judgment coupling, the delete mode. The filter input narrows the rows
+// (label/search text).
 function Menu() {
   const store = useAppStore();
   const open = () => store.state.menuOpen();
@@ -67,7 +67,6 @@ function Menu() {
     const total = Object.values(p).reduce((a, b) => a + b, 0);
     return total > 0 ? `${total} left` : "";
   };
-  let fbPathEl;
   return (
     <div id="menu" hidden={!open()}>
       <Show when={open()}>
@@ -124,16 +123,15 @@ function Menu() {
               </label>
             </div>
           </Show>
-          <Show when={matches("feedback.json path")}>
+          <Show when={matches("download feedback")}>
             <div class="menurow">
-              <div class="menulabel">feedback.json path</div>
-              <div class="fbpathrow">
-                <input
-                  type="text" spellcheck={false} ref={fbPathEl}
-                  value={store.state.feedbackPath ?? ""}
-                />
-                <button onClick={() => store.actions.menu.applyFeedbackPath(fbPathEl?.value?.trim() ?? "")}>apply</button>
-              </div>
+              <div class="menulabel">judgments</div>
+              <a
+                class="btn"
+                href={`/api/collections/${encodeURIComponent(store.state.host())}/feedback.json`}
+                download={`kosmozoo_${store.state.host()}_feedback.json`}
+                title="download this collection's judgments (generated on demand)"
+              >download feedback.json</a>
             </div>
           </Show>
         </div>
@@ -183,13 +181,6 @@ export function Header() {
       </span>
       <span class="flexspacer" />
       <InfoLayoutSwitcher />
-      <a
-        id="dlFeedback"
-        class="btn"
-        href="/api/feedback"
-        download="kosmozoo_feedback.json"
-        title="download the exact feedback.json as stored on the server"
-      >Download feedback</a>
         <div id="menuWrap" ref={menuWrapRef}>
           <button
             id="menuBtn"

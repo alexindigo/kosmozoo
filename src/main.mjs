@@ -4,7 +4,7 @@
 //   deno run --allow-all src/main.mjs
 //
 // Environment overrides: KOZMOZOO_PORT (default 2084), KOZMOZOO_HOSTS,
-// KOZMOZOO_STATE, KOZMOZOO_FEEDBACK.
+// KOZMOZOO_STATE, KOZMOZOO_FEEDBACK (migration import only — sqlite is canonical).
 
 import { resolveStateDir, ensureStateDir, CorruptStateError } from "./state.mjs";
 import { Settings } from "./settings.mjs";
@@ -24,13 +24,13 @@ let stateDir, settings, store;
 try {
   stateDir = await ensureStateDir(resolveStateDir());
   settings = await Settings.open(stateDir);
-  store = await Store.open(
-    stateDir,
-    settings.get("core", "feedbackPath", null)
+  // the feedback path is read ONCE, for the v1→v2 import; never written again
+  store = await Store.open(stateDir, {
+    settings,
+    feedbackPath: settings.get("core", "feedbackPath", null)
       ?? Deno.env.get("KOZMOZOO_FEEDBACK")
       ?? `${Deno.env.get("HOME")}/Documents/kosmozoo_feedback.json`,
-    { settings },
-  );
+  });
 } catch (e) {
   if (e instanceof CorruptStateError) {
     console.error(`kosmozoo: corrupt state file: ${e.path}`);

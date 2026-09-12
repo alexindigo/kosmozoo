@@ -47,7 +47,6 @@ docker run -d --name kz-e2e-engine --network host -v "$WORK":/work -w /work \
   -e KOZMOZOO_HOSTS="fake=127.0.0.1:$FAKE_PORT,another=127.0.0.1:$FAKE2_PORT,fixture-dir=folder:/work/tests/fixtures,mut=folder:/work/tests/.tmp-mutable" \
   -e KOZMOZOO_PORT="$ENGINE_PORT" \
   -e KOZMOZOO_STATE=/tmp/kz-e2e-state \
-  -e KOZMOZOO_FEEDBACK=/tmp/kz-e2e-state/feedback.json \
   -e KOZMOZOO_PLUGINS=/work/plugins \
   -e KOZMOZOO_REVALIDATE_MS=1500 \
   denoland/deno:latest run --allow-all src/main.mjs >/dev/null

@@ -1,10 +1,14 @@
-// tests/t_judgment.mjs — Phase 9 contract tests: vote/favorite/hidden are
+// tests/t_judgment.mjs — the judgment model: vote/favorite/hidden are
 // distinct; down-vote-hides coupling is a setting; reveal is temporary and
-// non-destructive; migration loses no field.
+// non-destructive. Judgments are entry columns (sqlite canonical);
+// judgmentPatch whitelists fields and deep-prunes defaults; two entries
+// sharing one hash carry INDEPENDENT judgments.
 
 import { assert, assertEquals } from "jsr:@std/assert";
-import { migrate, migrateEntry } from "../src/migrate-feedback.mjs";
-import { readFile } from "node:fs/promises";
+import { Store } from "../src/store.mjs";
+import { mkdtemp, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 
 // --- judgment semantics (pure functions on plain objects — no DOM) ---------
 
@@ -16,8 +20,6 @@ function isVisible(judgment, { downvoteHides = true, reveal = false } = {}) {
 }
 
 Deno.test("judgment: vote/favorite/hidden are distinct concepts", () => {
-  // vote is the decision signal; favorite is independent of project fit;
-  // hidden is a view filter. An image can be voted down AND favorited.
   const j = { vote: "down", favorite: true };
   assertEquals(j.vote, "down");
   assertEquals(j.favorite, true);
@@ -25,49 +27,57 @@ Deno.test("judgment: vote/favorite/hidden are distinct concepts", () => {
 
 Deno.test("judgment: down-vote hides by default; coupling is a setting", () => {
   const j = { vote: "down" };
-  assertEquals(isVisible(j), false);                       // default: hidden
-  assertEquals(isVisible(j, { downvoteHides: false }), true); // setting off
+  assertEquals(isVisible(j), false);
+  assertEquals(isVisible(j, { downvoteHides: false }), true);
 });
 
 Deno.test("judgment: 'show thumbed-down' is a temporary reveal, not a deletion", () => {
   const j = { vote: "down" };
   assertEquals(isVisible(j, { reveal: true }), true);
-  // the vote survives the reveal — this is the regression test against the
-  // outgoing button that deleted every down-vote to achieve the same effect
   assertEquals(j.vote, "down");
 });
 
-// --- migration ---------------------------------------------------------------
+// --- entry columns ------------------------------------------------------------
 
-Deno.test("migration: pos/neg -> notes, vote preserved, absent fields stay absent", () => {
-  const m = migrateEntry({ pos: "colors", neg: "baby face", vote: "up" });
-  assertEquals(m, { notes: { pos: "colors", neg: "baby face" }, vote: "up" });
-  // an entry with only a note carries no vote key at all
-  assertEquals(migrateEntry({ pos: "x" }), { notes: { pos: "x" } });
-  // a fully-empty entry migrates to nothing (pruned)
-  assertEquals(migrateEntry({}), {});
+Deno.test("judgment: patch whitelists fields and deep-prunes defaults", async () => {
+  const dir = await mkdtemp(join(tmpdir(), "kz-jpatch-"));
+  const store = await Store.open(dir);
+
+  // unknown fields rejected (E6)
+  assertEquals(store.judgmentPatch("h", "a.png", { ref: "x", plugins: {} }).ok, false);
+  assertEquals(store.judgmentPatch("h", "a.png", { "plugins..x": 1 }).ok, false);
+
+  // write → read back; defaults prune
+  store.judgmentPatch("h", "a.png", { vote: "down", favorite: true, notes: { pos: "c", neg: "" } });
+  assertEquals(store.judgmentGet("h", "a.png"), { vote: "down", favorite: true, notes: { pos: "c" } });
+
+  // plugin fields namespaced and pruned with the rest
+  store.judgmentPatch("h", "a.png", { "plugins.export.bucket": "good" });
+  assertEquals(store.judgmentGet("h", "a.png").plugins, { export: { bucket: "good" } });
+  store.judgmentPatch("h", "a.png", { "plugins.export.bucket": null });
+  assertEquals(store.judgmentGet("h", "a.png").plugins, undefined);
+
+  // clearing everything prunes the row back to empty
+  store.judgmentPatch("h", "a.png", { vote: null, favorite: null, notes: null });
+  assertEquals(store.judgmentGet("h", "a.png"), null);
+
+  store.close();
+  await rm(dir, { recursive: true });
 });
 
-Deno.test("migration: real 61-entry feedback.json — N in, N out, no field lost", async () => {
-  const path = "/home/user/Documents/kosmozoo_feedback.json";
-  let old;
-  try {
-    old = JSON.parse(await readFile(path, "utf-8"));
-  } catch {
-    console.log("  (skipped: real feedback.json not present in this environment)");
-    return;
-  }
-  const doc = migrate(old);
-  const inCount = Object.keys(old).filter((k) => Object.keys(old[k]).length).length;
-  const outCount = Object.keys(doc.data).length;
-  assertEquals(outCount, inCount);
-  // no field lost: every pos/neg/vote in the input appears in the output
-  for (const [key, entry] of Object.entries(old)) {
-    const m = doc.data[key];
-    if (!Object.keys(entry).length) continue;
-    if (entry.pos) assertEquals(m.notes.pos, entry.pos);
-    if (entry.neg) assertEquals(m.notes.neg, entry.neg);
-    if (entry.vote) assertEquals(m.vote, entry.vote);
-  }
-  assertEquals(doc.version, 1);
+Deno.test("judgment: two entries sharing one hash carry independent judgments", async () => {
+  const dir = await mkdtemp(join(tmpdir(), "kz-jper-"));
+  const store = await Store.open(dir);
+  const h = "ab".repeat(32);
+  await store.ingestFile("a", "same.png", h, 10);
+  await store.ingestFile("b", "same.png", h, 10);
+
+  store.judgmentPatch("a", "same.png", { vote: "up" });
+  store.judgmentPatch("b", "same.png", { vote: "down", notes: { neg: "dupe" } });
+
+  assertEquals(store.judgmentGet("a", "same.png"), { vote: "up" });
+  assertEquals(store.judgmentGet("b", "same.png"), { vote: "down", notes: { neg: "dupe" } });
+
+  store.close();
+  await rm(dir, { recursive: true });
 });

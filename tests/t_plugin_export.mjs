@@ -84,7 +84,7 @@ function hostTestKz(store, settings, router, caps) {
     judgments: {
       get: (h, f) => store.judgmentGet(h, f),
       set: (h, f, field, v) => store.judgmentSet(h, f, field, v),
-      _all: () => store.feedbackAll(),
+      _all: () => store.judgmentsAll(),
     },
     _fetchImageBytes: async () => null, // host unreachable in this test — bytes optional
   };

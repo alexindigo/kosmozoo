@@ -300,18 +300,27 @@ export function makeRouter(ctx) {
   add("PUT", "/api/judgments/<id>", async (req, { id }) => {
     const [host, filename] = splitHostKey(id);
     const body = await req.json();
-    for (const [field, value] of Object.entries(body)) {
-      await ctx.store.judgmentSet(host, filename, field, value);
-    }
-    return Response.json(ctx.store.judgmentGet(host, filename) ?? {});
+    const r = ctx.store.judgmentPatch(host, filename, body);
+    if (!r.ok) return Response.json({ error: r.error }, { status: 400 });
+    return Response.json(r.judgment ?? {});
   });
 
   add("DELETE", "/api/judgments/<id>", async (_req, { id }) => {
     const [host, filename] = splitHostKey(id);
-    for (const f of ["notes", "vote", "favorite"]) {
-      await ctx.store.judgmentSet(host, filename, f, null);
-    }
+    ctx.store.judgmentPatch(host, filename, { notes: null, vote: null, favorite: null });
     return Response.json({});
+  });
+
+  // The portable judgment document, generated on demand per collection.
+  add("GET", "/api/collections/<id>/feedback.json", async (_req, { id }) => {
+    const doc = ctx.store.feedbackExport(id);
+    if (!doc) return Response.json({ error: "unknown collection" }, { status: 404 });
+    return new Response(JSON.stringify(doc, null, 2), {
+      headers: {
+        "Content-Type": "application/json",
+        "Content-Disposition": `attachment; filename="kosmozoo_${id}_feedback.json"`,
+      },
+    });
   });
 
   add("GET", "/api/settings/<ns>", async (_req, { ns }) => {
@@ -360,34 +369,6 @@ export function makeRouter(ctx) {
       enabled: ctx.settings.get("core.scraper", "enabled", true),
       paused: ctx.settings.get("core.scraper", "paused", false),
     });
-  });
-
-  // --- feedback document ----------------------------------------------------
-  // Download the exact feedback.json as stored (the outgoing dlFeedback link).
-  add("GET", "/api/feedback", async () => {
-    const { readFile } = await import("node:fs/promises");
-    try {
-      const body = await readFile(ctx.store.feedbackPath);
-      return new Response(body, {
-        headers: {
-          "Content-Type": "application/json",
-          "Content-Disposition": "attachment; filename=\"kosmozoo_feedback.json\"",
-        },
-      });
-    } catch {
-      return Response.json({ error: "no feedback document yet" }, { status: 404 });
-    }
-  });
-
-  // Where judgments live. Applied live: the store re-opens at the new path.
-  add("PUT", "/api/feedback-path", async (req) => {
-    const { path } = await req.json();
-    if (!path || typeof path !== "string") {
-      return Response.json({ error: "path required" }, { status: 400 });
-    }
-    await ctx.store.setFeedbackPath(path);
-    await ctx.settings.set("core", "feedbackPath", path);
-    return Response.json({ feedbackPath: ctx.store.feedbackPath });
   });
 
   // --- metadata channel -------------------------------------------------------

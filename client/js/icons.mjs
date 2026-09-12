@@ -41,6 +41,10 @@ const PATHS = {
   <path d="M8.5 8.5l1.5 1.5" />
   <path d="M5 9l1.5 1.5" />`,
   "chevron-down": `<path d="M6 9l6 6l6 -6" />`,
+  "download": `<path stroke="none" d="M0 0h24v24H0z" fill="none"/>
+  <path d="M4 17v2a2 2 0 0 0 2 2h12a2 2 0 0 0 2 -2v-2" />
+  <path d="M7 11l5 5l5 -5" />
+  <path d="M12 4l0 12" />`,
 };
 
 export function iconSvg(name, size = 14) {

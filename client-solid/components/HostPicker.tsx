@@ -57,6 +57,14 @@ export function HostPicker() {
                   <span class={"hdot" + (h().online ? "" : " off")} />
                   <span class="hname">{n}</span>
                   <span class="haddr">{h().address + (h().online ? "" : " · offline")}</span>
+                  <a
+                    class="dl"
+                    title={`download ${n}'s judgments (feedback.json, generated on demand)`}
+                    href={`/api/collections/${encodeURIComponent(n)}/feedback.json`}
+                    download={`kosmozoo_${n}_feedback.json`}
+                    onClick={(e) => e.stopPropagation()}
+                    innerHTML={iconSvg("download", 12)}
+                  />
                   <button
                     class="rm"
                     title={`remove ${n}`}

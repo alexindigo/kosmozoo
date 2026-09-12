@@ -1,4 +1,4 @@
-// tests/t_scraper_api.mjs — scraper control + feedback document routes.
+// tests/t_scraper_api.mjs — scraper control + the per-collection judgment export.
 
 import { assert, assertEquals } from "jsr:@std/assert";
 import { makeRouter } from "../src/routes.mjs";
@@ -12,11 +12,11 @@ import { join } from "node:path";
 
 async function ctx(dir) {
   const settings = await Settings.open(dir);
-  const store = await Store.open(dir, join(dir, "feedback.json"));
+  const store = await Store.open(dir);
   const hosts = { local: "127.0.0.1:1" };
   const router = makeRouter({ hosts, store, settings, plugins: null });
   const scraper = new Prefetch({ hosts, store, settings, ingest: new Ingest(store, hosts) });
-  router.ctx = { hosts, store, settings, plugins: null, scraper };
+  router.ctx = { hosts, store, settings, plugins: null, prefetch: scraper };
   return { settings, store, router, scraper };
 }
 
@@ -42,36 +42,25 @@ Deno.test("scraper API: GET status, POST toggles enabled/paused persist", async 
   await rm(dir, { recursive: true });
 });
 
-Deno.test("feedback API: download serves the exact stored document", async () => {
+Deno.test("feedback export: per-collection v2 document on demand; 404 unknown", async () => {
   const dir = await mkdtemp(join(tmpdir(), "kz-fb-"));
   const { store, router } = await ctx(dir);
-  await store.judgmentSet("h", "f.png", "vote", "up");
-  const r = await router.handle(new Request("http://x/api/feedback"));
+  await store.judgmentSet("local", "f.png", "vote", "up");
+  await store.judgmentSet("local", "f.png", "notes", { pos: "colors" });
+  const r = await router.handle(new Request("http://x/api/collections/local/feedback.json"));
   assertEquals(r.status, 200);
   assert(r.headers.get("Content-Disposition").includes("attachment"));
   const doc = JSON.parse(await r.text());
-  assertEquals(doc.version, 1);
-  assertEquals(doc.data["h:f.png"].vote, "up");
-  await rm(dir, { recursive: true });
-});
+  assertEquals(doc.version, 2);
+  assertEquals(doc.collection, "local");
+  assertEquals(doc.entries["f.png"].vote, "up");
+  assertEquals(doc.entries["f.png"].notes, { pos: "colors" });
 
-Deno.test("feedback path: PUT re-opens the store at the new path live", async () => {
-  const dir = await mkdtemp(join(tmpdir(), "kz-fbpath-"));
-  const { store, settings, router } = await ctx(dir);
-  await store.judgmentSet("h", "a.png", "vote", "down");
+  const nf = await router.handle(new Request("http://x/api/collections/nope/feedback.json"));
+  assertEquals(nf.status, 404);
 
-  const newPath = join(dir, "elsewhere", "feedback.json");
-  const r = await router.handle(new Request("http://x/api/feedback-path", {
-    method: "PUT", headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ path: newPath }),
-  }));
-  assertEquals(r.status, 200);
-  assertEquals(store.feedbackPath, newPath);
-  assertEquals(settings.get("core", "feedbackPath"), newPath);
-
-  // writes now land in the NEW file
-  await store.judgmentSet("h", "b.png", "vote", "up");
-  const moved = JSON.parse(await readFile(newPath, "utf-8"));
-  assertEquals(moved.data["h:b.png"].vote, "up");
+  // the old live-document routes are gone
+  assertEquals((await router.handle(new Request("http://x/api/feedback"))).status, 404);
+  assertEquals((await router.handle(new Request("http://x/api/feedback-path", { method: "PUT" }))).status, 404);
   await rm(dir, { recursive: true });
 });

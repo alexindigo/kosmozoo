@@ -48,8 +48,7 @@ are replaced by collections/entries in cruft-cleanup §3.2.**
 | `/api/plugins` | GET | discovered plugins + their declared capabilities |
 | `/api/nodes` | GET | `class_type` registry discovered from extracted graphs |
 | `/api/scraper` | GET, POST | metadata scan: `enabled`/`paused` toggles + per-host pending counts |
-| `/api/feedback` | GET | the live `feedback.json` document as a download (→ §3.2) |
-| `/api/feedback-path` | PUT | relocate the feedback document live (→ §3.2) |
+| `/api/collections/<id>/feedback.json` | GET | the collection's judgments as a portable v2 document, generated on demand |
 | `/api/metadata?host=<name>` | GET | versioned meta poll `{items, pending, v}`; the client merges when `v` moves |
 | `/api/meta-want` | POST | `{host, files}` — on-screen names jump the extraction queue (the priority lane is broken today — audit E12; → §3.2) |
 | `/api/downloads-check` | POST | which filenames exist in the downloads dir (→ removed §3.2) |
@@ -77,17 +76,17 @@ from `client/`.
 
 | Concept | Meaning | Persistence |
 |---|---|---|
-| `vote` up/down | decision signal about project fitness | `feedback.json`, keyed by content hash (→ entry column §3.2) |
+| `vote` up/down | decision signal about project fitness | `entry` column, per (collection, name) |
 | `favorite` | interesting in itself, independent of fit | same |
-| `hidden` | delete fallback on hosts that can't delete | **persisted** per host in `core.delete.hidden` (→ §3.2) |
+| `hidden` | delete fallback on hosts that can't delete | `entry` column, per (collection, name) |
 
 - Down-vote **hides by default**; the coupling is the
   `core.judgment.downvoteHides` setting.
 - "Show thumbed-down" is a temporary reveal, never a data deletion.
-- Notes: `pos` / `neg` free text, debounced autosave. Prune-when-empty is
-  shallow today (empty objects can persist — audit D5; → §3.2).
+- Notes: `pos` / `neg` free text, debounced autosave; defaults are
+  deep-pruned (a field set to its default is stored as absent).
 - Core judgment record stays small: notes, vote, favorite. Plugin fields
-  live under `plugins.<name>` in the same record.
+  live in the entry's `plugin_fields` JSON, namespaced `plugins.<name>`.
 
 ## 4. Knowledge harvest (from the outgoing implementation)
 
@@ -124,8 +123,8 @@ Rows marked ⚠ are **currently violated** — the plan item restores them.
   (`fetch-vendor-solid.sh`, checksummed — → §3.0/§3.5).
 - Native sqlite3 library comes from the system:
   `DENO_SQLITE_PATH=/usr/lib/libsqlite3.so`.
-- `feedback.json` is a portable JSON document outside the repo (→ sqlite
-  canonical §3.2).
+- `feedback.json` is a portable judgment document, generated on demand per
+  collection (`/api/collections/<id>/feedback.json`) — sqlite is canonical.
 - Running kosmozoo stays one `deno run` away — the devcontainer is for
   contributing, never for running.
 - No ML runtime, model weights, or Python anywhere in core. Specialized
@@ -141,9 +140,10 @@ identity (→ the address becomes `collection:name` §3.2).
 
 State dir resolution: `KOZMOZOO_STATE` if set, else the repo root when
 writable, else `$XDG_STATE_HOME/kosmozoo` — so a dev checkout carries
-`metadata.db` / `settings.json` / `feedback.json` in the working tree
+`metadata.db` / `settings.json` in the working tree
 (untracked). (→ XDG-by-default §3.3.) Env overrides: `KOZMOZOO_PORT`
-(default 2084), `KOZMOZOO_HOSTS`, `KOZMOZOO_STATE`, `KOZMOZOO_FEEDBACK`,
+(default 2084), `KOZMOZOO_HOSTS`, `KOZMOZOO_STATE`, `KOZMOZOO_FEEDBACK`
+(migration import only),
 `KOZMOZOO_DOWNLOADS` (→ removed §3.2), `KOZMOZOO_PLUGINS`,
 `KOZMOZOO_REVALIDATE_MS`.
 
@@ -211,12 +211,14 @@ background ingest). A busy ComfyUI host is not a read outage.
 
 ### Judgments
 
-`feedback.json` (versioned document, `version: 1`) keyed by content hash
-with a human-readable `ref: "<host>:<filename>"` per entry. Legacy
-`host:filename` keys are re-keyed at startup and lazily on write; orphan
-entries keep their keys. Path: `core.feedbackPath` setting →
-`KOZMOZOO_FEEDBACK` → `<state dir>/feedback.json`. (→ sqlite canonical,
-per-collection export §3.2.)
+Judgments are columns on `entry` (`vote`, `favorite`, `notes`,
+`plugin_fields`) — sqlite is canonical and they are per (collection, name),
+so two instances of the same content carry independent judgments. Writes go
+through `judgmentPatch` (whitelisted fields, defaults deep-pruned, one
+statement). The old hash-keyed `feedback.json` is imported ONCE at first
+boot (fanned out to every entry with the hash; missing entries created as
+`gone`), backed up to `<path>.v1-backup-<ts>`, and never written again.
+`KOZMOZOO_FEEDBACK` is honored for that import only.
 
 ### Legacy import
 

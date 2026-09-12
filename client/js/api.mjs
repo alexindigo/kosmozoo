@@ -44,7 +44,8 @@ export const api = {
   metadata: (host) => req("GET", `/api/metadata?host=${encodeURIComponent(host)}`),
   metaWant: (host, files) => req("POST", "/api/meta-want", { host, files }),
   downloadsCheck: (files) => req("POST", "/api/downloads-check", { files }),
-  feedbackPath: (path) => req("PUT", "/api/feedback-path", { path }),
+  // per-collection judgment export (generated on demand)
+  feedbackExportUrl: (collection) => `${BASE}/api/collections/${encodeURIComponent(collection)}/feedback.json`,
   // variations plugin
   variationsProbe: (id) => req("GET", `/api/plugins/variations/probe/${encodeURIComponent(id)}`),
   inputList: (host) => req("GET", `/api/input-list/${encodeURIComponent(host)}`),

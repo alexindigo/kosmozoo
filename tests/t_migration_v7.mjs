@@ -21,7 +21,7 @@ async function openFixture() {
   const dir = await mkdtemp(join(tmpdir(), "kz-v7-"));
   await cp(FIXTURE, dir, { recursive: true });
   const settings = await Settings.open(dir);
-  const store = await Store.open(dir, join(dir, "feedback.json"), { settings });
+  const store = await Store.open(dir, { settings, feedbackPath: join(dir, "feedback.json") });
   return { dir, settings, store };
 }
 
@@ -66,11 +66,24 @@ Deno.test("migration v7: tables folded, old tables dropped, idempotent", async (
     const meta1 = store.metaVersion;
     assert(meta1 > 0, "meta_version seeded in kv");
 
-    // judgments still resolve through the entry table
-    assertEquals(store.judgmentGet("a", "shared.png"), { vote: "up", ref: "a:shared.png" });
-    assertEquals(store.judgmentGet("b", "shared.png"), { vote: "up", ref: "a:shared.png" });
+    // judgments fanned out from the v1 feedback document to ENTRY COLUMNS:
+    // BOTH entries sharing H1 carry the judgment (per-entry model)
+    assertEquals(store.judgmentGet("a", "shared.png"), { vote: "up" });
+    assertEquals(store.judgmentGet("b", "shared.png"), { vote: "up" });
+    // and they are independent afterwards
+    store.judgmentPatch("a", "shared.png", { vote: "down" });
+    assertEquals(store.judgmentGet("a", "shared.png"), { vote: "down" });
+    assertEquals(store.judgmentGet("b", "shared.png"), { vote: "up" });
+    // legacy keys: missing entries were created with state='gone', judgment kept
+    assertEquals(store.entryGet("a", "old-key.png").state, "gone");
     assertEquals(store.judgmentGet("a", "old-key.png"), { vote: "down", notes: { pos: "keep" } });
+    assertEquals(store.entryGet("orphan", "gone.png").state, "gone");
     assertEquals(store.judgmentGet("orphan", "gone.png"), { favorite: true });
+    // the v1 document was backed up, never rewritten
+    const remaining = [];
+    for await (const f of Deno.readDir(dir)) remaining.push(f.name);
+    assert(!remaining.includes("feedback.json"), "v1 feedback.json is renamed away");
+    assert(remaining.some((f) => f.startsWith("feedback.json.v1-backup-")), "backup copy exists");
 
     store.close();
 
@@ -85,8 +98,9 @@ Deno.test("migration v7: tables folded, old tables dropped, idempotent", async (
     }
     raw.close();
 
-    const store2 = await Store.open(dir, join(dir, "feedback.json"), {
+    const store2 = await Store.open(dir, {
       settings: await Settings.open(dir),
+      feedbackPath: join(dir, "feedback.json"),
     });
     assertEquals(store2.metaGet("a", "shared.png"), { seed: 1, steps: 20 });
     assertEquals(store2.metaVersion, meta1);

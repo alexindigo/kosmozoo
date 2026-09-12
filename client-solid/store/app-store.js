@@ -47,7 +47,6 @@ export function makeAppStore() {
     nodesRegistry: {},    // discovered node types (/api/nodes)
     fieldsStored: null,   // raw core.fields cfg — fieldsCfg derives below
     scraper: null,        // { enabled, paused, pending: {host: n} }
-    feedbackPath: null,   // where judgments live (engine-side)
     deletePrefs: { useAssetsPlus: true },
     ui: {},               // core.ui settings (stored host, ...)
     judgmentPrefs: { downvoteHides: true, revealThumbedDown: false, hideUp: false },
@@ -559,7 +558,6 @@ export function makeAppStore() {
       const jns = await api.settings("core.judgment").catch(() => ({}));
       setSt("judgmentPrefs", "downvoteHides", jns.downvoteHides ?? true);
       setSt("scraper", reconcile(await api.scraper().catch(() => null)));
-      setSt("feedbackPath", (await api.settings("core").catch(() => ({})))?.feedbackPath ?? null);
       actions.anchors.load();
       await actions.keys.loadSaved();
       await actions.anchors.loadPaneWidth();
@@ -1165,16 +1163,6 @@ export function makeAppStore() {
         setSt("deletePrefs", { ...st.deletePrefs, useAssetsPlus: on });
         setSt("hosts", reconcile(await api.hosts())); // deleteMode depends on the toggle
       },
-      async applyFeedbackPath(path) {
-        try {
-          const r = await api.feedbackPath(path);
-          setSt("feedbackPath", r.feedbackPath);
-          actions.status.info(`feedback path → ${r.feedbackPath}`);
-          if (host()) await loadImages(host());
-        } catch (err) {
-          actions.status.error(`feedback path failed: ${err.message}`);
-        }
-      },
     },
   };
 
@@ -1184,7 +1172,6 @@ export function makeAppStore() {
     get nodesRegistry() { return st.nodesRegistry; },
     get fieldsStored() { return st.fieldsStored; },
     get scraper() { return st.scraper; },
-    get feedbackPath() { return st.feedbackPath; },
     get deletePrefs() { return st.deletePrefs; },
     get ui() { return st.ui; },
     get judgmentPrefs() { return st.judgmentPrefs; },

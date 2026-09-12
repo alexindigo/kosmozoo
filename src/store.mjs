@@ -13,11 +13,12 @@
 
 import { Database } from "@db/sqlite";
 import { join } from "node:path";
-import { loadVersioned } from "./state.mjs";
-import { writeSerialized } from "./writer.mjs";
-import { hostKey, splitHostKey } from "./hosts.mjs";
+import { readFile, rename } from "node:fs/promises";
+import { CorruptStateError } from "./state.mjs";
+import { splitHostKey } from "./hosts.mjs";
 
 const SCHEMA_VERSION = 7;
+const CORE_JUDGMENT_FIELDS = new Set(["vote", "favorite", "notes"]);
 
 const MIGRATIONS = [
   // v0 → v1: create the single-table metadata store.
@@ -156,28 +157,96 @@ const kindFor = (address) => address?.startsWith("folder:") ? "folder" : "comfy"
 
 export class Store {
   #db;
-  #feedbackPath;
-  #feedback;
 
-  static async open(stateDir, feedbackPath, { settings } = {}) {
+  static async open(stateDir, { settings, feedbackPath } = {}) {
     const s = new Store();
     const dbPath = join(stateDir, "metadata.db");
     s.#db = new Database(dbPath);
     s.#db.exec("PRAGMA journal_mode = WAL");
     s.#runMigrations();
     await s.#foldV7(settings);
-
-    s.#feedbackPath = feedbackPath;
-    s.#feedback = await loadVersioned(feedbackPath, {
-      current: 1,
-      empty: () => ({}),
-      migrations: {},
-    });
-    // Migrate legacy host:filename judgment keys to hash keys.
-    if (s.#migrateJudgments()) {
-      await writeSerialized(s.#feedbackPath, new TextEncoder().encode(JSON.stringify(s.#feedback, null, 2)));
-    }
+    await s.#importFeedbackV1(feedbackPath, settings);
     return s;
+  }
+
+  // --- feedback.json v1 → entry columns (one-time) -------------------------
+  // The old hash-keyed judgment document is read ONCE: each entry fans out
+  // to every entry row with that hash (judgments are per entry now); legacy
+  // host:filename keys name an address directly — a missing entry row is
+  // created with state='gone' so nothing is lost. The source file is copied
+  // to <path>.v1-backup-<ts> and never written again.
+  async #importFeedbackV1(feedbackPath, settings) {
+    // nothing offered — a later boot WITH a path still gets its import
+    if (!feedbackPath) return;
+    if (this.#kvGet("fold.feedback.v2") === "done") return;
+    {
+      let doc = null;
+      try {
+        doc = JSON.parse(await readFile(feedbackPath, "utf-8"));
+      } catch (e) {
+        if (e instanceof SyntaxError) {
+          const quarantined = `${feedbackPath}.corrupt-${new Date().toISOString()}`;
+          await rename(feedbackPath, quarantined);
+          throw new CorruptStateError(feedbackPath, quarantined, e);
+        }
+        // ENOENT: nothing to import
+      }
+      if (doc) {
+        const now = Date.now();
+        const txn = this.#db.transaction(() => {
+          for (const [key, j] of Object.entries(doc.data ?? {})) {
+            if (!key.includes(":")) {
+              // hash key: fan out to EVERY entry row with that hash
+              for (const t of this.#db.prepare("SELECT collection, name FROM entry WHERE hash = ? AND kind = 'output'").all(key)) {
+                this.#applyJudgment(t.collection, t.name, j, now);
+              }
+            } else {
+              const [collection, name] = splitHostKey(key);
+              this.#ensureCollection(collection);
+              this.#db.prepare(
+                "INSERT OR IGNORE INTO entry (collection, name, kind, state, first_seen, last_seen) VALUES (?, ?, 'output', 'gone', ?, ?)",
+              ).run(collection, name, now, now);
+              this.#applyJudgment(collection, name, j, now);
+            }
+          }
+          this.#kvSet("fold.feedback.v2", "done");
+        });
+        txn();
+        await rename(feedbackPath, `${feedbackPath}.v1-backup-${new Date().toISOString()}`);
+      } else {
+        this.#kvSet("fold.feedback.v2", "done");
+      }
+    }
+    // the feedbackPath setting dies with the migration (sqlite is canonical)
+    if (settings?.get("core", "feedbackPath", null)) {
+      await settings.set("core", "feedbackPath", null);
+    }
+  }
+
+  // one judgment document → one entry's columns (in the caller's transaction)
+  #applyJudgment(collection, name, j, now) {
+    if (!j || typeof j !== "object") return;
+    const { vote, favorite, notes } = this.#pruneJudgment({
+      vote: j.vote ?? null,
+      favorite: j.favorite ? 1 : null,
+      notes: j.notes ?? null,
+      plugins: j.plugins ?? null,
+    });
+    this.#db.prepare(
+      `INSERT INTO entry (collection, name, kind, vote, favorite, notes, plugin_fields, state, first_seen, last_seen)
+       VALUES (?, ?, 'output', ?, ?, ?, ?, 'seen', ?, ?)
+       ON CONFLICT(collection, name, kind) DO UPDATE SET
+         vote = COALESCE(excluded.vote, entry.vote),
+         favorite = COALESCE(excluded.favorite, entry.favorite),
+         notes = COALESCE(excluded.notes, entry.notes),
+         plugin_fields = COALESCE(excluded.plugin_fields, entry.plugin_fields)`,
+    ).run(
+      collection, name,
+      vote, favorite,
+      notes == null ? null : JSON.stringify(notes),
+      j.plugins == null ? null : JSON.stringify(j.plugins),
+      now, now,
+    );
   }
 
   #runMigrations() {
@@ -543,113 +612,136 @@ export class Store {
     return out;
   }
 
-  // --- judgments (JSON-backed, keyed by hash — entry columns land next) ----
+  // --- judgments (entry columns; sqlite is canonical) ---------------------
 
-  // Resolve (host, filename) to the best judgment key: the content hash when
-  // known, else the legacy host:filename key when an entry exists under it.
-  #judgmentKey(host, filename) {
-    const hash = this.hashFor(host, filename);
-    if (hash && this.#feedback.data[hash]) return [hash, true];
-    const legacy = hostKey(host, filename);
-    if (this.#feedback.data[legacy]) return [legacy, false];
-    return [hash || legacy, !!hash];
+  #pruneJudgment({ vote, favorite, notes, plugins }) {
+    if (vote === "" || vote === undefined) vote = null;
+    if (favorite === false || favorite === undefined) favorite = null;
+    if (notes && typeof notes === "object") {
+      for (const k of Object.keys(notes)) {
+        if (notes[k] === null || notes[k] === undefined || notes[k] === "") delete notes[k];
+      }
+      if (Object.keys(notes).length === 0) notes = null;
+    } else if (notes === "" || notes === undefined) notes = null;
+    if (plugins && typeof plugins === "object") {
+      for (const ns of Object.keys(plugins)) {
+        const fields = plugins[ns];
+        if (fields && typeof fields === "object") {
+          for (const k of Object.keys(fields)) {
+            if (fields[k] === null || fields[k] === undefined || fields[k] === "") delete fields[k];
+          }
+        }
+        if (!fields || typeof fields !== "object" || Object.keys(fields).length === 0) delete plugins[ns];
+      }
+      if (Object.keys(plugins).length === 0) plugins = null;
+    } else if (plugins === "" || plugins === undefined) plugins = null;
+    return { vote: vote ?? null, favorite: favorite ?? null, notes, plugins };
+  }
+
+  #readJudgment(host, filename) {
+    const row = this.#db.prepare(
+      "SELECT vote, favorite, notes, plugin_fields FROM entry WHERE collection = ? AND name = ? AND kind = 'output'",
+    ).get(host, filename);
+    if (!row) return null;
+    const j = {};
+    if (row.vote != null) j.vote = row.vote;
+    if (row.favorite != null) j.favorite = !!row.favorite;
+    if (row.notes != null) { try { j.notes = JSON.parse(row.notes); } catch { /* corrupt */ } }
+    if (row.plugin_fields != null) { try { j.plugins = JSON.parse(row.plugin_fields); } catch { /* corrupt */ } }
+    return Object.keys(j).length ? j : null;
   }
 
   judgmentGet(host, filename) {
-    const [key] = this.#judgmentKey(host, filename);
-    return structuredClone(this.#feedback.data[key] ?? null);
+    return this.#readJudgment(host, filename);
+  }
+
+  // Whitelisted, deep-pruned, ONE statement. Fields: vote | favorite | notes
+  // | plugins.<ns>.<field>; null/"" values prune (defaults store as absent).
+  judgmentPatch(host, filename, patch) {
+    const cur = this.#readJudgment(host, filename) ?? {};
+    const next = {
+      vote: cur.vote ?? null,
+      favorite: cur.favorite ? 1 : null,
+      notes: cur.notes ?? null,
+      plugins: cur.plugins ?? null,
+    };
+    for (const [field, value] of Object.entries(patch ?? {})) {
+      if (CORE_JUDGMENT_FIELDS.has(field)) {
+        next[field] = field === "favorite" ? (value ? 1 : null) : value;
+        continue;
+      }
+      if (field.startsWith("plugins.")) {
+        const parts = field.split(".");
+        const ns = parts[1];
+        const pname = parts.slice(2).join(".");
+        if (!ns || !pname) return { ok: false, error: `bad judgment field: ${field}` };
+        next.plugins ??= {};
+        next.plugins[ns] ??= {};
+        next.plugins[ns][pname] = value;
+        continue;
+      }
+      return { ok: false, error: `unknown judgment field: ${field}` };
+    }
+    const pruned = this.#pruneJudgment(next);
+    this.#ensureCollection(host);
+    const now = Date.now();
+    this.#db.prepare("INSERT OR IGNORE INTO entry (collection, name, kind, state, first_seen, last_seen) VALUES (?, ?, 'output', 'seen', ?, ?)")
+      .run(host, filename, now, now);
+    this.#db.prepare(
+      `UPDATE entry SET vote = ?, favorite = ?, notes = ?, plugin_fields = ?, last_seen = ?
+       WHERE collection = ? AND name = ? AND kind = 'output'`,
+    ).run(
+      pruned.vote, pruned.favorite,
+      pruned.notes == null ? null : JSON.stringify(pruned.notes),
+      pruned.plugins == null ? null : JSON.stringify(pruned.plugins),
+      now, host, filename,
+    );
+    return { ok: true, judgment: this.#readJudgment(host, filename) };
   }
 
   async judgmentSet(host, filename, field, value) {
-    const [key, isHash] = this.#judgmentKey(host, filename);
-    const entry = this.#feedback.data[key] ?? {};
-    if (field.startsWith("plugins.")) {
-      const [, plugin, ...rest] = field.split(".");
-      const pname = rest.join(".");
-      if (!entry.plugins) entry.plugins = {};
-      if (!entry.plugins[plugin]) entry.plugins[plugin] = {};
-      if (value === null || value === undefined) delete entry.plugins[plugin][pname];
-      else entry.plugins[plugin][pname] = value;
-      if (Object.keys(entry.plugins[plugin]).length === 0) delete entry.plugins[plugin];
-      if (Object.keys(entry.plugins).length === 0) delete entry.plugins;
-    } else {
-      if (value === null || value === undefined || value === "") delete entry[field];
-      else entry[field] = value;
+    return this.judgmentPatch(host, filename, { [field]: value });
+  }
+
+  // Every judgment row, keyed for the plugin host's _all adapter (interim
+  // shape: by hash when ingested, collection:name otherwise; first wins on
+  // a shared hash — per-entry reads are the real API).
+  judgmentsAll() {
+    const out = {};
+    for (const row of this.#db.prepare(
+      `SELECT collection, name, hash, vote, favorite, notes, plugin_fields FROM entry
+       WHERE kind = 'output' AND (vote IS NOT NULL OR favorite IS NOT NULL OR notes IS NOT NULL OR plugin_fields IS NOT NULL)`,
+    ).all()) {
+      const key = row.hash ?? `${row.collection}:${row.name}`;
+      if (out[key]) continue;
+      const j = { ref: `${row.collection}:${row.name}` };
+      if (row.vote != null) j.vote = row.vote;
+      if (row.favorite != null) j.favorite = !!row.favorite;
+      if (row.notes != null) { try { j.notes = JSON.parse(row.notes); } catch { /* corrupt */ } }
+      if (row.plugin_fields != null) { try { j.plugins = JSON.parse(row.plugin_fields); } catch { /* corrupt */ } }
+      out[key] = j;
     }
-    if (isHash) {
-      const legacy = hostKey(host, filename);
-      if (this.#feedback.data[legacy] && key !== legacy) {
-        delete this.#feedback.data[legacy];
-      }
-      entry.ref = legacy;
+    return out;
+  }
+
+  // The portable judgment document, generated on demand per collection.
+  feedbackExport(collection) {
+    if (!this.collectionGet(collection)) return null;
+    const entries = {};
+    for (const row of this.#db.prepare(
+      `SELECT name, hash, vote, favorite, notes, plugin_fields FROM entry
+       WHERE collection = ? AND kind = 'output' AND (vote IS NOT NULL OR favorite IS NOT NULL OR notes IS NOT NULL OR plugin_fields IS NOT NULL)
+       ORDER BY name`,
+    ).all(collection)) {
+      const e = {};
+      if (row.hash != null) e.hash = row.hash;
+      if (row.vote != null) e.vote = row.vote;
+      if (row.favorite != null) e.favorite = !!row.favorite;
+      if (row.notes != null) { try { e.notes = JSON.parse(row.notes); } catch { /* corrupt */ } }
+      if (row.plugin_fields != null) { try { e.plugins = JSON.parse(row.plugin_fields); } catch { /* corrupt */ } }
+      entries[row.name] = e;
     }
-    if (Object.keys(entry).length === 0) delete this.#feedback.data[key];
-    else this.#feedback.data[key] = entry;
-    await this.#saveFeedback();
-  }
-
-  // Migrate existing judgment entries from host:filename keys to hash keys.
-  // Idempotent: entries already keyed by hash are left alone.
-  #migrateJudgments() {
-    const hashes = new Map();
-    let changed = false;
-    const newData = {};
-
-    for (const [key, entry] of Object.entries(this.#feedback.data)) {
-      if (!key.includes(":")) {
-        newData[key] = entry;
-        continue;
-      }
-      const [host, filename] = splitHostKey(key);
-      // Resolve via the entry table once per collection.
-      if (!hashes.has(host)) {
-        const rows = this.#db.prepare(
-          "SELECT name, hash FROM entry WHERE collection = ? AND kind = 'output' AND hash IS NOT NULL",
-        ).all(host);
-        const m = new Map();
-        for (const row of rows) m.set(row.name, row.hash);
-        hashes.set(host, m);
-      }
-      const hash = hashes.get(host).get(filename);
-      if (hash) {
-        entry.ref = key;
-        newData[hash] = entry;
-        changed = true;
-      } else {
-        newData[key] = entry; // file gone — orphan under the legacy key
-      }
-    }
-
-    if (changed) {
-      this.#feedback.data = newData;
-    }
-    return changed;
-  }
-
-  feedbackCount() {
-    return Object.keys(this.#feedback.data).length;
-  }
-
-  get feedbackPath() {
-    return this.#feedbackPath;
-  }
-
-  async setFeedbackPath(path) {
-    const doc = await loadVersioned(path, {
-      current: 1,
-      empty: () => ({}),
-      migrations: {},
-    });
-    this.#feedbackPath = path;
-    this.#feedback = doc;
-  }
-
-  feedbackAll() {
-    return structuredClone(this.#feedback.data);
-  }
-
-  async #saveFeedback() {
-    await writeSerialized(this.#feedbackPath, new TextEncoder().encode(JSON.stringify(this.#feedback, null, 2)));
+    return { version: 2, collection, generated_at: new Date().toISOString(), entries };
   }
 
   close() {

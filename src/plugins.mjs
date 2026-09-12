@@ -96,7 +96,7 @@ export class PluginHost {
       judgments: {
         get: (host, filename) => store.judgmentGet(host, filename),
         set: (host, filename, field, value) => store.judgmentSet(host, filename, field, value),
-        _all: () => store.feedbackAll(), // batch exporters iterate this
+        _all: () => store.judgmentsAll(), // batch exporters iterate this
       },
       // engine-mediated host fetch so plugins never talk to ComfyUI directly
       _fetchImageBytes: async (hostFilenameKey) => {
