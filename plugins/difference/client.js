@@ -19,7 +19,11 @@ export function register(client) {
       candidateEl.style.clipPath = "none"; // never blend through a clip boundary
     },
     clear(candidateEl, anchorEl) {
+      // mirror apply exactly: every property it sets comes back to default
       candidateEl.style.mixBlendMode = "";
+      candidateEl.style.opacity = "";
+      candidateEl.style.clipPath = "";
+      candidateEl.style.filter = ""; // amplify's residue too
       anchorEl.style.opacity = "";
     },
     // Optional amplification of faint differences (follow-on).

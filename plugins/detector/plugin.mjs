@@ -52,8 +52,7 @@ export function register(kz) {
     let body;
     if ((req.headers.get("Content-Type") ?? "").includes("application/json")) {
       const { collection, name } = await req.json().catch(() => ({}));
-      const hash = collection && name ? kz._hashFor(collection, name) : null;
-      const bytes = hash ? await kz._cacheGet(hash) : null;
+      const bytes = collection && name ? await kz.content.bytesForEntry(collection, name) : null;
       if (!bytes) {
         return Response.json({ error: "image not cached", reason: "ingest it first" }, { status: 404 });
       }

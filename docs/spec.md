@@ -242,21 +242,17 @@ The `kz` object handed to `register(kz)`:
 | Call | Kind | Purpose |
 |---|---|---|
 | `kz.mode(id, def)` | capability | a composition mode (no SPA consumer today) |
-| `kz.alignment(id, def)` | capability | an alignment contribution (no SPA consumer today) |
+| `kz.alignment(id, def)` | capability | an alignment contribution; `needs[].ok` may be a function — evaluated per `/api/plugins` request |
 | `kz.route(method, path, handler)` | route | server route under `/api/plugins/<name><path>` |
-| `kz.probe(def)` | capability | registered, **no consumer** (→ removed §3.4) |
-| `kz.exporter(def)` | capability | registered, **no consumer** (→ removed §3.4) |
+| `kz.exporter(def)` | capability | a training-export sink (kept while a plugin uses it) |
 | `kz.settings.get/set(k, v)` / `.ns()` | persistence | namespaced `plugins.<name>.*` settings |
-| `kz.store.getField/setField(host, file, field, v)` | persistence | plugin fields on the judgment record |
-| `kz.judgments.get/set(...)` | data | the core judgment record (notes/vote/favorite) |
-| `kz.judgments._all()` | internal | every judgment (batch exporters) (→ §3.4) |
-| `kz._hashFor(host, filename)` | internal | resolve hash from address (→ §3.4) |
-| `kz._cacheGet(hash)` | internal | read cached image bytes (→ §3.4) |
-| `kz._hostAddr(host)` | internal | resolve host name to address (→ §3.4) |
-| `kz._fetchImageBytes(key)` | internal | fetch image bytes via the engine (→ §3.4) |
+| `kz.store.getField/setField(collection, name, field, v)` | persistence | plugin fields on the entry's `plugin_fields` |
+| `kz.content.bytes(hash)` / `.graph(hash)` / `.bytesForEntry(collection, name)` | data | engine-mediated cache/graph reads |
+| `kz.judgments.get/set(...)` / `.all()` | data | the core judgment record (entry columns) |
+| `kz.reason(status, error, reason)` | response | the shared `{error, reason}` failure shape |
 
-Methods prefixed `_` are engine-internal accessors, not part of the public
-contract; both shipped server plugins (variations, export) cannot function
-without them today (→ public replacements + underscore removal §3.4).
-A plugin may also ship `client.js`, served at `/plugins/<name>/client.js`;
-the SPA does not load these today (§1).
+Underscore accessors are gone: no plugin reaches engine internals. The
+variations feature moved to `src/features/variations/` (core feature, not a
+plugin); the export plugin was deleted (a generic export returns later on
+the entries API). A plugin may also ship `client.js`, served at
+`/plugins/<name>/client.js`; the SPA does not load these today (§1).

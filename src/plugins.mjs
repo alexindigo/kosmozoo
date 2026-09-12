@@ -12,7 +12,6 @@
 
 import { readdir, stat } from "node:fs/promises";
 import { join } from "node:path";
-import { backingFor } from "./backings/index.mjs";
 
 export function pluginDirs(env = Deno.env.toObject()) {
   const dirs = [];
@@ -99,25 +98,25 @@ export class PluginHost {
         setField: (host, filename, field, value) =>
           store.judgmentSet(host, filename, `plugins.${name}.${field}`, value),
       },
+      // engine-mediated content access (the public surface — no plugin
+      // talks to a host or the cache directly)
+      content: {
+        bytes: (hash) => this.ctx.cache.get(hash),
+        graph: (hash) => store.contentGraph(this.ctx.cache, hash),
+        // bytes by entry address (hash resolution + cache read in one)
+        bytesForEntry: async (collection, name) => {
+          const hash = store.hashFor(collection, name);
+          return hash ? this.ctx.cache.get(hash) : null;
+        },
+      },
+      // every judgment row (batch exporters iterate this)
       judgments: {
         get: (host, filename) => store.judgmentGet(host, filename),
         set: (host, filename, field, value) => store.judgmentSet(host, filename, field, value),
-        _all: () => store.judgmentsAll(), // batch exporters iterate this
+        all: () => store.judgmentsAll(),
       },
-      // engine-mediated host fetch so plugins never talk to ComfyUI directly
-      _fetchImageBytes: async (hostFilenameKey) => {
-        const i = hostFilenameKey.indexOf(":");
-        const host = hostFilenameKey.slice(0, i), filename = hostFilenameKey.slice(i + 1);
-        const addr = this.ctx.hosts[host];
-        if (!addr) return null;
-        const r = await backingFor(addr).read(addr, filename, "output");
-        if (r.status !== 200) return null;
-        return new Uint8Array(await new Response(r.body).arrayBuffer());
-      },
-      // hash + cache access for plugins that need the ingested bytes
-      _hashFor: (host, filename) => store.hashFor(host, filename),
-      _cacheGet: (hash) => this.ctx.cache.get(hash),
-      _hostAddr: (host) => this.ctx.hosts[host] ?? null,
+      // the shared {error, reason} response shape (detector, critic, …)
+      reason: (status, error, reason) => Response.json({ error, reason }, { status }),
     };
   }
 

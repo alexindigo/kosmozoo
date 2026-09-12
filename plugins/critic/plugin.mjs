@@ -4,9 +4,7 @@
 //
 // Same shape as the detector: thin client to an external service, config'd
 // URL, degrades to absent. The service is any OpenAI-compatible vision
-// endpoint (or a local VLM). What kosmozoo gets: defect descriptions you edit
-// rather than type, candidate-vs-anchor difference descriptions, pre-tagged
-// recurring defect categories, and draft caption .txt for training export.
+// endpoint (or a local VLM).
 
 export function register(kz) {
   const url = () => kz.settings.get("serviceUrl", null);
@@ -21,37 +19,24 @@ export function register(kz) {
     }
   });
 
-  // describe what's wrong with an image
-  kz.route("POST", "/describe", async (req) => {
-    if (!url()) return Response.json({ error: "unconfigured" }, { status: 503 });
+  // one proxy per POST route: bytes in, JSON out; r.ok checked; the shared
+  // reason helper answers the same {error, reason} shape as the detector
+  const proxyTo = (path) => async (req) => {
+    if (!url()) return kz.reason(503, "service unconfigured", "unconfigured");
     const body = await req.arrayBuffer();
-    const r = await fetch(`${url()}/describe`, {
-      method: "POST", body, signal: AbortSignal.timeout(120_000),
-    }).catch(() => null);
-    if (!r) return Response.json({ error: "unreachable" }, { status: 503 });
+    let r;
+    try {
+      r = await fetch(`${url()}${path}`, {
+        method: "POST", body, signal: AbortSignal.timeout(120_000),
+      });
+    } catch (e) {
+      return kz.reason(503, "service unreachable", String(e?.message ?? e));
+    }
+    if (!r.ok) return kz.reason(502, "service error", `status ${r.status}`);
     return Response.json(await r.json());
-  });
+  };
 
-  // compare candidate against anchor; describe the difference
-  kz.route("POST", "/diff-describe", async (req) => {
-    if (!url()) return Response.json({ error: "unconfigured" }, { status: 503 });
-    const body = await req.arrayBuffer(); // two images packed by the caller
-    const r = await fetch(`${url()}/diff`, {
-      method: "POST", body, signal: AbortSignal.timeout(120_000),
-    }).catch(() => null);
-    if (!r) return Response.json({ error: "unreachable" }, { status: 503 });
-    return Response.json(await r.json());
-  });
-
-  // draft a caption .txt for the export plugin
-  kz.route("POST", "/caption", async (req) => {
-    if (!url()) return Response.json({ error: "unconfigured" }, { status: 503 });
-    const body = await req.arrayBuffer();
-    const r = await fetch(`${url()}/caption`, {
-      method: "POST", body, signal: AbortSignal.timeout(120_000),
-    }).catch(() => null);
-    if (!r) return Response.json({ error: "unreachable" }, { status: 503 });
-    const { caption } = await r.json();
-    return Response.json({ caption });
-  });
+  kz.route("POST", "/describe", proxyTo("/describe"));
+  kz.route("POST", "/diff-describe", proxyTo("/diff"));
+  kz.route("POST", "/caption", proxyTo("/caption"));
 }
