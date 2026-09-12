@@ -45,6 +45,18 @@ export async function atomicWrite(path, bytes) {
   await rename(tmp, path);
 }
 
+// A state file that exists but does not parse is NEVER overwritten: it is
+// renamed aside (quarantine) and boot stops with remediation. `path` is the
+// original location, `quarantined` where the bytes were preserved.
+export class CorruptStateError extends Error {
+  constructor(path, quarantined, cause) {
+    super(`${path}: corrupt JSON — bytes preserved at ${quarantined}`, { cause });
+    this.name = "CorruptStateError";
+    this.path = path;
+    this.quarantined = quarantined;
+  }
+}
+
 // A versioned JSON document. shape: { version: N, data: ... }.
 // migrations: { [fromVersion]: (data) => data } applied in order.
 export async function loadVersioned(path, { current, migrations = {}, empty }) {
@@ -52,7 +64,12 @@ export async function loadVersioned(path, { current, migrations = {}, empty }) {
   try {
     doc = JSON.parse(await readFile(path, "utf-8"));
   } catch (e) {
-    if (e.code === "ENOENT" || e instanceof SyntaxError) {
+    if (e instanceof SyntaxError) {
+      const quarantined = `${path}.corrupt-${new Date().toISOString()}`;
+      await rename(path, quarantined);
+      throw new CorruptStateError(path, quarantined, e);
+    }
+    if (e.code === "ENOENT") {
       doc = { version: current, data: empty() };
       await atomicWrite(path, new TextEncoder().encode(JSON.stringify(doc, null, 2)));
       return doc;
