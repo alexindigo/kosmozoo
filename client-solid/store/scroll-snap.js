@@ -8,38 +8,27 @@
 // wheel-rate classification, no device tuning: the model is direction +
 // proximity, which works the same on every input device.
 //
-// Nothing fires while a programmatic scroll is in flight (quiet window).
+// This module is one pure function + its constants. The quiet window (a
+// programmatic scroll in flight) is a STORE signal — programmaticScrollUntil
+// — set and read by the settle pipeline; no module globals (B6).
 
 // a tidy, never a yank: beyond this distance the user's landing stands
-const SNAP_TIDY_PX = 120;
+export const SNAP_TIDY_PX = 120;
 // below this net travel it was a wiggle, not a gesture — no snap
-const TRAVEL_FLOOR_PX = 24;
-// ignore scroll events caused by our own snap animation
-const SNAP_QUIET_MS = 500;
+export const TRAVEL_FLOOR_PX = 24;
+// how long a programmatic scroll stays in flight (the quiet window)
+export const SNAP_QUIET_MS = 500;
 
-let quietUntil = 0;
-
-// Call after a programmatic scroll (e.g. restoreToIndex) so the snap doesn't
-// immediately fight it.
-export function suppressScrollSnap(ms = SNAP_QUIET_MS) {
-  quietUntil = Math.max(quietUntil, Date.now() + ms);
-}
-
-// True while a programmatic scroll is in flight — the feed's bottom guard
-// checks this so it doesn't pin a smooth scroll passing the near-bottom zone.
-export function snapQuiet() {
-  return Date.now() < quietUntil;
-}
-
-// Settle-time tidy. direction: sign of net travel (1 down, -1 up); net: px of
-// travel this gesture. Targets the card boundary the gesture was heading
-// toward (down: the next card top ahead; up: the nearest top behind),
-// within SNAP_TIDY_PX — a small smooth ease, never a backward pull.
-export function snapTidy(col, virtualizer, { isDiffOpen, direction, net }) {
-  if (!col || !virtualizer || snapQuiet() || isDiffOpen()) return;
-  if (!direction || Math.abs(net) < TRAVEL_FLOOR_PX) return;
-  const items = virtualizer.getVirtualItems();
-  if (!items.length) return;
+// Settle-time tidy — pure: no state, no timers, no module globals.
+// items: the virtualizer's current items; direction: sign of net travel
+// (1 down, -1 up); net: px of travel this gesture. Targets the card boundary
+// the gesture was heading toward (down: the next card top ahead; up: the
+// nearest top behind), within SNAP_TIDY_PX — a small smooth ease, never a
+// backward pull. Returns true when a tidy scroll started (the caller opens
+// the quiet window).
+export function snapTidy(col, items, { direction, net }) {
+  if (!col || !items?.length) return false;
+  if (!direction || Math.abs(net) < TRAVEL_FLOOR_PX) return false;
   const top = col.scrollTop;
   let target = null;
   if (direction > 0) {
@@ -51,9 +40,9 @@ export function snapTidy(col, virtualizer, { isDiffOpen, direction, net }) {
       if (it.start <= top && (target === null || it.start > target)) target = it.start;
     }
   }
-  if (target === null) return;
+  if (target === null) return false;
   const delta = target - top;
-  if (Math.abs(delta) < 1 || Math.abs(delta) > SNAP_TIDY_PX) return;
-  quietUntil = Date.now() + SNAP_QUIET_MS;
+  if (Math.abs(delta) < 1 || Math.abs(delta) > SNAP_TIDY_PX) return false;
   col.scrollTo({ top: target, behavior: "smooth" });
+  return true;
 }

@@ -11,7 +11,7 @@
 // Note: the store ROOT is not assignable (st.x = v is silently ignored) —
 // root-level replacement goes through setSt("x", v); nested paths assign.
 
-import { createSignal, createMemo, createEffect, createContext, useContext } from "solid-js";
+import { createSignal, createMemo, createEffect, onCleanup, createContext, useContext } from "solid-js";
 import { createStore, reconcile } from "solid-js/store";
 import { api } from "/js/api.mjs";
 import { metaFromPngBytes } from "/shared/extractor.mjs";
@@ -27,7 +27,7 @@ import {
 import { fieldList, fieldsCfgFrom } from "./fields.js";
 import { makeImageWindow } from "./image-window.js";
 import { makeSizes } from "./sizes.js";
-import { suppressScrollSnap, snapQuiet, snapTidy } from "./scroll-snap.js";
+import { snapTidy, SNAP_QUIET_MS } from "./scroll-snap.js";
 
 // stored host if still present, else first online, else first
 function initialHost(hosts, stored) {
@@ -217,51 +217,60 @@ export function makeAppStore() {
   // --- feed seams (the Grid registers its handles here) -------------------------
   const seams = { virtualizer: null };
   // the scroll-activity seam: while a gesture is active the feed renders and
-  // the rail tracks — the model (current selection, snap tidy, bottom guard)
-  // moves only at settle. One debounce, owned here; Grid just calls
-  // feed.scrolled() per scroll event.
+  // the rail tracks — the model (current selection, snap tidy) moves only at
+  // settle. One debounce, owned here; Grid just calls feed.scrolled(top) per
+  // scroll event.
   const [feedActivity, setFeedActivity] = createSignal("settled");
+  // the feed's scroll position — Grid's scroll handler is the ONLY writer;
+  // the rail's wave bounds are the other consumer (one signal, both consumers)
+  const [feedScrollTop, setFeedScrollTop] = createSignal(0);
+  // a programmatic scroll in flight (the snap's quiet window) — a store
+  // signal, set by restoreToIndex/scrollTop/the settle tidy, read by settle;
+  // no module global (B6)
+  const [programmaticScrollUntil, setProgrammaticScrollUntil] = createSignal(0);
+  const scrollQuiet = () => Date.now() < programmaticScrollUntil();
+  const quietScrolls = (ms = SNAP_QUIET_MS) =>
+    setProgrammaticScrollUntil(Math.max(programmaticScrollUntil(), Date.now() + ms));
   let feedSettleTimer = 0;
   let gestureStart = null; // scrollTop at the gesture's origin
   const FEED_SETTLE_MS = 150;
 
-  function feedScrolled() {
+  function feedScrolled(top) {
     if (feedActivity() !== "scrolling") {
       setFeedActivity("scrolling");
       gestureStart = feedScrollEl()?.scrollTop ?? 0;
     }
-    // meta-want is a fetch, not a geometry write — safe mid-gesture; the
-    // resulting patches buffer to settle (the geometry still moves only at
-    // settle). Throttled so a fling doesn't queue wants per frame.
-    wantRangeThrottled(500);
+    setFeedScrollTop(top ?? feedScrollEl()?.scrollTop ?? 0);
     clearTimeout(feedSettleTimer);
     feedSettleTimer = setTimeout(feedSettle, FEED_SETTLE_MS);
   }
 
-  // the settle pipeline — order matters: selection from the stopped position,
-  // then the snap may ease it to a nearby boundary, then the bottom guard
+  // the settle pipeline (§3.5) — does exactly: (1) current from the stopped
+  // range, (2) the snap tidy (pure; the quiet window is the store signal),
+  // (3) resolveAhead for the new range, (4) want for it. No mid-gesture meta
+  // buffer — meta patches never change geometry (size is listing data), so
+  // they apply on arrival (B2 dead). No bottom guard — with exact estimates
+  // getTotalSize() is exact (B7 dead).
   function feedSettle() {
     feedSettleTimer = 0;
     setFeedActivity("settled");
     const col = feedScrollEl();
     const vz = feedVirtualizer();
     if (!col || !vz) { gestureStart = null; return; }
-    // 0. flush buffered model updates — geometry moves only between
-    //    gestures; corrections re-trigger the settle loop and converge
-    if (pendingMeta.size) {
-      for (const [idx, meta] of pendingMeta) setSt("images", idx, "meta", meta);
-      pendingMeta.clear();
-    }
-    // prefetch metas for the settled window's neighborhood (before they render)
-    wantRangeNow();
     // 1. current selection — a consequence of a STOPPED scroll
     actions.current.settleFromRange(vz.getVirtualItems(), col.scrollTop, col.clientHeight);
-    // 2. snap tidy — small, directional, capped (scroll-snap.js)
+    // 2. snap tidy — small, directional, capped; never while a programmatic
+    //    scroll is in flight or the workbench is open
     const net = gestureStart == null ? 0 : col.scrollTop - gestureStart;
-    snapTidy(col, vz, { isDiffOpen: () => st.diff.open, direction: Math.sign(net), net });
     gestureStart = null;
-    // 3. bottom guard — settle-time, never mid-gesture
-    safetyNet();
+    if (!scrollQuiet() && !st.diff.open) {
+      if (snapTidy(col, vz.getVirtualItems(), { direction: Math.sign(net), net })) quietScrolls();
+    }
+    // 3. sizes resolve around the stopped range…
+    stageResolveAhead();
+    // 4. …and metas are wanted for it (the mid-gesture throttle is folded
+    //    into this debounce — B3 dead)
+    wantRangeNow();
   }
 
   function restoreToIndex(idx) {
@@ -271,33 +280,14 @@ export function makeAppStore() {
     seams.virtualizer?.scrollToIndex(viewPos, { align: "center" });
     // a programmatic center, not user scrolling — keep the snap from
     // immediately pulling the centered card back to the top edge
-    suppressScrollSnap();
+    quietScrolls();
     wantRangeNow();
-  }
-
-  // bottom guard: near the bottom, nudge a scrollToOffset so the virtualizer
-  // re-checks its range. Settle-time only (the settle pipeline calls it);
-  // never while a programmatic scroll is in flight — it would pin a smooth
-  // scroll passing through the near-bottom zone.
-  function safetyNet() {
-    if (snapQuiet()) return;
-    const vz = seams.virtualizer;
-    const col = feedScrollEl();
-    if (!vz || !col) return;
-    // geometry from the virtualizer's total size (the DOM reserves exactly
-    // it) + the seamed element's scroll position
-    if (vz.getTotalSize() - (col.scrollTop + col.clientHeight) < col.clientHeight * 1.5) {
-      vz.scrollToOffset(col.scrollTop, { align: "start" });
-    }
   }
 
   // --- metadata channel: want + poll + patch in place ---------------------------
   let metaVersion = 0;
   const wantSet = new Set();
   let wantTimer = null;
-  // meta patches that landed mid-gesture — applied at settle (feedSettle),
-  // so card geometry never changes under the user's scroll
-  const pendingMeta = new Map();
   let metaPollTimer = null;
 
   function wantMeta(image) {
@@ -333,14 +323,24 @@ export function makeAppStore() {
       if (r.pending !== undefined) setSt("metaPending", r.pending);
       if (r.changed) {
         metaVersion = r.v;
-        const scrolling = feedActivity() === "scrolling";
+        const byId = imageIdxById();
         for (const [name, meta] of Object.entries(r.items ?? {})) {
-          const idx = st.images.findIndex((i) => i.filename === name);
-          if (idx < 0 || st.images[idx].meta) continue;
-          // geometry only moves between gestures: while the user scrolls,
-          // meta patches buffer and flush at settle (the feedSettle pipeline)
-          if (scrolling) pendingMeta.set(idx, meta);
-          else setSt("images", idx, "meta", meta);
+          const idx = byId.get(`${host()}:${name}`);
+          if (idx === undefined || st.images[idx].meta) continue;
+          // meta patches never change geometry (size is listing data) — they
+          // apply on arrival; the settle buffer is dead (B2)
+          setSt("images", idx, "meta", meta);
+        }
+        // dims ride the same poll (§4.4): an entry the dims pass reached
+        // after the listing loaded gets its width/height patched in — the
+        // size-known view extends without a reload
+        for (const [name, d] of Object.entries(r.dims ?? {})) {
+          const idx = byId.get(`${host()}:${name}`);
+          if (idx === undefined || !d) continue;
+          const img = st.images[idx];
+          if (img.width && img.height) continue;
+          setSt("images", idx, "width", d.width);
+          setSt("images", idx, "height", d.height);
         }
         // the node registry grows as the engine extracts — refresh it
         // alongside so newly discovered node types materialize without a
@@ -351,10 +351,21 @@ export function makeAppStore() {
     if (st.metaPending > 0) scheduleMetaPoll();
   }
 
+  // the scraper status poll (the menu row reads it) lives ONLY while ingest
+  // work is pending — the forever-setInterval is dead (B5); the effect owns
+  // its timer and cleans it up
+  createEffect(() => {
+    if (!(st.metaPending > 0)) return;
+    const t = setInterval(async () => {
+      setSt("scraper", reconcile(await api.prefetch().catch(() => st.scraper)));
+    }, 2000);
+    onCleanup(() => clearInterval(t));
+  });
+
   // meta-want follows the viewport: from a little behind the current window
   // to a few screens ahead of it, so most sizes resolve BEFORE those cards
-  // render — the offset has less to absorb. Throttled into the scroll path
-  // (a fetch, not a geometry write — the resulting patches buffer to settle).
+  // render. Called at settle, at restore, and after a load — the scroll-path
+  // throttle is folded into the settle debounce (B3).
   const WANT_LOOKAHEAD = 60, WANT_BEHIND = 10;
 
   function wantRangeNow() {
@@ -366,12 +377,6 @@ export function makeAppStore() {
       const image = st.images[v[i]];
       if (image) wantMeta(image);
     }
-  }
-  let wantThrottleT = 0;
-  function wantRangeThrottled(ms = 500) {
-    if (Date.now() < wantThrottleT) return;
-    wantThrottleT = Date.now() + ms;
-    wantRangeNow();
   }
 
   // --- image list load -----------------------------------------------------------
@@ -500,22 +505,22 @@ export function makeAppStore() {
   }));
   const pendingSizes = createMemo(() => view().map((i) => st.images[i])
     .filter((img) => !!img && !((img.width && img.height) || (img.meta?.width && img.meta?.height)) && sizes_.sizeOf(img.id) === null && !sizes_.loadFailed(img.id)));
-  createEffect(() => {
-    const pending = pendingSizes();
-    if (!pending.length) return;
-    // stage around the virtualizer's visible range (§3.5: resolveAhead(range)
-    // — the pump follows the viewport; the range's VIEW indices let it stage
-    // AHEAD of the size-known list, so the tail can extend)
+  // the staging pass shared by the reactive pump and the settle pipeline:
+  // resolve sizes around the virtualizer's current range. The range's
+  // indices are known-size-list positions, an ordered subset of view, so
+  // they serve as view positions: the window covers the visible span and
+  // stages AHEAD into entries whose size is still unknown. resolveAhead
+  // indexes st.images directly — no per-landing materialization.
+  function stageResolveAhead() {
     const vz = feedVirtualizer();
     const items = vz?.getVirtualItems() ?? [];
     if (!items.length) return;
-    // pass the VIEW indices — resolveAhead indexes st.images directly (a
-    // 3000-entry materialization per landing is what this must not do).
-    // The range's indices are known-size-list positions, an ordered subset
-    // of view, so they serve as view positions: the window covers the
-    // visible span and stages AHEAD into entries whose size is still unknown
-    const v = view();
-    sizes_.resolveAhead(v, items[0].index, items[items.length - 1].index);
+    sizes_.resolveAhead(view(), items[0].index, items[items.length - 1].index);
+  }
+  createEffect(() => {
+    const pending = pendingSizes();
+    if (!pending.length) return;
+    stageResolveAhead();
   });
 
   // the image-src window derives membership from the virtualizer's range
@@ -629,10 +634,6 @@ export function makeAppStore() {
       await actions.anchors.loadPaneWidth();
       // persisted per-image zoom views (feed zoom carries across reloads)
       await initViews().catch(() => {});
-      // scraper status poll (the menu row reads it; the counter derives)
-      setInterval(async () => {
-        setSt("scraper", reconcile(await api.prefetch().catch(() => st.scraper)));
-      }, 2000);
       // the URL hash outranks the stored host: /#host[#filename] is shareable state
       const route = parseUrl();
       const urlHost = route.view === "diff" ? route.left?.source : route.host;
@@ -956,7 +957,7 @@ export function makeAppStore() {
       scrollTop() {
         const col = feedScrollEl();
         if (!col) return;
-        suppressScrollSnap();
+        quietScrolls();
         col.scrollTo({ top: 0, behavior: "smooth" });
       },
     },
@@ -1278,6 +1279,7 @@ export function makeAppStore() {
     workspace,
     infoLayout,
     feedScrollEl,
+    feedScrollTop,
     feedVirtualizer,
     feedActivity,
     // a card's image size: the listing's content dims, else the extractor

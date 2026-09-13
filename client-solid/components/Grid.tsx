@@ -49,8 +49,10 @@ export function Grid() {
   onMount(() => {
     store.actions.feed.register({ virtualizer, scrollEl: col });
     // scrolling is render + rail tracking only; the model (current selection,
-    // snap tidy) moves at settle — the store owns the debounce
-    const onScroll = () => store.actions.feed.scrolled();
+    // snap tidy) moves at settle — the store owns the debounce. The handler
+    // is the ONLY writer of the store's scrollTop signal (one signal, both
+    // consumers: settle and the rail's wave)
+    const onScroll = () => store.actions.feed.scrolled(col?.scrollTop ?? 0);
     col?.addEventListener("scroll", onScroll, { passive: true });
     onCleanup(() => col?.removeEventListener("scroll", onScroll));
     // a column-size change is the only legitimate height change: re-measure
