@@ -31,9 +31,10 @@ store.actions.boot().catch((e) => store.actions.status.error(`load failed: ${e?.
 window.addEventListener("hashchange", () => store.actions.route.changed());
 window.addEventListener("popstate", () => store.actions.route.changed());
 
-// key bindings — registration order is the Escape precedence: the keys panel
-// closes first, then the workbench. The delete confirmation's capture-phase
-// listener beats both.
+// key bindings — Escape precedence is structural: the dispatcher hands
+// Escape to the top key layer first (an open modal, a running capture),
+// then these bindings run in registration order (the keys panel closes
+// before the workbench).
 store.actions.keys.register("app.keys", "?", () => store.actions.keys.togglePanel(), {
   desc: "actions & keys panel", ctx: "global",
 });

@@ -82,6 +82,12 @@ export function makeAppStore() {
   const [confirmDelete, setConfirmDelete] = createSignal(null); // { image } | { images }
   const [keysPanelOpen, setKeysPanelOpen] = createSignal(false);
   const [capturing, setCapturing] = createSignal(null); // action id awaiting a keypress
+  // the key-layer stack: open modals push { id, onEscape } and the ONE key
+  // dispatcher hands Escape to the TOP layer only (G4 — no per-modal
+  // listeners, no double-close, capture-cancel outranks the panel's own
+  // Esc-close binding). An onEscape returning false declines the event
+  // (dispatch continues).
+  const [keyLayers, setKeyLayers] = createSignal([]);
   const [keysFilter, setKeysFilter] = createSignal("");
   const [menuFilter, setMenuFilter] = createSignal("");
   const [anchorPaneWidth, setAnchorPaneWidth] = createSignal(300); // px, divider-adjusted, persisted
@@ -556,6 +562,22 @@ export function makeAppStore() {
   const keymap = makeKeymap();
   const [keysVersion, setKeysVersion] = createSignal(0);
   const bumpKeys = () => setKeysVersion((v) => v + 1);
+
+  // a running key capture is the TOP key layer: plain Escape cancels it
+  // (the panel stays open); a modified Escape declines — that is a rebind
+  // candidate, not a cancel
+  createEffect(() => {
+    if (!capturing()) return;
+    setKeyLayers((ls) => [...ls.filter((l) => l.id !== "keys-capture"), {
+      id: "keys-capture",
+      onEscape: (e) => {
+        if (e?.ctrlKey || e?.altKey || e?.shiftKey || e?.metaKey) return false;
+        setCapturing(null);
+        return true;
+      },
+    }]);
+    onCleanup(() => setKeyLayers((ls) => ls.filter((l) => l.id !== "keys-capture")));
+  });
 
   // --- anchor helpers --------------------------------------------------------------
   const ANCHORS_LS_KEY = "kosmozoo.anchors.v1";
@@ -1054,15 +1076,19 @@ export function makeAppStore() {
         setCapturing(null);
       },
       startCapture(id) { setCapturing(id); },
+      // key layers: open modals push themselves; Escape goes to the top one
+      pushLayer(layer) {
+        setKeyLayers((ls) => [...ls.filter((l) => l.id !== layer.id), layer]);
+      },
+      popLayer(id) {
+        setKeyLayers((ls) => ls.filter((l) => l.id !== id));
+      },
       // the capture hook: a pressed key rebinds the capturing action.
-      // Plain Escape cancels the capture.
+      // (Plain Escape never reaches here — the capture layer cancels first;
+      // a modified Escape declines the layer and lands here as a rebind.)
       captureEvent(e) {
         const id = capturing();
         if (!id) return;
-        if (e.key === "Escape" && !e.ctrlKey && !e.altKey && !e.shiftKey && !e.metaKey) {
-          setCapturing(null);
-          return;
-        }
         const combo = comboFromEvent(e);
         const res = keymap.rebind(id, combo);
         if (res.conflict) {
@@ -1093,10 +1119,19 @@ export function makeAppStore() {
         keymap.setKeymap(saved ?? {});
         bumpKeys();
       },
-      // dispatch a keydown through the bindings (first match wins, in
-      // registration order — the panel registers before the workbench so
-      // its Escape outranks wb.close)
+      // the ONE keydown entry point (main.tsx binds it): Escape goes to the
+      // top key layer first (an open modal, a running capture), then the
+      // keymap's bindings — first match wins, in registration order (the
+      // panel registers before the workbench so keys.close outranks wb.close)
       dispatch(e) {
+        if (e.key === "Escape") {
+          const top = keyLayers().at(-1);
+          if (top && top.onEscape(e) !== false) {
+            e.preventDefault();
+            e.stopPropagation();
+            return;
+          }
+        }
         if (capturing()) {
           e.preventDefault();
           e.stopPropagation();

@@ -22,7 +22,7 @@ export function KeysPanel() {
   };
 
   return (
-    <Modal overlayId="keysPanel" panelId="keysPanelInner" open={store.state.keysPanelOpen()} onClose={close}>
+    <Modal overlayId="keysPanel" panelId="keysPanelInner" open={store.state.keysPanelOpen()} onClose={close} escapeLayer={false}>
       <div id="keysPanelHead">
         <h2>Actions & keys</h2>
         <input
