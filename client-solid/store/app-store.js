@@ -11,7 +11,7 @@
 // Note: the store ROOT is not assignable (st.x = v is silently ignored) —
 // root-level replacement goes through setSt("x", v); nested paths assign.
 
-import { createSignal, createMemo, createContext, useContext } from "solid-js";
+import { createSignal, createMemo, createEffect, createContext, useContext } from "solid-js";
 import { createStore, reconcile } from "solid-js/store";
 import { api } from "/js/api.mjs";
 import { metaFromPngBytes } from "/shared/extractor.mjs";
@@ -26,6 +26,7 @@ import {
 } from "/js/route-parse.mjs";
 import { fieldList, fieldsCfgFrom } from "./fields.js";
 import { makeImageWindow } from "./image-window.js";
+import { makeSizes } from "./sizes.js";
 import { suppressScrollSnap, snapQuiet, snapTidy } from "./scroll-snap.js";
 
 // stored host if still present, else first online, else first
@@ -474,8 +475,57 @@ export function makeAppStore() {
 
   const imageIdx = (id) => st.images.findIndex((i) => i.id === id);
 
-  // the image-src window (visible ∪ workbench ± pad)
-  const window_ = makeImageWindow({ state: { get images() { return st.images; }, get diff() { return st.diff; }, host } });
+  // §3.5: every card's size is DATA before it renders — listing dims →
+  // meta dims → off-DOM measurement (sizes store). The virtualizer's item
+  // list is the size-known view; the pending set drives the resolver. Both
+  // memos are reactive over the listing (store paths) and the sizes store
+  // (version signal), so landings recompute both by construction.
+  // id → index map maintained alongside images — the resolver must not
+  // scan the full listing per staged load (srcFor was O(n) per resolve)
+  const imageIdxById = createMemo(() => {
+    const m = new Map();
+    for (let i = 0; i < st.images.length; i++) m.set(st.images[i].id, i);
+    return m;
+  });
+  const sizes_ = makeSizes({
+    srcFor: (id) => {
+      const img = st.images[imageIdxById().get(id)];
+      return img ? api.entryBytesUrl(img.host, img.filename) : null;
+    },
+    imageAt: (i) => st.images[i],
+  });
+  const entriesWithKnownSize = createMemo(() => view().filter((i) => {
+    const img = st.images[i];
+    return !!img && (!!img.width && !!img.height || !!(img.meta?.width && img.meta?.height) || sizes_.sizeOf(img.id) !== null);
+  }));
+  const pendingSizes = createMemo(() => view().map((i) => st.images[i])
+    .filter((img) => !!img && !((img.width && img.height) || (img.meta?.width && img.meta?.height)) && sizes_.sizeOf(img.id) === null && !sizes_.loadFailed(img.id)));
+  createEffect(() => {
+    const pending = pendingSizes();
+    if (!pending.length) return;
+    // stage around the virtualizer's visible range (§3.5: resolveAhead(range)
+    // — the pump follows the viewport; the range's VIEW indices let it stage
+    // AHEAD of the size-known list, so the tail can extend)
+    const vz = feedVirtualizer();
+    const items = vz?.getVirtualItems() ?? [];
+    if (!items.length) return;
+    // pass the VIEW indices — resolveAhead indexes st.images directly (a
+    // 3000-entry materialization per landing is what this must not do).
+    // The range's indices are known-size-list positions, an ordered subset
+    // of view, so they serve as view positions: the window covers the
+    // visible span and stages AHEAD into entries whose size is still unknown
+    const v = view();
+    sizes_.resolveAhead(v, items[0].index, items[items.length - 1].index);
+  });
+
+  // the image-src window derives membership from the virtualizer's range
+  // ± pad (§3.5) — the store's registered virtualizer is the one source
+  const window_ = makeImageWindow({ range: () => {
+    const vz = seams.virtualizer;
+    const items = vz?.getVirtualItems() ?? [];
+    if (!items.length) return null;
+    return { first: items[0].index, last: items[items.length - 1].index };
+  } });
 
   // --- status-stack helpers ------------------------------------------------------
   const chipTimers = { transient: 0 };
@@ -1230,14 +1280,18 @@ export function makeAppStore() {
     feedScrollEl,
     feedVirtualizer,
     feedActivity,
-    // a card's image size: meta's dims when extracted, else the off-DOM
-    // loader's natural measurement (0 layout effect) — null = unknown
+    // a card's image size: the listing's content dims, else the extractor
+    // meta's dims, else the off-DOM loader's measurement — null = unknown
+    // (unknown = the card is NOT in the feed — the §3.5 invariant)
     cardSize(idx) {
       const img = st.images[idx];
       if (!img) return null;
+      if (img.width && img.height) return { w: img.width, h: img.height };
       if (img.meta?.width && img.meta?.height) return { w: img.meta.width, h: img.meta.height };
-      return window_.sizeOf(img.id);
+      return sizes_.sizeOf(img.id);
     },
+    pendingSizeCount: () => pendingSizes().length,
+    entriesWithKnownSize: () => entriesWithKnownSize(),
   };
 
   // UI state accessor — separate reactive graph

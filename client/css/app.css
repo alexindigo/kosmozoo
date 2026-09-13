@@ -16,6 +16,7 @@
   --foreground-mid: #999;
   --foreground-dim: #666;
   --foreground-bright: #fff;
+  --card-chrome-h: 148px;         /* card chrome under the image box — read once by sizes.js */
   --primary: #38bdf8;            /* primary action, current pointer */
   --secondary: #7ab3ff;          /* interactive accent: hover, links, active */
   --positive: #9ece6a;           /* up-vote, success */

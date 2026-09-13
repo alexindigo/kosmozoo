@@ -33,11 +33,9 @@ export function Card(props) {
   const src = () => {
     const img = image();
     if (!img) return null;
-    // gate: the img inserts once the size is known (meta or off-card loader);
-    // a size the loader cannot resolve (broken bytes) falls back to the
-    // in-card error path, which owns error display + retry
-    if (!sizeInfo() && !store.state.window.loadFailed(img.id)) return null;
-    return store.state.window.getSrc(props.imgIdx(), img.id);
+    // the card is only MOUNTED at known size (§3.5) — the img's src follows
+    // the window's range membership; broken bytes take the in-card error path
+    return store.state.window.getSrc(props.imgIdx(), img);
   };
   const [flash, setFlash] = createSignal(false);
 
