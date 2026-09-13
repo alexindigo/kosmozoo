@@ -85,16 +85,19 @@ async function attempt(name, fn) {
   });
 
   // down-vote auto-hides: the card leaves the feed immediately (not on
-  // the next manual rebuild); reset needs reveal toggled back on
+  // the next manual rebuild); reset needs reveal toggled back on.
+  // Selected by data-name: under size-before-render the first DOM card is
+  // the first size-KNOWN entry — mount position no longer implies entries[0]
   await attempt("down-vote auto-hides the card", async () => {
     const before = await page.evaluate("document.querySelectorAll('.card').length");
-    await page.evaluate("document.querySelector('.card .votebtn.down').click()");
+    const name = await page.evaluate("document.querySelector('.card').dataset.name");
+    const sel = `.card[data-name="${name}"]`;
+    await page.evaluate(`document.querySelector('${sel} .votebtn.down').click()`);
     await sleep(300);
-    const gone = !await page.evaluate("document.querySelector('.card[data-idx=\"0\"]')");
+    const gone = !await page.evaluate(`!!document.querySelector('${sel}')`);
     check("card left the feed right away", gone);
     await page.evaluate(`(async () => {
-      const img = (await (await fetch("/api/collections/fake/entries")).json())[0];
-      await fetch("/api/collections/fake/entries/" + encodeURIComponent(img.name) + "/judgment", { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ vote: null, favorite: null, notes: null }) });
+      await fetch("/api/collections/fake/entries/" + encodeURIComponent(${JSON.stringify(name)}) + "/judgment", { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ vote: null, favorite: null, notes: null }) });
       // reveal on (restores the card), then back off — reveal only filters
       // cards still down-voted, and the reset deleted the vote
       document.getElementById("unhideBtn").click();
@@ -103,13 +106,15 @@ async function attempt(name, fn) {
     // up-vote hides too when the "hide up-voted" coupling is enabled —
     // one visibility rule covers every hidden flavor
     await page.evaluate(`document.getElementById("hideUpBtn").click()`);
-    await page.evaluate("document.querySelector('.card .votebtn.up').click()");
+    await page.poll("!!document.querySelector('.card .votebtn.up')", 3000);
+    const nameUp = await page.evaluate("document.querySelector('.card').dataset.name");
+    const selUp = `.card[data-name="${nameUp}"]`;
+    await page.evaluate(`document.querySelector('${selUp} .votebtn.up').click()`);
     await sleep(300);
-    const goneUp = !await page.evaluate("document.querySelector('.card[data-idx=\"0\"]')");
+    const goneUp = !await page.evaluate(`!!document.querySelector('${selUp}')`);
     check("up-vote hides when coupling on", goneUp);
     await page.evaluate(`(async () => {
-      const img = (await (await fetch("/api/collections/fake/entries")).json())[0];
-      await fetch("/api/collections/fake/entries/" + encodeURIComponent(img.name) + "/judgment", { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ vote: null, favorite: null, notes: null }) });
+      await fetch("/api/collections/fake/entries/" + encodeURIComponent(${JSON.stringify(nameUp)}) + "/judgment", { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ vote: null, favorite: null, notes: null }) });
       document.getElementById("hideUpBtn").click(); // coupling off -> rebuild restores
     })()`);
     await page.poll("document.querySelectorAll('.card').length === " + before, 3000);
@@ -243,19 +248,19 @@ async function attempt(name, fn) {
     await page.key("Escape");
     await page.poll(`(async () => ${KZ}.state.diff.open === false)()`, 5000);
 
-    // chunked feed: renders on approach (sentinel + scroll net). Scroll-step
-    // until the end-of-list marker shows.
-    let reachedEnd = false;
-    for (let i = 0; i < 400; i++) {
-      await page.evaluate("(() => { const c = document.getElementById(\"candidatesCol\"); c.scrollTop = c.scrollHeight; })(), true");
-      await sleep(250);
-      reachedEnd = await page.evaluate("!!document.querySelector('.endoflist')");
-      if (reachedEnd) break;
-    }
-    check("feed renders to the end under scrolling (chunked, sentinel+net)", reachedEnd);
+    // deep jump via the store: restoreToIndex + one settle. (The old
+    // 400-iteration scroll-chase fought the prefetch rate — with the
+    // two-pass prefetch the honest volume test is the jump itself.)
+    const n = await page.evaluate(`(async () => {
+      const kz = ${KZ};
+      const last = kz.state.images.length - 1;
+      kz.actions.feed.restoreToIndex(last);
+      return last;
+    })()`);
+    await page.poll(`!!document.querySelector('.card[data-idx="${n}"]')`, 15000);
+    check("feed renders to the end under a deep jump (restoreToIndex)", true);
     await page.poll(`(async () => {
-      const n = ${KZ}.state.images.length - 1;
-      const el = document.querySelector('.card[data-idx="' + n + '"] img');
+      const el = document.querySelector('.card[data-idx="${n}"] img');
       return !!(el && el.getAttribute("src"));
     })()`, 15000);
     check("scroll to end loads tail images", true);

@@ -60,6 +60,13 @@ for url in "http://127.0.0.1:$FAKE_PORT/api/system_stats" "http://127.0.0.1:$ENG
   done
 done
 
+# 2b. two-pass prefetch (§4.2): the browser suites must test the feed, not
+#     the prefetch rate — wait for the dims pass to drain (~40 s for 3000)
+for i in $(seq 1 240); do
+  [ "$(curl -s "http://127.0.0.1:$ENGINE_PORT/api/prefetch" | jq -r '.dimsPending // 1')" = "0" ] && break
+  sleep 1
+done
+
 # 3. headless Chromium drives the SPA — raw CDP, no npm dependencies.
 #    The Playwright image supplies the browser; Node 22 supplies WebSocket.
 docker run --rm --network host -v "$WORK":/work -w /work \
@@ -87,3 +94,9 @@ docker run --rm --network host -v "$WORK":/work -w /work \
   -e E2E_ENGINE="http://127.0.0.1:$ENGINE_PORT" \
   --entrypoint node "$PW_IMAGE" \
   /work/tests/e2e/cache.e2e.cjs
+
+# 7. feed invariant e2e (§3.5): exact card heights, stable tops
+docker run --rm --network host -v "$WORK":/work -w /work \
+  -e E2E_ENGINE="http://127.0.0.1:$ENGINE_PORT" \
+  --entrypoint node "$PW_IMAGE" \
+  /work/tests/e2e/feed.e2e.cjs
