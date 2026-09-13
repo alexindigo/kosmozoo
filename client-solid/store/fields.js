@@ -1,7 +1,7 @@
 // client-solid/store/fields.js — the metadata fields machinery, parameterized
-// over the store's node registry + stored picker cfg. NOTHING is hardcoded
-// about nodes: the field list derives from the engine's node registry; a
-// field id is `<class_type>.<input>`.
+// over the store's node registry. NOTHING is hardcoded about nodes: the field
+// list derives from the engine's node registry; a field id is
+// `<class_type>.<input>`.
 
 const LONG_TEXT = 120; // chars: full-text fields render in the desc area
 
@@ -51,7 +51,10 @@ function fieldGetter(classType, input) {
   };
 }
 
-// [[id, getter]] flat, sorted by group title then input — the registry shape
+// [[id, getter]] flat, sorted by group title then input — the registry shape.
+// This list is also the hook a future overlay-fields picker will target (the
+// card-strip picker was deleted: it toggled a gate nothing read — a later
+// picker decides which detail OVERLAYS show).
 export function fieldList(registry) {
   const reg = registry ?? {};
   const entries = Object.entries(reg);
@@ -62,33 +65,17 @@ export function fieldList(registry) {
         .map((input) => [fieldId(classType, input), fieldGetter(classType, input)]));
 }
 
-// Picker config merged over the live list: fields may come and go with the
-// registry; preserved toggles for ids not yet discovered still apply when
-// they appear.
-export function fieldsCfgFrom(list, stored) {
-  const out = {};
-  for (const [id] of list) {
-    out[id] = { card: stored?.[id]?.card ?? false };
-  }
-  const storedEntries = Object.entries(stored ?? {});
-  for (const [id, cfg] of storedEntries) {
-    if (!(id in out)) out[id] = { card: cfg.card ?? false };
-  }
-  return out;
-}
-
 export function formatScalar(v) {
   if (typeof v === "number") return String(parseFloat(v.toFixed(10)));
   return String(v);
 }
 
-// [label, text, long?] rows from meta, gated by cfg.card when gated=true.
-// Rows are labeled by the actual node name (class_type) — never the registry
-// title, which any workflow renames per instance.
-export function materializeRows(meta, { gated, list, cfg }) {
+// [label, text, long?] rows from meta. Rows are labeled by the actual node
+// name (class_type) — never the registry title, which any workflow renames
+// per instance.
+export function materializeRows(meta, { list }) {
   const rows = [];
   for (const [id, getter] of list) {
-    if (gated && !cfg[id]?.card) continue;
     const v = getter(meta);
     if (v == null) continue;
     const [classType, input] = parseFieldId(id);
@@ -103,31 +90,18 @@ export function materializeRows(meta, { gated, list, cfg }) {
 }
 
 // full rows (details pane / ⓘ overlay): every field the image carries
-export function fullFieldRows(meta, { list, cfg }) {
-  return materializeRows(meta, { gated: false, list, cfg });
-}
-
-// [groupTitle, [[id, input]]], sorted by group title, fields sorted by
-// input — the picker's table shape (groups derive from the registry).
-export function fieldGroupsOf(registry) {
-  const reg = registry ?? {};
-  const entries = Object.entries(reg);
-  return entries
-    .sort(([a, aInfo], [b, bInfo]) => (aInfo.title || a).localeCompare(bInfo.title || b))
-    .map(([classType, info]) => [
-      reg[classType]?.title || classType,
-      Object.keys(info.inputs ?? {}).sort().map((input) => [fieldId(classType, input), input]),
-    ]);
+export function fullFieldRows(meta, { list }) {
+  return materializeRows(meta, { list });
 }
 
 // The "changed vs the previous image" highlight: builds the previous meta's
 // keyspace; the returned predicate marks a current row whose (label, value)
 // isn't in it — a changed value, or a field the previous image didn't carry.
 // Values compare through the same formatting both sides (materializeRows).
-export function valueDiffer(compareMeta, { list, cfg }) {
+export function valueDiffer(compareMeta, { list }) {
   if (!compareMeta) return () => false;
   const seen = new Map(); // label -> Set of values (multi-instance: any match is "unchanged")
-  for (const [label, v] of fullFieldRows(compareMeta, { list, cfg })) {
+  for (const [label, v] of fullFieldRows(compareMeta, { list })) {
     if (!seen.has(label)) seen.set(label, new Set());
     seen.get(label).add(v);
   }
@@ -172,6 +146,3 @@ export function nodeImages(meta, host) {
   }
   return out;
 }
-
-// validatedNodeImages intentionally removed — nodeImages returns refs it
-// resolves; validation lives wherever the component can re-validate.

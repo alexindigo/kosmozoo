@@ -16,7 +16,6 @@ import { StatusStack } from "./StatusStack.js";
 import { ScrollTopButton } from "./ScrollTopButton.js";
 import { DiffStage } from "./DiffStage.js";
 import { ConfirmDelete } from "./ConfirmDelete.js";
-import { FieldsOverlay } from "./FieldsOverlay.js";
 import { InfoOverlay } from "./InfoOverlay.js";
 import { KeysPanel } from "./KeysPanel.js";
 import { FeatureModals } from "../features/index.js";
@@ -37,7 +36,6 @@ export function App() {
       <DiffStage />
       <FeatureModals />
       <ConfirmDelete />
-      <FieldsOverlay />
       <InfoOverlay />
       <KeysPanel />
     </>

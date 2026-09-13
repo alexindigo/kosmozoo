@@ -16,7 +16,7 @@ import { fullFieldRows, valueDiffer, nodeImages, NODE_IMG_EXT } from "../store/f
 
 export function MetaBody(props) {
   const store = useAppStore();
-  const ctx = () => ({ list: store.state.fieldsList(), cfg: store.state.fieldsCfg() });
+  const ctx = () => ({ list: store.state.fieldsList() });
   const rows = () => props.meta ? fullFieldRows(props.meta, ctx()) : [];
   const differs = () => valueDiffer(props.compareMeta, ctx());
 

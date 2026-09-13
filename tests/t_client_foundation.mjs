@@ -92,7 +92,6 @@ Deno.test("diff: malformed sides parse to null, not garbage", () => {
 
 import {
   fieldList,
-  fieldsCfgFrom,
   fullFieldRows,
 } from "../client-solid/store/fields.js";
 
@@ -102,7 +101,6 @@ const REGISTRY = {
   CLIPTextEncode: { title: null, inputs: { text: "string" } },
 };
 const LIST = fieldList(REGISTRY);
-const CFG = fieldsCfgFrom(LIST, null);
 
 Deno.test("fields: every node input is a field; instances each get a row", () => {
   const rows = fullFieldRows({
@@ -111,7 +109,7 @@ Deno.test("fields: every node input is a field; instances each get a row", () =>
       { id: "2", type: "LoraLoaderModelOnly", inputs: { lora_name: "a.safetensors", strength_model: 0.8 } },
       { id: "3", type: "LoraLoaderModelOnly", inputs: { lora_name: "b.safetensors", strength_model: 0.5 } },
     ],
-  }, { list: LIST, cfg: CFG });
+  }, { list: LIST });
   assert(rows.some(([l, v]) => l === "LoraLoaderModelOnly — lora_name" && v === "a.safetensors"), "lora name row");
   assert(rows.some(([l, v]) => l === "LoraLoaderModelOnly — lora_name" && v === "b.safetensors"), "second lora name row");
   assert(rows.some(([l, v]) => l === "LoraLoaderModelOnly — strength_model" && v === "0.8"));
@@ -124,7 +122,7 @@ Deno.test("fields: every node input is a field; instances each get a row", () =>
 Deno.test("fields: unknown node types on the image simply don't render", () => {
   const rows = fullFieldRows({
     nodes: [{ id: "1", type: "FluxGuidance", inputs: { guidance: 3.5 } }],
-  }, { list: LIST, cfg: CFG });
+  }, { list: LIST });
   assertEquals(rows, []); // FluxGuidance is not in the registry yet
 });
 
@@ -135,7 +133,7 @@ Deno.test("valueDiffer: values that differ from the previous meta are marked", a
       { id: "1", type: "KSampler", inputs: { steps: 20, seed: 7 } },
       { id: "2", type: "LoraLoaderModelOnly", inputs: { lora_name: "a.safetensors", strength_model: 0.8 } },
     ],
-  }, { list: LIST, cfg: CFG });
+  }, { list: LIST });
   assert(!differs("KSampler — seed", "7"), "same value is unchanged");
   assert(differs("KSampler — seed", "8"), "a changed value is marked");
   assert(!differs("KSampler — steps", "20"));
@@ -143,7 +141,7 @@ Deno.test("valueDiffer: values that differ from the previous meta are marked", a
   assert(!differs("LoraLoaderModelOnly — strength_model", "0.8"));
   assert(differs("FluxGuidance — guidance", "3.5"), "a field the previous image lacked is marked");
   // no comparison target → nothing differs
-  assert(!valueDiffer(null, { list: LIST, cfg: CFG })("KSampler — seed", "999"));
+  assert(!valueDiffer(null, { list: LIST })("KSampler — seed", "999"));
 });
 
 Deno.test("nodeImages: only LoadImage image inputs surface — SaveImage's filename_prefix is not an input file", async () => {

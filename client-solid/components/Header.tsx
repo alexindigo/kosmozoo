@@ -91,11 +91,6 @@ function Menu() {
               <span id="scraperPending" class="menuextra">{scraperPending()}</span>
             </div>
           </Show>
-          <Show when={matches("metadata fields card strip picker")}>
-            <div class="menurow">
-              <button onClick={() => store.actions.fieldsOverlay.open()}>metadata fields…</button>
-            </div>
-          </Show>
           <Show when={matches("down-vote hides")}>
             <div class="menurow">
               <label class="switchwrap" title="thumbs-down removes an image from view (reveal with the Unhide button)">

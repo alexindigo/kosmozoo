@@ -24,7 +24,7 @@ import {
   planDeleteCurrent,
   diffUrl,
 } from "/js/route-parse.mjs";
-import { fieldList, fieldsCfgFrom, nodeImages } from "./fields.js";
+import { fieldList, nodeImages } from "./fields.js";
 import { makeImageWindow } from "./image-window.js";
 import { makeSizes } from "./sizes.js";
 import { snapTidy, SNAP_QUIET_MS } from "./scroll-snap.js";
@@ -46,7 +46,6 @@ export function makeAppStore() {
   const [st, setSt] = createStore({
     hosts: {},            // name -> { address, kind, online, capabilities }
     nodesRegistry: {},    // discovered node types (/api/nodes)
-    fieldsStored: null,   // raw core.fields cfg — fieldsCfg derives below
     scraper: null,        // { enabled, paused, pending: {host: n} }
     deletePrefs: { useAssetsPlus: true },
     ui: {},               // core.ui settings (stored host, ...)
@@ -85,7 +84,6 @@ export function makeAppStore() {
   const [capturing, setCapturing] = createSignal(null); // action id awaiting a keypress
   const [keysFilter, setKeysFilter] = createSignal("");
   const [menuFilter, setMenuFilter] = createSignal("");
-  const [fieldsOverlayOpen, setFieldsOverlayOpen] = createSignal(false);
   const [anchorPaneWidth, setAnchorPaneWidth] = createSignal(300); // px, divider-adjusted, persisted
   // the feed's scroll container — Grid hands it over via feed.register; a
   // signal so late registration still lands
@@ -109,9 +107,8 @@ export function makeAppStore() {
     } catch { return "split"; }
   })());
 
-  // --- fields derivation (registry + stored cfg) ------------------------------
+  // --- fields derivation (registry) --------------------------------------------
   const fieldsList = createMemo(() => fieldList(st.nodesRegistry));
-  const fieldsCfg = createMemo(() => fieldsCfgFrom(fieldsList(), st.fieldsStored));
 
   // --- feed view: filter + judgment visibility, derived -----------------------
   function isVisible(img) {
@@ -644,7 +641,6 @@ export function makeAppStore() {
         setUiSt("info", "split", clampSplit(ui.infoSplit));
       }
       setSt("nodesRegistry", await api.nodes().catch(() => ({})));
-      setSt("fieldsStored", (await api.settings("core.fields").catch(() => ({})))?.cfg ?? null);
       const del = await api.settings("core.delete").catch(() => ({}));
       setSt("deletePrefs", { useAssetsPlus: del.useAssetsPlus ?? true });
       const jns = await api.settings("core.judgment").catch(() => ({}));
@@ -1113,28 +1109,6 @@ export function makeAppStore() {
       },
     },
 
-    // --- fields picker overlay ---------------------------------------------------
-    fieldsOverlay: {
-      open() { setFieldsOverlayOpen(true); },
-      close() { setFieldsOverlayOpen(false); },
-      // a per-field card/strip toggle: applied to the stored cfg (the cfg
-      // memo derives from it, so cards refresh by construction), persisted
-      setField(id, col, on) {
-        const merged = { ...(st.fieldsStored ?? {}) };
-        merged[id] = { card: false, ...merged[id], [col]: on };
-        setSt("fieldsStored", merged);
-        api.setSettings("core.fields", { cfg: merged }).catch(() => {});
-      },
-      setGroup(ids, col, on) {
-        const merged = { ...(st.fieldsStored ?? {}) };
-        for (const id of ids) {
-          merged[id] = { card: false, ...merged[id], [col]: on };
-        }
-        setSt("fieldsStored", merged);
-        api.setSettings("core.fields", { cfg: merged }).catch(() => {});
-      },
-    },
-
     // --- anchors: local reference images, persisted as data URLs ----------------
     anchors: {
       load() {
@@ -1261,7 +1235,6 @@ export function makeAppStore() {
       (f.bulkAction ? [{ ...f.bulkAction, onAction: () => f.bulkAction.onAction({ state: stateObj, actions }) }] : [])),
     get hosts() { return st.hosts; },
     get nodesRegistry() { return st.nodesRegistry; },
-    get fieldsStored() { return st.fieldsStored; },
     get scraper() { return st.scraper; },
     get deletePrefs() { return st.deletePrefs; },
     get ui() { return st.ui; },
@@ -1278,7 +1251,6 @@ export function makeAppStore() {
     // derived
     view,
     fieldsList,
-    fieldsCfg,
     // the image-src window (a capability, not data)
     window: window_,
     // scalar atoms
@@ -1297,7 +1269,6 @@ export function makeAppStore() {
     capturing,
     // the keymap's action list, fanned out by the version signal
     bindings: () => { keysVersion(); return keymap.list(); },
-    fieldsOverlayOpen,
     anchorPaneWidth,
     confirmDelete,
     keysPanelOpen,
