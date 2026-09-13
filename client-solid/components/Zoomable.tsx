@@ -3,12 +3,17 @@
 //
 // The unload→error artificial-broken class dies by construction: the img src
 // is derived, and a null src renders NO src attribute, so removing it can
-// never fire an error. The zoom behavior (js/zoomable.mjs) attaches once.
-// The box is full column width with a 16:9 floor on its aspect (taller for
-// tall images); the image inside is scale-down + centered — never upscaled,
-// never rendered in a corner.
+// never fire an error. The zoom behavior (js/zoomable.mjs) binds PER KEY
+// with teardown: a retargeted box rebinds and restores the new key's
+// persisted view — no transform, pan, or zoomed class leaks across images
+// (G3). The box is full column width with a 16:9 floor on its aspect (taller
+// for tall images); the image inside is scale-down + centered — never
+// upscaled, never rendered in a corner.
+//
+// Props are VALUES (callers pass accessor calls: ar={ar()}) — no dual
+// value/function contract (G12).
 
-import { createSignal, createEffect, onMount } from "solid-js";
+import { createSignal, createMemo, createEffect, on, onCleanup } from "solid-js";
 import { makeZoomable } from "/js/zoomable.mjs";
 
 // Decompose "W / H" into the --ar-num/--ar-den custom properties, clamped to
@@ -23,42 +28,64 @@ function arStyle(ar) {
 }
 
 export function Zoomable(props) {
-  const [phase, setPhase] = createSignal(props.src == null ? "empty" : "loading");
+  // the load lifecycle: phase is a memo over (src, loaded, errored) — src is
+  // the source of truth; a src change restarts the lifecycle
+  const [loaded, setLoaded] = createSignal(false);
+  const [errored, setErrored] = createSignal(false);
+  const phase = createMemo(() => {
+    if (props.src == null) return "empty";
+    if (errored()) return "error";
+    return loaded() ? "loaded" : "loading";
+  });
+  createEffect(on(() => props.src, () => { setLoaded(false); setErrored(false); }));
 
-  // src is the source of truth for the lifecycle phase
-  createEffect(() => setPhase(props.src == null ? "empty" : "loading"));
+  // the zoom's render state — the behavior emits it, JSX renders it
+  const [transform, setTransform] = createSignal("");
+  const [zoomed, setZoomed] = createSignal(false);
 
   let imgEl;
-  onMount(() => {
-    if (imgEl) makeZoomable(imgEl, {
-      key: typeof props.zoomKey === "function" ? props.zoomKey() : props.zoomKey,
-      onZoomChange: props.onZoomChange,
+  let binding = null;
+  // bind per key: the old binding is disposed before the new one restores
+  // its persisted view (G3)
+  createEffect(on(() => props.zoomKey, () => {
+    binding?.dispose();
+    binding = null;
+    setTransform("");
+    setZoomed(false);
+    if (!imgEl) return;
+    binding = makeZoomable(imgEl, {
+      key: props.zoomKey,
+      onZoomChange: (z) => props.onZoomChange?.(z),
+      onTransform: (t, z) => { setTransform(t); setZoomed(z); },
     });
-  });
+  }));
+  onCleanup(() => { binding?.dispose(); binding = null; });
 
   createEffect(() => props.onPhase?.(phase()));
 
   return (
     <div
       class={"imgwrap" + (phase() === "loaded" ? "" : ` ic-${phase()}`)}
-      style={arStyle(typeof props.ar === "function" ? props.ar() : props.ar)}
+      style={arStyle(props.ar)}
       onClick={() => { if (phase() === "error") props.onErrorClick?.(); else props.onOpen?.(); }}
     >
       <img
         ref={imgEl}
-        alt={typeof props.alt === "function" ? props.alt() : props.alt}
+        alt={props.alt}
         src={props.src == null ? undefined : props.src}
+        style={{ transform: transform() || undefined }}
+        classList={{ zoomed: zoomed() }}
         onLoad={(e) => {
           const img = e.target;
           if (img.naturalWidth && img.naturalHeight) props.onLoaded?.(img.naturalWidth, img.naturalHeight);
           // natural size is the box's aspect source; the image itself is
           // scale-down inside and never exceeds it (never upscaled)
-          setPhase("loaded");
+          setLoaded(true);
         }}
         onError={() => {
           // a src removed between fetch and event must not read as an error
-          if (!imgEl?.getAttribute("src")) return;
-          setPhase("error");
+          if (props.src == null) return;
+          setErrored(true);
         }}
       />
     </div>

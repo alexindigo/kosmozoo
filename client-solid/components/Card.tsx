@@ -85,7 +85,7 @@ export function Card(props) {
       <Zoomable
         src={src()}
         alt={image()?.filename}
-        ar={ar}
+        ar={ar()}
         zoomKey={image()?.id}
         onOpen={() => store.actions.diff.openFromFeed(props.imgIdx())}
         onErrorClick={() => store.state.window.retry(props.imgIdx())}
