@@ -13,7 +13,6 @@
 import { onMount, onCleanup, createEffect } from "solid-js";
 import { For, Show } from "solid-js/web";
 import { createVirtualizer } from "@tanstack/solid-virtual";
-import { matchesFile } from "/js/route-parse.mjs";
 import { useAppStore } from "../store/app-store.js";
 import { WINDOW_PAD } from "../store/image-window.js";
 import { cardHeight, measureGeometry, geometryMeasured, invalidateGeometry } from "../store/sizes.js";
@@ -125,12 +124,8 @@ function CardSlot(props) {
   const image = () => store.state.images.find((i) => i.id === props.entryId);
   const imgIdx = () => store.state.images.indexOf(image());
   const j = () => image()?.judgment ?? {};
-  const isCurrent = () => {
-    const cur = store.state.current();
-    const im = image();
-    return !!cur && !!im && cur.remote === store.state.host()
-      && matchesFile(im, store.state.host(), cur.image);
-  };
+  // the store's currentEntry memo owns the pointer→entry derivation (G7)
+  const isCurrent = () => store.state.currentEntry()?.index === imgIdx();
 
   return (
     <div

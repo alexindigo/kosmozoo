@@ -10,25 +10,17 @@
 
 import { createEffect, createMemo, For, Show } from "solid-js";
 import { useAppStore, clampSplit } from "../store/app-store.js";
-import { matchesFile } from "/js/route-parse.mjs";
-import { nodeImages, fmtBytes } from "../store/fields.js";
+import { fmtBytes } from "../store/fields.js";
 import { MetaBody } from "./MetaBody.js";
 import { Zoomable } from "./Zoomable.js";
 
-// a { remote, image } pointer → its feed entry (anchors are not feed entries)
-function imageFor(store, c) {
-  if (!c || c.remote === "anchor") return null;
-  return store.state.images.find((i) => i.host === c.remote && matchesFile(i, c.remote, c.image)) ?? null;
-}
-
 export function DetailsBody() {
   const store = useAppStore();
-  const im = () => imageFor(store, store.state.current());
-  const compareMeta = createMemo(() => imageFor(store, store.state.currentStack().at(-1) ?? null)?.meta ?? null);
-  const images = () => {
-    const resolved = im();
-    return resolved?.host ? nodeImages(resolved.meta ?? null, resolved.host) : [];
-  };
+  // the store owns the pointer→entry derivation (G7): currentEntry for the
+  // live pointer, entryFor for the history one
+  const im = () => store.state.currentEntry()?.entry ?? null;
+  const compareMeta = createMemo(() => store.state.entryFor(store.state.currentStack().at(-1) ?? null)?.entry?.meta ?? null);
+  const images = () => store.state.currentNodeImages();
   const hasImages = () => images().length > 0;
   const colsClass = () => {
     const l = store.state.infoLayout();

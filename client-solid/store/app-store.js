@@ -24,7 +24,7 @@ import {
   planDeleteCurrent,
   diffUrl,
 } from "/js/route-parse.mjs";
-import { fieldList, fieldsCfgFrom } from "./fields.js";
+import { fieldList, fieldsCfgFrom, nodeImages } from "./fields.js";
 import { makeImageWindow } from "./image-window.js";
 import { makeSizes } from "./sizes.js";
 import { snapTidy, SNAP_QUIET_MS } from "./scroll-snap.js";
@@ -44,7 +44,7 @@ export const clampSplit = (v) => Math.min(0.8, Math.max(0.2, v));
 export function makeAppStore() {
   // app data tree — engine-side state
   const [st, setSt] = createStore({
-    hosts: {},            // name -> { address, online, deleteMode }
+    hosts: {},            // name -> { address, kind, online, capabilities }
     nodesRegistry: {},    // discovered node types (/api/nodes)
     fieldsStored: null,   // raw core.fields cfg — fieldsCfg derives below
     scraper: null,        // { enabled, paused, pending: {host: n} }
@@ -136,6 +136,23 @@ export function makeAppStore() {
   });
 
   // --- current pointer + trail -------------------------------------------------
+  // A { remote, image } pointer → its feed entry (anchors are not feed
+  // entries) — the ONE derivation; components used to each carry their own
+  // copy of this find (G7).
+  function entryFor(c) {
+    if (!c || c.remote === "anchor") return null;
+    const idx = st.images.findIndex((i) => i.host === c.remote && matchesFile(i, c.remote, c.image));
+    return idx < 0 ? null : { index: idx, entry: st.images[idx], collection: c.remote };
+  }
+  // the current feed entry: { index, entry, collection } | null
+  const currentEntry = createMemo(() => entryFor(current()));
+  // the current entry's discovered node images (Header's layout switcher and
+  // the details pane read the SAME derivation)
+  const currentNodeImages = createMemo(() => {
+    const ce = currentEntry();
+    return ce ? nodeImages(ce.entry.meta ?? null, ce.entry.host) : [];
+  });
+
   // Trail bound: a scroll-through-the-feed session turns over the pointer
   // constantly — the stack is a bounded window, not a full history.
   const STACK_CAP = 200;
@@ -584,11 +601,15 @@ export function makeAppStore() {
   }
 
   // wire shape → store shape; capabilities.delete drives the affordances
-  // (deleteMode reads flip to capabilities in §3.6)
   const toHosts = (colls) => Object.fromEntries(Object.entries(colls ?? {}).map(([n, c]) => [n, {
     address: c.address, kind: c.kind, online: c.online,
-    capabilities: c.capabilities ?? null, deleteMode: c.capabilities?.delete ?? "hide",
+    capabilities: c.capabilities ?? null,
   }]));
+
+  // the loaded collection's record — the delete affordances read
+  // capabilities.delete from HERE, never a derived mirror (G1: indexing
+  // hosts with the host SIGNAL function always read the "hide" fallback)
+  const currentCollection = createMemo(() => st.hosts[host()] ?? null);
 
   // registered feature modules — a plain module-level list, not store
   // state: registration happens once at boot (before first render), and
@@ -1227,7 +1248,7 @@ export function makeAppStore() {
       async deleteAssetsPlus(on) {
         await api.setSettings("core.delete", { useAssetsPlus: on }).catch(() => {});
         setSt("deletePrefs", { ...st.deletePrefs, useAssetsPlus: on });
-        setSt("hosts", reconcile(toHosts(await api.collections()))); // deleteMode depends on the toggle
+        setSt("hosts", reconcile(toHosts(await api.collections()))); // capabilities.delete depends on the toggle
       },
     },
   };
@@ -1264,6 +1285,10 @@ export function makeAppStore() {
     host,
     current,
     currentStack,
+    currentEntry,
+    currentNodeImages,
+    currentCollection,
+    entryFor,
     filter,
     hostMenuOpen,
     menuOpen,

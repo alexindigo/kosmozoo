@@ -6,9 +6,7 @@
 import { onCleanup } from "solid-js";
 import { For, Show } from "solid-js/web";
 import { iconSvg } from "/js/icons.mjs";
-import { matchesFile } from "/js/route-parse.mjs";
 import { useAppStore } from "../store/app-store.js";
-import { nodeImages } from "../store/fields.js";
 import { HostPicker } from "./HostPicker.js";
 
 // layout-switcher icons: a square with one divider — vertical right of
@@ -33,8 +31,7 @@ function InfoLayoutSwitcher() {
     if (store.state.workspace() !== "details") return false;
     const c = store.state.current();
     if (!c || c.remote === "anchor") return false;
-    const img = store.state.images.find((i) => i.host === c.remote && matchesFile(i, c.remote, c.image));
-    return !!(img?.host && nodeImages(img.meta ?? null, img.host).length);
+    return store.state.currentNodeImages().length > 0;
   };
   return (
     <Show when={applicable()}>

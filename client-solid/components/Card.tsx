@@ -10,6 +10,7 @@ import { createSignal, createEffect, onMount } from "solid-js";
 import { For, Show } from "solid-js/web";
 import { iconSvg } from "/js/icons.mjs";
 import { useAppStore } from "../store/app-store.js";
+import { deleteCopy } from "../lib/delete-copy.js";
 import { Zoomable } from "./Zoomable.js";
 import { IconButton } from "./IconButton.js";
 import { NoteBox } from "./NoteBox.js";
@@ -78,7 +79,8 @@ export function Card(props) {
       .catch(() => {});
   };
 
-  const deleteMode = () => store.state.hosts[image()?.host]?.deleteMode;
+  const del = () => store.state.hosts[image()?.host]?.capabilities?.delete ?? null;
+  const delCopy = () => deleteCopy(del());
 
   return (
     <>
@@ -133,15 +135,11 @@ export function Card(props) {
             title="download this image"
             onClick={(e) => { e.stopPropagation(); store.actions.images.download(image()?.id); }}
           >save</button>
-          <Show when={deleteMode()}>
+          <Show when={del()}>
             <IconButton
-              icon={iconSvg(deleteMode() === "hide" ? "eye-off" : "trash", 16)}
+              icon={iconSvg(delCopy().icon, 16)}
               variant="delete"
-              title={deleteMode() === "trash"
-                ? "move to trash on the host (recoverable)"
-                : deleteMode() === "unlink"
-                  ? "delete the file from the host folder (permanent)"
-                  : "hide from kosmozoo (this host can't delete files)"}
+              title={delCopy().cardTitle}
               onAction={() => store.actions.confirm.open({ image: image() })}
             />
           </Show>

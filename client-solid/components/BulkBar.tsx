@@ -8,12 +8,16 @@
 import { For, Show } from "solid-js";
 import { iconSvg } from "/js/icons.mjs";
 import { useAppStore } from "../store/app-store.js";
+import { deleteCopy } from "../lib/delete-copy.js";
 import { IconButton } from "./IconButton.js";
 
 export function BulkBar() {
   const store = useAppStore();
   const n = () => Object.keys(store.state.selected).length;
-  const deleteMode = () => store.state.hosts[store.state.host]?.deleteMode ?? "hide";
+  // capabilities.delete from the CURRENT COLLECTION's record (G1 fixed by
+  // construction — the old read indexed hosts with the host signal function)
+  const del = () => store.state.currentCollection()?.capabilities?.delete ?? "hide";
+  const copy = () => deleteCopy(del());
 
   return (
     <Show when={n() > 0}>
@@ -42,10 +46,8 @@ export function BulkBar() {
           onClick={() => store.actions.bulk.save()}
         >save</button>
         <IconButton
-          icon={iconSvg(deleteMode() === "hide" ? "eye-off" : "trash", 16)} variant="delete"
-          title={deleteMode() === "trash" ? "move all selected to trash on the host (recoverable)"
-            : deleteMode() === "unlink" ? "delete all selected files from the host folder (permanent)"
-              : "hide all selected from kosmozoo (this host can't delete files)"}
+          icon={iconSvg(copy().icon, 16)} variant="delete"
+          title={copy().bulkTitle}
           onAction={() => store.actions.confirm.open({ images: store.actions.bulk.images() })}
         />
         <button id="bulkClear" title="clear selection" onClick={() => store.actions.bulk.clear()}>×</button>
