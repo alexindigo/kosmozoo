@@ -145,6 +145,7 @@ const MIGRATIONS = [
         state         TEXT NOT NULL DEFAULT 'seen',    -- seen | ingested | gone
         vote          TEXT, favorite INTEGER, notes TEXT, hidden INTEGER,
         plugin_fields TEXT,
+        width         INTEGER, height INTEGER,         -- dims known before the hash is (§4.2 dims pass)
         first_seen    REAL NOT NULL, last_seen REAL NOT NULL,
         PRIMARY KEY (collection, name, kind)
       );
@@ -162,7 +163,7 @@ const STATEMENTS = {
   kvGet: "SELECT v FROM kv WHERE k = ?",
   kvSet: "INSERT INTO kv (k, v) VALUES (?, ?) ON CONFLICT(k) DO UPDATE SET v = excluded.v",
   bumpMeta: "UPDATE kv SET v = CAST(CAST(v AS INTEGER) + 1 AS TEXT) WHERE k = 'meta_version'",
-  collectionsAll: "SELECT id, kind, address, link, created_at FROM collection ORDER BY id",
+  collectionsAll: "SELECT id, kind, address, link, created_at FROM collection ORDER BY rowid",
   collectionGet: "SELECT id, kind, address, link, created_at FROM collection WHERE id = ?",
   collectionAdd: "INSERT INTO collection (id, kind, address, created_at) VALUES (?, ?, ?, ?) ON CONFLICT(id) DO UPDATE SET kind = excluded.kind, address = excluded.address",
   collectionRemove: "DELETE FROM collection WHERE id = ?",
@@ -177,7 +178,7 @@ const STATEMENTS = {
        ON CONFLICT(collection, name, kind) DO UPDATE SET hash = excluded.hash, stamp = excluded.stamp, state = 'ingested', last_seen = excluded.last_seen`,
   hashFor: "SELECT hash FROM entry WHERE collection = ? AND name = ? AND kind = 'output'",
   fileInfo: "SELECT hash, stamp FROM entry WHERE collection = ? AND name = ? AND kind = 'output'",
-  entryGet: "SELECT collection, name, kind, hash, stamp, state, vote, favorite, notes, hidden, plugin_fields, first_seen, last_seen FROM entry WHERE collection = ? AND name = ? AND kind = ?",
+  entryGet: "SELECT collection, name, kind, hash, stamp, state, vote, favorite, notes, hidden, plugin_fields, width, height, first_seen, last_seen FROM entry WHERE collection = ? AND name = ? AND kind = ?",
   entryInsertSeen: "INSERT OR IGNORE INTO entry (collection, name, kind, state, first_seen, last_seen) VALUES (?, ?, 'output', 'seen', ?, ?)",
   entryGone: "UPDATE entry SET state = 'gone', last_seen = ? WHERE collection = ? AND name = ? AND kind = 'output'",
   entryHide: "UPDATE entry SET hidden = 1, last_seen = ? WHERE collection = ? AND name = ? AND kind = 'output'",
@@ -221,6 +222,23 @@ const STATEMENTS = {
        WHERE collection = ? AND kind = 'output' AND (vote IS NOT NULL OR favorite IS NOT NULL OR notes IS NOT NULL OR plugin_fields IS NOT NULL)
        ORDER BY name`,
   instancesOf: "SELECT collection, name FROM entry WHERE hash = ? AND kind = 'output' ORDER BY collection, name",
+  goneNames: "SELECT name FROM entry WHERE collection = ? AND kind = 'output' AND state = 'gone'",
+  entryDims: `SELECT COALESCE(c.width, e.width) AS width, COALESCE(c.height, e.height) AS height
+       FROM entry e LEFT JOIN content c ON c.hash = e.hash
+       WHERE e.collection = ? AND e.name = ? AND e.kind = 'output'`,
+  entryDimsPut: `INSERT INTO entry (collection, name, kind, width, height, state, first_seen, last_seen)
+       VALUES (?, ?, 'output', ?, ?, 'seen', ?, ?)
+       ON CONFLICT(collection, name, kind) DO UPDATE SET
+         width = COALESCE(excluded.width, entry.width),
+         height = COALESCE(excluded.height, entry.height),
+         last_seen = excluded.last_seen`,
+  dimsKnown: `SELECT e.name FROM entry e LEFT JOIN content c ON c.hash = e.hash
+       WHERE e.collection = ? AND e.kind = 'output'
+         AND COALESCE(c.width, e.width) IS NOT NULL AND COALESCE(c.height, e.height) IS NOT NULL`,
+  dimsForHost: `SELECT e.name, COALESCE(c.width, e.width) AS width, COALESCE(c.height, e.height) AS height
+       FROM entry e LEFT JOIN content c ON c.hash = e.hash
+       WHERE e.collection = ? AND e.kind = 'output'
+         AND COALESCE(c.width, e.width) IS NOT NULL AND COALESCE(c.height, e.height) IS NOT NULL`,
 };
 
 const kindFor = (address) => address?.startsWith("folder:") ? "folder" : "comfy";
@@ -235,6 +253,7 @@ export class Store {
     s.#db = new Database(dbPath);
     s.#db.exec("PRAGMA journal_mode = WAL");
     s.#runMigrations();
+    s.#topUpEntryDims();
     s.#q = Object.fromEntries(
       Object.entries(STATEMENTS).map(([k, sql]) => [k, s.#db.prepare(sql)]),
     );
@@ -319,6 +338,15 @@ export class Store {
       MIGRATIONS[v](this.#db);
       this.#db.exec(`PRAGMA user_version = ${v + 1}`);
     }
+  }
+
+  // v7 is branch-local: dbs migrated before the entry dims columns existed
+  // (dev copies) are topped up here — idempotent, and a no-op on fresh v7
+  // dbs whose CREATE TABLE already carries them.
+  #topUpEntryDims() {
+    const cols = this.#db.prepare("PRAGMA table_info(entry)").all().map((c) => c.name);
+    if (!cols.includes("width")) this.#db.exec("ALTER TABLE entry ADD COLUMN width INTEGER");
+    if (!cols.includes("height")) this.#db.exec("ALTER TABLE entry ADD COLUMN height INTEGER");
   }
 
   // --- the v6→v7 data fold -------------------------------------------------
@@ -514,6 +542,10 @@ export class Store {
 
     this.#q.entryOutputIngest.run(host, filename, hash, stamp, now, now);
 
+    // dims move to content at ingest; the entry's columns stay in sync so
+    // the COALESCE reads hold even when the content row is later dropped
+    if (dims) this.#q.entryDimsPut.run(host, filename, dims.width ?? null, dims.height ?? null, now, now);
+
     if (changed && old && old !== hash) {
       const refs = this.#q.contentRefs.value(old)[0];
       if (refs === 0) this.#q.contentDelete.run(old);
@@ -704,6 +736,45 @@ export class Store {
   // think elsewhere" query).
   instancesOf(hash) {
     return this.#q.instancesOf.all(hash);
+  }
+
+  // Names the source no longer has: confirmed gone, never rendered.
+  goneNames(collection) {
+    return new Set(this.#q.goneNames.all(collection).map((r) => r.name));
+  }
+
+  // --- entry dims (§4.2: dims are known before the hash is) ----------------
+
+  // { width, height } from the content row (via the entry's hash) or the
+  // entry's own columns — null when neither knows.
+  entryDims(collection, name) {
+    const row = this.#q.entryDims.get(collection, name);
+    if (!row || row.width == null || row.height == null) return null;
+    return { width: row.width, height: row.height };
+  }
+
+  // Store dims a head read yielded. Creates the 'seen' entry row when the
+  // name has none yet; never wipes known dims with nulls. Bumps the meta
+  // version so /meta polls deliver dims to clients.
+  entryDimsPut(collection, name, dims) {
+    this.#ensureCollection(collection);
+    const now = Date.now();
+    this.#q.entryDimsPut.run(collection, name, dims?.width ?? null, dims?.height ?? null, now, now);
+    this.#bumpMeta();
+  }
+
+  // Names whose dims are known (either source) — the dims-pass queue gate.
+  dimsKnown(collection) {
+    return new Set(this.#q.dimsKnown.all(collection).map((r) => r.name));
+  }
+
+  // name -> { width, height } for every dimmed entry (the /meta poll payload).
+  dimsForHost(collection) {
+    const out = {};
+    for (const r of this.#q.dimsForHost.all(collection)) {
+      out[r.name] = { width: r.width, height: r.height };
+    }
+    return out;
   }
 
   // Every judgment row, keyed for the plugin host's _all adapter (interim

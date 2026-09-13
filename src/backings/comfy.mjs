@@ -62,14 +62,20 @@ export async function stat(addr, name, kind = "output") {
   }
 }
 
-// Read bytes. Upstream serves some files as application/octet-stream (with
+// Read bytes. `range: [start, end]` (inclusive) asks for a head slice (the
+// dims pass, §4.2): aiohttp's FileResponse honors Range and answers 206; a
+// server that ignores it answers 200 with the full body — callers accept
+// both. Upstream serves some files as application/octet-stream (with
 // nosniff) — the browser can't render those, so map the extension when the
 // upstream type is useless.
-export async function read(addr, name, kind = "output") {
+export async function read(addr, name, kind = "output", { range } = {}) {
   if (!assertSafeName(name)) return { status: 400 };
   let r;
   try {
-    r = await fetch(viewUrl(addr, name, kind), { signal: AbortSignal.timeout(HOST_TIMEOUT_MS) });
+    r = await fetch(viewUrl(addr, name, kind), {
+      headers: range ? { Range: `bytes=${range[0]}-${range[1]}` } : undefined,
+      signal: AbortSignal.timeout(HOST_TIMEOUT_MS),
+    });
   } catch {
     return { status: 502 };
   }
@@ -81,7 +87,7 @@ export async function read(addr, name, kind = "output") {
   else if (ct) headers.set("Content-Type", ct);
   const cl = r.headers.get("Content-Length");
   if (cl) headers.set("Content-Length", cl);
-  return { status: 200, body: r.body, headers };
+  return { status: r.status, body: r.body, headers };
 }
 
 // Upload one image into the input dir (the same mechanism the ComfyUI web

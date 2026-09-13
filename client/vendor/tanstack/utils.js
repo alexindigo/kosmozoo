@@ -4,7 +4,7 @@ function memo(getDeps, fn, opts) {
   let isInitial = true;
   function memoizedFunction() {
     var _a;
-    const debugEnabled = process.env.NODE_ENV !== "production" && !!opts.key && !!((_a = opts.debug) == null ? void 0 : _a.call(opts));
+    const debugEnabled = false && !!opts.key && !!((_a = opts.debug) == null ? void 0 : _a.call(opts));
     let depTime = 0;
     if (debugEnabled) depTime = Date.now();
     const newDeps = getDeps();

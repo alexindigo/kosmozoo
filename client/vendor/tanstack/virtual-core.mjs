@@ -360,7 +360,7 @@ class Virtualizer {
         this.notify(isScrolling);
       },
       {
-        key: process.env.NODE_ENV !== "production" && "maybeNotify",
+        key: false && "maybeNotify",
         debug: () => this.options.debug,
         initialDeps: [
           this.isScrolling,
@@ -714,7 +714,7 @@ class Virtualizer {
         return measurements;
       },
       {
-        key: process.env.NODE_ENV !== "production" && "getMeasurements",
+        key: false && "getMeasurements",
         debug: () => this.options.debug
       }
     );
@@ -742,7 +742,7 @@ class Virtualizer {
         return this.range;
       },
       {
-        key: process.env.NODE_ENV !== "production" && "calculateRange",
+        key: false && "calculateRange",
         debug: () => this.options.debug
       }
     );
@@ -773,7 +773,7 @@ class Virtualizer {
         });
       },
       {
-        key: process.env.NODE_ENV !== "production" && "getVirtualIndexes",
+        key: false && "getVirtualIndexes",
         debug: () => this.options.debug
       }
     );
@@ -915,7 +915,7 @@ class Virtualizer {
         return virtualItems;
       },
       {
-        key: process.env.NODE_ENV !== "production" && "getVirtualItems",
+        key: false && "getVirtualItems",
         debug: () => this.options.debug
       }
     );
@@ -1129,7 +1129,7 @@ class Virtualizer {
   // synchronous so the grown transforms commit in the same paint (#1227).
   applyScrollAdjustment(delta, behavior) {
     if (delta === 0) return false;
-    if (process.env.NODE_ENV !== "production" && this.options.debug) {
+    if (false && this.options.debug) {
       console.info("correction", delta);
     }
     if (isIOSWebKit() && (this.isScrolling || this._iosTouching || this._iosJustTouchEnded)) {

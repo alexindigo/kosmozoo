@@ -10,6 +10,11 @@ import { backingFor } from "./backings/index.mjs";
 import { metaFromPngBytes, imageDims, EXTRACTOR_VERSION } from "./extractor.mjs";
 
 const DEFAULT_REVALIDATE_MS = 60_000;
+// Dims live in the first bytes of the file: PNG IHDR at 16–24, GIF at 6–10,
+// WebP VP8/VP8L/VP8X within the first 30, JPEG SOF usually within the first
+// few KB — a 64 KB head covers the usual case; the full ingest is the
+// fallback for the rest (§4.2).
+const DIMS_HEAD_BYTES = 65_536;
 
 export class Ingest {
   #store;
@@ -53,6 +58,24 @@ export class Ingest {
     if (cur && cur.ext >= EXTRACTOR_VERSION) return;
     const [meta, hasWorkflow] = await metaFromPngBytes(bytes);
     await this.#store.metaPut(collection, name, meta, { hasWorkflow, ext: EXTRACTOR_VERSION });
+  }
+
+  // Dims WITHOUT ingestion (§4.2 pass 1): known dims (content via the
+  // entry's hash, or the entry's own columns) short-circuit the read; else a
+  // ranged head read → imageDims → stored on the entry. No hash, no cache
+  // write, no extract. status 404 means the source lost the file (the
+  // prefetch acts on it exactly like pass 2 would).
+  async dims(collection, name, kind = "output") {
+    const known = this.#store.entryDims(collection, name);
+    if (known) return { status: 200, dims: known };
+    const addr = this.#hosts[collection];
+    if (!addr) return { status: 404, dims: null };
+    const r = await backingFor(addr).read(addr, name, kind, { range: [0, DIMS_HEAD_BYTES - 1] });
+    if (r.status !== 200 && r.status !== 206) return { status: r.status, dims: null };
+    const bytes = new Uint8Array(await new Response(r.body).arrayBuffer());
+    const dims = imageDims(bytes);
+    if (dims) this.#store.entryDimsPut(collection, name, dims);
+    return { status: r.status, dims };
   }
 
   // Read-through: entry has a hash and the cache has the bytes → serve;

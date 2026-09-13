@@ -113,7 +113,7 @@ export function Card(props) {
         </span>
         <span class="btnwrap">
           <span class={"saved" + (flash() ? " show" : "")}>Feedback saved</span>
-          <For each={store.featureCardActions(image())}>
+          <For each={store.state.featureCardActions(image())}>
             {(a) => <IconButton icon={a.icon} variant={a.variant} title={a.title} onAction={a.onAction} />}
           </For>
           <IconButton

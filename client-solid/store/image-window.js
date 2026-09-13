@@ -149,8 +149,10 @@ export function makeImageWindow(store) {
     version(); // reactive: window membership changes re-derive srcs
     const b = bounds();
     if (!b || idx < b[0] || idx > b[1]) return null;
+    const img = store.state.images[idx];
+    if (!img) return null;
     const nonce = retryNonce.get(idx);
-    return api.imageBytesUrl(imageId) + (nonce ? `?_r=${nonce}` : "");
+    return api.entryBytesUrl(img.host, img.filename) + (nonce ? `?_r=${nonce}` : "");
   };
 
   // a card finished loading -> it is no longer errored

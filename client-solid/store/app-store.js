@@ -55,7 +55,6 @@ export function makeAppStore() {
     anchors: [],          // [{ name, src(dataURL), meta? }] — local drops, persisted
     diff: { open: false },                  // workbench: single-image viewer
     diff: { open: false },                  // workbench: single-image viewer
-    features: [],       // registered at boot by main.tsx from features/index.tsx
     variations: { open: false, images: [], key: null }, // modal session
     infoOverlay: { open: false, name: "", meta: null }, // anchor ⓘ params
     chips: [],            // status stack: { slot, kind, msg }
@@ -536,16 +535,21 @@ export function makeAppStore() {
     capabilities: c.capabilities ?? null, deleteMode: c.capabilities?.delete ?? "hide",
   }]));
 
+  // registered feature modules — a plain module-level list, not store
+  // state: registration happens once at boot (before first render), and
+  // store array proxies can't support flatMap/map chains on function-valued
+  // items (the Symbol(solid-proxy) defineProperty trap)
+  const registeredFeatures = [];
   const actions = {
     features: {
       // a feature module { name, actions?, cardAction?, bulkAction?, Modal? }
       // installs its store actions under its name + joins the affordance list
       register(f) {
-        if (st.features.some((x) => x.name === f.name)) return;
+        if (registeredFeatures.some((x) => x.name === f.name)) return;
         if (f.actions) {
           actions[f.name] = f.actions({ get state() { return stateObj; }, actions, setSt, reconcile });
         }
-        setSt("features", st.features.concat([f]));
+        registeredFeatures.push(f);
       },
     },
 
@@ -1179,9 +1183,9 @@ export function makeAppStore() {
 
   const stateObj = {
     // trees — getters keep reads subscribed to the live store paths
-    featureCardActions: (image) => st.features.flatMap((f) =>
+    featureCardActions: (image) => registeredFeatures.flatMap((f) =>
       (f.cardAction ? [{ ...f.cardAction, onAction: () => f.cardAction.onAction({ state: stateObj, actions }, image) }] : [])),
-    featureBulkActions: () => st.features.flatMap((f) =>
+    featureBulkActions: () => registeredFeatures.flatMap((f) =>
       (f.bulkAction ? [{ ...f.bulkAction, onAction: () => f.bulkAction.onAction({ state: stateObj, actions }) }] : [])),
     get hosts() { return st.hosts; },
     get nodesRegistry() { return st.nodesRegistry; },

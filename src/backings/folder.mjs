@@ -1,7 +1,7 @@
 // src/backings/folder.mjs — the folder backing: a local directory as a
 // collection whose "API" is the filesystem. Flat folder: basename only.
 
-import { readdir, readFile, stat as fsStat, unlink } from "node:fs/promises";
+import { readdir, readFile, open as fsOpen, stat as fsStat, unlink } from "node:fs/promises";
 import { basename, join } from "node:path";
 import { RENDERABLE, EXT_MIME } from "./mime.mjs";
 
@@ -53,12 +53,33 @@ export async function stat(addr, name) {
   }
 }
 
-export async function read(addr, name, _kind = "output") {
+// Read bytes. `range: [start, end]` (inclusive) reads just that head slice —
+// the dims pass never touches the rest of the file (§4.2).
+export async function read(addr, name, _kind = "output", { range } = {}) {
   if (!assertSafeName(name)) return { status: 400 };
+  const full = join(folderPath(addr), name);
+  const mime = EXT_MIME[name.split(".").pop().toLowerCase()];
+  if (range) {
+    try {
+      const fh = await fsOpen(full, "r");
+      try {
+        const len = range[1] - range[0] + 1;
+        const buf = new Uint8Array(len);
+        const { bytesRead } = await fh.read(buf, 0, len, range[0]);
+        const headers = new Headers();
+        if (mime) headers.set("Content-Type", mime);
+        headers.set("Content-Length", String(bytesRead));
+        return { status: 206, body: buf.subarray(0, bytesRead), headers };
+      } finally {
+        await fh.close();
+      }
+    } catch {
+      return { status: 404 };
+    }
+  }
   try {
-    const bytes = await readFile(join(folderPath(addr), name));
+    const bytes = await readFile(full);
     const headers = new Headers();
-    const mime = EXT_MIME[name.split(".").pop().toLowerCase()];
     if (mime) headers.set("Content-Type", mime);
     headers.set("Content-Length", String(bytes.length));
     return { status: 200, body: bytes, headers };

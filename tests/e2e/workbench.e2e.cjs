@@ -94,7 +94,7 @@ async function attempt(name, fn) {
     check("card left the feed right away", gone);
     await page.evaluate(`(async () => {
       const img = (await (await fetch("/api/collections/fake/entries")).json())[0];
-      await fetch("/api/collections/fake/entries/" + encodeURIComponent(img.name) + "/judgment, { method: "DELETE" });
+      await fetch("/api/collections/fake/entries/" + encodeURIComponent(img.name) + "/judgment", { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ vote: null, favorite: null, notes: null }) });
       // reveal on (restores the card), then back off — reveal only filters
       // cards still down-voted, and the reset deleted the vote
       document.getElementById("unhideBtn").click();
@@ -109,7 +109,7 @@ async function attempt(name, fn) {
     check("up-vote hides when coupling on", goneUp);
     await page.evaluate(`(async () => {
       const img = (await (await fetch("/api/collections/fake/entries")).json())[0];
-      await fetch("/api/collections/fake/entries/" + encodeURIComponent(img.name) + "/judgment, { method: "DELETE" });
+      await fetch("/api/collections/fake/entries/" + encodeURIComponent(img.name) + "/judgment", { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ vote: null, favorite: null, notes: null }) });
       document.getElementById("hideUpBtn").click(); // coupling off -> rebuild restores
     })()`);
     await page.poll("document.querySelectorAll('.card').length === " + before, 3000);

@@ -43,6 +43,14 @@ curl -fSL "https://cdn.jsdelivr.net/npm/@tanstack/virtual-core@3.17.8/dist/esm/i
 curl -fSL "https://cdn.jsdelivr.net/npm/@tanstack/virtual-core@3.17.8/dist/esm/lazy-measurements.js" -o client/vendor/tanstack/lazy-measurements.js
 curl -fSL "https://cdn.jsdelivr.net/npm/@tanstack/virtual-core@3.17.8/dist/esm/utils.js" -o client/vendor/tanstack/utils.js
 
+# the dists' process.env.NODE_ENV references are bundler-build-time
+# substitutions; there is no bundler (and no `process`) in the browser —
+# substitute the production value once, at vendor time. The checksum
+# manifest covers the result: a hand edit to the dist is what the guard
+# catches (tests/t_vendor_pristine.mjs).
+sed -i 's|process\.env\.NODE_ENV !== "production"|false|g' \
+  client/vendor/tanstack/virtual-core.mjs client/vendor/tanstack/utils.js
+
 # checksum manifest — tests/t_vendor_pristine.mjs recomputes and compares;
 # regenerated here so the files and their guard always move together.
 # Repo-root-relative paths so `sha256sum -c client/vendor/CHECKSUMS` works.

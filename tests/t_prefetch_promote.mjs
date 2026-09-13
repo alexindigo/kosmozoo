@@ -1,7 +1,9 @@
 // tests/t_prefetch_promote.mjs — want actually promotes (audit E12): a name
 // sitting in the walk lane moves to the prio lane and is processed NEXT.
 // Uses the SAME name for prio and walk — the old test's different-names
-// setup is what masked the bug.
+// setup is what masked the bug. Since the two-pass prefetch (§4.2) every
+// name also gets a dims head read (a Range request) before its ingest —
+// `processed` counts INGEST reads only.
 
 import { assert, assertEquals } from "jsr:@std/assert";
 import { Prefetch } from "../src/prefetch.mjs";
@@ -22,6 +24,11 @@ Deno.test("prefetch: enqueue a.png in walk, then want(['a.png']) — a.png is ne
     if (url.pathname !== "/api/view") return new Response("nf", { status: 404 });
     const name = url.searchParams.get("filename");
     if (req.method === "HEAD") return new Response(null, { headers: { ETag: '"e"' } });
+    if (req.headers.get("range")) {
+      // pass-1 dims head read — the body yields no parseable dims, so the
+      // name falls to pass 2 as usual and the ingest count stays clean
+      return new Response(`head-${name}`, { status: 206, headers: { ETag: '"e"', "Content-Type": "image/png" } });
+    }
     processed.push(name);
     await new Promise((r) => setTimeout(r, 20));
     return new Response(`bytes-${name}`, { headers: { ETag: '"e"', "Content-Type": "image/png" } });

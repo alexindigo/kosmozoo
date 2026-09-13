@@ -65,8 +65,10 @@ export function makeRouter(ctx) {
       meta: st.meta,
       extracted: st.extracted,
       judgment: ctx.store.judgmentGet(collection, name),
-      width: c?.width ?? null,
-      height: c?.height ?? null,
+      // dims: content (ingested) wins; the entry's own columns carry the
+      // dims pass's head-read result before the hash exists (§4.2)
+      width: c?.width ?? e?.width ?? null,
+      height: c?.height ?? e?.height ?? null,
     };
   };
 
@@ -146,7 +148,8 @@ export function makeRouter(ctx) {
     // The listing comes from the backing; the store overlays judgment + dims.
     const list = await backingFor(addr).list(addr);
     const hidden = ctx.store.hiddenNames(id);
-    const visible = hidden.size ? list.filter((f) => !hidden.has(f.name)) : list;
+    const gone = ctx.store.goneNames(id);
+    const visible = list.filter((f) => !hidden.has(f.name) && !gone.has(f.name));
     const size = new Map(visible.map((f) => [f.name, f.size]));
     return Response.json(visible.map((f) => entryShape(id, f.name, size.get(f.name))));
   });
@@ -310,13 +313,20 @@ export function makeRouter(ctx) {
 
   add("GET", "/api/prefetch", async () => {
     const pending = {};
+    let dimsPending = 0;
+    let ingestPending = 0;
     for (const name of Object.keys(ctx.hosts)) {
       pending[name] = ctx.prefetch.pending(name);
+      ingestPending += pending[name];
+      dimsPending += ctx.prefetch.dimsPending(name);
     }
     return Response.json({
       enabled: ctx.settings.get("core.scraper", "enabled", true),
       paused: ctx.settings.get("core.scraper", "paused", false),
       pending,
+      // the two-pass totals (§4.2): pass 1 dims heads, pass 2 full ingests
+      dimsPending,
+      ingestPending,
     });
   });
 
@@ -349,6 +359,9 @@ export function makeRouter(ctx) {
       v,
       changed: true,
       items: ctx.store.metaForHost(id),
+      // dims ride the same poll — an entry the dims pass reached gets its
+      // width/height patched into the client before extraction finishes
+      dims: ctx.store.dimsForHost(id),
       pending: ctx.prefetch.pending(id),
     });
   });

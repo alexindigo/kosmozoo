@@ -19,7 +19,7 @@ export function BulkBar() {
     <Show when={n() > 0}>
       <div id="bulkBar">
         <span id="bulkCount">{`${n()} selected`}</span>
-        <For each={store.featureBulkActions()}>
+        <For each={store.state.featureBulkActions()}>
           {(a) => <IconButton icon={a.icon} variant={a.variant} title={a.title} onAction={a.onAction} />}
         </For>
         <IconButton
