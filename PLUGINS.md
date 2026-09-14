@@ -4,6 +4,11 @@ Extend your own kosmozoo install without waiting for an upstream merge. A
 plugin is a folder; drop it in, restart, live. No manifest, no versioning, no
 marketplace.
 
+Not everything extensible is a plugin: **variations** is a *feature module*
+(`src/features/`) — a core module with isolated state, mounted at
+`/api/features/variations/*`. Features ship with the engine; plugins are the
+drop-in tier.
+
 ## Where plugins live
 
 Discovery checks, in order:
@@ -16,7 +21,7 @@ Discovery checks, in order:
 
 ```
 plugins/<name>/
-    plugin.mjs   # export function register(kz) — engine hooks (server side)
+    plugin.mjs   # (or .ts / .js) export function register(kz) — engine hooks
     client.js    # optional, served at /plugins/<name>/client.js — UI hooks
 ```
 
@@ -30,37 +35,37 @@ What `register(kz)` can touch:
 
 | Call | Kind | Purpose |
 |---|---|---|
-| `kz.mode(id, def)` | capability | a composition mode (blend/split/difference/flicker) |
+| `kz.mode(id, def)` | capability | a composition mode (client half picks it up) |
 | `kz.alignment(id, def)` | capability | an alignment contribution (e.g. `face-anchored`) |
 | `kz.route(method, path, handler)` | route | server route under `/api/plugins/<name><path>` |
-| `kz.probe(def)` | capability | an extractor probe contribution |
-| `kz.exporter(def)` | capability | a training-export sink |
 | `kz.settings.get/set(k, v)` / `.ns()` | persistence | namespaced `plugins.<name>.*` settings — core never sees them |
-| `kz.store.getField/setField(host, file, field, v)` | persistence | plugin fields on the judgment record, namespaced |
-| `kz.judgments.get/set(...)` | data | the core judgment record (notes/vote/favorite) |
+| `kz.store.getField/setField(collection, name, field, v)` | persistence | plugin fields on the judgment record, namespaced |
+| `kz.judgments.get/set(collection, name, …)` / `.all()` | data | the core judgment record (notes/vote/favorite) |
+| `kz.content.bytes(hash)` / `.graph(hash)` / `.bytesForEntry(collection, name)` | data | engine-mediated content access — no plugin talks to a host or the cache directly |
+| `kz.reason(status, error, reason)` | shape | the shared `{error, reason}` failure response |
 
-Judgment entries are keyed by **content hash** (SHA-256), not by
-`host:filename`.  The same image on two hosts shares one judgment record.
-Each entry carries a `ref: "<host>:<filename>"` so the portable file stays
-human-readable.
+Judgments are **per entry** — keyed by `(collection, name)`, stored as
+columns on the entry row. The same image in two collections has two
+judgment records; `kz.judgments.all()` returns each row with its `hash` so
+batch consumers can group by content when they want to.
 
 A plugin declares its own config (a service URL), its own optional
 dependency, and its own failure states (*"service unreachable"*, *"model not
 downloaded"*, *"loading"*) and surfaces them as **reasons** on the relevant
-axis. **Absent must look like absent, never like broken.**
+axis. **Absent must look like absent, never like broken.** Capability
+`needs` are evaluated per request, never frozen at register time.
 
-## The three plugin shapes
+## The bundled plugins
 
-The first three plugins each prove a different shape:
+Each proves a different shape:
 
-1. **difference** — client-only (a composition mode).
-2. **export** — server + client (training export; the reason Deno is the
-   foundation).
-3. **detector** — brings its own external dependency (a detection *service*,
+1. **difference** — client-only (a composition mode via `kz.mode`).
+2. **detector** — brings its own external dependency (a detection *service*,
    addressed like a ComfyUI host), and degrades to absent when unconfigured.
-4. **variations** — server + client (batch parameter sweep). Reads the cached
-   PNG's embedded ComfyUI graph, generates permutations, clones + mutates the
-   graph, and POSTs each to the source host's `/api/prompt`.
+3. **critic** — a thin proxy: routes forwarded to an external
+   describe/caption service, failures surfaced via `kz.reason`.
+4. **hello** — the minimal proof that the host loads a folder and calls
+   `register(kz)`.
 
 ## Hello world
 
@@ -68,7 +73,7 @@ The first three plugins each prove a different shape:
 
 ```js
 export function register(kz) {
-  kz.settings.set("loaded", true);
+  kz.settings.get("loaded", false); // reads must not write (a plugin boot is not a state change)
   kz.route("GET", "/hello", () => Response.json({ hello: "kosmozoo" }));
 }
 ```

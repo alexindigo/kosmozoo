@@ -70,7 +70,7 @@ const NAME_RE = /^[\w][\w.-]*$/;
 const ADDR_RE = /^[\w.-]+:\d+$/;
 
 // Validate a new collection: name grammar + address grammar; a folder
-// collection must name an existing directory (docs/folder-hosts.md).
+// collection must name an existing directory (spec §2).
 export async function validateCollection(name, address) {
   if (!name || !NAME_RE.test(name)) return "bad name (word chars, dots, hyphens)";
   if (address?.startsWith("folder:")) {

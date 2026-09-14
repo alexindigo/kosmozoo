@@ -1,10 +1,10 @@
 # Kosmozoo spec
 
-Engine + client contracts for the Deno + Solid tree (`solid-migration-split`
-and forward). The product rationale lives in
-`~/Documents/kosmozoo/NORTH_STAR.md`; this file is the binding contract for
-what exists here. Statements marked **→ changes in cruft-cleanup §N** are
-true today and change under that plan.
+Engine + client contracts for the Deno + Solid tree. The product rationale
+lives in `~/Documents/kosmozoo/NORTH_STAR.md`; this file is the binding
+contract for what exists here. The client architecture (store shape, feed
+invariant, key dispatcher, feature modules, persisted-key registry) lives in
+`~/Documents/kosmozoo/ARCHITECTURE.md`.
 
 ## 1. The three axes (design contract; plumbing dormant)
 
@@ -20,8 +20,8 @@ toggles. Availability and reason derive from each mode's declared `needs`.
 What IS shipped: the feed (virtualized grid), the workbench (single-image
 stage with a decode-guarded swap, notes/vote/favorite, anchor pane), the
 variations feature (server route + modal), and the `/diff?l=<h>#<f>&r=…`
-pair-URL grammar kept for the unfinished two-sided diff layer
-(cruft-cleanup §9 Q1 — diff is the first *layer* over the feed).
+pair-URL grammar kept for the unfinished two-sided diff layer — `/diff` is
+the first *layer* over the feed; more layers follow.
 
 Keys are the primary input; the keys panel (`?`) lists the live bindings.
 
@@ -35,7 +35,7 @@ the resources; a collection's `capabilities` answer what its backing can do.
 | `/api/collections` | GET | configured collections, online probe, `kind`, `capabilities` (`list`/`read`/`add`/`delete` ∈ `trash`/`unlink`/`hide`, `rename`) |
 | `/api/collections` | POST | add a source-backed collection `{name, address}` |
 | `/api/collections/<id>` | DELETE | remove; refuses the last collection |
-| `/api/collections/<id>/entries` | GET | the feed listing: size, hash, state, meta, judgment, content dims. `?kind=input` lists the input dir instead |
+| `/api/collections/<id>/entries` | GET | the feed listing: size, hash, state, meta, judgment, and dims — `COALESCE(content, entry)`, so an entry the dims pass reached carries width/height before it has a hash. Gone entries are excluded. `?kind=input` lists the input dir instead |
 | `/api/collections/<id>/entries/<name>` | GET | one entry |
 | `/api/collections/<id>/entries` | POST | multipart upload into the input dir; **409 with the conflicting name, never an overwrite** |
 | `/api/collections/<id>/entries/<name>` | DELETE | per capability: folder → unlink; comfy + assets_plus → trash; otherwise → hide + history cleanup |
@@ -43,15 +43,15 @@ the resources; a collection's `capabilities` answer what its backing can do.
 | `/api/collections/<id>/entries/<name>/bytes` | HEAD | 404 when the entry's bytes are unknown, else `content-length` |
 | `/api/collections/<id>/entries/<name>/judgment` | PATCH | whitelisted fields (`vote`/`favorite`/`notes`/`plugins.<ns>.*`), defaults deep-pruned, one statement |
 | `/api/collections/<id>/feedback.json` | GET | the collection's judgments as a portable v2 document, generated on demand |
-| `/api/collections/<id>/meta` | GET | versioned meta poll `?since=<v>` → `{v, changed, items?, pending}` |
+| `/api/collections/<id>/meta` | GET | versioned poll `?since=<v>` → `{v, changed, items?, dims?, pending}` — extracted metas and entry dims ride the same channel |
 | `/api/collections/<id>/want` | POST | `{files}` — on-screen names jump the extraction queue |
 | `/api/content/<hash>` | GET | the content record + `instances: [{collection, name}]` |
 | `/api/content/<hash>/bytes` | GET | cache bytes by hash (plugins, workbench) |
-| `/api/prefetch` | GET, POST | background ingestion: `enabled`/`paused` toggles + per-collection pending |
+| `/api/prefetch` | GET, POST | the two-pass background ingestion: `enabled`/`paused` toggles, per-collection ingest `pending`, and the pass totals `dimsPending`/`ingestPending` |
 | `/api/settings/<ns>` | GET, PATCH | namespaced settings (`core.*`, `plugins.<name>.*`) |
 | `/api/plugins` | GET | discovered plugins + their declared capabilities |
 | `/api/nodes` | GET | `class_type` registry discovered from extracted graphs |
-| `/api/features` | GET | feature modules (→ variations moves here §3.4) |
+| `/api/features` | GET | the registered feature modules (`variations`) |
 
 Entry identity on the wire is the plain name under a collection; the
 `collection:name` string survives only inside the client as a derived
@@ -64,16 +64,32 @@ Plugin routes mount under `/api/plugins/<name><path>`:
 
 | Plugin | Routes |
 |---|---|
-| `export` | `PUT /assign`, `POST /run`, `GET /assignments` (→ removed §3.4) |
-| `detector` | `POST /detect`, `GET /status` |
+| `detector` | `POST /detect`, `GET /status`, `GET /health` |
 | `critic` | `GET /status`, `POST /describe`, `POST /diff-describe`, `POST /caption` |
 | `hello` | `GET /hello` |
 
-Static surfaces: `/shared/<name>.mjs` serves any `src/*.mjs` module to the
-browser today (→ allow-listed §3.3); `/plugins/<name>/client.js` serves a
-plugin's client half; `/` and `/diff` serve the Solid app from
-`client-solid-dist/`, with shared assets (`/css`, `/vendor`, `/js`, logos)
-from `client/`.
+Collections answer one capabilities shape (the ONE derivation —
+`src/collections.mjs` — read by the listing, the delete route, and the
+client's delete affordance alike):
+
+| kind | list | read | add | delete | rename |
+|---|---|---|---|---|---|
+| `folder` | ✓ | ✓ | — | `unlink` (permanent) | — |
+| `comfy` + assets_plus | ✓ | ✓ | ✓ (input-dir upload) | `trash` (recoverable) | — |
+| `comfy` otherwise | ✓ | ✓ | ✓ | `hide` (kosmozoo-side flag + history cleanup) | — |
+| `virtual` | schema slot only (future) | | | | |
+
+A folder collection's address is `folder:/abs/path`; it lists renderable
+extensions (png, jpg, jpeg, webp, gif, svg, avif, bmp), newest-first by
+mtime, basename-only (no subdirectories, no traversal); its bytes come
+straight from disk; the PNG extraction pipeline applies unchanged. A
+non-directory `folder:` address is rejected at add time (400 with reason).
+
+Static surfaces: `/shared/<name>` serves the allow-listed `src/` modules
+(`extractor.mjs`, `features/variations/shared.mjs`) to the browser;
+`/plugins/<name>/client.js` serves a plugin's client half; `/` and `/diff`
+serve the Solid app from `client-solid-dist/`, with shared assets (`/css`,
+`/vendor`, `/js`, logos) from `client/`.
 
 ## 3. Judgment model
 
@@ -94,7 +110,6 @@ from `client/`.
 ## 4. Knowledge harvest (from the outgoing implementation)
 
 Non-obvious behaviour the rewrite must not rediscover one bug at a time.
-Rows marked ⚠ are **currently violated** — the plan item restores them.
 
 | # | Lesson | Outgoing evidence |
 |---|---|---|
@@ -102,15 +117,15 @@ Rows marked ⚠ are **currently violated** — the plan item restores them.
 | 2 | Outgoing view state must be written back before the incoming view is read | `index.html:2402` |
 | 3 | Cover the swap: hold the outgoing frame until the incoming image loads | `index.html:2287–2300`, `2326` |
 | 4 | Derived state must never persist over its source | charter invariant 1 |
-| 5 | List progress needs three independent mechanisms (sentinel, scroll safety net, programmatic restore) | charter, list engine |
+| 5 | List progress needed three independent mechanisms (sentinel, scroll safety net, programmatic restore) only because sizes were unknown at render; with size-before-render (ARCHITECTURE.md) a deep jump is one `scrollToIndex` and the safety net is gone | charter, list engine |
 | 6 | Unload by `removeAttribute('src')` — aborts the fetch and releases decoded bytes | `index.html:1442` |
 | 7 | Never cache a `null` detection — a transient failure would poison that image permanently | `index.html:2966–2971` |
-| 8 ⚠ | Scraper politeness set: single-flight, 100 ms gaps, backoff capped 30 s, HTTP 404 ⇒ permanent, two-tier queue with on-screen priority, pause gate — **priority promotion and per-host backoff are broken today (audit E12–E14; → §3.2)** | `server.py:810–890` |
+| 8 | Scraper politeness set: single-flight, 100 ms gaps, backoff capped 30 s, HTTP 404 ⇒ permanent, two-tier queue with on-screen priority, pause gate — restored in the prefetch (per-collection backoff; `want` promotes in both passes) | `server.py:810–890` |
 | 9 | Graph inputs arrive as arrays when they are links — scalar probes must filter | `server.py:493–501` |
 | 10 | Prompt-text walk: ≤8 hops, `zeroout` on the path ⇒ empty string | `server.py:466–481` |
 | 11 | PNG text chunks: stop at first `IDAT`, cap at 256 KB | `server.py:703–748` |
 | 12 | Guides persist globally, not per-image | `kosmozoo.guides.v1` |
-| 13 ⚠ | Judgment entries prune only when fully empty; a field set to its default is stored as absent — **the prune is shallow today (audit D5; → §3.2)** | `server.py:756–778` |
+| 13 | Judgment entries prune only when fully empty; a field set to its default is stored as absent — restored (`judgmentPatch` deep-prunes) | `server.py:756–778` |
 | 14 | Manual image retry must cache-bust, or a partial cached response is reused | `index.html:1427–1438` |
 | 15 | ~20 ComfyUI `class_type` probes are empirical field data, not architecture — port them verbatim | `server.py:516–683` |
 
@@ -122,8 +137,11 @@ Rows marked ⚠ are **currently violated** — the plan item restores them.
   `deno run --allow-all build.mjs` (Babel + `babel-preset-solid` from pinned
   esm.sh URLs, no Vite, no npm) from `client-solid/` into
   `client-solid-dist/`; framework-free modules stay in `client/js/`.
-  Solid + the virtualizer are vendored dists with build-time path rewrites
-  (`fetch-vendor-solid.sh`, checksummed — → §3.0/§3.5).
+  Solid, the virtualizer, and noUiSlider (ESM) are vendored dists with
+  vendor-time path rewrites and the `process.env.NODE_ENV` substitution
+  (no bundler, no `process` in the browser); `fetch-vendor-solid.sh`
+  regenerates files and `client/vendor/CHECKSUMS` together, and
+  `tests/t_vendor_pristine.mjs` fails a hand edit.
 - Native sqlite3 library comes from the system:
   `DENO_SQLITE_PATH=/usr/lib/libsqlite3.so`.
 - `feedback.json` is a portable judgment document, generated on demand per
@@ -136,19 +154,17 @@ Rows marked ⚠ are **currently violated** — the plan item restores them.
 
 ## 6. Storage (hash identity + sqlite + JSON documents)
 
-Identity is content hash (SHA-256). `host:filename` is an address, not an
-identity (→ the address becomes `collection:name` §3.2).
+Identity is content hash (SHA-256). `collection:name` is an address, not
+an identity.
 
 ### State location
 
-State dir resolution: `KOZMOZOO_STATE` if set, else the repo root when
-writable, else `$XDG_STATE_HOME/kosmozoo` — so a dev checkout carries
-`metadata.db` / `settings.json` in the working tree
-(untracked). (→ XDG-by-default §3.3.) Env overrides: `KOZMOZOO_PORT`
-(default 2084), `KOZMOZOO_HOSTS`, `KOZMOZOO_STATE`, `KOZMOZOO_FEEDBACK`
-(migration import only),
-`KOZMOZOO_DOWNLOADS` (→ removed §3.2), `KOZMOZOO_PLUGINS`,
-`KOZMOZOO_REVALIDATE_MS`.
+State dir resolution: `KOZMOZOO_STATE` if set, else
+`$XDG_STATE_HOME/kosmozoo` (default `~/.local/state/kosmozoo`) — the repo
+working tree is never a state dir. Env overrides: `KOZMOZOO_PORT` (default
+2084), `KOZMOZOO_HOSTS` (first-boot seed), `KOZMOZOO_STATE`,
+`KOZMOZOO_FEEDBACK` (migration import only), `KOZMOZOO_CACHE`,
+`KOZMOZOO_PLUGINS`, `KOZMOZOO_REVALIDATE_MS`.
 
 ### Schema (`metadata.db`, `PRAGMA user_version = 7`, ordered migrations)
 
@@ -181,6 +197,7 @@ CREATE TABLE entry (
   state TEXT NOT NULL DEFAULT 'seen',   -- seen | ingested | gone
   vote TEXT, favorite INTEGER, notes TEXT, hidden INTEGER,
   plugin_fields TEXT,                   -- JSON, namespaced plugins.<name>
+  width INTEGER, height INTEGER,        -- dims known before the hash is (dims pass)
   first_seen REAL NOT NULL, last_seen REAL NOT NULL,
   PRIMARY KEY (collection, name, kind)
 );
@@ -200,23 +217,40 @@ judgment columns (§Judgments below).
 
 ### Cache (`~/.local/share/kosmozoo/cache/`, override `KOZMOZOO_CACHE`)
 
-Layout `<ab>/<hash>.png` regardless of real type (→ extension-less §3.3).
-Atomic writes only (tmp → rename). Unbounded.
+Layout `<ab>/<hash>` — extension-less; the mime is sniffed from the bytes
+at serve time. Atomic writes only (tmp → rename). Unbounded.
 
 ### Ingestion (read → hash → cache → content → entry)
 
 `src/ingest.mjs` is the ONLY module that turns bytes into rows: read from
 the backing → SHA-256 → cache (atomic) → content row (+ dims, + extractor
 output when the row's `ext` is stale) → entry (`hash`, `stamp`,
-`state='ingested'`). The prefetch walk is this path running ahead of the
-user; the bytes routes are this path running on demand. Revalidation is an
-`Ingest` method (stale-while-revalidate over every backing kind).
+`state='ingested'`). The bytes routes are this path running on demand;
+revalidation is an `Ingest` method (stale-while-revalidate over every
+backing kind).
+
+`Ingest.dims(collection, name)` is the pre-ingest half: dims live in a
+file's first bytes (PNG IHDR, GIF descriptor, WebP VP8*, JPEG SOF), so a
+64 KB ranged head read (`Range: bytes=0-65535`; full-read fallback on a
+200-without-206) + `imageDims` stores them on `entry.width/height` — no
+hash, no cache write, no extract. Known dims (content via the entry's
+hash, or the entry columns) short-circuit the read; a 404 head read marks
+the entry `gone`.
+
+The prefetch runs TWO passes over each collection's listing: pass 1 the
+dims head reads (10 ms inter-file — size-before-render on a fresh host is
+fast), pass 2 the full ingestion above at the existing politeness
+(100 ms). The dims queue drains before ingestion starts; `want`
+(on-screen names) promotes in both queues; per-collection backoff caps at
+30 s; 404 ⇒ `entry.state='gone'` (permanent); the pause gate holds both
+passes.
 
 ### Serve path (cache-first)
 
-`GET /api/images/<id>/bytes`: hash → cache hit (serve + debounced
-revalidation) → read-through ingestion → host proxy as last resort (with
-background ingest). A busy ComfyUI host is not a read outage.
+`GET /api/collections/<id>/entries/<name>/bytes`: hash → cache hit (serve
++ debounced revalidation) → read-through ingestion → backing proxy as last
+resort (with background ingest). A busy ComfyUI host is not a read
+outage.
 
 ### Judgments
 
@@ -229,12 +263,6 @@ boot (fanned out to every entry with the hash; missing entries created as
 `gone`), backed up to `<path>.v1-backup-<ts>`, and never written again.
 `KOZMOZOO_FEEDBACK` is honored for that import only.
 
-### Legacy import
-
-`deno task import-legacy` merges the frozen Python `metadata.db` into the
-local store (idempotent). (→ removed §3.2: its rows are hash-less metas,
-which the v7 model discards by design — a fresh scrape re-derives them)
-
 ## 7. Plugin surfaces
 
 The `kz` object handed to `register(kz)`:
@@ -244,7 +272,6 @@ The `kz` object handed to `register(kz)`:
 | `kz.mode(id, def)` | capability | a composition mode (no SPA consumer today) |
 | `kz.alignment(id, def)` | capability | an alignment contribution; `needs[].ok` may be a function — evaluated per `/api/plugins` request |
 | `kz.route(method, path, handler)` | route | server route under `/api/plugins/<name><path>` |
-| `kz.exporter(def)` | capability | a training-export sink (kept while a plugin uses it) |
 | `kz.settings.get/set(k, v)` / `.ns()` | persistence | namespaced `plugins.<name>.*` settings |
 | `kz.store.getField/setField(collection, name, field, v)` | persistence | plugin fields on the entry's `plugin_fields` |
 | `kz.content.bytes(hash)` / `.graph(hash)` / `.bytesForEntry(collection, name)` | data | engine-mediated cache/graph reads |

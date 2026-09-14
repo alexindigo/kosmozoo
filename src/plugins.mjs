@@ -79,8 +79,6 @@ export class PluginHost {
       // as capabilities and picked up by the client half
       mode: (id, def) => caps.push({ kind: "mode", id, ...def }),
       alignment: (id, def) => caps.push({ kind: "alignment", id, ...def }),
-      // exporter stays until the export plugin is deleted (cruft-cleanup §3.4)
-      exporter: (def) => caps.push({ kind: "exporter", ...def }),
       // server route under /api/plugins/<name>/...
       route: (method, path, handler) => {
         router.add(method, `/api/plugins/${name}${path}`, handler);
@@ -109,7 +107,7 @@ export class PluginHost {
           return hash ? this.ctx.cache.get(hash) : null;
         },
       },
-      // every judgment row (batch exporters iterate this)
+      // every judgment row (batch consumers iterate this)
       judgments: {
         get: (host, filename) => store.judgmentGet(host, filename),
         set: (host, filename, field, value) => store.judgmentSet(host, filename, field, value),
