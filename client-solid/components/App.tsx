@@ -36,8 +36,10 @@ export function App() {
         <WorkspacePane />
         <WorkspaceBar />
       </main>
-      <StatusStack />
-      <ScrollTopButton />
+      <div id="statusCol">
+        <ScrollTopButton />
+        <StatusStack />
+      </div>
       <DiffStage />
       <FeatureModals />
       <ConfirmDelete />
