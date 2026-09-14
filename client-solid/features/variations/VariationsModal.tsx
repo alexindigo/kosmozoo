@@ -1,5 +1,5 @@
-// client-solid/components/VariationsModal.tsx — the variations panel,
-// declarative: the shared Modal's portal mode puts it under document.body.
+// client-solid/features/variations/VariationsModal.tsx — the variations
+// panel, declarative: the shared Modal portals it to the page level.
 //
 // Layout: title centered at top; left: parameter rows (<SliderRow>), enabled
 // cards float to the top, LoadImage sweep rows above them; vertical divider;
@@ -11,7 +11,7 @@
 // was last focused. Prefix/suffix WRAP the original filename basename in the
 // submission (they don't replace it).
 
-import { createSignal, onMount, onCleanup, For, Show } from "solid-js";
+import { createSignal, createEffect, createResource, onCleanup, For, Show } from "solid-js";
 import { iconSvg } from "/js/icons.mjs";
 import { paramDef, defaultRange, fallbackParams } from "./graph.mjs";
 import { useAppStore } from "../../store/app-store.js";
@@ -22,17 +22,16 @@ import { Modal } from "../../components/Modal.js";
 export function VariationsModal() {
   const store = useAppStore();
   // keyed on the session object: switching the wand to another image (or
-  // the bulk bar's batch) rebuilds the session from scratch. The Modal's
-  // portal mode puts .vz-root directly under document.body (the e2e
-  // asserts the parent); the session lives and dies with the Show above;
-  // backdrop and Esc close come from the Modal.
+  // the bulk bar's batch) rebuilds the session from scratch. The session
+  // lives and dies with the Show; backdrop and Esc close come from the
+  // Modal (mounted == open, so its key layer does too).
   return (
     <Show
       when={store.state.variations.open ? store.state.variations : null}
       keyed
     >
       {(v) => (
-        <Modal portal class="vz-root" open onClose={() => store.actions.variations.close()}>
+        <Modal class="vz-root" onClose={() => store.actions.variations.close()}>
           <ModalBody images={[...v.images]} onClose={() => store.actions.variations.close()} />
         </Modal>
       )}
@@ -53,6 +52,10 @@ function ModalBody(props) {
   const [rows, setRows] = createSignal({}); // key -> { enabled, min, max, increment, placeholderKey, ... }
   const [running, setRunning] = createSignal(false);
   const [result, setResult] = createSignal(null); // { text, ok }
+  // the auto-close after a successful run must not fire into an unmounted
+  // session (G14)
+  let closeT = null;
+  onCleanup(() => clearTimeout(closeT));
   // prefix/suffix are controlled state — the ONLY writers are the signal
   // setters; token ops are pure text transforms owned here, never surgery
   // on a rendered input's .value
@@ -61,88 +64,97 @@ function ModalBody(props) {
   const tokenFor = (key) => `_{${key}}`;
   const addToken = (text, key) => text.includes(tokenFor(key)) ? text : text + tokenFor(key);
   const removeToken = (text, key) => text.split(tokenFor(key)).join("");
-  // refs exist solely to restore focus/selection after a label-click insert
+  // refs exist solely to read the live selection and restore the caret
+  // after a label-click insert
   let prefixEl, suffixEl;
-  // last-focused prefix/suffix input — tracked so label clicks know which
-  // input to insert into; the selection is read live at click time
-  let lastInput = null;
-  const trackSel = (e) => { lastInput = e.currentTarget; };
-  // a slider label click inserts its {placeholder} at the input's selection.
-  // The tracked input's live value+selection are read at click time — direct
+  // the input a label click inserts into — ONE focus signal replaces the
+  // four-listener tracking on each input (G14); the label's mousedown
+  // preventDefault keeps the focus (and the selection) alive through the
+  // click
+  const [focused, setFocused] = createSignal(null); // "prefix" | "suffix"
+  // a slider label click inserts its {placeholder} at the focused input's
+  // selection. The live value+selection are read at click time — direct
   // programmatic sets bypass onInput, so the signal adopts the buffer here,
-  // then the write goes through the signal (the only writer) and the caret
-  // is restored
+  // then the write goes through the signal (the only writer). Solid's
+  // signal write is synchronous outside a batch, so the caret restores
+  // right after it — no microtask hop.
   const onInsertPlaceholder = (key) => {
-    if (!lastInput) return;
-    const cur = lastInput.value;
-    const start = lastInput.selectionStart ?? cur.length;
-    const end = lastInput.selectionEnd ?? cur.length;
+    const which = focused();
+    if (!which) return;
+    const el = which === "prefix" ? prefixEl : suffixEl;
+    if (!el) return;
+    const cur = el.value;
+    const start = el.selectionStart ?? cur.length;
+    const end = el.selectionEnd ?? cur.length;
     const placeholder = `{${key}}`;
     const next = cur.slice(0, start) + placeholder + cur.slice(end);
     const caret = start + placeholder.length;
-    if (lastInput === prefixEl) setPrefix(next); else setSuffix(next);
-    queueMicrotask(() => {
-      lastInput.focus();
-      lastInput.setSelectionRange(caret, caret);
-    });
+    if (which === "prefix") setPrefix(next); else setSuffix(next);
+    el.focus();
+    el.setSelectionRange(caret, caret);
   };
 
-  onMount(() => {
-    const meta = image.meta ?? {};
-    // The graph is the source of truth: only render sliders for parameters
-    // whose target node exists in this image's graph. writeOnly params
-    // (widget-only custom seed nodes etc.) are skipped for now.
-    const resolve = (forGraph) => {
-      const init = {};
-      for (const { id, key, current, integer, type, title } of forGraph) {
-        const p = paramDef(id, current, integer);
-        // absolute: a value window around the current value; relative
-        // (batch): signed offsets around it, default ±spread
-        const def = batch ? { min: -p.spread, max: p.spread } : defaultRange(p, current);
-        init[id] = {
-          enabled: false, min: def.min, max: def.max, increment: p.defaultInc,
-          placeholderKey: id,
-          current, integer,
-          label: title ?? type, // node display title else class_type
-          input: key,
-        };
-      }
-      // Presentation nicety: auto-enable the denoise row when the graph has
-      // one — the user lands on the most common single-axis sweep. Matches
-      // any node type; "denoise" is the input name, not a node name.
-      const denoiseKey = Object.keys(init).find((k) => init[k].input === "denoise");
-      if (denoiseKey) {
-        init[denoiseKey].enabled = true;
-        setSuffix((s) => addToken(s, denoiseKey));
-      }
-      setRows(init);
-      setParams(forGraph);
-    };
-    store.actions.variations.probe(image)
-      .then((data) => {
-        if (!data?.params) return resolve(fallbackParams(meta));
-        resolve(data.params);
-        // LoadImage sweep axes: one row per string param, files listed from
-        // the host's input dir
-        const sp = data.stringParams ?? [];
-        setStrParams(sp);
-        if (sp.length && image.host) {
-          store.actions.variations.inputList(image.host)
-            .then((files) => {
-              const init = {};
-              for (const p of sp) {
-                init[p.id] = {
-                  enabled: false, mode: "new", file: files[0] ?? null,
-                  files, current: p.current, label: p.title ?? p.type,
-                  localFiles: null, // File[] picked from a local directory
-                };
-              }
-              setImgRows(init);
-            })
-            .catch(() => {});
-        }
-      })
-      .catch(() => resolve(fallbackParams(meta)));
+  // probe + input list are RESOURCES (G14): recency and cancellation come
+  // from the primitive — no onMount promise chain, no swallowed errors.
+  // The graph is the source of truth: only parameters whose target node
+  // exists in this image's graph render (writeOnly params — widget-only
+  // custom seed nodes etc. — are skipped for now).
+  const [probe] = createResource(() => store.actions.variations.probe(image));
+
+  const resolve = (forGraph) => {
+    const init = {};
+    for (const { id, key, current, integer, type, title } of forGraph) {
+      const p = paramDef(id, current, integer);
+      // absolute: a value window around the current value; relative
+      // (batch): signed offsets around it, default ±spread
+      const def = batch ? { min: -p.spread, max: p.spread } : defaultRange(p, current);
+      init[id] = {
+        enabled: false, min: def.min, max: def.max, increment: p.defaultInc,
+        placeholderKey: id,
+        current, integer,
+        label: title ?? type, // node display title else class_type
+        input: key,
+      };
+    }
+    // Presentation nicety: auto-enable the denoise row when the graph has
+    // one — the user lands on the most common single-axis sweep. Matches
+    // any node type; "denoise" is the input name, not a node name.
+    const denoiseKey = Object.keys(init).find((k) => init[k].input === "denoise");
+    if (denoiseKey) {
+      init[denoiseKey].enabled = true;
+      setSuffix((s) => addToken(s, denoiseKey));
+    }
+    setRows(init);
+    setParams(forGraph);
+  };
+
+  createEffect(() => {
+    if (probe.loading) return;
+    const data = probe();
+    if (!data?.params) { resolve(fallbackParams(image.meta ?? {})); return; }
+    resolve(data.params);
+    // LoadImage sweep axes: one row per string param, files listed from the
+    // host's input dir
+    setStrParams(data.stringParams ?? []);
+  });
+
+  const [inputFiles] = createResource(
+    () => (strParams().length && image.host ? image.host : null),
+    (hostName) => store.actions.variations.inputList(hostName),
+  );
+  createEffect(() => {
+    const sp = strParams();
+    if (!sp.length || inputFiles.loading) return;
+    const files = inputFiles() ?? [];
+    const init = {};
+    for (const p of sp) {
+      init[p.id] = {
+        enabled: false, mode: "new", file: files[0] ?? null,
+        files, current: p.current, label: p.title ?? p.type,
+        localFiles: null, // File[] picked from a local directory
+      };
+    }
+    setImgRows(init);
   });
 
   const onToggle = (key, checked) => {
@@ -318,7 +330,7 @@ function ModalBody(props) {
         + (failed.length ? ` (${failed.length} failed)` : "")
         + (engineErrors.length ? ` — ${engineErrors[0]}` : "");
       setResult({ text: summary, ok: !allFailed && submitted > 0 });
-      setTimeout(props.onClose, 3000);
+      closeT = setTimeout(props.onClose, 3000);
     } catch (e) {
       setResult({ text: `fetch failed: ${e.message}`, ok: false });
     } finally {
@@ -340,7 +352,6 @@ function ModalBody(props) {
               <For each={strParams()}>
                 {(p) => {
                   const r = () => imgRows()[p.id];
-                  let dirPickEl, filesPickEl;
                   return (
                     <Show when={r()}>
                       <div class={"vz-imgrow" + (r().enabled ? " on" : "")}>
@@ -374,38 +385,18 @@ function ModalBody(props) {
                             {/* local directory: whole picked folder; local files: a
                                 multi-picked subset. Both read into localFiles. */}
                             <Show when={r().mode === "local"}>
-                              <span class="vz-imglocal">
-                                <input
-                                  type="file" class="vz-imgdirpick" style="display:none"
-                                  webkitdirectory multiple
-                                  ref={(el) => { dirPickEl = el; }}
-                                  onChange={(e) => {
-                                    const fl = [...(e.target.files ?? [])].filter((f) => UPLOAD_IMG_EXT.test(f.name));
-                                    onImgField(p.id, "localFiles", fl);
-                                  }}
-                                />
-                                <button
-                                  class="vz-imgdirbtn"
-                                  onClick={() => dirPickEl?.click()}
-                                >{r().localFiles?.length ? `${r().localFiles.length} files picked` : "pick a folder…"}</button>
-                              </span>
+                              <FilePick
+                                inputAttrs={{ class: "vz-imgdirpick", webkitdirectory: true, multiple: true }}
+                                label={() => (r().localFiles?.length ? `${r().localFiles.length} files picked` : "pick a folder…")}
+                                onPick={(fl) => onImgField(p.id, "localFiles", fl)}
+                              />
                             </Show>
                             <Show when={r().mode === "files"}>
-                              <span class="vz-imglocal">
-                                <input
-                                  type="file" class="vz-imgfilespick" style="display:none"
-                                  multiple accept="image/*"
-                                  ref={(el) => { filesPickEl = el; }}
-                                  onChange={(e) => {
-                                    const fl = [...(e.target.files ?? [])].filter((f) => UPLOAD_IMG_EXT.test(f.name));
-                                    onImgField(p.id, "localFiles", fl);
-                                  }}
-                                />
-                                <button
-                                  class="vz-imgdirbtn"
-                                  onClick={() => filesPickEl?.click()}
-                                >{r().localFiles?.length ? `${r().localFiles.length} files picked` : "pick files…"}</button>
-                              </span>
+                              <FilePick
+                                inputAttrs={{ class: "vz-imgfilespick", multiple: true, accept: "image/*" }}
+                                label={() => (r().localFiles?.length ? `${r().localFiles.length} files picked` : "pick files…")}
+                                onPick={(fl) => onImgField(p.id, "localFiles", fl)}
+                              />
                             </Show>
                           </div>
                         </Show>
@@ -459,16 +450,16 @@ function ModalBody(props) {
               type="text" class="vz-tinput vz-prefix" ref={prefixEl}
               value={prefix()}
               title="click a slider label to insert its {placeholder}"
-              onFocus={trackSel} onSelect={trackSel} onKeyUp={trackSel} onMouseUp={trackSel}
-              onInput={(e) => { setPrefix(e.currentTarget.value); trackSel(e); }}
+              onFocus={() => setFocused("prefix")}
+              onInput={(e) => setPrefix(e.currentTarget.value)}
             />
             <div class="vz-rlabel">suffix</div>
             <input
               type="text" class="vz-tinput vz-suffix" ref={suffixEl}
               value={suffix()}
               title="click a slider label to insert its {placeholder} (enabled sliders auto-append)"
-              onFocus={trackSel} onSelect={trackSel} onKeyUp={trackSel} onMouseUp={trackSel}
-              onInput={(e) => { setSuffix(e.currentTarget.value); trackSel(e); }}
+              onFocus={() => setFocused("suffix")}
+              onInput={(e) => setSuffix(e.currentTarget.value)}
             />
             {/* spacer pushes Run + error to the BOTTOM of the right column, so
                 the primary action sits opposite the tallest content on the left */}
@@ -484,5 +475,23 @@ function ModalBody(props) {
           innerHTML={iconSvg("x", 16)}
         />
     </div>
+  );
+}
+
+// one hidden file input + its trigger button (G14: the directory and files
+// pickers were copy-paste twins differing only in input attributes)
+function FilePick(props) {
+  let el;
+  return (
+    <span class="vz-imglocal">
+      <input
+        type="file" style="display:none" ref={el}
+        {...props.inputAttrs}
+        onChange={(e) => {
+          props.onPick([...(e.target.files ?? [])].filter((f) => UPLOAD_IMG_EXT.test(f.name)));
+        }}
+      />
+      <button class="vz-imgdirbtn" onClick={() => el?.click()}>{props.label()}</button>
+    </span>
   );
 }

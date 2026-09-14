@@ -9,6 +9,8 @@ vendor/
 client/vendor/*
 !client/vendor/solid/
 !client/vendor/tanstack/
+!client/vendor/nouislider.mjs
+!client/vendor/nouislider.min.css
 !client/vendor/CHECKSUMS
 .venv/
 faceboxes_cache.json

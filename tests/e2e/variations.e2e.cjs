@@ -53,19 +53,24 @@ async function main() {
     });
 
     // --- modal is a page-level fixed overlay (not clipped by any card) ---
+    // behavior, not implementation: the backdrop is fixed, covers the
+    // viewport, and contains the panel (the portal parent tag is an
+    // implementation detail)
     await attempt("modal is a page-level fixed overlay", async () => {
       const info = await cdp.evaluate(`(() => {
         const root = document.querySelector('.vz-root');
         const panel = document.querySelector('.vz-panel');
         if (!root || !panel) return { error: 'not open' };
+        const r = root.getBoundingClientRect();
         return {
-          rootParent: root.parentElement?.tagName,
           rootPosition: getComputedStyle(root).position,
+          coversViewport: r.width >= window.innerWidth - 1 && r.height >= window.innerHeight - 1,
+          panelInRoot: root.contains(panel),
           panelPosition: getComputedStyle(panel).position,
         };
       })()`);
-      check("modal is fixed to body, not clipped by card",
-        info.rootParent === "BODY" && info.rootPosition === "fixed",
+      check("modal is a page-level fixed overlay (not clipped by a card)",
+        info.rootPosition === "fixed" && info.coversViewport && info.panelInRoot,
         JSON.stringify(info));
     });
 

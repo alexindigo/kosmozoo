@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
-# fetch-vendor-solid.sh — vendor the SolidJS browser runtime + the Solid
-# wrapper for the already-vendored @tanstack/virtual-core into client/vendor/.
-# Pinned versions; re-run to repair, safe to re-run.
+# fetch-vendor-solid.sh — vendor the SolidJS browser runtime, the Solid
+# wrapper for the already-vendored @tanstack/virtual-core, and noUiSlider
+# (ESM + base CSS) into client/vendor/. Pinned versions; re-run to repair,
+# safe to re-run.
 #
 # Vendor-time path fix (same pattern as preact's hooks.mjs): the dists import
 # each other by bare specifier, which a browser cannot resolve — rewrite those
@@ -13,6 +14,8 @@ SOLID_V=1.9.15
 SOLID_BASE="https://cdn.jsdelivr.net/npm/solid-js@${SOLID_V}"
 SV_V=3.13.37
 SV_BASE="https://cdn.jsdelivr.net/npm/@tanstack/solid-virtual@${SV_V}"
+NOUI_V=15.8.1
+NOUI_BASE="https://cdn.jsdelivr.net/npm/nouislider@${NOUI_V}"
 
 mkdir -p client/vendor/solid client/vendor/tanstack
 
@@ -51,6 +54,12 @@ curl -fSL "https://cdn.jsdelivr.net/npm/@tanstack/virtual-core@3.17.8/dist/esm/u
 sed -i 's|process\.env\.NODE_ENV !== "production"|false|g' \
   client/vendor/tanstack/virtual-core.mjs client/vendor/tanstack/utils.js
 
+# noUiSlider — the ESM build (SliderRow imports it; the UMD global script is
+# gone, G13) + the base CSS (index.html links it). Self-contained, no
+# imports; the app's .vz-* rules restyle the internals.
+curl -fSL "${NOUI_BASE}/dist/nouislider.mjs" -o client/vendor/nouislider.mjs
+curl -fSL "${NOUI_BASE}/dist/nouislider.min.css" -o client/vendor/nouislider.min.css
+
 # checksum manifest — tests/t_vendor_pristine.mjs recomputes and compares;
 # regenerated here so the files and their guard always move together.
 # Repo-root-relative paths so `sha256sum -c client/vendor/CHECKSUMS` works.
@@ -58,6 +67,7 @@ sha256sum \
   client/vendor/solid/solid.mjs client/vendor/solid/web.mjs client/vendor/solid/store.mjs \
   client/vendor/tanstack/solid-virtual.mjs client/vendor/tanstack/virtual-core.mjs \
   client/vendor/tanstack/lazy-measurements.js client/vendor/tanstack/utils.js \
+  client/vendor/nouislider.mjs client/vendor/nouislider.min.css \
   > client/vendor/CHECKSUMS
 
 # no bare specifiers may survive vendoring
@@ -65,7 +75,7 @@ if grep -nE "(from|import)[[:space:]]+['\"][^.]" \
   client/vendor/solid/solid.mjs client/vendor/solid/web.mjs \
   client/vendor/solid/store.mjs client/vendor/tanstack/solid-virtual.mjs \
   client/vendor/tanstack/virtual-core.mjs client/vendor/tanstack/lazy-measurements.js \
-  client/vendor/tanstack/utils.js; then
+  client/vendor/tanstack/utils.js client/vendor/nouislider.mjs; then
   echo "fetch-vendor-solid: bare specifier survived the path fix" >&2
   exit 1
 fi

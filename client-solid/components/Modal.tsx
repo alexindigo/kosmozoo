@@ -1,63 +1,44 @@
 // client-solid/components/Modal.tsx — one modal shell for every overlay.
 //
-// Renders the fixed backdrop + centered panel. Clicking the backdrop (the
-// overlay element itself, not its contents) closes it — structurally
-// (target === currentTarget), never by id-string.
+// ONE contract (G10): the parent controls visibility with a <Show>; Modal
+// renders the backdrop + panel (.modal-backdrop / .modal-panel) and always
+// portals to document.body — the overlay is a page-level element by
+// construction, never a child of the surface that opened it. Clicking the
+// backdrop (the overlay element itself, not its contents) closes it —
+// structurally (target === currentTarget), never by id-string.
 //
-// Escape is NOT listened for here (G4): an open modal pushes itself onto the
-// store's key-layer stack and the app's ONE key dispatcher hands Escape to
-// the top layer — so exactly one modal closes per press, in open order, and
-// a running key capture (a higher layer) outranks the panel underneath.
-// `escapeLayer={false}` opts out (the keys panel's Esc-close is its own
-// keymap binding). The caller supplies the panel's id/class and children;
-// the close affordance is a child too, so each panel keeps its own layout.
-//
-// portal mode (`portal` prop): the Portal's container IS the overlay (the
-// id/class/backdrop-handler land on it) — for modals whose DOM contract
-// needs the overlay directly under <body> (the Solid Portal wraps content
-// in its own div, which would otherwise sit between body and the overlay).
-// Visibility in portal mode is the caller's conditional; `open` gates only
-// the key layer.
+// Escape is NOT listened for here (G4): a mounted modal is a key layer and
+// the app's ONE key dispatcher hands Escape to the top layer only — exactly
+// one modal closes per press. `escapeLayer={false}` opts out (the keys
+// panel's Esc-close is its own keymap binding). The caller supplies the
+// overlay/panel ids and children; the close affordance is a child too, so
+// each panel keeps its own layout.
 
-import { createEffect, onCleanup } from "solid-js";
+import { onMount, onCleanup } from "solid-js";
 import { Portal } from "solid-js/web";
 import { useAppStore } from "../store/app-store.js";
 
 export function Modal(props) {
   const store = useAppStore();
-  // open → on the layer stack; closed/unmounted → off it
-  createEffect(() => {
-    if (!props.open || props.escapeLayer === false) return;
-    const id = props.overlayId ?? props.class ?? "modal";
-    store.actions.keys.pushLayer({ id, onEscape: () => props.onClose() });
-    onCleanup(() => store.actions.keys.popLayer(id));
-  });
-
-  if (props.portal) {
-    return (
-      <Portal
-        mount={document.body}
-        ref={(el) => {
-          if (props.overlayId) el.id = props.overlayId;
-          if (props.class) el.className = props.class;
-          el.addEventListener("click", (e) => {
-            if (e.target === el) props.onClose();
-          });
-        }}
-      >
-        {props.children}
-      </Portal>
-    );
+  // mounted == open (the parent's <Show> gates it): the key layer's
+  // lifecycle is exactly the modal's lifecycle
+  const layerId = props.overlayId ?? props.class ?? "modal";
+  if (props.escapeLayer !== false) {
+    onMount(() => store.actions.keys.pushLayer({ id: layerId, onEscape: () => props.onClose?.() }));
+    onCleanup(() => store.actions.keys.popLayer(layerId));
   }
 
   return (
-    <div
-      id={props.overlayId}
-      class={props.class}
-      hidden={!props.open}
-      onClick={(e) => { if (e.target === e.currentTarget) props.onClose(); }}
-    >
-      <div id={props.panelId} class={props.panelClass}>{props.children}</div>
-    </div>
+    <Portal mount={document.body}>
+      <div
+        id={props.overlayId}
+        class={"modal-backdrop" + (props.class ? " " + props.class : "")}
+        onClick={(e) => { if (e.target === e.currentTarget) props.onClose?.(); }}
+      >
+        <div id={props.panelId} class="modal-panel">
+          {props.children}
+        </div>
+      </div>
+    </Portal>
   );
 }

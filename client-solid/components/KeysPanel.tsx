@@ -3,7 +3,7 @@
 // action is listed with its effective binding; click a binding to recapture
 // it, right-click resets it; overrides persist in settings core.keys.
 
-import { For } from "solid-js";
+import { For, Show } from "solid-js";
 import { useAppStore } from "../store/app-store.js";
 import { Modal } from "./Modal.js";
 
@@ -22,7 +22,8 @@ export function KeysPanel() {
   };
 
   return (
-    <Modal overlayId="keysPanel" panelId="keysPanelInner" open={store.state.keysPanelOpen()} onClose={close} escapeLayer={false}>
+    <Show when={store.state.keysPanelOpen()}>
+    <Modal overlayId="keysPanel" panelId="keysPanelInner" onClose={close} escapeLayer={false}>
       <div id="keysPanelHead">
         <h2>Actions & keys</h2>
         <input
@@ -58,5 +59,6 @@ export function KeysPanel() {
       </div>
       <div id="keysFoot">click a binding to change it · right-click resets one · Esc cancels capture</div>
     </Modal>
+    </Show>
   );
 }

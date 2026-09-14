@@ -11,8 +11,6 @@ import { createResource } from "solid-js";
 import { useAppStore } from "../store/app-store.js";
 import { iconSvg } from "/js/icons.mjs";
 
-const KEYS_BTN_SVG = '<svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.6"><rect x="2" y="6" width="20" height="12" rx="2"/><path d="M6 10h.01M10 10h.01M14 10h.01M18 10h.01M6 14h.01M18 14h.01M9 14h6"/></svg>';
-
 export function DiffStage() {
   const store = useAppStore();
 
@@ -48,7 +46,7 @@ export function DiffStage() {
       <button
         id="diffKeysBtn" title="actions & keys (?)"
         onClick={() => store.actions.ui.toggleKeysPanel()}
-        innerHTML={KEYS_BTN_SVG}
+        innerHTML={iconSvg("keyboard", 18)}
       />
     </div>
   );

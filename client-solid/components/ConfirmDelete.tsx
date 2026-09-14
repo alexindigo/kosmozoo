@@ -42,7 +42,7 @@ export function ConfirmDelete() {
 
   return (
     <Show when={n() > 0}>
-      <Modal overlayId="confirmOverlay" panelId="confirmPanel" open onClose={close}>
+      <Modal overlayId="confirmOverlay" panelId="confirmPanel" onClose={close}>
         <div class="confirm-title">{copy().title}</div>
         <div class="confirm-body">{copy().body(n(), images()[0].filename, images()[0].host)}</div>
         <div class="confirm-actions">

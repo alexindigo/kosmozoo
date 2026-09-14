@@ -5,10 +5,11 @@
 //       ●──────────────●
 //                current
 //
-// The dual-thumb slider is noUiSlider (vendored), bound in onMount on the
-// lane's .vz-slider element: the library renders the track, thumbs and
-// connect band there. Drag snaps to the row's increment (slide event);
-// keyboard nudge on a focused thumb uses the fine step (options.step).
+// The dual-thumb slider is noUiSlider (vendored ESM — no window global,
+// G13), bound in onMount on the lane's .vz-slider element: the library
+// renders the track, thumbs and connect band there. Drag snaps to the row's
+// increment (slide event); keyboard nudge on a focused thumb uses the fine
+// step (options.step).
 // Alignment is structural: rail, connect band, thumbs and the orange
 // current-value marker share one lane centerline by construction.
 //
@@ -24,14 +25,20 @@
 // The row never reaches into its parent — label clicks report through
 // onInsertPlaceholder and the parent owns the form.
 
-import { onMount, onCleanup } from "solid-js";
+import { createSignal, onMount, onCleanup } from "solid-js";
+import noUiSlider from "/vendor/nouislider.mjs";
 import { snapTo, fmt } from "./graph.mjs";
 
 const fmtSigned = (v) => (v > 0 ? "+" : "") + fmt(v);
 
 export function SliderRow(props) {
-  let sliderEl, minLblEl, maxLblEl;
+  let sliderEl;
   const fineStep = Math.pow(10, -props.param.decimals);
+
+  // the bound labels are signals rendered by JSX (G13 — no imperative
+  // textContent/style writes from the library callback)
+  const [minLbl, setMinLbl] = createSignal({ text: "", left: "0%" });
+  const [maxLbl, setMaxLbl] = createSignal({ text: "", left: "0%" });
 
   // absolute: the param's clamp; relative: ±(spread×10) around the current
   const lo = props.relative ? -(props.param.spread ?? 1) * 10 : props.param.clamp[0];
@@ -53,10 +60,8 @@ export function SliderRow(props) {
     });
     slider.on("update", (values) => {
       const [a, b] = values.map(Number);
-      minLblEl.textContent = props.relative ? fmtSigned(a) : fmt(a);
-      maxLblEl.textContent = props.relative ? fmtSigned(b) : fmt(b);
-      minLblEl.style.left = ((a - lo) / span) * 100 + "%";
-      maxLblEl.style.left = ((b - lo) / span) * 100 + "%";
+      setMinLbl({ text: props.relative ? fmtSigned(a) : fmt(a), left: ((a - lo) / span) * 100 + "%" });
+      setMaxLbl({ text: props.relative ? fmtSigned(b) : fmt(b), left: ((b - lo) / span) * 100 + "%" });
       const vals = slider.get().map(Number);
       props.onRange(props.param.key, { min: Math.min(vals[0], vals[1]), max: Math.max(vals[0], vals[1]) });
     });
@@ -104,8 +109,8 @@ export function SliderRow(props) {
         >{props.param.label}</div>
         <div class="vz-rangewrap">
           <div class="vz-lane vz-lane-labels">
-            <div class="vz-bound vz-min-lbl" ref={minLblEl} />
-            <div class="vz-bound vz-max-lbl" ref={maxLblEl} />
+            <div class="vz-bound vz-min-lbl" style={{ left: minLbl().left }}>{minLbl().text}</div>
+            <div class="vz-bound vz-max-lbl" style={{ left: maxLbl().left }}>{maxLbl().text}</div>
           </div>
           <div class="vz-lane vz-lane-track">
             {/* the full-range track line spans the inset span, so its ends are

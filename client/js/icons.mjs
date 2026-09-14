@@ -40,7 +40,24 @@ const PATHS = {
   <path d="M9 5l1.5 1.5" />
   <path d="M8.5 8.5l1.5 1.5" />
   <path d="M5 9l1.5 1.5" />`,
-  "chevron-down": `<path d="M6 9l6 6l6 -6" />`,
+  "menu": `<path d="M4 6h16" />
+  <path d="M4 12h16" />
+  <path d="M4 18h16" />`,
+  "layout-split": `<rect x="3" y="3" width="18" height="18" rx="2" />
+  <line x1="15" y1="3" x2="15" y2="21" />`,
+  "layout-stacked": `<rect x="3" y="3" width="18" height="18" rx="2" />
+  <line x1="3" y1="15" x2="21" y2="15" />`,
+  "layout-rev": `<rect x="3" y="3" width="18" height="18" rx="2" />
+  <line x1="9" y1="3" x2="9" y2="21" />`,
+  "anchor": `<path stroke="none" d="M0 0h24v24H0z" fill="none"/>
+  <circle cx="12" cy="5" r="3" />
+  <line x1="12" y1="22" x2="12" y2="8" />
+  <path d="M5 12H2a10 10 0 0 0 20 0h-3" />`,
+  "keyboard": `<path stroke="none" d="M0 0h24v24H0z" fill="none"/>
+  <rect x="2" y="6" width="20" height="12" rx="2" />
+  <path d="M6 10h.01M10 10h.01M14 10h.01M18 10h.01M6 14h.01M18 14h.01M9 14h6" />`,
+  "arrow-up": `<path d="M12 19V5" />
+  <path d="M5 12l7-7 7 7" />`,
   "download": `<path stroke="none" d="M0 0h24v24H0z" fill="none"/>
   <path d="M4 17v2a2 2 0 0 0 2 2h12a2 2 0 0 0 2 -2v-2" />
   <path d="M7 11l5 5l5 -5" />
