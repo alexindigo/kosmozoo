@@ -46,10 +46,19 @@ export function SliderRow(props) {
   const span = hi - lo;
 
   onMount(() => {
-    // step: fineStep — keyboard nudges use the fine step directly. Drag
-    // snapping is handled in the `slide` event, which only fires on drag.
-    // The handlers read props live (Solid's props proxy), so the current
-    // increment is always the one that snaps.
+    // step: fineStep — keyboard nudges use the fine step directly. The
+    // `slide` event fires for BOTH pointer drags and keyboard nudges, so
+    // the snap is gated on a real drag being in flight: a keyboard nudge
+    // snapped to the (coarser) increment would be undone unless it crossed
+    // a full increment — the fine step is its whole point. The handlers
+    // read props live (Solid's props proxy), so the current increment is
+    // always the one that snaps.
+    let dragging = false;
+    const onDown = () => { dragging = true; };
+    const onUp = () => { dragging = false; };
+    sliderEl.addEventListener("pointerdown", onDown);
+    window.addEventListener("pointerup", onUp);
+    window.addEventListener("pointercancel", onUp);
     const slider = noUiSlider.create(sliderEl, {
       start: [props.defaults.min, props.defaults.max],
       connect: true,
@@ -65,13 +74,34 @@ export function SliderRow(props) {
       const vals = slider.get().map(Number);
       props.onRange(props.param.key, { min: Math.min(vals[0], vals[1]), max: Math.max(vals[0], vals[1]) });
     });
-    slider.on("slide", (values) => {
-      const snapped = values.map((v) => snapTo(Number(v), props.increment(), props.param.decimals));
-      if (snapped[0] !== Number(values[0]) || snapped[1] !== Number(values[1])) {
-        slider.set(snapped.map(String));
-      }
+    // The snap lands on RELEASE, never mid-drag: a set() during an active
+    // drag puts the widget in its tap-transition state, which rejects the
+    // drag's own move events — the thumb would freeze at the first snap.
+    // While dragging, the thumb follows the pointer freely (the labels
+    // track it live via `update`); the change event at the end snaps the
+    // dragged handle — and only it — to the row's increment. Keyboard
+    // nudges never set wasDragging, so their fine step survives.
+    let wasDragging = false;
+    slider.on("slide", () => { if (dragging) wasDragging = true; });
+    slider.on("change", (values, handleNumber) => {
+      if (!wasDragging) return;
+      wasDragging = false;
+      const next = values.map(Number);
+      let changed = false;
+      const snapOne = (i) => {
+        const sn = snapTo(next[i], props.increment(), props.param.decimals);
+        if (sn !== next[i]) { next[i] = sn; changed = true; }
+      };
+      if (handleNumber === undefined || handleNumber === null) { snapOne(0); snapOne(1); }
+      else snapOne(handleNumber);
+      if (changed) slider.set(next.map(String));
     });
-    onCleanup(() => slider.destroy());
+    onCleanup(() => {
+      sliderEl.removeEventListener("pointerdown", onDown);
+      window.removeEventListener("pointerup", onUp);
+      window.removeEventListener("pointercancel", onUp);
+      slider.destroy();
+    });
   });
 
   const commitInc = (v) => {

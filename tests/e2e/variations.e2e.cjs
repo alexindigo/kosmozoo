@@ -1,10 +1,13 @@
-// tests/e2e/variations.e2e.cjs — e2e coverage for the variations modal.
+// tests/e2e/variations.e2e.cjs — e2e coverage for the variations feature
+// module (the engine's /api/features/variations/* + the client modal).
 //
-// Runs against the live engine (started by run.sh) with the fake ComfyUI host.
-// The variations panel is a real page-level modal (backdrop + centered panel),
-// opened by the wand button on each card.
+// Runs against the live engine (started by run.sh) with the fake ComfyUI
+// host. The panel is a page-level modal opened by the wand button on each
+// card. Assertions are behavioral: trusted clicks/keys/drags through the
+// Input domain, the widget's public aria contract, and the row's own
+// labels — never the slider library's internals (I3/I7).
 
-const { CDP, sleep } = require("./cdp.cjs");
+const { CDP } = require("./cdp.cjs");
 
 const ENGINE = process.env.E2E_ENGINE ?? "http://127.0.0.1:18260";
 const FAKE = process.env.E2E_FAKE ?? "http://127.0.0.1:18261";
@@ -47,9 +50,9 @@ async function main() {
       await cdp.evaluate(`
         document.querySelector('.card[data-idx="0"] .votebtn.variations').click()
       `);
-      await sleep(200);
-      const has = await cdp.evaluate(`!!document.querySelector('.vz-root .vz-panel')`);
-      check("wand click opens variations modal", has);
+      const opened = await cdp.poll(`!!document.querySelector('.vz-root .vz-panel')`, 5000)
+        .then(() => true).catch(() => false);
+      check("wand click opens variations modal", opened);
     });
 
     // --- modal is a page-level fixed overlay (not clipped by any card) ---
@@ -109,14 +112,11 @@ async function main() {
         "current=" + cur);
     });
     await attempt("denoise auto-enabled on open (count > 0)", async () => {
-      await sleep(200);
+      const denoiseOn = await cdp.poll(`(() => {
+        const r = document.querySelector('.vz-slider-row[data-param-key$="denoise"]');
+        return !!r && !r.classList.contains('vz-off');
+      })()`, 5000).then(() => true).catch(() => false);
       const count = await cdp.evaluate(`document.querySelector('.vz-count')?.textContent`);
-      const denoiseOn = await cdp.evaluate(`(() => {
-        for (const r of document.querySelectorAll('.vz-slider-row')) {
-          if (/denoise$/.test(r.dataset.paramKey ?? "")) return !r.classList.contains('vz-off');
-        }
-        return false;
-      })()`);
       const n = parseInt(count, 10);
       check("denoise auto-enabled and count > 0",
         denoiseOn && n > 0,
@@ -136,15 +136,14 @@ async function main() {
 
     // --- enabling floats the row to the top, disabled rows sink ---
     await attempt("enabled slider card rises to top", async () => {
-      // Enable the SECOND row too, then check ordering
-      await cdp.evaluate(`(() => {
+      // enable the LAST row too — through a trusted click (I7), then poll
+      // the reorder instead of sleeping
+      const lastKey = await cdp.evaluate(`(() => {
         const rows = document.querySelectorAll('.vz-slider-row');
-        if (rows.length < 2) return;
-        const cb = rows[rows.length - 1].querySelector('.vz-cb');
-        cb.checked = true;
-        cb.dispatchEvent(new Event('change'));
+        return rows.length > 1 ? rows[rows.length - 1].dataset.paramKey : null;
       })()`);
-      await sleep(100);
+      await cdp.clickAt(`.vz-slider-row[data-param-key="${lastKey}"] .vz-cb`);
+      await cdp.poll(`document.querySelectorAll('.vz-slider-row:not(.vz-off)').length >= 2`, 5000);
       const order = await cdp.evaluate(`(() => {
         const rows = [...document.querySelectorAll('.vz-slider-row')];
         return rows.map((r) => ({
@@ -165,22 +164,24 @@ async function main() {
     // --- disabling removes the auto-inserted placeholder ---
     await attempt("disable removes _{key}_ from suffix", async () => {
       const before = await cdp.evaluate(`document.querySelector('.vz-suffix')?.value`);
-      // Disable the LAST enabled row (the one from the reorder test)
-      await cdp.evaluate(`(() => {
-        // Find any currently-enabled row and toggle it off
+      // toggle off any enabled non-denoise row (denoise stays for later
+      // specs) — trusted click, then poll the suffix shrink
+      const key = await cdp.evaluate(`(() => {
         for (const r of document.querySelectorAll('.vz-slider-row')) {
           if (!r.classList.contains('vz-off')) {
-            const key = r.dataset.paramKey;
-            // Skip denoise so the subsequent tests can still run against it
-            if (key?.endsWith('denoise')) continue;
-            const cb = r.querySelector('.vz-cb');
-            cb.checked = false;
-            cb.dispatchEvent(new Event('change'));
-            return key;
+            const k = r.dataset.paramKey;
+            if (k?.endsWith('denoise')) continue;
+            return k;
           }
         }
+        return null;
       })()`);
-      await sleep(100);
+      if (!key) {
+        check("suffix shrank after disable", false, "no enabled non-denoise row to disable");
+        return;
+      }
+      await cdp.clickAt(`.vz-slider-row[data-param-key="${key}"] .vz-cb`);
+      await cdp.poll(`document.querySelector('.vz-suffix').value.length < ${JSON.stringify(before ?? "").length}`, 5000);
       const after = await cdp.evaluate(`document.querySelector('.vz-suffix')?.value`);
       check("suffix shrank after disable", after.length < before.length,
         JSON.stringify({ before, after }));
@@ -189,65 +190,67 @@ async function main() {
     // --- per-slider increment updates count ---
     await attempt("per-slider increment change updates count", async () => {
       const before = parseInt(await cdp.evaluate(`document.querySelector('.vz-count')?.textContent`), 10);
+      // type the new increment like a user: focus, select-all, trusted
+      // insertText, blur (the change event commits)
       await cdp.evaluate(`(() => {
         const inc = document.querySelector('.vz-slider-row .vz-row-inc-input');
-        inc.value = '0.025';
-        inc.dispatchEvent(new Event('change'));
+        inc.focus(); inc.select();
       })()`);
-      await sleep(100);
+      await cdp.send("Input.insertText", { text: "0.025" });
+      await cdp.evaluate(`document.querySelector('.vz-slider-row .vz-row-inc-input').blur()`);
+      await cdp.poll(`parseInt(document.querySelector('.vz-count').textContent, 10) !== ${before}`, 5000);
       const after = parseInt(await cdp.evaluate(`document.querySelector('.vz-count')?.textContent`), 10);
       check("per-slider increment change updates count", before !== after, before + " → " + after);
     });
 
-    // --- dragging snaps to the row's increment (via the slide event) ---
-    // noUiSlider's `slide` event fires during pointer drag. Our handler snaps
-    // the values to the row's increment. This test verifies the handler is
-    // registered and the increment is correctly tracked.
-    await attempt("slide handler snaps to per-slider increment", async () => {
-      const result = await cdp.evaluate(`(() => {
-        const row = document.querySelector('.vz-slider-row[data-param-key$="denoise"]');
-        const slider = row.querySelector('.vz-slider');
-        if (!slider?.noUiSlider) return { error: 'no slider' };
-        const inc = row.querySelector('.vz-row-inc-input');
-        inc.value = '0.1';
-        inc.dispatchEvent(new Event('change'));
-        // Check that the slider's step is the fine step (keyboard) and the
-        // increment is tracked separately (drag snapping via slide event)
-        return {
-          step: slider.noUiSlider.options.step,
-          hasSlideHandler: typeof slider.noUiSlider === 'object',
-        };
+    // --- dragging snaps to the row's increment ---
+    // Behavior, not library internals (I3): a trusted thumb drag lands the
+    // value on a multiple of the row's increment, observed through the
+    // row's own max label.
+    await attempt("drag snaps to the per-slider increment", async () => {
+      const rowSel = '.vz-slider-row[data-param-key$="denoise"]';
+      await cdp.evaluate(`(() => {
+        const inc = document.querySelector('${rowSel} .vz-row-inc-input');
+        inc.focus(); inc.select();
       })()`);
-      check("slide handler registered with fine step",
-        result.step === 0.01 && result.hasSlideHandler === true,
-        JSON.stringify(result));
+      await cdp.send("Input.insertText", { text: "0.1" });
+      await cdp.evaluate(`document.querySelector('${rowSel} .vz-row-inc-input').blur()`);
+      await cdp.poll(`document.querySelector('${rowSel} .vz-row-inc-input').value === "0.1"`, 5000);
+      const before = await cdp.evaluate(`document.querySelector('${rowSel} .vz-max-lbl')?.textContent ?? ""`);
+      const h1 = await cdp.evaluate(`(() => {
+        const r = document.querySelector('${rowSel} .noUi-handle[data-handle="1"]').getBoundingClientRect();
+        return { x: r.left + r.width / 2, y: r.top + r.height / 2 };
+      })()`);
+      await cdp.drag(h1.x, h1.y, h1.x - 37, h1.y); // left: the value decreases
+      await cdp.poll(`(document.querySelector('${rowSel} .vz-max-lbl')?.textContent ?? "") !== ${JSON.stringify(before)}`, 5000);
+      const after = await cdp.evaluate(`document.querySelector('${rowSel} .vz-max-lbl')?.textContent`);
+      const v = parseFloat(after);
+      const snapped = Math.abs(v / 0.1 - Math.round(v / 0.1)) < 1e-6;
+      check("drag lands on an increment multiple", snapped, `${before} -> ${after}`);
     });
 
-    // --- keyboard nudge: noUiSlider keyboardSupport is enabled with fine step ---
-    // Synthetic KeyboardEvents don't reliably trigger noUiSlider's internal
-    // handler (known browser limitation). This test verifies the slider is
-    // configured for keyboard support with the fine step, which is what a
-    // real user's arrow keys will use.
-    await attempt("slider configured for keyboard with fine step", async () => {
-      const result = await cdp.evaluate(`(() => {
-        const row = document.querySelector('.vz-slider-row[data-param-key$="denoise"]');
-        const slider = row.querySelector('.vz-slider');
-        if (!slider?.noUiSlider) return { error: 'no slider' };
-        // Reset increment to default so we can check the fine step
-        const inc = row.querySelector('.vz-row-inc-input');
-        inc.value = '0.05';
-        inc.dispatchEvent(new Event('change'));
-        const handle = slider.querySelector('.noUi-handle[data-handle="0"]');
-        return {
-          tabindex: handle?.getAttribute('tabindex'),
-          role: handle?.getAttribute('role'),
-          ariaValueNow: handle?.getAttribute('aria-valuenow'),
-          step: slider.noUiSlider.options.step,
-        };
+    // --- keyboard nudge moves the thumb by the fine step ---
+    // Trusted keys through the Input domain (synthetic KeyboardEvents don't
+    // reach noUiSlider's internal handler) — the nudge is observed on the
+    // thumb's public aria contract, not the library's options (I3).
+    await attempt("keyboard nudge moves the thumb by the fine step", async () => {
+      const h0 = '.vz-slider-row[data-param-key$="denoise"] .noUi-handle[data-handle="0"]';
+      // the row's own min label carries the full-precision value (the aria
+      // valuenow is one-decimal — a 0.01 nudge would be invisible there)
+      const lbl = '.vz-slider-row[data-param-key$="denoise"] .vz-min-lbl';
+      await cdp.evaluate(`document.querySelector('${h0}').focus()`);
+      const before = parseFloat(await cdp.evaluate(`document.querySelector('${lbl}').textContent`));
+      await cdp.keyTrusted("ArrowUp", { vk: 38 });
+      await cdp.poll(`parseFloat(document.querySelector('${lbl}').textContent) !== ${before}`, 5000);
+      const after = parseFloat(await cdp.evaluate(`document.querySelector('${lbl}').textContent`));
+      const step = Math.round((after - before) * 1000) / 1000;
+      check("arrow key nudges by the fine step (0.01)", step === 0.01, `${before} -> ${after}`);
+      const a = await cdp.evaluate(`(() => {
+        const h = document.querySelector('${h0}');
+        return { role: h.getAttribute('role'), tabindex: h.getAttribute('tabindex') };
       })()`);
-      check("keyboard nudge uses fine step",
-        result.tabindex === "0" && result.role === "slider" && result.step === 0.01,
-        JSON.stringify(result));
+      check("thumb exposes the slider a11y contract",
+        a.role === "slider" && a.tabindex === "0", JSON.stringify(a));
     });
 
     // --- track rail spans the thumb-travel span; everything shares a centerline ---
@@ -281,13 +284,23 @@ async function main() {
     });
 
     // --- thumbs attach to the rail ends at min/max ---
+    // Driven through the widget's own keyboard contract (Home/End), not the
+    // library API (I3); the tap transition settles by position stability.
     await attempt("thumbs attach to the rail ends at min/max", async () => {
-      const v = await cdp.evaluate(`(async () => {
-        const row = document.querySelector('.vz-slider-row[data-param-key$="denoise"]');
-        const slider = row.querySelector('.vz-slider');
-        const ns = slider.noUiSlider;
-        ns.set([ns.options.range.min, ns.options.range.max]);
-        await new Promise(r => setTimeout(r, 500)); // let the tap transition settle
+      const rowSel = '.vz-slider-row[data-param-key$="denoise"]';
+      await cdp.evaluate(`document.querySelector('${rowSel} .noUi-handle[data-handle="0"]').focus()`);
+      await cdp.keyTrusted("Home", { vk: 36 });
+      await cdp.evaluate(`document.querySelector('${rowSel} .noUi-handle[data-handle="1"]').focus()`);
+      await cdp.keyTrusted("End", { vk: 35 });
+      await cdp.poll(`(async () => {
+        const hs = document.querySelectorAll('${rowSel} .noUi-handle');
+        const read = () => [...hs].map((h) => h.getBoundingClientRect().left).join(",");
+        const a = read();
+        await new Promise(r => setTimeout(r, 200));
+        return a === read();
+      })()`, 8000);
+      const v = await cdp.evaluate(`(() => {
+        const row = document.querySelector('${rowSel}');
         const rail = row.querySelector('.vz-rail').getBoundingClientRect();
         const h0 = row.querySelector('.noUi-handle[data-handle="0"]').getBoundingClientRect();
         const h1 = row.querySelector('.noUi-handle[data-handle="1"]').getBoundingClientRect();
@@ -318,7 +331,6 @@ async function main() {
 
     // --- label click inserts {key} into focused suffix ---
     await attempt("slider label click inserts {key} at cursor", async () => {
-      await sleep(300); // let probe refine label
       const result = await cdp.evaluate(`(() => {
         const row = document.querySelector('.vz-slider-row');
         const suffix = document.querySelector('.vz-suffix');
@@ -342,9 +354,9 @@ async function main() {
     // --- Esc closes the modal ---
     await attempt("Esc closes the modal", async () => {
       await cdp.key("Escape");
-      await sleep(200);
-      const still = await cdp.evaluate(`!!document.querySelector('.vz-root')`);
-      check("Esc closes modal", !still);
+      const closed = await cdp.poll(`!document.querySelector('.vz-root')`, 5000)
+        .then(() => true).catch(() => false);
+      check("Esc closes modal", closed);
     });
 
     // --- backdrop click closes the modal ---
@@ -352,15 +364,15 @@ async function main() {
       await cdp.evaluate(`
         document.querySelector('.card[data-idx="0"] .votebtn.variations').click()
       `);
-      await sleep(200);
+      await cdp.poll(`!!document.querySelector('.vz-root .vz-panel')`, 5000);
       await cdp.evaluate(`(() => {
         const root = document.querySelector('.vz-root');
         // click DIRECTLY on the root (backdrop), not on the panel
         root.dispatchEvent(new MouseEvent('click', { bubbles: true }));
       })()`);
-      await sleep(200);
-      const still = await cdp.evaluate(`!!document.querySelector('.vz-root')`);
-      check("backdrop click closes modal", !still);
+      const closed = await cdp.poll(`!document.querySelector('.vz-root')`, 5000)
+        .then(() => true).catch(() => false);
+      check("backdrop click closes modal", closed);
     });
 
     // --- wand re-click closes the modal ---
@@ -368,13 +380,13 @@ async function main() {
       await cdp.evaluate(`
         document.querySelector('.card[data-idx="0"] .votebtn.variations').click()
       `);
-      await sleep(200);
+      await cdp.poll(`!!document.querySelector('.vz-root .vz-panel')`, 5000);
       await cdp.evaluate(`
         document.querySelector('.card[data-idx="0"] .votebtn.variations').click()
       `);
-      await sleep(200);
-      const still = await cdp.evaluate(`!!document.querySelector('.vz-root')`);
-      check("wand re-click closes modal", !still);
+      const closed = await cdp.poll(`!document.querySelector('.vz-root')`, 5000)
+        .then(() => true).catch(() => false);
+      check("wand re-click closes modal", closed);
     });
 
     // --- × button closes the modal ---
@@ -382,40 +394,32 @@ async function main() {
       await cdp.evaluate(`
         document.querySelector('.card[data-idx="0"] .votebtn.variations').click()
       `);
-      await sleep(200);
+      await cdp.poll(`!!document.querySelector('.vz-root .vz-panel')`, 5000);
       await cdp.evaluate(`document.querySelector('.vz-close').click()`);
-      await sleep(200);
-      const still = await cdp.evaluate(`!!document.querySelector('.vz-root')`);
-      check("× button closes modal", !still);
+      const closed = await cdp.poll(`!document.querySelector('.vz-root')`, 5000)
+        .then(() => true).catch(() => false);
+      check("× button closes modal", closed);
     });
 
     // --- Run submits and produces a result message ---
+    // The auto-enabled denoise row carries a default range — Run goes
+    // straight through the UI, and the result message is polled (no
+    // library-API setup, no fixed sleeps).
     await attempt("Run produces a result message", async () => {
       await cdp.evaluate(`
         document.querySelector('.card[data-idx="0"] .votebtn.variations').click()
       `);
-      // Wait for the probe to populate the slider rows
-      await cdp.poll(`document.querySelectorAll('.vz-slider-row').length > 0`, 5000);
-      await cdp.evaluate(`(() => {
-        const row = document.querySelector('.vz-slider-row');
-        const cb2 = row.querySelector('.vz-cb');
-        cb2.checked = true;
-        cb2.dispatchEvent(new Event('change'));
-        const slider = row.querySelector('.vz-slider');
-        if (slider?.noUiSlider) {
-          slider.noUiSlider.set([0.3, 0.9]);
-        }
-      })()`);
-      await sleep(200);
+      await cdp.poll(`document.querySelectorAll('.vz-slider-row:not(.vz-off)').length > 0`, 5000);
       await cdp.evaluate(`document.querySelector('.vz-run').click()`);
-      await sleep(2000);
+      const hasResult = await cdp.poll(`(document.querySelector('.vz-error')?.textContent ?? '').length > 0`, 10000)
+        .then(() => true).catch(() => false);
       const errText = await cdp.evaluate(`
         document.querySelector('.vz-error')?.textContent ?? ''
       `);
-      const hasResult = errText.length > 0;
       check("Run produces a result message", hasResult, errText);
       // cleanup: close any lingering modal
       await cdp.evaluate(`document.querySelector('.vz-close')?.click()`);
+      await cdp.poll(`!document.querySelector('.vz-root')`, 5000).catch(() => {});
     });
 
     // --- relative ranges (batch mode) ----------------------------------------
@@ -453,8 +457,12 @@ async function main() {
     // model 0.5/clip 0.5): the panel must surface both strength params with
     // the first carrier's current values.
     await attempt("lora strength rows surface on a lora graph", async () => {
-      // make sure the fixture's bytes (and embedded graph) are ingested
-      await cdp.evaluate(`fetch("/api/collections/fake/entries/flux-lora.png/bytes"), true`);
+      // make sure the fixture's bytes (and embedded graph) are ingested —
+      // AWAITED: the probe right below needs the graph in the cache
+      await cdp.evaluate(`(async () => {
+        await fetch("/api/collections/fake/entries/flux-lora.png/bytes");
+        return true;
+      })()`);
       await cdp.evaluate(`
         document.querySelector('.card[data-name="flux-lora.png"] .votebtn.variations').click()
       `);
@@ -474,7 +482,7 @@ async function main() {
         info["LoraLoader.strength_clip"] != null && parseFloat(info["LoraLoader.strength_clip"]) === 0.8,
         JSON.stringify(info));
       await cdp.evaluate(`document.querySelector('.vz-close')?.click()`);
-      await sleep(200);
+      await cdp.poll(`!document.querySelector('.vz-root')`, 5000).catch(() => {});
     });
 
     // --- lora strength run mutates both carriers -------------------------------

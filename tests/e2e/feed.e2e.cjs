@@ -66,17 +66,25 @@ const AUDIT = `(async () => {
   const dims = await page.evaluate(`(async () => (await (await fetch("/api/prefetch")).json()).dimsPending)()`);
   check("dims pass drained before the feed audit", dims === 0, `dimsPending=${dims}`);
 
-  // fling deep into the list, then settle
+  // fling deep into the list, then settle — settled means the scroll
+  // position held still across a beat and the current card was assigned
+  // (no fixed sleep)
   await page.evaluate(`(() => { document.getElementById("candidatesCol").scrollTop = 144000; })()`);
-  await sleep(2500);
-  await page.poll("!!document.querySelector('.card.current')", 10000);
+  await page.poll(`(async () => {
+    const c = document.getElementById("candidatesCol");
+    const a = c.scrollTop;
+    await new Promise(r => setTimeout(r, 250));
+    return a === c.scrollTop && !!document.querySelector(".card.current");
+  })()`, 15000);
 
   const a1 = await page.evaluate(AUDIT);
   check("cards rendered after the fling", a1.cards > 0, `${a1.cards} cards @ scrollTop ${a1.scrollTop}`);
   check("every card height === cardHeight(size, colW)", a1.nullSize === 0 && a1.maxDelta === 0,
     `nullSize=${a1.nullSize} maxDelta=${a1.maxDelta}`);
 
-  // meta patches land inside this window — geometry must not move
+  // meta patches land inside this window — geometry must not move. The
+  // 5 s span IS the assertion (the poll interval is 5 s), not a settle
+  // sleep: the audit runs again after it, unchanged.
   await sleep(5000);
   const a2 = await page.evaluate(AUDIT);
   check("heights still exact after the 5 s meta window", a2.nullSize === 0 && a2.maxDelta === 0,

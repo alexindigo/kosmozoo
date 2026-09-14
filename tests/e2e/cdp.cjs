@@ -7,9 +7,24 @@
 
 const { spawn } = require("node:child_process");
 const http = require("node:http");
+const fs = require("node:fs");
+const nodePath = require("node:path");
 
-const CHROME = process.env.CHROME_BIN
-  ?? "/ms-playwright/chromium-1148/chrome-linux/chrome";
+// the browser comes from the Playwright image — its build dir is DISCOVERED
+// from the image's own /ms-playwright content, never hand-synced with the
+// image tag in run.sh (I5)
+function chromiumBin() {
+  if (process.env.CHROME_BIN) return process.env.CHROME_BIN;
+  const root = "/ms-playwright";
+  const dirs = fs.readdirSync(root).filter((d) => /^chromium-\d+$/.test(d)).sort().reverse();
+  for (const d of dirs) {
+    const bin = nodePath.join(root, d, "chrome-linux", "chrome");
+    if (fs.existsSync(bin)) return bin;
+  }
+  throw new Error(`no chromium build found under ${root}`);
+}
+
+const CHROME = chromiumBin();
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
@@ -130,17 +145,49 @@ class CDP {
       button: opts.button ?? "left",
       clickCount: opts.clickCount ?? 0,
       modifiers: opts.modifiers ?? 0,
+      // widgets that track the pressed-button state (noUiSlider ends a
+      // drag on a move with buttons === 0) need the real button mask
+      ...(opts.buttons !== undefined ? { buttons: opts.buttons } : {}),
       ...(type === "mouseWheel" ? { deltaX: opts.deltaX ?? 0, deltaY: opts.deltaY ?? 0 } : {}),
     });
   }
 
+  // trusted click on an element's center (I7: real input events, not
+  // synthetic dispatchEvent — controls see exactly what a user produces)
+  async clickAt(selector) {
+    const box = await this.evaluate(`(() => {
+      const el = document.querySelector(${JSON.stringify(selector)});
+      if (!el) return null;
+      // a trusted click lands at viewport coordinates — scroll the target
+      // into view first (rows below a scroll container's fold have rects
+      // outside the clickable area)
+      el.scrollIntoView({ block: "center", inline: "nearest" });
+      const r = el.getBoundingClientRect();
+      return { x: r.left + r.width / 2, y: r.top + r.height / 2 };
+    })()`);
+    if (!box) throw new Error("clickAt: no element for " + selector);
+    await this.mouse("mousePressed", box.x, box.y, { clickCount: 1, buttons: 1 });
+    await this.mouse("mouseReleased", box.x, box.y, { clickCount: 1, buttons: 0 });
+  }
+
+  // trusted key via the Input domain — for widgets whose handlers ignore
+  // synthetic KeyboardEvents (noUiSlider's keyboard support)
+  async keyTrusted(key, { code = key, vk = 0 } = {}) {
+    for (const type of ["rawKeyDown", "keyUp"]) {
+      await this.send("Input.dispatchKeyEvent", {
+        type, key, code,
+        windowsVirtualKeyCode: vk, nativeVirtualKeyCode: vk,
+      });
+    }
+  }
+
   async drag(x0, y0, x1, y1, { steps = 6, modifiers = 0 } = {}) {
-    await this.mouse("mousePressed", x0, y0, { clickCount: 1, modifiers });
+    await this.mouse("mousePressed", x0, y0, { clickCount: 1, modifiers, buttons: 1 });
     for (let i = 1; i <= steps; i++) {
-      await this.mouse("mouseMoved", x0 + (x1 - x0) * i / steps, y0 + (y1 - y0) * i / steps, { modifiers });
+      await this.mouse("mouseMoved", x0 + (x1 - x0) * i / steps, y0 + (y1 - y0) * i / steps, { modifiers, buttons: 1 });
       await sleep(16);
     }
-    await this.mouse("mouseReleased", x1, y1, { clickCount: 1, modifiers });
+    await this.mouse("mouseReleased", x1, y1, { clickCount: 1, modifiers, buttons: 0 });
   }
 
   async close() {

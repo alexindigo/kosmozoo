@@ -8,7 +8,7 @@
 //
 // Run via tests/e2e/run.sh.
 
-const { CDP, sleep } = require("./cdp.cjs");
+const { CDP } = require("./cdp.cjs");
 
 const ENGINE = process.env.E2E_ENGINE ?? "http://127.0.0.1:18260";
 
@@ -36,7 +36,7 @@ function check(name, ok, detail = "") {
 
   // 2. Esc closes; pasted URL means no pushed entry → back on the feed
   await cdp.evaluate("document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }))");
-  await sleep(300);
+  await cdp.poll(`(async () => ${KZ}.state.diff.open === false && location.pathname === "/")()`, 5000);
   const afterEsc = await cdp.evaluate(`(async () => ({ open: ${KZ}.state.diff.open, path: location.pathname }))()`);
   check("esc: workbench closes", afterEsc.open === false);
   check("esc: lands back on the feed", afterEsc.path === "/", JSON.stringify(afterEsc));

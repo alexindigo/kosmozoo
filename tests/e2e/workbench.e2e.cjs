@@ -9,7 +9,7 @@
 //
 // Run via tests/e2e/run.sh.
 
-const { CDP, sleep } = require("./cdp.cjs");
+const { CDP } = require("./cdp.cjs");
 
 const ENGINE = process.env.E2E_ENGINE ?? "http://127.0.0.1:18260";
 
@@ -35,8 +35,8 @@ async function attempt(name, fn) {
 
   await page.goto(ENGINE + "/");
   await page.poll("!!document.querySelector('.card')", 20000);
-  // let chunked render get going
-  await sleep(1500);
+  // the window is populated (no fixed settle sleep — poll the render)
+  await page.poll("document.querySelectorAll('.card').length > 3", 10000);
 
   const total = await page.evaluate(`(async () => (await (await fetch("/api/collections/fake/entries")).json()).length)()`);
   check("grid loaded images from engine", total > 3000, `${total} images`);
@@ -65,22 +65,31 @@ async function attempt(name, fn) {
   });
 
   // action buttons: ONE pattern — active = filled icon in the accent,
-  // border hover-only; never a standing border
+  // border hover-only; never a standing border. Colors compare against the
+  // palette's ROLE vars resolved in-page (I3) — never rgb literals, so a
+  // re-theme cannot fail the spec.
   await attempt("active buttons fill their icon, no standing border", async () => {
-    const r = await page.evaluate(`(() => new Promise((res) => {
+    await page.evaluate("document.querySelector('.card .votebtn.up').click()");
+    await page.poll("document.querySelector('.card .votebtn.up').classList.contains('on')", 3000);
+    const r = await page.evaluate(`(() => {
       const up = document.querySelector('.card .votebtn.up');
-      up.click();
-      setTimeout(() => {
-        const path = up.querySelector("svg path:not([stroke='none'])");
-        res({
-          on: up.classList.contains('on'),
-          fill: getComputedStyle(path).fill,
-          border: getComputedStyle(up).borderColor,
-        });
-      }, 300);
-    }))()`);
-    check("up active: icon filled green", r.on && r.fill === "rgb(158, 206, 106)", JSON.stringify(r));
-    check("up active: border stays default", r.border === "rgb(51, 51, 51)", r.border);
+      const path = up.querySelector("svg path:not([stroke='none'])");
+      const probe = document.createElement("span");
+      document.body.appendChild(probe);
+      const resolve = (v) => { probe.style.color = v; return getComputedStyle(probe).color; };
+      const root = getComputedStyle(document.documentElement);
+      const out = {
+        on: up.classList.contains('on'),
+        fill: getComputedStyle(path).fill,
+        positive: resolve(root.getPropertyValue("--positive")),
+        borderColor: getComputedStyle(up).borderColor,
+        border: resolve(root.getPropertyValue("--border")),
+      };
+      probe.remove();
+      return out;
+    })()`);
+    check("up active: icon filled with the positive role", r.on && r.fill === r.positive, JSON.stringify(r));
+    check("up active: border stays the default role", r.borderColor === r.border, r.borderColor);
     await page.evaluate("document.querySelector('.card .votebtn.up').click()");
   });
 
@@ -93,8 +102,8 @@ async function attempt(name, fn) {
     const name = await page.evaluate("document.querySelector('.card').dataset.name");
     const sel = `.card[data-name="${name}"]`;
     await page.evaluate(`document.querySelector('${sel} .votebtn.down').click()`);
-    await sleep(300);
-    const gone = !await page.evaluate(`!!document.querySelector('${sel}')`);
+    const gone = await page.poll(`!document.querySelector('${sel}')`, 3000)
+      .then(() => true).catch(() => false);
     check("card left the feed right away", gone);
     await page.evaluate(`(async () => {
       await fetch("/api/collections/fake/entries/" + encodeURIComponent(${JSON.stringify(name)}) + "/judgment", { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ vote: null, favorite: null, notes: null }) });
@@ -110,8 +119,8 @@ async function attempt(name, fn) {
     const nameUp = await page.evaluate("document.querySelector('.card').dataset.name");
     const selUp = `.card[data-name="${nameUp}"]`;
     await page.evaluate(`document.querySelector('${selUp} .votebtn.up').click()`);
-    await sleep(300);
-    const goneUp = !await page.evaluate(`!!document.querySelector('${selUp}')`);
+    const goneUp = await page.poll(`!document.querySelector('${selUp}')`, 3000)
+      .then(() => true).catch(() => false);
     check("up-vote hides when coupling on", goneUp);
     await page.evaluate(`(async () => {
       await fetch("/api/collections/fake/entries/" + encodeURIComponent(${JSON.stringify(nameUp)}) + "/judgment", { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ vote: null, favorite: null, notes: null }) });
@@ -158,7 +167,8 @@ async function attempt(name, fn) {
       return { x: r.left + r.width / 2, y: r.top + r.height / 2 };
     })()`);
     await page.mouse("mouseWheel", box.x, box.y, { deltaY: -240, modifiers: 2 });
-    await page.poll("document.querySelector('.card .imgwrap img').classList.contains('zoomed')", 3000);
+    // behavior, not the class hook (I3): the zoom shows as the transform
+    await page.poll("document.querySelector('.card .imgwrap img').style.transform.includes('scale(')", 3000);
     check("Ctrl+wheel zooms a candidate card in place", true);
     const tf = await page.evaluate("document.querySelector('.card .imgwrap img').style.transform");
     check("zoom applies a transform", tf.includes("scale("), tf.slice(0, 40));
