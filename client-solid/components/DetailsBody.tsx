@@ -8,9 +8,11 @@
 // layout follows store.state.infoLayout. Filename links in the text column
 // re-focus the images column on that image.
 
-import { createEffect, createMemo, For, Show } from "solid-js";
+import { createSignal, createEffect, createMemo, For, Show } from "solid-js";
 import { useAppStore, clampSplit } from "../store/app-store.js";
 import { fmtBytes } from "../store/fields.js";
+import { useDrag } from "../lib/drag.js";
+import { flash } from "../lib/flash.js";
 import { MetaBody } from "./MetaBody.js";
 import { Zoomable } from "./Zoomable.js";
 
@@ -33,41 +35,27 @@ export function DetailsBody() {
   });
 
   // filename links in the text column focus the images column on that image —
-  // MetaBody reports the click via onImageRef; the images column is ours
+  // MetaBody reports the click via onImageRef; the images column is ours.
+  // The flash is a signal through the shared helper (G9)
   let infoEl;
+  const [flashFile, setFlashFile] = createSignal(null);
+  const [flashOn, setFlashOn] = createSignal(false);
+  const fireFlash = flash(setFlashOn);
   const focusImage = (file) => {
-    const target = infoEl?.querySelector(`.infoimg[data-file="${CSS.escape(file)}"]`);
-    if (!target) return;
-    target.scrollIntoView({ behavior: "smooth", block: "nearest" });
-    target.classList.add("flash");
-    setTimeout(() => target.classList.remove("flash"), 1200);
+    infoEl?.querySelector(`.infoimg[data-file="${CSS.escape(file)}"]`)
+      ?.scrollIntoView({ behavior: "smooth", block: "nearest" });
+    setFlashFile(file);
+    fireFlash();
   };
 
   const split = () => store.ui.info.split;
-  // drag via window listeners (works even at 0 px)
-  const onSplitDown = (e) => {
-    e.preventDefault();
-    const el = e.currentTarget;
-    // the highlight persists for the whole drag (a class — the pointer
-    // roams free of the strip), plus the shared resizing cursor
-    el.classList.add("dragging");
-    document.body.classList.add("resizing");
-    const box = el.parentElement.getBoundingClientRect();
-    // the drag axis comes from the layout model, not the DOM class
-    const vertical = store.state.infoLayout() === "stacked";
-    const move = (ev) => {
-      const pos = vertical ? (ev.clientY - box.top) / box.height
-        : (ev.clientX - box.left) / box.width;
-      store.actions.ui.info.split.set(clampSplit(pos));
-    };
-    const up = () => {
-      window.removeEventListener("pointermove", move);
-      el.classList.remove("dragging");
-      document.body.classList.remove("resizing");
-    };
-    window.addEventListener("pointermove", move);
-    window.addEventListener("pointerup", up, { once: true });
-  };
+  // the divider drag is the shared primitive (G8); the axis comes from the
+  // layout model, not the DOM class
+  const { dragging, ref: sepRef } = useDrag({
+    axis: () => (store.state.infoLayout() === "stacked" ? "y" : "x"),
+    onDrag: (ev, ctx) => store.actions.ui.info.split.set(clampSplit(ctx.frac)),
+  });
+  createEffect(() => store.actions.ui.setResizing(dragging()));
 
   return (
     <div class="info-body metabody">
@@ -89,7 +77,8 @@ export function DetailsBody() {
               <div class="info-source-images" style={{ "flex-basis": `${split() * 100}%` }}>
                 <For each={images()}>
                   {(image) => (
-                    <div class="infoimg" data-file={image.file}>
+                    <div class="infoimg" data-file={image.file}
+      classList={{ flash: flashOn() && flashFile() === image.file }}>
                       <Zoomable
                         src={image.src}
                         alt={image.file}
@@ -100,7 +89,7 @@ export function DetailsBody() {
                   )}
                 </For>
               </div>
-              <div class="separator" onPointerDown={onSplitDown} />
+              <div class="separator" ref={sepRef} />
               <div class="info-source-nodes">
                 <Head im={im()} />
                 <MetaBody meta={im()?.meta ?? null} host={im()?.host} compareMeta={compareMeta()} skipImages onImageRef={focusImage} />

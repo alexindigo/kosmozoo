@@ -13,10 +13,6 @@ import { aspectFromMeta } from "../store/fields.js";
 import { Zoomable } from "./Zoomable.js";
 import { IconButton } from "./IconButton.js";
 
-// name of the anchor currently being drag-reordered (module-level: it
-// survives the reactive updates the reorder itself triggers)
-let dragged = null;
-
 function AnchorCard(props) {
   const store = useAppStore();
   const [zoomed, setZoomed] = createSignal(false);
@@ -26,18 +22,24 @@ function AnchorCard(props) {
       data-name={props.anchor.name}
       draggable={!zoomed()}
       onDragStart={(e) => {
-        dragged = props.anchor.name;
-        e.dataTransfer.setData("text/x-anchor", "");
+        props.setDragged(props.anchor.name);
+        // the dataTransfer carries the REAL payload (G20): the dropzone
+        // tells a reorder from a file drop by the drag's own data
+        e.dataTransfer.setData("text/x-anchor", props.anchor.name);
         e.dataTransfer.effectAllowed = "move";
       }}
-      onDragEnd={() => { dragged = null; }}
+      onDragEnd={() => {
+        props.setDragged(null);
+        store.actions.anchors.persist(); // persistence waits for the drop (G5)
+      }}
       onDragOver={(e) => {
-        if (!dragged || dragged === props.anchor.name) return;
+        const d = props.dragged();
+        if (!d || d === props.anchor.name) return;
         e.preventDefault();
         e.dataTransfer.dropEffect = "move";
         const rect = e.currentTarget.getBoundingClientRect();
         store.actions.anchors.reorder(
-          dragged, props.anchor.name, (e.clientY - rect.top) < rect.height / 2);
+          d, props.anchor.name, (e.clientY - rect.top) < rect.height / 2);
       }}
     >
       <Zoomable
@@ -68,11 +70,15 @@ function AnchorCard(props) {
 export function AnchorSpace() {
   const store = useAppStore();
   let fileEl;
+  // the drag-reorder state is component state, not a module global (G20)
+  const [dragged, setDragged] = createSignal(null);
   return (
     <>
       <div id="anchorList">
         <For each={store.state.anchors}>
-          {(anchor, idx) => <AnchorCard anchor={anchor} idx={idx()} />}
+          {(anchor, idx) => (
+            <AnchorCard anchor={anchor} idx={idx()} dragged={dragged} setDragged={setDragged} />
+          )}
         </For>
       </div>
       <div
@@ -83,12 +89,12 @@ export function AnchorSpace() {
         onDrop={async (e) => {
           e.preventDefault();
           e.currentTarget.classList.remove("over");
-          if (dragged) { dragged = null; return; } // was a reorder, not files
+          if (e.dataTransfer?.getData("text/x-anchor")) return; // a reorder, not files
           if (e.dataTransfer?.files?.length) await store.actions.anchors.addFiles([...e.dataTransfer.files]);
         }}
       >Drop images here<br />(or click to browse)</div>
       <input
-        type="file" id="fileInput" ref={fileEl} accept="image/*" multiple hidden
+        type="file" ref={fileEl} accept="image/*" multiple hidden
         onChange={async (e) => {
           if (e.target.files.length) await store.actions.anchors.addFiles([...e.target.files]);
           e.target.value = "";

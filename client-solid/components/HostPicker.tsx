@@ -4,10 +4,11 @@
 // an add row. Data/actions come from the global store; this declares the DOM
 // and forwards intents. DOM contract identical to the preact HostPicker.
 
-import { createSignal, onCleanup } from "solid-js";
+import { createSignal } from "solid-js";
 import { For } from "solid-js/web";
 import { iconSvg } from "/js/icons.mjs";
 import { useAppStore } from "../store/app-store.js";
+import { useClickOutside } from "../lib/click-outside.js";
 
 export function HostPicker() {
   const store = useAppStore();
@@ -15,14 +16,11 @@ export function HostPicker() {
   const [name, setName] = createSignal("");
   const [addr, setAddr] = createSignal("");
 
-  // click outside closes the dropdown (the picker's own clicks stopPropagation)
-  const onDocClick = (e) => {
-    if (store.state.hostMenuOpen() && rootRef && !rootRef.contains(e.target)) {
-      store.actions.hosts.closeMenu();
-    }
-  };
-  document.addEventListener("click", onDocClick);
-  onCleanup(() => document.removeEventListener("click", onDocClick));
+  // click outside closes the dropdown — the shared primitive; the root
+  // contains the button, so it needs no stopPropagation shield
+  useClickOutside(() => rootRef, () => {
+    if (store.state.hostMenuOpen()) store.actions.hosts.closeMenu();
+  });
 
   const submitAdd = async () => {
     const r = await store.actions.hosts.add(name(), addr());
@@ -37,7 +35,7 @@ export function HostPicker() {
       <button
         id="hostBtn"
         title="choose host"
-        onClick={(e) => { e.stopPropagation(); store.actions.hosts.toggleMenu(); }}
+        onClick={() => store.actions.hosts.toggleMenu()}
       >
         <span id="hostDot" class={"hdot" + (store.state.hosts[store.state.host()]?.online ? "" : " off")} />
         <span id="hostBtnLabel">{store.state.host() ?? "no hosts"}</span>

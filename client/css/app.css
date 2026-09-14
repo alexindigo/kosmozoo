@@ -50,6 +50,7 @@ body { display: flex; flex-direction: column; }
   display: flex; gap: 8px; align-items: center; padding: 0 8px;
   background: var(--focused-background); border-bottom: 1px solid var(--border); z-index: 10; }
 #chrome h1 { font-size: 15px; margin: 0 4px 0 2px; font-weight: 600; }
+#chrome img.logo { border-radius: 6px; }
 #chrome .flexspacer { flex: 1; }
 #chrome select, #chrome input { background: var(--lifted); color: var(--foreground);
   border: 1px solid var(--border-strong); border-radius: 4px; padding: 3px 6px; }
@@ -150,12 +151,13 @@ main { display: flex; flex: 1; min-height: 0; }
 #divider::before { content: ""; position: absolute; inset: 0 3px;
   background: var(--border); border-radius: 1px; transition: background .15s; }
 #divider:hover::before, #divider.dragging::before { background: var(--foreground-mid); }
+/* the pane's width is owned by the store signal (rendered as an inline
+   style) — no duplicate CSS default (G17/H7); min/max bound the drag */
 #workspace { flex: 0 0 auto; background: var(--surface); border: 1px solid var(--lifted);
   border-radius: 8px; margin: 8px 0; padding: 8px;
   display: flex; flex-direction: column; overflow: hidden;
-  width: 300px; min-width: 220px; max-width: 70vw; }
+  min-width: 220px; max-width: 70vw; }
 .ws-space { flex: 1; min-height: 0; display: flex; flex-direction: column; }
-.ws-space[hidden] { display: none; }
 
 /* workspace bar: one button per space, pinned to the window's right edge */
 #wsBar { flex: 0 0 32px; display: flex; flex-direction: column; align-items: center;

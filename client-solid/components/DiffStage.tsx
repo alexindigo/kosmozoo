@@ -1,12 +1,13 @@
 // client-solid/components/DiffStage.tsx — the workbench surface.
 //
 // A single-image viewer of the store's current pointer. Renders the stage and
-// owns the hidden flag from store.state.diff.open. The src is derived under a
-// generation guard: a new image decodes off-screen first and the old one
-// stays visible until it is ready — a stale load never clobbers a newer one.
+// owns the hidden flag from store.state.diff.open. The src is a decode-guarded
+// resource (G16): a new image decodes off-screen first and the last value
+// stays visible until it is ready — a stale load never clobbers a newer one,
+// and the resource's own recency replaces the hand-rolled generation counter.
 // The image fits the stage via object-fit.
 
-import { createSignal, createEffect } from "solid-js";
+import { createResource } from "solid-js";
 import { useAppStore } from "../store/app-store.js";
 import { iconSvg } from "/js/icons.mjs";
 
@@ -14,26 +15,25 @@ const KEYS_BTN_SVG = '<svg viewBox="0 0 24 24" width="18" height="18" fill="none
 
 export function DiffStage() {
   const store = useAppStore();
-  const [src, setSrc] = createSignal(null);
-  let gen = 0;
 
-  // decode guard: swap the visible src only once the new image is ready and
-  // the load wasn't superseded by a newer one (or closed mid-load)
-  createEffect(() => {
-    if (!store.state.diff.open) return;
-    const r = store.actions.diff.resolve(store.state.current());
-    if (!r) { setSrc(null); return; }
-    const g = ++gen;
-    const img = new Image();
-    img.src = r.src;
-    img.decode()
-      .then(() => { if (g === gen && store.state.diff.open) setSrc(r.src); })
-      .catch(() => { /* failed decode keeps whatever is on screen */ });
-  });
+  // decode guard: the visible src swaps only once the new image decodes;
+  // a failed decode keeps whatever is on screen (the resource holds its
+  // last value), and closing the workbench idles the source
+  const [decoded] = createResource(
+    () => (store.state.diff.open
+      ? (store.actions.diff.resolve(store.state.current())?.src ?? null)
+      : null),
+    async (url) => {
+      const img = new Image();
+      img.src = url;
+      await img.decode();
+      return url;
+    },
+  );
 
   // Escape closes via the keys system (the "wb.close" binding registered at
-  // boot — the keys panel's Escape outranks it by registration order, and
-  // the delete confirmation's capture-phase listener beats both).
+  // boot) — an open modal's key layer outranks it, and a running key
+  // capture outranks that.
 
   return (
     <div id="diff" hidden={!store.state.diff.open}>
@@ -43,11 +43,11 @@ export function DiffStage() {
         innerHTML={iconSvg("x", 16)}
       />
       <div id="diffStage">
-        <img id="diffImg" alt="" src={src() ?? undefined} />
+        <img id="diffImg" alt="" src={decoded() ?? undefined} />
       </div>
       <button
         id="diffKeysBtn" title="actions & keys (?)"
-        onClick={(e) => { e.stopPropagation(); store.actions.ui.toggleKeysPanel(); }}
+        onClick={() => store.actions.ui.toggleKeysPanel()}
         innerHTML={KEYS_BTN_SVG}
       />
     </div>

@@ -1,63 +1,37 @@
 // client-solid/components/NoteBox.tsx — one notes box (neg or pos): a
-// textarea that autosaves (debounced) and saves on blur, plus
-// copy-from-neighbor. Unsaved text mirrors into the store's drafts map
-// (session-only) so neighbors read it without DOM walks; the box owns its
-// own editing; the parent supplies onSave(text) and getNeighborText(dir).
+// CONTROLLED textarea whose value is the store's draft mirror (session-only)
+// falling back to the judgment note. Typing writes the draft; the store's
+// notes.setDraft owns the debounced autosave (G11 — no component-owned
+// timer); blur flushes. Copy-from-neighbor writes through the store like a
+// typed edit — no DOM value writes, no hand-called onInput. The parent
+// supplies onSave(text) (returning its promise) and getNeighborText(dir).
 
-import { onCleanup, createEffect, untrack } from "solid-js";
 import { useAppStore } from "../store/app-store.js";
 
 export function NoteBox(props) {
   const store = useAppStore();
-  let taEl;
-  let timer = null;
 
   const key = () => `${props.noteId}:${props.sign}`;
+  // unsaved draft first, then the judgment note
+  const text = () => store.state.drafts[key()] ?? props.initialValue ?? "";
 
-  onCleanup(() => clearTimeout(timer));
-
-  const flush = () => {
-    clearTimeout(timer);
-    timer = null;
-    store.actions.notes.clearDraft(props.noteId, props.sign);
-    props.onSave(taEl?.value ?? "");
-  };
-  const schedule = () => {
-    clearTimeout(timer);
-    timer = setTimeout(flush, 500);
-  };
-  const onInput = () => {
-    store.actions.notes.setDraft(props.noteId, props.sign, taEl?.value ?? "");
-    schedule();
-  };
+  const onInput = (e) =>
+    store.actions.notes.setDraft(props.noteId, props.sign, e.target.value, props.onSave);
+  const onBlur = () =>
+    store.actions.notes.flushDraft(props.noteId, props.sign, props.onSave);
   const copyFrom = (dir) => {
-    const text = props.getNeighborText(dir);
-    if (text && taEl) {
-      taEl.value = text;
-      onInput();
-    }
+    const t = props.getNeighborText(dir);
+    if (t) store.actions.notes.setDraft(props.noteId, props.sign, t, props.onSave);
   };
-
-  // initial value per image: unsaved draft first, then the judgment note.
-  // Re-applies when the card slot retargets to a different image (virtual
-  // reuse); untracked reads keep typing from being clobbered mid-edit.
-  createEffect(() => {
-    props.noteId;
-    const v = untrack(() =>
-      store.state.drafts[key()]
-      ?? (typeof props.initialValue === "function" ? props.initialValue() : (props.initialValue ?? ""))
-    );
-    if (taEl && taEl.value !== v) taEl.value = v;
-  });
 
   return (
     <div class="boxcol">
       <textarea
         class={props.sign}
         placeholder={props.placeholder}
-        ref={taEl}
+        value={text()}
         onInput={onInput}
-        onBlur={flush}
+        onBlur={onBlur}
       />
       <div class="btnrow">
         <button onClick={() => copyFrom(1)}>copy from below</button>

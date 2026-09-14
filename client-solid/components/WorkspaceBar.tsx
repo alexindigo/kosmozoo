@@ -14,13 +14,13 @@ export function WorkspaceBar() {
       <button
         id="wsBtnDetails" data-space="details" title="image details"
         class={store.state.workspace() === "details" ? "on" : ""}
-        onClick={(e) => { e.stopPropagation(); store.actions.ui.setWorkspace("details"); }}
+        onClick={() => store.actions.ui.setWorkspace("details")}
         innerHTML={DETAILS_SVG}
       />
       <button
         id="wsBtnAnchors" data-space="anchors" title="anchors"
         class={store.state.workspace() === "anchors" ? "on" : ""}
-        onClick={(e) => { e.stopPropagation(); store.actions.ui.setWorkspace("anchors"); }}
+        onClick={() => store.actions.ui.setWorkspace("anchors")}
         innerHTML={ANCHORS_SVG}
       />
     </nav>

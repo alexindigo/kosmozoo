@@ -97,6 +97,9 @@ export function makeAppStore() {
   // the feed's virtualizer — the scroll-state data source (visible range,
   // total size); components derive from it instead of walking the DOM
   const [feedVirtualizer, setFeedVirtualizer] = createSignal(null);
+  // a divider drag is in flight — App renders the body-level cursor class
+  // from this ONE signal (G8: no component touches document.body directly)
+  const [resizing, setResizing] = createSignal(false);
 
   // right-column space + details layout — persisted (workspaceState contract).
   // Read once at construction: the persisted space must be set before the
@@ -500,6 +503,24 @@ export function makeAppStore() {
 
   const imageIdx = (id) => st.images.findIndex((i) => i.id === id);
 
+  // the ONE download-name convention (G23): <host>#<filename>, unless the
+  // filename already carries the tag
+  function downloadName(img) {
+    return img.filename.startsWith(img.host + "#") ? img.filename : img.host + "#" + img.filename;
+  }
+  // the ONE transient-anchor download (G23): download() and bulk.save() share it
+  function triggerDownload(url, name) {
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = name;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+  }
+  // note autosave: one timer per note key, owned by the store (G11)
+  const noteTimers = {};
+  const NOTE_SAVE_MS = 500;
+
   // §3.5: every card's size is DATA before it renders — listing dims →
   // meta dims → off-DOM measurement (sizes store). The virtualizer's item
   // list is the size-known view; the pending set drives the resolver. Both
@@ -736,14 +757,7 @@ export function makeAppStore() {
         const idx = imageIdx(id);
         if (idx < 0) return;
         const img = st.images[idx];
-        const pfx = img.host + "#";
-        const name = img.filename.startsWith(pfx) ? img.filename : pfx + img.filename;
-        const a = document.createElement("a");
-        a.href = api.entryBytesUrl(img.host, img.filename);
-        a.download = name;
-        document.body.appendChild(a);
-        a.click();
-        a.remove();
+        triggerDownload(api.entryBytesUrl(img.host, img.filename), downloadName(img));
       },
     },
 
@@ -796,14 +810,36 @@ export function makeAppStore() {
     },
 
     // unsaved note text — lives here so neighbors read drafts without
-    // walking the DOM for a rendered textarea
+    // walking the DOM for a rendered textarea. setDraft owns the autosave
+    // debounce (G11): the draft mirror is the controlled textarea's value;
+    // the save lands first and the draft clears only when it still holds
+    // the saved text (no rollback flicker mid-edit).
     notes: {
-      setDraft(id, cls, text) { setSt("drafts", `${id}:${cls}`, text); },
+      setDraft(id, cls, text, save) {
+        const key = `${id}:${cls}`;
+        setSt("drafts", key, text);
+        clearTimeout(noteTimers[key]);
+        noteTimers[key] = setTimeout(async () => {
+          delete noteTimers[key];
+          await save?.(text);
+          if (st.drafts[key] === text) setSt("drafts", key, undefined);
+        }, NOTE_SAVE_MS);
+      },
+      async flushDraft(id, cls, save) {
+        const key = `${id}:${cls}`;
+        const text = st.drafts[key];
+        clearTimeout(noteTimers[key]);
+        delete noteTimers[key];
+        if (text === undefined) return;
+        await save?.(text);
+        if (st.drafts[key] === text) setSt("drafts", key, undefined);
+      },
       clearDraft(id, cls) { setSt("drafts", `${id}:${cls}`, undefined); },
     },
 
     ui: {
       setFilter(v) { setFilter(v); }, // the view memo consumes it
+      setResizing(v) { setResizing(!!v); },
       toggleMenu() { setMenuOpen(!menuOpen()); },
       closeMenu() { setMenuOpen(false); },
       async refresh() {
@@ -825,7 +861,8 @@ export function makeAppStore() {
           set(ratio) {
             const r = clampSplit(ratio);
             setUiSt("info", "split", r);
-            // TODO: handle persistence failure (optimistic UI, TODO comment per design)
+            // optimistic: the local split stands; a failed persist only
+            // loses the memory across reloads
             api.setSettings("core.ui", { infoSplit: r }).catch(() => {});
           },
         },
@@ -1148,7 +1185,7 @@ export function makeAppStore() {
     anchors: {
       load() {
         try {
-          const list = (JSON.parse(localStorage.getItem("kosmozoo.anchors.v1")) || [])
+          const list = (JSON.parse(localStorage.getItem(ANCHORS_LS_KEY)) || [])
             .filter((a) => a && a.name && a.src);
           setSt("anchors", reconcile(list));
         } catch {
@@ -1176,7 +1213,10 @@ export function makeAppStore() {
         setSt("anchors", (as) => as.filter((a) => a.name !== name));
         persistAnchors();
       },
-      // drag reorder: move the dragged anchor before/after the hovered one
+      // drag reorder: move the dragged anchor before/after the hovered one.
+      // A no-op when the position would not change, and persistence waits
+      // for the drop (G5 — stringifying every base64 anchor per pointer
+      // move was the drag cost)
       reorder(draggedName, overName, before) {
         if (!draggedName || draggedName === overName) return;
         const arr = [...st.anchors];
@@ -1184,10 +1224,13 @@ export function makeAppStore() {
         if (from < 0 || arr.findIndex((a) => a.name === overName) < 0) return;
         const [item] = arr.splice(from, 1);
         const to = arr.findIndex((a) => a.name === overName);
-        arr.splice(before ? to : to + 1, 0, item);
+        const insertAt = before ? to : to + 1;
+        if (insertAt === from) return; // unchanged position — no write
+        arr.splice(insertAt, 0, item);
         setSt("anchors", reconcile(arr));
-        persistAnchors();
       },
+      // the drop end of a reorder: persist once (G5)
+      persist() { persistAnchors(); },
       showInfo(name, meta) { setSt("infoOverlay", { open: true, name, meta }); },
       closeInfo() { setSt("infoOverlay", "open", false); },
       setPaneWidth(w) {
@@ -1232,12 +1275,7 @@ export function makeAppStore() {
       save() {
         const images = actions.bulk.images();
         for (const img of images) {
-          const a = document.createElement("a");
-          a.href = api.entryBytesUrl(img.host, img.filename);
-          a.download = img.filename.startsWith(img.host + "#") ? img.filename : img.host + "#" + img.filename;
-          document.body.appendChild(a);
-          a.click();
-          a.remove();
+          triggerDownload(api.entryBytesUrl(img.host, img.filename), downloadName(img));
         }
         actions.status.info(`saving ${images.length} image${images.length > 1 ? "s" : ""}`);
       },
@@ -1274,6 +1312,8 @@ export function makeAppStore() {
     get deletePrefs() { return st.deletePrefs; },
     get ui() { return st.ui; },
     get judgmentPrefs() { return st.judgmentPrefs; },
+    resizing,
+    downloadName,
     get images() { return st.images; },
     get selected() { return st.selected; },
     get anchors() { return st.anchors; },

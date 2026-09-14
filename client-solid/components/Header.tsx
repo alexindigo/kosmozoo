@@ -3,10 +3,10 @@
 // Logo/title, host picker, filter box, options button, the menu with its
 // settings rows, and the layout switcher.
 
-import { onCleanup } from "solid-js";
 import { For, Show } from "solid-js/web";
 import { iconSvg } from "/js/icons.mjs";
 import { useAppStore } from "../store/app-store.js";
+import { useClickOutside } from "../lib/click-outside.js";
 import { HostPicker } from "./HostPicker.js";
 
 // layout-switcher icons: a square with one divider — vertical right of
@@ -65,8 +65,8 @@ function Menu() {
     return total > 0 ? `${total} left` : "";
   };
   return (
-    <div id="menu" hidden={!open()}>
-      <Show when={open()}>
+    <Show when={open()}>
+      <div id="menu">
         <input
           id="menuSearch" type="search" placeholder="filter settings…" spellcheck={false}
           value={store.state.menuFilter()}
@@ -127,8 +127,8 @@ function Menu() {
             </div>
           </Show>
         </div>
-      </Show>
-    </div>
+      </div>
+    </Show>
   );
 }
 
@@ -136,18 +136,15 @@ export function Header() {
   const store = useAppStore();
   let menuWrapRef;
 
-  // click outside the menu closes it (menuBtn's own click stops propagation)
-  const onDocClick = (e) => {
-    if (store.state.menuOpen() && menuWrapRef && !menuWrapRef.contains(e.target)) {
-      store.actions.ui.closeMenu();
-    }
-  };
-  document.addEventListener("click", onDocClick);
-  onCleanup(() => document.removeEventListener("click", onDocClick));
+  // click outside the menu closes it — the shared primitive; the wrapper
+  // contains the button, so no stopPropagation shield is needed
+  useClickOutside(() => menuWrapRef, () => {
+    if (store.state.menuOpen()) store.actions.ui.closeMenu();
+  });
 
   return (
     <header id="chrome">
-      <img src="/logo-64.png" alt="kosmozoo" width={24} height={24} style="border-radius:6px" />
+      <img class="logo" src="/logo-64.png" alt="kosmozoo" width={24} height={24} />
       <h1>Kosmozoo</h1>
       <HostPicker />
       <input
@@ -155,6 +152,7 @@ export function Header() {
         type="search"
         placeholder="filter filenames…"
         spellcheck={false}
+        value={store.state.filter()}
         onInput={(e) => store.actions.ui.setFilter(e.target.value)}
       />
       <span id="headerButtons">
@@ -177,7 +175,7 @@ export function Header() {
           <button
             id="menuBtn"
             title="options"
-            onClick={(e) => { e.stopPropagation(); store.actions.ui.toggleMenu(); }}
+            onClick={() => store.actions.ui.toggleMenu()}
           >
             <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
               <path d="M4 6h16" />

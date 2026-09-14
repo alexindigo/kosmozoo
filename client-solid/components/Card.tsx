@@ -6,11 +6,12 @@
 // the store's images tree (the source of truth); vote/favorite are
 // path-level updates the card's bindings follow by construction.
 
-import { createSignal, createEffect, onMount } from "solid-js";
+import { createSignal, onMount } from "solid-js";
 import { For, Show } from "solid-js/web";
 import { iconSvg } from "/js/icons.mjs";
 import { useAppStore } from "../store/app-store.js";
 import { deleteCopy } from "../lib/delete-copy.js";
+import { flash } from "../lib/flash.js";
 import { Zoomable } from "./Zoomable.js";
 import { IconButton } from "./IconButton.js";
 import { NoteBox } from "./NoteBox.js";
@@ -38,16 +39,16 @@ export function Card(props) {
     // the window's range membership; broken bytes take the in-card error path
     return store.state.window.getSrc(props.imgIdx(), img);
   };
-  const [flash, setFlash] = createSignal(false);
+  // the two flash windows are signals through the shared helper (G9) —
+  // no classList pokes, no orphan timers
+  const [savedOn, setSavedOn] = createSignal(false);
+  const flashSaved = flash(setSavedOn);
+  const [copiedOn, setCopiedOn] = createSignal(false);
+  const flashCopied = flash(setCopiedOn, 800);
 
   onMount(() => {
     if (image()?.size == null) store.actions.images.fillSize(image().id);
   });
-
-  const flashSaved = () => {
-    setFlash(true);
-    setTimeout(() => setFlash(false), 1200);
-  };
 
   const saveNote = (cls) => (text) => {
     const notes = { ...(image()?.judgment?.notes ?? {}), [cls]: text };
@@ -68,14 +69,8 @@ export function Card(props) {
 
   const copyName = (e) => {
     e.stopPropagation();
-    const el = e.currentTarget;
-    const im = image();
-    const pfx = im.host + "#";
-    navigator.clipboard?.writeText(im.filename.startsWith(pfx) ? im.filename : pfx + im.filename)
-      .then(() => {
-        el.classList.add("copied");
-        setTimeout(() => el.classList.remove("copied"), 800);
-      })
+    navigator.clipboard?.writeText(store.state.downloadName(image()))
+      .then(flashCopied)
       .catch(() => {});
   };
 
@@ -107,12 +102,12 @@ export function Card(props) {
               store.actions.selected.set(image()?.id, e.target.checked);
             }}
           />
-          <span class="copyable" title="click to copy host#filename" onClick={copyName}>
+          <span class="copyable" classList={{ copied: copiedOn() }} title="click to copy host#filename" onClick={copyName}>
             {image()?.filename}
           </span>
         </span>
         <span class="btnwrap">
-          <span class={"saved" + (flash() ? " show" : "")}>Feedback saved</span>
+          <span class={"saved" + (savedOn() ? " show" : "")}>Feedback saved</span>
           <For each={store.state.featureCardActions(image())}>
             {(a) => <IconButton icon={a.icon} variant={a.variant} title={a.title} onAction={a.onAction} />}
           </For>
@@ -148,12 +143,12 @@ export function Card(props) {
       <div class="pair">
         <NoteBox
           sign="neg" placeholder="negatives…" noteId={image()?.id}
-          initialValue={() => image()?.judgment?.notes?.neg ?? ""}
+          initialValue={image()?.judgment?.notes?.neg ?? ""}
           onSave={saveNote("neg")} getNeighborText={neighborText("neg")}
         />
         <NoteBox
           sign="pos" placeholder="positives…" noteId={image()?.id}
-          initialValue={() => image()?.judgment?.notes?.pos ?? ""}
+          initialValue={image()?.judgment?.notes?.pos ?? ""}
           onSave={saveNote("pos")} getNeighborText={neighborText("pos")}
         />
       </div>
