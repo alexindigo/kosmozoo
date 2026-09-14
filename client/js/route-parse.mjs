@@ -2,7 +2,7 @@
 // api): parsing /#<remote>[#<image>] and /diff#..., building diff URLs, and
 // the host-prefix stripping shared by hash mirror and feed matching. The
 // stateful writers (setCurrent, mirrorCurrentHash, findByFile, resolveSide)
-// live in route.mjs; the Solid store gets its current/hash logic from here.
+// live in the app store; this module is the pure grammar only.
 
 export function parseUrl() {
   if (typeof location === "undefined") return { view: "feed", host: null, file: null };

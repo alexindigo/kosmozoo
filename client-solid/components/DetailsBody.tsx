@@ -1,6 +1,5 @@
 // client-solid/components/DetailsBody.tsx — the current image's metadata
-// details, declarative (the outgoing WorkspacePane built this DOM by hand
-// inside an effect).
+// details, declarative.
 //
 // Reads the store's current pointer (hidden images included). Field values
 // that differ from the previous current image (stack top) render .pdiff.

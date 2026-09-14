@@ -1,4 +1,4 @@
-// client/js/variations.mjs — variations knowledge service.
+// client-solid/features/variations/graph.mjs — variations knowledge service.
 //
 // The variations panel is probe-driven: the engine's /probe enumerates every
 // numeric scalar input of every node instance in the image's graph; the

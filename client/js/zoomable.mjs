@@ -1,9 +1,10 @@
 // client/js/zoomable.mjs — in-feed zoom for ANY image. One code path for
 // candidate cards and anchor thumbs alike: same functionality, same code.
 // Ctrl+wheel zooms toward the cursor; drag pans while zoomed. A drag
-// suppresses its trailing click (a pan must not open the lightbox). Views
-// persist via views.mjs, so a crop made here carries into the lightbox and
-// back — and reloads restore it.
+// suppresses its trailing click (a pan must not open the workbench). View
+// persistence is caller-provided (getView/setView — the app store owns the
+// views and their debounced save), so a crop made here carries into the
+// workbench and back — and reloads restore it.
 //
 // The binding has a lifecycle: makeZoomable returns { dispose } — the
 // component rebinds when its target key changes (G3: a retargeted box must
@@ -12,9 +13,7 @@
 // rendered by the component — the behavior never writes element style or
 // classes itself.
 
-import { getView, setView } from "./views.mjs";
-
-export function makeZoomable(img, { key, onZoomChange, onTransform } = {}) {
+export function makeZoomable(img, { key, getView, setView, onZoomChange, onTransform } = {}) {
   let scale = 1, txf = 0, tyf = 0, dragMoved = 0;
 
   const apply = () => {
@@ -22,7 +21,7 @@ export function makeZoomable(img, { key, onZoomChange, onTransform } = {}) {
     const transform = scale === 1
       ? ""
       : `translate(${txf * img.offsetWidth}px, ${tyf * img.offsetHeight}px) scale(${scale})`;
-    if (key) {
+    if (key && setView) {
       setView(key, scale > 1 || txf || tyf
         ? { s: scale, txf, tyf, fh: false, fv: false, rot: 0 }
         : null);
@@ -31,7 +30,7 @@ export function makeZoomable(img, { key, onZoomChange, onTransform } = {}) {
     onTransform?.(transform, scale > 1);
   };
 
-  if (key) {
+  if (key && getView) {
     const stored = getView(key);
     if (stored) { scale = stored.s; txf = stored.txf; tyf = stored.tyf; apply(); }
   }
@@ -75,7 +74,7 @@ export function makeZoomable(img, { key, onZoomChange, onTransform } = {}) {
     img.addEventListener("pointercancel", up);
   };
 
-  // swallow the click that ends a pan-drag (it must not open the lightbox)
+  // swallow the click that ends a pan-drag (it must not open the workbench)
   const onClick = (e) => {
     if (dragMoved > 5) {
       e.stopImmediatePropagation();

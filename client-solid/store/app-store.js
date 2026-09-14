@@ -15,7 +15,6 @@ import { createSignal, createMemo, createEffect, onCleanup, createContext, useCo
 import { createStore, reconcile } from "solid-js/store";
 import { api } from "/js/api.mjs";
 import { metaFromPngBytes } from "/shared/extractor.mjs";
-import { initViews } from "/js/views.mjs";
 import { makeKeymap, comboFromEvent } from "/js/keys.mjs";
 import {
   parseUrl,
@@ -53,6 +52,7 @@ export function makeAppStore() {
     images: [],           // [{ id, host, filename, size, meta, judgment }]
     selected: {},         // id -> true (bulk actions; session-only)
     anchors: [],          // [{ name, src(dataURL), meta? }] — local drops, persisted
+    views: {},            // per-image zoom views — key -> { s, txf, tyf, … } (G24 fold)
     diff: { open: false },                  // workbench: single-image viewer
     diff: { open: false },                  // workbench: single-image viewer
     variations: { open: false, images: [], key: null }, // modal session
@@ -600,6 +600,23 @@ export function makeAppStore() {
     onCleanup(() => setKeyLayers((ls) => ls.filter((l) => l.id !== "keys-capture")));
   });
 
+  // --- per-image zoom views (folded from views.mjs — G24: no second
+  // module-level store; the state lives in the tree and the debounced
+  // persistence lives here). Keys are image ids ("host:filename") for
+  // candidates, "anchor:<name>" for anchors; box-fraction units;
+  // default-absent (an untouched view is absent, not a default object).
+  const viewDirty = new Set();
+  let viewsTimer = null;
+  async function flushViews() {
+    clearTimeout(viewsTimer);
+    viewsTimer = null;
+    if (!viewDirty.size) return;
+    const patch = {};
+    for (const k of viewDirty) patch[k] = st.views[k] ?? null;
+    viewDirty.clear();
+    await api.setSettings("core.views", patch).catch(() => {});
+  }
+
   // --- anchor helpers --------------------------------------------------------------
   const ANCHORS_LS_KEY = "kosmozoo.anchors.v1";
   const ANCHOR_MAX_DIM = 1200;
@@ -693,7 +710,7 @@ export function makeAppStore() {
       await actions.keys.loadSaved();
       await actions.anchors.loadPaneWidth();
       // persisted per-image zoom views (feed zoom carries across reloads)
-      await initViews().catch(() => {});
+      await actions.views.init();
       // the URL hash outranks the stored host: /#host[#filename] is shareable state
       const route = parseUrl();
       const urlHost = route.view === "diff" ? route.left?.source : route.host;
@@ -807,6 +824,25 @@ export function makeAppStore() {
 
     selected: {
       set(id, on) { setSt("selected", id, on ? true : undefined); },
+    },
+
+    // per-image zoom views: zoomable.mjs reads/writes through these (the
+    // module-level Map/Set/timer are gone — G24); one debounce owns the save
+    views: {
+      async init() {
+        const stored = await api.settings("core.views").catch(() => ({}));
+        const clean = {};
+        for (const [k, v] of Object.entries(stored)) if (v) clean[k] = v;
+        setSt("views", reconcile(clean));
+      },
+      get(key) { return st.views[key] ?? null; },
+      set(key, v) {
+        if (v) setSt("views", key, v);
+        else setSt("views", key, undefined);
+        viewDirty.add(key);
+        clearTimeout(viewsTimer);
+        viewsTimer = setTimeout(flushViews, 400);
+      },
     },
 
     // unsaved note text — lives here so neighbors read drafts without
@@ -1323,6 +1359,7 @@ export function makeAppStore() {
     get chips() { return st.chips; },
     get metaPending() { return st.metaPending; },
     get drafts() { return st.drafts; },
+    get views() { return st.views; },
     // derived
     view,
     fieldsList,

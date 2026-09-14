@@ -15,6 +15,7 @@
 
 import { createSignal, createMemo, createEffect, on, onCleanup } from "solid-js";
 import { makeZoomable } from "/js/zoomable.mjs";
+import { useAppStore } from "../store/app-store.js";
 
 // Decompose "W / H" into the --ar-num/--ar-den custom properties, clamped to
 // the 16:9 floor: the box is never shorter than 16:9, taller for tall images
@@ -28,6 +29,7 @@ function arStyle(ar) {
 }
 
 export function Zoomable(props) {
+  const store = useAppStore();
   // the load lifecycle: phase is a memo over (src, loaded, errored) — src is
   // the source of truth; a src change restarts the lifecycle
   const [loaded, setLoaded] = createSignal(false);
@@ -55,6 +57,8 @@ export function Zoomable(props) {
     if (!imgEl) return;
     binding = makeZoomable(imgEl, {
       key: props.zoomKey,
+      getView: store.actions.views.get,
+      setView: store.actions.views.set,
       onZoomChange: (z) => props.onZoomChange?.(z),
       onTransform: (t, z) => { setTransform(t); setZoomed(z); },
     });

@@ -2,7 +2,7 @@
 //
 // Collapsed = status dot + current host name + ▾. Open = one row per host +
 // an add row. Data/actions come from the global store; this declares the DOM
-// and forwards intents. DOM contract identical to the preact HostPicker.
+// and forwards intents.
 
 import { createSignal } from "solid-js";
 import { For } from "solid-js/web";

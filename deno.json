@@ -7,12 +7,10 @@
     "solid-js/jsx-runtime": "./client/vendor/solid/solid.mjs",
     "/js/api.mjs": "./client/js/api.mjs",
     "/js/route-parse.mjs": "./client/js/route-parse.mjs",
-    "/js/views.mjs": "./client/js/views.mjs",
     "/js/icons.mjs": "./client/js/icons.mjs",
     "/js/zoomable.mjs": "./client/js/zoomable.mjs",
     "/js/rail.mjs": "./client/js/rail.mjs",
     "/js/keys.mjs": "./client/js/keys.mjs",
-    "/js/feedview.mjs": "./client/js/feedview.mjs",
     "/shared/extractor.mjs": "./src/extractor.mjs",
     "/shared/features/variations/shared.mjs": "./src/features/variations/shared.mjs"
   },
