@@ -14,8 +14,14 @@
 //   a:unhashed.png files row, hash NULL (+ a metadata row — DISCARDED)
 //   a:nopng.png   H9 images row nopng=1 (DROPPED — a fresh scrape decides)
 //   a:ghost.png   only on the hidden list (entry created hidden=1)
+//   c:c-file.png  host c NOT in the hosts map (offline placeholder collection,
+//                 kind comfy / address null — the fold warns by name)
+//   d:hidden-host.png  hidden list names host d: no files row, no map entry
+//                 (the fold creates the collection first, so the FK holds)
 //   input_cache rows -> kind='input' entries
 //   feedback: H1 hash key + one legacy a:old-key.png key + one orphan key
+//             + one hash key with NO files row (recovered via ref)
+//             + one plugins:{} entry (pruned to absent) + one plugin-field entry
 
 import { Database } from "@db/sqlite";
 import { mkdir, writeFile } from "node:fs/promises";
@@ -25,7 +31,7 @@ await mkdir(OUT, { recursive: true });
 
 const H1 = "aa".repeat(32), H2 = "bb".repeat(32), H3 = "cc".repeat(32);
 const H4 = "dd".repeat(32), H5 = "ee".repeat(32), H6 = "ff".repeat(32);
-const H9 = "99".repeat(32);
+const H7 = "77".repeat(32), H9 = "99".repeat(32);
 
 const db = new Database(`${OUT}/metadata.db`);
 db.exec(`
@@ -73,6 +79,7 @@ insFile.run("a", "unhashed.png", null, null, null, null);
 insFile.run("a", "nopng.png", H9, 70, now - 2000, "st-a-nopng");
 insFile.run("b", "shared.png", H1, 100, now - 4500, "st-b-shared");
 insFile.run("b", "meta-only.png", H3, 80, now - 3500, "st-b-meta");
+insFile.run("c", "c-file.png", null, null, null, null); // host c: not in the map
 
 const insImg = db.prepare("INSERT INTO images (hash, meta, source, has_workflow, nopng, ext, updated_at) VALUES (?,?,?,?,?,?,?)");
 insImg.run(H1, JSON.stringify({ seed: 1, steps: 20 }), "png", 1, 0, 4, now - 1000);
@@ -98,7 +105,7 @@ await writeFile(`${OUT}/settings.json`, JSON.stringify({
   version: 1,
   data: {
     "core.hosts": { map: { a: "1.2.3.4:8188", b: "folder:/var/images" } },
-    "core.delete": { useAssetsPlus: true, hidden: { a: ["ghost.png", "shared.png"] } },
+    "core.delete": { useAssetsPlus: true, hidden: { a: ["ghost.png", "shared.png"], d: ["hidden-host.png"] } },
   },
 }, null, 2));
 
@@ -106,10 +113,16 @@ await writeFile(`${OUT}/feedback.json`, JSON.stringify({
   version: 1,
   data: {
     [H1]: { vote: "up", ref: "a:shared.png" },
+    // hash matches no files/metadata row anywhere — recovered via ref
+    [H7]: { vote: "up", ref: "a:ref-only.png" },
     "a:old-key.png": { vote: "down", notes: { pos: "keep" } },
     "orphan:gone.png": { favorite: true },
+    // plugins pruned to empty → stored as absent, never "{}"
+    "a:plugins-empty.png": { vote: "down", plugins: {} },
+    // a real plugin field survives into plugin_fields
+    "a:plugins-real.png": { favorite: true, plugins: { det: { faces: 2 } } },
   },
 }, null, 2));
 
 console.log(`state-v6 fixture written to ${OUT}`);
-console.log({ H1, H2, H3, H4, H5, H6 });
+console.log({ H1, H2, H3, H4, H5, H6, H7 });

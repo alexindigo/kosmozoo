@@ -34,8 +34,8 @@ await up();
 async function mkStore() {
   const dir = await mkdtemp(join(tmpdir(), "kz-scraper-"));
   const settings = await Settings.open(dir);
-  await settings.set("core.scraper", "enabled", true);
-  await settings.set("core.scraper", "paused", false);
+  await settings.set("core.prefetch", "enabled", true);
+  await settings.set("core.prefetch", "paused", false);
   const store = await Store.open(dir, join(dir, "feedback.json"));
   return { dir, settings, store };
 }
@@ -78,13 +78,13 @@ Deno.test("prefetch: priority feed drains before walk", async () => {
   const { dir, settings, store } = await mkStore();
   const s = new Prefetch({ hosts: { local: FAKE }, store, settings, ingest: new Ingest(store, { local: FAKE }, { cache: new Cache(join(dir, "cache")) }), listRefreshMs: 3_600_000 });
   // pause so nothing drains before both queues are populated
-  await settings.set("core.scraper", "paused", true);
+  await settings.set("core.prefetch", "paused", true);
   s.feed("local", ["flux-controlnet.png"]);            // walk
   s.feed("local", ["flux-pulid.png"], true);           // priority
   s.start();
   await new Promise((r) => setTimeout(r, 300));        // let the gate hold
   assert(s.pending("local") >= 2, "paused: nothing drained");
-  await settings.set("core.scraper", "paused", false); // resume
+  await settings.set("core.prefetch", "paused", false); // resume
   for (let i = 0; i < 80 && s.pending("local") > 0; i++) {
     await new Promise((r) => setTimeout(r, 150));
   }

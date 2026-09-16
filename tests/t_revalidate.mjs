@@ -28,7 +28,6 @@ async function rig(name, { revalidateMs = 3_600_000 } = {}) {
   const hosts = { h: `folder:${folder}` };
   const ingest = new Ingest(store, hosts, { cache: new Cache(join(dir, "cache")), revalidateMs });
   const router = makeRouter({ hosts, store, settings, plugins: null, cache: new Cache(join(dir, "cache")), ingest });
-  router.ctx = { hosts, store, settings, plugins: null, cache: new Cache(join(dir, "cache")), ingest };
   return { dir, folder, store, ingest, router, hosts };
 }
 
@@ -249,7 +248,6 @@ Deno.test("comfy host: a changed ETag remaps the same filename to new content", 
   const hosts = { c: stub.addr };
   const ingest = new Ingest(store, hosts, { cache: new Cache(join(dir, "cache")) });
   const router = makeRouter({ hosts, store, settings, plugins: null, cache: new Cache(join(dir, "cache")), ingest });
-  router.ctx = { hosts, store, settings, plugins: null, cache: new Cache(join(dir, "cache")), ingest };
 
   await ingest.ensure("c", "img.png");
   const v1 = store.fileInfo("c", "img.png");

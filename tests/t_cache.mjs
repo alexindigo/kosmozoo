@@ -134,7 +134,6 @@ Deno.test("serve path: bytes carry validators — ETag (content hash) + no-cache
   const hosts = { h: `folder:${folder}` };
   const ingest = new Ingest(store, hosts, { cache: new Cache(join(dir, "cache")) });
   const router = makeRouter({ hosts, store, settings, plugins: null, cache: new Cache(join(dir, "cache")), ingest });
-  router.ctx = { hosts, store, settings, plugins: null, cache: new Cache(join(dir, "cache")), ingest };
 
   const { hash } = await ingest.ensure("h", "img.png");
   const r1 = await router.handle(new Request("http://x/api/collections/h/entries/img.png/bytes"));
@@ -171,7 +170,6 @@ Deno.test("serve path: cache hit serves directly, no host needed", async () => {
   const hosts = { host: `folder:${folder}` };
   const ingest = new Ingest(store, hosts, { cache: new Cache(join(dir, "cache")) });
   const router = makeRouter({ hosts, store, settings, plugins: null, cache: new Cache(join(dir, "cache")), ingest });
-  router.ctx = { hosts, store, settings, plugins: null, cache: new Cache(join(dir, "cache")), ingest };
 
   // First request: ingestion populates cache.
   const r1 = await router.handle(new Request("http://x/api/collections/host/entries/img.png/bytes"));
@@ -205,7 +203,6 @@ Deno.test("serve path: round-trip preserves Content-Type", async () => {
   const hosts = { h: `folder:${folder}` };
   const ingest = new Ingest(store, hosts, { cache: new Cache(join(dir, "cache")) });
   const router = makeRouter({ hosts, store, settings, plugins: null, cache: new Cache(join(dir, "cache")), ingest });
-  router.ctx = { hosts, store, settings, plugins: null, cache: new Cache(join(dir, "cache")), ingest };
 
   const r = await router.handle(new Request("http://x/api/collections/h/entries/img.png/bytes"));
   assertEquals(r.status, 200);
@@ -248,7 +245,7 @@ Deno.test("judgment migration: v1 feedback fans out to entry columns, file backe
   });
   const names = [];
   for await (const f of Deno.readDir(dir)) names.push(f.name);
-  assert(!names.includes("fb.json"), "the v1 document is renamed away");
+  assert(names.includes("fb.json"), "the v1 document is copied, left in place");
   assert(names.some((f) => f.startsWith("fb.json.v1-backup-")));
   store2.close();
 

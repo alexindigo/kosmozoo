@@ -51,6 +51,13 @@ export class Settings {
     await this.#save();
   }
 
+  // Mutate the whole document via fn and persist ONCE — for multi-namespace
+  // edits (the v7 fold's settings cleanup) that must land as one write.
+  async update(fn) {
+    fn(this.#doc.data);
+    await this.#save();
+  }
+
   async #save() {
     await writeSerialized(this.#path, new TextEncoder().encode(JSON.stringify(this.#doc, null, 2)));
   }

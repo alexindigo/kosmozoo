@@ -33,17 +33,6 @@ function cartesianProduct(arrays) {
   return out;
 }
 
-// Permutation count for the modal's live counter: enabled numeric ranges ×
-// enabled enum (LoadImage) axes, same math the engine's run uses.
-export function permutationCount(ranges, imageParams = {}) {
-  const enabled = Object.values(ranges).filter((r) => r.enabled);
-  const imgEnabled = Object.values(imageParams).filter((p) => p.enabled && Array.isArray(p.values) && p.values.length);
-  let n = 1;
-  for (const r of enabled) n *= rangeValues(r.min, r.max, r.increment).length;
-  for (const p of imgEnabled) n *= p.values.length;
-  return enabled.length || imgEnabled.length ? n : 0;
-}
-
 // Each enabled range carries its own REQUIRED `increment` (no global
 // fallback — a range without one is a client bug the run answers 400 to).
 // `imageParams` adds enum axes (outermost). The current-combo exclusion

@@ -7,7 +7,7 @@
 
 import { sha256 } from "./cache.mjs";
 import { backingFor } from "./backings/index.mjs";
-import { metaFromPngBytes, imageDims, EXTRACTOR_VERSION } from "./extractor.mjs";
+import { metaFromPngBytes, imageDims, parsePngTextChunks, EXTRACTOR_VERSION } from "./extractor.mjs";
 
 const DEFAULT_REVALIDATE_MS = 60_000;
 // Dims live in the first bytes of the file: PNG IHDR at 16–24, GIF at 6–10,
@@ -21,7 +21,7 @@ export class Ingest {
   #hosts;
   #cache;
   #revalidateMs;
-  #inflight = new Map(); // "collection:name:kind" -> Promise (single-flight)
+  #inflight = new Map(); // "<collection>\0<name>\0<kind>" -> Promise (single-flight)
   #lastCheck = new Map(); // "in:?collection:name" -> ts (revalidation debounce)
 
   constructor(store, hosts, { cache, revalidateMs = DEFAULT_REVALIDATE_MS }) {
@@ -83,7 +83,8 @@ export class Ingest {
   // (collection, name, kind): concurrent callers share one backing read.
   // Resolves { hash, bytes, status: 200 } or { status } (backing said no).
   async ensure(collection, name, kind = "output") {
-    const key = `${collection}${name}${kind}`;
+    // \0-separated: plain concatenation collides ("ab","c" vs "a","bc")
+    const key = `${collection}\u0000${name}\u0000${kind}`;
     if (this.#inflight.has(key)) return this.#inflight.get(key);
     const p = this.#ensureInner(collection, name, kind)
       .finally(() => this.#inflight.delete(key));
@@ -112,6 +113,16 @@ export class Ingest {
   // Raw-bytes path — the caller already has them (upload proxy, tests).
   async ensureBytes(collection, name, bytes, { kind = "output", stamp = null } = {}) {
     return this.ingest(collection, name, kind, { bytes, stamp });
+  }
+
+  // The parsed embedded ComfyUI graph for cached bytes (null when absent or
+  // invalid) — engine-side only (the variations feature's probe/run, plugins).
+  async graph(hash) {
+    const bytes = await this.#cache.get(hash);
+    if (!bytes) return null;
+    const chunks = await parsePngTextChunks(bytes);
+    if (!chunks?.prompt) return null;
+    try { return JSON.parse(chunks.prompt); } catch { return null; }
   }
 
   // --- revalidation (stale-while-revalidate over every backing kind) ---------

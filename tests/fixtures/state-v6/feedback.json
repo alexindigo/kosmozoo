@@ -5,6 +5,10 @@
       "vote": "up",
       "ref": "a:shared.png"
     },
+    "7777777777777777777777777777777777777777777777777777777777777777": {
+      "vote": "up",
+      "ref": "a:ref-only.png"
+    },
     "a:old-key.png": {
       "vote": "down",
       "notes": {
@@ -13,6 +17,18 @@
     },
     "orphan:gone.png": {
       "favorite": true
+    },
+    "a:plugins-empty.png": {
+      "vote": "down",
+      "plugins": {}
+    },
+    "a:plugins-real.png": {
+      "favorite": true,
+      "plugins": {
+        "det": {
+          "faces": 2
+        }
+      }
     }
   }
 }

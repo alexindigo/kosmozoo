@@ -1,5 +1,6 @@
 // tests/t_metadata_api.mjs — the metadata channel: versioned poll, meta-want
-// priority lane, downloads existence check.
+// priority lane, downloads existence check; and the listing's one-statement
+// contract (no per-entry queries at 3000 files).
 
 import { assert, assertEquals } from "jsr:@std/assert";
 import { makeRouter } from "../src/routes.mjs";
@@ -10,13 +11,16 @@ import { Ingest } from "../src/ingest.mjs";
 import { Cache } from "../src/cache.mjs";
 import { mkdtemp, rm, writeFile, mkdir } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join } from "node:path";async function ctx(dir, { downloadsDir } = {}) {
+import { join } from "node:path";
+
+async function ctx(dir) {
   const settings = await Settings.open(dir);
   const store = await Store.open(dir, join(dir, "feedback.json"));
   const hosts = { local: "127.0.0.1:1" };
-  const router = makeRouter({ hosts, store, settings, plugins: null, downloadsDir });
-  const scraper = new Prefetch({ hosts, store, settings, ingest: new Ingest(store, hosts, { cache: new Cache(join(dir, "cache")) }) });
-  router.ctx = { hosts, store, settings, plugins: null, prefetch: scraper, downloadsDir };
+  const cache = new Cache(join(dir, "cache"));
+  const ingest = new Ingest(store, hosts, { cache });
+  const scraper = new Prefetch({ hosts, store, settings, ingest });
+  const router = makeRouter({ hosts, store, settings, plugins: null, cache, ingest, prefetch: scraper });
   return { settings, store, router, scraper };
 }
 
@@ -101,10 +105,52 @@ Deno.test("metaState: pending vs extracted vs none", async () => {
   const settings = await Settings.open(dir);
   const hosts = { local: `folder:${folder}` };
   const router = makeRouter({ hosts, store, settings, plugins: null });
-  router.ctx = { hosts, store, settings, plugins: null };
   const list = await (await router.handle(new Request("http://x/api/collections/local/entries"))).json();
   const bareEntry = list.find((i) => (i.name ?? i.filename) === "bare.png");
   assertEquals(bareEntry.extracted, true);
   assertEquals(bareEntry.meta, null);
   await rm(dir, { recursive: true });
+});
+
+Deno.test("listing: one statement per listing — no per-entry queries at 3000 files", async () => {
+  const dir = await mkdtemp(join(tmpdir(), "kz-list1-"));
+  const names = Array.from({ length: 3000 }, (_, i) => `img-${String(i).padStart(4, "0")}.png`);
+  const server = Deno.serve({ port: 0, hostname: "127.0.0.1" }, (req) => {
+    if (new URL(req.url).pathname === "/internal/files/output") return Response.json(names);
+    return new Response("nf", { status: 404 });
+  });
+  try {
+    const settings = await Settings.open(dir);
+    const store = await Store.open(dir, join(dir, "fb.json"));
+    const hosts = { local: `127.0.0.1:${server.addr.port}` };
+    const cache = new Cache(join(dir, "cache"));
+    const ingest = new Ingest(store, hosts, { cache });
+    const router = makeRouter({ hosts, store, settings, plugins: null, cache, ingest });
+    // a few rows so the join carries judgment + dims
+    await store.ingestFile("local", names[0], "aa".repeat(32), 100);
+    await store.judgmentPatch("local", names[0], { vote: "up" });
+    await store.entryDimsPut("local", names[1], { width: 64, height: 32 });
+
+    // count the store's queries during one listing
+    const calls = {};
+    for (const m of ["entryGet", "metaState", "contentGet", "judgmentGet", "entryJoined", "entriesForCollection"]) {
+      calls[m] = 0;
+      const orig = store[m].bind(store);
+      store[m] = (...a) => { calls[m]++; return orig(...a); };
+    }
+    const r = await router.handle(new Request("http://x/api/collections/local/entries"));
+    const list = await r.json();
+    assertEquals(list.length, 3000);
+    assertEquals(calls.entriesForCollection, 1); // ONE statement
+    assertEquals(calls.entryJoined, 0);
+    assertEquals(calls.entryGet + calls.metaState + calls.contentGet + calls.judgmentGet, 0);
+    // the join actually delivered judgment + dims
+    assertEquals(list[0].judgment, { vote: "up" });
+    const dimmed = list.find((e) => e.name === names[1]);
+    assertEquals(dimmed.width, 64);
+    assertEquals(dimmed.height, 32);
+  } finally {
+    await server.shutdown();
+    await rm(dir, { recursive: true, force: true });
+  }
 });

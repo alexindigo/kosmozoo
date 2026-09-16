@@ -13,6 +13,9 @@
         "a": [
           "ghost.png",
           "shared.png"
+        ],
+        "d": [
+          "hidden-host.png"
         ]
       }
     }

@@ -11,16 +11,16 @@
 //   comfy + trash   → trash (recoverable via the assets_plus extension)
 //   comfy otherwise → hide (kosmozoo-side flag; ComfyUI has no delete API)
 
-import { backingFor, isFolderHost } from "./backings/index.mjs";
+import { isFolderHost } from "./backings/index.mjs";
 import { stat } from "node:fs/promises";
 import { folderPath } from "./backings/folder.mjs";
 
-export async function capabilities(collection, { online = true, useAssetsPlus = true } = {}) {
+export async function capabilities(collection, { online = true, useAssetsPlus = true, comfy = null } = {}) {
   const kind = collection.kind ?? (isFolderHost(collection.address) ? "folder" : "comfy");
   if (kind === "folder") {
     return { list: true, read: true, add: false, delete: "unlink", rename: false };
   }
-  const trash = online && useAssetsPlus && await backingFor(collection.address).hasAssetsPlus?.(collection.address);
+  const trash = online && useAssetsPlus && comfy != null && await comfy.hasAssetsPlus();
   return {
     list: true,
     read: true,
@@ -89,10 +89,6 @@ export async function validateCollection(name, address) {
 }
 
 // `collection:name` identity grammar (legacy judgment keys, variations ids).
-export function hostKey(host, filename) {
-  return `${host}:${filename}`;
-}
-
 export function splitHostKey(key) {
   const i = key.indexOf(":");
   return [key.slice(0, i), key.slice(i + 1)];

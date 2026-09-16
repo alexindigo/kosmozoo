@@ -1,8 +1,8 @@
 // src/context.mjs — the engine context, fully constructed before the router
 // (audit E1: no router.ctx reassignment, no ctx.x?. guards downstream).
 //
-//   { settings, store, hosts, backings, ingest, prefetch, plugins, features,
-//     paths: { state } }
+//   { settings, store, hosts, backings, cache, ingest, prefetch, plugins,
+//     features, comfy, paths: { state } }
 //
 // Tests build the same shape with fakes: buildContext({ env, fakes }).
 
@@ -12,7 +12,6 @@ import { Store } from "./store.mjs";
 import { loadCollections } from "./collections.mjs";
 import * as backings from "./backings/index.mjs";
 import * as comfyBacking from "./backings/comfy.mjs";
-import * as folderBacking from "./backings/folder.mjs";
 import { Ingest } from "./ingest.mjs";
 import { Prefetch } from "./prefetch.mjs";
 import { PluginHost } from "./plugins.mjs";
@@ -33,41 +32,52 @@ export async function buildContext({ env = Deno.env.toObject(), fakes = {}, star
   const cache = fakes.cache ?? new Cache(
     env.KOZMOZOO_CACHE ?? `${env.HOME ?? "/tmp"}/.local/share/kosmozoo/cache`,
   );
-  const revalidateMs = Number(env.KOZMOZOO_REVALIDATE_MS ?? 60_000);
-  const ingest = fakes.ingest ?? new Ingest(store, hosts, { cache, revalidateMs });
+  const ingest = fakes.ingest ?? new Ingest(store, hosts, {
+    cache,
+    // the default lives in ingest.mjs; the env override is the only knob
+    ...(env.KOZMOZOO_REVALIDATE_MS == null ? {} : { revalidateMs: Number(env.KOZMOZOO_REVALIDATE_MS) }),
+  });
   const prefetch = fakes.prefetch ?? new Prefetch({ hosts, store, settings, ingest });
 
-  // one object, fields known up front; plugins fill before serving
+  // one comfy client per address — its assets-plus and object_info caches
+  // are instance state, so nothing outlives the address it belongs to
+  const comfyClients = new Map(); // addr → client
+  const comfy = (collection) => {
+    const addr = hosts[collection];
+    let client = comfyClients.get(addr);
+    if (!client) {
+      client = comfyBacking.comfyClient(addr);
+      comfyClients.set(addr, client);
+    }
+    return client;
+  };
+
+  // plugin routes are collected here and mounted once the router exists —
+  // the context (plugin host included) is fully built before the router,
+  // and nothing is reassigned afterwards (E1)
+  const pluginRoutes = [];
+  const plugins = fakes.plugins ?? new PluginHost({
+    store, settings, hosts, cache, ingest,
+    route: (method, path, handler) => pluginRoutes.push({ method, path, handler }),
+  });
+  const discovered = plugins === fakes.plugins ? [] : await plugins.discover();
+
   const ctx = {
-    settings, store, hosts, backings, cache, ingest, prefetch,
-    plugins: null, features: [],
+    settings, store, hosts, backings, cache, ingest, prefetch, plugins,
+    features: [],
+    comfy,
     paths: { state: stateDir },
   };
   const router = makeRouter(ctx);
-  const plugins = fakes.plugins ?? new PluginHost({ store, settings, router, hosts, cache });
-  const discovered = plugins === fakes.plugins ? [] : await plugins.discover();
-  ctx.plugins = plugins;
+  for (const { method, path, handler } of pluginRoutes) router.add(method, path, handler);
 
   // feature modules: isolated core features on the engine surface
   const featureApp = {
-    store, cache, hosts,
+    store, cache, hosts, ingest, comfy,
     // a backing bound to one collection (engine-mediated; the feature never
     // fetches a host directly)
     backings: {
-      comfy: (collection) => {
-        const addr = hosts[collection];
-        return {
-          objectInfo: () => comfyBacking.objectInfo(addr),
-          enqueue: (prompt) => comfyBacking.enqueue(addr, prompt),
-        };
-      },
-      folder: (collection) => {
-        const addr = hosts[collection];
-        return {
-          read: (name, kind) => folderBacking.read(addr, name, kind),
-          stat: (name, kind) => folderBacking.stat(addr, name, kind),
-        };
-      },
+      comfy: (collection) => comfy(collection),
     },
     route: (method, path, handler) => router.add(method, path, handler),
   };

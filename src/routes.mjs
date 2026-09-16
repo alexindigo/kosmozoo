@@ -2,15 +2,14 @@
 //
 // Collections + entries are the resources (spec §2). Plugin routes live
 // under /api/plugins/<name>/... and are registered by the plugin host.
+// The context arrives fully built (plugins included) — makeRouter never
+// reassigns or guards it (E1).
 
 import { backingFor, isFolderHost, EXT_MIME } from "./backings/index.mjs";
-import { sha256 } from "./cache.mjs";
 import { capabilities, validateCollection, addCollection, removeCollection } from "./collections.mjs";
 import { sniffMime } from "./extractor.mjs";
 
 export function makeRouter(ctx) {
-  // ctx: { hosts, store, settings, plugins, ingest, prefetch } — `router.ctx`
-  // is settable so main.mjs can hand the plugin host back in after construction.
   const routes = [];
 
   const add = (method, pattern, handler) => {
@@ -53,22 +52,33 @@ export function makeRouter(ctx) {
     return new Response(bytes, { headers: h });
   };
 
-  const entryShape = (collection, name, size) => {
-    const e = ctx.store.entryGet(collection, name);
-    const st = ctx.store.metaState(collection, name);
-    const c = e?.hash ? ctx.store.contentGet(e.hash) : null;
+  // One joined row (entry ⟕ content, judgment columns included) → the wire
+  // shape. No further queries: the listing maps rows from ONE statement, and
+  // a name with no row is a fresh entry (state 'seen').
+  const entryShape = (collection, name, size, row = null) => {
+    const r = row;
+    let meta = null;
+    if (r?.meta) { try { meta = JSON.parse(r.meta); } catch { /* corrupt */ } }
+    let judgment = null;
+    if (r && (r.vote != null || r.favorite != null || r.notes != null || r.plugin_fields != null)) {
+      judgment = {};
+      if (r.vote != null) judgment.vote = r.vote;
+      if (r.favorite != null) judgment.favorite = !!r.favorite;
+      if (r.notes != null) { try { judgment.notes = JSON.parse(r.notes); } catch { /* corrupt */ } }
+      if (r.plugin_fields != null) { try { judgment.plugins = JSON.parse(r.plugin_fields); } catch { /* corrupt */ } }
+    }
     return {
       name,
-      size: size ?? c?.bytes ?? null,
-      hash: e?.hash ?? null,
-      state: e?.state ?? "seen",
-      meta: st.meta,
-      extracted: st.extracted,
-      judgment: ctx.store.judgmentGet(collection, name),
+      size: size ?? r?.bytes ?? null,
+      hash: r?.hash ?? null,
+      state: r?.state ?? "seen",
+      meta,
+      extracted: r?.hash != null,
+      judgment,
       // dims: content (ingested) wins; the entry's own columns carry the
-      // dims pass's head-read result before the hash exists (§4.2)
-      width: c?.width ?? e?.width ?? null,
-      height: c?.height ?? e?.height ?? null,
+      // dims pass's head-read result before the hash exists
+      width: r?.width ?? null,
+      height: r?.height ?? null,
     };
   };
 
@@ -83,7 +93,11 @@ export function makeRouter(ctx) {
         address,
         kind: c.kind,
         online,
-        capabilities: await capabilities(c, { online, useAssetsPlus: useAssetsPlus() }),
+        capabilities: await capabilities(c, {
+          online,
+          useAssetsPlus: useAssetsPlus(),
+          comfy: ctx.comfy?.(id) ?? null,
+        }),
       };
     }
     return Response.json(out);
@@ -99,6 +113,15 @@ export function makeRouter(ctx) {
     }
     const err = await validateCollection(body.name, body.address);
     if (err) return Response.json({ error: err }, { status: 400 });
+    // an existing id with a different address is a conflict, not a silent
+    // re-point (every entry/judgment under the id would change host)
+    const existing = ctx.store.collectionGet(body.name);
+    if (existing && existing.address !== body.address) {
+      return Response.json(
+        { error: `collection "${body.name}" already exists with address ${existing.address}` },
+        { status: 409 },
+      );
+    }
     addCollection(ctx.store, ctx.hosts, body.name, body.address);
     const c = ctx.store.collectionGet(body.name);
     return Response.json({
@@ -133,7 +156,7 @@ export function makeRouter(ctx) {
   // --- entries ----------------------------------------------------------------
 
   // The feed listing (kind=output, the default) or the input-dir listing
-  // (kind=input). Hidden entries stay out of every output listing.
+  // (kind=input). Hidden/gone entries stay out of every output listing.
   add("GET", "/api/collections/<id>/entries", async (req, { id }, url) => {
     const addr = ctx.hosts[id];
     if (!addr) return Response.json({ error: "unknown collection" }, { status: 404 });
@@ -145,18 +168,21 @@ export function makeRouter(ctx) {
         return Response.json({ error: `collection unreachable: ${e.message}` }, { status: 502 });
       }
     }
-    // The listing comes from the backing; the store overlays judgment + dims.
+    // The listing comes from the backing; the store overlays judgment + dims
+    // in ONE joined statement (no per-entry queries). A backing-listed name
+    // with a gone/hidden row is dropped here; a name with no row is fresh.
     const list = await backingFor(addr).list(addr);
-    const hidden = ctx.store.hiddenNames(id);
-    const gone = ctx.store.goneNames(id);
-    const visible = list.filter((f) => !hidden.has(f.name) && !gone.has(f.name));
-    const size = new Map(visible.map((f) => [f.name, f.size]));
-    return Response.json(visible.map((f) => entryShape(id, f.name, size.get(f.name))));
+    const rows = new Map(ctx.store.entriesForCollection(id).map((r) => [r.name, r]));
+    const visible = list.filter((f) => {
+      const r = rows.get(f.name);
+      return !r || (r.state !== "gone" && r.hidden !== 1);
+    });
+    return Response.json(visible.map((f) => entryShape(id, f.name, f.size, rows.get(f.name))));
   });
 
   add("GET", "/api/collections/<id>/entries/<name>", async (_req, { id, name }) => {
     if (!ctx.hosts[id]) return Response.json({ error: "unknown collection" }, { status: 404 });
-    return Response.json(entryShape(id, name));
+    return Response.json(entryShape(id, name, null, ctx.store.entryJoined(id, name)));
   });
 
   // Upload one image into a comfy collection's input dir (multipart field
@@ -191,7 +217,13 @@ export function makeRouter(ctx) {
     const addr = ctx.hosts[id];
     if (!addr) return Response.json({ error: "unknown collection" }, { status: 404 });
     const c = ctx.store.collectionGet(id) ?? { id, kind: isFolderHost(addr) ? "folder" : "comfy", address: addr };
-    const caps = await capabilities(c, { useAssetsPlus: useAssetsPlus() });
+    // DELETE probes too (cheap, cached by the assets-plus TTL): an
+    // unreachable host answers "hide" — try and report, never guess trash
+    const caps = await capabilities(c, {
+      online: await backingFor(addr).probe(addr),
+      useAssetsPlus: useAssetsPlus(),
+      comfy: ctx.comfy?.(id) ?? null,
+    });
     const backing = backingFor(addr);
     if (caps.delete === "unlink" || caps.delete === "trash") {
       const res = await backing.remove(addr, name);
@@ -235,20 +267,14 @@ export function makeRouter(ctx) {
       }
     }
 
-    // Read through ingestion.
+    // Read through ingestion — the one ingestion path. A failing backing is
+    // a 502 carrying the reason; no direct backing read in a route, no
+    // swallowed errors.
     const got = await ctx.ingest.ensure(id, name, kind);
     if (got.status === 200) return makeResponse(got.bytes, got.hash);
     if (got.status === 400) return new Response("bad filename", { status: 400 });
-
-    // Last resort: proxy from the backing (+ ingest in the background for
-    // the next request).
-    const r = await backingFor(ctx.hosts[id]).read(ctx.hosts[id], name, kind);
-    if (r.status === 400) return new Response("bad filename", { status: 400 });
-    if (r.status !== 200) return new Response("not found", { status: r.status });
-    const bytes = new Uint8Array(await new Response(r.body).arrayBuffer());
-    const hash = await sha256(bytes);
-    ctx.ingest.ensureBytes(id, name, bytes, { kind }).catch(() => {});
-    return makeResponse(bytes, hash);
+    if (got.status === 404) return new Response("not found", { status: 404 });
+    return Response.json({ error: `backing read failed: status ${got.status}` }, { status: 502 });
   });
 
   // --- judgments (entry columns) ------------------------------------------------
@@ -277,7 +303,6 @@ export function makeRouter(ctx) {
     if (req.headers.get("If-None-Match") === etag) {
       return new Response(null, { status: 304, headers: { ETag: etag, "Cache-Control": "no-cache" } });
     }
-    const c = ctx.store.contentGet(hash);
     const h = new Headers({ "Content-Length": String(bytes.length), ETag: etag, "Cache-Control": "no-cache" });
     h.set("Content-Type", sniffMime(bytes) ?? "application/octet-stream");
     return new Response(bytes, { headers: h });
@@ -298,7 +323,7 @@ export function makeRouter(ctx) {
   });
 
   add("GET", "/api/plugins", async () => {
-    return Response.json(ctx.plugins ? ctx.plugins.list() : []);
+    return Response.json(ctx.plugins.list());
   });
 
   add("GET", "/api/nodes", async () => {
@@ -313,34 +338,37 @@ export function makeRouter(ctx) {
 
   add("GET", "/api/prefetch", async () => {
     const pending = {};
+    const lastError = {};
     let dimsPending = 0;
     let ingestPending = 0;
     for (const name of Object.keys(ctx.hosts)) {
       pending[name] = ctx.prefetch.pending(name);
       ingestPending += pending[name];
       dimsPending += ctx.prefetch.dimsPending(name);
+      lastError[name] = ctx.prefetch.lastError(name);
     }
     return Response.json({
-      enabled: ctx.settings.get("core.scraper", "enabled", true),
-      paused: ctx.settings.get("core.scraper", "paused", false),
+      enabled: ctx.settings.get("core.prefetch", "enabled", true),
+      paused: ctx.settings.get("core.prefetch", "paused", false),
       pending,
-      // the two-pass totals (§4.2): pass 1 dims heads, pass 2 full ingests
+      // the two-pass totals: pass 1 dims heads, pass 2 full ingests
       dimsPending,
       ingestPending,
+      lastError,
     });
   });
 
   add("POST", "/api/prefetch", async (req) => {
     const body = await req.json();
     if (typeof body.enabled === "boolean") {
-      await ctx.settings.set("core.scraper", "enabled", body.enabled);
+      await ctx.settings.set("core.prefetch", "enabled", body.enabled);
     }
     if (typeof body.paused === "boolean") {
-      await ctx.settings.set("core.scraper", "paused", body.paused);
+      await ctx.settings.set("core.prefetch", "paused", body.paused);
     }
     return Response.json({
-      enabled: ctx.settings.get("core.scraper", "enabled", true),
-      paused: ctx.settings.get("core.scraper", "paused", false),
+      enabled: ctx.settings.get("core.prefetch", "enabled", true),
+      paused: ctx.settings.get("core.prefetch", "paused", false),
     });
   });
 
@@ -369,7 +397,7 @@ export function makeRouter(ctx) {
   // Scroll-driven extraction: the client reports rendered-but-meta-less
   // names; they jump the queue (the prio lane drains first).
   add("POST", "/api/collections/<id>/want", async (req, { id }) => {
-    if (!ctx.hosts[id]) return Response.json({ error: "unknown collection" }, { status: 400 });
+    if (!ctx.hosts[id]) return Response.json({ error: "unknown collection" }, { status: 404 });
     const { files } = await req.json();
     if (!Array.isArray(files)) return Response.json({ error: "files must be an array" }, { status: 400 });
     const pending = ctx.prefetch.feed(id, files, true);
@@ -377,8 +405,7 @@ export function makeRouter(ctx) {
   });
 
   return {
-    get ctx() { return ctx; },
-    set ctx(v) { ctx = v; },
+    ctx,
     async handle(req) {
       const url = new URL(req.url);
       const m = match(req.method, url.pathname);

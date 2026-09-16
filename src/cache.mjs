@@ -20,10 +20,6 @@ export class Cache {
     this.#root = root;
   }
 
-  get root() {
-    return this.#root;
-  }
-
   path(hash) {
     return join(this.#root, hash.slice(0, 2), hash);
   }

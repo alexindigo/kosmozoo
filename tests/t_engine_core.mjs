@@ -5,7 +5,7 @@ import { assert, assertEquals } from "jsr:@std/assert";
 import { ensureStateDir, resolveStateDir, loadVersioned, atomicWrite } from "../src/state.mjs";
 import { Settings } from "../src/settings.mjs";
 import { Store } from "../src/store.mjs";
-import { parseHosts, hostKey, splitHostKey } from "../src/collections.mjs";
+import { parseHosts, splitHostKey } from "../src/collections.mjs";
 import { makeRouter } from "../src/routes.mjs";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -42,12 +42,10 @@ Deno.test("state: XDG by default, KOZMOZOO_STATE wins, ensureStateDir probes wri
 
 // --- hosts ---------------------------------------------------------------
 
-Deno.test("hosts: parse KOZMOZOO_HOSTS, hostKey round-trip", () => {
+Deno.test("hosts: parse KOZMOZOO_HOSTS, hostKey split", () => {
   const hosts = parseHosts({ KOZMOZOO_HOSTS: "a=1.2.3.4:8188, b=host2:8188" });
   assertEquals(hosts, { a: "1.2.3.4:8188", b: "host2:8188" });
-  const k = hostKey("a", "img.png");
-  assertEquals(k, "a:img.png");
-  assertEquals(splitHostKey(k), ["a", "img.png"]);
+  assertEquals(splitHostKey("a:img.png"), ["a", "img.png"]);
 });
 
 // --- settings ------------------------------------------------------------

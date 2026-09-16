@@ -1,11 +1,8 @@
 // src/extractor.mjs — per-image metadata extraction from ComfyUI graphs.
 //
-// Ported verbatim from the outgoing server.py:466–766 and index.html's
-// extractMeta. This is where the mirror dies: ONE module, imported by both
-// the engine and the browser. ~20 empirical class_type probes are field
-// data, not architecture — do not re-derive, port.
-//
-// Shared between engine (Deno) and client (browser) — no node: imports here.
+// ONE module shared by the engine and the browser (no node: imports here).
+// ~20 empirical class_type probes are field data, not architecture — port
+// them verbatim, do not re-derive them.
 
 // Bump when the extraction shape changes; content rows with an older ext
 // are stale and re-extract on their next ingest (decided in src/ingest.mjs,
@@ -189,7 +186,7 @@ export function extractMetaFromGraph(graph) {
     }
   }
 
-  // --- extra node-derived fields (all opt-in in the fields picker) --------
+  // --- extra node-derived fields -----------------------------------------
   const g = firstNode(nodes, "fluxguidance");
   let v = scalarInput(g, "guidance");
   if (v !== null) meta.guidance = v;
@@ -268,8 +265,8 @@ export function extractMetaFromGraph(graph) {
   v = scalarInput(cs, "stop_at_clip_layer");
   if (typeof v === "number") meta.clip_skip = Math.abs(Math.trunc(v));
 
-  // Generic scan: every node's scalar fields ride along. The whole point of
-  // the registry — nothing about nodes is hardcoded anywhere.
+  // Generic scan: every node's scalar fields ride along, backed by the
+  // discovered node registry.
   meta.nodes = collectNodes(graph);
 
   return meta;

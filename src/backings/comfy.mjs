@@ -116,14 +116,13 @@ export async function write(addr, name, bytes) {
 // without it is impossible — the engine then only hides the image (the
 // routes) and tidies Comfy's history on a best-effort basis.
 
-// Capability probe cache: addr -> { v, t }. Only DEFINITIVE answers are
-// cached (true, or an HTTP 404 from the extension endpoint) for a 60 s TTL;
-// network errors and odd shapes fall through uncached.
+// Capability probe (assets_plus extension) for one address. Only DEFINITIVE
+// answers are cached (true, or an HTTP 404 from the extension endpoint) for
+// a 60 s TTL; network errors and odd shapes fall through uncached.
 const ASSETS_PLUS_TTL_MS = 60_000;
-const assetsPlusCache = new Map();
 
-export async function hasAssetsPlus(addr) {
-  const c = assetsPlusCache.get(addr);
+export async function hasAssetsPlus(addr, cache = new Map()) {
+  const c = cache.get(addr);
   if (c && Date.now() - c.t < ASSETS_PLUS_TTL_MS) return c.v;
   try {
     const r = await fetch(`http://${addr}/api/assets_plus/output/delete`, {
@@ -135,11 +134,11 @@ export async function hasAssetsPlus(addr) {
     if (r.ok) {
       const d = await r.json();
       if (Array.isArray(d?.removed) && Array.isArray(d?.failed)) {
-        assetsPlusCache.set(addr, { v: true, t: Date.now() });
+        cache.set(addr, { v: true, t: Date.now() });
         return true;
       }
     } else if (r.status === 404) {
-      assetsPlusCache.set(addr, { v: false, t: Date.now() }); // no extension
+      cache.set(addr, { v: false, t: Date.now() }); // no extension
     }
   } catch { /* unreachable — not definitive, not cached */ }
   return false;
@@ -200,14 +199,13 @@ export async function historyDelete(addr, name) {
 
 // --- the prompt/graph surface (variations feature) ----------------------------
 
-// object_info cache: addr -> { types: Map<paramId,"INT"|"FLOAT"> | null,
-// outputClasses: Set<class_type> | null, t }. TTL'd (a host's node set is
-// stable per version); misses are not cached forever.
+// object_info cache for one address: { types: Map<paramId,"INT"|"FLOAT"> |
+// null, outputClasses: Set<class_type> | null, t }. TTL'd (a host's node set
+// is stable per version); misses are not cached forever.
 const OBJECT_INFO_TTL_MS = 60_000;
-const objectInfoCache = new Map();
 
-export async function objectInfo(addr) {
-  const c = objectInfoCache.get(addr);
+export async function objectInfo(addr, cache = new Map()) {
+  const c = cache.get(addr);
   if (c && Date.now() - c.t < OBJECT_INFO_TTL_MS) return c;
   let out = { types: null, outputClasses: null };
   try {
@@ -226,8 +224,22 @@ export async function objectInfo(addr) {
       }
     }
   } catch { /* offline — the null maps stand */ }
-  objectInfoCache.set(addr, { ...out, t: Date.now() });
+  cache.set(addr, { ...out, t: Date.now() });
   return out;
+}
+
+// ONE stateful client per address: the caches are instance state created by
+// the context, never module globals. Stateless I/O stays with the module
+// functions above.
+export function comfyClient(addr) {
+  const assetsPlus = new Map();
+  const objectInfoCache = new Map();
+  return {
+    addr,
+    hasAssetsPlus: () => hasAssetsPlus(addr, assetsPlus),
+    objectInfo: () => objectInfo(addr, objectInfoCache),
+    enqueue: (prompt) => enqueue(addr, prompt),
+  };
 }
 
 // Queue a prompt graph. Returns { ok, status, error? } — the caller owns

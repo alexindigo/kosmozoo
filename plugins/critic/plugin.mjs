@@ -33,7 +33,9 @@ export function register(kz) {
       return kz.reason(503, "service unreachable", String(e?.message ?? e));
     }
     if (!r.ok) return kz.reason(502, "service error", `status ${r.status}`);
-    return Response.json(await r.json());
+    const data = await r.json().catch(() => null);
+    if (!data) return kz.reason(502, "service error", "no JSON in response");
+    return Response.json(data);
   };
 
   kz.route("POST", "/describe", proxyTo("/describe"));

@@ -163,12 +163,13 @@ export function lineageTag(source, params) {
 
 // --- registration ----------------------------------------------------------------
 
-// app: { store, cache, hosts, backings } — the engine surface for features.
+// app: { store, cache, hosts, ingest, comfy, backings } — the engine surface
+// for features.
 export function register(app) {
   const inspect = async (collection, name) => {
     const hash = app.store.hashFor(collection, name);
     if (!hash) return { error: "image not ingested (no hash)", status: 404 };
-    const graph = await app.store.contentGraph(app.cache, hash);
+    const graph = await app.ingest.graph(hash);
     if (!graph) return { error: "no embedded ComfyUI graph in this PNG", status: 422 };
     const addr = app.hosts[collection];
     if (!addr) return { error: "unknown collection", status: 404 };

@@ -5,6 +5,7 @@
 import { assert, assertEquals } from "jsr:@std/assert";
 import { loadCollections, validateCollection } from "../src/collections.mjs";
 import { backingFor } from "../src/backings/index.mjs";
+import { comfyClient } from "../src/backings/comfy.mjs";
 import { makeRouter } from "../src/routes.mjs";
 import { Settings } from "../src/settings.mjs";
 import { Store } from "../src/store.mjs";
@@ -127,21 +128,24 @@ Deno.test("hosts: assets-plus probe caches only definitive answers", async () =>
     return new Response("nf", { status: 404 });
   });
   try {
+    // the caches live on the client instance (one per address, built by the
+    // context) — not in module globals
+    const client = comfyClient(addr);
     // non-definitive answers (500) are NOT cached: every call re-probes
-    assertEquals(await backingFor(addr).hasAssetsPlus(addr), false);
+    assertEquals(await client.hasAssetsPlus(), false);
     assertEquals(probeCalls, 1);
-    assertEquals(await backingFor(addr).hasAssetsPlus(addr), false);
+    assertEquals(await client.hasAssetsPlus(), false);
     assertEquals(probeCalls, 2);
 
     // a definitive 404 (no extension) IS cached within the TTL
     mode = "404";
-    assertEquals(await backingFor(addr).hasAssetsPlus(addr), false);
+    assertEquals(await client.hasAssetsPlus(), false);
     assertEquals(probeCalls, 3);
-    assertEquals(await backingFor(addr).hasAssetsPlus(addr), false);
+    assertEquals(await client.hasAssetsPlus(), false);
     assertEquals(probeCalls, 3);
 
     // a real probe (200 with the delete-shaped body) is definitive: cached
-    // (fresh addr — the module-level cache is keyed by address)
+    // (fresh client — the cache is per address / per client instance)
     let probeCalls2 = 0;
     const { addr: addr2, close: close2 } = fakeComfy((req) => {
       if (new URL(req.url).pathname === "/api/assets_plus/output/delete") {
@@ -151,8 +155,9 @@ Deno.test("hosts: assets-plus probe caches only definitive answers", async () =>
       return new Response("nf", { status: 404 });
     });
     try {
-      assertEquals(await backingFor(addr2).hasAssetsPlus(addr2), true);
-      assertEquals(await backingFor(addr2).hasAssetsPlus(addr2), true);
+      const client2 = comfyClient(addr2);
+      assertEquals(await client2.hasAssetsPlus(), true);
+      assertEquals(await client2.hasAssetsPlus(), true);
       assertEquals(probeCalls2, 1);
     } finally {
       await close2();

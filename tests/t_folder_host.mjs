@@ -4,7 +4,7 @@
 
 import { assert, assertEquals } from "jsr:@std/assert";
 import { isFolderHost, backingFor } from "../src/backings/index.mjs";
-import { validateCollection, hostKey } from "../src/collections.mjs";
+import { validateCollection } from "../src/collections.mjs";
 import { parseListingEntry } from "../src/backings/comfy.mjs";
 import { makeRouter } from "../src/routes.mjs";
 import { Settings } from "../src/settings.mjs";

@@ -1,22 +1,20 @@
 // src/store.mjs — the engine store: content / collection / entry (schema v7)
-// + the discovered-node registry + (until the judgments commit) the
-// feedback.json judgment document.
+// + the discovered-node registry.
 //
 //   content    — what the bytes ARE: hash → meta, dims, workflow flag
 //   collection — a namespace of names: a ComfyUI host, a local folder
 //   entry      — collection:name → hash; carries the per-instance state
 //                (stamp, seen/ingested/gone) and judgment columns
 //
-// This module still exposes the old host-shaped surface (metaState/hashFor/
-// inputCache*/judgment*) — routes keep their shape until the collections
-// API lands; the methods below are the adapters over the three tables.
+// The host-shaped surface (metaState/hashFor/inputCache*/judgment*) is what
+// routes, ingest, prefetch and the plugin host consume; each method maps
+// onto the three tables.
 
 import { Database } from "@db/sqlite";
 import { join } from "node:path";
-import { readFile, rename } from "node:fs/promises";
+import { copyFile, readFile, rename } from "node:fs/promises";
 import { CorruptStateError } from "./state.mjs";
 import { splitHostKey } from "./collections.mjs";
-import { parsePngTextChunks } from "./extractor.mjs";
 
 const SCHEMA_VERSION = 7;
 const CORE_JUDGMENT_FIELDS = new Set(["vote", "favorite", "notes"]);
@@ -165,7 +163,9 @@ const STATEMENTS = {
   bumpMeta: "UPDATE kv SET v = CAST(CAST(v AS INTEGER) + 1 AS TEXT) WHERE k = 'meta_version'",
   collectionsAll: "SELECT id, kind, address, link, created_at FROM collection ORDER BY rowid",
   collectionGet: "SELECT id, kind, address, link, created_at FROM collection WHERE id = ?",
-  collectionAdd: "INSERT INTO collection (id, kind, address, created_at) VALUES (?, ?, ?, ?) ON CONFLICT(id) DO UPDATE SET kind = excluded.kind, address = excluded.address",
+  // a re-add with a DIFFERENT address must not silently re-point the id —
+  // the route answers 409; the statement itself never updates
+  collectionAdd: "INSERT OR IGNORE INTO collection (id, kind, address, created_at) VALUES (?, ?, ?, ?)",
   collectionRemove: "DELETE FROM collection WHERE id = ?",
   ensureCollection: "INSERT OR IGNORE INTO collection (id, kind, address, created_at) VALUES (?, 'comfy', NULL, ?)",
   nodeRegGet: "SELECT title, inputs FROM node_registry WHERE class_type = ?",
@@ -179,6 +179,18 @@ const STATEMENTS = {
   hashFor: "SELECT hash FROM entry WHERE collection = ? AND name = ? AND kind = 'output'",
   fileInfo: "SELECT hash, stamp FROM entry WHERE collection = ? AND name = ? AND kind = 'output'",
   entryGet: "SELECT collection, name, kind, hash, stamp, state, vote, favorite, notes, hidden, plugin_fields, width, height, first_seen, last_seen FROM entry WHERE collection = ? AND name = ? AND kind = ?",
+  // one joined row per entry (entry ⟕ content) — judgment, dims and byte
+  // size arrive in the SAME row, so a listing never queries per entry
+  entryJoined: `SELECT e.name, e.hash, e.state, e.hidden, e.vote, e.favorite, e.notes, e.plugin_fields,
+       COALESCE(c.width, e.width) AS width, COALESCE(c.height, e.height) AS height,
+       c.bytes, c.meta
+     FROM entry e LEFT JOIN content c ON c.hash = e.hash
+     WHERE e.collection = ? AND e.name = ? AND e.kind = 'output'`,
+  entriesForCollection: `SELECT e.name, e.hash, e.state, e.hidden, e.vote, e.favorite, e.notes, e.plugin_fields,
+       COALESCE(c.width, e.width) AS width, COALESCE(c.height, e.height) AS height,
+       c.bytes, c.meta
+     FROM entry e LEFT JOIN content c ON c.hash = e.hash
+     WHERE e.collection = ? AND e.kind = ?`,
   entryInsertSeen: "INSERT OR IGNORE INTO entry (collection, name, kind, state, first_seen, last_seen) VALUES (?, ?, 'output', 'seen', ?, ?)",
   entryGone: "UPDATE entry SET state = 'gone', last_seen = ? WHERE collection = ? AND name = ? AND kind = 'output'",
   entryHide: "UPDATE entry SET hidden = 1, last_seen = ? WHERE collection = ? AND name = ? AND kind = 'output'",
@@ -216,6 +228,7 @@ const STATEMENTS = {
          notes = COALESCE(excluded.notes, entry.notes),
          plugin_fields = COALESCE(excluded.plugin_fields, entry.plugin_fields)`,
   entryInsertGone: "INSERT OR IGNORE INTO entry (collection, name, kind, state, first_seen, last_seen) VALUES (?, ?, 'output', 'gone', ?, ?)",
+  entryInsertGoneHash: "INSERT OR IGNORE INTO entry (collection, name, kind, hash, state, first_seen, last_seen) VALUES (?, ?, 'output', ?, 'gone', ?, ?)",
   judgmentsAll: `SELECT collection, name, hash, vote, favorite, notes, plugin_fields FROM entry
        WHERE kind = 'output' AND (vote IS NOT NULL OR favorite IS NOT NULL OR notes IS NOT NULL OR plugin_fields IS NOT NULL)`,
   feedbackExport: `SELECT name, hash, vote, favorite, notes, plugin_fields FROM entry
@@ -252,13 +265,22 @@ export class Store {
     const dbPath = join(stateDir, "metadata.db");
     s.#db = new Database(dbPath);
     s.#db.exec("PRAGMA journal_mode = WAL");
+    // the schema declares ON DELETE CASCADE and entry→content references —
+    // without this pragma they are decoration
+    s.#db.exec("PRAGMA foreign_keys = ON");
     s.#runMigrations();
-    s.#topUpEntryDims();
     s.#q = Object.fromEntries(
       Object.entries(STATEMENTS).map(([k, sql]) => [k, s.#db.prepare(sql)]),
     );
     await s.#foldV7(settings);
-    await s.#importFeedbackV1(feedbackPath, settings);
+    const stats = await s.#importFeedbackV1(feedbackPath, settings);
+    if (stats) {
+      console.log(
+        `feedback v1 import: ${stats.applied} applied` +
+          ` (${stats.fannedOut} fanned out by hash, ${stats.orphansByRef} recovered via ref),` +
+          ` ${stats.dropped} dropped`,
+      );
+    }
     return s;
   }
 
@@ -266,58 +288,95 @@ export class Store {
   // The old hash-keyed judgment document is read ONCE: each entry fans out
   // to every entry row with that hash (judgments are per entry now); legacy
   // host:filename keys name an address directly — a missing entry row is
-  // created with state='gone' so nothing is lost. The source file is copied
-  // to <path>.v1-backup-<ts> and never written again.
+  // created with state='gone' so nothing is lost. A hash key matching no
+  // entry falls back to the judgment's own ref ("<host>:<filename>"): the
+  // entry is created state='gone' with the hash set; a key with no rows and
+  // no usable ref is counted as dropped and logged — nothing is silently
+  // lost. The source file is copied to <path>.v1-backup-<ts> and the done
+  // flag (not the file's absence) prevents re-import.
   async #importFeedbackV1(feedbackPath, settings) {
     // nothing offered — a later boot WITH a path still gets its import
     if (!feedbackPath) return;
     if (this.#kvGet("fold.feedback.v2") === "done") return;
-    {
-      let doc = null;
-      try {
-        doc = JSON.parse(await readFile(feedbackPath, "utf-8"));
-      } catch (e) {
-        if (e instanceof SyntaxError) {
-          const quarantined = `${feedbackPath}.corrupt-${new Date().toISOString()}`;
-          await rename(feedbackPath, quarantined);
-          throw new CorruptStateError(feedbackPath, quarantined, e);
-        }
-        // ENOENT: nothing to import
+    let doc = null;
+    try {
+      doc = JSON.parse(await readFile(feedbackPath, "utf-8"));
+    } catch (e) {
+      if (e instanceof SyntaxError) {
+        const quarantined = `${feedbackPath}.corrupt-${new Date().toISOString()}`;
+        await rename(feedbackPath, quarantined);
+        throw new CorruptStateError(feedbackPath, quarantined, e);
       }
-      if (doc) {
-        const now = Date.now();
-        const txn = this.#db.transaction(() => {
-          for (const [key, j] of Object.entries(doc.data ?? {})) {
-            if (!key.includes(":")) {
-              // hash key: fan out to EVERY entry row with that hash
-              for (const t of this.#q.entriesByHash.all(key)) {
-                this.#applyJudgment(t.collection, t.name, j, now);
-              }
-            } else {
-              const [collection, name] = splitHostKey(key);
-              this.#ensureCollection(collection);
-              this.#q.entryInsertGone.run(collection, name, now, now);
-              this.#applyJudgment(collection, name, j, now);
+      if (e.code !== "ENOENT") {
+        // only a missing file means "nothing to import" — a real read error
+        // (EACCES on a root-owned file, EISDIR, …) stops the boot instead of
+        // presenting an empty judgment table as a completed import
+        throw new Error(
+          `${feedbackPath}: feedback import failed (${e.code ?? "error"}): ${e.message}`,
+          { cause: e },
+        );
+      }
+      // ENOENT: nothing to import
+    }
+    const stats = { applied: 0, fannedOut: 0, orphansByRef: 0, dropped: 0 };
+    const now = Date.now();
+    const txn = this.#db.transaction(() => {
+      for (const [key, j] of Object.entries(doc?.data ?? {})) {
+        if (!key.includes(":")) {
+          // hash key: fan out to EVERY entry row with that hash
+          const rows = this.#q.entriesByHash.all(key);
+          if (rows.length > 0) {
+            stats.applied++;
+            for (const t of rows) {
+              this.#applyJudgment(t.collection, t.name, j, now);
+              stats.fannedOut++;
             }
+            continue;
           }
-          this.#kvSet("fold.feedback.v2", "done");
-        });
-        txn();
-        await rename(feedbackPath, `${feedbackPath}.v1-backup-${new Date().toISOString()}`);
-      } else {
-        this.#kvSet("fold.feedback.v2", "done");
+          // no entry carries this hash — the ref names where it lived
+          const ref = typeof j?.ref === "string" ? j.ref : "";
+          const i = ref.indexOf(":");
+          if (i > 0 && ref.slice(0, i) && ref.slice(i + 1)) {
+            const [collection, name] = [ref.slice(0, i), ref.slice(i + 1)];
+            this.#ensureCollection(collection);
+            this.#q.contentPlaceholder.run(key, now); // entry.hash references content
+            this.#q.entryInsertGoneHash.run(collection, name, key, now, now);
+            this.#applyJudgment(collection, name, j, now);
+            stats.applied++;
+            stats.orphansByRef++;
+            continue;
+          }
+          stats.dropped++;
+          console.warn(`feedback import: dropped judgment "${key}" — no entry rows, no usable ref`);
+        } else {
+          const [collection, name] = splitHostKey(key);
+          this.#ensureCollection(collection);
+          this.#q.entryInsertGone.run(collection, name, now, now);
+          this.#applyJudgment(collection, name, j, now);
+          stats.applied++;
+        }
       }
+      this.#kvSet("fold.feedback.v2", "done");
+      this.#kvSet("fold.feedback.v2.stats", JSON.stringify(stats));
+    });
+    txn();
+    // copy, never rename: the source may be a bind-mounted single file or in
+    // a root-owned dir; the done flag prevents re-import either way. Only
+    // when a document was actually read — ENOENT leaves nothing to copy.
+    if (doc) {
+      await copyFile(feedbackPath, `${feedbackPath}.v1-backup-${new Date().toISOString()}`);
     }
     // the feedbackPath setting dies with the migration (sqlite is canonical)
     if (settings?.get("core", "feedbackPath", null)) {
       await settings.set("core", "feedbackPath", null);
     }
+    return stats;
   }
 
   // one judgment document → one entry's columns (in the caller's transaction)
   #applyJudgment(collection, name, j, now) {
     if (!j || typeof j !== "object") return;
-    const { vote, favorite, notes } = this.#pruneJudgment({
+    const { vote, favorite, notes, plugins } = this.#pruneJudgment({
       vote: j.vote ?? null,
       favorite: j.favorite ? 1 : null,
       notes: j.notes ?? null,
@@ -327,7 +386,7 @@ export class Store {
       collection, name,
       vote, favorite,
       notes == null ? null : JSON.stringify(notes),
-      j.plugins == null ? null : JSON.stringify(j.plugins),
+      plugins == null ? null : JSON.stringify(plugins),
       now, now,
     );
   }
@@ -340,82 +399,110 @@ export class Store {
     }
   }
 
-  // v7 is branch-local: dbs migrated before the entry dims columns existed
-  // (dev copies) are topped up here — idempotent, and a no-op on fresh v7
-  // dbs whose CREATE TABLE already carries them.
-  #topUpEntryDims() {
-    const cols = this.#db.prepare("PRAGMA table_info(entry)").all().map((c) => c.name);
-    if (!cols.includes("width")) this.#db.exec("ALTER TABLE entry ADD COLUMN width INTEGER");
-    if (!cols.includes("height")) this.#db.exec("ALTER TABLE entry ADD COLUMN height INTEGER");
-  }
-
   // --- the v6→v7 data fold -------------------------------------------------
   // metadata/files/images/input_cache rows fold into content+entry; the
   // settings hosts map folds into collection; the hidden lists fold onto
   // entries. Old tables are dropped at the end. Idempotent via kv flag, so
   // a crash mid-fold re-runs safely (all steps are INSERT OR IGNORE/UPDATE).
+  // The settings-side cleanup runs on every boot until it succeeds: it checks
+  // the namespaces themselves, so a settings write that failed after the
+  // transaction committed is retried on the next boot.
   async #foldV7(settings) {
-    if (this.#kvGet("fold.v7") === "done") return;
-    const now = Date.now();
-    const txn = this.#db.transaction(() => {
-      const d = this.#db;
-      // collections from the settings hosts map
-      const map = settings?.get("core.hosts", "map", {}) ?? {};
-      for (const [name, address] of Object.entries(map)) {
-        d.prepare("INSERT OR IGNORE INTO collection (id, kind, address, created_at) VALUES (?, ?, ?, ?)")
-          .run(name, kindFor(address), address, now);
-      }
-      // any files-table host the map doesn't know gets an offline placeholder
-      d.exec(`
-        INSERT OR IGNORE INTO collection (id, kind, address, created_at)
-          SELECT DISTINCT host, 'comfy', NULL, ${now} FROM files;
-      `);
-      // content: ingested rows win; address-keyed rows only fill gaps via
-      // their files.hash. nopng rows become nothing (a fresh scrape decides).
-      d.exec(`
-        INSERT OR IGNORE INTO content (hash, meta, has_workflow, ext, updated_at)
-          SELECT hash, meta, has_workflow, ext, updated_at FROM images WHERE nopng = 0;
-        INSERT OR IGNORE INTO content (hash, meta, has_workflow, ext, updated_at)
-          SELECT f.hash, m.meta, m.has_workflow, m.ext, m.updated_at
-          FROM metadata m JOIN files f ON f.host = m.host AND f.filename = m.filename
-          WHERE m.nopng = 0 AND f.hash IS NOT NULL;
-        UPDATE content SET bytes = (SELECT MAX(size) FROM files WHERE files.hash = content.hash);
-        -- every entry.hash must reference a content row (FK): placeholder
-        -- rows (ext=0 → stale → re-walked) for hashes whose meta was dropped
-        INSERT OR IGNORE INTO content (hash, updated_at)
-          SELECT hash, ${now} FROM files WHERE hash IS NOT NULL;
-        INSERT OR IGNORE INTO content (hash, updated_at)
-          SELECT hash, ${now} FROM input_cache;
-        INSERT OR IGNORE INTO entry (collection, name, kind, hash, stamp, state, first_seen, last_seen)
-          SELECT host, filename, 'output', hash, stamp,
-                 CASE WHEN hash IS NULL THEN 'seen' ELSE 'ingested' END, ${now}, ${now} FROM files;
-        INSERT OR IGNORE INTO entry (collection, name, kind, hash, stamp, state, first_seen, last_seen)
-          SELECT host, filename, 'input', hash, stamp, 'ingested', ${now}, ${now} FROM input_cache;
-        DROP TABLE metadata; DROP TABLE files; DROP TABLE images; DROP TABLE input_cache;
-      `);
-      // the hidden lists land on entries (created when the name is new)
-      const hidden = settings?.get("core.delete", "hidden", {}) ?? {};
-      for (const [host, names] of Object.entries(hidden)) {
-        for (const name of names) {
-          d.prepare("INSERT OR IGNORE INTO entry (collection, name, kind, state, first_seen, last_seen) VALUES (?, ?, 'output', 'seen', ?, ?)")
-            .run(host, name, now, now);
-          d.prepare("UPDATE entry SET hidden = 1 WHERE collection = ? AND name = ? AND kind = 'output'")
-            .run(host, name);
+    if (this.#kvGet("fold.v7") !== "done") {
+      const now = Date.now();
+      const txn = this.#db.transaction(() => {
+        const d = this.#db;
+        // collections from the settings hosts map
+        const map = settings?.get("core.hosts", "map", {}) ?? {};
+        for (const [name, address] of Object.entries(map)) {
+          d.prepare("INSERT OR IGNORE INTO collection (id, kind, address, created_at) VALUES (?, ?, ?, ?)")
+            .run(name, kindFor(address), address, now);
         }
-      }
-      this.#kvSet("meta_version", String(Math.floor(now)));
-      this.#kvSet("fold.v7", "done");
-    });
-    txn();
-    // settings namespaces die with the fold
-    if (settings?.get("core.hosts", "map", null)) {
-      // no bulk-delete API: drop the keys one by one
-      for (const k of Object.keys(settings.getNs("core.hosts"))) {
-        await settings.set("core.hosts", k, null);
-      }
+        // a host the old tables know but the map doesn't gets an offline
+        // placeholder: the fold cannot know its address, so kind defaults to
+        // comfy — the rehearsal report lists these by name
+        const known = new Set(Object.keys(map));
+        for (const table of ["files", "input_cache"]) {
+          for (const r of d.prepare(`SELECT DISTINCT host FROM ${table}`).all()) {
+            if (known.has(r.host)) continue;
+            known.add(r.host);
+            console.warn(
+              `fold v7: host "${r.host}" appears in ${table} but not the hosts map —` +
+                ` created as an offline collection (kind comfy, no address)`,
+            );
+            d.prepare("INSERT OR IGNORE INTO collection (id, kind, address, created_at) VALUES (?, 'comfy', NULL, ?)")
+              .run(r.host, now);
+          }
+        }
+        // content: ingested rows win; address-keyed rows only fill gaps via
+        // their files.hash. nopng rows become nothing (a fresh scrape decides).
+        d.exec(`
+          INSERT OR IGNORE INTO content (hash, meta, has_workflow, ext, updated_at)
+            SELECT hash, meta, has_workflow, ext, updated_at FROM images WHERE nopng = 0;
+          INSERT OR IGNORE INTO content (hash, meta, has_workflow, ext, updated_at)
+            SELECT f.hash, m.meta, m.has_workflow, m.ext, m.updated_at
+            FROM metadata m JOIN files f ON f.host = m.host AND f.filename = m.filename
+            WHERE m.nopng = 0 AND f.hash IS NOT NULL;
+          UPDATE content SET bytes = (SELECT MAX(size) FROM files WHERE files.hash = content.hash);
+          -- every entry.hash must reference a content row (FK): placeholder
+          -- rows (ext=0 → stale → re-walked) for hashes whose meta was dropped
+          INSERT OR IGNORE INTO content (hash, updated_at)
+            SELECT hash, ${now} FROM files WHERE hash IS NOT NULL;
+          INSERT OR IGNORE INTO content (hash, updated_at)
+            SELECT hash, ${now} FROM input_cache;
+          INSERT OR IGNORE INTO entry (collection, name, kind, hash, stamp, state, first_seen, last_seen)
+            SELECT host, filename, 'output', hash, stamp,
+                   CASE WHEN hash IS NULL THEN 'seen' ELSE 'ingested' END, ${now}, ${now} FROM files;
+          INSERT OR IGNORE INTO entry (collection, name, kind, hash, stamp, state, first_seen, last_seen)
+            SELECT host, filename, 'input', hash, stamp, 'ingested', ${now}, ${now} FROM input_cache;
+          DROP TABLE metadata; DROP TABLE files; DROP TABLE images; DROP TABLE input_cache;
+        `);
+        // the hidden lists land on entries (created when the name is new);
+        // a hidden host with no collection row gets one first, or the FK
+        // would orphan the entry
+        const hidden = settings?.get("core.delete", "hidden", {}) ?? {};
+        for (const [host, names] of Object.entries(hidden)) {
+          this.#ensureCollection(host);
+          for (const name of names) {
+            d.prepare("INSERT OR IGNORE INTO entry (collection, name, kind, state, first_seen, last_seen) VALUES (?, ?, 'output', 'seen', ?, ?)")
+              .run(host, name, now, now);
+            d.prepare("UPDATE entry SET hidden = 1 WHERE collection = ? AND name = ? AND kind = 'output'")
+              .run(host, name);
+          }
+        }
+        this.#kvSet("meta_version", String(Math.floor(now)));
+        this.#kvSet("fold.v7", "done");
+      });
+      txn();
     }
-    if (settings?.get("core.delete", "hidden", null)) {
-      await settings.set("core.delete", "hidden", null);
+    await this.#retireFoldedSettings(settings);
+  }
+
+  // The namespaces the fold consumed: core.hosts.map and core.delete.hidden
+  // moved into the db; core.scraper is renamed core.prefetch. Edited in
+  // memory, persisted once; checked by namespace (not flag) so a failed
+  // write re-runs here on the next boot.
+  async #retireFoldedSettings(settings) {
+    if (!settings) return;
+    const dirty =
+      settings.get("core.hosts", "map", null) != null ||
+      settings.get("core.delete", "hidden", null) != null ||
+      Object.keys(settings.getNs("core.scraper")).length > 0;
+    if (!dirty) return;
+    try {
+      await settings.update((data) => {
+        if (data["core.hosts"]?.map !== undefined) delete data["core.hosts"].map;
+        if (data["core.delete"]?.hidden !== undefined) delete data["core.delete"].hidden;
+        if (data["core.scraper"] !== undefined) {
+          data["core.prefetch"] = { ...(data["core.prefetch"] ?? {}), ...data["core.scraper"] };
+          delete data["core.scraper"];
+        }
+        for (const ns of ["core.hosts", "core.delete"]) {
+          if (data[ns] && Object.keys(data[ns]).length === 0) delete data[ns];
+        }
+      });
+    } catch (e) {
+      console.warn(`fold v7: settings cleanup failed (retried next boot): ${e?.message ?? e}`);
     }
   }
 
@@ -448,7 +535,8 @@ export class Store {
     return this.#q.collectionGet.get(id) ?? null;
   }
 
-  // { id: address } — the shape the old hosts map had (runtime adapter).
+  // { id: address } — the { name: address } shape routes, ingest, prefetch
+  // and the plugin host hold (collections with no address stay out).
   collectionMap() {
     const out = {};
     for (const r of this.collections()) if (r.address) out[r.id] = r.address;
@@ -586,16 +674,6 @@ export class Store {
 
   // --- content + entry records ------------------------------------------------
 
-  // the parsed embedded ComfyUI graph for cached bytes (null when absent or
-  // invalid) — engine-side only (the variations feature's probe/run).
-  async contentGraph(cache, hash) {
-    const bytes = await cache.get(hash);
-    if (!bytes) return null;
-    const chunks = await parsePngTextChunks(bytes);
-    if (!chunks?.prompt) return null;
-    try { return JSON.parse(chunks.prompt); } catch { return null; }
-  }
-
   contentGet(hash) {
     const row = this.#q.contentGet.get(hash) ?? null;
     if (!row) return null;
@@ -606,6 +684,19 @@ export class Store {
 
   entryGet(collection, name, kind = "output") {
     return this.#q.entryGet.get(collection, name, kind) ?? null;
+  }
+
+  // One joined row (entry ⟕ content) for the wire shape — the listing and
+  // the single-entry route both map it without further queries.
+  entryJoined(collection, name) {
+    return this.#q.entryJoined.get(collection, name) ?? null;
+  }
+
+  // Every joined row of one collection, kind-filtered (the feed listing's
+  // single statement; hidden/gone rows are excluded by the route, which
+  // must also drop backing-listed names that carry those states).
+  entriesForCollection(collection, kind = "output") {
+    return this.#q.entriesForCollection.all(collection, kind);
   }
 
   // --- metadata (sqlite-backed, re-derivable) ----------------------------

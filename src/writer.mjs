@@ -7,7 +7,7 @@
 // — only the LATEST payload is written after the in-flight write completes.
 //
 // atomicWrite (state.mjs) stays the durability primitive; it is only ever
-// called from here. (migrate-feedback.mjs is a one-shot CLI on death row.)
+// called from here.
 
 import { atomicWrite } from "./state.mjs";
 

@@ -15,9 +15,10 @@ async function ctx(dir) {
   const settings = await Settings.open(dir);
   const store = await Store.open(dir);
   const hosts = { local: "127.0.0.1:1" };
-  const router = makeRouter({ hosts, store, settings, plugins: null });
-  const scraper = new Prefetch({ hosts, store, settings, ingest: new Ingest(store, hosts, { cache: new Cache(join(dir, "cache")) }) });
-  router.ctx = { hosts, store, settings, plugins: null, prefetch: scraper };
+  const cache = new Cache(join(dir, "cache"));
+  const ingest = new Ingest(store, hosts, { cache });
+  const scraper = new Prefetch({ hosts, store, settings, ingest });
+  const router = makeRouter({ hosts, store, settings, plugins: null, cache, ingest, prefetch: scraper });
   return { settings, store, router, scraper };
 }
 
@@ -38,8 +39,8 @@ Deno.test("scraper API: GET status, POST toggles enabled/paused persist", async 
   body = await r.json();
   assertEquals(body.enabled, false);
   assertEquals(body.paused, true);
-  assertEquals(settings.get("core.scraper", "enabled"), false);
-  assertEquals(settings.get("core.scraper", "paused"), true);
+  assertEquals(settings.get("core.prefetch", "enabled"), false);
+  assertEquals(settings.get("core.prefetch", "paused"), true);
   await rm(dir, { recursive: true });
 });
 

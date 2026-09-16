@@ -13,18 +13,20 @@ export function register(kz) {
 
   // ONE deadline: the service's /health exposes it (its worker deadline),
   // the plugin honors it with a margin. Refreshed lazily on first detect and
-  // on every /status; the default only covers the unconfigured window.
+  // on every /status. No hand-synced default: no deadline from /health means
+  // unconfigured — /detect refuses rather than guessing a timeout.
   let deadlineMs = null;
   const deadline = async () => {
     if (deadlineMs) return deadlineMs;
     const url = serviceUrl();
-    if (!url) return 65_000;
+    if (!url) return null;
     try {
       const r = await fetch(`${url}/health`, { signal: AbortSignal.timeout(5000) });
+      if (!r.ok) return null;
       const h = await r.json();
       if (typeof h.deadline_ms === "number") deadlineMs = h.deadline_ms + 5000;
-    } catch { /* unreachable — the default stands */ }
-    return deadlineMs ?? 65_000;
+    } catch { return null; }
+    return deadlineMs ?? null;
   };
 
   kz.alignment("face-anchored", {
@@ -45,10 +47,14 @@ export function register(kz) {
   // reads the bytes from the CACHE (no browser round-trip). A raw
   // octet-stream body still works for local anchor blobs.
   kz.route("POST", "/detect", async (req) => {
-    const url = serviceUrl();
-    if (!url) {
-      return Response.json({ error: "service unreachable", reason: "unconfigured" }, { status: 503 });
+    const d = await deadline();
+    if (!d) {
+      return Response.json(
+        { error: "service unreachable", reason: "unconfigured (no deadline from /health)" },
+        { status: 503 },
+      );
     }
+    const url = serviceUrl();
     let body;
     if ((req.headers.get("Content-Type") ?? "").includes("application/json")) {
       const { collection, name } = await req.json().catch(() => ({}));
@@ -66,20 +72,23 @@ export function register(kz) {
         method: "POST",
         headers: { "Content-Type": "application/octet-stream" },
         body,
-        signal: AbortSignal.timeout(await deadline()),
+        signal: AbortSignal.timeout(d),
       });
     } catch (e) {
       // absent, not broken: surface the failure state as a reason
       return Response.json({ error: "service unreachable", reason: String(e?.message ?? e) }, { status: 503 });
     }
     if (!res.ok) {
-      const d = await res.json().catch(() => ({}));
+      const data = await res.json().catch(() => ({}));
       return Response.json(
-        { error: "service error", reason: d.reason ?? `status ${res.status}` },
+        { error: "service error", reason: data.reason ?? `status ${res.status}` },
         { status: 502 },
       );
     }
-    const data = await res.json();
+    const data = await res.json().catch(() => null);
+    if (!data) {
+      return Response.json({ error: "service error", reason: "no JSON in response" }, { status: 502 });
+    }
     return Response.json(data); // { w, h, faces: [{bbox, score, kps}] }
   });
 
@@ -88,6 +97,7 @@ export function register(kz) {
     if (!url) return Response.json({ state: "unconfigured" });
     try {
       const r = await fetch(`${url}/health`, { signal: AbortSignal.timeout(5000) });
+      if (!r.ok) return Response.json({ state: "unreachable" });
       const h = await r.json();
       if (typeof h.deadline_ms === "number") deadlineMs = h.deadline_ms + 5000;
       // model_ready is the honest readiness bit (worker alive AND the

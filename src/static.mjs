@@ -1,5 +1,4 @@
 // src/static.mjs — serve the client SPA and static assets.
-// Zero-build: the client is plain ES modules served as-is.
 
 import { join, normalize, extname, relative } from "node:path";
 import { readFile } from "node:fs/promises";

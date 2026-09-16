@@ -51,6 +51,26 @@ Deno.test("ingest: concurrent ensure() is single-flight — one backing read", a
   await rm(dir, { recursive: true });
 });
 
+Deno.test("ingest: the single-flight key separates colliding (collection, name) pairs", async () => {
+  const dir = await mkdtemp(join(tmpdir(), "kz-sfkey-"));
+  const { state, server, addr } = countingComfy();
+  const store = await Store.open(dir, join(dir, "fb.json"));
+  // ("ab","c") and ("a","bc") concatenate to the same string — the \0-
+  // separated key must keep them distinct: two concurrent callers, two reads
+  const ingest = new Ingest(store, { ab: addr, a: addr }, { cache: new Cache(join(dir, "cache")) });
+  const [r1, r2] = await Promise.all([
+    ingest.ensure("ab", "c.png"),
+    ingest.ensure("a", "bc.png"),
+  ]);
+  assertEquals(state.reads, 2); // no shared flight across the collision
+  assert(r1.hash && r2.hash);
+  assertEquals(store.hashFor("ab", "c.png"), r1.hash);
+  assertEquals(store.hashFor("a", "bc.png"), r2.hash);
+
+  await server.shutdown();
+  await rm(dir, { recursive: true });
+});
+
 Deno.test("ingest: extraction is decided by content.ext — stale re-extracts, current skips", async () => {
   const dir = await mkdtemp(join(tmpdir(), "kz-ext-"));
   const { server, addr } = countingComfy("not-a-png");

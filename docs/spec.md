@@ -47,7 +47,7 @@ the resources; a collection's `capabilities` answer what its backing can do.
 | `/api/collections/<id>/want` | POST | `{files}` — on-screen names jump the extraction queue |
 | `/api/content/<hash>` | GET | the content record + `instances: [{collection, name}]` |
 | `/api/content/<hash>/bytes` | GET | cache bytes by hash (plugins, workbench) |
-| `/api/prefetch` | GET, POST | the two-pass background ingestion: `enabled`/`paused` toggles, per-collection ingest `pending`, and the pass totals `dimsPending`/`ingestPending` |
+| `/api/prefetch` | GET, POST | the two-pass background ingestion: `enabled`/`paused` toggles, per-collection ingest `pending`, the pass totals `dimsPending`/`ingestPending`, and each collection's `lastError` |
 | `/api/settings/<ns>` | GET, PATCH | namespaced settings (`core.*`, `plugins.<name>.*`) |
 | `/api/plugins` | GET | discovered plugins + their declared capabilities |
 | `/api/nodes` | GET | `class_type` registry discovered from extracted graphs |
@@ -240,10 +240,13 @@ the entry `gone`.
 The prefetch runs TWO passes over each collection's listing: pass 1 the
 dims head reads (10 ms inter-file — size-before-render on a fresh host is
 fast), pass 2 the full ingestion above at the existing politeness
-(100 ms). The dims queue drains before ingestion starts; `want`
-(on-screen names) promotes in both queues; per-collection backoff caps at
-30 s; 404 ⇒ `entry.state='gone'` (permanent); the pause gate holds both
-passes.
+(100 ms). Each collection gets its OWN async worker with its own inter-file
+delays and backoff — one host's outage never stalls another; a worker's
+failure is logged, surfaced as its `lastError` on `/api/prefetch`, and the
+worker restarts after the backoff cap. The dims queue drains before
+ingestion starts; `want` (on-screen names) promotes in both queues;
+per-collection backoff caps at 30 s; 404 ⇒ `entry.state='gone'`
+(permanent); the pause gate holds both passes.
 
 ### Serve path (cache-first)
 
@@ -259,9 +262,12 @@ Judgments are columns on `entry` (`vote`, `favorite`, `notes`,
 so two instances of the same content carry independent judgments. Writes go
 through `judgmentPatch` (whitelisted fields, defaults deep-pruned, one
 statement). The old hash-keyed `feedback.json` is imported ONCE at first
-boot (fanned out to every entry with the hash; missing entries created as
-`gone`), backed up to `<path>.v1-backup-<ts>`, and never written again.
-`KOZMOZOO_FEEDBACK` is honored for that import only.
+boot: hash keys fan out to every entry with the hash; a key matching no
+entry is recovered via the judgment's `ref` (`<host>:<filename>` — the
+entry is created `gone` with the hash set); anything unrecoverable is
+counted as dropped and logged. The imported document is copied to
+`<path>.v1-backup-<ts>` and never written again. `KOZMOZOO_FEEDBACK` is
+honored for that import only.
 
 ## 7. Plugin surfaces
 
