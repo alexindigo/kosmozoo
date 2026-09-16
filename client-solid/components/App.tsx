@@ -5,7 +5,7 @@
 // pane + bar), status stack, scroll-top button, workbench stage, feature
 // modals, delete confirmation, and the overlays (anchor info, keys panel).
 
-import { createEffect } from "solid-js";
+import { createEffect, onCleanup } from "solid-js";
 import { useAppStore } from "../store/app-store.js";
 import { Header } from "./Header.js";
 import { BulkBar } from "./BulkBar.js";
@@ -26,6 +26,12 @@ export function App() {
   // the shared resizing cursor: ONE body-class writer, driven by the store
   // signal the drag primitive's consumers set (G8)
   createEffect(() => document.body.classList.toggle("resizing", store.state.resizing()));
+  // the only document-level drop listener anywhere: preventing the default
+  // dragover keeps the browser from navigating on a missed drop — the
+  // anchor dropzone is the only drop TARGET
+  const noNav = (e) => e.preventDefault();
+  document.addEventListener("dragover", noNav);
+  onCleanup(() => document.removeEventListener("dragover", noNav));
   return (
     <>
       <Header />

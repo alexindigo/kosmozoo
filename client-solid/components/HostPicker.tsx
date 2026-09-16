@@ -5,7 +5,7 @@
 // and forwards intents.
 
 import { createSignal } from "solid-js";
-import { For } from "solid-js/web";
+import { For } from "solid-js";
 import { iconSvg } from "/js/icons.mjs";
 import { useAppStore } from "../store/app-store.js";
 import { useClickOutside } from "../lib/click-outside.js";
@@ -37,8 +37,8 @@ export function HostPicker() {
         title="choose host"
         onClick={() => store.actions.hosts.toggleMenu()}
       >
-        <span id="hostDot" class={"hdot" + (store.state.hosts[store.state.host()]?.online ? "" : " off")} />
-        <span id="hostBtnLabel">{store.state.host() ?? "no hosts"}</span>
+        <span class={"hdot" + (store.state.hosts[store.state.host()]?.online ? "" : " off")} />
+        <span>{store.state.host() ?? "no hosts"}</span>
         <span class="chev">▾</span>
       </button>
       <div id="hostDrop" hidden={!store.state.hostMenuOpen()}>

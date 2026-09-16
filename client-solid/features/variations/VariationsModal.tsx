@@ -11,7 +11,7 @@
 // was last focused. Prefix/suffix WRAP the original filename basename in the
 // submission (they don't replace it).
 
-import { createSignal, createEffect, createResource, onCleanup, For, Show } from "solid-js";
+import { createSignal, createMemo, createEffect, createResource, onCleanup, For, Show } from "solid-js";
 import { iconSvg } from "/js/icons.mjs";
 import { paramDef, defaultRange, fallbackParams } from "./graph.mjs";
 import { useAppStore } from "../../store/app-store.js";
@@ -202,7 +202,7 @@ function ModalBody(props) {
   // its current value. A swept LoadImage axis whose values exclude the
   // current filename makes every numeric combo novel, so nothing is
   // subtracted then.
-  const tally = () => {
+  const tally = createMemo(() => {
     let perImage = 1;
     let anyEnabled = false;
     let numericCurrentInRange = true;
@@ -244,7 +244,7 @@ function ModalBody(props) {
     const excludeCurrent = anyEnabled && numericCurrentInRange && imagesAtCurrent;
     if (excludeCurrent && perImage > 0) perImage -= 1;
     return { n: anyEnabled ? perImage * props.images.length : 0, anyEnabled, perImage };
-  };
+  });
 
   async function runVariations() {
     setResult(null);

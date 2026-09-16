@@ -3,7 +3,8 @@
 
 const BASE = ""; // same origin
 
-async function req(method, path, body) {
+// the ONE JSON transport — exported so feature modules (variations) share it
+export async function req(method, path, body) {
   const r = await fetch(BASE + path, {
     method,
     headers: body ? { "Content-Type": "application/json" } : undefined,
@@ -15,7 +16,7 @@ async function req(method, path, body) {
 
 // raw POST: { ok, status, text }, no throw — for endpoints whose error
 // bodies carry detail the caller parses (the variations run report)
-async function postRaw(path, body) {
+export async function postRaw(path, body) {
   const r = await fetch(BASE + path, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
@@ -44,7 +45,6 @@ export const api = {
   setPrefetch: (kv) => req("POST", "/api/prefetch", kv),
   meta: (collection, since) => req("GET", `/api/collections/${enc(collection)}/meta?since=${since}`),
   want: (collection, files) => req("POST", `/api/collections/${enc(collection)}/want`, { files }),
-  // variations transport + input list live in client-solid/features/variations/api.js
   // per-collection judgment export (generated on demand)
   feedbackExportUrl: (collection) => `${BASE}/api/collections/${enc(collection)}/feedback.json`,
   // byte size isn't in every listing — a HEAD on the bytes route fills it;

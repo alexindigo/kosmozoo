@@ -229,6 +229,55 @@ Deno.test("tapeWindow: zero capacity is safe", async () => {
   assertEquals(tapeWindow(1000, 0, 0, 0, 0), 0);
 });
 
+// --- images.fillSize ----------------------------------------------------------
+
+Deno.test("images.fillSize: HEAD probe fills the byte size on the right entry", async () => {
+  const { api } = await import("../client/js/api.mjs");
+  // the store mirrors the pointer into the URL — stub the two browser
+  // globals for this process (no DOM in the unit suite)
+  globalThis.location = { hash: "", pathname: "/" };
+  globalThis.history = { state: null, replaceState() {}, pushState() {} };
+  const store = makeAppStore();
+  // fake the engine surface the store talks to (the module object is shared
+  // — patched per test, restored after)
+  const origEntries = api.entries;
+  const origProbe = api.entrySizeProbe;
+  const origMeta = api.meta;
+  const origWant = api.want;
+  const origNodes = api.nodes;
+  api.entries = async () => [
+    { name: "a.png", size: null, hash: null, state: "seen", meta: null, extracted: false, judgment: null, width: 100, height: 50 },
+  ];
+  api.entrySizeProbe = async (collection, name) => {
+    assertEquals([collection, name], ["h", "a.png"]);
+    return 12345;
+  };
+  api.meta = async () => ({ v: 1, changed: false });
+  api.want = async () => ({ pending: 0 });
+  api.nodes = async () => ({});
+  try {
+    await store.actions.hosts.select("h");
+    assertEquals(store.state.images.length, 1);
+    assertEquals(store.state.images[0].size, null);
+    await store.actions.images.fillSize("h:a.png");
+    assertEquals(store.state.images[0].size, 12345);
+    // a second call with a known size is a no-op (no probe fired)
+    let probes = 0;
+    api.entrySizeProbe = async () => { probes++; return 999; };
+    await store.actions.images.fillSize("h:a.png");
+    assertEquals(probes, 0);
+    assertEquals(store.state.images[0].size, 12345);
+  } finally {
+    api.entries = origEntries;
+    api.entrySizeProbe = origProbe;
+    api.meta = origMeta;
+    api.want = origWant;
+    api.nodes = origNodes;
+    delete globalThis.location;
+    delete globalThis.history;
+  }
+});
+
 // --- deletion navigation ------------------------------------------------------
 
 Deno.test("planDeleteCurrent: previous current iff adjacent, else feed-above, else topmost", async () => {

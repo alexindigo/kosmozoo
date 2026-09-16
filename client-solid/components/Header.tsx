@@ -3,7 +3,7 @@
 // Logo/title, host picker, filter box, options button, the menu with its
 // settings rows, and the layout switcher.
 
-import { For, Show } from "solid-js/web";
+import { For, Show } from "solid-js";
 import { iconSvg } from "/js/icons.mjs";
 import { useAppStore } from "../store/app-store.js";
 import { useClickOutside } from "../lib/click-outside.js";

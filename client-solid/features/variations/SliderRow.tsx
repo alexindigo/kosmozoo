@@ -67,13 +67,19 @@ export function SliderRow(props) {
       behaviour: "drag",
       keyboardSupport: true,
     });
+    // `update` tracks the bound LABELS live (it also fires on programmatic
+    // set() — the row's state is only ever written by user gestures)
     slider.on("update", (values) => {
       const [a, b] = values.map(Number);
       setMinLbl({ text: props.relative ? fmtSigned(a) : fmt(a), left: ((a - lo) / span) * 100 + "%" });
       setMaxLbl({ text: props.relative ? fmtSigned(b) : fmt(b), left: ((b - lo) / span) * 100 + "%" });
+    });
+    // onRange fires ONLY from slide/change (user gestures) — never from
+    // `update`, which would re-report every programmatic set (G13)
+    const report = () => {
       const vals = slider.get().map(Number);
       props.onRange(props.param.key, { min: Math.min(vals[0], vals[1]), max: Math.max(vals[0], vals[1]) });
-    });
+    };
     // The snap lands on RELEASE, never mid-drag: a set() during an active
     // drag puts the widget in its tap-transition state, which rejects the
     // drag's own move events — the thumb would freeze at the first snap.
@@ -82,19 +88,24 @@ export function SliderRow(props) {
     // dragged handle — and only it — to the row's increment. Keyboard
     // nudges never set wasDragging, so their fine step survives.
     let wasDragging = false;
-    slider.on("slide", () => { if (dragging) wasDragging = true; });
+    slider.on("slide", () => {
+      if (dragging) wasDragging = true;
+      report();
+    });
     slider.on("change", (values, handleNumber) => {
-      if (!wasDragging) return;
-      wasDragging = false;
-      const next = values.map(Number);
-      let changed = false;
-      const snapOne = (i) => {
-        const sn = snapTo(next[i], props.increment(), props.param.decimals);
-        if (sn !== next[i]) { next[i] = sn; changed = true; }
-      };
-      if (handleNumber === undefined || handleNumber === null) { snapOne(0); snapOne(1); }
-      else snapOne(handleNumber);
-      if (changed) slider.set(next.map(String));
+      if (wasDragging) {
+        wasDragging = false;
+        const next = values.map(Number);
+        let changed = false;
+        const snapOne = (i) => {
+          const sn = snapTo(next[i], props.increment(), props.param.decimals);
+          if (sn !== next[i]) { next[i] = sn; changed = true; }
+        };
+        if (handleNumber === undefined || handleNumber === null) { snapOne(0); snapOne(1); }
+        else snapOne(handleNumber);
+        if (changed) slider.set(next.map(String));
+      }
+      report();
     });
     onCleanup(() => {
       sliderEl.removeEventListener("pointerdown", onDown);

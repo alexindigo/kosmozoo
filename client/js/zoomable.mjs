@@ -16,7 +16,9 @@
 export function makeZoomable(img, { key, getView, setView, onZoomChange, onTransform } = {}) {
   let scale = 1, txf = 0, tyf = 0, dragMoved = 0;
 
-  const apply = () => {
+  // persist=false on restore: reading the stored view back is not a write —
+  // a remount must not dirty the store into a settings PATCH
+  const apply = (persist = true) => {
     if (scale <= 1.001) { scale = 1; txf = 0; tyf = 0; }
     const transform = scale === 1
       ? ""
@@ -24,7 +26,7 @@ export function makeZoomable(img, { key, getView, setView, onZoomChange, onTrans
     if (key && setView) {
       setView(key, scale > 1 || txf || tyf
         ? { s: scale, txf, tyf, fh: false, fv: false, rot: 0 }
-        : null);
+        : null, { persist });
     }
     onZoomChange?.(scale > 1);
     onTransform?.(transform, scale > 1);
@@ -32,7 +34,7 @@ export function makeZoomable(img, { key, getView, setView, onZoomChange, onTrans
 
   if (key && getView) {
     const stored = getView(key);
-    if (stored) { scale = stored.s; txf = stored.txf; tyf = stored.tyf; apply(); }
+    if (stored) { scale = stored.s; txf = stored.txf; tyf = stored.tyf; apply(false); }
   }
 
   const onWheel = (e) => {

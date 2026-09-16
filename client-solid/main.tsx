@@ -47,10 +47,3 @@ store.actions.keys.register("wb.close", "Escape", () => store.actions.diff.close
   ctx: "workbench", desc: "close the workbench",
 });
 document.addEventListener("keydown", (e) => store.actions.keys.dispatch(e));
-
-// drag-and-drop anywhere drops anchors (local files, never uploaded)
-document.addEventListener("dragover", (e) => e.preventDefault());
-document.addEventListener("drop", async (e) => {
-  e.preventDefault();
-  if (e.dataTransfer?.files?.length) await store.actions.anchors.addFiles([...e.dataTransfer.files]);
-});

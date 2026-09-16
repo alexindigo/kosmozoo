@@ -9,7 +9,7 @@
 //
 // Run via tests/e2e/run.sh.
 
-const { CDP } = require("./cdp.cjs");
+const { CDP, sleep, collectPageErrors } = require("./cdp.cjs");
 
 const ENGINE = process.env.E2E_ENGINE ?? "http://127.0.0.1:18260";
 
@@ -30,8 +30,7 @@ async function attempt(name, fn) {
 
 (async () => {
   const page = await CDP.launch();
-  const pageErrors = [];
-  await page.send("Runtime.enable");
+  const pageErrors = await collectPageErrors(page);
 
   await page.goto(ENGINE + "/");
   await page.poll("!!document.querySelector('.card')", 20000);
@@ -51,6 +50,26 @@ async function attempt(name, fn) {
       return s.state.anchors.length;
     })()`);
     check("anchor dropped locally (blob, never uploaded)", n === 1);
+  });
+
+  // the dropzone is the ONLY drop target — a document-level handler would
+  // add the same file twice
+  await attempt("drop one file on the anchor zone: exactly one anchor added", async () => {
+    await page.evaluate(`(async () => { ${KZ}.actions.ui.setWorkspace("anchors"); })()`);
+    await page.poll("!!document.getElementById('dropzone')", 5000);
+    const before = await page.evaluate(`(async () => ${KZ}.state.anchors.length)()`);
+    await page.evaluate(`(async () => {
+      const bytes = await (await fetch("/api/collections/fake/entries/flux-basic.png/bytes")).blob();
+      const dt = new DataTransfer();
+      dt.items.add(new File([bytes], "dropped.png", { type: "image/png" }));
+      document.getElementById("dropzone").dispatchEvent(
+        new DragEvent("drop", { dataTransfer: dt, bubbles: true, cancelable: true }));
+    })()`);
+    await page.poll(`(async () => ${KZ}.state.anchors.length === ${before + 1})()`, 5000);
+    const n = await page.evaluate(`(async () => ${KZ}.state.anchors.length)()`);
+    check("drop one file on the anchor zone: exactly one anchor added", n === before + 1, `${before} -> ${n}`);
+    check("the dropped anchor is in the pane", await page.evaluate(
+      `!!document.querySelector('.card.anchor[data-name="dropped.png"]')`));
   });
 
   // --- workbench: single-image viewer (opens on card click, Esc closes) ----
@@ -249,6 +268,35 @@ async function attempt(name, fn) {
       return true;
     })()`);
     await page.poll(`(async () => ${KZ}.state.host() === 'fake' && ${KZ}.state.images.length > 100)()`, 8000);
+  });
+
+  // --- row 12 ---------------------------------------------------------------
+
+  // a failed decode on the workbench stage keeps the previous image and
+  // never throws (the decode guard resolves to the last good src)
+  await attempt("workbench: a failed decode keeps the previous image", async () => {
+    await page.evaluate(`(async () => {
+      ${KZ}.actions.current.set("fake", "flux-basic.png");
+      ${KZ}.actions.diff.open();
+    })()`);
+    await page.poll(`(async () => ${KZ}.state.diff.open === true)()`, 5000);
+    await page.poll(`document.getElementById('diffImg').src.includes('flux-basic.png')`, 10000);
+    const good = await page.evaluate("document.getElementById('diffImg').src");
+    // point the pointer at a file whose bytes 404 (sync on the 404 itself,
+    // then one beat for the resource to settle — not a settle sleep)
+    await page.evaluate(`(async () => {
+      ${KZ}.actions.current.set("fake", "nope-404.png");
+      await fetch("/api/collections/fake/entries/nope-404.png/bytes").catch(() => null);
+    })()`);
+    await sleep(300);
+    const after = await page.evaluate("document.getElementById('diffImg').src");
+    check("a failed decode keeps the previous image on stage", after === good, after.slice(-40));
+    check("no page error from the failed decode", pageErrors.length === 0, pageErrors[0] ?? "");
+    // a good image still swaps in afterwards
+    await page.evaluate(`(async () => { ${KZ}.actions.current.set("fake", "flux-lora.png"); })()`);
+    await page.poll(`document.getElementById('diffImg').src.includes('flux-lora.png')`, 10000);
+    check("a good image still swaps in after a failed decode", true);
+    await page.evaluate(`(async () => { ${KZ}.actions.diff.close(); })()`);
   });
 
   // --- row 12 ---------------------------------------------------------------

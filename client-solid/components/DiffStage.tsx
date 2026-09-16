@@ -15,8 +15,9 @@ export function DiffStage() {
   const store = useAppStore();
 
   // decode guard: the visible src swaps only once the new image decodes;
-  // a failed decode keeps whatever is on screen (the resource holds its
-  // last value), and closing the workbench idles the source
+  // a failed decode RESOLVES to the last good src (never throws, never
+  // blanks the stage), and closing the workbench idles the source
+  let lastGood = null;
   const [decoded] = createResource(
     () => (store.state.diff.open
       ? (store.actions.diff.resolve(store.state.current())?.src ?? null)
@@ -24,8 +25,13 @@ export function DiffStage() {
     async (url) => {
       const img = new Image();
       img.src = url;
-      await img.decode();
-      return url;
+      try {
+        await img.decode();
+        lastGood = url;
+        return url;
+      } catch {
+        return lastGood;
+      }
     },
   );
 

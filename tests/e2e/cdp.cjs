@@ -196,4 +196,23 @@ class CDP {
   }
 }
 
-module.exports = { CDP, sleep };
+// install the Runtime.exceptionThrown collector on a connected page: the
+// returned array fills with uncaught page errors — assert it empty at the
+// end of the suite (declared-but-never-populated arrays cannot fail)
+async function collectPageErrors(page) {
+  const pageErrors = [];
+  await page.send("Runtime.enable");
+  const orig = page.ws.onmessage;
+  page.ws.onmessage = (ev) => {
+    orig(ev);
+    let msg;
+    try { msg = JSON.parse(ev.data); } catch { return; }
+    if (msg.method === "Runtime.exceptionThrown") {
+      const d = msg.params.exceptionDetails;
+      pageErrors.push(String(d.exception?.description ?? d.text).split("\n")[0]);
+    }
+  };
+  return pageErrors;
+}
+
+module.exports = { CDP, sleep, collectPageErrors };

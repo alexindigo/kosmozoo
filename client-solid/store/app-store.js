@@ -11,7 +11,7 @@
 // Note: the store ROOT is not assignable (st.x = v is silently ignored) —
 // root-level replacement goes through setSt("x", v); nested paths assign.
 
-import { createSignal, createMemo, createEffect, onCleanup, createContext, useContext } from "solid-js";
+import { createSignal, createMemo, createEffect, onCleanup, createContext, useContext, untrack } from "solid-js";
 import { createStore, reconcile } from "solid-js/store";
 import { api } from "/js/api.mjs";
 import { metaFromPngBytes } from "/shared/extractor.mjs";
@@ -19,7 +19,6 @@ import { makeKeymap, comboFromEvent } from "/js/keys.mjs";
 import {
   parseUrl,
   stripHostPrefix,
-  matchesFile,
   planDeleteCurrent,
   diffUrl,
 } from "/js/route-parse.mjs";
@@ -53,7 +52,6 @@ export function makeAppStore() {
     selected: {},         // id -> true (bulk actions; session-only)
     anchors: [],          // [{ name, src(dataURL), meta? }] — local drops, persisted
     views: {},            // per-image zoom views — key -> { s, txf, tyf, … } (G24 fold)
-    diff: { open: false },                  // workbench: single-image viewer
     diff: { open: false },                  // workbench: single-image viewer
     variations: { open: false, images: [], key: null }, // modal session
     infoOverlay: { open: false, name: "", meta: null }, // anchor ⓘ params
@@ -144,10 +142,11 @@ export function makeAppStore() {
   // --- current pointer + trail -------------------------------------------------
   // A { remote, image } pointer → its feed entry (anchors are not feed
   // entries) — the ONE derivation; components used to each carry their own
-  // copy of this find (G7).
+  // copy of this find (G7). Indexed by the (host, filename) map next to
+  // imageIdxById — never a scan.
   function entryFor(c) {
     if (!c || c.remote === "anchor") return null;
-    const idx = st.images.findIndex((i) => i.host === c.remote && matchesFile(i, c.remote, c.image));
+    const idx = imageIdxByFile().get(`${c.remote}:${stripHostPrefix(c.remote, c.image ?? "")}`) ?? -1;
     return idx < 0 ? null : { index: idx, entry: st.images[idx], collection: c.remote };
   }
   // the current feed entry: { index, entry, collection } | null
@@ -201,7 +200,7 @@ export function makeAppStore() {
 
   function findByFile(file) {
     if (!file) return -1;
-    return st.images.findIndex((i) => matchesFile(i, host(), file));
+    return imageIdxByFile().get(`${host()}:${stripHostPrefix(host(), file)}`) ?? -1;
   }
 
   // one resolver for every source kind; new feeds plug in here. Accepts
@@ -292,15 +291,19 @@ export function makeAppStore() {
     // 3. sizes resolve around the stopped range…
     stageResolveAhead();
     // 4. …and metas are wanted for it (the mid-gesture throttle is folded
-    //    into this debounce — B3 dead)
+    //    into this debounce — B3 dead); the want flush rides the same settle
     wantRangeNow();
+    flushWant();
   }
 
   function restoreToIndex(idx) {
     if (idx < 0) return;
-    const viewPos = view().indexOf(idx);
-    if (viewPos < 0) return;
-    seams.virtualizer?.scrollToIndex(viewPos, { align: "center" });
+    // the virtualizer's index space is the size-known list (a subset of
+    // view) — map into IT, not the view (they only coincide when every
+    // entry's size is known)
+    const knownPos = entriesWithKnownSize().indexOf(idx);
+    if (knownPos < 0) return;
+    seams.virtualizer?.scrollToIndex(knownPos, { align: "center" });
     // a programmatic center, not user scrolling — keep the snap from
     // immediately pulling the centered card back to the top edge
     quietScrolls();
@@ -310,14 +313,13 @@ export function makeAppStore() {
   // --- metadata channel: want + poll + patch in place ---------------------------
   let metaVersion = 0;
   const wantSet = new Set();
-  let wantTimer = null;
   let metaPollTimer = null;
 
+  // wants only collect — the flush rides the settle debounce (B3: no timer
+  // of its own; feedSettle calls flushWant after wantRangeNow)
   function wantMeta(image) {
     if (image.meta || wantSet.has(image.filename)) return;
     wantSet.add(image.filename);
-    clearTimeout(wantTimer);
-    wantTimer = setTimeout(flushWant, 500);
   }
 
   async function flushWant() {
@@ -404,9 +406,11 @@ export function makeAppStore() {
 
   // --- image list load -----------------------------------------------------------
   async function loadImages(name) {
-    // a host switch must not leave the previous host's feed on screen
+    // a host switch must not leave the previous host's feed on screen —
+    // and its per-entry error state dies with the list (id-keyed, cleared)
     setSt("images", reconcile([]));
     setSt("selected", reconcile({}));
+    window_.clear();
     if (!name) return;
     actions.status.active("load", `loading image list from ${name}…`);
     try {
@@ -436,6 +440,7 @@ export function makeAppStore() {
         mirrorCurrentHash();
       }
       wantRangeNow();
+      flushWant(); // the no-restore path has no scroll to settle the flush
       await pollMetadata();
       actions.status.clear("load");
       if (st.images.length === 0) {
@@ -501,7 +506,7 @@ export function makeAppStore() {
     return true;
   }
 
-  const imageIdx = (id) => st.images.findIndex((i) => i.id === id);
+  const imageIdx = (id) => imageIdxById().get(id) ?? -1;
 
   // the ONE download-name convention (G23): <host>#<filename>, unless the
   // filename already carries the tag
@@ -526,11 +531,21 @@ export function makeAppStore() {
   // list is the size-known view; the pending set drives the resolver. Both
   // memos are reactive over the listing (store paths) and the sizes store
   // (version signal), so landings recompute both by construction.
-  // id → index map maintained alongside images — the resolver must not
-  // scan the full listing per staged load (srcFor was O(n) per resolve)
+  // id → index map maintained alongside images — every per-id lookup uses
+  // it (CardSlot, judgment actions, the loader's srcFor), never a scan
   const imageIdxById = createMemo(() => {
     const m = new Map();
     for (let i = 0; i < st.images.length; i++) m.set(st.images[i].id, i);
+    return m;
+  });
+  // (host, filename) → index — entryFor/findByFile's lookup; the filename
+  // is normalized (the "host#" tag is stripped) so either form hits
+  const imageIdxByFile = createMemo(() => {
+    const m = new Map();
+    for (let i = 0; i < st.images.length; i++) {
+      const img = st.images[i];
+      m.set(`${img.host}:${stripHostPrefix(img.host, img.filename)}`, i);
+    }
     return m;
   });
   const sizes_ = makeSizes({
@@ -540,28 +555,47 @@ export function makeAppStore() {
     },
     imageAt: (i) => st.images[i],
   });
-  const entriesWithKnownSize = createMemo(() => view().filter((i) => {
-    const img = st.images[i];
-    return !!img && (!!img.width && !!img.height || !!(img.meta?.width && img.meta?.height) || sizes_.sizeOf(img.id) !== null);
-  }));
-  const pendingSizes = createMemo(() => view().map((i) => st.images[i])
-    .filter((img) => !!img && !((img.width && img.height) || (img.meta?.width && img.meta?.height)) && sizes_.sizeOf(img.id) === null && !sizes_.loadFailed(img.id)));
+  const sizeKnown = (img) =>
+    !!img && (!!img.width && !!img.height || !!(img.meta?.width && img.meta?.height) || sizes_.sizeOf(img.id) !== null);
+  const sizePending = (img) =>
+    !!img && !((img.width && img.height) || (img.meta?.width && img.meta?.height)) && sizes_.sizeOf(img.id) === null && !sizes_.loadFailed(img.id);
+  const entriesWithKnownSize = createMemo(() => view().filter((i) => sizeKnown(st.images[i])));
+  // the pending set as a COUNT and a lazy index iterator — never a
+  // 3000-element materialization per landing (RC8)
+  const pendingSizeCount = createMemo(() => {
+    let n = 0;
+    for (const i of view()) if (sizePending(st.images[i])) n++;
+    return n;
+  });
+  function* pendingSizeIdx() {
+    for (let vp = 0; vp < view().length; vp++) {
+      if (sizePending(st.images[view()[vp]])) yield vp;
+    }
+  }
   // the staging pass shared by the reactive pump and the settle pipeline:
   // resolve sizes around the virtualizer's current range. The range's
-  // indices are known-size-list positions, an ordered subset of view, so
-  // they serve as view positions: the window covers the visible span and
-  // stages AHEAD into entries whose size is still unknown. resolveAhead
-  // indexes st.images directly — no per-landing materialization.
+  // indices are KNOWN-LIST positions (the virtualizer's index space); the
+  // resolver walks VIEW positions — the visible window's edges are mapped
+  // between the two so the behind window covers every pending entry above
+  // the first visible, and the ahead window stages past the last.
   function stageResolveAhead() {
     const vz = feedVirtualizer();
     const items = vz?.getVirtualItems() ?? [];
     if (!items.length) return;
-    sizes_.resolveAhead(view(), items[0].index, items[items.length - 1].index);
+    const known = entriesWithKnownSize();
+    const v = view();
+    const firstView = v.indexOf(known[items[0].index]);
+    const lastView = v.indexOf(known[items[items.length - 1].index]);
+    if (firstView < 0 || lastView < 0) return;
+    sizes_.resolveAhead(v, firstView, lastView);
   }
+  // the drain pump: a landing re-stages the next batch. It tracks the
+  // pending COUNT and the settle signal only — never getVirtualItems()
+  // (mid-gesture staging was a second stager; feedSettle stages too)
   createEffect(() => {
-    const pending = pendingSizes();
-    if (!pending.length) return;
-    stageResolveAhead();
+    if (pendingSizeCount() === 0) return;
+    if (feedActivity() !== "settled") return;
+    untrack(stageResolveAhead);
   });
 
   // the image-src window derives membership from the virtualizer's range
@@ -765,6 +799,7 @@ export function makeAppStore() {
       async fillSize(id) {
         const idx = imageIdx(id);
         if (idx < 0 || st.images[idx].size != null) return;
+        const img = st.images[idx];
         const size = await api.entrySizeProbe(img.host, img.filename);
         if (size != null) setSt("images", idx, "size", size);
       },
@@ -836,9 +871,12 @@ export function makeAppStore() {
         setSt("views", reconcile(clean));
       },
       get(key) { return st.views[key] ?? null; },
-      set(key, v) {
+      // persist:false — a restore writing the stored view back is a read,
+      // not a write: it must not schedule a settings PATCH
+      set(key, v, { persist = true } = {}) {
         if (v) setSt("views", key, v);
         else setSt("views", key, undefined);
+        if (!persist) return;
         viewDirty.add(key);
         clearTimeout(viewsTimer);
         viewsTimer = setTimeout(flushViews, 400);
@@ -926,16 +964,20 @@ export function makeAppStore() {
       // scrolling IS browsing: once the scroll SETTLES, the last card whose
       // top crossed the feed's vertical midpoint becomes current (debounced
       // by the caller — a fast scroll must not spend a render per frame).
-      // items: the virtualizer's visible range — [{ index (view position),
-      // start, size }] in scroll order; viewport geometry comes from the
-      // seamed scroll element. Index math, never the DOM.
+      // items: the virtualizer's visible range — [{ index, start, size }] in
+      // scroll order, where index is a KNOWN-LIST position (the virtualizer's
+      // index space) — mapped through entriesWithKnownSize, never view()
+      // (they only coincide when every entry's size is known). Viewport
+      // geometry comes from the seamed scroll element. Index math, never
+      // the DOM.
       settleFromRange(items, viewportTop, clientHeight) {
         if (st.diff.open) return;
         const mid = viewportTop + clientHeight / 2;
+        const known = entriesWithKnownSize();
         let file = null;
         for (const it of items) {
           if (it.start > mid) break;
-          const im = st.images[view()[it.index]];
+          const im = st.images[known[it.index]];
           if (im) file = im.filename;
         }
         if (!file || file === current()?.image) return;
@@ -947,42 +989,6 @@ export function makeAppStore() {
     confirm: {
       open(req) { setConfirmDelete(req); },
       close() { setConfirmDelete(null); },
-    },
-
-    variations: {
-      // wand toggle: re-clicking the same image's wand closes the modal
-      open(image) {
-        const key = image?.id ?? null;
-        if (st.variations.open && st.variations.key === key) {
-          actions.variations.close();
-          return;
-        }
-        setSt("variations", reconcile({ open: true, images: [image], key }));
-      },
-      // bulk bar's wand: RELATIVE sweeps applied to every selected image
-      // around its own current value — even for a single image, since
-      // that's the batch affordance
-      openBulk(images) {
-        const key = "batch:" + images.map((i) => i.id).join("|");
-        if (st.variations.open && st.variations.key === key) {
-          actions.variations.close();
-          return;
-        }
-        setSt("variations", reconcile({ open: true, images, key }));
-      },
-      close() { setSt("variations", reconcile({ open: false, images: [], key: null })); },
-
-      // modal I/O — api.mjs owns the transport; the modal keeps session-scoped
-      // results (probe params, file lists) in local signals
-      probe(image) { return api.variationsProbe(image.id).catch(() => null); },
-      inputList(hostName) { return api.inputList(hostName).catch(() => []); },
-      uploadInput(hostName, form) { return api.uploadInput(hostName, form); },
-      async run(payload) {
-        const { ok, status, text } = await api.variationsRun(payload);
-        let data = null;
-        try { data = JSON.parse(text); } catch { /* non-JSON error body */ }
-        return { ok, status, data, text };
-      },
     },
 
     diff: {
@@ -1064,7 +1070,7 @@ export function makeAppStore() {
       // and the settle pipeline; the model never moves mid-gesture
       scrolled: feedScrolled,
       wantRangeNow,
-      retryImage(idx) { window_.retry(idx); },
+      retryImage(id) { window_.retry(id); },
       // floating button: back to the top of the feed
       scrollTop() {
         const col = feedScrollEl();
@@ -1400,7 +1406,9 @@ export function makeAppStore() {
       if (img.meta?.width && img.meta?.height) return { w: img.meta.width, h: img.meta.height };
       return sizes_.sizeOf(img.id);
     },
-    pendingSizeCount: () => pendingSizes().length,
+    pendingSizeCount,
+    pendingSizeIdx,
+    imageIdxById,
     entriesWithKnownSize: () => entriesWithKnownSize(),
   };
 

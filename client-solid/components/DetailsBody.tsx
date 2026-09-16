@@ -126,7 +126,8 @@ function Head(props) {
   const srcIdx = () => {
     const s = lineageSrc();
     if (!s) return -1;
-    return store.state.images.findIndex((i) => i.host === s.srcHost && i.filename === s.srcFile);
+    // the store's (host, filename) map owns the lookup — never a scan
+    return store.state.entryFor({ remote: s.srcHost, image: s.srcFile })?.index ?? -1;
   };
 
   return (

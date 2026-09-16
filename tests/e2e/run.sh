@@ -98,5 +98,6 @@ docker run --rm --network host -v "$WORK":/work -w /work \
 # 7. feed invariant e2e (§3.5): exact card heights, stable tops
 docker run --rm --network host -v "$WORK":/work -w /work \
   -e E2E_ENGINE="http://127.0.0.1:$ENGINE_PORT" \
+  -e E2E_FAKE="http://127.0.0.1:$FAKE_PORT" \
   --entrypoint node "$PW_IMAGE" \
   /work/tests/e2e/feed.e2e.cjs

@@ -15,7 +15,7 @@
 // (Grid's handler is its only writer). No innerHTML rebuilds, no querySelector
 // walks, no paint loop.
 
-import { createSignal, createEffect, createMemo, onMount, onCleanup, For } from "solid-js";
+import { createSignal, createMemo, onMount, onCleanup, For } from "solid-js";
 import { useAppStore } from "../store/app-store.js";
 import { tapeWindow } from "/js/rail.mjs";
 
@@ -55,15 +55,14 @@ export function FeedRail() {
 
   // viewport-visible cards → known-list positions, derived EXACTLY from the
   // virtualizer's visible range (items outside the viewport are overscan —
-  // filtered by the intersection test). Tracks the store's scroll signal;
-  // Grid's handler is its only writer.
+  // filtered by the intersection test). The scroll position is the store
+  // signal's VALUE (Grid's handler is its only writer) — no DOM read.
   const waveBounds = createMemo(() => {
-    store.state.feedScrollTop(); // the scroll reactivity
+    const top = store.state.feedScrollTop();
     const n = N();
     const vz = store.state.feedVirtualizer();
     const col = store.state.feedScrollEl();
     if (!vz || !col || n <= 1) return null;
-    const top = col.scrollTop;
     const bottom = top + col.clientHeight;
     let first = -1, last = -1;
     for (const it of vz.getVirtualItems()) {
@@ -74,17 +73,15 @@ export function FeedRail() {
     return first < 0 ? null : [first, last];
   });
 
-  // the tape window: the pure tapeWindow() fold over the wave
-  const [tapeStart, setTapeStart] = createSignal(0);
-  createEffect(() => {
+  // the tape window: the pure tapeWindow() fold over the wave — ONE memo
+  // with prev (no reset-to-0 on count change: a new feed re-centers
+  // through the same fold instead of flickering the tape away and back)
+  const tapeStart = createMemo((prev) => {
     const wb = waveBounds();
     const cap = capacity();
-    if (!wb || cap <= 0) return;
-    const next = tapeWindow(N(), cap, wb[0], wb[1], tapeStart());
-    if (next !== tapeStart()) setTapeStart(next);
-  });
-  // a new feed (filter/judgment/host): the old tape window is meaningless
-  createEffect(() => { N(); setTapeStart(0); });
+    if (!wb || cap <= 0) return prev;
+    return tapeWindow(N(), cap, wb[0], wb[1], prev);
+  }, 0);
 
   const ticks = createMemo(() => {
     const count = Math.max(0, Math.min(capacity(), N() - tapeStart()));

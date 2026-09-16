@@ -72,6 +72,8 @@ export function AnchorSpace() {
   let fileEl;
   // the drag-reorder state is component state, not a module global (G20)
   const [dragged, setDragged] = createSignal(null);
+  // the dropzone's highlight is a signal-driven class, not classList pokes
+  const [over, setOver] = createSignal(false);
   return (
     <>
       <div id="anchorList">
@@ -83,12 +85,13 @@ export function AnchorSpace() {
       </div>
       <div
         id="dropzone"
+        classList={{ over: over() }}
         onClick={() => fileEl?.click()}
-        onDragOver={(e) => { e.preventDefault(); e.currentTarget.classList.add("over"); }}
-        onDragLeave={(e) => e.currentTarget.classList.remove("over")}
+        onDragOver={(e) => { e.preventDefault(); setOver(true); }}
+        onDragLeave={() => setOver(false)}
         onDrop={async (e) => {
           e.preventDefault();
-          e.currentTarget.classList.remove("over");
+          setOver(false);
           if (e.dataTransfer?.getData("text/x-anchor")) return; // a reorder, not files
           if (e.dataTransfer?.files?.length) await store.actions.anchors.addFiles([...e.dataTransfer.files]);
         }}

@@ -10,19 +10,20 @@
 // spans (.imgref) report clicks through the optional onImageRef(file)
 // callback — the component never leaks its internals to a parent.
 
-import { For, Show } from "solid-js";
+import { createMemo, For, Show } from "solid-js";
 import { useAppStore } from "../store/app-store.js";
 import { fullFieldRows, valueDiffer, nodeImages, NODE_IMG_EXT } from "../store/fields.js";
 
 export function MetaBody(props) {
   const store = useAppStore();
   const ctx = () => ({ list: store.state.fieldsList() });
-  const rows = () => props.meta ? fullFieldRows(props.meta, ctx()) : [];
-  const differs = () => valueDiffer(props.compareMeta, ctx());
+  // derived data is memoized — these recompute per meta change, not per render
+  const rows = createMemo(() => props.meta ? fullFieldRows(props.meta, ctx()) : []);
+  const differs = createMemo(() => valueDiffer(props.compareMeta, ctx()));
 
   // group rows by their node type (the part before " — "), first-appearance
   // order; prompt groups sink to the bottom of the section list
-  const groups = () => {
+  const groups = createMemo(() => {
     const m = new Map();
     for (const [label, v, long] of rows()) {
       const i = label.indexOf(" — ");
@@ -32,7 +33,7 @@ export function MetaBody(props) {
     }
     return [...m].sort((a, b) =>
       +/clip\s*text\s*encode/i.test(a[0]) - +/clip\s*text\s*encode/i.test(b[0]));
-  };
+  });
 
   // collapse state lives in the store (persisted under the same
   // kosmozoo.infoGroups.v1 key as before)
@@ -84,7 +85,7 @@ function InfoGroup(props) {
   const longRows = () => props.grows.filter(([, , long]) => long);
 
   return (
-    <div class={"infogroup" + (props.isCollapsed() ? " collapsed" : "")} data-group={props.group}>
+    <div class={"infogroup" + (props.isCollapsed() ? " collapsed" : "")}>
       <button
         class="infogroup-head"
         title={props.isCollapsed() ? "expand" : "collapse"}

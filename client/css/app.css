@@ -17,6 +17,7 @@
   --foreground-dim: #666;
   --foreground-bright: #fff;
   --card-chrome-h: 148px;         /* card chrome under the image box — read once by sizes.js */
+  --grid-gap: 16px;               /* inter-card spacing — part of the virtualizer's item size */
   --primary: #38bdf8;            /* primary action, current pointer */
   --secondary: #7ab3ff;          /* interactive accent: hover, links, active */
   --positive: #9ece6a;           /* up-vote, success */
@@ -28,6 +29,7 @@
   --background-stage: #0a0a0c;   /* image stage (imgwrap, inline images) */
   --chrome-h: 37px;              /* header strip height — bulk bar anchors to it */
   --backdrop: rgba(0,0,0,.6);    /* the one modal backdrop tone (H5) */
+  --dropdown-gap: 8px;           /* dropdown/flash offset from its anchor */
   /* page-level layer scale (H6): chrome < dropdown < overlay < modal <
      confirm < status. Component-local stacking stays plain integers. */
   --z-chrome: 10; --z-dropdown: 20; --z-overlay: 30;
@@ -80,7 +82,7 @@ body.resizing { cursor: col-resize; user-select: none; }
 .hdot { width: 7px; height: 7px; border-radius: 50%; background: var(--secondary);
   flex: 0 0 auto; }
 .hdot.off { background: var(--foreground-dim); }
-#hostDrop { position: absolute; top: calc(100% + 8px); left: 0; z-index: var(--z-dropdown);
+#hostDrop { position: absolute; top: calc(100% + var(--dropdown-gap)); left: 0; z-index: var(--z-dropdown);
   background: var(--focused-background); border: 1px solid var(--border); border-radius: 8px;
   padding: 8px; min-width: 280px; display: flex; flex-direction: column;
   gap: 2px; }
@@ -163,7 +165,7 @@ main { display: flex; flex: 1; min-height: 0; }
   background: transparent; cursor: col-resize; }
 #divider::before, .separator::before { content: ""; position: absolute;
   inset: 0 var(--line-inset); }
-#divider { --grab-w: 7px; border-radius: 4px; margin: 0 -6px; z-index: 5; }
+#divider { --grab-w: 7px; border-radius: 4px; margin: 0 -6px; z-index: var(--z-chrome); }
 #divider::before { background: var(--border); border-radius: 1px; transition: background .15s; }
 #divider:hover::before, #divider.dragging::before { background: var(--foreground-mid); }
 /* the pane's width is owned by the store signal (rendered as an inline
@@ -198,7 +200,9 @@ main { display: flex; flex: 1; min-height: 0; }
 #dropzone:hover, #dropzone.over { border-color: var(--secondary); color: var(--secondary); }
 
 /* --- candidates feed: record cards --------------------------------------- */
-#grid { display: flex; flex-direction: column; gap: 16px; padding: 8px; }
+#grid { display: flex; flex-direction: column;
+  --grid-pad: 8px; padding: var(--grid-pad);
+  position: relative; /* the measuring probe's containing block */ }
 /* Static decoration architecture: every box carries its border in all
    states, at constant size; state changes border-color only. No outward
    decorations (outline, outer box-shadow) near scroll/clip boundaries —
@@ -214,9 +218,18 @@ main { display: flex; flex: 1; min-height: 0; }
    explicit intra-layer precedence rule when it lands). */
 @layer card-base, card-state, card-status, card-activity;
 
-.card { scroll-margin-top: 8px;
+.card, .card--probe { scroll-margin-top: 8px;
   background: var(--focused-background); border-radius: 8px; padding: 12px;
-  border-width: 1px; border-style: solid; }
+  border-width: 1px; border-style: solid;
+  /* the inter-card spacing rides ON the card: the virtualizer's item size
+     is cardHeight + this margin, so its scroll math matches the DOM
+     exactly (a flex gap would be invisible to it) */
+  margin-bottom: var(--grid-gap); }
+/* the measuring probe IS a card for styling (the shared rule above), but
+   invisible and out of flow — geometry constants are measured from it,
+   never from a live feed card */
+.card--probe { position: absolute; inset-inline: var(--grid-pad); top: 0; visibility: hidden;
+  pointer-events: none; border-color: transparent; }
 @layer card-base     { .card { border-color: var(--focused-background); } }
 @layer card-state    { .card[data-vote="up"]   { border-color: var(--positive-dim); }
                        .card[data-vote="down"] { border-color: var(--negative); } }
@@ -284,7 +297,7 @@ main { display: flex; flex: 1; min-height: 0; }
 .copyable.copied { color: var(--secondary); }
 /* the save-confirmation flash overlays the row (anchored left of the action
    buttons) instead of occupying width in every card's title row */
-.saved { position: absolute; right: calc(100% + 8px); top: 50%;
+.saved { position: absolute; right: calc(100% + var(--dropdown-gap)); top: 50%;
   transform: translateY(-50%); color: var(--positive); font-size: 11px;
   opacity: 0; transition: opacity .3s; white-space: nowrap; pointer-events: none; }
 .saved.show { opacity: 1; }
@@ -335,7 +348,7 @@ main { display: flex; flex: 1; min-height: 0; }
 
 /* --- ☰ menu panel ---------------------------------------------------------- */
 #menuWrap { position: relative; }
-#menu { position: absolute; top: calc(100% + 8px); right: 0; z-index: var(--z-dropdown);
+#menu { position: absolute; top: calc(100% + var(--dropdown-gap)); right: 0; z-index: var(--z-dropdown);
   background: var(--focused-background); border: 1px solid var(--border); border-radius: 8px;
   padding: 10px; min-width: 300px; display: flex; flex-direction: column;
   gap: 8px; }
@@ -362,7 +375,6 @@ main { display: flex; flex: 1; min-height: 0; }
 .switchwrap input:checked + .track::after {
   transform: translateX(calc(var(--track-w) - var(--knob) - 2 * var(--inset)));
   background: var(--foreground-bright); }
-.switchwrap.mini .track { --track-w: 22px; --track-h: 13px; --knob: 9px; }
 
 /* --- the status corner: ONE fixed flex column holds the scroll-top button
    above the status stack (H7 — the button's bottom:56px was hand-synced to
@@ -467,7 +479,7 @@ main { display: flex; flex: 1; min-height: 0; }
 .confirm-ok:disabled, .confirm-cancel:disabled { opacity: .5; cursor: default; }
 
 /* --- workbench chrome -------------------------------------------------------- */
-#diffKeysBtn { position: absolute; right: 14px; bottom: 12px; z-index: 45;
+#diffKeysBtn { position: absolute; right: 14px; bottom: 12px; z-index: var(--z-modal);
   background: color-mix(in srgb, var(--surface) 65%, transparent); border: 1px solid var(--border); border-radius: 6px;
   color: var(--foreground-mid); padding: 5px 7px; cursor: pointer; display: flex; }
 #diffKeysBtn:hover { color: var(--foreground); border-color: var(--foreground-dim); }
@@ -480,7 +492,7 @@ main { display: flex; flex: 1; min-height: 0; }
   align-items: center; justify-content: center; }
 #diffImg { max-width: 100%; max-height: 100%; object-fit: contain;
   user-select: none; -webkit-user-drag: none; }
-#diffClose { position: absolute; top: 6px; right: 8px; z-index: 45;
+#diffClose { position: absolute; top: 6px; right: 8px; z-index: var(--z-modal);
   background: color-mix(in srgb, var(--surface) 65%, transparent); border: 1px solid var(--border);
   border-radius: 6px; color: var(--foreground-mid); padding: 5px 7px; cursor: pointer;
   display: flex; }
@@ -496,7 +508,7 @@ main { display: flex; flex: 1; min-height: 0; }
   display: flex; flex-direction: column;
   border-radius: 12px; padding: 20px 24px;
   font-size: 12px; color: var(--foreground);
-  box-shadow: 0 12px 40px rgba(0,0,0,.5); }
+  box-shadow: 0 12px 40px var(--backdrop); }
 
 /* title */
 .vz-title { font-size: 15px; color: var(--foreground-bright); text-align: center;
@@ -633,7 +645,7 @@ main { display: flex; flex: 1; min-height: 0; }
 /* Orange "current value" marker — overlaid on the slider lane. */
 .vz-marker { position: absolute; width: 2px; height: 20px;
   top: 50%; transform: translate(-50%, -50%);
-  background: var(--attention); pointer-events: none; z-index: 2; }
+  background: var(--attention); pointer-events: none; z-index: var(--z-chrome); }
 
 /* Lane 3: current-value label below the track — same horizontal inset. */
 .vz-lane-current { position: relative; height: 14px; margin: 2px var(--thumb-inset) 0; }
@@ -711,7 +723,7 @@ main { display: flex; flex: 1; min-height: 0; }
    elements only render — clicks/drag hits target the imgwrap above them */
 .info-source-images .infoimg img { max-height: none; pointer-events: none; }
 /* the details split's instance of the grab-strip pattern */
-.separator { --grab-w: 13px; z-index: 2; }
+.separator { --grab-w: 13px; z-index: var(--z-chrome); }
 .separator::before { background: var(--lifted); }
 /* stacked layout: the same strip turned — in a column flex the basis IS
    the height, and the line inset flips to the horizontal edges */

@@ -34,12 +34,12 @@ export function WorkspacePane() {
       <aside id="workspace" ref={asideEl} style={{ width: `${store.state.anchorPaneWidth()}px` }}>
         <Switch>
           <Match when={store.state.workspace() === "anchors"}>
-            <div id="wsAnchors" class="ws-space">
+            <div class="ws-space">
               <AnchorSpace />
             </div>
           </Match>
           <Match when={true}>
-            <div id="wsDetails" class="ws-space">
+            <div class="ws-space">
               <DetailsBody />
             </div>
           </Match>

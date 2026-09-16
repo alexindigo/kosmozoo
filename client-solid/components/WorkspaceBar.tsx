@@ -10,13 +10,13 @@ export function WorkspaceBar() {
   return (
     <nav id="wsBar">
       <button
-        id="wsBtnDetails" data-space="details" title="image details"
+        title="image details"
         class={store.state.workspace() === "details" ? "on" : ""}
         onClick={() => store.actions.ui.setWorkspace("details")}
         innerHTML={iconSvg("info-circle", 16)}
       />
       <button
-        id="wsBtnAnchors" data-space="anchors" title="anchors"
+        title="anchors"
         class={store.state.workspace() === "anchors" ? "on" : ""}
         onClick={() => store.actions.ui.setWorkspace("anchors")}
         innerHTML={iconSvg("anchor", 16)}

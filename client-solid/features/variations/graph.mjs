@@ -39,7 +39,7 @@ export function paramDef(id, current, integer) {
   const spread = ov.spread ?? defaultSpread(current, integer, decimals);
   const defaultInc = ov.defaultInc ?? defaultIncrement(decimals);
   const clamp = ov.clamp ?? defaultClamp(current, decimals);
-  return { key: id, label: ov.label ?? id, decimals, spread, defaultInc, clamp };
+  return { key: id, label: id, decimals, spread, defaultInc, clamp };
 }
 
 function defaultDecimals(current) {

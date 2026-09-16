@@ -27,8 +27,6 @@ export function ConfirmDelete() {
     setBusy(false);
   };
 
-  // Esc comes from the Modal (capture phase — it outranks what's under it)
-
   const confirm = async () => {
     if (busy()) return;
     setBusy(true);
@@ -37,7 +35,9 @@ export function ConfirmDelete() {
     else setBusy(false); // nothing succeeded — stay open
   };
 
-  const mode = () => store.state.hosts[images()[0]?.host]?.capabilities?.delete ?? "hide";
+  // the loaded collection's record answers the mode — never the first
+  // image's host (a mixed-host bulk selection would mislabel the action)
+  const mode = () => store.state.currentCollection()?.capabilities?.delete ?? "hide";
   const copy = () => deleteCopy(mode());
 
   return (

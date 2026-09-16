@@ -7,7 +7,7 @@
 // path-level updates the card's bindings follow by construction.
 
 import { createSignal, onMount } from "solid-js";
-import { For, Show } from "solid-js/web";
+import { For, Show } from "solid-js";
 import { iconSvg } from "/js/icons.mjs";
 import { useAppStore } from "../store/app-store.js";
 import { deleteCopy } from "../lib/delete-copy.js";
@@ -18,7 +18,9 @@ import { NoteBox } from "./NoteBox.js";
 
 export function Card(props) {
   const store = useAppStore();
-  const image = () => store.state.images[props.imgIdx()];
+  // the card knows its entry id; the index comes from the store's map — O(1)
+  const imgIdx = () => store.state.imageIdxById().get(props.entryId);
+  const image = () => store.state.images[imgIdx()];
   const meta = () => image()?.meta ?? null;
   const j = () => image()?.judgment ?? {};
 
@@ -27,7 +29,7 @@ export function Card(props) {
   // An unknown size renders the 16:9 floor placeholder; the img inserts
   // only once the size is known (off-card resolution keeps it out of view
   // until then)
-  const sizeInfo = () => store.state.cardSize(props.imgIdx());
+  const sizeInfo = () => store.state.cardSize(imgIdx());
   const ar = () => {
     const s = sizeInfo();
     return s ? `${s.w} / ${s.h}` : null;
@@ -37,7 +39,7 @@ export function Card(props) {
     if (!img) return null;
     // the card is only MOUNTED at known size (§3.5) — the img's src follows
     // the window's range membership; broken bytes take the in-card error path
-    return store.state.window.getSrc(props.imgIdx(), img);
+    return store.state.window.getSrc(imgIdx(), img);
   };
   // the two flash windows are signals through the shared helper (G9) —
   // no classList pokes, no orphan timers
@@ -59,7 +61,7 @@ export function Card(props) {
   // over the saved judgment note (it may hold newer edits).
   const neighborText = (cls) => (dir) => {
     const images = store.state.images;
-    for (let i = props.imgIdx() + dir; i >= 0 && i < images.length; i += dir) {
+    for (let i = imgIdx() + dir; i >= 0 && i < images.length; i += dir) {
       const im = images[i];
       const text = store.state.drafts[`${im?.id}:${cls}`] ?? im?.judgment?.notes?.[cls] ?? "";
       if (text) return text;
@@ -84,11 +86,11 @@ export function Card(props) {
         alt={image()?.filename}
         ar={ar()}
         zoomKey={image()?.id}
-        onOpen={() => store.actions.diff.openFromFeed(props.imgIdx())}
-        onErrorClick={() => store.state.window.retry(props.imgIdx())}
+        onOpen={() => store.actions.diff.openFromFeed(imgIdx())}
+        onErrorClick={() => store.state.window.retry(props.entryId)}
         onPhase={(p) => {
-          if (p === "loaded") store.state.window.markLoaded(props.imgIdx());
-          else if (p === "error") store.state.window.markError(props.imgIdx());
+          if (p === "loaded") store.state.window.markLoaded(props.entryId);
+          else if (p === "error") store.state.window.markError(props.entryId);
         }}
       />
       <div class="ctitle">

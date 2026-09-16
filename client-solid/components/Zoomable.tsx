@@ -76,9 +76,7 @@ export function Zoomable(props) {
         alt={props.alt}
         src={props.src == null ? undefined : props.src}
         style={{ transform: transform() || undefined }}
-        onLoad={(e) => {
-          const img = e.target;
-          if (img.naturalWidth && img.naturalHeight) props.onLoaded?.(img.naturalWidth, img.naturalHeight);
+        onLoad={() => {
           // natural size is the box's aspect source; the image itself is
           // scale-down inside and never exceeds it (never upscaled)
           setLoaded(true);

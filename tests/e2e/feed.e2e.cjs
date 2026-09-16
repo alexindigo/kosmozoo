@@ -91,6 +91,92 @@ const AUDIT = `(async () => {
     `nullSize=${a2.nullSize} maxDelta=${a2.maxDelta}`);
   check("current card's top did not move", a1.currentTop !== null && a2.currentTop === a1.currentTop,
     `${a1.currentTop} -> ${a2.currentTop}`);
+
+  // --- above-fold landings: a size landing behind the fold inserts a card
+  // above the viewport; the feed compensates, so the list does not shift ---
+  const prefetchCtl = (kv) => page.evaluate(`(async () => {
+    await fetch("/api/prefetch", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(${JSON.stringify(kv)}) });
+  })()`);
+  try {
+    const FAKE = process.env.E2E_FAKE ?? "http://127.0.0.1:18261";
+    const fakeAddr = FAKE.replace(/^https?:\/\//, "");
+    // an "undimmed" collection: a fresh id on the same fake host with the
+    // walk DISABLED (walk lanes frozen, prio lanes drain), so only wanted
+    // files ever carry dims. Both flags are set explicitly — the engine's
+    // settings persist across suite runs. The dims prio lane shares one
+    // event loop with every collection's worker, so the case waits for the
+    // boot backlog to drain first (a no-op late in the suite).
+    await page.poll(`(async () => {
+      const pf = await (await fetch("/api/prefetch")).json();
+      return pf.ingestPending === 0 && pf.dimsPending === 0;
+    })()`, 300000);
+    await prefetchCtl({ enabled: false, paused: false });
+    await page.evaluate(`(async () => {
+      await fetch("/api/collections/undim", { method: "DELETE" }).catch(() => null); // residue from an earlier run
+      const r = await fetch("/api/collections", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ name: "undim", address: "${fakeAddr}" }) });
+      return r.status;
+    })()`);
+    const names = await page.evaluate(`(async () =>
+      (await (await fetch("/api/collections/undim/entries")).json()).map((e) => e.name))()`);
+    check("undim collection listed", names.length > 2000, `${names.length} entries`);
+    // dims for [0..1599] except the 50-name window [1400..1449] — the
+    // behind window that must resolve before anything below it
+    const wanted = names.filter((_, i) => i < 1600 && !(i >= 1400 && i < 1450));
+    await page.evaluate(`(async () => {
+      const r = await fetch("/api/collections/undim/want", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ files: ${JSON.stringify(wanted)} }),
+      });
+      if (!r.ok) throw new Error("want failed: " + r.status + " " + (await r.text()));
+    })()`);
+    // engine-side first: the wanted 1550 carry dims (the prio lane drains
+    // at ~20/s while the walk stays frozen); then the client's meta poll
+    // merges them into the known list within a poll cycle
+    await page.poll(`(async () =>
+      (await (await fetch("/api/collections/undim/entries")).json())
+        .filter((e) => e.width != null).length >= 1550)()`, 180000);
+    await page.evaluate(`(async () => { ${KZ}.actions.hosts.select("undim"); })()`);
+    await page.poll(`(async () => ${KZ}.state.entriesWithKnownSize().length >= 1550)()`, 30000);
+
+    // scrub-jump deep into the list, settle, audit
+    await page.evaluate(`(async () => {
+      const kz = ${KZ};
+      kz.actions.feed.restoreToIndex(kz.state.entriesWithKnownSize()[1500]);
+    })()`);
+    await page.poll(`(async () => {
+      const c = document.getElementById("candidatesCol");
+      const a = c.scrollTop;
+      await new Promise(r => setTimeout(r, 250));
+      return a === c.scrollTop && !!document.querySelector(".card.current");
+    })()`, 15000);
+    const b1 = await page.evaluate(AUDIT);
+
+    // the behind window lands above the fold — poll its two ends in
+    await page.poll(`(async () => {
+      const kz = ${KZ};
+      const known = new Set(kz.state.entriesWithKnownSize());
+      const imgs = kz.state.images;
+      return known.has(imgs.findIndex((i) => i.filename === ${JSON.stringify(names[1400])}))
+          && known.has(imgs.findIndex((i) => i.filename === ${JSON.stringify(names[1449])}));
+    })()`, 60000);
+    check("behind window landed above the fold", true);
+    const b2 = await page.evaluate(AUDIT);
+    check("current card's top did not move across the landings",
+      b1.currentTop !== null && b2.currentTop === b1.currentTop, `${b1.currentTop} -> ${b2.currentTop}`);
+    check("heights still exact after the landings", b2.nullSize === 0 && b2.maxDelta === 0,
+      `nullSize=${b2.nullSize} maxDelta=${b2.maxDelta}`);
+  } catch (e) {
+    check("above-fold landings case", false, e.message.slice(0, 200));
+  } finally {
+    // leave the engine as found: walk resumed, scratch collection gone
+    try {
+      await page.evaluate(`(async () => {
+        await fetch("/api/prefetch", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ enabled: true, paused: false }) });
+        await fetch("/api/collections/undim", { method: "DELETE" }).catch(() => null);
+      })()`);
+    } catch { /* engine teardown handles it */ }
+  }
+
   check("no uncaught page errors", pageErrors.length === 0, pageErrors[0] ?? "");
 
   await page.close();

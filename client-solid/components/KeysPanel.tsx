@@ -11,13 +11,10 @@ export function KeysPanel() {
   const store = useAppStore();
   const close = () => store.actions.keys.closePanel();
 
+  // keymap.list() rows are the rows — filtered, never re-derived (G19)
   const rows = () => {
     const q = (store.state.keysFilter() ?? "").toLowerCase();
     return store.state.bindings()
-      .map(({ id, key, defaultKey, desc, ctx }) => ({
-        id, key, defaultKey, desc: desc ?? id, ctx: ctx ?? "global",
-        overridden: key !== defaultKey,
-      }))
       .filter((a) => !q || `${a.desc} ${a.id} ${a.ctx}`.toLowerCase().includes(q));
   };
 

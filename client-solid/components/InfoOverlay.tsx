@@ -17,7 +17,7 @@ export function InfoOverlay() {
       <Modal overlayId="infoOverlay" panelId="infoPanel" onClose={close}>
         <button id="infoClose" title="close (Esc)" onClick={close} innerHTML={iconSvg("x", 16)} />
         <div id="infoTitle">{store.state.infoOverlay.name}</div>
-        <div id="infoBody" class="metabody">
+        <div class="metabody">
           <MetaBody meta={store.state.infoOverlay.meta ?? null} host={null} compareMeta={null} />
         </div>
       </Modal>
