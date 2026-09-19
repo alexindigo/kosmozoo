@@ -267,10 +267,11 @@ export function makeRouter(ctx) {
       }
     }
 
-    // Read through ingestion — the one ingestion path. A failing backing is
-    // a 502 carrying the reason; no direct backing read in a route, no
-    // swallowed errors.
-    const got = await ctx.ingest.ensure(id, name, kind);
+    // Read through ingestion — the one ingestion path. A human is waiting
+    // on this exact image: the read gate serves it before background work.
+    // A failing backing is a 502 carrying the reason; no direct backing
+    // read in a route, no swallowed errors.
+    const got = await ctx.ingest.ensure(id, name, kind, { priority: "high" });
     if (got.status === 200) return makeResponse(got.bytes, got.hash);
     if (got.status === 400) return new Response("bad filename", { status: 400 });
     if (got.status === 404) return new Response("not found", { status: 404 });
