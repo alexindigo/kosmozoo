@@ -278,6 +278,58 @@ Deno.test("images.fillSize: HEAD probe fills the byte size on the right entry", 
   }
 });
 
+// --- current-pointer visibility invariant -----------------------------------
+
+Deno.test("current: a hidden current advances to the next visible entry (one guard, not per-action)", async () => {
+  const { api } = await import("../client/js/api.mjs");
+  globalThis.location = { hash: "", pathname: "/" };
+  globalThis.history = { state: null, replaceState() {}, pushState() {} };
+  const store = makeAppStore();
+  const origEntries = api.entries;
+  const origMeta = api.meta;
+  const origWant = api.want;
+  const origNodes = api.nodes;
+  const origSetJudgment = api.setJudgment;
+  api.entries = async () => ["a.png", "b.png", "c.png", "d.png"].map((name) => ({
+    name, size: 1, hash: null, state: "seen", meta: null, extracted: false, judgment: null, width: 100, height: 50,
+  }));
+  api.meta = async () => ({ v: 1, changed: false });
+  api.want = async () => ({ pending: 0 });
+  api.nodes = async () => ({});
+  api.setJudgment = async () => ({});
+  try {
+    await store.actions.hosts.select("h");
+    const img = (n) => store.state.images.find((i) => i.filename === n);
+
+    // current on b.png; down-vote it (downvoteHides is on by default) →
+    // the pointer advances to the NEXT visible entry
+    store.actions.current.set("h", "b.png");
+    await store.actions.judgments.setVote(img("b.png"), "down");
+    assertEquals(store.state.current(), { remote: "h", image: "c.png" });
+
+    // down-vote the LAST visible entry → the pointer walks back to the previous
+    store.actions.current.set("h", "d.png");
+    await store.actions.judgments.setVote(img("d.png"), "down");
+    assertEquals(store.state.current(), { remote: "h", image: "c.png" });
+
+    // down-vote a NON-current card → the pointer does not move
+    await store.actions.judgments.setVote(img("a.png"), "down");
+    assertEquals(store.state.current(), { remote: "h", image: "c.png" });
+
+    // down-vote the last visible one → nothing left → pointer clears
+    await store.actions.judgments.setVote(img("c.png"), "down");
+    assertEquals(store.state.current(), null);
+  } finally {
+    api.entries = origEntries;
+    api.meta = origMeta;
+    api.want = origWant;
+    api.nodes = origNodes;
+    api.setJudgment = origSetJudgment;
+    delete globalThis.location;
+    delete globalThis.history;
+  }
+});
+
 // --- deletion navigation ------------------------------------------------------
 
 Deno.test("planDeleteCurrent: previous current iff adjacent, else feed-above, else topmost", async () => {

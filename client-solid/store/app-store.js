@@ -158,6 +158,25 @@ export function makeAppStore() {
     return ce ? nodeImages(ce.entry.meta ?? null, ce.entry.host) : [];
   });
 
+  // The current pointer never names an entry the feed has hidden. This is
+  // the ONE guard — enforced against the view, never per action: a vote, a
+  // pref toggle, a filter, or any future visibility rule all land here by
+  // construction. A hidden current advances to the next visible entry in
+  // view order (else the previous, else nothing).
+  createEffect(() => {
+    const c = current();
+    if (!c?.image || c.remote !== host()) return;
+    if (!st.images.length) return; // a reload in flight, not a visibility change
+    const v = view();
+    const idx = findByFile(c.image);
+    if (idx >= 0 && v.includes(idx)) return;
+    const next = idx >= 0
+      ? (v.find((i) => i > idx) ?? v[v.length - 1] ?? null)
+      : (v[0] ?? null);
+    assignCurrent(next != null ? { remote: host(), image: st.images[next].filename } : null, { push: false });
+    mirrorCurrentHash();
+  });
+
   // Trail bound: a scroll-through-the-feed session turns over the pointer
   // constantly — the stack is a bounded window, not a full history.
   const STACK_CAP = 200;
