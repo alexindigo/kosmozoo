@@ -550,8 +550,21 @@ export function makeAppStore() {
   // list is the size-known view; the pending set drives the resolver. Both
   // memos are reactive over the listing (store paths) and the sizes store
   // (version signal), so landings recompute both by construction.
-  // id → index map maintained alongside images — every per-id lookup uses
-  // it (CardSlot, judgment actions, the loader's srcFor), never a scan
+  //
+  // THE TWO INDEX SPACES. The state array (st.images) is indexed by IMAGE
+  // INDEX (listing order); the feed renders a filtered view of it
+  // (entriesWithKnownSize), indexed by FEED POSITION. On a dense list they
+  // coincide; while dims are still arriving the list is sparse and image
+  // index > feed position — so they are NEVER interchangeable. The rule:
+  //   feed code (Grid, Card, the src window, the rail, settle, staging)
+  //   handles feed positions and entry ids only; image indices exist only
+  //   in state-level code (judgment actions, bulk ops, entryFor).
+  // The crossing is exactly these named conversions — nothing else maps
+  // between spaces:
+  //   imageIdxById / imageIdxByFile — id/file → image index (state space)
+  //   feedPositionOf / feedEntryAt  — id ↔ feed position (feed space)
+  // (stageResolveAhead is the one further crossing, feed → view, for the
+  // size loader, which must see pending entries too.)
   const imageIdxById = createMemo(() => {
     const m = new Map();
     for (let i = 0; i < st.images.length; i++) m.set(st.images[i].id, i);
@@ -591,6 +604,15 @@ export function makeAppStore() {
       if (sizePending(st.images[view()[vp]])) yield vp;
     }
   }
+  // the feed-space conversions (see THE TWO INDEX SPACES above)
+  const feedPosById = createMemo(() => {
+    const m = new Map();
+    const list = entriesWithKnownSize();
+    for (let p = 0; p < list.length; p++) m.set(st.images[list[p]].id, p);
+    return m;
+  });
+  const feedEntryAt = (pos) => st.images[entriesWithKnownSize()[pos]];
+  const feedPositionOf = (id) => feedPosById().get(id);
   // the staging pass shared by the reactive pump and the settle pipeline:
   // resolve sizes around the virtualizer's current range. The range's
   // indices are KNOWN-LIST positions (the virtualizer's index space); the
@@ -992,11 +1014,10 @@ export function makeAppStore() {
       settleFromRange(items, viewportTop, clientHeight) {
         if (st.diff.open) return;
         const mid = viewportTop + clientHeight / 2;
-        const known = entriesWithKnownSize();
         let file = null;
         for (const it of items) {
           if (it.start > mid) break;
-          const im = st.images[known[it.index]];
+          const im = feedEntryAt(it.index);
           if (im) file = im.filename;
         }
         if (!file || file === current()?.image) return;
@@ -1428,6 +1449,8 @@ export function makeAppStore() {
     pendingSizeCount,
     pendingSizeIdx,
     imageIdxById,
+    feedEntryAt,
+    feedPositionOf,
     entriesWithKnownSize: () => entriesWithKnownSize(),
   };
 

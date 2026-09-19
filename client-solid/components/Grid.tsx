@@ -32,8 +32,9 @@ export function Grid() {
 
   // the virtualizer's item list is entriesWithKnownSize (the size-known
   // view) — count, keys and estimates ALL map through that ONE list, keyed
-  // by entry id: a string, so identity is stable by construction
-  const knownAt = (i) => store.state.images[store.state.entriesWithKnownSize()[i]];
+  // by entry id: a string, so identity is stable by construction. knownAt
+  // is the store's feedEntryAt — the one feed→entry conversion
+  const knownAt = (i) => store.state.feedEntryAt(i);
 
   const virtualizer = createVirtualizer({
     get count() { return store.state.entriesWithKnownSize().length; },

@@ -330,6 +330,57 @@ Deno.test("current: a hidden current advances to the next visible entry (one gua
   }
 });
 
+// --- the src window on a sparse known list ---------------------------------
+
+Deno.test("src window: a rendered card gets its src even when its image index is far from its feed position", async () => {
+  const { api } = await import("../client/js/api.mjs");
+  globalThis.location = { hash: "", pathname: "/" };
+  globalThis.history = { state: null, replaceState() {}, pushState() {} };
+  const store = makeAppStore();
+  const origEntries = api.entries;
+  const origMeta = api.meta;
+  const origWant = api.want;
+  const origNodes = api.nodes;
+  // 30 entries; dims known only for image indices 0, 25, 28 — a SPARSE
+  // known list: image index ≠ feed position
+  api.entries = async () => Array.from({ length: 30 }, (_, i) => ({
+    name: `f${i}.png`, size: 1, hash: null, state: "seen", meta: null, extracted: false,
+    judgment: null,
+    width: [0, 25, 28].includes(i) ? 100 : null,
+    height: [0, 25, 28].includes(i) ? 50 : null,
+  }));
+  api.meta = async () => ({ v: 1, changed: false });
+  api.want = async () => ({ pending: 0 });
+  api.nodes = async () => ({});
+  try {
+    await store.actions.hosts.select("h");
+    assertEquals(store.state.entriesWithKnownSize(), [0, 25, 28]);
+    assertEquals(store.state.feedPositionOf("h:f28.png"), 2);
+    // the rendered window covers feed positions 1..2; its bounds pad to
+    // [0, 12] in FEED POSITIONS — a membership check in image indices would
+    // wrongly exclude image index 28 (> 12)
+    store.actions.feed.register({
+      virtualizer: {
+        getVirtualItems: () => [
+          { index: 1, start: 0, end: 100, key: "h:f25.png" },
+          { index: 2, start: 100, end: 200, key: "h:f28.png" },
+        ],
+      },
+      scrollEl: null,
+    });
+    const img = store.state.images[28];
+    const src = store.state.window.getSrc(store.state.feedPositionOf(img.id), img);
+    assert(src && src.includes(encodeURIComponent("f28.png")), `rendered card must get its src, got ${src}`);
+  } finally {
+    api.entries = origEntries;
+    api.meta = origMeta;
+    api.want = origWant;
+    api.nodes = origNodes;
+    delete globalThis.location;
+    delete globalThis.history;
+  }
+});
+
 // --- deletion navigation ------------------------------------------------------
 
 Deno.test("planDeleteCurrent: previous current iff adjacent, else feed-above, else topmost", async () => {

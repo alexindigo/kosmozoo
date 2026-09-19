@@ -37,9 +37,10 @@ export function Card(props) {
   const src = () => {
     const img = image();
     if (!img) return null;
-    // the card is only MOUNTED at known size — the img's src follows
-    // the window's range membership; broken bytes take the in-card error path
-    return store.state.window.getSrc(imgIdx(), img);
+    // the card is only MOUNTED at known size — the img's src follows the
+    // window's range membership, in FEED POSITIONS (the one index space the
+    // window knows); broken bytes take the in-card error path
+    return store.state.window.getSrc(store.state.feedPositionOf(props.entryId), img);
   };
   // the two flash windows are signals through the shared helper —
   // no classList pokes, no orphan timers

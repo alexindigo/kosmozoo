@@ -5,9 +5,14 @@
 // regCache, no index scan — the range membership IS the mechanism; the
 // workbench pins its entry id explicitly. Size resolution lives in
 // ./sizes.js; this module owns only src membership + the error-retry seam.
-// Error state is keyed by ENTRY ID (a host switch reindexes the list; index
-// keys would retarget another image) and cleared on host switch; the retry
-// timer itself is sizes.js's one scheduler.
+//
+// ONE INDEX SPACE: range and membership are both FEED POSITIONS (the
+// virtualizer's index space). Callers pass store.state.feedPositionOf(id)
+// — never an image index (the two coincide only on a dense list; the
+// store's TWO INDEX SPACES rule lives in app-store.js). Error state is
+// keyed by ENTRY ID (a host switch reindexes the list; index keys would
+// retarget another image) and cleared on host switch; the retry timer
+// itself is sizes.js's one scheduler.
 
 import { createSignal } from "solid-js";
 import { api } from "/js/api.mjs";
@@ -15,8 +20,8 @@ import { scheduleRetry } from "./sizes.js";
 
 export const WINDOW_PAD = 10;
 
-// range: => { first, last } in image indices — fed from the registered
-// virtualizer's getVirtualItems.
+// range: () => { first, last } in FEED POSITIONS — fed from the registered
+// virtualizer's getVirtualItems().
 export function makeImageWindow({ range }) {
   const errored = new Set();    // entry ids whose bytes failed
   const retryNonce = new Map(); // id -> cache-bust nonce
@@ -50,11 +55,11 @@ export function makeImageWindow({ range }) {
 
   // src for a feed card: in-window → bytes url, else null. Reactive: reads
   // the range signal + the bump, so a range change re-derives exactly the
-  // bound srcs. Membership is by position (idx); the error state is by id.
-  const getSrc = (idx, img) => {
+  // bound srcs. pos is the card's FEED POSITION; the error state is by id.
+  const getSrc = (pos, img) => {
     version();
     const b = bounds();
-    if (!b || idx < b[0] || idx > b[1]) return null;
+    if (!b || pos < b[0] || pos > b[1]) return null;
     const nonce = retryNonce.get(img.id);
     return api.entryBytesUrl(img.host, img.filename) + (nonce ? `?_r=${nonce}` : "");
   };
