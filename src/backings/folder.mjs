@@ -54,7 +54,7 @@ export async function stat(addr, name) {
 }
 
 // Read bytes. `range: [start, end]` (inclusive) reads just that head slice —
-// the dims pass never touches the rest of the file (§4.2).
+// the dims pass never touches the rest of the file .
 export async function read(addr, name, _kind = "output", { range } = {}) {
   if (!assertSafeName(name)) return { status: 400 };
   const full = join(folderPath(addr), name);

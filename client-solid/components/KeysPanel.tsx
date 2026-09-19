@@ -11,7 +11,7 @@ export function KeysPanel() {
   const store = useAppStore();
   const close = () => store.actions.keys.closePanel();
 
-  // keymap.list() rows are the rows — filtered, never re-derived (G19)
+  // keymap.list rows are the rows — filtered, never re-derived 
   const rows = () => {
     const q = (store.state.keysFilter() ?? "").toLowerCase();
     return store.state.bindings()

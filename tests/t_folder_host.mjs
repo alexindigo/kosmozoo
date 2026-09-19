@@ -7,8 +7,8 @@ import { isFolderHost, backingFor } from "../src/backings/index.mjs";
 import { validateCollection } from "../src/collections.mjs";
 import { parseListingEntry } from "../src/backings/comfy.mjs";
 import { makeRouter } from "../src/routes.mjs";
-import { Settings } from "../src/settings.mjs";
 import { Store } from "../src/store.mjs";
+import { mkStateRig } from "./helpers/rig.mjs";
 import { Prefetch } from "../src/prefetch.mjs";
 import { Ingest } from "../src/ingest.mjs";
 import { Cache } from "../src/cache.mjs";
@@ -63,8 +63,8 @@ Deno.test("folder host: validation, probe, list newest-first, traversal guard", 
 
 Deno.test("folder host: routes serve the folder's files and bytes", async () => {
   const dir = await mkdtemp(join(tmpdir(), "kz-fr-"));
-  const settings = await Settings.open(dir);
-  const store = await Store.open(dir, join(dir, "feedback.json"));
+  const rig = await mkStateRig("folder", { dir });
+  const { settings, store } = rig;
   const router = makeRouter({ hosts: { fixtures: "folder:" + FIXTURES }, store, settings, plugins: null, cache: new Cache(join(dir, "cache")), ingest: new Ingest(store, { fixtures: "folder:" + FIXTURES }, { cache: new Cache(join(dir, "cache")) }) });
 
   const r = await router.handle(new Request("http://x/api/collections/fixtures/entries"));
@@ -86,8 +86,8 @@ Deno.test("folder host: routes serve the folder's files and bytes", async () => 
 
 Deno.test("folder host: the scraper path extracts metadata from ComfyUI PNGs", async () => {
   const dir = await mkdtemp(join(tmpdir(), "kz-fs-"));
-  const settings = await Settings.open(dir);
-  const store = await Store.open(dir, join(dir, "feedback.json"));
+  const rig = await mkStateRig("folder", { dir });
+  const { settings, store } = rig;
   const hosts = { fixtures: "folder:" + FIXTURES };
   const s = new Prefetch({ hosts, store, settings, ingest: new Ingest(store, hosts, { cache: new Cache(join(dir, "cache")) }) });
   s.feed("fixtures", ["flux-basic.png", "flux-lora.png"]);

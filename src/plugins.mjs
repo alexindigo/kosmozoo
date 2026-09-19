@@ -4,8 +4,8 @@
 // Discovery: KOZMOZOO_PLUGINS → $XDG_DATA_HOME/kosmozoo/plugins/ →
 // repo-local ./plugins/ for development. A plugin is trusted and in-process.
 //
-//   <name>/plugin.ts (or .mjs)  — export function register(kz)   engine hooks
-//   <name>/client.js            — optional, served to the browser  UI hooks
+// <name>/plugin.ts (or .mjs) — export function register(kz) engine hooks
+// <name>/client.js — optional, served to the browser UI hooks
 //
 // The kz surface is what a plugin can touch. Core knows the config surface,
 // never the plugin's internals.
@@ -85,7 +85,7 @@ export class PluginHost {
     this.#plugins.set(name, { name, dir, capabilities: caps, hasClient });
   }
 
-  // The kz surface handed to a plugin at register() time.
+  // The kz surface handed to a plugin at register time.
   #kz(name, caps) {
     return {
       // composition modes (client) / alignment contributions are announced

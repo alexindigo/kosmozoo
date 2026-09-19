@@ -2,10 +2,10 @@
 //
 // Two spaces share the pane: the metadata details of the current image and
 // the anchors feed. store.state.workspace picks which is shown — a <Switch>,
-// so the hidden space is NOT mounted with its effects running (G17). The
+// so the hidden space is NOT mounted with its effects running . The
 // divider drag resizes the split via the shared drag primitive (persisted
 // via core.ui.anchorWidth); the pane width is owned by the store signal
-// alone — the CSS carries no duplicate default (H7).
+// alone — the CSS carries no duplicate default .
 
 import { createEffect, Switch, Match } from "solid-js";
 import { useAppStore } from "../store/app-store.js";

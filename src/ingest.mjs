@@ -13,7 +13,7 @@ const DEFAULT_REVALIDATE_MS = 60_000;
 // Dims live in the first bytes of the file: PNG IHDR at 16–24, GIF at 6–10,
 // WebP VP8/VP8L/VP8X within the first 30, JPEG SOF usually within the first
 // few KB — a 64 KB head covers the usual case; the full ingest is the
-// fallback for the rest (§4.2).
+// fallback for the rest .
 const DIMS_HEAD_BYTES = 65_536;
 
 export class Ingest {
@@ -60,7 +60,7 @@ export class Ingest {
     await this.#store.metaPut(collection, name, meta, { hasWorkflow, ext: EXTRACTOR_VERSION });
   }
 
-  // Dims WITHOUT ingestion (§4.2 pass 1): known dims (content via the
+  // Dims WITHOUT ingestion ( pass 1): known dims (content via the
   // entry's hash, or the entry's own columns) short-circuit the read; else a
   // ranged head read → imageDims → stored on the entry. No hash, no cache
   // write, no extract. status 404 means the source lost the file (the

@@ -1,6 +1,6 @@
 // client-solid/store/app-store.js — the single global store.
 //
-// One makeAppStore() created at boot, provided via context at the app root.
+// One makeAppStore created at boot, provided via context at the app root.
 // Views read store.state.* and call store.actions.* — nothing else. The store
 // owns the model: api.mjs is a store-internal dependency; views never fetch.
 //
@@ -51,7 +51,7 @@ export function makeAppStore() {
     images: [],           // [{ id, host, filename, size, meta, judgment }]
     selected: {},         // id -> true (bulk actions; session-only)
     anchors: [],          // [{ name, src(dataURL), meta? }] — local drops, persisted
-    views: {},            // per-image zoom views — key -> { s, txf, tyf, … } (G24 fold)
+    views: {},            // per-image zoom views — key -> { s, txf, tyf, … } ( fold)
     diff: { open: false },                  // workbench: single-image viewer
     variations: { open: false, images: [], key: null }, // modal session
     infoOverlay: { open: false, name: "", meta: null }, // anchor ⓘ params
@@ -81,7 +81,7 @@ export function makeAppStore() {
   const [keysPanelOpen, setKeysPanelOpen] = createSignal(false);
   const [capturing, setCapturing] = createSignal(null); // action id awaiting a keypress
   // the key-layer stack: open modals push { id, onEscape } and the ONE key
-  // dispatcher hands Escape to the TOP layer only (G4 — no per-modal
+  // dispatcher hands Escape to the TOP layer only ( — no per-modal
   // listeners, no double-close, capture-cancel outranks the panel's own
   // Esc-close binding). An onEscape returning false declines the event
   // (dispatch continues).
@@ -96,7 +96,7 @@ export function makeAppStore() {
   // total size); components derive from it instead of walking the DOM
   const [feedVirtualizer, setFeedVirtualizer] = createSignal(null);
   // a divider drag is in flight — App renders the body-level cursor class
-  // from this ONE signal (G8: no component touches document.body directly)
+  // from this ONE signal : no component touches document.body directly)
   const [resizing, setResizing] = createSignal(false);
 
   // right-column space + details layout — persisted (workspaceState contract).
@@ -142,7 +142,7 @@ export function makeAppStore() {
   // --- current pointer + trail -------------------------------------------------
   // A { remote, image } pointer → its feed entry (anchors are not feed
   // entries) — the ONE derivation; components used to each carry their own
-  // copy of this find (G7). Indexed by the (host, filename) map next to
+  // copy of this find . Indexed by the (host, filename) map next to
   // imageIdxById — never a scan.
   function entryFor(c) {
     if (!c || c.remote === "anchor") return null;
@@ -248,7 +248,7 @@ export function makeAppStore() {
   const [feedScrollTop, setFeedScrollTop] = createSignal(0);
   // a programmatic scroll in flight (the snap's quiet window) — a store
   // signal, set by restoreToIndex/scrollTop/the settle tidy, read by settle;
-  // no module global (B6)
+  // no module global 
   const [programmaticScrollUntil, setProgrammaticScrollUntil] = createSignal(0);
   const scrollQuiet = () => Date.now() < programmaticScrollUntil();
   const quietScrolls = (ms = SNAP_QUIET_MS) =>
@@ -267,12 +267,12 @@ export function makeAppStore() {
     feedSettleTimer = setTimeout(feedSettle, FEED_SETTLE_MS);
   }
 
-  // the settle pipeline (§3.5) — does exactly: (1) current from the stopped
+  // the settle pipeline — does exactly: (1) current from the stopped
   // range, (2) the snap tidy (pure; the quiet window is the store signal),
   // (3) resolveAhead for the new range, (4) want for it. No mid-gesture meta
   // buffer — meta patches never change geometry (size is listing data), so
-  // they apply on arrival (B2 dead). No bottom guard — with exact estimates
-  // getTotalSize() is exact (B7 dead).
+  // they apply on arrival ( dead). No bottom guard — with exact estimates
+  // getTotalSize is exact ( dead).
   function feedSettle() {
     feedSettleTimer = 0;
     setFeedActivity("settled");
@@ -282,7 +282,7 @@ export function makeAppStore() {
     // 1. current selection — a consequence of a STOPPED scroll
     actions.current.settleFromRange(vz.getVirtualItems(), col.scrollTop, col.clientHeight);
     // 2. snap tidy — small, directional, capped; never while a programmatic
-    //    scroll is in flight or the workbench is open
+    // scroll is in flight or the workbench is open
     const net = gestureStart == null ? 0 : col.scrollTop - gestureStart;
     gestureStart = null;
     if (!scrollQuiet() && !st.diff.open) {
@@ -291,7 +291,7 @@ export function makeAppStore() {
     // 3. sizes resolve around the stopped range…
     stageResolveAhead();
     // 4. …and metas are wanted for it (the mid-gesture throttle is folded
-    //    into this debounce — B3 dead); the want flush rides the same settle
+    // into this debounce — dead); the want flush rides the same settle
     wantRangeNow();
     flushWant();
   }
@@ -315,7 +315,7 @@ export function makeAppStore() {
   const wantSet = new Set();
   let metaPollTimer = null;
 
-  // wants only collect — the flush rides the settle debounce (B3: no timer
+  // wants only collect — the flush rides the settle debounce : no timer
   // of its own; feedSettle calls flushWant after wantRangeNow)
   function wantMeta(image) {
     if (image.meta || wantSet.has(image.filename)) return;
@@ -353,10 +353,10 @@ export function makeAppStore() {
           const idx = byId.get(`${host()}:${name}`);
           if (idx === undefined || st.images[idx].meta) continue;
           // meta patches never change geometry (size is listing data) — they
-          // apply on arrival; the settle buffer is dead (B2)
+          // apply on arrival; the settle buffer is dead 
           setSt("images", idx, "meta", meta);
         }
-        // dims ride the same poll (§4.4): an entry the dims pass reached
+        // dims ride the same poll : an entry the dims pass reached
         // after the listing loaded gets its width/height patched in — the
         // size-known view extends without a reload
         for (const [name, d] of Object.entries(r.dims ?? {})) {
@@ -377,7 +377,7 @@ export function makeAppStore() {
   }
 
   // the scraper status poll (the menu row reads it) lives ONLY while ingest
-  // work is pending — the forever-setInterval is dead (B5); the effect owns
+  // work is pending — the forever-setInterval is dead ; the effect owns
   // its timer and cleans it up
   createEffect(() => {
     if (!(st.metaPending > 0)) return;
@@ -390,7 +390,7 @@ export function makeAppStore() {
   // meta-want follows the viewport: from a little behind the current window
   // to a few screens ahead of it, so most sizes resolve BEFORE those cards
   // render. Called at settle, at restore, and after a load — the scroll-path
-  // throttle is folded into the settle debounce (B3).
+  // throttle is folded into the settle debounce .
   const WANT_LOOKAHEAD = 60, WANT_BEHIND = 10;
 
   function wantRangeNow() {
@@ -415,7 +415,7 @@ export function makeAppStore() {
     actions.status.active("load", `loading image list from ${name}…`);
     try {
       setSt("images", reconcile((await api.entries(name)).map((e) => ({
-        // collection:name string keys exist only here, derived (plan §3.2)
+        // collection:name string keys exist only here, derived (plan )
         id: `${name}:${e.name}`, host: name, filename: e.name,
         size: e.size, hash: e.hash, state: e.state,
         meta: e.meta, extracted: e.extracted, judgment: e.judgment,
@@ -508,12 +508,12 @@ export function makeAppStore() {
 
   const imageIdx = (id) => imageIdxById().get(id) ?? -1;
 
-  // the ONE download-name convention (G23): <host>#<filename>, unless the
+  // the ONE download-name convention : <host>#<filename>, unless the
   // filename already carries the tag
   function downloadName(img) {
     return img.filename.startsWith(img.host + "#") ? img.filename : img.host + "#" + img.filename;
   }
-  // the ONE transient-anchor download (G23): download() and bulk.save() share it
+  // the ONE transient-anchor download : download and bulk.save share it
   function triggerDownload(url, name) {
     const a = document.createElement("a");
     a.href = url;
@@ -522,11 +522,11 @@ export function makeAppStore() {
     a.click();
     a.remove();
   }
-  // note autosave: one timer per note key, owned by the store (G11)
+  // note autosave: one timer per note key, owned by the store 
   const noteTimers = {};
   const NOTE_SAVE_MS = 500;
 
-  // §3.5: every card's size is DATA before it renders — listing dims →
+  // : every card's size is DATA before it renders — listing dims →
   // meta dims → off-DOM measurement (sizes store). The virtualizer's item
   // list is the size-known view; the pending set drives the resolver. Both
   // memos are reactive over the listing (store paths) and the sizes store
@@ -590,7 +590,7 @@ export function makeAppStore() {
     sizes_.resolveAhead(v, firstView, lastView);
   }
   // the drain pump: a landing re-stages the next batch. It tracks the
-  // pending COUNT and the settle signal only — never getVirtualItems()
+  // pending COUNT and the settle signal only — never getVirtualItems
   // (mid-gesture staging was a second stager; feedSettle stages too)
   createEffect(() => {
     if (pendingSizeCount() === 0) return;
@@ -599,7 +599,7 @@ export function makeAppStore() {
   });
 
   // the image-src window derives membership from the virtualizer's range
-  // ± pad (§3.5) — the store's registered virtualizer is the one source
+  // ± pad — the store's registered virtualizer is the one source
   const window_ = makeImageWindow({ range: () => {
     const vz = seams.virtualizer;
     const items = vz?.getVirtualItems() ?? [];
@@ -634,7 +634,7 @@ export function makeAppStore() {
     onCleanup(() => setKeyLayers((ls) => ls.filter((l) => l.id !== "keys-capture")));
   });
 
-  // --- per-image zoom views (folded from views.mjs — G24: no second
+  // --- per-image zoom views (folded from views.mjs — : no second
   // module-level store; the state lives in the tree and the debounced
   // persistence lives here). Keys are image ids ("host:filename") for
   // candidates, "anchor:<name>" for anchors; box-fraction units;
@@ -698,7 +698,7 @@ export function makeAppStore() {
   }]));
 
   // the loaded collection's record — the delete affordances read
-  // capabilities.delete from HERE, never a derived mirror (G1: indexing
+  // capabilities.delete from HERE, never a derived mirror : indexing
   // hosts with the host SIGNAL function always read the "hide" fallback)
   const currentCollection = createMemo(() => st.hosts[host()] ?? null);
 
@@ -721,7 +721,7 @@ export function makeAppStore() {
     },
 
     // boot-time data, loaded exactly once (the bootData.mjs contract).
-    // api.hosts() is deliberately not caught — a failed host list fails the
+    // api.hosts is deliberately not caught — a failed host list fails the
     // whole boot (the caller surfaces it).
     async boot() {
       setSt("hosts", reconcile(toHosts(await api.collections())));
@@ -804,7 +804,7 @@ export function makeAppStore() {
         if (size != null) setSt("images", idx, "size", size);
       },
       // download via a transient anchor (plain download — the "saved"
-      // indicator was removed with the feature, §9 Q3)
+      // indicator was removed with the feature, Q3)
       download(id) {
         const idx = imageIdx(id);
         if (idx < 0) return;
@@ -862,7 +862,7 @@ export function makeAppStore() {
     },
 
     // per-image zoom views: zoomable.mjs reads/writes through these (the
-    // module-level Map/Set/timer are gone — G24); one debounce owns the save
+    // module-level Map/Set/timer are gone — ); one debounce owns the save
     views: {
       async init() {
         const stored = await api.settings("core.views").catch(() => ({}));
@@ -885,7 +885,7 @@ export function makeAppStore() {
 
     // unsaved note text — lives here so neighbors read drafts without
     // walking the DOM for a rendered textarea. setDraft owns the autosave
-    // debounce (G11): the draft mirror is the controlled textarea's value;
+    // debounce : the draft mirror is the controlled textarea's value;
     // the save lands first and the draft clears only when it still holds
     // the saved text (no rollback flicker mid-edit).
     notes: {
@@ -966,7 +966,7 @@ export function makeAppStore() {
       // by the caller — a fast scroll must not spend a render per frame).
       // items: the virtualizer's visible range — [{ index, start, size }] in
       // scroll order, where index is a KNOWN-LIST position (the virtualizer's
-      // index space) — mapped through entriesWithKnownSize, never view()
+      // index space) — mapped through entriesWithKnownSize, never view
       // (they only coincide when every entry's size is known). Viewport
       // geometry comes from the seamed scroll element. Index math, never
       // the DOM.
@@ -1257,7 +1257,7 @@ export function makeAppStore() {
       },
       // drag reorder: move the dragged anchor before/after the hovered one.
       // A no-op when the position would not change, and persistence waits
-      // for the drop (G5 — stringifying every base64 anchor per pointer
+      // for the drop ( — stringifying every base64 anchor per pointer
       // move was the drag cost)
       reorder(draggedName, overName, before) {
         if (!draggedName || draggedName === overName) return;
@@ -1271,7 +1271,7 @@ export function makeAppStore() {
         arr.splice(insertAt, 0, item);
         setSt("anchors", reconcile(arr));
       },
-      // the drop end of a reorder: persist once (G5)
+      // the drop end of a reorder: persist once 
       persist() { persistAnchors(); },
       showInfo(name, meta) { setSt("infoOverlay", { open: true, name, meta }); },
       closeInfo() { setSt("infoOverlay", "open", false); },
@@ -1398,7 +1398,7 @@ export function makeAppStore() {
     feedActivity,
     // a card's image size: the listing's content dims, else the extractor
     // meta's dims, else the off-DOM loader's measurement — null = unknown
-    // (unknown = the card is NOT in the feed — the §3.5 invariant)
+    // (unknown = the card is NOT in the feed — the invariant)
     cardSize(idx) {
       const img = st.images[idx];
       if (!img) return null;

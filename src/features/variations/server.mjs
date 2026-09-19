@@ -1,10 +1,10 @@
 // src/features/variations/server.mjs — batch parameter sweep from a card.
 //
-//   GET  /probe/<id>  — inspect a graph: per-param labels + current values
-//   POST /run         — permutations (cartesian × enabled ranges, edges
-//                       inclusive, current excluded), clone + mutate the
-//                       graph per permutation, enqueue on the source host.
-//                       Final filename per submission is <prefix><basename><suffix>.
+// GET /probe/<id> — inspect a graph: per-param labels + current values
+// POST /run — permutations (cartesian × enabled ranges, edges
+// inclusive, current excluded), clone + mutate the
+// graph per permutation, enqueue on the source host.
+// Final filename per submission is <prefix><basename><suffix>.
 //
 // ComfyUI knowledge lives HERE (graph conventions, LoadImage axes, output
 // nodes) — the backing owns object_info/enqueue; the store owns the bytes.

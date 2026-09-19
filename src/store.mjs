@@ -1,10 +1,10 @@
 // src/store.mjs — the engine store: content / collection / entry (schema v7)
 // + the discovered-node registry.
 //
-//   content    — what the bytes ARE: hash → meta, dims, workflow flag
-//   collection — a namespace of names: a ComfyUI host, a local folder
-//   entry      — collection:name → hash; carries the per-instance state
-//                (stamp, seen/ingested/gone) and judgment columns
+// content — what the bytes ARE: hash → meta, dims, workflow flag
+// collection — a namespace of names: a ComfyUI host, a local folder
+// entry — collection:name → hash; carries the per-instance state
+// (stamp, seen/ingested/gone) and judgment columns
 //
 // The host-shaped surface (metaState/hashFor/inputCache*/judgment*) is what
 // routes, ingest, prefetch and the plugin host consume; each method maps
@@ -143,7 +143,7 @@ const MIGRATIONS = [
         state         TEXT NOT NULL DEFAULT 'seen',    -- seen | ingested | gone
         vote          TEXT, favorite INTEGER, notes TEXT, hidden INTEGER,
         plugin_fields TEXT,
-        width         INTEGER, height INTEGER,         -- dims known before the hash is (§4.2 dims pass)
+        width         INTEGER, height INTEGER,         -- dims known before the hash is (the dims pass)
         first_seen    REAL NOT NULL, last_seen REAL NOT NULL,
         PRIMARY KEY (collection, name, kind)
       );
@@ -156,7 +156,7 @@ const MIGRATIONS = [
 
 // Every recurring statement is prepared ONCE (audit D9: a prepare per call
 // is a compile per call — a 3000-file listing compiled ~10k statements).
-// The registry is prepared eagerly in open() right after the migrations.
+// The registry is prepared eagerly in open right after the migrations.
 const STATEMENTS = {
   kvGet: "SELECT v FROM kv WHERE k = ?",
   kvSet: "INSERT INTO kv (k, v) VALUES (?, ?) ON CONFLICT(k) DO UPDATE SET v = excluded.v",
@@ -229,8 +229,6 @@ const STATEMENTS = {
          plugin_fields = COALESCE(excluded.plugin_fields, entry.plugin_fields)`,
   entryInsertGone: "INSERT OR IGNORE INTO entry (collection, name, kind, state, first_seen, last_seen) VALUES (?, ?, 'output', 'gone', ?, ?)",
   entryInsertGoneHash: "INSERT OR IGNORE INTO entry (collection, name, kind, hash, state, first_seen, last_seen) VALUES (?, ?, 'output', ?, 'gone', ?, ?)",
-  judgmentsAll: `SELECT collection, name, hash, vote, favorite, notes, plugin_fields FROM entry
-       WHERE kind = 'output' AND (vote IS NOT NULL OR favorite IS NOT NULL OR notes IS NOT NULL OR plugin_fields IS NOT NULL)`,
   feedbackExport: `SELECT name, hash, vote, favorite, notes, plugin_fields FROM entry
        WHERE collection = ? AND kind = 'output' AND (vote IS NOT NULL OR favorite IS NOT NULL OR notes IS NOT NULL OR plugin_fields IS NOT NULL)
        ORDER BY name`,
@@ -834,7 +832,7 @@ export class Store {
     return new Set(this.#q.goneNames.all(collection).map((r) => r.name));
   }
 
-  // --- entry dims (§4.2: dims are known before the hash is) ----------------
+  // --- entry dims : dims are known before the hash is) ----------------
 
   // { width, height } from the content row (via the entry's hash) or the
   // entry's own columns — null when neither knows.
@@ -864,24 +862,6 @@ export class Store {
     const out = {};
     for (const r of this.#q.dimsForHost.all(collection)) {
       out[r.name] = { width: r.width, height: r.height };
-    }
-    return out;
-  }
-
-  // Every judgment row, keyed for the plugin host's _all adapter (interim
-  // shape: by hash when ingested, collection:name otherwise; first wins on
-  // a shared hash — per-entry reads are the real API).
-  judgmentsAll() {
-    const out = {};
-    for (const row of this.#q.judgmentsAll.all()) {
-      const key = row.hash ?? `${row.collection}:${row.name}`;
-      if (out[key]) continue;
-      const j = { ref: `${row.collection}:${row.name}` };
-      if (row.vote != null) j.vote = row.vote;
-      if (row.favorite != null) j.favorite = !!row.favorite;
-      if (row.notes != null) { try { j.notes = JSON.parse(row.notes); } catch { /* corrupt */ } }
-      if (row.plugin_fields != null) { try { j.plugins = JSON.parse(row.plugin_fields); } catch { /* corrupt */ } }
-      out[key] = j;
     }
     return out;
   }

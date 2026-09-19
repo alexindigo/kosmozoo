@@ -2,7 +2,7 @@
 //
 // A single-image viewer of the store's current pointer. Renders the stage and
 // owns the hidden flag from store.state.diff.open. The src is a decode-guarded
-// resource (G16): a new image decodes off-screen first and the last value
+// resource : a new image decodes off-screen first and the last value
 // stays visible until it is ready — a stale load never clobbers a newer one,
 // and the resource's own recency replaces the hand-rolled generation counter.
 // The image fits the stage via object-fit.

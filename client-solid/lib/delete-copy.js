@@ -1,4 +1,4 @@
-// client-solid/lib/delete-copy.js — the ONE delete-copy table (G18): the
+// client-solid/lib/delete-copy.js — the ONE delete-copy table : the
 // card's delete button, the bulk bar's, and the confirmation modal all say
 // what the collection's delete capability does, in the same words. `mode` is
 // capabilities.delete: "trash" | "unlink" | "hide" (anything else reads as

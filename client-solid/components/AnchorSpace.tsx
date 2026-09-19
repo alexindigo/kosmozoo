@@ -23,14 +23,14 @@ function AnchorCard(props) {
       draggable={!zoomed()}
       onDragStart={(e) => {
         props.setDragged(props.anchor.name);
-        // the dataTransfer carries the REAL payload (G20): the dropzone
+        // the dataTransfer carries the REAL payload : the dropzone
         // tells a reorder from a file drop by the drag's own data
         e.dataTransfer.setData("text/x-anchor", props.anchor.name);
         e.dataTransfer.effectAllowed = "move";
       }}
       onDragEnd={() => {
         props.setDragged(null);
-        store.actions.anchors.persist(); // persistence waits for the drop (G5)
+        store.actions.anchors.persist(); // persistence waits for the drop 
       }}
       onDragOver={(e) => {
         const d = props.dragged();
@@ -70,7 +70,7 @@ function AnchorCard(props) {
 export function AnchorSpace() {
   const store = useAppStore();
   let fileEl;
-  // the drag-reorder state is component state, not a module global (G20)
+  // the drag-reorder state is component state, not a module global 
   const [dragged, setDragged] = createSignal(null);
   // the dropzone's highlight is a signal-driven class, not classList pokes
   const [over, setOver] = createSignal(false);

@@ -1,15 +1,15 @@
 // src/collections.mjs — the collection registry + capabilities.
 //
 // Collections are user config: env seeds the table on first boot, then they
-// are user-managed (POST/DELETE /api/collections). capabilities() is the ONE
+// are user-managed (POST/DELETE /api/collections). capabilities is the ONE
 // function that answers "what can this collection do" for every consumer
 // (GET /api/collections, DELETE entry, the client's delete affordance) —
 // the deleteMode double-derivation (audit E2) dies here.
 //
 // Derived from the backing kind (+ the assets-plus probe for comfy):
-//   folder          → unlink (permanent)
-//   comfy + trash   → trash (recoverable via the assets_plus extension)
-//   comfy otherwise → hide (kosmozoo-side flag; ComfyUI has no delete API)
+// folder → unlink (permanent)
+// comfy + trash → trash (recoverable via the assets_plus extension)
+// comfy otherwise → hide (kosmozoo-side flag; ComfyUI has no delete API)
 
 import { isFolderHost } from "./backings/index.mjs";
 import { stat } from "node:fs/promises";
@@ -19,6 +19,10 @@ export async function capabilities(collection, { online = true, useAssetsPlus = 
   const kind = collection.kind ?? (isFolderHost(collection.address) ? "folder" : "comfy");
   if (kind === "folder") {
     return { list: true, read: true, add: false, delete: "unlink", rename: false };
+  }
+  if (kind === "virtual") {
+    // the schema slot only (future) — a virtual collection has no backing
+    return { list: false, read: false, add: false, delete: false, rename: false };
   }
   const trash = online && useAssetsPlus && comfy != null && await comfy.hasAssetsPlus();
   return {
@@ -70,7 +74,7 @@ const NAME_RE = /^[\w][\w.-]*$/;
 const ADDR_RE = /^[\w.-]+:\d+$/;
 
 // Validate a new collection: name grammar + address grammar; a folder
-// collection must name an existing directory (spec §2).
+// collection must name an existing directory (spec ).
 export async function validateCollection(name, address) {
   if (!name || !NAME_RE.test(name)) return "bad name (word chars, dots, hyphens)";
   if (address?.startsWith("folder:")) {

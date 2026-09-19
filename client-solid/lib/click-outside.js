@@ -1,4 +1,4 @@
-// client-solid/lib/click-outside.js — ONE click-outside primitive (G15):
+// client-solid/lib/click-outside.js — ONE click-outside primitive :
 // a document-level click with a structural containment check. The dropdown's
 // own clicks are inside by construction — no stopPropagation shield needed.
 

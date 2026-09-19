@@ -1,7 +1,7 @@
 // client-solid/components/NoteBox.tsx — one notes box (neg or pos): a
 // CONTROLLED textarea whose value is the store's draft mirror (session-only)
 // falling back to the judgment note. Typing writes the draft; the store's
-// notes.setDraft owns the debounced autosave (G11 — no component-owned
+// notes.setDraft owns the debounced autosave ( — no component-owned
 // timer); blur flushes. Copy-from-neighbor writes through the store like a
 // typed edit — no DOM value writes, no hand-called onInput. The parent
 // supplies onSave(text) (returning its promise) and getNeighborText(dir).

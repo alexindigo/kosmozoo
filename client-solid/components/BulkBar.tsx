@@ -14,7 +14,7 @@ import { IconButton } from "./IconButton.js";
 export function BulkBar() {
   const store = useAppStore();
   const n = () => Object.keys(store.state.selected).length;
-  // capabilities.delete from the CURRENT COLLECTION's record (G1 fixed by
+  // capabilities.delete from the CURRENT COLLECTION's record ( fixed by
   // construction — the old read indexed hosts with the host signal function)
   const del = () => store.state.currentCollection()?.capabilities?.delete ?? "hide";
   const copy = () => deleteCopy(del());

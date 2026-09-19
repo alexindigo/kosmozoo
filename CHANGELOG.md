@@ -27,4 +27,5 @@ implements from `docs/spec.md`.
   state dir; `KOZMOZOO_DOWNLOADS` is gone.
 - Client: one Solid store (views never fetch), size-before-render feed, one
   key dispatcher with modal layers, client feature registry mirroring the
-  engine's; all persistence is engine settings — no localStorage.
+  engine's; persistence is engine settings plus four localStorage keys
+  (info groups, workspace pane, info layout, anchors).

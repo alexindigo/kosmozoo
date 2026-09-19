@@ -4,9 +4,9 @@
 // it. The collection's capabilities.delete decides what the action means,
 // and the shared delete-copy table (lib/delete-copy.js — the card and bulk
 // bar buttons read the same one) says exactly what will happen:
-//   trash  — assets_plus trash on the Comfy host (recoverable)
-//   unlink — permanent removal from a folder host
-//   hide   — the files stay on the host; the images are hidden from kosmozoo
+// trash — assets_plus trash on the Comfy host (recoverable)
+// unlink — permanent removal from a folder host
+// hide — the files stay on the host; the images are hidden from kosmozoo
 
 import { createSignal, Show } from "solid-js";
 import { useAppStore } from "../store/app-store.js";

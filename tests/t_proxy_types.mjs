@@ -5,8 +5,8 @@ import { assertEquals } from "jsr:@std/assert";
 import { makeRouter } from "../src/routes.mjs";
 import { Ingest } from "../src/ingest.mjs";
 import { Cache } from "../src/cache.mjs";
-import { Settings } from "../src/settings.mjs";
 import { Store } from "../src/store.mjs";
+import { mkStateRig } from "./helpers/rig.mjs";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -30,8 +30,8 @@ await up();
 
 Deno.test("proxy: SVG upstream (octet-stream) is served as image/svg+xml", async () => {
   const dir = await mkdtemp(join(tmpdir(), "kz-proxy-"));
-  const settings = await Settings.open(dir);
-  const store = await Store.open(dir, join(dir, "feedback.json"));
+  const rig = await mkStateRig("proxy", { dir });
+  const { settings, store } = rig;
   const router = makeRouter({ hosts: { fake: FAKE }, store, settings, plugins: null, cache: new Cache(join(dir, "cache")), ingest: new Ingest(store, { fake: FAKE }, { cache: new Cache(join(dir, "cache")) }) });
 
   const r = await router.handle(new Request("http://x/api/collections/fake/entries/logo.svg/bytes"));
@@ -44,8 +44,8 @@ Deno.test("proxy: SVG upstream (octet-stream) is served as image/svg+xml", async
 
 Deno.test("proxy: PNG keeps its upstream Content-Type", async () => {
   const dir = await mkdtemp(join(tmpdir(), "kz-proxy2-"));
-  const settings = await Settings.open(dir);
-  const store = await Store.open(dir, join(dir, "feedback.json"));
+  const rig = await mkStateRig("proxy", { dir });
+  const { settings, store } = rig;
   const router = makeRouter({ hosts: { fake: FAKE }, store, settings, plugins: null, cache: new Cache(join(dir, "cache")), ingest: new Ingest(store, { fake: FAKE }, { cache: new Cache(join(dir, "cache")) }) });
   const r = await router.handle(new Request("http://x/api/collections/fake/entries/flux-basic.png/bytes"));
   assertEquals(r.status, 200);

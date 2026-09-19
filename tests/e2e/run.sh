@@ -15,7 +15,10 @@ ENGINE_PORT="${E2E_ENGINE_PORT:-18260}"
 PW_IMAGE="${PW_IMAGE:-mcr.microsoft.com/playwright:v1.49.1-noble}"
 
 cleanup() {
-  docker rm -f kz-e2e-fake kz-e2e-fake2 kz-e2e-engine >/dev/null 2>&1 || true
+  # explicit names only — the ONLY sanctioned docker rm. stderr stays
+  # visible; the routine "No such container" noise on a clean start is
+  # filtered, everything else prints (a failure must be learned from)
+  docker rm -f kz-e2e-fake kz-e2e-fake2 kz-e2e-engine 2>&1 | grep -v "No such container" || true
   rm -rf "$WORK/tests/.tmp-mutable" "$WORK/tests/.tmp-comfy"
 }
 trap cleanup EXIT
@@ -61,11 +64,17 @@ for url in "http://127.0.0.1:$FAKE_PORT/api/system_stats" "http://127.0.0.1:$ENG
 done
 
 # 2b. two-pass prefetch (§4.2): the browser suites must test the feed, not
-#     the prefetch rate — wait for the dims pass to drain (~40 s for 3000)
+#     the prefetch rate — wait for the dims pass to drain (~40 s for 3000).
+#     A timeout FAILS the run — proceeding would test the wrong thing.
 for i in $(seq 1 240); do
   [ "$(curl -s "http://127.0.0.1:$ENGINE_PORT/api/prefetch" | jq -r '.dimsPending // 1')" = "0" ] && break
   sleep 1
 done
+[ "$(curl -s "http://127.0.0.1:$ENGINE_PORT/api/prefetch" | jq -r '.dimsPending // 1')" = "0" ] || {
+  echo "dims pass did not drain in 240 s — refusing to test the prefetch rate instead of the feed"
+  docker logs kz-e2e-engine | tail -5
+  exit 1
+}
 
 # 3. headless Chromium drives the SPA — raw CDP, no npm dependencies.
 #    The Playwright image supplies the browser; Node 22 supplies WebSocket.

@@ -37,11 +37,11 @@ export function Card(props) {
   const src = () => {
     const img = image();
     if (!img) return null;
-    // the card is only MOUNTED at known size (§3.5) — the img's src follows
+    // the card is only MOUNTED at known size — the img's src follows
     // the window's range membership; broken bytes take the in-card error path
     return store.state.window.getSrc(imgIdx(), img);
   };
-  // the two flash windows are signals through the shared helper (G9) —
+  // the two flash windows are signals through the shared helper —
   // no classList pokes, no orphan timers
   const [savedOn, setSavedOn] = createSignal(false);
   const flashSaved = flash(setSavedOn);

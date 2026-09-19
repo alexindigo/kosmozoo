@@ -1,8 +1,8 @@
 // src/context.mjs — the engine context, fully constructed before the router
 // (audit E1: no router.ctx reassignment, no ctx.x?. guards downstream).
 //
-//   { settings, store, hosts, backings, cache, ingest, prefetch, plugins,
-//     features, comfy, paths: { state } }
+// { settings, store, hosts, backings, cache, ingest, prefetch, plugins,
+// features, comfy, paths: { state } }
 //
 // Tests build the same shape with fakes: buildContext({ env, fakes }).
 

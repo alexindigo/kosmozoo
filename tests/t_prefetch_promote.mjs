@@ -36,7 +36,7 @@ Deno.test("prefetch: enqueue a.png in walk, then want(['a.png']) — a.png is ne
   const addr = `127.0.0.1:${server.addr.port}`;
 
   const settings = await Settings.open(dir);
-  const store = await Store.open(dir, join(dir, "fb.json"));
+  const store = await Store.open(dir, { feedbackPath: join(dir, "fb.json") });
   const ingest = new Ingest(store, { local: addr }, { cache: new Cache(join(dir, "cache")) });
   const pf = new Prefetch({ hosts: { local: addr }, store, settings, ingest, interFileDelayMs: 5 });
 

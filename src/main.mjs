@@ -4,7 +4,8 @@
 //   deno run --allow-all src/main.mjs
 //
 // Environment overrides: KOZMOZOO_PORT (default 2084), KOZMOZOO_HOSTS,
-// KOZMOZOO_STATE, KOZMOZOO_FEEDBACK (migration import only — sqlite is canonical).
+// KOZMOZOO_STATE, KOZMOZOO_FEEDBACK (migration import only — sqlite is
+// canonical), KOZMOZOO_CACHE, KOZMOZOO_PLUGINS, KOZMOZOO_REVALIDATE_MS.
 
 import { CorruptStateError } from "./state.mjs";
 import { buildContext } from "./context.mjs";
@@ -40,7 +41,7 @@ Deno.serve({ port: PORT }, async (req) => {
   return serveStatic(url.pathname);
 });
 
-console.log(`kosmozoo engine on http://127.0.0.1:${PORT}  (state: ${ctx.paths.state})`);
+console.log(`kosmozoo engine on http://127.0.0.1:${PORT} (state: ${ctx.paths.state})`);
 console.log(`collections: ${Object.keys(ctx.hosts).join(", ")}`);
 if (discovered.length) {
   console.log(`plugins: ${discovered.map((p) => p.name).join(", ")}`);

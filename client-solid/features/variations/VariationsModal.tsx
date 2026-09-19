@@ -53,7 +53,7 @@ function ModalBody(props) {
   const [running, setRunning] = createSignal(false);
   const [result, setResult] = createSignal(null); // { text, ok }
   // the auto-close after a successful run must not fire into an unmounted
-  // session (G14)
+  // session 
   let closeT = null;
   onCleanup(() => clearTimeout(closeT));
   // prefix/suffix are controlled state — the ONLY writers are the signal
@@ -68,7 +68,7 @@ function ModalBody(props) {
   // after a label-click insert
   let prefixEl, suffixEl;
   // the input a label click inserts into — ONE focus signal replaces the
-  // four-listener tracking on each input (G14); the label's mousedown
+  // four-listener tracking on each input ; the label's mousedown
   // preventDefault keeps the focus (and the selection) alive through the
   // click
   const [focused, setFocused] = createSignal(null); // "prefix" | "suffix"
@@ -94,7 +94,7 @@ function ModalBody(props) {
     el.setSelectionRange(caret, caret);
   };
 
-  // probe + input list are RESOURCES (G14): recency and cancellation come
+  // probe + input list are RESOURCES : recency and cancellation come
   // from the primitive — no onMount promise chain, no swallowed errors.
   // The graph is the source of truth: only parameters whose target node
   // exists in this image's graph render (writeOnly params — widget-only
@@ -383,7 +383,7 @@ function ModalBody(props) {
                               </select>
                             </Show>
                             {/* local directory: whole picked folder; local files: a
-                                multi-picked subset. Both read into localFiles. */}
+ multi-picked subset. Both read into localFiles. */}
                             <Show when={r().mode === "local"}>
                               <FilePick
                                 inputAttrs={{ class: "vz-imgdirpick", webkitdirectory: true, multiple: true }}
@@ -462,7 +462,7 @@ function ModalBody(props) {
               onInput={(e) => setSuffix(e.currentTarget.value)}
             />
             {/* spacer pushes Run + error to the BOTTOM of the right column, so
-                the primary action sits opposite the tallest content on the left */}
+ the primary action sits opposite the tallest content on the left */}
             <div class="vz-rspacer" />
             <button
               class="vz-run" disabled={running() || undefined} onClick={runVariations}
@@ -478,7 +478,7 @@ function ModalBody(props) {
   );
 }
 
-// one hidden file input + its trigger button (G14: the directory and files
+// one hidden file input + its trigger button : the directory and files
 // pickers were copy-paste twins differing only in input attributes)
 function FilePick(props) {
   let el;

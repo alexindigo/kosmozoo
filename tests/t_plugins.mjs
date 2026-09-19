@@ -4,8 +4,8 @@
 import { assert, assertEquals } from "jsr:@std/assert";
 import { PluginHost } from "../src/plugins.mjs";
 import { makeRouter } from "../src/routes.mjs";
-import { Settings } from "../src/settings.mjs";
 import { Store } from "../src/store.mjs";
+import { mkStateRig } from "./helpers/rig.mjs";
 import { Ingest } from "../src/ingest.mjs";
 import { Cache } from "../src/cache.mjs";
 import { mkdtemp, rm, mkdir, writeFile } from "node:fs/promises";
@@ -15,10 +15,8 @@ import { join } from "node:path";
 // The plugin host is built before the router: its routes are collected and
 // mounted once the router exists (the buildContext order).
 async function pluginRig(dir) {
-  const settings = await Settings.open(dir);
-  const store = await Store.open(dir, join(dir, "feedback.json"));
-  const cache = new Cache(join(dir, "cache"));
-  const ingest = new Ingest(store, {}, { cache });
+  const rig = await mkStateRig("plugins", { dir });
+  const { settings, store, cache, ingest } = rig;
   const pluginRoutes = [];
   const host = new PluginHost({
     store, settings, hosts: {}, cache, ingest,

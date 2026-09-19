@@ -1,12 +1,12 @@
 // client-solid/components/SliderRow.tsx — one variations parameter row.
 //
-//  [☐]  label                                                    increment
-//       min                                          max         [-][0.05][+]
-//       ●──────────────●
-//                current
+// [☐] label increment
+// min max [-][0.05][+]
+// ●──────────────●
+// current
 //
 // The dual-thumb slider is noUiSlider (vendored ESM — no window global,
-// G13), bound in onMount on the lane's .vz-slider element: the library
+// ), bound in onMount on the lane's .vz-slider element: the library
 // renders the track, thumbs and connect band there. Drag snaps to the row's
 // increment (slide event); keyboard nudge on a focused thumb uses the fine
 // step (options.step).
@@ -14,10 +14,10 @@
 // current-value marker share one lane centerline by construction.
 //
 // Two modes:
-//   absolute — thumbs are min/max values; the marker sits at the image's
-//              current value and its label shows it.
-//   relative — batch sweeps: thumbs are signed OFFSETS from the current
-//              value; the marker is pinned to the center and labeled "X".
+// absolute — thumbs are min/max values; the marker sits at the image's
+// current value and its label shows it.
+// relative — batch sweeps: thumbs are signed OFFSETS from the current
+// value; the marker is pinned to the center and labeled "X".
 //
 // Props convention: enabled/increment/current are GETTERS (the parent's rows
 // state outlives this row — <For> keeps it mounted across toggles); the rest
@@ -35,7 +35,7 @@ export function SliderRow(props) {
   let sliderEl;
   const fineStep = Math.pow(10, -props.param.decimals);
 
-  // the bound labels are signals rendered by JSX (G13 — no imperative
+  // the bound labels are signals rendered by JSX ( — no imperative
   // textContent/style writes from the library callback)
   const [minLbl, setMinLbl] = createSignal({ text: "", left: "0%" });
   const [maxLbl, setMaxLbl] = createSignal({ text: "", left: "0%" });
@@ -68,19 +68,19 @@ export function SliderRow(props) {
       keyboardSupport: true,
     });
     // `update` tracks the bound LABELS live (it also fires on programmatic
-    // set() — the row's state is only ever written by user gestures)
+    // set — the row's state is only ever written by user gestures)
     slider.on("update", (values) => {
       const [a, b] = values.map(Number);
       setMinLbl({ text: props.relative ? fmtSigned(a) : fmt(a), left: ((a - lo) / span) * 100 + "%" });
       setMaxLbl({ text: props.relative ? fmtSigned(b) : fmt(b), left: ((b - lo) / span) * 100 + "%" });
     });
     // onRange fires ONLY from slide/change (user gestures) — never from
-    // `update`, which would re-report every programmatic set (G13)
+    // `update`, which would re-report every programmatic set 
     const report = () => {
       const vals = slider.get().map(Number);
       props.onRange(props.param.key, { min: Math.min(vals[0], vals[1]), max: Math.max(vals[0], vals[1]) });
     };
-    // The snap lands on RELEASE, never mid-drag: a set() during an active
+    // The snap lands on RELEASE, never mid-drag: a set during an active
     // drag puts the widget in its tap-transition state, which rejects the
     // drag's own move events — the thumb would freeze at the first snap.
     // While dragging, the thumb follows the pointer freely (the labels
@@ -155,10 +155,10 @@ export function SliderRow(props) {
           </div>
           <div class="vz-lane vz-lane-track">
             {/* the full-range track line spans the inset span, so its ends are
-                exactly where the thumbs land at min/max */}
+ exactly where the thumbs land at min/max */}
             <div class="vz-rail" />
             {/* the marker's reference box shares the slider's inset span, so
-                the marker stays centered on the value point */}
+ the marker stays centered on the value point */}
             <div class="vz-marker-inset">
               <div
                 class="vz-marker"
@@ -166,7 +166,7 @@ export function SliderRow(props) {
               />
             </div>
             {/* the slider insets itself within the lane; the library's base
-                fills it, so thumb centers travel exactly the inset span */}
+ fills it, so thumb centers travel exactly the inset span */}
             <div class="vz-slider" ref={sliderEl} disabled={!props.enabled() || undefined} />
           </div>
           <div class="vz-lane vz-lane-current">

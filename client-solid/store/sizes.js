@@ -1,12 +1,12 @@
 // client-solid/store/sizes.js — every card's size is DATA, resolved before
 // the card renders:
 //
-//   a card mounts only when its size is known, and never changes height
-//   while mounted.
+// a card mounts only when its size is known, and never changes height
+// while mounted.
 //
 // Sources, in order: the listing's content dims (free, engine-resolved) →
 // the extractor meta's dims → off-DOM Image measurement (zero layout
-// effect) → 'failed'. The virtualizer's estimateSize is cardHeight() — exact
+// effect) → 'failed'. The virtualizer's estimateSize is cardHeight — exact
 // for every mounted row, so the virtualizer never compensates and no timer
 // coordinates geometry.
 
@@ -62,7 +62,7 @@ export function gridGapPx() {
 // border), and the rendered chrome is fractional (line boxes). Estimates
 // must equal the rendered rects EXACTLY, so the truth
 // is measured, cached in signals, and invalidated on resize. Callers that
-// change geometry follow the measurement with virtualizer.measure() — the
+// change geometry follow the measurement with virtualizer.measure — the
 // core memoizes on its own dep list, so the signals alone do not refresh
 // the estimates.
 const [geomInset, setGeomInset] = createSignal(null);
@@ -121,11 +121,11 @@ export function makeSizes({ srcFor, imageAt }) {
   const inFlight = new Set();
   // GC guard: the Image object is the ONLY holder of the load's onload/
   // onerror — if nothing references it, the collector aborts the load
-  // mid-flight and the inFlight slot leaks forever (the pump stalls at
+  // mid-flight and the inFlight slot leaks forever ( stalls at
   // MAX_INFLIGHT). Keep every loading image referenced until it settles.
   const loading = new Map();
   const [version, setVersion] = createSignal(0);
-  // the bumper MUST change the value: a bare setVersion() writes undefined
+  // the bumper MUST change the value: a bare setVersion writes undefined
   // once and then never notifies again (undefined === undefined) — every
   // downstream memo/effect silently freezes (the entire feed drain stall)
   const bump = () => setVersion((v) => v + 1);
@@ -173,7 +173,7 @@ export function makeSizes({ srcFor, imageAt }) {
   // size lands inserts a card above the fold — when the pending-above count
   // is small (≤ 50) every one of them resolves before anything below, so
   // the common case never has pending entries above the fold. viewIdx is
-  // view()'s index list and images come via imageAt — nothing materializes
+  // view's index list and images come via imageAt — nothing materializes
   // the listing per call.
   function resolveAhead(viewIdx, first, last) {
     if (!viewIdx.length) return;

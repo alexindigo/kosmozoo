@@ -53,11 +53,11 @@ export function matchesFile(image, host, file) {
 }
 
 // Where the current pointer goes when the current image is deleted:
-//   1. the previous current (stack top) — iff it sits NEXT TO the deleted
-//      one in the feed and survives the delete itself
-//   2. else the nearest surviving image above the deleted one in the feed
-//   3. else (the deleted image had nothing above it) the new topmost;
-//      nothing left at all → clear
+// 1. the previous current (stack top) — iff it sits NEXT TO the deleted
+// one in the feed and survives the delete itself
+// 2. else the nearest surviving image above the deleted one in the feed
+// 3. else (the deleted image had nothing above it) the new topmost;
+// nothing left at all → clear
 // images is the PRE-delete list. Returns { kind: "pop" } | { kind: "set",
 // image } | { kind: "clear" } | null (the current image was not deleted).
 export function planDeleteCurrent(images, deletedFiles, host, current, prev) {

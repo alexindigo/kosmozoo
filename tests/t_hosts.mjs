@@ -7,8 +7,8 @@ import { loadCollections, validateCollection } from "../src/collections.mjs";
 import { backingFor } from "../src/backings/index.mjs";
 import { comfyClient } from "../src/backings/comfy.mjs";
 import { makeRouter } from "../src/routes.mjs";
-import { Settings } from "../src/settings.mjs";
 import { Store } from "../src/store.mjs";
+import { mkStateRig } from "./helpers/rig.mjs";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -21,8 +21,8 @@ function fakeComfy(handler) {
 
 Deno.test("hosts: env seeds first boot; collections win after that", async () => {
   const dir = await mkdtemp(join(tmpdir(), "kz-hosts-"));
-  const settings = await Settings.open(dir);
-  const store = await Store.open(dir, join(dir, "feedback.json"), { settings });
+  const rig = await mkStateRig("hosts", { dir, feedbackPath: "feedback.json" });
+  const { settings, store } = rig;
   const h1 = await loadCollections(store, { KOZMOZOO_HOSTS: "a=1.1.1.1:8188,b=2.2.2.2:8188" });
   assertEquals(h1, { a: "1.1.1.1:8188", b: "2.2.2.2:8188" });
   // a later boot with a DIFFERENT env must not clobber the user-managed map
@@ -44,8 +44,8 @@ Deno.test("hosts: validation rejects malformed name/address", async () => {
 
 Deno.test("hosts: POST adds + persists + probes; DELETE removes; last host guarded", async () => {
   const dir = await mkdtemp(join(tmpdir(), "kz-hosts2-"));
-  const settings = await Settings.open(dir);
-  const store = await Store.open(dir, join(dir, "feedback.json"), { settings });
+  const rig = await mkStateRig("hosts", { dir, feedbackPath: "feedback.json" });
+  const { settings, store } = rig;
   const hosts = await loadCollections(store, { KOZMOZOO_HOSTS: "a=127.0.0.1:1" });
   const router = makeRouter({ hosts, store, settings, plugins: null });
 
@@ -98,8 +98,8 @@ Deno.test("hosts: upload never sends overwrite; 409 surfaces the conflicting nam
 
     // the route answers 409 carrying the conflicting name
     const dir = await mkdtemp(join(tmpdir(), "kz-upload-"));
-    const settings = await Settings.open(dir);
-    const store = await Store.open(dir, join(dir, "feedback.json"));
+    const rig = await mkStateRig("upload", { dir });
+    const { settings, store } = rig;
     const router = makeRouter({ hosts: { c: addr }, store, settings, plugins: null });
     const form = new FormData();
     form.append("image", new Blob([new Uint8Array([1])], { type: "image/png" }), "taken.png");

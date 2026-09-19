@@ -2,10 +2,10 @@
 
 :root { color-scheme: dark;
   /* The app's semantic palette — the ONLY place colors are defined.
-     Component rules reference roles, never raw values. Derived tones are
-     computed from the roles, so a future color scheme swaps this block
-     and nothing else. Positive (green) is reserved for positive-feedback
-     affordances — never for general UI elements. */
+ Component rules reference roles, never raw values. Derived tones are
+ computed from the roles, so a future color scheme swaps this block
+ and nothing else. Positive (green) is reserved for positive-feedback
+ affordances — never for general UI elements. */
   --black: #000;
   --background: #111;            /* app background */
   --surface: #151515;            /* card/workbox surfaces */
@@ -28,10 +28,10 @@
   --border-strong: #3a3a3a;      /* control borders */
   --background-stage: #0a0a0c;   /* image stage (imgwrap, inline images) */
   --chrome-h: 37px;              /* header strip height — bulk bar anchors to it */
-  --backdrop: rgba(0,0,0,.6);    /* the one modal backdrop tone (H5) */
+  --backdrop: rgba(0,0,0,.6);    /* the one modal backdrop tone */
   --dropdown-gap: 8px;           /* dropdown/flash offset from its anchor */
-  /* page-level layer scale (H6): chrome < dropdown < overlay < modal <
-     confirm < status. Component-local stacking stays plain integers. */
+  /* page-level layer scale : chrome < dropdown < overlay < modal <
+ confirm < status. Component-local stacking stays plain integers. */
   --z-chrome: 10; --z-dropdown: 20; --z-overlay: 30;
   --z-modal: 40; --z-confirm: 50; --z-status: 60;
   /* derived tones — computed from the roles, never raw */
@@ -42,21 +42,21 @@
 * { box-sizing: border-box; }
 html, body { height: 100%; }
 /* the app is one flex column: the header sits in normal flow (it can never
-   overlap content) and #app fills the rest */
+ overlap content) and #app fills the rest */
 body { margin: 0; background: var(--background); color: var(--foreground);
   font: 13px/1.4 system-ui, sans-serif; overflow: hidden;
   scrollbar-width: none;
   display: flex; flex-direction: column; }
 body::-webkit-scrollbar { display: none; }
 body.resizing { cursor: col-resize; user-select: none; }
-/* the single sanctioned important-flag (H4): the hidden attribute outranks
-   any display a component rule sets — the seven per-selector overrides are
-   dead with it */
+/* the single sanctioned important-flag : the hidden attribute outranks
+ any display a component rule sets — the seven per-selector overrides are
+ dead with it */
 [hidden] { display: none !important; }
 
 /* --- header -------------------------------------------------------------- */
 /* #app is the Solid root; it takes over body's flex-column role so the
-   surfaces <App> renders lay out exactly as body's direct children did. */
+ surfaces <App> renders lay out exactly as body's direct children did. */
 #app { flex: 1; min-height: 0; display: flex; flex-direction: column; }
 #chrome { height: var(--chrome-h); flex: 0 0 auto;
   display: flex; gap: 8px; align-items: center; padding: 0 8px;
@@ -118,19 +118,19 @@ body.resizing { cursor: col-resize; user-select: none; }
 #bulkClear:hover { color: var(--foreground); border-color: var(--foreground-dim); }
 
 /* --- main: two feeds share the window; divider splits; each column scrolls
-   itself (no page-level scroll) ------------------------------------------- */
+ itself (no page-level scroll) ------------------------------------------- */
 main { display: flex; flex: 1; min-height: 0; }
 
 /* feed position rail: a tape of small grey ticks spanning the view, the
-   viewport-visible images as a wave of wider/brighter ticks over it.
-   Left-aligned — Grok's edge indicator mirrored to the left edge. The rail
-   is a static flex child of <main> (declared in App.tsx) that pushes the
-   feed column right, like the right rail pushes the workspace panels;
-   FeedRail.tsx renders its ticks/labels as JSX. */
+ viewport-visible images as a wave of wider/brighter ticks over it.
+ Left-aligned — Grok's edge indicator mirrored to the left edge. The rail
+ is a static flex child of <main> (declared in App.tsx) that pushes the
+ feed column right, like the right rail pushes the workspace panels;
+ FeedRail.tsx renders its ticks/labels as JSX. */
 #feedRail { position: relative; flex: 0 0 22px; align-self: stretch;
   /* rail geometry is owned HERE (js reads these custom properties — the
-     rail's capacity/scrub math can never silently desync from the CSS):
-     tick step = height + gap; the labels reserve top/bottom bands */
+ rail's capacity/scrub math can never silently desync from the CSS):
+ tick step = height + gap; the labels reserve top/bottom bands */
   --fr-tick-step: 5px; --fr-tick-gap: 3px;
   --fr-label-top: 14px; --fr-label-bottom: 28px;
   margin-left: 6px;
@@ -141,25 +141,25 @@ main { display: flex; flex: 1; min-height: 0; }
   margin-bottom: var(--fr-tick-gap);
   background: var(--foreground-dim); }
 /* the wave must read as a BRIGHT clump over the grey tape, not one more
-   grey tick — light foreground, longer than the tape ticks */
+ grey tick — light foreground, longer than the tape ticks */
 #feedRail .fr-tick.wave { width: 18px; background: var(--foreground);
   box-shadow: 0 0 3px color-mix(in srgb, var(--foreground) 35%, transparent); }
 #feedRail .fr-num { position: absolute; left: 2px; font-size: 8px;
   color: var(--foreground-dim); font-family: ui-monospace, monospace; }
 #feedRail .fr-top { top: 2px; }
 /* the bottom band is two 8px lines inside the reserved --fr-label-bottom
-   (H7): the upper line sits at the band's half — derived, not hand-synced */
+ : the upper line sits at the band's half — derived, not hand-synced */
 #feedRail .fr-bottom { bottom: calc(var(--fr-label-bottom) / 2); }
 #feedRail .fr-total { bottom: 2px; color: var(--foreground-dim); }
 #candidatesCol { flex: 1; min-width: 0; overflow-y: auto; overflow-x: hidden;
   scrollbar-width: none; }
 #candidatesCol::-webkit-scrollbar { display: none; }
-/* ONE grab-strip pattern (H7): the strip is --grab-w wide and its 1px line
-   is centered by an inset derived from that one var — width and inset can
-   never desync. Two instances: #divider (feed|workspace, negative margins
-   widen the grab zone without enlarging the line) and .separator (the
-   details split). Dragging keeps the highlight on (a class, not :hover —
-   the captured pointer can leave the strip mid-drag). */
+/* ONE grab-strip pattern : the strip is --grab-w wide and its 1px line
+ is centered by an inset derived from that one var — width and inset can
+ never desync. Two instances: #divider (feed|workspace, negative margins
+ widen the grab zone without enlarging the line) and .separator (the
+ details split). Dragging keeps the highlight on (a class, not :hover —
+ the captured pointer can leave the strip mid-drag). */
 #divider, .separator { --line-inset: calc((var(--grab-w) - 1px) / 2);
   flex: 0 0 var(--grab-w); align-self: stretch; position: relative;
   background: transparent; cursor: col-resize; }
@@ -169,7 +169,7 @@ main { display: flex; flex: 1; min-height: 0; }
 #divider::before { background: var(--border); border-radius: 1px; transition: background .15s; }
 #divider:hover::before, #divider.dragging::before { background: var(--foreground-mid); }
 /* the pane's width is owned by the store signal (rendered as an inline
-   style) — no duplicate CSS default (G17/H7); min/max bound the drag */
+ style) — no duplicate CSS default (/); min/max bound the drag */
 #workspace { flex: 0 0 auto; background: var(--surface); border: 1px solid var(--lifted);
   border-radius: 8px; margin: 8px 0; padding: 8px;
   display: flex; flex-direction: column; overflow: hidden;
@@ -187,7 +187,7 @@ main { display: flex; flex: 1; min-height: 0; }
 
 /* details space: current image's full metadata */
 /* overflow-x hidden: an x-shift (e.g. scrollIntoView from a filename link)
-   must never clip the images box's left edge invisibly */
+ must never clip the images box's left edge invisibly */
 .info-body { flex: 1; overflow-y: auto; overflow-x: hidden; scrollbar-width: none; }
 .info-body::-webkit-scrollbar { display: none; }
 #anchorList { flex: 1; overflow-y: auto; display: flex; flex-direction: column;
@@ -204,30 +204,30 @@ main { display: flex; flex: 1; min-height: 0; }
   --grid-pad: 8px; padding: var(--grid-pad);
   position: relative; /* the measuring probe's containing block */ }
 /* Static decoration architecture: every box carries its border in all
-   states, at constant size; state changes border-color only. No outward
-   decorations (outline, outer box-shadow) near scroll/clip boundaries —
-   nothing paints outside a border box, so nothing can be clipped.
+ states, at constant size; state changes border-color only. No outward
+ decorations (outline, outer box-shadow) near scroll/clip boundaries —
+ nothing paints outside a border box, so nothing can be clipped.
 
-   Decoration layers: base < state < status < activity — the layer above
-   overrides the layer below (cascade-layer order, not selector
-   specificity); items within a layer are mutually exclusive by data
-   construction (vote is one value; favorite is a boolean; current is a
-   single pointer). The resting border matches the card's own background
-   — present in structure, quiet in tone. Future items: ranked (status
-   layer), being-saved (activity layer — a second activity item needs an
-   explicit intra-layer precedence rule when it lands). */
+ Decoration layers: base < state < status < activity — the layer above
+ overrides the layer below (cascade-layer order, not selector
+ specificity); items within a layer are mutually exclusive by data
+ construction (vote is one value; favorite is a boolean; current is a
+ single pointer). The resting border matches the card's own background
+ — present in structure, quiet in tone. Future items: ranked (status
+ layer), being-saved (activity layer — a second activity item needs an
+ explicit intra-layer precedence rule when it lands). */
 @layer card-base, card-state, card-status, card-activity;
 
 .card, .card--probe { scroll-margin-top: 8px;
   background: var(--focused-background); border-radius: 8px; padding: 12px;
   border-width: 1px; border-style: solid;
   /* the inter-card spacing rides ON the card: the virtualizer's item size
-     is cardHeight + this margin, so its scroll math matches the DOM
-     exactly (a flex gap would be invisible to it) */
+ is cardHeight + this margin, so its scroll math matches the DOM
+ exactly (a flex gap would be invisible to it) */
   margin-bottom: var(--grid-gap); }
 /* the measuring probe IS a card for styling (the shared rule above), but
-   invisible and out of flow — geometry constants are measured from it,
-   never from a live feed card */
+ invisible and out of flow — geometry constants are measured from it,
+ never from a live feed card */
 .card--probe { position: absolute; inset-inline: var(--grid-pad); top: 0; visibility: hidden;
   pointer-events: none; border-color: transparent; }
 @layer card-base     { .card { border-color: var(--focused-background); } }
@@ -238,18 +238,18 @@ main { display: flex; flex: 1; min-height: 0; }
 @layer card-activity { .card.current { border-color: var(--primary); } }
 
 /* image box: aspect-true, reserved before pixels land.
-   Default rule: image width = column width, height = derived from aspect-ratio
-   with a 16:9 floor (taller for tall images). The image inside is scale-down
-   + centered — never upscaled, never rendered in a corner.
-   --ar-num/--ar-den default to 16:9 so a meta-less box renders at the same
-   aspect the virtualizer's estimateSize assumes (no first-measure jump). */
+ Default rule: image width = column width, height = derived from aspect-ratio
+ with a 16:9 floor (taller for tall images). The image inside is scale-down
+ + centered — never upscaled, never rendered in a corner.
+ --ar-num/--ar-den default to 16:9 so a meta-less box renders at the same
+ aspect the virtualizer's estimateSize assumes (no first-measure jump). */
 .imgwrap { position: relative;
   width: 100%; aspect-ratio: var(--ar-num, 16) / var(--ar-den, 9);
   background: var(--background-stage); border-width: 1px; border-style: solid; border-radius: 4px;
   overflow: hidden; }
 /* the image box's own layer stack (same model as the card's): base is
-   transparent; error is the load-lifecycle state; the link-target flash
-   is activity and outranks during its window */
+ transparent; error is the load-lifecycle state; the link-target flash
+ is activity and outranks during its window */
 @layer box-base, box-state, box-activity;
 @layer box-base     { .imgwrap { border-color: transparent; } }
 @layer box-state    { .imgwrap.ic-error { border-color: var(--error); } }
@@ -258,9 +258,9 @@ main { display: flex; flex: 1; min-height: 0; }
 .imgwrap img { width: 100%; height: 100%; object-fit: scale-down; display: block;
   cursor: zoom-in; }
 .imgwrap.ic-empty img { cursor: default; }
-/* the error state's whole box, co-located with its state color (H8):
-   proper box, no alt-text collision. These stay UNLAYERED on purpose —
-   unlayered beats layered, so the img rule outranks the base .imgwrap img */
+/* the error state's whole box, co-located with its state color :
+ proper box, no alt-text collision. These stay UNLAYERED on purpose —
+ unlayered beats layered, so the img rule outranks the base .imgwrap img */
 .imgwrap.ic-error { min-height: 120px; display: grid; place-items: center; }
 .imgwrap.ic-error img { display: none; }
 .imgwrap.ic-error::after { content: "load failed — click to retry";
@@ -282,7 +282,7 @@ main { display: flex; flex: 1; min-height: 0; }
   cursor: pointer; display: grid; place-items: center; }
 .selcb:hover { border-color: var(--secondary); }
 .selcb:checked { background: var(--secondary); border-color: var(--secondary); }
-/* the check is grid-centered (H7) — no hand-tuned left/top offsets */
+/* the check is grid-centered — no hand-tuned left/top offsets */
 .selcb:checked::after { content: ""; width: 3px; height: 7px;
   border: solid var(--background); border-width: 0 1.5px 1.5px 0;
   transform: rotate(45deg); }
@@ -296,7 +296,7 @@ main { display: flex; flex: 1; min-height: 0; }
 .copyable:hover { color: var(--secondary); }
 .copyable.copied { color: var(--secondary); }
 /* the save-confirmation flash overlays the row (anchored left of the action
-   buttons) instead of occupying width in every card's title row */
+ buttons) instead of occupying width in every card's title row */
 .saved { position: absolute; right: calc(100% + var(--dropdown-gap)); top: 50%;
   transform: translateY(-50%); color: var(--positive); font-size: 11px;
   opacity: 0; transition: opacity .3s; white-space: nowrap; pointer-events: none; }
@@ -307,9 +307,9 @@ main { display: flex; flex: 1; min-height: 0; }
 .votebtn svg { vertical-align: -1px; }
 .votebtn:hover, .savebtn:hover { border-color: var(--foreground-dim); color: var(--foreground-mid); }
 /* one pattern for every action button under the image: the button
-   contributes ONLY an accent token. Base color is the muted accent,
-   the border is hover-only, and the active state is the icon itself —
-   full color plus fill. No per-button rules beyond the token. */
+ contributes ONLY an accent token. Base color is the muted accent,
+ the border is hover-only, and the active state is the icon itself —
+ full color plus fill. No per-button rules beyond the token. */
 .votebtn { --btn-c: var(--foreground-mid);
   color: color-mix(in srgb, var(--btn-c) 55%, transparent); }
 .votebtn.down { --btn-c: var(--negative); }
@@ -360,8 +360,8 @@ main { display: flex; flex: 1; min-height: 0; }
 .menulabel { color: var(--foreground-dim); font-size: 11px; }
 .menuextra { color: var(--foreground-dim); font-size: 11px; margin-left: auto; }
 
-/* switches — the knob travel derives from the track/knob/inset vars (H7):
-   track − knob − 2×inset, never a hand-computed translateX */
+/* switches — the knob travel derives from the track/knob/inset vars :
+ track − knob − 2×inset, never a hand-computed translateX */
 .switchwrap { display: flex; align-items: center; gap: 8px; cursor: pointer; }
 .switchwrap input { display: none; }
 .switchwrap .track { --track-w: 28px; --track-h: 16px; --knob: 12px; --inset: 2px;
@@ -377,8 +377,8 @@ main { display: flex; flex: 1; min-height: 0; }
   background: var(--foreground-bright); }
 
 /* --- the status corner: ONE fixed flex column holds the scroll-top button
-   above the status stack (H7 — the button's bottom:56px was hand-synced to
-   the stack; the column derives the order) --------------------------------- */
+ above the status stack ( — the button's bottom:56px was hand-synced to
+ the stack; the column derives the order) --------------------------------- */
 #statusCol { position: fixed; left: 12px; bottom: 10px; z-index: var(--z-status);
   display: flex; flex-direction: column; justify-content: flex-end; align-items: flex-start;
   gap: 8px; max-width: calc(100vw - 24px); pointer-events: none; }
@@ -393,7 +393,7 @@ main { display: flex; flex: 1; min-height: 0; }
   max-width: 100%; }
 .statuschip { background: color-mix(in srgb, var(--focused-background) 88%, transparent); border: 1px solid var(--border);
   /* state is color, never geometry: the left accent border is always 3px;
-     the kind only recolors it (no 2px state shift) */
+ the kind only recolors it (no 2px state shift) */
   border-left: 3px solid transparent;
   border-radius: 6px; padding: 4px 10px; font-size: 12px; color: var(--foreground-mid);
   max-width: calc(100vw - 24px); white-space: normal; overflow-wrap: anywhere;
@@ -402,11 +402,11 @@ main { display: flex; flex: 1; min-height: 0; }
 .statuschip.active { color: var(--foreground); border-left-color: var(--secondary); }
 .statuschip.error { color: var(--negative); border-left-color: var(--error); }
 
-/* --- the modal contract (H5): ONE backdrop + panel pair. Every modal
-   renders .modal-backdrop/.modal-panel (Modal.tsx portals them to body);
-   per-overlay rules carry only what is genuinely per-overlay — the layer
-   tier, sizing, scroll. The five copied backdrop/panel schemes and their
-   raw rgba() tones are gone; --backdrop owns the tone. ------------------- */
+/* --- the modal contract : ONE backdrop + panel pair. Every modal
+ renders .modal-backdrop/.modal-panel (Modal.tsx portals them to body);
+ per-overlay rules carry only what is genuinely per-overlay — the layer
+ tier, sizing, scroll. The five copied backdrop/panel schemes and their
+ raw rgba tones are gone; --backdrop owns the tone. ------------------- */
 .modal-backdrop { position: fixed; inset: 0; z-index: var(--z-modal);
   background: var(--backdrop);
   display: flex; align-items: center; justify-content: center; padding: 24px; }
@@ -428,9 +428,9 @@ main { display: flex; flex: 1; min-height: 0; }
 .metabody .plabel { color: var(--foreground-mid); }
 /* a field value that differs from the previous current image's */
 .metabody .pdiff { color: var(--foreground-bright); }
-/* the Head component's rules, one scope (H9): name line, sub-line, and the
-   variation lineage (which image this one came from) all render inside
-   .metabody */
+/* the Head component's rules, one scope : name line, sub-line, and the
+ variation lineage (which image this one came from) all render inside
+ .metabody */
 .metabody .ws-head { margin-bottom: 10px; }
 .metabody .ws-name { font-size: 12px; overflow-wrap: anywhere; }
 .metabody .ws-sub { color: var(--foreground-dim); font-size: 11px; margin-top: 2px; }
@@ -485,8 +485,8 @@ main { display: flex; flex: 1; min-height: 0; }
 #diffKeysBtn:hover { color: var(--foreground); border-color: var(--foreground-dim); }
 
 /* --- workbench: single-image viewer -----------------------------------------
-   The current image, fitted to the stage. Stripped to the studs: no
-   composition modes, no blink, no zoom/pan — those are being rebuilt. */
+ The current image, fitted to the stage. Stripped to the studs: no
+ composition modes, no blink, no zoom/pan — those are being rebuilt. */
 #diff { position: fixed; inset: 0; background: var(--black); z-index: var(--z-overlay); }
 #diffStage { position: absolute; inset: 0; display: flex;
   align-items: center; justify-content: center; }
@@ -523,8 +523,8 @@ main { display: flex; flex: 1; min-height: 0; }
   overflow-y: auto; min-height: 0; flex: 1; padding-right: 4px; }
 
 /* Each param is a little card. Enabled cards float to the top; disabled
-   ones sit below — the ordered() memo's reactive sort, no DOM
-   manipulation. */
+ ones sit below — the ordered memo's reactive sort, no DOM
+ manipulation. */
 .vz-slider-row { display: grid;
   grid-template-columns: 18px 1fr 110px;
   gap: 12px; align-items: start;
@@ -536,8 +536,8 @@ main { display: flex; flex: 1; min-height: 0; }
 .vz-slider-row.vz-off { opacity: 0.55;
   background: color-mix(in srgb, var(--surface) 85%, transparent); }
 /* When a row is disabled the range picker chrome fades away, but the
-   orange "current value" tick and its numeric label STAY visible so the
-   image's actual value is legible on every row (enabled or not). */
+ orange "current value" tick and its numeric label STAY visible so the
+ image's actual value is legible on every row (enabled or not). */
 .vz-slider-row.vz-off .vz-min-lbl,
 .vz-slider-row.vz-off .vz-max-lbl,
 .vz-slider-row.vz-off .vz-slider { visibility: hidden; }
@@ -579,18 +579,18 @@ main { display: flex; flex: 1; min-height: 0; }
 .vz-label:hover { color: var(--secondary); }
 
 /* Dual-thumb slider layout: three stacked lanes.
-   Lane 1: min/max labels. Lane 2: noUiSlider (renders track, thumbs,
-   connect band). Lane 3: current-value label. The slider library handles
-   the internal alignment — thumbs, track, and connect band share the
-   same centerline by the library's own layout. */
+ Lane 1: min/max labels. Lane 2: noUiSlider (renders track, thumbs,
+ connect band). Lane 3: current-value label. The slider library handles
+ the internal alignment — thumbs, track, and connect band share the
+ same centerline by the library's own layout. */
 .vz-rangewrap { position: relative; margin-top: 2px;
   /* the half-thumb inset is owned once, here; the rail, the marker's
-     reference box, and the slider all read the same var, so their spans
-     match and thumbs attach to the rail ends instead of hanging off them */
+ reference box, and the slider all read the same var, so their spans
+ match and thumbs attach to the rail ends instead of hanging off them */
   --thumb-w: 14px; --thumb-inset: calc(var(--thumb-w) / 2); }
 
 /* Lane 1: min/max labels above the track — the horizontal inset matches the
-   track's, so a bound at 0%/100% centers on the thumb at that end. */
+ track's, so a bound at 0%/100% centers on the thumb at that end. */
 .vz-lane-labels { position: relative; height: 14px; margin: 0 var(--thumb-inset) 2px; }
 .vz-bound { position: absolute; top: 0; transform: translateX(-50%);
   color: var(--foreground); font-size: 11px;
@@ -601,8 +601,8 @@ main { display: flex; flex: 1; min-height: 0; }
   pointer-events: none; }
 
 /* Lane 2: the noUiSlider element. The library renders its own internal
-   structure; we override the colors and sizes. Its default horizontal
-   height is 18px — --lane-h matches it so the internal layout math aligns. */
+ structure; we override the colors and sizes. Its default horizontal
+ height is 18px — --lane-h matches it so the internal layout math aligns. */
 .vz-lane-track { --lane-h: 18px; position: relative; height: var(--lane-h); margin-bottom: 2px; }
 .vz-rail { position: absolute; left: var(--thumb-inset); right: var(--thumb-inset); top: 50%; height: 2px;
   transform: translateY(-50%); background: var(--border); border-radius: 1px; }
@@ -610,33 +610,33 @@ main { display: flex; flex: 1; min-height: 0; }
   margin: 0 var(--thumb-inset); }
 
 /* noUiSlider overrides — match our palette. Key: don't override the base's
-   dimensions (it fills the target by default). The track line is drawn by
-   a separate .vz-rail element centered on the lane, not by the base. */
+ dimensions (it fills the target by default). The track line is drawn by
+ a separate .vz-rail element centered on the lane, not by the base. */
 .vz-lane-track .noUi-target { background: transparent; border: none;
   box-shadow: none; }
 .vz-lane-track .noUi-base { background: transparent;
   width: calc(100% - 2 * var(--thumb-inset));
   margin: 0 var(--thumb-inset); }
 /* the library owns `transform` on connects (inline positioning), so
-   centering goes through a margin tied to the band's own height var */
+ centering goes through a margin tied to the band's own height var */
 .vz-lane-track .noUi-connect { --band-h: 3px;
   background: var(--secondary); height: var(--band-h);
   top: 50%; margin-top: calc(var(--band-h) / -2); border-radius: 1px; }
 /* noUiSlider's origin is full-width/zero-height by design — the library's
-   translate math depends on it; don't shrink it to the thumb size. */
+ translate math depends on it; don't shrink it to the thumb size. */
 .vz-lane-track .noUi-handle { width: var(--thumb-w); height: var(--thumb-w);
   border-radius: 50%; background: var(--secondary); border: 2px solid var(--background);
   cursor: pointer; box-shadow: none;
   /* right offset is half the handle width so the handle's CENTER sits on the
-     value point (the vendored default -17px assumes the library's 34px
-     handle and would push our center 10px right of it) */
+ value point (the vendored default -17px assumes the library's 34px
+ handle and would push our center 10px right of it) */
   right: calc(var(--thumb-w) / -2);
   /* border-box so the 14px includes the 2px border ring — the browser's
-     default content-box would add the border on top, pushing the center
-     down by 2px. */
+ default content-box would add the border on top, pushing the center
+ down by 2px. */
   box-sizing: border-box;
   /* center the thumb on the lane's centerline — derived from the lane and
-     thumb vars (H7), not a hand-computed offset */
+ thumb vars , not a hand-computed offset */
   top: calc((var(--lane-h) - var(--thumb-w)) / 2); }
 .vz-lane-track .noUi-handle::before,
 .vz-lane-track .noUi-handle::after { display: none; }
@@ -655,8 +655,8 @@ main { display: flex; flex: 1; min-height: 0; }
   white-space: nowrap; }
 
 /* per-row increment stepper (right of the slider).
-   Self-centers against the row — no top arithmetic. The checkbox still
-   top-aligns via its own alignment. */
+ Self-centers against the row — no top arithmetic. The checkbox still
+ top-aligns via its own alignment. */
 .vz-row-inc { display: flex; align-items: center; gap: 4px;
   flex: 0 0 auto;
   align-self: center; }
@@ -703,30 +703,30 @@ main { display: flex; flex: 1; min-height: 0; }
 .infogroup-body .infosec { margin-top: 8px; }
 
 /* details split: source images and node metadata arranged by the
-   header's layout switcher (state.infoLayout). The separator lane (13px,
-   line centered) owns the inter-column separation — 6.5px of air on each
-   side, symmetric across split/rev/stacked; no flex gap is paid on top. */
+ header's layout switcher (state.infoLayout). The separator lane (13px,
+ line centered) owns the inter-column separation — 6.5px of air on each
+ side, symmetric across split/rev/stacked; no flex gap is paid on top. */
 .info { display: flex; gap: 0; align-items: stretch; flex: 1; min-height: 0; }
 .info.rev { flex-direction: row-reverse; }
 .info.stacked { flex-direction: column; }
 /* images column: the inline flex-basis carries the split ratio; shrink
-   allowed so the row yields space to the text column instead of
-   overflowing the body when the pane is narrow */
+ allowed so the row yields space to the text column instead of
+ overflowing the body when the pane is narrow */
 .info-source-images { flex: 0 1 auto; min-width: 0; }
 /* text floor: the metadata column stays readable, the images column
-   shrinks below its split first */
+ shrinks below its split first */
 .info-source-nodes { flex: 1; min-width: 120px; }
 .info.stacked .info-source-images, .info.stacked .info-source-nodes { flex: none; max-width: 100%; width: 100%; }
 /* input images have no known dimensions — the box hugs the image */
 .info-source-images .imgwrap { aspect-ratio: auto; }
 /* the image column is for inspection — no small-cap height here; image
-   elements only render — clicks/drag hits target the imgwrap above them */
+ elements only render — clicks/drag hits target the imgwrap above them */
 .info-source-images .infoimg img { max-height: none; pointer-events: none; }
 /* the details split's instance of the grab-strip pattern */
 .separator { --grab-w: 13px; z-index: var(--z-chrome); }
 .separator::before { background: var(--lifted); }
 /* stacked layout: the same strip turned — in a column flex the basis IS
-   the height, and the line inset flips to the horizontal edges */
+ the height, and the line inset flips to the horizontal edges */
 .info.stacked .separator { width: 100%; cursor: row-resize; }
 .info.stacked .separator::before { inset: var(--line-inset) 0; }
 .separator:hover::before { background: var(--foreground); }
@@ -744,7 +744,7 @@ main { display: flex; flex: 1; min-height: 0; }
 .vz-divider { width: 1px; background: var(--foreground-dim); flex: 0 0 auto; }
 
 /* right column — stretches full body height so the spacer can shove Run
-   to the bottom of the column. */
+ to the bottom of the column. */
 .vz-right { width: 150px; display: flex; flex-direction: column;
   justify-content: flex-start; gap: 4px; flex: 0 0 auto;
   align-self: stretch; }
@@ -767,7 +767,7 @@ main { display: flex; flex: 1; min-height: 0; }
   font-family: ui-monospace, monospace; }
 .vz-tinput:focus { outline: none; border-color: var(--secondary); }
 /* Run button — sky blue, sits at the bottom of the right column via the
-   spacer above it. Fills the column width for a solid primary-action target. */
+ spacer above it. Fills the column width for a solid primary-action target. */
 .vz-run { background: var(--primary); color: var(--black); border: none;
   border-radius: 8px; padding: 10px 0; font-size: 14px; font-weight: 600;
   cursor: pointer; width: 100%; }

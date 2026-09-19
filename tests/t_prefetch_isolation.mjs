@@ -8,8 +8,8 @@ import { Prefetch } from "../src/prefetch.mjs";
 import { Ingest } from "../src/ingest.mjs";
 import { Cache } from "../src/cache.mjs";
 import { Store } from "../src/store.mjs";
+import { mkStateRig } from "./helpers/rig.mjs";
 import { makeRouter } from "../src/routes.mjs";
-import { Settings } from "../src/settings.mjs";
 import { mkdtemp, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -34,9 +34,8 @@ Deno.test("prefetch isolation: a host failing every read never stalls the health
   const goodAddr = `127.0.0.1:${good.addr.port}`;
   const badAddr = `127.0.0.1:${bad.addr.port}`;
 
-  const settings = await Settings.open(dir);
-  const store = await Store.open(dir);
-  const cache = new Cache(join(dir, "cache"));
+  const rig = await mkStateRig("iso", { dir });
+  const { settings, store, cache } = rig;
   const ingest = new Ingest(store, { healthy: goodAddr, broken: badAddr }, { cache });
   const pf = new Prefetch({
     hosts: { healthy: goodAddr, broken: badAddr }, store, settings, ingest,
@@ -93,9 +92,8 @@ Deno.test("prefetch: a collection added at runtime gets a worker and drains", as
   });
   const addr = `127.0.0.1:${server.addr.port}`;
 
-  const settings = await Settings.open(dir);
-  const store = await Store.open(dir);
-  const cache = new Cache(join(dir, "cache"));
+  const rig = await mkStateRig("isolate", { dir });
+  const { settings, store, cache } = rig;
   const hosts = {}; // nothing registered at start
   const ingest = new Ingest(store, hosts, { cache });
   const pf = new Prefetch({
@@ -132,9 +130,8 @@ Deno.test("prefetch: a collection removed and re-added starts clean and drains a
   });
   const addr = `127.0.0.1:${server.addr.port}`;
 
-  const settings = await Settings.open(dir);
-  const store = await Store.open(dir);
-  const cache = new Cache(join(dir, "cache"));
+  const rig = await mkStateRig("isore", { dir });
+  const { settings, store, cache } = rig;
   const hosts = { c: addr };
   const ingest = new Ingest(store, hosts, { cache });
   const pf = new Prefetch({

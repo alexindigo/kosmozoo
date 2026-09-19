@@ -10,7 +10,7 @@ export function ScrollTopButton() {
   const store = useAppStore();
 
   const visible = () => {
-    // the store's currentEntry memo owns the pointer→entry derivation (G7):
+    // the store's currentEntry memo owns the pointer→entry derivation :
     // visible when the current entry is not the feed's topmost card
     const ce = store.state.currentEntry();
     const v = store.state.view();

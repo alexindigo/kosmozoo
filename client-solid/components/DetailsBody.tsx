@@ -17,7 +17,7 @@ import { Zoomable } from "./Zoomable.js";
 
 export function DetailsBody() {
   const store = useAppStore();
-  // the store owns the pointer→entry derivation (G7): currentEntry for the
+  // the store owns the pointer→entry derivation : currentEntry for the
   // live pointer, entryFor for the history one
   const im = () => store.state.currentEntry()?.entry ?? null;
   const compareMeta = createMemo(() => store.state.entryFor(store.state.currentStack().at(-1) ?? null)?.entry?.meta ?? null);
@@ -35,7 +35,7 @@ export function DetailsBody() {
 
   // filename links in the text column focus the images column on that image —
   // MetaBody reports the click via onImageRef; the images column is ours.
-  // The flash is a signal through the shared helper (G9)
+  // The flash is a signal through the shared helper 
   let infoEl;
   const [flashFile, setFlashFile] = createSignal(null);
   const [flashOn, setFlashOn] = createSignal(false);
@@ -48,7 +48,7 @@ export function DetailsBody() {
   };
 
   const split = () => store.ui.info.split;
-  // the divider drag is the shared primitive (G8); the axis comes from the
+  // the divider drag is the shared primitive ; the axis comes from the
   // layout model, not the DOM class
   const { dragging, ref: sepRef } = useDrag({
     axis: () => (store.state.infoLayout() === "stacked" ? "y" : "x"),

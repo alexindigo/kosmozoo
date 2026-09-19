@@ -4,9 +4,9 @@
 import { assert, assertEquals, assertExists, assertFalse } from "jsr:@std/assert";
 import { sha256, Cache } from "../src/cache.mjs";
 import { Ingest } from "../src/ingest.mjs";
-import { Settings } from "../src/settings.mjs";
 import { Store } from "../src/store.mjs";
 import { makeRouter } from "../src/routes.mjs";
+import { mkStateRig } from "./helpers/rig.mjs";
 import { isFolderHost } from "../src/backings/index.mjs";
 import { mkdtemp, rm, writeFile, mkdir } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -62,9 +62,10 @@ Deno.test("ingestion: folder host → sha256 → cache → files table → image
   const bytes = new TextEncoder().encode("fake png bytes " + Date.now());
   await writeFile(join(folder, "test.png"), bytes);
 
-  const store = await Store.open(dir, join(dir, "fb.json"));
+  const rig = await mkStateRig("ing", { dir });
+  const { store } = rig;
   const hosts = { fixtures: `folder:${folder}` };
-  const ingest = new Ingest(store, hosts, { cache: new Cache(join(dir, "cache")) });
+  const ingest = new Ingest(store, hosts, { cache: rig.cache });
 
   // Before ingestion: no hash, no cache.
   assertEquals(store.hashFor("fixtures", "test.png"), null);
@@ -96,9 +97,10 @@ Deno.test("ingestion: same bytes on two hosts → same hash → one identity", a
   await writeFile(join(folder1, "img.png"), bytes);
   await writeFile(join(folder2, "img.png"), bytes);
 
-  const store = await Store.open(dir, join(dir, "fb.json"));
+  const rig = await mkStateRig("oneid", { dir });
+  const { store } = rig;
   const hosts = { host1: `folder:${folder1}`, host2: `folder:${folder2}` };
-  const ingest = new Ingest(store, hosts, { cache: new Cache(join(dir, "cache")) });
+  const ingest = new Ingest(store, hosts, { cache: rig.cache });
 
   const { hash: h1 } = await ingest.ensure("host1", "img.png");
   const { hash: h2 } = await ingest.ensure("host2", "img.png");
@@ -129,11 +131,11 @@ Deno.test("serve path: bytes carry validators — ETag (content hash) + no-cache
   await mkdir(folder);
   await writeFile(join(folder, "img.png"), bytes);
 
-  const settings = await Settings.open(dir);
-  const store = await Store.open(dir, join(dir, "fb.json"));
+  const rig = await mkStateRig("cache", { dir });
+  const { settings, store } = rig;
   const hosts = { h: `folder:${folder}` };
-  const ingest = new Ingest(store, hosts, { cache: new Cache(join(dir, "cache")) });
-  const router = makeRouter({ hosts, store, settings, plugins: null, cache: new Cache(join(dir, "cache")), ingest });
+  const ingest = new Ingest(store, hosts, { cache: rig.cache });
+  const router = makeRouter({ hosts, store, settings, plugins: null, cache: rig.cache, ingest });
 
   const { hash } = await ingest.ensure("h", "img.png");
   const r1 = await router.handle(new Request("http://x/api/collections/h/entries/img.png/bytes"));
@@ -165,11 +167,11 @@ Deno.test("serve path: cache hit serves directly, no host needed", async () => {
   await mkdir(folder);
   await writeFile(join(folder, "img.png"), bytes);
 
-  const settings = await Settings.open(dir);
-  const store = await Store.open(dir, join(dir, "fb.json"));
+  const rig = await mkStateRig("svc", { dir });
+  const { settings, store } = rig;
   const hosts = { host: `folder:${folder}` };
-  const ingest = new Ingest(store, hosts, { cache: new Cache(join(dir, "cache")) });
-  const router = makeRouter({ hosts, store, settings, plugins: null, cache: new Cache(join(dir, "cache")), ingest });
+  const ingest = new Ingest(store, hosts, { cache: rig.cache });
+  const router = makeRouter({ hosts, store, settings, plugins: null, cache: rig.cache, ingest });
 
   // First request: ingestion populates cache.
   const r1 = await router.handle(new Request("http://x/api/collections/host/entries/img.png/bytes"));
@@ -198,11 +200,11 @@ Deno.test("serve path: round-trip preserves Content-Type", async () => {
   await mkdir(folder);
   await writeFile(join(folder, "img.png"), png);
 
-  const settings = await Settings.open(dir);
-  const store = await Store.open(dir, join(dir, "fb.json"));
+  const rig = await mkStateRig("cache", { dir });
+  const { settings, store } = rig;
   const hosts = { h: `folder:${folder}` };
-  const ingest = new Ingest(store, hosts, { cache: new Cache(join(dir, "cache")) });
-  const router = makeRouter({ hosts, store, settings, plugins: null, cache: new Cache(join(dir, "cache")), ingest });
+  const ingest = new Ingest(store, hosts, { cache: rig.cache });
+  const router = makeRouter({ hosts, store, settings, plugins: null, cache: rig.cache, ingest });
 
   const r = await router.handle(new Request("http://x/api/collections/h/entries/img.png/bytes"));
   assertEquals(r.status, 200);
@@ -224,9 +226,10 @@ Deno.test("judgment migration: v1 feedback fans out to entry columns, file backe
 
   // an ingested file + a v1 feedback document keyed by legacy address AND hash
   const fbPath = join(dir, "fb.json");
-  const store = await Store.open(dir);
+  const rig = await mkStateRig("jmig", { dir });
+  const { store } = rig;
   const hosts = { h: `folder:${folder}` };
-  const ingest = new Ingest(store, hosts, { cache: new Cache(join(dir, "cache")) });
+  const ingest = new Ingest(store, hosts, { cache: rig.cache });
   const { hash } = await ingest.ensure("h", "judge.png");
   assertExists(hash);
   store.close();
@@ -252,7 +255,7 @@ Deno.test("judgment migration: v1 feedback fans out to entry columns, file backe
   await rm(dir, { recursive: true });
 });
 
-Deno.test("judgments: judgmentsAll returns hash-keyed entries with ref; per-collection export", async () => {
+Deno.test("judgments: per-collection export generates the portable v2 document", async () => {
   const dir = await mkdtemp(join(tmpdir(), "kz-fball-"));
 
   const bytes = new TextEncoder().encode("feedback all test");
@@ -260,20 +263,14 @@ Deno.test("judgments: judgmentsAll returns hash-keyed entries with ref; per-coll
   await mkdir(folder);
   await writeFile(join(folder, "fb.png"), bytes);
 
-  const store = await Store.open(dir);
+  const rig = await mkStateRig("jmig", { dir });
+  const { store } = rig;
   const hosts = { h: `folder:${folder}` };
-  const ingest = new Ingest(store, hosts, { cache: new Cache(join(dir, "cache")) });
+  const ingest = new Ingest(store, hosts, { cache: rig.cache });
   const { hash } = await ingest.ensure("h", "fb.png");
 
   await store.judgmentSet("h", "fb.png", "vote", "up");
   await store.judgmentSet("h", "fb.png", "favorite", true);
-
-  const all = store.judgmentsAll();
-  const entryKey = Object.keys(all).find((k) => k.length === 64);
-  assertExists(entryKey);
-  assertEquals(all[entryKey].vote, "up");
-  assertEquals(all[entryKey].favorite, true);
-  assertEquals(all[entryKey].ref, "h:fb.png");
 
   // the per-collection export generates the portable v2 document on demand
   const doc = store.feedbackExport("h");

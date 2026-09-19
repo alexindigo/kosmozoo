@@ -1,6 +1,6 @@
 // src/routes.mjs — dispatch table for the public engine API.
 //
-// Collections + entries are the resources (spec §2). Plugin routes live
+// Collections + entries are the resources (spec ). Plugin routes live
 // under /api/plugins/<name>/... and are registered by the plugin host.
 // The context arrives fully built (plugins included) — makeRouter never
 // reassigns or guards it (E1).

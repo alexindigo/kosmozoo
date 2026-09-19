@@ -7,7 +7,7 @@
 // workbench and back — and reloads restore it.
 //
 // The binding has a lifecycle: makeZoomable returns { dispose } — the
-// component rebinds when its target key changes (G3: a retargeted box must
+// component rebinds when its target key changes : a retargeted box must
 // not carry the previous image's transform or pan). Render state (the
 // transform CSS, the zoomed flag) is emitted through onTransform and
 // rendered by the component — the behavior never writes element style or

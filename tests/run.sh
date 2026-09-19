@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
-# tests/run.sh — the test runner. All tests are Deno; run them in the
-# devcontainer (or any Deno 2 environment).
+# tests/run.sh — the test runner. All tests are Deno. Host deno segfaults
+# on sqlite FFI here — the unit suite runs via the docker image (see
+# AGENTS.md); the e2e suite is ./tests/e2e/run.sh.
 #
 #   ./tests/run.sh            # run the whole suite
 #   ./tests/run.sh t_fake     # run tests matching a filter

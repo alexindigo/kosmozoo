@@ -6,31 +6,19 @@ import { assert, assertEquals } from "jsr:@std/assert";
 import { Ingest } from "../src/ingest.mjs";
 import { Cache } from "../src/cache.mjs";
 import { Store } from "../src/store.mjs";
-import { Settings } from "../src/settings.mjs";
 import { EXTRACTOR_VERSION } from "../src/extractor.mjs";
+import { fakeComfyInline } from "./helpers/fake-comfy-inline.mjs";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
 // A counting fake backing: every /api/view read is tallied.
-function countingComfy(body = "counting v1") {
-  const state = { reads: 0 };
-  const server = Deno.serve({ port: 0, hostname: "127.0.0.1" }, (req) => {
-    const url = new URL(req.url);
-    if (url.pathname === "/api/view") {
-      if (req.method === "HEAD") return new Response(null, { headers: { ETag: '"e1"' } });
-      state.reads++;
-      return new Response(body, { headers: { ETag: '"e1"', "Content-Type": "image/png" } });
-    }
-    return new Response("nf", { status: 404 });
-  });
-  return { state, server, addr: `127.0.0.1:${server.addr.port}` };
-}
+const countingComfy = (body = "counting v1") => fakeComfyInline({ body });
 
 Deno.test("ingest: concurrent ensure() is single-flight — one backing read", async () => {
   const dir = await mkdtemp(join(tmpdir(), "kz-sf-"));
   const { state, server, addr } = countingComfy();
-  const store = await Store.open(dir, join(dir, "fb.json"));
+  const store = await Store.open(dir, { feedbackPath: join(dir, "fb.json") });
   const ingest = new Ingest(store, { c: addr }, { cache: new Cache(join(dir, "cache")) });
 
   const [r1, r2, r3] = await Promise.all([
@@ -38,14 +26,14 @@ Deno.test("ingest: concurrent ensure() is single-flight — one backing read", a
     ingest.ensure("c", "img.png"),
     ingest.ensure("c", "img.png"),
   ]);
-  assertEquals(state.reads, 1); // one backing read for three callers
+  assertEquals(state.reads.length, 1); // one backing read for three callers
   assert(r1.hash && r1.hash === r2.hash && r2.hash === r3.hash);
   assertEquals(store.hashFor("c", "img.png"), r1.hash);
 
   // a later ensure serves from the cache — no new backing read
   const again = await ingest.ensure("c", "img.png");
   assertEquals(again.hash, r1.hash);
-  assertEquals(state.reads, 1);
+  assertEquals(state.reads.length, 1);
 
   await server.shutdown();
   await rm(dir, { recursive: true });
@@ -54,7 +42,7 @@ Deno.test("ingest: concurrent ensure() is single-flight — one backing read", a
 Deno.test("ingest: the single-flight key separates colliding (collection, name) pairs", async () => {
   const dir = await mkdtemp(join(tmpdir(), "kz-sfkey-"));
   const { state, server, addr } = countingComfy();
-  const store = await Store.open(dir, join(dir, "fb.json"));
+  const store = await Store.open(dir, { feedbackPath: join(dir, "fb.json") });
   // ("ab","c") and ("a","bc") concatenate to the same string — the \0-
   // separated key must keep them distinct: two concurrent callers, two reads
   const ingest = new Ingest(store, { ab: addr, a: addr }, { cache: new Cache(join(dir, "cache")) });
@@ -62,7 +50,7 @@ Deno.test("ingest: the single-flight key separates colliding (collection, name) 
     ingest.ensure("ab", "c.png"),
     ingest.ensure("a", "bc.png"),
   ]);
-  assertEquals(state.reads, 2); // no shared flight across the collision
+  assertEquals(state.reads.length, 2); // no shared flight across the collision
   assert(r1.hash && r2.hash);
   assertEquals(store.hashFor("ab", "c.png"), r1.hash);
   assertEquals(store.hashFor("a", "bc.png"), r2.hash);
@@ -74,7 +62,7 @@ Deno.test("ingest: the single-flight key separates colliding (collection, name) 
 Deno.test("ingest: extraction is decided by content.ext — stale re-extracts, current skips", async () => {
   const dir = await mkdtemp(join(tmpdir(), "kz-ext-"));
   const { server, addr } = countingComfy("not-a-png");
-  const store = await Store.open(dir, join(dir, "fb.json"));
+  const store = await Store.open(dir, { feedbackPath: join(dir, "fb.json") });
   const ingest = new Ingest(store, { c: addr }, { cache: new Cache(join(dir, "cache")) });
 
   // pre-seed a CURRENT content row: the ensure must NOT re-extract

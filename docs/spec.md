@@ -19,9 +19,10 @@ toggles. Availability and reason derive from each mode's declared `needs`.
 
 What IS shipped: the feed (virtualized grid), the workbench (single-image
 stage with a decode-guarded swap, notes/vote/favorite, anchor pane), the
-variations feature (server route + modal), and the `/diff?l=<h>#<f>&r=…`
-pair-URL grammar kept for the unfinished two-sided diff layer — `/diff` is
-the first *layer* over the feed; more layers follow.
+variations feature (server route + modal), and the
+`/diff#<srcL>#<fileL>:<srcR>#<fileR>` pair-URL grammar kept for the
+unfinished two-sided diff layer — `/diff` is the first *layer* over the
+feed; more layers follow.
 
 Keys are the primary input; the keys panel (`?`) lists the live bindings.
 
@@ -64,7 +65,7 @@ Plugin routes mount under `/api/plugins/<name><path>`:
 
 | Plugin | Routes |
 |---|---|
-| `detector` | `POST /detect`, `GET /status`, `GET /health` |
+| `detector` | `POST /detect`, `GET /status` |
 | `critic` | `GET /status`, `POST /describe`, `POST /diff-describe`, `POST /caption` |
 | `hello` | `GET /hello` |
 
@@ -234,8 +235,9 @@ file's first bytes (PNG IHDR, GIF descriptor, WebP VP8*, JPEG SOF), so a
 64 KB ranged head read (`Range: bytes=0-65535`; full-read fallback on a
 200-without-206) + `imageDims` stores them on `entry.width/height` — no
 hash, no cache write, no extract. Known dims (content via the entry's
-hash, or the entry columns) short-circuit the read; a 404 head read marks
-the entry `gone`.
+hash, or the entry columns) short-circuit the read; a 404 head read tells
+the prefetch the source lost the file, and the prefetch marks the entry
+`gone`.
 
 The prefetch runs TWO passes over each collection's listing: pass 1 the
 dims head reads (10 ms inter-file — size-before-render on a fresh host is
@@ -281,7 +283,7 @@ The `kz` object handed to `register(kz)`:
 | `kz.settings.get/set(k, v)` / `.ns()` | persistence | namespaced `plugins.<name>.*` settings |
 | `kz.store.getField/setField(collection, name, field, v)` | persistence | plugin fields on the entry's `plugin_fields` |
 | `kz.content.bytes(hash)` / `.graph(hash)` / `.bytesForEntry(collection, name)` | data | engine-mediated cache/graph reads |
-| `kz.judgments.get/set(...)` / `.all()` | data | the core judgment record (entry columns) |
+| `kz.judgments.get/set(...)` | data | the core judgment record, per entry (entry columns) |
 | `kz.reason(status, error, reason)` | response | the shared `{error, reason}` failure shape |
 
 Underscore accessors are gone: no plugin reaches engine internals. The

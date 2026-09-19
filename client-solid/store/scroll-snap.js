@@ -10,7 +10,7 @@
 //
 // This module is one pure function + its constants. The quiet window (a
 // programmatic scroll in flight) is a STORE signal — programmaticScrollUntil
-// — set and read by the settle pipeline; no module globals (B6).
+// — set and read by the settle pipeline; no module globals .
 
 // a tidy, never a yank: beyond this distance the user's landing stands
 export const SNAP_TIDY_PX = 120;

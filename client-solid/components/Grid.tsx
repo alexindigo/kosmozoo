@@ -6,7 +6,7 @@
 // window — restore/step costs O(window), not O(scroll position).
 //
 // The feed's invariant: a card mounts only when its size is known and never
-// changes height while mounted. estimateSize IS cardHeight() — exact for
+// changes height while mounted. estimateSize IS cardHeight — exact for
 // every mounted row — so the library's measurement pass is not wired and
 // no timer coordinates geometry. A size landing that inserts an entry above
 // the viewport is compensated by the feed itself (see below): the list does
@@ -81,7 +81,7 @@ export function Grid() {
   // exact). Not a virtualizer patch: the feed owns this rule.
   //
   // The rule fires ONLY for size landings: a landing does not change the
-  // view (view() does not subscribe to dims paths), so a known-list change
+  // view (view does not subscribe to dims paths), so a known-list change
   // with a STABLE view is a landing — a vote, a reveal toggle, a filter, or
   // a host switch recomputes the view, and those shifts belong to the user.
   let prevView = null;
@@ -140,11 +140,11 @@ export function Grid() {
     >
       <div id="grid">
         {/* the stable measuring card: styled by the card rule (class
-            card--probe, so test/card selectors never see it) but never
-            visible — the geometry constants are measured from IT, never
-            from a live feed card. Mirrors the real card's chrome: the
-            btnwrap's icon button drives the title row's height, and the
-            notes rows' real labels wrap exactly like a live card's. */}
+ card--probe, so test/card selectors never see it) but never
+ visible — the geometry constants are measured from IT, never
+ from a live feed card. Mirrors the real card's chrome: the
+ btnwrap's icon button drives the title row's height, and the
+ notes rows' real labels wrap exactly like a live card's. */}
         <div class="card--probe" aria-hidden="true" ref={(el) => { probe = el; }}>
           <div class="imgwrap" />
           <div class="ctitle">
@@ -197,7 +197,7 @@ function CardSlot(props) {
   const imgIdx = () => store.state.imageIdxById().get(props.entryId);
   const image = () => store.state.images[imgIdx()];
   const j = () => image()?.judgment ?? {};
-  // the store's currentEntry memo owns the pointer→entry derivation (G7)
+  // the store's currentEntry memo owns the pointer→entry derivation 
   const isCurrent = () => store.state.currentEntry()?.index === imgIdx();
 
   return (

@@ -36,7 +36,7 @@ export class Prefetch {
     this.dimsInterFileDelayMs = dimsInterFileDelayMs;
     this.listRefreshMs = listRefreshMs;
     // collection -> { dimsPrio, dimsPrioSet, dimsWalk, dimsWalkSet, dimsInflight,
-    //                 prio, prioSet, walk, walkSet, inflight, errors, task, lastError }
+    // prio, prioSet, walk, walkSet, inflight, errors, task, lastError }
     this.workers = new Map();
     this.running = false;
   }
@@ -236,7 +236,7 @@ export class Prefetch {
     return true;
   }
 
-  // A sleep that ends early when stop() flips the flag — stop() awaits the
+  // A sleep that ends early when stop flips the flag — stop awaits the
   // workers, so a capped backoff must not hold the shutdown for 30 s.
   async #sleepUntil(ms) {
     const end = Date.now() + ms;

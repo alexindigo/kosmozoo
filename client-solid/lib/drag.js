@@ -1,4 +1,4 @@
-// client-solid/lib/drag.js — ONE pointer-drag primitive (G8): pointerdown on
+// client-solid/lib/drag.js — ONE pointer-drag primitive : pointerdown on
 // the handle, then window-level pointermove/pointerup (works at 0 px and
 // while the pointer roams free of the strip). Movement is projected onto an
 // axis as a 0..1 fraction of the handle's parent box (ctx.frac); onStart can

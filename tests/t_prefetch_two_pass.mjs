@@ -5,9 +5,8 @@
 import { assert, assertEquals } from "jsr:@std/assert";
 import { Prefetch } from "../src/prefetch.mjs";
 import { Ingest } from "../src/ingest.mjs";
-import { Cache } from "../src/cache.mjs";
 import { Store } from "../src/store.mjs";
-import { Settings } from "../src/settings.mjs";
+import { mkStateRig } from "./helpers/rig.mjs";
 import { mkdtemp, rm, readFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -32,9 +31,9 @@ Deno.test("prefetch: dims queue drains before ingest starts; want promotes in bo
   });
   const addr = `127.0.0.1:${server.addr.port}`;
 
-  const settings = await Settings.open(dir);
-  const store = await Store.open(dir);
-  const ingest = new Ingest(store, { local: addr }, { cache: new Cache(join(dir, "cache")) });
+  const rig = await mkStateRig("2pass", { dir });
+  const { settings, store, cache } = rig;
+  const ingest = new Ingest(store, { local: addr }, { cache });
   const pf = new Prefetch({
     hosts: { local: addr }, store, settings, ingest,
     interFileDelayMs: 2, dimsInterFileDelayMs: 1, listRefreshMs: 3_600_000,
@@ -78,17 +77,27 @@ Deno.test("prefetch: dims queue drains before ingest starts; want promotes in bo
 Deno.test("prefetch: a 404 dims head read marks the entry gone immediately", async () => {
   const dir = await mkdtemp(join(tmpdir(), "kz-2pass-gone-"));
   const png = await readFile(new URL("./fixtures/flux-basic.png", import.meta.url).pathname);
+  const hits = []; // [pass, name] in request order — which pass touched the file first
   const server = Deno.serve({ port: 0, hostname: "127.0.0.1" }, (req) => {
     const url = new URL(req.url);
     if (url.pathname !== "/api/view") return new Response("nf", { status: 404 });
-    if (url.searchParams.get("filename") !== "ok.png") return new Response("nf", { status: 404 });
+    const name = url.searchParams.get("filename");
+    if (name !== "ok.png") {
+      hits.push([req.headers.get("range") ? "dims" : "full", name]);
+      return new Response("nf", { status: 404 });
+    }
+    if (req.headers.get("range")) {
+      hits.push(["dims", name]);
+      return new Response(png.subarray(0, 64), { status: 206, headers: { "Content-Type": "image/png" } });
+    }
+    hits.push(["full", name]);
     return new Response(png, { headers: { ETag: '"e"', "Content-Type": "image/png" } });
   });
   const addr = `127.0.0.1:${server.addr.port}`;
 
-  const settings = await Settings.open(dir);
-  const store = await Store.open(dir);
-  const ingest = new Ingest(store, { local: addr }, { cache: new Cache(join(dir, "cache")) });
+  const rig = await mkStateRig("2pass", { dir });
+  const { settings, store, cache } = rig;
+  const ingest = new Ingest(store, { local: addr }, { cache });
   const pf = new Prefetch({
     hosts: { local: addr }, store, settings, ingest,
     interFileDelayMs: 2, dimsInterFileDelayMs: 1, listRefreshMs: 3_600_000,
@@ -104,8 +113,13 @@ Deno.test("prefetch: a 404 dims head read marks the entry gone immediately", asy
   }
   pf.stop();
 
-  assertEquals(goneState, "gone"); // marked by the DIMS pass…
+  assertEquals(goneState, "gone");
   assertEquals(store.hashFor("local", "gone.png"), null); // …never ingested
+  // and it was the DIMS pass that marked it: the first read of the file at
+  // all was a head read (a pass-2 full read hits the same 404 later —
+  // entryGone is idempotent — so order, not presence, is the proof)
+  const firstHit = hits.find(([, n]) => n === "gone.png");
+  assertEquals(firstHit?.[0], "dims", `the dims pass saw the 404 first: ${JSON.stringify(hits)}`);
 
   await server.shutdown();
   await rm(dir, { recursive: true });

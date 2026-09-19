@@ -5,13 +5,13 @@
 // is derived, and a null src renders NO src attribute, so removing it can
 // never fire an error. The zoom behavior (js/zoomable.mjs) binds PER KEY
 // with teardown: a retargeted box rebinds and restores the new key's
-// persisted view — no transform or pan leaks across images (G3). The box
+// persisted view — no transform or pan leaks across images . The box
 // is full column width with a 16:9 floor on its aspect (taller
 // for tall images); the image inside is scale-down + centered — never
 // upscaled, never rendered in a corner.
 //
-// Props are VALUES (callers pass accessor calls: ar={ar()}) — no dual
-// value/function contract (G12).
+// Props are VALUES (callers pass accessor calls: ar={ar}) — no dual
+// value/function contract .
 
 import { createSignal, createMemo, createEffect, on, onCleanup } from "solid-js";
 import { makeZoomable } from "/js/zoomable.mjs";
@@ -47,7 +47,7 @@ export function Zoomable(props) {
   let imgEl;
   let binding = null;
   // bind per key: the old binding is disposed before the new one restores
-  // its persisted view (G3)
+  // its persisted view 
   createEffect(on(() => props.zoomKey, () => {
     binding?.dispose();
     binding = null;

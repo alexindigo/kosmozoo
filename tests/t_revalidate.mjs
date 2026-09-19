@@ -13,6 +13,8 @@ import { Ingest } from "../src/ingest.mjs";
 import { Settings } from "../src/settings.mjs";
 import { Store } from "../src/store.mjs";
 import { makeRouter } from "../src/routes.mjs";
+import { mkStateRig } from "./helpers/rig.mjs";
+import { fakeComfyInline } from "./helpers/fake-comfy-inline.mjs";
 import { mkdtemp, rm, writeFile, mkdir, utimes } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -20,15 +22,13 @@ import { join } from "node:path";
 // Direct-check tests get a huge interval so the debounce never fires;
 // debounce tests pass their own.
 async function rig(name, { revalidateMs = 3_600_000 } = {}) {
-  const dir = await mkdtemp(join(tmpdir(), `kz-rev-${name}-`));
-  const folder = join(dir, "images");
+  const r = await mkStateRig(`rev-${name}`, { revalidateMs });
+  const folder = join(r.dir, "images");
   await mkdir(folder);
-  const settings = await Settings.open(dir);
-  const store = await Store.open(dir, join(dir, "fb.json"));
   const hosts = { h: `folder:${folder}` };
-  const ingest = new Ingest(store, hosts, { cache: new Cache(join(dir, "cache")), revalidateMs });
-  const router = makeRouter({ hosts, store, settings, plugins: null, cache: new Cache(join(dir, "cache")), ingest });
-  return { dir, folder, store, ingest, router, hosts };
+  const ingest = new Ingest(r.store, hosts, { cache: r.cache, revalidateMs });
+  const router = makeRouter({ hosts, store: r.store, settings: r.settings, plugins: null, cache: r.cache, ingest });
+  return { dir: r.dir, folder, store: r.store, ingest, router, hosts, close: r.close };
 }
 
 const bytesRoute = (router) =>
@@ -36,22 +36,7 @@ const bytesRoute = (router) =>
 
 // A minimal ComfyUI stand-in: /api/view with a caller-controlled ETag and
 // body, HEAD handled explicitly (no dependence on serve internals).
-function comfyStub(initial) {
-  const state = { ...initial };
-  const server = Deno.serve({ port: 0, hostname: "127.0.0.1", onListen: () => {} }, (req) => {
-    const url = new URL(req.url);
-    if (url.pathname !== "/api/view") return new Response("nope", { status: 404 });
-    const headers = {
-      ETag: state.etag,
-      "Content-Type": "image/png",
-      "Content-Length": String(state.body.length),
-    };
-    return req.method === "HEAD"
-      ? new Response(null, { headers })
-      : new Response(state.body, { headers });
-  });
-  return { state, server, addr: `127.0.0.1:${server.addr.port}` };
-}
+const comfyStub = (initial) => fakeComfyInline(initial);
 
 // --- the stamp seam -----------------------------------------------------------
 
@@ -227,7 +212,7 @@ Deno.test("debounce: a second change inside the window is not re-checked", async
 Deno.test("unreachable host: stamp check fails quietly, the row is kept", async () => {
   const dir = await mkdtemp(join(tmpdir(), "kz-rev-down-"));
   const settings = await Settings.open(dir);
-  const store = await Store.open(dir, join(dir, "fb.json"));
+  const store = await Store.open(dir, { feedbackPath: join(dir, "fb.json") });
   const hosts = { c: "127.0.0.1:1" }; // comfy-style, unreachable
   await store.ingestFile("c", "img.png", "deadbeef", 3, { stamp: "s1" });
   const ingest = new Ingest(store, hosts, { cache: new Cache(join(dir, "cache")) });
@@ -244,7 +229,7 @@ Deno.test("comfy host: a changed ETag remaps the same filename to new content", 
   const dir = await mkdtemp(join(tmpdir(), "kz-rev-comfy-"));
   const stub = comfyStub({ etag: '"e1"', body: "comfy v1" });
   const settings = await Settings.open(dir);
-  const store = await Store.open(dir, join(dir, "fb.json"));
+  const store = await Store.open(dir, { feedbackPath: join(dir, "fb.json") });
   const hosts = { c: stub.addr };
   const ingest = new Ingest(store, hosts, { cache: new Cache(join(dir, "cache")) });
   const router = makeRouter({ hosts, store, settings, plugins: null, cache: new Cache(join(dir, "cache")), ingest });

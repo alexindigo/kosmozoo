@@ -5,6 +5,7 @@ import { assert, assertEquals } from "jsr:@std/assert";
 import { ensureStateDir, resolveStateDir, loadVersioned, atomicWrite } from "../src/state.mjs";
 import { Settings } from "../src/settings.mjs";
 import { Store } from "../src/store.mjs";
+import { mkStateRig } from "./helpers/rig.mjs";
 import { parseHosts, splitHostKey } from "../src/collections.mjs";
 import { makeRouter } from "../src/routes.mjs";
 import { mkdtemp, rm } from "node:fs/promises";
@@ -70,7 +71,7 @@ Deno.test("settings: namespaced set/get, null deletes", async () => {
 Deno.test("store: judgment defaults stored absent, entry prunes when empty", async () => {
   const dir = await mkdtemp(join(tmpdir(), "kz-store-"));
   const fb = join(dir, "feedback.json");
-  const st = await Store.open(dir, fb);
+  const st = await Store.open(dir, { feedbackPath: fb });
   await st.judgmentSet("h", "f.png", "vote", "down");
   assertEquals(st.judgmentGet("h", "f.png"), { vote: "down" });
   await st.judgmentSet("h", "f.png", "vote", null);
@@ -87,8 +88,8 @@ Deno.test("store: judgment defaults stored absent, entry prunes when empty", asy
 
 Deno.test("api: /api/collections probes online status; unknown routes 404", async () => {
   const dir = await mkdtemp(join(tmpdir(), "kz-api-"));
-  const settings = await Settings.open(dir);
-  const store = await Store.open(dir, join(dir, "feedback.json"));
+  const rig = await mkStateRig("core", { dir });
+  const { settings, store } = rig;
   const router = makeRouter({ hosts: { local: "127.0.0.1:1" }, store, settings, plugins: null });
   const res = await router.handle(new Request("http://x/api/collections"));
   assertEquals(res.status, 200);
@@ -101,8 +102,8 @@ Deno.test("api: /api/collections probes online status; unknown routes 404", asyn
 
 Deno.test("api: settings namespace round-trip via HTTP", async () => {
   const dir = await mkdtemp(join(tmpdir(), "kz-api2-"));
-  const settings = await Settings.open(dir);
-  const store = await Store.open(dir, join(dir, "feedback.json"));
+  const rig = await mkStateRig("core", { dir });
+  const { settings, store } = rig;
   const router = makeRouter({ hosts: {}, store, settings, plugins: null });
   const r = await router.handle(new Request("http://x/api/settings/core.judgment", {
     method: "PATCH",

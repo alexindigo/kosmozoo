@@ -8,10 +8,10 @@
 // indices sit at the rail's top and bottom, the total count below.
 // Click/drag scrubs: the tick under the cursor becomes the centered card.
 //
-// The tape and ticks are JSX (§3.5): the wave bounds derive EXACTLY from the
-// virtualizer's visible range — no hysteresis band (B10 existed only because
+// The tape and ticks are JSX : the wave bounds derive EXACTLY from the
+// virtualizer's visible range — no hysteresis band ( existed only because
 // tops moved; exact sizes mean they don't) — the tape window is the pure
-// tapeWindow() fold, and scroll reactivity is the store's scrollTop signal
+// tapeWindow fold, and scroll reactivity is the store's scrollTop signal
 // (Grid's handler is its only writer). No innerHTML rebuilds, no querySelector
 // walks, no paint loop.
 
@@ -73,7 +73,7 @@ export function FeedRail() {
     return first < 0 ? null : [first, last];
   });
 
-  // the tape window: the pure tapeWindow() fold over the wave — ONE memo
+  // the tape window: the pure tapeWindow fold over the wave — ONE memo
   // with prev (no reset-to-0 on count change: a new feed re-centers
   // through the same fold instead of flickering the tape away and back)
   const tapeStart = createMemo((prev) => {

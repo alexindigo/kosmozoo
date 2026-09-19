@@ -6,7 +6,7 @@
 //
 // Run via tests/e2e/run.sh (step 7; the dims pass has drained by then).
 
-const { CDP, sleep } = require("./cdp.cjs");
+const { CDP, sleep, collectPageErrors } = require("./cdp.cjs");
 
 const ENGINE = process.env.E2E_ENGINE ?? "http://127.0.0.1:18260";
 const KZ = `(await import("/store/instance.js")).appStore`;
@@ -41,18 +41,7 @@ const AUDIT = `(async () => {
 
 (async () => {
   const page = await CDP.launch(9335);
-  const pageErrors = [];
-  await page.send("Runtime.enable");
-  const orig = page.ws.onmessage;
-  page.ws.onmessage = (ev) => {
-    orig(ev);
-    let msg;
-    try { msg = JSON.parse(ev.data); } catch { return; }
-    if (msg.method === "Runtime.exceptionThrown") {
-      const d = msg.params.exceptionDetails;
-      pageErrors.push(String(d.exception?.description ?? d.text).split("\n")[0]);
-    }
-  };
+  const pageErrors = await collectPageErrors(page);
 
   await page.goto(ENGINE + "/");
   await page.poll("!!document.querySelector('.card')", 20000);

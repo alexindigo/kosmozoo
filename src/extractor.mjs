@@ -56,7 +56,7 @@ export function basename(v) {
 // node name, _meta.title (when present) is its display title. This feeds the
 // registry: node types and their fields are discovered from graphs.
 // (The class_type probes BELOW, by contrast, are empirical field data ported
-// verbatim from real fleets — spec §4 #15. Different rule on purpose.)
+// verbatim from real fleets — spec #15. Different rule on purpose.)
 export function collectNodes(graph, { stringCap = 4096 } = {}) {
   const out = [];
   for (const [id, n] of Object.entries(graph ?? {})) {

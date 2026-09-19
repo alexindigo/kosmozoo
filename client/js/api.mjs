@@ -1,5 +1,5 @@
 // client/js/api.mjs — engine API client. The SPA is one client of the
-// engine's public API (docs/spec.md §2).
+// engine's public API (docs/spec.md ).
 
 const BASE = ""; // same origin
 

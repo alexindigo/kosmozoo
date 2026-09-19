@@ -63,7 +63,7 @@ export async function stat(addr, name, kind = "output") {
 }
 
 // Read bytes. `range: [start, end]` (inclusive) asks for a head slice (the
-// dims pass, §4.2): aiohttp's FileResponse honors Range and answers 206; a
+// dims pass, ): aiohttp's FileResponse honors Range and answers 206; a
 // server that ignores it answers 200 with the full body — callers accept
 // both. Upstream serves some files as application/octet-stream (with
 // nosniff) — the browser can't render those, so map the extension when the

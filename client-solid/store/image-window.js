@@ -15,8 +15,8 @@ import { scheduleRetry } from "./sizes.js";
 
 export const WINDOW_PAD = 10;
 
-// range: () => { first, last } in image indices — fed from the registered
-// virtualizer's getVirtualItems().
+// range: => { first, last } in image indices — fed from the registered
+// virtualizer's getVirtualItems.
 export function makeImageWindow({ range }) {
   const errored = new Set();    // entry ids whose bytes failed
   const retryNonce = new Map(); // id -> cache-bust nonce

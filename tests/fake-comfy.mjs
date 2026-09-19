@@ -110,6 +110,25 @@ try {
 // One filename that must 404, to drive the permanent-failure path.
 const MISSING = "missing-404.png";
 
+// full-read order for tests that assert drain priority (dims head reads are
+// excluded — they exercise the same file with a Range header)
+const readOrder = [];
+
+// aiohttp's FileResponse honors Range and answers 206; the dims pass's head
+// reads exercise the real path (a server that ignores it answers 200 with
+// the full body — callers accept both)
+function ranged(req, bytes, headers) {
+  const range = req.headers.get("range");
+  const m = range && /^bytes=(\d+)-(\d+)$/.exec(range);
+  if (!m) return new Response(bytes, { headers });
+  const start = Number(m[1]);
+  const end = Math.min(Number(m[2]) + 1, bytes.length);
+  const h = new Headers(headers);
+  h.set("Content-Range", `bytes ${start}-${end - 1}/${bytes.length}`);
+  h.set("Content-Length", String(end - start));
+  return new Response(bytes.subarray(start, end), { status: 206, headers: h });
+}
+
 function fileList() {
   const names = [...fixtures.keys()];
   for (let i = 0; i < bulkCount; i++) {
@@ -169,11 +188,16 @@ export const server = Deno.serve({ port }, async (req) => {
     return Response.json(fileList());
   }
 
+  if (p === "/read-order") {
+    return Response.json(readOrder);
+  }
+
   if (p === "/api/view") {
     const filename = url.searchParams.get("filename") ?? "";
     const name = basename(filename);
     if (name === MISSING) return new Response("not found", { status: 404 });
     const head = req.method === "HEAD";
+    if (!head && !req.headers.get("range")) readOrder.push(name);
     // aiohttp-style ETag: "<mtime_ns_hex>-<size_hex>" (the engine's stamp).
     const etag = (mtimeNs, size) => `"${mtimeNs.toString(16)}-${size.toString(16)}"`;
     if (mutableDir) {
@@ -197,21 +221,33 @@ export const server = Deno.serve({ port }, async (req) => {
       const bytes = fixtures.get(name).bytes;
       // Real ComfyUI serves SVG (and sometimes everything) as octet-stream.
       const type = name.endsWith(".svg") ? "application/octet-stream" : "image/png";
-      return new Response(head ? null : bytes, {
-        headers: {
-          "Content-Type": type,
-          "Content-Length": String(bytes.length),
-          ETag: etag(0n, BigInt(bytes.length)),
-        },
+      if (head) {
+        return new Response(null, {
+          headers: {
+            "Content-Type": type,
+            "Content-Length": String(bytes.length),
+            ETag: etag(0n, BigInt(bytes.length)),
+          },
+        });
+      }
+      return ranged(req, bytes, {
+        "Content-Type": type,
+        ETag: etag(0n, BigInt(bytes.length)),
       });
     }
     if (/^bulk-\d{5}\.png$/.test(name)) {
-      return new Response(head ? null : BULK_PNG, {
-        headers: {
-          "Content-Type": "image/png",
-          "Content-Length": String(BULK_PNG.length),
-          ETag: etag(0n, BigInt(BULK_PNG.length)),
-        },
+      if (head) {
+        return new Response(null, {
+          headers: {
+            "Content-Type": "image/png",
+            "Content-Length": String(BULK_PNG.length),
+            ETag: etag(0n, BigInt(BULK_PNG.length)),
+          },
+        });
+      }
+      return ranged(req, BULK_PNG, {
+        "Content-Type": "image/png",
+        ETag: etag(0n, BigInt(BULK_PNG.length)),
       });
     }
     return new Response("not found", { status: 404 });

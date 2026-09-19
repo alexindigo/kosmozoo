@@ -1,13 +1,13 @@
 // client-solid/components/Modal.tsx — one modal shell for every overlay.
 //
-// ONE contract (G10): the parent controls visibility with a <Show>; Modal
+// ONE contract : the parent controls visibility with a <Show>; Modal
 // renders the backdrop + panel (.modal-backdrop / .modal-panel) and always
 // portals to document.body — the overlay is a page-level element by
 // construction, never a child of the surface that opened it. Clicking the
 // backdrop (the overlay element itself, not its contents) closes it —
 // structurally (target === currentTarget), never by id-string.
 //
-// Escape is NOT listened for here (G4): a mounted modal is a key layer and
+// Escape is NOT listened for here : a mounted modal is a key layer and
 // the app's ONE key dispatcher hands Escape to the top layer only — exactly
 // one modal closes per press. `escapeLayer={false}` opts out (the keys
 // panel's Esc-close is its own keymap binding). The caller supplies the

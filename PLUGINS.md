@@ -21,7 +21,7 @@ Discovery checks, in order:
 
 ```
 plugins/<name>/
-    plugin.mjs   # (or .ts / .js) export function register(kz) — engine hooks
+    plugin.ts    # (or .mjs / .js — discovery tries .ts first) export function register(kz) — engine hooks
     client.js    # optional, served at /plugins/<name>/client.js — UI hooks
 ```
 

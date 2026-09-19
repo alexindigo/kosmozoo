@@ -3,7 +3,7 @@
 // same served URL (/store/instance.js) and drive the same instance — no
 // window global, no proxy.
 //
-// makeAppStore() runs inside createRoot: the store is a long-lived
+// makeAppStore runs inside createRoot: the store is a long-lived
 // singleton, so its memos and effects need a permanent owner. Without one,
 // Solid garbage-collects ownerless computations once unobserved — the
 // reactive graph silently freezes after the first few runs.

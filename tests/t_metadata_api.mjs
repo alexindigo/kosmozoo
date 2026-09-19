@@ -9,19 +9,18 @@ import { Store } from "../src/store.mjs";
 import { Prefetch } from "../src/prefetch.mjs";
 import { Ingest } from "../src/ingest.mjs";
 import { Cache } from "../src/cache.mjs";
+import { mkStateRig } from "./helpers/rig.mjs";
 import { mkdtemp, rm, writeFile, mkdir } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
 async function ctx(dir) {
-  const settings = await Settings.open(dir);
-  const store = await Store.open(dir, join(dir, "feedback.json"));
+  const rig = await mkStateRig("meta", { dir });
   const hosts = { local: "127.0.0.1:1" };
-  const cache = new Cache(join(dir, "cache"));
-  const ingest = new Ingest(store, hosts, { cache });
-  const scraper = new Prefetch({ hosts, store, settings, ingest });
-  const router = makeRouter({ hosts, store, settings, plugins: null, cache, ingest, prefetch: scraper });
-  return { settings, store, router, scraper };
+  const ingest = new Ingest(rig.store, hosts, { cache: rig.cache });
+  const scraper = new Prefetch({ hosts, store: rig.store, settings: rig.settings, ingest });
+  const router = makeRouter({ hosts, store: rig.store, settings: rig.settings, plugins: null, cache: rig.cache, ingest, prefetch: scraper });
+  return { settings: rig.settings, store: rig.store, router, scraper };
 }
 
 Deno.test("metadata: version bumps on write; items are per-host, nulls skipped", async () => {
@@ -83,7 +82,7 @@ Deno.test("nodes registry: extraction populates /api/nodes with type→fields", 
 
 Deno.test("metaState: pending vs extracted vs none", async () => {
   const dir = await mkdtemp(join(tmpdir(), "kz-mstate-"));
-  const store = await Store.open(dir, join(dir, "fb.json"));
+  const store = await Store.open(dir, { feedbackPath: join(dir, "fb.json") });
   const folder = join(dir, "images");
   await mkdir(folder);
   // never touched: pending
@@ -121,7 +120,7 @@ Deno.test("listing: one statement per listing — no per-entry queries at 3000 f
   });
   try {
     const settings = await Settings.open(dir);
-    const store = await Store.open(dir, join(dir, "fb.json"));
+    const store = await Store.open(dir, { feedbackPath: join(dir, "fb.json") });
     const hosts = { local: `127.0.0.1:${server.addr.port}` };
     const cache = new Cache(join(dir, "cache"));
     const ingest = new Ingest(store, hosts, { cache });

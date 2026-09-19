@@ -7,10 +7,8 @@ import { Prefetch } from "../src/prefetch.mjs";
 import { Ingest } from "../src/ingest.mjs";
 import { Cache } from "../src/cache.mjs";
 import { EXTRACTOR_VERSION } from "../src/extractor.mjs";
-import { Settings } from "../src/settings.mjs";
-import { Store } from "../src/store.mjs";
-import { mkdtemp, rm } from "node:fs/promises";
-import { tmpdir } from "node:os";
+import { mkStateRig } from "./helpers/rig.mjs";
+import { rm } from "node:fs/promises";
 import { join } from "node:path";
 
 const FAKE_PORT = 18211;
@@ -32,12 +30,10 @@ async function up() {
 await up();
 
 async function mkStore() {
-  const dir = await mkdtemp(join(tmpdir(), "kz-scraper-"));
-  const settings = await Settings.open(dir);
-  await settings.set("core.prefetch", "enabled", true);
-  await settings.set("core.prefetch", "paused", false);
-  const store = await Store.open(dir, join(dir, "feedback.json"));
-  return { dir, settings, store };
+  const rig = await mkStateRig("scraper", {});
+  await rig.settings.set("core.prefetch", "enabled", true);
+  await rig.settings.set("core.prefetch", "paused", false);
+  return { dir: rig.dir, settings: rig.settings, store: rig.store };
 }
 
 Deno.test("prefetch: headless walk drains the fed queue and the listing", async () => {
@@ -84,6 +80,9 @@ Deno.test("prefetch: priority feed drains before walk", async () => {
   s.start();
   await new Promise((r) => setTimeout(r, 300));        // let the gate hold
   assert(s.pending("local") >= 2, "paused: nothing drained");
+  // the fake's read order is cumulative across the file's tests — compare
+  // first occurrences AFTER this test's resume point
+  const baseline = (await (await fetch(`http://${FAKE}/read-order`)).json()).length;
   await settings.set("core.prefetch", "paused", false); // resume
   for (let i = 0; i < 80 && s.pending("local") > 0; i++) {
     await new Promise((r) => setTimeout(r, 150));
@@ -93,6 +92,13 @@ Deno.test("prefetch: priority feed drains before walk", async () => {
   // priority item landed
   assert(store.metaState("local", "flux-pulid.png").meta);
   assert(store.metaState("local", "flux-controlnet.png").meta);
+  // and it landed FIRST: the priority file's first ingest read after the
+  // resume precedes the walk file's
+  const order = (await (await fetch(`http://${FAKE}/read-order`)).json()).slice(baseline);
+  const prioFirst = order.findIndex((n) => n === "flux-pulid.png");
+  const walkFirst = order.findIndex((n) => n === "flux-controlnet.png");
+  assert(prioFirst >= 0 && walkFirst >= 0, `both files were read: ${order.join(",")}`);
+  assert(prioFirst < walkFirst, `priority drained first: ${order.join(",")}`);
   await rm(dir, { recursive: true });
 });
 
