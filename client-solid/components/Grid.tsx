@@ -203,12 +203,21 @@ function CardSlot(props) {
   const imgIdx = () => store.state.imageIdxById().get(props.entryId);
   const image = () => store.state.images[imgIdx()];
   const j = () => image()?.judgment ?? {};
-  // the store's currentEntry memo owns the pointer→entry derivation 
+  // the store's currentEntry memo owns the pointer→entry derivation (G7)
   const isCurrent = () => store.state.currentEntry()?.index === imgIdx();
+  // the vote/comment foot sticks to the viewport ONLY when the card is
+  // taller than it — on a fitting card the foot stays at the card's bottom
+  // (sticky would otherwise clamp it to the card's top over the image)
+  const isTall = () => {
+    const el = store.state.feedScrollEl();
+    const s = store.state.cardSize(imgIdx());
+    if (!s || !el) return false;
+    return cardHeight(s, el.clientWidth) + gridGapPx() > el.clientHeight;
+  };
 
   return (
     <div
-      class={"card" + (isCurrent() ? " current" : "")}
+      class={"card" + (isCurrent() ? " current" : "") + (isTall() ? " card--tall" : "")}
       data-idx={imgIdx()}
       data-name={image()?.filename}
       data-vote={j().vote || undefined}

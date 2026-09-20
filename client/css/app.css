@@ -328,11 +328,12 @@ main { display: flex; flex: 1; min-height: 0; }
 /* the notes pair row: negatives left, positives right */
 .pair { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-top: 6px; }
 
-/* the vote/comment foot: sticky to the viewport's bottom while a
-   taller-than-viewport card scrolls — in-flow (adds no height, so the
-   card-height invariant is untouched), raised over the image with the
-   card's own background and a shadow for separation */
-.card-foot { position: sticky; bottom: 0; z-index: var(--z-chrome);
+/* the vote/comment foot: sticky to the viewport's bottom ONLY on a card
+   taller than the viewport (.card--tall) — a fitting card keeps it at the
+   card's bottom. In-flow (adds no height, so the card-height invariant is
+   untouched), raised over the image with the card's own background and a
+   shadow for separation */
+.card--tall .card-foot { position: sticky; bottom: 0; z-index: var(--z-chrome);
   background: var(--focused-background);
   box-shadow: 0 -10px 14px -10px var(--backdrop); }
 
