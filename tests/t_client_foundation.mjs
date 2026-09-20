@@ -381,6 +381,23 @@ Deno.test("src window: a rendered card gets its src even when its image index is
   }
 });
 
+// --- the drag primitive's anchor-edge fraction -------------------------------
+
+Deno.test("fracFor: the fraction measures from the sized column's anchor edge", async () => {
+  const { fracFor } = await import("../client-solid/lib/drag.js");
+  const box = { left: 100, right: 500, top: 50, bottom: 250, width: 400, height: 200 };
+  // anchored left ("x"): pointer at the right quarter of the box
+  assertEquals(fracFor(box, { clientX: 200 }, "x"), 0.25);
+  // anchored right ("x-" — a rev layout): the same pointer is 0.75 from the right
+  assertEquals(fracFor(box, { clientX: 200 }, "x-"), 0.75);
+  // anchored top ("y") and bottom ("y-")
+  assertEquals(fracFor(box, { clientY: 100 }, "y"), 0.25);
+  assertEquals(fracFor(box, { clientY: 100 }, "y-"), 0.75);
+  // a snapped pane rect (the sized element's own box, not the container's)
+  const pane = { left: 300, right: 500, top: 0, bottom: 200, width: 200, height: 200 };
+  assertEquals(fracFor(pane, { clientX: 400 }, "x-"), 0.5);
+});
+
 // --- deletion navigation ------------------------------------------------------
 
 Deno.test("planDeleteCurrent: previous current iff adjacent, else feed-above, else topmost", async () => {

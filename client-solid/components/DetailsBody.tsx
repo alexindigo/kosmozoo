@@ -48,10 +48,14 @@ export function DetailsBody() {
   };
 
   const split = () => store.ui.info.split;
-  // the divider drag is the shared primitive ; the axis comes from the
-  // layout model, not the DOM class
+  // the divider drag is the shared primitive; the anchor edge comes from
+  // the layout model (stacked: images on top; rev: images on the right;
+  // split: images on the left) — the fraction measures from THAT edge
   const { dragging, ref: sepRef } = useDrag({
-    axis: () => (store.state.infoLayout() === "stacked" ? "y" : "x"),
+    axis: () => {
+      const l = store.state.infoLayout();
+      return l === "stacked" ? "y" : l === "rev" ? "x-" : "x";
+    },
     onDrag: (ev, ctx) => store.actions.ui.info.split.set(clampSplit(ctx.frac)),
   });
   createEffect(() => store.actions.ui.setResizing(dragging()));

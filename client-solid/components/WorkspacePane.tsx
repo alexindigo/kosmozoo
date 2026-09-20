@@ -17,12 +17,15 @@ export function WorkspacePane() {
   const store = useAppStore();
   let asideEl;
 
-  // the pane's right edge is snapshotted at drag start — the width derives
-  // from it, no hand-synced constant
+  // the pane is anchored RIGHT of its own box (the wsBar sits after it, so
+  // the container's edge is not the pane's edge): the fraction is measured
+  // against the pane's rect from its right edge — the same anchor-edge
+  // vocabulary as every divider
   const { dragging, ref: dividerRef } = useDrag({
-    onStart: () => ({ right: asideEl.getBoundingClientRect().right }),
+    axis: () => "x-",
+    onStart: () => ({ box: asideEl.getBoundingClientRect() }),
     onDrag: (ev, ctx) => {
-      const w = Math.min(Math.max(ctx.right - ev.clientX, 220), window.innerWidth * 0.7);
+      const w = Math.min(Math.max(ctx.frac * ctx.box.width, 220), window.innerWidth * 0.7);
       store.actions.anchors.setPaneWidth(Math.round(w));
     },
   });
