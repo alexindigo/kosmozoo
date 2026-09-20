@@ -513,6 +513,114 @@ async function main() {
         JSON.stringify(res.body).slice(0, 160));
     });
 
+    // --- enum sweep rows: the host's own options, per node ---------------------
+    // flux-lora's two LoraLoader nodes each get a row listing the fake host's
+    // lora_name options; the image's current value is pre-checked and orange.
+    await attempt("enum rows list the host's options, current checked + orange", async () => {
+      await cdp.evaluate(`(async () => {
+        await fetch("/api/collections/fake/entries/flux-lora.png/bytes");
+        return true;
+      })()`);
+      await cdp.evaluate(`
+        document.querySelector('.card[data-name="flux-lora.png"] .votebtn.variations').click()
+      `);
+      await cdp.poll(`document.querySelectorAll('.vz-enumrow').length > 0`, 5000);
+      const info = await cdp.evaluate(`(() => {
+        const rows = [...document.querySelectorAll('.vz-enumrow')];
+        return {
+          ids: rows.map((r) => r.dataset.enumId),
+          labels: rows.map((r) => r.querySelector('.vz-imgrow-label')?.textContent),
+          curs: rows.map((r) => r.querySelector('.vz-enum-cur')?.textContent),
+        };
+      })()`);
+      // LoRA rows first (both loaders), then the sampler row
+      check("one enum row per node instance, LoRA first",
+        info.ids.length === 3
+          && info.ids[0] === "LoraLoader#20.lora_name"
+          && info.ids[1] === "LoraLoader#21.lora_name"
+          && info.ids[2] === "KSamplerSelect#8.sampler_name",
+        JSON.stringify(info));
+      check("per-node current values in the row heads",
+        info.curs[0] === "detail.safetensors" && info.curs[1] === "style.safetensors",
+        JSON.stringify(info.curs));
+
+      // enable node 20's row: the host's options render, current pre-checked
+      await cdp.clickAt('.vz-enumrow[data-enum-id="LoraLoader#20.lora_name"] .vz-imgrow-head .vz-cb');
+      await cdp.poll(`document.querySelectorAll('.vz-enumrow[data-enum-id="LoraLoader#20.lora_name"] .vz-enum-opt').length === 3`, 5000);
+      const opts = await cdp.evaluate(`(() => {
+        const row = document.querySelector('.vz-enumrow[data-enum-id="LoraLoader#20.lora_name"]');
+        const probe = document.createElement('span');
+        probe.style.color = 'var(--attention)';
+        document.body.appendChild(probe);
+        const orange = getComputedStyle(probe).color;
+        probe.remove();
+        return [...row.querySelectorAll('.vz-enum-opt')].map((o) => ({
+          name: o.querySelector('.vz-enum-opt-name')?.textContent,
+          checked: o.querySelector('input').checked,
+          isCurrent: o.classList.contains('vz-enum-current'),
+          color: getComputedStyle(o.querySelector('.vz-enum-opt-name')).color,
+          orange,
+        }));
+      })()`);
+      check("options are the host's own list, in order",
+        opts.map((o) => o.name).join("|") === "detail.safetensors|style.safetensors|other.safetensors",
+        JSON.stringify(opts.map((o) => o.name)));
+      const cur = opts.find((o) => o.name === "detail.safetensors");
+      check("current option pre-checked, orange-marked",
+        cur?.checked === true && cur?.isCurrent === true && cur?.color === cur?.orange,
+        JSON.stringify(cur));
+      check("other options neither checked nor orange",
+        opts.filter((o) => o.name !== "detail.safetensors")
+          .every((o) => !o.checked && !o.isCurrent && o.color !== o.orange),
+        JSON.stringify(opts));
+
+      // pick a second value: 2 picks × the auto-enabled denoise range →
+      // (denoise-only count + 1) × 2 − 1 (the current combo excluded once)
+      const c0 = parseInt(await cdp.evaluate(`document.querySelector('.vz-count')?.textContent`), 10);
+      const idx = await cdp.evaluate(`(() => {
+        const opts = [...document.querySelectorAll('.vz-enumrow[data-enum-id="LoraLoader#20.lora_name"] .vz-enum-opt')];
+        return opts.findIndex((o) => o.querySelector('.vz-enum-opt-name')?.textContent === 'other.safetensors') + 1;
+      })()`);
+      await cdp.clickAt(`.vz-enumrow[data-enum-id="LoraLoader#20.lora_name"] .vz-enum-list .vz-enum-opt:nth-of-type(${idx}) .vz-cb`);
+      const expected = (c0 + 1) * 2 - 1;
+      await cdp.poll(`parseInt(document.querySelector('.vz-count')?.textContent, 10) === ${expected}`, 5000);
+      const c1 = parseInt(await cdp.evaluate(`document.querySelector('.vz-count')?.textContent`), 10);
+      check("2 picks × numeric range → the right count",
+        c1 === expected, `denoise-only=${c0} with-2-picks=${c1} expected=${expected}`);
+      await cdp.evaluate(`document.querySelector('.vz-close')?.click()`);
+      await cdp.poll(`!document.querySelector('.vz-root')`, 5000).catch(() => {});
+    });
+
+    // --- enum sweep run: picks enqueue on the right node ------------------------
+    await attempt("enum sweep run enqueues the picks on the right node", async () => {
+      const res = await cdp.evaluate(`(async () => {
+        const r = await fetch("/api/features/variations/run", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            id: "fake:flux-lora.png", host: "fake", filename: "flux-lora.png",
+            ranges: {
+              "LoraLoader.strength_model": { enabled: true, min: 0.5, max: 1.0, increment: 0.5 },
+            },
+            imageParams: {
+              "LoraLoader#20.lora_name": { enabled: true, values: ["detail.safetensors", "other.safetensors"] },
+            },
+            prefix: "", suffix: "",
+          }),
+        });
+        return { status: r.status, body: await r.json() };
+      })()`);
+      // strength 0.5/1.0 (current 0.8 excluded) × lora detail/other = 4; the
+      // all-current combo isn't among them (0.8 is out of range) → 4 total
+      const perms = (res.body.errors ?? []).map((e) => e.permutation);
+      const loras = perms.map((p) => p?.["LoraLoader#20.lora_name"]);
+      check("enum picks multiply the numeric range and enqueue",
+        res.status === 200 && res.body.total === 4
+          && loras.filter((v) => v === "detail.safetensors").length === 2
+          && loras.filter((v) => v === "other.safetensors").length === 2,
+        JSON.stringify(res.body).slice(0, 200));
+    });
+
   } finally {
     await cdp.close();
   }

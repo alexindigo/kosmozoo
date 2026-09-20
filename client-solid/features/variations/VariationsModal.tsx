@@ -49,6 +49,8 @@ function ModalBody(props) {
   const [params, setParams] = createSignal(null); // null = probing; [] = none
   const [strParams, setStrParams] = createSignal([]); // LoadImage sweep axes
   const [imgRows, setImgRows] = createSignal({}); // id -> { enabled, mode, file, files, current, label, localFiles }
+  const [enumList, setEnumList] = createSignal([]); // probe enumParams, LoRA first
+  const [enumRows, setEnumRows] = createSignal({}); // id -> { enabled, picks, current, values, label, filter }
   const [rows, setRows] = createSignal({}); // key -> { enabled, min, max, increment, placeholderKey, ... }
   const [running, setRunning] = createSignal(false);
   const [result, setResult] = createSignal(null); // { text, ok }
@@ -136,6 +138,23 @@ function ModalBody(props) {
     // LoadImage sweep axes: one row per string param, files listed from the
     // host's input dir
     setStrParams(data.stringParams ?? []);
+    // enum sweep axes (LoRA names, samplers, …): one row per NODE instance,
+    // options exactly as the host publishes them. LoRA rows first.
+    const eps = [...(data.enumParams ?? [])].sort((a, b) => {
+      const la = a.key === "lora_name" ? 0 : 1;
+      const lb = b.key === "lora_name" ? 0 : 1;
+      if (la !== lb) return la - lb;
+      return `${a.title ?? a.type}.${a.key}`.localeCompare(`${b.title ?? b.type}.${b.key}`);
+    });
+    setEnumList(eps);
+    const einit = {};
+    for (const p of eps) {
+      einit[p.id] = {
+        enabled: false, picks: [p.current], current: p.current,
+        values: p.values, label: `${p.title ?? p.type}.${p.key}`, filter: "",
+      };
+    }
+    setEnumRows(einit);
   });
 
   const [inputFiles] = createResource(
@@ -184,6 +203,24 @@ function ModalBody(props) {
   };
   const onImgField = (id, field, value) => {
     setImgRows((rs) => ({ ...rs, [id]: { ...rs[id], [field]: value } }));
+  };
+
+  // enum sweep rows: the master checkbox arms the axis (its picks ride the
+  // imageParams channel at run time); the option checkboxes pick the values.
+  // The current value starts pre-checked — unchecking it is how the current
+  // combo leaves the sweep.
+  const onEnumToggle = (id, checked) => {
+    setEnumRows((rs) => ({ ...rs, [id]: { ...rs[id], enabled: checked } }));
+  };
+  const onEnumField = (id, field, value) => {
+    setEnumRows((rs) => ({ ...rs, [id]: { ...rs[id], [field]: value } }));
+  };
+  const onEnumPick = (id, v, checked) => {
+    setEnumRows((rs) => {
+      const r = rs[id];
+      const picks = checked ? [...r.picks, v] : r.picks.filter((x) => x !== v);
+      return { ...rs, [id]: { ...r, picks } };
+    });
   };
 
   // enabled cards first, then by node label + input name
@@ -239,6 +276,15 @@ function ModalBody(props) {
       perImage *= vals.length;
       if (!(r.current && vals.includes(r.current))) imagesAtCurrent = false;
     }
+    // enum sweep axes (LoRA names, samplers, …): same math — an enabled row
+    // with no picks is inert, and a pick list without the current value
+    // makes every numeric combo novel
+    for (const r of Object.values(enumRows())) {
+      if (!r.enabled || !r.picks.length) continue;
+      anyEnabled = true;
+      perImage *= r.picks.length;
+      if (!(r.current && r.picks.includes(r.current))) imagesAtCurrent = false;
+    }
     // subtract the current combo only when numeric axes are at current AND
     // every swept image axis includes the current filename
     const excludeCurrent = anyEnabled && numericCurrentInRange && imagesAtCurrent;
@@ -286,6 +332,12 @@ function ModalBody(props) {
           }
         }
         if (values.length) imageParams[id] = { enabled: true, values };
+      }
+      // enum sweep axes ride the same imageParams channel — one
+      // { enabled, values } per armed row, values = the row's picks
+      for (const [id, r] of Object.entries(enumRows())) {
+        if (!r.enabled || !r.picks.length) continue;
+        imageParams[id] = { enabled: true, values: [...r.picks] };
       }
       let submitted = 0, totalJobs = 0;
       const failed = [];
@@ -398,6 +450,57 @@ function ModalBody(props) {
                                 onPick={(fl) => onImgField(p.id, "localFiles", fl)}
                               />
                             </Show>
+                          </div>
+                        </Show>
+                      </div>
+                    </Show>
+                  );
+                }}
+              </For>
+              {/* enum sweep axes: one row per node instance, options exactly
+ as the host publishes them; the current value is pre-checked and orange */}
+              <For each={enumList()}>
+                {(p) => {
+                  const r = () => enumRows()[p.id];
+                  const filtered = () => {
+                    const f = r().filter.trim().toLowerCase();
+                    return f ? r().values.filter((v) => v.toLowerCase().includes(f)) : r().values;
+                  };
+                  return (
+                    <Show when={r()}>
+                      <div class={"vz-imgrow vz-enumrow" + (r().enabled ? " on" : "")} data-enum-id={p.id}>
+                        <label class="vz-imgrow-head">
+                          <input
+                            type="checkbox" class="vz-cb"
+                            checked={r().enabled}
+                            onChange={(e) => onEnumToggle(p.id, e.target.checked)}
+                          />
+                          <span class="vz-imgrow-label">{r().label}</span>
+                          <span class="vz-imgrow-cur vz-enum-cur" title={r().current}>{r().current}</span>
+                        </label>
+                        <Show when={r().enabled}>
+                          <div class="vz-imgrow-body vz-enum-body">
+                            <Show when={r().values.length > 10}>
+                              <input
+                                type="text" class="vz-enum-filter" placeholder="filter…"
+                                value={r().filter}
+                                onInput={(e) => onEnumField(p.id, "filter", e.currentTarget.value)}
+                              />
+                            </Show>
+                            <div class="vz-enum-list">
+                              <For each={filtered()}>
+                                {(v) => (
+                                  <label class={"vz-enum-opt" + (v === r().current ? " vz-enum-current" : "")}>
+                                    <input
+                                      type="checkbox" class="vz-cb"
+                                      checked={r().picks.includes(v)}
+                                      onChange={(e) => onEnumPick(p.id, v, e.target.checked)}
+                                    />
+                                    <span class="vz-enum-opt-name" title={v}>{v}</span>
+                                  </label>
+                                )}
+                              </For>
+                            </div>
                           </div>
                         </Show>
                       </div>

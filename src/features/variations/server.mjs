@@ -46,6 +46,31 @@ export function stringParams(graph) {
   return out;
 }
 
+// Per-node enum params: every graph node input whose <type>.<input> the
+// host lists options for and whose graph value is a string. values = THAT
+// key's option list only — never mixed. One row per NODE instance (the id
+// carries the node id, unlike the multi-carrier numeric params). LoadImage
+// .image is excluded (the imgRows own it).
+export function enumParams(graph, enums) {
+  const out = [];
+  for (const [id, n] of Object.entries(graph ?? {})) {
+    const type = String(n.class_type ?? "");
+    for (const [key, v] of Object.entries(n.inputs ?? {})) {
+      if (typeof v !== "string") continue;
+      if (type.toLowerCase().endsWith("loadimage") && key === "image") continue;
+      const values = enums?.get(`${type}.${key}`);
+      if (!values?.length) continue;
+      out.push({
+        id: `${type}#${id}.${key}`,
+        nodeId: id, nodeIds: [id], key, type,
+        title: n._meta?.title && n._meta.title !== type ? String(n._meta.title) : null,
+        current: v, values,
+      });
+    }
+  }
+  return out;
+}
+
 // Every numeric scalar input of every node instance is a varyable parameter
 // (multi-carrier: same-type same-input instances share one param and sweep
 // together). The host's declared type wins over value inference for integer.
@@ -173,8 +198,8 @@ export function register(app) {
     if (!graph) return { error: "no embedded ComfyUI graph in this PNG", status: 422 };
     const addr = app.hosts[collection];
     if (!addr) return { error: "unknown collection", status: 404 };
-    const { types } = await app.backings.comfy(collection).objectInfo();
-    return { graph, addr, types };
+    const { types, enums } = await app.backings.comfy(collection).objectInfo();
+    return { graph, addr, types, enums };
   };
 
   app.route("GET", "/probe/<id>", async (_req, { id }) => {
@@ -183,7 +208,11 @@ export function register(app) {
     const collection = id.slice(0, i), name = id.slice(i + 1);
     const r = await inspect(collection, name);
     if (r.error) return Response.json({ error: r.error }, { status: r.status });
-    return Response.json({ params: inspectGraph(r.graph, r.types), stringParams: stringParams(r.graph) });
+    return Response.json({
+      params: inspectGraph(r.graph, r.types),
+      stringParams: stringParams(r.graph),
+      enumParams: enumParams(r.graph, r.enums),
+    });
   });
 
   app.route("POST", "/run", async (req) => {
@@ -198,7 +227,7 @@ export function register(app) {
 
     const r = await inspect(host, filename);
     if (r.error) return Response.json({ error: r.error }, { status: r.status });
-    const { graph, addr, types } = r;
+    const { graph, addr, types, enums } = r;
 
     // Inspect once for current values + labels. Types come from the host's
     // object_info — the current value is not a reliable integer signal.
@@ -214,7 +243,15 @@ export function register(app) {
       currentValues[p.id] = p.current;
       labelMap[p.id] = p.title ?? p.type;
     }
-    const fullInspection = [...inspection, ...strParams];
+    // enum axes (LoRA names, samplers, …): picks land on the right node via
+    // fullInspection; the current value feeds the current-combo exclusion
+    // and the prefix/suffix templating like every other axis
+    const enParams = enumParams(graph, enums);
+    for (const p of enParams) {
+      currentValues[p.id] = p.current;
+      labelMap[p.id] = p.title ?? p.type;
+    }
+    const fullInspection = [...inspection, ...strParams, ...enParams];
 
     // Batch sweeps arrive as offsets from each image's own current value;
     // resolve them now that this graph's current values are known.

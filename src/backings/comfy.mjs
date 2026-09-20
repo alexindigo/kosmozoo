@@ -200,25 +200,31 @@ export async function historyDelete(addr, name) {
 // --- the prompt/graph surface (variations feature) ----------------------------
 
 // object_info cache for one address: { types: Map<paramId,"INT"|"FLOAT"> |
-// null, outputClasses: Set<class_type> | null, t }. TTL'd (a host's node set
+// null, outputClasses: Set<class_type> | null, enums:
+// Map<"<type>.<input>", string[]> | null, t }. TTL'd (a host's node set
 // is stable per version); misses are not cached forever.
 const OBJECT_INFO_TTL_MS = 60_000;
 
 export async function objectInfo(addr, cache = new Map()) {
   const c = cache.get(addr);
   if (c && Date.now() - c.t < OBJECT_INFO_TTL_MS) return c;
-  let out = { types: null, outputClasses: null };
+  let out = { types: null, outputClasses: null, enums: null };
   try {
     const r = await fetch(`http://${addr}/api/object_info`, { signal: AbortSignal.timeout(HOST_TIMEOUT_MS) });
     if (r.ok) {
       const info = await r.json();
-      out = { types: new Map(), outputClasses: new Set() };
+      out = { types: new Map(), outputClasses: new Set(), enums: new Map() };
       for (const [type, def] of Object.entries(info)) {
         if (def?.output_node) out.outputClasses.add(type);
         for (const section of ["required", "optional"]) {
           for (const [key, spec] of Object.entries(def?.input?.[section] ?? {})) {
             const t = Array.isArray(spec) ? spec[0] : spec;
             if (t === "INT" || t === "FLOAT") out.types.set(`${type}.${key}`, t);
+            // combo widget: the host publishes THIS field's option list —
+            // an enum axis for the variations sweep (never mixed across fields)
+            if (Array.isArray(t) && t.length && t.every((v) => typeof v === "string")) {
+              out.enums.set(`${type}.${key}`, t);
+            }
           }
         }
       }

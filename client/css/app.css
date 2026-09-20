@@ -583,6 +583,23 @@ main { display: flex; flex: 1; min-height: 0; }
   padding: 3px 10px; cursor: pointer; }
 .vz-imgrow-body .vz-imgdirbtn:hover { border-color: var(--foreground-dim); }
 
+/* enum sweep rows (LoRA names, samplers, …): same card as the imgRows, the
+ options as a scrollable checkbox list below the head. The current value is
+ orange — the same "current notch" accent the slider rows use. */
+.vz-enum-body { flex-direction: column; }
+.vz-enum-cur { color: var(--attention); }
+.vz-enum-filter { background: var(--background); color: var(--foreground);
+  border: 1px solid var(--border-strong); border-radius: 4px; font-size: 12px;
+  padding: 3px 6px; }
+.vz-enum-filter:focus { outline: none; border-color: var(--secondary); }
+.vz-enum-list { display: flex; flex-direction: column; gap: 2px;
+  max-height: 180px; overflow-y: auto; }
+.vz-enum-opt { display: flex; align-items: center; gap: 8px; cursor: pointer;
+  font-size: 12px; color: var(--foreground); padding: 1px 0; }
+.vz-enum-opt .vz-cb { margin: 0; width: 14px; height: 14px; flex: 0 0 auto; }
+.vz-enum-opt-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.vz-enum-current .vz-enum-opt-name { color: var(--attention); }
+
 /* checkbox — orange square (matches the mockup) */
 .vz-cb { -webkit-appearance: none; appearance: none;
   width: 16px; height: 16px; border-radius: 3px;

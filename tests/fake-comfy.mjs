@@ -167,17 +167,22 @@ export const server = Deno.serve({ port }, async (req) => {
 
   // Declared input types (INT/FLOAT) for the fixture graph node classes —
   // the variations plugin reads these so float params at integer-looking
-  // values (denoise=1, strength=1) are not mistaken for integers.
+  // values (denoise=1, strength=1) are not mistaken for integers. Combo
+  // widgets carry their option list (the variations enum sweep axes).
   if (p === "/api/object_info") {
     const INT = ["INT", {}], FLOAT = ["FLOAT", {}];
+    // the fixture graphs' loras, plus one the graphs don't use (a pick target)
+    const LORAS = [["detail.safetensors", "style.safetensors", "other.safetensors"], {}];
+    const SAMPLERS = [["euler", "dpmpp_2m", "uni_pc"], {}];
     const def = (inputs) => ({ input: { required: inputs } });
     return Response.json({
       FluxGuidance: def({ guidance: FLOAT }),
       RandomNoise: def({ noise_seed: INT }),
       BasicScheduler: def({ steps: INT, denoise: FLOAT }),
       EmptyLatentImage: def({ width: INT, height: INT, batch_size: INT }),
-      LoraLoader: def({ strength_model: FLOAT, strength_clip: FLOAT }),
-      LoraLoaderModelOnly: def({ strength_model: FLOAT }),
+      LoraLoader: def({ lora_name: LORAS, strength_model: FLOAT, strength_clip: FLOAT }),
+      LoraLoaderModelOnly: def({ lora_name: LORAS, strength_model: FLOAT }),
+      KSamplerSelect: def({ sampler_name: SAMPLERS }),
       KSampler: def({ seed: INT, steps: INT, cfg: FLOAT, denoise: FLOAT }),
       // the feature identifies output nodes by this flag (F4)
       SaveImage: { output_node: true, input: { required: { filename_prefix: ["STRING", {}] } } },
