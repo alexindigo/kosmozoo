@@ -16,6 +16,7 @@ const LAYOUT_MODES = [
   ["split", "layout-split", "images left / metadata right"],
   ["stacked", "layout-stacked", "images above / metadata below"],
   ["rev", "layout-rev", "metadata left / images right"],
+  ["stacked-rev", "layout-stacked-rev", "metadata above / images below"],
 ];
 
 // the layout switcher applies to the details pane's current image: shown

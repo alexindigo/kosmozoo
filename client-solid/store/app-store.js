@@ -110,7 +110,7 @@ export function makeAppStore() {
   const [infoLayout, setInfoLayoutSig] = createSignal((() => {
     try {
       const l = localStorage.getItem("kosmozoo.infoLayout.v1");
-      return l === "rev" || l === "stacked" ? l : "split";
+      return l === "rev" || l === "stacked" || l === "stacked-rev" ? l : "split";
     } catch { return "split"; }
   })());
 
@@ -967,7 +967,7 @@ export function makeAppStore() {
         try { localStorage.setItem("kosmozoo.workspace.v1", space); } catch { /* private mode */ }
       },
       setInfoLayout(mode) {
-        if (!(mode === "split" || mode === "rev" || mode === "stacked") || infoLayout() === mode) return;
+        if (!(mode === "split" || mode === "rev" || mode === "stacked" || mode === "stacked-rev") || infoLayout() === mode) return;
         setInfoLayoutSig(mode);
         try { localStorage.setItem("kosmozoo.infoLayout.v1", mode); } catch { /* private mode */ }
       },

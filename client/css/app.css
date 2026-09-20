@@ -328,6 +328,14 @@ main { display: flex; flex: 1; min-height: 0; }
 /* the notes pair row: negatives left, positives right */
 .pair { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-top: 6px; }
 
+/* the vote/comment foot: sticky to the viewport's bottom while a
+   taller-than-viewport card scrolls — in-flow (adds no height, so the
+   card-height invariant is untouched), raised over the image with the
+   card's own background and a shadow for separation */
+.card-foot { position: sticky; bottom: 0; z-index: var(--z-chrome);
+  background: var(--focused-background);
+  box-shadow: 0 -10px 14px -10px var(--backdrop); }
+
 .props { color: var(--foreground-dim); font-size: 12px; }
 .props .plabel { color: var(--foreground); opacity: .55; }
 
@@ -714,6 +722,7 @@ main { display: flex; flex: 1; min-height: 0; }
 .info { display: flex; gap: 0; align-items: stretch; flex: 1; min-height: 0; }
 .info.rev { flex-direction: row-reverse; }
 .info.stacked { flex-direction: column; }
+.info.stacked-rev { flex-direction: column-reverse; }
 /* images column: the inline flex-basis carries the split ratio; shrink
  allowed so the row yields space to the text column instead of
  overflowing the body when the pane is narrow */
@@ -721,16 +730,17 @@ main { display: flex; flex: 1; min-height: 0; }
 /* text floor: the metadata column stays readable, the images column
  shrinks below its split first */
 .info-source-nodes { flex: 1; min-width: 120px; }
-.info.stacked .info-source-images, .info.stacked .info-source-nodes { flex: none; max-width: 100%; width: 100%; }
-/* stacked preconditions, made structural: the images column lets its
-   flex-basis CAP it (min-height: 0 — a tall image must not outvote the
-   split), its content scrolls when several images stack, and a single
-   image fills its share (the imgwrap clips it; the img object-fits
-   inside). The nodes column scrolls within its own share. */
-.info.stacked .info-source-images { min-height: 0; overflow-y: auto; }
-.info.stacked .infoimg:only-child { height: 100%; margin-top: 0; }
-.info.stacked .infoimg:only-child .imgwrap { height: 100%; }
-.info.stacked .info-source-nodes { min-height: 0; overflow-y: auto; }
+.info:is(.stacked, .stacked-rev) .info-source-images,
+.info:is(.stacked, .stacked-rev) .info-source-nodes { flex: none; max-width: 100%; width: 100%; }
+/* stacked preconditions (both column orders), made structural: the images
+   column lets its flex-basis CAP it (min-height: 0 — a tall image must
+   not outvote the split), its content scrolls when several images stack,
+   and a single image fills its share (the imgwrap clips it; the img
+   object-fits inside). The nodes column scrolls within its own share. */
+.info:is(.stacked, .stacked-rev) .info-source-images { min-height: 0; overflow-y: auto; }
+.info:is(.stacked, .stacked-rev) .infoimg:only-child { height: 100%; margin-top: 0; }
+.info:is(.stacked, .stacked-rev) .infoimg:only-child .imgwrap { height: 100%; }
+.info:is(.stacked, .stacked-rev) .info-source-nodes { min-height: 0; overflow-y: auto; }
 /* input images have no known dimensions — the box hugs the image */
 .info-source-images .imgwrap { aspect-ratio: auto; }
 /* the image column is for inspection — no small-cap height here; image

@@ -25,7 +25,7 @@ export function DetailsBody() {
   const hasImages = () => images().length > 0;
   const colsClass = () => {
     const l = store.state.infoLayout();
-    return "info " + (l === "rev" ? "rev" : l === "stacked" ? "stacked" : "split");
+    return "info " + (l === "rev" ? "rev" : l === "stacked" ? "stacked" : l === "stacked-rev" ? "stacked-rev" : "split");
   };
 
   createEffect(() => {
@@ -49,12 +49,13 @@ export function DetailsBody() {
 
   const split = () => store.ui.info.split;
   // the divider drag is the shared primitive; the anchor edge comes from
-  // the layout model (stacked: images on top; rev: images on the right;
-  // split: images on the left) — the fraction measures from THAT edge
+  // the layout model (stacked: images on top; stacked-rev: on the bottom;
+  // rev: on the right; split: on the left) — the fraction measures from
+  // THAT edge
   const { dragging, ref: sepRef } = useDrag({
     axis: () => {
       const l = store.state.infoLayout();
-      return l === "stacked" ? "y" : l === "rev" ? "x-" : "x";
+      return l === "stacked" ? "y" : l === "stacked-rev" ? "y-" : l === "rev" ? "x-" : "x";
     },
     onDrag: (ev, ctx) => store.actions.ui.info.split.set(clampSplit(ctx.frac)),
   });
@@ -113,7 +114,11 @@ function Head(props) {
   const subText = () => {
     const im = props.im;
     const bits = [];
-    if (im.meta?.width && im.meta?.height) bits.push(`${im.meta.width}×${im.meta.height}px`);
+    // dimensions: the entry's own dims (listing / dims pass) first, the
+    // extractor meta's as the fallback — the filesize needs no dims
+    const w = im.width ?? im.meta?.width;
+    const h = im.height ?? im.meta?.height;
+    if (w && h) bits.push(`${w}×${h}px`);
     const sz = im.size != null ? fmtBytes(im.size) : null;
     if (sz) bits.push(sz);
     return bits.length ? bits.join(" · ") : (im.host ? "" : "local anchor");

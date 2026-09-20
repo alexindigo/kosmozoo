@@ -49,6 +49,8 @@ const PATHS = {
   <line x1="3" y1="15" x2="21" y2="15" />`,
   "layout-rev": `<rect x="3" y="3" width="18" height="18" rx="2" />
   <line x1="9" y1="3" x2="9" y2="21" />`,
+  "layout-stacked-rev": `<rect x="3" y="3" width="18" height="18" rx="2" />
+  <line x1="3" y1="9" x2="21" y2="9" />`,
   "anchor": `<path stroke="none" d="M0 0h24v24H0z" fill="none"/>
   <circle cx="12" cy="5" r="3" />
   <line x1="12" y1="22" x2="12" y2="8" />
