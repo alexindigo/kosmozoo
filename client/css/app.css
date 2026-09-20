@@ -188,7 +188,12 @@ main { display: flex; flex: 1; min-height: 0; }
 /* details space: current image's full metadata */
 /* overflow-x hidden: an x-shift (e.g. scrollIntoView from a filename link)
  must never clip the images box's left edge invisibly */
-.info-body { flex: 1; overflow-y: auto; overflow-x: hidden; scrollbar-width: none; }
+.info-body { flex: 1; overflow-y: auto; overflow-x: hidden; scrollbar-width: none;
+  /* a flex column, so the split container's height is DEFINITE for its
+     children — the stacked split's flex-basis percentage resolves only
+     against a definite container height (a block parent leaves it
+     content-sized and the divider can move nothing) */
+  display: flex; flex-direction: column; min-height: 0; }
 .info-body::-webkit-scrollbar { display: none; }
 #anchorList { flex: 1; overflow-y: auto; display: flex; flex-direction: column;
   gap: 10px; scrollbar-width: none; }
@@ -717,6 +722,15 @@ main { display: flex; flex: 1; min-height: 0; }
  shrinks below its split first */
 .info-source-nodes { flex: 1; min-width: 120px; }
 .info.stacked .info-source-images, .info.stacked .info-source-nodes { flex: none; max-width: 100%; width: 100%; }
+/* stacked preconditions, made structural: the images column lets its
+   flex-basis CAP it (min-height: 0 — a tall image must not outvote the
+   split), its content scrolls when several images stack, and a single
+   image fills its share (the imgwrap clips it; the img object-fits
+   inside). The nodes column scrolls within its own share. */
+.info.stacked .info-source-images { min-height: 0; overflow-y: auto; }
+.info.stacked .infoimg:only-child { height: 100%; margin-top: 0; }
+.info.stacked .infoimg:only-child .imgwrap { height: 100%; }
+.info.stacked .info-source-nodes { min-height: 0; overflow-y: auto; }
 /* input images have no known dimensions — the box hugs the image */
 .info-source-images .imgwrap { aspect-ratio: auto; }
 /* the image column is for inspection — no small-cap height here; image
