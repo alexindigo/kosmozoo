@@ -114,7 +114,12 @@ export function Grid() {
           // estimateSize formula returns for the inserted item
           if (s) delta += cardHeight(s, col?.clientWidth ?? 800) + gridGapPx();
         }
-        if (delta > 0) col.scrollTop += delta;
+        if (delta > 0) {
+          // compensation is a programmatic scroll, not a user gesture:
+          // the settle's snap must not re-tidy the restored position
+          store.actions.feed.quiet();
+          col.scrollTop += delta;
+        }
       }
     }
     prevView = v;

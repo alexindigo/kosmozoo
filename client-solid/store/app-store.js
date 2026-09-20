@@ -1106,6 +1106,9 @@ export function makeAppStore() {
         setFeedVirtualizer(seamsIn?.virtualizer ?? null);
       },
       restoreToIndex,
+      // a programmatic scroll must not invite the snap — compensation and
+      // restores call this so the next settle does not re-tidy
+      quiet: quietScrolls,
       // the single scroll entry point — the store owns the activity state
       // and the settle pipeline; the model never moves mid-gesture
       scrolled: feedScrolled,
