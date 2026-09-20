@@ -94,66 +94,71 @@ export function Card(props) {
           else if (p === "error") store.state.window.markError(props.entryId);
         }}
       />
-      <div class="ctitle">
-        <span class="ctitle-left">
-          <input
-            type="checkbox" class="selcb"
-            checked={!!store.state.selected[image()?.id]}
-            title="select for bulk actions"
-            onClick={(e) => {
-              e.stopPropagation();
-              store.actions.selected.set(image()?.id, e.target.checked);
-            }}
-          />
-          <span class="copyable" classList={{ copied: copiedOn() }} title="click to copy host#filename" onClick={copyName}>
-            {image()?.filename}
-          </span>
-        </span>
-        <span class="btnwrap">
-          <span class={"saved" + (savedOn() ? " show" : "")}>Feedback saved</span>
-          <For each={store.state.featureCardActions(image())}>
-            {(a) => <IconButton icon={a.icon} variant={a.variant} title={a.title} onAction={a.onAction} />}
-          </For>
-          <IconButton
-            icon={iconSvg("thumb-down")} variant="down" active={j().vote === "down"}
-            title="thumbs down — hides (Unhide up top restores)"
-            onAction={() => store.actions.judgments.setVote(image(), "down")}
-          />
-          <IconButton
-            icon={iconSvg("thumb-up")} variant="up" active={j().vote === "up"} title="thumbs up"
-            onAction={() => store.actions.judgments.setVote(image(), j().vote === "up" ? null : "up")}
-          />
-          <IconButton
-            icon={iconSvg("star")} variant="favorite" active={!!j().favorite}
-            title="favorite — interesting in itself, not project fitness"
-            onAction={() => store.actions.judgments.toggleFavorite(image())}
-          />
-          <button
-            class="savebtn"
-            title="download this image"
-            onClick={(e) => { e.stopPropagation(); store.actions.images.download(image()?.id); }}
-          >save</button>
-          <Show when={del()}>
-            <IconButton
-              icon={iconSvg(delCopy().icon, 16)}
-              variant="delete"
-              title={delCopy().cardTitle}
-              onAction={() => store.actions.confirm.open({ image: image() })}
+      {/* the vote/comment foot: sticky to the viewport's bottom while a
+          taller-than-viewport card scrolls — voting stays reachable
+          without chasing the card's end (in-flow: no height added) */}
+      <div class="card-foot">
+        <div class="ctitle">
+          <span class="ctitle-left">
+            <input
+              type="checkbox" class="selcb"
+              checked={!!store.state.selected[image()?.id]}
+              title="select for bulk actions"
+              onClick={(e) => {
+                e.stopPropagation();
+                store.actions.selected.set(image()?.id, e.target.checked);
+              }}
             />
-          </Show>
-        </span>
-      </div>
-      <div class="pair">
-        <NoteBox
-          sign="neg" placeholder="negatives…" noteId={image()?.id}
-          initialValue={image()?.judgment?.notes?.neg ?? ""}
-          onSave={saveNote("neg")} getNeighborText={neighborText("neg")}
-        />
-        <NoteBox
-          sign="pos" placeholder="positives…" noteId={image()?.id}
-          initialValue={image()?.judgment?.notes?.pos ?? ""}
-          onSave={saveNote("pos")} getNeighborText={neighborText("pos")}
-        />
+            <span class="copyable" classList={{ copied: copiedOn() }} title="click to copy host#filename" onClick={copyName}>
+              {image()?.filename}
+            </span>
+          </span>
+          <span class="btnwrap">
+            <span class={"saved" + (savedOn() ? " show" : "")}>Feedback saved</span>
+            <For each={store.state.featureCardActions(image())}>
+              {(a) => <IconButton icon={a.icon} variant={a.variant} title={a.title} onAction={a.onAction} />}
+            </For>
+            <IconButton
+              icon={iconSvg("thumb-down")} variant="down" active={j().vote === "down"}
+              title="thumbs down — hides (Unhide up top restores)"
+              onAction={() => store.actions.judgments.setVote(image(), "down")}
+            />
+            <IconButton
+              icon={iconSvg("thumb-up")} variant="up" active={j().vote === "up"} title="thumbs up"
+              onAction={() => store.actions.judgments.setVote(image(), j().vote === "up" ? null : "up")}
+            />
+            <IconButton
+              icon={iconSvg("star")} variant="favorite" active={!!j().favorite}
+              title="favorite — interesting in itself, not project fitness"
+              onAction={() => store.actions.judgments.toggleFavorite(image())}
+            />
+            <button
+              class="savebtn"
+              title="download this image"
+              onClick={(e) => { e.stopPropagation(); store.actions.images.download(image()?.id); }}
+            >save</button>
+            <Show when={del()}>
+              <IconButton
+                icon={iconSvg(delCopy().icon, 16)}
+                variant="delete"
+                title={delCopy().cardTitle}
+                onAction={() => store.actions.confirm.open({ image: image() })}
+              />
+            </Show>
+          </span>
+        </div>
+        <div class="pair">
+          <NoteBox
+            sign="neg" placeholder="negatives…" noteId={image()?.id}
+            initialValue={image()?.judgment?.notes?.neg ?? ""}
+            onSave={saveNote("neg")} getNeighborText={neighborText("neg")}
+          />
+          <NoteBox
+            sign="pos" placeholder="positives…" noteId={image()?.id}
+            initialValue={image()?.judgment?.notes?.pos ?? ""}
+            onSave={saveNote("pos")} getNeighborText={neighborText("pos")}
+          />
+        </div>
       </div>
     </>
   );

@@ -149,11 +149,12 @@ async function attempt(name, fn) {
   });
 
   // card anatomy: image, then the filename row, then the feedback boxes —
-  // full metadata lives in the details pane (the card carries no meta section)
+  // full metadata lives in the details pane (the card carries no meta
+  // section). Read in document order: the sticky foot wraps title+notes.
   await attempt("card order: image, filename, feedback", async () => {
     const order = await page.evaluate(`(() => {
       const card = document.querySelector('.card');
-      return [...card.children].map((el) =>
+      return [...card.querySelectorAll(".imgwrap, .ctitle, .pair")].map((el) =>
         el.classList.contains('imgwrap') ? 'img' :
         el.classList.contains('ctitle') ? 'title' : 'notes').join(',');
     })()`);
