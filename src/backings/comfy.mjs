@@ -253,7 +253,9 @@ export function comfyClient(addr) {
 }
 
 // Queue a prompt graph. Returns { ok, status, error? } — the caller owns
-// permutation-level error reporting.
+// permutation-level error reporting. Failures log the host's FULL body to
+// the engine console: the response error is capped for display, but a
+// validation detail truncated at the boundary is undiagnosable.
 export async function enqueue(addr, prompt) {
   try {
     const resp = await fetch(`http://${addr}/api/prompt`, {
@@ -264,10 +266,12 @@ export async function enqueue(addr, prompt) {
     });
     if (!resp.ok) {
       const text = await resp.text();
+      console.error(`[comfy] enqueue ${addr} → ${resp.status}: ${text}`);
       return { ok: false, status: resp.status, error: `ComfyUI ${resp.status}: ${text.slice(0, 200)}` };
     }
     return { ok: true, status: resp.status };
   } catch (e) {
+    console.error(`[comfy] enqueue ${addr} → fetch failed: ${e.message}`);
     return { ok: false, status: 502, error: `fetch failed: ${e.message}` };
   }
 }

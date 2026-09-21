@@ -303,6 +303,7 @@ export function register(app) {
     if (permutations.length > MAX_PERMUTATIONS) {
       return Response.json({ error: `too many permutations (${permutations.length} > ${MAX_PERMUTATIONS})` }, { status: 413 });
     }
+    console.log(`[variations] run ${host}:${filename} — ${permutations.length} permutations over ${Object.keys(imageParams ?? {}).length} enum/text axes`);
 
     // Output nodes by object_info's output_node flag, indexed once per run.
     const producing = outputClasses?.size
@@ -318,6 +319,7 @@ export function register(app) {
     for (const perm of permutations) {
       const { graph: mutated, applied } = mutateGraph(graph, perm, fullInspection);
       if (applied.length === 0) {
+        console.error(`[variations] permutation matched no nodes ${JSON.stringify(perm)}`);
         errors.push({ permutation: perm, error: "no applicable nodes found" });
         continue;
       }
@@ -348,10 +350,14 @@ export function register(app) {
         prompt: mutated,
         extra_data: { extra_pnginfo: lineageTag(`${host}:${filename}`, perm) },
       });
-      if (!res.ok) errors.push({ permutation: perm, error: res.error });
-      else submitted++;
+      if (!res.ok) {
+        console.error(`[variations] permutation failed ${JSON.stringify(perm)} → ${res.error}`);
+        errors.push({ permutation: perm, error: res.error });
+      } else submitted++;
     }
 
+    if (errors.length) console.error(`[variations] ${host}:${filename} → submitted ${submitted}/${permutations.length}, ${errors.length} failed`);
+    else console.log(`[variations] ${host}:${filename} → submitted ${submitted}/${permutations.length}`);
     return Response.json({ submitted, total: permutations.length, errors });
   });
 }
