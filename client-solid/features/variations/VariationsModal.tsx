@@ -622,13 +622,14 @@ function ModalBody(props) {
               onFocus={() => setFocused("suffix")}
               onInput={(e) => setSuffix(e.currentTarget.value)}
             />
-            {/* spacer pushes Run + error to the BOTTOM of the right column, so
- the primary action sits opposite the tallest content on the left */}
+            {/* spacer pushes the result + Run to the BOTTOM of the right
+ column — the result message sits above the button, centered on it,
+ and the button is the column's last element */}
             <div class="vz-rspacer" />
+            <div class={"vz-error" + (result()?.ok ? " vz-ok" : "")}>{result()?.text ?? ""}</div>
             <button
               class="vz-run" disabled={running() || undefined} onClick={runVariations}
             >{running() ? "Running…" : "Run"}</button>
-            <div class={"vz-error" + (result()?.ok ? " vz-ok" : "")}>{result()?.text ?? ""}</div>
           </div>
         </div>
         <button

@@ -843,8 +843,11 @@ main { display: flex; flex: 1; min-height: 0; }
   cursor: pointer; width: 100%; }
 .vz-run:hover { filter: brightness(1.1); box-shadow: 0 0 0 3px var(--primary-dim); }
 .vz-run:disabled { opacity: 0.5; cursor: default; }
+/* run result: sits directly above the full-width Run button, so centering
+ the text centers it against the button; the extra bottom margin is the air
+ between message and button */
 .vz-error { color: var(--negative); font-size: 11px; min-height: 14px;
-  margin-top: 6px; word-break: break-word; }
+  margin-top: 6px; margin-bottom: 10px; text-align: center; word-break: break-word; }
 .vz-error.vz-ok { color: var(--positive); }
 .vz-close { position: absolute; top: 10px; right: 12px;
   background: none; border: none; color: var(--foreground-dim); cursor: pointer;

@@ -417,6 +417,33 @@ async function main() {
         document.querySelector('.vz-error')?.textContent ?? ''
       `);
       check("Run produces a result message", hasResult, errText);
+      // result layout: message above the Run button, centered on it, the
+      // button last in the column; the fake host 404s every enqueue, so the
+      // result IS an error and must render the error color
+      const geom = await cdp.evaluate(`(() => {
+        const col = document.querySelector('.vz-right').getBoundingClientRect();
+        const msg = document.querySelector('.vz-error');
+        const btn = document.querySelector('.vz-run');
+        const m = msg.getBoundingClientRect(), b = btn.getBoundingClientRect();
+        const probe = document.createElement('span');
+        probe.style.color = 'var(--negative)';
+        document.body.appendChild(probe);
+        const red = getComputedStyle(probe).color;
+        probe.remove();
+        return {
+          msgAbove: m.bottom <= b.top + 0.5,
+          centerDelta: Math.abs((m.left + m.width / 2) - (b.left + b.width / 2)),
+          btnAtBottom: Math.abs(b.bottom - col.bottom),
+          msgColor: getComputedStyle(msg).color, red,
+          isOk: msg.classList.contains('vz-ok'),
+        };
+      })()`);
+      check("result message above the Run button, centered, button at the column bottom",
+        geom.msgAbove && geom.centerDelta < 1 && geom.btnAtBottom < 1.5,
+        JSON.stringify(geom));
+      check("failed run renders the error color",
+        !geom.isOk && geom.msgColor === geom.red,
+        JSON.stringify(geom));
       // cleanup: close any lingering modal
       await cdp.evaluate(`document.querySelector('.vz-close')?.click()`);
       await cdp.poll(`!document.querySelector('.vz-root')`, 5000).catch(() => {});
