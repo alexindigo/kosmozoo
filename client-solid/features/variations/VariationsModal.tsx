@@ -336,12 +336,13 @@ function ModalBody(props) {
     }
     // enum sweep axes (LoRA names, samplers, …): same math — an enabled row
     // with no picks is inert, and a pick list without the current value
-    // makes every numeric combo novel
+    // makes every numeric combo novel. ("" is a real current value — the
+    // checks are != null, not truthy)
     for (const r of Object.values(enumRows())) {
       if (!r.enabled || !r.picks.length) continue;
       anyEnabled = true;
       perImage *= r.picks.length;
-      if (!(r.current && r.picks.includes(r.current))) imagesAtCurrent = false;
+      if (!(r.current != null && r.picks.includes(r.current))) imagesAtCurrent = false;
     }
     // text sweep axes (prompts, …): lines × {{label}} cartesian, same math
     // again — the shared expander computes the exact picks (the run payload
@@ -352,7 +353,7 @@ function ModalBody(props) {
       if (!vals.length) continue;
       anyEnabled = true;
       perImage *= vals.length;
-      if (!(r.current && vals.includes(r.current))) imagesAtCurrent = false;
+      if (!(r.current != null && vals.includes(r.current))) imagesAtCurrent = false;
     }
     // subtract the current combo only when numeric axes are at current AND
     // every swept image axis includes the current filename

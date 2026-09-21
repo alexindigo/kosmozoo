@@ -102,8 +102,12 @@ export function parseSemicolonList(raw) {
 // template, expanded cartesian-style over only the labels it contains; a
 // line without placeholders contributes itself. tplValues: label -> string[]
 // (parsed). A label without values inerts the WHOLE row — never render a
-// literal {{label}} into a prompt by accident.
+// literal {{label}} into a prompt by accident. An entirely blank text is ONE
+// value — the empty string: enabling the row and clearing the field is how a
+// sweep-to-empty is expressed (when the current value is already empty, the
+// current-combo exclusion drops it — a no-op sweep, not a job).
 export function expandTextAxes(text, tplValues = {}) {
+  if (textLines(text).length === 0) return [""];
   const labels = templateLabels(text);
   if (labels.some((l) => !(tplValues[l]?.length > 0))) return [];
   const out = [];

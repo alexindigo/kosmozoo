@@ -821,6 +821,43 @@ async function main() {
       await cdp.poll(`!document.querySelector('.vz-root')`, 5000).catch(() => {});
     });
 
+    // --- sweep-to-empty: a blank text row is ONE empty value ----------------------
+    // Enabling the prompt row and clearing its field sweeps the field to "".
+    // (Current is non-empty, so the combo is novel — no exclusion.)
+    await attempt("sweep-to-empty: cleared text row submits one empty value", async () => {
+      await cdp.evaluate(`
+        document.querySelector('.card[data-idx="0"] .votebtn.variations').click()
+      `);
+      await cdp.poll(`document.querySelectorAll('.vz-slider-row').length > 0`, 5000);
+      await cdp.clickAt('.vz-textrow[data-text-id="CLIPTextEncode#2.text"] .vz-imgrow-head .vz-cb');
+      await cdp.poll(`!!document.querySelector('.vz-textrow[data-text-id="CLIPTextEncode#2.text"] .vz-text-values')`, 5000);
+      await cdp.evaluate(`(() => {
+        const orig = window.fetch;
+        window.__runBodies = [];
+        window.fetch = (...a) => {
+          if (String(a[0]).includes('/features/variations/run')) window.__runBodies.push(a[1]?.body);
+          return orig(...a);
+        };
+        const t = document.querySelector('.vz-textrow[data-text-id="CLIPTextEncode#2.text"] .vz-text-values');
+        t.value = "";
+        t.dispatchEvent(new Event('input', { bubbles: true }));
+      })()`);
+      const c0 = 3; // denoise-only count (0.85..1.0 step 0.05, current excluded)
+      await cdp.poll(`parseInt(document.querySelector('.vz-count')?.textContent, 10) === ${c0 + 1}`, 5000);
+      check("cleared text row counts as one (empty) value", true, `count=${c0 + 1}`);
+      await cdp.evaluate(`document.querySelector('.vz-run').click()`);
+      await cdp.poll(`(document.querySelector('.vz-error')?.textContent ?? '').length > 0`, 10000);
+      const body = await cdp.evaluate(`(() => {
+        const b = JSON.parse(window.__runBodies[0] ?? "{}");
+        return { values: b.imageParams?.["CLIPTextEncode#2.text"]?.values ?? null };
+      })()`);
+      check("run payload carries the empty string",
+        JSON.stringify(body.values) === JSON.stringify([""]),
+        JSON.stringify(body));
+      await cdp.evaluate(`document.querySelector('.vz-close')?.click()`);
+      await cdp.poll(`!document.querySelector('.vz-root')`, 5000).catch(() => {});
+    });
+
   } finally {
     await cdp.close();
   }

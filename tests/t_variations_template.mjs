@@ -5,6 +5,7 @@
 import { assertEquals } from "jsr:@std/assert";
 import {
   templateLabels, parseSemicolonList, expandTextAxes, textLines,
+  generatePermutations,
 } from "../src/features/variations/shared.mjs";
 
 // --- label detection -----------------------------------------------------------
@@ -71,4 +72,28 @@ Deno.test("expandTextAxes: a label without values inerts the whole row", () => {
   assertEquals(expandTextAxes("{{a}} {{b}}", { a: ["x"] }), []);
   // even plain lines drop out while a label is unconfigured
   assertEquals(expandTextAxes("plain line\n{{a}}", {}), []);
+});
+
+// --- sweep-to-empty: a blank text is ONE value — the empty string --------------
+
+Deno.test("expandTextAxes: an entirely blank text expands to one empty value", () => {
+  assertEquals(expandTextAxes(""), [""]);
+  assertEquals(expandTextAxes("  \n  \n"), [""]);
+});
+
+Deno.test("sweep-to-empty: empty pick vs a non-empty current is one novel permutation", () => {
+  const perms = generatePermutations({}, { "CLIPTextEncode#5.text": "ugly, blurry" }, {
+    "CLIPTextEncode#5.text": { enabled: true, values: [""] },
+  });
+  assertEquals(perms.length, 1);
+  assertEquals(perms[0]["CLIPTextEncode#5.text"], "");
+});
+
+Deno.test("sweep-to-empty: empty pick vs an already-empty current is a no-op", () => {
+  // sweeping "" → "" produces nothing new — the current-combo exclusion
+  // drops it and the run answers 400
+  const perms = generatePermutations({}, { "CLIPTextEncode#5.text": "" }, {
+    "CLIPTextEncode#5.text": { enabled: true, values: [""] },
+  });
+  assertEquals(perms.length, 0);
 });

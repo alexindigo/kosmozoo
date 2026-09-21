@@ -298,7 +298,7 @@ export function register(app) {
       return Response.json({ error: e.message }, { status: 400 });
     }
     if (permutations.length === 0) {
-      return Response.json({ error: "no permutations (check ranges and increment)" }, { status: 400 });
+      return Response.json({ error: "no permutations to submit (enable an axis or move it off the current values)" }, { status: 400 });
     }
     if (permutations.length > MAX_PERMUTATIONS) {
       return Response.json({ error: `too many permutations (${permutations.length} > ${MAX_PERMUTATIONS})` }, { status: 413 });
