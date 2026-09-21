@@ -531,6 +531,14 @@ main { display: flex; flex: 1; min-height: 0; }
   display: flex; justify-content: center; }
 .dz-wipe::before { content: ""; width: 2px; background: var(--attention); }
 
+/* Difference (4): the mask canvas, fitted like an image layer; the photo
+ layers stay mounted out of view */
+#diffStage[data-mode="difference"] .dz-a,
+#diffStage[data-mode="difference"] .dz-b { display: none; }
+.dz-canvas-cell { position: absolute; inset: 0; }
+.dz-canvas { max-width: 100%; max-height: 100%; object-fit: contain; }
+.dz-opacity { width: 90px; accent-color: var(--secondary); }
+
 /* chrome: mode control bottom-center (keys are primary; the control shows
  state and clicks), One-Up extras bottom-left */
 #diffModes { position: absolute; bottom: 10px; left: 50%; transform: translateX(-50%);
@@ -541,7 +549,7 @@ main { display: flex; flex: 1; min-height: 0; }
 .dz-mode:hover:not(:disabled) { color: var(--foreground); border-color: var(--foreground-dim); }
 .dz-mode.on { color: var(--secondary); border-color: var(--secondary); }
 .dz-mode:disabled { opacity: 0.35; cursor: default; }
-#diffPlay { position: absolute; bottom: 10px; left: 12px; display: flex; gap: 6px;
+#diffPlay, #diffMaskCtl { position: absolute; bottom: 10px; left: 12px; display: flex; gap: 6px;
   align-items: center; z-index: var(--z-modal); }
 .dz-sidebtn, .dz-playbtn { height: 24px; min-width: 28px; border-radius: 6px;
   font-size: 12px; display: flex; align-items: center; justify-content: center;

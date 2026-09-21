@@ -148,6 +148,58 @@ function check(name, ok, detail = "") {
     single.a && !single.b && single.inert, JSON.stringify(single));
   await cdp.evaluate(`document.getElementById('diffClose').click()`);
 
+  // 8. Difference: key 4 paints the mask canvas — changed pixels light up in
+  // the attention orange; identical sides paint none; the base toggle never
+  // blanks the stage. (The fixtures share one pixel payload, so the changed
+  // pair is fixture × solid bulk image — different sizes too, which also
+  // exercises the center-align.)
+  await cdp.evaluate(`(async () => {
+    ${KZ}.actions.diff.openDiff({ source: "fake", file: "flux-basic.png" }, { source: "fake", file: "bulk-00000.png" });
+  })()`);
+  await cdp.poll(`(async () => ${KZ}.state.diff.open)()`, 5000);
+  await cdp.evaluate("document.dispatchEvent(new KeyboardEvent('keydown', { key: '4', bubbles: true }))");
+  await cdp.poll(`(async () => ${KZ}.state.diff.mode === "difference")()`, 5000);
+  const ORANGE = `(d, i) => d[i] === 255 && d[i + 1] === 136 && d[i + 2] === 0`;
+  const painted = await cdp.poll(`(() => {
+    const c = document.querySelector('.dz-canvas');
+    if (!c || !c.width) return false;
+    const d = c.getContext('2d').getImageData(0, 0, c.width, c.height).data;
+    let n = 0;
+    for (let i = 0; i < d.length; i += 4) if ((${ORANGE})(d, i)) n++;
+    return n > 100;
+  })()`, 10000).then(() => true).catch(() => false);
+  check("Difference: changed pixels light up orange on the canvas", painted);
+
+  await cdp.evaluate(`(async () => { ${KZ}.actions.diff.setDiffBase("b"); })()`);
+  await cdp.poll(`(() => {
+    const c = document.querySelector('.dz-canvas');
+    return c && c.width > 0;
+  })()`, 5000);
+  const baseSwap = await cdp.evaluate(`(() => {
+    const c = document.querySelector('.dz-canvas');
+    const d = c.getContext('2d').getImageData(0, 0, c.width, c.height).data;
+    let n = 0;
+    for (let i = 0; i < d.length; i += 4) if ((${ORANGE})(d, i)) n++;
+    return { w: c.width, orange: n };
+  })()`);
+  check("Difference: base toggle keeps the stage painted",
+    baseSwap.w > 0 && baseSwap.orange > 100, JSON.stringify(baseSwap));
+
+  // identical sides → delta zero everywhere → no highlight
+  await cdp.evaluate(`(async () => {
+    ${KZ}.actions.diff.openDiff({ source: "fake", file: "flux-basic.png" }, { source: "another", file: "flux-basic.png" });
+  })()`);
+  await cdp.poll(`(async () => ${KZ}.state.diff.open)()`, 5000);
+  const identical = await cdp.poll(`(() => {
+    const c = document.querySelector('.dz-canvas');
+    if (!c || !c.width) return false;
+    const d = c.getContext('2d').getImageData(0, 0, c.width, c.height).data;
+    for (let i = 0; i < d.length; i += 4) if ((${ORANGE})(d, i)) return false;
+    return true;
+  })()`, 10000).then(() => true).catch(() => false);
+  check("Difference: identical sides paint no highlight", identical);
+  await cdp.evaluate(`document.getElementById('diffClose').click()`);
+
   await cdp.close();
   console.log(failures ? `DIFF E2E: ${failures} FAILURE(S)` : "DIFF E2E: ALL PASS");
   process.exit(failures ? 1 : 0);

@@ -13,6 +13,7 @@
 import { createSignal, createResource, createEffect, on, onMount, onCleanup, Show } from "solid-js";
 import { useAppStore } from "../store/app-store.js";
 import { makeZoomable } from "/js/zoomable.mjs";
+import { differenceMask } from "../features/diff/mask.mjs";
 import { DiffChrome } from "./DiffChrome.js";
 
 // one decode-guarded src per side: the visible src swaps only once the new
@@ -118,6 +119,43 @@ export function DiffStage() {
     window.addEventListener("pointercancel", up);
   };
 
+  // Difference: paint the mask from the two decoded sides, recomputing when
+  // a side's src or a mask pref changes. The canvas keeps its last paint
+  // until the new one lands — a recompute never blanks the stage. Different
+  // intrinsic sizes center-align onto max(w)×max(h) (no scaling — alignment
+  // is a later axis).
+  let canvasEl;
+  createEffect(() => {
+    const aUrl = srcA(), bUrl = srcB();
+    const absolute = d().diffAbs, opacity = d().diffOpacity, baseIsA = d().diffBase === "a";
+    if (d().mode !== "difference" || !hasB() || !aUrl || !bUrl || !canvasEl) return;
+    let cancelled = false;
+    (async () => {
+      const load = (u) => new Promise((res) => {
+        const im = new Image();
+        im.onload = () => res(im);
+        im.onerror = () => res(null);
+        im.src = u;
+      });
+      const [ia, ib] = await Promise.all([load(aUrl), load(bUrl)]);
+      if (cancelled || !ia || !ib) return;
+      const W = Math.max(ia.naturalWidth, ib.naturalWidth);
+      const H = Math.max(ia.naturalHeight, ib.naturalHeight);
+      const grab = (im) => {
+        const c = document.createElement("canvas");
+        c.width = W; c.height = H;
+        const x = c.getContext("2d", { willReadFrequently: true });
+        x.drawImage(im, (W - im.naturalWidth) / 2, (H - im.naturalHeight) / 2);
+        return x.getImageData(0, 0, W, H);
+      };
+      const mask = differenceMask(grab(ia), grab(ib), { absolute, opacity, baseIsA });
+      if (cancelled) return;
+      canvasEl.width = W; canvasEl.height = H;
+      canvasEl.getContext("2d").putImageData(mask, 0, 0);
+    })();
+    onCleanup(() => { cancelled = true; });
+  });
+
   return (
     <div id="diff" hidden={!d().open}>
       <DiffChrome />
@@ -136,6 +174,11 @@ export function DiffStage() {
           <Show when={d().mode === "split"}>
             <Wipe onDown={onSplitDown} />
           </Show>
+        </Show>
+        <Show when={hasB() && d().mode === "difference"}>
+          <div class="dz-cell dz-canvas-cell">
+            <canvas class="dz-canvas" ref={canvasEl} style={{ transform: transform() || undefined }} />
+          </div>
         </Show>
       </div>
     </div>
