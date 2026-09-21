@@ -1,8 +1,9 @@
 // client-solid/features/variations/VariationsModal.tsx — the variations
 // panel, declarative: the shared Modal portals it to the page level.
 //
-// Layout: title centered at top; left: parameter rows (<SliderRow>), enabled
-// cards float to the top, LoadImage sweep rows above them; vertical divider;
+// Layout: title centered at top; left: parameter rows, LoadImage sweep rows
+// first; enabled cards float to the top, the rest follow the info panel's
+// own order (registry title, then input); vertical divider;
 // right: variations count (big), prefix, suffix, Run.
 //
 // Slider rows are populated once the probe returns — the graph decides which
@@ -14,10 +15,17 @@
 import { createSignal, createMemo, createEffect, createResource, onCleanup, For, Show } from "solid-js";
 import { iconSvg } from "/js/icons.mjs";
 import { paramDef, defaultRange, fallbackParams } from "./graph.mjs";
+import { textLines, templateLabels, expandTextAxes, parseSemicolonList } from "/shared/features/variations/shared.mjs";
 import { useAppStore } from "../../store/app-store.js";
 import { UPLOAD_IMG_EXT } from "../../store/fields.js";
 import { SliderRow } from "./SliderRow.js";
 import { Modal } from "../../components/Modal.js";
+
+// every label's raw input parsed to its value list (empties kept — they
+// substitute the token with "")
+const tplParsed = (tpl) => Object.fromEntries(
+  Object.entries(tpl ?? {}).map(([k, v]) => [k, parseSemicolonList(v)]),
+);
 
 export function VariationsModal() {
   const store = useAppStore();
@@ -49,8 +57,10 @@ function ModalBody(props) {
   const [params, setParams] = createSignal(null); // null = probing; [] = none
   const [strParams, setStrParams] = createSignal([]); // LoadImage sweep axes
   const [imgRows, setImgRows] = createSignal({}); // id -> { enabled, mode, file, files, current, label, localFiles }
-  const [enumList, setEnumList] = createSignal([]); // probe enumParams, LoRA first
+  const [enumList, setEnumList] = createSignal([]); // probe enumParams, graph order
   const [enumRows, setEnumRows] = createSignal({}); // id -> { enabled, picks, current, values, label, filter }
+  const [textList, setTextList] = createSignal([]); // probe textParams, graph order
+  const [textRows, setTextRows] = createSignal({}); // id -> { enabled, text, current, label }
   const [rows, setRows] = createSignal({}); // key -> { enabled, min, max, increment, placeholderKey, ... }
   const [running, setRunning] = createSignal(false);
   const [result, setResult] = createSignal(null); // { text, ok }
@@ -113,7 +123,7 @@ function ModalBody(props) {
       init[id] = {
         enabled: false, min: def.min, max: def.max, increment: p.defaultInc,
         placeholderKey: id,
-        current, integer,
+        current, integer, type,
         label: title ?? type, // node display title else class_type
         input: key,
       };
@@ -139,13 +149,9 @@ function ModalBody(props) {
     // host's input dir
     setStrParams(data.stringParams ?? []);
     // enum sweep axes (LoRA names, samplers, …): one row per NODE instance,
-    // options exactly as the host publishes them. LoRA rows first.
-    const eps = [...(data.enumParams ?? [])].sort((a, b) => {
-      const la = a.key === "lora_name" ? 0 : 1;
-      const lb = b.key === "lora_name" ? 0 : 1;
-      if (la !== lb) return la - lb;
-      return `${a.title ?? a.type}.${a.key}`.localeCompare(`${b.title ?? b.type}.${b.key}`);
-    });
+    // options exactly as the host publishes them. Probe order = graph order;
+    // the display sort happens in orderedItems.
+    const eps = data.enumParams ?? [];
     setEnumList(eps);
     const einit = {};
     for (const p of eps) {
@@ -155,6 +161,21 @@ function ModalBody(props) {
       };
     }
     setEnumRows(einit);
+    // text sweep axes (prompts, …): one row per node instance; the values
+    // are user-supplied (one per line), pre-filled with the current text.
+    // tpl holds the {{label}} substitution inputs' raw text, keyed by label —
+    // kept even when a label temporarily leaves the text (an accidental edit
+    // doesn't lose the values)
+    const tps = data.textParams ?? [];
+    setTextList(tps);
+    const tinit = {};
+    for (const p of tps) {
+      tinit[p.id] = {
+        enabled: false, text: p.current, current: p.current, tpl: {},
+        label: `${p.title ?? p.type}.${p.key}`,
+      };
+    }
+    setTextRows(tinit);
   });
 
   const [inputFiles] = createResource(
@@ -223,15 +244,52 @@ function ModalBody(props) {
     });
   };
 
-  // enabled cards first, then by node label + input name
-  const ordered = () => Object.keys(rows()).sort((a, b) => {
-    const rs = rows();
-    const ea = rs[a].enabled ? 0 : 1;
-    const eb = rs[b].enabled ? 0 : 1;
-    if (ea !== eb) return ea - eb;
-    const la = `${rs[a].label}.${rs[a].input}`;
-    const lb = `${rs[b].label}.${rs[b].input}`;
-    return la.localeCompare(lb);
+  // text sweep rows: the master checkbox arms the axis; the textarea holds
+  // the values to sweep, one per line (pre-filled with the current text)
+  const onTextToggle = (id, checked) => {
+    setTextRows((rs) => ({ ...rs, [id]: { ...rs[id], enabled: checked } }));
+  };
+  const onTextField = (id, field, value) => {
+    setTextRows((rs) => ({ ...rs, [id]: { ...rs[id], [field]: value } }));
+  };
+  const onTextTpl = (id, label, value) => {
+    setTextRows((rs) => ({ ...rs, [id]: { ...rs[id], tpl: { ...rs[id].tpl, [label]: value } } }));
+  };
+
+  // Row order mirrors the info panel: registry title (fallback class_type),
+  // then input name; per-instance rows of one type+input keep graph (probe)
+  // order, and prompt (CLIPTextEncode) rows sink to the bottom — exactly the
+  // info panel's group order. Enabled rows float to the top. Items are plain
+  // strings ("num:"/"enum:"/"txt:" + id) so <For> keeps rows mounted.
+  const enumById = createMemo(() => new Map(enumList().map((p) => [p.id, p])));
+  const textById = createMemo(() => new Map(textList().map((p) => [p.id, p])));
+  const orderedItems = createMemo(() => {
+    const reg = store.state.nodesRegistry ?? {};
+    const titleOf = (type) => reg[type]?.title || type;
+    const sinkOf = (type) => +/clip\s*text\s*encode/i.test(type);
+    const items = [];
+    for (const [key, r] of Object.entries(rows())) {
+      items.push({ id: "num:" + key, enabled: !!r.enabled, sort: [sinkOf(r.type), titleOf(r.type), r.input, 0] });
+    }
+    const erank = new Map(enumList().map((p, i) => [p.id, i]));
+    for (const p of enumList()) {
+      const r = enumRows()[p.id];
+      if (!r) continue;
+      items.push({ id: "enum:" + p.id, enabled: !!r.enabled, sort: [sinkOf(p.type), titleOf(p.type), p.key, erank.get(p.id) ?? 0] });
+    }
+    const trank = new Map(textList().map((p, i) => [p.id, i]));
+    for (const p of textList()) {
+      const r = textRows()[p.id];
+      if (!r) continue;
+      items.push({ id: "txt:" + p.id, enabled: !!r.enabled, sort: [sinkOf(p.type), titleOf(p.type), p.key, trank.get(p.id) ?? 0] });
+    }
+    return items
+      .sort((a, b) => {
+        if (a.enabled !== b.enabled) return a.enabled ? -1 : 1;
+        const [sa, ta, ia, ra] = a.sort, [sb, tb, ib, rb] = b.sort;
+        return sa - sb || ta.localeCompare(tb) || ia.localeCompare(ib) || ra - rb;
+      })
+      .map((it) => it.id);
   });
 
   // variations count: product of per-param steps. The engine excludes the
@@ -284,6 +342,17 @@ function ModalBody(props) {
       anyEnabled = true;
       perImage *= r.picks.length;
       if (!(r.current && r.picks.includes(r.current))) imagesAtCurrent = false;
+    }
+    // text sweep axes (prompts, …): lines × {{label}} cartesian, same math
+    // again — the shared expander computes the exact picks (the run payload
+    // uses it too, so the count can't drift from what would be submitted)
+    for (const r of Object.values(textRows())) {
+      if (!r.enabled) continue;
+      const vals = expandTextAxes(r.text, tplParsed(r.tpl));
+      if (!vals.length) continue;
+      anyEnabled = true;
+      perImage *= vals.length;
+      if (!(r.current && vals.includes(r.current))) imagesAtCurrent = false;
     }
     // subtract the current combo only when numeric axes are at current AND
     // every swept image axis includes the current filename
@@ -338,6 +407,13 @@ function ModalBody(props) {
       for (const [id, r] of Object.entries(enumRows())) {
         if (!r.enabled || !r.picks.length) continue;
         imageParams[id] = { enabled: true, values: [...r.picks] };
+      }
+      // text sweep axes too — values = the textarea's lines, {{label}}
+      // templates expanded cartesian-style by the shared expander
+      for (const [id, r] of Object.entries(textRows())) {
+        if (!r.enabled) continue;
+        const vals = expandTextAxes(r.text, tplParsed(r.tpl));
+        if (vals.length) imageParams[id] = { enabled: true, values: vals };
       }
       let submitted = 0, totalJobs = 0;
       const failed = [];
@@ -457,67 +533,49 @@ function ModalBody(props) {
                   );
                 }}
               </For>
-              {/* enum sweep axes: one row per node instance, options exactly
- as the host publishes them; the current value is pre-checked and orange */}
-              <For each={enumList()}>
-                {(p) => {
-                  const r = () => enumRows()[p.id];
-                  const filtered = () => {
-                    const f = r().filter.trim().toLowerCase();
-                    return f ? r().values.filter((v) => v.toLowerCase().includes(f)) : r().values;
-                  };
-                  return (
-                    <Show when={r()}>
-                      <div class={"vz-imgrow vz-enumrow" + (r().enabled ? " on" : "")} data-enum-id={p.id}>
-                        <label class="vz-imgrow-head">
-                          <input
-                            type="checkbox" class="vz-cb"
-                            checked={r().enabled}
-                            onChange={(e) => onEnumToggle(p.id, e.target.checked)}
-                          />
-                          <span class="vz-imgrow-label">{r().label}</span>
-                          <span class="vz-imgrow-cur vz-enum-cur" title={r().current}>{r().current}</span>
-                        </label>
-                        <Show when={r().enabled}>
-                          <div class="vz-imgrow-body vz-enum-body">
-                            <Show when={r().values.length > 10}>
-                              <input
-                                type="text" class="vz-enum-filter" placeholder="filter…"
-                                value={r().filter}
-                                onInput={(e) => onEnumField(p.id, "filter", e.currentTarget.value)}
-                              />
-                            </Show>
-                            <div class="vz-enum-list">
-                              <For each={filtered()}>
-                                {(v) => (
-                                  <label class={"vz-enum-opt" + (v === r().current ? " vz-enum-current" : "")}>
-                                    <input
-                                      type="checkbox" class="vz-cb"
-                                      checked={r().picks.includes(v)}
-                                      onChange={(e) => onEnumPick(p.id, v, e.target.checked)}
-                                    />
-                                    <span class="vz-enum-opt-name" title={v}>{v}</span>
-                                  </label>
-                                )}
-                              </For>
-                            </div>
-                          </div>
-                        </Show>
-                      </div>
-                    </Show>
-                  );
-                }}
-              </For>
+              {/* one merged parameter list: enabled cards float to the top,
+ the rest follow the info panel's order (enum + numeric rows interleave) */}
               <Show
                 when={params() !== null}
                 fallback={<div class="vz-loading">inspecting graph…</div>}
               >
                 <Show
-                  when={params().length > 0}
+                  when={orderedItems().length > 0}
                   fallback={<div class="vz-loading">this graph exposes no varyable parameters</div>}
                 >
-                  <For each={ordered()}>
-                    {(key) => {
+                  <For each={orderedItems()}>
+                    {(itemId) => {
+                      if (itemId.startsWith("enum:")) {
+                        const id = itemId.slice(5);
+                        const p = enumById().get(id);
+                        return (
+                          <Show when={p && enumRows()[id]}>
+                            <EnumRow
+                              p={p}
+                              row={() => enumRows()[id]}
+                              onToggle={onEnumToggle}
+                              onPick={onEnumPick}
+                              onField={onEnumField}
+                            />
+                          </Show>
+                        );
+                      }
+                      if (itemId.startsWith("txt:")) {
+                        const id = itemId.slice(4);
+                        const p = textById().get(id);
+                        return (
+                          <Show when={p && textRows()[id]}>
+                            <TextRow
+                              p={p}
+                              row={() => textRows()[id]}
+                              onToggle={onTextToggle}
+                              onField={onTextField}
+                              onTpl={onTextTpl}
+                            />
+                          </Show>
+                        );
+                      }
+                      const key = itemId.slice(4);
                       const row0 = rows()[key];
                       const p = paramDef(key, row0.current, row0.integer);
                       return (
@@ -577,6 +635,102 @@ function ModalBody(props) {
           class="vz-close" title="close (Esc)" onClick={props.onClose}
           innerHTML={iconSvg("x", 16)}
         />
+    </div>
+  );
+}
+
+// one enum sweep row: master checkbox + label + the orange current value;
+// enabled → the host's options as a filterable checkbox list (the current
+// value pre-checked and orange-marked). Props convention mirrors SliderRow:
+// p is stable per row, row is a GETTER, interactions report through the
+// callbacks — the row never reaches into its parent.
+function EnumRow(props) {
+  const r = () => props.row();
+  const filtered = () => {
+    const f = r().filter.trim().toLowerCase();
+    return f ? r().values.filter((v) => v.toLowerCase().includes(f)) : r().values;
+  };
+  return (
+    <div class={"vz-imgrow vz-enumrow" + (r().enabled ? " on" : "")} data-enum-id={props.p.id}>
+      <label class="vz-imgrow-head">
+        <input
+          type="checkbox" class="vz-cb"
+          checked={r().enabled}
+          onChange={(e) => props.onToggle(props.p.id, e.target.checked)}
+        />
+        <span class="vz-imgrow-label">{r().label}</span>
+        <span class="vz-imgrow-cur vz-enum-cur" title={r().current}>{r().current}</span>
+      </label>
+      <Show when={r().enabled}>
+        <div class="vz-imgrow-body vz-enum-body">
+          <Show when={r().values.length > 10}>
+            <input
+              type="text" class="vz-enum-filter" placeholder="filter…"
+              value={r().filter}
+              onInput={(e) => props.onField(props.p.id, "filter", e.currentTarget.value)}
+            />
+          </Show>
+          <div class="vz-enum-list">
+            <For each={filtered()}>
+              {(v) => (
+                <label class={"vz-enum-opt" + (v === r().current ? " vz-enum-current" : "")}>
+                  <input
+                    type="checkbox" class="vz-cb"
+                    checked={r().picks.includes(v)}
+                    onChange={(e) => props.onPick(props.p.id, v, e.target.checked)}
+                  />
+                  <span class="vz-enum-opt-name" title={v}>{v}</span>
+                </label>
+              )}
+            </For>
+          </div>
+        </div>
+      </Show>
+    </div>
+  );
+}
+
+// one text sweep row: master checkbox + label + the orange current value;
+// enabled → a textarea holding the values to sweep, one per line (the
+// current text pre-filled). Each {{label}} in the text spawns a substitution
+// input below the textarea (semicolon-separated values, cartesian-expanded
+// at tally/run time). Same props convention as EnumRow/SliderRow.
+function TextRow(props) {
+  const r = () => props.row();
+  return (
+    <div class={"vz-imgrow vz-textrow" + (r().enabled ? " on" : "")} data-text-id={props.p.id}>
+      <label class="vz-imgrow-head">
+        <input
+          type="checkbox" class="vz-cb"
+          checked={r().enabled}
+          onChange={(e) => props.onToggle(props.p.id, e.target.checked)}
+        />
+        <span class="vz-imgrow-label">{r().label}</span>
+        <span class="vz-imgrow-cur vz-enum-cur" title={r().current}>{r().current}</span>
+      </label>
+      <Show when={r().enabled}>
+        <div class="vz-imgrow-body vz-enum-body">
+          <textarea
+            class="vz-text-values" rows="4"
+            placeholder="one value per line — {{label}} adds a substitution axis"
+            value={r().text}
+            onInput={(e) => props.onField(props.p.id, "text", e.currentTarget.value)}
+          />
+          <For each={templateLabels(r().text)}>
+            {(lab) => (
+              <div class="vz-tpl-row">
+                <span class="vz-tpl-label" title={lab}>{lab}</span>
+                <input
+                  type="text" class="vz-tpl-input"
+                  value={r().tpl?.[lab] ?? ""}
+                  placeholder="values; separated; by; semicolons"
+                  onInput={(e) => props.onTpl(props.p.id, lab, e.currentTarget.value)}
+                />
+              </div>
+            )}
+          </For>
+        </div>
+      </Show>
     </div>
   );
 }

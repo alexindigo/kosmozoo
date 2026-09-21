@@ -600,6 +600,24 @@ main { display: flex; flex: 1; min-height: 0; }
 .vz-enum-opt-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .vz-enum-current .vz-enum-opt-name { color: var(--attention); }
 
+/* text sweep rows (prompts, …): the values textarea — one value per line */
+.vz-text-values { background: var(--background); color: var(--foreground);
+  border: 1px solid var(--border-strong); border-radius: 4px; font-size: 12px;
+  padding: 4px 6px; font-family: ui-monospace, monospace;
+  resize: vertical; min-height: 3em; }
+.vz-text-values:focus { outline: none; border-color: var(--secondary); }
+
+/* {{label}} substitution inputs: one row per label detected in the text */
+.vz-tpl-row { display: flex; align-items: center; gap: 8px; }
+.vz-tpl-label { color: var(--foreground-dim); font-size: 11px;
+  font-family: ui-monospace, monospace; flex: 0 0 auto;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 40%; }
+.vz-tpl-input { flex: 1; min-width: 0; background: var(--background);
+  color: var(--foreground); border: 1px solid var(--border-strong);
+  border-radius: 4px; font-size: 12px; padding: 3px 6px;
+  font-family: ui-monospace, monospace; }
+.vz-tpl-input:focus { outline: none; border-color: var(--secondary); }
+
 /* checkbox — orange square (matches the mockup) */
 .vz-cb { -webkit-appearance: none; appearance: none;
   width: 16px; height: 16px; border-radius: 3px;

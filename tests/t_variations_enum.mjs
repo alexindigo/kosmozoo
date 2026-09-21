@@ -38,6 +38,14 @@ const OBJECT_INFO = {
   },
   KSamplerSelect: { input: { required: { sampler_name: [SAMPLER_OPTIONS, {}] } } },
   BasicScheduler: { input: { required: { steps: ["INT", {}], denoise: ["FLOAT", {}] } } },
+  // the other combo shape: "COMBO" with the options in the widget config
+  // (and a duplicate entry — the host's list is published verbatim)
+  ImageScaleToMaxDimension: {
+    input: { required: {
+      upscale_method: ["COMBO", { multiselect: false, options: ["area", "lanczos", "bilinear", "bilinear"] }],
+      largest_size: ["INT", {}],
+    } },
+  },
   SaveImage: { output_node: true, input: { required: { filename_prefix: ["STRING", {}] } } },
 };
 
@@ -53,6 +61,8 @@ Deno.test("objectInfo: combo widgets surface as per-field enum option lists", as
     assertEquals(enums.get("LoraLoaderModelOnly.lora_name"), LORA_OPTIONS);
     assertEquals(enums.get("LoraLoader.lora_name"), LORA_OPTIONS);
     assertEquals(enums.get("KSamplerSelect.sampler_name"), SAMPLER_OPTIONS);
+    // the "COMBO" + widget-config options shape, deduped
+    assertEquals(enums.get("ImageScaleToMaxDimension.upscale_method"), ["area", "lanczos", "bilinear"]);
     // scalar types + output classes unchanged
     assertEquals(types.get("LoraLoader.strength_model"), "FLOAT");
     assertEquals(types.get("BasicScheduler.steps"), "INT");

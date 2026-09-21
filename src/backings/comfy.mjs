@@ -221,9 +221,13 @@ export async function objectInfo(addr, cache = new Map()) {
             const t = Array.isArray(spec) ? spec[0] : spec;
             if (t === "INT" || t === "FLOAT") out.types.set(`${type}.${key}`, t);
             // combo widget: the host publishes THIS field's option list —
-            // an enum axis for the variations sweep (never mixed across fields)
-            if (Array.isArray(t) && t.length && t.every((v) => typeof v === "string")) {
-              out.enums.set(`${type}.${key}`, t);
+            // either as the spec type itself ([["a","b"], {}]) or as
+            // "COMBO" with an options list in the widget config
+            const raw = Array.isArray(t) ? t
+              : (Array.isArray(spec) && t === "COMBO" ? spec[1]?.options : null);
+            if (Array.isArray(raw) && raw.length) {
+              const list = [...new Set(raw.filter((v) => typeof v === "string"))];
+              if (list.length) out.enums.set(`${type}.${key}`, list);
             }
           }
         }

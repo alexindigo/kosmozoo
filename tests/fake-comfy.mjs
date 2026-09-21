@@ -174,12 +174,23 @@ export const server = Deno.serve({ port }, async (req) => {
     // the fixture graphs' loras, plus one the graphs don't use (a pick target)
     const LORAS = [["detail.safetensors", "style.safetensors", "other.safetensors"], {}];
     const SAMPLERS = [["euler", "dpmpp_2m", "uni_pc"], {}];
+    // the loader combos a real host publishes — without these the fixture
+    // graphs' loader fields would surface as free-text sweep rows
+    const UNETS = [["flux1-dev.safetensors"], {}];
+    const DTYPES = [["default", "fp8_e4m3fn", "fp8_e5m2"], {}];
+    const CLIPS = [["t5xxl_fp16.safetensors", "clip_l.safetensors"], {}];
+    const CLIPTYPES = [["flux", "sdxl", "sd3"], {}];
+    const VAES = [["ae.safetensors"], {}];
+    const SCHEDULERS = [["simple", "sgm_uniform", "karras", "exponential"], {}];
     const def = (inputs) => ({ input: { required: inputs } });
     return Response.json({
       FluxGuidance: def({ guidance: FLOAT }),
       RandomNoise: def({ noise_seed: INT }),
-      BasicScheduler: def({ steps: INT, denoise: FLOAT }),
+      BasicScheduler: def({ steps: INT, denoise: FLOAT, scheduler: SCHEDULERS }),
       EmptyLatentImage: def({ width: INT, height: INT, batch_size: INT }),
+      UNETLoader: def({ unet_name: UNETS, weight_dtype: DTYPES }),
+      CLIPLoader: def({ clip_name: CLIPS, type: CLIPTYPES }),
+      VAELoader: def({ vae_name: VAES }),
       LoraLoader: def({ lora_name: LORAS, strength_model: FLOAT, strength_clip: FLOAT }),
       LoraLoaderModelOnly: def({ lora_name: LORAS, strength_model: FLOAT }),
       KSamplerSelect: def({ sampler_name: SAMPLERS }),

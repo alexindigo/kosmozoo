@@ -533,20 +533,41 @@ async function main() {
           curs: rows.map((r) => r.querySelector('.vz-enum-cur')?.textContent),
         };
       })()`);
-      // LoRA rows first (both loaders), then the sampler row
-      check("one enum row per node instance, LoRA first",
-        info.ids.length === 3
-          && info.ids[0] === "LoraLoader#20.lora_name"
-          && info.ids[1] === "LoraLoader#21.lora_name"
-          && info.ids[2] === "KSamplerSelect#8.sampler_name",
+      // info-panel order: class_type, then input; per-instance rows in graph
+      // order (alphabetically: BasicScheduler < CLIPLoader < KSamplerSelect <
+      // LoraLoader < UNETLoader < VAELoader)
+      check("one enum row per node instance, info-panel order",
+        info.ids.join("|") === [
+          "BasicScheduler#9.scheduler",
+          "CLIPLoader#3.clip_name", "CLIPLoader#3.type",
+          "KSamplerSelect#8.sampler_name",
+          "LoraLoader#20.lora_name", "LoraLoader#21.lora_name",
+          "UNETLoader#1.unet_name", "UNETLoader#1.weight_dtype",
+          "VAELoader#13.vae_name",
+        ].join("|"),
         JSON.stringify(info));
       check("per-node current values in the row heads",
-        info.curs[0] === "detail.safetensors" && info.curs[1] === "style.safetensors",
+        info.curs.join("|") === [
+          "simple", "t5xxl_fp16.safetensors", "flux", "euler",
+          "detail.safetensors", "style.safetensors",
+          "flux1-dev.safetensors", "default", "ae.safetensors",
+        ].join("|"),
         JSON.stringify(info.curs));
 
       // enable node 20's row: the host's options render, current pre-checked
       await cdp.clickAt('.vz-enumrow[data-enum-id="LoraLoader#20.lora_name"] .vz-imgrow-head .vz-cb');
       await cdp.poll(`document.querySelectorAll('.vz-enumrow[data-enum-id="LoraLoader#20.lora_name"] .vz-enum-opt').length === 3`, 5000);
+      // the enabled enum row floats to the top — right after the auto-enabled
+      // denoise row; the disabled rows keep info-panel order below
+      const order = await cdp.evaluate(`(() => {
+        const rows = [...document.querySelectorAll('.vz-slider-row, .vz-enumrow')];
+        return rows.map((r) => r.dataset.enumId ?? r.dataset.paramKey);
+      })()`);
+      check("enabled enum row floats to the top",
+        order[0] === "BasicScheduler.denoise"
+          && order[1] === "LoraLoader#20.lora_name"
+          && order.indexOf("KSamplerSelect#8.sampler_name") > 1,
+        JSON.stringify(order));
       const opts = await cdp.evaluate(`(() => {
         const row = document.querySelector('.vz-enumrow[data-enum-id="LoraLoader#20.lora_name"]');
         const probe = document.createElement('span');
@@ -619,6 +640,158 @@ async function main() {
           && loras.filter((v) => v === "detail.safetensors").length === 2
           && loras.filter((v) => v === "other.safetensors").length === 2,
         JSON.stringify(res.body).slice(0, 200));
+    });
+
+    // --- text sweep rows: prompts are user-valued axes ---------------------------
+    // flux-basic's only free-text input is the CLIPTextEncode prompt — the
+    // SaveImage prefix is the run's own machinery and gets no row.
+    await attempt("text rows surface prompts, not the output prefix", async () => {
+      await cdp.evaluate(`
+        document.querySelector('.card[data-idx="0"] .votebtn.variations').click()
+      `);
+      await cdp.poll(`document.querySelectorAll('.vz-slider-row').length > 0`, 5000);
+      const info = await cdp.evaluate(`(() => {
+        const rows = [...document.querySelectorAll('.vz-textrow')];
+        const all = [...document.querySelectorAll('.vz-slider-row, .vz-enumrow, .vz-textrow')];
+        const last = all.at(-1);
+        return {
+          ids: rows.map((r) => r.dataset.textId),
+          curs: rows.map((r) => r.querySelector('.vz-enum-cur')?.textContent),
+          last: last?.dataset.textId ?? last?.dataset.enumId ?? last?.dataset.paramKey,
+        };
+      })()`);
+      check("prompt text row present, output prefix absent",
+        info.ids.join() === "CLIPTextEncode#2.text"
+          && info.curs[0] === "a portrait, studio light",
+        JSON.stringify(info));
+      check("prompt row sinks to the bottom (info-panel order)",
+        info.last === "CLIPTextEncode#2.text", info.last);
+
+      // enable → textarea pre-filled with the current prompt; a second line
+      // doubles the sweep (minus the current combo)
+      await cdp.clickAt('.vz-textrow[data-text-id="CLIPTextEncode#2.text"] .vz-imgrow-head .vz-cb');
+      await cdp.poll(`!!document.querySelector('.vz-textrow[data-text-id="CLIPTextEncode#2.text"] .vz-text-values')`, 5000);
+      const pre = await cdp.evaluate(`document.querySelector('.vz-textrow[data-text-id="CLIPTextEncode#2.text"] .vz-text-values').value`);
+      check("textarea pre-filled with the current text",
+        pre === "a portrait, studio light", JSON.stringify(pre));
+      const c0 = parseInt(await cdp.evaluate(`document.querySelector('.vz-count')?.textContent`), 10);
+      await cdp.evaluate(`(() => {
+        const t = document.querySelector('.vz-textrow[data-text-id="CLIPTextEncode#2.text"] .vz-text-values');
+        t.value = t.value + "\\na cyberpunk alley, rain";
+        t.dispatchEvent(new Event('input', { bubbles: true }));
+      })()`);
+      const expected = (c0 + 1) * 2 - 1;
+      await cdp.poll(`parseInt(document.querySelector('.vz-count')?.textContent, 10) === ${expected}`, 5000);
+      check("2 text values × numeric range → the right count",
+        parseInt(await cdp.evaluate(`document.querySelector('.vz-count')?.textContent`), 10) === expected,
+        `denoise-only=${c0} expected=${expected}`);
+      // the enabled text row floats to the top (the prompt sink applies to
+      // the disabled rows, not the enabled group)
+      const order = await cdp.evaluate(`(() => {
+        const rows = [...document.querySelectorAll('.vz-slider-row, .vz-enumrow, .vz-textrow')];
+        return rows.map((r) => r.dataset.textId ?? r.dataset.enumId ?? r.dataset.paramKey);
+      })()`);
+      check("enabled text row floats to the top",
+        order[0] === "BasicScheduler.denoise" && order[1] === "CLIPTextEncode#2.text",
+        JSON.stringify(order));
+      await cdp.evaluate(`document.querySelector('.vz-close')?.click()`);
+      await cdp.poll(`!document.querySelector('.vz-root')`, 5000).catch(() => {});
+    });
+
+    // --- text sweep run: picks enqueue verbatim ----------------------------------
+    await attempt("text sweep run enqueues the picked prompts", async () => {
+      const res = await cdp.evaluate(`(async () => {
+        const r = await fetch("/api/features/variations/run", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            id: "fake:flux-basic.png", host: "fake", filename: "flux-basic.png",
+            ranges: {},
+            imageParams: {
+              "CLIPTextEncode#2.text": { enabled: true, values: ["a portrait, studio light", "a cyberpunk alley, rain"] },
+            },
+            prefix: "", suffix: "",
+          }),
+        });
+        return { status: r.status, body: await r.json() };
+      })()`);
+      const texts = (res.body.errors ?? []).map((e) => e.permutation?.["CLIPTextEncode#2.text"]);
+      check("text picks enqueue, current combo excluded",
+        res.status === 200 && res.body.total === 1
+          && texts.join() === "a cyberpunk alley, rain",
+        JSON.stringify(res.body).slice(0, 160));
+    });
+
+    // --- template axes: {{label}} substitution inputs ------------------------------
+    // Typing {{label}} into the textarea spawns a values input per label; the
+    // picks are the cartesian expansion (empty values substitute with "").
+    await attempt("template axes expand {{label}} substitutions cartesian-style", async () => {
+      await cdp.evaluate(`
+        document.querySelector('.card[data-idx="0"] .votebtn.variations').click()
+      `);
+      await cdp.poll(`document.querySelectorAll('.vz-slider-row').length > 0`, 5000);
+      await cdp.clickAt('.vz-textrow[data-text-id="CLIPTextEncode#2.text"] .vz-imgrow-head .vz-cb');
+      await cdp.poll(`!!document.querySelector('.vz-textrow[data-text-id="CLIPTextEncode#2.text"] .vz-text-values')`, 5000);
+      // spy on the run payload — the expansion is client-side, the POST body
+      // is the honest record of what would be enqueued
+      await cdp.evaluate(`(() => {
+        const orig = window.fetch;
+        window.__runBodies = [];
+        window.fetch = (...a) => {
+          if (String(a[0]).includes('/features/variations/run')) window.__runBodies.push(a[1]?.body);
+          return orig(...a);
+        };
+      })()`);
+      // a two-label template spawns two substitution inputs, in order
+      await cdp.evaluate(`(() => {
+        const t = document.querySelector('.vz-textrow[data-text-id="CLIPTextEncode#2.text"] .vz-text-values');
+        t.value = "a {{animal}}, {{style}} style";
+        t.dispatchEvent(new Event('input', { bubbles: true }));
+      })()`);
+      await cdp.poll(`document.querySelectorAll('.vz-textrow .vz-tpl-row').length === 2`, 5000);
+      const labels = await cdp.evaluate(`
+        [...document.querySelectorAll('.vz-textrow .vz-tpl-label')].map((l) => l.textContent)
+      `);
+      check("one substitution input per label, first-appearance order",
+        labels.join("|") === "animal|style", JSON.stringify(labels));
+      const setTpl = async (i, v) => {
+        await cdp.evaluate(`(() => {
+          const inp = document.querySelectorAll('.vz-textrow .vz-tpl-input')[${i}];
+          inp.value = ${JSON.stringify(v)};
+          inp.dispatchEvent(new Event('input', { bubbles: true }));
+        })()`);
+      };
+      // a label without values inerts the row — the count is denoise-only
+      const c0 = parseInt(await cdp.evaluate(`document.querySelector('.vz-count')?.textContent`), 10);
+      await setTpl(0, "cat; dog");
+      const cInert = parseInt(await cdp.evaluate(`document.querySelector('.vz-count')?.textContent`), 10);
+      check("unconfigured label inerts the row", cInert === c0, `c0=${c0} got=${cInert}`);
+      // both labels configured: 2×2 cartesian; the current text is NOT among
+      // the picks (it has no placeholders), so no current-combo exclusion
+      await setTpl(1, "oil; ink");
+      const expected4 = (c0 + 1) * 4;
+      await cdp.poll(`parseInt(document.querySelector('.vz-count')?.textContent, 10) === ${expected4}`, 5000);
+      check("2×2 labels cartesian → the right count", true, `count=${expected4}`);
+      // an empty segment is a real value (the token substitutes with "")
+      await setTpl(1, "oil; ; ink");
+      const expected6 = (c0 + 1) * 6;
+      await cdp.poll(`parseInt(document.querySelector('.vz-count')?.textContent, 10) === ${expected6}`, 5000);
+      check("empty value counts as a value", true, `count=${expected6}`);
+      // Run: the captured payload carries the fully expanded texts
+      await cdp.evaluate(`document.querySelector('.vz-run').click()`);
+      await cdp.poll(`(document.querySelector('.vz-error')?.textContent ?? '').length > 0`, 10000);
+      const values = await cdp.evaluate(`(() => {
+        const body = JSON.parse(window.__runBodies[0] ?? "{}");
+        return body.imageParams?.["CLIPTextEncode#2.text"]?.values ?? null;
+      })()`);
+      check("run payload carries the expanded texts (empty value included)",
+        JSON.stringify(values) === JSON.stringify([
+          "a cat, oil style", "a cat,  style", "a cat, ink style",
+          "a dog, oil style", "a dog,  style", "a dog, ink style",
+        ]),
+        JSON.stringify(values));
+      await cdp.evaluate(`document.querySelector('.vz-close')?.click()`);
+      await cdp.poll(`!document.querySelector('.vz-root')`, 5000).catch(() => {});
     });
 
   } finally {

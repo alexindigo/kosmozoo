@@ -67,6 +67,64 @@ export function generatePermutations(ranges, currentValues, imageParams = {}) {
   }).map((perm) => Object.fromEntries([...keys, ...imgKeys].map((k, i) => [k, perm[i]])));
 }
 
+// --- text template axes ({{label}} substitutions) ------------------------------
+
+// the text sweep's value list: one value per line, blanks dropped
+export function textLines(text) {
+  return String(text ?? "").split("\n").map((s) => s.trim()).filter(Boolean);
+}
+
+// Distinct {{label}} names in first-appearance order. The name is trimmed;
+// empty names ({{ }}) are not labels.
+export function templateLabels(text) {
+  const out = [];
+  const seen = new Set();
+  for (const m of String(text ?? "").matchAll(/\{\{([^{}]+?)\}\}/g)) {
+    const name = m[1].trim();
+    if (!name || seen.has(name)) continue;
+    seen.add(name);
+    out.push(name);
+  }
+  return out;
+}
+
+// Semicolon-separated label values: trimmed, but interior EMPTIES are real
+// values ("green; ; banana" = three values, the middle one an empty string —
+// it substitutes the token with ""). Only a wholly empty input means
+// "not configured".
+export function parseSemicolonList(raw) {
+  const s = String(raw ?? "");
+  if (s.trim() === "") return [];
+  return s.split(";").map((v) => v.trim());
+}
+
+// Expand a text row into its final sweep values. Each line is an independent
+// template, expanded cartesian-style over only the labels it contains; a
+// line without placeholders contributes itself. tplValues: label -> string[]
+// (parsed). A label without values inerts the WHOLE row — never render a
+// literal {{label}} into a prompt by accident.
+export function expandTextAxes(text, tplValues = {}) {
+  const labels = templateLabels(text);
+  if (labels.some((l) => !(tplValues[l]?.length > 0))) return [];
+  const out = [];
+  for (const line of textLines(text)) {
+    const here = templateLabels(line);
+    if (here.length === 0) { out.push(line); continue; }
+    let combos = [[]];
+    for (const l of here) {
+      const next = [];
+      for (const c of combos) for (const v of tplValues[l]) next.push([...c, v]);
+      combos = next;
+    }
+    for (const c of combos) {
+      const values = {};
+      here.forEach((l, i) => { values[l] = c[i]; });
+      out.push(line.replace(/\{\{([^{}]+?)\}\}/g, (m, name) => values[name.trim()] ?? m));
+    }
+  }
+  return out;
+}
+
 // Substitute both bare keys ({denoise}) and node-prefixed keys
 // ({scheduler:denoise}). Both map back to the same internal param name.
 // `labelMap` is param -> canonical label for this graph; the template may

@@ -71,6 +71,33 @@ export function enumParams(graph, enums) {
   return out;
 }
 
+// Per-node text params: string inputs that are neither enum-typed (the host
+// publishes an option list — the enum rows own those) nor LoadImage.image
+// (the imgRows own it). filename_prefix on output nodes is excluded too —
+// the run rewrites it per permutation, so a pick would never survive.
+// values are user-supplied at run time; the probe only reports the current
+// text.
+export function textParams(graph, enums, outputClasses) {
+  const out = [];
+  for (const [id, n] of Object.entries(graph ?? {})) {
+    const type = String(n.class_type ?? "");
+    const isOutput = outputClasses?.has(type) ?? false;
+    for (const [key, v] of Object.entries(n.inputs ?? {})) {
+      if (typeof v !== "string") continue;
+      if (type.toLowerCase().endsWith("loadimage") && key === "image") continue;
+      if (isOutput && key === "filename_prefix") continue;
+      if (enums?.get(`${type}.${key}`)?.length) continue;
+      out.push({
+        id: `${type}#${id}.${key}`,
+        nodeId: id, nodeIds: [id], key, type,
+        title: n._meta?.title && n._meta.title !== type ? String(n._meta.title) : null,
+        current: v,
+      });
+    }
+  }
+  return out;
+}
+
 // Every numeric scalar input of every node instance is a varyable parameter
 // (multi-carrier: same-type same-input instances share one param and sweep
 // together). The host's declared type wins over value inference for integer.
@@ -198,8 +225,8 @@ export function register(app) {
     if (!graph) return { error: "no embedded ComfyUI graph in this PNG", status: 422 };
     const addr = app.hosts[collection];
     if (!addr) return { error: "unknown collection", status: 404 };
-    const { types, enums } = await app.backings.comfy(collection).objectInfo();
-    return { graph, addr, types, enums };
+    const { types, enums, outputClasses } = await app.backings.comfy(collection).objectInfo();
+    return { graph, addr, types, enums, outputClasses };
   };
 
   app.route("GET", "/probe/<id>", async (_req, { id }) => {
@@ -212,6 +239,7 @@ export function register(app) {
       params: inspectGraph(r.graph, r.types),
       stringParams: stringParams(r.graph),
       enumParams: enumParams(r.graph, r.enums),
+      textParams: textParams(r.graph, r.enums, r.outputClasses),
     });
   });
 
@@ -227,7 +255,7 @@ export function register(app) {
 
     const r = await inspect(host, filename);
     if (r.error) return Response.json({ error: r.error }, { status: r.status });
-    const { graph, addr, types, enums } = r;
+    const { graph, addr, types, enums, outputClasses } = r;
 
     // Inspect once for current values + labels. Types come from the host's
     // object_info — the current value is not a reliable integer signal.
@@ -251,7 +279,13 @@ export function register(app) {
       currentValues[p.id] = p.current;
       labelMap[p.id] = p.title ?? p.type;
     }
-    const fullInspection = [...inspection, ...strParams, ...enParams];
+    // text axes (prompts, …): same wiring — user-supplied values this time
+    const txtParams = textParams(graph, enums, outputClasses);
+    for (const p of txtParams) {
+      currentValues[p.id] = p.current;
+      labelMap[p.id] = p.title ?? p.type;
+    }
+    const fullInspection = [...inspection, ...strParams, ...enParams, ...txtParams];
 
     // Batch sweeps arrive as offsets from each image's own current value;
     // resolve them now that this graph's current values are known.
@@ -271,7 +305,6 @@ export function register(app) {
     }
 
     // Output nodes by object_info's output_node flag, indexed once per run.
-    const { outputClasses } = await app.backings.comfy(host).objectInfo();
     const producing = outputClasses?.size
       ? findProducingOutputNode(graph, filename, outputClasses)
       : null;
