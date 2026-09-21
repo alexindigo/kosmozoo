@@ -19,10 +19,9 @@ export function parseUrl() {
   };
 }
 
-// /diff#<srcL>#<fileL>:<srcR>#<fileR> — the pair view is gone (the workbench
-// is a single-image viewer now), but the grammar is kept so /diff deep links
-// still resolve (they open the workbench on the left side) and the pure
-// parsers stay unit-testable.
+// /diff#<srcL>#<fileL>:<srcR>#<fileR> — the pair view is live: the workbench
+// is the two-sided comparator and both sides of a /diff deep link apply
+// (left sets the feed current, right the right-pane current).
 export function parseDiffHash(h) {
   const [ls, rs] = h.split(":");
   return { left: parseSide(ls), right: parseSide(rs) };

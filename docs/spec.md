@@ -17,12 +17,12 @@ toggles. Availability and reason derive from each mode's declared `needs`.
 | **Composition** | yes | `blend` / `split` / `difference` / `flicker` | `difference` plugin registers the mode from its client half; dormant for the same reason |
 | **Attention (ROI)** | no | guides, region focus | not implemented |
 
-What IS shipped: the feed (virtualized grid), the workbench (single-image
-stage with a decode-guarded swap, notes/vote/favorite, anchor pane), the
-variations feature (server route + modal), and the
-`/diff#<srcL>#<fileL>:<srcR>#<fileR>` pair-URL grammar kept for the
-unfinished two-sided diff layer — `/diff` is the first *layer* over the
-feed; more layers follow.
+What IS shipped: the feed (virtualized grid), the workbench (the two-sided
+comparator — feed current × right-pane current, Kaleidoscope's four views
+with shared pan/zoom; pair URL live), notes/vote/favorite, anchor pane, and
+the variations feature (server route + modal). The three plugin axes
+(alignment / composition-as-plugins / ROI) stay dormant — Difference-the-view
+is the canvas mask, not the `difference` plugin.
 
 Keys are the primary input; the keys panel (`?`) lists the live bindings.
 

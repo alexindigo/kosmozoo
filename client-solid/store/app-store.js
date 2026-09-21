@@ -11,7 +11,7 @@
 // Note: the store ROOT is not assignable (st.x = v is silently ignored) —
 // root-level replacement goes through setSt("x", v); nested paths assign.
 
-import { createSignal, createMemo, createEffect, onCleanup, createContext, useContext, untrack } from "solid-js";
+import { createSignal, createMemo, createEffect, on, onCleanup, createContext, useContext, untrack } from "solid-js";
 import { createStore, reconcile } from "solid-js/store";
 import { api } from "/js/api.mjs";
 import { metaFromPngBytes } from "/shared/extractor.mjs";
@@ -23,6 +23,7 @@ import {
   diffUrl,
 } from "/js/route-parse.mjs";
 import { fieldList, nodeImages } from "./fields.js";
+import { pairSides } from "../features/diff/pair.mjs";
 import { makeImageWindow } from "./image-window.js";
 import { makeSizes } from "./sizes.js";
 import { snapTidy, SNAP_QUIET_MS } from "./scroll-snap.js";
@@ -52,7 +53,22 @@ export function makeAppStore() {
     selected: {},         // id -> true (bulk actions; session-only)
     anchors: [],          // [{ name, src(dataURL), meta? }] — local drops, persisted
     views: {},            // per-image zoom views — key -> { s, txf, tyf, … } ( fold)
-    diff: { open: false },                  // workbench: single-image viewer
+    // workbench: the two-sided comparator. The pair is feed current ×
+    // right-pane current (session-only); modes and mask prefs are session-only.
+    diff: {
+      open: false,
+      mode: "two-up",       // two-up | one-up | split | difference
+      col: "feed",          // active column (One-Up visible side, Up/Down target)
+      playing: false,
+      intervalMs: 400,
+      splitT: 0.5,          // wipe position, 0..1 of stage width
+      diffBase: "a",        // a = feed, b = right
+      diffAbs: true,        // absolute vs proportional highlight
+      diffOpacity: 1,
+      anchorName: null,     // right current (anchors space); null → first
+      infoFile: null,       // right current (details space): node-image file…
+      infoSource: null,     //   …or a /diff-URL right side's source (else derived)
+    },
     variations: { open: false, images: [], key: null }, // modal session
     infoOverlay: { open: false, name: "", meta: null }, // anchor ⓘ params
     chips: [],            // status stack: { slot, kind, msg }
@@ -157,6 +173,30 @@ export function makeAppStore() {
     const ce = currentEntry();
     return ce ? nodeImages(ce.entry.meta ?? null, ce.entry.host) : [];
   });
+
+  // the comparator's pair: feed current × right-pane current (the right side
+  // follows the workspace space — anchors, or the info panel's node images)
+  const diffPair = createMemo(() => pairSides({
+    current: current(),
+    workspace: workspace(),
+    anchors: st.anchors,
+    anchorName: st.diff.anchorName,
+    nodeImages: currentNodeImages(),
+    infoFile: st.diff.infoFile,
+    infoSource: st.diff.infoSource,
+    host: host(),
+  }));
+
+  // a B side pinned to the current graph's node images dies with that graph:
+  // when the feed current moves, a stale infoFile resets to the new graph's
+  // first (or nothing); a /diff-URL side (infoSource set) survives
+  createEffect(on(currentNodeImages, (imgs) => {
+    const f = st.diff.infoFile;
+    if (!f || st.diff.infoSource) return;
+    if (!imgs.some((im) => im.file === f)) {
+      setSt("diff", "infoFile", imgs[0]?.file ?? null);
+    }
+  }));
 
   // The current pointer never names an entry the feed has hidden. This is
   // the ONE guard — enforced against the view, never per action: a vote, a
@@ -482,11 +522,17 @@ export function makeAppStore() {
   // trail, patch the list, then navigate. Computed against the PRE-delete list
   // (adjacency needs the original indices), executed after it.
   async function deleteImages(images) {
-    // the workbench may be sitting on one of these images
+    // the workbench may be sitting on one of these images — either side of
+    // the pair (input:<host> sides name input-dir files of that host)
     if (st.diff.open) {
-      const sideMatches = (side, img) => !!side && side.source === img.host &&
-        (side.file === img.filename || side.file === img.host + "#" + img.filename);
-      if (images.some((i) => sideMatches(st.diff.left, i) || sideMatches(st.diff.right, i))) {
+      const { a, b } = diffPair();
+      const sideMatches = (side, img) => {
+        if (!side) return false;
+        const src = side.source.startsWith("input:") ? side.source.slice("input:".length) : side.source;
+        return src === img.host &&
+          (side.file === img.filename || side.file === img.host + "#" + img.filename);
+      };
+      if (images.some((i) => sideMatches(a, i) || sideMatches(b, i))) {
         setSt("diff", "open", false);
       }
     }
@@ -1062,38 +1108,63 @@ export function makeAppStore() {
           if (idx >= 0) restoreToIndex(idx);
         }
       },
-      // feed card click: the current image is that candidate
+      // first item of the active pane becomes the right current when none
+      // is set yet — the right position is remembered session-wide after that
+      ensureRightDefault() {
+        if (workspace() === "anchors") {
+          if (!st.diff.anchorName && st.anchors.length) setSt("diff", "anchorName", st.anchors[0].name);
+        } else {
+          const imgs = currentNodeImages();
+          if (!st.diff.infoFile && imgs.length) setSt("diff", "infoFile", imgs[0].file);
+        }
+      },
+      // feed card click: the current image is that candidate; the pair is
+      // feed × (first item of the right pane when unset)
       openFromFeed(imgIdx) {
         const im = st.images[imgIdx];
         if (!im) return;
         assignCurrent({ remote: im.host, image: im.filename });
         mirrorCurrentHash();
+        actions.diff.ensureRightDefault();
         actions.diff.open();
       },
-      // discovered image click: fromOutput refs (LoadImage-from-output) are
-      // ordinary output images — open them via the feed-image path, not the
-      // input-bytes route
+      // discovered image click: that node image becomes the right side (B) —
+      // the feed current stays; the pair is the generated image × its source
       openInput(h, file, fromOutput = false) {
         if (!h || !file) return;
-        assignCurrent({ remote: fromOutput ? h : `input:${h}`, image: file });
-        mirrorCurrentHash();
+        setSt("diff", "infoFile", file);
+        setSt("diff", "infoSource", null); // pane-picked: derived from nodeImages
         actions.diff.open();
       },
-      // anchor card click: the current image is that anchor
+      // anchor thumb click: that anchor becomes the right side (B) — the
+      // feed current stays; the pair is feed current × that anchor
       openFromAnchor(anchorIdx) {
         const anchor = st.anchors[anchorIdx];
         if (!anchor) return;
-        assignCurrent({ remote: "anchor", image: anchor.name });
-        // anchors are not feed URLs — no hash mirror
+        setSt("diff", "anchorName", anchor.name);
         actions.diff.open();
       },
-      // /diff deep links (the pair view is gone — the workbench opens on the
-      // left side and ignores the right). A push entry keeps the /diff URL so
-      // browser back/forward close/re-open via the route.
+      // /diff deep links: both sides apply — left sets the feed current,
+      // right sets the right current by source (anchor → the anchors pane;
+      // anything else → the details pane, with its source kept for
+      // resolution). A push entry keeps the /diff URL so browser
+      // back/forward close/re-open via the route.
       openDiff(left, right, { push } = {}) {
         if (!left || !resolveSide(left)) return false;
         assignCurrent({ remote: left.source ?? left.remote, image: left.file ?? left.image });
         mirrorCurrentHash();
+        if (right) {
+          const src = right.source ?? right.remote;
+          const file = right.file ?? right.image;
+          if (src === "anchor") {
+            setSt("diff", "anchorName", file);
+            actions.ui.setWorkspace("anchors");
+          } else {
+            setSt("diff", "infoFile", file);
+            setSt("diff", "infoSource", src);
+            actions.ui.setWorkspace("details");
+          }
+        }
         if (push && right) history.pushState({ kz: 1 }, "", diffUrl(left, right));
         return actions.diff.open();
       },
@@ -1403,6 +1474,7 @@ export function makeAppStore() {
     get selected() { return st.selected; },
     get anchors() { return st.anchors; },
     get diff() { return st.diff; },
+    diffPair,
     get variations() { return st.variations; },
     get infoOverlay() { return st.infoOverlay; },
     get chips() { return st.chips; },
