@@ -76,7 +76,7 @@ async function attempt(name, fn) {
   await attempt("workbench opens on a card click, shows the image, Esc closes", async () => {
     await page.evaluate("document.querySelector('.card .imgwrap').click(), true");
     await page.poll(`(async () => ${KZ}.state.diff.open === true)()`, 5000);
-    await page.poll("!!document.getElementById('diffImg').src", 10000);
+    await page.poll("!!document.querySelector('.dz-a .dz-img').src", 10000);
     check("workbench shows the current image", true);
     await page.key("Escape");
     await page.poll(`(async () => ${KZ}.state.diff.open === false)()`, 5000);
@@ -351,8 +351,8 @@ async function attempt(name, fn) {
       ${KZ}.actions.diff.open();
     })()`);
     await page.poll(`(async () => ${KZ}.state.diff.open === true)()`, 5000);
-    await page.poll(`document.getElementById('diffImg').src.includes('flux-basic.png')`, 10000);
-    const good = await page.evaluate("document.getElementById('diffImg').src");
+    await page.poll(`document.querySelector('.dz-a .dz-img').src.includes('flux-basic.png')`, 10000);
+    const good = await page.evaluate("document.querySelector('.dz-a .dz-img').src");
     // point the pointer at a file whose bytes 404 (sync on the 404 itself,
     // then one beat for the resource to settle — not a settle sleep)
     await page.evaluate(`(async () => {
@@ -360,12 +360,12 @@ async function attempt(name, fn) {
       await fetch("/api/collections/fake/entries/nope-404.png/bytes").catch(() => null);
     })()`);
     await sleep(300);
-    const after = await page.evaluate("document.getElementById('diffImg').src");
+    const after = await page.evaluate("document.querySelector('.dz-a .dz-img').src");
     check("a failed decode keeps the previous image on stage", after === good, after.slice(-40));
     check("no page error from the failed decode", pageErrors.length === 0, pageErrors[0] ?? "");
     // a good image still swaps in afterwards
     await page.evaluate(`(async () => { ${KZ}.actions.current.set("fake", "flux-lora.png"); })()`);
-    await page.poll(`document.getElementById('diffImg').src.includes('flux-lora.png')`, 10000);
+    await page.poll(`document.querySelector('.dz-a .dz-img').src.includes('flux-lora.png')`, 10000);
     check("a good image still swaps in after a failed decode", true);
     await page.evaluate(`(async () => { ${KZ}.actions.diff.close(); })()`);
   });

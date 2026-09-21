@@ -51,4 +51,37 @@ store.actions.keys.register("wb.close", "Escape", () => store.actions.diff.close
   when: () => store.state.diff.open && !store.state.keysPanelOpen(),
   ctx: "workbench", desc: "close the workbench",
 });
+// the comparator: 1–4 pick a view (with a pair), arrows step the active
+// column, Space plays the blink — the digits/arrows never fire into a
+// focused text field (the dispatcher guards those already)
+const wbOpen = () => store.state.diff.open && !store.state.keysPanelOpen();
+const wbPair = () => wbOpen() && !!store.state.diffPair().b;
+store.actions.keys.register("wb.twoUp", "1", () => store.actions.diff.setMode("two-up"), {
+  when: wbPair, ctx: "workbench", desc: "comparator: Two-Up",
+});
+store.actions.keys.register("wb.oneUp", "2", () => store.actions.diff.setMode("one-up"), {
+  when: wbPair, ctx: "workbench", desc: "comparator: One-Up (blink)",
+});
+store.actions.keys.register("wb.split", "3", () => store.actions.diff.setMode("split"), {
+  when: wbPair, ctx: "workbench", desc: "comparator: Split wipe",
+});
+store.actions.keys.register("wb.difference", "4", () => store.actions.diff.setMode("difference"), {
+  when: wbPair, ctx: "workbench", desc: "comparator: Difference mask",
+});
+store.actions.keys.register("wb.colLeft", "ArrowLeft", () => store.actions.diff.setCol("feed"), {
+  when: wbPair, ctx: "workbench", desc: "comparator: feed column",
+});
+store.actions.keys.register("wb.colRight", "ArrowRight", () => store.actions.diff.setCol("right"), {
+  when: wbPair, ctx: "workbench", desc: "comparator: right column",
+});
+store.actions.keys.register("wb.prev", "ArrowUp", () => store.actions.diff.step(-1), {
+  when: wbOpen, ctx: "workbench", desc: "comparator: step back",
+});
+store.actions.keys.register("wb.next", "ArrowDown", () => store.actions.diff.step(1), {
+  when: wbOpen, ctx: "workbench", desc: "comparator: step forward",
+});
+store.actions.keys.register("wb.play", " ", () => store.actions.diff.togglePlay(), {
+  when: () => wbPair() && store.state.diff.mode === "one-up",
+  ctx: "workbench", desc: "comparator: play/pause the blink",
+});
 document.addEventListener("keydown", (e) => store.actions.keys.dispatch(e));

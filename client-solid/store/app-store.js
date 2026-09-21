@@ -189,12 +189,13 @@ export function makeAppStore() {
 
   // a B side pinned to the current graph's node images dies with that graph:
   // when the feed current moves, a stale infoFile resets to the new graph's
-  // first (or nothing); a /diff-URL side (infoSource set) survives
+  // first (or nothing) — /diff-URL sides included
   createEffect(on(currentNodeImages, (imgs) => {
     const f = st.diff.infoFile;
-    if (!f || st.diff.infoSource) return;
+    if (!f) return;
     if (!imgs.some((im) => im.file === f)) {
       setSt("diff", "infoFile", imgs[0]?.file ?? null);
+      setSt("diff", "infoSource", null);
     }
   }));
 
@@ -1087,6 +1088,43 @@ export function makeAppStore() {
         return true;
       },
       hide() { setSt("diff", "open", false); },
+      // --- comparator session state (all session-only) -------------------------
+      setMode(mode) {
+        if (mode === "two-up" || mode === "one-up" || mode === "split" || mode === "difference") {
+          setSt("diff", "mode", mode);
+        }
+      },
+      setCol(col) { if (col === "feed" || col === "right") setSt("diff", "col", col); },
+      setSplit(t) { setSt("diff", "splitT", Math.min(1, Math.max(0, t))); },
+      setIntervalMs(ms) { if (ms >= 50) setSt("diff", "intervalMs", ms); },
+      togglePlay() { setSt("diff", "playing", !st.diff.playing); },
+      setDiffBase(b) { if (b === "a" || b === "b") setSt("diff", "diffBase", b); },
+      setDiffAbs(x) { setSt("diff", "diffAbs", !!x); },
+      setDiffOpacity(x) { setSt("diff", "diffOpacity", Math.min(1, Math.max(0, x))); },
+      // step the active column: the feed column walks the feed view list,
+      // the right column walks its pane (anchors, or the current graph's
+      // node images)
+      step(dir) {
+        if (st.diff.col === "feed") {
+          const v = view();
+          const idx = findByFile(current()?.image);
+          const next = idx >= 0 ? v[v.indexOf(idx) + dir] : null;
+          if (next == null) return;
+          assignCurrent({ remote: host(), image: st.images[next].filename });
+          mirrorCurrentHash();
+          return;
+        }
+        if (workspace() === "anchors") {
+          const names = st.anchors.map((a) => a.name);
+          const i = names.indexOf(st.diff.anchorName ?? names[0]);
+          if (names[i + dir] != null) setSt("diff", "anchorName", names[i + dir]);
+          return;
+        }
+        const imgs = currentNodeImages();
+        const i = imgs.findIndex((im) => im.file === (st.diff.infoFile ?? imgs[0]?.file));
+        const n = imgs[i + dir];
+        if (n) { setSt("diff", "infoFile", n.file); setSt("diff", "infoSource", null); }
+      },
       close() {
         if (!st.diff.open) return;
         const c = current();
