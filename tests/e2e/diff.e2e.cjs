@@ -51,6 +51,35 @@ function check(name, ok, detail = "") {
   await cdp.poll(`(async () => ${KZ}.state.diff.open)()`, 5000);
   check("forward: re-opens the workbench", true);
 
+  // 4. workbench zoom: ctrl+wheel on the stage image zooms the IMAGE (the
+  // browser's own page zoom must never engage)
+  await cdp.poll("document.getElementById('diffImg').naturalWidth > 0", 10000);
+  const pre = await cdp.evaluate(`(() => {
+    const img = document.getElementById('diffImg');
+    const r = img.getBoundingClientRect();
+    return { x: r.left + r.width / 2, y: r.top + r.height / 2, dpr: window.devicePixelRatio };
+  })()`);
+  await cdp.mouse("mouseWheel", pre.x, pre.y, { deltaY: -240, modifiers: 2 });
+  await cdp.poll(`(document.getElementById('diffImg').style.transform ?? "").includes("scale(")`, 5000);
+  const post = await cdp.evaluate(`({
+    t: document.getElementById('diffImg').style.transform,
+    dpr: window.devicePixelRatio,
+  })`);
+  check("workbench: ctrl+wheel zooms the stage image", post.t.includes("scale("), post.t);
+  check("workbench: page did NOT zoom", post.dpr === pre.dpr, `dpr ${pre.dpr} -> ${post.dpr}`);
+
+  // 5. the zoom view persists under the shared key ("<host>:<file>" — the
+  // same key the feed card uses, so the crop carries across views)
+  await cdp.poll(`(async () => !!${KZ}.state.views["fake:flux-basic.png"])()`, 5000);
+  check("workbench: zoom view persisted under the shared key", true);
+
+  // 6. ctrl+wheel over the stage BACKGROUND (no image under the cursor):
+  // no image zoom, no page zoom — the gesture is dead
+  const bg = await cdp.evaluate(`({ dpr: window.devicePixelRatio })`);
+  await cdp.mouse("mouseWheel", 40, 40, { deltaY: -240, modifiers: 2 });
+  const bgAfter = await cdp.evaluate(`({ dpr: window.devicePixelRatio })`);
+  check("page background: no page zoom", bgAfter.dpr === bg.dpr, `dpr ${bg.dpr} -> ${bgAfter.dpr}`);
+
   await cdp.close();
   console.log(failures ? `DIFF E2E: ${failures} FAILURE(S)` : "DIFF E2E: ALL PASS");
   process.exit(failures ? 1 : 0);

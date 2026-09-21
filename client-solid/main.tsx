@@ -6,8 +6,13 @@ import { AppStoreContext } from "./store/app-store.js";
 import { appStore } from "./store/instance.js";
 import { App } from "./components/App.js";
 import { FEATURES } from "./features/index.js";
+import { installNoPageZoom } from "/js/no-page-zoom.mjs";
 
 const store = appStore;
+
+// the page itself never zooms — browser zoom gestures over the app chrome
+// are dead; image zoom lives in the app's own zoomable behavior
+installNoPageZoom();
 
 // features register into the store before anything renders (the store never
 // imports a feature by name — the registry is the only place that knows them)

@@ -7,9 +7,10 @@
 // and the resource's own recency replaces the hand-rolled generation counter.
 // The image fits the stage via object-fit.
 
-import { createResource } from "solid-js";
+import { createSignal, createResource, createEffect, on, onCleanup } from "solid-js";
 import { useAppStore } from "../store/app-store.js";
 import { iconSvg } from "/js/icons.mjs";
+import { makeZoomable } from "/js/zoomable.mjs";
 
 export function DiffStage() {
   const store = useAppStore();
@@ -35,6 +36,32 @@ export function DiffStage() {
     },
   );
 
+  // the zoom's render state — the behavior emits it, JSX renders it (same
+  // contract as the Zoomable component)
+  const [transform, setTransform] = createSignal("");
+  let imgEl;
+  let binding = null;
+  // bind per current image while the workbench is open. The zoom key is the
+  // pointer's own "<remote>:<image>" — the same key the feed card, the info
+  // panel, and the anchor thumb use — so a crop made in any view restores
+  // in every other view
+  createEffect(on(
+    () => (store.state.diff.open ? store.state.current() : null),
+    (c) => {
+      binding?.dispose();
+      binding = null;
+      setTransform("");
+      if (!imgEl || !c) return;
+      binding = makeZoomable(imgEl, {
+        key: `${c.remote}:${c.image}`,
+        getView: store.actions.views.get,
+        setView: store.actions.views.set,
+        onTransform: (t) => setTransform(t),
+      });
+    },
+  ));
+  onCleanup(() => { binding?.dispose(); binding = null; });
+
   // Escape closes via the keys system (the "wb.close" binding registered at
   // boot) — an open modal's key layer outranks it, and a running key
   // capture outranks that.
@@ -47,7 +74,11 @@ export function DiffStage() {
         innerHTML={iconSvg("x", 16)}
       />
       <div id="diffStage">
-        <img id="diffImg" alt="" src={decoded() ?? undefined} />
+        <img
+          id="diffImg" alt="" ref={imgEl}
+          src={decoded() ?? undefined}
+          style={{ transform: transform() || undefined }}
+        />
       </div>
       <button
         id="diffKeysBtn" title="actions & keys (?)"

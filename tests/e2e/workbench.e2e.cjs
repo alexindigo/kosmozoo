@@ -83,6 +83,76 @@ async function attempt(name, fn) {
     check("Esc closes the workbench", true);
   });
 
+  // --- image zoom: ctrl+wheel zooms the image under the cursor; the page
+  // itself never zooms (browser zoom is disabled app-wide) -------------------
+  await attempt("card zoom: ctrl+wheel zooms the card image, not the page", async () => {
+    const pre = await page.evaluate(`(() => {
+      const img = document.querySelector('.card[data-idx="0"] .imgwrap img');
+      const r = img.getBoundingClientRect();
+      return { x: r.left + r.width / 2, y: r.top + r.height / 2, dpr: window.devicePixelRatio };
+    })()`);
+    await page.mouse("mouseWheel", pre.x, pre.y, { deltaY: -240, modifiers: 2 });
+    await page.poll(`(document.querySelector('.card[data-idx="0"] .imgwrap img').style.transform ?? "").includes("scale(")`, 5000);
+    const post = await page.evaluate(`({
+      t: document.querySelector('.card[data-idx="0"] .imgwrap img').style.transform,
+      dpr: window.devicePixelRatio,
+    })`);
+    check("card image zoomed", post.t.includes("scale("), post.t);
+    check("page did not zoom", post.dpr === pre.dpr, `dpr ${pre.dpr} -> ${post.dpr}`);
+  });
+
+  await attempt("info panel zoom: ctrl+wheel zooms the node image", async () => {
+    // ingest the fixture, re-select the host (the entries reload carries its
+    // meta — the meta poll only runs while ingestion is pending), show the
+    // DETAILS space (earlier anchor tests switch the pane away), then focus
+    // the image
+    await page.evaluate(`(async () => {
+      await fetch("/api/collections/fake/entries/flux-controlnet.png/bytes");
+      await ${KZ}.actions.hosts.select("fake");
+      ${KZ}.actions.ui.setWorkspace("details");
+      ${KZ}.actions.current.set("fake", "flux-controlnet.png");
+    })()`);
+    await page.poll(`!!document.querySelector('.info-source-images .infoimg img')`, 15000);
+    // the img element mounts before its bytes land — wait for real pixels
+    // (a 0-height img can't be wheel-targeted)
+    await page.poll(`document.querySelector('.info-source-images .infoimg img').naturalWidth > 0`, 10000);
+    const pre = await page.evaluate(`(() => {
+      const img = document.querySelector('.info-source-images .infoimg img');
+      const r = img.getBoundingClientRect();
+      const cx = r.left + r.width / 2, cy = r.top + r.height / 2;
+      const at = document.elementFromPoint(cx, cy);
+      window.__spy = null;
+      window.addEventListener('wheel', (e) => { window.__spy = { ctrl: e.ctrlKey, target: e.target?.tagName + '.' + (e.target?.className ?? '') }; }, true);
+      return {
+        x: cx, y: cy, dpr: window.devicePixelRatio,
+        rect: { x: r.x, y: r.y, w: r.width, h: r.height },
+        at: at ? at.tagName + '.' + String(at.className ?? '') : null,
+        vw: window.innerWidth, vh: window.innerHeight,
+      };
+    })()`);
+    console.log("   [dbg] target:", JSON.stringify(pre));
+    await page.mouse("mouseWheel", pre.x, pre.y, { deltaY: -240, modifiers: 2 });
+    await new Promise((r) => setTimeout(r, 400));
+    console.log("   [dbg] spy:", await page.evaluate(`JSON.stringify(window.__spy)`),
+      "transform:", await page.evaluate(`document.querySelector('.info-source-images .infoimg img').style.transform`));
+    await page.poll(`(document.querySelector('.info-source-images .infoimg img').style.transform ?? "").includes("scale(")`, 5000);
+    const post = await page.evaluate(`({ dpr: window.devicePixelRatio })`);
+    check("info panel image zoomed", true);
+    check("page did not zoom", post.dpr === pre.dpr, `dpr ${pre.dpr} -> ${post.dpr}`);
+  });
+
+  await attempt("page zoom is dead outside images", async () => {
+    // ctrl+wheel over the app chrome (the header — no image under the cursor)
+    const pre = await page.evaluate(`(() => {
+      const el = document.querySelector('#hdr') ?? document.body;
+      const r = el.getBoundingClientRect();
+      return { x: Math.min(r.left + 10, window.innerWidth - 10), y: r.top + 4, dpr: window.devicePixelRatio };
+    })()`);
+    await page.mouse("mouseWheel", pre.x, pre.y, { deltaY: -240, modifiers: 2 });
+    const post = await page.evaluate(`({ dpr: window.devicePixelRatio })`);
+    check("no page zoom over the chrome", post.dpr === pre.dpr, `dpr ${pre.dpr} -> ${post.dpr}`);
+  });
+
   // action buttons: ONE pattern — active = filled icon in the accent,
   // border hover-only; never a standing border. Colors compare against the
   // palette's ROLE vars resolved in-page (I3) — never rgb literals, so a

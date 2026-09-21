@@ -204,6 +204,15 @@ export const server = Deno.serve({ port }, async (req) => {
     return Response.json(fileList());
   }
 
+  // the input dir: the node-referenced images the fixture graphs carry
+  // (flux-controlnet's canny.png, flux-ipadapter's ref.png) — the info
+  // panel's discovered-images column loads these bytes
+  const INPUT_IMAGES = ["canny.png", "ref.png"];
+
+  if (p === "/internal/files/input") {
+    return Response.json(INPUT_IMAGES.map((n) => n + " [137]"));
+  }
+
   if (p === "/read-order") {
     return Response.json(readOrder);
   }
@@ -216,6 +225,26 @@ export const server = Deno.serve({ port }, async (req) => {
     if (!head && !req.headers.get("range")) readOrder.push(name);
     // aiohttp-style ETag: "<mtime_ns_hex>-<size_hex>" (the engine's stamp).
     const etag = (mtimeNs, size) => `"${mtimeNs.toString(16)}-${size.toString(16)}"`;
+    // input-dir node references: served as real images (the fixture bytes
+    // stand in — the info panel needs a loadable image, not specific pixels)
+    if (INPUT_IMAGES.includes(name)) {
+      const bytes = fixtures.get("flux-basic.png")?.bytes;
+      if (bytes) {
+        if (head) {
+          return new Response(null, {
+            headers: {
+              "Content-Type": "image/png",
+              "Content-Length": String(bytes.length),
+              ETag: etag(0n, BigInt(bytes.length)),
+            },
+          });
+        }
+        return ranged(req, bytes, {
+          "Content-Type": "image/png",
+          ETag: etag(0n, BigInt(bytes.length)),
+        });
+      }
+    }
     if (mutableDir) {
       let st = null;
       try {

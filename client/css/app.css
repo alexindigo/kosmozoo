@@ -503,9 +503,10 @@ main { display: flex; flex: 1; min-height: 0; }
 
 /* --- workbench: single-image viewer -----------------------------------------
  The current image, fitted to the stage. Stripped to the studs: no
- composition modes, no blink, no zoom/pan — those are being rebuilt. */
+ composition modes, no blink — zoom/pan is the shared zoomable behavior
+ (ctrl+wheel toward the cursor, drag to pan); the stage clips the overflow. */
 #diff { position: fixed; inset: 0; background: var(--black); z-index: var(--z-overlay); }
-#diffStage { position: absolute; inset: 0; display: flex;
+#diffStage { position: absolute; inset: 0; display: flex; overflow: hidden;
   align-items: center; justify-content: center; }
 #diffImg { max-width: 100%; max-height: 100%; object-fit: contain;
   user-select: none; -webkit-user-drag: none; }
@@ -789,9 +790,10 @@ main { display: flex; flex: 1; min-height: 0; }
 .info:is(.stacked, .stacked-rev) .info-source-nodes { flex: 1; min-height: 0; overflow-y: auto; }
 /* input images have no known dimensions — the box hugs the image */
 .info-source-images .imgwrap { aspect-ratio: auto; }
-/* the image column is for inspection — no small-cap height here; image
- elements only render — clicks/drag hits target the imgwrap above them */
-.info-source-images .infoimg img { max-height: none; pointer-events: none; }
+/* the image column is for inspection — no small-cap height here. Clicks
+ bubble to the imgwrap (opens the workbench); wheel/pointer hits the img
+ itself — the zoom binding (ctrl+wheel, drag-pan) lives there */
+.info-source-images .infoimg img { max-height: none; }
 /* the details split's instance of the grab-strip pattern */
 .separator { --grab-w: 13px; z-index: var(--z-chrome); }
 .separator::before { background: var(--lifted); }
