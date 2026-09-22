@@ -237,6 +237,23 @@ function check(name, ok, detail = "") {
   }))()`);
   check("opacity: works in Split too (top layer fades)",
     opSplit.a === "0.4" && opSplit.b === "1" && opSplit.slider, JSON.stringify(opSplit));
+  // One-Up: BOTH layers render (the other one behind), the active on top —
+  // faded active lets the bottom show through
+  await cdp.evaluate("document.dispatchEvent(new KeyboardEvent('keydown', { key: '2', bubbles: true }))");
+  await cdp.poll(`(async () => ${KZ}.state.diff.mode === "one-up")()`, 5000);
+  const opOneUp = await cdp.evaluate(`(() => ({
+    aOp: getComputedStyle(document.querySelector('.dz-a .dz-img')).opacity,
+    bOp: getComputedStyle(document.querySelector('.dz-b .dz-img')).opacity,
+    aVis: getComputedStyle(document.querySelector('.dz-a')).visibility,
+    bVis: getComputedStyle(document.querySelector('.dz-b')).visibility,
+    aZ: parseInt(getComputedStyle(document.querySelector('.dz-a')).zIndex) || 0,
+    bZ: parseInt(getComputedStyle(document.querySelector('.dz-b')).zIndex) || 0,
+  }))()`);
+  check("One-Up: the other layer shows behind the faded active one",
+    opOneUp.aOp === "0.4" && opOneUp.bOp === "1"
+      && opOneUp.aVis === "visible" && opOneUp.bVis === "visible"
+      && opOneUp.aZ > opOneUp.bZ,
+    JSON.stringify(opOneUp));
   await cdp.evaluate(`(async () => { ${KZ}.actions.diff.setActiveOpacity(1); })()`);
   await cdp.evaluate("document.dispatchEvent(new KeyboardEvent('keydown', { key: '1', bubbles: true }))");
   await cdp.poll(`(async () => ${KZ}.state.diff.mode === "two-up")()`, 5000);

@@ -520,11 +520,12 @@ main { display: flex; flex: 1; min-height: 0; }
 #diffStage[data-mode="two-up"] { flex-direction: row; }
 #diffStage[data-mode="two-up"][data-col="right"] { flex-direction: row-reverse; }
 
-/* One-Up (2): one cell full stage — the active column shows, the other
- stays mounted (and decoding) out of view */
+/* One-Up (2): both layers stacked full stage — the ACTIVE layer on top.
+ At full opacity it covers the other (a single image, as before); faded by
+ --active-op the other one shows through behind it */
 #diffStage[data-mode="one-up"] .dz-cell { position: absolute; inset: 0; }
-#diffStage[data-mode="one-up"][data-col="feed"] .dz-b,
-#diffStage[data-mode="one-up"][data-col="right"] .dz-a { visibility: hidden; }
+#diffStage[data-mode="one-up"][data-col="feed"] .dz-a { z-index: 1; }
+#diffStage[data-mode="one-up"][data-col="right"] .dz-b { z-index: 1; }
 
 /* Split (3): layers stacked on the shared registration; the ACTIVE cell is
  the top (clipped) layer — a percentage of the stage, one var */
