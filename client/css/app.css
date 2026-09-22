@@ -555,12 +555,17 @@ main { display: flex; flex: 1; min-height: 0; }
   padding: 6px 12px; z-index: var(--z-modal); }
 #diffBar #diffModes { display: flex; gap: 4px; margin-left: auto; margin-right: auto; }
 #diffBar #diffCtl { display: flex; gap: 6px; align-items: center; }
-.dz-mode { width: 28px; height: 24px; border-radius: 6px; font-size: 12px;
-  background: color-mix(in srgb, var(--surface) 65%, transparent);
-  border: 1px solid var(--border); color: var(--foreground-mid); cursor: pointer; }
-.dz-mode:hover:not(:disabled) { color: var(--foreground); border-color: var(--foreground-dim); }
-.dz-mode.on { color: var(--secondary); border-color: var(--secondary); }
-.dz-mode:disabled { opacity: 0.35; cursor: default; }
+/* the mode switcher: one segmented control (icon + label per segment, the
+ active segment filled with the accent — Kaleidoscope-style) */
+.dz-seg { border: 1px solid var(--border); border-radius: 8px; overflow: hidden; }
+.dz-segbtn { display: flex; align-items: center; gap: 6px; padding: 4px 10px;
+  font-size: 12px; background: transparent; border: none;
+  color: var(--foreground-mid); cursor: pointer; }
+.dz-segbtn + .dz-segbtn { border-left: 1px solid var(--border); }
+.dz-segbtn:hover:not(:disabled) { color: var(--foreground); }
+.dz-segbtn.on { background: var(--secondary); color: var(--black); }
+.dz-segbtn:disabled { opacity: 0.35; cursor: default; }
+.dz-segicon { display: flex; }
 .dz-lockbtn { width: 28px; height: 24px; border-radius: 6px; display: flex;
   align-items: center; justify-content: center;
   background: color-mix(in srgb, var(--surface) 65%, transparent);

@@ -10,10 +10,10 @@ import { useAppStore } from "../store/app-store.js";
 import { iconSvg } from "/js/icons.mjs";
 
 const MODES = [
-  ["1", "two-up"],
-  ["2", "one-up"],
-  ["3", "split"],
-  ["4", "difference"],
+  ["1", "two-up", "Two-Up", "view-two-up"],
+  ["2", "one-up", "One-Up", "view-one-up"],
+  ["3", "split", "Split", "view-split"],
+  ["4", "difference", "Difference", "view-difference"],
 ];
 
 export function DiffChrome() {
@@ -57,15 +57,18 @@ export function DiffChrome() {
             />
           </Show>
         </div>
-        <div id="diffModes">
+        <div id="diffModes" class="dz-seg">
           <For each={MODES}>
-            {([key, m]) => (
+            {([key, m, label, icon]) => (
               <button
-                class={"dz-mode" + (d().mode === m ? " on" : "")}
+                class={"dz-segbtn" + (d().mode === m ? " on" : "")}
                 disabled={!hasB() || undefined}
-                title={`${m} (${key})`}
+                title={`${label} (${key})`}
                 onClick={() => store.actions.diff.setMode(m)}
-              >{key}</button>
+              >
+                <span class="dz-segicon" innerHTML={iconSvg(icon, 14)} />
+                {label}
+              </button>
             )}
           </For>
         </div>

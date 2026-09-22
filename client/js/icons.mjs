@@ -24,6 +24,19 @@ const PATHS = {
   <path d="M14 5m0 1a1 1 0 0 1 1 -1h2a1 1 0 0 1 1 1v12a1 1 0 0 1 -1 1h-2a1 1 0 0 1 -1 -1z" />`,
   "player-play": `<path stroke="none" d="M0 0h24v24H0z" fill="none"/>
   <path d="M7 4v16l13 -8z" />`,
+  "view-two-up": `<path stroke="none" d="M0 0h24v24H0z" fill="none"/>
+  <rect x="3" y="5" width="8" height="14" rx="1" />
+  <rect x="13" y="5" width="8" height="14" rx="1" />`,
+  "view-one-up": `<path stroke="none" d="M0 0h24v24H0z" fill="none"/>
+  <rect x="5" y="5" width="14" height="14" rx="1" />`,
+  "view-split": `<path stroke="none" d="M0 0h24v24H0z" fill="none"/>
+  <rect x="4" y="4" width="16" height="16" rx="1" />
+  <path d="M12 4v16" />`,
+  "view-difference": `<path stroke="none" d="M0 0h24v24H0z" fill="none"/>
+  <path d="M4 4h7v7h-7z" />
+  <path d="M13 4h7v7h-7z" />
+  <path d="M4 13h7v7h-7z" />
+  <path d="M13 13h7v7h-7z" />`,
   "lock": `<path stroke="none" d="M0 0h24v24H0z" fill="none"/>
   <path d="M5 13a2 2 0 0 1 2 -2h10a2 2 0 0 1 2 2v6a2 2 0 0 1 -2 2h-10a2 2 0 0 1 -2 -2v-6z" />
   <path d="M11 16a1 1 0 1 0 2 0a1 1 0 0 0 -2 0" />

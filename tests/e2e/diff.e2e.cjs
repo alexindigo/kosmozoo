@@ -77,6 +77,31 @@ function check(name, ok, detail = "") {
       && panels.modesBg === "rgba(0, 0, 0, 0)",
     JSON.stringify(panels));
 
+  // the mode switcher is Kaleidoscope-style: icon + text labels in one
+  // segmented control, the active segment filled with the accent
+  const seg = await cdp.evaluate(`(() => {
+    const btns = [...document.querySelectorAll('.dz-segbtn')];
+    const probe = document.createElement('span');
+    probe.style.color = 'var(--secondary)';
+    document.body.appendChild(probe);
+    const accent = getComputedStyle(probe).color;
+    probe.remove();
+    const on = btns.find((b) => b.classList.contains('on'));
+    return {
+      labels: btns.map((b) => b.textContent.trim()),
+      icons: btns.every((b) => !!b.querySelector('.dz-segicon svg')),
+      activeLabel: on?.textContent.trim(),
+      activeBg: on ? getComputedStyle(on).backgroundColor : null,
+      accent,
+      grouped: btns.length > 1 && getComputedStyle(btns[1]).borderLeftWidth !== "0px",
+    };
+  })()`);
+  check("chrome: segmented mode buttons with labels, active filled with the accent",
+    seg.labels.join("|") === "Two-Up|One-Up|Split|Difference"
+      && seg.icons && seg.activeLabel === "Two-Up"
+      && seg.activeBg === seg.accent && seg.grouped,
+    JSON.stringify(seg));
+
   // 2. two view states: unlocked, a gesture writes only the target's key.
   // (Lock defaults ON — unlock first. Clean slate: no persisted views, so
   // prior suites/runs can't leak a crop in — session-level, settings untouched.)
@@ -227,7 +252,7 @@ function check(name, ok, detail = "") {
   const single = await cdp.evaluate(`(() => ({
     a: !!document.querySelector('.dz-a .dz-img'),
     b: !!document.querySelector('.dz-b'),
-    inert: [...document.querySelectorAll('.dz-mode')].every((b) => b.disabled),
+    inert: [...document.querySelectorAll('.dz-segbtn')].every((b) => b.disabled),
     lock: document.querySelector('.dz-lockbtn')?.disabled ?? null,
   }))()`);
   check("single-image: one img, the 1–4 control inert",
