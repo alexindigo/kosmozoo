@@ -28,6 +28,7 @@ export function DiffChrome() {
         onClick={() => store.actions.diff.close()}
         innerHTML={iconSvg("x", 16)}
       />
+      {/* mode buttons — their own group, bottom-center */}
       <div id="diffModes">
         <For each={MODES}>
           {([key, m]) => (
@@ -40,26 +41,23 @@ export function DiffChrome() {
           )}
         </For>
       </div>
-      <Show when={hasB() && d().mode === "one-up"}>
-        <div id="diffPlay">
-          <button
-            class="dz-sidebtn" title="which side is showing (ArrowLeft/Right)"
-            onClick={() => store.actions.diff.setCol(d().col === "feed" ? "right" : "feed")}
-          >{d().col === "feed" ? "A" : "B"}</button>
-          <button
-            class="dz-playbtn" title="auto-play blink (Space)"
-            onClick={() => store.actions.diff.togglePlay()}
-            innerHTML={iconSvg(d().playing ? "player-pause" : "player-play", 14)}
-          />
-          <input
-            type="number" class="dz-interval" title="blink interval, ms"
-            value={d().intervalMs} min="50" step="50"
-            onChange={(e) => store.actions.diff.setIntervalMs(parseInt(e.target.value, 10) || d().intervalMs)}
-          />
-        </div>
-      </Show>
-      <Show when={hasB() && d().mode === "difference"}>
-        <div id="diffMaskCtl">
+      {/* the controls strip, bottom-left: A/B + lock always (with a pair),
+ the mode-4 extras (abs/prop, opacity) join in Difference */}
+      <div id="diffCtl">
+        <button
+          class="dz-sidebtn" title="active side — primary in every view (ArrowLeft/Right)"
+          disabled={!hasB() || undefined}
+          onClick={() => store.actions.diff.setCol(d().col === "feed" ? "right" : "feed")}
+        >{d().col === "feed" ? "A" : "B"}</button>
+        <button
+          class={"dz-lockbtn" + (d().locked ? " on" : "")}
+          title={d().locked ? "locked — gestures move both (l)" : "unlocked — gestures move the target (l)"}
+          aria-pressed={d().locked}
+          disabled={!hasB() || undefined}
+          onClick={() => store.actions.diff.setLocked(!d().locked)}
+          innerHTML={iconSvg(d().locked ? "lock" : "lock-open", 14)}
+        />
+        <Show when={hasB() && d().mode === "difference"}>
           <button
             class="dz-sidebtn" title="mask base — the photo shown under the highlight"
             onClick={() => store.actions.diff.setDiffBase(d().diffBase === "a" ? "b" : "a")}
@@ -73,8 +71,8 @@ export function DiffChrome() {
             min="0" max="1" step="0.05" value={d().diffOpacity}
             onInput={(e) => store.actions.diff.setDiffOpacity(parseFloat(e.currentTarget.value))}
           />
-        </div>
-      </Show>
+        </Show>
+      </div>
       <button
         id="diffKeysBtn" title="actions & keys (?)"
         onClick={() => store.actions.ui.toggleKeysPanel()}

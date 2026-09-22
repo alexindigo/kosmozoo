@@ -24,6 +24,14 @@ const PATHS = {
   <path d="M14 5m0 1a1 1 0 0 1 1 -1h2a1 1 0 0 1 1 1v12a1 1 0 0 1 -1 1h-2a1 1 0 0 1 -1 -1z" />`,
   "player-play": `<path stroke="none" d="M0 0h24v24H0z" fill="none"/>
   <path d="M7 4v16l13 -8z" />`,
+  "lock": `<path stroke="none" d="M0 0h24v24H0z" fill="none"/>
+  <path d="M5 13a2 2 0 0 1 2 -2h10a2 2 0 0 1 2 2v6a2 2 0 0 1 -2 2h-10a2 2 0 0 1 -2 -2v-6z" />
+  <path d="M11 16a1 1 0 1 0 2 0a1 1 0 0 0 -2 0" />
+  <path d="M8 11v-4a4 4 0 1 1 8 0v4" />`,
+  "lock-open": `<path stroke="none" d="M0 0h24v24H0z" fill="none"/>
+  <path d="M5 11m0 2a2 2 0 0 1 2 -2h10a2 2 0 0 1 2 2v6a2 2 0 0 1 -2 2h-10a2 2 0 0 1 -2 -2z" />
+  <path d="M12 15a1 1 0 1 0 0 2a1 1 0 0 0 0 -2" />
+  <path d="M8 11v-5a4 4 0 1 1 8 0" />`,
   "trash": `<path stroke="none" d="M0 0h24v24H0z" fill="none"/>
   <path d="M4 7l16 0" />
   <path d="M10 11l0 6" />

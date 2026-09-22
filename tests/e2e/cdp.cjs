@@ -39,10 +39,14 @@ function getJson(url) {
 }
 
 class CDP {
-  static async launch(port = 9333) {
+  static async launch(port = 9333, { windowSize } = {}) {
     const proc = spawn(CHROME, [
       "--headless=new", "--no-sandbox", "--disable-dev-shm-usage",
       "--disable-gpu", "--hide-scrollbars", "--mute-audio",
+      // suites that emulate a viewport wider than the 800×600 default window
+      // must size the physical window to fit — Input events beyond it are
+      // silently dropped (the diff suite passes 1600,1000 for its 1400×900)
+      ...(windowSize ? [`--window-size=${windowSize}`] : []),
       `--remote-debugging-port=${port}`, `--user-data-dir=/tmp/cdp-profile-${port}`,
       "about:blank",
     ], { stdio: "ignore" });

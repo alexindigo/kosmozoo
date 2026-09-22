@@ -512,8 +512,9 @@ main { display: flex; flex: 1; min-height: 0; }
 .dz-img { max-width: 100%; max-height: 100%; object-fit: contain;
   user-select: none; -webkit-user-drag: none; }
 
-/* Two-Up (1): both cells share the row */
+/* Two-Up (1): both cells share the row; the ACTIVE column is the left one */
 #diffStage[data-mode="two-up"] { flex-direction: row; }
+#diffStage[data-mode="two-up"][data-col="right"] { flex-direction: row-reverse; }
 
 /* One-Up (2): one cell full stage — the active column shows, the other
  stays mounted (and decoding) out of view */
@@ -521,10 +522,14 @@ main { display: flex; flex: 1; min-height: 0; }
 #diffStage[data-mode="one-up"][data-col="feed"] .dz-b,
 #diffStage[data-mode="one-up"][data-col="right"] .dz-a { visibility: hidden; }
 
-/* Split (3): layers stacked on the shared registration; the top layer is
- clipped to the right of the wipe — a percentage of the stage, one var */
+/* Split (3): layers stacked on the shared registration; the ACTIVE cell is
+ the top (clipped) layer — a percentage of the stage, one var */
 #diffStage[data-mode="split"] .dz-cell { position: absolute; inset: 0; }
-#diffStage[data-mode="split"] .dz-b { clip-path: inset(0 0 0 calc(var(--split, 0.5) * 100%)); }
+#diffStage[data-mode="split"][data-col="feed"] .dz-a,
+#diffStage[data-mode="split"][data-col="right"] .dz-b {
+  clip-path: inset(0 0 0 calc(var(--split, 0.5) * 100%));
+  z-index: 1;
+}
 .dz-wipe { position: absolute; top: 0; bottom: 0;
   left: calc(var(--split, 0.5) * 100%); width: 14px; translate: -50% 0;
   cursor: ew-resize; z-index: var(--z-chrome);
@@ -549,18 +554,24 @@ main { display: flex; flex: 1; min-height: 0; }
 .dz-mode:hover:not(:disabled) { color: var(--foreground); border-color: var(--foreground-dim); }
 .dz-mode.on { color: var(--secondary); border-color: var(--secondary); }
 .dz-mode:disabled { opacity: 0.35; cursor: default; }
-#diffPlay, #diffMaskCtl { position: absolute; bottom: 10px; left: 12px; display: flex; gap: 6px;
-  align-items: center; z-index: var(--z-modal); }
-.dz-sidebtn, .dz-playbtn { height: 24px; min-width: 28px; border-radius: 6px;
-  font-size: 12px; display: flex; align-items: center; justify-content: center;
+.dz-lockbtn { width: 28px; height: 24px; border-radius: 6px; display: flex;
+  align-items: center; justify-content: center;
   background: color-mix(in srgb, var(--surface) 65%, transparent);
   border: 1px solid var(--border); color: var(--foreground-mid); cursor: pointer; }
-.dz-sidebtn:hover, .dz-playbtn:hover { color: var(--foreground); border-color: var(--foreground-dim); }
-.dz-sidebtn { font-weight: 700; color: var(--attention); }
-.dz-interval { width: 62px; background: var(--background); color: var(--foreground);
-  border: 1px solid var(--foreground-dim); border-radius: 4px; padding: 2px 4px;
-  font-size: 11px; text-align: center; font-family: ui-monospace, monospace; }
-.dz-interval:focus { outline: none; border-color: var(--secondary); }
+.dz-lockbtn:hover:not(:disabled) { color: var(--foreground); border-color: var(--foreground-dim); }
+.dz-lockbtn.on { color: var(--secondary); border-color: var(--secondary); }
+.dz-lockbtn:disabled { opacity: 0.35; cursor: default; }
+/* the controls strip, bottom-left: A/B + lock always (with a pair); the
+ mode-4 extras (abs/prop, opacity) join in Difference */
+#diffCtl { position: absolute; bottom: 10px; left: 12px; display: flex; gap: 6px;
+  align-items: center; z-index: var(--z-modal); }
+.dz-sidebtn { height: 24px; min-width: 28px; border-radius: 6px;
+  font-size: 12px; display: flex; align-items: center; justify-content: center;
+  background: color-mix(in srgb, var(--surface) 65%, transparent);
+  border: 1px solid var(--border); color: var(--foreground-mid); cursor: pointer;
+  font-weight: 700; }
+.dz-sidebtn:hover:not(:disabled) { color: var(--foreground); border-color: var(--foreground-dim); }
+.dz-sidebtn:disabled { opacity: 0.35; cursor: default; }
 #diffClose { position: absolute; top: 6px; right: 8px; z-index: var(--z-modal);
   background: color-mix(in srgb, var(--surface) 65%, transparent); border: 1px solid var(--border);
   border-radius: 6px; color: var(--foreground-mid); padding: 5px 7px; cursor: pointer;

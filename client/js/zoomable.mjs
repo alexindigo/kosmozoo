@@ -1,5 +1,5 @@
 // client/js/zoomable.mjs — in-feed zoom for ANY image. One code path for
-// candidate cards and anchor thumbs alike: same functionality, same code.
+// candidate cards, anchor thumbs, and the comparator stage alike.
 // Ctrl+wheel zooms toward the cursor; drag pans while zoomed. A drag
 // suppresses its trailing click (a pan must not open the workbench). View
 // persistence is caller-provided (getView/setView — the app store owns the
@@ -8,72 +8,125 @@
 //
 // The binding has a lifecycle: makeZoomable returns { dispose } — the
 // component rebinds when its target key changes : a retargeted box must
-// not carry the previous image's transform or pan). Render state (the
-// transform CSS, the zoomed flag) is emitted through onTransform and
-// rendered by the component — the behavior never writes element style or
-// classes itself.
+// not carry the previous image's transform or pan).
+//
+// Views are read FRESH per gesture (never cached between events): a peer
+// write can never go stale. `target(ev)` picks the gesture's { key, box }
+// (the comparator's Two-Up aims at the cell under the pointer; the default
+// is the bound element's own key + parent box — the card path). `also(t)`
+// names an entangled peer key: the gesture's delta ({ds, dtxf, dtyf}) is
+// applied to that key's stored view too — entangle, never copy; one writer
+// per gesture, so no recursion. Render state (the transform CSS, the zoomed
+// flag) is emitted through onTransform and rendered by the component — the
+// behavior never writes element style or classes itself.
 
-export function makeZoomable(img, { key, getView, setView, onZoomChange, onTransform } = {}) {
-  let scale = 1, txf = 0, tyf = 0, dragMoved = 0;
+const IDENTITY = { s: 1, txf: 0, tyf: 0 };
 
-  // persist=false on restore: reading the stored view back is not a write —
-  // a remount must not dirty the store into a settings PATCH
-  const apply = (persist = true) => {
-    if (scale <= 1.001) { scale = 1; txf = 0; tyf = 0; }
-    const transform = scale === 1
-      ? ""
-      : `translate(${txf * img.offsetWidth}px, ${tyf * img.offsetHeight}px) scale(${scale})`;
-    if (key && setView) {
-      setView(key, scale > 1 || txf || tyf
-        ? { s: scale, txf, tyf, fh: false, fv: false, rot: 0 }
-        : null, { persist });
-    }
-    onZoomChange?.(scale > 1);
-    onTransform?.(transform, scale > 1);
+export function makeZoomable(el, { key, target, also, getView, setView, onZoomChange, onTransform } = {}) {
+  let dragMoved = 0;
+
+  const targetFor = (ev) => target ? target(ev) : { key, box: el.parentElement };
+  // SNAPSHOT the stored view: getView may hand back a live store proxy —
+  // after the target's write lands, a proxy reads the NEW value and the
+  // peer's delta would compute against it (ds = 1, the no-op entangle)
+  const read = (k) => {
+    const v = k && getView ? getView(k) : null;
+    return v ? { s: v.s, txf: v.txf, tyf: v.tyf } : { ...IDENTITY };
   };
 
-  if (key && getView) {
+  const clampView = (v) => {
+    const s = Math.min(12, Math.max(1, v.s));
+    if (s <= 1.001) return { ...IDENTITY };
+    return { s, txf: v.txf, tyf: v.tyf };
+  };
+  const storeView = (k, v) => {
+    if (!k || !setView) return;
+    setView(k, v.s > 1 || v.txf || v.tyf
+      ? { s: v.s, txf: v.txf, tyf: v.tyf, fh: false, fv: false, rot: 0 }
+      : null);
+  };
+  const transformFor = (v, box) => v.s === 1
+    ? ""
+    : `translate(${v.txf * box.offsetWidth}px, ${v.tyf * box.offsetHeight}px) scale(${v.s})`;
+
+  // one writer per gesture: the target key gets the new view; the entangled
+  // peer (when locked) gets the same DELTA against its own stored view —
+  // never the target's absolute crop
+  const write = (t, prev, next) => {
+    next = clampView(next);
+    storeView(t.key, next);
+    const otherKey = also?.(t);
+    if (otherKey && getView) {
+      const ds = next.s / prev.s;
+      const o = read(otherKey);
+      storeView(otherKey, clampView({
+        s: o.s * ds,
+        txf: o.txf + (next.txf - prev.txf),
+        tyf: o.tyf + (next.tyf - prev.tyf),
+      }));
+    }
+    onZoomChange?.(next.s > 1);
+    onTransform?.(transformFor(next, t.box), next.s > 1);
+  };
+
+  // restore-on-bind: the card path renders the stored view's transform
+  // immediately (no write — a remount must not dirty the store)
+  if (key && getView && setView) {
     const stored = getView(key);
-    if (stored) { scale = stored.s; txf = stored.txf; tyf = stored.tyf; apply(false); }
+    if (stored) {
+      const v = clampView(stored);
+      onZoomChange?.(v.s > 1);
+      onTransform?.(transformFor(v, el.parentElement), v.s > 1);
+    }
   }
 
   const onWheel = (e) => {
     if (!e.ctrlKey) return;
     e.preventDefault();
-    const next = Math.min(12, Math.max(1, scale * Math.exp(-e.deltaY * 0.012)));
-    if (next === scale) return;
-    // zoom toward the cursor
-    const r = img.parentElement.getBoundingClientRect();
+    const t = targetFor(e);
+    const cur = read(t.key);
+    const next = Math.min(12, Math.max(1, cur.s * Math.exp(-e.deltaY * 0.012)));
+    if (next === cur.s) return;
+    // zoom toward the cursor, in the target box's frame
+    const r = t.box.getBoundingClientRect();
     const ox = r.left + r.width / 2, oy = r.top + r.height / 2;
-    const k = 1 - next / scale;
-    txf += k * ((e.clientX - ox) / r.width - txf);
-    tyf += k * ((e.clientY - oy) / r.height - tyf);
-    scale = next;
-    apply();
+    const k = 1 - next / cur.s;
+    write(t, cur, {
+      s: next,
+      txf: cur.txf + k * ((e.clientX - ox) / r.width - cur.txf),
+      tyf: cur.tyf + k * ((e.clientY - oy) / r.height - cur.tyf),
+    });
   };
 
   const onDown = (e) => {
     dragMoved = 0;
-    if (scale <= 1) return;
+    const t = targetFor(e);
+    const start = read(t.key);
+    if (start.s <= 1) return;
     e.preventDefault();
     e.stopPropagation();
-    img.setPointerCapture(e.pointerId);
+    el.setPointerCapture(e.pointerId);
     let lx = e.clientX, ly = e.clientY;
+    let cur = start;
     const move = (ev) => {
       dragMoved += Math.abs(ev.clientX - lx) + Math.abs(ev.clientY - ly);
-      txf += (ev.clientX - lx) / (scale * img.offsetWidth);
-      tyf += (ev.clientY - ly) / (scale * img.offsetHeight);
+      const next = {
+        s: cur.s,
+        txf: cur.txf + (ev.clientX - lx) / (cur.s * t.box.offsetWidth),
+        tyf: cur.tyf + (ev.clientY - ly) / (cur.s * t.box.offsetHeight),
+      };
+      write(t, cur, next);
+      cur = next;
       lx = ev.clientX; ly = ev.clientY;
-      apply();
     };
     const up = () => {
-      img.removeEventListener("pointermove", move);
-      img.removeEventListener("pointerup", up);
-      img.removeEventListener("pointercancel", up);
+      el.removeEventListener("pointermove", move);
+      el.removeEventListener("pointerup", up);
+      el.removeEventListener("pointercancel", up);
     };
-    img.addEventListener("pointermove", move);
-    img.addEventListener("pointerup", up);
-    img.addEventListener("pointercancel", up);
+    el.addEventListener("pointermove", move);
+    el.addEventListener("pointerup", up);
+    el.addEventListener("pointercancel", up);
   };
 
   // swallow the click that ends a pan-drag (it must not open the workbench)
@@ -85,16 +138,16 @@ export function makeZoomable(img, { key, getView, setView, onZoomChange, onTrans
     }
   };
 
-  img.addEventListener("wheel", onWheel, { passive: false });
-  img.addEventListener("pointerdown", onDown);
-  img.addEventListener("click", onClick, true);
-  img.draggable = false;
+  el.addEventListener("wheel", onWheel, { passive: false });
+  el.addEventListener("pointerdown", onDown);
+  el.addEventListener("click", onClick, true);
+  el.draggable = false;
 
   return {
     dispose() {
-      img.removeEventListener("wheel", onWheel);
-      img.removeEventListener("pointerdown", onDown);
-      img.removeEventListener("click", onClick, true);
+      el.removeEventListener("wheel", onWheel);
+      el.removeEventListener("pointerdown", onDown);
+      el.removeEventListener("click", onClick, true);
     },
   };
 }

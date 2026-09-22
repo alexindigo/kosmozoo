@@ -80,8 +80,7 @@ store.actions.keys.register("wb.prev", "ArrowUp", () => store.actions.diff.step(
 store.actions.keys.register("wb.next", "ArrowDown", () => store.actions.diff.step(1), {
   when: wbOpen, ctx: "workbench", desc: "comparator: step forward",
 });
-store.actions.keys.register("wb.play", " ", () => store.actions.diff.togglePlay(), {
-  when: () => wbPair() && store.state.diff.mode === "one-up",
-  ctx: "workbench", desc: "comparator: play/pause the blink",
+store.actions.keys.register("wb.lock", "l", () => store.actions.diff.setLocked(!store.state.diff.locked), {
+  when: wbPair, ctx: "workbench", desc: "comparator: lock/unlock entangled zoom",
 });
 document.addEventListener("keydown", (e) => store.actions.keys.dispatch(e));

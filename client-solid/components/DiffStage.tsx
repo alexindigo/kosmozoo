@@ -10,7 +10,7 @@
 // two-up (key 1), one-up blink (2), split wipe (3), difference mask (4).
 // No pair (no B) → single image, like a one-file Kaleidoscope.
 
-import { createSignal, createResource, createEffect, on, onMount, onCleanup, Show } from "solid-js";
+import { createMemo, createResource, createEffect, on, onMount, onCleanup, Show } from "solid-js";
 import { useAppStore } from "../store/app-store.js";
 import { makeZoomable } from "/js/zoomable.mjs";
 import { differenceMask } from "../features/diff/mask.mjs";
@@ -58,44 +58,54 @@ export function DiffStage() {
   const d = () => store.state.diff;
   const hasB = () => !!pair().b;
 
-  // the shared zoom's render state — the behavior emits it, JSX copies it
-  // onto every visible layer
-  const [transform, setTransform] = createSignal("");
-  let stageEl;
-  let binding = null;
-  // persist under the feed side's key (the feed card / info panel share it);
-  // a feed-less single image (anchor-only) keeps the anchor key
-  const zoomKey = () => {
-    const side = pair().a ?? pair().b;
-    return side ? `${side.source}:${side.file}` : null;
+  // TWO view states, one per side. Each layer's transform derives from its
+  // own key in the store's views (view-fraction space; the layer's own box
+  // turns fractions into px). Locked = the gesture's delta also writes the
+  // peer key (entangle, never copy); unlocked = only the target's key.
+  const keyA = () => (pair().a ? `${pair().a.source}:${pair().a.file}` : null);
+  const keyB = () => (pair().b ? `${pair().b.source}:${pair().b.file}` : null);
+  const layerT = (el, key) => {
+    const v = key ? store.state.views[key] : null;
+    if (!el || !v || !(v.s > 1)) return "";
+    return `translate(${v.txf * el.offsetWidth}px, ${v.tyf * el.offsetHeight}px) scale(${v.s})`;
   };
+  let stageEl, cellAEl, cellBEl;
+  const tA = createMemo(() => layerT(cellAEl, keyA()));
+  const tB = createMemo(() => layerT(cellBEl, keyB()));
+  // the canvas (temporary, until the crop-aware mask): follows the ACTIVE view
+  const tActive = () => (d().col === "feed" ? tA() : tB());
+
+  // one binding on the stage box; the gesture's target is picked per event:
+  // Two-Up aims at the cell under the pointer, every other mode at the
+  // active column. Locked adds the peer key as the delta's second target.
+  const targetFor = (e) => {
+    if (d().mode === "two-up" && hasB()) {
+      const r = cellBEl.getBoundingClientRect();
+      if (e.clientX >= r.left && e.clientX <= r.right) return { key: keyB(), box: cellBEl };
+      return { key: keyA(), box: cellAEl };
+    }
+    return d().col === "feed" ? { key: keyA(), box: cellAEl } : { key: keyB(), box: cellBEl };
+  };
+  const alsoFor = (t) => {
+    if (!d().locked || !hasB()) return null;
+    return t.key === keyA() ? keyB() : keyA();
+  };
+  let binding = null;
   createEffect(on(
-    () => (store.state.diff.open ? zoomKey() : null),
-    (key) => {
+    () => store.state.diff.open,
+    (open) => {
       binding?.dispose();
       binding = null;
-      setTransform("");
-      if (!stageEl || !key) return;
+      if (!stageEl || !open) return;
       binding = makeZoomable(stageEl, {
-        key,
+        target: targetFor,
+        also: alsoFor,
         getView: store.actions.views.get,
         setView: store.actions.views.set,
-        onTransform: (t) => setTransform(t),
       });
     },
   ));
   onCleanup(() => { binding?.dispose(); binding = null; });
-
-  // One-Up auto-play: flip the visible column on the interval, only while
-  // both sides hold a decoded src (a blink never swaps into a blank)
-  createEffect(() => {
-    if (!(d().open && d().playing && d().mode === "one-up" && hasB())) return;
-    const t = setInterval(() => {
-      if (!srcA() || !srcB()) return;
-      store.actions.diff.setCol(d().col === "feed" ? "right" : "feed");
-    }, d().intervalMs);
-    onCleanup(() => clearInterval(t));
-  });
 
   // the split wipe: --split is the single source of the wipe position; the
   // drag is measured in stage fraction. The handle's pointerdown is eaten so
@@ -164,12 +174,12 @@ export function DiffStage() {
         data-mode={d().mode} data-col={d().col}
         style={{ "--split": d().splitT }}
       >
-        <div class="dz-cell dz-a">
-          <img class="dz-img" src={srcA() ?? undefined} alt="" style={{ transform: transform() || undefined }} />
+        <div class="dz-cell dz-a" ref={cellAEl}>
+          <img class="dz-img" src={srcA() ?? undefined} alt="" style={{ transform: tA() || undefined }} />
         </div>
         <Show when={hasB()}>
-          <div class="dz-cell dz-b">
-            <img class="dz-img" src={srcB() ?? undefined} alt="" style={{ transform: transform() || undefined }} />
+          <div class="dz-cell dz-b" ref={cellBEl}>
+            <img class="dz-img" src={srcB() ?? undefined} alt="" style={{ transform: tB() || undefined }} />
           </div>
           <Show when={d().mode === "split"}>
             <Wipe onDown={onSplitDown} />
@@ -177,7 +187,7 @@ export function DiffStage() {
         </Show>
         <Show when={hasB() && d().mode === "difference"}>
           <div class="dz-cell dz-canvas-cell">
-            <canvas class="dz-canvas" ref={canvasEl} style={{ transform: transform() || undefined }} />
+            <canvas class="dz-canvas" ref={canvasEl} style={{ transform: tActive() || undefined }} />
           </div>
         </Show>
       </div>
