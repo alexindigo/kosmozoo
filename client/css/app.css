@@ -565,6 +565,15 @@ main { display: flex; flex: 1; min-height: 0; }
  mode-4 extras (abs/prop, opacity) join in Difference */
 #diffCtl { position: absolute; bottom: 10px; left: 12px; display: flex; gap: 6px;
   align-items: center; z-index: var(--z-modal); }
+
+/* both bottom strips read as ONE translucent panel over the stage image */
+#diffModes, #diffCtl {
+  background: color-mix(in srgb, var(--surface) 60%, transparent);
+  backdrop-filter: blur(6px);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 4px;
+}
 .dz-sidebtn { height: 24px; min-width: 28px; border-radius: 6px;
   font-size: 12px; display: flex; align-items: center; justify-content: center;
   background: color-mix(in srgb, var(--surface) 65%, transparent);
