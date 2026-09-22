@@ -10,11 +10,13 @@
 export const HIGHLIGHT = [255, 136, 0];
 
 // The destination rect of one photo drawn the way the on-screen img is laid
-// out: contain-fitted and centered in the stage, then the side's own view
-// applied ({s, txf, tyf} — scale about the stage center, then translate by
+// out. THE FIT RULE IS SHARED WITH THE LAYOUT (.dz-img): contain-fitted and
+// centered, NEVER UPSCALED (fit caps at 1 — a small photo renders at
+// natural size, with the stage showing margins around it). Then the side's
+// own view ({s, txf, tyf} — scale about the stage center, then translate by
 // the view fractions of the stage box). Pure: the canvas draw uses this.
 export function viewRect(imgW, imgH, view, stageW, stageH) {
-  const fit = Math.min(stageW / imgW, stageH / imgH);
+  const fit = Math.min(1, stageW / imgW, stageH / imgH);
   const fw = imgW * fit, fh = imgH * fit;
   const v = view ?? { s: 1, txf: 0, tyf: 0 };
   const cx = stageW / 2 + v.txf * stageW;

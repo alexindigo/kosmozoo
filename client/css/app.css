@@ -509,6 +509,8 @@ main { display: flex; flex: 1; min-height: 0; }
 #diffStage { position: absolute; inset: 0; display: flex; overflow: hidden; }
 .dz-cell { flex: 1; min-width: 0; min-height: 0; overflow: hidden;
   display: flex; align-items: center; justify-content: center; }
+/* the fit rule is shared with the mask's viewRect: contain-fit + centered,
+ NEVER upscaled (a small photo renders at natural size with margins) */
 .dz-img { max-width: 100%; max-height: 100%; object-fit: contain;
   user-select: none; -webkit-user-drag: none; }
 /* the ACTIVE column's photo fades by --active-op (Split: the top layer

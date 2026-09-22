@@ -17,6 +17,17 @@ Deno.test("viewRect: identity view is the contain-fit center-pad", () => {
   assertEquals(r.dy, 0);
 });
 
+Deno.test("viewRect: a photo smaller than the stage is NEVER upscaled", () => {
+  // the layout's rule (max-width/height + object-fit: contain): a 640×360
+  // photo in a 1400×900 stage renders at natural size, centered — the mask
+  // must draw it the same way or the buffers can never align
+  const r = viewRect(640, 360, null, 1400, 900);
+  assertEquals(r.dw, 640);
+  assertEquals(r.dh, 360);
+  assertEquals(r.dx, (1400 - 640) / 2);
+  assertEquals(r.dy, (900 - 360) / 2);
+});
+
 Deno.test("viewRect: a translated view is NOT the native pad", () => {
   const id = viewRect(1024, 1024, null, 1400, 900);
   const moved = viewRect(1024, 1024, { s: 1, txf: 0.1, tyf: -0.05 }, 1400, 900);
