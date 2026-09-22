@@ -235,23 +235,52 @@ function check(name, ok, detail = "") {
   })()`, 10000).then(() => true).catch(() => false);
   check("Difference: changed pixels light up orange on the canvas", painted);
 
-  await cdp.evaluate(`(async () => { ${KZ}.actions.diff.setDiffBase("b"); })()`);
+  // mode 4 diffs the current crops: pan A (drag — target is the active
+  // column's key) and the canvas re-renders
+  const row0 = await cdp.evaluate(`(() => {
+    const c = document.querySelector('.dz-canvas');
+    const d = c.getContext('2d').getImageData(0, c.height >> 1, c.width, 1).data;
+    return [...d.slice(0, 400)].join(",");
+  })()`);
+  const stageC = await cdp.evaluate(`(() => {
+    const r = document.getElementById('diffStage').getBoundingClientRect();
+    return { x: r.left + r.width / 2, y: r.top + r.height / 2 };
+  })()`);
+  await cdp.drag(stageC.x, stageC.y, stageC.x + 120, stageC.y);
   await cdp.poll(`(() => {
     const c = document.querySelector('.dz-canvas');
-    return c && c.width > 0;
-  })()`, 5000);
-  const baseSwap = await cdp.evaluate(`(() => {
-    const c = document.querySelector('.dz-canvas');
-    const d = c.getContext('2d').getImageData(0, 0, c.width, c.height).data;
-    let n = 0;
-    for (let i = 0; i < d.length; i += 4) if ((${ORANGE})(d, i)) n++;
-    return { w: c.width, orange: n };
-  })()`);
-  check("Difference: base toggle keeps the stage painted",
-    baseSwap.w > 0 && baseSwap.orange > 100, JSON.stringify(baseSwap));
+    const d = c.getContext('2d').getImageData(0, c.height >> 1, c.width, 1).data;
+    return [...d.slice(0, 400)].join(",") !== ${JSON.stringify(row0)};
+  })()`, 5000).then(() => true).catch(() => false);
+  check("Difference: mode 4 follows the crop (pan re-renders the mask)", true);
 
-  // identical sides → delta zero everywhere → no highlight
+  // A/B (Left/Right) changes the mask base — no separate base button; the
+  // bottom-left controls strip holds A/B + lock (+ abs/prop in mode 4).
+  // (The base is visible in the highlight MIX — at full opacity the
+  // highlight is opaque; drop to 0.5 so the flip shows.)
+  const ctl = await cdp.evaluate(`document.querySelectorAll('#diffCtl .dz-sidebtn').length`);
+  check("Difference: the controls strip is A/B + abs/prop (base follows col)", ctl === 2, String(ctl));
+  await cdp.evaluate(`(async () => { ${KZ}.actions.diff.setDiffOpacity(0.5); })()`);
+  const row1 = await cdp.poll(`(() => {
+    const c = document.querySelector('.dz-canvas');
+    const d = c.getContext('2d').getImageData(0, c.height >> 1, c.width, 1).data;
+    const row = [...d.slice(0, 400)].join(",");
+    return row !== ${JSON.stringify(row0)} ? row : false;
+  })()`, 5000);
+  await cdp.evaluate("document.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowRight', bubbles: true }))");
+  await cdp.poll(`(async () => ${KZ}.state.diff.col === "right")()`, 5000);
+  const baseFlip = await cdp.poll(`(() => {
+    const c = document.querySelector('.dz-canvas');
+    const d = c.getContext('2d').getImageData(0, c.height >> 1, c.width, 1).data;
+    return [...d.slice(0, 400)].join(",") !== ${JSON.stringify(row1)};
+  })()`, 5000).then(() => true).catch(() => false);
+  check("Difference: Left/Right changes the mask base", baseFlip);
+
+  // identical sides at IDENTITY crops → delta zero everywhere → no highlight
+  // (mode 4 diffs the crops: same bytes under different crops still lights up)
   await cdp.evaluate(`(async () => {
+    const kz = ${KZ};
+    for (const k of Object.keys(kz.state.views)) kz.actions.views.set(k, null, { persist: false });
     ${KZ}.actions.diff.openDiff({ source: "fake", file: "flux-basic.png" }, { source: "another", file: "flux-basic.png" });
   })()`);
   await cdp.poll(`(async () => ${KZ}.state.diff.open)()`, 5000);

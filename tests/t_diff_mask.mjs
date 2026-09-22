@@ -3,7 +3,37 @@
 // absolute/proportional rules.
 
 import { assert, assertEquals } from "jsr:@std/assert";
-import { differenceMask, HIGHLIGHT } from "../client-solid/features/diff/mask.mjs";
+import { differenceMask, viewRect, HIGHLIGHT } from "../client-solid/features/diff/mask.mjs";
+
+// --- viewRect: the crop-aware draw geometry ------------------------------------
+
+Deno.test("viewRect: identity view is the contain-fit center-pad", () => {
+  // 1024² into a 1400×900 stage: fit = 900/1024, centered
+  const r = viewRect(1024, 1024, null, 1400, 900);
+  const fw = 1024 * (900 / 1024);
+  assertEquals(r.dw, fw);
+  assertEquals(r.dh, fw);
+  assertEquals(r.dx, (1400 - fw) / 2);
+  assertEquals(r.dy, 0);
+});
+
+Deno.test("viewRect: a translated view is NOT the native pad", () => {
+  const id = viewRect(1024, 1024, null, 1400, 900);
+  const moved = viewRect(1024, 1024, { s: 1, txf: 0.1, tyf: -0.05 }, 1400, 900);
+  assert(moved.dx !== id.dx || moved.dy !== id.dy, "a crop moves the rect");
+  assertEquals(moved.dx, id.dx + 0.1 * 1400);
+  assertEquals(moved.dy, id.dy - 0.05 * 900);
+});
+
+Deno.test("viewRect: a zoomed view scales about the stage center", () => {
+  const id = viewRect(1024, 1024, null, 1400, 900);
+  const z = viewRect(1024, 1024, { s: 2, txf: 0, tyf: 0 }, 1400, 900);
+  assertEquals(z.dw, id.dw * 2);
+  assertEquals(z.dh, id.dh * 2);
+  // center preserved: dx = stageW/2 - dw/2
+  assertEquals(z.dx + z.dw / 2, 1400 / 2);
+  assertEquals(z.dy + z.dh / 2, 900 / 2);
+});
 
 const px = (r, g, b) => [r, g, b, 255];
 const img = (w, h, data) => new ImageData(new Uint8ClampedArray(data), w, h);

@@ -59,10 +59,6 @@ export function DiffChrome() {
         />
         <Show when={hasB() && d().mode === "difference"}>
           <button
-            class="dz-sidebtn" title="mask base — the photo shown under the highlight"
-            onClick={() => store.actions.diff.setDiffBase(d().diffBase === "a" ? "b" : "a")}
-          >{d().diffBase === "a" ? "A" : "B"}</button>
-          <button
             class="dz-sidebtn" title="absolute / proportional highlight"
             onClick={() => store.actions.diff.setDiffAbs(!d().diffAbs)}
           >{d().diffAbs ? "abs" : "prop"}</button>

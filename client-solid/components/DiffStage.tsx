@@ -13,7 +13,7 @@
 import { createMemo, createResource, createEffect, on, onMount, onCleanup, Show } from "solid-js";
 import { useAppStore } from "../store/app-store.js";
 import { makeZoomable } from "/js/zoomable.mjs";
-import { differenceMask } from "../features/diff/mask.mjs";
+import { differenceMask, viewRect } from "../features/diff/mask.mjs";
 import { DiffChrome } from "./DiffChrome.js";
 
 // one decode-guarded src per side: the visible src swaps only once the new
@@ -72,8 +72,6 @@ export function DiffStage() {
   let stageEl, cellAEl, cellBEl;
   const tA = createMemo(() => layerT(cellAEl, keyA()));
   const tB = createMemo(() => layerT(cellBEl, keyB()));
-  // the canvas (temporary, until the crop-aware mask): follows the ACTIVE view
-  const tActive = () => (d().col === "feed" ? tA() : tB());
 
   // one binding on the stage box; the gesture's target is picked per event:
   // Two-Up aims at the cell under the pointer, every other mode at the
@@ -129,15 +127,17 @@ export function DiffStage() {
     window.addEventListener("pointercancel", up);
   };
 
-  // Difference: paint the mask from the two decoded sides, recomputing when
-  // a side's src or a mask pref changes. The canvas keeps its last paint
-  // until the new one lands — a recompute never blanks the stage. Different
-  // intrinsic sizes center-align onto max(w)×max(h) (no scaling — alignment
-  // is a later axis).
+  // Difference: mode 4 diffs THE TWO CURRENT CROPS — each photo drawn into
+  // a stage-sized buffer through its own view (viewRect), then masked. The
+  // canvas is stage-sized and carries NO transform: the crops are already
+  // in the pixels. Recomputes when either src, either view, col (the base),
+  // diffAbs, or diffOpacity changes; keeps its last paint (never blanks).
   let canvasEl;
   createEffect(() => {
     const aUrl = srcA(), bUrl = srcB();
-    const absolute = d().diffAbs, opacity = d().diffOpacity, baseIsA = d().diffBase === "a";
+    const absolute = d().diffAbs, opacity = d().diffOpacity, baseIsA = d().col === "feed";
+    const vA = keyA() ? store.state.views[keyA()] : null;
+    const vB = keyB() ? store.state.views[keyB()] : null;
     if (d().mode !== "difference" || !hasB() || !aUrl || !bUrl || !canvasEl) return;
     let cancelled = false;
     (async () => {
@@ -149,16 +149,17 @@ export function DiffStage() {
       });
       const [ia, ib] = await Promise.all([load(aUrl), load(bUrl)]);
       if (cancelled || !ia || !ib) return;
-      const W = Math.max(ia.naturalWidth, ib.naturalWidth);
-      const H = Math.max(ia.naturalHeight, ib.naturalHeight);
-      const grab = (im) => {
+      const stage = stageEl.getBoundingClientRect();
+      const W = Math.round(stage.width), H = Math.round(stage.height);
+      const grab = (im, v) => {
         const c = document.createElement("canvas");
         c.width = W; c.height = H;
         const x = c.getContext("2d", { willReadFrequently: true });
-        x.drawImage(im, (W - im.naturalWidth) / 2, (H - im.naturalHeight) / 2);
+        const r = viewRect(im.naturalWidth, im.naturalHeight, v, W, H);
+        x.drawImage(im, r.dx, r.dy, r.dw, r.dh);
         return x.getImageData(0, 0, W, H);
       };
-      const mask = differenceMask(grab(ia), grab(ib), { absolute, opacity, baseIsA });
+      const mask = differenceMask(grab(ia, vA), grab(ib, vB), { absolute, opacity, baseIsA });
       if (cancelled) return;
       canvasEl.width = W; canvasEl.height = H;
       canvasEl.getContext("2d").putImageData(mask, 0, 0);
@@ -187,7 +188,7 @@ export function DiffStage() {
         </Show>
         <Show when={hasB() && d().mode === "difference"}>
           <div class="dz-cell dz-canvas-cell">
-            <canvas class="dz-canvas" ref={canvasEl} style={{ transform: tActive() || undefined }} />
+            <canvas class="dz-canvas" ref={canvasEl} />
           </div>
         </Show>
       </div>

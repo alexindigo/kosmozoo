@@ -61,7 +61,6 @@ export function makeAppStore() {
       col: "feed",          // active column (One-Up visible side, primary in every view)
       locked: true,         // entangled zoom: a gesture's delta writes BOTH view keys
       splitT: 0.5,          // wipe position, 0..1 of stage width
-      diffBase: "a",        // mask base (until the crop-aware mask follows col)
       diffAbs: true,        // absolute vs proportional highlight
       diffOpacity: 1,
       anchorName: null,     // right current (anchors space); null → first
@@ -1096,7 +1095,6 @@ export function makeAppStore() {
       setCol(col) { if (col === "feed" || col === "right") setSt("diff", "col", col); },
       setLocked(x) { setSt("diff", "locked", !!x); },
       setSplit(t) { setSt("diff", "splitT", Math.min(1, Math.max(0, t))); },
-      setDiffBase(b) { if (b === "a" || b === "b") setSt("diff", "diffBase", b); },
       setDiffAbs(x) { setSt("diff", "diffAbs", !!x); },
       setDiffOpacity(x) { setSt("diff", "diffOpacity", Math.min(1, Math.max(0, x))); },
       // step the active column: the feed column walks the feed view list,
