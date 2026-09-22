@@ -22,7 +22,7 @@
 
 const IDENTITY = { s: 1, txf: 0, tyf: 0 };
 
-export function makeZoomable(el, { key, target, also, getView, setView, onZoomChange, onTransform } = {}) {
+export function makeZoomable(el, { key, target, also, panAlways = false, getView, setView, onZoomChange, onTransform } = {}) {
   let dragMoved = 0;
 
   const targetFor = (ev) => target ? target(ev) : { key, box: el.parentElement };
@@ -36,7 +36,9 @@ export function makeZoomable(el, { key, target, also, getView, setView, onZoomCh
 
   const clampView = (v) => {
     const s = Math.min(12, Math.max(1, v.s));
-    if (s <= 1.001) return { ...IDENTITY };
+    // zoom-out-to-1 recenters — unless pan is a first-class view state:
+    // then a panned {s:1, txf, tyf} view is real and must survive
+    if (!panAlways && s <= 1.001) return { ...IDENTITY };
     return { s, txf: v.txf, tyf: v.tyf };
   };
   const storeView = (k, v) => {
@@ -45,7 +47,7 @@ export function makeZoomable(el, { key, target, also, getView, setView, onZoomCh
       ? { s: v.s, txf: v.txf, tyf: v.tyf, fh: false, fv: false, rot: 0 }
       : null);
   };
-  const transformFor = (v, box) => v.s === 1
+  const transformFor = (v, box) => (v.s === 1 && !v.txf && !v.tyf)
     ? ""
     : `translate(${v.txf * box.offsetWidth}px, ${v.tyf * box.offsetHeight}px) scale(${v.s})`;
 
@@ -102,7 +104,8 @@ export function makeZoomable(el, { key, target, also, getView, setView, onZoomCh
     dragMoved = 0;
     const t = targetFor(e);
     const start = read(t.key);
-    if (start.s <= 1) return;
+    // the drag pans at any zoom when panAlways — otherwise zoomed-only
+    if (!panAlways && start.s <= 1) return;
     e.preventDefault();
     e.stopPropagation();
     el.setPointerCapture(e.pointerId);

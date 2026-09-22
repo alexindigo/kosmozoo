@@ -67,7 +67,7 @@ export function DiffStage() {
   const keyB = () => (pair().b ? `${pair().b.source}:${pair().b.file}` : null);
   const layerT = (el, key) => {
     const v = key ? store.state.views[key] : null;
-    if (!el || !v || !(v.s > 1)) return "";
+    if (!el || !v || !(v.s > 1 || v.txf || v.tyf)) return "";
     return `translate(${v.txf * el.offsetWidth}px, ${v.tyf * el.offsetHeight}px) scale(${v.s})`;
   };
   let stageEl, cellAEl, cellBEl;
@@ -101,6 +101,7 @@ export function DiffStage() {
       binding = makeZoomable(stageEl, {
         target: targetFor,
         also: alsoFor,
+        panAlways: true, // the comparator pans at any zoom; cards keep zoomed-only pan
         getView: store.actions.views.get,
         setView: store.actions.views.set,
       });

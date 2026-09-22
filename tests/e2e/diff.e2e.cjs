@@ -114,6 +114,17 @@ function check(name, ok, detail = "") {
     const r = document.querySelector('.dz-b').getBoundingClientRect();
     return { x: r.left + r.width / 2, y: r.top + r.height / 2 };
   })()`);
+  // pan works at zoom 1 (not only when zoomed): a drag at identity moves the
+  // view ({s:1, txf≠0}), and only the target's
+  await cdp.drag(cellB.x, cellB.y, cellB.x + 40, cellB.y + 20);
+  const pan1 = await cdp.evaluate(`(async () => ({
+    a: ${KZ}.state.views["fake:flux-basic.png"] ?? null,
+    b: JSON.parse(JSON.stringify(${KZ}.state.views["another:flux-basic.png"] ?? "null")),
+    tb: document.querySelector('.dz-b .dz-img').style.transform,
+  }))()`);
+  check("pan works at zoom 1 (drag moves the view, scale stays 1)",
+    pan1.a === null && pan1.b && pan1.b.s === 1 && pan1.b.txf !== 0 && pan1.tb.includes("translate("),
+    JSON.stringify(pan1));
   await cdp.mouse("mouseWheel", cellB.x, cellB.y, { deltaY: -40, modifiers: 2 });
   await cdp.poll(`(async () => !!${KZ}.state.views["another:flux-basic.png"])()`, 5000);
   const twoStates = await cdp.evaluate(`(async () => ({
@@ -370,12 +381,33 @@ function check(name, ok, detail = "") {
   })()`, 10000).then(() => true).catch(() => false);
   check("Difference: changed pixels light up orange on the canvas", painted);
 
+  // the mask never upscales a small photo (the layout's fit rule): the bulk
+  // image (640×360, natural size centered) leaves the stage margins
+  // un-covered → margins show the base, NOT the highlight. (Identity crops
+  // for this one — A is zoomed from the lock checks.)
+  await cdp.evaluate(`(async () => {
+    const kz = ${KZ};
+    for (const k of Object.keys(kz.state.views)) kz.actions.views.set(k, null, { persist: false });
+  })()`);
+  const marginOrange = await cdp.poll(`(() => {
+    const c = document.querySelector('.dz-canvas');
+    if (!c || !c.width) return false;
+    const x = c.getContext('2d');
+    const isOrange = (px_, py) => {
+      const d = x.getImageData(px_, py, 1, 1).data;
+      return d[0] === 255 && d[1] === 136 && d[2] === 0;
+    };
+    return !isOrange(10, 450) && isOrange(500, 450);
+  })()`, 5000).then(() => true).catch(() => false);
+  check("Difference: small photos keep natural size (margins stay base, overlap highlights)",
+    marginOrange);
+
   // mode 4 diffs the current crops: pan A (drag — target is the active
   // column's key) and the canvas re-renders
   const row0 = await cdp.evaluate(`(() => {
     const c = document.querySelector('.dz-canvas');
     const d = c.getContext('2d').getImageData(0, c.height >> 1, c.width, 1).data;
-    return [...d.slice(0, 400)].join(",");
+    return [...d].join(",");
   })()`);
   const stageC = await cdp.evaluate(`(() => {
     const r = document.getElementById('diffStage').getBoundingClientRect();
@@ -385,7 +417,7 @@ function check(name, ok, detail = "") {
   await cdp.poll(`(() => {
     const c = document.querySelector('.dz-canvas');
     const d = c.getContext('2d').getImageData(0, c.height >> 1, c.width, 1).data;
-    return [...d.slice(0, 400)].join(",") !== ${JSON.stringify(row0)};
+    return [...d].join(",") !== ${JSON.stringify(row0)};
   })()`, 5000).then(() => true).catch(() => false);
   check("Difference: mode 4 follows the crop (pan re-renders the mask)", true);
 
@@ -399,7 +431,7 @@ function check(name, ok, detail = "") {
   const row1 = await cdp.poll(`(() => {
     const c = document.querySelector('.dz-canvas');
     const d = c.getContext('2d').getImageData(0, c.height >> 1, c.width, 1).data;
-    const row = [...d.slice(0, 400)].join(",");
+    const row = [...d].join(",");
     return row !== ${JSON.stringify(row0)} ? row : false;
   })()`, 5000);
   await cdp.evaluate("document.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowRight', bubbles: true }))");
@@ -407,7 +439,7 @@ function check(name, ok, detail = "") {
   const baseFlip = await cdp.poll(`(() => {
     const c = document.querySelector('.dz-canvas');
     const d = c.getContext('2d').getImageData(0, c.height >> 1, c.width, 1).data;
-    return [...d.slice(0, 400)].join(",") !== ${JSON.stringify(row1)};
+    return [...d].join(",") !== ${JSON.stringify(row1)};
   })()`, 5000).then(() => true).catch(() => false);
   check("Difference: Left/Right changes the mask base", baseFlip);
 
