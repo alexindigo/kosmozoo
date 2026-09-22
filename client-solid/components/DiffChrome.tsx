@@ -45,6 +45,12 @@ export function DiffChrome() {
             onClick={() => store.actions.diff.setLocked(!d().locked)}
             innerHTML={iconSvg(d().locked ? "lock" : "lock-open", 14)}
           />
+          <input
+            type="range" class="dz-opacity dz-active-op" title="active image opacity"
+            min="0" max="1" step="0.05" value={d().activeOpacity}
+            disabled={!hasB() || undefined}
+            onInput={(e) => store.actions.diff.setActiveOpacity(parseFloat(e.currentTarget.value))}
+          />
           <Show when={hasB() && d().mode === "difference"}>
             <button
               class="dz-sidebtn" title="absolute / proportional highlight"

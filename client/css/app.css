@@ -511,6 +511,10 @@ main { display: flex; flex: 1; min-height: 0; }
   display: flex; align-items: center; justify-content: center; }
 .dz-img { max-width: 100%; max-height: 100%; object-fit: contain;
   user-select: none; -webkit-user-drag: none; }
+/* the ACTIVE column's photo fades by --active-op (Split: the top layer
+ lets the bottom show through; Two-Up/One-Up: against the stage) */
+#diffStage[data-col="feed"] .dz-a .dz-img,
+#diffStage[data-col="right"] .dz-b .dz-img { opacity: var(--active-op, 1); }
 
 /* Two-Up (1): both cells share the row; the ACTIVE column is the left one */
 #diffStage[data-mode="two-up"] { flex-direction: row; }

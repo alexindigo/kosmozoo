@@ -22,22 +22,25 @@ export function viewRect(imgW, imgH, view, stageW, stageH) {
   return { dx: cx - (fw * v.s) / 2, dy: cy - (fh * v.s) / 2, dw: fw * v.s, dh: fh * v.s };
 }
 
-export function differenceMask(a, b, { absolute = true, opacity = 1, baseIsA = true } = {}) {
+export function differenceMask(a, b, { absolute = true, opacity = 1, baseIsA = true, baseOpacity = 1 } = {}) {
   const base = baseIsA ? a : b;
   const out = new ImageData(a.width, a.height);
   const bd = base.data, ad = a.data, dd = b.data, od = out.data;
   for (let i = 0; i < bd.length; i += 4) {
+    // the active side IS the base photo; its opacity scales every
+    // contribution the base makes (identical regions AND under the highlight)
+    const br = bd[i] * baseOpacity, bg = bd[i + 1] * baseOpacity, bb = bd[i + 2] * baseOpacity;
     const dr = Math.abs(ad[i] - dd[i]);
     const dg = Math.abs(ad[i + 1] - dd[i + 1]);
     const db = Math.abs(ad[i + 2] - dd[i + 2]);
     const delta = Math.max(dr, dg, db);
     if (delta === 0) {
-      od[i] = bd[i]; od[i + 1] = bd[i + 1]; od[i + 2] = bd[i + 2]; od[i + 3] = 255;
+      od[i] = br; od[i + 1] = bg; od[i + 2] = bb; od[i + 3] = 255;
     } else {
       const k = absolute ? opacity : (delta / 255) * opacity;
-      od[i] = HIGHLIGHT[0] * k + bd[i] * (1 - k);
-      od[i + 1] = HIGHLIGHT[1] * k + bd[i + 1] * (1 - k);
-      od[i + 2] = HIGHLIGHT[2] * k + bd[i + 2] * (1 - k);
+      od[i] = HIGHLIGHT[0] * k + br * (1 - k);
+      od[i + 1] = HIGHLIGHT[1] * k + bg * (1 - k);
+      od[i + 2] = HIGHLIGHT[2] * k + bb * (1 - k);
       od[i + 3] = 255;
     }
   }

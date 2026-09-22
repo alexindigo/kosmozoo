@@ -164,6 +164,38 @@ function check(name, ok, detail = "") {
   }))()`);
   check("unlock: no jump — both crops stay put", stayed.a === stayA && stayed.b === stayB);
 
+  // 4b. split hit-testing: the gesture hits the layer VISIBLE at the
+  // pointer — left of the wipe is the bottom layer, right is the top one
+  await cdp.evaluate("document.dispatchEvent(new KeyboardEvent('keydown', { key: '3', bubbles: true }))");
+  await cdp.poll(`(async () => ${KZ}.state.diff.mode === "split")()`, 5000);
+  const readViews = `(async () => ({
+    a: JSON.stringify(${KZ}.state.views["fake:flux-basic.png"] ?? null),
+    b: JSON.stringify(${KZ}.state.views["another:flux-basic.png"] ?? null),
+  }))()`;
+  // col is "feed" → A is the top layer (right of the wipe), B underneath (left)
+  const hitBefore = await cdp.evaluate(readViews);
+  await cdp.mouse("mouseWheel", 350, 450, { deltaY: -40, modifiers: 2 });
+  const leftHit = await cdp.evaluate(readViews);
+  check("split: a wheel left of the wipe hits the bottom layer (B)",
+    leftHit.b !== hitBefore.b && leftHit.a === hitBefore.a,
+    JSON.stringify({ hitBefore, leftHit }));
+  await cdp.mouse("mouseWheel", 1050, 450, { deltaY: -40, modifiers: 2 });
+  const rightHit = await cdp.evaluate(readViews);
+  check("split: a wheel right of the wipe hits the top layer (A)",
+    rightHit.a !== leftHit.a && rightHit.b === leftHit.b,
+    JSON.stringify({ leftHit, rightHit }));
+  // locked: a wheel anywhere moves both
+  await cdp.evaluate(`(async () => { ${KZ}.actions.diff.setLocked(true); })()`);
+  await cdp.mouse("mouseWheel", 350, 450, { deltaY: -40, modifiers: 2 });
+  const lockHit = await cdp.evaluate(readViews);
+  check("split, locked: a wheel left of the wipe still moves both",
+    JSON.parse(lockHit.a).s > (JSON.parse(rightHit.a)?.s ?? 0)
+      && JSON.parse(lockHit.b).s > (JSON.parse(rightHit.b)?.s ?? 0),
+    JSON.stringify({ rightHit, lockHit }));
+  await cdp.evaluate(`(async () => { ${KZ}.actions.diff.setLocked(false); })()`);
+  await cdp.evaluate("document.dispatchEvent(new KeyboardEvent('keydown', { key: '1', bubbles: true }))");
+  await cdp.poll(`(async () => ${KZ}.state.diff.mode === "two-up")()`, 5000);
+
   // 5. A/B layout: the active column is the left cell in Two-Up
   await cdp.evaluate("document.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowRight', bubbles: true }))");
   await cdp.poll(`(async () => ${KZ}.state.diff.col === "right")()`, 5000);
@@ -173,6 +205,41 @@ function check(name, ok, detail = "") {
     return { al: a.left, bl: b.left };
   })()`);
   check("A/B: active column is the left cell in Two-Up", layout.bl < layout.al, JSON.stringify(layout));
+
+  // 5b. active opacity: the slider sits in the controls strip in every mode;
+  // it fades the ACTIVE layer (Two-Up: col=right → B), moves with A/B, and
+  // dims the Split top layer and the Difference base
+  const op = await cdp.evaluate(`(async () => {
+    ${KZ}.actions.diff.setActiveOpacity(0.4);
+    return {
+      slider: !!document.querySelector('.dz-active-op'),
+      a: getComputedStyle(document.querySelector('.dz-a .dz-img')).opacity,
+      b: getComputedStyle(document.querySelector('.dz-b .dz-img')).opacity,
+    };
+  })()`);
+  check("opacity: the slider fades the ACTIVE layer only (col=right → B)",
+    op.slider && op.b === "0.4" && op.a === "1", JSON.stringify(op));
+  // A/B flip moves the fade to the other layer
+  await cdp.evaluate("document.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowLeft', bubbles: true }))");
+  await cdp.poll(`(async () => ${KZ}.state.diff.col === "feed")()`, 5000);
+  const opFlip = await cdp.evaluate(`(() => ({
+    a: getComputedStyle(document.querySelector('.dz-a .dz-img')).opacity,
+    b: getComputedStyle(document.querySelector('.dz-b .dz-img')).opacity,
+  }))()`);
+  check("opacity: the fade follows the A/B switch", opFlip.a === "0.4" && opFlip.b === "1", JSON.stringify(opFlip));
+  // Split: the TOP (active) layer carries it (col=feed → A on top)
+  await cdp.evaluate("document.dispatchEvent(new KeyboardEvent('keydown', { key: '3', bubbles: true }))");
+  await cdp.poll(`(async () => ${KZ}.state.diff.mode === "split")()`, 5000);
+  const opSplit = await cdp.evaluate(`(() => ({
+    a: getComputedStyle(document.querySelector('.dz-a .dz-img')).opacity,
+    b: getComputedStyle(document.querySelector('.dz-b .dz-img')).opacity,
+    slider: !!document.querySelector('.dz-active-op'),
+  }))()`);
+  check("opacity: works in Split too (top layer fades)",
+    opSplit.a === "0.4" && opSplit.b === "1" && opSplit.slider, JSON.stringify(opSplit));
+  await cdp.evaluate(`(async () => { ${KZ}.actions.diff.setActiveOpacity(1); })()`);
+  await cdp.evaluate("document.dispatchEvent(new KeyboardEvent('keydown', { key: '1', bubbles: true }))");
+  await cdp.poll(`(async () => ${KZ}.state.diff.mode === "two-up")()`, 5000);
 
   // 6. One-Up: Left/Right flips the visible side; the auto-play is gone
   await cdp.evaluate("document.dispatchEvent(new KeyboardEvent('keydown', { key: '2', bubbles: true }))");
@@ -343,6 +410,24 @@ function check(name, ok, detail = "") {
     return true;
   })()`, 10000).then(() => true).catch(() => false);
   check("Difference: identical sides paint no highlight", identical);
+  // active opacity dims the mask BASE (identical sides = base everywhere)
+  const bright = async () => cdp.evaluate(`(() => {
+    const c = document.querySelector('.dz-canvas');
+    const d = c.getContext('2d').getImageData(0, 0, c.width, c.height).data;
+    let sum = 0;
+    for (let i = 0; i < d.length; i += 40) sum += d[i];
+    return sum;
+  })()`);
+  const bFull = await bright();
+  await cdp.evaluate(`(async () => { ${KZ}.actions.diff.setActiveOpacity(0.5); })()`);
+  const dimmed = await cdp.poll(`(async () => {
+    const c = document.querySelector('.dz-canvas');
+    const d = c.getContext('2d').getImageData(0, 0, c.width, c.height).data;
+    let sum = 0;
+    for (let i = 0; i < d.length; i += 40) sum += d[i];
+    return sum < ${bFull} * 0.6;
+  })()`, 5000).then(() => true).catch(() => false);
+  check("Difference: active opacity dims the mask base", dimmed, `brightness ${bFull} -> dimmed`);
   await cdp.evaluate(`document.getElementById('diffClose').click()`);
 
   await cdp.close();

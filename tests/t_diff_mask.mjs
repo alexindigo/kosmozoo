@@ -81,3 +81,22 @@ Deno.test("mask: the base pixel stays under the highlight (the mask reads as a p
   // same highlight, different bases underneath → different mixes
   assert(baseA.data[0] !== baseB.data[0] || baseA.data[1] !== baseB.data[1]);
 });
+
+// --- baseOpacity: the active side's photo dims, the highlight still mixes over --
+
+Deno.test("mask: baseOpacity dims identical regions by the base's share", () => {
+  const a = img(1, 1, px(200, 100, 50));
+  const b = img(1, 1, px(200, 100, 50));
+  const full = differenceMask(a, b, { absolute: true, opacity: 1, baseIsA: true, baseOpacity: 0.5 });
+  assertEquals([...full.data], [100, 50, 25, 255]);
+});
+
+Deno.test("mask: baseOpacity dims the base under the highlight too", () => {
+  const a = img(1, 1, px(200, 200, 200));
+  const b = img(1, 1, px(0, 0, 0));
+  const m = differenceMask(a, b, { absolute: true, opacity: 0.5, baseIsA: true, baseOpacity: 0.5 });
+  // highlight at k=0.5 over a half-dimmed base (200 × 0.5 = 100)
+  assertEquals(Math.round(m.data[0]), Math.round(HIGHLIGHT[0] * 0.5 + 100 * 0.5));
+  assertEquals(Math.round(m.data[1]), Math.round(HIGHLIGHT[1] * 0.5 + 100 * 0.5));
+  assertEquals(Math.round(m.data[2]), Math.round(HIGHLIGHT[2] * 0.5 + 100 * 0.5));
+});
