@@ -496,7 +496,7 @@ main { display: flex; flex: 1; min-height: 0; }
 .confirm-ok:disabled, .confirm-cancel:disabled { opacity: .5; cursor: default; }
 
 /* --- workbench chrome -------------------------------------------------------- */
-#diffKeysBtn { position: absolute; right: 14px; bottom: 12px; z-index: var(--z-modal);
+#diffKeysBtn { z-index: var(--z-modal);
   background: color-mix(in srgb, var(--surface) 65%, transparent); border: 1px solid var(--border); border-radius: 6px;
   color: var(--foreground-mid); padding: 5px 7px; cursor: pointer; display: flex; }
 #diffKeysBtn:hover { color: var(--foreground); border-color: var(--foreground-dim); }
@@ -544,10 +544,17 @@ main { display: flex; flex: 1; min-height: 0; }
 .dz-canvas { max-width: 100%; max-height: 100%; object-fit: contain; }
 .dz-opacity { width: 90px; accent-color: var(--secondary); }
 
-/* chrome: mode control bottom-center (keys are primary; the control shows
- state and clicks), One-Up extras bottom-left */
-#diffModes { position: absolute; bottom: 10px; left: 50%; transform: translateX(-50%);
-  display: flex; gap: 4px; z-index: var(--z-modal); }
+/* ONE bottom panel holding all the buttons: the controls strip at the left,
+ the 1–4 mode buttons centered, the keys button at the right — one shared
+ translucent backdrop over the stage image */
+#diffBar { position: absolute; left: 0; right: 0; bottom: 0;
+  display: flex; align-items: center; gap: 10px;
+  background: color-mix(in srgb, var(--surface) 60%, transparent);
+  backdrop-filter: blur(6px);
+  border-top: 1px solid var(--border);
+  padding: 6px 12px; z-index: var(--z-modal); }
+#diffBar #diffModes { display: flex; gap: 4px; margin-left: auto; margin-right: auto; }
+#diffBar #diffCtl { display: flex; gap: 6px; align-items: center; }
 .dz-mode { width: 28px; height: 24px; border-radius: 6px; font-size: 12px;
   background: color-mix(in srgb, var(--surface) 65%, transparent);
   border: 1px solid var(--border); color: var(--foreground-mid); cursor: pointer; }
@@ -561,19 +568,6 @@ main { display: flex; flex: 1; min-height: 0; }
 .dz-lockbtn:hover:not(:disabled) { color: var(--foreground); border-color: var(--foreground-dim); }
 .dz-lockbtn.on { color: var(--secondary); border-color: var(--secondary); }
 .dz-lockbtn:disabled { opacity: 0.35; cursor: default; }
-/* the controls strip, bottom-left: A/B + lock always (with a pair); the
- mode-4 extras (abs/prop, opacity) join in Difference */
-#diffCtl { position: absolute; bottom: 10px; left: 12px; display: flex; gap: 6px;
-  align-items: center; z-index: var(--z-modal); }
-
-/* both bottom strips read as ONE translucent panel over the stage image */
-#diffModes, #diffCtl {
-  background: color-mix(in srgb, var(--surface) 60%, transparent);
-  backdrop-filter: blur(6px);
-  border: 1px solid var(--border);
-  border-radius: 10px;
-  padding: 4px;
-}
 .dz-sidebtn { height: 24px; min-width: 28px; border-radius: 6px;
   font-size: 12px; display: flex; align-items: center; justify-content: center;
   background: color-mix(in srgb, var(--surface) 65%, transparent);

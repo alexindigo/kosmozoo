@@ -51,22 +51,30 @@ function check(name, ok, detail = "") {
     Math.abs(twoUpGeom.acy - twoUpGeom.bcy) < 1 && twoUpGeom.left,
     JSON.stringify(twoUpGeom));
 
-  // the bottom strips read as one translucent panel each (background with
-  // alpha, a border, and rounded corners)
+  // ONE bottom panel holds all the buttons: it spans the bottom, contains
+  // both strips + the keys button, and carries the translucent backdrop
   const panels = await cdp.evaluate(`(() => {
     const alphaOf = (c) => {
       if (c.includes("/")) return parseFloat(c.split("/")[1]); // color(srgb r g b / a)
-      const parts = c.split(","); // rgba(r, g, b, a)
+      const parts = c.split(",");
       return parts.length > 3 ? parseFloat(parts[3]) : 1;
     };
-    const read = (sel) => {
-      const cs = getComputedStyle(document.querySelector(sel));
-      return { alpha: alphaOf(cs.backgroundColor), radius: parseFloat(cs.borderRadius), border: parseFloat(cs.borderTopWidth) };
+    const bar = document.getElementById('diffBar');
+    const cs = getComputedStyle(bar);
+    const r = bar.getBoundingClientRect();
+    return {
+      contains: bar.contains(document.getElementById('diffModes'))
+        && bar.contains(document.getElementById('diffCtl'))
+        && bar.contains(document.getElementById('diffKeysBtn')),
+      alpha: alphaOf(cs.backgroundColor),
+      bottom: window.innerHeight - r.bottom,
+      fullWidth: r.left <= 1 && r.right >= window.innerWidth - 1,
+      modesBg: getComputedStyle(document.getElementById('diffModes')).backgroundColor,
     };
-    return { modes: read('#diffModes'), ctl: read('#diffCtl') };
   })()`);
-  check("chrome: the bottom strips are translucent panels",
-    [panels.modes, panels.ctl].every((p) => p.alpha > 0 && p.alpha < 1 && p.radius >= 8 && parseFloat(p.border) >= 1),
+  check("chrome: ONE translucent bottom panel holds all the buttons",
+    panels.contains && panels.alpha > 0 && panels.alpha < 1 && panels.bottom < 1 && panels.fullWidth
+      && panels.modesBg === "rgba(0, 0, 0, 0)",
     JSON.stringify(panels));
 
   // 2. two view states: unlocked, a gesture writes only the target's key.

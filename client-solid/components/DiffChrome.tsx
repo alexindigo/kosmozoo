@@ -28,52 +28,53 @@ export function DiffChrome() {
         onClick={() => store.actions.diff.close()}
         innerHTML={iconSvg("x", 16)}
       />
-      {/* mode buttons — their own group, bottom-center */}
-      <div id="diffModes">
-        <For each={MODES}>
-          {([key, m]) => (
-            <button
-              class={"dz-mode" + (d().mode === m ? " on" : "")}
-              disabled={!hasB() || undefined}
-              title={`${m} (${key})`}
-              onClick={() => store.actions.diff.setMode(m)}
-            >{key}</button>
-          )}
-        </For>
-      </div>
-      {/* the controls strip, bottom-left: A/B + lock always (with a pair),
- the mode-4 extras (abs/prop, opacity) join in Difference */}
-      <div id="diffCtl">
-        <button
-          class="dz-sidebtn" title="active side — primary in every view (ArrowLeft/Right)"
-          disabled={!hasB() || undefined}
-          onClick={() => store.actions.diff.setCol(d().col === "feed" ? "right" : "feed")}
-        >{d().col === "feed" ? "A" : "B"}</button>
-        <button
-          class={"dz-lockbtn" + (d().locked ? " on" : "")}
-          title={d().locked ? "locked — gestures move both (l)" : "unlocked — gestures move the target (l)"}
-          aria-pressed={d().locked}
-          disabled={!hasB() || undefined}
-          onClick={() => store.actions.diff.setLocked(!d().locked)}
-          innerHTML={iconSvg(d().locked ? "lock" : "lock-open", 14)}
-        />
-        <Show when={hasB() && d().mode === "difference"}>
+      {/* ONE bottom panel holding all the buttons: controls at the left,
+ the 1–4 modes centered, the keys button at the right */}
+      <div id="diffBar">
+        <div id="diffCtl">
           <button
-            class="dz-sidebtn" title="absolute / proportional highlight"
-            onClick={() => store.actions.diff.setDiffAbs(!d().diffAbs)}
-          >{d().diffAbs ? "abs" : "prop"}</button>
-          <input
-            type="range" class="dz-opacity" title="mask opacity"
-            min="0" max="1" step="0.05" value={d().diffOpacity}
-            onInput={(e) => store.actions.diff.setDiffOpacity(parseFloat(e.currentTarget.value))}
+            class="dz-sidebtn" title="active side — primary in every view (ArrowLeft/Right)"
+            disabled={!hasB() || undefined}
+            onClick={() => store.actions.diff.setCol(d().col === "feed" ? "right" : "feed")}
+          >{d().col === "feed" ? "A" : "B"}</button>
+          <button
+            class={"dz-lockbtn" + (d().locked ? " on" : "")}
+            title={d().locked ? "locked — gestures move both (l)" : "unlocked — gestures move the target (l)"}
+            aria-pressed={d().locked}
+            disabled={!hasB() || undefined}
+            onClick={() => store.actions.diff.setLocked(!d().locked)}
+            innerHTML={iconSvg(d().locked ? "lock" : "lock-open", 14)}
           />
-        </Show>
+          <Show when={hasB() && d().mode === "difference"}>
+            <button
+              class="dz-sidebtn" title="absolute / proportional highlight"
+              onClick={() => store.actions.diff.setDiffAbs(!d().diffAbs)}
+            >{d().diffAbs ? "abs" : "prop"}</button>
+            <input
+              type="range" class="dz-opacity" title="mask opacity"
+              min="0" max="1" step="0.05" value={d().diffOpacity}
+              onInput={(e) => store.actions.diff.setDiffOpacity(parseFloat(e.currentTarget.value))}
+            />
+          </Show>
+        </div>
+        <div id="diffModes">
+          <For each={MODES}>
+            {([key, m]) => (
+              <button
+                class={"dz-mode" + (d().mode === m ? " on" : "")}
+                disabled={!hasB() || undefined}
+                title={`${m} (${key})`}
+                onClick={() => store.actions.diff.setMode(m)}
+              >{key}</button>
+            )}
+          </For>
+        </div>
+        <button
+          id="diffKeysBtn" title="actions & keys (?)"
+          onClick={() => store.actions.ui.toggleKeysPanel()}
+          innerHTML={iconSvg("keyboard", 18)}
+        />
       </div>
-      <button
-        id="diffKeysBtn" title="actions & keys (?)"
-        onClick={() => store.actions.ui.toggleKeysPanel()}
-        innerHTML={iconSvg("keyboard", 18)}
-      />
     </>
   );
 }
