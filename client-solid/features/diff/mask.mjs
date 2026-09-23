@@ -24,7 +24,14 @@ export function viewRect(imgW, imgH, view, stageW, stageH) {
   return { dx: cx - (fw * v.s) / 2, dy: cy - (fh * v.s) / 2, dw: fw * v.s, dh: fh * v.s };
 }
 
-export function differenceMask(a, b, { absolute = true, opacity = 1, baseIsA = true, baseOpacity = 1 } = {}) {
+// Real photos carry a noise floor (JPEG recompression, AI re-synthesis):
+// the absolute rule would light up most of any real pair. A delta at or
+// below the threshold counts as IDENTICAL — measured on real variation
+// siblings: ~46% of pixels land at ≤2, so threshold 2 shows the base there
+// and reserves the highlight for genuine differences.
+const DEFAULT_THRESHOLD = 2;
+
+export function differenceMask(a, b, { absolute = true, opacity = 1, baseIsA = true, baseOpacity = 1, threshold = DEFAULT_THRESHOLD } = {}) {
   const base = baseIsA ? a : b;
   const out = new ImageData(a.width, a.height);
   const bd = base.data, ad = a.data, dd = b.data, od = out.data;
@@ -36,7 +43,7 @@ export function differenceMask(a, b, { absolute = true, opacity = 1, baseIsA = t
     const dg = Math.abs(ad[i + 1] - dd[i + 1]);
     const db = Math.abs(ad[i + 2] - dd[i + 2]);
     const delta = Math.max(dr, dg, db);
-    if (delta === 0) {
+    if (delta <= threshold) {
       od[i] = br; od[i + 1] = bg; od[i + 2] = bb; od[i + 3] = 255;
     } else {
       const k = absolute ? opacity : (delta / 255) * opacity;

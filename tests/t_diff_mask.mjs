@@ -111,3 +111,22 @@ Deno.test("mask: baseOpacity dims the base under the highlight too", () => {
   assertEquals(Math.round(m.data[1]), Math.round(HIGHLIGHT[1] * 0.5 + 100 * 0.5));
   assertEquals(Math.round(m.data[2]), Math.round(HIGHLIGHT[2] * 0.5 + 100 * 0.5));
 });
+
+// --- threshold: the noise floor shows the base, not the highlight -------------
+
+Deno.test("mask: deltas at or below the threshold count as identical", () => {
+  const a = img(3, 1, [...px(100, 100, 100), ...px(100, 100, 100), ...px(100, 100, 100)]);
+  const b = img(3, 1, [...px(101, 100, 100), ...px(102, 100, 100), ...px(103, 100, 100)]);
+  const m = differenceMask(a, b, { absolute: true, opacity: 1, baseIsA: true });
+  // delta 1, 2 → base; delta 3 → highlight
+  assertEquals([...m.data.slice(0, 4)], px(100, 100, 100));
+  assertEquals([...m.data.slice(4, 8)], px(100, 100, 100));
+  assertEquals([...m.data.slice(8, 12)], [...HIGHLIGHT, 255]);
+});
+
+Deno.test("mask: threshold 0 restores the strict any-delta rule", () => {
+  const a = img(1, 1, px(100, 100, 100));
+  const b = img(1, 1, px(101, 100, 100));
+  const m = differenceMask(a, b, { absolute: true, opacity: 1, baseIsA: true, threshold: 0 });
+  assertEquals([...m.data], [...HIGHLIGHT, 255]);
+});
