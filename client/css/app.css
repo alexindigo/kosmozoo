@@ -450,9 +450,11 @@ main { display: flex; flex: 1; min-height: 0; }
  .metabody */
 .metabody .ws-head { margin-bottom: 10px; }
 .metabody .ws-name { font-size: 12px; overflow-wrap: anywhere; }
-.metabody .ws-sub { color: var(--foreground-dim); font-size: 11px; margin-top: 2px; }
+.metabody .ws-sub { color: var(--foreground-dim); font-size: 11px; margin-top: 2px;
+  overflow-wrap: anywhere; }
 .metabody .ws-lineage { margin-top: 2px; }
-.metabody .ws-lineage-src { color: var(--secondary); font-size: 11px; }
+.metabody .ws-lineage-src { color: var(--secondary); font-size: 11px;
+  overflow-wrap: anywhere; }
 .metabody a.ws-lineage-src { cursor: pointer; text-decoration: none; }
 .metabody a.ws-lineage-src:hover { text-decoration: underline; }
 
