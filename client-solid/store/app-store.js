@@ -68,6 +68,7 @@ export function makeAppStore() {
       anchorName: null,     // right current (anchors space); null → first
       infoFile: null,       // right current (details space): node-image file…
       infoSource: null,     //   …or a /diff-URL right side's source (else derived)
+      pairedWith: null,     // the left image a /diff open established the pair on
     },
     variations: { open: false, images: [], key: null }, // modal session
     infoOverlay: { open: false, name: "", meta: null }, // anchor ⓘ params
@@ -188,16 +189,24 @@ export function makeAppStore() {
   }));
 
   // a B side pinned to the current graph's node images dies with that graph:
-  // when the feed current moves, a stale infoFile resets to the new graph's
-  // first (or nothing) — /diff-URL sides included
-  createEffect(on(currentNodeImages, (imgs) => {
-    const f = st.diff.infoFile;
-    if (!f) return;
-    if (!imgs.some((im) => im.file === f)) {
-      setSt("diff", "infoFile", imgs[0]?.file ?? null);
-      setSt("diff", "infoSource", null);
-    }
-  }));
+  // when the feed current moves to a DIFFERENT image, a stale infoFile
+  // resets to the new graph's first (or nothing) — /diff-URL sides included.
+  // The reset is gated on the pointer's IDENTITY changing, and skips the
+  // pointer move a /diff open established the pair on (pairedWith).
+  createEffect(on(
+    () => (current() ? `${current().remote}:${current().image}` : null),
+    (key, prevKey) => {
+      const f = st.diff.infoFile;
+      if (!f || key === prevKey) return;
+      if (st.diff.pairedWith === key) return; // the establishing move
+      setSt("diff", "pairedWith", null);
+      const imgs = currentNodeImages();
+      if (!imgs.some((im) => im.file === f)) {
+        setSt("diff", "infoFile", imgs[0]?.file ?? null);
+        setSt("diff", "infoSource", null);
+      }
+    },
+  ));
 
   // The current pointer never names an entry the feed has hidden. This is
   // the ONE guard — enforced against the view, never per action: a vote, a
@@ -1191,6 +1200,8 @@ export function makeAppStore() {
         if (!left || !resolveSide(left)) return false;
         assignCurrent({ remote: left.source ?? left.remote, image: left.file ?? left.image });
         mirrorCurrentHash();
+        // the reset must not fire on THIS establishing pointer move
+        setSt("diff", "pairedWith", `${left.source ?? left.remote}:${left.file ?? left.image}`);
         if (right) {
           const src = right.source ?? right.remote;
           const file = right.file ?? right.image;
