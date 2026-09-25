@@ -105,6 +105,25 @@ function check(name, ok, detail = "") {
       && seg.activeBg === seg.accent && seg.pillRadius >= 20,
     JSON.stringify(seg));
 
+  // the pill is ALWAYS at the bar's center, independent of the left/right
+  // clusters' widths (Two-Up: few left controls; Difference: many)
+  const centered = async () => cdp.evaluate(`(() => {
+    const r = (s) => { const b = document.querySelector(s).getBoundingClientRect(); return { left: b.left, width: b.width };
+    };
+    const bar = r('#diffBar'), pill = r('#diffModes');
+    return Math.abs((pill.left + pill.width / 2) - (bar.left + bar.width / 2));
+  })()`);
+  const offTwoUp = await centered();
+  check("chrome: the mode pill is centered in Two-Up (few left controls)",
+    offTwoUp < 1, `offset=${offTwoUp}`);
+  await cdp.evaluate("document.dispatchEvent(new KeyboardEvent('keydown', { key: '4', bubbles: true }))");
+  await cdp.poll(`(async () => ${KZ}.state.diff.mode === "difference")()`, 5000);
+  const offDiff = await centered();
+  check("chrome: the mode pill stays centered in Difference (many left controls)",
+    offDiff < 1, `offset=${offDiff}`);
+  await cdp.evaluate("document.dispatchEvent(new KeyboardEvent('keydown', { key: '1', bubbles: true }))");
+  await cdp.poll(`(async () => ${KZ}.state.diff.mode === "two-up")()`, 5000);
+
   // 2. two view states: unlocked, a gesture writes only the target's key.
   // (Lock defaults ON — unlock first. Clean slate: no persisted views, so
   // prior suites/runs can't leak a crop in — session-level, settings untouched.)
