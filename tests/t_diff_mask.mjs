@@ -67,9 +67,9 @@ Deno.test("mask: a 1-channel delta is the full highlight when absolute", () => {
 
 Deno.test("mask: the same delta is a partial highlight when proportional", () => {
   const a = img(1, 1, px(100, 100, 100));
-  const b = img(1, 1, px(100, 100, 110)); // delta = 10 → k = 10/255
+  const b = img(1, 1, px(100, 100, 110)); // delta = 10 → k = (10-8)/(255-8) ≈ 0.008
   const m = differenceMask(a, b, { absolute: false, opacity: 1, baseIsA: true });
-  const k = 10 / 255;
+  const k = (10 - 8) / (255 - 8);
   assertEquals(Math.round(m.data[0]), Math.round(HIGHLIGHT[0] * k + 100 * (1 - k)));
   assertEquals(Math.round(m.data[1]), Math.round(HIGHLIGHT[1] * k + 100 * (1 - k)));
   assertEquals(Math.round(m.data[2]), Math.round(HIGHLIGHT[2] * k + 100 * (1 - k)));
@@ -116,12 +116,22 @@ Deno.test("mask: baseOpacity dims the base under the highlight too", () => {
 
 Deno.test("mask: deltas at or below the threshold count as identical", () => {
   const a = img(3, 1, [...px(100, 100, 100), ...px(100, 100, 100), ...px(100, 100, 100)]);
-  const b = img(3, 1, [...px(101, 100, 100), ...px(102, 100, 100), ...px(103, 100, 100)]);
-  const m = differenceMask(a, b, { absolute: true, opacity: 1, baseIsA: true });
-  // delta 1, 2 → base; delta 3 → highlight
+  const b = img(3, 1, [...px(108, 100, 100), ...px(109, 100, 100), ...px(100, 100, 100)]);
+  const m = differenceMask(a, b, { absolute: true, opacity: 1, baseIsA: true, threshold: 8 });
+  // delta 8 → base; delta 9 → highlight; delta 0 → base
   assertEquals([...m.data.slice(0, 4)], px(100, 100, 100));
-  assertEquals([...m.data.slice(4, 8)], px(100, 100, 100));
-  assertEquals([...m.data.slice(8, 12)], [...HIGHLIGHT, 255]);
+  assertEquals([...m.data.slice(4, 8)], [...HIGHLIGHT, 255]);
+  assertEquals([...m.data.slice(8, 12)], px(100, 100, 100));
+});
+
+Deno.test("mask: proportional ramps FROM the threshold, not from zero", () => {
+  const a = img(1, 1, px(0, 0, 0));
+  const b = img(1, 1, px(128, 128, 128));
+  const m = differenceMask(a, b, { absolute: false, opacity: 1, baseIsA: true, threshold: 8 });
+  // k = (128 - 8) / (255 - 8) ≈ 0.486
+  const k = (128 - 8) / (255 - 8);
+  assertEquals(Math.round(m.data[0]), Math.round(HIGHLIGHT[0] * k));
+  assertEquals(Math.round(m.data[1]), Math.round(HIGHLIGHT[1] * k));
 });
 
 Deno.test("mask: threshold 0 restores the strict any-delta rule", () => {

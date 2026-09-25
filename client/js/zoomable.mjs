@@ -28,10 +28,14 @@ export function makeZoomable(el, { key, target, also, panAlways = false, getView
   const targetFor = (ev) => target ? target(ev) : { key, box: el.parentElement };
   // SNAPSHOT the stored view: getView may hand back a live store proxy —
   // after the target's write lands, a proxy reads the NEW value and the
-  // peer's delta would compute against it (ds = 1, the no-op entangle)
+  // peer's delta would compute against it (ds = 1, the no-op entangle).
+  // Non-finite fields are sanitized: a NaN that ever reached a persisted
+  // view (a zero-box gesture) reads as identity, never as poison.
   const read = (k) => {
     const v = k && getView ? getView(k) : null;
-    return v ? { s: v.s, txf: v.txf, tyf: v.tyf } : { ...IDENTITY };
+    if (!v) return { ...IDENTITY };
+    const num = (x) => (Number.isFinite(x) ? x : 0);
+    return { s: num(v.s) || 1, txf: num(v.txf), tyf: num(v.tyf) };
   };
 
   const clampView = (v) => {
@@ -86,6 +90,9 @@ export function makeZoomable(el, { key, target, also, panAlways = false, getView
     if (!e.ctrlKey) return;
     e.preventDefault();
     const t = targetFor(e);
+    // a zero-sized reference box is never a valid target (a hidden element
+    // would divide by zero and poison the view with NaN)
+    if (!t.box || t.box.offsetWidth === 0 || t.box.offsetHeight === 0) return;
     const cur = read(t.key);
     const next = Math.min(12, Math.max(1, cur.s * Math.exp(-e.deltaY * 0.012)));
     if (next === cur.s) return;
@@ -106,6 +113,8 @@ export function makeZoomable(el, { key, target, also, panAlways = false, getView
     const start = read(t.key);
     // the drag pans at any zoom when panAlways — otherwise zoomed-only
     if (!panAlways && start.s <= 1) return;
+    // a zero-sized reference box is never a valid target (see onWheel)
+    if (!t.box || t.box.offsetWidth === 0 || t.box.offsetHeight === 0) return;
     e.preventDefault();
     e.stopPropagation();
     el.setPointerCapture(e.pointerId);

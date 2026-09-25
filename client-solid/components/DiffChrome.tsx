@@ -57,6 +57,11 @@ export function DiffChrome() {
               onClick={() => store.actions.diff.setDiffAbs(!d().diffAbs)}
             >{d().diffAbs ? "abs" : "prop"}</button>
             <input
+              type="range" class="dz-opacity dz-threshold" title="difference threshold — deltas at or below it count as matching"
+              min="0" max="64" step="1" value={d().diffThreshold}
+              onInput={(e) => store.actions.diff.setDiffThreshold(parseInt(e.currentTarget.value, 10))}
+            />
+            <input
               type="range" class="dz-opacity" title="mask opacity"
               min="0" max="1" step="0.05" value={d().diffOpacity}
               onInput={(e) => store.actions.diff.setDiffOpacity(parseFloat(e.currentTarget.value))}

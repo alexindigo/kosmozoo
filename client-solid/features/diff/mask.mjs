@@ -25,11 +25,13 @@ export function viewRect(imgW, imgH, view, stageW, stageH) {
 }
 
 // Real photos carry a noise floor (JPEG recompression, AI re-synthesis):
-// the absolute rule would light up most of any real pair. A delta at or
-// below the threshold counts as IDENTICAL — measured on real variation
-// siblings: ~46% of pixels land at ≤2, so threshold 2 shows the base there
-// and reserves the highlight for genuine differences.
-const DEFAULT_THRESHOLD = 2;
+// the absolute rule lights up most of any real pair. The threshold is the
+// floor below which pixels count as MATCHING (measured on real variation
+// siblings, the noise band sits at ≤8) — user-tunable in the mask controls.
+// Proportional ramps FROM the threshold: the highlight fades in above it
+// instead of from zero, so repaint noise shows nothing and genuine
+// changes light up.
+const DEFAULT_THRESHOLD = 8;
 
 export function differenceMask(a, b, { absolute = true, opacity = 1, baseIsA = true, baseOpacity = 1, threshold = DEFAULT_THRESHOLD } = {}) {
   const base = baseIsA ? a : b;
@@ -46,7 +48,9 @@ export function differenceMask(a, b, { absolute = true, opacity = 1, baseIsA = t
     if (delta <= threshold) {
       od[i] = br; od[i + 1] = bg; od[i + 2] = bb; od[i + 3] = 255;
     } else {
-      const k = absolute ? opacity : (delta / 255) * opacity;
+      const k = absolute
+        ? opacity
+        : Math.max(0, (delta - threshold) / (255 - threshold)) * opacity;
       od[i] = HIGHLIGHT[0] * k + br * (1 - k);
       od[i + 1] = HIGHLIGHT[1] * k + bg * (1 - k);
       od[i + 2] = HIGHLIGHT[2] * k + bb * (1 - k);

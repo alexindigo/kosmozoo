@@ -420,6 +420,14 @@ function check(name, ok, detail = "") {
     return [...d].join(",") !== ${JSON.stringify(row0)};
   })()`, 5000).then(() => true).catch(() => false);
   check("Difference: mode 4 follows the crop (pan re-renders the mask)", true);
+  // regression: a gesture in mode 4 must never poison the view with NaN
+  // (the cells are display:none there — a 0×0 reference box divided by zero)
+  const finite = await cdp.evaluate(`(async () => {
+    const v = ${KZ}.state.views["fake:flux-basic.png"];
+    return v ? { txf: v.txf, finite: Number.isFinite(v.txf) && Number.isFinite(v.tyf) } : null;
+  })()`);
+  check("Difference: a drag in mode 4 keeps the view finite (no NaN)",
+    finite?.finite === true, JSON.stringify(finite));
 
   // A/B (Left/Right) changes the mask base — no separate base button; the
   // bottom-left controls strip holds A/B + lock (+ abs/prop in mode 4).
@@ -427,6 +435,26 @@ function check(name, ok, detail = "") {
   // highlight is opaque; drop to 0.5 so the flip shows.)
   const ctl = await cdp.evaluate(`document.querySelectorAll('#diffCtl .dz-sidebtn').length`);
   check("Difference: the controls strip is A/B + abs/prop (base follows col)", ctl === 2, String(ctl));
+
+  // the threshold knob: raising the match floor hides moderate differences
+  await cdp.poll(`!!document.querySelector('.dz-threshold')`, 5000);
+  const orangeCount = `(() => {
+    const c = document.querySelector('.dz-canvas');
+    const d = c.getContext('2d').getImageData(0, 0, c.width, c.height).data;
+    let n = 0;
+    for (let i = 0; i < d.length; i += 4) if ((${ORANGE})(d, i)) n++;
+    return n;
+  })()`;
+  const s8 = await cdp.evaluate(orangeCount);
+  await cdp.evaluate(`(async () => { ${KZ}.actions.diff.setDiffThreshold(250); })()`);
+  const dropped = await cdp.poll(`(() => {
+    const n = ${orangeCount};
+    return n < ${s8} * 0.1;
+  })()`, 5000).then(() => true).catch(() => false);
+  const n250 = await cdp.evaluate(orangeCount);
+  check("Difference: the threshold knob tunes the match floor", dropped,
+    `orange ${s8} @8 -> ${n250} @250`);
+  await cdp.evaluate(`(async () => { ${KZ}.actions.diff.setDiffThreshold(8); })()`);
   await cdp.evaluate(`(async () => { ${KZ}.actions.diff.setDiffOpacity(0.5); })()`);
   const row1 = await cdp.poll(`(() => {
     const c = document.querySelector('.dz-canvas');

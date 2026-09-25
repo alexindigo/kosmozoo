@@ -64,6 +64,7 @@ export function makeAppStore() {
       activeOpacity: 1,     // the active column's photo opacity (every mode)
       diffAbs: true,        // absolute vs proportional highlight
       diffOpacity: 1,
+      diffThreshold: 8,     // the match floor: deltas at or below it show the base
       anchorName: null,     // right current (anchors space); null → first
       infoFile: null,       // right current (details space): node-image file…
       infoSource: null,     //   …or a /diff-URL right side's source (else derived)
@@ -1099,6 +1100,7 @@ export function makeAppStore() {
       setActiveOpacity(x) { setSt("diff", "activeOpacity", Math.min(1, Math.max(0, x))); },
       setDiffAbs(x) { setSt("diff", "diffAbs", !!x); },
       setDiffOpacity(x) { setSt("diff", "diffOpacity", Math.min(1, Math.max(0, x))); },
+      setDiffThreshold(x) { setSt("diff", "diffThreshold", Math.min(255, Math.max(0, Math.round(x)))); },
       // step the active column: the feed column walks the feed view list,
       // the right column walks its pane (anchors, or the current graph's
       // node images)

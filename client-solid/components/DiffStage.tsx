@@ -77,7 +77,10 @@ export function DiffStage() {
   // one binding on the stage box; the gesture's target is the layer VISIBLE
   // at the pointer (hitLayer — derived from the same layout state the
   // renderer uses, so no layer is ever unreachable). Locked adds the peer
-  // key as the delta's second target.
+  // key as the delta's second target. THE REFERENCE BOX: the layer's own
+  // cell in every mode EXCEPT Difference — there the cells are display:none
+  // (0×0 — dividing by them would poison the view with NaN), so the stage
+  // itself is the box the mask draws against.
   const targetFor = (e) => {
     const layer = hitLayer({
       mode: d().mode, col: d().col, splitT: d().splitT,
@@ -85,7 +88,8 @@ export function DiffStage() {
       cellBRect: hasB() ? cellBEl.getBoundingClientRect() : null,
       stageRect: stageEl.getBoundingClientRect(),
     });
-    return layer === "b" ? { key: keyB(), box: cellBEl } : { key: keyA(), box: cellAEl };
+    const box = d().mode === "difference" ? stageEl : (layer === "b" ? cellBEl : cellAEl);
+    return { key: layer === "b" ? keyB() : keyA(), box };
   };
   const alsoFor = (t) => {
     if (!d().locked || !hasB()) return null;
@@ -140,7 +144,7 @@ export function DiffStage() {
   createEffect(() => {
     const aUrl = srcA(), bUrl = srcB();
     const absolute = d().diffAbs, opacity = d().diffOpacity, baseIsA = d().col === "feed";
-    const baseOpacity = d().activeOpacity;
+    const baseOpacity = d().activeOpacity, threshold = d().diffThreshold;
     const vA = keyA() ? store.state.views[keyA()] : null;
     const vB = keyB() ? store.state.views[keyB()] : null;
     if (d().mode !== "difference" || !hasB() || !aUrl || !bUrl || !canvasEl) return;
@@ -164,7 +168,7 @@ export function DiffStage() {
         x.drawImage(im, r.dx, r.dy, r.dw, r.dh);
         return x.getImageData(0, 0, W, H);
       };
-      const mask = differenceMask(grab(ia, vA), grab(ib, vB), { absolute, opacity, baseIsA, baseOpacity });
+      const mask = differenceMask(grab(ia, vA), grab(ib, vB), { absolute, opacity, baseIsA, baseOpacity, threshold });
       if (cancelled) return;
       canvasEl.width = W; canvasEl.height = H;
       canvasEl.getContext("2d").putImageData(mask, 0, 0);
