@@ -438,6 +438,21 @@ function check(name, ok, detail = "") {
 
   // the threshold knob: raising the match floor hides moderate differences
   await cdp.poll(`!!document.querySelector('.dz-threshold')`, 5000);
+  // every slider control has a leading icon and a tooltip on its group
+  const ctlIcons = await cdp.evaluate(`(() => {
+    const groups = [...document.querySelectorAll('#diffCtl .dz-ctl')];
+    return {
+      n: groups.length,
+      icons: groups.every((g) => !!g.querySelector('.dz-ctl-icon svg')),
+      titles: groups.map((g) => g.title),
+    };
+  })()`);
+  check("controls: each slider has an icon and a tooltip",
+    ctlIcons.n === 3 && ctlIcons.icons
+      && ctlIcons.titles[0].includes("active image opacity")
+      && ctlIcons.titles[1].includes("threshold")
+      && ctlIcons.titles[2].includes("highlight opacity"),
+    JSON.stringify(ctlIcons));
   const orangeCount = `(() => {
     const c = document.querySelector('.dz-canvas');
     const d = c.getContext('2d').getImageData(0, 0, c.width, c.height).data;

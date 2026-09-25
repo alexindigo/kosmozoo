@@ -37,6 +37,14 @@ const PATHS = {
   <path d="M13 4h7v7h-7z" />
   <path d="M4 13h7v7h-7z" />
   <path d="M13 13h7v7h-7z" />`,
+  "opacity": `<path stroke="none" d="M0 0h24v24H0z" fill="none"/>
+  <rect x="4" y="4" width="16" height="16" rx="2" />
+  <path d="M4 12h16v6a2 2 0 0 1 -2 2h-12a2 2 0 0 1 -2 -2z" fill="currentColor" stroke="none" />`,
+  "filter": `<path stroke="none" d="M0 0h24v24H0z" fill="none"/>
+  <path d="M4 5h16l-6 7v5l-4 2v-7z" />`,
+  "contrast": `<path stroke="none" d="M0 0h24v24H0z" fill="none"/>
+  <circle cx="12" cy="12" r="9" />
+  <path d="M12 4a8 8 0 0 0 0 16z" fill="currentColor" stroke="none" />`,
   "lock": `<path stroke="none" d="M0 0h24v24H0z" fill="none"/>
   <path d="M5 13a2 2 0 0 1 2 -2h10a2 2 0 0 1 2 2v6a2 2 0 0 1 -2 2h-10a2 2 0 0 1 -2 -2v-6z" />
   <path d="M11 16a1 1 0 1 0 2 0a1 1 0 0 0 -2 0" />
