@@ -148,10 +148,8 @@ export function DiffChrome() {
                 disabled={!hasB() || undefined}
                 title={`${label} (${key})`}
                 onClick={() => store.actions.diff.setMode(m)}
-              >
-                <span class="dz-segicon" innerHTML={iconSvg(icon, 14)} />
-                {label}
-              </button>
+                innerHTML={iconSvg(icon, 16)}
+              />
             )}
           </For>
         </div>

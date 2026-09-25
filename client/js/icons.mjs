@@ -25,18 +25,24 @@ const PATHS = {
   "player-play": `<path stroke="none" d="M0 0h24v24H0z" fill="none"/>
   <path d="M7 4v16l13 -8z" />`,
   "view-two-up": `<path stroke="none" d="M0 0h24v24H0z" fill="none"/>
-  <rect x="3" y="5" width="8" height="14" rx="1" />
-  <rect x="13" y="5" width="8" height="14" rx="1" />`,
-  "view-one-up": `<path stroke="none" d="M0 0h24v24H0z" fill="none"/>
-  <rect x="5" y="5" width="14" height="14" rx="1" />`,
-  "view-split": `<path stroke="none" d="M0 0h24v24H0z" fill="none"/>
-  <rect x="4" y="4" width="16" height="16" rx="1" />
+  <rect x="3.5" y="6" width="6.5" height="12" rx="1.5" />
+  <rect x="14" y="6" width="6.5" height="12" rx="1.5" />
   <path d="M12 4v16" />`,
+  "view-one-up": `<path stroke="none" d="M0 0h24v24H0z" fill="none"/>
+  <rect x="4" y="4" width="11" height="11" rx="2" />
+  <rect x="9" y="9" width="11" height="11" rx="2" />`,
+  "view-split": `<path stroke="none" d="M0 0h24v24H0z" fill="none"/>
+  <rect x="3" y="7" width="7" height="10" rx="1.5" />
+  <rect x="14" y="7" width="7" height="10" rx="1.5" />
+  <path d="M12 3v18" />
+  <circle cx="12" cy="3" r="0.5" fill="currentColor" />
+  <circle cx="12" cy="21" r="0.5" fill="currentColor" />`,
   "view-difference": `<path stroke="none" d="M0 0h24v24H0z" fill="none"/>
-  <path d="M4 4h7v7h-7z" />
-  <path d="M13 4h7v7h-7z" />
-  <path d="M4 13h7v7h-7z" />
-  <path d="M13 13h7v7h-7z" />`,
+  <rect x="4" y="4" width="16" height="16" rx="2" />
+  <path d="M5 14 L14 5" />
+  <path d="M5 19 L19 5" />
+  <path d="M10 19 L19 10" />
+  <path d="M15 19 L19 15" />`,
   "opacity": `<path stroke="none" d="M0 0h24v24H0z" fill="none"/>
   <rect x="4" y="4" width="16" height="16" rx="2" />
   <path d="M4 12h16v6a2 2 0 0 1 -2 2h-12a2 2 0 0 1 -2 -2z" fill="currentColor" stroke="none" />`,

@@ -69,18 +69,20 @@ function check(name, ok, detail = "") {
       alpha: alphaOf(cs.backgroundColor),
       bottom: window.innerHeight - r.bottom,
       fullWidth: r.left <= 1 && r.right >= window.innerWidth - 1,
-      modesBg: getComputedStyle(document.getElementById('diffModes')).backgroundColor,
+      modesInBar: bar.contains(document.getElementById('diffModes')),
+      modesAlpha: alphaOf(getComputedStyle(document.getElementById('diffModes')).backgroundColor),
     };
   })()`);
   check("chrome: ONE translucent bottom panel holds all the buttons",
     panels.contains && panels.alpha > 0 && panels.alpha < 1 && panels.bottom < 1 && panels.fullWidth
-      && panels.modesBg === "rgba(0, 0, 0, 0)",
+      && panels.modesInBar && panels.modesAlpha > 0 && panels.modesAlpha < 1,
     JSON.stringify(panels));
 
-  // the mode switcher is Kaleidoscope-style: icon + text labels in one
-  // segmented control, the active segment filled with the accent
+  // the mode switcher is Kaleidoscope's icon-only pill: four glyph segments
+  // in a dark capsule, the active one highlighted with the accent
   const seg = await cdp.evaluate(`(() => {
-    const btns = [...document.querySelectorAll('.dz-segbtn')];
+    const bar = document.querySelector('#diffModes');
+    const btns = [...bar.querySelectorAll('.dz-segbtn')];
     const probe = document.createElement('span');
     probe.style.color = 'var(--secondary)';
     document.body.appendChild(probe);
@@ -88,18 +90,19 @@ function check(name, ok, detail = "") {
     probe.remove();
     const on = btns.find((b) => b.classList.contains('on'));
     return {
-      labels: btns.map((b) => b.textContent.trim()),
-      icons: btns.every((b) => !!b.querySelector('.dz-segicon svg')),
-      activeLabel: on?.textContent.trim(),
+      n: btns.length,
+      noLabels: btns.every((b) => b.textContent.trim() === ""),
+      icons: btns.every((b) => !!b.querySelector('svg')),
+      titles: btns.map((b) => b.title),
       activeBg: on ? getComputedStyle(on).backgroundColor : null,
       accent,
-      grouped: btns.length > 1 && getComputedStyle(btns[1]).borderLeftWidth !== "0px",
+      pillRadius: parseFloat(getComputedStyle(bar).borderRadius),
     };
   })()`);
-  check("chrome: segmented mode buttons with labels, active filled with the accent",
-    seg.labels.join("|") === "Two-Up|One-Up|Split|Difference"
-      && seg.icons && seg.activeLabel === "Two-Up"
-      && seg.activeBg === seg.accent && seg.grouped,
+  check("chrome: icon-only segmented pill, active highlighted with the accent",
+    seg.n === 4 && seg.noLabels && seg.icons
+      && seg.titles.every((t) => /\(\d\)$/.test(t))
+      && seg.activeBg === seg.accent && seg.pillRadius >= 20,
     JSON.stringify(seg));
 
   // 2. two view states: unlocked, a gesture writes only the target's key.
