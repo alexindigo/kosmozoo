@@ -436,23 +436,75 @@ function check(name, ok, detail = "") {
   const ctl = await cdp.evaluate(`document.querySelectorAll('#diffCtl .dz-sidebtn').length`);
   check("Difference: the controls strip is A/B + abs/prop (base follows col)", ctl === 2, String(ctl));
 
-  // the threshold knob: raising the match floor hides moderate differences
-  await cdp.poll(`!!document.querySelector('.dz-threshold')`, 5000);
-  // every slider control has a leading icon and a tooltip on its group
+  // every slider control is an icon button (with a tooltip); clicking opens
+  // its vertical slider popup
   const ctlIcons = await cdp.evaluate(`(() => {
-    const groups = [...document.querySelectorAll('#diffCtl .dz-ctl')];
+    const groups = [...document.querySelectorAll('#diffCtl .dz-vslider')];
     return {
       n: groups.length,
-      icons: groups.every((g) => !!g.querySelector('.dz-ctl-icon svg')),
+      icons: groups.every((g) => !!g.querySelector('.dz-vbtn svg')),
       titles: groups.map((g) => g.title),
     };
   })()`);
-  check("controls: each slider has an icon and a tooltip",
+  check("controls: each slider is an icon button with a tooltip",
     ctlIcons.n === 3 && ctlIcons.icons
       && ctlIcons.titles[0].includes("active image opacity")
       && ctlIcons.titles[1].includes("threshold")
       && ctlIcons.titles[2].includes("highlight opacity"),
     JSON.stringify(ctlIcons));
+
+  // the popup: anchored above its icon, fill from the bottom, thumb centered
+  await cdp.clickAt('#diffCtl .dz-active-op');
+  await cdp.poll(`!!document.querySelector('.dz-vpop .dz-vtrack')`, 5000);
+  const pop = await cdp.evaluate(`(() => {
+    const r = (s) => {
+      const b = document.querySelector(s).getBoundingClientRect();
+      return { left: b.left, top: b.top, right: b.right, bottom: b.bottom, width: b.width, height: b.height };
+    };
+    return {
+      btn: r('#diffCtl .dz-active-op'),
+      pop: r('.dz-vpop'),
+      track: r('.dz-vtrack'),
+      thumb: r('.dz-vthumb'),
+      fill: r('.dz-vfill'),
+    };
+  })()`);
+  const popGeom = {
+    above: pop.pop.bottom <= pop.btn.top + 1,
+    centeredOnBtn: Math.abs((pop.pop.left + pop.pop.width / 2) - (pop.btn.left + pop.btn.width / 2)),
+    thumbCentered: Math.abs((pop.thumb.left + pop.thumb.width / 2) - (pop.track.left + pop.track.width / 2)),
+    fillFromBottom: Math.abs(pop.fill.bottom - pop.track.bottom) < 1,
+    thumbAtTop: Math.abs((pop.thumb.top + pop.thumb.height / 2) - pop.track.top),
+  };
+  const popValue = await cdp.evaluate(`(async () => ${KZ}.state.diff.activeOpacity)()`);
+  check("popup: above the icon, thumb centered, fill from the bottom",
+    popGeom.above && popGeom.centeredOnBtn < 2 && popGeom.thumbCentered < 1 && popGeom.fillFromBottom,
+    JSON.stringify(popGeom));
+  // the thumb's center marks the value point (opacity 1 → the track's top)
+  check("popup: the thumb marks the current value (1 → top)",
+    popValue === 1 && popGeom.thumbAtTop < 2, JSON.stringify({ ...popGeom, value: popValue }));
+  // drag the track down → the value drops and the ACTIVE layer follows
+  // (col is "feed" here → the A layer)
+  await cdp.evaluate(`(() => {
+    const r = document.querySelector('.dz-vtrack').getBoundingClientRect();
+    window.__vt = { x: r.left + r.width / 2, y0: r.top + 10, y1: r.top + r.height - 10 };
+  })()`);
+  const vt = await cdp.evaluate(`window.__vt`);
+  await cdp.drag(vt.x, vt.y0, vt.x, vt.y1);
+  await cdp.poll(`(async () => ${KZ}.state.diff.activeOpacity < 0.3)()`, 5000);
+  const afterDrag = await cdp.evaluate(`(async () => ({
+    v: ${KZ}.state.diff.activeOpacity,
+    op: getComputedStyle(document.querySelector('.dz-a .dz-img')).opacity,
+  }))()`);
+  check("popup: dragging the track sets the value (active layer follows)",
+    afterDrag.v < 0.3 && Math.abs(parseFloat(afterDrag.op) - afterDrag.v) < 1e-3,
+    JSON.stringify(afterDrag));
+  // Esc closes the popup, not the workbench
+  await cdp.evaluate("document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }))");
+  await cdp.poll(`!document.querySelector('.dz-vpop')`, 5000);
+  const stillOpen = await cdp.evaluate(`(async () => ${KZ}.state.diff.open)()`);
+  check("popup: Esc closes the popup, workbench stays open", stillOpen === true);
+  await cdp.evaluate(`(async () => { ${KZ}.actions.diff.setActiveOpacity(1); })()`);
   const orangeCount = `(() => {
     const c = document.querySelector('.dz-canvas');
     const d = c.getContext('2d').getImageData(0, 0, c.width, c.height).data;
