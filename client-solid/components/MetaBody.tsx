@@ -13,6 +13,7 @@
 import { createMemo, For, Show } from "solid-js";
 import { useAppStore } from "../store/app-store.js";
 import { fullFieldRows, valueDiffer, nodeImages, NODE_IMG_EXT } from "../store/fields.js";
+import { measuredSrc } from "../lib/img-measure.js";
 
 export function MetaBody(props) {
   const store = useAppStore();
@@ -66,12 +67,24 @@ export function MetaBody(props) {
         </For>
         <Show when={props.host && !props.skipImages}>
           <For each={nodeImages(props.meta, props.host)}>
-            {(im) => (
-              <div class="infoimg">
-                <div class="plabel">{im.label}</div>
-                <img src={im.src} loading="lazy" alt={im.file} />
-              </div>
-            )}
+            {(im) => {
+              // the feed's rule here too: the img mounts only at its
+              // measured aspect — no grow-on-load morph (a failed measure
+              // still renders so the broken-bytes state stays visible)
+              const s = () => measuredSrc(im.src);
+              return (
+                <div class="infoimg">
+                  <div class="plabel">{im.label}</div>
+                  <Show when={s() !== "pending"}>
+                    <img
+                      src={im.src}
+                      alt={im.file}
+                      style={s() !== "failed" ? { "aspect-ratio": `${s().w} / ${s().h}`, width: "100%" } : undefined}
+                    />
+                  </Show>
+                </div>
+              );
+            }}
           </For>
         </Show>
       </Show>
