@@ -183,6 +183,27 @@ function cartesianProduct(arrays) {
   return out;
 }
 
+// Breadth-first sweep order: index-major within each axis. Given axes
+// [A: a1,a2] × [B: b1,b2,b3] × [C: c1], produce:
+//   a1b1c1, a2b2c1, a1b3c1, a2b1c1, ...
+// i.e. "in order of the panels in the variation UI" — round-robin across
+// axes, so no single axis drains before the others have sampled.
+export function breadthFirstSweep(arrays) {
+  if (arrays.length === 0) return [[]];
+  const out = [];
+  const count = arrays.reduce((n, arr) => n * arr.length, 1);
+  for (let i = 0; i < count; i++) {
+    let idx = i;
+    const combo = [];
+    for (const arr of arrays) {
+      combo.push(arr[idx % arr.length]);
+      idx = Math.floor(idx / arr.length);
+    }
+    out.push(combo);
+  }
+  return out;
+}
+
 // Each enabled range now carries its own `increment`. A single global
 // `fallbackIncrement` is used for entries missing one (legacy callers).
 // `imageParams` (LoadImage sweep) adds enum axes: permutations are the
@@ -201,23 +222,33 @@ export function generatePermutations(ranges, fallbackIncrement, currentValues, i
     return rangeValues(r.min, r.max, inc);
   });
   const imgKeys = imgEnabled.map(([k]) => k);
-  const imgArrays = imgEnabled.map(([, p]) => p.values);
+  // Deduplicate image values per axis: the same file listed twice in a sweep
+  // (duplicate LoadImage nodes, or a file re-selected in the variations UI)
+  // would generate the exact same permutation twice, submitting the same
+  // image twice. Preserve first-occurrence order.
+  const imgArrays = imgEnabled.map(([, p]) => [...new Set(p.values)]);
 
   const fmt = (v) => (typeof v === "string" ? v : formatValue(v));
   const currentKey = [...keys, ...imgKeys].map((k) => fmt(currentValues[k])).join("|");
 
-  const product = cartesianProduct([...valueArrays, ...imgArrays]);
+  // Image axes are the UI panels' first-order selection (LoadImage sweep) —
+  // they vary fastest in breadth-first so numerics spread over images, not
+  // the reverse. Column-major would stall images behind numerics.
+  // Order axes the same way they're consumed downstream:
+  //   - enumerate breadth-first across all axes (img axis fastest)
+  //   - enumerate the KEYS in the same order so perm[i] maps to the right name
+  const allKeys = [...imgKeys, ...keys];
+  const allArrays = [...imgArrays, ...valueArrays];
+  const product = breadthFirstSweep(allArrays);
   return product.filter((perm) => {
     // the current combo is redundant only when EVERY axis sits at its
     // current value — a swept LoadImage axis at a DIFFERENT file makes the
     // combination novel, so the current denoise/cfg/… value must NOT be
     // skipped there
-    if (keys.length === 0) return perm.map(fmt).join("|") !== currentKey;
-    const imgOffset = keys.length;
-    const numericsCurrent = keys.every((k, i) => fmt(perm[i]) === fmt(currentValues[k]));
-    const imagesCurrent = imgKeys.every((k, j) => fmt(perm[imgOffset + j]) === fmt(currentValues[k]));
-    return !(numericsCurrent && imagesCurrent);
-  }).map((perm) => Object.fromEntries([...keys, ...imgKeys].map((k, i) => [k, perm[i]])));
+    if (allKeys.length === 0) return perm.map(fmt).join("|") !== currentKey;
+    const allAtCurrent = perm.every((v, i) => fmt(v) === fmt(currentValues[allKeys[i]]));
+    return !allAtCurrent;
+  }).map((perm) => Object.fromEntries(allKeys.map((k, i) => [k, perm[i]])));
 }
 
 // --- filename template -------------------------------------------------------
@@ -256,6 +287,30 @@ export function dedupHostTag(basename, hostTag) {
   let b = basename;
   while (b.startsWith(hostTag) && b.length > hostTag.length) b = b.slice(hostTag.length);
   return b;
+}
+
+// Filesystem NAME_MAX is 255 bytes; ComfyUI appends "_NNNNN_.png" (~12) and
+// the caller wraps the basename with <host-tag><pfx><sfx>. Cap the lineage
+// middle at 200 chars so the assembled prefix can never hit NAME_MAX.
+// Fold in the MIDDLE (user directive 2026-09-05): keep head AND tail —
+// head carries the pipeline identity, tail carries the newest lineage —
+// and mark the fold with "~".
+export const MAX_BASENAME = 200;
+
+export function clampBasename(basename, max = MAX_BASENAME) {
+  if (basename.length <= max) return basename;
+  const keep = max - 1;                 // one char reserved for the "~"
+  const head = Math.ceil(keep / 2);
+  const tail = Math.floor(keep / 2);
+  return basename.slice(0, head) + "~" + basename.slice(basename.length - tail);
+}
+
+// Sources previously varied sometimes carry the "<host>#" tag re-embedded
+// MID-name (e.g. "ark#athena_impl_..._ark#var_alisa_impl_..."). dedupHostTag
+// strips only the leading run; this removes every re-occurrence so tags
+// don't re-accumulate across generations.
+export function stripWideHostTag(basename, hostTag) {
+  return basename.split(hostTag).join("");
 }
 
 // The lineage tag: ComfyUI writes every extra_pnginfo key as a JSON-encoded
@@ -311,8 +366,20 @@ export function findProducingSaveImage(graph, originalFilename) {
 // its extension — including the ComfyUI counter (e.g. "StyleMix_01822_") —
 // so the variation's name traces back to the source image.
 // Returns { kept, dropped } — how many nodes affected.
+
+// How much of the 255-byte NAME_MAX remains for the lineage middle after
+// <host-tag><pfx> and <sfx> have claimed their share.
+export const HEADROOM = 15;  // ComfyUI's "_NNNNN_.png" counter suffix
+export const NAME_MAX_WITHOUT_COUNTER = 200;  // hard 200-cap on the assembled prefix
+export function clampBudget(pfx, sfx) {
+  return 255 - HEADROOM - String(pfx).length - String(sfx).length;
+}
+
 export function narrowToOneSaveImage(graph, producing, basename, pfx, sfx) {
-  producing.node.inputs.filename_prefix = pfx + basename + sfx;
+  // Assembled prefix gets the same middle-fold treatment as the lineage middle
+  // alone: <head> + "~" + <tail>, at most NAME_MAX_WITHOUT_COUNTER. PFX head
+  // and SFX tail both survive.
+  producing.node.inputs.filename_prefix = clampBasename(pfx + basename + sfx, NAME_MAX_WITHOUT_COUNTER);
   let dropped = 0;
   for (const [nid, n] of Object.entries(graph)) {
     if (nid === producing.id) continue;
@@ -330,7 +397,7 @@ export function wrapAllSaveImagePrefixes(graph, pfx, sfx) {
   for (const n of Object.values(graph)) {
     if (String(n.class_type ?? "").toLowerCase() !== "saveimage") continue;
     const orig = String(n.inputs?.filename_prefix ?? "");
-    n.inputs.filename_prefix = pfx + orig + sfx;
+    n.inputs.filename_prefix = pfx + clampBasename(orig) + sfx;
     touched++;
   }
   return touched;
@@ -437,7 +504,8 @@ export function register(kz) {
     // filename_prefix so variations trace back to the source image. A source
     // that is itself a variation already carries "<host>#" (maybe several
     // deep) — dedup so the output carries exactly one.
-    const originalBasename = dedupHostTag(stripExtension(filename), hostTag);
+    const originalBasename = clampBasename(
+      stripWideHostTag(dedupHostTag(stripExtension(filename), hostTag), hostTag));
 
     const errors = [];
     let submitted = 0;

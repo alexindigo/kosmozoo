@@ -13,6 +13,11 @@ import {
   resolveRelativeRanges,
   dedupHostTag,
   lineageTag,
+  clampBasename,
+  stripWideHostTag,
+  clampBudget,
+  HEADROOM,
+  breadthFirstSweep,
 } from "../plugins/variations/plugin.mjs";
 
 // --- permutation engine ---------------------------------------------------
@@ -585,4 +590,173 @@ Deno.test("mutateGraph: a declared-FLOAT strength sweeps in floats, not rounded 
   const params = inspectGraph(graph, types);
   const { graph: mutated } = mutateGraph(graph, { "LoraLoaderModelOnly.strength_model": 0.55 }, params);
   assertEquals(mutated["1"].inputs.strength_model, 0.55);
+});
+
+// --- Errno 36 regression: basename clamp + host-tag stripping (2026-09-05) --
+
+Deno.test("clampBasename: leaves short basenames alone", () => {
+  assertEquals(clampBasename("athena_impl_00047_"), "athena_impl_00047_");
+});
+
+Deno.test("clampBasename: folds the MIDDLE of over-200-char lineage chains", () => {
+  const long = "HEADHEADHEADHEADHEADHEAD" + "x".repeat(400) + "TAILTAILTAILTAIL";
+  const out = clampBasename(long);
+  assertEquals(out.length, 200);
+  assert(out.startsWith("HEADHEADHEAD"), "head preserved");
+  assert(out.endsWith("TAILTAILTAILTAIL"), "tail preserved");
+  assert(out.includes("~"), "fold marker present");
+});
+
+Deno.test("clampBasename: head and tail are balanced", () => {
+  const out = clampBasename("a".repeat(300));
+  const head = out.slice(0, out.indexOf("~"));
+  const tail = out.slice(out.indexOf("~") + 1);
+  assertEquals(head.length, 100);
+  assertEquals(tail.length, 99);
+  assertEquals(out[head.length], "~");
+});
+
+Deno.test("clampBasename: custom max", () => {
+  assertEquals(clampBasename("abcdefgh", 5), "ab~gh");
+  assertEquals(clampBasename("abcd", 5), "abcd");
+});
+
+Deno.test("stripWideHostTag: removes every re-occurrence of the host tag", () => {
+  const s = "athena_impl_00047__0.55_ark#var_alisa_impl_00341_ark#ark#chain_00001_";
+  assertEquals(
+    stripWideHostTag(s, "ark#"),
+    "athena_impl_00047__0.55_var_alisa_impl_00341_chain_00001_",
+  );
+});
+
+Deno.test("stripWideHostTag: no-op when tag absent", () => {
+  assertEquals(stripWideHostTag("foo_00001_", "ark#"), "foo_00001_");
+});
+
+Deno.test("wrapAllSaveImagePrefixes: fallback path clamps over-length own prefixes", () => {
+  const graph = {
+    "18": { class_type: "SaveImage", inputs: { filename_prefix: "z".repeat(300), images: ["17", 0] } },
+  };
+  wrapAllSaveImagePrefixes(graph, "P_", "_S");
+  const prefix = graph["18"].inputs.filename_prefix;
+  assertEquals(prefix.length, 2 + 200 + 2);
+  assert(prefix.startsWith("P_"));
+  assert(prefix.endsWith("_S"));
+  assert(prefix.includes("~"));
+});
+
+Deno.test("wrapAllSaveImagePrefixes: short prefixes pass through unchanged", () => {
+  const graph = {
+    "18": { class_type: "SaveImage", inputs: { filename_prefix: "small", images: ["17", 0] } },
+  };
+  wrapAllSaveImagePrefixes(graph, "P_", "_S");
+  assertEquals(graph["18"].inputs.filename_prefix, "P_small_S");
+});
+// --- clampBudget: assembled-prefix length bound (Errno 36 round 2) ---------
+
+Deno.test("clampBudget: pfx sfx eat from NAME_MAX", () => {
+  assertEquals(clampBudget("ark#", "_0.55"), 255 - HEADROOM - 4 - 5);
+});
+
+Deno.test("narrowToOneSaveImage: assembles under NAME_MAX when budget small", () => {
+  const graph = {
+    "18": { class_type: "SaveImage", inputs: { filename_prefix: "anything", images: ["17", 0] } },
+  };
+  const producing = { id: "18", node: graph["18"], prefix: "anything" };
+  const long = "x".repeat(400);
+  narrowToOneSaveImage(graph, producing, long, "P_", "_S");
+  const prefix = graph["18"].inputs.filename_prefix;
+  assert(prefix.length <= 255, "assembled prefix within NAME_MAX");
+  assert(prefix.startsWith("P_"));
+  assert(prefix.endsWith("_S"));
+});
+
+Deno.test("narrowToOneSaveImage: oversized pfx+sfx truncated to the 200-cap", () => {
+  const graph = {
+    "18": { class_type: "SaveImage", inputs: { filename_prefix: "anything", images: ["17", 0] } },
+  };
+  const producing = { id: "18", node: graph["18"], prefix: "anything" };
+  const pfx = "p".repeat(240);
+  const sfx = "s".repeat(30);
+  narrowToOneSaveImage(graph, producing, "yyyy", pfx, sfx);
+  const prefix = graph["18"].inputs.filename_prefix;
+  assert(prefix.length <= 200, "assembled prefix hard-capped at 200 regardless");
+});
+// --- hard 200-cap on the assembled prefix (user 2026-09-10) ----------------
+
+Deno.test("narrowToOneSaveImage: assembled prefix hard-capped, middle-folded", () => {
+  const graph = {
+    "18": { class_type: "SaveImage", inputs: { filename_prefix: "a", images: ["17", 0] } },
+  };
+  const producing = { id: "18", node: graph["18"], prefix: "a" };
+  const long = "p".repeat(500);
+  narrowToOneSaveImage(graph, producing, long, "PFX_", "_SFX");
+  const prefix = graph["18"].inputs.filename_prefix;
+  assertEquals(prefix.length, 200, "exactly 200 chars");
+  assert(prefix.startsWith("PFX_"));
+  assert(prefix.includes("~"), "fold marker in middle");
+  assert(prefix.endsWith("_SFX"));
+});
+
+Deno.test("narrowToOneSaveImage: short prefix passes through untouched", () => {
+  const graph = {
+    "18": { class_type: "SaveImage", inputs: { filename_prefix: "a", images: ["17", 0] } },
+  };
+  const producing = { id: "18", node: graph["18"], prefix: "a" };
+  narrowToOneSaveImage(graph, producing, "short", "P_", "_S");
+  assertEquals(graph["18"].inputs.filename_prefix, "P_short_S");
+});
+// --- imageParams dedup: duplicate sweep values don't double-submit ---------
+
+Deno.test("generatePermutations: duplicate values in an image axis are deduplicated", () => {
+  const perms = generatePermutations(
+    {},
+    0.05,
+    {},
+    { "LoadImage.image": { enabled: true, values: ["a.png", "a.png", "b.png", "b.png", "b.png"] } },
+  );
+  assertEquals(perms.length, 2, "only unique values sweep");
+  const values = perms.map((p) => p["LoadImage.image"]).sort();
+  assertEquals(values, ["a.png", "b.png"]);
+});
+
+Deno.test("generatePermutations: duplicates across numeric + image axes don't multiply", () => {
+  const perms = generatePermutations(
+    { "KSampler.denoise": { enabled: true, min: 0.5, max: 0.55, increment: 0.05 } },
+    0.05,
+    {},
+    { "LoadImage.image": { enabled: true, values: ["a.png", "a.png"] } },
+  );
+  assertEquals(perms.length, 2, "numeric × unique image values only");
+});
+// --- breadth-first sweep ordering (user 2026-09-10) -------------------------
+
+Deno.test("breadthFirstSweep: interleaves axes round-robin (panel order)", () => {
+  const combos = breadthFirstSweep([[1, 2], ["a", "b", "c"], ["x"]]);
+  // Axis 0 (A) alternates fastest, axis 1 (B) slower, axis 2 (C) slowest:
+  // (1,a),(2,a),(1,b),(2,b),(1,c),(2,c) — breadth, not column-major.
+  assertEquals(combos.length, 6);
+  assertEquals(combos[0], [1, "a", "x"]);
+  assertEquals(combos[1], [2, "a", "x"]);
+  assertEquals(combos[2], [1, "b", "x"]);
+  assertEquals(combos[3], [2, "b", "x"]);
+  assertEquals(combos[4], [1, "c", "x"]);
+  assertEquals(combos[5], [2, "c", "x"]);
+});
+
+Deno.test("generatePermutations: emits permutations in breadth-first order", () => {
+  const perms = generatePermutations(
+    { "KSampler.denoise": { enabled: true, min: 0.5, max: 0.6, increment: 0.05 } },
+    0.05,
+    {},
+    { "LoadImage.image": { enabled: true, values: ["i1.png", "i2.png"] } },
+  );
+  // denoise axis (3 values) × image axis (2 values): image axis alternates
+  // fastest, denoise slower.
+  const seq = perms.map((p) => [p["LoadImage.image"], p["KSampler.denoise"]]);
+  assertEquals(seq.length, 6);
+  assertEquals(seq[0][0], "i1.png");
+  assertEquals(seq[1][0], "i2.png");
+  assertEquals(seq[2][0], "i1.png");
+  assertEquals(seq[3][0], "i2.png");
 });
