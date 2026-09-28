@@ -14,6 +14,9 @@ import {
   stringParams,
   mutateGraph,
   lineageTag,
+  clampBasename,
+  clampBudget,
+  NAME_MAX_WITHOUT_COUNTER,
 } from "../src/features/variations/server.mjs";
 
 // object_info's output_node flag, faked for these graphs
@@ -263,6 +266,54 @@ Deno.test("wrapAllOutputPrefixes: fallback wraps every SaveImage's own prefix", 
   assertEquals(touched, 2);
   assertEquals(graph["1"].inputs.filename_prefix, "pre_Alpha_suf");
   assertEquals(graph["2"].inputs.filename_prefix, "pre_Beta_suf");
+});
+
+// --- filename_prefix clamp (ark ENAMETOOLONG incident, 2026-09-27) -----------
+
+Deno.test("clampBasename: folds the MIDDLE of an over-long name, head and tail survive", () => {
+  const long = "x".repeat(120) + "y".repeat(120);
+  const out = clampBasename(long, NAME_MAX_WITHOUT_COUNTER);
+  assertEquals(out.length, 200);
+  assert(out.startsWith("x".repeat(100)), "head keeps the first 100 chars");
+  assert(out.endsWith("y".repeat(99)), "tail keeps the last 99 chars");
+  assertEquals(out[100], "~");
+});
+
+Deno.test("narrowToOneOutputNode: the incident's 253-char prefix is capped at 200", () => {
+  // ark#atmo_style_with_person lineage chain that died with ENAMETOOLONG.
+  const basename = "atmo_style_with_person_00001__0.7_00001__0.85_0.8_00001__0.85_athena_stuff_1.jpg_00003__0.7_00001__0.69_00001__athena_stuff_2.jpg_00001__image_2026-07-23_02-04-34_1.jpg_00001__00001__00001__0.55_00001__1881046-mechwarrior-dos-buy-a-new-mech.png";
+  const pfx = "ark#";
+  const sfx = "_0.65";
+  assert(pfx.length + basename.length + sfx.length > 240, "fixture must actually be over budget");
+  const graph = {
+    "14": { class_type: "SaveImage", inputs: { filename_prefix: "atmo_style_with_person", images: ["13", 0] } },
+  };
+  const producing = findProducingOutputNode(graph, basename + ".png", OUT);
+  narrowToOneOutputNode(graph, producing.id, basename, pfx, sfx, OUT);
+  const out = graph["14"].inputs.filename_prefix;
+  assertEquals(out.length, NAME_MAX_WITHOUT_COUNTER);
+  assert(out.startsWith(pfx), "pfx head survives");
+  assert(out.endsWith(sfx), "sfx tail survives");
+  assert(out.includes("~"), "the fold is marked");
+});
+
+Deno.test("wrapAllOutputPrefixes: fallback subtracts pfx/sfx from the middle budget", () => {
+  const pfx = "pre_".repeat(20);       // 80 chars
+  const sfx = "_suf".repeat(20);       // 80 chars
+  const orig = "m".repeat(200);
+  const graph = {
+    "1": { class_type: "SaveImage", inputs: { filename_prefix: orig, images: [] } },
+  };
+  wrapAllOutputPrefixes(graph, pfx, sfx, OUT);
+  const out = graph["1"].inputs.filename_prefix;
+  // assembled + ComfyUI's "_NNNNN_.png" (~15 headroom) must fit NAME_MAX 255
+  assert(out.length <= 255 - 15, `assembled ${out.length} over the 240 budget`);
+  assert(out.startsWith(pfx), "pfx survives");
+  assert(out.endsWith(sfx), "sfx survives");
+});
+
+Deno.test("clampBudget: 255 minus headroom minus pfx/sfx", () => {
+  assertEquals(clampBudget("aa", "bbb"), 255 - 15 - 2 - 3);
 });
 
 // --- inspectGraph: graph-driven param discovery -------------------------------

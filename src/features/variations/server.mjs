@@ -180,6 +180,28 @@ export function outputNodeIndex(graph, outputClasses) {
   return out;
 }
 
+// Filesystem NAME_MAX is 255 bytes; ComfyUI appends "_NNNNN_.png" (~12)
+// to the prefix. Fold over-long names in the MIDDLE: keep head AND tail —
+// head carries the pipeline identity, tail carries the newest lineage —
+// and mark the fold with "~". (Ported from kosmozoo.dev's variations
+// plugin after a lineage-chained batch died at SaveImage with
+// ENAMETOOLONG — assembled prefixes hit 252–264 chars.)
+export function clampBasename(basename, max) {
+  if (basename.length <= max) return basename;
+  const keep = max - 1;                 // one char reserved for the "~"
+  const head = Math.ceil(keep / 2);
+  const tail = Math.floor(keep / 2);
+  return basename.slice(0, head) + "~" + basename.slice(basename.length - tail);
+}
+
+export const HEADROOM = 15;  // ComfyUI's "_NNNNN_.png" counter suffix
+export const NAME_MAX_WITHOUT_COUNTER = 200;  // hard cap on the assembled prefix
+// How much of NAME_MAX remains for a node's own middle after pfx/sfx have
+// claimed their share (fallback path wraps every node's prefix).
+export function clampBudget(pfx, sfx) {
+  return 255 - HEADROOM - String(pfx).length - String(sfx).length;
+}
+
 // Wrap ONLY the producing node's filename_prefix with pfx/sfx and delete
 // every OTHER output node so the run produces one file, not N.
 export function narrowToOneOutputNode(graph, producingId, basename, pfx, sfx, outputClasses) {
@@ -189,17 +211,21 @@ export function narrowToOneOutputNode(graph, producingId, basename, pfx, sfx, ou
     delete graph[nid];
     dropped++;
   }
-  graph[producingId].inputs.filename_prefix = pfx + basename + sfx;
+  // Assembled prefix gets the middle-fold treatment: pfx head and sfx tail
+  // both survive, at most NAME_MAX_WITHOUT_COUNTER chars total.
+  graph[producingId].inputs.filename_prefix = clampBasename(pfx + basename + sfx, NAME_MAX_WITHOUT_COUNTER);
   return { kept: 1, dropped };
 }
 
 // Fallback: wrap every output node's own prefix with the user's pfx/sfx.
+// The middle budget subtracts pfx/sfx so a long pfx/sfx can't push the
+// assembled prefix over NAME_MAX either.
 export function wrapAllOutputPrefixes(graph, pfx, sfx, outputClasses) {
   let touched = 0;
   for (const n of Object.values(graph)) {
     if (!outputClasses.has(String(n.class_type ?? ""))) continue;
     const orig = String(n.inputs?.filename_prefix ?? "");
-    n.inputs.filename_prefix = pfx + orig + sfx;
+    n.inputs.filename_prefix = pfx + clampBasename(orig, clampBudget(pfx, sfx)) + sfx;
     touched++;
   }
   return touched;
