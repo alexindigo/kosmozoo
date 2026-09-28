@@ -288,6 +288,22 @@ Deno.test("wrapAllSaveImagePrefixes: fallback wraps every SaveImage's own prefix
   assertEquals(graph["2"].inputs.filename_prefix, "pre_Beta_suf");
 });
 
+Deno.test("wrapAllSaveImagePrefixes: fallback subtracts pfx/sfx from the middle budget", () => {
+  // clampBudget was defined but never called on this path — a long pfx/sfx
+  // plus a long node prefix could still push the assembly over NAME_MAX.
+  const pfx = "pre_".repeat(20);       // 80 chars
+  const sfx = "_suf".repeat(20);       // 80 chars
+  const graph = {
+    "1": { class_type: "SaveImage", inputs: { filename_prefix: "m".repeat(200), images: [] } },
+  };
+  wrapAllSaveImagePrefixes(graph, pfx, sfx);
+  const out = graph["1"].inputs.filename_prefix;
+  // assembled + ComfyUI's "_NNNNN_.png" (~15 headroom) must fit NAME_MAX 255
+  assert(out.length <= 255 - 15, `assembled ${out.length} over the 240 budget`);
+  assert(out.startsWith(pfx), "pfx survives");
+  assert(out.endsWith(sfx), "sfx survives");
+});
+
 // --- inspectGraph: graph-driven param discovery -------------------------------
 // Generic: every numeric scalar input of every node instance is a param,
 // id = <class_type>.<input>, shared with the fields registry.
@@ -634,12 +650,15 @@ Deno.test("stripWideHostTag: no-op when tag absent", () => {
 });
 
 Deno.test("wrapAllSaveImagePrefixes: fallback path clamps over-length own prefixes", () => {
+  // The fallback subtracts pfx/sfx from the budget (clampBudget) — the
+  // middle is NOT the default 200; with a 2-char pfx/sfx it's 236, and the
+  // assembled prefix lands exactly on the 240 (= 255 − 15 headroom) budget.
   const graph = {
     "18": { class_type: "SaveImage", inputs: { filename_prefix: "z".repeat(300), images: ["17", 0] } },
   };
   wrapAllSaveImagePrefixes(graph, "P_", "_S");
   const prefix = graph["18"].inputs.filename_prefix;
-  assertEquals(prefix.length, 2 + 200 + 2);
+  assertEquals(prefix.length, 255 - 15);
   assert(prefix.startsWith("P_"));
   assert(prefix.endsWith("_S"));
   assert(prefix.includes("~"));

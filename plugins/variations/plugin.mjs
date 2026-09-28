@@ -391,13 +391,16 @@ export function narrowToOneSaveImage(graph, producing, basename, pfx, sfx) {
 }
 
 // Fallback path: wrap every SaveImage's own prefix with the user's pfx/sfx.
-// Used only when no SaveImage matches the original filename.
+// Used only when no SaveImage matches the original filename. The middle
+// budget subtracts pfx/sfx so a long pfx/sfx can't push the assembled
+// prefix over NAME_MAX either (previously clampBasename got the default
+// 200 here — clampBudget was defined but never called on this path).
 export function wrapAllSaveImagePrefixes(graph, pfx, sfx) {
   let touched = 0;
   for (const n of Object.values(graph)) {
     if (String(n.class_type ?? "").toLowerCase() !== "saveimage") continue;
     const orig = String(n.inputs?.filename_prefix ?? "");
-    n.inputs.filename_prefix = pfx + clampBasename(orig) + sfx;
+    n.inputs.filename_prefix = pfx + clampBasename(orig, clampBudget(pfx, sfx)) + sfx;
     touched++;
   }
   return touched;
