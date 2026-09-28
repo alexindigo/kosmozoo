@@ -12,6 +12,7 @@ import { useAppStore, clampSplit } from "../store/app-store.js";
 import { fmtBytes } from "../store/fields.js";
 import { useDrag } from "../lib/drag.js";
 import { flash } from "../lib/flash.js";
+import { measuredSrc } from "../lib/img-measure.js";
 import { MetaBody } from "./MetaBody.js";
 import { Zoomable } from "./Zoomable.js";
 
@@ -80,17 +81,26 @@ export function DetailsBody() {
             <div class={colsClass()} ref={(el) => { infoEl = el; }}>
               <div class="info-source-images" style={{ "flex-basis": `${split() * 100}%` }}>
                 <For each={images()}>
-                  {(image) => (
-                    <div class="infoimg" data-file={image.file}
-      classList={{ flash: flashOn() && flashFile() === image.file }}>
-                      <Zoomable
-                        src={image.src}
-                        alt={image.file}
-                        zoomKey={`input:${im()?.host}:${image.file}`}
-                        onOpen={() => store.actions.diff.openInput(im()?.host, image.file, image.fromOutput)}
-                      />
-                    </div>
-                  )}
+                  {(image) => {
+                    const s = () => measuredSrc(image.src);
+                    return (
+                      <div class="infoimg" data-file={image.file}
+        classList={{ flash: flashOn() && flashFile() === image.file }}>
+                        {/* mount only at the measured aspect — the box never
+                            morphs height (a failed measure still renders, so
+                            the broken-bytes path stays reachable) */}
+                        <Show when={s() !== "pending"}>
+                          <Zoomable
+                            src={image.src}
+                            alt={image.file}
+                            ar={s() !== "failed" ? `${s().w} / ${s().h}` : null}
+                            zoomKey={`input:${im()?.host}:${image.file}`}
+                            onOpen={() => store.actions.diff.openInput(im()?.host, image.file, image.fromOutput)}
+                          />
+                        </Show>
+                      </div>
+                    );
+                  }}
                 </For>
               </div>
               <div class="separator" ref={sepRef} />

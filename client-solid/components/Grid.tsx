@@ -176,7 +176,7 @@ export function Grid() {
         </div>
         <div style={`height:${padStart()}px`} />
         <For each={items()}>
-          {(vi) => <CardSlot entryId={vi.key} />}
+          {(vi) => <CardSlot entryId={vi.key} slotSize={vi.size} />}
         </For>
         <div style={`height:${padEnd()}px`}>
           <Show when={pending() > 0}>
@@ -198,10 +198,21 @@ export function Grid() {
 // One virtual slot: the .card contract wrapper + the Card. The slot receives
 // the entry id (the virtualizer's item key — a string) and resolves the
 // image through the store's id → index map — O(1), never a scan.
+//
+// THE LAST-MILE GATE. The virtualizer's key mapping and the store's reactive
+// memos update on different clocks (reconcile mutates the items in place on
+// the core's schedule), so a slot CAN be handed an id that resolves to no
+// image or to an image whose size is not yet known. The invariant "a card
+// mounts only at known size, and never changes height while mounted" is
+// enforced HERE, not just at the list: until the size is final the slot
+// renders a blank placeholder at the virtual item's OWN size — the rendered
+// list always matches the virtualizer's scroll math exactly, and the card
+// appears once, at its final height. No 16:9 floor box, no shrink, no jump.
 function CardSlot(props) {
   const store = useAppStore();
   const imgIdx = () => store.state.imageIdxById().get(props.entryId);
   const image = () => store.state.images[imgIdx()];
+  const ready = () => imgIdx() != null && store.state.cardSize(imgIdx()) != null;
   const j = () => image()?.judgment ?? {};
   // the store's currentEntry memo owns the pointer→entry derivation (G7)
   const isCurrent = () => store.state.currentEntry()?.index === imgIdx();
@@ -216,14 +227,19 @@ function CardSlot(props) {
   };
 
   return (
-    <div
-      class={"card" + (isCurrent() ? " current" : "") + (isTall() ? " card--tall" : "")}
-      data-idx={imgIdx()}
-      data-name={image()?.filename}
-      data-vote={j().vote || undefined}
-      data-favorite={j().favorite ? "1" : undefined}
+    <Show
+      when={ready()}
+      fallback={<div class="card--slot-gap" style={`height:${Math.max(0, (props.slotSize ?? 0) - gridGapPx())}px`} />}
     >
-      <Card entryId={props.entryId} />
-    </div>
+      <div
+        class={"card" + (isCurrent() ? " current" : "") + (isTall() ? " card--tall" : "")}
+        data-idx={imgIdx()}
+        data-name={image()?.filename}
+        data-vote={j().vote || undefined}
+        data-favorite={j().favorite ? "1" : undefined}
+      >
+        <Card entryId={props.entryId} />
+      </div>
+    </Show>
   );
 }
