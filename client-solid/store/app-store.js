@@ -330,6 +330,8 @@ export function makeAppStore() {
     if (feedActivity() !== "scrolling") {
       setFeedActivity("scrolling");
       gestureStart = feedScrollEl()?.scrollTop ?? 0;
+      // the src window freezes mid-gesture: a 200-card sweep fires nothing
+      window_.freeze();
     }
     setFeedScrollTop(top ?? feedScrollEl()?.scrollTop ?? 0);
     clearTimeout(feedSettleTimer);
@@ -359,6 +361,8 @@ export function makeAppStore() {
     }
     // 3. sizes resolve around the stopped range…
     stageResolveAhead();
+    // 3b. …and the src window ripples out from the current card
+    settleWindow();
     // 4. …and metas are wanted for it (the mid-gesture throttle is folded
     // into this debounce — dead); the want flush rides the same settle
     wantRangeNow();
@@ -695,14 +699,51 @@ export function makeAppStore() {
     untrack(stageResolveAhead);
   });
 
-  // the image-src window derives membership from the virtualizer's range
-  // ± pad — the store's registered virtualizer is the one source
-  const window_ = makeImageWindow({ range: () => {
-    const vz = seams.virtualizer;
+  // a current change outside scrolling (keys, clicks, restores, the initial
+  // load) ripples the src window around the new current — the gesture path
+  // rides feedSettle instead
+  let lastWindowedCurrent = null;
+  createEffect(() => {
+    const ce = currentEntry();
+    if (feedActivity() !== "settled") return;
+    if (!ce || ce.entry.id === lastWindowedCurrent) return;
+    lastWindowedCurrent = ce.entry.id;
+    untrack(settleWindow);
+  });
+
+  // idle-time landings: cards that newly appear inside the visible range
+  // get covered without a re-ripple (positions shift under a frozen window;
+  // the union is by id)
+  createEffect(on(entriesWithKnownSize, () => {
+    if (feedActivity() !== "settled") return;
+    const vz = feedVirtualizer();
     const items = vz?.getVirtualItems() ?? [];
-    if (!items.length) return null;
-    return { first: items[0].index, last: items[items.length - 1].index };
-  } });
+    if (!items.length) return;
+    untrack(() => window_.coverRange(items[0].index, items[items.length - 1].index));
+  }));
+
+  // the image-src window: frozen while scrolling (sweeping 200 cards fires
+  // nothing), rippling C, C+1, C-1, … from the current card at settle;
+  // in-flight loads are never aborted. Membership by entry id (landings
+  // shift positions under a frozen window; ids don't move).
+  const window_ = makeImageWindow({
+    entryAt: feedEntryAt,
+    count: () => entriesWithKnownSize().length,
+  });
+  // the settle/current-change trigger: ripple around the current card,
+  // covering the stopped range
+  function settleWindow() {
+    const vz = feedVirtualizer();
+    const items = vz?.getVirtualItems() ?? [];
+    if (!items.length) return;
+    const ce = currentEntry();
+    const anchor = ce ? feedPositionOf(ce.entry.id) : null;
+    window_.settle(
+      anchor ?? Math.round((items[0].index + items[items.length - 1].index) / 2),
+      items[0].index,
+      items[items.length - 1].index,
+    );
+  }
 
   // --- status-stack helpers ------------------------------------------------------
   const chipTimers = { transient: 0 };
@@ -1224,6 +1265,9 @@ export function makeAppStore() {
         seams.virtualizer = seamsIn?.virtualizer ?? null;
         setFeedScrollEl(seamsIn?.scrollEl ?? null);
         setFeedVirtualizer(seamsIn?.virtualizer ?? null);
+        // the first settle for a fresh feed: ripple around the current card
+        // (idle-time landings cover whatever arrives after)
+        if (feedActivity() === "settled") settleWindow();
       },
       restoreToIndex,
       // a programmatic scroll must not invite the snap — compensation and
