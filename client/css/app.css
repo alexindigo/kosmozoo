@@ -144,6 +144,12 @@ main { display: flex; flex: 1; min-height: 0; }
  grey tick — light foreground, longer than the tape ticks */
 #feedRail .fr-tick.wave { width: 18px; background: var(--foreground);
   box-shadow: 0 0 3px color-mix(in srgb, var(--foreground) 35%, transparent); }
+/* state-colored ticks — the card border's colors and its precedence
+ (current > favorite > vote; later rule wins over .wave's foreground) */
+#feedRail .fr-tick.up { background: var(--positive-dim); }
+#feedRail .fr-tick.down { background: var(--negative); }
+#feedRail .fr-tick.fav { background: var(--attention); }
+#feedRail .fr-tick.current { background: var(--primary); }
 #feedRail .fr-num { position: absolute; left: 2px; font-size: 8px;
   color: var(--foreground-dim); font-family: ui-monospace, monospace; }
 #feedRail .fr-top { top: 2px; }
