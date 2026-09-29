@@ -87,6 +87,7 @@ export function Grid() {
   // a host switch recomputes the view, and those shifts belong to the user.
   let prevView = null;
   let prevList = null;
+  let prevMerge = -1;
   let anchor = { id: null, pos: 0 };
   const anchorNow = () => {
     const top = col?.scrollTop ?? 0;
@@ -99,10 +100,15 @@ export function Grid() {
   createEffect(() => {
     const v = store.state.view();
     const list = store.state.entriesWithKnownSize();
+    const merge = store.state.feedMergeNonce();
     virtualizer.getVirtualItems(); // the virtualizer's own reactivity
-    const landing = prevView === v && prevList && prevList !== list;
+    // a landing with a stable view — or a refresh-MERGE (the nonce moved):
+    // new entries arrived from the server and the visible cards must not
+    // shift. A filter/vote/host switch recomputes the view WITHOUT the
+    // nonce — those shifts belong to the user.
+    const landing = (prevView === v && prevList && prevList !== list) || merge !== prevMerge;
     if (landing && anchor.id != null) {
-      const prevSet = new Set(prevList);
+      const prevSet = prevList ? new Set(prevList) : new Set();
       const newPos = list.findIndex((i) => store.state.images[i]?.id === anchor.id);
       if (newPos > anchor.pos) {
         let delta = 0;
@@ -124,6 +130,7 @@ export function Grid() {
     }
     prevView = v;
     prevList = list;
+    prevMerge = merge;
     // refresh the anchor from the post-compensation state
     anchorNow();
   });

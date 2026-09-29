@@ -330,6 +330,57 @@ Deno.test("current: a hidden current advances to the next visible entry (one gua
   }
 });
 
+// --- refresh: merge new arrivals, never a wipe --------------------------------
+
+Deno.test("refresh merges new entries into the feed — no wipe, pointer and nodes survive", async () => {
+  const { api } = await import("../client/js/api.mjs");
+  globalThis.location = { hash: "", pathname: "/" };
+  globalThis.history = { state: null, replaceState() {}, pushState() {} };
+  const store = makeAppStore();
+  const origEntries = api.entries;
+  const origMeta = api.meta;
+  const origWant = api.want;
+  const origNodes = api.nodes;
+  const origCollections = api.collections;
+  const entry = (name) => ({
+    name, size: 1, hash: null, state: "seen", meta: null, extracted: false,
+    judgment: null, width: 100, height: 50,
+  });
+  let list = ["a.png", "b.png", "c.png"];
+  api.entries = async () => list.map(entry);
+  api.meta = async () => ({ v: 1, changed: false });
+  api.want = async () => ({ pending: 0 });
+  api.nodes = async () => ({});
+  api.collections = async () => ({ h: { name: "h" } });
+  try {
+    await store.actions.hosts.select("h");
+    const before = store.state.images;
+    const aNode = before[0];
+    const currentId = store.state.currentEntry()?.entry?.id;
+    assertEquals(store.state.feedMergeNonce(), 0);
+    // two new arrivals at the top of the server's listing
+    list = ["new1.png", "new2.png", "a.png", "b.png", "c.png"];
+    await store.actions.ui.refresh();
+    // merged, not wiped: the new entries prepended, the old entry's store
+    // node is the SAME reference (no remount), the count grew
+    assertEquals(store.state.images.length, 5);
+    assertEquals(store.state.images.map((i) => i.filename), ["new1.png", "new2.png", "a.png", "b.png", "c.png"]);
+    assert(store.state.images[2] === aNode, "unchanged entries keep their store nodes — no remount");
+    // the current pointer is id-keyed: it follows its entry through the merge
+    assertEquals(store.state.currentEntry()?.entry?.id, currentId);
+    // the merge nonce moved (the feed's above-fold compensation keys off it)
+    assertEquals(store.state.feedMergeNonce(), 1);
+  } finally {
+    api.entries = origEntries;
+    api.meta = origMeta;
+    api.want = origWant;
+    api.nodes = origNodes;
+    api.collections = origCollections;
+    delete globalThis.location;
+    delete globalThis.history;
+  }
+});
+
 // --- the src window on a sparse known list ---------------------------------
 
 Deno.test("src window: a rendered card gets its src even when its image index is far from its feed position", async () => {

@@ -531,6 +531,40 @@ export function makeAppStore() {
     }
   }
 
+  // Refresh: get new stuff from the server and ADD it to the feed — never a
+  // wipe. The fetched listing reconciles into the existing list (keyed by
+  // id): unchanged entries keep their store nodes (cards don't remount,
+  // in-flight loads keep flying, selections and the src window survive),
+  // new arrivals insert where the server orders them, gone entries leave.
+  // The current pointer is id-keyed — it follows its entry through the
+  // merge; the feed's above-fold compensation (Grid's rule, fed by the
+  // merge nonce) keeps the visible cards anchored across prepends.
+  const [feedMergeNonce, setFeedMergeNonce] = createSignal(0);
+  async function refreshImages(name) {
+    if (!name) return;
+    actions.status.active("load", `checking ${name} for new images…`);
+    try {
+      const prevIds = new Set(st.images.map((i) => i.id));
+      const entries = await api.entries(name);
+      setFeedMergeNonce((n) => n + 1);
+      setSt("images", reconcile(entries.map((e) => ({
+        id: `${name}:${e.name}`, host: name, filename: e.name,
+        size: e.size, hash: e.hash, state: e.state,
+        meta: e.meta, extracted: e.extracted, judgment: e.judgment,
+        width: e.width, height: e.height,
+      }))));
+      wantRangeNow();
+      flushWant();
+      await pollMetadata();
+      actions.status.clear("load");
+      const fresh = entries.filter((e) => !prevIds.has(`${name}:${e.name}`)).length;
+      if (fresh > 0) actions.status.info(`${fresh} new image${fresh > 1 ? "s" : ""} from ${name}`);
+    } catch (err) {
+      actions.status.clear("load");
+      actions.status.error(`couldn't refresh ${name}: ${err?.message ?? err}`);
+    }
+  }
+
   // --- deletion --------------------------------------------------------------------
   // Port of the ConfirmDelete confirm path: delete, plan the pointer, scrub the
   // trail, patch the list, then navigate. Computed against the PRE-delete list
@@ -1056,7 +1090,7 @@ export function makeAppStore() {
       closeMenu() { setMenuOpen(false); },
       async refresh() {
         setSt("hosts", reconcile(toHosts(await api.collections())));
-        if (host()) await loadImages(host());
+        if (host()) await refreshImages(host());
       },
       setWorkspace(space) {
         if (workspace() === space) return;
@@ -1602,6 +1636,7 @@ export function makeAppStore() {
     infoLayout,
     feedScrollEl,
     feedScrollTop,
+    feedMergeNonce,
     feedVirtualizer,
     feedActivity,
     // a card's image size: the listing's content dims, else the extractor
