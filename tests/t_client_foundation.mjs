@@ -369,6 +369,9 @@ Deno.test("src window: a rendered card gets its src even when its image index is
       scrollEl: null,
     });
     const img = store.state.images[28];
+    // the settle-driven window: nothing fires until a settle ripples out
+    // from the anchor — settle(anchor=2, cover 1..2) covers pos 2 in step 0
+    store.state.window.settle(2, 1, 2);
     const src = store.state.window.getSrc(store.state.feedPositionOf(img.id), img);
     assert(src && src.includes(encodeURIComponent("f28.png")), `rendered card must get its src, got ${src}`);
   } finally {
@@ -379,6 +382,49 @@ Deno.test("src window: a rendered card gets its src even when its image index is
     delete globalThis.location;
     delete globalThis.history;
   }
+});
+
+// --- the image-src window: settle ripple, freeze, in-flight preservation ---
+
+Deno.test("image window: settle ripples C, C+1, C-1, … and freeze stops it", async () => {
+  const { makeImageWindow } = await import("../client-solid/store/image-window.js");
+  const w = makeImageWindow({
+    entryAt: (p) => ({ id: `e${p}`, host: "h", filename: `f${p}.png` }),
+    count: () => 11,
+    rippleMs: 10,
+  });
+  const has = (p) => w.getSrc(p, { id: `e${p}`, host: "h", filename: `f${p}.png` }) != null;
+  w.settle(5, 0, 10);
+  assert(has(5), "C fires first");
+  assert(!has(6) && !has(4), "neighbors have not fired yet");
+  await new Promise((r) => setTimeout(r, 16));   // ring 1
+  assert(has(6), "C+1 fires before C-1");
+  assert(!has(4), "C-1 has not fired yet");
+  await new Promise((r) => setTimeout(r, 16));   // ring 2
+  assert(has(4), "C-1 fires next");
+  w.freeze();
+  const wasAt9 = has(9);
+  await new Promise((r) => setTimeout(r, 120));
+  assertEquals(has(9), wasAt9, "a frozen window fires no further rings");
+  assert(has(5) && has(6) && has(4), "members stay assigned through a freeze");
+});
+
+Deno.test("image window: a started load survives the next settle; a loaded one is reaped", async () => {
+  const { makeImageWindow } = await import("../client-solid/store/image-window.js");
+  const w = makeImageWindow({
+    entryAt: (p) => ({ id: `e${p}`, host: "h", filename: `f${p}.png` }),
+    count: () => 30,
+    rippleMs: 5,
+  });
+  const has = (p) => w.getSrc(p, { id: `e${p}`, host: "h", filename: `f${p}.png` }) != null;
+  w.settle(5, 4, 6);
+  w.markStarted("e5");            // the card's loading phase reports a start
+  w.settle(20, 19, 21);           // a far-away settle (big scroll)
+  assert(has(5), "the started id stays a member across re-windows");
+  assert(has(20), "the new anchor is covered");
+  w.markLoaded("e5");
+  w.settle(22, 21, 23);
+  assert(!has(5), "a loaded id is reaped by the next settle");
 });
 
 // --- the drag primitive's anchor-edge fraction -------------------------------

@@ -90,7 +90,8 @@ export function Card(props) {
         onOpen={() => store.actions.diff.openFromFeed(imgIdx())}
         onErrorClick={() => store.state.window.retry(props.entryId)}
         onPhase={(p) => {
-          if (p === "loaded") store.state.window.markLoaded(props.entryId);
+          if (p === "loading") store.state.window.markStarted(props.entryId);
+          else if (p === "loaded") store.state.window.markLoaded(props.entryId);
           else if (p === "error") store.state.window.markError(props.entryId);
         }}
       />
