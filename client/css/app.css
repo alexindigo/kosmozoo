@@ -405,8 +405,8 @@ main { display: flex; flex: 1; min-height: 0; }
 /* --- the status corner: ONE fixed flex column holds the scroll-top button
  above the status stack ( — the button's bottom:56px was hand-synced to
  the stack; the column derives the order) --------------------------------- */
-#statusCol { position: fixed; left: 12px; bottom: 10px; z-index: var(--z-status);
-  display: flex; flex-direction: column; justify-content: flex-end; align-items: flex-start;
+#statusCol { position: fixed; right: 12px; bottom: 10px; z-index: var(--z-status);
+  display: flex; flex-direction: column; justify-content: flex-end; align-items: flex-end;
   gap: 8px; max-width: calc(100vw - 24px); pointer-events: none; }
 /* the workbench's bottom bar owns the corner when it's open (the column is
  z-status, above the overlay) — the status floats above the bar instead of
