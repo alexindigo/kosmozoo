@@ -1008,24 +1008,35 @@ export function makeAppStore() {
     },
 
     judgments: {
-      // vote: 'up' | 'down' | null — path-level update; the view memo and
-      // the card's data attrs follow by construction
+      // Optimistic: the star/marker flips ON THE CLICK — the server
+      // reconciles behind it; a failed write rolls back with an error chip.
+      // (was: await PATCH first, then the store — an ~89 ms gap per click)
       async setVote(image, vote) {
-        await api.setJudgment(image.host, image.filename, { vote });
         const idx = imageIdx(image.id);
         if (idx < 0) return;
-        // the engine lists images with judgment: null — the path set needs an
-        // object to traverse into
+        const prev = image.judgment?.vote ?? null;
         if (!st.images[idx].judgment) setSt("images", idx, "judgment", {});
         setSt("images", idx, "judgment", "vote", vote === null ? undefined : vote);
+        try {
+          await api.setJudgment(image.host, image.filename, { vote });
+        } catch (e) {
+          setSt("images", idx, "judgment", "vote", prev ?? undefined);
+          actions.status.error(`vote failed: ${image.filename}: ${e.message}`);
+        }
       },
       async toggleFavorite(image) {
-        const next = !(image.judgment?.favorite);
-        await api.setJudgment(image.host, image.filename, { favorite: next || null });
         const idx = imageIdx(image.id);
         if (idx < 0) return;
+        const prev = !!image.judgment?.favorite;
+        const next = !prev;
         if (!st.images[idx].judgment) setSt("images", idx, "judgment", {});
         setSt("images", idx, "judgment", "favorite", next ? true : undefined);
+        try {
+          await api.setJudgment(image.host, image.filename, { favorite: next || null });
+        } catch (e) {
+          setSt("images", idx, "judgment", "favorite", prev ? true : undefined);
+          actions.status.error(`favorite failed: ${image.filename}: ${e.message}`);
+        }
       },
       async saveNotes(image, notes) {
         await api.setJudgment(image.host, image.filename, { notes }).catch(() => {});
