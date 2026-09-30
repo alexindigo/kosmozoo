@@ -122,8 +122,9 @@ export function Grid() {
         }
         if (delta > 0) {
           // compensation is a programmatic scroll, not a user gesture:
-          // the settle's snap must not re-tidy the restored position
-          store.actions.feed.quiet();
+          // the settle must neither re-tidy the position (snap) nor
+          // reassign current from it
+          store.actions.feed.compensating();
           col.scrollTop += delta;
         }
       }

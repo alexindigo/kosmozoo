@@ -11,7 +11,7 @@
 // Note: the store ROOT is not assignable (st.x = v is silently ignored) —
 // root-level replacement goes through setSt("x", v); nested paths assign.
 
-import { createSignal, createMemo, createEffect, on, onCleanup, createContext, useContext, untrack } from "solid-js";
+import { createSignal, createMemo, createEffect, on, onCleanup, createContext, useContext, untrack, batch } from "solid-js";
 import { createStore, reconcile } from "solid-js/store";
 import { api } from "/js/api.mjs";
 import { metaFromPngBytes } from "/shared/extractor.mjs";
@@ -322,6 +322,11 @@ export function makeAppStore() {
   const scrollQuiet = () => Date.now() < programmaticScrollUntil();
   const quietScrolls = (ms = SNAP_QUIET_MS) =>
     setProgrammaticScrollUntil(Math.max(programmaticScrollUntil(), Date.now() + ms));
+  // a COMPENSATION scroll (landing/merge) is quieter than quiet: the settle
+  // it triggers must not reassign current at all — the scroll exists to
+  // preserve position, and with sub-card estimate error the viewport-middle
+  // pick would hop. Restores keep their snap-quiet but DO track current.
+  const [suppressSettleCurrent, setSuppressSettleCurrent] = createSignal(false);
   let feedSettleTimer = 0;
   let gestureStart = null; // scrollTop at the gesture's origin
   const FEED_SETTLE_MS = 150;
@@ -350,8 +355,14 @@ export function makeAppStore() {
     const col = feedScrollEl();
     const vz = feedVirtualizer();
     if (!col || !vz) { gestureStart = null; return; }
-    // 1. current selection — a consequence of a STOPPED scroll
-    actions.current.settleFromRange(vz.getVirtualItems(), col.scrollTop, col.clientHeight);
+    // 1. current selection — a consequence of a STOPPED scroll. A settle
+    // triggered by a COMPENSATION scroll (landing/merge) must not reassign:
+    // the scroll exists to preserve position, and with sub-card estimate
+    // error the viewport-middle pick hops to the wrong card
+    if (!suppressSettleCurrent()) {
+      actions.current.settleFromRange(vz.getVirtualItems(), col.scrollTop, col.clientHeight);
+    }
+    setSuppressSettleCurrent(false);
     // 2. snap tidy — small, directional, capped; never while a programmatic
     // scroll is in flight or the workbench is open
     const net = gestureStart == null ? 0 : col.scrollTop - gestureStart;
@@ -546,13 +557,19 @@ export function makeAppStore() {
     try {
       const prevIds = new Set(st.images.map((i) => i.id));
       const entries = await api.entries(name);
-      setFeedMergeNonce((n) => n + 1);
-      setSt("images", reconcile(entries.map((e) => ({
-        id: `${name}:${e.name}`, host: name, filename: e.name,
-        size: e.size, hash: e.hash, state: e.state,
-        meta: e.meta, extracted: e.extracted, judgment: e.judgment,
-        width: e.width, height: e.height,
-      }))));
+      // ONE atomic write: the reconcile and the merge nonce land in a single
+      // flush — the feed's compensation effect sees the post-merge list with
+      // the pre-merge anchor (unbatched, the setSt pass re-anchors before
+      // the nonce pass and the measured shift collapses to zero)
+      batch(() => {
+        setSt("images", reconcile(entries.map((e) => ({
+          id: `${name}:${e.name}`, host: name, filename: e.name,
+          size: e.size, hash: e.hash, state: e.state,
+          meta: e.meta, extracted: e.extracted, judgment: e.judgment,
+          width: e.width, height: e.height,
+        }))));
+        setFeedMergeNonce((n) => n + 1);
+      });
       wantRangeNow();
       flushWant();
       await pollMetadata();
@@ -765,17 +782,22 @@ export function makeAppStore() {
     count: () => entriesWithKnownSize().length,
   });
   // the settle/current-change trigger: ripple around the current card,
-  // covering the stopped range
+  // covering the stopped range — but when the pointer is OFF the stopped
+  // range (a programmatic deep jump, a restore), anchor on the range's
+  // middle: rippling from a stale pointer would walk hundreds of rings
+  // before the visible cards ever get a src
   function settleWindow() {
     const vz = feedVirtualizer();
     const items = vz?.getVirtualItems() ?? [];
     if (!items.length) return;
+    const first = items[0].index;
+    const last = items[items.length - 1].index;
     const ce = currentEntry();
-    const anchor = ce ? feedPositionOf(ce.entry.id) : null;
+    const cpos = ce ? feedPositionOf(ce.entry.id) : null;
     window_.settle(
-      anchor ?? Math.round((items[0].index + items[items.length - 1].index) / 2),
-      items[0].index,
-      items[items.length - 1].index,
+      cpos != null && cpos >= first && cpos <= last ? cpos : Math.round((first + last) / 2),
+      first,
+      last,
     );
   }
 
@@ -1307,6 +1329,9 @@ export function makeAppStore() {
       // a programmatic scroll must not invite the snap — compensation and
       // restores call this so the next settle does not re-tidy
       quiet: quietScrolls,
+      // a COMPENSATION scroll (landing/merge): snap-quiet AND the settle
+      // must not reassign current — it exists to preserve position
+      compensating() { quietScrolls(); setSuppressSettleCurrent(true); },
       // the single scroll entry point — the store owns the activity state
       // and the settle pipeline; the model never moves mid-gesture
       scrolled: feedScrolled,

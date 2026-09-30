@@ -158,7 +158,10 @@ main { display: flex; flex: 1; min-height: 0; }
 #feedRail .fr-bottom { bottom: calc(var(--fr-label-bottom) / 2); }
 #feedRail .fr-total { bottom: 2px; color: var(--foreground-dim); }
 #candidatesCol { flex: 1; min-width: 0; overflow-y: auto; overflow-x: hidden;
-  scrollbar-width: none; }
+  scrollbar-width: none;
+  /* the feed owns every scroll adjustment (landings, merges) — the browser's
+   native scroll anchoring re-clamps mid-transient and double-compensates */
+  overflow-anchor: none; }
 #candidatesCol::-webkit-scrollbar { display: none; }
 /* ONE grab-strip pattern : the strip is --grab-w wide and its 1px line
  is centered by an inset derived from that one var — width and inset can
