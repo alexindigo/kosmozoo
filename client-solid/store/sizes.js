@@ -107,6 +107,18 @@ export function cardHeight(size, colW) {
   return q64((colW - inset) / Math.min(ar, 16 / 9)) + chrome;
 }
 
+// Immutable identity-keyed offsets: old indices cannot describe old entries
+// after a listing reorder. Heights include the inter-card margin.
+export function feedOffsets(entries, heightOf) {
+  const offsets = new Map();
+  let offset = 0;
+  for (const entry of entries) {
+    offsets.set(entry.id, offset);
+    offset += heightOf(entry);
+  }
+  return offsets;
+}
+
 export function makeSizes({ srcFor, imageAt }) {
   // the chrome height is read HERE (store creation — the CSS is applied by
   // now; never at module import) and re-read on every resize: it is the one

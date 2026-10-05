@@ -22,7 +22,7 @@ export function Card(props) {
   const imgIdx = () => store.state.imageIdxById().get(props.entryId);
   const image = () => store.state.images[imgIdx()];
   const meta = () => image()?.meta ?? null;
-  const j = () => image()?.judgment ?? {};
+  const state = () => store.state.cardState(props.entryId);
 
   // the box's aspect is DATA — the store's resolved size (meta, else the
   // off-DOM loader's natural measurement), never the in-card img's load.
@@ -53,9 +53,11 @@ export function Card(props) {
     if (image()?.size == null) store.actions.images.fillSize(image().id);
   });
 
-  const saveNote = (cls) => (text) => {
-    const notes = { ...(image()?.judgment?.notes ?? {}), [cls]: text };
-    store.actions.judgments.saveNotes(image(), notes).then(() => flashSaved());
+  const saveNote = (sign) => (text, id) => {
+    return store.actions.judgments.dispatch(id, { type: "note", sign, text }).then((result) => {
+      if (result.ok && props.entryId === id) flashSaved();
+      return result;
+    });
   };
 
   // First neighbor WITH CONTENT in that direction; an unsaved draft wins
@@ -120,24 +122,29 @@ export function Card(props) {
               {(a) => <IconButton icon={a.icon} variant={a.variant} title={a.title} onAction={a.onAction} />}
             </For>
             <IconButton
-              icon={iconSvg("thumb-down")} variant="down" active={j().vote === "down"}
+              icon={iconSvg("thumb-down")} variant="down" active={state().active.down}
               title="thumbs down — hides (Unhide up top restores)"
-              onAction={() => store.actions.judgments.setVote(image(), "down")}
+              onAction={() => store.actions.judgments.dispatch(props.entryId, { type: "toggle", field: "vote", value: "down" })}
             />
             <IconButton
-              icon={iconSvg("thumb-up")} variant="up" active={j().vote === "up"} title="thumbs up"
-              onAction={() => store.actions.judgments.setVote(image(), j().vote === "up" ? null : "up")}
+              icon={iconSvg("thumb-up")} variant="up" active={state().active.up} title="thumbs up"
+              onAction={() => store.actions.judgments.dispatch(props.entryId, { type: "toggle", field: "vote", value: "up" })}
             />
             <IconButton
-              icon={iconSvg("star")} variant="favorite" active={!!j().favorite}
+              icon={iconSvg("star")} variant="favorite" active={state().active.favorite}
               title="favorite — interesting in itself, not project fitness"
-              onAction={() => store.actions.judgments.toggleFavorite(image())}
+              onAction={() => store.actions.judgments.dispatch(props.entryId, { type: "toggle", field: "favorite" })}
             />
-            <button
-              class="savebtn"
+            <IconButton
+              icon={iconSvg("bookmark")} variant="bookmark" active={state().active.bookmark}
+              title="bookmark - return to this image later"
+              onAction={() => store.actions.judgments.dispatch(props.entryId, { type: "toggle", field: "bookmark" })}
+            />
+            <IconButton
+              icon={iconSvg("download")} variant="download"
               title="download this image"
-              onClick={(e) => { e.stopPropagation(); store.actions.images.download(image()?.id); }}
-            >save</button>
+              onAction={() => store.actions.images.download(image()?.id)}
+            />
             <Show when={del()}>
               <IconButton
                 icon={iconSvg(delCopy().icon, 16)}

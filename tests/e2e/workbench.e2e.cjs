@@ -101,18 +101,28 @@ async function attempt(name, fn) {
     check("page did not zoom", post.dpr === pre.dpr, `dpr ${pre.dpr} -> ${post.dpr}`);
   });
 
+  const beforeInfo = await page.evaluate(`(async () => ${KZ}.state.current())()`);
   await attempt("info panel zoom: ctrl+wheel zooms the node image", async () => {
     // ingest the fixture, re-select the host (the entries reload carries its
     // meta — the meta poll only runs while ingestion is pending), show the
     // DETAILS space (earlier anchor tests switch the pane away), then focus
-    // the image
+    // and center the image so the reload's scroll settle keeps it current.
     await page.evaluate(`(async () => {
       await fetch("/api/collections/fake/entries/flux-controlnet.png/bytes");
-      await ${KZ}.actions.hosts.select("fake");
-      ${KZ}.actions.ui.setWorkspace("details");
-      ${KZ}.actions.current.set("fake", "flux-controlnet.png");
+      const kz = ${KZ};
+      await kz.actions.hosts.select("fake");
+      kz.actions.ui.setWorkspace("details");
+      kz.actions.current.set("fake", "flux-controlnet.png");
+      const entry = kz.state.currentEntry();
+      if (entry?.entry.filename !== "flux-controlnet.png") throw new Error("fixture not selected");
+      kz.actions.feed.restoreToIndex(entry.index);
     })()`);
-    await page.poll(`!!document.querySelector('.info-source-images .infoimg img')`, 15000);
+    await page.poll(`(async () => {
+      const kz = ${KZ};
+      return kz.state.feedActivity() === "settled"
+        && kz.state.current()?.image === "flux-controlnet.png"
+        && !!document.querySelector('.info-source-images .infoimg img');
+    })()`, 15000);
     // the img element mounts before its bytes land — wait for real pixels
     // (a 0-height img can't be wheel-targeted)
     await page.poll(`document.querySelector('.info-source-images .infoimg img').naturalWidth > 0`, 10000);
@@ -140,6 +150,19 @@ async function attempt(name, fn) {
     check("info panel image zoomed", true);
     check("page did not zoom", post.dpr === pre.dpr, `dpr ${pre.dpr} -> ${post.dpr}`);
   });
+  // Restore the fixture navigation's context even when its check fails;
+  // later feed checks must not target an overscan card above the viewport.
+  await page.evaluate(`(async () => {
+    const kz = ${KZ};
+    const previous = ${JSON.stringify(beforeInfo)};
+    kz.actions.current.set(previous.remote, previous.image);
+    kz.actions.feed.restoreToIndex(kz.state.currentEntry().index);
+  })()`);
+  await page.poll(`(async () => {
+    const kz = ${KZ};
+    return kz.state.feedActivity() === "settled"
+      && kz.state.current()?.image === ${JSON.stringify(beforeInfo.image)};
+  })()`, 5000);
 
   await attempt("page zoom is dead outside images", async () => {
     // ctrl+wheel over the app chrome (the header — no image under the cursor)

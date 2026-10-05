@@ -18,7 +18,7 @@
   --foreground-bright: #fff;
   --card-chrome-h: 148px;         /* card chrome under the image box — read once by sizes.js */
   --grid-gap: 16px;               /* inter-card spacing — part of the virtualizer's item size */
-  --primary: #38bdf8;            /* primary action, current pointer */
+  --primary: #38bdf8;            /* primary action, bookmark */
   --secondary: #7ab3ff;          /* interactive accent: hover, links, active */
   --positive: #9ece6a;           /* up-vote, success */
   --negative: #f66;              /* down-vote, delete */
@@ -136,20 +136,12 @@ main { display: flex; flex: 1; min-height: 0; }
   margin-left: 6px;
   cursor: pointer; user-select: none; touch-action: none; }
 #feedRail .fr-tape { position: absolute; left: 2px; top: var(--fr-label-top); bottom: var(--fr-label-bottom); }
-/* tape: dim (not the near-black stage tone) so the grey scale reads */
+/* Tick color is the card-state color, not a second judgment interpretation. */
 #feedRail .fr-tick { width: 10px; height: calc(var(--fr-tick-step) - var(--fr-tick-gap));
   margin-bottom: var(--fr-tick-gap);
-  background: var(--foreground-dim); }
-/* the wave must read as a BRIGHT clump over the grey tape, not one more
- grey tick — light foreground, longer than the tape ticks */
-#feedRail .fr-tick.wave { width: 18px; background: var(--foreground);
-  box-shadow: 0 0 3px color-mix(in srgb, var(--foreground) 35%, transparent); }
-/* state-colored ticks — the card border's colors and its precedence
- (current > favorite > vote; later rule wins over .wave's foreground) */
-#feedRail .fr-tick.up { background: var(--positive-dim); }
-#feedRail .fr-tick.down { background: var(--negative); }
-#feedRail .fr-tick.fav { background: var(--attention); }
-#feedRail .fr-tick.current { background: var(--primary); }
+  background: var(--card-color); }
+#feedRail .fr-tick.wave { width: 18px;
+  box-shadow: 0 0 3px color-mix(in srgb, var(--card-color) 35%, transparent); }
 #feedRail .fr-num { position: absolute; left: 2px; font-size: 8px;
   color: var(--foreground-dim); font-family: ui-monospace, monospace; }
 #feedRail .fr-top { top: 2px; }
@@ -216,40 +208,26 @@ main { display: flex; flex: 1; min-height: 0; }
 /* --- candidates feed: record cards --------------------------------------- */
 #grid { display: flex; flex-direction: column;
   --grid-pad: 8px; padding: var(--grid-pad);
+  container-type: inline-size;
   position: relative; /* the measuring probe's containing block */ }
-/* Static decoration architecture: every box carries its border in all
- states, at constant size; state changes border-color only. No outward
- decorations (outline, outer box-shadow) near scroll/clip boundaries —
- nothing paints outside a border box, so nothing can be clipped.
-
- Decoration layers: base < state < status < activity — the layer above
- overrides the layer below (cascade-layer order, not selector
- specificity); items within a layer are mutually exclusive by data
- construction (vote is one value; favorite is a boolean; current is a
- single pointer). The resting border matches the card's own background
- — present in structure, quiet in tone. Future items: ranked (status
- layer), being-saved (activity layer — a second activity item needs an
- explicit intra-layer precedence rule when it lands). */
-@layer card-base, card-state, card-status, card-activity;
+/* Card state supplies color tokens. Border and inward-glow geometry exist
+ in every state; no judgment-specific selectors or decorations are added. */
 
 .card, .card--probe { scroll-margin-top: 8px;
+  --card-color: var(--focused-background); --card-glow-color: var(--focused-background);
   background: var(--focused-background); border-radius: 8px; padding: 12px;
   border-width: 1px; border-style: solid;
   /* the inter-card spacing rides ON the card: the virtualizer's item size
  is cardHeight + this margin, so its scroll math matches the DOM
  exactly (a flex gap would be invisible to it) */
   margin-bottom: var(--grid-gap); }
+.card { border-color: var(--card-color);
+  box-shadow: inset 0 0 12px color-mix(in srgb, var(--card-glow-color) 35%, transparent); }
 /* the measuring probe IS a card for styling (the shared rule above), but
  invisible and out of flow — geometry constants are measured from it,
  never from a live feed card */
 .card--probe { position: absolute; inset-inline: var(--grid-pad); top: 0; visibility: hidden;
   pointer-events: none; border-color: transparent; }
-@layer card-base     { .card { border-color: var(--focused-background); } }
-@layer card-state    { .card[data-vote="up"]   { border-color: var(--positive-dim); }
-                       .card[data-vote="down"] { border-color: var(--negative); } }
-@layer card-status   { .card[data-favorite="1"] { border-color: var(--attention); }
-                       /* ranked (future) */ }
-@layer card-activity { .card.current { border-color: var(--primary); } }
 
 /* image box: aspect-true, reserved before pixels land.
  Default rule: image width = column width, height = derived from aspect-ratio
@@ -329,10 +307,19 @@ main { display: flex; flex: 1; min-height: 0; }
 .votebtn.down { --btn-c: var(--negative); }
 .votebtn.up { --btn-c: var(--positive); }
 .votebtn.favorite { --btn-c: var(--attention); }
+.votebtn.bookmark { --btn-c: var(--primary); }
 .votebtn.delete { --btn-c: var(--negative); }
 .votebtn:hover { color: var(--btn-c); border-color: var(--btn-c); }
 .votebtn.on { color: var(--btn-c); }
 .votebtn.on svg path:not([stroke="none"]) { fill: currentColor; }
+
+/* Keep actions reachable on a narrow feed: a separate wrapping row, mirrored
+ by the geometry probe, rather than letting fixed controls escape the card. */
+@container (max-width: 420px) {
+  .ctitle { flex-direction: column; align-items: stretch; }
+  .ctitle .btnwrap { flex-wrap: wrap; justify-content: flex-end; white-space: normal; }
+  .ctitle .votebtn { padding-inline: 4px; }
+}
 
 /* the notes pair row: negatives left, positives right */
 .pair { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-top: 6px; }

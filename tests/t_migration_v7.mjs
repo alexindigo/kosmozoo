@@ -95,7 +95,7 @@ Deno.test("migration v7: tables folded, old tables dropped, idempotent", async (
     // the old tables are gone and the fold is idempotent on re-open
     const raw = new Database(join(dir, "metadata.db"));
     const [ver] = raw.prepare("PRAGMA user_version").value();
-    assertEquals(ver, 7);
+    assertEquals(ver, 8);
     const tables = raw.prepare("SELECT name FROM sqlite_master WHERE type = 'table' ORDER BY name").all().map((r) => r.name);
     assert(tables.includes("content") && tables.includes("collection") && tables.includes("entry") && tables.includes("kv"));
     for (const old of ["metadata", "files", "images", "input_cache"]) {

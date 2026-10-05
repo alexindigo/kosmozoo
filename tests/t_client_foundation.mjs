@@ -304,20 +304,20 @@ Deno.test("current: a hidden current advances to the next visible entry (one gua
     // current on b.png; down-vote it (downvoteHides is on by default) →
     // the pointer advances to the NEXT visible entry
     store.actions.current.set("h", "b.png");
-    await store.actions.judgments.setVote(img("b.png"), "down");
+    await store.actions.judgments.setVote(img("b.png").id, "down");
     assertEquals(store.state.current(), { remote: "h", image: "c.png" });
 
     // down-vote the LAST visible entry → the pointer walks back to the previous
     store.actions.current.set("h", "d.png");
-    await store.actions.judgments.setVote(img("d.png"), "down");
+    await store.actions.judgments.setVote(img("d.png").id, "down");
     assertEquals(store.state.current(), { remote: "h", image: "c.png" });
 
     // down-vote a NON-current card → the pointer does not move
-    await store.actions.judgments.setVote(img("a.png"), "down");
+    await store.actions.judgments.setVote(img("a.png").id, "down");
     assertEquals(store.state.current(), { remote: "h", image: "c.png" });
 
     // down-vote the last visible one → nothing left → pointer clears
-    await store.actions.judgments.setVote(img("c.png"), "down");
+    await store.actions.judgments.setVote(img("c.png").id, "down");
     assertEquals(store.state.current(), null);
   } finally {
     api.entries = origEntries;
@@ -328,6 +328,154 @@ Deno.test("current: a hidden current advances to the next visible entry (one gua
     delete globalThis.location;
     delete globalThis.history;
   }
+});
+
+// --- independent bookmarks and in-flight judgment writes -------------------
+
+async function withBookmarkStore(run) {
+  const { api } = await import("../client/js/api.mjs");
+  const saved = { ...api };
+  globalThis.location = { hash: "", pathname: "/" };
+  globalThis.history = { state: null, replaceState() {}, pushState() {} };
+  const store = makeAppStore();
+  let names = ["a.png", "b.png"];
+  api.entries = async () => names.map((name) => ({
+    name, size: 1, hash: null, state: "seen", meta: null, extracted: false,
+    judgment: { favorite: true, vote: "up" }, width: 100, height: 50,
+  }));
+  api.meta = async () => ({ v: 1, changed: false });
+  api.want = async () => ({ pending: 0 });
+  api.nodes = async () => ({});
+  api.collections = async () => ({ h: { name: "h" }, other: { name: "other" } });
+  try {
+    await store.actions.hosts.select("h");
+    await run(store, api, (next) => { names = next; });
+  } finally {
+    Object.assign(api, saved);
+    delete globalThis.location;
+    delete globalThis.history;
+  }
+}
+
+Deno.test("bookmark: immediate independent toggle, ordered writes, latest intent survives refresh", async () => {
+  await withBookmarkStore(async (store, api, list) => {
+    const requests = [];
+    api.setJudgment = (host, file, patch) => new Promise((resolve) => {
+      requests.push({ host, file, patch, resolve });
+    });
+    const a = store.state.images[0];
+    const first = store.actions.judgments.toggleBookmark(a.id);
+    assertEquals(a.judgment.bookmark, true, "bookmark flips before the request completes");
+    assertEquals(a.judgment.favorite, true);
+    assertEquals(a.judgment.vote, "up");
+    const second = store.actions.judgments.toggleBookmark(a.id);
+    assertEquals(a.judgment.bookmark, undefined);
+    await Promise.resolve();
+    assertEquals(requests.length, 1, "rapid toggles serialize for this entry");
+    assertEquals(requests[0].patch, { bookmark: true });
+    list(["new.png", "a.png", "b.png"]);
+    await store.actions.ui.refresh();
+    assertEquals(store.state.images[1].judgment.bookmark, undefined);
+    requests[0].resolve({});
+    await first;
+    await Promise.resolve();
+    assertEquals(requests.length, 2);
+    assertEquals(requests[1].patch, { bookmark: null });
+    requests[1].resolve({});
+    await second;
+    assertEquals(store.state.images[1].judgment.bookmark, undefined);
+    assertEquals(store.state.images[1].judgment.favorite, true);
+  });
+});
+
+Deno.test("bookmark: rollback re-resolves identity after prepend and does not touch another host", async () => {
+  await withBookmarkStore(async (store, api, list) => {
+    let reject;
+    api.setJudgment = () => new Promise((_, no) => { reject = no; });
+    const write = store.actions.judgments.toggleBookmark(store.state.images[0].id);
+    await Promise.resolve();
+    list(["new.png", "a.png", "b.png"]);
+    await store.actions.ui.refresh();
+    assertEquals(store.state.images[1].judgment.bookmark, true, "refresh preserves the pending flag");
+    reject(new Error("offline"));
+    await write;
+    assertEquals(store.state.images[1].judgment.bookmark, undefined);
+    assertEquals(store.state.images[0].judgment.bookmark, undefined);
+    assert(store.state.chips.some((c) => c.kind === "error" && c.msg.includes("bookmark failed")));
+
+    const outgoing = store.actions.judgments.toggleBookmark(store.state.images[1].id);
+    await Promise.resolve();
+    await store.actions.hosts.select("other");
+    reject(new Error("offline again"));
+    await outgoing;
+    assert(store.state.images.every((im) => im.host === "other" && !im.judgment.bookmark));
+  });
+});
+
+Deno.test("bookmark: a superseded failure cannot undo a later toggle; latest failure restores confirmed state", async () => {
+  await withBookmarkStore(async (store, api) => {
+    const pending = [];
+    api.setJudgment = () => new Promise((resolve, reject) => { pending.push({ resolve, reject }); });
+    const a = store.state.images[0];
+    const first = store.actions.judgments.toggleBookmark(a.id);
+    const second = store.actions.judgments.toggleBookmark(a.id);
+    const third = store.actions.judgments.toggleBookmark(a.id);
+    await Promise.resolve();
+    pending[0].reject(new Error("first failed"));
+    await first;
+    await Promise.resolve();
+    assertEquals(a.judgment.bookmark, true, "a stale failure leaves the newest intent intact");
+    pending[1].resolve({});
+    await second;
+    await Promise.resolve();
+    pending[2].reject(new Error("last failed"));
+    await third;
+    assertEquals(a.judgment.bookmark, undefined, "latest failure restores the last successful write");
+    assertEquals(a.judgment.favorite, true);
+  });
+});
+
+Deno.test("bookmark: a listing started before the toggle cannot overwrite its completed save", async () => {
+  await withBookmarkStore(async (store, api) => {
+    let deliver;
+    const stale = store.state.images.map((im) => ({
+      name: im.filename, size: im.size, width: im.width, height: im.height,
+      meta: null, extracted: false, judgment: { favorite: true, vote: "up" },
+    }));
+    api.entries = () => new Promise((resolve) => { deliver = resolve; });
+    api.setJudgment = async () => ({});
+    const read = store.actions.ui.refresh();
+    while (!deliver) await Promise.resolve();
+    await store.actions.judgments.toggleBookmark(store.state.images[0].id);
+    deliver(stale);
+    await read;
+    assertEquals(store.state.images[0].judgment.bookmark, true);
+    api.entries = async () => stale;
+    await store.actions.ui.refresh();
+    assertEquals(store.state.images[0].judgment.bookmark, undefined,
+      "a later fresh server read remains authoritative");
+  });
+});
+
+Deno.test("bookmark: a listing started during the pending save cannot restore stale server state", async () => {
+  await withBookmarkStore(async (store, api) => {
+    let finish, deliver;
+    const stale = store.state.images.map((im) => ({
+      name: im.filename, size: im.size, width: im.width, height: im.height,
+      meta: null, extracted: false, judgment: { favorite: true, vote: "up" },
+    }));
+    api.setJudgment = () => new Promise((resolve) => { finish = resolve; });
+    const write = store.actions.judgments.toggleBookmark(store.state.images[0].id);
+    await Promise.resolve();
+    api.entries = () => new Promise((resolve) => { deliver = resolve; });
+    const read = store.actions.ui.refresh();
+    while (!deliver) await Promise.resolve();
+    finish({});
+    await write;
+    deliver(stale);
+    await read;
+    assertEquals(store.state.images[0].judgment.bookmark, true);
+  });
 });
 
 // --- refresh: merge new arrivals, never a wipe --------------------------------
@@ -379,6 +527,53 @@ Deno.test("refresh merges new entries into the feed — no wipe, pointer and nod
     delete globalThis.location;
     delete globalThis.history;
   }
+});
+
+// --- compensation belongs to the loaded feed ------------------------------
+
+Deno.test("feed: compensation preserves current but cannot suppress the new collection's scroll", async () => {
+  await withBookmarkStore(async (store, api) => {
+    api.setSettings = async () => ({});
+    const col = { scrollTop: 0, clientHeight: 100 };
+    store.actions.feed.register({
+      scrollEl: col,
+      virtualizer: {
+        scrollToIndex() {},
+        getVirtualItems: () => store.state.images.map((im, index) => ({
+          key: im.id, index, start: index * 100, end: (index + 1) * 100,
+        })),
+      },
+    });
+    const settled = async () => {
+      for (let i = 0; i < 100 && store.state.feedActivity() !== "settled"; i++) {
+        await new Promise((resolve) => setTimeout(resolve, 10));
+      }
+      assertEquals(store.state.feedActivity(), "settled");
+      store.state.window.freeze();
+    };
+    try {
+      store.actions.current.set("h", "a.png");
+      store.actions.feed.compensating();
+      col.scrollTop = 110;
+      store.actions.feed.scrolled(col.scrollTop);
+      await settled();
+      assertEquals(store.state.current(), { remote: "h", image: "a.png" },
+        "compensation in the same feed preserves its current entry");
+
+      store.actions.feed.compensating();
+      col.scrollTop = 120;
+      store.actions.feed.scrolled(col.scrollTop);
+      await store.actions.hosts.select("other");
+      store.actions.current.set("other", "a.png");
+      col.scrollTop = 110;
+      store.actions.feed.scrolled(col.scrollTop);
+      await settled();
+      assertEquals(store.state.current(), { remote: "other", image: "b.png" },
+        "the new feed's first scroll selects its viewport entry");
+    } finally {
+      store.state.window.freeze();
+    }
+  });
 });
 
 // --- the src window on a sparse known list ---------------------------------

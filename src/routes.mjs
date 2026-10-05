@@ -60,10 +60,11 @@ export function makeRouter(ctx) {
     let meta = null;
     if (r?.meta) { try { meta = JSON.parse(r.meta); } catch { /* corrupt */ } }
     let judgment = null;
-    if (r && (r.vote != null || r.favorite != null || r.notes != null || r.plugin_fields != null)) {
+    if (r && (r.vote != null || r.favorite != null || r.bookmark != null || r.notes != null || r.plugin_fields != null)) {
       judgment = {};
       if (r.vote != null) judgment.vote = r.vote;
       if (r.favorite != null) judgment.favorite = !!r.favorite;
+      if (r.bookmark != null) judgment.bookmark = !!r.bookmark;
       if (r.notes != null) { try { judgment.notes = JSON.parse(r.notes); } catch { /* corrupt */ } }
       if (r.plugin_fields != null) { try { judgment.plugins = JSON.parse(r.plugin_fields); } catch { /* corrupt */ } }
     }

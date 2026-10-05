@@ -9,6 +9,8 @@ export function IconButton(props) {
     <button
       class={"votebtn " + props.variant + (props.active ? " on" : "")}
       title={props.title}
+      aria-label={props.title}
+      aria-pressed={props.active === undefined ? undefined : !!props.active}
       onClick={(e) => { e.stopPropagation(); props.onAction(e); }}
       innerHTML={props.icon}
     />

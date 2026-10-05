@@ -12,12 +12,12 @@
 // the viewport is compensated by the feed itself (see below): the list does
 // not shift.
 
-import { onMount, onCleanup, createEffect } from "solid-js";
+import { onMount, onCleanup, createEffect, createMemo } from "solid-js";
 import { For, Show } from "solid-js";
 import { createVirtualizer } from "@tanstack/solid-virtual";
 import { useAppStore } from "../store/app-store.js";
 import { WINDOW_PAD } from "../store/image-window.js";
-import { cardHeight, gridGapPx, measureGeometry, invalidateGeometry } from "../store/sizes.js";
+import { cardHeight, feedOffsets, gridGapPx, measureGeometry, invalidateGeometry } from "../store/sizes.js";
 import { iconSvg } from "/js/icons.mjs";
 import { Card } from "./Card.js";
 import { IconButton } from "./IconButton.js";
@@ -35,11 +35,17 @@ export function Grid() {
   // by entry id: a string, so identity is stable by construction. knownAt
   // is the store's feedEntryAt — the one feed→entry conversion
   const knownAt = (i) => store.state.feedEntryAt(i);
+  // A new ordered identity snapshot invalidates the virtualizer's geometry
+  // even when count is unchanged (reorder/replacement is not a count change).
+  const itemKey = createMemo(() => {
+    const ids = store.state.entriesWithKnownSize().map((i) => store.state.images[i].id);
+    return (i) => ids[i] ?? i;
+  });
 
   const virtualizer = createVirtualizer({
     get count() { return store.state.entriesWithKnownSize().length; },
     getScrollElement: scrollEl,
-    getItemKey: (i) => knownAt(i)?.id ?? i,
+    get getItemKey() { return itemKey(); },
     estimateSize: (i) => {
       const w = col?.clientWidth ?? 800;
       // exact for every mounted row: the card's own height PLUS the inter-
@@ -88,50 +94,42 @@ export function Grid() {
   let prevView = null;
   let prevList = null;
   let prevMerge = -1;
-  let anchor = { id: null, pos: 0 };
+  let previousOffsets = null;
+  let anchorId = null;
+  const offsets = createMemo(() => feedOffsets(
+    store.state.entriesWithKnownSize().map((i) => store.state.images[i]),
+    (entry) => cardHeight(store.state.cardSize(store.state.imageIdxById().get(entry.id)), col?.clientWidth ?? 800) + gridGapPx(),
+  ));
   const anchorNow = () => {
     const top = col?.scrollTop ?? 0;
     const items = virtualizer.getVirtualItems();
     const first = items.find((it) => it.end > top) ?? items[0];
-    anchor = first
-      ? { id: knownAt(first.index)?.id ?? null, pos: first.index }
-      : { id: null, pos: 0 };
+    anchorId = first ? knownAt(first.index)?.id ?? null : null;
   };
   createEffect(() => {
+    // A scroll within an unchanged virtual window still moves the anchor.
+    store.state.feedScrollTop();
     const v = store.state.view();
     const list = store.state.entriesWithKnownSize();
     const merge = store.state.feedMergeNonce();
+    const nextOffsets = offsets();
     virtualizer.getVirtualItems(); // the virtualizer's own reactivity
     // a landing with a stable view — or a refresh-MERGE (the nonce moved):
     // new entries arrived from the server and the visible cards must not
     // shift. A filter/vote/host switch recomputes the view WITHOUT the
     // nonce — those shifts belong to the user.
     const landing = (prevView === v && prevList && prevList !== list) || merge !== prevMerge;
-    if (landing && anchor.id != null) {
-      const prevSet = prevList ? new Set(prevList) : new Set();
-      const newPos = list.findIndex((i) => store.state.images[i]?.id === anchor.id);
-      if (newPos > anchor.pos) {
-        let delta = 0;
-        for (let k = anchor.pos; k < newPos; k++) {
-          const id = store.state.images[list[k]]?.id;
-          if (id == null || prevSet.has(id)) continue; // not a fresh insertion
-          const s = store.state.cardSize(list[k]);
-          // the DOM shift is the card AND its margin — the same value the
-          // estimateSize formula returns for the inserted item
-          if (s) delta += cardHeight(s, col?.clientWidth ?? 800) + gridGapPx();
-        }
-        if (delta > 0) {
-          // compensation is a programmatic scroll, not a user gesture:
-          // the settle must neither re-tidy the position (snap) nor
-          // reassign current from it
-          store.actions.feed.compensating();
-          col.scrollTop += delta;
-        }
+    if (landing && previousOffsets?.has(anchorId) && nextOffsets.has(anchorId)) {
+      const delta = nextOffsets.get(anchorId) - previousOffsets.get(anchorId);
+      if (delta !== 0) {
+        store.actions.feed.compensating();
+        col.scrollTop += delta;
       }
     }
     prevView = v;
     prevList = list;
     prevMerge = merge;
+    previousOffsets = nextOffsets;
     // refresh the anchor from the post-compensation state
     anchorNow();
   });
@@ -168,7 +166,12 @@ export function Grid() {
             </span>
             <span class="btnwrap">
               <IconButton icon={iconSvg("wand", 16)} variant="variations" title="probe" onAction={() => {}} />
-              <button class="savebtn" tabindex="-1">save</button>
+              <IconButton icon={iconSvg("thumb-down")} variant="down" title="probe" onAction={() => {}} />
+              <IconButton icon={iconSvg("thumb-up")} variant="up" title="probe" onAction={() => {}} />
+              <IconButton icon={iconSvg("star")} variant="favorite" title="probe" onAction={() => {}} />
+              <IconButton icon={iconSvg("bookmark")} variant="bookmark" title="probe" onAction={() => {}} />
+              <IconButton icon={iconSvg("download")} variant="download" title="probe" onAction={() => {}} />
+              <IconButton icon={iconSvg("trash", 16)} variant="delete" title="probe" onAction={() => {}} />
             </span>
           </div>
           <div class="pair">
@@ -222,8 +225,7 @@ function CardSlot(props) {
   const image = () => store.state.images[imgIdx()];
   const ready = () => imgIdx() != null && store.state.cardSize(imgIdx()) != null;
   const j = () => image()?.judgment ?? {};
-  // the store's currentEntry memo owns the pointer→entry derivation (G7)
-  const isCurrent = () => store.state.currentEntry()?.index === imgIdx();
+  const state = () => store.state.cardState(props.entryId);
   // the vote/comment foot sticks to the viewport ONLY when the card is
   // taller than it — on a fitting card the foot stays at the card's bottom
   // (sticky would otherwise clamp it to the card's top over the image)
@@ -240,11 +242,14 @@ function CardSlot(props) {
       fallback={<div class="card--slot-gap" style={`height:${Math.max(0, (props.slotSize ?? 0) - gridGapPx())}px`} />}
     >
       <div
-        class={"card" + (isCurrent() ? " current" : "") + (isTall() ? " card--tall" : "")}
+        class={"card" + (state().current ? " current" : "") + (isTall() ? " card--tall" : "")}
+        style={state().style}
+        data-treatment={state().treatment}
         data-idx={imgIdx()}
         data-name={image()?.filename}
         data-vote={j().vote || undefined}
-        data-favorite={j().favorite ? "1" : undefined}
+        data-favorite={state().active.favorite ? "1" : undefined}
+        data-bookmark={state().active.bookmark ? "1" : undefined}
       >
         <Card entryId={props.entryId} />
       </div>

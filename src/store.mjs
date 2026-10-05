@@ -1,4 +1,4 @@
-// src/store.mjs — the engine store: content / collection / entry (schema v7)
+// src/store.mjs — the engine store: content / collection / entry (schema v8)
 // + the discovered-node registry.
 //
 // content — what the bytes ARE: hash → meta, dims, workflow flag
@@ -16,8 +16,8 @@ import { copyFile, readFile, rename } from "node:fs/promises";
 import { CorruptStateError } from "./state.mjs";
 import { splitHostKey } from "./collections.mjs";
 
-const SCHEMA_VERSION = 7;
-const CORE_JUDGMENT_FIELDS = new Set(["vote", "favorite", "notes"]);
+const SCHEMA_VERSION = 8;
+const CORE_JUDGMENT_FIELDS = new Set(["vote", "favorite", "bookmark", "notes"]);
 
 const MIGRATIONS = [
   // v0 → v1: create the single-table metadata store.
@@ -151,6 +151,10 @@ const MIGRATIONS = [
       CREATE TABLE IF NOT EXISTS kv (k TEXT PRIMARY KEY, v TEXT);
     `);
   },
+  // v7 → v8: independent per-entry bookmarks; existing entries stay unset.
+  (db) => {
+    db.exec(`ALTER TABLE entry ADD COLUMN bookmark INTEGER`);
+  },
 ];
 
 
@@ -178,15 +182,15 @@ const STATEMENTS = {
        ON CONFLICT(collection, name, kind) DO UPDATE SET hash = excluded.hash, stamp = excluded.stamp, state = 'ingested', last_seen = excluded.last_seen`,
   hashFor: "SELECT hash FROM entry WHERE collection = ? AND name = ? AND kind = 'output'",
   fileInfo: "SELECT hash, stamp FROM entry WHERE collection = ? AND name = ? AND kind = 'output'",
-  entryGet: "SELECT collection, name, kind, hash, stamp, state, vote, favorite, notes, hidden, plugin_fields, width, height, first_seen, last_seen FROM entry WHERE collection = ? AND name = ? AND kind = ?",
+  entryGet: "SELECT collection, name, kind, hash, stamp, state, vote, favorite, bookmark, notes, hidden, plugin_fields, width, height, first_seen, last_seen FROM entry WHERE collection = ? AND name = ? AND kind = ?",
   // one joined row per entry (entry ⟕ content) — judgment, dims and byte
   // size arrive in the SAME row, so a listing never queries per entry
-  entryJoined: `SELECT e.name, e.hash, e.state, e.hidden, e.vote, e.favorite, e.notes, e.plugin_fields,
+  entryJoined: `SELECT e.name, e.hash, e.state, e.hidden, e.vote, e.favorite, e.bookmark, e.notes, e.plugin_fields,
        COALESCE(c.width, e.width) AS width, COALESCE(c.height, e.height) AS height,
        c.bytes, c.meta
      FROM entry e LEFT JOIN content c ON c.hash = e.hash
      WHERE e.collection = ? AND e.name = ? AND e.kind = 'output'`,
-  entriesForCollection: `SELECT e.name, e.hash, e.state, e.hidden, e.vote, e.favorite, e.notes, e.plugin_fields,
+  entriesForCollection: `SELECT e.name, e.hash, e.state, e.hidden, e.vote, e.favorite, e.bookmark, e.notes, e.plugin_fields,
        COALESCE(c.width, e.width) AS width, COALESCE(c.height, e.height) AS height,
        c.bytes, c.meta
      FROM entry e LEFT JOIN content c ON c.hash = e.hash
@@ -217,20 +221,21 @@ const STATEMENTS = {
        WHERE e.collection = ? AND e.kind = 'output' AND c.meta IS NOT NULL`,
   metaFresh: `SELECT e.name FROM entry e JOIN content c ON c.hash = e.hash
        WHERE e.collection = ? AND e.kind = 'output' AND c.ext >= ?`,
-  judgmentRead: "SELECT vote, favorite, notes, plugin_fields FROM entry WHERE collection = ? AND name = ? AND kind = 'output'",
-  judgmentUpdate: `UPDATE entry SET vote = ?, favorite = ?, notes = ?, plugin_fields = ?, last_seen = ?
+  judgmentRead: "SELECT vote, favorite, bookmark, notes, plugin_fields FROM entry WHERE collection = ? AND name = ? AND kind = 'output'",
+  judgmentUpdate: `UPDATE entry SET vote = ?, favorite = ?, bookmark = ?, notes = ?, plugin_fields = ?, last_seen = ?
        WHERE collection = ? AND name = ? AND kind = 'output'`,
-  judgmentApply: `INSERT INTO entry (collection, name, kind, vote, favorite, notes, plugin_fields, state, first_seen, last_seen)
-       VALUES (?, ?, 'output', ?, ?, ?, ?, 'seen', ?, ?)
+  judgmentApply: `INSERT INTO entry (collection, name, kind, vote, favorite, bookmark, notes, plugin_fields, state, first_seen, last_seen)
+       VALUES (?, ?, 'output', ?, ?, ?, ?, ?, 'seen', ?, ?)
        ON CONFLICT(collection, name, kind) DO UPDATE SET
          vote = COALESCE(excluded.vote, entry.vote),
          favorite = COALESCE(excluded.favorite, entry.favorite),
+         bookmark = COALESCE(excluded.bookmark, entry.bookmark),
          notes = COALESCE(excluded.notes, entry.notes),
          plugin_fields = COALESCE(excluded.plugin_fields, entry.plugin_fields)`,
   entryInsertGone: "INSERT OR IGNORE INTO entry (collection, name, kind, state, first_seen, last_seen) VALUES (?, ?, 'output', 'gone', ?, ?)",
   entryInsertGoneHash: "INSERT OR IGNORE INTO entry (collection, name, kind, hash, state, first_seen, last_seen) VALUES (?, ?, 'output', ?, 'gone', ?, ?)",
-  feedbackExport: `SELECT name, hash, vote, favorite, notes, plugin_fields FROM entry
-       WHERE collection = ? AND kind = 'output' AND (vote IS NOT NULL OR favorite IS NOT NULL OR notes IS NOT NULL OR plugin_fields IS NOT NULL)
+  feedbackExport: `SELECT name, hash, vote, favorite, bookmark, notes, plugin_fields FROM entry
+       WHERE collection = ? AND kind = 'output' AND (vote IS NOT NULL OR favorite IS NOT NULL OR bookmark IS NOT NULL OR notes IS NOT NULL OR plugin_fields IS NOT NULL)
        ORDER BY name`,
   instancesOf: "SELECT collection, name FROM entry WHERE hash = ? AND kind = 'output' ORDER BY collection, name",
   goneNames: "SELECT name FROM entry WHERE collection = ? AND kind = 'output' AND state = 'gone'",
@@ -382,7 +387,7 @@ export class Store {
     });
     this.#q.judgmentApply.run(
       collection, name,
-      vote, favorite,
+      vote, favorite, null, // legacy imports never create or clear bookmarks
       notes == null ? null : JSON.stringify(notes),
       plugins == null ? null : JSON.stringify(plugins),
       now, now,
@@ -737,9 +742,10 @@ export class Store {
 
   // --- judgments (entry columns; sqlite is canonical) ---------------------
 
-  #pruneJudgment({ vote, favorite, notes, plugins }) {
+  #pruneJudgment({ vote, favorite, bookmark, notes, plugins }) {
     if (vote === "" || vote === undefined) vote = null;
     if (favorite === false || favorite === undefined) favorite = null;
+    if (bookmark === false || bookmark === undefined) bookmark = null;
     if (notes && typeof notes === "object") {
       for (const k of Object.keys(notes)) {
         if (notes[k] === null || notes[k] === undefined || notes[k] === "") delete notes[k];
@@ -758,7 +764,7 @@ export class Store {
       }
       if (Object.keys(plugins).length === 0) plugins = null;
     } else if (plugins === "" || plugins === undefined) plugins = null;
-    return { vote: vote ?? null, favorite: favorite ?? null, notes, plugins };
+    return { vote: vote ?? null, favorite: favorite ?? null, bookmark: bookmark ?? null, notes, plugins };
   }
 
   #readJudgment(host, filename) {
@@ -767,6 +773,7 @@ export class Store {
     const j = {};
     if (row.vote != null) j.vote = row.vote;
     if (row.favorite != null) j.favorite = !!row.favorite;
+    if (row.bookmark != null) j.bookmark = !!row.bookmark;
     if (row.notes != null) { try { j.notes = JSON.parse(row.notes); } catch { /* corrupt */ } }
     if (row.plugin_fields != null) { try { j.plugins = JSON.parse(row.plugin_fields); } catch { /* corrupt */ } }
     return Object.keys(j).length ? j : null;
@@ -776,19 +783,20 @@ export class Store {
     return this.#readJudgment(host, filename);
   }
 
-  // Whitelisted, deep-pruned, ONE statement. Fields: vote | favorite | notes
+  // Whitelisted, deep-pruned, ONE statement. Fields: vote | favorite | bookmark | notes
   // | plugins.<ns>.<field>; null/"" values prune (defaults store as absent).
   judgmentPatch(host, filename, patch) {
     const cur = this.#readJudgment(host, filename) ?? {};
     const next = {
       vote: cur.vote ?? null,
       favorite: cur.favorite ? 1 : null,
+      bookmark: cur.bookmark ? 1 : null,
       notes: cur.notes ?? null,
       plugins: cur.plugins ?? null,
     };
     for (const [field, value] of Object.entries(patch ?? {})) {
       if (CORE_JUDGMENT_FIELDS.has(field)) {
-        next[field] = field === "favorite" ? (value ? 1 : null) : value;
+        next[field] = field === "favorite" || field === "bookmark" ? (value ? 1 : null) : value;
         continue;
       }
       if (field.startsWith("plugins.")) {
@@ -809,7 +817,7 @@ export class Store {
     this.#q.entryInsertSeen
       .run(host, filename, now, now);
     this.#q.judgmentUpdate.run(
-      pruned.vote, pruned.favorite,
+      pruned.vote, pruned.favorite, pruned.bookmark,
       pruned.notes == null ? null : JSON.stringify(pruned.notes),
       pruned.plugins == null ? null : JSON.stringify(pruned.plugins),
       now, host, filename,
@@ -875,6 +883,7 @@ export class Store {
       if (row.hash != null) e.hash = row.hash;
       if (row.vote != null) e.vote = row.vote;
       if (row.favorite != null) e.favorite = !!row.favorite;
+      if (row.bookmark != null) e.bookmark = !!row.bookmark;
       if (row.notes != null) { try { e.notes = JSON.parse(row.notes); } catch { /* corrupt */ } }
       if (row.plugin_fields != null) { try { e.plugins = JSON.parse(row.plugin_fields); } catch { /* corrupt */ } }
       entries[row.name] = e;

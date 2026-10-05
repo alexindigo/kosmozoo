@@ -19,7 +19,7 @@ toggles. Availability and reason derive from each mode's declared `needs`.
 
 What IS shipped: the feed (virtualized grid), the workbench (the two-sided
 comparator — feed current × right-pane current, Kaleidoscope's four views
-with shared pan/zoom; pair URL live), notes/vote/favorite, anchor pane, and
+with shared pan/zoom; pair URL live), notes/vote/favorite/bookmark, anchor pane, and
 the variations feature (server route + modal). The three plugin axes
 (alignment / composition-as-plugins / ROI) stay dormant — Difference-the-view
 is the canvas mask, not the `difference` plugin.
@@ -42,7 +42,7 @@ the resources; a collection's `capabilities` answer what its backing can do.
 | `/api/collections/<id>/entries/<name>` | DELETE | per capability: folder → unlink; comfy + assets_plus → trash; otherwise → hide + history cleanup |
 | `/api/collections/<id>/entries/<name>/bytes` | GET | cache-first bytes (`?kind=input` for input-dir files); ETag is the content hash, `Cache-Control: no-cache` |
 | `/api/collections/<id>/entries/<name>/bytes` | HEAD | 404 when the entry's bytes are unknown, else `content-length` |
-| `/api/collections/<id>/entries/<name>/judgment` | PATCH | whitelisted fields (`vote`/`favorite`/`notes`/`plugins.<ns>.*`), defaults deep-pruned, one statement |
+| `/api/collections/<id>/entries/<name>/judgment` | PATCH | whitelisted fields (`vote`/`favorite`/`bookmark`/`notes`/`plugins.<ns>.*`), defaults deep-pruned, one statement |
 | `/api/collections/<id>/feedback.json` | GET | the collection's judgments as a portable v2 document, generated on demand |
 | `/api/collections/<id>/meta` | GET | versioned poll `?since=<v>` → `{v, changed, items?, dims?, pending}` — extracted metas and entry dims ride the same channel |
 | `/api/collections/<id>/want` | POST | `{files}` — on-screen names jump the extraction queue |
@@ -98,6 +98,7 @@ serve the Solid app from `client-solid-dist/`, with shared assets (`/css`,
 |---|---|---|
 | `vote` up/down | decision signal about project fitness | `entry` column, per (collection, name) |
 | `favorite` | interesting in itself, independent of fit | same |
+| `bookmark` | return to this image later, independent of favorite | same |
 | `hidden` | delete fallback on hosts that can't delete | `entry` column, per (collection, name) |
 
 - Down-vote **hides by default**; the coupling is the
@@ -105,8 +106,21 @@ serve the Solid app from `client-solid-dist/`, with shared assets (`/css`,
 - "Show thumbed-down" is a temporary reveal, never a data deletion.
 - Notes: `pos` / `neg` free text, debounced autosave; defaults are
   deep-pruned (a field set to its default is stored as absent).
-- Core judgment record stays small: notes, vote, favorite. Plugin fields
+- Core judgment record stays small: notes, vote, favorite, bookmark. Plugin fields
   live in the entry's `plugin_fields` JSON, namespaced `plugins.<name>`.
+- The card action row uses an icon-only download control and a sky-blue
+  bookmark toggle between star and download. Existing favorites never become
+  bookmarks automatically. All judgment intents (button, bulk, keyboard, or
+  programmatic) share one entry-ID handler. Optimistic state, serialization,
+  confirmation, read protection, and rollback are shared, not per control.
+  Note edits carry their original entry ID and merge signs in the handler.
+- One card-state derivation supplies active control flags and presentation
+  tokens. Border treatment is favorite (orange), else bookmark (sky blue),
+  else vote; current retains that color or supplies white when untreated.
+  Card and rail consume the same color token. The tick has no judgment-specific
+  color logic. Border and inset-shadow geometry exist in every state; only
+  colors change. Non-current shadow blends into the background; current shadow
+  follows the treatment. Decoration never changes card height.
 
 ## 4. Knowledge harvest (from the outgoing implementation)
 
@@ -167,7 +181,7 @@ working tree is never a state dir. Env overrides: `KOZMOZOO_PORT` (default
 `KOZMOZOO_FEEDBACK` (migration import only), `KOZMOZOO_CACHE`,
 `KOZMOZOO_PLUGINS`, `KOZMOZOO_REVALIDATE_MS`.
 
-### Schema (`metadata.db`, `PRAGMA user_version = 7`, ordered migrations)
+### Schema (`metadata.db`, `PRAGMA user_version = 8`, ordered migrations)
 
 Content is what the bytes are; a collection is a namespace of names backed
 by a host or folder; an entry is one instance's state in one collection.
@@ -196,7 +210,7 @@ CREATE TABLE entry (
   hash TEXT REFERENCES content(hash),   -- null until ingested
   stamp TEXT,                           -- opaque source stamp (revalidation)
   state TEXT NOT NULL DEFAULT 'seen',   -- seen | ingested | gone
-  vote TEXT, favorite INTEGER, notes TEXT, hidden INTEGER,
+  vote TEXT, favorite INTEGER, bookmark INTEGER, notes TEXT, hidden INTEGER,
   plugin_fields TEXT,                   -- JSON, namespaced plugins.<name>
   width INTEGER, height INTEGER,        -- dims known before the hash is (dims pass)
   first_seen REAL NOT NULL, last_seen REAL NOT NULL,
@@ -215,6 +229,7 @@ Migrations are ordered and idempotent. v6→v7 folds `metadata`/`files`/
 `collection`, the per-host hidden lists onto entries, and drops the old
 tables. A separate one-shot import folds `feedback.json` v1 into entry
 judgment columns (§Judgments below).
+v7→v8 adds the nullable `bookmark` column without changing existing judgments.
 
 ### Cache (`~/.local/share/kosmozoo/cache/`, override `KOZMOZOO_CACHE`)
 
@@ -259,7 +274,7 @@ outage.
 
 ### Judgments
 
-Judgments are columns on `entry` (`vote`, `favorite`, `notes`,
+Judgments are columns on `entry` (`vote`, `favorite`, `bookmark`, `notes`,
 `plugin_fields`) — sqlite is canonical and they are per (collection, name),
 so two instances of the same content carry independent judgments. Writes go
 through `judgmentPatch` (whitelisted fields, defaults deep-pruned, one

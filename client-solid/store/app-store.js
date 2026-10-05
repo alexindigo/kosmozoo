@@ -27,6 +27,8 @@ import { pairSides } from "../features/diff/pair.mjs";
 import { makeImageWindow } from "./image-window.js";
 import { makeSizes } from "./sizes.js";
 import { snapTidy, SNAP_QUIET_MS } from "./scroll-snap.js";
+import { makeJudgments } from "./judgments.js";
+import { cardState } from "./card-state.js";
 
 // stored host if still present, else first online, else first
 function initialHost(hosts, stored) {
@@ -489,22 +491,45 @@ export function makeAppStore() {
   }
 
   // --- image list load -----------------------------------------------------------
+  const judgments = makeJudgments({
+    entryFor: (id) => st.images[imageIdx(id)],
+    write: (collection, filename, patch) => api.setJudgment(collection, filename, patch),
+    onError: (message) => actions.status.error(message),
+    apply(id, patch) {
+      const idx = imageIdx(id);
+      if (idx < 0 || !Object.keys(patch).length) return;
+      batch(() => {
+        if (!st.images[idx].judgment) setSt("images", idx, "judgment", {});
+        for (const [field, value] of Object.entries(patch)) {
+          // Reconciliation can install its target; the writer must keep its own snapshot.
+          setSt("images", idx, "judgment", field,
+            value && typeof value === "object" ? reconcile(structuredClone(value)) : value ?? undefined);
+        }
+      });
+    },
+  });
+
   async function loadImages(name) {
     // a host switch must not leave the previous host's feed on screen —
     // and its per-entry error state dies with the list (id-keyed, cleared)
+    // Compensation belongs to the outgoing feed, never the new feed's scroll.
+    setSuppressSettleCurrent(false);
     setSt("images", reconcile([]));
     setSt("selected", reconcile({}));
     window_.clear();
     if (!name) return;
     actions.status.active("load", `loading image list from ${name}…`);
+    const read = judgments.beginRead(name);
     try {
       setSt("images", reconcile((await api.entries(name)).map((e) => ({
         // collection:name string keys exist only here, derived (plan )
         id: `${name}:${e.name}`, host: name, filename: e.name,
         size: e.size, hash: e.hash, state: e.state,
-        meta: e.meta, extracted: e.extracted, judgment: e.judgment,
+        meta: e.meta, extracted: e.extracted,
+        judgment: judgments.overlay(`${name}:${e.name}`, e.judgment, read),
         width: e.width, height: e.height,
       }))));
+      judgments.endRead(read);
       // the URL is adopted into current after every (re)fetch, then the feed
       // centers on it. Only a first visit with no hash at all invents a
       // current image (top card); a hash stripped to #host stays file-less.
@@ -539,6 +564,8 @@ export function makeAppStore() {
     } catch (err) {
       actions.status.clear("load");
       actions.status.error(`couldn't load images from ${name}: ${err?.message ?? err}`);
+    } finally {
+      judgments.endRead(read);
     }
   }
 
@@ -554,6 +581,7 @@ export function makeAppStore() {
   async function refreshImages(name) {
     if (!name) return;
     actions.status.active("load", `checking ${name} for new images…`);
+    const read = judgments.beginRead(name);
     try {
       const prevIds = new Set(st.images.map((i) => i.id));
       const entries = await api.entries(name);
@@ -565,11 +593,13 @@ export function makeAppStore() {
         setSt("images", reconcile(entries.map((e) => ({
           id: `${name}:${e.name}`, host: name, filename: e.name,
           size: e.size, hash: e.hash, state: e.state,
-          meta: e.meta, extracted: e.extracted, judgment: e.judgment,
+          meta: e.meta, extracted: e.extracted,
+          judgment: judgments.overlay(`${name}:${e.name}`, e.judgment, read),
           width: e.width, height: e.height,
         }))));
         setFeedMergeNonce((n) => n + 1);
       });
+      judgments.endRead(read);
       wantRangeNow();
       flushWant();
       await pollMetadata();
@@ -579,6 +609,8 @@ export function makeAppStore() {
     } catch (err) {
       actions.status.clear("load");
       actions.status.error(`couldn't refresh ${name}: ${err?.message ?? err}`);
+    } finally {
+      judgments.endRead(read);
     }
   }
 
@@ -1008,44 +1040,11 @@ export function makeAppStore() {
     },
 
     judgments: {
-      // Optimistic: the star/marker flips ON THE CLICK — the server
-      // reconciles behind it; a failed write rolls back with an error chip.
-      // (was: await PATCH first, then the store — an ~89 ms gap per click)
-      async setVote(image, vote) {
-        const idx = imageIdx(image.id);
-        if (idx < 0) return;
-        const prev = image.judgment?.vote ?? null;
-        if (!st.images[idx].judgment) setSt("images", idx, "judgment", {});
-        setSt("images", idx, "judgment", "vote", vote === null ? undefined : vote);
-        try {
-          await api.setJudgment(image.host, image.filename, { vote });
-        } catch (e) {
-          setSt("images", idx, "judgment", "vote", prev ?? undefined);
-          actions.status.error(`vote failed: ${image.filename}: ${e.message}`);
-        }
-      },
-      async toggleFavorite(image) {
-        const idx = imageIdx(image.id);
-        if (idx < 0) return;
-        const prev = !!image.judgment?.favorite;
-        const next = !prev;
-        if (!st.images[idx].judgment) setSt("images", idx, "judgment", {});
-        setSt("images", idx, "judgment", "favorite", next ? true : undefined);
-        try {
-          await api.setJudgment(image.host, image.filename, { favorite: next || null });
-        } catch (e) {
-          setSt("images", idx, "judgment", "favorite", prev ? true : undefined);
-          actions.status.error(`favorite failed: ${image.filename}: ${e.message}`);
-        }
-      },
-      async saveNotes(image, notes) {
-        await api.setJudgment(image.host, image.filename, { notes }).catch(() => {});
-        const idx = imageIdx(image.id);
-        if (idx < 0) return;
-        if (!st.images[idx].judgment) setSt("images", idx, "judgment", {});
-        setSt("images", idx, "judgment", "notes",
-          (!notes.pos && !notes.neg) ? undefined : notes);
-      },
+      dispatch: judgments.dispatch,
+      setVote(id, vote) { return actions.judgments.dispatch(id, { type: "set", patch: { vote } }); },
+      toggleFavorite(id) { return actions.judgments.dispatch(id, { type: "toggle", field: "favorite" }); },
+      toggleBookmark(id) { return actions.judgments.dispatch(id, { type: "toggle", field: "bookmark" }); },
+      saveNotes(id, notes) { return actions.judgments.dispatch(id, { type: "set", patch: { notes } }); },
       // "Show thumbed-down" toggles a session flag — the votes are never touched
       toggleReveal() {
         setSt("judgmentPrefs", "revealThumbedDown", !st.judgmentPrefs.revealThumbedDown);
@@ -1096,12 +1095,13 @@ export function makeAppStore() {
     notes: {
       setDraft(id, cls, text, save) {
         const key = `${id}:${cls}`;
+        judgments.retain(id, key);
         setSt("drafts", key, text);
         clearTimeout(noteTimers[key]);
         noteTimers[key] = setTimeout(async () => {
           delete noteTimers[key];
-          await save?.(text);
-          if (st.drafts[key] === text) setSt("drafts", key, undefined);
+          const result = await save?.(text, id);
+          if (result?.ok && st.drafts[key] === text) actions.notes.clearDraft(id, cls);
         }, NOTE_SAVE_MS);
       },
       async flushDraft(id, cls, save) {
@@ -1110,10 +1110,18 @@ export function makeAppStore() {
         clearTimeout(noteTimers[key]);
         delete noteTimers[key];
         if (text === undefined) return;
-        await save?.(text);
-        if (st.drafts[key] === text) setSt("drafts", key, undefined);
+        judgments.retain(id, key);
+        const result = await save?.(text, id);
+        if (result?.ok && st.drafts[key] === text) actions.notes.clearDraft(id, cls);
+        return result;
       },
-      clearDraft(id, cls) { setSt("drafts", `${id}:${cls}`, undefined); },
+      clearDraft(id, cls) {
+        const key = `${id}:${cls}`;
+        clearTimeout(noteTimers[key]);
+        delete noteTimers[key];
+        setSt("drafts", key, undefined);
+        judgments.release(id, key);
+      },
     },
 
     ui: {
@@ -1570,26 +1578,18 @@ export function makeAppStore() {
       images() { return st.images.filter((i) => st.selected[i.id]); },
       clear() { setSt("selected", reconcile({})); },
       async vote(vote) {
-        const images = actions.bulk.images();
-        await Promise.all(images.map((img) =>
-          api.setJudgment(img.host, img.filename, { vote }).then(() => {
-            const idx = imageIdx(img.id);
-            if (idx < 0) return;
-            if (!st.images[idx].judgment) setSt("images", idx, "judgment", {});
-            setSt("images", idx, "judgment", "vote", vote);
-          }).catch((e) => actions.status.error(`vote failed: ${img.filename}: ${e.message}`))));
-        actions.status.info(`${images.length} image${images.length > 1 ? "s" : ""} ${vote === "up" ? "up-voted" : "down-voted"}`);
+        const ids = actions.bulk.images().map((img) => img.id);
+        const results = await Promise.all(ids.map((id) => actions.judgments.setVote(id, vote)));
+        const count = results.filter((result) => result.ok).length;
+        if (count) actions.status.info(`${count} image${count > 1 ? "s" : ""} ${vote === "up" ? "up-voted" : "down-voted"}`);
+        return results;
       },
       async favorite() {
-        const images = actions.bulk.images();
-        await Promise.all(images.map((img) =>
-          api.setJudgment(img.host, img.filename, { favorite: true }).then(() => {
-            const idx = imageIdx(img.id);
-            if (idx < 0) return;
-            if (!st.images[idx].judgment) setSt("images", idx, "judgment", {});
-            setSt("images", idx, "judgment", "favorite", true);
-          }).catch((e) => actions.status.error(`favorite failed: ${img.filename}: ${e.message}`))));
-        actions.status.info(`${images.length} image${images.length > 1 ? "s" : ""} favorited`);
+        const ids = actions.bulk.images().map((img) => img.id);
+        const results = await Promise.all(ids.map((id) => actions.judgments.dispatch(id, { type: "set", patch: { favorite: true } })));
+        const count = results.filter((result) => result.ok).length;
+        if (count) actions.status.info(`${count} image${count > 1 ? "s" : ""} favorited`);
+        return results;
       },
       save() {
         const images = actions.bulk.images();
@@ -1643,6 +1643,10 @@ export function makeAppStore() {
     get chips() { return st.chips; },
     get metaPending() { return st.metaPending; },
     get drafts() { return st.drafts; },
+    cardState(id) {
+      const img = st.images[imageIdxById().get(id)];
+      return cardState(img?.judgment, !!img && currentEntry()?.entry.id === id);
+    },
     get views() { return st.views; },
     // derived
     view,

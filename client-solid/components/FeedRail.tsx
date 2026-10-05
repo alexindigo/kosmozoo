@@ -94,21 +94,6 @@ export function FeedRail() {
     return !!wb && idx >= wb[0] && idx <= wb[1];
   };
 
-  // a tick wears its card's state color — the card border's own precedence:
-  // current > favorite > vote (the card's layer order). Judgments are
-  // reactive store paths, so a vote re-colors its tick live.
-  const tickState = (idx) => {
-    const e = store.state.feedEntryAt(idx);
-    if (!e) return {};
-    const j = e.judgment ?? {};
-    return {
-      current: store.state.currentEntry()?.entry?.id === e.id,
-      fav: !!j.favorite,
-      up: j.vote === "up",
-      down: j.vote === "down",
-    };
-  };
-
   const topLabel = () => tapeStart() + 1;
   const bottomLabel = () => Math.min(tapeStart() + capacity(), N());
 
@@ -152,7 +137,17 @@ export function FeedRail() {
     >
       <div class="fr-tape" ref={(el) => { tape = el; }}>
         <For each={ticks()}>
-          {(idx) => <div class="fr-tick" classList={{ wave: inWave(idx), ...tickState(idx) }} />}
+          {(idx) => {
+            const entry = () => store.state.feedEntryAt(idx);
+            const state = () => store.state.cardState(entry()?.id);
+            return <div class="fr-tick"
+              classList={{ wave: inWave(idx), current: state().current }}
+              style={state().style}
+              data-entry-id={entry()?.id}
+              data-treatment={state().treatment}
+              title={entry()?.filename}
+            />;
+          }}
         </For>
       </div>
       <div class="fr-num fr-top">{topLabel()}</div>

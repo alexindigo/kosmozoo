@@ -4,7 +4,7 @@
 // loader without a DOM).
 
 import { assert, assertEquals } from "jsr:@std/assert";
-import { cardHeight, makeSizes, measureGeometry, invalidateGeometry } from "../client-solid/store/sizes.js";
+import { cardHeight, feedOffsets, makeSizes, measureGeometry, invalidateGeometry } from "../client-solid/store/sizes.js";
 
 // measureGeometry reads the probe's rects — fake the element shape it reads
 function fakeProbe(wrapW, cardH, wrapH) {
@@ -26,6 +26,20 @@ Deno.test("cardHeight: 16:9 / tall / wide / zero-height", () => {
   assertEquals(cardHeight({ w: 3200, h: 900 }, COLW), cardHeight({ w: 1600, h: 900 }, COLW));
   // zero height: the formula must not divide by zero — the 16:9 floor stands
   assertEquals(cardHeight({ w: 100, h: 0 }, COLW), cardHeight({ w: 1600, h: 900 }, COLW));
+});
+
+Deno.test("feed offsets: heterogeneous insertions, removals and replacements preserve entry identity", () => {
+  const A = { id: "A", height: 700 }, B = { id: "B", height: 500 };
+  const C = { id: "C", height: 600 }, T = { id: "T", height: 900 };
+  const X = { id: "X", height: 640.625 };
+  const heights = (entry) => entry.height;
+  const original = feedOffsets([A, B, C, T], heights);
+  const inserted = feedOffsets([X, A, B, C, T], heights);
+  assertEquals(inserted.get("T") - original.get("T"), 640.625);
+  assertEquals(original.get("T") - inserted.get("T"), -640.625);
+  const replaced = feedOffsets([X, B, C, T], heights);
+  assertEquals(replaced.get("T") - original.get("T"), -59.375);
+  assertEquals(original.get("T"), 1800, "old snapshot never follows mutated indices");
 });
 
 // A fake Image: construction registers; the test fires onload/onerror by hand
