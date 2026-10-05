@@ -246,6 +246,10 @@ const AUDIT = `(async () => {
     kz.actions.anchors.setPaneWidth(560);
     return previous;
   })()`);
+  await page.poll(`(async () => {
+    const audit = await ${AUDIT};
+    return audit.cards > 0 && audit.maxDelta === 0;
+  })()`, 10000);
   await page.poll(`(() => {
     const el = document.querySelector('${card}');
     const bounds = el.getBoundingClientRect();
