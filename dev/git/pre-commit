@@ -1,0 +1,6 @@
+#!/usr/bin/env bash
+# kosmozoo-full-project-pre-commit-v1
+set -euo pipefail
+HOOK_DIR="$(dirname "$(realpath "$0")")"
+exec python3 -B "$HOOK_DIR/../kosmozoo-verification/current/controller.py" \
+  --config "$HOOK_DIR/../kosmozoo-verification/config.json"

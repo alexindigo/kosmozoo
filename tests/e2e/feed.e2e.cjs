@@ -479,7 +479,7 @@ async function railMotion(page) {
     await page.poll(`(async () =>
       (await (await fetch("/api/collections/undim/entries")).json())
         .filter((e) => e.width != null).length >= 1550)()`, 180000);
-    await page.evaluate(`(async () => { ${KZ}.actions.hosts.select("undim"); })()`);
+    await page.evaluate(`(async () => { await ${KZ}.actions.hosts.select("undim"); })()`);
     await page.poll(`(async () => ${KZ}.state.entriesWithKnownSize().length >= 1550)()`, 30000);
 
     // scrub-jump deep into the list, settle, audit
