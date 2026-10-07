@@ -19,3 +19,13 @@ export function backingFor(addr) {
 
 export { assertSafeName } from "./folder.mjs";
 export { RENDERABLE, EXT_MIME } from "./mime.mjs";
+
+// Validate at operation boundaries before cache, store or queue access. The
+// local folder's existing basename-only grammar remains driver-owned.
+export function validEntryName(addr, name) {
+  return typeof name === "string" && name.length > 0 &&
+    !name.includes("\0") &&
+    (backingFor(addr).validName ?? folder.assertSafeName)(name);
+}
+
+export const inventoryFor = (addr, options) => backingFor(addr).inventory(addr, options);

@@ -18,19 +18,24 @@ import { folderPath } from "./backings/folder.mjs";
 export async function capabilities(collection, { online = true, useAssetsPlus = true, comfy = null } = {}) {
   const kind = collection.kind ?? (isFolderHost(collection.address) ? "folder" : "comfy");
   if (kind === "folder") {
-    return { list: true, read: true, add: false, delete: "unlink", rename: false };
+    return { list: true, read: true, add: false, delete: "unlink", rename: false,
+      subfolders: { supported: false, reason: "Local folder sources are flat; output root only" } };
   }
   if (kind === "virtual") {
     // the schema slot only (future) — a virtual collection has no backing
     return { list: false, read: false, add: false, delete: false, rename: false };
   }
   const trash = online && useAssetsPlus && comfy != null && await comfy.hasAssetsPlus();
+  const subfolders = comfy?.subfolders
+    ? await comfy.subfolders()
+    : { supported: null, reason: "Recursive inventory support has not been discovered" };
   return {
     list: true,
     read: true,
     add: true, // the upload endpoint exists (an offline host fails at POST time)
     delete: trash ? "trash" : "hide",
     rename: false,
+    subfolders,
   };
 }
 

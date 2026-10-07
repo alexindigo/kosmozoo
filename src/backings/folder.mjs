@@ -42,6 +42,12 @@ export async function list(addr, kind = "output") {
   return kind === "input" ? files.map((f) => f.n) : files.map((f) => ({ name: f.n, size: f.size }));
 }
 
+export async function inventory(addr) {
+  const items = await list(addr);
+  return { revision: null, coverage: "root-only", folders: [""], items,
+    subfolders: { supported: false, reason: "Local folder sources are flat; output root only" } };
+}
+
 // { stamp: mtime stringified, size } — the folder's whole revalidation seam.
 export async function stat(addr, name) {
   if (!assertSafeName(name)) return null;

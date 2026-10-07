@@ -1021,3 +1021,22 @@ body:has(#diff:not([hidden])) #statusCol { bottom: 56px; }
 @media (prefers-reduced-motion: reduce) {
   #chrome .source-progress, #chrome .chrome-icon { transition: none; }
 }
+
+/* Folder scope and pin-group allocation remain inside Header's own split. */
+#chrome .folder-picker { flex: 0 1 150px; min-width: 32px; max-width: 210px; }
+#chrome .folder-picker select { display: block; width: 100%; min-width: 0; box-sizing: border-box;
+  height: 24px; padding: 2px 6px; border: 1px solid var(--border-strong); border-radius: 4px;
+  background: var(--background); color: var(--foreground-mid); font: inherit;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap; cursor: pointer; }
+#chrome .folder-picker select:disabled { opacity: .5; cursor: default; }
+#chrome select:focus-visible { outline: 2px solid var(--secondary); outline-offset: 2px; }
+#chrome .pinned-source-group { display: flex; align-items: center; min-width: 0; flex: 1 1 auto; }
+#chrome .pinned-source-group.has-pins { gap: 8px; padding-inline-start: 8px; }
+#chrome .pinned-separator { flex: 0 0 1px; width: 1px; height: 18px; background: var(--border); }
+#chrome .pinned-sources { gap: 4px; }
+@container chrome-feed (max-width: 220px) {
+  #chrome .chrome-feed-inner { gap: 0; }
+  #chrome .folder-picker { flex-basis: 50px; min-width: 4px; }
+  #chrome .folder-picker select { padding-inline: 0; }
+  #chrome .pinned-source-group.has-pins { gap: 1px; padding-inline-start: 1px; }
+}

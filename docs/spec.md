@@ -33,12 +33,12 @@ the resources; a collection's `capabilities` answer what its backing can do.
 
 | Route | Methods | Notes |
 |---|---|---|
-| `/api/collections` | GET | configured collections, online probe, `kind`, `pinned`/`autoRefresh` booleans, `capabilities` (`list`/`read`/`add`/`delete` ∈ `trash`/`unlink`/`hide`, `rename`) |
+| `/api/collections` | GET | configured collections, online probe, `kind`, `pinned`/`autoRefresh` booleans, `capabilities` (`list`/`read`/`add`/`delete` ∈ `trash`/`unlink`/`hide`, `rename`, `subfolders: {supported,reason}`) |
 | `/api/collections` | POST | add a source-backed collection `{name, address, pinned?, autoRefresh?}`; flags default false; repeating the same name/address preserves existing flags; different address is 409 |
 | `/api/collections/<id>` | PATCH | partial `{pinned?: boolean, autoRefresh?: boolean}`; validates the complete object before writing; invalid fields/types/null/arrays/malformed JSON are 400, unknown source is 404, empty object is a no-op; returns saved booleans without host/folder probing |
 | `/api/collections/<id>` | DELETE | remove; refuses the last collection |
 | `/api/collections/<id>/activity` | GET | cached engine-owned activity plus canonical flags; never probes a host; unknown source is 404; folders return `supported:false` and a reason |
-| `/api/collections/<id>/entries` | GET | the feed listing: size, hash, state, meta, judgment, and dims — `COALESCE(content, entry)`, so an entry the dims pass reached carries width/height before it has a hash. Gone entries are excluded. `?kind=input` lists the input dir instead |
+| `/api/collections/<id>/entries` | GET | the feed listing: size, hash, state, meta, judgment, and dims — `COALESCE(content, entry)`, so an entry the dims pass reached carries width/height before it has a hash. Gone entries are excluded. `?inventory=1` returns the coherent output envelope described below; default remains an array. `?kind=input` lists the input dir instead |
 | `/api/collections/<id>/entries/<name>` | GET | one entry |
 | `/api/collections/<id>/entries` | POST | multipart upload into the input dir; **409 with the conflicting name, never an overwrite** |
 | `/api/collections/<id>/entries/<name>` | DELETE | per capability: folder → unlink; comfy + assets_plus → trash; otherwise → hide + history cleanup |
@@ -47,7 +47,7 @@ the resources; a collection's `capabilities` answer what its backing can do.
 | `/api/collections/<id>/entries/<name>/judgment` | PATCH | whitelisted fields (`vote`/`favorite`/`bookmark`/`notes`/`plugins.<ns>.*`), defaults deep-pruned, one statement |
 | `/api/collections/<id>/feedback.json` | GET | the collection's judgments as a portable v2 document, generated on demand |
 | `/api/collections/<id>/meta` | GET | versioned poll `?since=<v>` → `{v, changed, items?, dims?, pending}` — extracted metas and entry dims ride the same channel |
-| `/api/collections/<id>/want` | POST | `{files}` — on-screen names jump the extraction queue |
+| `/api/collections/<id>/want` | POST | `{files}` — on-screen names jump the extraction queue; the whole name array validates before any queue mutation |
 | `/api/content/<hash>` | GET | the content record + `instances: [{collection, name}]` |
 | `/api/content/<hash>/bytes` | GET | cache bytes by hash (plugins, workbench) |
 | `/api/prefetch` | GET, POST | the two-pass background ingestion: `enabled`/`paused` toggles, per-collection ingest `pending`, the pass totals `dimsPending`/`ingestPending`, and each collection's `lastError` |
@@ -59,6 +59,89 @@ the resources; a collection's `capabilities` answer what its backing can do.
 Entry identity on the wire is the plain name under a collection; the
 `collection:name` string survives only inside the client as a derived
 accessor. Underneath it, identity is the content hash (§6).
+
+For Comfy, `name` is the complete canonical output-root-relative POSIX path:
+`image.png`, `a/image.png` and `b/image.png` are distinct addresses with independent
+judgments, even when bytes share one content hash. Root names/schema v9 are
+unchanged. Encode the entire name as **one** URL segment, for example
+`/api/collections/fake/entries/a%2Fimage.png/bytes`. Router captures decode once;
+literal `%2F` text is not recursively decoded into another path. Canonical Comfy
+paths reject absolute/drive-absolute paths, backslashes, empty/repeated/trailing
+segments, exact `.`/`..` segments and controls; ordinary percent, colon, hash,
+spaces and Unicode retain their exact identity. Local folder names keep their
+existing flat basename grammar. Named-entry and direct Ingest validation precedes
+cache/store/backing access. Comfy reads, HEAD/range/stat, input references and
+deletion split path into transport `subfolder` and leaf `filename` only at the
+backing boundary. Hide-history matching also includes output type and directory.
+
+### Output inventory and folder scope
+
+`?inventory=1` returns `{revision, coverage, subfolders, folders, entries}`.
+`revision` is an ephemeral address-owner epoch plus scan revision; `coverage` is
+`recursive` or `root-only`; `subfolders` is `{supported, reason}`. `folders`
+contains root `""` and every discovered image-directory ancestor. It is derived
+from validated raw inventory before Kosmozoo hidden/gone/judgment overlay, and
+published atomically with `entries`. Empty physical directories and AssetsPlus's
+own hidden assets cannot be independently enumerated.
+
+Complete discovery combines stock `/internal/files/output` roots with the
+filesystem-backed AssetsPlus descendant list using `recursive=1`, `scan_depth=-1`,
+`limit=0`, existing renderable extensions and `query=/`, without cursor/since/history.
+The slash query matches all descendants and excludes every canonical root before
+AssetsPlus's metadata inspection, so oversized root images cannot fail that scan.
+Root entries retain stock order/visibility and precede descending-mtime/path-sorted
+descendants; stock roots carry no source mtime. AssetsPlus-only hidden root files
+remain visible, as explicitly approved; Kosmozoo's own hidden/gone overlay and
+AssetsPlus descendant hiding remain honored. Whole responses validate before publication;
+conflicting duplicates, malformed records and truncation are errors. Definitive
+extension absence permits explicit stock-root coverage with a disabled folder
+control. A known recursive host's outage/incompatible response cannot downgrade
+to root-only. Discovery is independent of the delete preference. Existing 10s
+network timeouts apply. Collection capability probes discover config separately
+from inventory scans.
+
+Context-owned Comfy address clients share config/scan flights and immutable
+snapshots across route, alias and worker readers. Explicit listing/refresh is
+fresh; background reads may reuse inventory within the existing 60s relist cadence.
+Completion invalidates once per address; invalidation during a scan coalesces a
+follow-up before publication. Last-address removal/shutdown aborts and fences late
+results; re-add gets a new owner. Folder drivers project their existing flat list.
+Listing schedules no ingestion writes; the existing worker/want paths acquire
+dimensions and bytes.
+
+Root browsing includes every discoverable output; selected folder includes its
+descendants by segment boundary, so `a` excludes `ab`. The SPA keeps complete
+inventory and derives local folder/filename/judgment views without refetching on
+folder selection. Selected IDs, drafts, zoom, anchors, source/metadata sessions
+and edited feature state survive view exclusion. Missing image-derived folders
+remain selected with an empty/unavailable option, empty feed and fileless URL.
+
+The browser stores `kosmozoo.sourceBrowse.v1` as
+`{version:1, hosts:{id:{address,folder,current}}}`: one address-checked pair per
+host, independent per browser/origin. `current:null` is deliberate, distinct from
+no record. Corrupt/future bytes are preserved; denied/quota storage falls back to
+session memory with one reported error. Different-host tab writes merge without
+storage-event navigation. Successful listing resolves a missing remembered image
+within retained scope; offline/loading states never erase the pair. Source pin/
+refresh flags and judgments remain SQLite-owned.
+
+Feed URLs retain `#host[#encoded-full-name]`, with optional `folder` and `filter`
+query parameters (empty values omitted), preserving unrelated query values.
+Explicit feed/diff URLs and Back/Forward win over memory, including fileless
+intent. Bare boot/source selection restores that host's pair. Folder changes keep
+current if visible, otherwise choose first visible or null. Explicit image links
+widen scope when needed and omit the outgoing filename filter; Back restores
+previous folder/filter/image. Typing and current movement replace; source/folder/
+link navigation can push. Refresh adopts live browsing intent, not an older URL.
+Diff sources and filenames encode separately; both sides and folder/filter context
+survive left stepping/mirroring/close. Clipboard references retain full paths;
+individual downloads suggest `host#leaf` while requesting exact full-path bytes.
+
+Nested variations match the exact producing node directory, retain that directory
+and full-path lineage, and apply existing prefix/suffix/counter/NAME_MAX treatment
+only to the leaf. Ambiguous nested producers and directory-bearing nested
+prefix/suffix substitutions reject rather than guessing. Browsing scope is not a
+generation destination.
 
 Feature routes mount under `/api/features/<name><path>`: `variations`
 serves `GET /probe/<id>` + `POST /run` (a core feature module, not a plugin).
@@ -142,7 +225,8 @@ wanted and acquire real dimensions. Grid rendering uses entry-ID strings, with
 current measurement sizes resolved separately; replacing measurement objects
 does not remount retained cards.
 
-Feed-side topbar order: logo/wordmark, refresh icon, dropdown, pinned sources,
+Feed-side topbar order: logo/wordmark, refresh icon, host dropdown, controlled
+native Output folder selector, separated pinned sources,
 flexible space, filename filter. Pinned buttons forward the dropdown's selection
 action; circles are grey idle, filled SVG sectors for available counters, distinct
 active outlines when indeterminate, and warning/unknown treatments without stale
@@ -157,8 +241,14 @@ are unchanged; the filter follows the actual feed edge. Unhide/Hide up-voted
 chrome buttons are removed; their session visibility actions and judgment
 preferences remain available to existing non-chrome consumers.
 
+The pinned group has a non-scrolling vertical separator only when pins exist,
+with smaller gaps inside its scrollable button strip. Empty pins retain flexible
+allocation. Folder labels truncate within compact allocations with full path in
+the accessible title; unsupported controls expose a root-only reason. Native
+select typing retains precedence in the existing key dispatcher.
+
 Static surfaces: `/shared/<name>` serves the allow-listed `src/` modules
-(`extractor.mjs`, `features/variations/shared.mjs`) to the browser;
+(`extractor.mjs`, `features/variations/shared.mjs`, `entry-path.mjs`) to the browser;
 `/plugins/<name>/client.js` serves a plugin's client half; `/` and `/diff`
 serve the Solid app from `client-solid-dist/`, with shared assets (`/css`,
 `/vendor`, `/js`, logos) from `client/`.

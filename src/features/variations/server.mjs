@@ -13,6 +13,7 @@ import {
   generatePermutations, resolveRelativeRanges, templateReplace,
   paramId, formatValue,
 } from "./shared.mjs";
+import { validEntryName } from "../../backings/index.mjs";
 
 // hard cap on permutations per run — a sweep is a human-scale batch, not a
 // fork bomb (F7). Above the cap the run answers 413.
@@ -153,22 +154,30 @@ function stripExtension(name) {
   return dot > 0 ? name.slice(0, dot) : name;
 }
 
+const outputPath = (value) => {
+  const name = String(value), slash = name.lastIndexOf("/");
+  return { directory: slash < 0 ? "" : name.slice(0, slash + 1), leaf: name.slice(slash + 1) };
+};
+
 // Output nodes are identified by object_info's `output_node: true` (F4 —
 // not a hardcoded class-name pattern). Among those, the node that PRODUCED
 // the source image is identified by prefix-matching the original filename
 // (ComfyUI names outputs `<prefix>_<counter>_.<ext>`).
 export function findProducingOutputNode(graph, originalFilename, outputClasses) {
   const base = stripExtension(originalFilename);
-  let best = null;
+  const directory = outputPath(originalFilename).directory;
+  let best = null, ambiguous = false;
   for (const [nid, n] of Object.entries(graph)) {
     if (!outputClasses.has(String(n.class_type ?? ""))) continue;
     const pfx = n.inputs?.filename_prefix;
     if (typeof pfx !== "string" || !pfx) continue;
+    if (outputPath(pfx).directory !== directory) continue;
     if (base === pfx || base.startsWith(pfx + "_")) {
-      if (!best || pfx.length > best.prefix.length) best = { id: nid, node: n, prefix: pfx };
+      if (!best || pfx.length > best.prefix.length) { best = { id: nid, node: n, prefix: pfx }; ambiguous = false; }
+      else if (directory && pfx.length === best.prefix.length) ambiguous = true;
     }
   }
-  return best;
+  return ambiguous ? null : best;
 }
 
 // Index the graph's output nodes once per run (not per permutation).
@@ -213,7 +222,8 @@ export function narrowToOneOutputNode(graph, producingId, basename, pfx, sfx, ou
   }
   // Assembled prefix gets the middle-fold treatment: pfx head and sfx tail
   // both survive, at most NAME_MAX_WITHOUT_COUNTER chars total.
-  graph[producingId].inputs.filename_prefix = clampBasename(pfx + basename + sfx, NAME_MAX_WITHOUT_COUNTER);
+  const directory = outputPath(graph[producingId].inputs.filename_prefix).directory;
+  graph[producingId].inputs.filename_prefix = directory + clampBasename(pfx + outputPath(basename).leaf + sfx, NAME_MAX_WITHOUT_COUNTER);
   return { kept: 1, dropped };
 }
 
@@ -225,7 +235,8 @@ export function wrapAllOutputPrefixes(graph, pfx, sfx, outputClasses) {
   for (const n of Object.values(graph)) {
     if (!outputClasses.has(String(n.class_type ?? ""))) continue;
     const orig = String(n.inputs?.filename_prefix ?? "");
-    n.inputs.filename_prefix = pfx + clampBasename(orig, clampBudget(pfx, sfx)) + sfx;
+    const { directory, leaf } = outputPath(orig);
+    n.inputs.filename_prefix = directory + pfx + clampBasename(leaf, clampBudget(pfx, sfx)) + sfx;
     touched++;
   }
   return touched;
@@ -245,12 +256,13 @@ export function lineageTag(source, params) {
 // for features.
 export function register(app) {
   const inspect = async (collection, name) => {
+    const addr = app.hosts[collection];
+    if (!addr) return { error: "unknown collection", status: 404 };
+    if (!validEntryName(addr, name)) return { error: "bad entry path", status: 400 };
     const hash = app.store.hashFor(collection, name);
     if (!hash) return { error: "image not ingested (no hash)", status: 404 };
     const graph = await app.ingest.graph(hash);
     if (!graph) return { error: "no embedded ComfyUI graph in this PNG", status: 422 };
-    const addr = app.hosts[collection];
-    if (!addr) return { error: "unknown collection", status: 404 };
     const { types, enums, outputClasses } = await app.backings.comfy(collection).objectInfo();
     return { graph, addr, types, enums, outputClasses };
   };
@@ -335,10 +347,13 @@ export function register(app) {
     const producing = outputClasses?.size
       ? findProducingOutputNode(graph, filename, outputClasses)
       : null;
+    if (filename.includes("/") && !producing) {
+      return Response.json({ error: "Cannot identify an unambiguous producing output directory for this image" }, { status: 400 });
+    }
 
     const pfxTpl = String(prefix ?? "");
     const sfxTpl = String(suffix ?? "");
-    const originalBasename = stripExtension(filename);
+    const originalBasename = stripExtension(outputPath(filename).leaf);
 
     const errors = [];
     let submitted = 0;
@@ -357,6 +372,10 @@ export function register(app) {
       const tokenValues = rawImage != null ? { ...perm, image: rawImage } : perm;
       const pfx = templateReplace(pfxTpl, tokenValues, currentValues, labelMap);
       const sfx = templateReplace(sfxTpl, tokenValues, currentValues, labelMap);
+      if (filename.includes("/") && /[/\\]/.test(pfx + sfx)) {
+        errors.push({ permutation: perm, error: "Prefix/suffix must stay within the producing directory's filename leaf" });
+        continue;
+      }
 
       if (producing) {
         const p = findProducingOutputNode(mutated, filename, outputClasses);

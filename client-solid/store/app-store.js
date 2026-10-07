@@ -18,10 +18,12 @@ import { metaFromPngBytes } from "/shared/extractor.mjs";
 import { makeKeymap, comboFromEvent } from "/js/keys.mjs";
 import {
   parseUrl,
-  stripHostPrefix,
   planDeleteCurrent,
   diffUrl,
+  feedUrl,
 } from "/js/route-parse.mjs";
+import { isEntryName, isFolderPath, inFolder } from "/shared/entry-path.mjs";
+import { makeSourceBrowse } from "./source-browse.js";
 import { fieldList, nodeImages } from "./fields.js";
 import { pairSides } from "../features/diff/pair.mjs";
 import { makeImageWindow } from "./image-window.js";
@@ -42,7 +44,7 @@ function initialHost(hosts, stored) {
 // routes through this
 export const clampSplit = (v) => Math.min(0.8, Math.max(0.2, v));
 
-export function makeAppStore({ pollActivity = typeof window !== "undefined" } = {}) {
+export function makeAppStore({ pollActivity = typeof window !== "undefined", storage = () => globalThis.localStorage } = {}) {
   // app data tree — engine-side state
   const [st, setSt] = createStore({
     hosts: {},            // name -> { address, kind, online, capabilities }
@@ -54,6 +56,8 @@ export function makeAppStore({ pollActivity = typeof window !== "undefined" } = 
     ui: {},               // core.ui settings (stored host, ...)
     judgmentPrefs: { downvoteHides: true, revealThumbedDown: false, hideUp: false },
     images: [],           // [{ id, host, filename, size, meta, judgment }]
+    inventory: { revision: null, coverage: null, folders: [""], loading: false,
+      subfolders: { supported: null, reason: "Output inventory has not loaded" } },
     selected: {},         // id -> true (bulk actions; session-only)
     anchors: [],          // [{ name, src(dataURL), meta? }] — local drops, persisted
     views: {},            // per-image zoom views — key -> { s, txf, tyf, … } ( fold)
@@ -110,6 +114,9 @@ export function makeAppStore({ pollActivity = typeof window !== "undefined" } = 
   const [current, setCurrentSig] = createSignal(null); // { remote, image } | null
   const [currentStack, setCurrentStack] = createSignal([]); // trail, oldest first
   const [filter, setFilter] = createSignal("");
+  const [selectedFolder, setSelectedFolder] = createSignal("");
+  let sourceBrowse, browseRevision = 0, browseTarget = { folder: "", current: undefined, filter: "" };
+  const [browseRestore, setBrowseRestore] = createSignal(null);
   const [hostMenuOpen, setHostMenuOpen] = createSignal(false);
   const [menuOpen, setMenuOpen] = createSignal(false);
   const [confirmDelete, setConfirmDelete] = createSignal(null); // { image } | { images }
@@ -162,10 +169,15 @@ export function makeAppStore({ pollActivity = typeof window !== "undefined" } = 
     return !!jp.revealThumbedDown;
   }
   // view = display order of image indices (filtered + visible)
+  const folderView = createMemo(() => {
+    const folder = selectedFolder(), out = [];
+    for (let i = 0; i < st.images.length; i++) if (inFolder(st.images[i].filename, folder)) out.push(i);
+    return out;
+  });
   const view = createMemo(() => {
     const q = filter().toLowerCase();
     const out = [];
-    for (let i = 0; i < st.images.length; i++) {
+    for (const i of folderView()) {
       const img = st.images[i];
       if (q && !img.filename.toLowerCase().includes(q)) continue;
       if (!isVisible(img)) continue;
@@ -181,7 +193,7 @@ export function makeAppStore({ pollActivity = typeof window !== "undefined" } = 
   // imageIdxById — never a scan.
   function entryFor(c) {
     if (!c || c.remote === "anchor") return null;
-    const idx = imageIdxByFile().get(`${c.remote}:${stripHostPrefix(c.remote, c.image ?? "")}`) ?? -1;
+    const idx = fileIndex(c.remote, c.image);
     return idx < 0 ? null : { index: idx, entry: st.images[idx], collection: c.remote };
   }
   // the current feed entry: { index, entry, collection } | null
@@ -216,6 +228,7 @@ export function makeAppStore({ pollActivity = typeof window !== "undefined" } = 
     (key, prevKey) => {
       const f = st.diff.infoFile;
       if (!f || key === prevKey) return;
+      if (st.diff.infoSource && st.diff.open && typeof location !== "undefined" && location.pathname === "/diff") return;
       if (st.diff.pairedWith === key) return; // the establishing move
       setSt("diff", "pairedWith", null);
       const imgs = currentNodeImages();
@@ -234,6 +247,7 @@ export function makeAppStore({ pollActivity = typeof window !== "undefined" } = 
   createEffect(() => {
     const c = current();
     if (!c?.image || c.remote !== host()) return;
+    if (st.inventory.loading || sourceSession?.pendingBrowse) return;
     if (!st.images.length) return; // a reload in flight, not a visibility change
     const v = view();
     const idx = findByFile(c.image);
@@ -252,14 +266,35 @@ export function makeAppStore({ pollActivity = typeof window !== "undefined" } = 
   // The single writer for current. On an actual change the replaced pointer
   // goes onto the stack (oldest first) unless push is false (deletion
   // navigation: the outgoing pointer is dead, it must not linger).
-  function assignCurrent(next, { push = true } = {}) {
+  function persistBrowse() {
+    const s = sourceSession, c = current();
+    if (!ownsSession(s) || !s.inventoryReady || (c && c.remote !== host())) return;
+    sourceBrowse?.set(s.id, { address: s.address, folder: selectedFolder(), current: c?.image ?? null });
+  }
+
+  function assignCurrent(next, { push = true, persist = true, intent = true, widen = intent } = {}) {
+    if (next?.image && next.remote === host()) {
+      const idx = fileIndex(next.remote, next.image);
+      if (idx >= 0) next = { remote: next.remote, image: st.images[idx].filename };
+    }
     const prev = current();
     if (push && prev && (prev.remote !== next?.remote || prev.image !== next?.image)) {
       const stack = [...currentStack(), prev];
       if (stack.length > STACK_CAP) stack.shift();
       setCurrentStack(stack);
     }
-    setCurrentSig(next ?? null);
+    batch(() => {
+      if (widen && next?.remote === host() && next.image && !inFolder(next.image, selectedFolder())) setSelectedFolder("");
+      setCurrentSig(next ?? null);
+      if (intent) {
+        browseRevision++;
+        setBrowseRestore(null);
+        if (!next || next.remote === host()) {
+          browseTarget = { folder: selectedFolder(), filter: filter(), current: next?.image ?? null };
+        }
+      }
+    });
+    if (persist) persistBrowse();
   }
 
   // Walk the trail back: the popped entry leaves the stack (a back-navigation,
@@ -269,25 +304,49 @@ export function makeAppStore({ pollActivity = typeof window !== "undefined" } = 
     const stack = currentStack();
     if (!stack.length) return null;
     const prev = stack[stack.length - 1];
+    persistBrowse();
     setCurrentStack(stack.slice(0, -1));
-    setCurrentSig(prev);
+    if (prev.remote !== host() && st.hosts[prev.remote]) {
+      actions.hosts.select(prev.remote, { target: { ...rememberedTarget(prev.remote), current: prev.image, explicit: true }, historyMode: "replace" });
+    } else {
+      assignCurrent(prev, { push: false });
+      mirrorCurrentHash();
+    }
     return prev;
   }
 
   // The URL hash MIRRORS current (replaceState → no hashchange loop).
   // Anchors are not feed URLs, so they are not mirrored.
-  function mirrorCurrentHash() {
+  function mirrorCurrentHash(mode = "replace") {
     const c = current();
-    if (!c || c.remote === "anchor") return;
-    const file = c.image ? stripHostPrefix(c.remote, c.image) : null;
-    const want = "#" + encodeURIComponent(c.remote)
-      + (file ? "#" + encodeURIComponent(file) : "");
-    if (location.hash !== want) history.replaceState(history.state, "", want);
+    if (typeof location === "undefined" || typeof history === "undefined" || !host() || c?.remote === "anchor") return;
+    const context = { folder: selectedFolder(), filter: filter(), search: location.search ?? "" };
+    let want;
+    if (location.pathname === "/diff") {
+      if (!st.diff.open) return; // route adoption establishes both sides first
+      const pair = diffPair();
+      if (pair.a && pair.b) want = diffUrl(pair.a, pair.b, context);
+      else return;
+    } else want = feedUrl(host(), c?.remote === host() ? c.image : null, context);
+    if ((location.pathname ?? "/") + (location.search ?? "") + (location.hash ?? "") !== want) {
+      if (mode === "push") history.pushState({ kzBrowse: 1 }, "", want);
+      else history.replaceState(history.state, "", want);
+    }
+  }
+
+  // Exact canonical addresses win. A legacy host# reference is only a fallback
+  // when that exact name is absent; real host# filenames never get rekeyed.
+  function fileIndex(remote, file) {
+    if (!file) return -1;
+    const map = imageIdxByFile(), exact = map.get(`${remote}:${file}`);
+    if (exact !== undefined) return exact;
+    const prefix = remote + "#";
+    return map.get(`${remote}:${file.startsWith(prefix) ? file.slice(prefix.length) : prefix + file}`) ?? -1;
   }
 
   function findByFile(file) {
     if (!file) return -1;
-    return imageIdxByFile().get(`${host()}:${stripHostPrefix(host(), file)}`) ?? -1;
+    return fileIndex(host(), file);
   }
 
   // one resolver for every source kind; new feeds plug in here. Accepts
@@ -350,6 +409,7 @@ export function makeAppStore({ pollActivity = typeof window !== "undefined" } = 
   const FEED_SETTLE_MS = 150;
 
   function feedScrolled(top) {
+    if (!scrollQuiet() && !suppressSettleCurrent()) setBrowseRestore(null);
     if (feedActivity() !== "scrolling") {
       setFeedActivity("scrolling");
       gestureStart = feedScrollEl()?.scrollTop ?? 0;
@@ -534,10 +594,82 @@ export function makeAppStore({ pollActivity = typeof window !== "undefined" } = 
     },
   });
 
+  function inventoryReply(reply, kind) {
+    if (!reply || !Array.isArray(reply.entries) || !Array.isArray(reply.folders) ||
+        !reply.folders.includes("") || reply.folders.some((folder) => !isFolderPath(folder)) ||
+        reply.entries.some((entry) => !entry || !isEntryName(kind, entry.name)) ||
+        !["recursive", "root-only"].includes(reply.coverage) || !reply.subfolders ||
+        typeof reply.subfolders.supported !== "boolean") {
+      throw new Error("Invalid output inventory response");
+    }
+    return reply;
+  }
+
+  function liveBrowseTarget() {
+    const c = current();
+    return { folder: selectedFolder(), filter: filter(), current: c?.remote === host() ? c.image : null };
+  }
+
+  function rememberedTarget(name) {
+    const saved = sourceBrowse.get(name, st.hosts[name]?.address);
+    return { folder: saved?.folder ?? "", current: saved ? saved.current : undefined, filter: "" };
+  }
+
+  function routeTarget(route) {
+    return { folder: route.folder ?? "", filter: route.filter ?? "",
+      current: route.view === "diff" ? route.left?.file ?? null : route.file, explicit: true };
+  }
+
+  function beginBrowse(target) {
+    browseRevision++;
+    setBrowseRestore(null);
+    browseTarget = { ...target, folder: st.hosts[host()]?.kind === "folder" ? "" : target.folder ?? "", filter: target.filter ?? "" };
+    batch(() => { setSelectedFolder(browseTarget.folder); setFilter(browseTarget.filter); });
+  }
+
+  // Resolve only after a successful coherent listing. A remembered null is
+  // deliberate; a missing/default image falls back within the retained scope.
+  function applyBrowseTarget(target) {
+    let idx = target.current ? findByFile(target.current) : -1;
+    if (target.explicit && idx >= 0 && !inFolder(st.images[idx].filename, selectedFolder())) setSelectedFolder("");
+    const visible = view();
+    if (target.current === null) idx = -1;
+    else if (idx < 0 || !visible.includes(idx)) idx = visible[0] ?? -1;
+    assignCurrent(idx >= 0 ? { remote: host(), image: st.images[idx].filename } : null, { intent: false, persist: false });
+    browseTarget = { ...target, ...liveBrowseTarget() };
+    persistBrowse();
+    return idx;
+  }
+
+  // A navigation restores once, when its selected entry has dimensions. This
+  // is data-driven (no timer or repeated scroll), fenced by source and intent.
+  function restoreBrowse(idx) {
+    if (idx < 0) return;
+    const image = st.images[idx], position = view().indexOf(idx);
+    if (position < 0) return;
+    if (sizeKnown(image)) { restoreToIndex(idx); return; }
+    setBrowseRestore({ id: image.id, session: sourceSession, revision: browseRevision });
+    wantSet.add(image.filename);
+    flushWant(sourceSession);
+    sizes_.resolveAhead(view(), position, position);
+  }
+  createEffect(() => {
+    const request = browseRestore();
+    if (!request) return;
+    const idx = imageIdxById().get(request.id);
+    if (!ownsSession(request.session) || request.revision !== browseRevision || currentEntry()?.entry.id !== request.id) {
+      untrack(() => setBrowseRestore(null)); return;
+    }
+    if (idx === undefined || !sizeKnown(st.images[idx]) || feedActivity() !== "settled") return;
+    untrack(() => { setBrowseRestore(null); restoreToIndex(idx); });
+  });
+
   async function loadImages(name) {
     const s = beginSourceSession(name);
-    const file = parseUrl().file;
-    const firstVisit = !location.hash;
+    s.pendingBrowse = true;
+    s.inventoryReady = false;
+    setSt("inventory", { revision: null, coverage: null, folders: [""], loading: true,
+      subfolders: st.hosts[name]?.capabilities?.subfolders ?? { supported: null, reason: "Output inventory is loading" } });
     // a host switch must not leave the previous host's feed on screen —
     // and its per-entry error state dies with the list (id-keyed, cleared)
     // Compensation belongs to the outgoing feed, never the new feed's scroll.
@@ -553,34 +685,27 @@ export function makeAppStore({ pollActivity = typeof window !== "undefined" } = 
     const target = source?.target;
     const read = judgments.beginRead(name);
     try {
-      const entries = await api.entries(name);
+      const inventory = inventoryReply(await api.inventory(name), st.hosts[name]?.kind);
       if (!ownsSession(s)) return;
-      setSt("images", reconcile(entries.map((e) => ({
-        // collection:name string keys exist only here, derived (plan )
-        id: `${name}:${e.name}`, host: name, filename: e.name,
-        size: e.size, hash: e.hash, state: e.state,
-        meta: e.meta, extracted: e.extracted,
-        judgment: judgments.overlay(`${name}:${e.name}`, e.judgment, read),
-        width: e.width, height: e.height,
-      }))));
+      let idx;
+      batch(() => {
+        setSt("images", reconcile(inventory.entries.map((e) => ({
+          // collection:name string keys exist only here, derived (plan )
+          id: `${name}:${e.name}`, host: name, filename: e.name,
+          size: e.size, hash: e.hash, state: e.state,
+          meta: e.meta, extracted: e.extracted,
+          judgment: judgments.overlay(`${name}:${e.name}`, e.judgment, read),
+          width: e.width, height: e.height,
+        }))));
+        s.inventoryReady = true;
+        s.pendingBrowse = false;
+        setSt("inventory", { revision: inventory.revision, coverage: inventory.coverage,
+          folders: inventory.folders, subfolders: inventory.subfolders, loading: false });
+        idx = applyBrowseTarget(browseTarget);
+      });
       judgments.endRead(read);
-      // the URL is adopted into current after every (re)fetch, then the feed
-      // centers on it. Only a first visit with no hash at all invents a
-      // current image (top card); a hash stripped to #host stays file-less.
-      let idx = file ? findByFile(file) : -1;
-      if (idx < 0 && firstVisit) {
-        const first = view()[0];
-        if (first != null) idx = first;
-      }
-      if (idx >= 0) {
-        assignCurrent({ remote: name, image: st.images[idx].filename });
-        mirrorCurrentHash();
-        restoreToIndex(idx);
-      } else {
-        // URL names a file the list doesn't have (yet) — keep it, no center
-        assignCurrent(file ? { remote: name, image: file } : null);
-        mirrorCurrentHash();
-      }
+      mirrorCurrentHash();
+      restoreBrowse(idx);
       wantRangeNow();
       flushWant(s); // the no-restore path has no scroll to settle the flush
       await pollMetadata(s);
@@ -598,6 +723,7 @@ export function makeAppStore({ pollActivity = typeof window !== "undefined" } = 
       }
     } catch (err) {
       if (!ownsSession(s)) return;
+      setSt("inventory", "loading", false);
       actions.status.clear("load");
       actions.status.error(`couldn't load images from ${name}: ${err?.message ?? err}`);
     } finally {
@@ -622,12 +748,13 @@ export function makeAppStore({ pollActivity = typeof window !== "undefined" } = 
   async function refreshImages(s) {
     if (!ownsSession(s)) return false;
     const name = s.id;
+    const wasReady = s.inventoryReady;
     actions.status.active("load", `checking ${name} for new images…`);
     const read = judgments.beginRead(name);
     try {
       const prevIds = new Set(st.images.map((i) => i.id));
       const before = new Map(st.images.map((i) => [i.id, { meta: i.meta, width: i.width, height: i.height }]));
-      const entries = await api.entries(name);
+      const inventory = inventoryReply(await api.inventory(name), st.hosts[name]?.kind), entries = inventory.entries;
       if (!ownsSession(s)) return false;
       // ONE atomic write: the reconcile and the merge nonce land in a single
       // flush — the feed's compensation effect sees the post-merge list with
@@ -648,20 +775,31 @@ export function makeAppStore({ pollActivity = typeof window !== "undefined" } = 
             height: enriched?.height && enriched.height !== start?.height ? enriched.height : e.height ?? enriched?.height ?? null,
           };
         })));
+        s.inventoryReady = true;
+        s.pendingBrowse = false;
+        setSt("inventory", { revision: inventory.revision, coverage: inventory.coverage,
+          folders: inventory.folders, subfolders: inventory.subfolders, loading: false });
+        const c = current();
+        if (!c || c.remote === name) applyBrowseTarget(wasReady ? { ...browseTarget, ...liveBrowseTarget() } : browseTarget);
         setFeedMergeNonce((n) => n + 1);
       });
+      mirrorCurrentHash();
+      const pendingRestore = browseRestore();
+      if (pendingRestore) restoreBrowse(findByFile(current()?.image));
       judgments.endRead(read);
       wantRangeNow();
       for (const img of st.images) if (!img.width || !img.height) wantSet.add(img.filename);
       flushWant(s);
       await pollMetadata(s);
       if (!ownsSession(s)) return false;
+      setSt("inventory", "loading", false);
       actions.status.clear("load");
       const fresh = entries.filter((e) => !prevIds.has(`${name}:${e.name}`)).length;
       if (fresh > 0) actions.status.info(`${fresh} new image${fresh > 1 ? "s" : ""} from ${name}`);
       return true;
     } catch (err) {
       if (!ownsSession(s)) return false;
+      setSt("inventory", "loading", false);
       actions.status.clear("load");
       actions.status.error(`couldn't refresh ${name}: ${err?.message ?? err}`);
       return false;
@@ -731,11 +869,10 @@ export function makeAppStore({ pollActivity = typeof window !== "undefined" } = 
     const hostName = images[0].host;
     const deletedFiles = new Set(images.filter((i) => okIds.has(i.id)).map((i) => i.filename));
     const plan = planDeleteCurrent(
-      st.images, deletedFiles, hostName, current(), currentStack().at(-1) ?? null);
+      folderView().map((idx) => st.images[idx]), deletedFiles, hostName, current(), currentStack().at(-1) ?? null);
     // deleted images are dead ends — scrub them from the back-trail
-    const deletedStripped = new Set([...deletedFiles].map((f) => stripHostPrefix(hostName, f)));
     setCurrentStack(currentStack().filter((p) =>
-      p.remote !== hostName || p.image == null || !deletedStripped.has(stripHostPrefix(hostName, p.image))));
+      p.remote !== hostName || p.image == null || !deletedFiles.has(p.image)));
     setSt("images", (imgs) => imgs.filter((i) => !okIds.has(i.id)));
     if (plan) {
       if (plan.kind === "pop") popCurrent();
@@ -757,7 +894,8 @@ export function makeAppStore({ pollActivity = typeof window !== "undefined" } = 
   // the ONE download-name convention : <host>#<filename>, unless the
   // filename already carries the tag
   function downloadName(img) {
-    return img.filename.startsWith(img.host + "#") ? img.filename : img.host + "#" + img.filename;
+    const leaf = img.filename.split("/").at(-1);
+    return leaf.startsWith(img.host + "#") ? leaf : img.host + "#" + leaf;
   }
   // the ONE transient-anchor download : download and bulk.save share it
   function triggerDownload(url, name) {
@@ -803,7 +941,7 @@ export function makeAppStore({ pollActivity = typeof window !== "undefined" } = 
     const m = new Map();
     for (let i = 0; i < st.images.length; i++) {
       const img = st.images[i];
-      m.set(`${img.host}:${stripHostPrefix(img.host, img.filename)}`, i);
+      m.set(`${img.host}:${img.filename}`, i);
     }
     return m;
   });
@@ -1154,23 +1292,34 @@ export function makeAppStore({ pollActivity = typeof window !== "undefined" } = 
       const route = parseUrl();
       const urlHost = route.view === "diff" ? route.left?.source : route.host;
       const h = urlHost && st.hosts[urlHost] ? urlHost : initialHost(st.hosts, st.ui.host);
-      if (h) await actions.hosts.select(h, { keepFile: true }); // hash pristine at boot
+      const target = urlHost && st.hosts[urlHost] ? routeTarget(route) : { ...rememberedTarget(h), filter: route.filter ?? "" };
+      if (h) await actions.hosts.select(h, { target, historyMode: "replace" });
       // a /diff URL boots into the workbench on the left side
-      if (route.view === "diff") actions.diff.openDiff(route.left, route.right);
+      if (route.view === "diff") await actions.diff.openDiff(route.left, route.right);
     },
 
     hosts: {
-      // keepFile: boot and URL-driven switches arrive with the hash already
-      // pristine; UI switches drop the file part (it named the old host's image)
-      async select(name, { keepFile } = {}) {
-        setHost(name);
+      // Explicit URLs supply their complete target. UI source navigation
+      // captures outgoing memory first, then restores the incoming pair.
+      async select(name, { keepFile, target, historyMode = "push", force = false } = {}) {
         setHostMenuOpen(false);
-        if (!keepFile) {
-          assignCurrent({ remote: name, image: null });
-          mirrorCurrentHash();
+        if (!force && !keepFile && !target && host() === name && ownsSession(sourceSession)) return sourceSession.loadTask;
+        persistBrowse();
+        target ??= keepFile ? routeTarget(parseUrl()) : rememberedTarget(name);
+        if (!isFolderPath(target.folder ?? "") || (target.current != null && !isEntryName(st.hosts[name]?.kind, target.current))) {
+          actions.status.error("Invalid browsing address"); return;
         }
+        batch(() => {
+          setSt("inventory", "loading", true);
+          setHost(name);
+          beginBrowse(target);
+          assignCurrent(target.current ? { remote: name, image: target.current } : null, { persist: false, intent: false });
+        });
+        if (historyMode !== "none") mirrorCurrentHash(historyMode);
         api.setSettings("core.ui", { host: name }).catch(() => {});
-        await loadImages(name);
+        const task = loadImages(name);
+        if (sourceSession?.id === name) sourceSession.loadTask = task;
+        await task;
       },
       async add(name, addr) {
         name = (name ?? "").trim();
@@ -1235,8 +1384,30 @@ export function makeAppStore({ pollActivity = typeof window !== "undefined" } = 
       },
     },
 
+    folders: {
+      select(folder) {
+        if (!isFolderPath(folder) || folder === selectedFolder() || !host()) return;
+        if (st.hosts[host()]?.kind === "folder" && folder !== "") return;
+        const c = current();
+        const target = { folder, filter: filter(), current: c?.remote === host() ? c.image : undefined };
+        if (sourceSession?.loading || !sourceSession?.inventoryReady) {
+          if (target.current && !inFolder(target.current, folder)) target.current = undefined;
+          batch(() => {
+            beginBrowse(target);
+            assignCurrent(target.current ? { remote: host(), image: target.current } : null, { persist: false, intent: false });
+          });
+        } else {
+          let idx;
+          batch(() => { beginBrowse(target); sourceSession.pendingBrowse = false; idx = applyBrowseTarget(target); });
+          restoreBrowse(idx);
+        }
+        mirrorCurrentHash("push");
+        wantRangeNow(); flushWant();
+      },
+    },
+
     images: {
-      reload() { return loadImages(host()); },
+      reload() { return actions.hosts.select(host(), { target: liveBrowseTarget(), force: true, historyMode: "replace" }); },
       delete(images) { return deleteImages(images); },
       // byte size isn't in every host's listing — a HEAD on the bytes route fills it
       async fillSize(id) {
@@ -1345,7 +1516,14 @@ export function makeAppStore({ pollActivity = typeof window !== "undefined" } = 
     },
 
     ui: {
-      setFilter(v) { setFilter(v); }, // the view memo consumes it
+      setFilter(v) {
+        if (v === filter()) return;
+        browseRevision++;
+        setBrowseRestore(null);
+        browseTarget = { ...browseTarget, filter: v };
+        setFilter(v);
+        mirrorCurrentHash();
+      },
       setResizing(v) { setResizing(!!v); },
       toggleMenu() { setMenuOpen(!menuOpen()); },
       closeMenu() { setMenuOpen(false); },
@@ -1393,6 +1571,20 @@ export function makeAppStore({ pollActivity = typeof window !== "undefined" } = 
       set(remote, image) {
         assignCurrent({ remote, image });
         mirrorCurrentHash();
+      },
+      linkUrl(remote, image) {
+        const folder = remote === host() && inFolder(image, selectedFolder()) ? selectedFolder() : "";
+        return feedUrl(remote, image, { folder, filter: "", search: typeof location === "undefined" ? "" : location.search ?? "" });
+      },
+      async navigate(remote, image) {
+        if (!st.hosts[remote] || !isEntryName(st.hosts[remote]?.kind, image)) { actions.status.error("Image source or address is unavailable"); return false; }
+        const url = actions.current.linkUrl(remote, image);
+        const previous = (location.pathname ?? "/") + (location.search ?? "") + (location.hash ?? "");
+        if (previous === url) return true;
+        persistBrowse();
+        history.pushState({ kzBrowse: 1 }, "", url);
+        await actions.route.changed();
+        return true;
       },
       assign: assignCurrent,
       pop: popCurrent,
@@ -1482,15 +1674,14 @@ export function makeAppStore({ pollActivity = typeof window !== "undefined" } = 
           if (history.state?.kz) {
             history.back(); // a pushed entry: popstate lands on the feed URL
           } else {
-            const feed = c && c.remote !== "anchor" && st.hosts[c.remote]
-              ? `/#${encodeURIComponent(c.remote)}#${encodeURIComponent(stripHostPrefix(c.remote, c.image))}`
-              : `/#${encodeURIComponent(host())}`;
+            const feed = feedUrl(host(), c?.remote === host() ? c.image : null,
+              { folder: selectedFolder(), filter: filter(), search: location.search ?? "" });
             history.replaceState(null, "", feed);
             window.dispatchEvent(new PopStateEvent("popstate"));
           }
         } else if (c && c.remote !== "anchor" && c.remote === host()) {
           // opened from the feed: re-center it on the current image
-          const idx = findByFile(stripHostPrefix(c.remote, c.image));
+          const idx = findByFile(c.image);
           if (idx >= 0) restoreToIndex(idx);
         }
       },
@@ -1537,10 +1728,17 @@ export function makeAppStore({ pollActivity = typeof window !== "undefined" } = 
       // back/forward close/re-open via the route.
       openDiff(left, right, { push } = {}) {
         if (!left || !resolveSide(left)) return false;
-        assignCurrent({ remote: left.source ?? left.remote, image: left.file ?? left.image });
-        mirrorCurrentHash();
+        const remote = left.source ?? left.remote, image = left.file ?? left.image;
+        if (st.hosts[remote] && remote !== host()) {
+          const context = typeof location === "undefined" ? { folder: "", filter: "" } : parseUrl();
+          const loading = actions.hosts.select(remote, { target: { folder: context.folder ?? "", filter: context.filter ?? "", current: image, explicit: true }, historyMode: "none" });
+          const intent = browseRevision;
+          return loading.then(() => intent === browseRevision && host() === remote ? actions.diff.openDiff(left, right, { push }) : false);
+        }
+        batch(() => {
         // the reset must not fire on THIS establishing pointer move
-        setSt("diff", "pairedWith", `${left.source ?? left.remote}:${left.file ?? left.image}`);
+        setSt("diff", "pairedWith", `${remote}:${image}`);
+        assignCurrent({ remote, image });
         if (right) {
           const src = right.source ?? right.remote;
           const file = right.file ?? right.image;
@@ -1553,8 +1751,12 @@ export function makeAppStore({ pollActivity = typeof window !== "undefined" } = 
             actions.ui.setWorkspace("details");
           }
         }
-        if (push && right) history.pushState({ kz: 1 }, "", diffUrl(left, right));
-        return actions.diff.open();
+        setSt("diff", "open", true);
+        });
+        if (push && right) history.pushState({ kz: 1 }, "", diffUrl(left, right,
+          { folder: selectedFolder(), filter: filter(), search: location.search ?? "" }));
+        else mirrorCurrentHash();
+        return true;
       },
     },
 
@@ -1593,24 +1795,47 @@ export function makeAppStore({ pollActivity = typeof window !== "undefined" } = 
     route: {
       async changed() {
         const r = parseUrl();
-        if (r.view === "diff") {
-          actions.diff.openDiff(r.left, r.right); // back/forward into a diff URL re-opens it
-          return;
-        }
-        if (st.diff.open) setSt("diff", "open", false); // navigating away closes the workbench
-        if (r.host && r.host !== host()) {
-          if (!st.hosts[r.host]) return;
-          await actions.hosts.select(r.host, { keepFile: true }); // hash already pristine
-          return;
-        }
-        if (!r.file) return;
-        const idx = findByFile(r.file);
-        if (idx >= 0) {
-          assignCurrent({ remote: host(), image: st.images[idx].filename });
-          mirrorCurrentHash();
-          restoreToIndex(idx);
+        const remote = r.view === "diff" ? r.left?.source : r.host;
+        if (remote && !st.hosts[remote] && !remote.startsWith("input:") && remote !== "anchor") return;
+        const name = st.hosts[remote] ? remote : host();
+        if (!name || !isFolderPath(r.folder ?? "")) return;
+        const target = routeTarget(r);
+        if (target.current != null && !isEntryName(st.hosts[name]?.kind, target.current)) return;
+        let intent;
+        if (name !== host() || !ownsSession(sourceSession)) {
+          const loading = actions.hosts.select(name, { target, historyMode: "none" });
+          intent = browseRevision;
+          await loading;
         } else {
-          await loadImages(host());
+          const s = sourceSession;
+          if (s.loading) {
+            batch(() => {
+              beginBrowse(target);
+              assignCurrent(target.current ? { remote: name, image: target.current } : null, { persist: false, intent: false });
+            });
+            intent = browseRevision;
+            await s.loadTask;
+          } else if (target.current && findByFile(target.current) < 0) {
+            batch(() => {
+              setSt("inventory", "loading", true);
+              s.pendingBrowse = true;
+              beginBrowse(target);
+              assignCurrent({ remote: name, image: target.current }, { persist: false, intent: false });
+            });
+            intent = browseRevision;
+            await requestRefresh(s);
+          } else {
+            let idx;
+            batch(() => { beginBrowse(target); s.pendingBrowse = false; idx = applyBrowseTarget(target); });
+            intent = browseRevision;
+            restoreBrowse(idx);
+          }
+        }
+        if (intent !== browseRevision || host() !== name) return;
+        if (r.view === "diff") await actions.diff.openDiff(r.left, r.right);
+        else {
+          if (st.diff.open) setSt("diff", "open", false);
+          mirrorCurrentHash();
         }
       },
     },
@@ -1711,6 +1936,7 @@ export function makeAppStore({ pollActivity = typeof window !== "undefined" } = 
       // keymap's bindings — first match wins, in registration order (the
       // panel registers before the workbench so keys.close outranks wb.close)
       dispatch(e) {
+        if (!capturing() && typeof e.target?.matches === "function" && e.target.matches("select")) return;
         if (e.key === "Escape") {
           const top = keyLayers().at(-1);
           if (top && top.onEscape(e) !== false) {
@@ -1858,7 +2084,15 @@ export function makeAppStore({ pollActivity = typeof window !== "undefined" } = 
     get judgmentPrefs() { return st.judgmentPrefs; },
     resizing,
     downloadName,
+    referenceName: (image) => `${image.host}#${image.filename}`,
     get images() { return st.images; },
+    get inventory() { return st.inventory; },
+    selectedFolder,
+    folderView,
+    folderOptions() {
+      const choices = st.inventory.folders;
+      return choices.includes(selectedFolder()) ? choices : [...choices, selectedFolder()].sort();
+    },
     get selected() { return st.selected; },
     get anchors() { return st.anchors; },
     get diff() { return st.diff; },
@@ -1928,6 +2162,8 @@ export function makeAppStore({ pollActivity = typeof window !== "undefined" } = 
     get infoGroups() { return uiSt.infoGroups; },
   };
 
+  sourceBrowse = makeSourceBrowse({ storage, onError: (message) => actions.status.error(message),
+    validCurrent: (address, name) => isEntryName(Object.values(st.hosts).find((source) => source.address === address)?.kind, name) });
   return { state: stateObj, actions, ui: uiStateObj, dispose };
 }
 

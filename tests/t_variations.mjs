@@ -218,6 +218,31 @@ Deno.test("findProducingOutputNode: null when no SaveImage matches", () => {
   assertEquals(found, null);
 });
 
+Deno.test("nested outputs: producer matching includes exact directory and cannot choose a sibling/root node", () => {
+  const graph = {
+    root: { class_type: "SaveImage", inputs: { filename_prefix: "a", images: [] } },
+    sibling: { class_type: "SaveImage", inputs: { filename_prefix: "ab/image", images: [] } },
+    correct: { class_type: "SaveImage", inputs: { filename_prefix: "a/day/image", images: [] } },
+  };
+  assertEquals(findProducingOutputNode(graph, "a/day/image_00042_.png", OUT)?.id, "correct");
+  assertEquals(findProducingOutputNode(graph, "a_/image_00042_.png", OUT), null);
+  graph.duplicate = structuredClone(graph.correct);
+  assertEquals(findProducingOutputNode(graph, "a/day/image_00042_.png", OUT), null);
+});
+
+Deno.test("nested variations: preserve node directory and source counter; NAME_MAX folding touches only leaf", () => {
+  const directory = Array.from({ length: 12 }, (_, i) => "directory-" + i).join("/") + "/";
+  const graph = { one: { class_type: "SaveImage", inputs: { filename_prefix: directory + "image", images: [] } } };
+  narrowToOneOutputNode(graph, "one", directory + "image_00042_" + "x".repeat(250), "var_", "_0.5", OUT);
+  const output = graph.one.inputs.filename_prefix;
+  assert(output.startsWith(directory + "var_image_00042_"));
+  assertEquals(output.slice(directory.length).length, NAME_MAX_WITHOUT_COUNTER);
+  assert(output.endsWith("_0.5"));
+  const fallback = { one: { class_type: "SaveImage", inputs: { filename_prefix: "a/day/image", images: [] } } };
+  wrapAllOutputPrefixes(fallback, "var_", "_new", OUT);
+  assertEquals(fallback.one.inputs.filename_prefix, "a/day/var_image_new");
+});
+
 Deno.test("narrowToOneOutputNode: wraps the ORIGINAL basename (with counter), drops other SaveImages", () => {
   const graph = {
     "12": { class_type: "SaveImage", inputs: { filename_prefix: "Logotype Pipeline", images: ["9", 0] } },
@@ -609,4 +634,46 @@ Deno.test("mutateGraph: a declared-FLOAT strength sweeps in floats, not rounded 
   const params = inspectGraph(graph, types);
   const { graph: mutated } = mutateGraph(graph, { "LoraLoaderModelOnly.strength_model": 0.55 }, params);
   assertEquals(mutated["1"].inputs.strength_model, 0.55);
+});
+
+Deno.test("nested variation route: exact source bytes/lineage and producing directory; ambiguous copied graph never enqueues", async () => {
+  const { buildContext } = await import("../src/context.mjs");
+  const { mkStateRig } = await import("./helpers/rig.mjs");
+  const { testPng } = await import("./helpers/png.mjs");
+  const graph = { "1": { class_type: "KSampler", inputs: { denoise: 1 } },
+    "2": { class_type: "SaveImage", inputs: { filename_prefix: "series/deep/output", images: ["1", 0] } } };
+  const copied = structuredClone(graph); copied["2"].inputs.filename_prefix = "output";
+  const enqueues = [];
+  const server = Deno.serve({ port: 0, hostname: "127.0.0.1" }, async (req) => {
+    const url = new URL(req.url);
+    if (url.pathname === "/api/object_info") return Response.json({ SaveImage: { output_node: true, input: { required: { filename_prefix: ["STRING", {}] } } },
+      KSampler: { input: { required: { denoise: ["FLOAT", {}] } } } });
+    if (url.pathname === "/api/prompt") { enqueues.push(await req.json()); return Response.json({ prompt_id: "test" }); }
+    if (url.pathname === "/api/view") {
+      assertEquals(url.searchParams.get("subfolder"), "series/deep");
+      const bytes = testPng(8, 9, undefined, url.searchParams.get("filename") === "output_00042_.png" ? graph : copied);
+      return new Response(req.method === "HEAD" ? null : bytes, { headers: { ETag: '"test"', "Content-Length": String(bytes.length) } });
+    }
+    return new Response(null, { status: 404 });
+  });
+  const hosts = { h: `127.0.0.1:${server.addr.port}` }, rig = await mkStateRig("nested-run", { hosts });
+  const { ctx, router } = await buildContext({ start: false, env: { HOME: rig.dir },
+    fakes: { ...rig, plugins: { list: () => [] }, prefetch: { requestRelist() {} } } });
+  try {
+    const file = "series/deep/output_00042_.png";
+    await rig.ingest.ensure("h", file);
+    const run = (filename, prefix = "var_") => router.handle(new Request("http://x/api/features/variations/run", { method: "POST", body: JSON.stringify({
+      id: "h:" + filename, host: "h", filename, prefix, suffix: "_{KSampler.denoise}",
+      ranges: { "KSampler.denoise": { enabled: true, min: .5, max: .5, increment: .1 } },
+    }) }));
+    const result = await run(file);
+    assertEquals(result.status, 200); assertEquals((await result.json()).submitted, 1);
+    assertEquals(enqueues[0].prompt["2"].inputs.filename_prefix, "series/deep/var_output_00042__0.5");
+    assertEquals(enqueues[0].extra_data.extra_pnginfo.kz.source, "h:" + file);
+    await rig.ingest.ensure("h", "series/deep/copied.png");
+    const rejected = await run("series/deep/copied.png");
+    assertEquals(rejected.status, 400); assertEquals(enqueues.length, 1);
+    const unsafeSuffix = await run(file, "different/directory/");
+    assertEquals((await unsafeSuffix.json()).submitted, 0); assertEquals(enqueues.length, 1);
+  } finally { await ctx.jobs.stop(); await ctx.inventory.stop(); await rig.close(); await server.shutdown(); }
 });

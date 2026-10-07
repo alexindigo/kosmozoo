@@ -38,12 +38,12 @@ export async function buildContext({ env = Deno.env.toObject(), fakes = {}, star
     // the default lives in ingest.mjs; the env override is the only knob
     ...(env.KOZMOZOO_REVALIDATE_MS == null ? {} : { revalidateMs: Number(env.KOZMOZOO_REVALIDATE_MS) }),
   });
-  const prefetch = fakes.prefetch ?? new Prefetch({ hosts, store, settings, ingest });
-
   // one comfy client per address — its assets-plus and object_info caches
   // are instance state, so nothing outlives the address it belongs to
   const comfyClients = new Map(); // addr → client
+  let inventoryStopped = false;
   const clientAt = (addr) => {
+    if (inventoryStopped) throw new Error("ComfyUI address owners stopped");
     let client = comfyClients.get(addr);
     if (!client) {
       client = comfyBacking.comfyClient(addr);
@@ -52,9 +52,26 @@ export async function buildContext({ env = Deno.env.toObject(), fakes = {}, star
     return client;
   };
   const comfy = (collection) => clientAt(hosts[collection]);
+  const inventory = (collection, options = {}) => backings.inventoryFor(hosts[collection], { ...options, client: clientAt });
+  inventory.reconcile = () => {
+    const addresses = new Set(Object.values(hosts));
+    for (const [address, client] of comfyClients) {
+      if (addresses.has(address)) continue;
+      client.disposeInventory();
+      comfyClients.delete(address);
+    }
+  };
+  inventory.stop = () => {
+    inventoryStopped = true;
+    const pending = [...comfyClients.values()].map((client) => client.disposeInventory());
+    comfyClients.clear();
+    return Promise.allSettled(pending);
+  };
+  const prefetch = fakes.prefetch ?? new Prefetch({ hosts, store, settings, ingest, inventory });
   const jobs = fakes.jobs ?? new Jobs({
     hosts, client: clientAt,
-    onFinish(_address, sources) {
+    onFinish(address, sources) {
+      clientAt(address).invalidateInventory();
       for (const id of sources) {
         if (store.collectionGet(id)?.auto_refresh) prefetch.requestRelist(id);
       }
@@ -74,7 +91,7 @@ export async function buildContext({ env = Deno.env.toObject(), fakes = {}, star
   const ctx = {
     settings, store, hosts, backings, cache, ingest, prefetch, jobs, plugins,
     features: [],
-    comfy,
+    comfy, inventory,
     paths: { state: stateDir },
   };
   const router = makeRouter(ctx);

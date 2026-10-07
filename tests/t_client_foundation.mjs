@@ -6,6 +6,10 @@
 
 import { assert, assertEquals } from "jsr:@std/assert";
 import { makeAppStore } from "../client-solid/store/app-store.js";
+import { api } from "../client/js/api.mjs";
+import { clientInventory } from "./helpers/client-inventory.mjs";
+
+api.inventory = async (...args) => clientInventory(await api.entries(...args));
 
 const BOX = { w: 1000, h: 500 };
 

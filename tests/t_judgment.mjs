@@ -199,7 +199,8 @@ Deno.test("judgment: PATCH, entry read and folder listing expose bookmark indepe
     const address = `folder:${dir}`;
     store.collectionAdd("h", address);
     store.judgmentPatch("h", "b.png", { favorite: true });
-    const router = makeRouter({ store, hosts: { h: address } });
+    const { makeTestInventory } = await import("./helpers/rig.mjs");
+    const router = makeRouter({ store, hosts: { h: address }, inventory: makeTestInventory({ h: address }) });
     const url = "http://test/api/collections/h/entries/a.png";
     const patched = await router.handle(new Request(`${url}/judgment`, { method: "PATCH", body: JSON.stringify({ bookmark: true }) }));
     assertEquals(patched.status, 200);

@@ -64,8 +64,9 @@ export function Card(props) {
   // over the saved judgment note (it may hold newer edits).
   const neighborText = (cls) => (dir) => {
     const images = store.state.images;
-    for (let i = imgIdx() + dir; i >= 0 && i < images.length; i += dir) {
-      const im = images[i];
+    const ordering = store.state.folderView();
+    for (let i = ordering.indexOf(imgIdx()) + dir; i >= 0 && i < ordering.length; i += dir) {
+      const im = images[ordering[i]];
       const text = store.state.drafts[`${im?.id}:${cls}`] ?? im?.judgment?.notes?.[cls] ?? "";
       if (text) return text;
     }
@@ -74,7 +75,7 @@ export function Card(props) {
 
   const copyName = (e) => {
     e.stopPropagation();
-    navigator.clipboard?.writeText(store.state.downloadName(image()))
+    navigator.clipboard?.writeText(store.state.referenceName(image()))
       .then(flashCopied)
       .catch(() => {});
   };
@@ -112,7 +113,7 @@ export function Card(props) {
                 store.actions.selected.set(image()?.id, e.target.checked);
               }}
             />
-            <span class="copyable" classList={{ copied: copiedOn() }} title="click to copy host#filename" onClick={copyName}>
+            <span class="copyable" classList={{ copied: copiedOn() }} title={`${image()?.filename} — click to copy host#full-path`} onClick={copyName}>
               {image()?.filename}
             </span>
           </span>

@@ -27,6 +27,8 @@ import { parseArgs } from "node:util";
 import { readdir, readFile } from "node:fs/promises";
 import { statSync } from "node:fs";
 import { join, basename } from "node:path";
+import { isEntryPath, splitEntryPath } from "../src/entry-path.mjs";
+import { testPng } from "./helpers/png.mjs";
 
 // ---------------------------------------------------------------------------
 // Minimal PNG tEXt chunk reader — just enough to pull the embedded
@@ -129,14 +131,22 @@ function ranged(req, bytes, headers) {
   return new Response(bytes.subarray(start, end), { status: 206, headers: h });
 }
 
-function fileList() {
+function fileNames() {
   const names = [...published.keys(), ...fixtures.keys()];
   for (let i = 0; i < bulkCount; i++) {
     names.push("bulk-" + String(i).padStart(5, "0") + ".png");
   }
   names.push(MISSING);
+  return names.filter((name) => !removed.has(name));
+}
+
+function fileList() {
   // Real ComfyUI suffixes each entry with " [size]"; the engine strips it.
-  return names.map((n) => n + " [" + n.length * 137 + "]");
+  return fileNames().map((name, index) => ({ name, mtime: published.get(name)?.mtime ?? 1_900_000_000 - index }))
+    .filter(({ name }) => !name.includes("/"))
+    .sort((a, b) => b.mtime - a.mtime || a.name.localeCompare(b.name))
+    .map(({ name: n }) => n + " [" +
+    ((published.get(n) ?? fixtures.get(n))?.bytes.length ?? (n === MISSING ? 0 : BULK_PNG.length)) + "]");
 }
 
 function history() {
@@ -160,8 +170,30 @@ function history() {
 // Explicit test-only external activity. Named output bytes are real fixture
 // bytes, acquired by the production engine's ordinary GET/HEAD/range path.
 const published = new Map();
+const publishedInputs = new Map();
+const removed = new Set();
 let terminalHistory = history();
 let running = [], pending = [], logs = [], failures = {}, delays = {};
+let extension = true, listOverride = null, publishRevision = 0;
+let captureEnqueue = false, enqueues = [];
+let metadataBombs = new Set(), assetsHidden = new Set();
+
+function publication(description) {
+  const fixture = description.fixture === "bulk" ? { bytes: BULK_PNG, promptGraph: null }
+    : fixtures.get(description.fixture ?? "flux-basic.png");
+  if (!fixture) return null;
+  if (description.width || description.height || description.color || description.graphPrefix || description.lineage) {
+    const width = description.width ?? new DataView(fixture.bytes.buffer, fixture.bytes.byteOffset).getUint32(16);
+    const height = description.height ?? new DataView(fixture.bytes.buffer, fixture.bytes.byteOffset).getUint32(20);
+    if (![width, height].every((n) => Number.isInteger(n) && n > 0 && n <= 2048)) return null;
+    const graph = fixture.promptGraph ? structuredClone(fixture.promptGraph) : null;
+    if (description.graphPrefix && graph) {
+      for (const node of Object.values(graph)) if (node.class_type === "SaveImage") node.inputs.filename_prefix = description.graphPrefix;
+    }
+    return { bytes: testPng(width, height, description.color, graph, description.lineage), promptGraph: graph };
+  }
+  return fixture;
+}
 
 function queueRows(ids) {
   return ids.map((id, index) => [index, id, {}, { client_id: "external-fixture-client" }, []]);
@@ -175,6 +207,9 @@ export const server = Deno.serve({ port }, async (req) => {
     const body = await req.json();
     if (body.reset) {
       published.clear(); terminalHistory = history();
+      removed.clear(); publishedInputs.clear(); extension = true; listOverride = null; publishRevision = 0;
+      captureEnqueue = false; enqueues = [];
+      metadataBombs = new Set(); assetsHidden = new Set();
       running = []; pending = []; logs = []; failures = {}; delays = {};
     }
     if (body.running) running = [...body.running];
@@ -184,18 +219,36 @@ export const server = Deno.serve({ port }, async (req) => {
     if (body.clearHistory) terminalHistory = {};
     if (body.failures) failures = { ...body.failures };
     if (body.delays) delays = { ...body.delays };
+    if (body.extension !== undefined) extension = body.extension;
+    if (body.listOverride !== undefined) listOverride = body.listOverride;
+    if (body.captureEnqueue !== undefined) captureEnqueue = body.captureEnqueue;
+    if (body.metadataBombs) metadataBombs = new Set(body.metadataBombs);
+    if (body.assetsHidden) assetsHidden = new Set(body.assetsHidden);
+    for (const name of body.remove ?? []) removed.add(name);
+    for (const output of body.publish ?? []) {
+      const fixture = publication(output);
+      if (!fixture || !isEntryPath(output.name)) return new Response("invalid fixture output", { status: 400 });
+      removed.delete(output.name);
+      published.set(output.name, { ...fixture, mtime: output.mtime ?? 2_000_000_000 + ++publishRevision });
+    }
+    for (const input of body.publishInputs ?? []) {
+      const fixture = publication(input);
+      if (!fixture || !isEntryPath(input.name)) return new Response("invalid fixture input", { status: 400 });
+      publishedInputs.set(input.name, fixture);
+    }
     for (const job of body.finish ?? []) {
       running = running.filter((id) => id !== job.id);
       pending = pending.filter((id) => id !== job.id);
       if (job.output) {
-        const fixture = fixtures.get(job.fixture ?? "flux-basic.png");
-        if (!fixture || basename(job.output) !== job.output) return new Response("invalid fixture output", { status: 400 });
-        published.set(job.output, fixture);
+        const fixture = publication(job);
+        if (!fixture || !isEntryPath(job.output)) return new Response("invalid fixture output", { status: 400 });
+        removed.delete(job.output);
+        published.set(job.output, { ...fixture, mtime: job.mtime ?? 2_000_000_000 + ++publishRevision });
       }
       const outcome = job.outcome ?? "success";
       terminalHistory[job.id] = {
         prompt: [0, job.id, {}, { client_id: "external-fixture-client" }],
-        outputs: job.output ? { "9": { images: [{ filename: job.output, type: "output" }] } } : {},
+        outputs: job.output ? { "9": { images: [{ ...splitEntryPath(job.output), type: "output" }] } } : {},
         status: { completed: outcome === "success", status_str: outcome === "success" ? "success" : "error",
           messages: [[outcome === "interrupted" ? "execution_interrupted" : outcome === "error" ? "execution_error" : "execution_success", {}]] },
       };
@@ -204,12 +257,56 @@ export const server = Deno.serve({ port }, async (req) => {
   }
 
   const channel = p === "/api/queue" ? "queue" : p.startsWith("/api/history") ? "history"
-    : p === "/internal/logs/raw" ? "logs" : p === "/internal/files/output" ? "listing" : null;
+    : p === "/internal/logs/raw" ? "logs"
+    : p === "/internal/files/output" || p === "/api/assets_plus/output/list" ? "listing" : null;
   if (channel && req.method === "GET") {
     if (delays[channel]) await new Promise((resolve) => setTimeout(resolve, delays[channel]));
     if (failures[channel]) return new Response("controlled failure", { status: failures[channel] });
   }
   if (p === "/api/queue" && req.method === "GET") return Response.json({ queue_running: queueRows(running), queue_pending: queueRows(pending) });
+  if (p === "/__test/enqueues" && req.method === "GET") return Response.json(enqueues);
+  if (p === "/api/prompt" && req.method === "POST" && captureEnqueue) {
+    enqueues.push(await req.json());
+    return Response.json({ prompt_id: `captured-${enqueues.length}` });
+  }
+  if (p === "/api/assets_plus/config" && req.method === "GET") {
+    if (!extension) return new Response("extension unavailable", { status: 404 });
+    return Response.json({ allowed_extensions: [".png", ".jpg", ".jpeg", ".webp"],
+      recursive: true, scan_depth: null, list_limit: 200 });
+  }
+  if (p === "/api/assets_plus/output/list" && req.method === "GET") {
+    if (!extension) return new Response("extension unavailable", { status: 404 });
+    if (listOverride !== null) return Response.json(listOverride);
+    const recursive = !["0", "false", "False"].includes(url.searchParams.get("recursive") ?? "1");
+    const depth = Number(url.searchParams.get("scan_depth") ?? -1);
+    const extensions = new Set((url.searchParams.get("extensions") ?? "png,jpg,jpeg,webp").split(",").map((x) => x.replace(/^\./, "").toLowerCase()));
+    let items = fileNames().map((name, i) => ({ relpath: name, filename: name.split("/").at(-1),
+      size: (published.get(name) ?? fixtures.get(name))?.bytes.length ?? (name === MISSING ? 0 : BULK_PNG.length),
+      mtime: published.get(name)?.mtime ?? 1_900_000_000 - i, type: "image", has_workflow: false,
+    })).filter((item) => (recursive || !item.relpath.includes("/")) &&
+      (depth < 0 || item.relpath.split("/").length - 1 <= depth) && extensions.has(item.relpath.split(".").pop().toLowerCase()));
+    items.sort((a, b) => b.mtime - a.mtime || (a.relpath < b.relpath ? -1 : a.relpath > b.relpath ? 1 : 0));
+    // AssetsPlus hides/searches before Image.open(), but paginates afterward.
+    const query = url.searchParams.get("query") ?? url.searchParams.get("q");
+    items = items.filter((item) => !assetsHidden.has(item.relpath) &&
+      (!query || item.relpath.toLowerCase().includes(query.toLowerCase())));
+    if (items.some((item) => metadataBombs.has(item.relpath))) {
+      return Response.json({ success: false, error: "DecompressionBombError" }, { status: 500 });
+    }
+    const latest_mtime = items[0]?.mtime ?? 0;
+    const since = url.searchParams.get("since"), cursor = url.searchParams.get("cursor");
+    if (since !== null) items = items.filter((item) => item.mtime > Number(since));
+    else if (cursor) {
+      const split = cursor.indexOf(":"), time = Number(split < 0 ? cursor : cursor.slice(0, split));
+      const name = split < 0 ? null : cursor.slice(split + 1);
+      items = items.filter((item) => item.mtime < time || (name !== null && item.mtime === time && item.relpath > name));
+    }
+    const limit = Number(url.searchParams.get("limit") ?? 200);
+    const has_more = limit !== 0 && items.length > limit;
+    if (limit) items = items.slice(0, limit);
+    const last = items.at(-1);
+    return Response.json({ items, has_more, latest_mtime, cursor: last ? `${last.mtime}:${last.relpath}` : cursor ?? "" });
+  }
   if (p === "/internal/logs/raw" && req.method === "GET") return Response.json({ entries: logs, size: logs.length });
   if (p.startsWith("/api/history/") && req.method === "GET") {
     const id = decodeURIComponent(p.slice("/api/history/".length));
@@ -266,7 +363,7 @@ export const server = Deno.serve({ port }, async (req) => {
   const INPUT_IMAGES = ["canny.png", "ref.png"];
 
   if (p === "/internal/files/input") {
-    return Response.json(INPUT_IMAGES.map((n) => n + " [137]"));
+    return Response.json([...INPUT_IMAGES, ...publishedInputs.keys()].filter((name) => !name.includes("/")).map((n) => n + " [137]"));
   }
 
   if (p === "/read-order") {
@@ -275,15 +372,23 @@ export const server = Deno.serve({ port }, async (req) => {
 
   if (p === "/api/view") {
     const filename = url.searchParams.get("filename") ?? "";
-    const name = basename(filename);
+    const subfolder = url.searchParams.get("subfolder") ?? "";
+    if (basename(filename) !== filename) return new Response("bad filename", { status: 400 });
+    const name = subfolder ? `${subfolder}/${filename}` : filename;
+    if (!isEntryPath(name) || removed.has(name)) return new Response("not found", { status: 404 });
     if (name === MISSING) return new Response("not found", { status: 404 });
     const head = req.method === "HEAD";
     if (!head && !req.headers.get("range")) readOrder.push(name);
     // aiohttp-style ETag: "<mtime_ns_hex>-<size_hex>" (the engine's stamp).
     const etag = (mtimeNs, size) => `"${mtimeNs.toString(16)}-${size.toString(16)}"`;
+    if (url.searchParams.get("type") === "input" && publishedInputs.has(name)) {
+      const bytes = publishedInputs.get(name).bytes;
+      const headers = { "Content-Type": "image/png", "Content-Length": String(bytes.length), ETag: etag(0n, BigInt(bytes.length)) };
+      return head ? new Response(null, { headers }) : ranged(req, bytes, headers);
+    }
     // input-dir node references: served as real images (the fixture bytes
     // stand in — the info panel needs a loadable image, not specific pixels)
-    if (INPUT_IMAGES.includes(name)) {
+    if (url.searchParams.get("type") === "input" && INPUT_IMAGES.includes(name)) {
       const bytes = fixtures.get("flux-basic.png")?.bytes;
       if (bytes) {
         if (head) {
@@ -320,6 +425,7 @@ export const server = Deno.serve({ port }, async (req) => {
     }
     if (fixtures.has(name) || published.has(name)) {
       const bytes = (published.get(name) ?? fixtures.get(name)).bytes;
+      const stamp = etag(BigInt(published.get(name)?.mtime ?? 0), BigInt(bytes.length));
       // Real ComfyUI serves SVG (and sometimes everything) as octet-stream.
       const type = name.endsWith(".svg") ? "application/octet-stream" : "image/png";
       if (head) {
@@ -327,13 +433,13 @@ export const server = Deno.serve({ port }, async (req) => {
           headers: {
             "Content-Type": type,
             "Content-Length": String(bytes.length),
-            ETag: etag(0n, BigInt(bytes.length)),
+            ETag: stamp,
           },
         });
       }
       return ranged(req, bytes, {
         "Content-Type": type,
-        ETag: etag(0n, BigInt(bytes.length)),
+        ETag: stamp,
       });
     }
     if (/^bulk-\d{5}\.png$/.test(name)) {

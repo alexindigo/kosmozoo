@@ -11,6 +11,7 @@ import { HostPicker } from "./HostPicker.js";
 import { IconButton } from "./IconButton.js";
 import { FeedFilter } from "./FeedFilter.js";
 import { SourceProgress } from "./SourceProgress.js";
+import { FolderPicker } from "./FolderPicker.js";
 
 // layout-switcher icons (icons.mjs): a square with one divider — vertical
 // right of center (wide images / narrow text), horizontal (stacked),
@@ -134,6 +135,7 @@ function Menu() {
 
 export function Header() {
   const store = useAppStore();
+  const pins = () => Object.keys(store.state.hosts).filter((id) => store.state.hosts[id].pinned);
   let menuWrapRef;
 
   // click outside the menu closes it — the shared primitive; the wrapper
@@ -151,8 +153,14 @@ export function Header() {
           <IconButton id="refreshBtn" chrome variant="refresh" title="Refresh sources and image list"
             icon={iconSvg("refresh", 16)} onAction={() => store.actions.ui.refresh()} />
           <HostPicker />
-          <div class="pinned-sources" aria-label="Pinned sources">
-            <For each={Object.keys(store.state.hosts).filter((id) => store.state.hosts[id].pinned)}>
+          <FolderPicker options={store.state.folderOptions()} value={store.state.selectedFolder()}
+            supported={store.state.inventory.subfolders.supported} reason={store.state.inventory.subfolders.reason}
+            loading={store.state.inventory.loading} unavailable={!store.state.inventory.folders.includes(store.state.selectedFolder())}
+            onSelect={store.actions.folders.select} />
+          <div class="pinned-source-group" classList={{ "has-pins": pins().length > 0 }}>
+            <Show when={pins().length > 0}><span class="pinned-separator" role="separator" aria-orientation="vertical" /></Show>
+            <div class="pinned-sources" aria-label="Pinned sources">
+            <For each={pins()}>
               {(id) => (
                 <button type="button" class={"pinned-source" + (store.state.host() === id ? " on" : "")}
                   data-source={id} aria-pressed={store.state.host() === id}
@@ -162,6 +170,7 @@ export function Header() {
                 </button>
               )}
             </For>
+            </div>
           </div>
           <FeedFilter value={store.state.filter()} onInput={store.actions.ui.setFilter}
             pushLayer={store.actions.keys.pushLayer} popLayer={store.actions.keys.popLayer}

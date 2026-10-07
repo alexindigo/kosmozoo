@@ -271,9 +271,9 @@ const AUDIT = `(async () => {
     const kz = ${KZ};
     const { api } = await import('/js/api.mjs');
     const { cardHeight, gridGapPx } = await import('/store/sizes.js');
-    const original = api.entries;
-    const rows = await original('fixture-dir');
-    api.entries = async (id) => id === 'fixture-dir' ? [...rows].reverse() : original(id);
+    const original = api.inventory;
+    const inventory = await original('fixture-dir'), rows = inventory.entries;
+    api.inventory = async (id) => id === 'fixture-dir' ? { ...inventory, entries: [...rows].reverse() } : original(id);
     try {
       await kz.actions.ui.refresh();
       const list = kz.state.entriesWithKnownSize();
@@ -289,7 +289,7 @@ const AUDIT = `(async () => {
         return it.key === im.id && it.start === rect.start && it.size === rect.size;
       });
     } finally {
-      api.entries = original;
+      api.inventory = original;
       await kz.actions.ui.refresh();
     }
   })()`);
@@ -297,14 +297,14 @@ const AUDIT = `(async () => {
   const smallLanding = await page.evaluate(`(async () => {
     const kz = ${KZ};
     const { api } = await import('/js/api.mjs');
-    const original = api.entries;
-    const rows = await original('fixture-dir');
+    const original = api.inventory;
+    const inventory = await original('fixture-dir'), rows = inventory.entries;
     const withheld = rows.find((e) => e.name === 'flux-controlnet.png');
     const base = rows.filter((e) => e !== withheld);
-    api.entries = async (id) => id === 'fixture-dir' ? base : original(id);
+    api.inventory = async (id) => id === 'fixture-dir' ? { ...inventory, entries: base } : original(id);
     try {
       kz.actions.current.set('fixture-dir', base[0].name);
-      await kz.actions.hosts.select('fixture-dir');
+      await kz.actions.images.reload();
       const vz = kz.state.feedVirtualizer(), col = kz.state.feedScrollEl();
       const anchorName = base[2].name;
       const index = kz.state.images.findIndex((im) => im.filename === anchorName);
@@ -316,12 +316,12 @@ const AUDIT = `(async () => {
       const beforeCard = el();
       const beforeEditor = beforeCard.querySelector('textarea');
       const before = beforeCard.getBoundingClientRect().top;
-      api.entries = async (id) => id === 'fixture-dir' ? [base[0], withheld, ...base.slice(1)] : original(id);
+      api.inventory = async (id) => id === 'fixture-dir' ? { ...inventory, entries: [base[0], withheld, ...base.slice(1)] } : original(id);
       await kz.actions.ui.refresh();
       return { before, after: el().getBoundingClientRect().top,
         sameCard: beforeCard === el(), sameEditor: !!beforeEditor && beforeEditor === el().querySelector('textarea') };
     } finally {
-      api.entries = original;
+      api.inventory = original;
       await kz.actions.ui.refresh();
     }
   })()`);
@@ -479,6 +479,23 @@ const AUDIT = `(async () => {
         check(`filter geometry ${width}/${space}: same feed edge, input left, icon stationary`,
           after.delta <= 1 && Math.abs(before.icon - after.icon) < 1 && after.inputRight <= after.iconLeft && after.barRight <= after.viewport,
           JSON.stringify({ before, after }));
+        await page.evaluate(`(async () => {
+          const s = ${KZ}; await s.actions.hosts.patch('fake', { pinned: true });
+          await s.actions.hosts.patch('another', { pinned: true }); s.actions.folders.select('geometry/long-caption');
+        })()`);
+        await page.poll(`(${geometry}).delta <= 1`);
+        check(`folder/pin geometry ${width}/${space}: caption and separated scroll strip retain the feed boundary`, await page.evaluate(`(() => {
+          const icon = document.getElementById('filterBtn').getBoundingClientRect();
+          const folder = document.getElementById('outputFolder').getBoundingClientRect();
+          const separator = document.querySelector('.pinned-separator').getBoundingClientRect();
+          const strip = document.querySelector('.pinned-sources').getBoundingClientRect();
+          return (${geometry}).delta <= 1 && Math.abs(icon.right - ${after.icon}) <= 1 && folder.width > 0 &&
+            separator.right <= strip.left + 1 && document.getElementById('outputFolder').title.includes('geometry/long-caption');
+        })()`));
+        await page.evaluate(`(async () => { const s = ${KZ}; s.actions.folders.select('');
+          await s.actions.hosts.patch('fake', { pinned: false }); await s.actions.hosts.patch('another', { pinned: false }); })()`);
+        await page.poll(`(${geometry}).delta <= 1 && !document.querySelector('.pinned-separator')`);
+        check(`empty-pin geometry ${width}/${space}: no separator and unchanged flexible boundary`, (await page.evaluate(geometry)).delta <= 1);
         await capture(page, `filter-expanded-${width}-${space}`);
         const divider = await page.evaluate(`(() => {
           const r = document.getElementById('divider').getBoundingClientRect();
@@ -523,14 +540,14 @@ const AUDIT = `(async () => {
       s.actions.views.set('anchor:source-refresh-anchor.png', { s: 2, txf: .1, tyf: .2 }, { persist: false });
       const { api } = await import('/js/api.mjs');
       let release; const gate = new Promise((r) => release = r);
-      window.__sourceApi = { setJudgment: api.setJudgment, entries: api.entries, want: api.want };
+      window.__sourceApi = { setJudgment: api.setJudgment, inventory: api.inventory, want: api.want };
       window.__sourceRelease = release; window.__sourceUnknown = false; window.__sourceWanted = false;
       api.setJudgment = async (...args) => { await gate; return window.__sourceApi.setJudgment(...args); };
-      api.entries = async (id) => {
-        const rows = await window.__sourceApi.entries(id);
-        const output = rows.find((r) => r.name === 'e2e-source-completed.png');
+      api.inventory = async (id) => {
+        const inventory = await window.__sourceApi.inventory(id);
+        const output = inventory.entries.find((r) => r.name === 'e2e-source-completed.png');
         if (output && !output.width) window.__sourceUnknown = true;
-        return rows;
+        return inventory;
       };
       api.want = async (id, files) => {
         if (id === 'fake' && files.includes('e2e-source-completed.png')) window.__sourceWanted = true;
@@ -657,6 +674,61 @@ const AUDIT = `(async () => {
       await s.actions.hosts.patch('fake', { pinned: false, autoRefresh: false });
       await fetch('/api/prefetch', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ paused: false, enabled: true }) });
     })()`);
+  }
+
+  try {
+    await control({ reset: true, publish: [{ name: 'scoped/seed.png', width: 96, height: 80 }] });
+    await page.evaluate(`(async () => { const s = ${KZ}; s.actions.ui.setFilter('');
+      await s.actions.hosts.select('fake'); await s.actions.ui.refresh(); s.actions.folders.select('scoped');
+      await s.actions.hosts.patch('fake', { autoRefresh: true }); await s.actions.hosts.pollActivity('fake'); })()`);
+    await page.poll(`document.querySelector('.card.current[data-name="scoped/seed.png"] img')?.naturalWidth === 96`, 20000);
+    await page.evaluate(`(async () => {
+      const s = ${KZ}, { api } = await import('/js/api.mjs');
+      window.__nestedApi = { inventory: api.inventory, want: api.want };
+      window.__nestedUnknown = false; window.__nestedWanted = false;
+      api.inventory = async (id) => {
+        const inventory = await window.__nestedApi.inventory(id);
+        const row = inventory.entries.find(e => e.name === 'scoped/deep/completed.png');
+        if (row && !row.width) window.__nestedUnknown = true;
+        return inventory;
+      };
+      api.want = async (id, files) => {
+        if (id === 'fake' && files.includes('scoped/deep/completed.png')) window.__nestedWanted = true;
+        return window.__nestedApi.want(id, files);
+      };
+      await fetch('/api/prefetch', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ paused: true }) });
+    })()`);
+    await control({ finish: [
+      { id: 'nested-auto-complete', output: 'scoped/deep/completed.png', width: 87, height: 73, color: [20, 120, 200, 255] },
+      { id: 'nested-auto-sibling', output: 'scoped-other/sibling.png', width: 91, height: 77 },
+    ] });
+    await page.poll(`document.querySelector('.card[data-name="scoped/deep/completed.png"] img')?.naturalWidth === 87`, 25000);
+    check('nested completion retains the prior current instead of stealing focus', await page.evaluate(`(async () => ${KZ}.state.current()?.image === 'scoped/seed.png')()`));
+    await page.evaluate(`(async () => ${KZ}.actions.feed.scrollTop())()`);
+    await page.poll(`(async () => {
+      const s = ${KZ}, image = document.querySelector('.card[data-name="scoped/deep/completed.png"] img');
+      if (!image?.naturalWidth || s.state.feedActivity() !== 'settled' || s.state.feedScrollEl().scrollTop > 1) return false;
+      const r = image.getBoundingClientRect(), feed = s.state.feedScrollEl().getBoundingClientRect();
+      return r.width > 0 && r.top < feed.bottom && r.bottom > feed.top;
+    })()`, 20000);
+    const nested = await page.evaluate(`(async () => {
+      const s = ${KZ}, image = document.querySelector('.card[data-name="scoped/deep/completed.png"] img'), r = image.getBoundingClientRect();
+      return { folder: s.state.selectedFolder(), current: s.state.current(), decoded: image.naturalHeight,
+        visible: r.width > 0 && r.bottom > 0 && r.top < innerHeight, unknown: window.__nestedUnknown, wanted: window.__nestedWanted,
+        siblingListed: s.state.images.some(e => e.filename === 'scoped-other/sibling.png'),
+        siblingExcluded: !s.state.view().some(i => s.state.images[i].filename.startsWith('scoped-other/')) };
+    })()`);
+    check('external completion auto-refreshes the selected subtree through actual nested bytes/dimensions', nested.folder === 'scoped' && nested.decoded === 73 && nested.visible && nested.unknown && nested.wanted, JSON.stringify(nested));
+    check('sibling completion stays in full inventory but outside the selected subtree', nested.siblingListed && nested.siblingExcluded, JSON.stringify(nested));
+    await capture(page, 'output-folders-auto-nested-1400');
+  } catch (error) { check('nested auto-refresh consumer case', false, error.message); }
+  finally {
+    await control({ reset: true });
+    await page.evaluate(`(async () => { const s = ${KZ}, { api } = await import('/js/api.mjs');
+      if (window.__nestedApi) Object.assign(api, window.__nestedApi);
+      s.actions.ui.setFilter(''); s.actions.folders.select(''); await s.actions.hosts.patch('fake', { autoRefresh: false });
+      await fetch('/api/prefetch', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ paused: false }) });
+      await s.actions.ui.refresh(); })()`);
   }
 
   check("no uncaught page errors", pageErrors.length === 0, pageErrors[0] ?? "");

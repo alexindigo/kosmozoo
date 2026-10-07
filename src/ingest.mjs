@@ -6,7 +6,7 @@
 // demand. Revalidation is a method here (instance clock, no module globals).
 
 import { sha256 } from "./cache.mjs";
-import { backingFor } from "./backings/index.mjs";
+import { backingFor, validEntryName } from "./backings/index.mjs";
 import { metaFromPngBytes, imageDims, parsePngTextChunks, EXTRACTOR_VERSION } from "./extractor.mjs";
 
 const DEFAULT_REVALIDATE_MS = 60_000;
@@ -89,6 +89,7 @@ export class Ingest {
   // bytes → hash → cache → content (+extract when stale) → entry. Returns
   // the hash. `kind` is 'output' (extracted) or 'input' (never extracted).
   async ingest(collection, name, kind, { bytes, stamp = null }) {
+    if (!validEntryName(this.#hosts[collection], name)) throw new TypeError("bad entry path");
     const hash = await sha256(bytes);
     await this.#cache.put(hash, bytes);
     if (kind === "input") {
@@ -121,6 +122,7 @@ export class Ingest {
   // write, no extract. status 404 means the source lost the file (the
   // prefetch acts on it exactly like pass 2 would).
   async dims(collection, name, kind = "output") {
+    if (!validEntryName(this.#hosts[collection], name)) return { status: 400, dims: null };
     const known = this.#store.entryDims(collection, name);
     if (known) return { status: 200, dims: known };
     const addr = this.#hosts[collection];
@@ -140,6 +142,7 @@ export class Ingest {
   // the read gate serves it before background work.
   // Resolves { hash, bytes, status: 200 } or { status } (backing said no).
   async ensure(collection, name, kind = "output", { priority = "low" } = {}) {
+    if (!validEntryName(this.#hosts[collection], name)) return { status: 400 };
     // \0-separated: plain concatenation collides ("ab","c" vs "a","bc")
     const key = `${collection}\u0000${name}\u0000${kind}`;
     const existing = this.#inflight.get(key);
@@ -198,6 +201,7 @@ export class Ingest {
 
   scheduleRevalidate(collection, name, { input = false } = {}) {
     if (!this.#hosts[collection]) return;
+    if (!validEntryName(this.#hosts[collection], name)) return;
     const key = `${input ? "in:" : ""}${collection}:${name}`;
     const now = Date.now();
     if (now - (this.#lastCheck.get(key) ?? 0) < this.#revalidateMs) return;
@@ -211,6 +215,7 @@ export class Ingest {
   async revalidateNow(collection, name, { input = false } = {}) {
     const addr = this.#hosts[collection];
     if (!addr) return;
+    if (!validEntryName(addr, name)) return;
     const stamp = (await backingFor(addr).stat(addr, name, input ? "input" : "output"))?.stamp ?? null;
     if (stamp == null) return; // gone/unreachable — keep what we have
 

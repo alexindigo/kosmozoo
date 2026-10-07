@@ -9,7 +9,7 @@ import { Store } from "../src/store.mjs";
 import { Prefetch } from "../src/prefetch.mjs";
 import { Ingest } from "../src/ingest.mjs";
 import { Cache } from "../src/cache.mjs";
-import { mkStateRig } from "./helpers/rig.mjs";
+import { mkStateRig, makeTestInventory } from "./helpers/rig.mjs";
 import { mkdtemp, rm, writeFile, mkdir } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -103,7 +103,7 @@ Deno.test("metaState: pending vs extracted vs none", async () => {
   await writeFile(join(folder, "bare.png"), "x");
   const settings = await Settings.open(dir);
   const hosts = { local: `folder:${folder}` };
-  const router = makeRouter({ hosts, store, settings, plugins: null });
+  const router = makeRouter({ hosts, store, settings, plugins: null, inventory: makeTestInventory(hosts) });
   const list = await (await router.handle(new Request("http://x/api/collections/local/entries"))).json();
   const bareEntry = list.find((i) => (i.name ?? i.filename) === "bare.png");
   assertEquals(bareEntry.extracted, true);
@@ -124,7 +124,7 @@ Deno.test("listing: one statement per listing — no per-entry queries at 3000 f
     const hosts = { local: `127.0.0.1:${server.addr.port}` };
     const cache = new Cache(join(dir, "cache"));
     const ingest = new Ingest(store, hosts, { cache });
-    const router = makeRouter({ hosts, store, settings, plugins: null, cache, ingest });
+    const router = makeRouter({ hosts, store, settings, plugins: null, cache, ingest, inventory: makeTestInventory(hosts) });
     // a few rows so the join carries judgment + dims
     await store.ingestFile("local", names[0], "aa".repeat(32), 100);
     await store.judgmentPatch("local", names[0], { vote: "up" });

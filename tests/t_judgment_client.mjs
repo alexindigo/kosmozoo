@@ -2,6 +2,7 @@ import { assert, assertEquals } from "jsr:@std/assert";
 import { makeAppStore } from "../client-solid/store/app-store.js";
 import { api } from "../client/js/api.mjs";
 import { makeJudgments } from "../client-solid/store/judgments.js";
+import { clientInventory } from "./helpers/client-inventory.mjs";
 
 const initial = { vote: "up", favorite: true, bookmark: true, notes: { pos: "saved", neg: "old" } };
 const changed = { vote: "down", favorite: null, bookmark: null, notes: { pos: "edited" } };
@@ -25,6 +26,7 @@ async function withStore(run, judgment = initial) {
     judgment: structuredClone(judgment), width: 100, height: 50,
   }));
   api.entries = async () => listing();
+  api.inventory = async (...args) => clientInventory(await api.entries(...args));
   api.meta = async () => ({ v: 1, changed: false });
   api.want = async () => ({ pending: 0 });
   api.nodes = async () => ({});

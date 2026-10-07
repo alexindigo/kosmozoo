@@ -8,7 +8,7 @@ import { validateCollection } from "../src/collections.mjs";
 import { parseListingEntry } from "../src/backings/comfy.mjs";
 import { makeRouter } from "../src/routes.mjs";
 import { Store } from "../src/store.mjs";
-import { mkStateRig } from "./helpers/rig.mjs";
+import { mkStateRig, makeTestInventory } from "./helpers/rig.mjs";
 import { Prefetch } from "../src/prefetch.mjs";
 import { Ingest } from "../src/ingest.mjs";
 import { Cache } from "../src/cache.mjs";
@@ -65,7 +65,7 @@ Deno.test("folder host: routes serve the folder's files and bytes", async () => 
   const dir = await mkdtemp(join(tmpdir(), "kz-fr-"));
   const rig = await mkStateRig("folder", { dir });
   const { settings, store } = rig;
-  const router = makeRouter({ hosts: { fixtures: "folder:" + FIXTURES }, store, settings, plugins: null, cache: new Cache(join(dir, "cache")), ingest: new Ingest(store, { fixtures: "folder:" + FIXTURES }, { cache: new Cache(join(dir, "cache")) }) });
+  const router = makeRouter({ hosts: { fixtures: "folder:" + FIXTURES }, inventory: makeTestInventory({ fixtures: "folder:" + FIXTURES }), store, settings, plugins: null, cache: new Cache(join(dir, "cache")), ingest: new Ingest(store, { fixtures: "folder:" + FIXTURES }, { cache: new Cache(join(dir, "cache")) }) });
 
   const r = await router.handle(new Request("http://x/api/collections/fixtures/entries"));
   assertEquals(r.status, 200);
@@ -125,4 +125,24 @@ Deno.test("folder host: delete unlinks the file, guarded like every other path",
   assertEquals((await backingFor("folder:" + dir).remove("folder:" + dir, "../outside.png")).detail, "bad filename");
   assertEquals((await backingFor("folder:" + dir).remove("folder:" + dir, "a/b.png")).detail, "bad filename");
   await rm(dir, { recursive: true });
+});
+
+Deno.test("folder host: ordinary flat leaf characters are not rejected by Comfy's path grammar", async () => {
+  const rig = await mkStateRig("flat-leaves"), address = "folder:" + rig.dir;
+  rig.hosts.flat = address; rig.store.collectionAdd("flat", address);
+  const names = ["C:file.png", "\\leaf.png", "line\n.png"];
+  const { testPng } = await import("./helpers/png.mjs");
+  const bytes = testPng(4, 5);
+  for (const name of names) await writeFile(join(rig.dir, name), bytes);
+  const router = makeRouter({ ...rig });
+  try {
+    const inventory = await (await router.handle(new Request("http://x/api/collections/flat/entries?inventory=1"))).json();
+    assertEquals(inventory.folders, [""]);
+    assertEquals(inventory.entries.map((entry) => entry.name).sort(), names.sort());
+    for (const name of names) {
+      const result = await router.handle(new Request(`http://x/api/collections/flat/entries/${encodeURIComponent(name)}/bytes`));
+      assertEquals(result.status, 200);
+      assertEquals(new Uint8Array(await result.arrayBuffer()), bytes);
+    }
+  } finally { await rig.close(); }
 });

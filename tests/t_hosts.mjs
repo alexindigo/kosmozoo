@@ -8,7 +8,7 @@ import { backingFor } from "../src/backings/index.mjs";
 import { comfyClient } from "../src/backings/comfy.mjs";
 import { makeRouter } from "../src/routes.mjs";
 import { Store } from "../src/store.mjs";
-import { mkStateRig } from "./helpers/rig.mjs";
+import { mkStateRig, makeTestInventory } from "./helpers/rig.mjs";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -47,7 +47,7 @@ Deno.test("hosts: POST adds + persists + probes; DELETE removes; last host guard
   const rig = await mkStateRig("hosts", { dir, feedbackPath: "feedback.json" });
   const { settings, store } = rig;
   const hosts = await loadCollections(store, { KOZMOZOO_HOSTS: "a=127.0.0.1:1" });
-  const router = makeRouter({ hosts, store, settings, plugins: null, jobs: { reconcile() {} } });
+  const router = makeRouter({ hosts, store, settings, plugins: null, inventory: makeTestInventory(hosts), jobs: { reconcile() {} } });
 
   // add
   const r = await router.handle(new Request("http://x/api/collections", {

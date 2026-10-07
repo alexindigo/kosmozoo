@@ -557,7 +557,13 @@ async function attempt(name, fn) {
       await page.poll(`(async () => ${KZ}.state.host() === 'another' && ${KZ}.state.images.length > 0)()`);
       await page.clickAt(pinned);
       await page.poll(`(async () => ${KZ}.state.host() === 'fake' && ${KZ}.state.images.length > 3000)()`);
-      check("pinned click uses dropdown selection/URL flow", await page.evaluate(`location.hash === '#fake' && document.querySelector('${pinned}').getAttribute('aria-pressed') === 'true'`));
+      check("pinned click restores the source's saved current through the dropdown selection/URL flow", await page.evaluate(`(async () => {
+        const s = ${KZ}, memory = JSON.parse(localStorage.getItem('kosmozoo.sourceBrowse.v1')).hosts.fake;
+        const route = (await import('/js/route-parse.mjs')).parseUrl();
+        return route.host === 'fake' && route.file === memory.current && route.folder === memory.folder &&
+          document.querySelector('${pinned}').getAttribute('aria-pressed') === 'true' &&
+          s.state.current()?.image === memory.current;
+      })()`));
     } finally {
       await sourceControl({ reset: true });
       await page.evaluate(`(async () => {
@@ -566,6 +572,96 @@ async function attempt(name, fn) {
         await s.actions.hosts.patch('fixture-dir', { pinned: false });
         await s.actions.hosts.patch('fake', { pinned: false, autoRefresh: false });
       })()`);
+    }
+  });
+
+  await attempt("folder browsing: native scope, decoded nested output, per-browser memory and filter history", async () => {
+    const nativeFolder = async (value) => {
+      const index = await page.evaluate(`Array.from(document.querySelector('#outputFolder').options).findIndex(o => o.value === ${JSON.stringify(value)})`);
+      if (index < 0) throw new Error('missing native option ' + value);
+      await page.clickAt('#outputFolder');
+      await page.keyTrusted('Home', { code: 'Home', vk: 36 });
+      for (let i = 0; i < index; i++) await page.keyTrusted('ArrowDown', { code: 'ArrowDown', vk: 40 });
+      await page.keyTrusted('Enter', { code: 'Enter', vk: 13 });
+      await page.poll(`(async () => ${KZ}.state.selectedFolder() === ${JSON.stringify(value)})()`);
+    };
+    try {
+      await sourceControl({ reset: true, publish: [
+        { name: 'a/image.png', width: 96, height: 72, color: [30, 170, 60, 255] },
+        { name: 'a/deep/image.png', width: 100, height: 80, color: [170, 30, 60, 255] },
+        { name: 'ab/image.png', width: 120, height: 90, color: [60, 30, 170, 255] },
+        { name: 'b/target.png', width: 140, height: 110, color: [30, 60, 170, 255] },
+        { name: 'a/visible.png', width: 128, height: 96, graphPrefix: 'a/visible',
+          lineage: { v: 1, source: 'fake:b/target.png', params: {} } },
+      ], clearHistory: true });
+      await page.send('Emulation.setDeviceMetricsOverride', { width: 1400, height: 900, deviceScaleFactor: 1, mobile: false });
+      await page.evaluate(`(async () => {
+        const s = ${KZ}; await s.actions.hosts.select('fake'); s.actions.ui.setFilter('');
+        s.actions.folders.select(''); await s.actions.ui.refresh(); await s.actions.hosts.patch('fake', { pinned: true });
+      })()`);
+      await page.poll(`(async () => ${KZ}.state.inventory.folders.includes('a/deep'))()`, 20000);
+      check('folder picker is between host and separated pinned group', await page.evaluate(`(() => {
+        const host = document.getElementById('hostPicker'), folder = document.getElementById('folderPicker');
+        return host.nextElementSibling === folder && folder.nextElementSibling.classList.contains('pinned-source-group') &&
+          !!folder.nextElementSibling.querySelector('.pinned-separator') && document.querySelector('#outputFolder').getAttribute('aria-label') === 'Output folder';
+      })()`));
+      await nativeFolder('a');
+      await page.poll(`document.querySelector('.card[data-name="a/visible.png"] img')?.naturalWidth === 128`, 20000);
+      check('trusted native selection renders actual nested pixels and excludes sibling prefix', await page.evaluate(`(async () => {
+        const s = ${KZ}, img = document.querySelector('.card[data-name="a/visible.png"] img'), r = img.getBoundingClientRect();
+        return s.state.host() === 'fake' && s.state.view().every(i => s.state.images[i].filename.startsWith('a/')) &&
+          s.state.view().some(i => s.state.images[i].filename === 'a/deep/image.png') &&
+          !s.state.view().some(i => s.state.images[i].filename.startsWith('ab/')) && img.naturalHeight === 96 && r.width > 0 && r.bottom > 0 && r.top < innerHeight;
+      })()`));
+      await page.evaluate(`(async () => { const s = ${KZ}; s.actions.current.set('fake', 'a/visible.png'); s.actions.feed.restoreToIndex(s.state.currentEntry().index); })()`);
+      await page.poll(`!!document.querySelector('.ws-lineage-src[href]')`, 20000);
+      if (await page.evaluate(`document.getElementById('filter').hidden`)) await page.clickAt('#filterBtn');
+      await page.clickAt('#filter'); await page.send('Input.insertText', { text: 'a/' });
+      await page.poll(`new URLSearchParams(location.search).get('filter') === 'a/'`);
+      const previous = await page.evaluate(`location.href`);
+      await page.clickAt('.ws-lineage-src[href]');
+      await page.poll(`(async () => ${KZ}.state.current()?.image === 'b/target.png' && ${KZ}.state.filter() === '' && ${KZ}.state.selectedFolder() === '')()`, 20000);
+      await page.poll(`document.querySelector('.card.current[data-name="b/target.png"] img')?.naturalWidth === 140`, 20000);
+      check('lineage link navigates to its exact nested target without the outgoing URL filter', await page.evaluate(`!new URLSearchParams(location.search).has('filter') && document.getElementById('filter').value === ''`));
+      await page.evaluate(`history.back()`);
+      await page.poll(`(async () => location.href === ${JSON.stringify(previous)} && ${KZ}.state.current()?.image === 'a/visible.png' && ${KZ}.state.filter() === 'a/' && document.getElementById('filter').value === 'a/')()`, 20000);
+      check('Back restores former nested image, folder and URL filter/input together', true);
+      await page.evaluate(`history.forward()`);
+      await page.poll(`(async () => ${KZ}.state.current()?.image === 'b/target.png' && ${KZ}.state.filter() === '')()`, 20000);
+      await page.evaluate(`history.back()`);
+      await page.poll(`(async () => ${KZ}.state.selectedFolder() === 'a' && ${KZ}.state.current()?.image === 'a/visible.png')()`);
+      await page.clickAt('#hostBtn'); await page.poll(`!document.getElementById('hostDrop').hidden`);
+      await page.clickAt('#hostList [data-source="another"]');
+      await page.poll(`(async () => ${KZ}.state.host() === 'another')()`);
+      await page.clickAt('.pinned-source[data-source="fake"]');
+      await page.poll(`(async () => ${KZ}.state.host() === 'fake' && ${KZ}.state.selectedFolder() === 'a' && ${KZ}.state.current()?.image === 'a/visible.png')()`, 20000);
+      check('pinned A→B→A restores per-host folder/current memory', true);
+      await page.goto(ENGINE + '/');
+      await page.poll(`(async () => ${KZ}.state.selectedFolder() === 'a' && ${KZ}.state.current()?.image === 'a/visible.png')()`, 20000);
+      check('bare reload restores the browser pair', true);
+      const independent = await CDP.launch(9366, { windowSize: '1600,1000' });
+      try {
+        await independent.goto(ENGINE + '/');
+        await independent.poll(`(async () => ${KZ}.state.images.length > 3000)()`, 20000);
+        check('independent browser profile starts at root instead of borrowing another profile scope', await independent.evaluate(`(async () => ${KZ}.state.selectedFolder() === '')()`));
+      } finally { await independent.close(); }
+      await page.goto(ENGINE + '/?folder=a#fake');
+      await page.poll(`(async () => ${KZ}.state.images.length > 3000 && !${KZ}.state.inventory.loading)()`, 20000);
+      check('explicit source-only folder URL stays deliberately fileless over memory', await page.evaluate(`(async () => ${KZ}.state.current() === null && location.hash === '#fake' && ${KZ}.state.selectedFolder() === 'a')()`));
+      await page.goto(ENGINE + '/?folder=empty%2Funavailable#fake');
+      await page.poll(`(async () => !${KZ}.state.inventory.loading && ${KZ}.state.images.length > 3000)()`, 20000);
+      check('unavailable folder retains synthetic option, empty scope and fileless URL', await page.evaluate(`(async () => {
+        const s = ${KZ}, selected = document.querySelector('#outputFolder').selectedOptions[0];
+        return s.state.selectedFolder() === 'empty/unavailable' && s.state.view().length === 0 && s.state.current() === null &&
+          selected.value === 'empty/unavailable' && selected.textContent.includes('unavailable') && location.hash === '#fake';
+      })()`));
+      await sourceShot(page, 'output-folders-empty-unavailable-1400');
+      await page.evaluate(`(async () => { const s = ${KZ}; s.actions.folders.select('a'); s.actions.current.set('fake', 'a/visible.png'); })()`);
+      await sourceShot(page, 'output-folders-selected-a-1400');
+    } finally {
+      await sourceControl({ reset: true });
+      await page.evaluate(`(async () => { const s = ${KZ}; s.actions.ui.setFilter(''); s.actions.folders.select('');
+        await s.actions.hosts.patch('fake', { pinned: false, autoRefresh: false }); await s.actions.ui.refresh(); })()`);
     }
   });
 

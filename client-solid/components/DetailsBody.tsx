@@ -157,16 +157,16 @@ function Head(props) {
         {(s) => (
           <div class="ws-lineage">
             <Show
-              when={srcIdx() >= 0}
+              when={!!store.state.hosts[s().srcHost] || srcIdx() >= 0}
               fallback={<span class="ws-lineage-src">{`variation of ${s().srcFile}`}</span>}
             >
               <a
                 class="ws-lineage-src"
-                href=""
+                href={store.actions.current.linkUrl(s().srcHost, s().srcFile)}
                 onClick={(e) => {
+                  if (e.ctrlKey || e.metaKey || e.shiftKey || e.altKey || e.button !== 0) return;
                   e.preventDefault();
-                  store.actions.current.set(s().srcHost, s().srcFile);
-                  store.actions.feed.restoreToIndex(srcIdx());
+                  store.actions.current.navigate(s().srcHost, s().srcFile);
                 }}
               >{`variation of ${s().srcFile}`}</a>
             </Show>

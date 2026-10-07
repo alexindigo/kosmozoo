@@ -201,7 +201,7 @@ export function Grid() {
             <div class="endoflist">
               {store.state.filter()
                 ? `— all ${count()} matching “${store.state.filter()}” —`
-                : `— all ${store.state.images.length} images —`}
+                : `— all ${store.state.folderView().length} images —`}
             </div>
           </Show>
         </div>

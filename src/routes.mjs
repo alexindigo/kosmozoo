@@ -5,7 +5,7 @@
 // The context arrives fully built (plugins included) — makeRouter never
 // reassigns or guards it (E1).
 
-import { backingFor, isFolderHost, EXT_MIME } from "./backings/index.mjs";
+import { backingFor, isFolderHost, EXT_MIME, validEntryName } from "./backings/index.mjs";
 import { capabilities, validateCollection, validateAttributes, sourceAttributes, addCollection, removeCollection } from "./collections.mjs";
 import { sniffMime } from "./extractor.mjs";
 
@@ -15,7 +15,7 @@ export function makeRouter(ctx) {
   const add = (method, pattern, handler) => {
     // pattern: "/api/collections/<id>/entries/<name>" — segments, "<x>" captures one segment
     const parts = pattern.split("/").filter(Boolean);
-    routes.push({ method, parts, handler });
+    routes.push({ method, parts, handler, namedEntry: pattern.startsWith("/api/collections/<id>/entries/<name>") });
   };
 
   const match = (method, pathname) => {
@@ -30,7 +30,7 @@ export function makeRouter(ctx) {
         if (p.startsWith("<") && p.endsWith(">")) params[p.slice(1, -1)] = decodeURIComponent(segs[i]);
         else if (p !== segs[i]) { ok = false; break; }
       }
-      if (ok) return { handler: r.handler, params };
+      if (ok) return { handler: r.handler, params, namedEntry: r.namedEntry };
     }
     return null;
   };
@@ -130,6 +130,7 @@ export function makeRouter(ctx) {
     }
     addCollection(ctx.store, ctx.hosts, body.name, body.address, attributes);
     ctx.jobs.reconcile();
+    ctx.inventory.reconcile();
     const c = ctx.store.collectionGet(body.name);
     return Response.json({
       name: body.name,
@@ -163,6 +164,7 @@ export function makeRouter(ctx) {
     }
     removeCollection(ctx.store, ctx.hosts, id);
     ctx.jobs.reconcile();
+    ctx.inventory.reconcile();
     return Response.json({ removed: id });
   });
 
@@ -196,13 +198,19 @@ export function makeRouter(ctx) {
     // The listing comes from the backing; the store overlays judgment + dims
     // in ONE joined statement (no per-entry queries). A backing-listed name
     // with a gone/hidden row is dropped here; a name with no row is fresh.
-    const list = await backingFor(addr).list(addr);
+    let inventory;
+    try { inventory = await ctx.inventory(id); }
+    catch (error) { return Response.json({ error: `collection unreachable: ${error.message}` }, { status: 502 }); }
+    const list = inventory.items;
     const rows = new Map(ctx.store.entriesForCollection(id).map((r) => [r.name, r]));
     const visible = list.filter((f) => {
       const r = rows.get(f.name);
       return !r || (r.state !== "gone" && r.hidden !== 1);
     });
-    return Response.json(visible.map((f) => entryShape(id, f.name, f.size, rows.get(f.name))));
+    const entries = visible.map((f) => entryShape(id, f.name, f.size, rows.get(f.name)));
+    return Response.json(url.searchParams.get("inventory") === "1"
+      ? { revision: inventory.revision, coverage: inventory.coverage, subfolders: inventory.subfolders,
+        folders: inventory.folders, entries } : entries);
   });
 
   add("GET", "/api/collections/<id>/entries/<name>", async (_req, { id, name }) => {
@@ -224,6 +232,7 @@ export function makeRouter(ctx) {
     }
     const backing = backingFor(addr);
     if (!backing.write) return Response.json({ error: "this collection has no upload" }, { status: 400 });
+    if (!validEntryName(addr, file.name)) return Response.json({ error: "bad entry path" }, { status: 400 });
     const bytes = new Uint8Array(await file.arrayBuffer());
     const r = await backing.write(addr, file.name, bytes);
     if (!r.ok) {
@@ -260,9 +269,9 @@ export function makeRouter(ctx) {
     return Response.json({ deleted: true, mode: "hide", historyCleared });
   });
 
-  add("HEAD", "/api/collections/<id>/entries/<name>/bytes", async (_req, { id, name }) => {
+  add("HEAD", "/api/collections/<id>/entries/<name>/bytes", async (_req, { id, name }, url) => {
     if (!ctx.hosts[id]) return new Response(null, { status: 404 });
-    const e = ctx.store.entryGet(id, name);
+    const e = ctx.store.entryGet(id, name, url.searchParams.get("kind") === "input" ? "input" : "output");
     if (!e?.hash) return new Response(null, { status: 404 }); // E7: unknown says so
     const c = ctx.store.contentGet(e.hash);
     return new Response(null, {
@@ -424,8 +433,14 @@ export function makeRouter(ctx) {
   // names; they jump the queue (the prio lane drains first).
   add("POST", "/api/collections/<id>/want", async (req, { id }) => {
     if (!ctx.hosts[id]) return Response.json({ error: "unknown collection" }, { status: 404 });
-    const { files } = await req.json();
+    let body;
+    try { body = await req.json(); }
+    catch { return Response.json({ error: "files must be JSON" }, { status: 400 }); }
+    const files = body?.files;
     if (!Array.isArray(files)) return Response.json({ error: "files must be an array" }, { status: 400 });
+    if (files.some((name) => !validEntryName(ctx.hosts[id], name))) {
+      return Response.json({ error: "bad entry path" }, { status: 400 });
+    }
     const pending = ctx.prefetch.feed(id, files, true);
     return Response.json({ pending });
   });
@@ -434,8 +449,21 @@ export function makeRouter(ctx) {
     ctx,
     async handle(req) {
       const url = new URL(req.url);
-      const m = match(req.method, url.pathname);
+      let m;
+      try { m = match(req.method, url.pathname); }
+      catch (error) {
+        if (error instanceof URIError) return Response.json({ error: "malformed path escape" }, { status: 400 });
+        throw error;
+      }
       if (!m) return new Response("not found", { status: 404 });
+      // Every named-entry operation crosses this one boundary before touching
+      // stored/cached data or a backing, including HEAD and judgment writes.
+      if (m.namedEntry) {
+        const addr = ctx.hosts[m.params.id];
+        if (addr && !validEntryName(addr, m.params.name)) {
+          return Response.json({ error: "bad entry path" }, { status: 400 });
+        }
+      }
       return m.handler(req, m.params, url);
     },
     add, // plugin host registers its routes here

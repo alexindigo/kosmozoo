@@ -15,7 +15,7 @@
 // Must run headless — ingestion never requires an open browser.
 
 import { EXTRACTOR_VERSION } from "./extractor.mjs";
-import { backingFor } from "./backings/index.mjs";
+import { inventoryFor } from "./backings/index.mjs";
 
 const INTER_FILE_DELAY = 100;      // ms between ingest reads (pass 2)
 const DIMS_INTER_FILE_DELAY = 10;  // ms between head reads (pass 1 — 64 KB is cheap)
@@ -27,11 +27,12 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 export class Prefetch {
   // hosts: { name: "host:port" }; enabled/paused come from settings.
-  constructor({ hosts, store, settings, ingest, interFileDelayMs = INTER_FILE_DELAY, dimsInterFileDelayMs = DIMS_INTER_FILE_DELAY, listRefreshMs = LIST_REFRESH_MS }) {
+  constructor({ hosts, store, settings, ingest, inventory = (id, options) => inventoryFor(hosts[id], options), interFileDelayMs = INTER_FILE_DELAY, dimsInterFileDelayMs = DIMS_INTER_FILE_DELAY, listRefreshMs = LIST_REFRESH_MS }) {
     this.hosts = hosts;
     this.store = store;
     this.settings = settings;
     this.ingest = ingest;
+    this.inventory = inventory;
     this.interFileDelayMs = interFileDelayMs;
     this.dimsInterFileDelayMs = dimsInterFileDelayMs;
     this.listRefreshMs = listRefreshMs;
@@ -175,7 +176,7 @@ export class Prefetch {
     if (Date.now() - last > this.listRefreshMs) {
       this.#lastList.set(collection, Date.now());
       try {
-        const listing = await backingFor(this.hosts[collection]).list(this.hosts[collection]);
+        const listing = (await this.inventory(collection, { maxAgeMs: LIST_REFRESH_MS })).items;
         this.feed(collection, listing.map((f) => f.name ?? f));
       } catch (e) {
         // listing failed this round — the walk retries next tick

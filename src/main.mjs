@@ -46,6 +46,7 @@ const shutdown = async () => {
   if (stopping) return;
   stopping = true;
   await ctx.jobs.stop();
+  await ctx.inventory.stop();
   await ctx.prefetch.stop();
   await server.shutdown();
   ctx.store.close();

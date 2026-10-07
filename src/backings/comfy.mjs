@@ -3,11 +3,18 @@
 
 import { RENDERABLE, EXT_MIME } from "./mime.mjs";
 import { assertSafeName } from "./folder.mjs";
+import { isEntryPath, splitEntryPath, inventoryFolders } from "../entry-path.mjs";
 
 const HOST_TIMEOUT_MS = 10_000;
 
-const viewUrl = (addr, name, kind) =>
-  `http://${addr}/api/view?type=${kind}&filename=${encodeURIComponent(name)}`;
+export const validName = isEntryPath;
+
+export function viewUrl(addr, name, kind) {
+  const { filename, subfolder } = splitEntryPath(name);
+  const query = new URLSearchParams({ type: kind, filename });
+  if (subfolder) query.set("subfolder", subfolder);
+  return `http://${addr}/api/view?${query}`;
+}
 
 // Online probe: only the status code of /api/system_stats is inspected.
 export async function probe(addr) {
@@ -31,7 +38,8 @@ export function parseListingEntry(n) {
 
 // kind 'output' → [{ name, size }] (feed listing); kind 'input' → [name]
 // (LoadImage sweep sources, renderable only).
-export async function list(addr, kind = "output") {
+export async function list(addr, kind = "output", options = {}) {
+  if (kind === "output") return (await inventory(addr, options)).items;
   const r = await fetch(`http://${addr}/internal/files/${kind}`, { signal: AbortSignal.timeout(HOST_TIMEOUT_MS) });
   if (!r.ok) throw new Error(`ComfyUI listing: ${r.status}`); // E8: a down host is not an empty dir
   const raw = await r.json();
@@ -48,7 +56,7 @@ export async function list(addr, kind = "output") {
 // ETag (aiohttp derives it from mtime_ns+size; fallback Last-Modified|CL).
 // Compare for equality only — stamps are never ordered.
 export async function stat(addr, name, kind = "output") {
-  if (!assertSafeName(name)) return null;
+  if (!validName(name)) return null;
   try {
     const r = await fetch(viewUrl(addr, name, kind), { method: "HEAD", signal: AbortSignal.timeout(HOST_TIMEOUT_MS) });
     if (!r.ok) return null;
@@ -69,7 +77,7 @@ export async function stat(addr, name, kind = "output") {
 // nosniff) — the browser can't render those, so map the extension when the
 // upstream type is useless.
 export async function read(addr, name, kind = "output", { range } = {}) {
-  if (!assertSafeName(name)) return { status: 400 };
+  if (!validName(name)) return { status: 400 };
   let r;
   try {
     r = await fetch(viewUrl(addr, name, kind), {
@@ -94,7 +102,7 @@ export async function read(addr, name, kind = "output", { range } = {}) {
 // UI uses). No overwrite flag: ComfyUI answers 409 when the name exists —
 // an upload must never silently clobber the input dir.
 export async function write(addr, name, bytes) {
-  if (!assertSafeName(name)) return { ok: false, status: 400, error: "bad filename" };
+  if (!validName(name) || !assertSafeName(name)) return { ok: false, status: 400, error: "bad filename" };
   const form = new FormData();
   form.append("image", new Blob([bytes]), name);
   try {
@@ -146,7 +154,7 @@ export async function hasAssetsPlus(addr, cache = new Map()) {
 
 // Trash one image via assets_plus. { ok, mode, detail }.
 export async function remove(addr, name) {
-  if (!assertSafeName(name)) return { ok: false, mode: null, detail: "bad filename" };
+  if (!validName(name)) return { ok: false, mode: null, detail: "bad filename" };
   let r;
   try {
     r = await fetch(`http://${addr}/api/assets_plus/output/delete`, {
@@ -172,6 +180,7 @@ export async function remove(addr, name) {
 // produced the file and delete its history entry. The file itself is
 // untouched — this only tidies Comfy's own history panel.
 export async function historyDelete(addr, name) {
+  if (!validName(name)) return false;
   try {
     const r = await fetch(`http://${addr}/api/history`, { signal: AbortSignal.timeout(HOST_TIMEOUT_MS) });
     if (!r.ok) return false;
@@ -180,7 +189,10 @@ export async function historyDelete(addr, name) {
     for (const [pid, entry] of Object.entries(history)) {
       for (const nodeOut of Object.values(entry?.outputs ?? {})) {
         const items = [...(nodeOut?.images ?? []), ...(nodeOut?.gifs ?? [])];
-        if (items.some((o) => o?.filename === name)) { promptId = pid; break; }
+        if (items.some((o) => o?.type === "output" &&
+            (o.subfolder ? `${o.subfolder}/${o.filename}` : o.filename) === name)) {
+          promptId = pid; break;
+        }
       }
       if (promptId) break;
     }
@@ -204,6 +216,53 @@ export async function historyDelete(addr, name) {
 // Map<"<type>.<input>", string[]> | null, t }. TTL'd (a host's node set
 // is stable per version); misses are not cached forever.
 const OBJECT_INFO_TTL_MS = 60_000;
+
+// Filesystem inventory is independent of retained prompt history and delete
+// preferences. The pinned AssetsPlus handler treats limit=0 as an unsliced
+// scan and negative scan_depth as unlimited depth.
+export function normalizeInventory(payload) {
+  if (!payload || !Array.isArray(payload.items) || payload.has_more !== false ||
+      typeof payload.cursor !== "string" || !Number.isFinite(payload.latest_mtime)) {
+    throw new Error("ComfyUI inventory: malformed or incomplete scan");
+  }
+  const entries = new Map();
+  for (const item of payload.items) {
+    if (!item || !validName(item.relpath) || !RENDERABLE.has(item.relpath.split(".").pop().toLowerCase()) ||
+        !Number.isSafeInteger(item.size) || item.size < 0 || !Number.isFinite(item.mtime)) {
+      throw new Error("ComfyUI inventory: invalid record");
+    }
+    const next = { name: item.relpath, size: item.size, mtime: item.mtime };
+    const prior = entries.get(next.name);
+    if (prior && (prior.size !== next.size || prior.mtime !== next.mtime)) {
+      throw new Error("ComfyUI inventory: conflicting duplicate");
+    }
+    entries.set(next.name, next);
+  }
+  return [...entries.values()].sort((a, b) => b.mtime - a.mtime || (a.name < b.name ? -1 : a.name > b.name ? 1 : 0));
+}
+
+export function normalizeRootInventory(raw) {
+  if (!Array.isArray(raw) || raw.some((name) => typeof name !== "string")) throw new Error("ComfyUI listing: invalid array");
+  const entries = new Map();
+  for (const item of raw.map(parseListingEntry)) {
+    if (!validName(item.name) || item.name.includes("/")) throw new Error("ComfyUI root listing: invalid name");
+    if (!RENDERABLE.has(item.name.split(".").pop().toLowerCase())) continue;
+    if (item.size !== null && (!Number.isSafeInteger(item.size) || item.size < 0)) throw new Error("ComfyUI root listing: invalid size");
+    const prior = entries.get(item.name);
+    if (prior && prior.size !== item.size) throw new Error("ComfyUI root listing: conflicting duplicate");
+    entries.set(item.name, item);
+  }
+  return [...entries.values()];
+}
+
+export async function inventory(addr, { client, ...options } = {}) {
+  if (client) return client(addr).inventory(options);
+  // Compatibility for stateless standalone driver consumers. Production
+  // discovery receives the context's existing address owner.
+  const owner = comfyClient(addr);
+  try { return await owner.inventory(options); }
+  finally { owner.disposeInventory(); }
+}
 
 export async function objectInfo(addr, cache = new Map()) {
   const c = cache.get(addr);
@@ -241,9 +300,97 @@ export async function objectInfo(addr, cache = new Map()) {
 // ONE stateful client per address: the caches are instance state created by
 // the context, never module globals. Stateless I/O stays with the module
 // functions above.
-export function comfyClient(addr, { fetcher = fetch } = {}) {
+export function comfyClient(addr, { fetcher = fetch, clock = Date.now, epoch = crypto.randomUUID() } = {}) {
   const assetsPlus = new Map();
   const objectInfoCache = new Map();
+  let disposed = false, config = null, configTask = null, recursiveKnown = false;
+  let requested = 1, published = 0, revision = 0, snapshot = null, scanTask = null, sampledAt = 0;
+  const lifecycle = new AbortController();
+  const assertAlive = () => { if (disposed) throw new Error("ComfyUI inventory owner removed"); };
+  const request = (path) => fetcher(`http://${addr}${path}`, {
+    signal: AbortSignal.any([lifecycle.signal, AbortSignal.timeout(HOST_TIMEOUT_MS)]),
+  });
+  async function discover() {
+    assertAlive();
+    if (config && clock() - config.at < ASSETS_PLUS_TTL_MS) return config.value;
+    if (configTask) return configTask;
+    configTask = (async () => {
+      const r = await request("/api/assets_plus/config");
+      assertAlive();
+      let value;
+      if (r.status === 404 && !recursiveKnown) {
+        value = { supported: false, reason: "AssetsPlus is unavailable; stock ComfyUI lists output root only" };
+      } else {
+        if (!r.ok) throw new Error(`ComfyUI inventory config: ${r.status}`);
+        const d = await r.json();
+        assertAlive();
+        if (!d || typeof d.recursive !== "boolean" || !Array.isArray(d.allowed_extensions) ||
+            d.allowed_extensions.some((x) => typeof x !== "string") ||
+            !Number.isInteger(d.list_limit) || d.list_limit <= 0 ||
+            (d.scan_depth !== null && !Number.isInteger(d.scan_depth))) {
+          throw new Error("ComfyUI inventory config: incompatible response");
+        }
+        value = { supported: true, reason: null };
+      }
+      config = { at: clock(), value };
+      return value;
+    })().finally(() => { configTask = null; });
+    return configTask;
+  }
+
+  async function scan() {
+    let support = await discover();
+    const rootResponse = await request("/internal/files/output");
+    if (!rootResponse.ok) throw new Error(`ComfyUI listing: ${rootResponse.status}`);
+    const roots = normalizeRootInventory(await rootResponse.json());
+    assertAlive();
+    if (support.supported) {
+      // The native search runs before AssetsPlus opens images for metadata.
+      // '/' matches every descendant and no root, so oversized root images
+      // cannot poison nested discovery. Roots retain stock visibility/order.
+      const query = new URLSearchParams({ recursive: "1", scan_depth: "-1", limit: "0", extensions: [...RENDERABLE].join(","), query: "/" });
+      const r = await request(`/api/assets_plus/output/list?${query}`);
+      assertAlive();
+      if (r.status === 404 && !recursiveKnown) {
+        support = { supported: false, reason: "AssetsPlus output listing is unavailable; stock output root only" };
+        config = { at: clock(), value: support };
+      } else {
+        if (!r.ok) throw new Error(`ComfyUI inventory: ${r.status}`);
+        const nested = normalizeInventory(await r.json());
+        if (nested.some(({ name }) => !name.includes("/"))) throw new Error("ComfyUI descendant inventory: unexpected root entry");
+        const items = [...roots, ...nested];
+        assertAlive();
+        recursiveKnown = true;
+        return { coverage: "recursive", subfolders: support, folders: inventoryFolders(items), items };
+      }
+    }
+    return { coverage: "root-only", subfolders: support, folders: [""], items: roots };
+  }
+
+  function outputInventory({ maxAgeMs = 0 } = {}) {
+    assertAlive();
+    if (scanTask) return scanTask;
+    if (snapshot && published === requested && maxAgeMs > 0 && clock() - sampledAt < maxAgeMs) {
+      return Promise.resolve(snapshot);
+    }
+    scanTask = (async () => {
+      while (true) {
+        const generation = requested;
+        const result = await scan();
+        assertAlive();
+        // A finish during the scan invalidates its generation. Coalesce every
+        // such finish into a follow-up before any waiter consumes the result.
+        if (generation !== requested) continue;
+        snapshot = Object.freeze({ ...result, revision: `${epoch}:${++revision}`,
+          items: Object.freeze(result.items.map((item) => Object.freeze(item))),
+          folders: Object.freeze(result.folders), subfolders: Object.freeze(result.subfolders) });
+        published = generation;
+        sampledAt = clock();
+        return snapshot;
+      }
+    })().finally(() => { scanTask = null; });
+    return scanTask;
+  }
   const telemetry = async (path, signal) => {
     const timeout = AbortSignal.timeout(HOST_TIMEOUT_MS);
     const r = await fetcher(`http://${addr}${path}`, { signal: signal ? AbortSignal.any([signal, timeout]) : timeout });
@@ -253,6 +400,17 @@ export function comfyClient(addr, { fetcher = fetch } = {}) {
   const object = (v) => v && typeof v === "object" && !Array.isArray(v);
   return {
     addr,
+    inventory: outputInventory,
+    invalidateInventory() { if (!disposed) requested++; },
+    async subfolders() {
+      try { return await discover(); }
+      catch (error) { return { supported: recursiveKnown ? true : null, reason: error.message }; }
+    },
+    disposeInventory() {
+      disposed = true;
+      lifecycle.abort();
+      return Promise.allSettled([configTask, scanTask].filter(Boolean));
+    },
     hasAssetsPlus: () => hasAssetsPlus(addr, assetsPlus),
     objectInfo: () => objectInfo(addr, objectInfoCache),
     enqueue: (prompt) => enqueue(addr, prompt),

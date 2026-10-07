@@ -35,6 +35,7 @@ export const api = {
   patchCollection: (name, attributes) => req("PATCH", `/api/collections/${enc(name)}`, attributes),
   activity: (name) => req("GET", `/api/collections/${enc(name)}/activity`),
   entries: (collection) => req("GET", `/api/collections/${enc(collection)}/entries`),
+  inventory: (collection) => req("GET", `/api/collections/${enc(collection)}/entries?inventory=1`),
   entryBytesUrl: (collection, name) => `${BASE}${entryUrl(collection, name)}/bytes`,
   inputBytesUrl: (collection, name) => `${BASE}${entryUrl(collection, name)}/bytes?kind=input`,
   setJudgment: (collection, name, fields) => req("PATCH", `${entryUrl(collection, name)}/judgment`, fields),
