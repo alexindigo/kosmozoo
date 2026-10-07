@@ -240,3 +240,127 @@ Deno.test("chronology consumers: diagnostic dates never sort server order; load/
       { remote: "h", image: names[3] }, null), { kind: "set", image: names[1] });
   });
 });
+
+Deno.test("rail target: midpoint equality/tall cards/end clamping and incoherent keys share the committed selector", async () => {
+  await withBrowse(async ({ store }) => {
+    const names = store.state.images.map(e => e.filename);
+    const items = [{ index: 0, start: 0 }, { index: 1, start: 100 }, { index: 2, start: 1000 }];
+    for (const [top, height, expected] of [[0, 100, 0], [50, 100, 1], [500, 100, 1], [2000, 100, 2]]) {
+      store.actions.current.settleFromRange(items, top, height);
+      assertEquals(store.state.current().image, names[expected]);
+    }
+    const before = store.state.current();
+    for (const geometry of [[], [{ index: 0, start: NaN }], [{ index: 0, start: 0, key: "obsolete:id" }],
+      [{ index: 0, start: 100 }, { index: 1, start: 0 }]]) {
+      store.actions.current.settleFromRange(geometry, 0, 100);
+      assertEquals(store.state.current(), before);
+    }
+  });
+});
+
+Deno.test("rail motion: unchanged range + scrollTop moves only marker; fresh stopped geometry commits and explicit false wins", async () => {
+  await withBrowse(async ({ store, saved, navigation }) => {
+    const images = store.state.images, col = { scrollTop: 0, clientHeight: 100 };
+    const items = images.map((im, index) => ({ key: im.id, index, start: index * 100, end: (index + 1) * 100 }));
+    const virtualizer = { getVirtualItems: () => items, scrollToIndex() {} };
+    store.actions.feed.register({ scrollEl: col, virtualizer });
+    store.actions.current.set("h", images[0].filename);
+    const before = { current: JSON.stringify(store.state.current()), trail: JSON.stringify(store.state.currentStack()),
+      url: JSON.stringify(navigation.location), memory: saved.getItem(SOURCE_BROWSE_KEY) };
+    let wants = 0; api.want = async () => { wants++; return { pending: 0 }; };
+    for (const top of [50, 150]) {
+      col.scrollTop = top; store.actions.feed.scrolled(top);
+      assertEquals(store.state.feedMarkerEntryId(), images[top === 50 ? 1 : 2].id);
+      assertEquals(store.state.feedMarkerEntryId(), images[top === 50 ? 1 : 2].id);
+      assertEquals({ current: JSON.stringify(store.state.current()), trail: JSON.stringify(store.state.currentStack()),
+        url: JSON.stringify(navigation.location), memory: saved.getItem(SOURCE_BROWSE_KEY) }, before);
+      assertEquals(wants, 0);
+    }
+    assertEquals(store.state.cardState(images[0].id).current, true);
+    assertEquals(store.state.cardState(images[0].id, { current: false, surface: "rail" }).style["--card-color"], "var(--foreground-dim)");
+    assertEquals(store.state.cardState("unknown:id", { current: true, surface: "rail" }).current, false);
+    col.scrollTop = 80; // stopped geometry is fresher than the last signal
+    await new Promise(r => setTimeout(r, 180));
+    assertEquals(store.state.feedActivity(), "settled");
+    assertEquals(store.state.current().image, images[1].filename);
+    assertEquals(store.state.feedMarkerEntryId(), images[1].id);
+    assertEquals(parseUrl().file, images[1].filename);
+    assertEquals(JSON.parse(saved.getItem(SOURCE_BROWSE_KEY)).hosts.h.current, images[1].filename);
+  });
+});
+
+Deno.test("rail ownership: obsolete callback cannot commit or cancel a newer scroll across source/browse/seam/explicit/disposal intent", async () => {
+  await withBrowse(async ({ store }) => {
+    const realTimeout = globalThis.setTimeout, callbacks = [];
+    globalThis.setTimeout = (fn, delay, ...args) => {
+      if (delay !== 150) return realTimeout(fn, delay, ...args);
+      callbacks.push(() => fn(...args));
+      return realTimeout(() => {}, delay);
+    };
+    const register = () => {
+      const col = { scrollTop: 0, clientHeight: 100 };
+      store.actions.feed.register({ scrollEl: col, virtualizer: { scrollToIndex() {},
+        getVirtualItems: () => store.state.entriesWithKnownSize().map((idx, index) => ({ index, key: store.state.images[idx].id, start: index * 100, end: (index + 1) * 100 })) } });
+      return col;
+    };
+    const queue = col => { col.scrollTop = 150; store.actions.feed.scrolled(150); return callbacks.at(-1); };
+    try {
+      let col = register(), old = queue(col);
+      await store.actions.hosts.select("other"); await store.actions.hosts.select("h");
+      assertEquals(store.state.feedActivity(), "settled");
+      const newer = queue(col); const before = store.state.current();
+      old(); assertEquals(store.state.current(), before); assertEquals(store.state.feedActivity(), "scrolling");
+      newer(); assertEquals(store.state.current().image, "a/deep/image.png");
+      for (const change of [() => store.actions.ui.setFilter("deep"), () => store.actions.folders.select("a"),
+        () => store.actions.current.set("h", "a/visible.png"), () => { col = register(); }]) {
+        old = queue(col); change(); const current = store.state.current();
+        assertEquals(store.state.feedActivity(), "settled");old();assertEquals(store.state.current(), current);
+      }
+      store.actions.ui.setFilter(""); store.actions.folders.select("");
+      old = queue(col);store.actions.diff.open();store.actions.diff.step(1);
+      const stepped = store.state.current();old();assertEquals(store.state.current(), stepped);
+      assertEquals(store.state.feedMarkerEntryId(), store.state.currentEntry().entry.id);
+      store.actions.diff.hide();old=queue(col);store.dispose();
+      const disposed = store.state.current();old();assertEquals(store.state.current(), disposed);
+      assertEquals(store.state.feedActivity(), "settled");
+    } finally { globalThis.setTimeout = realTimeout; }
+  });
+});
+
+Deno.test("rail special motion: sparse known positions, compensation, quiet restore and workbench retain their current policy", async () => {
+  await withBrowse(async ({ store, lists }) => {
+    lists.h[1] = { ...lists.h[1], width: null, height: null };
+    await store.actions.images.reload();
+    const col = { scrollTop: 0, clientHeight: 100 };
+    const virtualizer = { scrollToIndex() {}, getVirtualItems: () => store.state.entriesWithKnownSize().map((idx, index) =>
+      ({ key: store.state.images[idx].id, index, start: index * 100, end: (index + 1) * 100 })) };
+    store.actions.feed.register({ scrollEl: col, virtualizer });
+    store.actions.current.set("h", "root.png");
+    store.actions.feed.restoreToIndex(0);col.scrollTop=50;store.actions.feed.scrolled(50);
+    assertEquals(store.state.feedMarkerEntryId(), "h:a/deep/image.png", "snap quiet does not block live target");
+    store.actions.feed.compensating();assertEquals(store.state.feedMarkerEntryId(), "h:root.png");
+    await new Promise(r=>setTimeout(r,180));assertEquals(store.state.current().image,"root.png");
+    store.actions.diff.open();col.scrollTop=150;store.actions.feed.scrolled(150);
+    assertEquals(store.state.feedMarkerEntryId(),"h:root.png");
+    await new Promise(r=>setTimeout(r,180));assertEquals(store.state.current().image,"root.png");
+  });
+});
+
+Deno.test("rail reorder/loading: stale virtual keys fall back to committed ID and loading retires the previous scroll", async () => {
+  await withBrowse(async ({ store, lists }) => {
+    const items=store.state.images.map((im,index)=>({key:im.id,index,start:index*100,end:(index+1)*100}));
+    const col={scrollTop:150,clientHeight:100};
+    store.actions.feed.register({scrollEl:col,virtualizer:{scrollToIndex(){},getVirtualItems:()=>items}});
+    store.actions.feed.scrolled(150);
+    const committed=store.state.currentEntry().entry.id;
+    lists.h.reverse();await store.actions.ui.refresh();
+    assertEquals(store.state.feedMarkerEntryId(),committed,"old geometry never selects another entry by its new index");
+    await new Promise(r=>setTimeout(r,180));assertEquals(store.state.currentEntry().entry.id,committed);
+    const gate=deferred();api.inventory=()=>gate.promise;
+    store.actions.feed.scrolled(150);const loading=store.actions.images.reload();
+    assertEquals(store.state.feedActivity(),"settled");
+    store.actions.feed.scrolled(150);assertEquals(store.state.feedActivity(),"settled","loading is not an eligible scroll context");
+    gate.resolve(clientInventory(lists.h,{coverage:"recursive"}));await loading;
+    assertEquals(store.state.currentEntry().entry.id,committed);
+  });
+});

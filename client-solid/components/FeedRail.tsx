@@ -52,6 +52,8 @@ export function FeedRail() {
   // virtualizer renders (one tick per feed row; pending sizes are the
   // "measuring…" tail, not rows)
   const N = () => store.state.entriesWithKnownSize().length;
+  // One read-only live target for the whole tape; cards keep committed current.
+  const markerId = createMemo(() => store.state.feedMarkerEntryId());
 
   // viewport-visible cards → known-list positions, derived EXACTLY from the
   // virtualizer's visible range (items outside the viewport are overscan —
@@ -139,7 +141,9 @@ export function FeedRail() {
         <For each={ticks()}>
           {(idx) => {
             const entry = () => store.state.feedEntryAt(idx);
-            const state = () => store.state.cardState(entry()?.id);
+            const state = () => store.state.cardState(entry()?.id, {
+              current: !!entry() && entry().id === markerId(), surface: "rail",
+            });
             return <div class="fr-tick"
               classList={{ wave: inWave(idx), current: state().current }}
               style={state().style}

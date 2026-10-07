@@ -37,3 +37,16 @@ Deno.test("card state: source changes update active controls and treatment witho
   assertEquals(cardState(judgment, true).treatment, "current");
   assertEquals(judgment.notes, { pos: "keep" });
 });
+
+Deno.test("rail presentation: only untreated non-current fallback becomes foreground-dim", () => {
+  assertEquals(cardState({}, false, { surface: "rail" }).style["--card-color"], "var(--foreground-dim)");
+  assertEquals(cardState({}, false).style["--card-color"], "var(--focused-background)");
+  for (const judgment of [{}, { favorite: true }, { bookmark: true }, { vote: "down" }, { vote: "up" },
+    { favorite: true, bookmark: true, vote: "down" }, { bookmark: true, vote: "up" }]) {
+    for (const current of [false, true]) {
+      const card = cardState(judgment, current), rail = cardState(judgment, current, { surface: "rail" });
+      assertEquals(rail, judgment.vote || judgment.favorite || judgment.bookmark || current ? card
+        : { ...card, style: { ...card.style, "--card-color": "var(--foreground-dim)" } });
+    }
+  }
+});

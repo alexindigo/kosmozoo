@@ -275,6 +275,19 @@ allocation. Folder labels truncate within compact allocations with full path in
 the accessible title; unsupported controls expose a root-only reason. Native
 select typing retains precedence in the existing key dispatcher.
 
+The existing feed rail current marker follows live viewport midpoint-crossing
+geometry during valid scrolling, then committed current after settle. One shared
+pure selector maps known-size virtual positions to IDs and rejects stale item-key
+geometry. The marker is read-only presentation, never another stored pointer:
+current/trail/URL/browser pair/metadata/comparison remain on the existing 150ms
+settle policy. Debounce callbacks belong to their source session, browse intent
+and registered seams; explicit context/current/diff navigation retires old work.
+Settle batches current and marker reconnection. Compensation and an open workbench
+retain committed marker/current; snap-quiet restore/scrub/top track actual motion.
+Ordinary rail ticks use the existing subdued `--foreground-dim` neutral through
+shared card-state presentation; card neutrals, judgment colors/priorities, wave
+length/glow, geometry, tape windowing and scrub handlers retain their contracts.
+
 Static surfaces: `/shared/<name>` serves the allow-listed `src/` modules
 (`extractor.mjs`, `features/variations/shared.mjs`, `entry-path.mjs`) to the browser;
 `/plugins/<name>/client.js` serves a plugin's client half; `/` and `/diff`

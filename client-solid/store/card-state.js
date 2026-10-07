@@ -6,10 +6,11 @@ const treatments = [
   { name: "up", field: "vote", value: "up", color: "var(--positive-dim)" },
 ];
 
-export function cardState(judgment, current = false) {
+export function cardState(judgment, current = false, { surface = "card" } = {}) {
   const active = Object.fromEntries(treatments.map((t) => [t.name, judgment?.[t.field] === t.value]));
   const treatment = treatments.find((t) => active[t.name]);
-  const color = treatment?.color ?? (current ? "var(--foreground-bright)" : "var(--focused-background)");
+  const color = treatment?.color ?? (current ? "var(--foreground-bright)"
+    : surface === "rail" ? "var(--foreground-dim)" : "var(--focused-background)");
   return {
     current,
     active,

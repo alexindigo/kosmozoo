@@ -45,6 +45,75 @@ const AUDIT = `(async () => {
   };
 })()`;
 
+async function railMotion(page) {
+  await page.evaluate(`(async () => {
+    const s=${KZ}; await s.actions.hosts.select('fixture-dir'); s.actions.ui.setWorkspace('details');
+    s.actions.ui.setFilter(''); s.actions.folders.select('');
+    if(s.state.judgmentPrefs.hideUp)s.actions.judgments.toggleHideUp();
+    for(const im of s.state.images){
+      await fetch('/api/collections/fixture-dir/entries/'+encodeURIComponent(im.filename)+'/bytes');
+      await s.actions.judgments.dispatch(im.id,{type:'set',patch:{vote:null,favorite:null,bookmark:null}});
+    }
+    await s.actions.ui.refresh();
+    window.__railOriginal=s.state.images.find(im=>im.filename.endsWith('.png')&&im.meta)?.filename??s.state.images[0].filename;
+    s.actions.current.set('fixture-dir',window.__railOriginal);
+    s.actions.feed.restoreToIndex(s.state.currentEntry().index);
+  })()`);
+  await page.poll(`(async()=>${KZ}.state.feedActivity()==='settled'&&document.querySelector('#workspace .info-body .ws-head .ws-name')?.textContent===window.__railOriginal)()`,20000);
+  await capture(page,'rail-idle-before');
+  const neutral=await page.evaluate(`(()=>{
+    const tick=document.querySelector('#feedRail .fr-tick:not(.current)'),card=document.querySelector('.card:not(.current)');
+    const probe=document.createElement('span');document.body.appendChild(probe);
+    probe.style.color='var(--foreground-dim)';const railExpected=getComputedStyle(probe).color;
+    probe.style.color='var(--focused-background)';const cardExpected=getComputedStyle(probe).color;probe.remove();
+    return {rail:getComputedStyle(tick).backgroundColor,railExpected,card:card?getComputedStyle(card).borderColor:cardExpected,cardExpected};
+  })()`);
+  check('rail neutral: subdued foreground-dim while card neutral stays focused-background',neutral.rail===neutral.railExpected&&neutral.card===neutral.cardExpected,JSON.stringify(neutral));
+  await page.evaluate(`(async()=>{
+    const s=${KZ},col=s.state.feedScrollEl();const start=performance.now(),frames=[],events=[];
+    const frame=()=>{const items=s.state.feedVirtualizer().getVirtualItems(),mid=col.scrollTop+col.clientHeight/2;
+      let target=null;for(const item of items){if(item.start>mid)break;target=s.state.feedEntryAt(item.index)?.id??target;}
+      frames.push({at:performance.now()-start,top:col.scrollTop,activity:s.state.feedActivity(),target,
+        marker:document.querySelector('#feedRail .fr-tick.current')?.dataset.entryId??null,
+        current:JSON.stringify(s.state.current()),trail:JSON.stringify(s.state.currentStack()),url:location.href,
+        memory:localStorage.getItem('kosmozoo.sourceBrowse.v1'),name:document.querySelector('#workspace .info-body .ws-head .ws-name')?.textContent??null});
+      if(performance.now()-start<3000)window.__railFrame=requestAnimationFrame(frame);};
+    const onScroll=()=>events.push({at:performance.now()-start,top:col.scrollTop});col.addEventListener('scroll',onScroll);
+    window.__railRecord={frames,events,stop(){cancelAnimationFrame(window.__railFrame);col.removeEventListener('scroll',onScroll);}};frame();
+  })()`);
+  try {
+    const point=await page.evaluate(`(()=>{const r=document.getElementById('candidatesCol').getBoundingClientRect();const x=r.left+2,y=r.top+r.height/2;return{x,y,hit:document.elementFromPoint(x,y)?.className};})()`);
+    console.log('RAIL WHEEL TARGET',JSON.stringify(point));
+    let motionShot;
+    for(let i=0;i<10;i++){
+      await page.mouse('mouseWheel',point.x,point.y,{deltaY:700,modifiers:0});
+      if(i===4)motionShot=capture(page,'rail-during-motion');
+      await sleep(50);
+    }
+    await motionShot;
+    await page.poll(`(async()=>{const s=${KZ};return s.state.feedActivity()==='settled'&&s.state.current()?.image!==window.__railOriginal&&document.querySelector('#workspace .info-body .ws-head .ws-name')?.textContent===s.state.current()?.image&&document.querySelector('#feedRail .fr-tick.current')?.dataset.entryId===s.state.currentEntry()?.entry.id;})()`,20000);
+    await page.poll(`window.__railRecord.frames.some(f=>f.activity==='settled'&&f.current!==window.__railRecord.frames[0].current)`);
+    const record=await page.evaluate(`window.__railRecord.stop();({frames:window.__railRecord.frames,events:window.__railRecord.events})`);
+    require('node:fs').writeFileSync('/work/tests/e2e/.shots/rail-frames.json',JSON.stringify(record,null,2));
+    const original=record.frames[0],moving=record.frames.filter(f=>f.activity==='scrolling'&&f.marker&&f.marker!==original.marker);
+    const unchanged=f=>['current','trail','url','memory','name'].every(k=>f[k]===original[k]);
+    const eventGaps=record.events.slice(1).map((e,i)=>e.at-record.events[i].at);
+    const continuous=record.events.length>=4&&record.events.at(-1).at-record.events[0].at>150&&eventGaps.every(g=>g<150);
+    check('rail timing: multiple live markers during continuous native scrolling while current/trail/URL/memory/rendered metadata remain deferred',
+      continuous&&moving.length>=3&&new Set(moving.map(f=>f.marker)).size>=2&&moving.every(f=>unchanged(f)&&f.marker===f.target),
+      JSON.stringify({events:record.events.length,maxGap:Math.max(...eventGaps),movingFrames:moving.length,markers:[...new Set(moving.map(f=>f.marker))]}));
+    const handed=record.frames.filter(f=>f.activity==='settled'&&f.current!==original.current);
+    check('rail settle: fresh current/URL and visible metadata adopt target without outgoing-marker flash',handed.length>0&&handed.every(f=>f.marker===JSON.parse(f.current).remote+':'+JSON.parse(f.current).image&&f.name===JSON.parse(f.current).image),JSON.stringify(handed.at(-1)));
+    const audit=await page.evaluate(AUDIT);check('rail timing: exact retained card heights',audit.maxDelta===0&&audit.nullSize===0,JSON.stringify(audit));
+    await capture(page,'rail-idle-after');
+  } finally {
+    const record=await page.evaluate(`window.__railRecord?.stop();({frames:window.__railRecord?.frames??[],events:window.__railRecord?.events??[]})`);
+    require('node:fs').writeFileSync('/work/tests/e2e/.shots/rail-frames-final.json',JSON.stringify(record,null,2));
+    console.log('RAIL RECORDER',JSON.stringify({events:record.events.length,frames:record.frames.length,last:record.frames.at(-1)}));
+    await page.evaluate(`delete window.__railRecord;delete window.__railFrame`);
+  }
+}
+
 (async () => {
   const page = await CDP.launch(9335, { windowSize: "1600,1200" });
   const pageErrors = await collectPageErrors(page);
@@ -60,6 +129,7 @@ const AUDIT = `(async () => {
   await page.poll(`(async () => ${KZ}.state.images.length > 3000)()`, 20000);
   const dims = await page.evaluate(`(async () => (await (await fetch("/api/prefetch")).json()).dimsPending)()`);
   check("dims pass drained before the feed audit", dims === 0, `dimsPending=${dims}`);
+  try { await railMotion(page); } catch(error) { check('rail scroll timing consumer',false,error.message); }
 
   // Card actions use the disposable folder collection, never a real host.
   await page.evaluate(`(async () => {

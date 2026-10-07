@@ -102,6 +102,7 @@ export function makeAppStore({ pollActivity = typeof window !== "undefined", sto
     host() === s.id && st.hosts[s.id]?.address === s.address;
 
   function beginSourceSession(id) {
+    retireFeedScroll();
     clearTimeout(sourceSession?.retryTimer);
     clearTimeout(metaPollTimer);
     wantSet.clear();
@@ -405,20 +406,70 @@ export function makeAppStore({ pollActivity = typeof window !== "undefined", sto
   // pick would hop. Restores keep their snap-quiet but DO track current.
   const [suppressSettleCurrent, setSuppressSettleCurrent] = createSignal(false);
   let feedSettleTimer = 0;
+  let pendingFeedSettle = null; // ownership of this debounce, never a preview ID
   let gestureStart = null; // scrollTop at the gesture's origin
   const FEED_SETTLE_MS = 150;
 
-  function feedScrolled(top) {
-    if (!scrollQuiet() && !suppressSettleCurrent()) setBrowseRestore(null);
-    if (feedActivity() !== "scrolling") {
-      setFeedActivity("scrolling");
-      gestureStart = feedScrollEl()?.scrollTop ?? 0;
-      // the src window freezes mid-gesture: a 200-card sweep fires nothing
-      window_.freeze();
-    }
-    setFeedScrollTop(top ?? feedScrollEl()?.scrollTop ?? 0);
+  function retireFeedScroll() {
     clearTimeout(feedSettleTimer);
-    feedSettleTimer = setTimeout(feedSettle, FEED_SETTLE_MS);
+    feedSettleTimer = 0;
+    pendingFeedSettle = null;
+    gestureStart = null;
+    setSuppressSettleCurrent(false);
+    setFeedActivity("settled");
+  }
+
+  const validScrollContext = (scheduled) => !!scheduled && ownsSession(scheduled.session) &&
+    !scheduled.session.loading && scheduled.session.inventoryReady && !scheduled.session.pendingBrowse &&
+    !st.inventory.loading && scheduled.revision === browseRevision &&
+    scheduled.virtualizer === feedVirtualizer() && scheduled.col === feedScrollEl();
+
+  // The existing midpoint-crossing rule, shared by committed settle and rail.
+  // Keys fence a virtualizer's old position geometry during identity reorders.
+  function feedTargetEntryId(items, viewportTop, clientHeight) {
+    if (!Array.isArray(items) || !Number.isFinite(viewportTop) || viewportTop < 0 ||
+        !Number.isFinite(clientHeight) || clientHeight <= 0) return null;
+    const mid = viewportTop + clientHeight / 2;
+    let target = null, previousStart = -Infinity;
+    for (const item of items) {
+      if (!item || !Number.isFinite(item.start) || item.start < previousStart) return null;
+      previousStart = item.start;
+      const entry = Number.isInteger(item.index) && item.index >= 0 ? feedEntryAt(item.index) : null;
+      if (item.key !== undefined && (!entry || item.key !== entry.id)) return null;
+      if (item.start <= mid && entry) target = entry.id;
+    }
+    return target;
+  }
+
+  function feedMarkerEntryId() {
+    const committed = currentEntry()?.entry.id ?? null;
+    if (feedActivity() !== "scrolling" || st.diff.open || suppressSettleCurrent() ||
+        !validScrollContext(pendingFeedSettle)) return committed;
+    const col = feedScrollEl(), vz = feedVirtualizer();
+    return col && vz ? feedTargetEntryId(vz.getVirtualItems(), feedScrollTop(), col.clientHeight) ?? committed : committed;
+  }
+
+  function feedScrolled(top) {
+    if (disposed) return;
+    const scheduled = { session: sourceSession, revision: browseRevision,
+      virtualizer: feedVirtualizer(), col: feedScrollEl() };
+    if (!validScrollContext(scheduled)) {
+      batch(() => { retireFeedScroll(); setFeedScrollTop(top ?? feedScrollEl()?.scrollTop ?? 0); });
+      return;
+    }
+    if (!scrollQuiet() && !suppressSettleCurrent()) setBrowseRestore(null);
+    clearTimeout(feedSettleTimer);
+    pendingFeedSettle = scheduled;
+    batch(() => {
+      if (feedActivity() !== "scrolling") {
+        setFeedActivity("scrolling");
+        gestureStart = feedScrollEl()?.scrollTop ?? 0;
+        // the src window freezes mid-gesture: a 200-card sweep fires nothing
+        window_.freeze();
+      }
+      setFeedScrollTop(top ?? feedScrollEl()?.scrollTop ?? 0);
+    });
+    feedSettleTimer = setTimeout(() => feedSettle(scheduled), FEED_SETTLE_MS);
   }
 
   // the settle pipeline — does exactly: (1) current from the stopped
@@ -427,20 +478,25 @@ export function makeAppStore({ pollActivity = typeof window !== "undefined", sto
   // buffer — meta patches never change geometry (size is listing data), so
   // they apply on arrival ( dead). No bottom guard — with exact estimates
   // getTotalSize is exact ( dead).
-  function feedSettle() {
-    feedSettleTimer = 0;
-    setFeedActivity("settled");
+  function feedSettle(scheduled) {
+    if (pendingFeedSettle !== scheduled) return; // cannot cancel a newer callback
+    if (!validScrollContext(scheduled)) { batch(retireFeedScroll); return; }
     const col = feedScrollEl();
     const vz = feedVirtualizer();
-    if (!col || !vz) { gestureStart = null; return; }
+    if (!col || !vz) { batch(retireFeedScroll); return; }
     // 1. current selection — a consequence of a STOPPED scroll. A settle
     // triggered by a COMPENSATION scroll (landing/merge) must not reassign:
     // the scroll exists to preserve position, and with sub-card estimate
     // error the viewport-middle pick hops to the wrong card
-    if (!suppressSettleCurrent()) {
-      actions.current.settleFromRange(vz.getVirtualItems(), col.scrollTop, col.clientHeight);
-    }
-    setSuppressSettleCurrent(false);
+    batch(() => {
+      if (!suppressSettleCurrent()) {
+        actions.current.settleFromRange(vz.getVirtualItems(), col.scrollTop, col.clientHeight);
+      }
+      feedSettleTimer = 0;
+      pendingFeedSettle = null;
+      setSuppressSettleCurrent(false);
+      setFeedActivity("settled");
+    });
     // 2. snap tidy — small, directional, capped; never while a programmatic
     // scroll is in flight or the workbench is open
     const net = gestureStart == null ? 0 : col.scrollTop - gestureStart;
@@ -621,10 +677,13 @@ export function makeAppStore({ pollActivity = typeof window !== "undefined", sto
   }
 
   function beginBrowse(target) {
-    browseRevision++;
-    setBrowseRestore(null);
-    browseTarget = { ...target, folder: st.hosts[host()]?.kind === "folder" ? "" : target.folder ?? "", filter: target.filter ?? "" };
-    batch(() => { setSelectedFolder(browseTarget.folder); setFilter(browseTarget.filter); });
+    batch(() => {
+      retireFeedScroll();
+      browseRevision++;
+      setBrowseRestore(null);
+      browseTarget = { ...target, folder: st.hosts[host()]?.kind === "folder" ? "" : target.folder ?? "", filter: target.filter ?? "" };
+      setSelectedFolder(browseTarget.folder); setFilter(browseTarget.filter);
+    });
   }
 
   // Resolve only after a successful coherent listing. A remembered null is
@@ -1001,6 +1060,7 @@ export function makeAppStore({ pollActivity = typeof window !== "undefined", sto
   // pending COUNT and the settle signal only — never getVirtualItems
   // (mid-gesture staging was a second stager; feedSettle stages too)
   createEffect(() => {
+    if (disposed) return;
     if (pendingSizeCount() === 0) return;
     if (feedActivity() !== "settled") return;
     untrack(stageResolveAhead);
@@ -1011,6 +1071,7 @@ export function makeAppStore({ pollActivity = typeof window !== "undefined", sto
   // rides feedSettle instead
   let lastWindowedCurrent = null;
   createEffect(() => {
+    if (disposed) return;
     const ce = currentEntry();
     if (feedActivity() !== "settled") return;
     if (!ce || ce.entry.id === lastWindowedCurrent) return;
@@ -1022,6 +1083,7 @@ export function makeAppStore({ pollActivity = typeof window !== "undefined", sto
   // get covered without a re-ripple (positions shift under a frozen window;
   // the union is by id)
   createEffect(on(entriesWithKnownSize, () => {
+    if (disposed) return;
     if (feedActivity() !== "settled") return;
     const vz = feedVirtualizer();
     const items = vz?.getVirtualItems() ?? [];
@@ -1234,6 +1296,8 @@ export function makeAppStore({ pollActivity = typeof window !== "undefined", sto
 
   function dispose() {
     disposed = true;
+    batch(retireFeedScroll);
+    window_.clear();
     clearTimeout(metaPollTimer);
     clearTimeout(sourceSession?.retryTimer);
     for (const record of sourceRecords.values()) clearTimeout(record.timer);
@@ -1520,10 +1584,13 @@ export function makeAppStore({ pollActivity = typeof window !== "undefined", sto
     ui: {
       setFilter(v) {
         if (v === filter()) return;
-        browseRevision++;
-        setBrowseRestore(null);
-        browseTarget = { ...browseTarget, filter: v };
-        setFilter(v);
+        batch(() => {
+          retireFeedScroll();
+          browseRevision++;
+          setBrowseRestore(null);
+          browseTarget = { ...browseTarget, filter: v };
+          setFilter(v);
+        });
         mirrorCurrentHash();
       },
       setResizing(v) { setResizing(!!v); },
@@ -1571,7 +1638,7 @@ export function makeAppStore({ pollActivity = typeof window !== "undefined", sto
 
     current: {
       set(remote, image) {
-        assignCurrent({ remote, image });
+        batch(() => { retireFeedScroll(); assignCurrent({ remote, image }); });
         mirrorCurrentHash();
       },
       linkUrl(remote, image) {
@@ -1588,8 +1655,8 @@ export function makeAppStore({ pollActivity = typeof window !== "undefined", sto
         await actions.route.changed();
         return true;
       },
-      assign: assignCurrent,
-      pop: popCurrent,
+      assign(next, options) { batch(() => { retireFeedScroll(); assignCurrent(next, options); }); },
+      pop() { return batch(() => { retireFeedScroll(); return popCurrent(); }); },
       mirror: mirrorCurrentHash,
       // scrolling IS browsing: once the scroll SETTLES, the last card whose
       // top crossed the feed's vertical midpoint becomes current (debounced
@@ -1602,15 +1669,10 @@ export function makeAppStore({ pollActivity = typeof window !== "undefined", sto
       // the DOM.
       settleFromRange(items, viewportTop, clientHeight) {
         if (st.diff.open) return;
-        const mid = viewportTop + clientHeight / 2;
-        let file = null;
-        for (const it of items) {
-          if (it.start > mid) break;
-          const im = feedEntryAt(it.index);
-          if (im) file = im.filename;
-        }
-        if (!file || file === current()?.image) return;
-        assignCurrent({ remote: host(), image: file });
+        const id = feedTargetEntryId(items, viewportTop, clientHeight);
+        const entry = id == null ? null : st.images[imageIdxById().get(id)];
+        if (!entry || entry.filename === current()?.image) return;
+        assignCurrent({ remote: host(), image: entry.filename });
         mirrorCurrentHash();
       },
     },
@@ -1626,10 +1688,10 @@ export function makeAppStore({ pollActivity = typeof window !== "undefined", sto
       // open the workbench on the current pointer
       open() {
         if (!current() || !resolveSide(current())) return false;
-        setSt("diff", "open", true);
+        batch(() => { retireFeedScroll(); setSt("diff", "open", true); });
         return true;
       },
-      hide() { setSt("diff", "open", false); },
+      hide() { batch(() => { retireFeedScroll(); setSt("diff", "open", false); }); },
       // --- comparator session state (all session-only) -------------------------
       setMode(mode) {
         if (mode === "two-up" || mode === "one-up" || mode === "split" || mode === "difference") {
@@ -1652,10 +1714,11 @@ export function makeAppStore({ pollActivity = typeof window !== "undefined", sto
           const idx = findByFile(current()?.image);
           const next = idx >= 0 ? v[v.indexOf(idx) + dir] : null;
           if (next == null) return;
-          assignCurrent({ remote: host(), image: st.images[next].filename });
+          batch(() => { retireFeedScroll(); assignCurrent({ remote: host(), image: st.images[next].filename }); });
           mirrorCurrentHash();
           return;
         }
+        batch(retireFeedScroll);
         if (workspace() === "anchors") {
           const names = st.anchors.map((a) => a.name);
           const i = names.indexOf(st.diff.anchorName ?? names[0]);
@@ -1670,7 +1733,7 @@ export function makeAppStore({ pollActivity = typeof window !== "undefined", sto
       close() {
         if (!st.diff.open) return;
         const c = current();
-        setSt("diff", "open", false);
+        batch(() => { retireFeedScroll(); setSt("diff", "open", false); });
         if (location.pathname === "/diff") {
           // opened from a /diff URL: land back on the feed
           if (history.state?.kz) {
@@ -1702,7 +1765,7 @@ export function makeAppStore({ pollActivity = typeof window !== "undefined", sto
       openFromFeed(imgIdx) {
         const im = st.images[imgIdx];
         if (!im) return;
-        assignCurrent({ remote: im.host, image: im.filename });
+        batch(() => { retireFeedScroll(); assignCurrent({ remote: im.host, image: im.filename }); });
         mirrorCurrentHash();
         actions.diff.ensureRightDefault();
         actions.diff.open();
@@ -1738,6 +1801,7 @@ export function makeAppStore({ pollActivity = typeof window !== "undefined", sto
           return loading.then(() => intent === browseRevision && host() === remote ? actions.diff.openDiff(left, right, { push }) : false);
         }
         batch(() => {
+        retireFeedScroll();
         // the reset must not fire on THIS establishing pointer move
         setSt("diff", "pairedWith", `${remote}:${image}`);
         assignCurrent({ remote, image });
@@ -1764,9 +1828,12 @@ export function makeAppStore({ pollActivity = typeof window !== "undefined", sto
 
     feed: {
       register(seamsIn) {
-        seams.virtualizer = seamsIn?.virtualizer ?? null;
-        setFeedScrollEl(seamsIn?.scrollEl ?? null);
-        setFeedVirtualizer(seamsIn?.virtualizer ?? null);
+        batch(() => {
+          if (seams.virtualizer !== (seamsIn?.virtualizer ?? null) || feedScrollEl() !== (seamsIn?.scrollEl ?? null)) retireFeedScroll();
+          seams.virtualizer = seamsIn?.virtualizer ?? null;
+          setFeedScrollEl(seamsIn?.scrollEl ?? null);
+          setFeedVirtualizer(seamsIn?.virtualizer ?? null);
+        });
         // the first settle for a fresh feed: ripple around the current card
         // (idle-time landings cover whatever arrives after)
         if (feedActivity() === "settled") settleWindow();
@@ -2104,9 +2171,9 @@ export function makeAppStore({ pollActivity = typeof window !== "undefined", sto
     get chips() { return st.chips; },
     get metaPending() { return st.metaPending; },
     get drafts() { return st.drafts; },
-    cardState(id) {
+    cardState(id, { current: override, surface = "card" } = {}) {
       const img = st.images[imageIdxById().get(id)];
-      return cardState(img?.judgment, !!img && currentEntry()?.entry.id === id);
+      return cardState(img?.judgment, !!img && (override ?? currentEntry()?.entry.id === id), { surface });
     },
     get views() { return st.views; },
     // derived
@@ -2140,6 +2207,7 @@ export function makeAppStore({ pollActivity = typeof window !== "undefined", sto
     feedMergeNonce,
     feedVirtualizer,
     feedActivity,
+    feedMarkerEntryId,
     // a card's image size: the listing's content dims, else the extractor
     // meta's dims, else the off-DOM loader's measurement — null = unknown
     // (unknown = the card is NOT in the feed — the invariant)
