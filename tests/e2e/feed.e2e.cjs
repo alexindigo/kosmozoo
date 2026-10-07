@@ -686,9 +686,11 @@ const AUDIT = `(async () => {
       const s = ${KZ}, { api } = await import('/js/api.mjs');
       window.__nestedApi = { inventory: api.inventory, want: api.want };
       window.__nestedUnknown = false; window.__nestedWanted = false;
+      window.__nestedResponses = [];
       api.inventory = async (id) => {
         const inventory = await window.__nestedApi.inventory(id);
         const row = inventory.entries.find(e => e.name === 'scoped/deep/completed.png');
+        window.__nestedResponses.push({ id, width: row?.width, height: row?.height, present: !!row });
         if (row && !row.width) window.__nestedUnknown = true;
         return inventory;
       };
@@ -697,7 +699,14 @@ const AUDIT = `(async () => {
         return window.__nestedApi.want(id, files);
       };
       await fetch('/api/prefetch', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ paused: true }) });
+      // Drain any refresh that started before installing the observer. Its
+      // awaiting original API function cannot be intercepted retroactively.
+      await s.actions.ui.refresh();
     })()`);
+    console.log('NESTED PRE-PUBLICATION', JSON.stringify(await page.evaluate(`(async () => ({
+      prefetch: await (await fetch('/api/prefetch')).json(),
+      entry: await (await fetch('/api/collections/fake/entries/scoped%2Fdeep%2Fcompleted.png')).json()
+    }))()`)));
     await control({ finish: [
       { id: 'nested-auto-complete', output: 'scoped/deep/completed.png', width: 87, height: 73, color: [20, 120, 200, 255] },
       { id: 'nested-auto-sibling', output: 'scoped-other/sibling.png', width: 91, height: 77 },
@@ -715,6 +724,7 @@ const AUDIT = `(async () => {
       const s = ${KZ}, image = document.querySelector('.card[data-name="scoped/deep/completed.png"] img'), r = image.getBoundingClientRect();
       return { folder: s.state.selectedFolder(), current: s.state.current(), decoded: image.naturalHeight,
         visible: r.width > 0 && r.bottom > 0 && r.top < innerHeight, unknown: window.__nestedUnknown, wanted: window.__nestedWanted,
+        responses: window.__nestedResponses,
         siblingListed: s.state.images.some(e => e.filename === 'scoped-other/sibling.png'),
         siblingExcluded: !s.state.view().some(i => s.state.images[i].filename.startsWith('scoped-other/')) };
     })()`);
@@ -729,6 +739,116 @@ const AUDIT = `(async () => {
       s.actions.ui.setFilter(''); s.actions.folders.select(''); await s.actions.hosts.patch('fake', { autoRefresh: false });
       await fetch('/api/prefetch', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ paused: false }) });
       await s.actions.ui.refresh(); })()`);
+  }
+
+  // Chronology is exercised through actual fake source dates, never a sorted
+  // API replacement. The unchanged-byte touch must reorder retained editors.
+  try {
+    const files = [
+      { name: 'chronology-root-today.png', mtime: 2100000004 },
+      { name: 'chronology/nested-yesterday.png', mtime: 2100000003 },
+      { name: 'chronology-root-last-week.png', mtime: 2100000002 },
+      { name: 'chronology/deep/nested-older.png', mtime: 2100000001 },
+      { name: 'chronology-tail.png', mtime: 2100000000 },
+    ].map(f => ({ ...f, width: 512, height: 512 }));
+    await control({ reset: true, publish: [...files].reverse() });
+    await page.goto(ENGINE + '/?filter=chronology#fake');
+    const scopedNames = `(async () => { const s = ${KZ}; return s.state.view().map(i => s.state.images[i].filename); })()`;
+    const expected = files.map(f => f.name);
+    await page.poll(`(async () => JSON.stringify(await ${scopedNames}) === ${JSON.stringify(JSON.stringify(expected))})()`, 20000);
+    await page.poll(`document.querySelector('.card[data-name="${expected[0]}"] img')?.naturalWidth === 512`, 20000);
+    const parity = await page.evaluate(`(async () => {
+      const s = ${KZ}, r = await (await fetch('/api/collections/fake/entries?inventory=1')).json();
+      const entries = r.entries.filter(e => e.name.includes('chronology'));
+      return r.chronology.complete && entries.every((e, i) => e.name === ${JSON.stringify(expected)}[i] &&
+        e.modified.atMs === ${JSON.stringify(files.map(f => f.mtime * 1000))}[i] &&
+        JSON.stringify(e.modified) === JSON.stringify(s.state.images.find(im => im.filename === e.name).modified));
+    })()`);
+    check('unified chronology: actual HTTP dates reach API/store and decoded root-before-nested-before-root feed', parity);
+    const anchor = expected[2], selector = `.card[data-name="${anchor}"]`;
+    await page.evaluate(`(async () => {
+      const s = ${KZ}; s.actions.current.set('fake', ${JSON.stringify(anchor)});
+      s.actions.feed.restoreToIndex(s.state.currentEntry().index);
+      s.actions.selected.set('fake:' + ${JSON.stringify(anchor)}, true);
+      const { api } = await import('/js/api.mjs');
+      window.__chronologyWriter = api.setJudgment;
+      let release; const gate = new Promise(r => release = r); window.__chronologyRelease = release;
+      api.setJudgment = async (...args) => { await gate; return window.__chronologyWriter(...args); };
+    })()`);
+    await page.poll(`document.querySelector('${selector} img')?.naturalWidth === 512`, 20000);
+    await page.clickAt(selector + ' textarea.pos');
+    await page.send('Input.insertText', { text: 'pending chronology draft' });
+    await page.poll(`(async () => ${KZ}.state.drafts['fake:${anchor}:pos'] === 'pending chronology draft')()`);
+    const zoomPoint = await page.evaluate(`(() => {
+      const r = document.querySelector('${selector} img').getBoundingClientRect(),
+        f = document.getElementById('candidatesCol').getBoundingClientRect();
+      return { x: (r.left + r.right) / 2, y: (Math.max(r.top, f.top) + Math.min(r.bottom, f.bottom)) / 2 };
+    })()`);
+    await page.mouse('mouseWheel', zoomPoint.x, zoomPoint.y, { modifiers: 2, deltaY: -100 });
+    await page.poll(`(async () => ${KZ}.state.views['fake:${anchor}']?.s > 1)()`);
+    const snapshot = `(async () => { const s = ${KZ}, card = document.querySelector('${selector}'); return {
+      current: s.state.current(), trail: s.state.currentStack(), url: location.href,
+      draft: s.state.drafts['fake:${anchor}:pos'], view: JSON.stringify(s.state.views['fake:${anchor}']),
+      selected: s.state.selected['fake:${anchor}'], top: card.getBoundingClientRect().top,
+      height: card.getBoundingClientRect().height, scrollTop: s.state.feedScrollEl().scrollTop,
+      scrollMax: s.state.feedScrollEl().scrollHeight - s.state.feedScrollEl().clientHeight,
+      editorText: card.querySelector('textarea.pos').value }; })()`;
+    await page.evaluate(`window.__chronologyCard = document.querySelector('${selector}'); window.__chronologyEditor = window.__chronologyCard.querySelector('textarea.pos')`);
+    const before = await page.evaluate(snapshot);
+    await capture(page, 'chronology-timestamp-reorder-before');
+    await control({ publish: [{ ...files[3], mtime: 2100000005 }] });
+    await page.evaluate(`(async () => ${KZ}.actions.ui.refresh())()`);
+    const reorderedNames = [expected[3], ...expected.slice(0, 3), expected[4]];
+    await page.poll(`(async () => JSON.stringify(await ${scopedNames}) === ${JSON.stringify(JSON.stringify(reorderedNames))})()`);
+    const after = await page.evaluate(snapshot);
+    const mounted = await page.evaluate(`window.__chronologyCard === document.querySelector('${selector}') && window.__chronologyEditor === document.querySelector('${selector} textarea.pos')`);
+    check('unified chronology: timestamp-only same-count reorder preserves mounted editor, draft, selection, zoom, current/trail/URL and viewport',
+      mounted && JSON.parse(before.view).s > 1 && Math.abs(before.top - after.top) <= 1 && before.height === after.height &&
+      ['current','trail','url','draft','view','selected','editorText'].every(k => JSON.stringify(before[k]) === JSON.stringify(after[k])), JSON.stringify({before,after,mounted}));
+    const audit = await page.evaluate(AUDIT);
+    check('unified chronology: exact card heights after timestamp-only reorder', audit.maxDelta === 0 && audit.nullSize === 0, JSON.stringify(audit));
+    await capture(page, 'chronology-timestamp-reorder-after');
+    await page.evaluate(`(async () => { const s=${KZ}; await s.actions.hosts.patch('fake', { autoRefresh:true }); await s.actions.hosts.pollActivity('fake'); })()`);
+    await control({ finish: [{ id:'chronology-root-finish', output:'chronology/deep/auto-root.png', width:512, height:512, mtime:2100000006 }] });
+    await page.poll(`(async () => ${KZ}.state.images[0]?.filename === 'chronology/deep/auto-root.png')()`, 20000);
+    await page.evaluate(`(async () => ${KZ}.actions.feed.scrollTop())()`);
+    await page.poll(`document.querySelector('.card[data-name="chronology/deep/auto-root.png"] img')?.naturalWidth === 512`, 20000);
+    check('unified chronology: automatic root feed interleaves and decodes newest descendant above roots', true);
+    await page.evaluate(`(async () => { const s=${KZ}; s.actions.folders.select('chronology'); })()`);
+    await page.poll(`(async () => JSON.stringify(await ${scopedNames}) === ${JSON.stringify(JSON.stringify(['chronology/deep/auto-root.png', expected[3], expected[1]]))})()`);
+    check('unified chronology: selected subtree is the server chronology subsequence', true);
+    await control({ publish: [{ ...files[1], mtime:2100000007 }] });
+    await page.evaluate(`(async () => ${KZ}.actions.ui.refresh())()`);
+    await page.poll(`(async () => (await ${scopedNames})[0] === ${JSON.stringify(expected[1])})()`);
+    await page.evaluate(`(async () => ${KZ}.actions.feed.scrollTop())()`);
+    await page.poll(`document.querySelector('.card[data-name="${expected[1]}"] img')?.naturalWidth === 512`, 20000);
+    check('unified chronology: manual subtree refresh observes unchanged-byte touch and decoded head', true);
+    await control({ finish: [{ id:'chronology-subtree-finish', output:'chronology/deep/auto-subtree.png', width:512, height:512, mtime:2100000008 }] });
+    await page.poll(`(async () => (await ${scopedNames})[0] === 'chronology/deep/auto-subtree.png')()`, 20000);
+    await page.evaluate(`(async () => ${KZ}.actions.feed.scrollTop())()`);
+    await page.poll(`document.querySelector('.card[data-name="chronology/deep/auto-subtree.png"] img')?.naturalWidth === 512`, 20000);
+    check('unified chronology: automatic subtree refresh decodes its true chronological head', true);
+    await capture(page, 'chronology-auto-subtree');
+    await page.clickAt('.card[data-name="chronology/deep/auto-subtree.png"] textarea.pos');
+    await page.send('Input.insertText', { text: 'chronological upper note' });
+    await page.poll(`(async () => ${KZ}.state.drafts['fake:chronology/deep/auto-subtree.png:pos'] === 'chronological upper note')()`);
+    await page.evaluate(`(async () => { const s=${KZ}; s.actions.current.set('fake',${JSON.stringify(expected[1])}); s.actions.feed.restoreToIndex(s.state.currentEntry().index); })()`);
+    const below = `.card[data-name="${expected[1]}"]`;
+    await page.poll(`!!document.querySelector('${below} textarea.pos')`);
+    await page.clickAt(below + ' .boxcol:last-child .btnrow button:last-child');
+    await page.poll(`document.querySelector('${below} textarea.pos').value === 'chronological upper note'`);
+    check('unified chronology: scoped note-copy above uses the newer chronological neighbor draft', true);
+    const rail = await page.evaluate(`(async () => { const s=${KZ}; const names=s.state.view().map(i=>s.state.images[i].id);
+      const ticks=[...document.querySelectorAll('#feedRail .fr-tick')].map(e=>e.dataset.entryId);
+      return JSON.stringify(ticks)===JSON.stringify(names); })()`);
+    check('unified chronology: scoped rail tick identities retain the chronological sequence', rail);
+  } catch (error) { check('unified chronology actual consumer', false, error.message); }
+  finally {
+    await page.evaluate(`(async () => { const s=${KZ}, {api}=await import('/js/api.mjs');
+      window.__chronologyRelease?.(); if(window.__chronologyWriter) api.setJudgment=window.__chronologyWriter;
+      s.actions.ui.setFilter(''); s.actions.folders.select(''); s.actions.bulk.clear();
+      await s.actions.hosts.patch('fake',{autoRefresh:false}); })()`);
+    await control({reset:true});
   }
 
   check("no uncaught page errors", pageErrors.length === 0, pageErrors[0] ?? "");

@@ -6,7 +6,7 @@ import { sha256, Cache } from "../src/cache.mjs";
 import { Ingest } from "../src/ingest.mjs";
 import { Store } from "../src/store.mjs";
 import { makeRouter } from "../src/routes.mjs";
-import { mkStateRig } from "./helpers/rig.mjs";
+import { mkStateRig, makeTestInventory } from "./helpers/rig.mjs";
 import { isFolderHost } from "../src/backings/index.mjs";
 import { mkdtemp, rm, writeFile, mkdir } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -135,7 +135,7 @@ Deno.test("serve path: bytes carry validators — ETag (content hash) + no-cache
   const { settings, store } = rig;
   const hosts = { h: `folder:${folder}` };
   const ingest = new Ingest(store, hosts, { cache: rig.cache });
-  const router = makeRouter({ hosts, store, settings, plugins: null, cache: rig.cache, ingest });
+  const router = makeRouter({ hosts, store, settings, plugins: null, cache: rig.cache, ingest, inventory: makeTestInventory(hosts) });
 
   const { hash } = await ingest.ensure("h", "img.png");
   const r1 = await router.handle(new Request("http://x/api/collections/h/entries/img.png/bytes"));
@@ -171,7 +171,7 @@ Deno.test("serve path: cache hit serves directly, no host needed", async () => {
   const { settings, store } = rig;
   const hosts = { host: `folder:${folder}` };
   const ingest = new Ingest(store, hosts, { cache: rig.cache });
-  const router = makeRouter({ hosts, store, settings, plugins: null, cache: rig.cache, ingest });
+  const router = makeRouter({ hosts, store, settings, plugins: null, cache: rig.cache, ingest, inventory: makeTestInventory(hosts) });
 
   // First request: ingestion populates cache.
   const r1 = await router.handle(new Request("http://x/api/collections/host/entries/img.png/bytes"));
@@ -204,7 +204,7 @@ Deno.test("serve path: round-trip preserves Content-Type", async () => {
   const { settings, store } = rig;
   const hosts = { h: `folder:${folder}` };
   const ingest = new Ingest(store, hosts, { cache: rig.cache });
-  const router = makeRouter({ hosts, store, settings, plugins: null, cache: rig.cache, ingest });
+  const router = makeRouter({ hosts, store, settings, plugins: null, cache: rig.cache, ingest, inventory: makeTestInventory(hosts) });
 
   const r = await router.handle(new Request("http://x/api/collections/h/entries/img.png/bytes"));
   assertEquals(r.status, 200);

@@ -190,3 +190,24 @@ Deno.test("dims: a head that yields nothing falls to the full ingest", async () 
   await server.shutdown();
   await rm(dir, { recursive: true });
 });
+Deno.test("source incarnation: late dimensions cannot attach to a replacement collection kept alive by an alias", async () => {
+  const { mkStateRig } = await import("./helpers/rig.mjs");
+  const { assertEquals } = await import("jsr:@std/assert");
+  const png = await Deno.readFile(new URL("./fixtures/flux-basic.png", import.meta.url));
+  let release, started = false;
+  const gate = new Promise((resolve) => release = resolve);
+  const server = Deno.serve({ port: 0, hostname: "127.0.0.1" }, async () => {
+    started = true; await gate; return new Response(png.subarray(0, 64), { status: 206 });
+  });
+  const address = `127.0.0.1:${server.addr.port}`, hosts = { h: address, alias: address };
+  const rig = await mkStateRig("incarnation-dims", { hosts });
+  rig.inventory.binding(address);
+  try {
+    const old = rig.ingest.dims("h", "image.png");
+    for (let i = 0; i < 100 && !started; i++) await new Promise((r) => setTimeout(r, 1));
+    delete hosts.h; rig.inventory.reconcile(); hosts.h = address; rig.inventory.reconcile();
+    rig.store.collectionAdd("h", address); release();
+    assertEquals((await old).status, 499);
+    assertEquals(rig.store.entryDims("h", "image.png"), null);
+  } finally { release(); await server.shutdown(); await rig.close(); }
+});

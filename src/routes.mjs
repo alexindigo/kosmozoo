@@ -55,7 +55,8 @@ export function makeRouter(ctx) {
   // One joined row (entry ⟕ content, judgment columns included) → the wire
   // shape. No further queries: the listing maps rows from ONE statement, and
   // a name with no row is a fresh entry (state 'seen').
-  const entryShape = (collection, name, size, row = null) => {
+  const entryShape = (collection, name, size, row = null,
+    modified = ctx.inventory.peek?.(collection)?.items.find((item) => item.name === name)?.modified ?? null) => {
     const r = row;
     let meta = null;
     if (r?.meta) { try { meta = JSON.parse(r.meta); } catch { /* corrupt */ } }
@@ -80,6 +81,7 @@ export function makeRouter(ctx) {
       // dims pass's head-read result before the hash exists
       width: r?.width ?? null,
       height: r?.height ?? null,
+      modified,
     };
   };
 
@@ -185,6 +187,7 @@ export function makeRouter(ctx) {
   // The feed listing (kind=output, the default) or the input-dir listing
   // (kind=input). Hidden/gone entries stay out of every output listing.
   add("GET", "/api/collections/<id>/entries", async (req, { id }, url) => {
+    const token = ctx.inventory.capture?.(id);
     const addr = ctx.hosts[id];
     if (!addr) return Response.json({ error: "unknown collection" }, { status: 404 });
     const kind = url.searchParams.get("kind") ?? "output";
@@ -201,16 +204,17 @@ export function makeRouter(ctx) {
     let inventory;
     try { inventory = await ctx.inventory(id); }
     catch (error) { return Response.json({ error: `collection unreachable: ${error.message}` }, { status: 502 }); }
+    if (token && !ctx.inventory.isCurrent(token)) return Response.json({ error: "Source incarnation changed" }, { status: 409 });
     const list = inventory.items;
     const rows = new Map(ctx.store.entriesForCollection(id).map((r) => [r.name, r]));
     const visible = list.filter((f) => {
       const r = rows.get(f.name);
       return !r || (r.state !== "gone" && r.hidden !== 1);
     });
-    const entries = visible.map((f) => entryShape(id, f.name, f.size, rows.get(f.name)));
+    const entries = visible.map((f) => entryShape(id, f.name, f.size, rows.get(f.name), f.modified));
     return Response.json(url.searchParams.get("inventory") === "1"
-      ? { revision: inventory.revision, coverage: inventory.coverage, subfolders: inventory.subfolders,
-        folders: inventory.folders, entries } : entries);
+      ? { revision: inventory.revision, generation: inventory.generation, coverage: inventory.coverage, subfolders: inventory.subfolders,
+         folders: inventory.folders, unavailable: inventory.unavailable, chronology: inventory.chronology, entries } : entries);
   });
 
   add("GET", "/api/collections/<id>/entries/<name>", async (_req, { id, name }) => {
@@ -283,6 +287,7 @@ export function makeRouter(ctx) {
   // Bytes, cache-first, with validators (the URL never changes when content
   // is remapped: no-cache + ETag = the content hash).
   add("GET", "/api/collections/<id>/entries/<name>/bytes", async (req, { id, name }, url) => {
+    const token = ctx.inventory.capture?.(id);
     if (!ctx.hosts[id]) return new Response("unknown collection", { status: 404 });
     const kind = url.searchParams.get("kind") === "input" ? "input" : "output";
     const mime = EXT_MIME[name.split(".").pop().toLowerCase()];
@@ -295,6 +300,7 @@ export function makeRouter(ctx) {
       : ctx.store.fileInfo(id, name);
     if (info?.hash) {
       const cached = await ctx.cache.get(info.hash);
+      if (token && !ctx.inventory.isCurrent(token)) return Response.json({ error: "Source incarnation changed" }, { status: 409 });
       if (cached) {
         ctx.ingest.scheduleRevalidate(id, name, { input: kind === "input" });
         return makeResponse(cached, info.hash);
@@ -306,6 +312,7 @@ export function makeRouter(ctx) {
     // A failing backing is a 502 carrying the reason; no direct backing
     // read in a route, no swallowed errors.
     const got = await ctx.ingest.ensure(id, name, kind, { priority: "high" });
+    if (token && !ctx.inventory.isCurrent(token)) return Response.json({ error: "Source incarnation changed" }, { status: 409 });
     if (got.status === 200) return makeResponse(got.bytes, got.hash);
     if (got.status === 400) return new Response("bad filename", { status: 400 });
     if (got.status === 404) return new Response("not found", { status: 404 });

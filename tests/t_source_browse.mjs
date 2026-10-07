@@ -214,3 +214,29 @@ Deno.test("browse: real host# filename remains exact; flat current memory and di
     assertEquals(parseUrl().filter, "a/"); assertEquals(parseUrl().folder, "a");
   });
 });
+
+Deno.test("chronology consumers: diagnostic dates never sort server order; load/refresh propagate null, folder/filter/step/delete preserve subsequences", async () => {
+  await withBrowse(async ({ store, lists, row }) => {
+    const names = ["root-today.png", "a/yesterday.png", "root-old.png", "a/deep/older.png"];
+    lists.h = names.map((name, i) => ({ ...row(name), hash: "same-content", modified: {
+      atMs: i * 1000, precisionMs: 1000, source: "http-last-modified" } }));
+    await store.actions.images.reload();
+    assertEquals(store.state.images.map(e => e.filename), names, "the client trusts contradictory server order");
+    assertEquals(store.state.images[0].modified.atMs, 0);
+    let scans = 0;
+    api.inventory = async id => { scans++; return clientInventory(lists[id], { coverage: "recursive" }); };
+    store.actions.folders.select("a"); store.actions.ui.setFilter(".png");
+    assertEquals(scans, 0, "scope changes never scan");
+    assertEquals(store.state.view().map(i => store.state.images[i].filename), [names[1], names[3]]);
+    store.actions.current.set("h", names[1]); store.actions.diff.step(1);
+    assertEquals(store.state.current().image, names[3]);
+    lists.h = [lists.h[3], lists.h[0], { ...lists.h[1], modified: null }, lists.h[2]];
+    await store.actions.ui.refresh();
+    assertEquals(store.state.images.map(e => e.filename), lists.h.map(e => e.name));
+    assertEquals(store.state.images.find(e => e.filename === names[1]).modified, null);
+    store.actions.diff.step(1); assertEquals(store.state.current().image, names[1]);
+    const { planDeleteCurrent } = await import("../client/js/route-parse.mjs");
+    assertEquals(planDeleteCurrent(store.state.folderView().map(i => store.state.images[i]), new Set([names[3]]), "h",
+      { remote: "h", image: names[3] }, null), { kind: "set", image: names[1] });
+  });
+});

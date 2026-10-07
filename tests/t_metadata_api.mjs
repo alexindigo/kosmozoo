@@ -115,6 +115,7 @@ Deno.test("listing: one statement per listing — no per-entry queries at 3000 f
   const dir = await mkdtemp(join(tmpdir(), "kz-list1-"));
   const names = Array.from({ length: 3000 }, (_, i) => `img-${String(i).padStart(4, "0")}.png`);
   const server = Deno.serve({ port: 0, hostname: "127.0.0.1" }, (req) => {
+    if (req.method === "HEAD") return new Response(null, { headers: { "Last-Modified": "Thu, 01 Jan 1970 00:00:00 GMT" } });
     if (new URL(req.url).pathname === "/internal/files/output") return Response.json(names);
     return new Response("nf", { status: 404 });
   });

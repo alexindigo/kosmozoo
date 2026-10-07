@@ -696,6 +696,7 @@ export function makeAppStore({ pollActivity = typeof window !== "undefined", sto
           meta: e.meta, extracted: e.extracted,
           judgment: judgments.overlay(`${name}:${e.name}`, e.judgment, read),
           width: e.width, height: e.height,
+          modified: e.modified ?? null,
         }))));
         s.inventoryReady = true;
         s.pendingBrowse = false;
@@ -773,6 +774,7 @@ export function makeAppStore({ pollActivity = typeof window !== "undefined", sto
             judgment: judgments.overlay(id, e.judgment, read),
             width: enriched?.width && enriched.width !== start?.width ? enriched.width : e.width ?? enriched?.width ?? null,
             height: enriched?.height && enriched.height !== start?.height ? enriched.height : e.height ?? enriched?.height ?? null,
+            modified: e.modified ?? null,
           };
         })));
         s.inventoryReady = true;

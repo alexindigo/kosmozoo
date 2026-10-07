@@ -24,7 +24,7 @@ Deno.test("prefetch isolation: a host failing every read never stalls the health
     const url = new URL(req.url);
     if (url.pathname === "/internal/files/output") return Response.json(NAMES);
     if (url.pathname !== "/api/view") return new Response("nf", { status: 404 });
-    if (req.method === "HEAD") return new Response(null, { headers: { ETag: '"e"' } });
+    if (req.method === "HEAD") return new Response(null, { headers: { ETag: '"e"', "Last-Modified": "Thu, 01 Jan 1970 00:00:00 GMT" } });
     if (req.headers.get("range")) {
       return new Response(png.subarray(0, 64), { status: 206, headers: { "Content-Type": "image/png" } });
     }
@@ -127,7 +127,7 @@ Deno.test("prefetch relist: runtime worker and a finish during listing retain a 
       if (calls === 1) { await firstList; return Response.json([]); }
       return Response.json(["arrived.png"]);
     }
-    if (path === "/api/view") return new Response(png, { headers: { "Content-Type": "image/png" } });
+    if (path === "/api/view") return req.method === "HEAD" ? new Response(null, { headers: { "Last-Modified": "Thu, 01 Jan 1970 00:00:00 GMT" } }) : new Response(png, { headers: { "Content-Type": "image/png" } });
     return new Response("no", { status: 404 });
   });
   const hosts = {}, rig = await mkStateRig("relist", { hosts });

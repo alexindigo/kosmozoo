@@ -11,7 +11,6 @@ import { Settings } from "./settings.mjs";
 import { Store } from "./store.mjs";
 import { loadCollections } from "./collections.mjs";
 import * as backings from "./backings/index.mjs";
-import * as comfyBacking from "./backings/comfy.mjs";
 import { Ingest } from "./ingest.mjs";
 import { Prefetch } from "./prefetch.mjs";
 import { Jobs } from "./jobs.mjs";
@@ -33,40 +32,17 @@ export async function buildContext({ env = Deno.env.toObject(), fakes = {}, star
   const cache = fakes.cache ?? new Cache(
     env.KOZMOZOO_CACHE ?? `${env.HOME ?? "/tmp"}/.local/share/kosmozoo/cache`,
   );
+  const inventory = fakes.inventory ?? backings.makeCollectionInventory(hosts);
   const ingest = fakes.ingest ?? new Ingest(store, hosts, {
     cache,
+    capture: inventory.capture, isCurrent: inventory.isCurrent,
     // the default lives in ingest.mjs; the env override is the only knob
     ...(env.KOZMOZOO_REVALIDATE_MS == null ? {} : { revalidateMs: Number(env.KOZMOZOO_REVALIDATE_MS) }),
   });
-  // one comfy client per address — its assets-plus and object_info caches
-  // are instance state, so nothing outlives the address it belongs to
-  const comfyClients = new Map(); // addr → client
-  let inventoryStopped = false;
-  const clientAt = (addr) => {
-    if (inventoryStopped) throw new Error("ComfyUI address owners stopped");
-    let client = comfyClients.get(addr);
-    if (!client) {
-      client = comfyBacking.comfyClient(addr);
-      comfyClients.set(addr, client);
-    }
-    return client;
-  };
+  // Registry dispatch creates both driver bindings. All consumers share the
+  // same address owner and collection-incarnation validation seam.
+  const clientAt = inventory.binding;
   const comfy = (collection) => clientAt(hosts[collection]);
-  const inventory = (collection, options = {}) => backings.inventoryFor(hosts[collection], { ...options, client: clientAt });
-  inventory.reconcile = () => {
-    const addresses = new Set(Object.values(hosts));
-    for (const [address, client] of comfyClients) {
-      if (addresses.has(address)) continue;
-      client.disposeInventory();
-      comfyClients.delete(address);
-    }
-  };
-  inventory.stop = () => {
-    inventoryStopped = true;
-    const pending = [...comfyClients.values()].map((client) => client.disposeInventory());
-    comfyClients.clear();
-    return Promise.allSettled(pending);
-  };
   const prefetch = fakes.prefetch ?? new Prefetch({ hosts, store, settings, ingest, inventory });
   const jobs = fakes.jobs ?? new Jobs({
     hosts, client: clientAt,

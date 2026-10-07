@@ -13,21 +13,53 @@ import { Ingest } from "../src/ingest.mjs";
 import { Settings } from "../src/settings.mjs";
 import { Store } from "../src/store.mjs";
 import { makeRouter } from "../src/routes.mjs";
-import { mkStateRig } from "./helpers/rig.mjs";
+import { mkStateRig, makeTestInventory } from "./helpers/rig.mjs";
 import { fakeComfyInline } from "./helpers/fake-comfy-inline.mjs";
 import { mkdtemp, rm, writeFile, mkdir, utimes } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
+Deno.test("source incarnation: delayed stat and revalidation throttle cannot cross same-id/address replacement", async () => {
+  const png = await Deno.readFile(new URL("./fixtures/flux-basic.png", import.meta.url));
+  let release, heads = 0, reads = 0;
+  const gate = new Promise(resolve => release = resolve);
+  const server = Deno.serve({ port: 0, hostname: "127.0.0.1" }, async req => {
+    if (req.method === "HEAD") {
+      heads++; if (heads === 1) await gate;
+      return new Response(null, { headers: { ETag: '"fresh-stamp"' } });
+    }
+    reads++; return new Response(png);
+  });
+  const address = `127.0.0.1:${server.addr.port}`, hosts = { h: address, alias: address };
+  const r = await mkStateRig("incarnation-stat", { hosts, revalidateMs: 3600000 });
+  const wait = async predicate => { for (let i = 0; i < 100; i++) { if (predicate()) return; await new Promise(r => setTimeout(r, 2)); } throw new Error("stat condition timeout"); };
+  try {
+    r.inventory.binding(address);
+    await r.ingest.ensureBytes("h", "image.png", png, { stamp: '"old-stamp"' });
+    r.ingest.scheduleRevalidate("h", "image.png"); await wait(() => heads === 1);
+    delete hosts.h; r.inventory.reconcile(); r.store.collectionRemove("h");
+    hosts.h = address; r.inventory.reconcile(); r.store.collectionAdd("h", address);
+    await r.ingest.ensureBytes("h", "image.png", png, { stamp: '"replacement-stamp"' });
+    r.ingest.scheduleRevalidate("h", "image.png");
+    await wait(() => heads === 2 && r.store.fileInfo("h", "image.png").stamp === '"fresh-stamp"');
+    assertEquals(reads, 1, "replacement gets its own unthrottled revalidation");
+    release(); await new Promise(r => setTimeout(r, 20));
+    assertEquals(reads, 1, "obsolete stat launches no byte read");
+    assertEquals(r.store.fileInfo("h", "image.png").stamp, '"fresh-stamp"');
+  } finally { release(); await server.shutdown(); await r.close(); }
+});
+
 // Direct-check tests get a huge interval so the debounce never fires;
 // debounce tests pass their own.
 async function rig(name, { revalidateMs = 3_600_000 } = {}) {
-  const r = await mkStateRig(`rev-${name}`, { revalidateMs });
+  const hosts = {};
+  const r = await mkStateRig(`rev-${name}`, { revalidateMs, hosts });
   const folder = join(r.dir, "images");
   await mkdir(folder);
-  const hosts = { h: `folder:${folder}` };
-  const ingest = new Ingest(r.store, hosts, { cache: r.cache, revalidateMs });
-  const router = makeRouter({ hosts, store: r.store, settings: r.settings, plugins: null, cache: r.cache, ingest });
+  hosts.h = `folder:${folder}`;
+  r.inventory.reconcile();
+  const ingest = r.ingest;
+  const router = makeRouter({ hosts, store: r.store, settings: r.settings, plugins: null, cache: r.cache, ingest, inventory: r.inventory });
   return { dir: r.dir, folder, store: r.store, ingest, router, hosts, close: r.close };
 }
 
@@ -232,7 +264,7 @@ Deno.test("comfy host: a changed ETag remaps the same filename to new content", 
   const store = await Store.open(dir, { feedbackPath: join(dir, "fb.json") });
   const hosts = { c: stub.addr };
   const ingest = new Ingest(store, hosts, { cache: new Cache(join(dir, "cache")) });
-  const router = makeRouter({ hosts, store, settings, plugins: null, cache: new Cache(join(dir, "cache")), ingest });
+  const router = makeRouter({ hosts, store, settings, plugins: null, inventory: makeTestInventory(hosts), cache: new Cache(join(dir, "cache")), ingest });
 
   await ingest.ensure("c", "img.png");
   const v1 = store.fileInfo("c", "img.png");

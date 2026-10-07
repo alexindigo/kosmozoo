@@ -4,6 +4,8 @@
 import { readdir, readFile, open as fsOpen, stat as fsStat, unlink } from "node:fs/promises";
 import { basename, join } from "node:path";
 import { RENDERABLE, EXT_MIME } from "./mime.mjs";
+import { makeInventoryOwner } from "./inventory-owner.mjs";
+import { InventoryError, bounded, cancelled } from "./inventory.mjs";
 
 export const FOLDER_RE = /^folder:(.+)$/;
 
@@ -26,26 +28,68 @@ export async function probe(addr) {
 
 // kind 'output' → [{ name, size }] newest-first; kind 'input' → [name].
 export async function list(addr, kind = "output") {
-  const dir = folderPath(addr);
-  const names = await readdir(dir);
-  const files = [];
-  for (const n of names) {
-    if (n.startsWith(".")) continue;
-    const ext = n.split(".").pop().toLowerCase();
-    if (!RENDERABLE.has(ext) || !assertSafeName(n)) continue;
-    try {
-      const s = await fsStat(join(dir, n));
-      if (s.isFile()) files.push({ n, mtime: s.mtimeMs, size: s.size });
-    } catch { /* vanished */ }
-  }
-  files.sort((a, b) => b.mtime - a.mtime || a.n.localeCompare(b.n));
-  return kind === "input" ? files.map((f) => f.n) : files.map((f) => ({ name: f.n, size: f.size }));
+  const items = (await inventory(addr)).items;
+  return kind === "input" ? items.map((item) => item.name) : items;
 }
 
-export async function inventory(addr) {
-  const items = await list(addr);
-  return { revision: null, coverage: "root-only", folders: [""], items,
-    subfolders: { supported: false, reason: "Local folder sources are flat; output root only" } };
+export function createBinding(addr, { clock, epoch, waveTimeoutMs, readerTimeoutMs, statter = fsStat, enumerator = readdir } = {}) {
+  let owner;
+  const names = async (signal) => {
+    if (signal.aborted) throw signal.reason ?? cancelled();
+    const raw = await enumerator(folderPath(addr));
+    if (signal.aborted) throw signal.reason ?? cancelled();
+    return raw.filter((name) => !name.startsWith(".") && assertSafeName(name) && RENDERABLE.has(name.split(".").pop().toLowerCase()));
+  };
+  const observe = (name, { signal = owner.signal } = {}) => {
+    if (!assertSafeName(name)) return Promise.reject(new InventoryError("invalid-name", "Bad flat filename"));
+    const combined = AbortSignal.any([owner.signal, signal]);
+    return bounded(async () => {
+      try {
+        const value = await statter(join(folderPath(addr), name));
+        if (combined.aborted) throw combined.reason ?? cancelled();
+        if (!value.isFile()) return { kind: "not-file", name, status: 404 };
+        return { kind: "present", name, status: 200, size: value.size, stamp: String(value.mtimeMs),
+          modified: { atMs: value.mtimeMs, precisionMs: null, source: "filesystem-stat" } };
+      } catch (error) {
+        if (error.code === "ENOENT") return { kind: "not-found", name, status: 404, reason: "source-not-found" };
+        throw error;
+      }
+    }, { signal: combined, timeoutMs: 10_000 });
+  };
+  const collect = async ({ signal }) => {
+    let current = await names(signal);
+    const discovered = new Set(current), observed = new Map();
+    for (const name of current) observed.set(name, await observe(name, { signal }));
+    const missing = current.filter((name) => observed.get(name).kind === "not-found");
+    if (missing.length) {
+      current = await names(signal);
+      for (const name of current) {
+        discovered.add(name);
+        if (!observed.has(name) || observed.get(name).kind === "not-found") observed.set(name, await observe(name, { signal }));
+      }
+    }
+    const records = [], unavailable = [];
+    for (const name of discovered) {
+      const result = observed.get(name);
+      if (result?.kind === "not-file") { discovered.delete(name); continue; }
+      if (current.includes(name) && result?.kind === "present") records.push({ name, size: result.size, modified: result.modified });
+      else if (result?.kind === "not-found") unavailable.push({ name, status: 404, reason: "confirmed-source-not-found" });
+    }
+    return { records, discovered: [...discovered], unavailable, flat: true, coverage: "root-only",
+      subfolders: { supported: false, reason: "Local folder sources are flat; output root only" } };
+  };
+  owner = makeInventoryOwner({ collect, clock, epoch, waveTimeoutMs, readerTimeoutMs });
+  return { addr, ...owner, observeMetadata: observe,
+    hasAssetsPlus: async () => false,
+    objectInfo: async () => ({ types: null, enums: null, outputClasses: null }),
+    enqueue: async () => ({ ok: false, status: 400, error: "Local folder sources cannot generate images" }) };
+}
+
+export async function inventory(addr, { binding, ...options } = {}) {
+  if (binding) return binding(addr).inventory(options);
+  const owner = createBinding(addr);
+  try { return await owner.inventory(options); }
+  finally { await owner.disposeInventory(); }
 }
 
 // { stamp: mtime stringified, size } — the folder's whole revalidation seam.

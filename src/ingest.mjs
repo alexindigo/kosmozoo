@@ -6,7 +6,8 @@
 // demand. Revalidation is a method here (instance clock, no module globals).
 
 import { sha256 } from "./cache.mjs";
-import { backingFor, validEntryName } from "./backings/index.mjs";
+import { backingFor, validEntryName, makeCollectionLifecycle } from "./backings/index.mjs";
+import { cancelled } from "./backings/inventory.mjs";
 import { metaFromPngBytes, imageDims, parsePngTextChunks, EXTRACTOR_VERSION } from "./extractor.mjs";
 
 const DEFAULT_REVALIDATE_MS = 60_000;
@@ -31,13 +32,21 @@ export class Ingest {
   // goes to a high-class waiter — "the engine is busy" becomes latency on
   // background work, never an error on a user-visible image.
   #lanes = new Map(); // addr -> { high: [], low: [], inflight: 0 }
+  #capture;
+  #isCurrent;
 
-  constructor(store, hosts, { cache, revalidateMs = DEFAULT_REVALIDATE_MS }) {
+  constructor(store, hosts, { cache, revalidateMs = DEFAULT_REVALIDATE_MS, capture, isCurrent }) {
     this.#store = store;
     this.#hosts = hosts;
     this.#cache = cache;
     this.#revalidateMs = revalidateMs;
+    const lifecycle = capture && isCurrent ? null : makeCollectionLifecycle(hosts);
+    this.#capture = capture ?? lifecycle.capture;
+    this.#isCurrent = isCurrent ?? lifecycle.isCurrent;
   }
+
+  #assertCurrent(token) { if (!this.#isCurrent(token)) throw cancelled(); }
+  #cancelled() { return { status: 499, cancelled: true }; }
 
   #lane(addr) {
     let l = this.#lanes.get(addr);
@@ -67,10 +76,10 @@ export class Ingest {
   // A backing read through the gate. `flight` (when given) lets a
   // high-priority caller joining an existing single-flight upgrade the
   // queued read from the low lane to the high lane.
-  #readGated(addr, name, kind, opts, priority, flight = null) {
+  #readGated(addr, name, kind, opts, priority, flight = null, token = null) {
     const l = this.#lane(addr);
     return new Promise((resolve, reject) => {
-      const job = { fn: () => backingFor(addr).read(addr, name, kind, opts), resolve, reject };
+      const job = { fn: () => token && !this.#isCurrent(token) ? this.#cancelled() : backingFor(addr).read(addr, name, kind, opts), resolve, reject };
       l[priority].push(job);
       if (flight) {
         flight.upgrade = () => {
@@ -88,10 +97,13 @@ export class Ingest {
 
   // bytes → hash → cache → content (+extract when stale) → entry. Returns
   // the hash. `kind` is 'output' (extracted) or 'input' (never extracted).
-  async ingest(collection, name, kind, { bytes, stamp = null }) {
-    if (!validEntryName(this.#hosts[collection], name)) throw new TypeError("bad entry path");
+  async ingest(collection, name, kind, { bytes, stamp = null, token = this.#capture(collection) }) {
+    this.#assertCurrent(token);
+    if (!validEntryName(token.address, name)) throw new TypeError("bad entry path");
     const hash = await sha256(bytes);
+    this.#assertCurrent(token);
     await this.#cache.put(hash, bytes);
+    this.#assertCurrent(token);
     if (kind === "input") {
       this.#store.inputCachePut(collection, name, hash, stamp);
       return hash;
@@ -103,16 +115,18 @@ export class Ingest {
       changed: !!before?.hash && before.hash !== hash,
       dims,
     });
-    await this.#extractIfStale(collection, name, bytes);
+    await this.#extractIfStale(collection, name, bytes, token);
     return hash;
   }
 
   // Extraction staleness is decided HERE and only here.
-  async #extractIfStale(collection, name, bytes) {
+  async #extractIfStale(collection, name, bytes, token) {
+    this.#assertCurrent(token);
     const hash = this.#store.hashFor(collection, name);
     const cur = hash ? this.#store.contentGet(hash) : null;
     if (cur && cur.ext >= EXTRACTOR_VERSION) return;
     const [meta, hasWorkflow] = await metaFromPngBytes(bytes);
+    this.#assertCurrent(token);
     await this.#store.metaPut(collection, name, meta, { hasWorkflow, ext: EXTRACTOR_VERSION });
   }
 
@@ -122,14 +136,17 @@ export class Ingest {
   // write, no extract. status 404 means the source lost the file (the
   // prefetch acts on it exactly like pass 2 would).
   async dims(collection, name, kind = "output") {
-    if (!validEntryName(this.#hosts[collection], name)) return { status: 400, dims: null };
+    const token = this.#capture(collection), addr = token?.address;
+    if (!token || !this.#isCurrent(token)) return { ...this.#cancelled(), dims: null };
+    if (!validEntryName(addr, name)) return { status: 400, dims: null };
     const known = this.#store.entryDims(collection, name);
     if (known) return { status: 200, dims: known };
-    const addr = this.#hosts[collection];
     if (!addr) return { status: 404, dims: null };
-    const r = await this.#readGated(addr, name, kind, { range: [0, DIMS_HEAD_BYTES - 1] }, "low");
+    const r = await this.#readGated(addr, name, kind, { range: [0, DIMS_HEAD_BYTES - 1] }, "low", null, token);
+    if (!this.#isCurrent(token)) return { ...this.#cancelled(), dims: null };
     if (r.status !== 200 && r.status !== 206) return { status: r.status, dims: null };
     const bytes = new Uint8Array(await new Response(r.body).arrayBuffer());
+    if (!this.#isCurrent(token)) return { ...this.#cancelled(), dims: null };
     const dims = imageDims(bytes);
     if (dims) this.#store.entryDimsPut(collection, name, dims);
     return { status: r.status, dims };
@@ -142,16 +159,19 @@ export class Ingest {
   // the read gate serves it before background work.
   // Resolves { hash, bytes, status: 200 } or { status } (backing said no).
   async ensure(collection, name, kind = "output", { priority = "low" } = {}) {
-    if (!validEntryName(this.#hosts[collection], name)) return { status: 400 };
+    const token = this.#capture(collection);
+    if (!token || !this.#isCurrent(token)) return this.#cancelled();
+    if (!validEntryName(token?.address, name)) return { status: 400 };
     // \0-separated: plain concatenation collides ("ab","c" vs "a","bc")
-    const key = `${collection}\u0000${name}\u0000${kind}`;
+    const key = `${token.incarnation}\u0000${collection}\u0000${name}\u0000${kind}`;
     const existing = this.#inflight.get(key);
     if (existing) {
       if (priority === "high") existing.upgrade?.();
       return existing.promise;
     }
-    const flight = { priority, promise: null, upgrade: null };
+    const flight = { priority, promise: null, upgrade: null, token };
     const p = this.#ensureInner(collection, name, kind, flight)
+      .catch((error) => { if (error.code === "cancelled") return this.#cancelled(); throw error; })
       .finally(() => this.#inflight.delete(key));
     flight.promise = p;
     this.#inflight.set(key, flight);
@@ -159,20 +179,26 @@ export class Ingest {
   }
 
   async #ensureInner(collection, name, kind, flight) {
-    const addr = this.#hosts[collection];
+    const token = flight.token, addr = token.address;
     if (!addr) return { status: 404 };
     const info = kind === "input"
       ? this.#store.inputCacheGet(collection, name)
       : this.#store.fileInfo(collection, name);
     if (info?.hash && await this.#cache.has(info.hash)) {
+      if (!this.#isCurrent(token)) return this.#cancelled();
       const bytes = await this.#cache.get(info.hash);
+      if (!this.#isCurrent(token)) return this.#cancelled();
       if (bytes) return { hash: info.hash, bytes, status: 200 };
     }
-    const r = await this.#readGated(addr, name, kind, undefined, flight.priority, flight);
+    const r = await this.#readGated(addr, name, kind, undefined, flight.priority, flight, token);
+    if (!this.#isCurrent(token)) return this.#cancelled();
     if (r.status !== 200) return { status: r.status };
     const bytes = new Uint8Array(await new Response(r.body).arrayBuffer());
+    if (!this.#isCurrent(token)) return this.#cancelled();
     const stamp = (await backingFor(addr).stat(addr, name, kind))?.stamp ?? null;
-    const hash = await this.ingest(collection, name, kind, { bytes, stamp });
+    if (!this.#isCurrent(token)) return this.#cancelled();
+    const hash = await this.ingest(collection, name, kind, { bytes, stamp, token });
+    if (!this.#isCurrent(token)) return this.#cancelled();
     return { hash, bytes, status: 200 };
   }
 
@@ -202,21 +228,23 @@ export class Ingest {
   scheduleRevalidate(collection, name, { input = false } = {}) {
     if (!this.#hosts[collection]) return;
     if (!validEntryName(this.#hosts[collection], name)) return;
-    const key = `${input ? "in:" : ""}${collection}:${name}`;
+    const token = this.#capture(collection);
+    const key = `${token.incarnation}\u0000${input ? "in:" : ""}${collection}:${name}`;
     const now = Date.now();
     if (now - (this.#lastCheck.get(key) ?? 0) < this.#revalidateMs) return;
     this.#lastCheck.set(key, now);
-    this.revalidateNow(collection, name, { input }).catch(() => {});
+    this.revalidateNow(collection, name, { input, token }).catch(() => {});
   }
 
   // Exported for tests and the scheduler: compare the source stamp against
   // the recorded one; on mismatch re-read and remap. Same content with a
   // newer stamp (a touch) only refreshes the stamp.
-  async revalidateNow(collection, name, { input = false } = {}) {
-    const addr = this.#hosts[collection];
+  async revalidateNow(collection, name, { input = false, token = this.#capture(collection) } = {}) {
+    const addr = token?.address;
     if (!addr) return;
     if (!validEntryName(addr, name)) return;
     const stamp = (await backingFor(addr).stat(addr, name, input ? "input" : "output"))?.stamp ?? null;
+    if (!this.#isCurrent(token)) return this.#cancelled();
     if (stamp == null) return; // gone/unreachable — keep what we have
 
     const info = input
@@ -225,14 +253,16 @@ export class Ingest {
     if (!info) return;
     if (info.stamp != null && stamp === info.stamp) return; // unchanged
 
-    const r = await this.#readGated(addr, name, input ? "input" : "output", undefined, "low");
+    const r = await this.#readGated(addr, name, input ? "input" : "output", undefined, "low", null, token);
+    if (!this.#isCurrent(token)) return this.#cancelled();
     if (r.status !== 200) return; // unreadable right now — keep what we have
     const bytes = new Uint8Array(await new Response(r.body).arrayBuffer());
     const hash = await sha256(bytes);
+    if (!this.#isCurrent(token)) return this.#cancelled();
     if (!input && info.hash === hash) {
       this.#store.touchFileStamp(collection, name, stamp); // touch only
       return;
     }
-    await this.ingest(collection, name, input ? "input" : "output", { bytes, stamp });
+    await this.ingest(collection, name, input ? "input" : "output", { bytes, stamp, token });
   }
 }

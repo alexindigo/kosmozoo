@@ -4,6 +4,9 @@
 import { RENDERABLE, EXT_MIME } from "./mime.mjs";
 import { assertSafeName } from "./folder.mjs";
 import { isEntryPath, splitEntryPath, inventoryFolders } from "../entry-path.mjs";
+import { makeInventoryOwner } from "./inventory-owner.mjs";
+import { makeMetadataCollector, interpretHeaders } from "./comfy-metadata.mjs";
+import { InventoryError, bounded, cancelled } from "./inventory.mjs";
 
 const HOST_TIMEOUT_MS = 10_000;
 
@@ -60,11 +63,8 @@ export async function stat(addr, name, kind = "output") {
   try {
     const r = await fetch(viewUrl(addr, name, kind), { method: "HEAD", signal: AbortSignal.timeout(HOST_TIMEOUT_MS) });
     if (!r.ok) return null;
-    const etag = r.headers.get("ETag");
-    const lm = r.headers.get("Last-Modified");
-    const cl = r.headers.get("Content-Length");
-    const stamp = etag ?? (lm || cl ? `${lm}|${cl}` : null);
-    return stamp == null && cl == null ? null : { stamp, size: cl ? Number(cl) : null };
+    const { stamp, size } = interpretHeaders(r);
+    return stamp == null && size == null ? null : { stamp, size: Number.isNaN(size) ? null : size };
   } catch {
     return null;
   }
@@ -238,7 +238,7 @@ export function normalizeInventory(payload) {
     }
     entries.set(next.name, next);
   }
-  return [...entries.values()].sort((a, b) => b.mtime - a.mtime || (a.name < b.name ? -1 : a.name > b.name ? 1 : 0));
+  return [...entries.values()];
 }
 
 export function normalizeRootInventory(raw) {
@@ -300,29 +300,39 @@ export async function objectInfo(addr, cache = new Map()) {
 // ONE stateful client per address: the caches are instance state created by
 // the context, never module globals. Stateless I/O stays with the module
 // functions above.
-export function comfyClient(addr, { fetcher = fetch, clock = Date.now, epoch = crypto.randomUUID() } = {}) {
+export function comfyClient(addr, { fetcher = fetch, clock = () => performance.now(), epoch = crypto.randomUUID(),
+  waveTimeoutMs = 60_000, readerTimeoutMs = 120_000, requestTimeoutMs = HOST_TIMEOUT_MS } = {}) {
   const assetsPlus = new Map();
   const objectInfoCache = new Map();
   let disposed = false, config = null, configTask = null, recursiveKnown = false;
-  let requested = 1, published = 0, revision = 0, snapshot = null, scanTask = null, sampledAt = 0;
-  const lifecycle = new AbortController();
+  let owner, metadata;
   const assertAlive = () => { if (disposed) throw new Error("ComfyUI inventory owner removed"); };
-  const request = (path) => fetcher(`http://${addr}${path}`, {
-    signal: AbortSignal.any([lifecycle.signal, AbortSignal.timeout(HOST_TIMEOUT_MS)]),
-  });
-  async function discover() {
+  const request = (path, signal = owner.signal) => {
+    const timeout = new AbortController();
+    const combined = AbortSignal.any([owner.signal, signal, timeout.signal]);
+    return bounded(async () => {
+      const response = await fetcher(`http://${addr}${path}`, { signal: combined });
+      const payload = response.ok ? await response.json() : null;
+      if (!response.ok) response.body?.cancel().catch(() => {});
+      assertAlive();
+      return { status: response.status, ok: response.ok, payload };
+    }, { signal: combined, timeoutMs: requestTimeoutMs,
+      timeoutError: new InventoryError("discovery-timeout", `ComfyUI discovery deadline: ${path}`),
+      onTimeout: (error) => timeout.abort(error) });
+  };
+  async function discover(signal = owner.signal) {
     assertAlive();
     if (config && clock() - config.at < ASSETS_PLUS_TTL_MS) return config.value;
     if (configTask) return configTask;
     configTask = (async () => {
-      const r = await request("/api/assets_plus/config");
+      const r = await request("/api/assets_plus/config", signal);
       assertAlive();
       let value;
       if (r.status === 404 && !recursiveKnown) {
         value = { supported: false, reason: "AssetsPlus is unavailable; stock ComfyUI lists output root only" };
       } else {
         if (!r.ok) throw new Error(`ComfyUI inventory config: ${r.status}`);
-        const d = await r.json();
+        const d = r.payload;
         assertAlive();
         if (!d || typeof d.recursive !== "boolean" || !Array.isArray(d.allowed_extensions) ||
             d.allowed_extensions.some((x) => typeof x !== "string") ||
@@ -338,59 +348,77 @@ export function comfyClient(addr, { fetcher = fetch, clock = Date.now, epoch = c
     return configTask;
   }
 
-  async function scan() {
-    let support = await discover();
-    const rootResponse = await request("/internal/files/output");
+  async function membership(signal) {
+    let support = await discover(signal);
+    const rootResponse = await request("/internal/files/output", signal);
     if (!rootResponse.ok) throw new Error(`ComfyUI listing: ${rootResponse.status}`);
-    const roots = normalizeRootInventory(await rootResponse.json());
+    const roots = normalizeRootInventory(rootResponse.payload);
     assertAlive();
     if (support.supported) {
       // The native search runs before AssetsPlus opens images for metadata.
       // '/' matches every descendant and no root, so oversized root images
-      // cannot poison nested discovery. Roots retain stock visibility/order.
+        // cannot poison nested discovery. Root visibility stays stock-owned;
+        // publication order comes only from uniform HEAD observations.
       const query = new URLSearchParams({ recursive: "1", scan_depth: "-1", limit: "0", extensions: [...RENDERABLE].join(","), query: "/" });
-      const r = await request(`/api/assets_plus/output/list?${query}`);
+      const r = await request(`/api/assets_plus/output/list?${query}`, signal);
       assertAlive();
       if (r.status === 404 && !recursiveKnown) {
         support = { supported: false, reason: "AssetsPlus output listing is unavailable; stock output root only" };
         config = { at: clock(), value: support };
       } else {
         if (!r.ok) throw new Error(`ComfyUI inventory: ${r.status}`);
-        const nested = normalizeInventory(await r.json());
+        const nested = normalizeInventory(r.payload);
         if (nested.some(({ name }) => !name.includes("/"))) throw new Error("ComfyUI descendant inventory: unexpected root entry");
         const items = [...roots, ...nested];
         assertAlive();
         recursiveKnown = true;
-        return { coverage: "recursive", subfolders: support, folders: inventoryFolders(items), items };
+        return { coverage: "recursive", subfolders: support, items };
       }
     }
-    return { coverage: "root-only", subfolders: support, folders: [""], items: roots };
+    return { coverage: "root-only", subfolders: support, items: roots };
   }
 
-  function outputInventory({ maxAgeMs = 0 } = {}) {
-    assertAlive();
-    if (scanTask) return scanTask;
-    if (snapshot && published === requested && maxAgeMs > 0 && clock() - sampledAt < maxAgeMs) {
-      return Promise.resolve(snapshot);
-    }
-    scanTask = (async () => {
-      while (true) {
-        const generation = requested;
-        const result = await scan();
-        assertAlive();
-        // A finish during the scan invalidates its generation. Coalesce every
-        // such finish into a follow-up before any waiter consumes the result.
-        if (generation !== requested) continue;
-        snapshot = Object.freeze({ ...result, revision: `${epoch}:${++revision}`,
-          items: Object.freeze(result.items.map((item) => Object.freeze(item))),
-          folders: Object.freeze(result.folders), subfolders: Object.freeze(result.subfolders) });
-        published = generation;
-        sampledAt = clock();
-        return snapshot;
-      }
-    })().finally(() => { scanTask = null; });
-    return scanTask;
+  async function observeNames(names, { signal, deadlineMs }) {
+    const stop = new AbortController(), combined = AbortSignal.any([signal, stop.signal]);
+    const results = new Map(); let index = 0, failure = null;
+    const worker = async () => {
+      try {
+        while (!combined.aborted && index < names.length) {
+          const name = names[index++];
+          results.set(name, await metadata.observe(name, { signal: combined, deadlineMs }));
+        }
+      } catch (error) { failure ??= error; stop.abort(error); }
+    };
+    await Promise.allSettled(Array.from({ length: Math.min(4, names.length) }, worker));
+    if (failure || signal.aborted) throw failure ?? signal.reason ?? cancelled();
+    return results;
   }
+  async function collect({ signal, deadlineMs }) {
+    let listed = await membership(signal);
+    const discovered = new Set(listed.items.map((item) => item.name));
+    const results = await observeNames([...discovered], { signal, deadlineMs });
+    const firstMissing = [...results].filter(([, result]) => result.kind === "not-found").map(([name]) => name);
+    if (firstMissing.length) {
+      listed = await membership(signal);
+      for (const item of listed.items) discovered.add(item.name);
+      const added = listed.items.map((item) => item.name).filter((name) => !results.has(name));
+      for (const [name, result] of await observeNames(added, { signal, deadlineMs })) results.set(name, result);
+      const retry = listed.items.map((item) => item.name).filter((name) => results.get(name)?.kind === "not-found");
+      for (const [name, result] of await observeNames(retry, { signal, deadlineMs })) results.set(name, result);
+    }
+    const records = [], unavailable = [], current = new Set(listed.items.map((item) => item.name));
+    for (const item of listed.items) {
+      const result = results.get(item.name);
+      if (result?.kind === "present") records.push({ name: item.name, size: result.size ?? item.size, modified: result.modified });
+      else if (result?.kind === "not-found") unavailable.push({ name: item.name, reason: "confirmed-source-not-found", status: 404 });
+      else throw new InventoryError("incomplete-metadata", `No valid metadata for ${item.name}`, { path: item.name });
+    }
+    for (const name of firstMissing) if (!current.has(name)) unavailable.push({ name, reason: "not-found-after-reconcile", status: 404 });
+    return { records, discovered: [...discovered], unavailable, coverage: listed.coverage, subfolders: listed.subfolders };
+  }
+  owner = makeInventoryOwner({ collect, clock, epoch, waveTimeoutMs, readerTimeoutMs });
+  metadata = makeMetadataCollector({ urlFor: (name, kind) => viewUrl(addr, name, kind), fetcher, clock,
+    signal: owner.signal, requestTimeoutMs });
   const telemetry = async (path, signal) => {
     const timeout = AbortSignal.timeout(HOST_TIMEOUT_MS);
     const r = await fetcher(`http://${addr}${path}`, { signal: signal ? AbortSignal.any([signal, timeout]) : timeout });
@@ -400,16 +428,20 @@ export function comfyClient(addr, { fetcher = fetch, clock = Date.now, epoch = c
   const object = (v) => v && typeof v === "object" && !Array.isArray(v);
   return {
     addr,
-    inventory: outputInventory,
-    invalidateInventory() { if (!disposed) requested++; },
+    inventory(options) { assertAlive(); return owner.inventory(options); },
+    invalidateInventory: owner.invalidateInventory,
+    peekInventory: owner.peekInventory,
+    observeMetadata: (name, options) => metadata.observe(name, options),
+    inventoryDiagnostics: () => metadata.stats(),
     async subfolders() {
       try { return await discover(); }
       catch (error) { return { supported: recursiveKnown ? true : null, reason: error.message }; }
     },
-    disposeInventory() {
+    async disposeInventory() {
       disposed = true;
-      lifecycle.abort();
-      return Promise.allSettled([configTask, scanTask].filter(Boolean));
+      await owner.disposeInventory();
+      metadata.dispose();
+      await Promise.allSettled([configTask].filter(Boolean));
     },
     hasAssetsPlus: () => hasAssetsPlus(addr, assetsPlus),
     objectInfo: () => objectInfo(addr, objectInfoCache),
@@ -454,6 +486,8 @@ export function comfyClient(addr, { fetcher = fetch, clock = Date.now, epoch = c
     },
   };
 }
+
+export const createBinding = comfyClient;
 
 // Queue a prompt graph. Returns { ok, status, error? } — the caller owns
 // permutation-level error reporting. Failures log the host's FULL body to

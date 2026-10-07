@@ -111,6 +111,31 @@ try {
 
 // One filename that must 404, to drive the permanent-failure path.
 const MISSING = "missing-404.png";
+const fixtureTimes = new Map([...fixtures.keys()].map((name, i) => [name, (1_900_000_000 - i) * 1000]));
+
+// One stable per-file model, independent of enumeration/arrival order.
+function fileMetadata(name) {
+  if (mutableDir) {
+    try {
+      const s = statSync(join(mutableDir, name));
+      if (s.isFile()) return { timeMs: s.mtimeMs, size: s.size };
+    } catch (error) { if (error.code !== "ENOENT") throw error; }
+  }
+  const publishedFile = published.get(name);
+  const bulk = /^bulk-(\d{5})\.png$/.exec(name);
+  return {
+    timeMs: publishedFile ? publishedFile.mtime * 1000 : fixtureTimes.get(name) ??
+      (bulk ? (1_800_000_000 - Number(bulk[1])) * 1000 : 1_700_000_000_000),
+    size: (publishedFile ?? fixtures.get(name))?.bytes.length ?? (name === MISSING ? 0 : BULK_PNG.length),
+  };
+}
+
+function sourceHeaders(name, type = "image/png") {
+  const { timeMs, size } = fileMetadata(name);
+  const ns = BigInt(Math.trunc(timeMs)) * 1_000_000n;
+  return { "Content-Type": type, "Content-Length": String(size),
+    "Last-Modified": new Date(timeMs).toUTCString(), ETag: `"${ns.toString(16)}-${size.toString(16)}"` };
+}
 
 // full-read order for tests that assert drain priority (dims head reads are
 // excluded — they exercise the same file with a Range header)
@@ -142,9 +167,9 @@ function fileNames() {
 
 function fileList() {
   // Real ComfyUI suffixes each entry with " [size]"; the engine strips it.
-  return fileNames().map((name, index) => ({ name, mtime: published.get(name)?.mtime ?? 1_900_000_000 - index }))
+  return fileNames().map((name) => ({ name, ...fileMetadata(name) }))
     .filter(({ name }) => !name.includes("/"))
-    .sort((a, b) => b.mtime - a.mtime || a.name.localeCompare(b.name))
+    .sort((a, b) => b.timeMs - a.timeMs || (a.name < b.name ? -1 : a.name > b.name ? 1 : 0))
     .map(({ name: n }) => n + " [" +
     ((published.get(n) ?? fixtures.get(n))?.bytes.length ?? (n === MISSING ? 0 : BULK_PNG.length)) + "]");
 }
@@ -177,6 +202,7 @@ let running = [], pending = [], logs = [], failures = {}, delays = {};
 let extension = true, listOverride = null, publishRevision = 0;
 let captureEnqueue = false, enqueues = [];
 let metadataBombs = new Set(), assetsHidden = new Set();
+let headOverrides = {}, headDelayMs = 0;
 
 function publication(description) {
   const fixture = description.fixture === "bulk" ? { bytes: BULK_PNG, promptGraph: null }
@@ -210,6 +236,7 @@ export const server = Deno.serve({ port }, async (req) => {
       removed.clear(); publishedInputs.clear(); extension = true; listOverride = null; publishRevision = 0;
       captureEnqueue = false; enqueues = [];
       metadataBombs = new Set(); assetsHidden = new Set();
+      headOverrides = {}; headDelayMs = 0;
       running = []; pending = []; logs = []; failures = {}; delays = {};
     }
     if (body.running) running = [...body.running];
@@ -224,6 +251,8 @@ export const server = Deno.serve({ port }, async (req) => {
     if (body.captureEnqueue !== undefined) captureEnqueue = body.captureEnqueue;
     if (body.metadataBombs) metadataBombs = new Set(body.metadataBombs);
     if (body.assetsHidden) assetsHidden = new Set(body.assetsHidden);
+    if (body.headOverrides) headOverrides = body.headOverrides;
+    if (body.headDelayMs !== undefined) headDelayMs = body.headDelayMs;
     for (const name of body.remove ?? []) removed.add(name);
     for (const output of body.publish ?? []) {
       const fixture = publication(output);
@@ -280,9 +309,9 @@ export const server = Deno.serve({ port }, async (req) => {
     const recursive = !["0", "false", "False"].includes(url.searchParams.get("recursive") ?? "1");
     const depth = Number(url.searchParams.get("scan_depth") ?? -1);
     const extensions = new Set((url.searchParams.get("extensions") ?? "png,jpg,jpeg,webp").split(",").map((x) => x.replace(/^\./, "").toLowerCase()));
-    let items = fileNames().map((name, i) => ({ relpath: name, filename: name.split("/").at(-1),
-      size: (published.get(name) ?? fixtures.get(name))?.bytes.length ?? (name === MISSING ? 0 : BULK_PNG.length),
-      mtime: published.get(name)?.mtime ?? 1_900_000_000 - i, type: "image", has_workflow: false,
+    let items = fileNames().map((name) => ({ relpath: name, filename: name.split("/").at(-1),
+      size: fileMetadata(name).size,
+      mtime: Math.floor(fileMetadata(name).timeMs / 1000), type: "image", has_workflow: false,
     })).filter((item) => (recursive || !item.relpath.includes("/")) &&
       (depth < 0 || item.relpath.split("/").length - 1 <= depth) && extensions.has(item.relpath.split(".").pop().toLowerCase()));
     items.sort((a, b) => b.mtime - a.mtime || (a.relpath < b.relpath ? -1 : a.relpath > b.relpath ? 1 : 0));
@@ -378,6 +407,18 @@ export const server = Deno.serve({ port }, async (req) => {
     if (!isEntryPath(name) || removed.has(name)) return new Response("not found", { status: 404 });
     if (name === MISSING) return new Response("not found", { status: 404 });
     const head = req.method === "HEAD";
+    if (head) {
+      if (headDelayMs) await new Promise((resolve) => setTimeout(resolve, headDelayMs));
+      const override = headOverrides[name];
+      if (override?.status && override.status !== 200) return new Response(null, { status: override.status });
+      if (override) {
+        const headers = new Headers(sourceHeaders(name));
+        for (const [key, value] of Object.entries(override.headers ?? {})) {
+          if (value === null) headers.delete(key); else headers.set(key, value);
+        }
+        return new Response(null, { headers });
+      }
+    }
     if (!head && !req.headers.get("range")) readOrder.push(name);
     // aiohttp-style ETag: "<mtime_ns_hex>-<size_hex>" (the engine's stamp).
     const etag = (mtimeNs, size) => `"${mtimeNs.toString(16)}-${size.toString(16)}"`;
@@ -425,7 +466,6 @@ export const server = Deno.serve({ port }, async (req) => {
     }
     if (fixtures.has(name) || published.has(name)) {
       const bytes = (published.get(name) ?? fixtures.get(name)).bytes;
-      const stamp = etag(BigInt(published.get(name)?.mtime ?? 0), BigInt(bytes.length));
       // Real ComfyUI serves SVG (and sometimes everything) as octet-stream.
       const type = name.endsWith(".svg") ? "application/octet-stream" : "image/png";
       if (head) {
@@ -433,13 +473,13 @@ export const server = Deno.serve({ port }, async (req) => {
           headers: {
             "Content-Type": type,
             "Content-Length": String(bytes.length),
-            ETag: stamp,
+            ...sourceHeaders(name, type),
           },
         });
       }
       return ranged(req, bytes, {
         "Content-Type": type,
-        ETag: stamp,
+        ...sourceHeaders(name, type),
       });
     }
     if (/^bulk-\d{5}\.png$/.test(name)) {
@@ -448,13 +488,13 @@ export const server = Deno.serve({ port }, async (req) => {
           headers: {
             "Content-Type": "image/png",
             "Content-Length": String(BULK_PNG.length),
-            ETag: etag(0n, BigInt(BULK_PNG.length)),
+            ...sourceHeaders(name),
           },
         });
       }
       return ranged(req, BULK_PNG, {
         "Content-Type": "image/png",
-        ETag: etag(0n, BigInt(BULK_PNG.length)),
+          ...sourceHeaders(name),
       });
     }
     return new Response("not found", { status: 404 });

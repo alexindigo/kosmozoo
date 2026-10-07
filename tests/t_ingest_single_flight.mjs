@@ -82,3 +82,32 @@ Deno.test("ingest: extraction is decided by content.ext — stale re-extracts, c
   await server.shutdown();
   await rm(dir, { recursive: true });
 });
+// Chronology's collection-incarnation seam also protects pending byte commits.
+Deno.test("source incarnation: same-id/address reuse cannot join or commit an old full read while an alias survives", async () => {
+  const { mkStateRig } = await import("./helpers/rig.mjs");
+  const { assert, assertEquals } = await import("jsr:@std/assert");
+  const { readFile } = await import("node:fs/promises");
+  const png = await readFile(new URL("./fixtures/flux-basic.png", import.meta.url));
+  let release, reads = 0;
+  const gate = new Promise((resolve) => release = resolve);
+  const server = Deno.serve({ port: 0, hostname: "127.0.0.1" }, async (req) => {
+    if (req.method === "HEAD") return new Response(null, { headers: { ETag: '"same-size-opaque"' } });
+    reads++; if (reads === 1) await gate;
+    return new Response(png, { headers: { "Content-Type": "image/png" } });
+  });
+  const address = `127.0.0.1:${server.addr.port}`, hosts = { h: address, alias: address };
+  const rig = await mkStateRig("incarnation-bytes", { hosts });
+  rig.inventory.binding(address);
+  try {
+    const old = rig.ingest.ensure("h", "image.png");
+    for (let i = 0; i < 100 && reads === 0; i++) await new Promise((r) => setTimeout(r, 1));
+    assertEquals(reads, 1);
+    delete hosts.h; rig.inventory.reconcile(); rig.store.collectionRemove("h");
+    hosts.h = address; rig.inventory.reconcile(); rig.store.collectionAdd("h", address);
+    const current = await rig.ingest.ensure("h", "image.png", "output", { priority: "high" });
+    assertEquals(current.status, 200); assertEquals(reads, 2);
+    release(); const obsolete = await old;
+    assertEquals(obsolete.status, 499); assert(obsolete.cancelled);
+    assertEquals(rig.store.hashFor("h", "image.png"), current.hash);
+  } finally { release(); await server.shutdown(); await rig.close(); }
+});

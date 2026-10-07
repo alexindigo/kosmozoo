@@ -76,7 +76,7 @@ backing boundary. Hide-history matching also includes output type and directory.
 
 ### Output inventory and folder scope
 
-`?inventory=1` returns `{revision, coverage, subfolders, folders, entries}`.
+`?inventory=1` returns `{revision, generation, coverage, subfolders, folders, entries, unavailable, chronology}`.
 `revision` is an ephemeral address-owner epoch plus scan revision; `coverage` is
 `recursive` or `root-only`; `subfolders` is `{supported, reason}`. `folders`
 contains root `""` and every discovered image-directory ancestor. It is derived
@@ -89,25 +89,53 @@ filesystem-backed AssetsPlus descendant list using `recursive=1`, `scan_depth=-1
 `limit=0`, existing renderable extensions and `query=/`, without cursor/since/history.
 The slash query matches all descendants and excludes every canonical root before
 AssetsPlus's metadata inspection, so oversized root images cannot fail that scan.
-Root entries retain stock order/visibility and precede descending-mtime/path-sorted
-descendants; stock roots carry no source mtime. AssetsPlus-only hidden root files
+Discovery retains stock root visibility but never provider ordering. Roots and
+descendants use the same metadata-only HEAD Last-Modified authority, represented
+as `modified:{atMs,precisionMs:1000,source:"http-last-modified"}`. Flat folders retain
+filesystem `mtimeMs`, with `precisionMs:null` and source `filesystem-stat`.
+One common finalizer sorts the whole union newest-first, then exact canonical name
+using deterministic string comparison. Zero/pre-epoch times are valid; HTTP seconds
+are not exact subsecond generation order, and timestamps never come from ETag,
+history, observation time or cache maxima. AssetsPlus-only hidden root files
 remain visible, as explicitly approved; Kosmozoo's own hidden/gone overlay and
 AssetsPlus descendant hiding remain honored. Whole responses validate before publication;
 conflicting duplicates, malformed records and truncation are errors. Definitive
 extension absence permits explicit stock-root coverage with a disabled folder
 control. A known recursive host's outage/incompatible response cannot downgrade
 to root-only. Discovery is independent of the delete preference. Existing 10s
-network timeouts apply. Collection capability probes discover config separately
+request timeouts apply; complete discovery/metadata waves have a 60s deadline.
+Collection capability probes discover config separately
 from inventory scans.
 
-Context-owned Comfy address clients share config/scan flights and immutable
-snapshots across route, alias and worker readers. Explicit listing/refresh is
-fresh; background reads may reuse inventory within the existing 60s relist cadence.
-Completion invalidates once per address; invalidation during a scan coalesces a
-follow-up before publication. Last-address removal/shutdown aborts and fences late
-results; re-add gets a new owner. Folder drivers project their existing flat list.
+Context-owned address bindings for both drivers share immutable complete snapshots
+and the common generation owner. Comfy metadata uses four concurrent HEADs per
+owner, separate from the byte-read gate. Missing/invalid dates and HTTP/transport
+failures reject incomplete chronology and retain prior data. Listing-to-HEAD 404
+reconciles once and retries still-listed paths once; confirmed absences appear in
+`unavailable`, preserving raw addresses for folder options. Available entries all
+carry dates; `chronology:{order:"modified-desc",complete:true}` declares the contract.
+Only a fresh, current worker-owned availability check may mark an entry gone,
+bypassing cached dimensions/bytes. GET inventory schedules no such writes.
+
+Explicit listing/refresh is fresh; background reads may reuse accepted snapshots
+within the configured relist cadence, with zero new HEADs. Initial invalidation
+coalesces a frozen follow-up target; further invalidations remain pending without
+starving that reader. Reader completion is logically bounded to 120s, including
+ignored-abort transports. Last-address removal/shutdown fences late results;
+re-add gets a new epoch. Collection-incarnation tokens additionally protect async
+overlay, worker queues and Ingest dimension/full-read/stat/remap/stamp commits,
+including same-ID/address reuse while another alias survives. Byte single-flight/
+revalidation throttle keys include incarnation; content cache keys do not change.
+Prefetch relist counters acknowledge only the captured successful request; failed
+or concurrently newer requests remain pending with bounded retry.
 Listing schedules no ingestion writes; the existing worker/want paths acquire
 dimensions and bytes.
+
+The API overlay and browser folder/filter/judgment/known-size projections preserve
+the finalized sequence as subsequences. The store retains `modified` in both load
+and refresh without same-content enrichment restoring old dates. Single-entry GET
+may expose a date from the accepted snapshot or null, without initiating a scan;
+bytes HEAD remains cache/content metadata, not source chronology.
 
 Root browsing includes every discoverable output; selected folder includes its
 descendants by segment boundary, so `a` excludes `ab`. The SPA keeps complete
