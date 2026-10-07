@@ -24,9 +24,11 @@ function chromiumBin() {
   throw new Error(`no chromium build found under ${root}`);
 }
 
-const CHROME = chromiumBin();
-
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+
+function disconnected(message) {
+  return Object.assign(new Error(message), { code: "CDP_DISCONNECTED" });
+}
 
 function getJson(url) {
   return new Promise((resolve, reject) => {
@@ -40,7 +42,7 @@ function getJson(url) {
 
 class CDP {
   static async launch(port = 9333, { windowSize } = {}) {
-    const proc = spawn(CHROME, [
+    const proc = spawn(chromiumBin(), [
       "--headless=new", "--no-sandbox", "--disable-dev-shm-usage",
       "--disable-gpu", "--hide-scrollbars", "--mute-audio",
       // suites that emulate a viewport wider than the 800×600 default window
@@ -66,18 +68,57 @@ class CDP {
     throw new Error("chromium devtools endpoint did not come up");
   }
 
-  constructor(proc, wsUrl) {
+  constructor(proc, wsUrl, { closeTimeoutMs = 3000, killTimeoutMs = 3000 } = {}) {
     this.proc = proc;
     this.wsUrl = wsUrl;
     this.id = 0;
     this.pending = new Map();
+    this.closeTimeoutMs = closeTimeoutMs;
+    this.killTimeoutMs = killTimeoutMs;
+    this.terminal = null;
+    this.closing = false;
+    this.closeTask = null;
+    this.exit = null;
+    this.processError = null;
+    this.connectReject = null;
+    this.exitTask = new Promise((resolve) => {
+      const exited = (code, signal) => {
+        this.exit = { code, signal };
+        this.disconnect(disconnected(`browser exited (${code ?? signal})`));
+        resolve(this.exit);
+      };
+      proc.once("exit", exited);
+      proc.on("error", (error) => {
+        this.processError = error;
+        this.disconnect(error);
+      });
+      if (proc.exitCode !== null || proc.signalCode !== null) {
+        exited(proc.exitCode, proc.signalCode);
+      }
+    });
+  }
+
+  disconnect(error) {
+    this.terminal ??= error;
+    this.connectReject?.(error);
+    this.connectReject = null;
+    for (const request of this.pending.values()) request.reject(error);
+    this.pending.clear();
   }
 
   connect() {
+    if (this.terminal) return Promise.reject(this.terminal);
     return new Promise((resolve, reject) => {
+      this.connectReject = reject;
       this.ws = new WebSocket(this.wsUrl);
-      this.ws.onopen = () => resolve();
-      this.ws.onerror = (e) => reject(new Error("ws error"));
+      this.ws.onopen = () => {
+        this.connectReject = null;
+        if (this.terminal) reject(this.terminal);
+        else resolve();
+      };
+      const ended = (error) => { this.disconnect(error); reject(error); };
+      this.ws.onerror = () => ended(disconnected("CDP socket error"));
+      this.ws.onclose = () => ended(disconnected("CDP socket closed"));
       this.ws.onmessage = (ev) => {
         const msg = JSON.parse(ev.data);
         if (msg.id && this.pending.has(msg.id)) {
@@ -91,10 +132,14 @@ class CDP {
   }
 
   send(method, params = {}) {
+    if (this.terminal) return Promise.reject(this.terminal);
+    if (!this.ws || this.ws.readyState !== 1) return Promise.reject(disconnected("CDP socket is not open"));
+    if (this.closing && method !== "Browser.close") return Promise.reject(disconnected("browser is closing"));
     const id = ++this.id;
     return new Promise((resolve, reject) => {
       this.pending.set(id, { resolve, reject });
-      this.ws.send(JSON.stringify({ id, method, params }));
+      try { this.ws.send(JSON.stringify({ id, method, params })); }
+      catch (error) { this.pending.delete(id); reject(error); }
     });
   }
 
@@ -194,9 +239,46 @@ class CDP {
     await this.mouse("mouseReleased", x1, y1, { clickCount: 1, modifiers, buttons: 0 });
   }
 
-  async close() {
-    try { await this.send("Browser.close"); } catch { /* already gone */ }
-    try { this.proc.kill("SIGKILL"); } catch { /* fine */ }
+  waitForExit(timeoutMs) {
+    if (this.exit) return Promise.resolve(true);
+    return new Promise((resolve) => {
+      const timer = setTimeout(() => resolve(false), timeoutMs);
+      this.exitTask.then(() => { clearTimeout(timer); resolve(true); });
+    });
+  }
+
+  close() {
+    if (!this.closeTask) {
+      const previousError = this.terminal;
+      this.closing = true;
+      this.closeTask = this.shutdown(previousError);
+    }
+    return this.closeTask;
+  }
+
+  async shutdown(previousError) {
+    let closeError, forced = false;
+    // Observe the request immediately, but await the owned process, not a reply
+    // that Chromium may never deliver before closing its DevTools transport.
+    const request = this.send("Browser.close").catch((error) => { closeError = error; });
+    try {
+      if (!await this.waitForExit(this.closeTimeoutMs)) {
+        forced = true;
+        this.proc.kill("SIGKILL");
+        if (!await this.waitForExit(this.killTimeoutMs)) throw new Error("browser did not exit after shutdown fallback");
+      }
+      this.disconnect(disconnected("browser closed"));
+      await request;
+      if (previousError) throw previousError;
+      if (this.processError) throw this.processError;
+      if (closeError && closeError.code !== "CDP_DISCONNECTED") throw closeError;
+      if (this.exit.code !== 0 && !(forced && this.exit.signal === "SIGKILL")) {
+        throw new Error(`browser shutdown failed (${this.exit.code ?? this.exit.signal})`);
+      }
+    } finally {
+      this.disconnect(disconnected("browser closed"));
+      this.ws?.close();
+    }
   }
 }
 
