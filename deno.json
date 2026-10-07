@@ -1,5 +1,13 @@
 {
   "imports": {
+    "https://esm.sh/@babel/parser@^7.26.0?target=es2022": "https://esm.sh/@babel/parser@7.29.8/es2022/parser.mjs",
+    "https://esm.sh/@babel/parser@^7.29.7?target=es2022": "https://esm.sh/@babel/parser@7.29.8/es2022/parser.mjs",
+    "https://esm.sh/@babel/parser@^7.29.8?target=es2022": "https://esm.sh/@babel/parser@7.29.8/es2022/parser.mjs",
+    "https://esm.sh/baseline-browser-mapping@^2.11.12?target=es2022": "https://esm.sh/baseline-browser-mapping@2.11.20/es2022/baseline-browser-mapping.mjs",
+    "https://esm.sh/browserslist@^4.24.0?target=es2022": "https://esm.sh/browserslist@4.28.8/es2022/browserslist.mjs",
+    "https://esm.sh/caniuse-lite@^1.0.30001809/dist/unpacker/agents?target=es2022": "https://esm.sh/caniuse-lite@1.0.30001810/es2022/dist/unpacker/agents.mjs",
+    "https://esm.sh/electron-to-chromium@^1.5.402/versions?target=es2022": "https://esm.sh/electron-to-chromium@1.5.416/es2022/versions.mjs",
+    "https://esm.sh/babel-preset-solid@1.9.15": "https://esm.sh/babel-preset-solid@1.9.15/denonext/babel-preset-solid.mjs",
     "@db/sqlite": "jsr:@db/sqlite@0.13.0",
     "solid-js": "./client/vendor/solid/solid.mjs",
     "solid-js/store": "./client/vendor/solid/store.mjs",
