@@ -60,8 +60,8 @@ export async function loadCollections(store, env = Deno.env.toObject()) {
 }
 
 // Registry mutations persist to the collection table AND patch the live map.
-export function addCollection(store, map, name, address) {
-  store.collectionAdd(name, address);
+export function addCollection(store, map, name, address, attributes = {}) {
+  store.collectionAdd(name, address, attributes);
   map[name] = address;
 }
 
@@ -72,6 +72,19 @@ export function removeCollection(store, map, name) {
 
 const NAME_RE = /^[\w][\w.-]*$/;
 const ADDR_RE = /^[\w.-]+:\d+$/;
+
+// Source attributes have their own persistence boundary: no address/folder
+// validation or host probing for an edit to an existing source.
+export function validateAttributes(patch) {
+  if (!patch || typeof patch !== "object" || Array.isArray(patch)) return "source attributes must be an object";
+  for (const [key, value] of Object.entries(patch)) {
+    if (key !== "pinned" && key !== "autoRefresh") return `unknown source attribute: ${key}`;
+    if (typeof value !== "boolean") return `${key} must be a boolean`;
+  }
+  return null;
+}
+
+export const sourceAttributes = (record) => ({ pinned: !!record.pinned, autoRefresh: !!record.auto_refresh });
 
 // Validate a new collection: name grammar + address grammar; a folder
 // collection must name an existing directory (spec ).

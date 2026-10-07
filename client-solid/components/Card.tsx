@@ -123,7 +123,7 @@ export function Card(props) {
             </For>
             <IconButton
               icon={iconSvg("thumb-down")} variant="down" active={state().active.down}
-              title="thumbs down — hides (Unhide up top restores)"
+              title="thumbs down — hides when down-vote hides is enabled"
               onAction={() => store.actions.judgments.dispatch(props.entryId, { type: "toggle", field: "vote", value: "down" })}
             />
             <IconButton

@@ -11,7 +11,7 @@
 // Note: the store ROOT is not assignable (st.x = v is silently ignored) —
 // root-level replacement goes through setSt("x", v); nested paths assign.
 
-import { createSignal, createMemo, createEffect, on, onCleanup, createContext, useContext, untrack, batch } from "solid-js";
+import { createSignal, createMemo, createEffect, on, onCleanup, getOwner, createContext, useContext, untrack, batch } from "solid-js";
 import { createStore, reconcile } from "solid-js/store";
 import { api } from "/js/api.mjs";
 import { metaFromPngBytes } from "/shared/extractor.mjs";
@@ -42,10 +42,12 @@ function initialHost(hosts, stored) {
 // routes through this
 export const clampSplit = (v) => Math.min(0.8, Math.max(0.2, v));
 
-export function makeAppStore() {
+export function makeAppStore({ pollActivity = typeof window !== "undefined" } = {}) {
   // app data tree — engine-side state
   const [st, setSt] = createStore({
     hosts: {},            // name -> { address, kind, online, capabilities }
+    sourceActivity: {},   // engine-owned ephemeral snapshots, never persisted
+    sourceSaving: {},     // confirmed source-attribute writer's pending rows
     nodesRegistry: {},    // discovered node types (/api/nodes)
     scraper: null,        // { enabled, paused, pending: {host: n} }
     deletePrefs: { useAssetsPlus: true },
@@ -91,6 +93,20 @@ export function makeAppStore() {
 
   // scalar atoms
   const [host, setHost] = createSignal(null);
+  let sourceSession = null, selectionGeneration = 0, disposed = false;
+  const ownsSession = (s) => !!s && !disposed && sourceSession === s &&
+    host() === s.id && st.hosts[s.id]?.address === s.address;
+
+  function beginSourceSession(id) {
+    clearTimeout(sourceSession?.retryTimer);
+    clearTimeout(metaPollTimer);
+    wantSet.clear();
+    metaVersion = 0;
+    setSt("metaPending", 0);
+    sourceSession = { id, address: st.hosts[id]?.address, generation: ++selectionGeneration,
+      loading: true, requested: 0, completed: 0, refreshTask: null, retryTimer: null, errors: 0 };
+    return sourceSession;
+  }
   const [current, setCurrentSig] = createSignal(null); // { remote, image } | null
   const [currentStack, setCurrentStack] = createSignal([]); // trail, oldest first
   const [filter, setFilter] = createSignal("");
@@ -408,35 +424,44 @@ export function makeAppStore() {
     wantSet.add(image.filename);
   }
 
-  async function flushWant() {
-    if (!host()) return;
+  async function flushWant(s = sourceSession) {
+    if (!ownsSession(s)) return;
     const files = [...wantSet];
     wantSet.clear();
     if (!files.length) return;
     try {
-      const r = await api.want(host(), files);
+      const r = await api.want(s.id, files);
+      if (!ownsSession(s)) return;
       if (typeof r.pending === "number") {
         setSt("metaPending", r.pending);
-        if (r.pending > 0) scheduleMetaPoll();
+        if (r.pending > 0) scheduleMetaPoll(1000, s);
       }
     } catch { /* next sweep re-wants */ }
   }
 
-  function scheduleMetaPoll(delay = 5000) {
+  function scheduleMetaPoll(delay = 5000, s = sourceSession) {
+    if (!ownsSession(s)) return;
     clearTimeout(metaPollTimer);
-    metaPollTimer = setTimeout(pollMetadata, delay);
+    metaPollTimer = setTimeout(() => pollMetadata(s), delay);
   }
 
-  async function pollMetadata() {
-    if (!host()) return;
+  function pollMetadata(s = sourceSession) {
+    if (!ownsSession(s)) return Promise.resolve();
+    if (s.metaTask) return s.metaTask;
+    s.metaTask = readMetadata(s).finally(() => { s.metaTask = null; });
+    return s.metaTask;
+  }
+
+  async function readMetadata(s) {
     try {
-      const r = await api.meta(host(), metaVersion);
+      const r = await api.meta(s.id, metaVersion);
+      if (!ownsSession(s)) return;
       if (r.pending !== undefined) setSt("metaPending", r.pending);
       if (r.changed) {
         metaVersion = r.v;
         const byId = imageIdxById();
         for (const [name, meta] of Object.entries(r.items ?? {})) {
-          const idx = byId.get(`${host()}:${name}`);
+          const idx = byId.get(`${s.id}:${name}`);
           if (idx === undefined || st.images[idx].meta) continue;
           // meta patches never change geometry (size is listing data) — they
           // apply on arrival; the settle buffer is dead 
@@ -446,7 +471,7 @@ export function makeAppStore() {
         // after the listing loaded gets its width/height patched in — the
         // size-known view extends without a reload
         for (const [name, d] of Object.entries(r.dims ?? {})) {
-          const idx = byId.get(`${host()}:${name}`);
+          const idx = byId.get(`${s.id}:${name}`);
           if (idx === undefined || !d) continue;
           const img = st.images[idx];
           if (img.width && img.height) continue;
@@ -456,10 +481,10 @@ export function makeAppStore() {
         // the node registry grows as the engine extracts — refresh it
         // alongside so newly discovered node types materialize without a
         // reload (a fresh engine boots with an empty registry)
-        api.nodes().then((reg) => setSt("nodesRegistry", reg)).catch(() => {});
+        api.nodes().then((reg) => { if (ownsSession(s)) setSt("nodesRegistry", reg); }).catch(() => {});
       }
     } catch { /* transient; next poll retries */ }
-    if (st.metaPending > 0) scheduleMetaPoll();
+    if (ownsSession(s) && st.metaPending > 0) scheduleMetaPoll(1000, s);
   }
 
   // the scraper status poll (the menu row reads it) lives ONLY while ingest
@@ -510,6 +535,9 @@ export function makeAppStore() {
   });
 
   async function loadImages(name) {
+    const s = beginSourceSession(name);
+    const file = parseUrl().file;
+    const firstVisit = !location.hash;
     // a host switch must not leave the previous host's feed on screen —
     // and its per-entry error state dies with the list (id-keyed, cleared)
     // Compensation belongs to the outgoing feed, never the new feed's scroll.
@@ -519,9 +547,15 @@ export function makeAppStore() {
     window_.clear();
     if (!name) return;
     actions.status.active("load", `loading image list from ${name}…`);
+    const source = sourceRecords.get(name);
+    if (source && !source.target) await readActivity(source);
+    if (!ownsSession(s)) return;
+    const target = source?.target;
     const read = judgments.beginRead(name);
     try {
-      setSt("images", reconcile((await api.entries(name)).map((e) => ({
+      const entries = await api.entries(name);
+      if (!ownsSession(s)) return;
+      setSt("images", reconcile(entries.map((e) => ({
         // collection:name string keys exist only here, derived (plan )
         id: `${name}:${e.name}`, host: name, filename: e.name,
         size: e.size, hash: e.hash, state: e.state,
@@ -533,9 +567,8 @@ export function makeAppStore() {
       // the URL is adopted into current after every (re)fetch, then the feed
       // centers on it. Only a first visit with no hash at all invents a
       // current image (top card); a hash stripped to #host stays file-less.
-      const file = parseUrl().file;
       let idx = file ? findByFile(file) : -1;
-      if (idx < 0 && !location.hash) {
+      if (idx < 0 && firstVisit) {
         const first = view()[0];
         if (first != null) idx = first;
       }
@@ -549,8 +582,10 @@ export function makeAppStore() {
         mirrorCurrentHash();
       }
       wantRangeNow();
-      flushWant(); // the no-restore path has no scroll to settle the flush
-      await pollMetadata();
+      flushWant(s); // the no-restore path has no scroll to settle the flush
+      await pollMetadata(s);
+      if (!ownsSession(s)) return;
+      if (sourceRecords.get(name) === source && source) source.consumed = target;
       actions.status.clear("load");
       if (st.images.length === 0) {
         actions.status.info(`no output images on ${name}`);
@@ -562,10 +597,16 @@ export function makeAppStore() {
         actions.status.info(base + (hidden ? ` (${hidden} hidden)` : ""));
       }
     } catch (err) {
+      if (!ownsSession(s)) return;
       actions.status.clear("load");
       actions.status.error(`couldn't load images from ${name}: ${err?.message ?? err}`);
     } finally {
       judgments.endRead(read);
+      s.loading = false;
+      if (ownsSession(s)) {
+        if (source?.target && st.hosts[name]?.autoRefresh && !sameTarget(source.target, source.consumed)) requestRefresh(s);
+        else if (s.requested > s.completed) drainRefresh(s);
+      }
     }
   }
 
@@ -578,40 +619,83 @@ export function makeAppStore() {
   // merge; the feed's above-fold compensation (Grid's rule, fed by the
   // merge nonce) keeps the visible cards anchored across prepends.
   const [feedMergeNonce, setFeedMergeNonce] = createSignal(0);
-  async function refreshImages(name) {
-    if (!name) return;
+  async function refreshImages(s) {
+    if (!ownsSession(s)) return false;
+    const name = s.id;
     actions.status.active("load", `checking ${name} for new images…`);
     const read = judgments.beginRead(name);
     try {
       const prevIds = new Set(st.images.map((i) => i.id));
+      const before = new Map(st.images.map((i) => [i.id, { meta: i.meta, width: i.width, height: i.height }]));
       const entries = await api.entries(name);
+      if (!ownsSession(s)) return false;
       // ONE atomic write: the reconcile and the merge nonce land in a single
       // flush — the feed's compensation effect sees the post-merge list with
       // the pre-merge anchor (unbatched, the setSt pass re-anchors before
       // the nonce pass and the measured shift collapses to zero)
       batch(() => {
-        setSt("images", reconcile(entries.map((e) => ({
-          id: `${name}:${e.name}`, host: name, filename: e.name,
-          size: e.size, hash: e.hash, state: e.state,
-          meta: e.meta, extracted: e.extracted,
-          judgment: judgments.overlay(`${name}:${e.name}`, e.judgment, read),
-          width: e.width, height: e.height,
-        }))));
+        setSt("images", reconcile(entries.map((e) => {
+          const id = `${name}:${e.name}`, live = st.images[imageIdx(id)], start = before.get(id);
+          const sameContent = live && !(e.hash && live.hash && e.hash !== live.hash);
+          const enriched = sameContent ? live : null;
+          return {
+            id, host: name, filename: e.name,
+            size: e.size ?? enriched?.size ?? null, hash: e.hash ?? enriched?.hash ?? null, state: e.state,
+            meta: enriched?.meta && enriched.meta !== start?.meta ? enriched.meta : e.meta ?? enriched?.meta ?? null,
+            extracted: e.extracted || !!enriched?.extracted,
+            judgment: judgments.overlay(id, e.judgment, read),
+            width: enriched?.width && enriched.width !== start?.width ? enriched.width : e.width ?? enriched?.width ?? null,
+            height: enriched?.height && enriched.height !== start?.height ? enriched.height : e.height ?? enriched?.height ?? null,
+          };
+        })));
         setFeedMergeNonce((n) => n + 1);
       });
       judgments.endRead(read);
       wantRangeNow();
-      flushWant();
-      await pollMetadata();
+      for (const img of st.images) if (!img.width || !img.height) wantSet.add(img.filename);
+      flushWant(s);
+      await pollMetadata(s);
+      if (!ownsSession(s)) return false;
       actions.status.clear("load");
       const fresh = entries.filter((e) => !prevIds.has(`${name}:${e.name}`)).length;
       if (fresh > 0) actions.status.info(`${fresh} new image${fresh > 1 ? "s" : ""} from ${name}`);
+      return true;
     } catch (err) {
+      if (!ownsSession(s)) return false;
       actions.status.clear("load");
       actions.status.error(`couldn't refresh ${name}: ${err?.message ?? err}`);
+      return false;
     } finally {
       judgments.endRead(read);
     }
+  }
+
+  // Manual and completion requests share the same selected-source lane. Each
+  // successful read consumes only its captured target; a later finish leaves
+  // another pass pending. Neither navigation nor modals are part of this path.
+  function requestRefresh(s = sourceSession) {
+    if (!ownsSession(s)) return Promise.resolve();
+    s.requested++;
+    return drainRefresh(s);
+  }
+
+  function drainRefresh(s) {
+    if (!ownsSession(s) || s.loading) return Promise.resolve();
+    if (s.refreshTask) return s.refreshTask;
+    clearTimeout(s.retryTimer);
+    s.refreshTask = (async () => {
+      while (ownsSession(s) && s.requested > s.completed) {
+        const requested = s.requested, source = sourceRecords.get(s.id), target = source?.target;
+        if (!await refreshImages(s)) {
+          if (ownsSession(s)) s.retryTimer = setTimeout(() => drainRefresh(s), Math.min(1000 * 2 ** s.errors++, 30000));
+          break;
+        }
+        s.errors = 0;
+        s.completed = requested;
+        if (source && sourceRecords.get(s.id) === source) source.consumed = target;
+      }
+    })().finally(() => { s.refreshTask = null; });
+    return s.refreshTask;
   }
 
   // --- deletion --------------------------------------------------------------------
@@ -920,8 +1004,101 @@ export function makeAppStore() {
   // wire shape → store shape; capabilities.delete drives the affordances
   const toHosts = (colls) => Object.fromEntries(Object.entries(colls ?? {}).map(([n, c]) => [n, {
     address: c.address, kind: c.kind, online: c.online,
+    pinned: !!c.pinned, autoRefresh: !!c.autoRefresh,
     capabilities: c.capabilities ?? null,
   }]));
+
+  const sourceRecords = new Map();
+  let registryRevision = 0, collectionRead = 0, activityStarted = false;
+  const sameTarget = (a, b) => !!a && !!b && a.epoch === b.epoch &&
+    a.terminalRevision === b.terminalRevision && a.resyncRevision === b.resyncRevision;
+
+  function reconcileSources() {
+    for (const [id, record] of sourceRecords) {
+      if (st.hosts[id]?.address === record.address && st.hosts[id]) continue;
+      clearTimeout(record.timer);
+      sourceRecords.delete(id);
+      setSt("sourceActivity", id, undefined);
+      setSt("sourceSaving", id, undefined);
+    }
+    for (const [id, source] of Object.entries(st.hosts)) {
+      if (sourceRecords.has(id)) continue;
+      const record = { id, address: source.address, writes: 0, revision: 0,
+        writeTask: Promise.resolve(), task: null, timer: null, errors: 0, target: null, consumed: null };
+      sourceRecords.set(id, record);
+      if (activityStarted && pollActivity) scheduleActivity(record, 0);
+    }
+  }
+
+  async function refreshHosts() {
+    const sequence = ++collectionRead, revision = registryRevision;
+    const stamps = new Map([...sourceRecords].map(([id, r]) => [id, { record: r, revision: r.revision }]));
+    const response = await api.collections();
+    if (disposed || sequence !== collectionRead || revision !== registryRevision) return;
+    const next = toHosts(response);
+    for (const [id, source] of Object.entries(next)) {
+      const record = sourceRecords.get(id), stamp = stamps.get(id);
+      if (record && (record !== stamp?.record || record.revision !== stamp.revision || record.writes)) {
+        source.pinned = st.hosts[id].pinned;
+        source.autoRefresh = st.hosts[id].autoRefresh;
+      }
+    }
+    setSt("hosts", reconcile(next));
+    reconcileSources();
+  }
+
+  function scheduleActivity(record, delay = 2000) {
+    clearTimeout(record.timer);
+    if (disposed || sourceRecords.get(record.id) !== record) return;
+    record.timer = setTimeout(() => readActivity(record), delay);
+  }
+
+  function readActivity(record) {
+    if (!record || disposed || sourceRecords.get(record.id) !== record) return Promise.resolve();
+    if (record.task) return record.task;
+    clearTimeout(record.timer);
+    const revision = record.revision;
+    record.task = (async () => {
+      try {
+        const snapshot = await api.activity(record.id);
+        if (disposed || sourceRecords.get(record.id) !== record) return;
+        record.errors = 0;
+        if (revision === record.revision && !record.writes) {
+          setSt("hosts", record.id, "pinned", !!snapshot.pinned);
+          setSt("hosts", record.id, "autoRefresh", !!snapshot.autoRefresh);
+        }
+        setSt("sourceActivity", record.id, reconcile(snapshot));
+        if (snapshot.supported && snapshot.epoch && snapshot.state !== "unknown") {
+          const target = { epoch: snapshot.epoch, terminalRevision: snapshot.terminalRevision, resyncRevision: snapshot.resyncRevision };
+          const first = !record.target, changed = !sameTarget(record.target, target);
+          record.target = target;
+          const selectedHere = ownsSession(sourceSession) && sourceSession.id === record.id;
+          const alreadyLoaded = selectedHere && !sourceSession.loading;
+          // Unknown startup telemetry cannot baseline a completed listing.
+          // If the first known sample arrives afterward, read fresh before
+          // consuming it; history baseline jobs need not become new finishes.
+          if (first && !alreadyLoaded) record.consumed = target;
+          if (changed && (!first || alreadyLoaded) && st.hosts[record.id]?.autoRefresh && selectedHere) requestRefresh(sourceSession);
+        }
+      } catch (error) {
+        if (disposed || sourceRecords.get(record.id) !== record) return;
+        record.errors++;
+        setSt("sourceActivity", record.id, { supported: true, state: "disconnected", progress: null, error: error.message });
+      } finally {
+        record.task = null;
+        if (activityStarted && pollActivity) scheduleActivity(record, Math.min(2000 * 2 ** record.errors, 30000));
+      }
+    })();
+    return record.task;
+  }
+
+  function dispose() {
+    disposed = true;
+    clearTimeout(metaPollTimer);
+    clearTimeout(sourceSession?.retryTimer);
+    for (const record of sourceRecords.values()) clearTimeout(record.timer);
+  }
+  if (getOwner()) onCleanup(dispose);
 
   // the loaded collection's record — the delete affordances read
   // capabilities.delete from HERE, never a derived mirror : indexing
@@ -950,7 +1127,9 @@ export function makeAppStore() {
     // api.hosts is deliberately not caught — a failed host list fails the
     // whole boot (the caller surfaces it).
     async boot() {
-      setSt("hosts", reconcile(toHosts(await api.collections())));
+      await refreshHosts();
+      activityStarted = true;
+      if (pollActivity) for (const record of sourceRecords.values()) scheduleActivity(record, 0);
       const ui = await api.settings("core.ui").catch(() => ({}));
       setSt("ui", ui);
       // persisted info-panel split hydrates the uiSt tree the details pane
@@ -999,7 +1178,8 @@ export function makeAppStore() {
         if (!name || !addr) return { ok: false };
         try {
           await api.addCollection(name, addr);
-          setSt("hosts", reconcile(toHosts(await api.collections())));
+          registryRevision++;
+          await refreshHosts();
           return { ok: true };
         } catch {
           return { ok: false };
@@ -1008,7 +1188,13 @@ export function makeAppStore() {
       async remove(name) {
         try {
           await api.removeCollection(name);
-          setSt("hosts", reconcile(toHosts(await api.collections())));
+          registryRevision++;
+          clearTimeout(sourceRecords.get(name)?.timer);
+          sourceRecords.delete(name);
+          setSt("hosts", name, undefined);
+          setSt("sourceActivity", name, undefined);
+          setSt("sourceSaving", name, undefined);
+          await refreshHosts();
           if (host() === name) {
             await actions.hosts.select(Object.keys(st.hosts)[0] ?? null);
           }
@@ -1016,6 +1202,37 @@ export function makeAppStore() {
       },
       toggleMenu() { setHostMenuOpen(!hostMenuOpen()); },
       closeMenu() { setHostMenuOpen(false); },
+      refresh: refreshHosts,
+      pollActivity(id) { return readActivity(sourceRecords.get(id)); },
+      patch(id, patch) {
+        const record = sourceRecords.get(id);
+        if (!record) return Promise.resolve({ ok: false });
+        const savedPatch = { ...patch };
+        record.revision++;
+        record.writes++;
+        setSt("sourceSaving", id, true);
+        const task = record.writeTask.then(async () => {
+          if (sourceRecords.get(id) !== record || disposed) return { ok: false };
+          try {
+            const saved = await api.patchCollection(id, savedPatch);
+            if (sourceRecords.get(id) !== record || disposed) return { ok: false };
+            batch(() => {
+              setSt("hosts", id, "pinned", !!saved.pinned);
+              setSt("hosts", id, "autoRefresh", !!saved.autoRefresh);
+            });
+            record.revision++;
+            return { ok: true };
+          } catch (error) {
+            if (sourceRecords.get(id) === record && !disposed) actions.status.error(`source ${id} save failed: ${error.message}`);
+            return { ok: false };
+          } finally {
+            record.writes--;
+            if (sourceRecords.get(id) === record && !record.writes) setSt("sourceSaving", id, undefined);
+          }
+        });
+        record.writeTask = task;
+        return task;
+      },
     },
 
     images: {
@@ -1023,11 +1240,14 @@ export function makeAppStore() {
       delete(images) { return deleteImages(images); },
       // byte size isn't in every host's listing — a HEAD on the bytes route fills it
       async fillSize(id) {
+        const s = sourceSession;
         const idx = imageIdx(id);
         if (idx < 0 || st.images[idx].size != null) return;
         const img = st.images[idx];
+        const hash = img.hash;
         const size = await api.entrySizeProbe(img.host, img.filename);
-        if (size != null) setSt("images", idx, "size", size);
+        const resolved = imageIdx(id);
+        if (ownsSession(s) && resolved >= 0 && st.images[resolved].hash === hash && size != null) setSt("images", resolved, "size", size);
       },
       // download via a transient anchor (plain download — the "saved"
       // indicator was removed with the feature, Q3)
@@ -1130,8 +1350,11 @@ export function makeAppStore() {
       toggleMenu() { setMenuOpen(!menuOpen()); },
       closeMenu() { setMenuOpen(false); },
       async refresh() {
-        setSt("hosts", reconcile(toHosts(await api.collections())));
-        if (host()) await refreshImages(host());
+        const s = sourceSession;
+        try {
+          await refreshHosts();
+          if (ownsSession(s)) await requestRefresh(s);
+        } catch (error) { if (ownsSession(s)) actions.status.error(`couldn't refresh sources: ${error.message}`); }
       },
       setWorkspace(space) {
         if (workspace() === space) return;
@@ -1614,7 +1837,7 @@ export function makeAppStore() {
       async deleteAssetsPlus(on) {
         await api.setSettings("core.delete", { useAssetsPlus: on }).catch(() => {});
         setSt("deletePrefs", { ...st.deletePrefs, useAssetsPlus: on });
-        setSt("hosts", reconcile(toHosts(await api.collections()))); // capabilities.delete depends on the toggle
+        await refreshHosts(); // capabilities.delete depends on the toggle
       },
     },
   };
@@ -1626,6 +1849,8 @@ export function makeAppStore() {
     featureBulkActions: () => registeredFeatures.flatMap((f) =>
       (f.bulkAction ? [{ ...f.bulkAction, onAction: () => f.bulkAction.onAction({ state: stateObj, actions }) }] : [])),
     get hosts() { return st.hosts; },
+    get sourceActivity() { return st.sourceActivity; },
+    get sourceSaving() { return st.sourceSaving; },
     get nodesRegistry() { return st.nodesRegistry; },
     get scraper() { return st.scraper; },
     get deletePrefs() { return st.deletePrefs; },
@@ -1703,7 +1928,7 @@ export function makeAppStore() {
     get infoGroups() { return uiSt.infoGroups; },
   };
 
-  return { state: stateObj, actions, ui: uiStateObj };
+  return { state: stateObj, actions, ui: uiStateObj, dispose };
 }
 
 export const AppStoreContext = createContext(null);

@@ -33,9 +33,11 @@ the resources; a collection's `capabilities` answer what its backing can do.
 
 | Route | Methods | Notes |
 |---|---|---|
-| `/api/collections` | GET | configured collections, online probe, `kind`, `capabilities` (`list`/`read`/`add`/`delete` ∈ `trash`/`unlink`/`hide`, `rename`) |
-| `/api/collections` | POST | add a source-backed collection `{name, address}` |
+| `/api/collections` | GET | configured collections, online probe, `kind`, `pinned`/`autoRefresh` booleans, `capabilities` (`list`/`read`/`add`/`delete` ∈ `trash`/`unlink`/`hide`, `rename`) |
+| `/api/collections` | POST | add a source-backed collection `{name, address, pinned?, autoRefresh?}`; flags default false; repeating the same name/address preserves existing flags; different address is 409 |
+| `/api/collections/<id>` | PATCH | partial `{pinned?: boolean, autoRefresh?: boolean}`; validates the complete object before writing; invalid fields/types/null/arrays/malformed JSON are 400, unknown source is 404, empty object is a no-op; returns saved booleans without host/folder probing |
 | `/api/collections/<id>` | DELETE | remove; refuses the last collection |
+| `/api/collections/<id>/activity` | GET | cached engine-owned activity plus canonical flags; never probes a host; unknown source is 404; folders return `supported:false` and a reason |
 | `/api/collections/<id>/entries` | GET | the feed listing: size, hash, state, meta, judgment, and dims — `COALESCE(content, entry)`, so an entry the dims pass reached carries width/height before it has a hash. Gone entries are excluded. `?kind=input` lists the input dir instead |
 | `/api/collections/<id>/entries/<name>` | GET | one entry |
 | `/api/collections/<id>/entries` | POST | multipart upload into the input dir; **409 with the conflicting name, never an overwrite** |
@@ -85,6 +87,75 @@ extensions (png, jpg, jpeg, webp, gif, svg, avif, bmp), newest-first by
 mtime, basename-only (no subdirectories, no traversal); its bytes come
 straight from disk; the PNG extraction pipeline applies unchanged. A
 non-directory `folder:` address is rejected at add time (400 with reason).
+
+### Source activity and chrome
+
+`Jobs` is context-owned; one single-flight read loop per distinct Comfy address
+observes all sources, including unselected/unpinned ones. Aliases share runtime
+activity and upstream reads, but their SQLite pin/refresh flags are independent.
+Runtime registration reconciles address references; removal of the last alias
+aborts its reads. Re-add has a fresh epoch. `start:false` starts no timers;
+shutdown stops/aborts monitoring. Cadence is 2s active/queued, 5s idle, failure
+backoff capped at 30s. Folder sources invoke no generation telemetry.
+
+The backing uses GET `/api/queue`, retained/targeted `/api/history` and best-effort
+`/internal/logs/raw`, with the existing 10s timeout plus an owner abort signal.
+Queue/history failures are not empty results. No graph, submitting client ID,
+arbitrary raw log or direct browser-to-Comfy connection crosses the activity API.
+
+Supported snapshots contain `epoch`, `state` (`unknown`, `idle`, `running`,
+`disconnected`), `sampledAt`, `runningCount`, `queuedCount`, `runningPromptId`,
+`progress` (null or `{value,max,fraction}`), `terminalRevision`, `resyncRevision`,
+`historyGap` and `error`. Before successful observation the state is unknown.
+Counters are best-effort **current-operation** progress, not workflow percentage
+or proof that outputs finished saving. Log snapshots are associated only with
+bracketed stable prompt identity and content continuity; stale/ambiguous counters
+are indeterminate, and disconnect/idle/prompt replacement clears fill. A slow
+unchanged operation count remains valid. Transfer-byte counters are excluded.
+
+Startup establishes full retained-history baseline without replaying old finishes.
+Regular history reads start at 64 and expand until the previous completion
+boundary is found or retained history is exhausted. Distinct terminal IDs advance
+the revision, including jobs entirely between polls, error/interruption and jobs
+without outputs. Vanished queue identities remain unresolved until targeted
+history proves terminal execution. Terminal evidence wins over stale queue data.
+Recovery/coverage gaps request freshness catch-up, without inventing successful
+jobs whose history was erased before observation. Stock APIs cannot supply a
+lossless audit of erased history or pending jobs submitted/deleted between samples.
+
+Saved `autoRefresh` requests a prefetch relist on terminal/catch-up notifications;
+the existing worker discovers outputs and runs dimension/ingestion passes,
+honoring its pause/politeness behavior. Entry GETs remain side-effect-free.
+The browser polls cached activity independently of metadata work, with per-source
+single-flight/backoff and lifecycle fences. Enabled-source completion and manual
+refresh use one selected-session incremental merge lane; completions during a
+read leave a follow-up pending, and failures retain the target for retry.
+The first known activity snapshot is coordinated with initial feed loading;
+unknown startup telemetry is not consumed as a baseline. If the feed loaded
+first, known activity requests freshness catch-up without replaying old history
+as new terminal jobs. Inactive sources never steal focus or write the selected
+feed. Load/metadata/want/size results are source-session-owned, including A→B→A
+navigation. Judgment read protection, newer same-content enrichment, keyed editing
+nodes, viewport anchors, bulk selection, URL/current/trail, notes, zoom, anchors
+and workbench state survive incremental arrivals. Unknown-size arrivals are
+wanted and acquire real dimensions. Grid rendering uses entry-ID strings, with
+current measurement sizes resolved separately; replacing measurement objects
+does not remount retained cards.
+
+Feed-side topbar order: logo/wordmark, refresh icon, dropdown, pinned sources,
+flexible space, filename filter. Pinned buttons forward the dropdown's selection
+action; circles are grey idle, filled SVG sectors for available counters, distinct
+active outlines when indeterminate, and warning/unknown treatments without stale
+fill. Source-row pin and auto-refresh toggles save independently without selecting
+or closing the dropdown. Folder refresh controls are disabled with an explicit
+reason; pinned folders have a grey circle labelled with their no-generation reason.
+The filter opens/focuses immediately left of its icon; click/Escape collapses
+without clearing its query. Header owns a separate split synchronized through
+the existing store-owned pane width, with scoped bounds matching the main pane
+and its adjacent divider/bar footprint. Main composition and its layout styles
+are unchanged; the filter follows the actual feed edge. Unhide/Hide up-voted
+chrome buttons are removed; their session visibility actions and judgment
+preferences remain available to existing non-chrome consumers.
 
 Static surfaces: `/shared/<name>` serves the allow-listed `src/` modules
 (`extractor.mjs`, `features/variations/shared.mjs`) to the browser;
@@ -181,7 +252,7 @@ working tree is never a state dir. Env overrides: `KOZMOZOO_PORT` (default
 `KOZMOZOO_FEEDBACK` (migration import only), `KOZMOZOO_CACHE`,
 `KOZMOZOO_PLUGINS`, `KOZMOZOO_REVALIDATE_MS`.
 
-### Schema (`metadata.db`, `PRAGMA user_version = 8`, ordered migrations)
+### Schema (`metadata.db`, `PRAGMA user_version = 9`, ordered migrations)
 
 Content is what the bytes are; a collection is a namespace of names backed
 by a host or folder; an entry is one instance's state in one collection.
@@ -201,7 +272,9 @@ CREATE TABLE collection (
   kind TEXT NOT NULL,             -- 'comfy' | 'folder' | 'virtual'
   address TEXT,                   -- host:port | folder:/abs/path | null
   link TEXT,                      -- virtual → backing collection (future)
-  created_at REAL NOT NULL
+  created_at REAL NOT NULL,
+  pinned INTEGER NOT NULL DEFAULT 0 CHECK (pinned IN (0, 1)),
+  auto_refresh INTEGER NOT NULL DEFAULT 0 CHECK (auto_refresh IN (0, 1))
 );
 CREATE TABLE entry (
   collection TEXT NOT NULL REFERENCES collection(id) ON DELETE CASCADE,
@@ -230,6 +303,11 @@ Migrations are ordered and idempotent. v6→v7 folds `metadata`/`files`/
 tables. A separate one-shot import folds `feedback.json` v1 into entry
 judgment columns (§Judgments below).
 v7→v8 adds the nullable `bookmark` column without changing existing judgments.
+v8→v9 transactionally adds the source flag columns, checking existing columns
+so a partial/version-write interrupted migration can be retried. Source flags
+are canonical SQLite attributes, shared by browsers and retained across restarts;
+they are not engine settings or browser convenience storage. Runtime activity
+and revision epochs are ephemeral and never persisted.
 
 ### Cache (`~/.local/share/kosmozoo/cache/`, override `KOZMOZOO_CACHE`)
 

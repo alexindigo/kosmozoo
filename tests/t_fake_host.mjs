@@ -86,3 +86,35 @@ Deno.test("bulk mode serves generated images", async () => {
 addEventListener("unload", () => {
   try { child.kill("SIGTERM"); } catch { /* already gone */ }
 });
+
+Deno.test("fake telemetry: external jobs, overwritten logs, targeted terminal history and real named output bytes", async () => {
+  const control = async (body) => {
+    const r = await fetch(`${BASE}/__test/activity`, { method: "POST", body: JSON.stringify(body) });
+    assertEquals(r.status, 200); return r.json();
+  };
+  try {
+    await control({ running: ["external"], pending: ["queued"], logs: [{ t: 1, m: "0/40\r" }] });
+    const queue = await (await fetch(`${BASE}/api/queue`)).json();
+    assertEquals(queue.queue_running[0][1], "external");
+    assertEquals(queue.queue_running[0][3].client_id, "external-fixture-client");
+    await control({ logs: [{ t: 1, m: "1/40\r" }] });
+    assertEquals(await (await fetch(`${BASE}/internal/logs/raw`)).json(), { entries: [{ t: 1, m: "1/40\r" }], size: 1 });
+    await control({ finish: [{ id: "external", outcome: "error", output: "arrived.png" }] });
+    const history = await (await fetch(`${BASE}/api/history/external`)).json();
+    assertEquals(history.external.status.status_str, "error");
+    assertEquals(Object.keys(await (await fetch(`${BASE}/api/history?max_items=1`)).json()), ["external"]);
+    const list = await (await fetch(`${BASE}/internal/files/output`)).json();
+    assert(list[0].startsWith("arrived.png ["));
+    const get = await fetch(`${BASE}/api/view?type=output&filename=arrived.png`);
+    const bytes = new Uint8Array(await get.arrayBuffer());
+    assertEquals([...bytes.subarray(0, 4)], [137, 80, 78, 71]);
+    const head = await fetch(`${BASE}/api/view?type=output&filename=arrived.png`, { method: "HEAD" });
+    assertEquals(Number(head.headers.get("content-length")), bytes.length);
+    const enqueue = await fetch(`${BASE}/api/prompt`, { method: "POST", body: "{}" });
+    assertEquals(enqueue.status, 404); await enqueue.arrayBuffer();
+    await control({ clearHistory: true, failures: { queue: 503 } });
+    assertEquals(await (await fetch(`${BASE}/api/history`)).json(), {});
+    const fail = await fetch(`${BASE}/api/queue`);
+    assertEquals(fail.status, 503); await fail.arrayBuffer();
+  } finally { await control({ reset: true }); }
+});

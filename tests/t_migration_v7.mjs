@@ -32,6 +32,7 @@ Deno.test("migration v7: tables folded, old tables dropped, idempotent", async (
     assertEquals(store.collectionGet("a"), {
       id: "a", kind: "comfy", address: "1.2.3.4:8188", link: null,
       created_at: store.collectionGet("a").created_at,
+      pinned: 0, auto_refresh: 0,
     });
     assertEquals(store.collectionGet("b").kind, "folder");
     assertEquals(store.collectionGet("b").address, "folder:/var/images");
@@ -95,7 +96,7 @@ Deno.test("migration v7: tables folded, old tables dropped, idempotent", async (
     // the old tables are gone and the fold is idempotent on re-open
     const raw = new Database(join(dir, "metadata.db"));
     const [ver] = raw.prepare("PRAGMA user_version").value();
-    assertEquals(ver, 8);
+    assertEquals(ver, 9);
     const tables = raw.prepare("SELECT name FROM sqlite_master WHERE type = 'table' ORDER BY name").all().map((r) => r.name);
     assert(tables.includes("content") && tables.includes("collection") && tables.includes("entry") && tables.includes("kv"));
     for (const old of ["metadata", "files", "images", "input_cache"]) {

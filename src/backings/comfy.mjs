@@ -241,14 +241,59 @@ export async function objectInfo(addr, cache = new Map()) {
 // ONE stateful client per address: the caches are instance state created by
 // the context, never module globals. Stateless I/O stays with the module
 // functions above.
-export function comfyClient(addr) {
+export function comfyClient(addr, { fetcher = fetch } = {}) {
   const assetsPlus = new Map();
   const objectInfoCache = new Map();
+  const telemetry = async (path, signal) => {
+    const timeout = AbortSignal.timeout(HOST_TIMEOUT_MS);
+    const r = await fetcher(`http://${addr}${path}`, { signal: signal ? AbortSignal.any([signal, timeout]) : timeout });
+    if (!r.ok) throw new Error(`ComfyUI telemetry ${path}: ${r.status}`);
+    return r.json();
+  };
+  const object = (v) => v && typeof v === "object" && !Array.isArray(v);
   return {
     addr,
     hasAssetsPlus: () => hasAssetsPlus(addr, assetsPlus),
     objectInfo: () => objectInfo(addr, objectInfoCache),
     enqueue: (prompt) => enqueue(addr, prompt),
+    async queue({ signal } = {}) {
+      const d = await telemetry("/api/queue", signal);
+      const ids = (rows) => {
+        if (!Array.isArray(rows) || rows.some((r) => !Array.isArray(r) || typeof r[1] !== "string" || !r[1])) {
+          throw new Error("ComfyUI queue: invalid prompt identities");
+        }
+        return rows.map((r) => r[1]);
+      };
+      return { running: ids(d?.queue_running), pending: ids(d?.queue_pending) };
+    },
+    async history({ maxItems, promptId, signal } = {}) {
+      const path = promptId ? `/api/history/${encodeURIComponent(promptId)}`
+        : `/api/history${maxItems === undefined ? "" : `?max_items=${maxItems}`}`;
+      const d = await telemetry(path, signal);
+      if (!object(d)) throw new Error("ComfyUI history: invalid object");
+      return Object.entries(d).map(([id, entry]) => {
+        if (!object(entry) || (entry.status !== undefined && !object(entry.status))) {
+          throw new Error("ComfyUI history: invalid entry");
+        }
+        const status = entry.status;
+        if (status && (typeof status.completed !== "boolean" || typeof status.status_str !== "string" || !Array.isArray(status.messages))) {
+          throw new Error("ComfyUI history: invalid status");
+        }
+        const messages = status?.messages ?? [];
+        const interrupted = messages.some((m) => Array.isArray(m) && m[0] === "execution_interrupted");
+        const failed = messages.some((m) => Array.isArray(m) && m[0] === "execution_error");
+        const terminal = !!status && (status.completed || status.status_str === "error" || interrupted || failed);
+        return { id, terminal, outcome: interrupted ? "interrupted" : failed || status?.status_str === "error" ? "error" : terminal ? "success" : null };
+      });
+    },
+    async logs({ signal } = {}) {
+      const d = await telemetry("/internal/logs/raw", signal);
+      if (!object(d) || !Array.isArray(d.entries) || !Number.isInteger(d.size) || d.size < 0 ||
+          d.entries.some((e) => !object(e) || typeof e.m !== "string" || !["string", "number"].includes(typeof e.t))) {
+        throw new Error("ComfyUI logs: invalid buffer");
+      }
+      return { entries: d.entries.map(({ t, m }) => ({ t, m })), size: d.size };
+    },
   };
 }
 

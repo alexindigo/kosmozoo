@@ -6,6 +6,8 @@
 // (https://github.com/tabler/tabler-icons/blob/master/LICENSE)
 
 const PATHS = {
+  "refresh": `<path d="M20 7v5h-5" /><path d="M4 17v-5h5" /><path d="M6.1 7a7 7 0 0 1 11.6-2L20 8M4 16l2.3 3A7 7 0 0 0 17.9 17" />`,
+  "pin": `<path d="M16 3l5 5-4 1-4 4v4l-3-3-7 7 7-7-3-3h4l4-4z" />`,
   "thumb-up": `<path stroke="none" d="M0 0h24v24H0z" fill="none"/>
   <path d="M7 11v8a1 1 0 0 1 -1 1h-2a1 1 0 0 1 -1 -1v-7a1 1 0 0 1 1 -1h3a4 4 0 0 0 4 -4v-1a2 2 0 0 1 4 0v5h3a2 2 0 0 1 2 2l-1 5a2 3 0 0 1 -2 2h-7a3 3 0 0 1 -3 -3" />`,
   "thumb-down": `<path stroke="none" d="M0 0h24v24H0z" fill="none"/>

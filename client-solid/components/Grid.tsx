@@ -135,6 +135,10 @@ export function Grid() {
   });
 
   const items = () => virtualizer.getVirtualItems();
+  // Measurement objects are replaced on insertion/resize. Render identity is
+  // the entry ID, not that transient object, so mounted editors survive.
+  const slotsById = createMemo(() => new Map(items().map((item) => [item.key, item])));
+  const renderedIds = createMemo(() => [...slotsById().keys()]);
   const count = () => store.state.entriesWithKnownSize().length;
   const padStart = () => items()[0]?.start ?? 0;
   // the bottom spacer reserves the rest of totalSize — the DOM height equals
@@ -186,8 +190,8 @@ export function Grid() {
           </div>
         </div>
         <div style={`height:${padStart()}px`} />
-        <For each={items()}>
-          {(vi) => <CardSlot entryId={vi.key} slotSize={vi.size} />}
+        <For each={renderedIds()}>
+          {(id) => <CardSlot entryId={id} slotSize={slotsById().get(id)?.size} />}
         </For>
         <div style={`height:${padEnd()}px`}>
           <Show when={pending() > 0}>

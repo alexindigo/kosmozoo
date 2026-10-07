@@ -28,7 +28,7 @@ try {
   throw e;
 }
 
-Deno.serve({ port: PORT }, async (req) => {
+const server = Deno.serve({ port: PORT }, async (req) => {
   const url = new URL(req.url);
   if (url.pathname.startsWith("/api/")) {
     try {
@@ -40,6 +40,17 @@ Deno.serve({ port: PORT }, async (req) => {
   // static.mjs maps the SPA, /shared/*, and /plugins/<name>/client.js
   return serveStatic(url.pathname);
 });
+
+let stopping = false;
+const shutdown = async () => {
+  if (stopping) return;
+  stopping = true;
+  await ctx.jobs.stop();
+  await ctx.prefetch.stop();
+  await server.shutdown();
+  ctx.store.close();
+};
+for (const signal of ["SIGINT", "SIGTERM"]) Deno.addSignalListener(signal, shutdown);
 
 console.log(`kosmozoo engine on http://127.0.0.1:${PORT} (state: ${ctx.paths.state})`);
 console.log(`collections: ${Object.keys(ctx.hosts).join(", ")}`);

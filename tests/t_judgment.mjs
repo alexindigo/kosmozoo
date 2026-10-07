@@ -291,7 +291,7 @@ Deno.test("judgment: v7 to v8 migration adds nullable bookmark and preserves raw
     assertEquals(store.judgmentGet("h", "b.png"), { vote: "up" });
     const migrated = new Database(dbPath);
     try {
-      assertEquals(migrated.prepare("PRAGMA user_version").value()[0], 8);
+      assertEquals(migrated.prepare("PRAGMA user_version").value()[0], 9);
       const rows = migrated.prepare("SELECT * FROM entry ORDER BY name").all();
       assertEquals(rows.map(({ bookmark, ...rest }) => rest), before);
       assertEquals(rows.map((r) => r.bookmark), [null, null, null]);

@@ -721,3 +721,303 @@ Deno.test("planDeleteCurrent: previous current iff adjacent, else feed-above, el
     { kind: "set", image: "b" },
   );
 });
+
+const deferredSourceRead = () => {
+  let resolve, reject;
+  const promise = new Promise((yes, no) => { resolve = yes; reject = no; });
+  return { promise, resolve, reject };
+};
+async function withSourceStore(run, { initialUnknown = false } = {}) {
+  const { api } = await import("../client/js/api.mjs");
+  const saved = { ...api }, location = globalThis.location, history = globalThis.history;
+  globalThis.location = { hash: "", pathname: "/" };
+  globalThis.history = { state: null, replaceState() {}, pushState() {} };
+  const sources = { h: { address: "h:1", online: true, kind: "comfy", pinned: false, autoRefresh: true },
+    other: { address: "other:1", online: true, kind: "comfy", pinned: false, autoRefresh: true } };
+  const activity = { h: { supported: true, state: "idle", epoch: "E", terminalRevision: 0, resyncRevision: 0 },
+    other: { supported: true, state: "idle", epoch: "F", terminalRevision: 0, resyncRevision: 0 } };
+  if (initialUnknown) Object.assign(activity.h, { state: "unknown", sampledAt: null });
+  const row = (name, extra = {}) => ({ name, size: null, hash: null, width: 100, height: 50,
+    meta: null, judgment: null, extracted: false, ...extra });
+  const lists = { h: [row("a.png"), row("b.png")], other: [row("other.png")] };
+  api.collections = async () => structuredClone(sources);
+  api.activity = async (id) => ({ ...activity[id], pinned: sources[id].pinned, autoRefresh: sources[id].autoRefresh });
+  api.patchCollection = async (id, patch) => { Object.assign(sources[id], patch); return { ...sources[id] }; };
+  api.entries = async (id) => structuredClone(lists[id]);
+  api.meta = async () => ({ v: 1, changed: false, pending: 0 });
+  api.want = async () => ({ pending: 0 });
+  api.nodes = async () => ({});
+  api.settings = async () => ({});
+  api.setSettings = async () => ({});
+  api.prefetch = async () => ({ pending: {} });
+  const store = makeAppStore({ pollActivity: false });
+  try {
+    await store.actions.boot();
+    await run({ store, api, sources, activity, lists, row });
+  } finally {
+    store.dispose();
+    store.actions.status.clear("transient");
+    Object.assign(api, saved);
+    if (location === undefined) delete globalThis.location; else globalThis.location = location;
+    if (history === undefined) delete globalThis.history; else globalThis.history = history;
+  }
+}
+
+Deno.test("source flags: confirmed independent serialized writer and stale collection/activity fences", async () => {
+  await withSourceStore(async ({ store, api, sources }) => {
+    const collection = deferredSourceRead(), telemetry = deferredSourceRead(), writes = [];
+    api.collections = () => collection.promise;
+    const read = store.actions.hosts.refresh();
+    api.activity = () => telemetry.promise;
+    const poll = store.actions.hosts.pollActivity("h");
+    api.patchCollection = (id, patch) => {
+      const pending = deferredSourceRead(); writes.push({ id, patch, ...pending }); return pending.promise;
+    };
+    const pin = store.actions.hosts.patch("h", { pinned: true });
+    const refreshOff = store.actions.hosts.patch("h", { autoRefresh: false });
+    assertEquals(store.state.hosts.h.pinned, false, "render only confirmed flags");
+    assertEquals(store.state.sourceSaving.h, true);
+    await Promise.resolve();
+    assertEquals(writes.length, 1);
+    writes[0].resolve({ pinned: true, autoRefresh: true });
+    await pin;
+    await Promise.resolve();
+    assertEquals(writes[1].patch, { autoRefresh: false });
+    writes[1].resolve({ pinned: true, autoRefresh: false });
+    await refreshOff;
+    collection.resolve(sources);
+    telemetry.resolve({ supported: true, epoch: "E", terminalRevision: 0, resyncRevision: 0, pinned: false, autoRefresh: true });
+    await Promise.all([read, poll]);
+    assertEquals([store.state.hosts.h.pinned, store.state.hosts.h.autoRefresh], [true, false]);
+    assertEquals(store.state.sourceSaving.h, undefined);
+    api.patchCollection = async () => { throw new Error("offline"); };
+    assertEquals((await store.actions.hosts.patch("h", { pinned: false })).ok, false);
+    assertEquals(store.state.hosts.h.pinned, true);
+    assert(store.state.chips.some((c) => c.kind === "error" && c.msg.includes("source h save failed")));
+  });
+});
+
+Deno.test("source refresh: completion during listing retains a follow-up, coalesces and preserves user state", async () => {
+  await withSourceStore(async ({ store, api, activity, row }) => {
+    const original = store.state.images[0], reads = [];
+    store.actions.selected.set(original.id, true);
+    store.actions.ui.setFilter(".png");
+    store.actions.views.set(original.id, { s: 2 }, { persist: false });
+    store.actions.diff.setMode("split");
+    store.actions.diff.setSplit(.4);
+    const current = store.state.current(), trail = [...store.state.currentStack()];
+    api.entries = () => { const read = deferredSourceRead(); reads.push(read); return read.promise; };
+    activity.h.terminalRevision = 1;
+    await store.actions.hosts.pollActivity("h");
+    assertEquals(reads.length, 1);
+    activity.h.terminalRevision = 3;
+    await store.actions.hosts.pollActivity("h");
+    assertEquals(reads.length, 1, "one refresh flight per loaded source session");
+    reads[0].resolve([row("first.png"), row("a.png"), row("b.png")]);
+    for (let i = 0; i < 30 && reads.length < 2; i++) await Promise.resolve();
+    assertEquals(reads.length, 2);
+    reads[1].resolve([row("second.png"), row("first.png"), row("a.png"), row("b.png")]);
+    for (let i = 0; i < 30; i++) await Promise.resolve();
+    assertEquals(store.state.images.map((i) => i.filename), ["second.png", "first.png", "a.png", "b.png"]);
+    assert(store.state.images[2] === original);
+    assertEquals(store.state.selected[original.id], true);
+    assertEquals(store.state.current(), current);
+    assertEquals(store.state.currentStack(), trail);
+    assertEquals(store.state.filter(), ".png");
+    assertEquals(store.state.views[original.id].s, 2);
+    assertEquals([store.state.diff.mode, store.state.diff.splitT], ["split", .4]);
+    assertEquals(store.state.feedMergeNonce(), 2);
+  });
+});
+
+Deno.test("source refresh: failed target retries, disabled/unselected sources never merge or select", async () => {
+  await withSourceStore(async ({ store, api, activity, sources, lists, row }) => {
+    let reads = 0;
+    api.entries = async (id) => { reads++; if (reads === 1) throw new Error("listing offline"); return lists[id]; };
+    lists.h.unshift(row("new.png"));
+    activity.h.terminalRevision++;
+    await store.actions.hosts.pollActivity("h");
+    for (let i = 0; i < 20; i++) await Promise.resolve();
+    assert(!store.state.images.some((i) => i.filename === "new.png"));
+    await store.actions.ui.refresh();
+    assert(store.state.images.some((i) => i.filename === "new.png"));
+    await store.actions.hosts.pollActivity("other");
+    lists.other.unshift(row("other-new.png"));
+    activity.other.terminalRevision++;
+    await store.actions.hosts.pollActivity("other");
+    assertEquals(store.state.host(), "h");
+    assert(store.state.images.every((i) => i.host === "h"));
+    sources.h.autoRefresh = false;
+    activity.h.terminalRevision++;
+    lists.h.unshift(row("disabled.png"));
+    await store.actions.hosts.pollActivity("h");
+    assert(!store.state.images.some((i) => i.filename === "disabled.png"));
+    await store.actions.ui.refresh();
+    assert(store.state.images.some((i) => i.filename === "disabled.png"));
+    await store.actions.hosts.select("other");
+    assertEquals(store.state.images[0].filename, "other-new.png");
+  });
+});
+
+for (const roundTrip of [false, true]) {
+  Deno.test(`source fences: stale load, refresh, want, meta and size after A→B${roundTrip ? "→A" : ""}`, async () => {
+    await withSourceStore(async ({ store, api, lists }) => {
+      const listing = deferredSourceRead(), metadata = deferredSourceRead(), size = deferredSourceRead();
+      const collections = deferredSourceRead();
+      api.collections = () => collections.promise;
+      const manualBeforeSwitch = store.actions.ui.refresh();
+      api.entrySizeProbe = () => size.promise;
+      const sizing = store.actions.images.fillSize("h:a.png");
+      api.entries = (id) => id === "h" ? listing.promise : Promise.resolve(lists[id]);
+      api.meta = (id) => id === "h" ? metadata.promise : Promise.resolve({ changed: false, pending: 0 });
+      const loading = store.actions.images.reload();
+      await store.actions.hosts.select("other");
+      if (roundTrip) {
+        api.entries = async (id) => lists[id];
+        api.meta = async () => ({ changed: false, pending: 0 });
+        await store.actions.hosts.select("h");
+      }
+      listing.resolve([{ name: "stale.png", width: 10, height: 10 }]);
+      metadata.resolve({ changed: true, v: 10, pending: 12, items: { "a.png": { seed: 999 } } });
+      size.resolve(999);
+      collections.resolve({ h: { address: "h:1" }, other: { address: "other:1" } });
+      await Promise.all([manualBeforeSwitch, loading, sizing]);
+      assertEquals(store.state.images.map((i) => i.filename), roundTrip ? ["a.png", "b.png"] : ["other.png"]);
+      assertEquals(store.state.images[0].size, null);
+      assertEquals(store.state.metaPending, 0);
+      assertEquals(store.state.images[0].meta, null);
+    });
+  });
+}
+
+Deno.test("source enrichment: size probe re-resolves inserted identity; known content replacement cannot inherit old dims/meta", async () => {
+  await withSourceStore(async ({ store, api, lists, row }) => {
+    const probe = deferredSourceRead();
+    api.entrySizeProbe = () => probe.promise;
+    const sizing = store.actions.images.fillSize("h:a.png");
+    lists.h.unshift(row("new.png"));
+    await store.actions.ui.refresh();
+    probe.resolve(123);
+    await sizing;
+    assertEquals(store.state.images[0].size, null);
+    assertEquals(store.state.images[1].size, 123);
+    lists.h[1] = row("a.png", { hash: "old", meta: { seed: 1 } });
+    await store.actions.ui.refresh();
+    lists.h[1] = row("a.png", { hash: "different", width: null, height: null });
+    await store.actions.ui.refresh();
+    assertEquals(store.state.images[1].hash, "different");
+    assertEquals(store.state.images[1].width, null);
+    assertEquals(store.state.images[1].meta, null);
+  });
+});
+
+for (const channel of ["metadata", "want"]) {
+  for (const roundTrip of [false, true]) {
+    Deno.test(`source ${channel}: actual in-flight response is fenced across A→B${roundTrip ? "→A" : ""}`, async () => {
+      await withSourceStore(async ({ store, api }) => {
+        const pending = deferredSourceRead();
+        let started = false;
+        if (channel === "metadata") {
+          api.meta = (id) => {
+            if (id !== "h") return Promise.resolve({ changed: false, pending: 0 });
+            started = true; return pending.promise;
+          };
+        } else {
+          api.want = (id) => {
+            if (id !== "h") return Promise.resolve({ pending: 0 });
+            started = true; return pending.promise;
+          };
+        }
+        const read = store.actions.ui.refresh();
+        for (let i = 0; i < 40 && !started; i++) await Promise.resolve();
+        assert(started, "the old source request really reached the channel");
+        await store.actions.hosts.select("other");
+        api.meta = async () => ({ changed: false, pending: 0 });
+        api.want = async () => ({ pending: 0 });
+        if (roundTrip) await store.actions.hosts.select("h");
+        pending.resolve(channel === "metadata" ? {
+          changed: true, v: 100, pending: 500, items: { "a.png": { seed: 999 } }, dims: { "a.png": { width: 999, height: 999 } },
+        } : { pending: 500 });
+        await read;
+        for (let i = 0; i < 10; i++) await Promise.resolve();
+        assertEquals(store.state.metaPending, 0);
+        assertEquals(store.state.images[0].meta, null);
+        assertEquals(store.state.images[0].width, 100);
+        assertEquals(store.state.images[0].host, roundTrip ? "h" : "other");
+      });
+    });
+  }
+}
+
+Deno.test("source enrichment: metadata learned through polling during a listing survives the older same-content result", async () => {
+  await withSourceStore(async ({ store, api, lists, row }) => {
+    lists.h = [row("a.png", { hash: "same-content", width: null, height: null }), row("b.png")];
+    const stale = structuredClone(lists.h);
+    api.want = async () => ({ pending: 1 });
+    api.meta = async () => ({ changed: false });
+    await store.actions.images.reload();
+    const listing = deferredSourceRead();
+    let started = false;
+    api.entries = () => { started = true; return listing.promise; };
+    api.meta = async () => ({ changed: true, v: 2, pending: 0,
+      items: { "a.png": { seed: 77 } }, dims: { "a.png": { width: 128, height: 64 } } });
+    const refresh = store.actions.ui.refresh();
+    for (let i = 0; i < 40 && !started; i++) await Promise.resolve();
+    assert(started);
+    for (let i = 0; i < 150 && store.state.images[0].width !== 128; i++) await new Promise((r) => setTimeout(r, 20));
+    assertEquals(store.state.images[0].width, 128, "source-owned metadata poll delivers enrichment before the listing completes");
+    listing.resolve(stale);
+    await refresh;
+    assertEquals(store.state.images[0].meta, { seed: 77 });
+    assertEquals([store.state.images[0].width, store.state.images[0].height], [128, 64]);
+  });
+});
+
+Deno.test("source activity: engine epoch/recovery changes catch up the selected feed", async () => {
+  await withSourceStore(async ({ store, activity, lists, row }) => {
+    lists.h.unshift(row("recovered.png"));
+    activity.h.epoch = "replacement-engine";
+    await store.actions.hosts.pollActivity("h");
+    for (let i = 0; i < 30; i++) await Promise.resolve();
+    assertEquals(store.state.images[0].filename, "recovered.png");
+    lists.h.unshift(row("gap-catchup.png"));
+    activity.h.resyncRevision++;
+    await store.actions.hosts.pollActivity("h");
+    for (let i = 0; i < 30; i++) await Promise.resolve();
+    assertEquals(store.state.images[0].filename, "gap-catchup.png");
+  });
+});
+
+Deno.test("source activity: first known snapshot after the initial listing catches up without inventing terminal revisions", async () => {
+  await withSourceStore(async ({ store, activity, lists, row }) => {
+    assertEquals(store.state.sourceActivity.h.state, "unknown");
+    lists.h.unshift(row("during-startup-baseline.png"));
+    activity.h.state = "idle"; activity.h.sampledAt = 1;
+    await store.actions.hosts.pollActivity("h");
+    for (let i = 0; i < 30; i++) await Promise.resolve();
+    assertEquals(store.state.images[0].filename, "during-startup-baseline.png");
+    assertEquals(store.state.sourceActivity.h.terminalRevision, 0);
+  }, { initialUnknown: true });
+});
+
+Deno.test("source lifecycle: an old activity response cannot configure a removed/re-added source ID", async () => {
+  await withSourceStore(async ({ store, api, sources }) => {
+    const old = deferredSourceRead();
+    const activity = api.activity;
+    api.activity = (id) => id === "h" ? old.promise : activity(id);
+    const poll = store.actions.hosts.pollActivity("h");
+    api.removeCollection = async (id) => { delete sources[id]; return { removed: id }; };
+    await store.actions.hosts.remove("h");
+    api.addCollection = async (id, address) => {
+      sources[id] = { address, kind: "comfy", online: true, pinned: false, autoRefresh: false };
+      return sources[id];
+    };
+    await store.actions.hosts.add("h", "h:1");
+    old.resolve({ supported: true, state: "running", epoch: "obsolete", terminalRevision: 99,
+      resyncRevision: 99, pinned: true, autoRefresh: true });
+    await poll;
+    assertEquals([store.state.hosts.h.pinned, store.state.hosts.h.autoRefresh], [false, false]);
+    assertEquals(store.state.sourceActivity.h, undefined);
+    assertEquals(store.state.host(), "other");
+  });
+});

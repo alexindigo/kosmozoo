@@ -10,6 +10,12 @@ const { CDP, sleep, collectPageErrors } = require("./cdp.cjs");
 
 const ENGINE = process.env.E2E_ENGINE ?? "http://127.0.0.1:18260";
 const KZ = `(await import("/store/instance.js")).appStore`;
+async function capture(page, name) {
+  const fs = require('node:fs');
+  fs.mkdirSync('/work/tests/e2e/.shots', { recursive: true });
+  const shot = await page.send('Page.captureScreenshot', { format: 'png' });
+  fs.writeFileSync(`/work/tests/e2e/.shots/${name}.png`, Buffer.from(shot.data, 'base64'));
+}
 
 let failures = 0;
 function check(name, ok, detail = "") {
@@ -40,7 +46,7 @@ const AUDIT = `(async () => {
 })()`;
 
 (async () => {
-  const page = await CDP.launch(9335);
+  const page = await CDP.launch(9335, { windowSize: "1600,1200" });
   const pageErrors = await collectPageErrors(page);
 
   await page.goto(ENGINE + "/");
@@ -307,10 +313,13 @@ const AUDIT = `(async () => {
       col.dispatchEvent(new Event('scroll'));
       await new Promise((resolve) => setTimeout(resolve, 250));
       const el = () => [...document.querySelectorAll('.card')].find((e) => e.dataset.name === anchorName);
-      const before = el().getBoundingClientRect().top;
+      const beforeCard = el();
+      const beforeEditor = beforeCard.querySelector('textarea');
+      const before = beforeCard.getBoundingClientRect().top;
       api.entries = async (id) => id === 'fixture-dir' ? [base[0], withheld, ...base.slice(1)] : original(id);
       await kz.actions.ui.refresh();
-      return { before, after: el().getBoundingClientRect().top };
+      return { before, after: el().getBoundingClientRect().top,
+        sameCard: beforeCard === el(), sameEditor: !!beforeEditor && beforeEditor === el().querySelector('textarea') };
     } finally {
       api.entries = original;
       await kz.actions.ui.refresh();
@@ -320,6 +329,8 @@ const AUDIT = `(async () => {
     // The browser rounds scroll offsets to physical pixels; card layout
     // remains fractional. Bound that rounding, not a card-sized movement.
     Math.abs(smallLanding.before - smallLanding.after) < 1, JSON.stringify(smallLanding));
+  check("small feed insertion: retained entry keeps the same mounted card and editor",
+    smallLanding.sameCard && smallLanding.sameEditor, JSON.stringify(smallLanding));
   await page.evaluate(`(async () => {
     const kz = ${KZ};
     const im = kz.state.images.find((i) => i.filename === "flux-basic.png");
@@ -438,6 +449,214 @@ const AUDIT = `(async () => {
         await fetch("/api/collections/undim", { method: "DELETE" }).catch(() => null);
       })()`);
     } catch { /* engine teardown handles it */ }
+  }
+
+  // The topbar-only split must follow the actual feed edge without changing
+  // the main composition: two workspace modes, widths, expansion and real drag.
+  try {
+    await page.evaluate(`(async () => {
+      const s = ${KZ}; await s.actions.hosts.select('fake'); s.actions.ui.setFilter('');
+    })()`);
+    const geometry = `(() => {
+      const region = document.getElementById('candidatesCol').getBoundingClientRect();
+      const icon = document.getElementById('filterBtn').getBoundingClientRect();
+      const control = document.querySelector('.feed-filter').getBoundingClientRect();
+      const input = document.getElementById('filter').getBoundingClientRect();
+      const inset = parseFloat(getComputedStyle(document.getElementById('chrome')).getPropertyValue('--chrome-inset'));
+      return { delta: Math.max(Math.abs(control.right - (region.right - inset)), Math.abs(icon.right - (region.right - inset))), icon: icon.right,
+        inputLeft: input.left, inputRight: input.right, iconLeft: icon.left, boundary: region.right,
+        barRight: document.getElementById('wsBar').getBoundingClientRect().right, viewport: innerWidth };
+    })()`;
+    for (const width of [1400, 780, 480]) {
+      await page.send('Emulation.setDeviceMetricsOverride', { width, height: 900, deviceScaleFactor: 1, mobile: false });
+      for (const space of ['details', 'anchors']) {
+        await page.evaluate(`(async () => ${KZ}.actions.ui.setWorkspace('${space}'))()`);
+        await page.poll(`(${geometry}).delta <= 1`);
+        const before = await page.evaluate(geometry);
+        await page.clickAt('#filterBtn');
+        await page.poll(`!document.getElementById('filter').hidden && document.activeElement.id === 'filter'`);
+        const after = await page.evaluate(geometry);
+        check(`filter geometry ${width}/${space}: same feed edge, input left, icon stationary`,
+          after.delta <= 1 && Math.abs(before.icon - after.icon) < 1 && after.inputRight <= after.iconLeft && after.barRight <= after.viewport,
+          JSON.stringify({ before, after }));
+        await capture(page, `filter-expanded-${width}-${space}`);
+        const divider = await page.evaluate(`(() => {
+          const r = document.getElementById('divider').getBoundingClientRect();
+          return { x: r.left + r.width/2, y: r.top + Math.min(100, r.height/2) };
+        })()`);
+        await page.drag(divider.x, divider.y, Math.max(40, divider.x - 30), divider.y);
+        await page.poll(`(${geometry}).delta <= 1`);
+        check(`filter geometry ${width}/${space}: follows trusted pane drag`, (await page.evaluate(geometry)).delta <= 1);
+        await page.key('Escape');
+        await page.poll(`document.getElementById('filter').hidden`);
+      }
+    }
+    await page.send('Emulation.setDeviceMetricsOverride', { width: 1400, height: 900, deviceScaleFactor: 1, mobile: false });
+    await page.evaluate(`(async () => ${KZ}.actions.anchors.setPaneWidth(300))()`);
+  } catch (error) { check('topbar JS-synchronized geometry', false, error.message); }
+
+  // End-of-chain proof: real external completion -> listing -> real image
+  // acquisition -> decoded card, while the incremental merge retains edits.
+  const FAKE_ACTIVITY = process.env.E2E_FAKE ?? 'http://127.0.0.1:18261';
+  const control = async (body) => {
+    const r = await fetch(FAKE_ACTIVITY + '/__test/activity', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body),
+    });
+    if (!r.ok) throw new Error('activity fixture control failed');
+  };
+  try {
+    await control({ reset: true });
+    await page.evaluate(`(async () => {
+      const s = ${KZ}; await s.actions.hosts.select('fake');
+      s.actions.ui.setWorkspace('details');
+      await s.actions.hosts.patch('fake', { pinned: true, autoRefresh: true });
+      await s.actions.hosts.pollActivity('fake');
+      s.actions.current.set('fake', 'flux-basic.png');
+      s.actions.feed.restoreToIndex(s.state.currentEntry().index);
+      s.actions.selected.set('fake:flux-basic.png', true);
+      s.actions.ui.setFilter('.png');
+      const blob = await (await fetch('/api/collections/fake/entries/flux-basic.png/bytes')).blob();
+      await s.actions.anchors.addFiles([new File([blob], 'source-refresh-anchor.png', { type: 'image/png' })]);
+      s.actions.ui.setWorkspace('anchors');
+      s.actions.diff.setMode('split'); s.actions.diff.setSplit(.37);
+      s.actions.views.set('fake:flux-basic.png', { s: 2, txf: .1, tyf: .2 }, { persist: false });
+      s.actions.views.set('anchor:source-refresh-anchor.png', { s: 2, txf: .1, tyf: .2 }, { persist: false });
+      const { api } = await import('/js/api.mjs');
+      let release; const gate = new Promise((r) => release = r);
+      window.__sourceApi = { setJudgment: api.setJudgment, entries: api.entries, want: api.want };
+      window.__sourceRelease = release; window.__sourceUnknown = false; window.__sourceWanted = false;
+      api.setJudgment = async (...args) => { await gate; return window.__sourceApi.setJudgment(...args); };
+      api.entries = async (id) => {
+        const rows = await window.__sourceApi.entries(id);
+        const output = rows.find((r) => r.name === 'e2e-source-completed.png');
+        if (output && !output.width) window.__sourceUnknown = true;
+        return rows;
+      };
+      api.want = async (id, files) => {
+        if (id === 'fake' && files.includes('e2e-source-completed.png')) window.__sourceWanted = true;
+        return window.__sourceApi.want(id, files);
+      };
+      await fetch('/api/prefetch', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ paused: true }) });
+    })()`);
+    await page.poll(`(async () => ${KZ}.state.feedActivity() === 'settled' && document.querySelector('.card[data-name="flux-basic.png"] img')?.naturalWidth > 0)()`);
+    const origin = '.card[data-name="flux-basic.png"]';
+    await page.clickAt(origin + ' .bookmark');
+    await page.poll(`document.querySelector('${origin} .bookmark').getAttribute('aria-pressed') === 'true'`);
+    await page.clickAt(origin + ' textarea.pos');
+    await page.send('Input.insertText', { text: 'pending source-refresh note' });
+    await page.poll(`(async () => ${KZ}.state.drafts['fake:flux-basic.png:pos']?.includes('pending source-refresh note'))()`);
+    await page.clickAt(origin + ' .variations');
+    await page.poll(`!!document.querySelector('.vz-row-inc-input')`, 20000);
+    await page.evaluate(`(() => {
+      const input = document.querySelector('.vz-row-inc-input');
+      input.value = '3'; input.dispatchEvent(new Event('input', { bubbles: true }));
+      window.__sourceModal = document.querySelector('.vz-panel'); window.__sourceField = input;
+    })()`);
+    const before = await page.evaluate(`(async () => {
+      const s = ${KZ}; s.actions.diff.ensureRightDefault(); s.actions.diff.open();
+      window.__sourceCard = document.querySelector('${origin}');
+      return { current: s.state.current(), trail: s.state.currentStack(), url: location.href,
+        top: window.__sourceCard.getBoundingClientRect().top, pair: s.state.diffPair(),
+        view: JSON.stringify({ feed: s.state.views['fake:flux-basic.png'], right: s.state.views['anchor:source-refresh-anchor.png'] }), anchors: s.state.anchors.map((a) => a.name),
+        draft: s.state.drafts['fake:flux-basic.png:pos'], field: window.__sourceField.value };
+    })()`);
+    await capture(page, 'source-edited-session-before');
+    await control({ finish: [{ id: 'feed-external-finish', output: 'e2e-source-completed.png' }] });
+    await page.poll(`(async () => ${KZ}.state.images.some((i) => i.filename === 'e2e-source-completed.png'))()`, 20000);
+    await page.poll(`(async () => ${KZ}.state.images.find((i) => i.filename === 'e2e-source-completed.png')?.width > 0)()`, 20000);
+    const preserved = await page.evaluate(`(async () => {
+      const s = ${KZ};
+      return { current: s.state.current(), trail: s.state.currentStack(), url: location.href,
+        top: document.querySelector('${origin}').getBoundingClientRect().top, pair: s.state.diffPair(),
+        view: JSON.stringify({ feed: s.state.views['fake:flux-basic.png'], right: s.state.views['anchor:source-refresh-anchor.png'] }), anchors: s.state.anchors.map((a) => a.name),
+        draft: s.state.drafts['fake:flux-basic.png:pos'], field: window.__sourceField.value,
+        sameCard: window.__sourceCard === document.querySelector('${origin}'),
+        sameModal: window.__sourceModal === document.querySelector('.vz-panel'),
+        sameField: window.__sourceField === document.querySelector('.vz-row-inc-input'),
+        selected: s.state.selected['fake:flux-basic.png'], filter: s.state.filter(),
+        split: s.state.diff.splitT, mode: s.state.diff.mode, bookmark: s.state.images.find((i) => i.filename === 'flux-basic.png').judgment.bookmark,
+        unknown: window.__sourceUnknown, wanted: window.__sourceWanted };
+    })()`);
+    check('completion insertion preserves mounted card/modal, pending notes/judgment, pair/crops, URL and viewport',
+      preserved.sameCard && preserved.sameModal && preserved.sameField && preserved.selected && preserved.bookmark &&
+      JSON.parse(before.view).feed?.s > 1 && JSON.parse(before.view).right?.s > 1 &&
+      preserved.filter === '.png' && preserved.split === .37 && preserved.mode === 'split' &&
+      Math.abs(preserved.top - before.top) <= 1 &&
+      ['current', 'trail', 'url', 'pair', 'view', 'anchors', 'draft', 'field'].every((key) => JSON.stringify(preserved[key]) === JSON.stringify(before[key])),
+      JSON.stringify({ before, after: preserved }));
+    check('new output begins unknown-sized and is promoted through real want/dimension acquisition', preserved.unknown && preserved.wanted);
+    await capture(page, 'source-edited-session-after');
+    await page.key('Escape');
+    await page.poll(`(async () => !${KZ}.state.variations.open)()`);
+    await page.key('Escape');
+    await page.poll(`(async () => !${KZ}.state.diff.open)()`);
+    await page.evaluate(`(async () => ${KZ}.actions.feed.scrollTop())()`);
+    await page.poll(`(async () => {
+      const s = ${KZ}, card = document.querySelector('.card[data-name="e2e-source-completed.png"]');
+      const image = card?.querySelector('img');
+      if (!image?.naturalWidth || s.state.feedActivity() !== 'settled' || s.state.feedScrollEl().scrollTop > 1) return false;
+      const box = image.getBoundingClientRect(), feed = s.state.feedScrollEl().getBoundingClientRect();
+      return box.top < feed.bottom && box.bottom > feed.top && box.width > 0 && box.height > 0;
+    })()`, 20000);
+    check('external finish automatically produces a decoded/rendered output card without refresh click', true);
+    await capture(page, 'source-completed-output-1400');
+    await page.evaluate(`(async () => ${KZ}.actions.hosts.patch('fake', { autoRefresh: false }))()`);
+    await page.poll(`(async () => !${KZ}.state.hosts.fake.autoRefresh)()`);
+    const nonce = await page.evaluate(`(async () => ${KZ}.state.feedMergeNonce())()`);
+    await control({ finish: [{ id: 'feed-disabled-finish', output: 'e2e-source-disabled.png' }] });
+    await page.poll(`(async () => {
+      const r = await (await fetch('/api/collections/fake/activity')).json();
+      return r.terminalRevision >= 2 && ${KZ}.state.sourceActivity.fake?.terminalRevision === r.terminalRevision;
+    })()`, 20000);
+    check('auto-refresh off leaves feed unchanged through observed finish', await page.evaluate(`(async () =>
+      !${KZ}.state.images.some((i) => i.filename === 'e2e-source-disabled.png') && ${KZ}.state.feedMergeNonce() === ${nonce})()`));
+    await page.clickAt('#refreshBtn');
+    await page.poll(`(async () => ${KZ}.state.images.some((i) => i.filename === 'e2e-source-disabled.png'))()`, 10000);
+    check('manual refresh still merges disabled-source output', true);
+    await page.evaluate(`(async () => { const s = ${KZ}; await s.actions.hosts.patch('fake', { autoRefresh: true }); await s.actions.hosts.select('another'); })()`);
+    await control({ finish: [{ id: 'feed-inactive-finish', output: 'e2e-source-inactive.png' }] });
+    await page.poll(`(async () => ${KZ}.state.sourceActivity.fake?.terminalRevision >= 3)()`, 20000);
+    check('inactive completion never switches selected source or writes its feed', await page.evaluate(`(async () =>
+      ${KZ}.state.host() === 'another' && ${KZ}.state.images.every((i) => i.host === 'another'))()`));
+    await page.clickAt('.pinned-source[data-source="fake"]');
+    await page.poll(`document.querySelector('.card[data-name="e2e-source-inactive.png"] img')?.naturalWidth > 0`, 20000);
+    check('normal pinned selection reads latest completed output', true);
+    // A slow initial history baseline may absorb an execution as old history.
+    // First-known activity must still catch up a feed loaded while unknown.
+    await control({ delays: { history: 4000 } });
+    await page.evaluate(`(async () => {
+      const s = ${KZ};
+      await fetch('/api/prefetch', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ paused: false, enabled: true }) });
+      await s.actions.hosts.add('startup-window', '127.0.0.2:${new URL(FAKE_ACTIVITY).port}');
+      await s.actions.hosts.patch('startup-window', { autoRefresh: true });
+      await fetch('/api/collections/startup-window/entries/flux-basic.png/bytes');
+      await s.actions.hosts.select('startup-window');
+    })()`);
+    await page.poll(`(async () => ${KZ}.state.sourceActivity['startup-window']?.state === 'unknown')()`, 5000);
+    await control({ finish: [{ id: 'during-startup-history', output: 'e2e-startup-window.png' }] });
+    await page.poll(`document.querySelector('.card[data-name="e2e-startup-window.png"] img')?.naturalWidth > 0`, 25000);
+    const startup = await page.evaluate(`(async () => ({
+      host: ${KZ}.state.host(), revision: ${KZ}.state.sourceActivity['startup-window'].terminalRevision,
+      decoded: document.querySelector('.card[data-name="e2e-startup-window.png"] img').naturalWidth,
+    }))()`);
+    check('first known activity catches up decoded output without replaying startup history as new finishes',
+      startup.host === 'startup-window' && startup.revision === 0 && startup.decoded > 0, JSON.stringify(startup));
+    await control({ delays: {} });
+    await page.evaluate(`(async () => { const s = ${KZ}; await s.actions.hosts.select('fake'); await s.actions.hosts.remove('startup-window'); })()`);
+  } catch (error) { check('source completion consumer/preservation case', false, error.message); }
+  finally {
+    await control({ reset: true });
+    await page.evaluate(`(async () => {
+      const s = ${KZ}, { api } = await import('/js/api.mjs');
+      window.__sourceRelease?.();
+      if (window.__sourceApi) Object.assign(api, window.__sourceApi);
+      if (s.state.hosts['startup-window']) { await s.actions.hosts.select('fake'); await s.actions.hosts.remove('startup-window'); }
+      await s.actions.judgments.dispatch('fake:flux-basic.png', { type: 'set', patch: { bookmark: null, notes: null } });
+      s.actions.anchors.remove('source-refresh-anchor.png');
+      s.actions.ui.setFilter(''); s.actions.bulk.clear();
+      await s.actions.hosts.patch('fake', { pinned: false, autoRefresh: false });
+      await fetch('/api/prefetch', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ paused: false, enabled: true }) });
+    })()`);
   }
 
   check("no uncaught page errors", pageErrors.length === 0, pageErrors[0] ?? "");

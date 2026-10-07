@@ -6,7 +6,7 @@
 // reassigns or guards it (E1).
 
 import { backingFor, isFolderHost, EXT_MIME } from "./backings/index.mjs";
-import { capabilities, validateCollection, addCollection, removeCollection } from "./collections.mjs";
+import { capabilities, validateCollection, validateAttributes, sourceAttributes, addCollection, removeCollection } from "./collections.mjs";
 import { sniffMime } from "./extractor.mjs";
 
 export function makeRouter(ctx) {
@@ -93,6 +93,7 @@ export function makeRouter(ctx) {
       out[id] = {
         address,
         kind: c.kind,
+        ...sourceAttributes(c),
         online,
         capabilities: await capabilities(c, {
           online,
@@ -112,7 +113,11 @@ export function makeRouter(ctx) {
     } catch {
       return Response.json({ error: "JSON body: {name, address}" }, { status: 400 });
     }
-    const err = await validateCollection(body.name, body.address);
+    if (!body || typeof body !== "object" || Array.isArray(body)) {
+      return Response.json({ error: "JSON body: {name, address}" }, { status: 400 });
+    }
+    const { name, address, ...attributes } = body;
+    const err = validateAttributes(attributes) ?? await validateCollection(name, address);
     if (err) return Response.json({ error: err }, { status: 400 });
     // an existing id with a different address is a conflict, not a silent
     // re-point (every entry/judgment under the id would change host)
@@ -123,14 +128,32 @@ export function makeRouter(ctx) {
         { status: 409 },
       );
     }
-    addCollection(ctx.store, ctx.hosts, body.name, body.address);
+    addCollection(ctx.store, ctx.hosts, body.name, body.address, attributes);
+    ctx.jobs.reconcile();
     const c = ctx.store.collectionGet(body.name);
     return Response.json({
       name: body.name,
       address: body.address,
       kind: c.kind,
+      ...sourceAttributes(c),
       online: await backingFor(body.address).probe(body.address),
     });
+  });
+
+  add("PATCH", "/api/collections/<id>", async (req, { id }) => {
+    let patch;
+    try { patch = await req.json(); }
+    catch { return Response.json({ error: "source attributes must be JSON" }, { status: 400 }); }
+    const error = validateAttributes(patch);
+    if (error) return Response.json({ error }, { status: 400 });
+    if (!ctx.store.collectionGet(id)) return Response.json({ error: "unknown collection" }, { status: 404 });
+    return Response.json({ id, ...sourceAttributes(ctx.store.collectionPatch(id, patch)) });
+  });
+
+  add("GET", "/api/collections/<id>/activity", (_req, { id }) => {
+    const source = ctx.store.collectionGet(id);
+    if (!source) return Response.json({ error: "unknown collection" }, { status: 404 });
+    return Response.json({ ...ctx.jobs.snapshot(id), ...sourceAttributes(source) });
   });
 
   add("DELETE", "/api/collections/<id>", async (_req, { id }) => {
@@ -139,6 +162,7 @@ export function makeRouter(ctx) {
       return Response.json({ error: "cannot remove the last collection" }, { status: 400 });
     }
     removeCollection(ctx.store, ctx.hosts, id);
+    ctx.jobs.reconcile();
     return Response.json({ removed: id });
   });
 

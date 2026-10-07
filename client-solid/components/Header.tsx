@@ -8,6 +8,9 @@ import { iconSvg } from "/js/icons.mjs";
 import { useAppStore } from "../store/app-store.js";
 import { useClickOutside } from "../lib/click-outside.js";
 import { HostPicker } from "./HostPicker.js";
+import { IconButton } from "./IconButton.js";
+import { FeedFilter } from "./FeedFilter.js";
+import { SourceProgress } from "./SourceProgress.js";
 
 // layout-switcher icons (icons.mjs): a square with one divider — vertical
 // right of center (wide images / narrow text), horizontal (stacked),
@@ -90,7 +93,7 @@ function Menu() {
           </Show>
           <Show when={matches("down-vote hides")}>
             <div class="menurow">
-              <label class="switchwrap" title="thumbs-down removes an image from view (reveal with the Unhide button)">
+              <label class="switchwrap" title="thumbs-down removes an image from view when this preference is enabled; votes are kept">
                 <input
                   type="checkbox" checked={store.state.judgmentPrefs.downvoteHides}
                   onChange={(e) => store.actions.judgments.setDownvoteHides(e.target.checked)}
@@ -140,34 +143,33 @@ export function Header() {
   });
 
   return (
-    <header id="chrome">
-      <img class="logo" src="/logo-64.png" alt="kosmozoo" width={24} height={24} />
-      <h1>Kosmozoo</h1>
-      <HostPicker />
-      <input
-        id="filter"
-        type="search"
-        placeholder="filter filenames…"
-        spellcheck={false}
-        value={store.state.filter()}
-        onInput={(e) => store.actions.ui.setFilter(e.target.value)}
-      />
-      <span id="headerButtons">
-        <button
-          id="refreshBtn" title="re-fetch hosts and image list"
-          onClick={() => store.actions.ui.refresh()}
-        >Refresh</button>
-        <button
-          id="unhideBtn" title="temporarily show thumbed-down images (votes are kept)"
-          onClick={() => store.actions.judgments.toggleReveal()}
-        >Unhide</button>
-        <button
-          id="hideUpBtn" title="hide thumbed-up images for this session (reload restores)"
-          onClick={() => store.actions.judgments.toggleHideUp()}
-        >Hide up-voted</button>
-      </span>
-      <span class="flexspacer" />
-      <InfoLayoutSwitcher />
+    <header id="chrome" class="chrome-split" style={{ "--chrome-pane-width": `${store.state.anchorPaneWidth()}px` }}>
+      <div class="chrome-feed">
+        <div class="chrome-feed-inner">
+          <img class="logo" src="/logo-64.png" alt="kosmozoo" width={24} height={24} />
+          <h1>Kosmozoo</h1>
+          <IconButton id="refreshBtn" chrome variant="refresh" title="Refresh sources and image list"
+            icon={iconSvg("refresh", 16)} onAction={() => store.actions.ui.refresh()} />
+          <HostPicker />
+          <div class="pinned-sources" aria-label="Pinned sources">
+            <For each={Object.keys(store.state.hosts).filter((id) => store.state.hosts[id].pinned)}>
+              {(id) => (
+                <button type="button" class={"pinned-source" + (store.state.host() === id ? " on" : "")}
+                  data-source={id} aria-pressed={store.state.host() === id}
+                  title={`Select ${id}`} onClick={() => store.actions.hosts.select(id)}>
+                  <SourceProgress name={id} activity={store.state.sourceActivity[id]} />
+                  <span>{id}</span>
+                </button>
+              )}
+            </For>
+          </div>
+          <FeedFilter value={store.state.filter()} onInput={store.actions.ui.setFilter}
+            pushLayer={store.actions.keys.pushLayer} popLayer={store.actions.keys.popLayer}
+            canEscape={() => !store.state.keysPanelOpen() && !store.state.diff.open} />
+        </div>
+      </div>
+      <div class="chrome-workspace">
+        <InfoLayoutSwitcher />
         <div id="menuWrap" ref={menuWrapRef}>
           <button
             id="menuBtn"
@@ -178,6 +180,7 @@ export function Header() {
           </button>
           <Menu />
         </div>
+      </div>
     </header>
   );
 }

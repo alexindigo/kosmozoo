@@ -9,6 +9,7 @@ import { For } from "solid-js";
 import { iconSvg } from "/js/icons.mjs";
 import { useAppStore } from "../store/app-store.js";
 import { useClickOutside } from "../lib/click-outside.js";
+import { IconButton } from "./IconButton.js";
 
 export function HostPicker() {
   const store = useAppStore();
@@ -49,12 +50,20 @@ export function HostPicker() {
               return (
                 <div
                   class={"hostpick" + (n === store.state.host() ? " current" : "") + (h().online ? "" : " off")}
+                  data-source={n}
                   title={`${n} — ${h().address}` + (h().online ? "" : " (offline)")}
                   onClick={() => store.actions.hosts.select(n)}
                 >
                   <span class={"hdot" + (h().online ? "" : " off")} />
                   <span class="hname">{n}</span>
                   <span class="haddr">{h().address + (h().online ? "" : " · offline")}</span>
+                  <IconButton chrome variant="pin" active={h().pinned} disabled={!!store.state.sourceSaving[n]}
+                    title={`${h().pinned ? "Unpin" : "Pin"} source ${n}`} icon={iconSvg("pin", 14)}
+                    onAction={() => store.actions.hosts.patch(n, { pinned: !h().pinned })} />
+                  <IconButton chrome variant="auto-refresh" active={h().autoRefresh}
+                    disabled={h().kind === "folder" || !!store.state.sourceSaving[n]}
+                    title={h().kind === "folder" ? "No generation jobs for folder sources" : `Auto-refresh ${n} when a job finishes`}
+                    icon={iconSvg("refresh", 14)} onAction={() => store.actions.hosts.patch(n, { autoRefresh: !h().autoRefresh })} />
                   <a
                     class="dl"
                     title={`download ${n}'s judgments (feedback.json, generated on demand)`}

@@ -47,7 +47,7 @@ Deno.test("hosts: POST adds + persists + probes; DELETE removes; last host guard
   const rig = await mkStateRig("hosts", { dir, feedbackPath: "feedback.json" });
   const { settings, store } = rig;
   const hosts = await loadCollections(store, { KOZMOZOO_HOSTS: "a=127.0.0.1:1" });
-  const router = makeRouter({ hosts, store, settings, plugins: null });
+  const router = makeRouter({ hosts, store, settings, plugins: null, jobs: { reconcile() {} } });
 
   // add
   const r = await router.handle(new Request("http://x/api/collections", {
@@ -114,6 +114,44 @@ Deno.test("hosts: upload never sends overwrite; 409 surfaces the conflicting nam
   } finally {
     await close();
   }
+});
+
+Deno.test("sources: offline partial patches validate atomically, repeat POST preserves flags and activity is cached", async () => {
+  const rig = await mkStateRig("source-api");
+  const hosts = { a: "127.0.0.1:1", folder: "folder:/no-longer-present" };
+  let reconciles = 0, probes = 0;
+  for (const [id, address] of Object.entries(hosts)) rig.store.collectionAdd(id, address);
+  const router = makeRouter({ ...rig, hosts,
+    comfy() { probes++; throw new Error("attribute writes must not probe"); },
+    jobs: { reconcile() { reconciles++; }, snapshot: () => ({ supported: true, state: "unknown", terminalRevision: 0 }) },
+  });
+  const patch = (id, body) => router.handle(new Request(`http://x/api/collections/${id}`, {
+    method: "PATCH", body: JSON.stringify(body),
+  }));
+  try {
+    assertEquals(await (await patch("a", { pinned: true })).json(), { id: "a", pinned: true, autoRefresh: false });
+    assertEquals(await (await patch("a", { autoRefresh: true })).json(), { id: "a", pinned: true, autoRefresh: true });
+    assertEquals(await (await patch("a", { pinned: false })).json(), { id: "a", pinned: false, autoRefresh: true });
+    assertEquals(await (await patch("a", {})).json(), { id: "a", pinned: false, autoRefresh: true });
+    assertEquals((await patch("folder", { pinned: true })).status, 200);
+    for (const bad of [null, [], false, 1, "true", { pinned: 1 }, { autoRefresh: null }, { pinned: true, other: false }]) {
+      assertEquals((await patch("a", bad)).status, 400);
+      assertEquals(rig.store.collectionGet("a").pinned, 0, "the whole patch is validated before any write");
+    }
+    assertEquals((await router.handle(new Request("http://x/api/collections/a", { method: "PATCH", body: "{" }))).status, 400);
+    assertEquals((await patch("missing", { pinned: true })).status, 404);
+    const post = (body) => router.handle(new Request("http://x/api/collections", { method: "POST", body: JSON.stringify(body) }));
+    const again = await post({ name: "a", address: hosts.a, pinned: true, autoRefresh: false });
+    assertEquals(again.status, 200);
+    assertEquals((await again.json()).autoRefresh, true);
+    assertEquals(rig.store.collectionGet("a").pinned, 0);
+    assertEquals((await post({ name: "a", address: "127.0.0.1:2" })).status, 409);
+    for (const bad of [null, [], { name: "b", address: "127.0.0.1:2", pinned: "yes" }]) assertEquals((await post(bad)).status, 400);
+    const activity = await router.handle(new Request("http://x/api/collections/a/activity"));
+    assertEquals(await activity.json(), { supported: true, state: "unknown", terminalRevision: 0, pinned: false, autoRefresh: true });
+    assertEquals(probes, 0);
+    assertEquals(reconciles, 1);
+  } finally { await rig.close(); }
 });
 
 Deno.test("hosts: assets-plus probe caches only definitive answers", async () => {

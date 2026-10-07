@@ -964,3 +964,60 @@ body:has(#diff:not([hidden])) #statusCol { bottom: 56px; }
   background: none; border: none; color: var(--foreground-dim); cursor: pointer;
   padding: 4px; }
 .vz-close:hover { color: var(--foreground); }
+
+/* The topbar has its own split. JS supplies the existing store-owned pane
+   width; these tracks mirror the main pane's bounds and net divider/bar
+   footprint without changing the main composition or measuring its DOM. */
+#chrome.chrome-split { --chrome-inset: 8px; display: grid; gap: 0; padding: 0;
+  grid-template-columns: minmax(0, 1fr) calc(clamp(220px, var(--chrome-pane-width), 70vw) + 27px); }
+#chrome .chrome-feed, #chrome .chrome-workspace { min-width: 0; padding-inline: var(--chrome-inset); }
+#chrome .chrome-feed { height: 100%; container: chrome-feed / inline-size; }
+#chrome .chrome-feed-inner, #chrome .chrome-workspace { display: flex; gap: 8px;
+  align-items: center; min-width: 0; height: 100%; }
+#chrome .chrome-workspace { justify-content: flex-end; }
+#chrome .logo { flex: 0 0 auto; }
+#chrome h1 { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+#chrome #hostPicker { flex: 0 1 auto; min-width: 38px; }
+#chrome #hostBtn { max-width: 100%; }
+#chrome #hostBtn > span:nth-child(2) { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+#chrome .chrome-icon { display: inline-flex; align-items: center; justify-content: center;
+  flex: 0 0 26px; width: 26px; height: 24px; padding: 0;
+  color: var(--foreground-mid); border-color: var(--border-strong); }
+#chrome .chrome-icon.on { color: var(--secondary); border-color: var(--secondary); }
+#chrome .chrome-icon:hover:not(:disabled) { color: var(--foreground); border-color: var(--foreground-mid); }
+#chrome .chrome-icon:disabled { opacity: .4; cursor: default; }
+#chrome button:focus-visible, #chrome input:focus-visible { outline: 2px solid var(--secondary); outline-offset: 2px; }
+#chrome .pinned-sources { display: flex; align-items: center; gap: 6px; flex: 1 1 auto;
+  min-width: 0; overflow-x: auto; scrollbar-width: none; }
+#chrome .pinned-sources::-webkit-scrollbar { display: none; }
+#chrome .pinned-source { display: inline-flex; align-items: center; gap: 5px;
+  flex: 0 0 auto; white-space: nowrap; font-size: 12px; padding: 2px 6px; }
+#chrome .pinned-source.on { color: var(--secondary); border-color: var(--secondary); }
+#chrome .feed-filter { display: flex; align-items: center; gap: 6px; min-width: 26px;
+  flex: 0 1 auto; max-width: 220px; margin-left: auto; }
+#chrome .feed-filter input { width: 180px; min-width: 0; flex: 1 1 auto; font: inherit; }
+#chrome .source-progress { flex: 0 0 auto; color: var(--foreground-dim); }
+#chrome .source-progress-base { fill: var(--foreground-dim); }
+#chrome .source-progress-outline { fill: none; stroke: currentColor; stroke-width: 1.5; }
+#chrome .source-progress-fill { fill: var(--secondary); }
+#chrome .source-progress.running { color: var(--secondary); }
+#chrome .source-progress:is(.running, .unknown, .disconnected) .source-progress-base { fill: var(--lifted); }
+#chrome .source-progress.indeterminate .source-progress-outline { stroke-width: 2.5; stroke-dasharray: 9 3; }
+#chrome .source-progress.unknown { color: var(--warning); }
+#chrome .source-progress.disconnected { color: var(--error); }
+#chrome .source-progress-mark { fill: none; stroke: currentColor; stroke-width: 1.5; stroke-linecap: round; }
+/* Density follows the topbar's feed allocation, including divider resizing. */
+@container chrome-feed (max-width: 220px) {
+  #chrome .chrome-feed-inner { gap: 1px; }
+  #chrome h1 { margin: 0; }
+  #chrome .logo { width: 20px; height: 20px; }
+  #chrome .chrome-icon { flex-basis: 20px; width: 20px; }
+  #chrome #hostPicker { min-width: 24px; flex-basis: 45px; }
+  #chrome #hostBtn { padding-inline: 1px; gap: 1px; }
+  #chrome #hostBtn .chev { font-size: 12px; }
+  #chrome .feed-filter { min-width: min-content; gap: 2px; }
+  #chrome .feed-filter input { width: 0; flex-basis: 120px; padding-inline: 2px; }
+}
+@media (prefers-reduced-motion: reduce) {
+  #chrome .source-progress, #chrome .chrome-icon { transition: none; }
+}

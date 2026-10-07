@@ -86,6 +86,15 @@ export class Prefetch {
     return w.dimsPrio.length + w.dimsWalk.length + (w.dimsInflight ? 1 : 0);
   }
 
+  // Invalidating BEFORE a list await preserves a completion that arrives
+  // during that read: it leaves another list due on the following step.
+  requestRelist(collection) {
+    if (!(collection in this.hosts)) return;
+    this.#lastList.delete(collection);
+    const w = this.#w(collection);
+    if (this.running && !w.task) w.task = this.#runCollection(collection);
+  }
+
   // Queue names whose dims are unknown (pass 1) or whose meta is unknown or
   // stale (pass 2). priority=true promotes in BOTH queues: already prio'd is
   // skipped; sitting in a walk lane MOVES to the prio lane (want actually

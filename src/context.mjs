@@ -1,7 +1,7 @@
 // src/context.mjs — the engine context, fully constructed before the router
 // (audit E1: no router.ctx reassignment, no ctx.x?. guards downstream).
 //
-// { settings, store, hosts, backings, cache, ingest, prefetch, plugins,
+// { settings, store, hosts, backings, cache, ingest, prefetch, jobs, plugins,
 // features, comfy, paths: { state } }
 //
 // Tests build the same shape with fakes: buildContext({ env, fakes }).
@@ -14,6 +14,7 @@ import * as backings from "./backings/index.mjs";
 import * as comfyBacking from "./backings/comfy.mjs";
 import { Ingest } from "./ingest.mjs";
 import { Prefetch } from "./prefetch.mjs";
+import { Jobs } from "./jobs.mjs";
 import { PluginHost } from "./plugins.mjs";
 import { makeRouter } from "./routes.mjs";
 import { Cache } from "./cache.mjs";
@@ -42,8 +43,7 @@ export async function buildContext({ env = Deno.env.toObject(), fakes = {}, star
   // one comfy client per address — its assets-plus and object_info caches
   // are instance state, so nothing outlives the address it belongs to
   const comfyClients = new Map(); // addr → client
-  const comfy = (collection) => {
-    const addr = hosts[collection];
+  const clientAt = (addr) => {
     let client = comfyClients.get(addr);
     if (!client) {
       client = comfyBacking.comfyClient(addr);
@@ -51,6 +51,15 @@ export async function buildContext({ env = Deno.env.toObject(), fakes = {}, star
     }
     return client;
   };
+  const comfy = (collection) => clientAt(hosts[collection]);
+  const jobs = fakes.jobs ?? new Jobs({
+    hosts, client: clientAt,
+    onFinish(_address, sources) {
+      for (const id of sources) {
+        if (store.collectionGet(id)?.auto_refresh) prefetch.requestRelist(id);
+      }
+    },
+  });
 
   // plugin routes are collected here and mounted once the router exists —
   // the context (plugin host included) is fully built before the router,
@@ -63,7 +72,7 @@ export async function buildContext({ env = Deno.env.toObject(), fakes = {}, star
   const discovered = plugins === fakes.plugins ? [] : await plugins.discover();
 
   const ctx = {
-    settings, store, hosts, backings, cache, ingest, prefetch, plugins,
+    settings, store, hosts, backings, cache, ingest, prefetch, jobs, plugins,
     features: [],
     comfy,
     paths: { state: stateDir },
@@ -90,6 +99,6 @@ export async function buildContext({ env = Deno.env.toObject(), fakes = {}, star
   }
   ctx.features = features.map((f) => f.name);
 
-  if (start) prefetch.start();
+  if (start) { prefetch.start(); jobs.start(); }
   return { ctx, router, discovered };
 }

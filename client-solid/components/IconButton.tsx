@@ -7,10 +7,16 @@
 export function IconButton(props) {
   return (
     <button
-      class={"votebtn " + props.variant + (props.active ? " on" : "")}
+      type="button"
+      id={props.id}
+      disabled={props.disabled}
+      ref={props.buttonRef}
+      class={(props.chrome ? "chrome-icon " : "votebtn ") + props.variant + (props.active ? " on" : "")}
       title={props.title}
       aria-label={props.title}
       aria-pressed={props.active === undefined ? undefined : !!props.active}
+      aria-expanded={props.expanded}
+      aria-controls={props.controls}
       onClick={(e) => { e.stopPropagation(); props.onAction(e); }}
       innerHTML={props.icon}
     />

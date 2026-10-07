@@ -130,7 +130,7 @@ function ranged(req, bytes, headers) {
 }
 
 function fileList() {
-  const names = [...fixtures.keys()];
+  const names = [...published.keys(), ...fixtures.keys()];
   for (let i = 0; i < bulkCount; i++) {
     names.push("bulk-" + String(i).padStart(5, "0") + ".png");
   }
@@ -151,14 +151,70 @@ function history() {
       outputs: {
         "9": { images: [{ filename: fname, type: "output" }] },
       },
+      status: { completed: true, status_str: "success", messages: [["execution_success", {}]] },
     };
   }
   return out;
 }
 
+// Explicit test-only external activity. Named output bytes are real fixture
+// bytes, acquired by the production engine's ordinary GET/HEAD/range path.
+const published = new Map();
+let terminalHistory = history();
+let running = [], pending = [], logs = [], failures = {}, delays = {};
+
+function queueRows(ids) {
+  return ids.map((id, index) => [index, id, {}, { client_id: "external-fixture-client" }, []]);
+}
+
 export const server = Deno.serve({ port }, async (req) => {
   const url = new URL(req.url);
   const p = url.pathname;
+
+  if (p === "/__test/activity" && req.method === "POST") {
+    const body = await req.json();
+    if (body.reset) {
+      published.clear(); terminalHistory = history();
+      running = []; pending = []; logs = []; failures = {}; delays = {};
+    }
+    if (body.running) running = [...body.running];
+    if (body.pending) pending = [...body.pending];
+    if (body.logs) logs = body.logs.map((entry) => ({ ...entry }));
+    if (body.appendLogs) logs.push(...body.appendLogs.map((entry) => ({ ...entry })));
+    if (body.clearHistory) terminalHistory = {};
+    if (body.failures) failures = { ...body.failures };
+    if (body.delays) delays = { ...body.delays };
+    for (const job of body.finish ?? []) {
+      running = running.filter((id) => id !== job.id);
+      pending = pending.filter((id) => id !== job.id);
+      if (job.output) {
+        const fixture = fixtures.get(job.fixture ?? "flux-basic.png");
+        if (!fixture || basename(job.output) !== job.output) return new Response("invalid fixture output", { status: 400 });
+        published.set(job.output, fixture);
+      }
+      const outcome = job.outcome ?? "success";
+      terminalHistory[job.id] = {
+        prompt: [0, job.id, {}, { client_id: "external-fixture-client" }],
+        outputs: job.output ? { "9": { images: [{ filename: job.output, type: "output" }] } } : {},
+        status: { completed: outcome === "success", status_str: outcome === "success" ? "success" : "error",
+          messages: [[outcome === "interrupted" ? "execution_interrupted" : outcome === "error" ? "execution_error" : "execution_success", {}]] },
+      };
+    }
+    return Response.json({ running, pending, published: [...published.keys()] });
+  }
+
+  const channel = p === "/api/queue" ? "queue" : p.startsWith("/api/history") ? "history"
+    : p === "/internal/logs/raw" ? "logs" : p === "/internal/files/output" ? "listing" : null;
+  if (channel && req.method === "GET") {
+    if (delays[channel]) await new Promise((resolve) => setTimeout(resolve, delays[channel]));
+    if (failures[channel]) return new Response("controlled failure", { status: failures[channel] });
+  }
+  if (p === "/api/queue" && req.method === "GET") return Response.json({ queue_running: queueRows(running), queue_pending: queueRows(pending) });
+  if (p === "/internal/logs/raw" && req.method === "GET") return Response.json({ entries: logs, size: logs.length });
+  if (p.startsWith("/api/history/") && req.method === "GET") {
+    const id = decodeURIComponent(p.slice("/api/history/".length));
+    return Response.json(terminalHistory[id] ? { [id]: terminalHistory[id] } : {});
+  }
 
   if (p === "/api/system_stats") {
     // Only the status code is inspected (drives the online/offline dot).
@@ -262,8 +318,8 @@ export const server = Deno.serve({ port }, async (req) => {
         });
       }
     }
-    if (fixtures.has(name)) {
-      const bytes = fixtures.get(name).bytes;
+    if (fixtures.has(name) || published.has(name)) {
+      const bytes = (published.get(name) ?? fixtures.get(name)).bytes;
       // Real ComfyUI serves SVG (and sometimes everything) as octet-stream.
       const type = name.endsWith(".svg") ? "application/octet-stream" : "image/png";
       if (head) {
@@ -298,8 +354,10 @@ export const server = Deno.serve({ port }, async (req) => {
     return new Response("not found", { status: 404 });
   }
 
-  if (p === "/api/history") {
-    return Response.json(history());
+  if (p === "/api/history" && req.method === "GET") {
+    const limit = url.searchParams.has("max_items") ? Number(url.searchParams.get("max_items")) : undefined;
+    const entries = Object.entries(terminalHistory);
+    return Response.json(Object.fromEntries(limit === undefined ? entries : entries.slice(-limit)));
   }
 
   return new Response("not found", { status: 404 });

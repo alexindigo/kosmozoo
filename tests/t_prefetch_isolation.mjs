@@ -116,6 +116,38 @@ Deno.test("prefetch: a collection added at runtime gets a worker and drains", as
   await rm(dir, { recursive: true, force: true });
 });
 
+Deno.test("prefetch relist: runtime worker and a finish during listing retain a coalesced follow-up through ingestion", async () => {
+  const png = await readFile(new URL("./fixtures/flux-basic.png", import.meta.url));
+  let calls = 0, release;
+  const firstList = new Promise((resolve) => release = resolve);
+  const server = Deno.serve({ port: 0, hostname: "127.0.0.1" }, async (req) => {
+    const path = new URL(req.url).pathname;
+    if (path === "/internal/files/output") {
+      calls++;
+      if (calls === 1) { await firstList; return Response.json([]); }
+      return Response.json(["arrived.png"]);
+    }
+    if (path === "/api/view") return new Response(png, { headers: { "Content-Type": "image/png" } });
+    return new Response("no", { status: 404 });
+  });
+  const hosts = {}, rig = await mkStateRig("relist", { hosts });
+  const pf = new Prefetch({ hosts, store: rig.store, settings: rig.settings, ingest: rig.ingest,
+    listRefreshMs: 3600000, interFileDelayMs: 1, dimsInterFileDelayMs: 1 });
+  try {
+    await pf.start();
+    hosts.late = `127.0.0.1:${server.addr.port}`;
+    pf.requestRelist("late");
+    for (let i = 0; i < 100 && calls === 0; i++) await new Promise((r) => setTimeout(r, 10));
+    assertEquals(calls, 1);
+    pf.requestRelist("late"); pf.requestRelist("late");
+    release();
+    for (let i = 0; i < 300 && !rig.store.hashFor("late", "arrived.png"); i++) await new Promise((r) => setTimeout(r, 10));
+    assertEquals(calls, 2);
+    assert(rig.store.hashFor("late", "arrived.png"), "new listing traverses real dimension and ingest passes");
+    assertEquals(rig.store.entryDims("late", "arrived.png"), { width: 1024, height: 1024 });
+  } finally { release(); await pf.stop(); await server.shutdown(); await rig.close(); }
+});
+
 Deno.test("prefetch: a collection removed and re-added starts clean and drains again", async () => {
   const dir = await mkdtemp(join(tmpdir(), "kz-isore-"));
   const png = await readFile(new URL("./fixtures/flux-basic.png", import.meta.url).pathname);

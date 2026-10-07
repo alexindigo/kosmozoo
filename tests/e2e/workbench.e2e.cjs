@@ -12,6 +12,19 @@
 const { CDP, sleep, collectPageErrors } = require("./cdp.cjs");
 
 const ENGINE = process.env.E2E_ENGINE ?? "http://127.0.0.1:18260";
+const FAKE = process.env.E2E_FAKE ?? "http://127.0.0.1:18261";
+const fs = require("node:fs");
+async function sourceControl(body) {
+  const response = await fetch(FAKE + "/__test/activity", {
+    method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body),
+  });
+  if (!response.ok) throw new Error(`fixture control ${response.status}`);
+}
+async function sourceShot(page, name) {
+  fs.mkdirSync("/work/tests/e2e/.shots", { recursive: true });
+  const shot = await page.send("Page.captureScreenshot", { format: "png" });
+  fs.writeFileSync(`/work/tests/e2e/.shots/${name}.png`, Buffer.from(shot.data, "base64"));
+}
 
 // the app store is a plain ES-module singleton — importing the served URL
 // returns THE instance the app booted (no window global). Scalar signals
@@ -29,7 +42,7 @@ async function attempt(name, fn) {
 }
 
 (async () => {
-  const page = await CDP.launch();
+  const page = await CDP.launch(9333, { windowSize: "1600,1200" });
   const pageErrors = await collectPageErrors(page);
 
   await page.goto(ENGINE + "/");
@@ -218,15 +231,16 @@ async function attempt(name, fn) {
       .then(() => true).catch(() => false);
     check("card left the feed right away", gone);
     await page.evaluate(`(async () => {
-      await fetch("/api/collections/fake/entries/" + encodeURIComponent(${JSON.stringify(name)}) + "/judgment", { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ vote: null, favorite: null, notes: null }) });
+      const kz = ${KZ};
+      await kz.actions.judgments.dispatch("fake:" + ${JSON.stringify(name)}, { type: "set", patch: { vote: null, favorite: null, notes: null } });
       // reveal on (restores the card), then back off — reveal only filters
       // cards still down-voted, and the reset deleted the vote
-      document.getElementById("unhideBtn").click();
-      document.getElementById("unhideBtn").click();
+      kz.actions.judgments.toggleReveal();
+      kz.actions.judgments.toggleReveal();
     })()`);
     // up-vote hides too when the "hide up-voted" coupling is enabled —
     // one visibility rule covers every hidden flavor
-    await page.evaluate(`document.getElementById("hideUpBtn").click()`);
+    await page.evaluate(`(async () => ${KZ}.actions.judgments.toggleHideUp())()`);
     await page.poll("!!document.querySelector('.card .votebtn.up')", 3000);
     const nameUp = await page.evaluate("document.querySelector('.card').dataset.name");
     const selUp = `.card[data-name="${nameUp}"]`;
@@ -235,8 +249,9 @@ async function attempt(name, fn) {
       .then(() => true).catch(() => false);
     check("up-vote hides when coupling on", goneUp);
     await page.evaluate(`(async () => {
-      await fetch("/api/collections/fake/entries/" + encodeURIComponent(${JSON.stringify(nameUp)}) + "/judgment", { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ vote: null, favorite: null, notes: null }) });
-      document.getElementById("hideUpBtn").click(); // coupling off -> rebuild restores
+      const kz = ${KZ};
+      await kz.actions.judgments.dispatch("fake:" + ${JSON.stringify(nameUp)}, { type: "set", patch: { vote: null, favorite: null, notes: null } });
+      kz.actions.judgments.toggleHideUp(); // coupling off restores the view
     })()`);
     await page.poll("document.querySelectorAll('.card').length === " + before, 3000);
   });
@@ -416,6 +431,142 @@ async function attempt(name, fn) {
       return !!(el && el.getAttribute("src"));
     })()`, 15000);
     check("scroll to end loads tail images", true);
+  });
+
+  await attempt("source chrome: pointer paths, shared persistence, progress and filter layer", async () => {
+    const pin = '#hostList [data-source="fake"] .pin';
+    const auto = '#hostList [data-source="fake"] .auto-refresh';
+    const pinned = '.pinned-source[data-source="fake"]';
+    try {
+      await page.send("Emulation.setDeviceMetricsOverride", { width: 1400, height: 900, deviceScaleFactor: 1, mobile: false });
+      await sourceControl({ reset: true });
+      await page.evaluate(`(async () => {
+        const s = ${KZ};
+        await s.actions.hosts.select('fake');
+        s.actions.current.set('fake', 'flux-basic.png');
+        s.actions.feed.restoreToIndex(s.state.currentEntry().index);
+        await s.actions.hosts.patch('fake', { pinned: false, autoRefresh: false });
+      })()`);
+      await page.poll(`document.querySelector('.card[data-name="flux-basic.png"] img')?.naturalWidth > 0`);
+      check("removed visibility buttons are absent", await page.evaluate(`!document.querySelector('#unhideBtn, #hideUpBtn')`));
+      check("refresh icon is immediately before source picker", await page.evaluate(`(() => {
+        const b = document.getElementById('refreshBtn');
+        return !!b.querySelector('svg') && !b.textContent.trim() && b.nextElementSibling.id === 'hostPicker';
+      })()`));
+      check("filter initially collapsed", await page.evaluate(`document.getElementById('filter').hidden && document.getElementById('filterBtn').getAttribute('aria-expanded') === 'false'`));
+      await page.clickAt('#hostBtn');
+      await page.poll(`!document.getElementById('hostDrop').hidden`);
+      await page.clickAt(pin);
+      await page.poll(`document.querySelector('${pin}').getAttribute('aria-pressed') === 'true' && !document.querySelector('${pin}').disabled`);
+      check("pin pointer click retains dropdown and source selection", await page.evaluate(`(async () => !document.getElementById('hostDrop').hidden && ${KZ}.state.host() === 'fake')()`));
+      await page.clickAt(auto);
+      await page.poll(`document.querySelector('${auto}').getAttribute('aria-pressed') === 'true' && !document.querySelector('${auto}').disabled`);
+      check("auto-refresh toggles independently without selecting row", await page.evaluate(`document.querySelector('${pin}').getAttribute('aria-pressed') === 'true' && !document.getElementById('hostDrop').hidden`));
+      check("folder refresh is disabled with explicit reason", await page.evaluate(`(() => {
+        const b = document.querySelector('#hostList [data-source="fixture-dir"] .auto-refresh');
+        return b.disabled && b.title === 'No generation jobs for folder sources';
+      })()`));
+      await page.clickAt('#hostList [data-source="fixture-dir"] .pin');
+      await page.poll(`document.querySelector('.pinned-source[data-source="fixture-dir"] .source-progress')?.dataset.state === 'idle'`);
+      check("folder pin keeps selection and presents grey unsupported activity", await page.evaluate(`(async () => {
+        const s = ${KZ}, circle = document.querySelector('.pinned-source[data-source="fixture-dir"] .source-progress');
+        return s.state.host() === 'fake' && circle.getAttribute('aria-label').includes('No generation jobs') &&
+          getComputedStyle(circle).color === getComputedStyle(circle.querySelector('.source-progress-base')).fill;
+      })()`));
+      await page.clickAt('#hostList [data-source="fixture-dir"] .pin');
+      await page.poll(`!document.querySelector('.pinned-source[data-source="fixture-dir"]')`);
+      await page.clickAt('#hostBtn');
+      await page.poll(`document.getElementById('hostDrop').hidden`);
+      await page.poll(`document.querySelector('${pinned} .source-progress')?.dataset.state === 'idle'`, 15000);
+      const idleColor = await page.evaluate(`getComputedStyle(document.querySelector('${pinned} .source-progress-base')).fill`);
+      check("idle source is grey with no sector", await page.evaluate(`!document.querySelector('${pinned} .source-progress-fill') && getComputedStyle(document.querySelector('${pinned} .source-progress')).color === ${JSON.stringify(idleColor)}`));
+      await sourceShot(page, 'source-idle-1400');
+      const fresh = await CDP.launch(9342, { windowSize: '1600,1000' });
+      const freshErrors = await collectPageErrors(fresh);
+      try {
+        await fresh.goto(ENGINE + '/#fake');
+        await fresh.poll(`document.querySelector('${pinned}')?.getAttribute('aria-pressed') === 'true'`, 20000);
+        check("saved pin/refresh are visible in a fresh browser", await fresh.evaluate(`(async () => {
+          const s = ${KZ}; return s.state.hosts.fake.pinned && s.state.hosts.fake.autoRefresh &&
+            !Object.keys(localStorage).some((k) => /pinned|autoRefresh/.test(k));
+        })()`));
+        check("fresh browser cold boot has no page errors", freshErrors.length === 0, freshErrors.join('; '));
+      } finally { await fresh.close(); }
+      await sourceControl({ running: ['chrome-external'], logs: [{ t: 1, m: '0/40\r' }] });
+      await page.poll(`document.querySelector('${pinned} .source-progress')?.classList.contains('indeterminate')`, 15000);
+      await sourceShot(page, 'source-indeterminate-1400');
+      await sourceControl({ appendLogs: [{ t: 1, m: '\u001b[32m25%| 10/40 [02:04, 12.4s/it]\u001b[0m\r' }] });
+      await page.poll(`document.querySelector('${pinned} .source-progress')?.dataset.fraction === '0.25'`, 15000);
+      const firstSector = await page.evaluate(`document.querySelector('${pinned} .source-progress-fill').getAttribute('d')`);
+      await sourceShot(page, 'source-running-quarter-1400');
+      await sourceControl({ appendLogs: [{ t: 1, m: '20/40\r' }] });
+      await page.poll(`document.querySelector('${pinned} .source-progress')?.dataset.fraction === '0.5'`, 15000);
+      check("external operation changes the rendered native SVG sector", await page.evaluate(`document.querySelector('${pinned} .source-progress-fill').getAttribute('d') !== ${JSON.stringify(firstSector)}`));
+      await sourceShot(page, 'source-running-half-1400');
+      await sourceControl({ appendLogs: [{ t: 1, m: '40/40\r' }] });
+      await page.poll(`document.querySelector('${pinned} .source-progress')?.dataset.fraction === '1'`, 15000);
+      check("100% operation renders a full circle while the job remains running", await page.evaluate(`document.querySelector('${pinned} .source-progress-fill').tagName === 'circle' && document.querySelector('${pinned} .source-progress').dataset.state === 'running'`));
+      await sourceShot(page, 'source-running-full-1400');
+      await sourceControl({ delays: { history: 6000 } });
+      await page.evaluate(`(async () => {
+        const s = ${KZ}; await s.actions.hosts.add('starting', '127.0.0.2:${new URL(FAKE).port}');
+        await s.actions.hosts.patch('starting', { pinned: true });
+      })()`);
+      await page.poll(`document.querySelector('.pinned-source[data-source="starting"] .source-progress')?.dataset.state === 'unknown'`, 5000);
+      await sourceShot(page, 'source-unknown-1400');
+      await page.evaluate(`(async () => ${KZ}.actions.hosts.remove('starting'))()`);
+      await sourceControl({ delays: {}, failures: { queue: 503 } });
+      await page.poll(`document.querySelector('${pinned} .source-progress')?.dataset.state === 'disconnected'`, 15000);
+      check("disconnect clears rendered progress fill", await page.evaluate(`!document.querySelector('${pinned} .source-progress-fill')`));
+      await sourceShot(page, 'source-disconnected-1400');
+      await sourceControl({ failures: {}, running: [] });
+      await page.clickAt('#filterBtn');
+      await page.poll(`!document.getElementById('filter').hidden && document.activeElement.id === 'filter'`);
+      await page.send('Input.insertText', { text: '.png' });
+      await page.poll(`(async () => ${KZ}.state.filter() === '.png')()`);
+      await sourceShot(page, 'source-filter-expanded-1400');
+      await page.evaluate(`(async () => {
+        const s = ${KZ}; s.actions.variations.open(s.state.images.find((i) => i.filename === 'flux-basic.png'));
+      })()`);
+      await page.poll(`!!document.querySelector('.vz-panel')`);
+      await page.key('Escape');
+      await page.poll(`(async () => !${KZ}.state.variations.open)()`);
+      check("modal Escape outranks filter layer", await page.evaluate(`!document.getElementById('filter').hidden`));
+      await page.evaluate(`(async () => ${KZ}.actions.keys.togglePanel())()`);
+      await page.poll(`(async () => ${KZ}.state.keysPanelOpen())()`);
+      await page.key('Escape');
+      await page.poll(`(async () => !${KZ}.state.keysPanelOpen())()`);
+      check("keys-panel contextual Escape also outranks expanded filter", await page.evaluate(`!document.getElementById('filter').hidden`));
+      await page.evaluate(`(async () => ${KZ}.actions.diff.open())()`);
+      await page.poll(`(async () => ${KZ}.state.diff.open)()`);
+      await page.key('Escape');
+      await page.poll(`(async () => !${KZ}.state.diff.open)()`);
+      check("workbench contextual Escape also outranks expanded filter", await page.evaluate(`!document.getElementById('filter').hidden`));
+      await page.key('Escape');
+      await page.poll(`document.getElementById('filter').hidden`);
+      check("collapse retains query and active icon", await page.evaluate(`document.querySelector('#filterBtn').getAttribute('aria-pressed') === 'true' && document.getElementById('filter').value === '.png'`));
+      await page.clickAt('#filterBtn');
+      await page.poll(`document.activeElement.id === 'filter'`);
+      await page.keyTrusted('a', { code: 'KeyA', vk: 65 });
+      check("typing in filter does not fire app keys", await page.evaluate(`(async () => !${KZ}.state.diff.open)()`));
+      await page.evaluate(`(async () => ${KZ}.actions.ui.setFilter(''))()`);
+      await page.key('Escape');
+      await page.clickAt('#hostBtn');
+      await page.poll(`!document.getElementById('hostDrop').hidden`);
+      await page.clickAt('#hostList [data-source="another"]');
+      await page.poll(`(async () => ${KZ}.state.host() === 'another' && ${KZ}.state.images.length > 0)()`);
+      await page.clickAt(pinned);
+      await page.poll(`(async () => ${KZ}.state.host() === 'fake' && ${KZ}.state.images.length > 3000)()`);
+      check("pinned click uses dropdown selection/URL flow", await page.evaluate(`location.hash === '#fake' && document.querySelector('${pinned}').getAttribute('aria-pressed') === 'true'`));
+    } finally {
+      await sourceControl({ reset: true });
+      await page.evaluate(`(async () => {
+        const s = ${KZ}; s.actions.ui.setFilter('');
+        if (s.state.hosts.starting) await s.actions.hosts.remove('starting');
+        await s.actions.hosts.patch('fixture-dir', { pinned: false });
+        await s.actions.hosts.patch('fake', { pinned: false, autoRefresh: false });
+      })()`);
+    }
   });
 
   check("no uncaught page errors", pageErrors.length === 0, pageErrors[0] ?? "");

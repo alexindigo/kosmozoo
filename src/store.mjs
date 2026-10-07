@@ -1,4 +1,4 @@
-// src/store.mjs — the engine store: content / collection / entry (schema v8)
+// src/store.mjs — the engine store: content / collection / entry (schema v9)
 // + the discovered-node registry.
 //
 // content — what the bytes ARE: hash → meta, dims, workflow flag
@@ -16,7 +16,7 @@ import { copyFile, readFile, rename } from "node:fs/promises";
 import { CorruptStateError } from "./state.mjs";
 import { splitHostKey } from "./collections.mjs";
 
-const SCHEMA_VERSION = 8;
+const SCHEMA_VERSION = 9;
 const CORE_JUDGMENT_FIELDS = new Set(["vote", "favorite", "bookmark", "notes"]);
 
 const MIGRATIONS = [
@@ -155,6 +155,18 @@ const MIGRATIONS = [
   (db) => {
     db.exec(`ALTER TABLE entry ADD COLUMN bookmark INTEGER`);
   },
+  // v8 → v9: source preferences. Column-aware for a retry after the schema
+  // committed but the runner's separate version write did not.
+  (db) => {
+    db.transaction(() => {
+      const columns = new Set(db.prepare("PRAGMA table_info(collection)").all().map((c) => c.name));
+      for (const name of ["pinned", "auto_refresh"]) {
+        if (!columns.has(name)) {
+          db.exec(`ALTER TABLE collection ADD COLUMN ${name} INTEGER NOT NULL DEFAULT 0 CHECK (${name} IN (0, 1))`);
+        }
+      }
+    })();
+  },
 ];
 
 
@@ -165,11 +177,12 @@ const STATEMENTS = {
   kvGet: "SELECT v FROM kv WHERE k = ?",
   kvSet: "INSERT INTO kv (k, v) VALUES (?, ?) ON CONFLICT(k) DO UPDATE SET v = excluded.v",
   bumpMeta: "UPDATE kv SET v = CAST(CAST(v AS INTEGER) + 1 AS TEXT) WHERE k = 'meta_version'",
-  collectionsAll: "SELECT id, kind, address, link, created_at FROM collection ORDER BY rowid",
-  collectionGet: "SELECT id, kind, address, link, created_at FROM collection WHERE id = ?",
+  collectionsAll: "SELECT id, kind, address, link, created_at, pinned, auto_refresh FROM collection ORDER BY rowid",
+  collectionGet: "SELECT id, kind, address, link, created_at, pinned, auto_refresh FROM collection WHERE id = ?",
   // a re-add with a DIFFERENT address must not silently re-point the id —
   // the route answers 409; the statement itself never updates
-  collectionAdd: "INSERT OR IGNORE INTO collection (id, kind, address, created_at) VALUES (?, ?, ?, ?)",
+  collectionAdd: "INSERT OR IGNORE INTO collection (id, kind, address, created_at, pinned, auto_refresh) VALUES (?, ?, ?, ?, ?, ?)",
+  collectionPatch: "UPDATE collection SET pinned = COALESCE(?, pinned), auto_refresh = COALESCE(?, auto_refresh) WHERE id = ?",
   collectionRemove: "DELETE FROM collection WHERE id = ?",
   ensureCollection: "INSERT OR IGNORE INTO collection (id, kind, address, created_at) VALUES (?, 'comfy', NULL, ?)",
   nodeRegGet: "SELECT title, inputs FROM node_registry WHERE class_type = ?",
@@ -546,8 +559,17 @@ export class Store {
     return out;
   }
 
-  collectionAdd(id, address) {
-    this.#q.collectionAdd.run(id, kindFor(address), address, Date.now());
+  collectionAdd(id, address, { pinned = false, autoRefresh = false } = {}) {
+    this.#q.collectionAdd.run(id, kindFor(address), address, Date.now(), pinned ? 1 : 0, autoRefresh ? 1 : 0);
+  }
+
+  collectionPatch(id, patch) {
+    if (patch.pinned === undefined && patch.autoRefresh === undefined) return this.collectionGet(id);
+    this.#q.collectionPatch.run(
+      patch.pinned === undefined ? null : Number(patch.pinned),
+      patch.autoRefresh === undefined ? null : Number(patch.autoRefresh), id,
+    );
+    return this.collectionGet(id);
   }
 
   collectionRemove(id) {
