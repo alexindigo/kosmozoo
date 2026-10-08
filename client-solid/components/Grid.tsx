@@ -12,12 +12,12 @@
 // the viewport is compensated by the feed itself (see below): the list does
 // not shift.
 
-import { onMount, onCleanup, createEffect, createMemo } from "solid-js";
+import { onMount, onCleanup, createEffect, createMemo, createSignal } from "solid-js";
 import { For, Show } from "solid-js";
 import { createVirtualizer } from "@tanstack/solid-virtual";
 import { useAppStore } from "../store/app-store.js";
 import { WINDOW_PAD } from "../store/image-window.js";
-import { cardHeight, feedOffsets, gridGapPx, measureGeometry, invalidateGeometry } from "../store/sizes.js";
+import { cardHeight, feedOffsets, gridGapPx, measureGeometry, invalidateGeometry, geometryMeasured } from "../store/sizes.js";
 import { iconSvg } from "/js/icons.mjs";
 import { Card } from "./Card.js";
 import { IconButton } from "./IconButton.js";
@@ -29,6 +29,11 @@ export function Grid() {
   let col;
   let probe;
   const scrollEl = () => col;
+  const [viewportSize, setViewportSize] = createSignal({ width: 0, height: 0 });
+  const measureViewport = () => {
+    const width = col?.clientWidth ?? 0, height = col?.clientHeight ?? 0;
+    setViewportSize((previous) => previous.width === width && previous.height === height ? previous : { width, height });
+  };
 
   // the virtualizer's item list is entriesWithKnownSize (the size-known
   // view) — count, keys and estimates ALL map through that ONE list, keyed
@@ -59,7 +64,11 @@ export function Grid() {
   });
 
   onMount(() => {
-    store.actions.feed.register({ virtualizer, scrollEl: col });
+    measureGeometry(probe, col?.clientWidth ?? 0);
+    measureViewport();
+    const unregister = store.actions.feed.register({ virtualizer, scrollEl: col,
+      viewport: () => ({ ...viewportSize(), ready: geometryMeasured(), items: virtualizer.getVirtualItems() }) });
+    onCleanup(unregister);
     // scrolling is render + rail tracking only; the model (current selection,
     // snap tidy) moves at settle — the store owns the debounce. The handler
     // is the ONLY writer of the store's scrollTop signal (one signal, both
@@ -70,11 +79,11 @@ export function Grid() {
     // the probe card makes the rendered geometry measurable on mount (no
     // waiting for a live card); a column-size change re-measures and re-runs
     // the estimates
-    measureGeometry(probe, col?.clientWidth ?? 0);
     const ro = new ResizeObserver(() => {
       invalidateGeometry();
       measureGeometry(probe, col?.clientWidth ?? 0);
       virtualizer.measure();
+      measureViewport();
     });
     if (col) ro.observe(col);
     onCleanup(() => ro.disconnect());

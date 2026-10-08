@@ -25,6 +25,7 @@ import {
 } from "/js/route-parse.mjs";
 import { isEntryName, isFolderPath, inFolder } from "/shared/entry-path.mjs";
 import { makeSourceBrowse } from "./source-browse.js";
+import { makeSourceFreshness } from "./source-freshness.js";
 import { fieldList, nodeImages } from "./fields.js";
 import { pairSides } from "../features/diff/pair.mjs";
 import { makeImageWindow } from "./image-window.js";
@@ -101,9 +102,10 @@ export function makeAppStore({ pollActivity = typeof window !== "undefined", sto
 
   // scalar atoms
   const [host, setHost] = createSignal(null);
+  const [acquisitionRevision, setAcquisitionRevision] = createSignal(0);
   let sourceSession = null, selectionGeneration = 0, disposed = false;
   const ownsSession = (s) => !!s && !disposed && sourceSession === s &&
-    host() === s.id && st.hosts[s.id]?.address === s.address;
+    host() === s.id && st.hosts[s.id]?.address === s.address && sourceRecords.get(s.id) === s.source;
 
   function beginSourceSession(id) {
     retireFeedScroll();
@@ -112,8 +114,10 @@ export function makeAppStore({ pollActivity = typeof window !== "undefined", sto
     wantSet.clear();
     metaVersion = 0;
     setSt("metaPending", 0);
-    sourceSession = { id, address: st.hosts[id]?.address, generation: ++selectionGeneration,
-      loading: true, requested: 0, completed: 0, refreshTask: null, retryTimer: null, errors: 0 };
+    sourceSession = { id, address: st.hosts[id]?.address, source: sourceRecords.get(id), generation: ++selectionGeneration,
+      loading: true, requested: 1, completed: 0, refreshTask: null, retryTimer: null, errors: 0 };
+    sizes_.setContext(sourceSession);
+    setAcquisitionRevision((v) => v + 1);
     return sourceSession;
   }
   const [current, setCurrentSig] = createSignal(null); // { remote, image } | null
@@ -291,6 +295,7 @@ export function makeAppStore({ pollActivity = typeof window !== "undefined", sto
       setCurrentSig(next ?? null);
       if (intent) {
         browseRevision++;
+        setAcquisitionRevision((v) => v + 1);
         setBrowseRestore(null);
         if (!next || next.remote === host()) {
           browseTarget = { folder: selectedFolder(), filter: filter(), current: next?.image ?? null };
@@ -387,6 +392,8 @@ export function makeAppStore({ pollActivity = typeof window !== "undefined", sto
 
   // --- feed seams (the Grid registers its handles here) -------------------------
   const seams = { virtualizer: null };
+  const [feedRegistration, setFeedRegistration] = createSignal(null);
+  let lastAcquisition = null;
   // the scroll-activity seam: while a gesture is active the feed renders and
   // the rail tracks — the model (current selection, snap tidy) moves only at
   // settle. One debounce, owned here; Grid just calls feed.scrolled(top) per
@@ -421,10 +428,12 @@ export function makeAppStore({ pollActivity = typeof window !== "undefined", sto
     setFeedActivity("settled");
   }
 
-  const validScrollContext = (scheduled) => !!scheduled && ownsSession(scheduled.session) &&
-    !scheduled.session.loading && scheduled.session.inventoryReady && !scheduled.session.pendingBrowse &&
+  const validAcquisitionContext = (scheduled) => !!scheduled && ownsSession(scheduled.session) &&
+    scheduled.session.inventoryReady && !scheduled.session.pendingBrowse &&
     !st.inventory.loading && scheduled.revision === browseRevision &&
     scheduled.virtualizer === feedVirtualizer() && scheduled.col === feedScrollEl();
+  const validScrollContext = (scheduled) => validAcquisitionContext(scheduled) &&
+    scheduled.commitEligible !== false && !scheduled.session.loading;
 
   // The existing midpoint-crossing rule, shared by committed settle and rail.
   // Keys fence a virtualizer's old position geometry during identity reorders.
@@ -454,8 +463,8 @@ export function makeAppStore({ pollActivity = typeof window !== "undefined", sto
   function feedScrolled(top) {
     if (disposed) return;
     const scheduled = { session: sourceSession, revision: browseRevision,
-      virtualizer: feedVirtualizer(), col: feedScrollEl() };
-    if (!validScrollContext(scheduled)) {
+      virtualizer: feedVirtualizer(), col: feedScrollEl(), commitEligible: !sourceSession?.loading };
+    if (!validAcquisitionContext(scheduled)) {
       batch(() => { retireFeedScroll(); setFeedScrollTop(top ?? feedScrollEl()?.scrollTop ?? 0); });
       return;
     }
@@ -466,6 +475,7 @@ export function makeAppStore({ pollActivity = typeof window !== "undefined", sto
       if (feedActivity() !== "scrolling") {
         setFeedActivity("scrolling");
         gestureStart = feedScrollEl()?.scrollTop ?? 0;
+        lastAcquisition = null;
         // the src window freezes mid-gesture: a 200-card sweep fires nothing
         window_.freeze();
       }
@@ -482,7 +492,7 @@ export function makeAppStore({ pollActivity = typeof window !== "undefined", sto
   // getTotalSize is exact ( dead).
   function feedSettle(scheduled) {
     if (pendingFeedSettle !== scheduled) return; // cannot cancel a newer callback
-    if (!validScrollContext(scheduled)) { batch(retireFeedScroll); return; }
+    if (!validAcquisitionContext(scheduled)) { batch(retireFeedScroll); return; }
     const col = feedScrollEl();
     const vz = feedVirtualizer();
     if (!col || !vz) { batch(retireFeedScroll); return; }
@@ -491,7 +501,7 @@ export function makeAppStore({ pollActivity = typeof window !== "undefined", sto
     // the scroll exists to preserve position, and with sub-card estimate
     // error the viewport-middle pick hops to the wrong card
     batch(() => {
-      if (!suppressSettleCurrent()) {
+      if (validScrollContext(scheduled) && !suppressSettleCurrent()) {
         actions.current.settleFromRange(vz.getVirtualItems(), col.scrollTop, col.clientHeight);
       }
       feedSettleTimer = 0;
@@ -503,17 +513,11 @@ export function makeAppStore({ pollActivity = typeof window !== "undefined", sto
     // scroll is in flight or the workbench is open
     const net = gestureStart == null ? 0 : col.scrollTop - gestureStart;
     gestureStart = null;
-    if (!scrollQuiet() && !st.diff.open) {
+    if (scheduled.commitEligible && !scrollQuiet() && !st.diff.open) {
       if (snapTidy(col, vz.getVirtualItems(), { direction: Math.sign(net), net })) quietScrolls();
     }
-    // 3. sizes resolve around the stopped range…
-    stageResolveAhead();
-    // 3b. …and the src window ripples out from the current card
-    settleWindow();
-    // 4. …and metas are wanted for it (the mid-gesture throttle is folded
-    // into this debounce — dead); the want flush rides the same settle
-    wantRangeNow();
-    flushWant();
+    // The owned readiness reconciliation observes the final stopped geometry.
+    setAcquisitionRevision((v) => v + 1);
   }
 
   function restoreToIndex(idx) {
@@ -663,6 +667,44 @@ export function makeAppStore({ pollActivity = typeof window !== "undefined", sto
     return reply;
   }
 
+  // All successful inventory reads share their acceptance responsibilities.
+  // The first accepted read owns initial restoration, including after retry.
+  function acceptInventory(s, inventory, read, before = new Map()) {
+    const name = s.id, wasReady = s.inventoryReady;
+    let idx = -1;
+    batch(() => {
+      setSt("images", reconcile(inventory.entries.map((e) => {
+        const id = `${name}:${e.name}`, live = st.images[imageIdx(id)], start = before.get(id);
+        const sameContent = live && !(e.hash && live.hash && e.hash !== live.hash);
+        const enriched = sameContent ? live : null;
+        return {
+          id, host: name, filename: e.name,
+          size: e.size ?? enriched?.size ?? null, hash: e.hash ?? enriched?.hash ?? null, state: e.state,
+          meta: enriched?.meta && enriched.meta !== start?.meta ? enriched.meta : e.meta ?? enriched?.meta ?? null,
+          extracted: e.extracted || !!enriched?.extracted,
+          judgment: judgments.overlay(id, e.judgment, read),
+          width: enriched?.width && enriched.width !== start?.width ? enriched.width : e.width ?? enriched?.width ?? null,
+          height: enriched?.height && enriched.height !== start?.height ? enriched.height : e.height ?? enriched?.height ?? null,
+          modified: e.modified ?? null,
+        };
+      })));
+      s.inventoryReady = true;
+      s.pendingBrowse = false;
+      setSt("inventory", { revision: inventory.revision, coverage: inventory.coverage,
+        folders: inventory.folders, subfolders: inventory.subfolders, loading: false });
+      const c = current();
+      if (!c || c.remote === name) idx = applyBrowseTarget(wasReady ? { ...browseTarget, ...liveBrowseTarget() } : browseTarget);
+      if (wasReady) setFeedMergeNonce((n) => n + 1);
+    });
+    judgments.endRead(read);
+    mirrorCurrentHash();
+    if (!wasReady) restoreBrowse(idx);
+    else if (browseRestore()) restoreBrowse(findByFile(current()?.image));
+    wantRangeNow();
+    for (const image of st.images) if (!image.width || !image.height) wantSet.add(image.filename);
+    flushWant(s);
+  }
+
   function liveBrowseTarget() {
     const c = current();
     return { folder: selectedFolder(), filter: filter(), current: c?.remote === host() ? c.image : null };
@@ -682,6 +724,7 @@ export function makeAppStore({ pollActivity = typeof window !== "undefined", sto
     batch(() => {
       retireFeedScroll();
       browseRevision++;
+      setAcquisitionRevision((v) => v + 1);
       setBrowseRestore(null);
       browseTarget = { ...target, folder: st.hosts[host()]?.kind === "folder" ? "" : target.folder ?? "", filter: target.filter ?? "" };
       setSelectedFolder(browseTarget.folder); setFilter(browseTarget.filter);
@@ -740,39 +783,26 @@ export function makeAppStore({ pollActivity = typeof window !== "undefined", sto
     window_.clear();
     if (!name) return;
     actions.status.active("load", `loading image list from ${name}…`);
-    const source = sourceRecords.get(name);
-    if (source && !source.target) await readActivity(source);
+    const source = s.source;
+    // Inventory is independent of an unavailable/held telemetry response.
+    // A quick cached response may establish the read's target; a later one
+    // remains unacknowledged and reconciles through the same refresh lane.
+    if (source && !source.freshness.target()) readActivity(source);
+    await Promise.resolve();
     if (!ownsSession(s)) return;
-    const target = source?.target;
+    const ticket = source?.freshness.capture(), requested = s.requested;
+    let accepted = false;
     const read = judgments.beginRead(name);
     try {
       const inventory = inventoryReply(await api.inventory(name), st.hosts[name]?.kind);
       if (!ownsSession(s)) return;
-      let idx;
-      batch(() => {
-        setSt("images", reconcile(inventory.entries.map((e) => ({
-          // collection:name string keys exist only here, derived (plan )
-          id: `${name}:${e.name}`, host: name, filename: e.name,
-          size: e.size, hash: e.hash, state: e.state,
-          meta: e.meta, extracted: e.extracted,
-          judgment: judgments.overlay(`${name}:${e.name}`, e.judgment, read),
-          width: e.width, height: e.height,
-          modified: e.modified ?? null,
-        }))));
-        s.inventoryReady = true;
-        s.pendingBrowse = false;
-        setSt("inventory", { revision: inventory.revision, coverage: inventory.coverage,
-          folders: inventory.folders, subfolders: inventory.subfolders, loading: false });
-        idx = applyBrowseTarget(browseTarget);
-      });
-      judgments.endRead(read);
-      mirrorCurrentHash();
-      restoreBrowse(idx);
-      wantRangeNow();
-      flushWant(s); // the no-restore path has no scroll to settle the flush
+      acceptInventory(s, inventory, read);
       await pollMetadata(s);
       if (!ownsSession(s)) return;
-      if (sourceRecords.get(name) === source && source) source.consumed = target;
+      if (sourceRecords.get(name) === source && source) source.freshness.accept(ticket);
+      s.completed = requested;
+      s.errors = 0;
+      accepted = true;
       actions.status.clear("load");
       if (st.images.length === 0) {
         actions.status.info(`no output images on ${name}`);
@@ -791,9 +821,10 @@ export function makeAppStore({ pollActivity = typeof window !== "undefined", sto
     } finally {
       judgments.endRead(read);
       s.loading = false;
+      setAcquisitionRevision((v) => v + 1);
       if (ownsSession(s)) {
-        if (source?.target && st.hosts[name]?.autoRefresh && !sameTarget(source.target, source.consumed)) requestRefresh(s);
-        else if (s.requested > s.completed) drainRefresh(s);
+        if (accepted) drainRefresh(s);
+        else scheduleRefreshRetry(s);
       }
     }
   }
@@ -810,7 +841,6 @@ export function makeAppStore({ pollActivity = typeof window !== "undefined", sto
   async function refreshImages(s) {
     if (!ownsSession(s)) return false;
     const name = s.id;
-    const wasReady = s.inventoryReady;
     actions.status.active("load", `checking ${name} for new images…`);
     const read = judgments.beginRead(name);
     try {
@@ -818,41 +848,7 @@ export function makeAppStore({ pollActivity = typeof window !== "undefined", sto
       const before = new Map(st.images.map((i) => [i.id, { meta: i.meta, width: i.width, height: i.height }]));
       const inventory = inventoryReply(await api.inventory(name), st.hosts[name]?.kind), entries = inventory.entries;
       if (!ownsSession(s)) return false;
-      // ONE atomic write: the reconcile and the merge nonce land in a single
-      // flush — the feed's compensation effect sees the post-merge list with
-      // the pre-merge anchor (unbatched, the setSt pass re-anchors before
-      // the nonce pass and the measured shift collapses to zero)
-      batch(() => {
-        setSt("images", reconcile(entries.map((e) => {
-          const id = `${name}:${e.name}`, live = st.images[imageIdx(id)], start = before.get(id);
-          const sameContent = live && !(e.hash && live.hash && e.hash !== live.hash);
-          const enriched = sameContent ? live : null;
-          return {
-            id, host: name, filename: e.name,
-            size: e.size ?? enriched?.size ?? null, hash: e.hash ?? enriched?.hash ?? null, state: e.state,
-            meta: enriched?.meta && enriched.meta !== start?.meta ? enriched.meta : e.meta ?? enriched?.meta ?? null,
-            extracted: e.extracted || !!enriched?.extracted,
-            judgment: judgments.overlay(id, e.judgment, read),
-            width: enriched?.width && enriched.width !== start?.width ? enriched.width : e.width ?? enriched?.width ?? null,
-            height: enriched?.height && enriched.height !== start?.height ? enriched.height : e.height ?? enriched?.height ?? null,
-            modified: e.modified ?? null,
-          };
-        })));
-        s.inventoryReady = true;
-        s.pendingBrowse = false;
-        setSt("inventory", { revision: inventory.revision, coverage: inventory.coverage,
-          folders: inventory.folders, subfolders: inventory.subfolders, loading: false });
-        const c = current();
-        if (!c || c.remote === name) applyBrowseTarget(wasReady ? { ...browseTarget, ...liveBrowseTarget() } : browseTarget);
-        setFeedMergeNonce((n) => n + 1);
-      });
-      mirrorCurrentHash();
-      const pendingRestore = browseRestore();
-      if (pendingRestore) restoreBrowse(findByFile(current()?.image));
-      judgments.endRead(read);
-      wantRangeNow();
-      for (const img of st.images) if (!img.width || !img.height) wantSet.add(img.filename);
-      flushWant(s);
+      acceptInventory(s, inventory, read, before);
       await pollMetadata(s);
       if (!ownsSession(s)) return false;
       setSt("inventory", "loading", false);
@@ -877,23 +873,35 @@ export function makeAppStore({ pollActivity = typeof window !== "undefined", sto
   function requestRefresh(s = sourceSession) {
     if (!ownsSession(s)) return Promise.resolve();
     s.requested++;
+    clearTimeout(s.retryTimer);
+    s.retryTimer = null;
     return drainRefresh(s);
   }
 
+  const requiresRefresh = (s) => ownsSession(s) && (s.requested > s.completed ||
+    !!st.hosts[s.id]?.autoRefresh && !!s.source?.freshness.pending());
+
+  function scheduleRefreshRetry(s) {
+    if (!ownsSession(s) || s.retryTimer || !requiresRefresh(s)) return;
+    s.retryTimer = setTimeout(() => {
+      s.retryTimer = null;
+      drainRefresh(s);
+    }, Math.min(1000 * 2 ** s.errors++, 30000));
+  }
+
   function drainRefresh(s) {
-    if (!ownsSession(s) || s.loading) return Promise.resolve();
+    if (!ownsSession(s) || s.loading || s.retryTimer || !requiresRefresh(s)) return Promise.resolve();
     if (s.refreshTask) return s.refreshTask;
-    clearTimeout(s.retryTimer);
     s.refreshTask = (async () => {
-      while (ownsSession(s) && s.requested > s.completed) {
-        const requested = s.requested, source = sourceRecords.get(s.id), target = source?.target;
+      while (requiresRefresh(s)) {
+        const requested = s.requested, source = s.source, ticket = source?.freshness.capture();
         if (!await refreshImages(s)) {
-          if (ownsSession(s)) s.retryTimer = setTimeout(() => drainRefresh(s), Math.min(1000 * 2 ** s.errors++, 30000));
+          scheduleRefreshRetry(s);
           break;
         }
         s.errors = 0;
         s.completed = requested;
-        if (source && sourceRecords.get(s.id) === source) source.consumed = target;
+        if (source && sourceRecords.get(s.id) === source) source.freshness.accept(ticket);
       }
     })().finally(() => { s.refreshTask = null; });
     return s.refreshTask;
@@ -1017,6 +1025,10 @@ export function makeAppStore({ pollActivity = typeof window !== "undefined", sto
       return img ? api.entryBytesUrl(img.host, img.filename) : null;
     },
     imageAt: (i) => st.images[i],
+    identityFor: (id) => {
+      const image = st.images[imageIdxById().get(id)];
+      return image ? image.hash ?? "" : null;
+    },
   });
   const sizeKnown = (img) =>
     !!img && (!!img.width && !!img.height || !!(img.meta?.width && img.meta?.height) || sizes_.sizeOf(img.id) !== null);
@@ -1061,41 +1073,6 @@ export function makeAppStore({ pollActivity = typeof window !== "undefined", sto
     if (firstView < 0 || lastView < 0) return;
     sizes_.resolveAhead(v, firstView, lastView);
   }
-  // the drain pump: a landing re-stages the next batch. It tracks the
-  // pending COUNT and the settle signal only — never getVirtualItems
-  // (mid-gesture staging was a second stager; feedSettle stages too)
-  createEffect(() => {
-    if (disposed) return;
-    if (pendingSizeCount() === 0) return;
-    if (feedActivity() !== "settled") return;
-    untrack(stageResolveAhead);
-  });
-
-  // a current change outside scrolling (keys, clicks, restores, the initial
-  // load) ripples the src window around the new current — the gesture path
-  // rides feedSettle instead
-  let lastWindowedCurrent = null;
-  createEffect(() => {
-    if (disposed) return;
-    const ce = currentEntry();
-    if (feedActivity() !== "settled") return;
-    if (!ce || ce.entry.id === lastWindowedCurrent) return;
-    lastWindowedCurrent = ce.entry.id;
-    untrack(settleWindow);
-  });
-
-  // idle-time landings: cards that newly appear inside the visible range
-  // get covered without a re-ripple (positions shift under a frozen window;
-  // the union is by id)
-  createEffect(on(entriesWithKnownSize, () => {
-    if (disposed) return;
-    if (feedActivity() !== "settled") return;
-    const vz = feedVirtualizer();
-    const items = vz?.getVirtualItems() ?? [];
-    if (!items.length) return;
-    untrack(() => window_.coverRange(items[0].index, items[items.length - 1].index));
-  }));
-
   // the image-src window: frozen while scrolling (sweeping 200 cards fires
   // nothing), rippling C, C+1, C-1, … from the current card at settle;
   // in-flight loads are never aborted. Membership by entry id (landings
@@ -1104,25 +1081,48 @@ export function makeAppStore({ pollActivity = typeof window !== "undefined", sto
     entryAt: feedEntryAt,
     count: () => entriesWithKnownSize().length,
   });
-  // the settle/current-change trigger: ripple around the current card,
-  // covering the stopped range — but when the pointer is OFF the stopped
-  // range (a programmatic deep jump, a restore), anchor on the range's
-  // middle: rippling from a stale pointer would walk hundreds of rings
-  // before the visible cards ever get a src
-  function settleWindow() {
-    const vz = feedVirtualizer();
-    const items = vz?.getVirtualItems() ?? [];
-    if (!items.length) return;
-    const first = items[0].index;
-    const last = items[items.length - 1].index;
-    const ce = currentEntry();
-    const cpos = ce ? feedPositionOf(ce.entry.id) : null;
-    window_.settle(
-      cpos != null && cpos >= first && cpos <= last ? cpos : Math.round((first + last) / 2),
-      first,
-      last,
-    );
-  }
+  // ONE readiness -> acquisition reconciliation. Geometry/range changes are
+  // real dependencies, independent of permission to commit scrolling state.
+  createEffect(() => {
+    acquisitionRevision();
+    const registration = feedRegistration(), s = sourceSession;
+    const ce = currentEntry(), known = entriesWithKnownSize(), pending = pendingSizeCount();
+    const loading = st.inventory.loading;
+    if (disposed || !ownsSession(s) || !s.inventoryReady || s.pendingBrowse || loading || feedActivity() !== "settled" || !registration) return;
+    const frame = registration.viewport ? registration.viewport() : {
+      width: registration.scrollEl?.clientWidth, height: registration.scrollEl?.clientHeight,
+      items: registration.virtualizer?.getVirtualItems() ?? [],
+    };
+    const items = frame?.items ?? [];
+    if (frame?.ready === false || !Number.isFinite(frame?.width) || frame.width <= 0 ||
+        !Number.isFinite(frame?.height) || frame.height <= 0 || !items.length) return;
+    const ids = [];
+    let previous = -1;
+    for (const item of items) {
+      const entry = Number.isInteger(item.index) ? st.images[known[item.index]] : null;
+      if (!entry || item.key !== entry.id || item.index <= previous || !Number.isFinite(item.start) ||
+          !Number.isFinite(item.end) || item.end <= item.start) return;
+      previous = item.index;
+      ids.push(entry.id);
+    }
+    const first = items[0].index, last = items[items.length - 1].index;
+    const currentId = ce?.entry.id ?? null, position = currentId ? feedPositionOf(currentId) : null;
+    const anchor = position != null && position >= first && position <= last ? position : Math.round((first + last) / 2);
+    const anchorId = feedEntryAt(anchor)?.id;
+    if (!anchorId) return;
+    const contextChanged = !lastAcquisition || lastAcquisition.session !== s || lastAcquisition.registration !== registration ||
+      lastAcquisition.revision !== browseRevision || lastAcquisition.currentId !== currentId || lastAcquisition.anchorId !== anchorId;
+    const coverageChanged = contextChanged || lastAcquisition.width !== frame.width || lastAcquisition.height !== frame.height ||
+      ids.length !== lastAcquisition.ids.length || ids.some((id, index) => id !== lastAcquisition.ids[index]);
+    untrack(() => {
+      if (contextChanged) window_.settle(anchor, first, last);
+      else if (coverageChanged) window_.coverRange(first, last);
+      if (pending) stageResolveAhead();
+      wantRangeNow(); flushWant(s);
+      lastAcquisition = { session: s, registration, revision: browseRevision, currentId, anchorId,
+        width: frame.width, height: frame.height, ids };
+    });
+  });
 
   // --- status-stack helpers ------------------------------------------------------
   const chipTimers = { transient: 0 };
@@ -1219,13 +1219,12 @@ export function makeAppStore({ pollActivity = typeof window !== "undefined", sto
 
   const sourceRecords = new Map();
   let registryRevision = 0, collectionRead = 0, activityStarted = false;
-  const sameTarget = (a, b) => !!a && !!b && a.epoch === b.epoch &&
-    a.terminalRevision === b.terminalRevision && a.resyncRevision === b.resyncRevision;
 
   function reconcileSources() {
     for (const [id, record] of sourceRecords) {
       if (st.hosts[id]?.address === record.address && st.hosts[id]) continue;
       clearTimeout(record.timer);
+      record.freshness.retire();
       sourceRecords.delete(id);
       setSt("sourceActivity", id, undefined);
       setSt("sourceSaving", id, undefined);
@@ -1233,7 +1232,7 @@ export function makeAppStore({ pollActivity = typeof window !== "undefined", sto
     for (const [id, source] of Object.entries(st.hosts)) {
       if (sourceRecords.has(id)) continue;
       const record = { id, address: source.address, writes: 0, revision: 0,
-        writeTask: Promise.resolve(), task: null, timer: null, errors: 0, target: null, consumed: null };
+        writeTask: Promise.resolve(), task: null, timer: null, errors: 0, freshness: makeSourceFreshness() };
       sourceRecords.set(id, record);
       if (activityStarted && pollActivity) scheduleActivity(record, 0);
     }
@@ -1254,6 +1253,7 @@ export function makeAppStore({ pollActivity = typeof window !== "undefined", sto
     }
     setSt("hosts", reconcile(next));
     reconcileSources();
+    drainRefresh(sourceSession);
   }
 
   function scheduleActivity(record, delay = 2000) {
@@ -1277,18 +1277,8 @@ export function makeAppStore({ pollActivity = typeof window !== "undefined", sto
           setSt("hosts", record.id, "autoRefresh", !!snapshot.autoRefresh);
         }
         setSt("sourceActivity", record.id, reconcile(snapshot));
-        if (snapshot.supported && snapshot.epoch && snapshot.state !== "unknown") {
-          const target = { epoch: snapshot.epoch, terminalRevision: snapshot.terminalRevision, resyncRevision: snapshot.resyncRevision };
-          const first = !record.target, changed = !sameTarget(record.target, target);
-          record.target = target;
-          const selectedHere = ownsSession(sourceSession) && sourceSession.id === record.id;
-          const alreadyLoaded = selectedHere && !sourceSession.loading;
-          // Unknown startup telemetry cannot baseline a completed listing.
-          // If the first known sample arrives afterward, read fresh before
-          // consuming it; history baseline jobs need not become new finishes.
-          if (first && !alreadyLoaded) record.consumed = target;
-          if (changed && (!first || alreadyLoaded) && st.hosts[record.id]?.autoRefresh && selectedHere) requestRefresh(sourceSession);
-        }
+        record.freshness.observe(snapshot);
+        if (ownsSession(sourceSession) && sourceSession.source === record) drainRefresh(sourceSession);
       } catch (error) {
         if (disposed || sourceRecords.get(record.id) !== record) return;
         record.errors++;
@@ -1305,9 +1295,10 @@ export function makeAppStore({ pollActivity = typeof window !== "undefined", sto
     disposed = true;
     batch(retireFeedScroll);
     window_.clear();
+    sizes_.dispose();
     clearTimeout(metaPollTimer);
     clearTimeout(sourceSession?.retryTimer);
-    for (const record of sourceRecords.values()) clearTimeout(record.timer);
+    for (const record of sourceRecords.values()) { clearTimeout(record.timer); record.freshness.retire(); }
   }
   if (getOwner()) onCleanup(dispose);
 
@@ -1416,6 +1407,7 @@ export function makeAppStore({ pollActivity = typeof window !== "undefined", sto
           await api.removeCollection(name);
           registryRevision++;
           clearTimeout(sourceRecords.get(name)?.timer);
+          sourceRecords.get(name)?.freshness.retire();
           sourceRecords.delete(name);
           setSt("hosts", name, undefined);
           setSt("sourceActivity", name, undefined);
@@ -1448,6 +1440,7 @@ export function makeAppStore({ pollActivity = typeof window !== "undefined", sto
               setSt("hosts", id, "autoRefresh", !!saved.autoRefresh);
             });
             record.revision++;
+            if (sourceSession?.source === record) drainRefresh(sourceSession);
             return { ok: true };
           } catch (error) {
             if (sourceRecords.get(id) === record && !disposed) actions.status.error(`source ${id} save failed: ${error.message}`);
@@ -1605,6 +1598,7 @@ export function makeAppStore({ pollActivity = typeof window !== "undefined", sto
         batch(() => {
           retireFeedScroll();
           browseRevision++;
+          setAcquisitionRevision((v) => v + 1);
           setBrowseRestore(null);
           browseTarget = { ...browseTarget, filter: v };
           setFilter(v);
@@ -1846,15 +1840,21 @@ export function makeAppStore({ pollActivity = typeof window !== "undefined", sto
 
     feed: {
       register(seamsIn) {
+        const registration = seamsIn ? { ...seamsIn } : null;
         batch(() => {
           if (seams.virtualizer !== (seamsIn?.virtualizer ?? null) || feedScrollEl() !== (seamsIn?.scrollEl ?? null)) retireFeedScroll();
           seams.virtualizer = seamsIn?.virtualizer ?? null;
           setFeedScrollEl(seamsIn?.scrollEl ?? null);
           setFeedVirtualizer(seamsIn?.virtualizer ?? null);
+          setFeedRegistration(registration);
         });
-        // the first settle for a fresh feed: ripple around the current card
-        // (idle-time landings cover whatever arrives after)
-        if (feedActivity() === "settled") settleWindow();
+        return () => {
+          if (feedRegistration() !== registration) return;
+          batch(() => {
+            retireFeedScroll(); seams.virtualizer = null;
+            setFeedRegistration(null); setFeedScrollEl(null); setFeedVirtualizer(null);
+          });
+        };
       },
       restoreToIndex,
       // a programmatic scroll must not invite the snap — compensation and

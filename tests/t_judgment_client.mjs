@@ -30,7 +30,9 @@ async function withStore(run, judgment = initial) {
   api.meta = async () => ({ v: 1, changed: false });
   api.want = async () => ({ pending: 0 });
   api.nodes = async () => ({});
-  api.collections = async () => ({ h: { kind: "folder" }, other: { kind: "comfy" } });
+  api.collections = async () => ({ h: { address: "folder:/fixture/h", kind: "folder", online: true },
+    other: { address: "other:1", kind: "comfy", online: true } });
+  api.activity = async () => ({ supported: false });
   api.setSettings = async () => ({});
   api.setJudgment = async () => ({});
   const store = makeAppStore();
@@ -43,9 +45,11 @@ async function withStore(run, judgment = initial) {
     };
   };
   try {
+    await store.actions.hosts.refresh();
     await store.actions.hosts.select("h");
     await run({ store, requests, holdWrites, listing, list: (next) => { names = next; } });
   } finally {
+    store.dispose(); store.actions.status.clear("transient");
     Object.assign(api, saved);
     if (location === undefined) delete globalThis.location; else globalThis.location = location;
     if (history === undefined) delete globalThis.history; else globalThis.history = history;

@@ -203,6 +203,9 @@ let extension = true, listOverride = null, publishRevision = 0;
 let captureEnqueue = false, enqueues = [];
 let metadataBombs = new Set(), assetsHidden = new Set();
 let headOverrides = {}, headDelayMs = 0;
+const telemetryRequests = { queue: 0, history: 0, logs: 0 };
+const activeLogs = new Set();
+let logSequence = 0;
 
 function publication(description) {
   const fixture = description.fixture === "bulk" ? { bytes: BULK_PNG, promptGraph: null }
@@ -237,6 +240,7 @@ export const server = Deno.serve({ port }, async (req) => {
       captureEnqueue = false; enqueues = [];
       metadataBombs = new Set(); assetsHidden = new Set();
       headOverrides = {}; headDelayMs = 0;
+      telemetryRequests.queue = 0; telemetryRequests.history = 0; telemetryRequests.logs = 0; activeLogs.clear();
       running = []; pending = []; logs = []; failures = {}; delays = {};
     }
     if (body.running) running = [...body.running];
@@ -285,11 +289,20 @@ export const server = Deno.serve({ port }, async (req) => {
     return Response.json({ running, pending, published: [...published.keys()] });
   }
 
+  if (p === "/__test/telemetry" && req.method === "GET") {
+    return Response.json({ requests: { ...telemetryRequests }, activeLogs: activeLogs.size });
+  }
+
   const channel = p === "/api/queue" ? "queue" : p.startsWith("/api/history") ? "history"
     : p === "/internal/logs/raw" ? "logs"
     : p === "/internal/files/output" || p === "/api/assets_plus/output/list" ? "listing" : null;
   if (channel && req.method === "GET") {
-    if (delays[channel]) await new Promise((resolve) => setTimeout(resolve, delays[channel]));
+    if (channel in telemetryRequests) telemetryRequests[channel]++;
+    const log = channel === "logs" ? ++logSequence : null;
+    if (log !== null) activeLogs.add(log);
+    try {
+      if (delays[channel]) await new Promise((resolve) => setTimeout(resolve, delays[channel]));
+    } finally { if (log !== null) activeLogs.delete(log); }
     if (failures[channel]) return new Response("controlled failure", { status: failures[channel] });
   }
   if (p === "/api/queue" && req.method === "GET") return Response.json({ queue_running: queueRows(running), queue_pending: queueRows(pending) });
@@ -336,7 +349,7 @@ export const server = Deno.serve({ port }, async (req) => {
     const last = items.at(-1);
     return Response.json({ items, has_more, latest_mtime, cursor: last ? `${last.mtime}:${last.relpath}` : cursor ?? "" });
   }
-  if (p === "/internal/logs/raw" && req.method === "GET") return Response.json({ entries: logs, size: logs.length });
+  if (p === "/internal/logs/raw" && req.method === "GET") return Response.json({ entries: logs, size: { cols: 80, rows: 24 } });
   if (p.startsWith("/api/history/") && req.method === "GET") {
     const id = decodeURIComponent(p.slice("/api/history/".length));
     return Response.json(terminalHistory[id] ? { [id]: terminalHistory[id] } : {});

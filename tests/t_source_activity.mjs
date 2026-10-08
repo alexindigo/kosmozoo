@@ -128,7 +128,8 @@ Deno.test("activity: start:false, independent backoff, removal/abort and fresh r
   r.data["one:8188"].queue = (o) => { signal = o.signal; return pending.promise; };
   const before = r.jobs.snapshot("a").epoch;
   const tick = r.jobs.tick("one:8188");
-  await Promise.resolve();
+  for (let i = 0; i < 20 && !signal; i++) await Promise.resolve();
+  assert(signal, "the owned primary queue request reached the backing before retirement");
   delete r.hosts.a;
   r.jobs.reconcile();
   assertEquals(signal.aborted, false, "remaining alias keeps the address owned");

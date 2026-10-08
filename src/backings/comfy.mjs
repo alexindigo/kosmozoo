@@ -478,11 +478,16 @@ export function comfyClient(addr, { fetcher = fetch, clock = () => performance.n
     },
     async logs({ signal } = {}) {
       const d = await telemetry("/internal/logs/raw", signal);
-      if (!object(d) || !Array.isArray(d.entries) || !Number.isInteger(d.size) || d.size < 0 ||
+      // Stock Comfy returns terminal geometry here, not a log-buffer count.
+      // Both characterized producers normalize to the same entry snapshot.
+      const count = Number.isSafeInteger(d?.size) && d.size >= 0;
+      const terminal = object(d?.size) && Number.isSafeInteger(d.size.cols) && d.size.cols >= 0 &&
+        Number.isSafeInteger(d.size.rows) && d.size.rows >= 0;
+      if (!object(d) || !Array.isArray(d.entries) || !(count || terminal) ||
           d.entries.some((e) => !object(e) || typeof e.m !== "string" || !["string", "number"].includes(typeof e.t))) {
         throw new Error("ComfyUI logs: invalid buffer");
       }
-      return { entries: d.entries.map(({ t, m }) => ({ t, m })), size: d.size };
+      return { entries: d.entries.map(({ t, m }) => ({ t, m })), size: count ? d.size : d.entries.length };
     },
   };
 }

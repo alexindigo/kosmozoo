@@ -924,6 +924,8 @@ async function railMotion(page) {
     await control({reset:true});
   }
 
+  await require('./auto-refresh.cjs')({ page, ENGINE, FAKE: FAKE_ACTIVITY, KZ, check });
+
   check("no uncaught page errors", pageErrors.length === 0, pageErrors[0] ?? "");
 
   await page.close();

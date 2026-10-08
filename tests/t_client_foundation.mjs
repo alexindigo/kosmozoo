@@ -350,11 +350,15 @@ async function withBookmarkStore(run) {
   api.meta = async () => ({ v: 1, changed: false });
   api.want = async () => ({ pending: 0 });
   api.nodes = async () => ({});
-  api.collections = async () => ({ h: { name: "h" }, other: { name: "other" } });
+  api.collections = async () => ({ h: { address: "h:1", kind: "comfy", online: true },
+    other: { address: "other:1", kind: "comfy", online: true } });
+  api.activity = async () => ({ supported: false });
   try {
+    await store.actions.hosts.refresh();
     await store.actions.hosts.select("h");
     await run(store, api, (next) => { names = next; });
   } finally {
+    store.dispose(); store.actions.status.clear("transient");
     Object.assign(api, saved);
     delete globalThis.location;
     delete globalThis.history;
@@ -503,8 +507,9 @@ Deno.test("refresh merges new entries into the feed — no wipe, pointer and nod
   api.meta = async () => ({ v: 1, changed: false });
   api.want = async () => ({ pending: 0 });
   api.nodes = async () => ({});
-  api.collections = async () => ({ h: { name: "h" } });
+  api.collections = async () => ({ h: { address: "h:1", kind: "comfy", online: true } });
   try {
+    await store.actions.hosts.refresh();
     await store.actions.hosts.select("h");
     const before = store.state.images;
     const aNode = before[0];

@@ -3,6 +3,17 @@
 
 const BASE = ""; // same origin
 
+export class ApiError extends Error {
+  constructor(method, path, status, detail = "") {
+    super(`${method} ${path}: ${status}${detail ? ` — ${detail}` : ""}`);
+    this.name = "ApiError";
+    this.method = method;
+    this.path = path;
+    this.status = status;
+    this.detail = detail;
+  }
+}
+
 // the ONE JSON transport — exported so feature modules (variations) share it
 export async function req(method, path, body) {
   const r = await fetch(BASE + path, {
@@ -10,7 +21,16 @@ export async function req(method, path, body) {
     headers: body ? { "Content-Type": "application/json" } : undefined,
     body: body ? JSON.stringify(body) : undefined,
   });
-  if (!r.ok) throw new Error(`${method} ${path}: ${r.status}`);
+  if (!r.ok) {
+    let detail = "";
+    try {
+      const payload = JSON.parse(await r.text());
+      const error = typeof payload?.error === "string" ? payload.error : payload?.error?.message;
+      const reason = typeof payload?.reason === "string" ? payload.reason : "";
+      detail = [typeof error === "string" ? error : "", reason].filter(Boolean).join(": ").trim().slice(0, 1024);
+    } catch { /* malformed/non-JSON bodies still retain their HTTP failure */ }
+    throw new ApiError(method, path, r.status, detail);
+  }
   return r.json();
 }
 

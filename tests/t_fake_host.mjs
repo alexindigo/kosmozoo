@@ -99,7 +99,8 @@ Deno.test("fake telemetry: external jobs, overwritten logs, targeted terminal hi
     assertEquals(queue.queue_running[0][1], "external");
     assertEquals(queue.queue_running[0][3].client_id, "external-fixture-client");
     await control({ logs: [{ t: 1, m: "1/40\r" }] });
-    assertEquals(await (await fetch(`${BASE}/internal/logs/raw`)).json(), { entries: [{ t: 1, m: "1/40\r" }], size: 1 });
+    assertEquals(await (await fetch(`${BASE}/internal/logs/raw`)).json(),
+      { entries: [{ t: 1, m: "1/40\r" }], size: { cols: 80, rows: 24 } });
     await control({ finish: [{ id: "external", outcome: "error", output: "arrived.png" }] });
     const history = await (await fetch(`${BASE}/api/history/external`)).json();
     assertEquals(history.external.status.status_str, "error");

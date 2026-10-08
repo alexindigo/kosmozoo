@@ -22,12 +22,19 @@ const MAX_BEHIND_ALL = 50;  // "resolve every pending entry above the fold" cap
 // window opens the callback re-queues whatever it owns (the loader's failed
 // ids, the image window's errored srcs).
 let retryTimer = null;
+const retryCallbacks = new Set();
 export function scheduleRetry(cb) {
-  if (retryTimer) return;
-  retryTimer = setTimeout(() => {
+  if (cb) retryCallbacks.add(cb);
+  if (!retryTimer) retryTimer = setTimeout(() => {
     retryTimer = null;
-    cb?.();
+    const callbacks = [...retryCallbacks];
+    retryCallbacks.clear();
+    for (const callback of callbacks) callback();
   }, ERROR_RETRY_MS);
+  return () => {
+    retryCallbacks.delete(cb);
+    if (!retryCallbacks.size && retryTimer) { clearTimeout(retryTimer); retryTimer = null; }
+  };
 }
 
 // Chrome under the image box (padding + title row + notes pair) is declared
@@ -119,14 +126,13 @@ export function feedOffsets(entries, heightOf) {
   return offsets;
 }
 
-export function makeSizes({ srcFor, imageAt }) {
+export function makeSizes({ srcFor, imageAt, identityFor = (id) => id }) {
   // the chrome height is read HERE (store creation — the CSS is applied by
   // now; never at module import) and re-read on every resize: it is the one
   // cardHeight input that can change without any entry changing
   chromeHeightPx();
-  if (typeof window !== "undefined") {
-    window.addEventListener("resize", () => { chromePx = null; chromeHeightPx(); });
-  }
+  const resize = () => { chromePx = null; chromeHeightPx(); };
+  if (typeof window !== "undefined") window.addEventListener("resize", resize);
   const sizes = new Map();   // id -> { w, h }
   const failed = new Set();  // ids the loader gave up on (one retry schedule)
   const retried = new Set(); // ids whose single retry already failed
@@ -136,6 +142,10 @@ export function makeSizes({ srcFor, imageAt }) {
   // mid-flight and the inFlight slot leaks forever ( stalls at
   // MAX_INFLIGHT). Keep every loading image referenced until it settles.
   const loading = new Map();
+  const identities = new Map();
+  let context = null, disposed = false;
+  let cancelRetry = null;
+  const retrySizes = () => { if (!disposed) { cancelRetry = null; retried.clear(); bump(); } };
   const [version, setVersion] = createSignal(0);
   // the bumper MUST change the value: a bare setVersion writes undefined
   // once and then never notifies again (undefined === undefined) — every
@@ -143,35 +153,68 @@ export function makeSizes({ srcFor, imageAt }) {
   const bump = () => setVersion((v) => v + 1);
 
   // reactive read: sizeOf subscribes to landings
-  const sizeOf = (id) => { version(); return sizes.get(id) ?? null; };
+  const sizeOf = (id) => { version(); return identities.get(id) === identityFor(id) ? sizes.get(id) ?? null : null; };
 
   function loadFailed(id) {
     version();
-    return failed.has(id);
+    return identities.get(id) === identityFor(id) && failed.has(id);
+  }
+
+  function retireImage(id) {
+    const image = loading.get(id);
+    if (image) {
+      image.onload = null; image.onerror = null;
+      image.removeAttribute("src");
+      loading.delete(id);
+    }
+    inFlight.delete(id);
+  }
+
+  function setContext(next) {
+    if (context === next && !disposed) return;
+    context = next;
+    cancelRetry?.(); cancelRetry = null;
+    for (const id of [...loading.keys()]) retireImage(id);
+    sizes.clear(); failed.clear(); retried.clear(); identities.clear();
+    bump();
+  }
+
+  function reconcileIdentity(id) {
+    const identity = identityFor(id);
+    if (identities.get(id) !== identity) {
+      retireImage(id); sizes.delete(id); failed.delete(id); retried.delete(id);
+      identities.set(id, identity);
+    }
+    return identity;
   }
 
   function resolve(id) {
-    if (typeof Image === "undefined") return; // headless (unit tests)
+    if (disposed || typeof Image === "undefined") return; // headless (unit tests)
+    const identity = reconcileIdentity(id), owner = context;
+    if (identity == null) return;
     if (sizes.has(id) || inFlight.has(id) || failed.has(id)) return;
     const src = srcFor(id);
     if (!src) return;
     inFlight.add(id);
     const img = new Image();
     loading.set(id, img);
+    const current = () => !disposed && context === owner && loading.get(id) === img && identityFor(id) === identity;
     img.onload = () => {
+      if (!current()) return;
       inFlight.delete(id);
       loading.delete(id);
       sizes.set(id, { w: img.naturalWidth, h: img.naturalHeight });
       bump();
     };
     img.onerror = () => {
+      if (!current()) return;
       inFlight.delete(id);
       loading.delete(id);
       if (retried.has(id)) {
         failed.add(id); // the single retry failed too — permanent
       } else {
         retried.add(id); // exactly one retry, in ERROR_RETRY_MS
-        scheduleRetry(() => { retried.clear(); bump(); });
+        cancelRetry = scheduleRetry(retrySizes);
       }
       bump();
     };
@@ -188,23 +231,33 @@ export function makeSizes({ srcFor, imageAt }) {
   // view's index list and images come via imageAt — nothing materializes
   // the listing per call.
   function resolveAhead(viewIdx, first, last) {
+    // Retire old content BEFORE capacity is tested: otherwise six stale
+    // slots can make identity reconciliation in resolve unreachable.
+    for (const id of loading.keys()) reconcileIdentity(id);
     if (!viewIdx.length) return;
     let pendingAbove = 0;
     for (let i = 0; i < first; i++) {
       const e = imageAt(viewIdx[i]);
-      if (e && !hasDims(e) && !failed.has(e.id)) pendingAbove++;
+      if (e && !hasDims(e) && !loadFailed(e.id)) pendingAbove++;
     }
     const behind = pendingAbove <= MAX_BEHIND_ALL ? first : RESOLVE_BEHIND;
     const from = Math.max(0, first - behind);
     const to = Math.min(viewIdx.length - 1, last + RESOLVE_AHEAD);
     const stage = (i) => {
       const e = imageAt(viewIdx[i]);
-      if (!e || hasDims(e) || failed.has(e.id)) return;
+      if (!e || hasDims(e) || loadFailed(e.id)) return;
       resolve(e.id);
     };
     for (let i = from; i < first && inFlight.size < MAX_INFLIGHT; i++) stage(i);
     for (let i = first; i <= to && inFlight.size < MAX_INFLIGHT; i++) stage(i);
   }
 
-  return { sizeOf, resolveAhead, loadFailed };
+  function dispose() {
+    if (disposed) return;
+    disposed = true;
+    if (typeof window !== "undefined") window.removeEventListener("resize", resize);
+    setContext(null);
+  }
+
+  return { sizeOf, resolveAhead, loadFailed, setContext, dispose };
 }

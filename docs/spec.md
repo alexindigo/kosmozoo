@@ -209,8 +209,15 @@ aborts its reads. Re-add has a fresh epoch. `start:false` starts no timers;
 shutdown stops/aborts monitoring. Cadence is 2s active/queued, 5s idle, failure
 backoff capped at 30s. Folder sources invoke no generation telemetry.
 
-The backing uses GET `/api/queue`, retained/targeted `/api/history` and best-effort
-`/internal/logs/raw`, with the existing 10s timeout plus an owner abort signal.
+The authoritative lane uses GET `/api/queue` and retained/targeted `/api/history`.
+It installs completion snapshots and notifies relisting without awaiting optional
+progress. A separate prompt-owned flight reads best-effort `/internal/logs/raw`
+and brackets it with queue identity; it cannot delay the next authoritative tick.
+Both lanes use the existing 10s backing timeout and owner abort signals. Progress
+retires on prompt change, disconnect, last-address removal or stop, and late
+results cannot decorate a replacement. Even an ignored abort cannot create a
+second physical auxiliary flight in that monitor. Stock `{size:{cols,rows},entries}`
+and legacy numeric-size log envelopes normalize at the backing boundary.
 Queue/history failures are not empty results. No graph, submitting client ID,
 arbitrary raw log or direct browser-to-Comfy connection crosses the activity API.
 
@@ -241,17 +248,54 @@ The browser polls cached activity independently of metadata work, with per-sourc
 single-flight/backoff and lifecycle fences. Enabled-source completion and manual
 refresh use one selected-session incremental merge lane; completions during a
 read leave a follow-up pending, and failures retain the target for retry.
-The first known activity snapshot is coordinated with initial feed loading;
-unknown startup telemetry is not consumed as a baseline. If the feed loaded
-first, known activity requests freshness catch-up without replaying old history
-as new terminal jobs. Inactive sources never steal focus or write the selected
-feed. Load/metadata/want/size results are source-session-owned, including A→B→A
+Each source's private freshness owner separates observed from accepted targets.
+Only an issued ticket captured for a successful owned inventory read acknowledges
+its captured epoch/terminal/resync tuple; unknown, forged, foreign, retired and
+older tickets cannot acknowledge newer accepted work. Initial/manual requested
+reads are separately retained, including an initial failure without any known
+activity. Failures retry at 1–30s; unchanged activity does not bypass backoff.
+Disabling auto-refresh pauses derived completion work without forgetting it;
+confirmed enablement reconciles already-observed pending work. Explicit refresh
+may request an immediate attempt.
+
+Initial inventory never waits for held/unavailable activity. Unknown startup
+telemetry is not consumed as a baseline: first-known activity after read capture
+leaves freshness catch-up pending without replaying history as terminal jobs.
+Initial and retry/refresh reads share one acceptance routine. The first successful
+acceptance owns navigation resolution and restoration even after initial failure;
+later acceptance owns keyed merge/viewport compensation and live browsing intent.
+Inactive sources never steal focus or write the selected feed.
+Load/metadata/want/size results are source-session/source-record-owned, including A→B→A
 navigation. Judgment read protection, newer same-content enrichment, keyed editing
 nodes, viewport anchors, bulk selection, URL/current/trail, notes, zoom, anchors
 and workbench state survive incremental arrivals. Unknown-size arrivals are
 wanted and acquire real dimensions. Grid rendering uses entry-ID strings, with
 current measurement sizes resolved separately; replacing measurement objects
 does not remount retained cards.
+
+Grid's registered, owner-disposed seam publishes reactive measured readiness,
+positive viewport dimensions and identity-keyed virtual items. One Store
+reconciliation stages sizes/wants and admits a coherent settled range; empty,
+zero or stale-key geometry stays pending. Range/size/readiness changes can acquire
+images without scrolling or another current change. Current-first ripple remains;
+idle coverage extends by union. Acquisition permission is separate from permission
+to commit scroll-derived current/trail/URL: loading-time motion can settle
+acquisition without later gaining browsing permission. Active gestures freeze
+new src admission; the existing 150ms settle, compensation suppression and
+one navigation restore remain.
+
+The private size factory owns measurement images, slots and ephemeral dimensions
+by source context and content identity. Context retirement disposes resources and
+cached dimensions; content replacement retires stale resources before the six-slot
+concurrency gate. Late callbacks require matching context/slot/content. Measurement
+and src-error owners share one eight-second retry timer with retained callbacks and
+owner-specific cancellation, so one owner's work or retirement cannot erase another's.
+Store disposal releases measurement resources, the resize listener and retry work.
+
+The shared browser JSON transport throws `ApiError` on non-success, retaining
+method/path/status and at most 1024 characters of recognized engine JSON
+`error`/`reason` detail. Empty, malformed and foreign bodies remain HTTP failures;
+successful payloads keep their existing shape. Failure detail is text, never HTML.
 
 Feed-side topbar order: logo/wordmark, refresh icon, host dropdown, controlled
 native Output folder selector, separated pinned sources,

@@ -39,6 +39,7 @@ export function makeImageWindow({ entryAt, count, rippleMs = RIPPLE_MS }) {
   const bump = () => setVersion((v) => v + 1);
 
   let rippleTimer = 0;
+  let cancelRetry = null;
 
   // stop the ripple (scroll start, new settle); members stay as they are —
   // a started load is never aborted
@@ -105,10 +106,11 @@ export function makeImageWindow({ entryAt, count, rippleMs = RIPPLE_MS }) {
   const markError = (id) => {
     startedIds.delete(id);
     errored.add(id);
-    scheduleRetry(requeueErrored);
+    cancelRetry = scheduleRetry(requeueErrored);
   };
 
   function requeueErrored() {
+    cancelRetry = null;
     let any = false;
     for (const id of [...errored]) {
       retryNonce.set(id, Date.now());
@@ -119,7 +121,7 @@ export function makeImageWindow({ entryAt, count, rippleMs = RIPPLE_MS }) {
     }
     if (any) {
       bump();
-      if (errored.size) scheduleRetry(requeueErrored);
+      if (errored.size) cancelRetry = scheduleRetry(requeueErrored);
     }
   }
 
@@ -136,6 +138,7 @@ export function makeImageWindow({ entryAt, count, rippleMs = RIPPLE_MS }) {
   // with the list
   const clear = () => {
     freeze();
+    cancelRetry?.(); cancelRetry = null;
     members.clear();
     startedIds.clear();
     errored.clear();

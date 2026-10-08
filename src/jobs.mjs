@@ -1,6 +1,7 @@
 // Engine-owned, GET-only source telemetry. Preferences stay on collection;
 // this cache is ephemeral and shared only by aliases of the same address.
 import { isFolderHost } from "./backings/index.mjs";
+import { bounded } from "./backings/inventory.mjs";
 
 const clean = (text) => text.replace(/\x1b\[[0-?]*[ -/]*[@-~]/g, "");
 
@@ -93,6 +94,7 @@ export class Jobs {
       if (addresses.has(address)) continue;
       this.clearTimer(monitor.timer);
       monitor.controller?.abort();
+      monitor.progressController?.abort();
       this.monitors.delete(address);
     }
     for (const [address, sources] of addresses) {
@@ -100,7 +102,8 @@ export class Jobs {
       if (!monitor) {
         monitor = { address, sources, snapshot: emptySnapshot(this.epoch()),
           baseline: false, seen: new Set(), boundary: null, tracked: new Set(),
-          logs: new ProgressLog(), errors: 0, timer: null, task: null, controller: null };
+          logs: new ProgressLog(), errors: 0, timer: null, task: null, controller: null,
+          progressTask: null, progressPhysicalTask: null, progressController: null };
         this.monitors.set(address, monitor);
         if (this.running) this.#schedule(monitor, 0);
       }
@@ -137,7 +140,10 @@ export class Jobs {
     this.clearTimer(monitor.timer);
     monitor.timer = null;
     monitor.controller = new AbortController();
-    monitor.task = this.#observe(monitor).finally(() => {
+    const controller = monitor.controller;
+    monitor.task = bounded(() => this.#observe(monitor, controller), { signal: controller.signal }).catch((error) => {
+      if (!controller.signal.aborted) throw error;
+    }).finally(() => {
       monitor.task = null;
       if (this.running && this.monitors.get(monitor.address) === monitor) {
         const delay = monitor.errors ? Math.min(2000 * 2 ** (monitor.errors - 1), 30_000)
@@ -148,9 +154,9 @@ export class Jobs {
     return monitor.task;
   }
 
-  async #observe(monitor) {
-    const alive = () => this.monitors.get(monitor.address) === monitor && !monitor.controller.signal.aborted;
-    const options = { signal: monitor.controller.signal };
+  async #observe(monitor, controller) {
+    const alive = () => this.monitors.get(monitor.address) === monitor && !controller.signal.aborted;
+    const options = { signal: controller.signal };
     const client = this.client(monitor.address);
     const s = { ...monitor.snapshot };
     let notifications = 0;
@@ -197,38 +203,80 @@ export class Jobs {
         if (!alive()) return;
         for (const entry of targeted) terminal(entry);
       }
-      let running = queue.running.filter((id) => !monitor.seen.has(id));
-      let pending = queue.pending.filter((id) => !monitor.seen.has(id));
-      let progress = null;
-      if (running.length === 1) {
-        let logs = null;
-        try { logs = await client.logs(options); } catch { /* counters are best effort */ }
-        if (!alive()) return;
-        // A stable prompt brackets the log read. A terminal history record wins
-        // over either older queue snapshot.
-        const after = await client.queue(options);
-        if (!alive()) return;
-        const bracketed = after.running.length === 1 && after.running[0] === running[0];
-        running = after.running.filter((id) => !monitor.seen.has(id));
-        pending = after.pending.filter((id) => !monitor.seen.has(id));
-        if (logs && bracketed) progress = monitor.logs.sample(logs, running[0]);
-        else monitor.logs.clear();
-      } else monitor.logs.clear();
+      const running = queue.running.filter((id) => !monitor.seen.has(id));
+      const pending = queue.pending.filter((id) => !monitor.seen.has(id));
+      const prompt = running.length === 1 ? running[0] : null;
+      const samePrompt = !!prompt && monitor.snapshot.state === "running" && monitor.snapshot.runningPromptId === prompt;
+      const progress = samePrompt ? monitor.snapshot.progress : null;
+      if (!samePrompt) {
+        monitor.progressController?.abort();
+        monitor.logs.clear();
+      }
       if (monitor.errors) { s.resyncRevision++; notifications++; }
       monitor.errors = 0;
       Object.assign(s, { state: running.length ? "running" : "idle", sampledAt: this.clock(),
         runningCount: running.length, queuedCount: pending.length,
-        runningPromptId: running.length === 1 ? running[0] : null,
+        runningPromptId: prompt,
         progress: running.length === 1 ? progress : null, error: null });
-      monitor.snapshot = s;
-      if (notifications) this.onFinish(monitor.address, monitor.sources, { ...s });
+      monitor.snapshot = { ...s };
+      if (notifications) {
+        notifications = 0;
+        this.onFinish(monitor.address, monitor.sources, { ...s });
+      }
+      // Completion publication and the next authoritative poll never await a
+      // best-effort progress read. One independent flight brackets that data.
+      if (prompt) this.#startProgress(monitor, prompt);
     } catch (error) {
       if (!alive()) return;
       monitor.errors++;
+      monitor.progressController?.abort();
       monitor.logs.clear();
       monitor.snapshot = { ...s, state: "disconnected", sampledAt: this.clock(),
         runningPromptId: null, progress: null, error: error?.message ?? String(error) };
       if (notifications) this.onFinish(monitor.address, monitor.sources, { ...monitor.snapshot });
+    }
+  }
+
+  #startProgress(monitor, prompt) {
+    if (monitor.progressPhysicalTask || this.monitors.get(monitor.address) !== monitor) return;
+    const controller = new AbortController();
+    monitor.progressController = controller;
+    const physical = this.#readProgress(monitor, prompt, controller);
+    monitor.progressPhysicalTask = physical;
+    const settled = () => {
+      if (monitor.progressPhysicalTask === physical) monitor.progressPhysicalTask = null;
+    };
+    physical.then(settled, settled);
+    const task = bounded(() => physical, { signal: controller.signal }).catch(() => {
+      // Auxiliary failure/cancellation is indeterminate progress, never an
+      // empty queue or completion. The physical flight remains capped.
+    }).finally(() => {
+      if (monitor.progressTask === task) monitor.progressTask = null;
+      if (monitor.progressController === controller) monitor.progressController = null;
+    });
+    monitor.progressTask = task;
+  }
+
+  async #readProgress(monitor, prompt, controller) {
+    const current = () => this.monitors.get(monitor.address) === monitor && !controller.signal.aborted &&
+      monitor.snapshot.state === "running" && monitor.snapshot.runningCount === 1 && monitor.snapshot.runningPromptId === prompt;
+    try {
+      const client = this.client(monitor.address), options = { signal: controller.signal };
+      const logs = await client.logs(options);
+      if (!current()) return;
+      const after = await client.queue(options);
+      if (!current()) return;
+      if (after.running.length === 1 && after.running[0] === prompt && !monitor.seen.has(prompt)) {
+        const progress = monitor.logs.sample(logs, prompt);
+        monitor.snapshot = { ...monitor.snapshot, progress };
+      } else {
+        monitor.logs.clear();
+        monitor.snapshot = { ...monitor.snapshot, progress: null };
+      }
+    } catch {
+      if (!current()) return;
+      monitor.logs.clear();
+      monitor.snapshot = { ...monitor.snapshot, progress: null };
     }
   }
 
@@ -237,7 +285,8 @@ export class Jobs {
     for (const monitor of this.monitors.values()) {
       this.clearTimer(monitor.timer);
       monitor.controller?.abort();
+      monitor.progressController?.abort();
     }
-    await Promise.allSettled([...this.monitors.values()].map((m) => m.task).filter(Boolean));
+    await Promise.allSettled([...this.monitors.values()].flatMap((m) => [m.task, m.progressTask]).filter(Boolean));
   }
 }
