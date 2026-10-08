@@ -1,0 +1,16 @@
+.git
+.devcontainer
+dev
+docs
+tests
+client-solid-dist
+state
+cache
+.env*
+*.bak
+**/__pycache__
+**/*.pyc
+*.md
+plugins/export
+plugins/variations
+plugins/**/*.py

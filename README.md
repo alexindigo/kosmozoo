@@ -4,17 +4,20 @@ Efficiently compare a high volume of generated images against preset
 anchors, and capture detailed feedback on what is wrong or right with each
 one.
 
-This is the **`cruft-cleanup`** branch: a fresh implementation on Deno +
-native ESM — the engine runs unbundled; the Solid client compiles via
+This tree is the Deno engine + Solid client implementation. The engine runs
+unbundled as native ESM; the Solid client compiles via
 `build.mjs` into `client-solid-dist/` — with the engine exposed as a public
 API and downstream curation (buckets, captions, reject-sets) moved behind a
 plugin boundary.
 
 - **Product rationale:** `~/Documents/kosmozoo/NORTH_STAR.md`
 - **Engine + client contract:** `docs/spec.md`
-- **The outgoing Python implementation** is frozen on `main` and tagged
-  `python-final`. The live install runs the Deno v6/preact line from
-  `~/Projects/kosmozoo.dev`; this branch is its replacement.
+- **The outgoing Python implementation** is tagged `python-final`.
+
+The supported packaged run is the production container image: compiled UI,
+cached engine dependencies and native SQLite, running non-root with persistent
+state/cache volumes. See [docs/container.md](docs/container.md) for building,
+configuration, source-data mounts and shutdown. The devcontainer is for contributing.
 
 ## Status
 

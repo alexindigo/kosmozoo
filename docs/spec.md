@@ -420,8 +420,9 @@ Non-obvious behaviour the rewrite must not rediscover one bug at a time.
   `DENO_SQLITE_PATH=/usr/lib/libsqlite3.so`.
 - `feedback.json` is a portable judgment document, generated on demand per
   collection (`/api/collections/<id>/feedback.json`) — sqlite is canonical.
-- Running kosmozoo stays one `deno run` away — the devcontainer is for
-  contributing, never for running.
+- The supported packaged run is the [production container image](container.md),
+  with built UI, cached dependencies, native SQLite and persistent state/cache;
+  development stays one `deno run` away, and the devcontainer is for contributing.
 - No ML runtime, model weights, or Python anywhere in core. Specialized
   capabilities live behind a plugin/service boundary.
 - Security deliberately deferred: no auth, no sandbox, no capability model.
