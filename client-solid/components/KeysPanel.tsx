@@ -9,7 +9,7 @@ import { Modal } from "./Modal.js";
 
 export function KeysPanel() {
   const store = useAppStore();
-  const close = () => store.actions.keys.closePanel();
+  const close = () => store.handles.invoke("keys.panel.close");
 
   // keymap.list rows are the rows — filtered, never re-derived 
   const rows = () => {
@@ -20,7 +20,7 @@ export function KeysPanel() {
 
   return (
     <Show when={store.state.keysPanelOpen()}>
-    <Modal overlayId="keysPanel" panelId="keysPanelInner" onClose={close} escapeLayer={false}>
+    <Modal overlayId="keysPanel" panelId="keysPanelInner" closeCommand="keys.panel.close" escapeLayer={false}>
       <div id="keysPanelHead">
         <h2>Actions & keys</h2>
         <input

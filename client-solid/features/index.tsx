@@ -5,7 +5,7 @@
 import * as variations from "./variations/index.js";
 
 // the name lives on the registry entry, mirroring the engine's registry
-// (src/features/index.mjs): the store installs a feature's actions under it
+// (src/features/index.mjs): installation contributes commands and public ports
 export const FEATURES = [
   { name: "variations", ...variations },
 ];

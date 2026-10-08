@@ -12,13 +12,13 @@ export function WorkspaceBar() {
       <button
         title="image details"
         class={store.state.workspace() === "details" ? "on" : ""}
-        onClick={() => store.actions.ui.setWorkspace("details")}
+        onClick={() => store.handles.invoke("workspace.select", { space: "details" })}
         innerHTML={iconSvg("info-circle", 16)}
       />
       <button
         title="anchors"
         class={store.state.workspace() === "anchors" ? "on" : ""}
-        onClick={() => store.actions.ui.setWorkspace("anchors")}
+        onClick={() => store.handles.invoke("workspace.select", { space: "anchors" })}
         innerHTML={iconSvg("anchor", 16)}
       />
     </nav>

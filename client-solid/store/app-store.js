@@ -1,8 +1,9 @@
 // client-solid/store/app-store.js — the single global store.
 //
 // One makeAppStore created at boot, provided via context at the app root.
-// Views read store.state.* and call store.actions.* — nothing else. The store
-// owns the model: api.mjs is a store-internal dependency; views never fetch.
+// Views read store.state.*, invoke shared handles, and use explicit mechanical/
+// editor/lifecycle ports. Private actions below own the model; covered public
+// compatibility signatures are facades into handles. Views never fetch.
 //
 // Reactivity shape: createStore for tree structures (hosts, images with
 // meta/judgments, settings mirrors) — path-level updates touch only
@@ -31,6 +32,9 @@ import { makeSizes } from "./sizes.js";
 import { snapTidy, SNAP_QUIET_MS } from "./scroll-snap.js";
 import { makeJudgments } from "./judgments.js";
 import { cardState } from "./card-state.js";
+import { makeCommandHandles } from "./command-handles.js";
+import { registerCoreCommands, commandFacades } from "./core-commands.js";
+import { makeInputPolicy } from "./input-policy.js";
 
 // stored host if still present, else first online, else first
 function initialHost(hosts, stored) {
@@ -123,11 +127,9 @@ export function makeAppStore({ pollActivity = typeof window !== "undefined", sto
   const [confirmDelete, setConfirmDelete] = createSignal(null); // { image } | { images }
   const [keysPanelOpen, setKeysPanelOpen] = createSignal(false);
   const [capturing, setCapturing] = createSignal(null); // action id awaiting a keypress
-  // the key-layer stack: open modals push { id, onEscape } and the ONE key
-  // dispatcher hands Escape to the TOP layer only ( — no per-modal
-  // listeners, no double-close, capture-cancel outranks the panel's own
-  // Esc-close binding). An onEscape returning false declines the event
-  // (dispatch continues).
+  // Layers are command references and opaque registrations. Input-policy
+  // eligibility/decline is separate from action results; an accepted modal
+  // request consumes Escape even if its owner later cancels it.
   const [keyLayers, setKeyLayers] = createSignal([]);
   const [keysFilter, setKeysFilter] = createSignal("");
   const [menuFilter, setMenuFilter] = createSignal("");
@@ -963,6 +965,9 @@ export function makeAppStore({ pollActivity = typeof window !== "undefined", sto
     const a = document.createElement("a");
     a.href = url;
     a.download = name;
+    // Resource activation is an implementation detail, not another outside
+    // user click. Keep native download behavior without re-entering UI routing.
+    a.addEventListener("click", (event) => event.stopPropagation());
     document.body.appendChild(a);
     a.click();
     a.remove();
@@ -1126,7 +1131,12 @@ export function makeAppStore({ pollActivity = typeof window !== "undefined", sto
   // --- keymap ------------------------------------------------------------------------
   // The registry itself is framework-free (client/js/keys.mjs); the version
   // signal fans mutations out to the keys panel.
-  const keymap = makeKeymap();
+  let inputPolicy;
+  const handles = makeCommandHandles({ observe: (result) => inputPolicy?.observe(result) });
+  const keymap = makeKeymap({
+    describe: (id) => handles.get(id).description,
+    request: (binding) => inputPolicy.request(binding),
+  });
   const [keysVersion, setKeysVersion] = createSignal(0);
   const bumpKeys = () => setKeysVersion((v) => v + 1);
 
@@ -1135,15 +1145,12 @@ export function makeAppStore({ pollActivity = typeof window !== "undefined", sto
   // candidate, not a cancel
   createEffect(() => {
     if (!capturing()) return;
-    setKeyLayers((ls) => [...ls.filter((l) => l.id !== "keys-capture"), {
+    const disposeLayer = actions.keys.pushLayer({
       id: "keys-capture",
-      onEscape: (e) => {
-        if (e?.ctrlKey || e?.altKey || e?.shiftKey || e?.metaKey) return false;
-        setCapturing(null);
-        return true;
-      },
-    }]);
-    onCleanup(() => setKeyLayers((ls) => ls.filter((l) => l.id !== "keys-capture")));
+      command: "keys.capture.cancel",
+      decline: (e) => !!(e?.ctrlKey || e?.altKey || e?.shiftKey || e?.metaKey),
+    });
+    onCleanup(disposeLayer);
   });
 
   // --- per-image zoom views (folded from views.mjs — : no second
@@ -1316,13 +1323,17 @@ export function makeAppStore({ pollActivity = typeof window !== "undefined", sto
   const registeredFeatures = [];
   const actions = {
     features: {
-      // a feature module { name, actions?, cardAction?, bulkAction?, Modal? }
-      // installs its store actions under its name + joins the affordance list
+      // Feature installation defines private operations/owner ports and semantic
+      // commands before data bindings/affordances join the registry.
       register(f) {
         if (registeredFeatures.some((x) => x.name === f.name)) return;
-        if (f.actions) {
-          actions[f.name] = f.actions({ get state() { return stateObj; }, actions, setSt, reconcile });
+        const installed = f.install?.({ state: stateObj, handles, setSt, reconcile });
+        if (installed) {
+          for (const command of installed.commands ?? []) handles.register(command);
+          for (const command of installed.ownedCommands ?? []) handles.registerOwned(command);
+          publicActions[f.name] = installed.ports;
         }
+        for (const binding of f.bindings ?? []) actions.keys.register(binding);
         registeredFeatures.push(f);
       },
     },
@@ -1429,7 +1440,8 @@ export function makeAppStore({ pollActivity = typeof window !== "undefined", sto
         const task = record.writeTask.then(async () => {
           if (sourceRecords.get(id) !== record || disposed) return { ok: false };
           try {
-            const saved = await api.patchCollection(id, savedPatch);
+            const actualPatch = savedPatch.toggle ? { [savedPatch.toggle]: !st.hosts[id][savedPatch.toggle] } : savedPatch;
+            const saved = await api.patchCollection(id, actualPatch);
             if (sourceRecords.get(id) !== record || disposed) return { ok: false };
             batch(() => {
               setSt("hosts", id, "pinned", !!saved.pinned);
@@ -1493,6 +1505,12 @@ export function makeAppStore({ pollActivity = typeof window !== "undefined", sto
         if (idx < 0) return;
         const img = st.images[idx];
         triggerDownload(api.entryBytesUrl(img.host, img.filename), downloadName(img));
+      },
+    },
+
+    collections: {
+      downloadFeedback(source) {
+        return triggerDownload(`/api/collections/${encodeURIComponent(source)}/feedback.json`, `kosmozoo_${source}_feedback.json`);
       },
     },
 
@@ -1944,8 +1962,8 @@ export function makeAppStore({ pollActivity = typeof window !== "undefined", sto
     // --- keys: bindings, capture, persisted keymap ------------------------------
     keys: {
       setFilter(v) { setKeysFilter(v); },
-      register(id, defaultKey, fn, opts = {}) {
-        keymap.bind(id, defaultKey, fn, opts);
+      register(binding, ...legacy) {
+        keymap.bind(binding, ...legacy);
         bumpKeys();
       },
       togglePanel() {
@@ -1957,12 +1975,14 @@ export function makeAppStore({ pollActivity = typeof window !== "undefined", sto
         setCapturing(null);
       },
       startCapture(id) { setCapturing(id); },
+      cancelCapture() { setCapturing(null); },
       // key layers: open modals push themselves; Escape goes to the top one
       pushLayer(layer) {
-        setKeyLayers((ls) => [...ls.filter((l) => l.id !== layer.id), layer]);
-      },
-      popLayer(id) {
-        setKeyLayers((ls) => ls.filter((l) => l.id !== id));
+        if (typeof layer.command !== "string" || layer.onEscape) throw new TypeError("Layer requires a command reference");
+        handles.get(layer.command);
+        const registration = { ...layer };
+        setKeyLayers((ls) => [...ls.filter((l) => l.id !== layer.id), registration]);
+        return () => setKeyLayers((ls) => ls.filter((l) => l !== registration));
       },
       // the capture hook: a pressed key rebinds the capturing action.
       // (Plain Escape never reaches here — the capture layer cancels first;
@@ -2004,26 +2024,7 @@ export function makeAppStore({ pollActivity = typeof window !== "undefined", sto
       // top key layer first (an open modal, a running capture), then the
       // keymap's bindings — first match wins, in registration order (the
       // panel registers before the workbench so keys.close outranks wb.close)
-      dispatch(e) {
-        if (!capturing() && typeof e.target?.matches === "function" && e.target.matches("select")) return;
-        if (e.key === "Escape") {
-          const top = keyLayers().at(-1);
-          if (top && top.onEscape(e) !== false) {
-            e.preventDefault();
-            e.stopPropagation();
-            return;
-          }
-        }
-        if (capturing()) {
-          e.preventDefault();
-          e.stopPropagation();
-          actions.keys.captureEvent(e);
-          return;
-        }
-        if (typeof e.target?.matches === "function"
-          && e.target.matches("input, textarea, select")) return;
-        if (keymap.dispatch(e)) e.preventDefault();
-      },
+      dispatch(e, phase) { return inputPolicy.dispatch(e, keymap, phase); },
     },
 
     // --- anchors: local reference images, persisted as data URLs ----------------
@@ -2140,9 +2141,9 @@ export function makeAppStore({ pollActivity = typeof window !== "undefined", sto
   const stateObj = {
     // trees — getters keep reads subscribed to the live store paths
     featureCardActions: (image) => registeredFeatures.flatMap((f) =>
-      (f.cardAction ? [{ ...f.cardAction, onAction: () => f.cardAction.onAction({ state: stateObj, actions }, image) }] : [])),
+      (f.cardAction ? [{ ...f.cardAction, args: { ...f.cardAction.args, id: image.id } }] : [])),
     featureBulkActions: () => registeredFeatures.flatMap((f) =>
-      (f.bulkAction ? [{ ...f.bulkAction, onAction: () => f.bulkAction.onAction({ state: stateObj, actions }) }] : [])),
+      (f.bulkAction ? [{ ...f.bulkAction, args: { ...f.bulkAction.args, target: "selected" } }] : [])),
     get hosts() { return st.hosts; },
     get sourceActivity() { return st.sourceActivity; },
     get sourceSaving() { return st.sourceSaving; },
@@ -2234,7 +2235,11 @@ export function makeAppStore({ pollActivity = typeof window !== "undefined", sto
 
   sourceBrowse = makeSourceBrowse({ storage, onError: (message) => actions.status.error(message),
     validCurrent: (address, name) => isEntryName(Object.values(st.hosts).find((source) => source.address === address)?.kind, name) });
-  return { state: stateObj, actions, ui: uiStateObj, dispose };
+  registerCoreCommands(handles, { ops: actions, state: stateObj });
+  const publicActions = commandFacades(handles, actions, stateObj);
+  inputPolicy = makeInputPolicy({ handles, state: stateObj, layers: keyLayers,
+    captureEvent: actions.keys.captureEvent, onError: (error) => actions.status.error(`input failed: ${error?.message ?? error}`) });
+  return { state: stateObj, actions: publicActions, handles, ui: uiStateObj, dispose };
 }
 
 export const AppStoreContext = createContext(null);

@@ -32,6 +32,11 @@ async function attempt(name, fn) {
 
 async function main() {
   const cdp = await CDP.launch(9334);
+  const closeAndDiscard = async () => {
+    await cdp.evaluate(`document.querySelector('.vz-close')?.click()`);
+    if (await cdp.evaluate(`!!document.querySelector('.vz-discard')`)) await cdp.clickAt('.vz-discard-confirm');
+    await cdp.poll(`!document.querySelector('.vz-root')`, 5000);
+  };
   try {
     await cdp.goto(ENGINE);
     await cdp.poll(`(async () => ${KZ}.state.images.length > 0)()`);
@@ -351,12 +356,19 @@ async function main() {
         JSON.stringify(result));
     });
 
-    // --- Esc closes the modal ---
-    await attempt("Esc closes the modal", async () => {
-      await cdp.key("Escape");
+    // --- Esc requests owned discard without throwing edits away ---
+    await attempt("Esc protects edits; Keep editing preserves the panel; Discard closes", async () => {
+      const before = await cdp.evaluate(`document.querySelector('.vz-suffix').value`);
+      await cdp.keyTrusted("Escape", { vk: 27 });
+      await cdp.poll(`!!document.querySelector('.vz-discard')`);
+      check("Esc opens the owned discard decision", await cdp.evaluate(`document.querySelector('.vz-panel').contains(document.querySelector('.vz-discard'))`));
+      await cdp.clickAt('.vz-keep');
+      check("Keep editing preserves exact suffix", await cdp.evaluate(`document.querySelector('.vz-suffix').value === ${JSON.stringify(before)}`));
+      await cdp.keyTrusted("Escape", { vk: 27 });
+      await cdp.clickAt('.vz-discard-confirm');
       const closed = await cdp.poll(`!document.querySelector('.vz-root')`, 5000)
         .then(() => true).catch(() => false);
-      check("Esc closes modal", closed);
+      check("Discard closes modal", closed);
     });
 
     // --- backdrop click closes the modal ---
@@ -445,8 +457,7 @@ async function main() {
         !geom.isOk && geom.msgColor === geom.red,
         JSON.stringify(geom));
       // cleanup: close any lingering modal
-      await cdp.evaluate(`document.querySelector('.vz-close')?.click()`);
-      await cdp.poll(`!document.querySelector('.vz-root')`, 5000).catch(() => {});
+      await closeAndDiscard();
     });
 
     // --- relative ranges (batch mode) ----------------------------------------
@@ -508,8 +519,7 @@ async function main() {
       check("lora clip strength row with first-carrier current",
         info["LoraLoader.strength_clip"] != null && parseFloat(info["LoraLoader.strength_clip"]) === 0.8,
         JSON.stringify(info));
-      await cdp.evaluate(`document.querySelector('.vz-close')?.click()`);
-      await cdp.poll(`!document.querySelector('.vz-root')`, 5000).catch(() => {});
+      await closeAndDiscard();
     });
 
     // --- lora strength run mutates both carriers -------------------------------
@@ -635,8 +645,7 @@ async function main() {
       const c1 = parseInt(await cdp.evaluate(`document.querySelector('.vz-count')?.textContent`), 10);
       check("2 picks × numeric range → the right count",
         c1 === expected, `denoise-only=${c0} with-2-picks=${c1} expected=${expected}`);
-      await cdp.evaluate(`document.querySelector('.vz-close')?.click()`);
-      await cdp.poll(`!document.querySelector('.vz-root')`, 5000).catch(() => {});
+      await closeAndDiscard();
     });
 
     // --- enum sweep run: picks enqueue on the right node ------------------------
@@ -721,8 +730,7 @@ async function main() {
       check("enabled text row floats to the top",
         order[0] === "BasicScheduler.denoise" && order[1] === "CLIPTextEncode#2.text",
         JSON.stringify(order));
-      await cdp.evaluate(`document.querySelector('.vz-close')?.click()`);
-      await cdp.poll(`!document.querySelector('.vz-root')`, 5000).catch(() => {});
+      await closeAndDiscard();
     });
 
     // --- text sweep run: picks enqueue verbatim ----------------------------------
@@ -817,8 +825,7 @@ async function main() {
           "a dog, oil style", "a dog,  style", "a dog, ink style",
         ]),
         JSON.stringify(values));
-      await cdp.evaluate(`document.querySelector('.vz-close')?.click()`);
-      await cdp.poll(`!document.querySelector('.vz-root')`, 5000).catch(() => {});
+      await closeAndDiscard();
     });
 
     // --- sweep-to-empty: a blank text row is ONE empty value ----------------------
@@ -854,10 +861,10 @@ async function main() {
       check("run payload carries the empty string",
         JSON.stringify(body.values) === JSON.stringify([""]),
         JSON.stringify(body));
-      await cdp.evaluate(`document.querySelector('.vz-close')?.click()`);
-      await cdp.poll(`!document.querySelector('.vz-root')`, 5000).catch(() => {});
+      await closeAndDiscard();
     });
 
+    await require('./variations-commands.cjs')({ cdp, check, ENGINE, FAKE, KZ });
   } finally {
     await cdp.close();
   }

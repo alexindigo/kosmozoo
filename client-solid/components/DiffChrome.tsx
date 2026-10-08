@@ -70,28 +70,27 @@ export function DiffChrome() {
   // one popup open at a time; Esc closes it (never the workbench), and a
   // pointerdown outside any control closes it too
   const [openCtl, setOpenCtl] = createSignal(null);
+  onCleanup(store.handles.own("workbench.popup.close", () => setOpenCtl(null)));
+  onCleanup(store.handles.own("workbench.popup.toggle", ({ control }) => setOpenCtl((cur) => cur === control ? null : control)));
   createEffect(() => {
     if (!openCtl()) return;
-    const onKey = (e) => {
-      if (e.key === "Escape") { e.preventDefault(); e.stopPropagation(); setOpenCtl(null); }
-    };
+    const disposeLayer = store.actions.keys.pushLayer({ id: "workbench-popup", phase: "capture", command: "workbench.popup.close" });
     const onDown = (e) => {
-      if (!e.target.closest?.(".dz-vslider")) setOpenCtl(null);
+      if (!e.target.closest?.(".dz-vslider")) store.handles.invoke("workbench.popup.close");
     };
-    document.addEventListener("keydown", onKey, true);
     document.addEventListener("pointerdown", onDown, true);
     onCleanup(() => {
-      document.removeEventListener("keydown", onKey, true);
+      disposeLayer();
       document.removeEventListener("pointerdown", onDown, true);
     });
   });
-  const toggle = (id) => setOpenCtl((cur) => (cur === id ? null : id));
+  const toggle = (control) => store.handles.invoke("workbench.popup.toggle", { control });
 
   return (
     <>
       <button
         id="diffClose" title="close (Esc)"
-        onClick={() => store.actions.diff.close()}
+        onClick={() => store.handles.invoke("workbench.close")}
         innerHTML={iconSvg("x", 16)}
       />
       {/* ONE bottom panel holding all the buttons: controls at the left,
@@ -101,14 +100,14 @@ export function DiffChrome() {
           <button
             class="dz-sidebtn" title="active side — primary in every view (ArrowLeft/Right)"
             disabled={!hasB() || undefined}
-            onClick={() => store.actions.diff.setCol(d().col === "feed" ? "right" : "feed")}
+            onClick={() => store.handles.invoke("workbench.column", { toggle: true })}
           >{d().col === "feed" ? "A" : "B"}</button>
           <button
             class={"dz-lockbtn" + (d().locked ? " on" : "")}
             title={d().locked ? "locked — gestures move both (l)" : "unlocked — gestures move the target (l)"}
             aria-pressed={d().locked}
             disabled={!hasB() || undefined}
-            onClick={() => store.actions.diff.setLocked(!d().locked)}
+            onClick={() => store.handles.invoke("workbench.lock", { toggle: true })}
             innerHTML={iconSvg(d().locked ? "lock" : "lock-open", 14)}
           />
           <VSlider
@@ -117,26 +116,26 @@ export function DiffChrome() {
             disabled={!hasB()}
             open={() => openCtl() === "active"}
             onToggle={() => toggle("active")}
-            onInput={(v) => store.actions.diff.setActiveOpacity(v)}
+            onInput={(value) => store.handles.invoke("workbench.parameters", { parameter: "activeOpacity", value })}
           />
           <Show when={hasB() && d().mode === "difference"}>
             <button
               class="dz-sidebtn" title="absolute / proportional highlight"
-              onClick={() => store.actions.diff.setDiffAbs(!d().diffAbs)}
+              onClick={() => store.handles.invoke("workbench.parameters", { parameter: "absolute", toggle: true })}
             >{d().diffAbs ? "abs" : "prop"}</button>
             <VSlider
               icon="filter" title="difference threshold — pixels within this delta count as matching" class="dz-threshold"
               value={() => d().diffThreshold / 64}
               open={() => openCtl() === "threshold"}
               onToggle={() => toggle("threshold")}
-              onInput={(v) => store.actions.diff.setDiffThreshold(Math.round(v * 64))}
+              onInput={(v) => store.handles.invoke("workbench.parameters", { parameter: "threshold", value: Math.round(v * 64) })}
             />
             <VSlider
               icon="contrast" title="highlight opacity" class="dz-mask-op"
               value={() => d().diffOpacity}
               open={() => openCtl() === "mask"}
               onToggle={() => toggle("mask")}
-              onInput={(v) => store.actions.diff.setDiffOpacity(v)}
+              onInput={(value) => store.handles.invoke("workbench.parameters", { parameter: "opacity", value })}
             />
           </Show>
         </div>
@@ -147,7 +146,7 @@ export function DiffChrome() {
                 class={"dz-segbtn" + (d().mode === m ? " on" : "")}
                 disabled={!hasB() || undefined}
                 title={`${label} (${key})`}
-                onClick={() => store.actions.diff.setMode(m)}
+                onClick={() => store.handles.invoke("workbench.mode", { mode: m })}
                 innerHTML={iconSvg(icon, 16)}
               />
             )}
@@ -155,7 +154,7 @@ export function DiffChrome() {
         </div>
         <button
           id="diffKeysBtn" title="actions & keys (?)"
-          onClick={() => store.actions.ui.toggleKeysPanel()}
+          onClick={() => store.handles.invoke("keys.panel.toggle")}
           innerHTML={iconSvg("keyboard", 18)}
         />
       </div>

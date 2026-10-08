@@ -7,15 +7,13 @@ export function FeedFilter(props) {
   const [expanded, setExpanded] = createSignal(false);
   let input, button;
   const collapse = () => { setExpanded(false); button?.focus(); };
-  const escape = () => {
-    if (props.canEscape && !props.canEscape()) return false;
-    collapse();
-  };
+  onCleanup(props.handles.own("feed.filter.close", collapse));
+  onCleanup(props.handles.own("feed.filter.toggle", () => expanded() ? collapse() : setExpanded(true)));
   createEffect(() => {
     if (!expanded()) return;
-    props.pushLayer({ id: "feed-filter", onEscape: escape });
+    const disposeLayer = props.pushLayer({ id: "feed-filter", command: "feed.filter.close", decline: () => props.canEscape && !props.canEscape() });
     input?.focus();
-    onCleanup(() => props.popLayer("feed-filter"));
+    onCleanup(disposeLayer);
   });
   return (
     <div class="feed-filter">
@@ -25,7 +23,7 @@ export function FeedFilter(props) {
       <IconButton id="filterBtn" chrome variant="filter" buttonRef={(el) => button = el}
         title={props.value ? `Filename filter: ${props.value}` : "Filter filenames"}
         active={!!props.value} expanded={expanded()} controls="filter" icon={iconSvg("filter", 16)}
-        onAction={() => expanded() ? collapse() : setExpanded(true)} />
+        onAction={() => props.handles.invoke("feed.filter.toggle")} />
     </div>
   );
 }

@@ -38,7 +38,7 @@ export function MetaBody(props) {
 
   // collapse state lives in the store (persisted under the same
   // kosmozoo.infoGroups.v1 key as before)
-  const toggleGroup = (group) => store.actions.ui.infoGroup.toggle(group);
+  const toggleGroup = (group) => store.handles.invoke("metadata.group.toggle", { group });
 
   return (
     <div>

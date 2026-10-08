@@ -107,7 +107,7 @@ export function FeedRail() {
     const k = Math.floor((e.clientY - r.top) / geom.tickPx);
     const pos = Math.max(0, Math.min(n - 1, tapeStart() + k));
     const imgIdx = store.state.entriesWithKnownSize()[pos];
-    if (imgIdx != null) store.actions.feed.restoreToIndex(imgIdx);
+    if (imgIdx != null) store.handles.invoke("feed.revealEntry", { id: store.state.images[imgIdx].id });
   };
   let dragging = false;
   const onDown = (e) => {

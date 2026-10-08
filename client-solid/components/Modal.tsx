@@ -14,7 +14,7 @@
 // overlay/panel ids and children; the close affordance is a child too, so
 // each panel keeps its own layout.
 
-import { onMount, onCleanup } from "solid-js";
+import { onCleanup } from "solid-js";
 import { Portal } from "solid-js/web";
 import { useAppStore } from "../store/app-store.js";
 
@@ -23,9 +23,9 @@ export function Modal(props) {
   // mounted == open (the parent's <Show> gates it): the key layer's
   // lifecycle is exactly the modal's lifecycle
   const layerId = props.overlayId ?? props.class ?? "modal";
+  const close = () => store.handles.invoke(props.closeCommand, props.closeArgs);
   if (props.escapeLayer !== false) {
-    onMount(() => store.actions.keys.pushLayer({ id: layerId, onEscape: () => props.onClose?.() }));
-    onCleanup(() => store.actions.keys.popLayer(layerId));
+    onCleanup(store.actions.keys.pushLayer({ id: layerId, command: props.closeCommand, args: props.closeArgs }));
   }
 
   return (
@@ -33,7 +33,7 @@ export function Modal(props) {
       <div
         id={props.overlayId}
         class={"modal-backdrop" + (props.class ? " " + props.class : "")}
-        onClick={(e) => { if (e.target === e.currentTarget) props.onClose?.(); }}
+        onClick={(e) => { if (e.target === e.currentTarget) close(); }}
       >
         <div id={props.panelId} class="modal-panel">
           {props.children}

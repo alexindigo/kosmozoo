@@ -665,6 +665,7 @@ async function attempt(name, fn) {
     }
   });
 
+  await require('./command-origins.cjs')({ page, ENGINE, KZ, check });
   check("no uncaught page errors", pageErrors.length === 0, pageErrors[0] ?? "");
 
   await page.close();

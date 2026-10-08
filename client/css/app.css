@@ -1040,3 +1040,18 @@ body:has(#diff:not([hidden])) #statusCol { bottom: 56px; }
   #chrome .folder-picker select { padding-inline: 0; }
   #chrome .pinned-source-group.has-pins { gap: 1px; padding-inline-start: 1px; }
 }
+
+/* The decision is contained by its owner; its editor never unmounts. */
+.vz-panel { position: relative; }
+.vz-editor { display: flex; flex-direction: column; flex: 1; min-height: 0; }
+.vz-discard-overlay { position: absolute; inset: 0; display: flex; align-items: center;
+  justify-content: center; background: var(--backdrop); border-radius: inherit; z-index: 1; }
+.vz-discard { width: min(360px, 85%); padding: 24px; border: 1px solid var(--border-strong);
+  border-radius: 8px; background: var(--focused-background); color: var(--foreground); }
+.vz-discard h2 { margin: 0 0 12px; font-size: 16px; color: var(--foreground-bright); }
+.vz-discard p { color: var(--foreground-mid); line-height: 1.5; }
+.vz-discard-actions { display: flex; gap: 12px; justify-content: flex-end; }
+.vz-discard-actions button { padding: 7px 12px; border: 1px solid var(--border-strong);
+  border-radius: 4px; background: var(--lifted); color: var(--foreground); cursor: pointer; }
+.vz-discard-actions .vz-discard-confirm { color: var(--negative); }
+.vz-discard-actions button:focus-visible { outline: 2px solid var(--secondary); outline-offset: 2px; }

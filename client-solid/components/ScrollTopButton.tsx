@@ -23,7 +23,7 @@ export function ScrollTopButton() {
       <button
         id="scrollTopBtn"
         title="back to top"
-        onClick={() => store.actions.feed.scrollTop()}
+        onClick={() => store.handles.invoke("feed.top")}
         innerHTML={iconSvg("arrow-up", 18)}
       />
     </Show>

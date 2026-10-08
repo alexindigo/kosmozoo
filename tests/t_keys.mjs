@@ -31,9 +31,9 @@ Deno.test("keys: combo bindings match exactly (Shift+ArrowRight ≠ ArrowRight)"
 
 Deno.test("keys: overrides apply, rebind detects conflicts, reset restores", () => {
   let fired = 0;
-  const km = makeKeymap();
-  km.bind("t.action.a", "a", () => fired++, { desc: "A", ctx: "t" });
-  km.bind("t.action.b", "b", () => {}, { desc: "B", ctx: "t" });
+  const km = makeKeymap({ describe: (id) => id, request: () => { fired++; return true; } });
+  km.bind({ id: "t.action.a", key: "a", command: "test.a", desc: "A", ctx: "t" });
+  km.bind({ id: "t.action.b", key: "b", command: "test.b", desc: "B", ctx: "t" });
 
   km.setKeymap({ "t.action.a": "Shift+F1" });
   assertEquals(km.list().find((a) => a.id === "t.action.a").key, "Shift+F1");
@@ -43,7 +43,7 @@ Deno.test("keys: overrides apply, rebind detects conflicts, reset restores", () 
   const c = km.rebind("t.action.b", "Shift+F1");
   assertEquals(c.conflict, "t.action.a");
   // no conflict across different ctx
-  km.bind("other.action", "x", () => {}, { desc: "X", ctx: "other" });
+  km.bind({ id: "other.action", key: "x", command: "test.x", desc: "X", ctx: "other" });
   assertEquals(km.rebind("other.action", "Shift+F1").ok, true);
 
   // rebind then dispatch
@@ -64,9 +64,9 @@ Deno.test("keys: comboFromEvent orders modifiers canonically", () => {
 });
 
 Deno.test("keys: findConflict treats bare letters case-insensitively", () => {
-  const km = makeKeymap();
-  km.bind("c.a", "h", () => {}, { ctx: "c" });
-  km.bind("c.b", "j", () => {}, { ctx: "c" });
+  const km = makeKeymap({ describe: (id) => id, request: () => true });
+  km.bind({ id: "c.a", key: "h", command: "test.a", ctx: "c" });
+  km.bind({ id: "c.b", key: "j", command: "test.b", ctx: "c" });
   assertEquals(km.findConflict("c.b", "H"), "c.a"); // "H" conflicts with "h"
   assertEquals(km.findConflict("c.b", "F9"), null);
 });

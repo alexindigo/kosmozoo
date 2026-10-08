@@ -1,37 +1,19 @@
 // client-solid/features/variations/index.tsx — the variations feature:
 // batch parameter sweep from a card. Exports the feature contract:
-// { actions, Modal, cardAction, bulkAction }.
+// { install, Modal, cardAction, bulkAction }.
 
 import { IconButton } from "../../components/IconButton.js";
 import { iconSvg } from "/js/icons.mjs";
 import { VariationsModal } from "./VariationsModal.js";
 import * as api from "./api.js";
+import { makeVariationSession } from "./session.js";
+import { variationCommands } from "./commands.js";
 
-// The modal reads these through store.actions.variations; they are thin
-// bindings over the feature's own transport.
-export function actions(store) {
-  return {
-    // wand toggle: re-clicking the same image's wand closes the modal
-    open(image) {
-      const key = image?.id ?? null;
-      if (store.state.variations.open && store.state.variations.key === key) {
-        store.actions.variations.close();
-        return;
-      }
-      store.setSt("variations", store.reconcile({ open: true, images: [image], key }));
-    },
-    // bulk bar's wand: RELATIVE sweeps applied to every selected image
-    // around its own current value — even for a single image
-    openBulk(images) {
-      const key = "batch:" + images.map((i) => i.id).join("|");
-      if (store.state.variations.open && store.state.variations.key === key) {
-        store.actions.variations.close();
-        return;
-      }
-      store.setSt("variations", store.reconcile({ open: true, images, key }));
-    },
-    close() { store.setSt("variations", store.reconcile({ open: false, images: [], key: null })); },
-
+// Assembly injects modal services and registers owner-safe command definitions.
+export function install(store) {
+  const broker = makeVariationSession({ read: () => store.state.variations,
+    write: (opening) => store.setSt("variations", store.reconcile(opening)) });
+  const services = {
     // modal I/O — the feature's api.js owns the transport; the modal keeps
     // session-scoped results (probe params, file lists) in local signals
     probe(image) { return api.probe(image.id).catch(() => null); },
@@ -44,6 +26,17 @@ export function actions(store) {
       return { ok, status, data, text };
     },
   };
+  return {
+    ownedCommands: [{ id: "variations.discard.cancel", validate: (args) => Object.keys(args).length === 0 }],
+    commands: variationCommands({ state: store.state, broker }),
+    ports: {
+      services,
+      registerOwner: broker.register,
+      open: (image) => store.handles.invoke("variations.open", { id: image.id }),
+      openBulk: (images) => store.handles.invoke("variations.open", { ids: images.map((image) => image.id), bulk: true }),
+      close: () => store.handles.invoke("variations.close"),
+    },
+  };
 }
 
 export function Modal() {
@@ -54,14 +47,14 @@ export const cardAction = {
   icon: iconSvg("wand", 16),
   variant: "variations",
   title: "generate variations",
-  onAction: (store, image) => store.actions.variations.open(image),
+  command: "variations.open",
 };
 
 export const bulkAction = {
   icon: iconSvg("wand", 16),
   variant: "variations",
   title: "generate variations of all selected (one relative sweep, applied to each)",
-  onAction: (store) => store.actions.variations.openBulk(store.actions.bulk.images()),
+  command: "variations.open", args: { bulk: true },
 };
 
 export { IconButton };

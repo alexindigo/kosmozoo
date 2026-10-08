@@ -95,7 +95,7 @@ export function DetailsBody() {
                             alt={image.file}
                             ar={s() !== "failed" ? `${s().w} / ${s().h}` : null}
                             zoomKey={`input:${im()?.host}:${image.file}`}
-                            onOpen={() => store.actions.diff.openInput(im()?.host, image.file, image.fromOutput)}
+                            onOpen={() => store.handles.invoke("workbench.pickInput", { source: im()?.host, file: image.file, fromOutput: !!image.fromOutput })}
                           />
                         </Show>
                       </div>
@@ -166,7 +166,7 @@ function Head(props) {
                 onClick={(e) => {
                   if (e.ctrlKey || e.metaKey || e.shiftKey || e.altKey || e.button !== 0) return;
                   e.preventDefault();
-                  store.actions.current.navigate(s().srcHost, s().srcFile);
+                  store.handles.invoke("entry.navigate", { source: s().srcHost, file: s().srcFile });
                 }}
               >{`variation of ${s().srcFile}`}</a>
             </Show>

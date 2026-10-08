@@ -30,7 +30,7 @@ function AnchorCard(props) {
       }}
       onDragEnd={() => {
         props.setDragged(null);
-        store.actions.anchors.persist(); // persistence waits for the drop 
+        store.handles.invoke("anchor.persist"); // persistence waits for the drop
       }}
       onDragOver={(e) => {
         const d = props.dragged();
@@ -38,8 +38,7 @@ function AnchorCard(props) {
         e.preventDefault();
         e.dataTransfer.dropEffect = "move";
         const rect = e.currentTarget.getBoundingClientRect();
-        store.actions.anchors.reorder(
-          d, props.anchor.name, (e.clientY - rect.top) < rect.height / 2);
+        store.handles.invoke("anchor.reorder", { name: d, over: props.anchor.name, before: (e.clientY - rect.top) < rect.height / 2 });
       }}
     >
       <Zoomable
@@ -48,18 +47,18 @@ function AnchorCard(props) {
         ar={aspectFromMeta(props.anchor.meta)}
         zoomKey={`anchor:${props.anchor.name}`}
         onZoomChange={setZoomed}
-        onOpen={() => store.actions.diff.openFromAnchor(props.idx)}
+        onOpen={() => store.handles.invoke("workbench.pickAnchor", { name: props.anchor.name })}
       />
       <div class="ctitle">
         <span class="aname" title={props.anchor.name}>{props.anchor.name}</span>
         <span class="btnwrap">
           <IconButton
             icon={iconSvg("info-circle", 14)} variant="ainfo" title="embedded parameters"
-            onAction={() => store.actions.anchors.showInfo(props.anchor.name, props.anchor.meta)}
+            onAction={() => store.handles.invoke("anchor.info.open", { name: props.anchor.name })}
           />
           <IconButton
             icon={iconSvg("trash", 13)} variant="rm" title="remove anchor"
-            onAction={() => store.actions.anchors.remove(props.anchor.name)}
+            onAction={() => store.handles.invoke("anchor.remove", { name: props.anchor.name })}
           />
         </span>
       </div>
@@ -93,13 +92,13 @@ export function AnchorSpace() {
           e.preventDefault();
           setOver(false);
           if (e.dataTransfer?.getData("text/x-anchor")) return; // a reorder, not files
-          if (e.dataTransfer?.files?.length) await store.actions.anchors.addFiles([...e.dataTransfer.files]);
+          if (e.dataTransfer?.files?.length) await store.handles.invoke("anchor.add", { files: [...e.dataTransfer.files] });
         }}
       >Drop images here<br />(or click to browse)</div>
       <input
         type="file" ref={fileEl} accept="image/*" multiple hidden
         onChange={async (e) => {
-          if (e.target.files.length) await store.actions.anchors.addFiles([...e.target.files]);
+          if (e.target.files.length) await store.handles.invoke("anchor.add", { files: [...e.target.files] });
           e.target.value = "";
         }}
       />

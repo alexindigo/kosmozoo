@@ -20,6 +20,8 @@ import { useAppStore } from "../../store/app-store.js";
 import { UPLOAD_IMG_EXT } from "../../store/fields.js";
 import { SliderRow } from "./SliderRow.js";
 import { Modal } from "../../components/Modal.js";
+import { snapshotDraft, sameDraft, makeLeaveGuard, focusMemory } from "./draft.js";
+import { VariationDiscardConfirmation } from "./VariationDiscardConfirmation.js";
 
 // every label's raw input parsed to its value list (empties kept — they
 // substitute the token with "")
@@ -29,26 +31,26 @@ const tplParsed = (tpl) => Object.fromEntries(
 
 export function VariationsModal() {
   const store = useAppStore();
-  // keyed on the session object: switching the wand to another image (or
-  // the bulk bar's batch) rebuilds the session from scratch. The session
-  // lives and dies with the Show; backdrop and Esc close come from the
-  // Modal (mounted == open, so its key layer does too).
+  // A permitted replacement changes the scalar mount identity, even when the
+  // store reconciles the descriptor. Targets are captured for this owner only.
   return (
     <Show
-      when={store.state.variations.open ? store.state.variations : null}
+      when={store.state.variations.open ? store.state.variations.session : null}
       keyed
     >
-      {(v) => (
-        <Modal class="vz-root" onClose={() => store.actions.variations.close()}>
-          <ModalBody images={[...v.images]} onClose={() => store.actions.variations.close()} />
-        </Modal>
-      )}
+      {(session) => {
+        const images = [...store.state.variations.images].map(snapshotDraft);
+        return <Modal class="vz-root" closeCommand="variations.close" closeArgs={{ session }}>
+          <ModalBody session={session} images={images} />
+        </Modal>;
+      }}
     </Show>
   );
 }
 
 function ModalBody(props) {
   const store = useAppStore();
+  const services = store.actions.variations.services;
   const image = props.images[0];
   // batch = more than one image: ranges become RELATIVE offsets from each
   // image's own current value (resolved by the plugin at run time), and the
@@ -67,12 +69,31 @@ function ModalBody(props) {
   // the auto-close after a successful run must not fire into an unmounted
   // session 
   let closeT = null;
-  onCleanup(() => clearTimeout(closeT));
+  let alive = true, runIdentity = null;
+  const [revision, setRevision] = createSignal(0);
+  const [decision, setDecision] = createSignal(null);
+  const children = new Set();
+  const registerEditor = (capability) => { children.add(capability); return () => children.delete(capability); };
+  let restoreFocus = () => {};
+  const rememberFocus = (restore) => { restoreFocus = restore; };
+  const focus = focusMemory(rememberFocus);
+  const invalidateClose = () => { clearTimeout(closeT); closeT = null; };
+  const edited = () => { setRevision((value) => value + 1); invalidateClose(); };
   // prefix/suffix are controlled state — the ONLY writers are the signal
   // setters; token ops are pure text transforms owned here, never surgery
   // on a rendered input's .value
   const [prefix, setPrefix] = createSignal("");
   const [suffix, setSuffix] = createSignal("");
+  const baseline = { rows: {}, images: {}, enums: {}, texts: {}, prefix: "", suffix: "" };
+  const [baselineVersion, bumpBaseline] = createSignal(0);
+  const draft = () => snapshotDraft({ rows: rows(), images: imgRows(), enums: enumRows(), texts: textRows(), prefix: prefix(), suffix: suffix() });
+  const dirty = createMemo(() => { baselineVersion(); return !sameDraft(draft(), baseline); });
+  const guard = makeLeaveGuard({ dirty,
+    suspend: () => { for (const child of children) child.suspend(); },
+    restore: () => { for (const child of children) child.resume(); restoreFocus(); },
+    decision: setDecision, invalidate: invalidateClose });
+  onCleanup(store.actions.variations.registerOwner(props.session, { requestLeave: guard.request, requestRun: runVariations }));
+  onCleanup(() => { alive = false; runIdentity = null; invalidateClose(); guard.dispose(); });
   const tokenFor = (key) => `_{${key}}`;
   const addToken = (text, key) => text.includes(tokenFor(key)) ? text : text + tokenFor(key);
   const removeToken = (text, key) => text.split(tokenFor(key)).join("");
@@ -101,6 +122,7 @@ function ModalBody(props) {
     const placeholder = `{${key}}`;
     const next = cur.slice(0, start) + placeholder + cur.slice(end);
     const caret = start + placeholder.length;
+    edited();
     if (which === "prefix") setPrefix(next); else setSuffix(next);
     el.focus();
     el.setSelectionRange(caret, caret);
@@ -111,7 +133,7 @@ function ModalBody(props) {
   // The graph is the source of truth: only parameters whose target node
   // exists in this image's graph render (writeOnly params — widget-only
   // custom seed nodes etc. — are skipped for now).
-  const [probe] = createResource(() => store.actions.variations.probe(image));
+  const [probe] = createResource(() => services.probe(image));
 
   const resolve = (forGraph) => {
     const init = {};
@@ -121,7 +143,7 @@ function ModalBody(props) {
       // (batch): signed offsets around it, default ±spread
       const def = batch ? { min: -p.spread, max: p.spread } : defaultRange(p, current);
       init[id] = {
-        enabled: false, min: def.min, max: def.max, increment: p.defaultInc,
+        enabled: false, min: def.min, max: def.max, increment: p.defaultInc, rawIncrement: String(p.defaultInc),
         placeholderKey: id,
         current, integer, type,
         label: title ?? type, // node display title else class_type
@@ -135,15 +157,20 @@ function ModalBody(props) {
     if (denoiseKey) {
       init[denoiseKey].enabled = true;
       setSuffix((s) => addToken(s, denoiseKey));
+      baseline.suffix = addToken(baseline.suffix, denoiseKey);
     }
     setRows(init);
+    baseline.rows = snapshotDraft(init);
     setParams(forGraph);
   };
 
+  let initializedProbe = false;
   createEffect(() => {
     if (probe.loading) return;
+    if (initializedProbe) return;
+    initializedProbe = true;
     const data = probe();
-    if (!data?.params) { resolve(fallbackParams(image.meta ?? {})); return; }
+    if (!data?.params) { resolve(fallbackParams(image.meta ?? {})); bumpBaseline((value) => value + 1); return; }
     resolve(data.params);
     // LoadImage sweep axes: one row per string param, files listed from the
     // host's input dir
@@ -161,6 +188,7 @@ function ModalBody(props) {
       };
     }
     setEnumRows(einit);
+    baseline.enums = snapshotDraft(einit);
     // text sweep axes (prompts, …): one row per node instance; the values
     // are user-supplied (one per line), pre-filled with the current text.
     // tpl holds the {{label}} substitution inputs' raw text, keyed by label —
@@ -176,15 +204,20 @@ function ModalBody(props) {
       };
     }
     setTextRows(tinit);
+    baseline.texts = snapshotDraft(tinit);
+    bumpBaseline((value) => value + 1);
   });
 
   const [inputFiles] = createResource(
     () => (strParams().length && image.host ? image.host : null),
-    (hostName) => store.actions.variations.inputList(hostName),
+    (hostName) => services.inputList(hostName),
   );
+  let initializedImages = false;
   createEffect(() => {
     const sp = strParams();
     if (!sp.length || inputFiles.loading) return;
+    if (initializedImages) return;
+    initializedImages = true;
     const files = inputFiles() ?? [];
     const init = {};
     for (const p of sp) {
@@ -195,9 +228,12 @@ function ModalBody(props) {
       };
     }
     setImgRows(init);
+    baseline.images = snapshotDraft(init);
+    bumpBaseline((value) => value + 1);
   });
 
   const onToggle = (key, checked) => {
+    edited();
     setRows((rs) => ({ ...rs, [key]: { ...rs[key], enabled: checked } }));
     // enabling auto-inserts the placeholder token into the suffix;
     // disabling removes it. No trailing underscore — ComfyUI's SaveImage
@@ -208,21 +244,25 @@ function ModalBody(props) {
   };
 
   const onRange = (key, { min, max }) => {
+    edited();
     setRows((rs) => (rs[key] ? { ...rs, [key]: { ...rs[key], min, max } } : rs));
   };
 
-  const onIncrement = (key, inc) => {
-    setRows((rs) => ({ ...rs, [key]: { ...rs[key], increment: inc } }));
+  const onIncrement = (key, inc, rawIncrement) => {
+    edited();
+    setRows((rs) => ({ ...rs, [key]: { ...rs[key], increment: inc, rawIncrement } }));
   };
 
   // LoadImage sweep: enabling auto-inserts the {LoadImage.image} token into
   // the suffix (the output name must encode WHICH input image produced it);
   // disabling removes it. Same grammar as the numeric placeholder tokens.
   const onImgToggle = (id, checked) => {
+    edited();
     setImgRows((rs) => ({ ...rs, [id]: { ...rs[id], enabled: checked } }));
     setSuffix((s) => checked ? addToken(s, id) : removeToken(s, id));
   };
   const onImgField = (id, field, value) => {
+    edited();
     setImgRows((rs) => ({ ...rs, [id]: { ...rs[id], [field]: value } }));
   };
 
@@ -231,12 +271,15 @@ function ModalBody(props) {
   // The current value starts pre-checked — unchecking it is how the current
   // combo leaves the sweep.
   const onEnumToggle = (id, checked) => {
+    edited();
     setEnumRows((rs) => ({ ...rs, [id]: { ...rs[id], enabled: checked } }));
   };
   const onEnumField = (id, field, value) => {
+    edited();
     setEnumRows((rs) => ({ ...rs, [id]: { ...rs[id], [field]: value } }));
   };
   const onEnumPick = (id, v, checked) => {
+    edited();
     setEnumRows((rs) => {
       const r = rs[id];
       const picks = checked ? [...r.picks, v] : r.picks.filter((x) => x !== v);
@@ -247,12 +290,15 @@ function ModalBody(props) {
   // text sweep rows: the master checkbox arms the axis; the textarea holds
   // the values to sweep, one per line (pre-filled with the current text)
   const onTextToggle = (id, checked) => {
+    edited();
     setTextRows((rs) => ({ ...rs, [id]: { ...rs[id], enabled: checked } }));
   };
   const onTextField = (id, field, value) => {
+    edited();
     setTextRows((rs) => ({ ...rs, [id]: { ...rs[id], [field]: value } }));
   };
   const onTextTpl = (id, label, value) => {
+    edited();
     setTextRows((rs) => ({ ...rs, [id]: { ...rs[id], tpl: { ...rs[id].tpl, [label]: value } } }));
   };
 
@@ -363,11 +409,30 @@ function ModalBody(props) {
   });
 
   async function runVariations() {
+    if (!alive) return { status: "stale" };
+    if (running() || guard.pending()) return { status: "busy" };
+    invalidateClose();
+    const captured = draft();
+    const targets = props.images.map(snapshotDraft);
+    const editRevision = revision();
+    const run = {};
+    runIdentity = run;
+    const ownsRun = () => alive && runIdentity === run;
+    if (Object.values(captured.rows).some((row) => row.enabled && (!Number.isFinite(row.increment) || row.increment <= 0))) {
+      setResult({ text: "Enter a valid positive increment; incomplete text has been kept.", ok: false });
+      return { status: "invalid" };
+    }
+    const usesLocalFiles = Object.values(captured.images).some((row) => row.enabled && row.mode !== "new" && row.localFiles?.length);
+    const backends = new Set(targets.map((target) => store.state.hosts[target.host]?.address ?? target.host));
+    if (usesLocalFiles && backends.size > 1) {
+      setResult({ text: "Local-file variations across different backends are unsupported. Your files and edits have been kept.", ok: false });
+      return { status: "invalid" };
+    }
     setResult(null);
     setRunning(true);
     try {
       const baseRanges = {};
-      for (const [key, r] of Object.entries(rows())) {
+      for (const [key, r] of Object.entries(captured.rows)) {
         baseRanges[key] = {
           enabled: r.enabled, min: r.min, max: r.max,
           increment: r.increment, placeholderKey: r.placeholderKey,
@@ -375,25 +440,27 @@ function ModalBody(props) {
           ...(batch ? { clamp: paramDef(key, r.current, r.integer)?.clamp } : {}),
         };
       }
-      const pfx = prefix();
-      const sfx = suffix();
+      const pfx = captured.prefix;
+      const sfx = captured.suffix;
       // LoadImage sweep axes: enabled rows become enum imageParams. A
       // "local directory" row uploads its picked files to the host's input
       // dir first (ComfyUI's LoadImage only reads that dir), then sweeps
       // over the uploaded names.
       const imageParams = {};
       const uploadErrors = [];
-      for (const [id, r] of Object.entries(imgRows())) {
+      for (const [id, r] of Object.entries(captured.images)) {
         if (!r.enabled) continue;
         let values = [];
         if (r.mode === "new") {
           values = r.file ? [r.file] : [];
         } else {
           for (const f of r.localFiles ?? []) {
+            if (!ownsRun()) return { status: "stale" };
             try {
               const form = new FormData();
               form.append("image", f, f.name);
-              const d = await store.actions.variations.uploadInput(image.host, form);
+              const d = await services.uploadInput(image.host, form);
+              if (!ownsRun()) return { status: "stale" };
               if (d?.name) values.push(d.name);
               else uploadErrors.push(`${f.name}: upload failed`);
             } catch (e) {
@@ -405,13 +472,14 @@ function ModalBody(props) {
       }
       // enum sweep axes ride the same imageParams channel — one
       // { enabled, values } per armed row, values = the row's picks
-      for (const [id, r] of Object.entries(enumRows())) {
+      if (!ownsRun()) return { status: "stale" };
+      for (const [id, r] of Object.entries(captured.enums)) {
         if (!r.enabled || !r.picks.length) continue;
         imageParams[id] = { enabled: true, values: [...r.picks] };
       }
       // text sweep axes too — values = the textarea's lines, {{label}}
       // templates expanded cartesian-style by the shared expander
-      for (const [id, r] of Object.entries(textRows())) {
+      for (const [id, r] of Object.entries(captured.texts)) {
         if (!r.enabled) continue;
         const vals = expandTextAxes(r.text, tplParsed(r.tpl));
         if (vals.length) imageParams[id] = { enabled: true, values: vals };
@@ -419,8 +487,10 @@ function ModalBody(props) {
       let submitted = 0, totalJobs = 0;
       const failed = [];
       const engineErrors = uploadErrors.slice();
+      let fullSuccess = uploadErrors.length === 0;
       const submit = async (img) => {
-        const res = await store.actions.variations.run({
+        if (!ownsRun()) return;
+        const res = await services.run({
           id: img.id, host: img.host, filename: img.filename,
           ranges: structuredClone(baseRanges),
           prefix: pfx, suffix: sfx,
@@ -428,47 +498,61 @@ function ModalBody(props) {
           ...(Object.keys(imageParams).length ? { imageParams } : {}),
         });
         const data = res.data;
+        if (!ownsRun()) return;
+        if (!res.ok || !Number.isInteger(data?.submitted) || !Number.isInteger(data?.total) ||
+            data.total <= 0 || data.submitted !== data.total || !Array.isArray(data.errors ?? []) || data.errors?.length) fullSuccess = false;
         if (!res.ok) {
           failed.push(`${img.filename}: ${data?.error ?? res.text ?? `error ${res.status}`}`);
           return;
         }
-        submitted += data?.submitted ?? 0;
-        totalJobs += data?.total ?? 0;
+        submitted += Number.isInteger(data?.submitted) ? data.submitted : 0;
+        totalJobs += Number.isInteger(data?.total) ? data.total : 0;
         // the engine reports per-permutation failures inline — collect the
         // detail from the SAME response (a second POST would double-submit)
-        for (const e of data?.errors ?? []) {
+        for (const e of Array.isArray(data?.errors) ? data.errors : []) {
           engineErrors.push(e?.error ?? String(e));
         }
       };
-      await Promise.all(props.images.map(async (img) => {
+      await Promise.all(targets.map(async (img) => {
         try {
           await submit(img);
         } catch (e) {
+          fullSuccess = false;
           failed.push(`${img.filename}: ${e.message}`);
         }
       }));
+      if (!ownsRun()) return { status: "stale" };
       const allFailed = submitted === 0 && totalJobs > 0;
       if ((submitted === 0 && totalJobs === 0) || allFailed) {
         const detail = failed[0] ?? engineErrors[0] ?? "nothing submitted";
         setResult({ text: detail, ok: false });
-        return;
+        return { status: "failed" };
       }
       const summary = (batch
         ? `submitted ${submitted}/${totalJobs} across ${props.images.length} images`
         : `submitted ${submitted}/${totalJobs}`)
         + (failed.length ? ` (${failed.length} failed)` : "")
         + (engineErrors.length ? ` — ${engineErrors[0]}` : "");
-      setResult({ text: summary, ok: !allFailed && submitted > 0 });
-      closeT = setTimeout(props.onClose, 3000);
+      setResult({ text: summary, ok: fullSuccess });
+      // Counts do not acknowledge field usage: edited configuration stays dirty.
+      if (fullSuccess && !dirty() && !guard.pending() && editRevision === revision() && sameDraft(captured, draft())) {
+        closeT = setTimeout(() => {
+          if (!ownsRun() || guard.pending() || dirty() || editRevision !== revision() || !sameDraft(captured, draft())) return;
+          store.handles.invoke("variations.close", { automatic: true, session: props.session });
+        }, 3000);
+      }
+      return { status: fullSuccess ? "submitted" : "failed", submitted, total: totalJobs };
     } catch (e) {
-      setResult({ text: `fetch failed: ${e.message}`, ok: false });
+      if (ownsRun()) setResult({ text: `fetch failed: ${e.message}`, ok: false });
+      return { status: ownsRun() ? "failed" : "stale" };
     } finally {
-      setRunning(false);
+      if (ownsRun()) setRunning(false);
     }
   }
 
   return (
-    <div class="vz-panel">
+    <div class="vz-panel" data-session={props.session}>
+      <div class="vz-editor" inert={!!decision()}>
         <div class="vz-title">
           {batch
             ? `Generate image variations · applying to ${props.images.length} images`
@@ -496,6 +580,7 @@ function ModalBody(props) {
                         <Show when={r().enabled}>
                           <div class="vz-imgrow-body">
                             <select
+                              {...focusMemory(rememberFocus)}
                               class="vz-imgmode" value={r().mode}
                               onChange={(e) => onImgField(p.id, "mode", e.target.value)}
                             >
@@ -505,6 +590,7 @@ function ModalBody(props) {
                             </select>
                             <Show when={r().mode === "new"}>
                               <select
+                                {...focusMemory(rememberFocus)}
                                 class="vz-imgfile" value={r().file ?? ""}
                                 onChange={(e) => onImgField(p.id, "file", e.target.value)}
                               >
@@ -515,6 +601,7 @@ function ModalBody(props) {
  multi-picked subset. Both read into localFiles. */}
                             <Show when={r().mode === "local"}>
                               <FilePick
+                                rememberFocus={rememberFocus}
                                 inputAttrs={{ class: "vz-imgdirpick", webkitdirectory: true, multiple: true }}
                                 label={() => (r().localFiles?.length ? `${r().localFiles.length} files picked` : "pick a folder…")}
                                 onPick={(fl) => onImgField(p.id, "localFiles", fl)}
@@ -522,6 +609,7 @@ function ModalBody(props) {
                             </Show>
                             <Show when={r().mode === "files"}>
                               <FilePick
+                                rememberFocus={rememberFocus}
                                 inputAttrs={{ class: "vz-imgfilespick", multiple: true, accept: "image/*" }}
                                 label={() => (r().localFiles?.length ? `${r().localFiles.length} files picked` : "pick files…")}
                                 onPick={(fl) => onImgField(p.id, "localFiles", fl)}
@@ -557,6 +645,7 @@ function ModalBody(props) {
                               onToggle={onEnumToggle}
                               onPick={onEnumPick}
                               onField={onEnumField}
+                              rememberFocus={rememberFocus}
                             />
                           </Show>
                         );
@@ -572,6 +661,7 @@ function ModalBody(props) {
                               onToggle={onTextToggle}
                               onField={onTextField}
                               onTpl={onTextTpl}
+                              rememberFocus={rememberFocus}
                             />
                           </Show>
                         );
@@ -592,6 +682,7 @@ function ModalBody(props) {
                           onRange={onRange}
                           onIncrement={onIncrement}
                           onInsertPlaceholder={onInsertPlaceholder}
+                          registerEditor={registerEditor} rememberFocus={rememberFocus}
                         />
                       );
                     }}
@@ -612,16 +703,16 @@ function ModalBody(props) {
               type="text" class="vz-tinput vz-prefix" ref={prefixEl}
               value={prefix()}
               title="click a slider label to insert its {placeholder}"
-              onFocus={() => setFocused("prefix")}
-              onInput={(e) => setPrefix(e.currentTarget.value)}
+              {...focus} onFocus={(e) => { setFocused("prefix"); focus.onFocus(e); }}
+              onInput={(e) => { edited(); setPrefix(e.currentTarget.value); }}
             />
             <div class="vz-rlabel">suffix</div>
             <input
               type="text" class="vz-tinput vz-suffix" ref={suffixEl}
               value={suffix()}
               title="click a slider label to insert its {placeholder} (enabled sliders auto-append)"
-              onFocus={() => setFocused("suffix")}
-              onInput={(e) => setSuffix(e.currentTarget.value)}
+              {...focus} onFocus={(e) => { setFocused("suffix"); focus.onFocus(e); }}
+              onInput={(e) => { edited(); setSuffix(e.currentTarget.value); }}
             />
             {/* spacer pushes the result + Run to the BOTTOM of the right
  column — the result message sits above the button, centered on it,
@@ -629,14 +720,18 @@ function ModalBody(props) {
             <div class="vz-rspacer" />
             <div class={"vz-error" + (result()?.ok ? " vz-ok" : "")}>{result()?.text ?? ""}</div>
             <button
-              class="vz-run" disabled={running() || undefined} onClick={runVariations}
+              class="vz-run" disabled={running() || undefined} onClick={() => store.handles.invoke("variations.run")}
             >{running() ? "Running…" : "Run"}</button>
           </div>
         </div>
         <button
-          class="vz-close" title="close (Esc)" onClick={props.onClose}
+          class="vz-close" title="close (Esc)" onClick={() => store.handles.invoke("variations.close", { session: props.session })}
           innerHTML={iconSvg("x", 16)}
         />
+      </div>
+      <Show when={decision()}>
+        <VariationDiscardConfirmation owner={props.session} running={running()} onCancel={guard.cancel} onDiscard={guard.discard} />
+      </Show>
     </div>
   );
 }
@@ -647,6 +742,7 @@ function ModalBody(props) {
 // p is stable per row, row is a GETTER, interactions report through the
 // callbacks — the row never reaches into its parent.
 function EnumRow(props) {
+  const focus = focusMemory(props.rememberFocus);
   const r = () => props.row();
   const filtered = () => {
     const f = r().filter.trim().toLowerCase();
@@ -667,6 +763,7 @@ function EnumRow(props) {
         <div class="vz-imgrow-body vz-enum-body">
           <Show when={r().values.length > 10}>
             <input
+              {...focus}
               type="text" class="vz-enum-filter" placeholder="filter…"
               value={r().filter}
               onInput={(e) => props.onField(props.p.id, "filter", e.currentTarget.value)}
@@ -677,6 +774,7 @@ function EnumRow(props) {
               {(v) => (
                 <label class={"vz-enum-opt" + (v === r().current ? " vz-enum-current" : "")}>
                   <input
+                    {...focus}
                     type="checkbox" class="vz-cb"
                     checked={r().picks.includes(v)}
                     onChange={(e) => props.onPick(props.p.id, v, e.target.checked)}
@@ -698,6 +796,7 @@ function EnumRow(props) {
 // input below the textarea (semicolon-separated values, cartesian-expanded
 // at tally/run time). Same props convention as EnumRow/SliderRow.
 function TextRow(props) {
+  const focus = focusMemory(props.rememberFocus);
   const r = () => props.row();
   return (
     <div class={"vz-imgrow vz-textrow" + (r().enabled ? " on" : "")} data-text-id={props.p.id}>
@@ -713,6 +812,7 @@ function TextRow(props) {
       <Show when={r().enabled}>
         <div class="vz-imgrow-body vz-enum-body">
           <textarea
+            {...focus}
             class="vz-text-values" rows="4"
             placeholder="one value per line — {{label}} adds a substitution axis"
             value={r().text}
@@ -723,6 +823,7 @@ function TextRow(props) {
               <div class="vz-tpl-row">
                 <span class="vz-tpl-label" title={lab}>{lab}</span>
                 <input
+                  {...focus}
                   type="text" class="vz-tpl-input"
                   value={r().tpl?.[lab] ?? ""}
                   placeholder="values; separated; by; semicolons"
@@ -750,7 +851,7 @@ function FilePick(props) {
           props.onPick([...(e.target.files ?? [])].filter((f) => UPLOAD_IMG_EXT.test(f.name)));
         }}
       />
-      <button class="vz-imgdirbtn" onClick={() => el?.click()}>{props.label()}</button>
+      <button class="vz-imgdirbtn" {...focusMemory(props.rememberFocus)} onClick={() => el?.click()}>{props.label()}</button>
     </span>
   );
 }

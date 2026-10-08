@@ -294,6 +294,57 @@ Static surfaces: `/shared/<name>` serves the allow-listed `src/` modules
 serve the Solid app from `client-solid-dist/`, with shared assets (`/css`,
 `/vendor`, `/js`, logos) from `client/`.
 
+### Client commands and modal ownership
+
+Application inputs follow **input → shared handle → private operation**. The plain
+per-store registry returns stable source-independent ports via
+`store.handles.get(id)`; `store.handles.invoke(id,args)` resolves that same port.
+Definitions validate data (not events/DOM/functions), preserving action results/
+Promises. Covered compatibility actions delegate to handles; mechanical/read/
+editor/lifecycle ports are explicitly classified. Ordered bindings reference
+commands with constant arguments/context/routing through one injected adapter.
+All twelve IDs/defaults/descriptions/matching/conflicts/saved-reset behavior remain.
+KeysPanel edits mappings; no new shortcut or command-launch control is introduced.
+
+Input eligibility is separate from semantic execution. Capture/bubble routing
+retains native select/typing/capture precedence and intentional decline. Accepted
+false/no-op/Promise requests consume input. Token-specific layer cleanup cannot
+erase a replacement owner. Popup capture Escape priority is retained except below
+an owned blocking decision. An injected result adapter observes async errors
+without replacing returned Promises. Programmatic mode/column/lock configuration
+remains callable independently of keyboard/UI pair/workbench gates.
+
+All card/bulk/button/menu/programmatic commands converge through judgment,
+navigation/selection/reference, download/delete, source/folder/filter, workspace/
+layout/preferences and anchor handles. Implicit IDs resolve before await/visibility
+mutation; source toggle interpretation remains in the serialized writer. Both
+native feedback links retain href/download and modified/auxiliary/context resource
+behavior; primary activation uses `collection.feedback.download` with the explicit
+originating source and actual v2 JSON download, without duplicate activation or
+synthetic outside-click propagation. Features contribute command definitions,
+data bindings and affordances through the registry, without feature-name dispatch.
+
+Variations owns form/baselines/File references/order, dirty comparison, decision,
+focus/caret and Run state. Its bridge contains opening metadata, a fresh scalar
+session and owner-safe request capabilities only. Dirty close/replacement shows
+**“Discard your changes?”**, **“Keep editing”** and **“Discard changes”** inside
+the still-mounted panel, outside its inert editor. Escape cancels only the decision;
+Cancel preserves exact form/widget/file identity and URL. Identical requests share
+one terminal Promise/continuation/permit; conflicts return busy, and stale/disposal/
+error paths settle safely. Raw incomplete increment text survives blur unchanged.
+SliderRow retires active widget listeners with the matching original-target
+terminal adaptation and quarantines that physical gesture through release/cancel.
+
+Run/button/handle input enters `variations.run` and the owner's requestRun. All draft
+domains/opening targets are captured before upload, running/pending-leave requests
+return busy, and owner/Run fences protect unsent work/results/timers. Different-
+backend local files reject before uploads. Full success needs valid positive
+complete counts on every target with no failures. Counts acknowledge no field
+usage: edited/unused/dormant work stays dirty even on success. The existing three-
+second close requires the same alive Run/edit revision, unchanged clean draft and
+no decision. Submitted jobs continue after dismissal. Source/folder/filter/Back/
+Forward browsing retains the modal and captured targets.
+
 ## 3. Judgment model
 
 | Concept | Meaning | Persistence |

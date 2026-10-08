@@ -248,8 +248,8 @@ async function railMotion(page) {
     kz.actions.current.set("fixture-dir", im.filename);
     await kz.actions.judgments.dispatch(id, { type: "toggle", field: "bookmark" });
     const programmatic = snapshot();
-    kz.actions.keys.register("test.bookmark.intent", "Alt+Shift+F8", () =>
-      kz.actions.judgments.dispatch(id, { type: "toggle", field: "bookmark" }));
+    kz.actions.keys.register({ id: "test.bookmark.intent", key: "Alt+Shift+F8", command: "judgment.apply",
+      args: { id, intent: { type: "toggle", field: "bookmark" } } });
     return { programmatic };
   })()`);
   check("programmatic intent: bookmark drives both border and tick blue",
@@ -640,7 +640,7 @@ async function railMotion(page) {
       window.__sourceModal = document.querySelector('.vz-panel'); window.__sourceField = input;
     })()`);
     const before = await page.evaluate(`(async () => {
-      const s = ${KZ}; s.actions.diff.ensureRightDefault(); s.actions.diff.open();
+      const s = ${KZ}; s.handles.invoke('workbench.openEntry', { id: s.state.currentEntry().entry.id });
       window.__sourceCard = document.querySelector('${origin}');
       return { current: s.state.current(), trail: s.state.currentStack(), url: location.href,
         top: window.__sourceCard.getBoundingClientRect().top, pair: s.state.diffPair(),
@@ -674,6 +674,9 @@ async function railMotion(page) {
     check('new output begins unknown-sized and is promoted through real want/dimension acquisition', preserved.unknown && preserved.wanted);
     await capture(page, 'source-edited-session-after');
     await page.key('Escape');
+    await page.poll(`!!document.querySelector('.vz-discard')`);
+    check('arrival-preserved edited modal asks its owned discard decision before dismissal', true);
+    await page.clickAt('.vz-discard-confirm');
     await page.poll(`(async () => !${KZ}.state.variations.open)()`);
     await page.key('Escape');
     await page.poll(`(async () => !${KZ}.state.diff.open)()`);

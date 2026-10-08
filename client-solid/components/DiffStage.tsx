@@ -123,7 +123,7 @@ export function DiffStage() {
     e.stopPropagation();
     const move = (ev) => {
       const r = stageEl.getBoundingClientRect();
-      store.actions.diff.setSplit((ev.clientX - r.left) / r.width);
+      store.handles.invoke("workbench.parameters", { parameter: "split", value: (ev.clientX - r.left) / r.width });
     };
     const up = () => {
       window.removeEventListener("pointermove", move);

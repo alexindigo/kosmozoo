@@ -7,6 +7,7 @@ import { appStore } from "./store/instance.js";
 import { App } from "./components/App.js";
 import { FEATURES } from "./features/index.js";
 import { installNoPageZoom } from "/js/no-page-zoom.mjs";
+import { CORE_BINDINGS } from "./store/key-bindings.js";
 
 const store = appStore;
 
@@ -36,51 +37,6 @@ store.actions.boot().catch((e) => store.actions.status.error(`load failed: ${e?.
 window.addEventListener("hashchange", () => store.actions.route.changed());
 window.addEventListener("popstate", () => store.actions.route.changed());
 
-// key bindings — Escape precedence is structural: the dispatcher hands
-// Escape to the top key layer first (an open modal, a running capture),
-// then these bindings run in registration order (the keys panel closes
-// before the workbench).
-store.actions.keys.register("app.keys", "?", () => store.actions.keys.togglePanel(), {
-  desc: "actions & keys panel", ctx: "global",
-});
-store.actions.keys.register("keys.close", "Escape", () => store.actions.keys.closePanel(), {
-  when: () => store.state.keysPanelOpen() && !store.state.capturing(),
-  desc: "close panel", ctx: "keys",
-});
-store.actions.keys.register("wb.close", "Escape", () => store.actions.diff.close(), {
-  when: () => store.state.diff.open && !store.state.keysPanelOpen(),
-  ctx: "workbench", desc: "close the workbench",
-});
-// the comparator: 1–4 pick a view (with a pair), arrows step the active
-// column, Space plays the blink — the digits/arrows never fire into a
-// focused text field (the dispatcher guards those already)
-const wbOpen = () => store.state.diff.open && !store.state.keysPanelOpen();
-const wbPair = () => wbOpen() && !!store.state.diffPair().b;
-store.actions.keys.register("wb.twoUp", "1", () => store.actions.diff.setMode("two-up"), {
-  when: wbPair, ctx: "workbench", desc: "comparator: Two-Up",
-});
-store.actions.keys.register("wb.oneUp", "2", () => store.actions.diff.setMode("one-up"), {
-  when: wbPair, ctx: "workbench", desc: "comparator: One-Up (blink)",
-});
-store.actions.keys.register("wb.split", "3", () => store.actions.diff.setMode("split"), {
-  when: wbPair, ctx: "workbench", desc: "comparator: Split wipe",
-});
-store.actions.keys.register("wb.difference", "4", () => store.actions.diff.setMode("difference"), {
-  when: wbPair, ctx: "workbench", desc: "comparator: Difference mask",
-});
-store.actions.keys.register("wb.colLeft", "ArrowLeft", () => store.actions.diff.setCol("feed"), {
-  when: wbPair, ctx: "workbench", desc: "comparator: feed column",
-});
-store.actions.keys.register("wb.colRight", "ArrowRight", () => store.actions.diff.setCol("right"), {
-  when: wbPair, ctx: "workbench", desc: "comparator: right column",
-});
-store.actions.keys.register("wb.prev", "ArrowUp", () => store.actions.diff.step(-1), {
-  when: wbOpen, ctx: "workbench", desc: "comparator: step back",
-});
-store.actions.keys.register("wb.next", "ArrowDown", () => store.actions.diff.step(1), {
-  when: wbOpen, ctx: "workbench", desc: "comparator: step forward",
-});
-store.actions.keys.register("wb.lock", "l", () => store.actions.diff.setLocked(!store.state.diff.locked), {
-  when: wbPair, ctx: "workbench", desc: "comparator: lock/unlock entangled zoom",
-});
+for (const binding of CORE_BINDINGS) store.actions.keys.register(binding);
+document.addEventListener("keydown", (e) => store.actions.keys.dispatch(e, "capture"), true);
 document.addEventListener("keydown", (e) => store.actions.keys.dispatch(e));

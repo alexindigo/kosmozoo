@@ -29,13 +29,31 @@ function signature(key) {
   return /^[a-z]$/i.test(key) && !key.includes("+") ? `letter:${key.toLowerCase()}` : key;
 }
 
-export function makeKeymap() {
-  const actions = [];     // { id, defaultKey, key, fn, when, desc, ctx }
+function dataOnly(value) {
+  if (value == null || ["string", "boolean"].includes(typeof value)) return;
+  if (typeof value === "number" && Number.isFinite(value)) return;
+  if (typeof value !== "object" || (!Array.isArray(value) && Object.getPrototypeOf(value) !== Object.prototype))
+    throw new TypeError("Bindings contain data only");
+  for (const item of Object.values(value)) dataOnly(item);
+}
+
+export function makeKeymap(adapter) {
+  if (!adapter || typeof adapter.request !== "function" || typeof adapter.describe !== "function")
+    throw new TypeError("A keymap requires one input adapter");
+  const actions = [];     // data descriptors, never execution callbacks
   let overrides = {};     // id -> combo
 
   const km = {
-    bind(id, key, fn, { when, desc, ctx } = {}) {
-      actions.push({ id, defaultKey: key, key: overrides[id] ?? key, fn, when, desc, ctx });
+    bind(binding, ...legacy) {
+      if (legacy.length || !binding || typeof binding !== "object" || Array.isArray(binding))
+        throw new TypeError("Use a data binding descriptor");
+      dataOnly(binding);
+      if (Object.keys(binding).some((key) => !["id", "key", "command", "args", "route", "ctx", "desc"].includes(key)) ||
+          !binding.id || typeof binding.key !== "string" || !binding.command || actions.some((a) => a.id === binding.id))
+        throw new TypeError("Invalid or duplicate binding");
+      const description = adapter.describe(binding.command);
+      const copy = structuredClone(binding);
+      actions.push({ ...copy, defaultKey: copy.key, key: overrides[copy.id] ?? copy.key, desc: copy.desc ?? description });
     },
     setKeymap(o) {
       overrides = o ?? {};
@@ -77,8 +95,7 @@ export function makeKeymap() {
     dispatch(e) {
       for (const a of actions) {
         if (!bindingMatches(a.key, e)) continue;
-        if (a.when && !a.when(e)) continue;
-        a.fn(e);
+        if (adapter.request({ id: a.id, command: a.command, args: a.args ?? {}, route: a.route, ctx: a.ctx }) === false) continue;
         return true;
       }
       return false;

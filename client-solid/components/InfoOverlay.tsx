@@ -11,10 +11,10 @@ import { iconSvg } from "/js/icons.mjs";
 
 export function InfoOverlay() {
   const store = useAppStore();
-  const close = () => store.actions.anchors.closeInfo();
+  const close = () => store.handles.invoke("anchor.info.close");
   return (
     <Show when={store.state.infoOverlay.open}>
-      <Modal overlayId="infoOverlay" panelId="infoPanel" onClose={close}>
+      <Modal overlayId="infoOverlay" panelId="infoPanel" closeCommand="anchor.info.close">
         <button id="infoClose" title="close (Esc)" onClick={close} innerHTML={iconSvg("x", 16)} />
         <div id="infoTitle">{store.state.infoOverlay.name}</div>
         <div class="metabody">

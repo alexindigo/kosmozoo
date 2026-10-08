@@ -25,14 +25,21 @@
 // The row never reaches into its parent — label clicks report through
 // onInsertPlaceholder and the parent owns the form.
 
-import { createSignal, onMount, onCleanup } from "solid-js";
+import { createSignal, createEffect, onMount, onCleanup } from "solid-js";
 import noUiSlider from "/vendor/nouislider.mjs";
 import { snapTo, fmt } from "./graph.mjs";
+import { makeSliderGesture } from "./slider-gesture.js";
+import { focusMemory } from "./draft.js";
 
 const fmtSigned = (v) => (v > 0 ? "+" : "") + fmt(v);
 
 export function SliderRow(props) {
   let sliderEl;
+  let gesture;
+  const [rawIncrement, setRawIncrement] = createSignal(String(props.increment()));
+  const focus = focusMemory(props.rememberFocus);
+  let wasDragging = false;
+  createEffect(() => { const enabled = !!props.enabled(); gesture?.setEnabled(enabled); });
   const fineStep = Math.pow(10, -props.param.decimals);
 
   // the bound labels are signals rendered by JSX ( — no imperative
@@ -53,12 +60,6 @@ export function SliderRow(props) {
     // a full increment — the fine step is its whole point. The handlers
     // read props live (Solid's props proxy), so the current increment is
     // always the one that snaps.
-    let dragging = false;
-    const onDown = () => { dragging = true; };
-    const onUp = () => { dragging = false; };
-    sliderEl.addEventListener("pointerdown", onDown);
-    window.addEventListener("pointerup", onUp);
-    window.addEventListener("pointercancel", onUp);
     const slider = noUiSlider.create(sliderEl, {
       start: [props.defaults.min, props.defaults.max],
       connect: true,
@@ -67,6 +68,13 @@ export function SliderRow(props) {
       behaviour: "drag",
       keyboardSupport: true,
     });
+    gesture = makeSliderGesture(sliderEl, { gate: (enabled) => enabled ? slider.enable() : slider.disable(),
+      onRetire: () => { wasDragging = false; } });
+    slider.on("start", () => gesture.started());
+    gesture.setEnabled(!!props.enabled());
+    const disposeEditor = props.registerEditor?.({ suspend: gesture.suspend, resume: gesture.resume });
+    const rememberWidget = (event) => focus.onFocus({ currentTarget: event.target });
+    sliderEl.addEventListener("focusin", rememberWidget);
     // `update` tracks the bound LABELS live (it also fires on programmatic
     // set — the row's state is only ever written by user gestures)
     slider.on("update", (values) => {
@@ -77,6 +85,7 @@ export function SliderRow(props) {
     // onRange fires ONLY from slide/change (user gestures) — never from
     // `update`, which would re-report every programmatic set 
     const report = () => {
+      if (gesture.suppressed()) return;
       const vals = slider.get().map(Number);
       props.onRange(props.param.key, { min: Math.min(vals[0], vals[1]), max: Math.max(vals[0], vals[1]) });
     };
@@ -87,12 +96,13 @@ export function SliderRow(props) {
     // track it live via `update`); the change event at the end snaps the
     // dragged handle — and only it — to the row's increment. Keyboard
     // nudges never set wasDragging, so their fine step survives.
-    let wasDragging = false;
     slider.on("slide", () => {
-      if (dragging) wasDragging = true;
+      if (gesture.suppressed()) return;
+      if (gesture.dragging()) wasDragging = true;
       report();
     });
     slider.on("change", (values, handleNumber) => {
+      if (gesture.suppressed()) return;
       if (wasDragging) {
         wasDragging = false;
         const next = values.map(Number);
@@ -108,15 +118,18 @@ export function SliderRow(props) {
       report();
     });
     onCleanup(() => {
-      sliderEl.removeEventListener("pointerdown", onDown);
-      window.removeEventListener("pointerup", onUp);
-      window.removeEventListener("pointercancel", onUp);
+      disposeEditor?.();
+      sliderEl.removeEventListener("focusin", rememberWidget);
+      gesture.dispose();
       slider.destroy();
     });
   });
 
   const commitInc = (v) => {
-    props.onIncrement(props.param.key, Math.max(fineStep, +Number(v).toFixed(props.param.decimals + 3)));
+    const next = Math.max(fineStep, +Number(v).toFixed(props.param.decimals + 3));
+    const raw = String(next);
+    setRawIncrement(raw);
+    props.onIncrement(props.param.key, next, raw);
   };
 
   // absolute: marker at the current value; relative: pinned to the center
@@ -167,7 +180,7 @@ export function SliderRow(props) {
             </div>
             {/* the slider insets itself within the lane; the library's base
  fills it, so thumb centers travel exactly the inset span */}
-            <div class="vz-slider" ref={sliderEl} disabled={!props.enabled() || undefined} />
+            <div class="vz-slider" ref={sliderEl} />
           </div>
           <div class="vz-lane vz-lane-current">
             <div
@@ -183,10 +196,23 @@ export function SliderRow(props) {
           onClick={() => commitInc(Math.max(fineStep, props.increment() / 2))}
         >−</button>
         <input
-          type="number" class="vz-row-inc-input"
-          value={String(props.increment())} step={String(fineStep)} min={String(fineStep)}
+          type="text" inputMode="decimal" role="spinbutton" aria-label={`${props.param.label} increment`}
+          aria-valuemin={fineStep} aria-valuenow={Number.isFinite(Number(rawIncrement())) && rawIncrement().trim() ? Number(rawIncrement()) : undefined}
+          class="vz-row-inc-input" value={rawIncrement()} {...focus}
           disabled={!props.enabled() || undefined}
-          onChange={(e) => commitInc(parseFloat(e.target.value) || props.param.defaultInc)}
+          onInput={(e) => {
+            const raw = e.currentTarget.value;
+            setRawIncrement(raw);
+            const value = raw.trim() ? Number(raw) : NaN;
+            props.onIncrement(props.param.key, Number.isFinite(value) && value >= fineStep ? value : null, raw);
+          }}
+          onKeyDown={(e) => {
+            if (!["ArrowUp", "ArrowDown"].includes(e.key)) return;
+            const value = Number(rawIncrement());
+            if (!rawIncrement().trim() || !Number.isFinite(value)) return;
+            e.preventDefault();
+            commitInc(value + (e.key === "ArrowUp" ? fineStep : -fineStep));
+          }}
         />
         <button
           class="vz-step-btn" title="larger step" disabled={!props.enabled() || undefined}

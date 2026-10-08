@@ -54,7 +54,7 @@ export function Card(props) {
   });
 
   const saveNote = (sign) => (text, id) => {
-    return store.actions.judgments.dispatch(id, { type: "note", sign, text }).then((result) => {
+    return store.handles.invoke("judgment.apply", { id, intent: { type: "note", sign, text } }).then((result) => {
       if (result.ok && props.entryId === id) flashSaved();
       return result;
     });
@@ -75,8 +75,8 @@ export function Card(props) {
 
   const copyName = (e) => {
     e.stopPropagation();
-    navigator.clipboard?.writeText(store.state.referenceName(image()))
-      .then(flashCopied)
+    store.handles.invoke("entry.copyReference", { id: props.entryId })
+      ?.then(flashCopied)
       .catch(() => {});
   };
 
@@ -90,7 +90,7 @@ export function Card(props) {
         alt={image()?.filename}
         ar={ar()}
         zoomKey={image()?.id}
-        onOpen={() => store.actions.diff.openFromFeed(imgIdx())}
+        onOpen={() => store.handles.invoke("workbench.openEntry", { id: props.entryId })}
         onErrorClick={() => store.state.window.retry(props.entryId)}
         onPhase={(p) => {
           if (p === "loading") store.state.window.markStarted(props.entryId);
@@ -110,7 +110,7 @@ export function Card(props) {
               title="select for bulk actions"
               onClick={(e) => {
                 e.stopPropagation();
-                store.actions.selected.set(image()?.id, e.target.checked);
+                store.handles.invoke("selection.set", { id: props.entryId, value: e.target.checked });
               }}
             />
             <span class="copyable" classList={{ copied: copiedOn() }} title={`${image()?.filename} — click to copy host#full-path`} onClick={copyName}>
@@ -120,38 +120,38 @@ export function Card(props) {
           <span class="btnwrap">
             <span class={"saved" + (savedOn() ? " show" : "")}>Feedback saved</span>
             <For each={store.state.featureCardActions(image())}>
-              {(a) => <IconButton icon={a.icon} variant={a.variant} title={a.title} onAction={a.onAction} />}
+              {(a) => <IconButton icon={a.icon} variant={a.variant} title={a.title} onAction={() => store.handles.invoke(a.command, a.args)} />}
             </For>
             <IconButton
               icon={iconSvg("thumb-down")} variant="down" active={state().active.down}
               title="thumbs down — hides when down-vote hides is enabled"
-              onAction={() => store.actions.judgments.dispatch(props.entryId, { type: "toggle", field: "vote", value: "down" })}
+              onAction={() => store.handles.invoke("judgment.apply", { id: props.entryId, intent: { type: "toggle", field: "vote", value: "down" } })}
             />
             <IconButton
               icon={iconSvg("thumb-up")} variant="up" active={state().active.up} title="thumbs up"
-              onAction={() => store.actions.judgments.dispatch(props.entryId, { type: "toggle", field: "vote", value: "up" })}
+              onAction={() => store.handles.invoke("judgment.apply", { id: props.entryId, intent: { type: "toggle", field: "vote", value: "up" } })}
             />
             <IconButton
               icon={iconSvg("star")} variant="favorite" active={state().active.favorite}
               title="favorite — interesting in itself, not project fitness"
-              onAction={() => store.actions.judgments.dispatch(props.entryId, { type: "toggle", field: "favorite" })}
+              onAction={() => store.handles.invoke("judgment.apply", { id: props.entryId, intent: { type: "toggle", field: "favorite" } })}
             />
             <IconButton
               icon={iconSvg("bookmark")} variant="bookmark" active={state().active.bookmark}
               title="bookmark - return to this image later"
-              onAction={() => store.actions.judgments.dispatch(props.entryId, { type: "toggle", field: "bookmark" })}
+              onAction={() => store.handles.invoke("judgment.apply", { id: props.entryId, intent: { type: "toggle", field: "bookmark" } })}
             />
             <IconButton
               icon={iconSvg("download")} variant="download"
               title="download this image"
-              onAction={() => store.actions.images.download(image()?.id)}
+              onAction={() => store.handles.invoke("image.download", { id: props.entryId })}
             />
             <Show when={del()}>
               <IconButton
                 icon={iconSvg(delCopy().icon, 16)}
                 variant="delete"
                 title={delCopy().cardTitle}
-                onAction={() => store.actions.confirm.open({ image: image() })}
+                onAction={() => store.handles.invoke("image.delete.request", { id: props.entryId })}
               />
             </Show>
           </span>

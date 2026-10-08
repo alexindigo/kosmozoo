@@ -255,10 +255,8 @@ Deno.test("judgment: bulk and keyboard intents share ordering and capture IDs be
     store.actions.selected.set("h:a.png", true);
     store.actions.selected.set("h:b.png", true);
     store.actions.current.set("h", "a.png");
-    store.actions.keys.register("test.vote", "x", () => {
-      const id = store.state.currentEntry()?.entry.id;
-      store.actions.judgments.dispatch(id, { type: "toggle", field: "vote", value: "down" });
-    });
+    store.actions.keys.register({ id: "test.vote", key: "x", command: "judgment.apply",
+      args: { target: "current", intent: { type: "toggle", field: "vote", value: "down" } } });
     store.actions.keys.dispatch({ key: "x", preventDefault() {} });
     const bulkVote = store.actions.bulk.vote("up");
     const bulkFavorite = store.actions.bulk.favorite();

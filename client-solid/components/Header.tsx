@@ -12,6 +12,7 @@ import { IconButton } from "./IconButton.js";
 import { FeedFilter } from "./FeedFilter.js";
 import { SourceProgress } from "./SourceProgress.js";
 import { FolderPicker } from "./FolderPicker.js";
+import { FeedbackLink } from "./FeedbackLink.js";
 
 // layout-switcher icons (icons.mjs): a square with one divider — vertical
 // right of center (wide images / narrow text), horizontal (stacked),
@@ -42,7 +43,7 @@ function InfoLayoutSwitcher() {
             <button
               class={store.state.infoLayout() === mode ? "on" : ""}
               title={"info layout: " + title}
-              onClick={() => store.actions.ui.setInfoLayout(mode)}
+              onClick={() => store.handles.invoke("metadata.layout", { layout: mode })}
               innerHTML={iconSvg(icon, 16)}
             />
           )}
@@ -79,14 +80,14 @@ function Menu() {
               <label class="switchwrap" title="walk the host's image list and extract PNG-embedded metadata in the background">
                 <input
                   type="checkbox" checked={!!store.state.scraper?.enabled}
-                  onChange={(e) => store.actions.menu.scraperToggle(e.target.checked)}
+                  onChange={(e) => store.handles.invoke("prefetch.enabled", { value: e.target.checked })}
                 />
                 <span class="track" />
                 metadata scan
               </label>
               <button
                 id="scraperPause" title="pause/resume the background scan (laptop mode)"
-                onClick={() => store.actions.menu.scraperPause()}
+                onClick={() => store.handles.invoke("prefetch.pause")}
                 innerHTML={iconSvg(store.state.scraper?.paused ? "player-play" : "player-pause", 12)}
               />
               <span id="scraperPending" class="menuextra">{scraperPending()}</span>
@@ -97,7 +98,7 @@ function Menu() {
               <label class="switchwrap" title="thumbs-down removes an image from view when this preference is enabled; votes are kept">
                 <input
                   type="checkbox" checked={store.state.judgmentPrefs.downvoteHides}
-                  onChange={(e) => store.actions.judgments.setDownvoteHides(e.target.checked)}
+                  onChange={(e) => store.handles.invoke("preference.downvoteHides", { value: e.target.checked })}
                 />
                 <span class="track" />
                 down-vote hides
@@ -109,7 +110,7 @@ function Menu() {
               <label class="switchwrap" title="delete from Comfy hosts through the assets_plus extension (recoverable trash); off falls back to hiding the image">
                 <input
                   type="checkbox" checked={store.state.deletePrefs.useAssetsPlus}
-                  onChange={(e) => store.actions.menu.deleteAssetsPlus(e.target.checked)}
+                  onChange={(e) => store.handles.invoke("preference.deleteAssetsPlus", { value: e.target.checked })}
                 />
                 <span class="track" />
                 trash-delete via assets_plus
@@ -119,12 +120,10 @@ function Menu() {
           <Show when={matches("download feedback")}>
             <div class="menurow">
               <div class="menulabel">judgments</div>
-              <a
+              <FeedbackLink source={store.state.host()}
                 class="btn"
-                href={`/api/collections/${encodeURIComponent(store.state.host())}/feedback.json`}
-                download={`kosmozoo_${store.state.host()}_feedback.json`}
                 title="download this collection's judgments (generated on demand)"
-              >download feedback.json</a>
+              >download feedback.json</FeedbackLink>
             </div>
           </Show>
         </div>
@@ -141,7 +140,7 @@ export function Header() {
   // click outside the menu closes it — the shared primitive; the wrapper
   // contains the button, so no stopPropagation shield is needed
   useClickOutside(() => menuWrapRef, () => {
-    if (store.state.menuOpen()) store.actions.ui.closeMenu();
+    if (store.state.menuOpen()) store.handles.invoke("menu.close");
   });
 
   return (
@@ -151,12 +150,12 @@ export function Header() {
           <img class="logo" src="/logo-64.png" alt="kosmozoo" width={24} height={24} />
           <h1>Kosmozoo</h1>
           <IconButton id="refreshBtn" chrome variant="refresh" title="Refresh sources and image list"
-            icon={iconSvg("refresh", 16)} onAction={() => store.actions.ui.refresh()} />
+            icon={iconSvg("refresh", 16)} onAction={() => store.handles.invoke("source.refresh")} />
           <HostPicker />
           <FolderPicker options={store.state.folderOptions()} value={store.state.selectedFolder()}
             supported={store.state.inventory.subfolders.supported} reason={store.state.inventory.subfolders.reason}
             loading={store.state.inventory.loading} unavailable={!store.state.inventory.folders.includes(store.state.selectedFolder())}
-            onSelect={store.actions.folders.select} />
+            onSelect={(folder) => store.handles.invoke("source.folder", { folder })} />
           <div class="pinned-source-group" classList={{ "has-pins": pins().length > 0 }}>
             <Show when={pins().length > 0}><span class="pinned-separator" role="separator" aria-orientation="vertical" /></Show>
             <div class="pinned-sources" aria-label="Pinned sources">
@@ -164,7 +163,7 @@ export function Header() {
               {(id) => (
                 <button type="button" class={"pinned-source" + (store.state.host() === id ? " on" : "")}
                   data-source={id} aria-pressed={store.state.host() === id}
-                  title={`Select ${id}`} onClick={() => store.actions.hosts.select(id)}>
+                  title={`Select ${id}`} onClick={() => store.handles.invoke("source.select", { id })}>
                   <SourceProgress name={id} activity={store.state.sourceActivity[id]} />
                   <span>{id}</span>
                 </button>
@@ -172,8 +171,8 @@ export function Header() {
             </For>
             </div>
           </div>
-          <FeedFilter value={store.state.filter()} onInput={store.actions.ui.setFilter}
-            pushLayer={store.actions.keys.pushLayer} popLayer={store.actions.keys.popLayer}
+          <FeedFilter value={store.state.filter()} onInput={(value) => store.handles.invoke("feed.filter", { value })}
+            handles={store.handles} pushLayer={store.actions.keys.pushLayer}
             canEscape={() => !store.state.keysPanelOpen() && !store.state.diff.open} />
         </div>
       </div>
@@ -183,7 +182,7 @@ export function Header() {
           <button
             id="menuBtn"
             title="options"
-            onClick={() => store.actions.ui.toggleMenu()}
+            onClick={() => store.handles.invoke("menu.toggle")}
           >
             <span innerHTML={iconSvg("menu", 16)} />
           </button>

@@ -24,33 +24,33 @@ export function BulkBar() {
       <div id="bulkBar">
         <span id="bulkCount">{`${n()} selected`}</span>
         <For each={store.state.featureBulkActions()}>
-          {(a) => <IconButton icon={a.icon} variant={a.variant} title={a.title} onAction={a.onAction} />}
+          {(a) => <IconButton icon={a.icon} variant={a.variant} title={a.title} onAction={() => store.handles.invoke(a.command, a.args)} />}
         </For>
         <IconButton
           icon={iconSvg("thumb-down")} variant="down"
           title="thumbs-down all selected (hides, if down-vote hides is on)"
-          onAction={() => store.actions.bulk.vote("down")}
+          onAction={() => store.handles.invoke("judgment.apply", { target: "selected", intent: { type: "set", patch: { vote: "down" } } })}
         />
         <IconButton
           icon={iconSvg("thumb-up")} variant="up"
           title="thumbs-up all selected"
-          onAction={() => store.actions.bulk.vote("up")}
+          onAction={() => store.handles.invoke("judgment.apply", { target: "selected", intent: { type: "set", patch: { vote: "up" } } })}
         />
         <IconButton
           icon={iconSvg("star")} variant="favorite"
           title="favorite all selected"
-          onAction={() => store.actions.bulk.favorite()}
+          onAction={() => store.handles.invoke("judgment.apply", { target: "selected", intent: { type: "set", patch: { favorite: true } } })}
         />
         <button
           class="savebtn" title="download all selected (the browser may ask to allow multiple)"
-          onClick={() => store.actions.bulk.save()}
+          onClick={() => store.handles.invoke("image.download", { target: "selected" })}
         >save</button>
         <IconButton
           icon={iconSvg(copy().icon, 16)} variant="delete"
           title={copy().bulkTitle}
-          onAction={() => store.actions.confirm.open({ images: store.actions.bulk.images() })}
+          onAction={() => store.handles.invoke("image.delete.request", { target: "selected" })}
         />
-        <button id="bulkClear" title="clear selection" onClick={() => store.actions.bulk.clear()}>×</button>
+        <button id="bulkClear" title="clear selection" onClick={() => store.handles.invoke("selection.clear")}>×</button>
       </div>
     </Show>
   );

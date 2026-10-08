@@ -8,7 +8,7 @@
 // unlink — permanent removal from a folder host
 // hide — the files stay on the host; the images are hidden from kosmozoo
 
-import { createSignal, Show } from "solid-js";
+import { createSignal, createEffect, Show } from "solid-js";
 import { useAppStore } from "../store/app-store.js";
 import { deleteCopy } from "../lib/delete-copy.js";
 import { Modal } from "./Modal.js";
@@ -23,14 +23,14 @@ export function ConfirmDelete() {
   const n = () => images().length;
 
   const close = () => {
-    store.actions.confirm.close();
+    store.handles.invoke("image.delete.cancel");
     setBusy(false);
   };
 
   const confirm = async () => {
     if (busy()) return;
     setBusy(true);
-    const ok = await store.actions.images.delete(images());
+    const ok = await store.handles.invoke("image.delete.confirm");
     if (ok) close();
     else setBusy(false); // nothing succeeded — stay open
   };
@@ -39,10 +39,11 @@ export function ConfirmDelete() {
   // image's host (a mixed-host bulk selection would mislabel the action)
   const mode = () => store.state.currentCollection()?.capabilities?.delete ?? "hide";
   const copy = () => deleteCopy(mode());
+  createEffect(() => { if (!store.state.confirmDelete()) setBusy(false); });
 
   return (
     <Show when={n() > 0}>
-      <Modal overlayId="confirmOverlay" panelId="confirmPanel" onClose={close}>
+      <Modal overlayId="confirmOverlay" panelId="confirmPanel" closeCommand="image.delete.cancel">
         <div class="confirm-title">{copy().title}</div>
         <div class="confirm-body">{copy().body(n(), images()[0].filename, images()[0].host)}</div>
         <div class="confirm-actions">
