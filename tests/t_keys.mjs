@@ -1,7 +1,7 @@
 // tests/t_keys.mjs — the rebindable key registry: combo matching, overrides,
 // conflicts, reset. Pure logic (no DOM).
 
-import { assert, assertEquals } from "jsr:@std/assert";
+import { assert, assertEquals, assertThrows } from "jsr:@std/assert";
 import { bindingMatches, comboFromEvent, makeKeymap } from "../client/js/keys.mjs";
 
 const ev = (key, mods = {}) => ({
@@ -69,4 +69,35 @@ Deno.test("keys: findConflict treats bare letters case-insensitively", () => {
   km.bind({ id: "c.b", key: "j", command: "test.b", ctx: "c" });
   assertEquals(km.findConflict("c.b", "H"), "c.a"); // "H" conflicts with "h"
   assertEquals(km.findConflict("c.b", "F9"), null);
+});
+
+Deno.test("binding data: accessors, symbols, hidden callbacks and cycles reject without activation", () => {
+  let reads = 0, described = 0;
+  const km = makeKeymap({ request: () => false, describe: () => { described++; return "mode"; } });
+  const base = { id: "test", key: "x", command: "workbench.mode" };
+  const hidden = Object.defineProperty({ ...base }, "callback", { value() {}, enumerable: false });
+  const cycle = {}; cycle.self = cycle;
+  for (const binding of [
+    { ...base, get args() { reads++; return { mode: "split" }; } },
+    { ...base, args: { get mode() { reads++; return "split"; } } },
+    { ...base, [Symbol("callback")]() {} }, hidden, { ...base, args: cycle }, { ...base, args: { ids: Array(1) } },
+  ]) assertThrows(() => km.bind(binding), TypeError);
+  assertEquals(reads, 0);
+  assertEquals(described, 0);
+  assertEquals(km.list(), []);
+});
+
+Deno.test("binding metadata: labels stay strings and invalid registration cannot become a row", () => {
+  const callback = () => "executor";
+  const km = makeKeymap({ request: () => false, describe: () => callback });
+  assertThrows(() => km.bind({ id: "bad", key: "x", command: "known" }), TypeError);
+  assertEquals(km.list(), []);
+  const valid = makeKeymap({ request: () => true, describe: () => "description" });
+  for (const descriptor of [
+    { id: 1, key: "x", command: "known" }, { id: "bad", key: "x", command: "known", desc: [] },
+    { id: "bad", key: "x", command: "known", args: [] },
+  ]) assertThrows(() => valid.bind(descriptor), TypeError);
+  valid.bind({ id: "valid", key: "x", command: "known", args: { mode: "split" } });
+  assertEquals(valid.list()[0].desc, "description");
+  assert(valid.dispatch(ev("x")));
 });

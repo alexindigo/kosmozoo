@@ -2,14 +2,38 @@
 export function assertData(value, { files = false } = {}, seen = new Set()) {
   if (value == null || ["string", "boolean"].includes(typeof value)) return;
   if (typeof value === "number" && Number.isFinite(value)) return;
-  if (files && typeof File !== "undefined" && value instanceof File) return;
-  if (typeof value !== "object" || seen.has(value) ||
-      (!Array.isArray(value) && Object.getPrototypeOf(value) !== Object.prototype && Object.getPrototypeOf(value) !== null)) {
+  const file = files && typeof File !== "undefined" && value instanceof File && Object.getPrototypeOf(value) === File.prototype;
+  const array = Array.isArray(value);
+  if (typeof value !== "object" || seen.has(value) || (!file &&
+      (array ? Object.getPrototypeOf(value) !== Array.prototype :
+        Object.getPrototypeOf(value) !== Object.prototype && Object.getPrototypeOf(value) !== null))) {
     throw new TypeError("Command payload must contain data only");
   }
+  const descriptors = Object.getOwnPropertyDescriptors(value);
+  const keys = Reflect.ownKeys(descriptors);
+  // Native File resources are opaque, identity-preserving inputs. Their runtime
+  // brand/byte-storage symbols are not semantic record fields (Deno uses them).
+  if (file) {
+    for (const key of keys) {
+      const descriptor = descriptors[key];
+      if (!Object.hasOwn(descriptor, "value") || typeof descriptor.value === "function")
+        throw new TypeError("File resources cannot carry callbacks");
+    }
+    return;
+  }
+  if (keys.some((key) => typeof key !== "string" || !Object.hasOwn(descriptors[key], "value") ||
+      (!descriptors[key].enumerable && !(array && key === "length"))))
+    throw new TypeError("Command payload must contain own data properties only");
+  if (array && keys.length !== descriptors.length.value + 1)
+    throw new TypeError("Command payload arrays must be dense");
   seen.add(value);
-  for (const item of Object.values(value)) assertData(item, { files }, seen);
-  seen.delete(value);
+  try {
+    for (const key of keys) {
+      if (array && key !== "length" && (!Number.isInteger(Number(key)) || String(Number(key)) !== key || Number(key) < 0 || Number(key) >= descriptors.length.value))
+        throw new TypeError("Command payload arrays must contain indexed data only");
+      assertData(descriptors[key].value, { files }, seen);
+    }
+  } finally { seen.delete(value); }
 }
 
 export function makeCommandHandles({ observe = () => {} } = {}) {
@@ -23,6 +47,8 @@ export function makeCommandHandles({ observe = () => {} } = {}) {
   const register = ({ id, description = id, validate = () => true, execute, files = false }) => {
     if (typeof id !== "string" || !id || ports.has(id)) throw new Error(`Duplicate or invalid command: ${id}`);
     if (typeof execute !== "function") throw new TypeError(`Missing capability: ${id}`);
+    if (typeof description !== "string" || typeof validate !== "function" || typeof files !== "boolean")
+      throw new TypeError(`Invalid command definition: ${id}`);
     const handle = Object.freeze({
       id, description,
       invoke(args = {}) {

@@ -29,12 +29,27 @@ function signature(key) {
   return /^[a-z]$/i.test(key) && !key.includes("+") ? `letter:${key.toLowerCase()}` : key;
 }
 
-function dataOnly(value) {
+function dataOnly(value, seen = new Set()) {
   if (value == null || ["string", "boolean"].includes(typeof value)) return;
   if (typeof value === "number" && Number.isFinite(value)) return;
-  if (typeof value !== "object" || (!Array.isArray(value) && Object.getPrototypeOf(value) !== Object.prototype))
+  const array = Array.isArray(value);
+  if (typeof value !== "object" || seen.has(value) || (array ? Object.getPrototypeOf(value) !== Array.prototype :
+      Object.getPrototypeOf(value) !== Object.prototype && Object.getPrototypeOf(value) !== null))
     throw new TypeError("Bindings contain data only");
-  for (const item of Object.values(value)) dataOnly(item);
+  const descriptors = Object.getOwnPropertyDescriptors(value);
+  const keys = Reflect.ownKeys(descriptors);
+  if (keys.some((key) => typeof key !== "string" || !Object.hasOwn(descriptors[key], "value") ||
+      (!descriptors[key].enumerable && !(array && key === "length"))))
+    throw new TypeError("Bindings contain own data properties only");
+  if (array && keys.length !== descriptors.length.value + 1) throw new TypeError("Binding arrays must be dense");
+  seen.add(value);
+  try {
+    for (const key of keys) {
+      if (array && key !== "length" && (!Number.isInteger(Number(key)) || String(Number(key)) !== key || Number(key) < 0 || Number(key) >= descriptors.length.value))
+        throw new TypeError("Binding arrays contain indexed data only");
+      dataOnly(descriptors[key].value, seen);
+    }
+  } finally { seen.delete(value); }
 }
 
 export function makeKeymap(adapter) {
@@ -48,10 +63,14 @@ export function makeKeymap(adapter) {
       if (legacy.length || !binding || typeof binding !== "object" || Array.isArray(binding))
         throw new TypeError("Use a data binding descriptor");
       dataOnly(binding);
-      if (Object.keys(binding).some((key) => !["id", "key", "command", "args", "route", "ctx", "desc"].includes(key)) ||
-          !binding.id || typeof binding.key !== "string" || !binding.command || actions.some((a) => a.id === binding.id))
+      if (Reflect.ownKeys(binding).some((key) => !["id", "key", "command", "args", "route", "ctx", "desc"].includes(key)) ||
+          typeof binding.id !== "string" || !binding.id || typeof binding.key !== "string" ||
+          typeof binding.command !== "string" || !binding.command || actions.some((a) => a.id === binding.id) ||
+          ["desc", "route", "ctx"].some((key) => binding[key] !== undefined && typeof binding[key] !== "string") ||
+          (binding.args !== undefined && (!binding.args || typeof binding.args !== "object" || Array.isArray(binding.args))))
         throw new TypeError("Invalid or duplicate binding");
       const description = adapter.describe(binding.command);
+      if (typeof description !== "string") throw new TypeError("Command descriptions must be strings");
       const copy = structuredClone(binding);
       actions.push({ ...copy, defaultKey: copy.key, key: overrides[copy.id] ?? copy.key, desc: copy.desc ?? description });
     },

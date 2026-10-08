@@ -1,5 +1,6 @@
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
+const { CDP } = require('./cdp.cjs');
 module.exports = async ({ page, ENGINE, KZ, check }) => {
   const invoke = (id,args={}) => page.evaluate(`(async()=>${KZ}.handles.invoke(${JSON.stringify(id)},${JSON.stringify(args)}))()`);
   const rendered = () => page.evaluate(`(async()=>{const s=${KZ};return{mode:s.state.diff.mode,col:s.state.diff.col,locked:s.state.diff.locked,
@@ -33,8 +34,21 @@ module.exports = async ({ page, ENGINE, KZ, check }) => {
   await invoke('workbench.close');
 
   // Browser downloads prove JSON bytes at the consumer, not just an href/spy.
+  // Own the download producer for exactly the lifetime of its private output.
+  const resourcePage=await CDP.launch(9349);
   const directory=fs.mkdtempSync('/work/tests/.tmp-command-downloads-');
-  await page.send('Browser.setDownloadBehavior',{behavior:'allow',downloadPath:directory});
+  try {
+    await resourcePage.goto(ENGINE+'/#fake');
+    await resourcePage.poll(`(async()=>${KZ}.state.images.length>0)()`);
+    await resourcePage.send('Browser.setDownloadBehavior',{behavior:'allow',downloadPath:directory});
+    await resourceProof(resourcePage);
+  } finally {
+    await resourcePage.close();
+    fs.rmSync(directory,{recursive:true,force:true});
+  }
+
+  async function resourceProof(page) {
+  const invoke = (id,args={}) => page.evaluate(`(async()=>${KZ}.handles.invoke(${JSON.stringify(id)},${JSON.stringify(args)}))()`);
   const waitFile=async name=>{
     const until=Date.now()+10000;
     while(Date.now()<until){const path=directory+'/'+name;if(fs.existsSync(path))return JSON.parse(fs.readFileSync(path,'utf8'));await new Promise(r=>setTimeout(r,50));}
@@ -74,6 +88,7 @@ module.exports = async ({ page, ENGINE, KZ, check }) => {
     check('commands: feedback retains href/download and modified/auxiliary/context native fallback',true);
   }finally{
     if(originalBookmark!==undefined)await invoke('judgment.apply',{id:'fake:flux-basic.png',intent:{type:'set',patch:{bookmark:originalBookmark}}});
-    await invoke('source.menu.close');await page.send('Browser.setDownloadBehavior',{behavior:'default'});fs.rmSync(directory,{recursive:true,force:true});
+    await invoke('source.menu.close');
+  }
   }
 };

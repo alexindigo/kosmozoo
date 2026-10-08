@@ -4,11 +4,14 @@ const text = (v) => typeof v === "string";
 const bool = (v) => typeof v === "boolean";
 const number = (v) => Number.isFinite(v);
 const oneOf = (...values) => (v) => values.includes(v);
-const optional = (test) => (v) => v === undefined || test(v);
-const ids = (v) => Array.isArray(v) && v.every(string);
+const optional = (test) => (v, present) => !present || test(v);
+const ids = (v) => Array.isArray(v) && Array.from(v).every(string);
 const target = oneOf("current", "selected");
-const shape = (fields) => (args) => Object.keys(args).every((key) => key in fields) &&
-  Object.entries(fields).every(([key, test]) => test(args[key]));
+const shape = (fields) => (args) => Reflect.ownKeys(args).every((key) => Object.hasOwn(fields, key)) &&
+  Object.entries(fields).every(([key, test]) => {
+    const present = Object.hasOwn(args, key);
+    return test(present ? args[key] : undefined, present);
+  });
 const side = (v) => !!v && string(v.source ?? v.remote) && string(v.file ?? v.image);
 const judgmentIntent = (v) => {
   if (!v || typeof v !== "object" || Array.isArray(v)) return false;

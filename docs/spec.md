@@ -306,6 +306,12 @@ commands with constant arguments/context/routing through one injected adapter.
 All twelve IDs/defaults/descriptions/matching/conflicts/saved-reset behavior remain.
 KeysPanel edits mappings; no new shortcut or command-launch control is introduced.
 
+Payload/binding records use own enumerable data properties and dense arrays;
+accessors, symbol properties, hidden callbacks and cycles reject before execution
+or getter activation. Description metadata is a string, never an executor alias.
+Present selectors/optional fields must carry valid values; undefined is not an ID.
+Explicitly allowed native File resources retain their exact object identity.
+
 Input eligibility is separate from semantic execution. Capture/bubble routing
 retains native select/typing/capture precedence and intentional decline. Accepted
 false/no-op/Promise requests consume input. Token-specific layer cleanup cannot

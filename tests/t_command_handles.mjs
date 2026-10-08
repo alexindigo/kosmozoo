@@ -271,3 +271,59 @@ Deno.test("judgment current target: resolves once and returns the original singu
   assertEquals(reads, 1);
   assertEquals(calls, [{ id: "original:a.png", intent }]);
 });
+
+Deno.test("command data: accessor, symbol, hidden callback and sparse/cyclic records reject before execution", () => {
+  const handles = makeCommandHandles();
+  let reads = 0, calls = 0;
+  handles.register({ id: "data", execute: () => calls++ });
+  const hidden = Object.defineProperty({}, "callback", { value() {}, enumerable: false });
+  const hiddenGetter = Object.defineProperty({}, "value", { get() { reads++; return 1; }, enumerable: false });
+  const cycle = {}; cycle.self = cycle;
+  for (const payload of [
+    { get value() { reads++; return 1; } }, { nested: [{ get value() { reads++; return 1; } }] },
+    { [Symbol("callback")]() {} }, hidden, hiddenGetter, { ids: Array(1) }, cycle,
+  ]) assertThrows(() => handles.invoke("data", payload), TypeError);
+  assertEquals(reads, 0);
+  assertEquals(calls, 0);
+});
+
+Deno.test("command registration: public metadata cannot alias executors or malformed definition fields", () => {
+  const handles = makeCommandHandles(), execute = () => "unchanged";
+  for (const description of [execute, {}, [], null, 1, Symbol("description")])
+    assertThrows(() => handles.register({ id: "bad", description, execute }), TypeError);
+  assertThrows(() => handles.register({ id: "bad", execute, validate: true }), TypeError);
+  assertThrows(() => handles.register({ id: "bad", execute, files: "yes" }), TypeError);
+  assertThrows(() => handles.registerOwned({ id: "bad", description: execute }), TypeError);
+  const port = handles.register({ id: "bad", description: "valid", execute });
+  assertEquals(port.invoke(), "unchanged");
+  assertEquals(handles.list(), [{ id: "bad", description: "valid" }]);
+});
+
+Deno.test("command selectors: absent selectors, present undefined and sparse IDs never reach operations", () => {
+  const handles = makeCommandHandles();
+  let calls = 0;
+  const operation = () => { calls++; return Promise.resolve({ ok: true }); };
+  const state = { images: [], selected: {}, imageIdxById: () => new Map(), currentEntry: operation };
+  registerCoreCommands(handles, { state, ops: { diff: { setMode: operation }, images: { download: operation },
+    judgments: { dispatch: operation }, confirm: { open: operation } } });
+  for (const selector of [{}, { id: undefined }, { ids: undefined }, { target: undefined }, { ids: Array(1) }, { ids: [undefined] }]) {
+    for (const id of ["image.download", "image.delete.request"]) assertThrows(() => handles.invoke(id, selector), TypeError);
+    assertThrows(() => handles.invoke("judgment.apply", { ...selector, intent: { type: "toggle", field: "bookmark" } }), TypeError);
+  }
+  for (const key of ["constructor", "toString", "hasOwnProperty", "__proto__"])
+    assertThrows(() => handles.invoke("workbench.mode", JSON.parse(`{"mode":"split","${key}":"unexpected"}`)), TypeError);
+  assertEquals(calls, 0);
+});
+
+Deno.test("command data: valid plain/null-prototype data, shared containers, File identity and original results remain", () => {
+  const handles = makeCommandHandles(), result = Promise.resolve({ ok: true });
+  const file = new File(["data"], "keep.png");
+  const shared = { value: 0.5 }, args = Object.assign(Object.create(null), { files: [file], a: shared, b: shared, optional: undefined });
+  let captured;
+  handles.register({ id: "files", files: true, execute: (payload) => { captured = payload; return result; } });
+  assertStrictEquals(handles.invoke("files", args), result);
+  assertStrictEquals(captured, args);
+  assertStrictEquals(captured.files[0], file);
+  handles.register({ id: "ordinary", execute() {} });
+  assertThrows(() => handles.invoke("ordinary", { file }), TypeError);
+});
