@@ -183,6 +183,7 @@ class ControllerTests(VMCase):
                           "phases": [{"name": p, "status": 0} for p in (["unit", "build"] if missing_phase else ["unit", "build", "browser"])],
                           "error": "fixture verification failure"}
                 (Path(evidence) / "result.json").write_text(json.dumps(result))
+                (Path(evidence) / "manifest.json").write_bytes((self.bundle / "manifest.json").read_bytes())
         return Transport
 
     def test_index_mutation_rejects_previous_green_tree(self):

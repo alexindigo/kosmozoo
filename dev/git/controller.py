@@ -6,9 +6,12 @@ import os
 from pathlib import Path
 import shlex
 import shutil
+import signal
 import subprocess
 import sys
 import uuid
+
+from lifecycle import Invocation
 
 from snapshot import VerificationError, export, git, require
 
@@ -19,19 +22,24 @@ def load_config(path):
             "Verification config must be owned by this user and not group/world writable")
     config = json.loads(path.read_text())
     require(config.get("version") == 1, "Unsupported verification config")
-    require(config.get("transport") in ("vm-transfer", "guest-local"), "No supported VM transport configured")
+    require(config.get("transport") in ("fresh-vm", "vm-transfer", "guest-local"), "No supported VM transport configured")
     for key in ["guest_root", "evidence_root"]:
         require(Path(config[key]).is_absolute(), key + " must be absolute")
-    uuid.UUID(config["vm_uuid"])
+    uuid.UUID(config["base"]["uuid"] if config["transport"] == "fresh-vm" else config["vm_uuid"])
     return config
+
+
+def transfer_module(config):
+    spec = importlib.util.spec_from_file_location("kosmozoo_vm_transfer", config["vm_transfer_module"])
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
 
 
 class RemoteVM:
     def __init__(self, config):
         self.config = config
-        spec = importlib.util.spec_from_file_location("kosmozoo_vm_transfer", config["vm_transfer_module"])
-        self.transfer = importlib.util.module_from_spec(spec)
-        spec.loader.exec_module(self.transfer)
+        self.transfer = transfer_module(config)
         self.profile = self.transfer.load_profile(config["profile"])
         require(self.profile["guest"]["domain"] == config["domain"] and self.profile["guest"]["uuid"] == config["vm_uuid"],
                 "Profile targets a different named VM")
@@ -117,9 +125,18 @@ def verify(config_path, repo=None, transport_factory=None):
     for name in ["snapshot.py", "guest.py"]:
         shutil.copyfile(Path(__file__).with_name(name), run / "bundle" / name)
     receipt = {"version": 1, "attempt": attempt, "tree": manifest["tree"], "success": False}
+    invocation = None
+    previous_signal = signal.getsignal(signal.SIGTERM)
+    def interrupted(signum, frame):
+        raise VerificationError("Invocation interrupted by SIGTERM")
+    signal.signal(signal.SIGTERM, interrupted)
     try:
-        factory = transport_factory or (RemoteVM if config["transport"] == "vm-transfer" else GuestLocalVM)
-        transport = factory(config)
+        active = config
+        if config["transport"] == "fresh-vm" and transport_factory is None:
+            invocation = Invocation(config, transfer_module(config), run)
+            active = invocation.prepare()
+        factory = transport_factory or (GuestLocalVM if config["transport"] == "guest-local" else RemoteVM)
+        transport = factory(active)
         remote = transport.send(run / "bundle", attempt)
         status = transport.run(remote, run / "guest-command.log")
         transport.collect(attempt, run / "evidence")
@@ -127,15 +144,26 @@ def verify(config_path, repo=None, transport_factory=None):
         require(result.get("attempt") == attempt, "Guest result does not match this attempt")
         require(status == 0 and result.get("success") is True, result.get("error", "Full VM verification failed"))
         require(result.get("tree") == manifest["tree"], "Guest result does not match this staged tree")
+        observed_manifest = json.loads((run / "evidence" / "manifest.json").read_text())
+        require(observed_manifest == manifest, "Guest manifest does not match complete staged inputs")
         phases = {phase["name"]: phase["status"] for phase in result.get("phases", [])}
-        require(all(phases.get(name) == 0 for name in ["unit", "build", "browser"]), "Incomplete full-project result")
+        required = ["unit", "build", "browser"]
+        if any(item["path"].startswith("dev/git/tests/") for item in manifest["files"]):
+            required.append("infrastructure")
+        require(all(phases.get(name) == 0 for name in required), "Incomplete full-project result")
         require(git(repo, "write-tree").decode().strip() == manifest["tree"], "Staged files changed while tests ran; commit again to verify the new tree")
+        if invocation:
+            invocation.retire()
+        require(git(repo, "write-tree").decode().strip() == manifest["tree"], "Staged files changed during lifecycle completion")
         receipt["success"] = True
         print("pre-commit: full staged project passed: " + manifest["tree"])
-    except Exception as error:
+    except (Exception, KeyboardInterrupt) as error:
         receipt["error"] = str(error)
+        if invocation:
+            invocation.retain(error)
         print("pre-commit: " + str(error), file=sys.stderr)
     finally:
+        signal.signal(signal.SIGTERM, previous_signal)
         (run / "receipt.json").write_text(json.dumps(receipt, indent=2))
         print("pre-commit: retained evidence: " + str(run), flush=True)
     return receipt
