@@ -3,6 +3,8 @@
 // client's modal). Environment-pure: no Deno, no DOM, no node APIs (served
 // to the browser via /shared/).
 
+import { sameContext } from "../../source-origin.mjs";
+
 export function paramId(classType, input) {
   return `${classType}.${input}`;
 }
@@ -39,40 +41,67 @@ function cartesianProduct(arrays) {
 // compares FORMATTED values so a string filename and a numeric current
 // compare honestly: the current combo is redundant only when EVERY axis
 // sits at its current value.
-export function generatePermutations(ranges, currentValues, imageParams = {}) {
+export function permutationAxes(ranges, imageParams = {}) {
   const enabled = Object.entries(ranges).filter(([, r]) => r.enabled);
   const imgEnabled = Object.entries(imageParams).filter(([, p]) => p.enabled && Array.isArray(p.values) && p.values.length);
-  if (enabled.length === 0 && imgEnabled.length === 0) return [];
-  for (const [, r] of enabled) {
-    if (typeof r.increment !== "number" || r.increment <= 0) {
-      throw new Error("every enabled range needs a positive increment");
+  return { enabled, imgEnabled, excluded: {
+    ranges: Object.entries(ranges).filter(([, r]) => r.enabled === false).map(([id]) => id),
+    imageParams: Object.entries(imageParams).filter(([, p]) => p.enabled === false).map(([id]) => id),
+  } };
+}
+
+export function generatePermutations(ranges, currentValues, imageParams = {}) {
+  const plan = permutationPlan(ranges, currentValues, imageParams);
+  if (!plan.axes.length || plan.total === 0) return [];
+  const output = [];
+  const visit = (index, values, current) => {
+    if (index === plan.axes.length) { if (!current) output.push(Object.fromEntries(values)); return; }
+    const axis = plan.axes[index];
+    for (let i = 0; i < axis.length; i++) {
+      const value = axis.at(i);
+      visit(index + 1, [...values, [axis.id, value]], current && axis.isCurrent(value));
     }
+  };
+  visit(0, [], true);
+  return output;
+}
+
+// One typed axis representation owns both count and generation. Counting does
+// not allocate the Cartesian product or serialize arbitrary text through a separator.
+export function permutationPlan(ranges, currentValues, imageParams = {}) {
+  const { enabled, imgEnabled } = permutationAxes(ranges, imageParams);
+  const fmt = value => typeof value === "string" ? value : formatValue(value);
+  const axes = [];
+  for (const [id, range] of enabled) {
+    if (!Number.isFinite(range.increment) || range.increment <= 0) throw new Error("every enabled range needs a positive increment");
+    if (!Number.isFinite(range.min) || !Number.isFinite(range.max)) throw new Error("range bounds must be finite");
+    const length = Math.max(0, Math.round((range.max - range.min) / range.increment) + 1);
+    if (!Number.isSafeInteger(length)) throw new Error("range is too large");
+    const at = index => Math.round((range.min + index * range.increment) * 1e10) / 1e10;
+    const isCurrent = value => Object.hasOwn(currentValues, id) && fmt(value) === fmt(currentValues[id]);
+    let matches = 0;
+    const target = Number(fmt(currentValues[id]));
+    if (length && Number.isFinite(target)) {
+      const bound = inclusive => {
+        let low = 0, high = length;
+        while (low < high) { const mid = low + Math.floor((high - low) / 2), value = at(mid); if (value < target || inclusive && value === target) low = mid + 1; else high = mid; }
+        return low;
+      };
+      const start = bound(false);
+      if (start < length && isCurrent(at(start))) matches = bound(true) - start;
+    }
+    axes.push({ id, length, at, isCurrent, matches });
   }
-
-  const keys = enabled.map(([k]) => k);
-  const valueArrays = enabled.map(([, r]) => rangeValues(r.min, r.max, r.increment));
-  const imgKeys = imgEnabled.map(([k]) => k);
-  const imgArrays = imgEnabled.map(([, p]) => p.values);
-
-  const fmt = (v) => (typeof v === "string" ? v : formatValue(v));
-  const currentKey = [...keys, ...imgKeys].map((k) => fmt(currentValues[k])).join("|");
-
-  const product = cartesianProduct([...valueArrays, ...imgArrays]);
-  return product.filter((perm) => {
-    if (keys.length === 0) return perm.map(fmt).join("|") !== currentKey;
-    const imgOffset = keys.length;
-    const numericsCurrent = keys.every((k, i) => fmt(perm[i]) === fmt(currentValues[k]));
-    const imagesCurrent = imgKeys.every((k, j) => fmt(perm[imgOffset + j]) === fmt(currentValues[k]));
-    return !(numericsCurrent && imagesCurrent);
-  }).map((perm) => Object.fromEntries([...keys, ...imgKeys].map((k, i) => [k, perm[i]])));
+  for (const [id, parameter] of imgEnabled) {
+    const values = parameter.values, isCurrent = value => Object.hasOwn(currentValues, id) && fmt(value) === fmt(currentValues[id]);
+    axes.push({ id, length: values.length, at: index => values[index], isCurrent, matches: values.filter(isCurrent).length });
+  }
+  const product = axes.reduce((n, axis) => n * axis.length, 1);
+  const current = axes.reduce((n, axis) => n * axis.matches, 1);
+  return { axes, total: axes.length ? product - current : 0 };
 }
 
 // --- text template axes ({{label}} substitutions) ------------------------------
-
-// the text sweep's value list: one value per line, blanks dropped
-export function textLines(text) {
-  return String(text ?? "").split("\n").map((s) => s.trim()).filter(Boolean);
-}
 
 // Distinct {{label}} names in first-appearance order. The name is trimmed;
 // empty names ({{ }}) are not labels.
@@ -98,42 +127,25 @@ export function parseSemicolonList(raw) {
   return s.split(";").map((v) => v.trim());
 }
 
-// Expand a text row into its final sweep values. Each line is an independent
-// template, expanded cartesian-style over only the labels it contains; a
-// line without placeholders contributes itself. tplValues: label -> string[]
-// (parsed). A label without values inerts the WHOLE row — never render a
-// literal {{label}} into a prompt by accident. An entirely blank text is ONE
-// value — the empty string: enabling the row and clearing the field is how a
-// sweep-to-empty is expressed (when the current value is already empty, the
-// current-combo exclusion drops it — a no-op sweep, not a job).
+// The entire text is ONE literal template. Formatting is never a list separator.
+// Only explicit labels create Cartesian axes; substitution changes their tokens
+// and leaves every other character intact. Missing values keep the row
+// inert. Clearing the field yields one empty string for sweep-to-empty.
 export function expandTextAxes(text, tplValues = {}) {
-  if (textLines(text).length === 0) return [""];
-  const labels = templateLabels(text);
+  const template = String(text ?? "");
+  const labels = templateLabels(template);
   if (labels.some((l) => !(tplValues[l]?.length > 0))) return [];
-  const out = [];
-  for (const line of textLines(text)) {
-    const here = templateLabels(line);
-    if (here.length === 0) { out.push(line); continue; }
-    let combos = [[]];
-    for (const l of here) {
-      const next = [];
-      for (const c of combos) for (const v of tplValues[l]) next.push([...c, v]);
-      combos = next;
-    }
-    for (const c of combos) {
-      const values = {};
-      here.forEach((l, i) => { values[l] = c[i]; });
-      out.push(line.replace(/\{\{([^{}]+?)\}\}/g, (m, name) => values[name.trim()] ?? m));
-    }
-  }
-  return out;
+  return cartesianProduct(labels.map(label => tplValues[label])).map(combo => {
+    const values = Object.fromEntries(labels.map((label, index) => [label, combo[index]]));
+    return template.replace(/\{\{([^{}]+?)\}\}/g, (match, name) => values[name.trim()] ?? match);
+  });
 }
 
 // Substitute both bare keys ({denoise}) and node-prefixed keys
 // ({scheduler:denoise}). Both map back to the same internal param name.
 // `labelMap` is param -> canonical label for this graph; the template may
 // use either.
-export function templateReplace(template, values, currentValues, labelMap = {}) {
+export function templateReplaceWithProof(template, values, currentValues, labelMap = {}) {
   const lookup = {};
   for (const [param, val] of Object.entries(currentValues)) {
     lookup[param] = val;
@@ -145,10 +157,65 @@ export function templateReplace(template, values, currentValues, labelMap = {}) 
     const lbl = labelMap[param];
     if (lbl && lbl !== param) lookup[lbl] = val;
   }
-  return template.replace(/\{([\w.:]+)\}/g, (_, key) => {
-    if (key in lookup) return formatValue(lookup[key]);
+  let complete = true;
+  const text = template.replace(/\{([\w.:]+)\}/g, (_, key) => {
+    if (Object.hasOwn(lookup, key)) return formatValue(lookup[key]);
+    complete = false;
     return `{${key}}`;
   });
+  return { text, complete };
+}
+
+export function templateReplace(template, values, currentValues, labelMap = {}) {
+  return templateReplaceWithProof(template, values, currentValues, labelMap).text;
+}
+
+// Additive Run evidence, shared by producer and consumer. Counts alone never
+// certify configuration. The returned field sets are intersections over every
+// accepted permutation; an invalid response returns null before any baseline write.
+const record = (value) => value !== null && typeof value === "object" && !Array.isArray(value);
+const shape = (value, keys) => record(value) && Object.keys(value).length === keys.length && keys.every(key => Object.hasOwn(value, key));
+const uuid = (value) => typeof value === "string" && /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(value);
+export function validRunAcknowledgement(value) {
+  return shape(value, ["version", "runId", "requestId"]) && [1, 2].includes(value.version) && uuid(value.runId) && uuid(value.requestId);
+}
+export function acknowledgedFields(request, response) {
+  const correlation = request?.acknowledgement, ack = response?.acknowledgement;
+  const ackKeys = correlation?.version === 2 ? ["version", "runId", "requestId", "target", "context", "accepted"] : ["version", "runId", "requestId", "target", "accepted"];
+  if (!validRunAcknowledgement(correlation) || !shape(ack, ackKeys) ||
+      ack.version !== correlation.version || ack.runId !== correlation.runId || ack.requestId !== correlation.requestId ||
+      correlation.version === 2 && !sameContext(request.context, ack.context) ||
+      !shape(ack.target, ["id", "host", "filename"]) || ["id", "host", "filename"].some(key => ack.target[key] !== request[key]) ||
+      !Number.isSafeInteger(response.total) || response.total <= 0 || response.submitted !== response.total ||
+      !Array.isArray(response.errors) || response.errors.length || !Array.isArray(ack.accepted) || ack.accepted.length !== response.total) return null;
+  const ranges = Object.keys(request.ranges ?? {}).filter(id => request.ranges[id]?.enabled === true);
+  const imageParams = Object.keys(request.imageParams ?? {}).filter(id => request.imageParams[id]?.enabled === true && request.imageParams[id]?.values?.length);
+  const rangeSelections = Object.keys(request.ranges ?? {}).filter(id => typeof request.ranges[id]?.enabled === "boolean");
+  const imageSelections = Object.keys(request.imageParams ?? {}).filter(id => typeof request.imageParams[id]?.enabled === "boolean");
+  if (ranges.some(id => imageParams.includes(id))) return null;
+  const indexes = new Set(), prompts = new Set();
+  const list = (values, allowed) => Array.isArray(values) && new Set(values).size === values.length && values.every(value => allowed.includes(value));
+  for (const accepted of ack.accepted) {
+    if (!shape(accepted, ["index", "promptId", "applied", "selections", "naming"]) || !Number.isSafeInteger(accepted.index) ||
+        accepted.index < 0 || accepted.index >= response.total || indexes.has(accepted.index) ||
+        typeof accepted.promptId !== "string" || !accepted.promptId.trim() || accepted.promptId !== accepted.promptId.trim() || prompts.has(accepted.promptId) ||
+        !shape(accepted.applied, ["ranges", "imageParams"]) || !list(accepted.applied.ranges, ranges) ||
+        !list(accepted.applied.imageParams, imageParams) || !list(accepted.naming, ["prefix", "suffix"]) ||
+        !shape(accepted.selections, ["ranges", "imageParams"]) || !list(accepted.selections.ranges, rangeSelections) ||
+        !list(accepted.selections.imageParams, imageSelections)) return null;
+    for (const channel of ["ranges", "imageParams"]) for (const id of accepted.selections[channel]) {
+      if (request[channel][id].enabled === true ? !accepted.applied[channel].includes(id)
+        : accepted.applied.ranges.includes(id) || accepted.applied.imageParams.includes(id)) return null;
+    }
+    indexes.add(accepted.index); prompts.add(accepted.promptId);
+  }
+  return {
+    ranges: ranges.filter(id => ack.accepted.every(item => item.applied.ranges.includes(id))),
+    imageParams: imageParams.filter(id => ack.accepted.every(item => item.applied.imageParams.includes(id))),
+    naming: ["prefix", "suffix"].filter(key => ack.accepted.every(item => item.naming.includes(key))),
+    rangeSelections: rangeSelections.filter(id => ack.accepted.every(item => item.selections.ranges.includes(id))),
+    imageSelections: imageSelections.filter(id => ack.accepted.every(item => item.selections.imageParams.includes(id))),
+  };
 }
 
 // Batch sweeps specify offsets from each image's OWN current value, not

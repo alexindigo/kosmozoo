@@ -8,6 +8,7 @@
 import { backingFor, isFolderHost, EXT_MIME, validEntryName } from "./backings/index.mjs";
 import { capabilities, validateCollection, validateAttributes, sourceAttributes } from "./collections.mjs";
 import { sniffMime } from "./extractor.mjs";
+import { sourceOrigin, sameOrigin, expectedOrigin } from "./source-origin.mjs";
 
 export function makeRouter(ctx) {
   const routes = [];
@@ -198,8 +199,14 @@ export function makeRouter(ctx) {
     if (!addr) return Response.json({ error: "unknown collection" }, { status: 404 });
     const kind = url.searchParams.get("kind") ?? "output";
     if (kind === "input") {
+      let expected;
+      try { expected = expectedOrigin(req); } catch (error) { return Response.json({ error: error.message }, { status: 400 }); }
+      const origin = sourceOrigin(id, ctx.sourceActivity.source(id));
+      if (expected && !sameOrigin(expected, origin)) return Response.json({ error: "Source origin changed" }, { status: 412 });
       try {
-        return Response.json(await backingFor(addr).list(addr, "input"));
+        const files = await backingFor(addr).list(addr, "input");
+        if (!ctx.inventory.isCurrent(token)) return Response.json({ error: "Source origin changed" }, { status: 412 });
+        return Response.json(expected ? { files, origin } : files);
       } catch (e) {
         return Response.json({ error: `collection unreachable: ${e.message}` }, { status: 502 });
       }
@@ -231,8 +238,14 @@ export function makeRouter(ctx) {
   // Upload one image into a comfy collection's input dir (multipart field
   // "image") — the browser can't post to ComfyUI directly (cross-origin).
   add("POST", "/api/collections/<id>/entries", async (req, { id }) => {
+    if (!ctx.sourceActivity.acceptingChanges()) return Response.json({ error: "Sources are stopping; no upload was admitted" }, { status: 503 });
+    const token = ctx.inventory.capture(id);
     const addr = ctx.hosts[id];
     if (!addr) return Response.json({ error: "unknown collection" }, { status: 404 });
+    const origin = sourceOrigin(id, ctx.sourceActivity.source(id));
+    let expected;
+    try { expected = expectedOrigin(req); } catch (error) { return Response.json({ error: error.message }, { status: 400 }); }
+    if (expected && !sameOrigin(expected, origin)) return Response.json({ error: "Source origin changed" }, { status: 412 });
     let form;
     try { form = await req.formData(); }
     catch { return Response.json({ error: "multipart form required" }, { status: 400 }); }
@@ -244,6 +257,7 @@ export function makeRouter(ctx) {
     if (!backing.write) return Response.json({ error: "this collection has no upload" }, { status: 400 });
     if (!validEntryName(addr, file.name)) return Response.json({ error: "bad entry path" }, { status: 400 });
     const bytes = new Uint8Array(await file.arrayBuffer());
+    if (!ctx.sourceActivity.acceptingChanges() || !ctx.inventory.isCurrent(token)) return Response.json({ error: "Source origin changed before upload" }, { status: 412 });
     const r = await backing.write(addr, file.name, bytes);
     if (!r.ok) {
       // 409: the name already exists in the input dir — say WHICH name
@@ -252,7 +266,8 @@ export function makeRouter(ctx) {
         { status: r.status },
       );
     }
-    return Response.json({ name: r.name });
+    if (!ctx.sourceActivity.acceptingChanges() || !ctx.inventory.isCurrent(token)) return Response.json({ error: "Source changed after upload; no follow-up was authorized", uploaded: { name: r.name, origin } }, { status: 412 });
+    return Response.json(expected ? { name: r.name, origin } : { name: r.name });
   });
 
   // Delete an entry from its source, per the collection's delete capability:

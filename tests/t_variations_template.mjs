@@ -1,10 +1,10 @@
 // tests/t_variations_template.mjs — {{label}} substitution axes inside text
 // sweeps: label detection, semicolon parsing (empties kept), cartesian
-// per-line expansion.
+// whole-template expansion.
 
 import { assertEquals } from "jsr:@std/assert";
 import {
-  templateLabels, parseSemicolonList, expandTextAxes, textLines,
+  templateLabels, parseSemicolonList, expandTextAxes,
   generatePermutations,
 } from "../src/features/variations/shared.mjs";
 
@@ -31,12 +31,12 @@ Deno.test("parseSemicolonList: empties are real values; only a blank input is un
 
 // --- expansion ------------------------------------------------------------------
 
-Deno.test("textLines: one value per line, blanks dropped", () => {
-  assertEquals(textLines("a\n\n b \n"), ["a", "b"]);
+Deno.test("text templates: blank lines and surrounding whitespace remain literal", () => {
+  assertEquals(expandTextAxes("a\n\n b \n"), ["a\n\n b \n"]);
 });
 
-Deno.test("expandTextAxes: plain lines pass through unchanged", () => {
-  assertEquals(expandTextAxes("a portrait\na house"), ["a portrait", "a house"]);
+Deno.test("expandTextAxes: plain multiline text passes through as one unchanged value", () => {
+  assertEquals(expandTextAxes("a portrait\na house"), ["a portrait\na house"]);
 });
 
 Deno.test("expandTextAxes: an empty value substitutes the token with the empty string", () => {
@@ -54,10 +54,10 @@ Deno.test("expandTextAxes: two labels expand cartesian-style", () => {
   );
 });
 
-Deno.test("expandTextAxes: per-line expansion — a line without placeholders contributes itself", () => {
+Deno.test("expandTextAxes: paragraphs without placeholders remain in every expanded whole template", () => {
   assertEquals(
     expandTextAxes("a {{animal}}\na house", { animal: ["cat", "dog"] }),
-    ["a cat", "a dog", "a house"],
+    ["a cat\na house", "a dog\na house"],
   );
 });
 
@@ -70,15 +70,15 @@ Deno.test("expandTextAxes: a label without values inerts the whole row", () => {
   assertEquals(expandTextAxes("{{a}}", { a: [] }), []);
   // one configured, one not — still inert (never render a literal {{b}})
   assertEquals(expandTextAxes("{{a}} {{b}}", { a: ["x"] }), []);
-  // even plain lines drop out while a label is unconfigured
+  // the whole template remains inert while a referenced label is unconfigured
   assertEquals(expandTextAxes("plain line\n{{a}}", {}), []);
 });
 
 // --- sweep-to-empty: a blank text is ONE value — the empty string --------------
 
-Deno.test("expandTextAxes: an entirely blank text expands to one empty value", () => {
+Deno.test("expandTextAxes: empty field is one empty value; whitespace-only text remains exact", () => {
   assertEquals(expandTextAxes(""), [""]);
-  assertEquals(expandTextAxes("  \n  \n"), [""]);
+  assertEquals(expandTextAxes("  \n  \n"), ["  \n  \n"]);
 });
 
 Deno.test("sweep-to-empty: empty pick vs a non-empty current is one novel permutation", () => {

@@ -1,6 +1,65 @@
 // End-of-chain outcomes inside the existing cold variations suite.
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
+const fileControl = '.vz-imgrow:not(.vz-enumrow):not(.vz-textrow) .vz-cb';
+const fileSetup = async (cdp) => {
+  await cdp.poll(`!!document.querySelector(${JSON.stringify(fileControl)})`);
+  await cdp.clickAt(fileControl);
+  await cdp.evaluate(`(()=>{const e=document.querySelector('.vz-imgmode');e.value='files';e.dispatchEvent(new Event('change',{bubbles:true}))})()`);
+  await cdp.poll(`!!document.querySelector('.vz-imgfilespick')`);
+  await cdp.evaluate(`(()=>{const e=document.querySelector('.vz-imgfilespick'),dt=new DataTransfer();dt.items.add(new File(['a'],'a.png',{type:'image/png'}));dt.items.add(new File(['b'],'b.png',{type:'image/png'}));e.files=dt.files;e.dispatchEvent(new Event('change',{bubbles:true}));window.__fileInput=e;window.__files=[...e.files]})()`);
+};
+
+async function verifyFileReadiness({ cdp, KZ, check }) {
+  const invoke = (id, args = {}) => cdp.evaluate(`(async()=>${KZ}.handles.invoke(${JSON.stringify(id)},${JSON.stringify(args)}))()`);
+  for (const [name, args] of [
+    ['single', { id: 'fake:flux-controlnet.png' }],
+    ['mixed batch', { ids: ['fake:flux-controlnet.png', 'another:flux-controlnet.png'], bulk: true }],
+    ['reopened single', { id: 'fake:flux-controlnet.png' }],
+  ]) {
+    let task, state = 'not started', setupError;
+    await cdp.evaluate(`(()=>{
+      window.__fileReadyFetch=window.fetch;window.__fileReadyRelease=null;window.__fileReadyResponse=null;window.__fileReadyEffects=[];
+      window.fetch=async(url,options)=>{
+        if(options?.body instanceof FormData || String(url).includes('/features/variations/run'))window.__fileReadyEffects.push(String(url));
+        const response=await window.__fileReadyFetch(url,options);
+        if(!String(url).includes('/entries?kind=input'))return response;
+        window.__fileReadyResponse={status:response.status,body:await response.clone().json(),origin:JSON.parse(options.headers['X-Kosmozoo-Origin'])};
+        return new Promise(resolve=>window.__fileReadyRelease=()=>resolve(response));
+      };
+    })()`);
+    try {
+      await invoke('variations.open', args);
+      await cdp.poll(`document.querySelectorAll('.vz-slider-row').length>0 && typeof window.__fileReadyRelease==='function'`);
+      const response = await cdp.evaluate('window.__fileReadyResponse');
+      assert.equal(response.status, 200); assert.deepEqual(response.body.origin, response.origin); assert(response.body.files.length > 0);
+      state = 'pending';
+      task = fileSetup(cdp).then(() => { state = 'complete'; }, error => { state = 'rejected'; setupError = error; });
+      assert.equal(await cdp.evaluate(`!!document.querySelector(${JSON.stringify(fileControl)})`), false);
+      assert.equal(state, 'pending', 'File setup must remain pending until its image control mounts');
+      await cdp.evaluate('window.__fileReadyRelease()');
+      await task; if (setupError) throw setupError;
+      assert.equal(state, 'complete');
+      assert(await cdp.evaluate(`document.querySelector('.vz-imgfilespick')===window.__fileInput && [...window.__fileInput.files].every((file,index)=>file===window.__files[index])`));
+      if (name === 'mixed batch') {
+        assert.equal((await invoke('variations.run')).status, 'invalid');
+        assert(await cdp.evaluate(`document.querySelector('.vz-error').textContent.includes('different backends')`));
+        assert(await cdp.evaluate(`document.querySelector('.vz-imgfilespick')===window.__fileInput && [...window.__fileInput.files].every((file,index)=>file===window.__files[index])`));
+      }
+      assert.deepEqual(await cdp.evaluate('window.__fileReadyEffects'), []);
+      check(`File setup owns delayed input readiness: ${name}, matched response, exact Files and no effects`, true);
+    } finally {
+      await cdp.evaluate('window.__fileReadyRelease?.();window.fetch=window.__fileReadyFetch');
+      await task;
+      if (await cdp.evaluate(`!!document.querySelector('.vz-panel')`)) {
+        await cdp.evaluate(`(async()=>{window.__fileReadyLeave=${KZ}.handles.invoke('variations.close');return true})()`);
+        if (await cdp.evaluate(`!!document.querySelector('.vz-discard')`)) await cdp.clickAt('.vz-discard-confirm');
+        await cdp.poll(`!document.querySelector('.vz-panel')`);
+      }
+    }
+  }
+}
+
 module.exports = async ({ cdp, check, FAKE, KZ }) => {
   const invoke = (id, args = {}) => cdp.evaluate(`(async()=>${KZ}.handles.invoke(${JSON.stringify(id)},${JSON.stringify(args)}))()`);
   const open = async (file = 'flux-basic.png') => {
@@ -29,12 +88,9 @@ module.exports = async ({ cdp, check, FAKE, KZ }) => {
     try { await run(); check(name, true); }
     catch (error) { check(name, false, error.stack ?? String(error)); throw error; }
   };
-  const fileSetup = async () => {
-    await cdp.clickAt('.vz-imgrow:not(.vz-enumrow):not(.vz-textrow) .vz-cb');
-    await cdp.evaluate(`(()=>{const e=document.querySelector('.vz-imgmode');e.value='files';e.dispatchEvent(new Event('change',{bubbles:true}))})()`);
-    await cdp.poll(`!!document.querySelector('.vz-imgfilespick')`);
-    await cdp.evaluate(`(()=>{const e=document.querySelector('.vz-imgfilespick'),dt=new DataTransfer();dt.items.add(new File(['a'],'a.png',{type:'image/png'}));dt.items.add(new File(['b'],'b.png',{type:'image/png'}));e.files=dt.files;e.dispatchEvent(new Event('change',{bubbles:true}));window.__fileInput=e;window.__files=[...e.files]})()`);
-  };
+
+  await test('File setup readiness follows the input catalogue across single, batch and reopened modals',
+    () => verifyFileReadiness({ cdp, KZ, check }));
 
   await test('owned decision: raw incomplete increment, DOM/widget identity, caret, Tab and Escape', async () => {
     await open();
@@ -86,7 +142,7 @@ module.exports = async ({ cdp, check, FAKE, KZ }) => {
 
   await test('editable domains and exact File objects survive Cancel and SPA navigation', async () => {
     await open('flux-controlnet.png');
-    await fileSetup();
+    await fileSetup(cdp);
     await cdp.clickAt('.vz-textrow .vz-imgrow-head .vz-cb');
     await type('.vz-text-values', 'a {{kept}} template');
     await type('.vz-tpl-input', 'first; second');
@@ -161,7 +217,7 @@ module.exports = async ({ cdp, check, FAKE, KZ }) => {
 
   await test('mixed-backend files reject before uploads; per-target zero cannot hide under aggregate success',async()=>{
     await invoke('variations.open',{ids:['fake:flux-controlnet.png','another:flux-controlnet.png'],bulk:true});
-    await cdp.poll(`document.querySelectorAll('.vz-slider-row').length>0`); await fileSetup();
+    await cdp.poll(`document.querySelectorAll('.vz-slider-row').length>0`); await fileSetup(cdp);
     await cdp.evaluate(`(()=>{window.__originalFetch=window.fetch;window.__sideEffects=0;window.fetch=(url,options)=>{if(options?.body instanceof FormData || String(url).includes('/features/variations/run'))window.__sideEffects++;return window.__originalFetch(url,options)}})()`);
     assert.equal((await invoke('variations.run')).status,'invalid');
     assert.equal(await cdp.evaluate(`window.__sideEffects`),0);
@@ -188,11 +244,11 @@ module.exports = async ({ cdp, check, FAKE, KZ }) => {
   });
 
   await test('Run snapshots before upload; stale A completion cannot publish or auto-close B', async () => {
-    await open('flux-controlnet.png'); await fileSetup();
+    await open('flux-controlnet.png'); await fileSetup(cdp);
     await cdp.clickAt('.vz-textrow .vz-imgrow-head .vz-cb');
     await type('.vz-text-values','before upload text');
     await cdp.evaluate(`(()=>{window.__originalFetch=window.fetch;window.__bodies=[];window.fetch=(url,options)=>{
-      if(options?.body instanceof FormData)return new Promise(resolve=>window.__upload=()=>resolve(new Response(JSON.stringify({name:'a.png'}),{status:200})));
+      if(options?.body instanceof FormData)return new Promise(resolve=>window.__upload=()=>resolve(new Response(JSON.stringify({name:options.body.get('image').name,origin:JSON.parse(options.headers['X-Kosmozoo-Origin'])}),{status:200})));
       if(String(url).includes('/features/variations/run')){window.__bodies.push(JSON.parse(options.body));return Promise.resolve(new Response(JSON.stringify({submitted:1,total:1}),{status:200}))}
       return window.__originalFetch(url,options)}})()`);
     await type('.vz-prefix','before-upload');
@@ -209,7 +265,7 @@ module.exports = async ({ cdp, check, FAKE, KZ }) => {
     assert.deepEqual(await cdp.evaluate(`Object.values(window.__bodies[0].imageParams).find(p=>p.values.includes('before upload text'))?.values`),['before upload text']);
     assert.equal(await cdp.evaluate(`document.querySelector('.vz-prefix').value`),'after-upload');
     await new Promise(r=>setTimeout(r,3200)); assert(await cdp.evaluate(`!!document.querySelector('.vz-panel')`));
-    await cdp.evaluate(`window.fetch=(url,options)=>String(url).includes('/features/variations/run')?new Promise(resolve=>window.__finish=()=>resolve(new Response(JSON.stringify({submitted:1,total:1}),{status:200}))):options?.body instanceof FormData?Promise.resolve(new Response(JSON.stringify({name:'a.png'}),{status:200})):window.__originalFetch(url,options)`);
+    await cdp.evaluate(`window.fetch=(url,options)=>String(url).includes('/features/variations/run')?new Promise(resolve=>window.__finish=()=>resolve(new Response(JSON.stringify({submitted:1,total:1}),{status:200}))):options?.body instanceof FormData?Promise.resolve(new Response(JSON.stringify({name:options.body.get('image').name,origin:JSON.parse(options.headers['X-Kosmozoo-Origin'])}),{status:200})):window.__originalFetch(url,options)`);
     await cdp.evaluate(`(async()=>{window.__oldRun=${KZ}.handles.invoke('variations.run');return true})()`);
     await cdp.poll(`typeof window.__finish==='function'`);
     await cdp.evaluate(`(async()=>{window.__replacement=${KZ}.handles.invoke('variations.open',{id:'fake:flux-basic.png'});return true})()`);
@@ -225,7 +281,7 @@ module.exports = async ({ cdp, check, FAKE, KZ }) => {
     await cdp.evaluate(`window.fetch=window.__originalFetch`); await discard();
   });
 
-  await test('partial/zero/malformed counts stay open; real successful edited fields remain dirty; clean success closes', async () => {
+  await test('partial/zero/malformed counts stay open; acknowledged edited fields manually close; clean success auto-closes', async () => {
     for(const response of [{submitted:1,total:2},{submitted:0,total:0},{submitted:1},{submitted:1,total:1,errors:[{error:'failed permutation'}]}]){
       await open();
       await cdp.evaluate(`(()=>{window.__originalFetch=window.fetch;window.fetch=(url,options)=>String(url).includes('/features/variations/run')?Promise.resolve(new Response(${JSON.stringify(JSON.stringify(response))},{status:200})):window.__originalFetch(url,options)})()`);
@@ -235,16 +291,15 @@ module.exports = async ({ cdp, check, FAKE, KZ }) => {
       await cdp.evaluate(`window.fetch=window.__originalFetch`); await discard();
     }
     await fetch(`${FAKE}/__test/activity`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({captureEnqueue:true})});
-    await open(); await type('.vz-prefix','edited-still-dirty');
+    await open(); await type('.vz-prefix','edited-acknowledged');
     assert.equal((await invoke('variations.run')).status,'submitted');
     const jobs=await(await fetch(`${FAKE}/__test/enqueues`)).json();
     assert(jobs.length>0); assert(jobs.every(job=>job.prompt && job.extra_data));
-    await new Promise(r=>setTimeout(r,3200));
-    assert(await cdp.evaluate(`!!document.querySelector('.vz-panel') && document.querySelector('.vz-error').classList.contains('vz-ok')`));
-    await requestClose(); assert(await cdp.evaluate(`!!document.querySelector('.vz-discard')`));
-    await cdp.clickAt('.vz-discard-confirm'); await cdp.poll(`!document.querySelector('.vz-panel')`);
+    await requestClose(); await cdp.poll(`!document.querySelector('.vz-panel')`);
+    assert.equal(await cdp.evaluate(`!!document.querySelector('.vz-discard')`),false);
     await open(); assert.equal((await invoke('variations.run')).status,'submitted');
     await cdp.poll(`!document.querySelector('.vz-panel')`,6000);
     await fetch(`${FAKE}/__test/activity`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({captureEnqueue:false})});
   });
 };
+module.exports.verifyFileReadiness = verifyFileReadiness;

@@ -99,8 +99,9 @@ export async function read(addr, name, kind = "output", { range } = {}) {
 }
 
 // Upload one image into the input dir (the same mechanism the ComfyUI web
-// UI uses). No overwrite flag: ComfyUI answers 409 when the name exists —
-// an upload must never silently clobber the input dir.
+// UI uses). No overwrite flag: stock Comfy may choose a collision-free name.
+// The engine's input route forwards backing conflicts; use the returned name,
+// never invent successful upload provenance from the requested filename.
 export async function write(addr, name, bytes) {
   if (!validName(name) || !assertSafeName(name)) return { ok: false, status: 400, error: "bad filename" };
   const form = new FormData();
@@ -110,8 +111,12 @@ export async function write(addr, name, bytes) {
       method: "POST", body: form, signal: AbortSignal.timeout(HOST_TIMEOUT_MS),
     });
     if (!r.ok) return { ok: false, status: r.status, error: `ComfyUI ${r.status}` };
-    const d = await r.json().catch(() => ({}));
-    return { ok: true, name: d.name ?? name };
+    const d = await r.json().catch(() => null);
+    if (!d || typeof d.name !== "string" || !validName(d.name) || !assertSafeName(d.name) ||
+        (d.type !== undefined && d.type !== "input") || (d.subfolder !== undefined && d.subfolder !== "")) {
+      return { ok: false, status: 502, error: "upload acceptance is unconfirmed: invalid returned input name; do not automatically retry" };
+    }
+    return { ok: true, name: d.name };
   } catch (e) {
     return { ok: false, status: 502, error: `upload failed: ${e.message}` };
   }
@@ -511,7 +516,16 @@ export async function enqueue(addr, prompt) {
       console.error(`[comfy] enqueue ${addr} → ${resp.status}: ${text}`);
       return { ok: false, status: resp.status, error: `ComfyUI ${resp.status}: ${text.slice(0, 200)}` };
     }
-    return { ok: true, status: resp.status };
+    const data = await resp.json().catch(() => null);
+    const object = value => value !== null && typeof value === "object" && !Array.isArray(value);
+    const identity = object(data) && typeof data.prompt_id === "string" && data.prompt_id.trim() && data.prompt_id === data.prompt_id.trim();
+    const nodeErrors = object(data?.node_errors) ? data.node_errors : null;
+    if (!identity || nodeErrors === null || data.error !== undefined) {
+      return { ok: true, status: resp.status, acceptance: "uncertain", error: "submission acceptance is unconfirmed; do not automatically resubmit" };
+    }
+    const partial = Object.keys(nodeErrors).length > 0;
+    return { ok: true, status: resp.status, acceptance: partial ? "partial" : "confirmed",
+      promptId: data.prompt_id, nodeErrors, ...(partial ? { error: "ComfyUI accepted only part of the prompt (node errors); configuration was not acknowledged" } : {}) };
   } catch (e) {
     console.error(`[comfy] enqueue ${addr} → fetch failed: ${e.message}`);
     return { ok: false, status: 502, error: `fetch failed: ${e.message}` };

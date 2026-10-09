@@ -36,7 +36,7 @@ const fmtSigned = (v) => (v > 0 ? "+" : "") + fmt(v);
 export function SliderRow(props) {
   let sliderEl;
   let gesture;
-  const [rawIncrement, setRawIncrement] = createSignal(String(props.increment()));
+  const rawIncrement = () => props.rawIncrement();
   const focus = focusMemory(props.rememberFocus);
   let wasDragging = false;
   createEffect(() => { const enabled = !!props.enabled(); gesture?.setEnabled(enabled); });
@@ -128,8 +128,7 @@ export function SliderRow(props) {
   const commitInc = (v) => {
     const next = Math.max(fineStep, +Number(v).toFixed(props.param.decimals + 3));
     const raw = String(next);
-    setRawIncrement(raw);
-    props.onIncrement(props.param.key, next, raw);
+    props.onIncrement(props.param.key, raw);
   };
 
   // absolute: marker at the current value; relative: pinned to the center
@@ -197,19 +196,17 @@ export function SliderRow(props) {
         >−</button>
         <input
           type="text" inputMode="decimal" role="spinbutton" aria-label={`${props.param.label} increment`}
-          aria-valuemin={fineStep} aria-valuenow={Number.isFinite(Number(rawIncrement())) && rawIncrement().trim() ? Number(rawIncrement()) : undefined}
+          aria-valuemin={fineStep} aria-valuenow={props.increment() ?? undefined}
           class="vz-row-inc-input" value={rawIncrement()} {...focus}
           disabled={!props.enabled() || undefined}
           onInput={(e) => {
             const raw = e.currentTarget.value;
-            setRawIncrement(raw);
-            const value = raw.trim() ? Number(raw) : NaN;
-            props.onIncrement(props.param.key, Number.isFinite(value) && value >= fineStep ? value : null, raw);
+            props.onIncrement(props.param.key, raw);
           }}
           onKeyDown={(e) => {
             if (!["ArrowUp", "ArrowDown"].includes(e.key)) return;
-            const value = Number(rawIncrement());
-            if (!rawIncrement().trim() || !Number.isFinite(value)) return;
+            const value = props.increment();
+            if (value === null || !Number.isFinite(value)) return;
             e.preventDefault();
             commitInc(value + (e.key === "ArrowUp" ? fineStep : -fineStep));
           }}

@@ -100,7 +100,8 @@ Deno.test("hosts: upload never sends overwrite; 409 surfaces the conflicting nam
     const dir = await mkdtemp(join(tmpdir(), "kz-upload-"));
     const rig = await mkStateRig("upload", { dir });
     const { settings, store } = rig;
-    const router = makeRouter({ hosts: { c: addr }, store, settings, plugins: null });
+    const context = sourceContext({ hosts: { c: addr }, store, settings, plugins: null });
+    const router = makeRouter(context);
     const form = new FormData();
     form.append("image", new Blob([new Uint8Array([1])], { type: "image/png" }), "taken.png");
     const res = await router.handle(new Request("http://x/api/collections/c/entries", { method: "POST", body: form }));
@@ -110,6 +111,7 @@ Deno.test("hosts: upload never sends overwrite; 409 surfaces the conflicting nam
     // a free name still uploads fine
     const ok = await backingFor(addr).write(addr, "free.png", new Uint8Array([2]));
     assertEquals(ok, { ok: true, name: "free.png" });
+    context.sourceActivity.stop(); await context.jobs.stop(); await context.inventory.stop();
     await rm(dir, { recursive: true });
   } finally {
     await close();

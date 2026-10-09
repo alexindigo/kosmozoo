@@ -703,8 +703,8 @@ async function main() {
       check("prompt row sinks to the bottom (info-panel order)",
         info.last === "CLIPTextEncode#2.text", info.last);
 
-      // enable → textarea pre-filled with the current prompt; a second line
-      // doubles the sweep (minus the current combo)
+      // Enable -> one current template. Adding paragraphs changes that one
+      // prompt; it does not introduce another text axis.
       await cdp.clickAt('.vz-textrow[data-text-id="CLIPTextEncode#2.text"] .vz-imgrow-head .vz-cb');
       await cdp.poll(`!!document.querySelector('.vz-textrow[data-text-id="CLIPTextEncode#2.text"] .vz-text-values')`, 5000);
       const pre = await cdp.evaluate(`document.querySelector('.vz-textrow[data-text-id="CLIPTextEncode#2.text"] .vz-text-values').value`);
@@ -716,9 +716,9 @@ async function main() {
         t.value = t.value + "\\na cyberpunk alley, rain";
         t.dispatchEvent(new Event('input', { bubbles: true }));
       })()`);
-      const expected = (c0 + 1) * 2 - 1;
+      const expected = c0 + 1;
       await cdp.poll(`parseInt(document.querySelector('.vz-count')?.textContent, 10) === ${expected}`, 5000);
-      check("2 text values × numeric range → the right count",
+      check("one multiline text template × numeric range → the right count",
         parseInt(await cdp.evaluate(`document.querySelector('.vz-count')?.textContent`), 10) === expected,
         `denoise-only=${c0} expected=${expected}`);
       // the enabled text row floats to the top (the prompt sink applies to
@@ -864,7 +864,11 @@ async function main() {
       await closeAndDiscard();
     });
 
+    await require('./variations-multiline.cjs')({ cdp, check, FAKE, KZ, closeAndDiscard });
     await require('./variations-commands.cjs')({ cdp, check, ENGINE, FAKE, KZ });
+    await require('./variations-acknowledgement.cjs')({ cdp, check, FAKE, KZ });
+    await require('./variations-selections.cjs')({ cdp, check, FAKE, KZ });
+    await require('./variations-lifecycle.cjs')({ cdp, check, ENGINE, FAKE, KZ });
   } finally {
     await cdp.close();
   }

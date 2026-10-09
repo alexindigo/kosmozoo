@@ -1,3 +1,13 @@
+// Native Web Crypto entropy also works on the app's HTTP LAN origin, where
+// randomUUID is unavailable. Correlation remains standard fresh version4 UUIDs.
+export function createRunId() {
+  const bytes = crypto.getRandomValues(new Uint8Array(16));
+  bytes[6] = (bytes[6] & 15) | 64;
+  bytes[8] = (bytes[8] & 63) | 128;
+  const hex = Array.from(bytes, byte => byte.toString(16).padStart(2, "0")).join("");
+  return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20)}`;
+}
+
 // Owner-private snapshots: containers are copied, File references/order retained.
 export function snapshotDraft(value) {
   if (value == null || typeof value !== "object") return value;

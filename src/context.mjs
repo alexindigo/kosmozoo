@@ -82,6 +82,10 @@ export async function buildContext({ env = Deno.env.toObject(), fakes = {}, star
     // fetches a host directly)
     backings: {
       comfy: (collection) => comfy(collection),
+      capture: inventory.capture,
+      isCurrent: token => sourceActivity.acceptingChanges() && inventory.isCurrent(token),
+      source: (collection) => sourceActivity.source(collection),
+      accepting: () => sourceActivity.acceptingChanges(),
     },
     route: (method, path, handler) => router.add(method, path, handler),
   };

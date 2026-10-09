@@ -1,5 +1,6 @@
 // Feature semantic definitions over injected composition/owner operations.
 import { isEntryName } from "/shared/entry-path.mjs";
+import { sourceOrigin } from "/shared/source-origin.mjs";
 
 export function variationCommands({ state, broker }) {
   const resolve = (id) => {
@@ -21,7 +22,7 @@ export function variationCommands({ state, broker }) {
       (a.bulk === undefined || typeof a.bulk === "boolean"),
       execute(a) {
         const ids = a.id ? [a.id] : a.ids ? [...a.ids] : state.images.filter((image) => state.selected[image.id]).map((image) => image.id);
-        const images = ids.map(resolve);
+        const images = ids.map(resolve).map(image => image ? { ...image, origin: sourceOrigin(image.host, state.hosts[image.host]) } : null);
         return images.some((image) => !image) ? Promise.resolve({ status: "stale" }) : broker.open(images, a.bulk ?? !a.id);
       } },
     { id: "variations.close", validate: (a) => Object.keys(a).every((key) => ["automatic", "session"].includes(key)) &&

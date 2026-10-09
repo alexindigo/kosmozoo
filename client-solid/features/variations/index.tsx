@@ -16,9 +16,9 @@ export function install(store) {
   const services = {
     // modal I/O — the feature's api.js owns the transport; the modal keeps
     // session-scoped results (probe params, file lists) in local signals
-    probe(image) { return api.probe(image.id).catch(() => null); },
-    inputList(hostName) { return api.inputList(hostName); },
-    uploadInput(hostName, form) { return api.uploadInput(hostName, form); },
+    probe(image) { return api.probe(image); },
+    inputList(hostName, origin) { return api.inputList(hostName, origin); },
+    uploadInput(hostName, form, origin) { return api.uploadInput(hostName, form, origin); },
     async run(payload) {
       const { ok, status, text } = await api.run(payload);
       let data = null;

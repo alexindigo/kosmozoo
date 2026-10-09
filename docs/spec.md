@@ -404,7 +404,7 @@ shared card-state presentation; card neutrals, judgment colors/priorities, wave
 length/glow, geometry, tape windowing and scrub handlers retain their contracts.
 
 Static surfaces: `/shared/<name>` serves the allow-listed `src/` modules
-(`extractor.mjs`, `features/variations/shared.mjs`, `entry-path.mjs`) to the browser;
+(`extractor.mjs`, `features/variations/shared.mjs`, `entry-path.mjs`, `source-origin.mjs`) to the browser;
 `/plugins/<name>/client.js` serves a plugin's client half; `/` and `/diff`
 serve the Solid app from `client-solid-dist/`, with shared assets (`/css`,
 `/vendor`, `/js`, logos) from `client/`.
@@ -456,15 +456,78 @@ error paths settle safely. Raw incomplete increment text survives blur unchanged
 SliderRow retires active widget listeners with the matching original-target
 terminal adaptation and quarantines that physical gesture through release/cancel.
 
-Run/button/handle input enters `variations.run` and the owner's requestRun. All draft
-domains/opening targets are captured before upload, running/pending-leave requests
-return busy, and owner/Run fences protect unsent work/results/timers. Different-
-backend local files reject before uploads. Full success needs valid positive
-complete counts on every target with no failures. Counts acknowledge no field
-usage: edited/unused/dormant work stays dirty even on success. The existing three-
-second close requires the same alive Run/edit revision, unchanged clean draft and
-no decision. Submitted jobs continue after dismissal. Source/folder/filter/Back/
-Forward browsing retains the modal and captured targets.
+One modal-private `makeVariationEditor` owns registered editable fields, clean
+baselines, codecs, compilation/consumption bindings, issued immutable Run tickets,
+results and close eligibility. Catalogue metadata is readonly and separate from
+editable work. Unknown edits reject before mutation. Dirty compares only declared
+editable leaves; initialization seeds untouched clean defaults without overwriting
+early typed naming or manufacturing a user-edit revision. SliderRow's raw increment
+is controlled by this owner and parsed once; view/child File/caret/gesture identity
+and stable row-ID mounting remain private. No whole row-object comparison or
+independently maintained acknowledgement path whitelist owns this flow.
+
+Run/button/handle input enters `variations.run` and the owner's requestRun. A private
+ticket captures all editable values/targets/revision/close generation before IO.
+The compiler emits the request and its raw-value consumption bindings in the same
+read/encode operation. Source-independent handles/broker retain opening metadata
+and owner capabilities only. Running/pending-decision input is busy. Clean metadata
+settling during a Run cannot strand captured submitted work. Newer/edit-and-revert
+revisions, pending decisions and genuinely unused values still prevent adoption.
+
+Opening/probe/Run retain an `Origin:{source,address,kind,epoch,incarnation}`; pin and
+refresh attribute revisions are not operation identity. Probe optionally accepts
+expected origin in `?origin=<JSON>` and returns `context:{origin,graphHash}`. Each
+target is prepared before uploads. A new effect cannot acquire a replacement source
+under the same ID; version2 Run compares captured origin and graph hash at entry,
+then fences source lifetime throughout unsent enqueues. Shutdown retires operation
+admission before backing IO. Already uploaded bytes/accepted jobs are not deleted
+or automatically retried.
+
+Input-list GET and multipart upload optionally carry `X-Kosmozoo-Origin:<JSON>`.
+The engine captures the registry token/address before awaits, checks expected
+origin before IO and lifetime after IO. Modern input reads return `{files,origin}`;
+modern uploads return `{name,origin}` with a validated real returned name. Retired
+upload contexts report412, including actual completed old-origin upload detail
+when applicable, rather than authorizing follow-ups or inventing a conflict.
+Legacy callers retain the input array/`{name}` shapes. Local-file runs across different
+physical backends reject before writes; aliases sharing one backend retain separate
+target identities and matched upload-resource provenance.
+
+The updated editor sends `acknowledgement:{version:2,runId,requestId}` and captured
+context. The response echoes correlation, matched context, `target:{id,host,filename}`
+and complete indexed `accepted:[{index,promptId,applied:{ranges:[],imageParams:[]},
+selections:{ranges:[],imageParams:[]},naming:[]}]`. Version1 proof and counts-only
+request consumers remain compatible. UUIDs use native Web Crypto entropy on the
+existing HTTP LAN origin; they are correlation, not retry/idempotency keys.
+
+Actual surviving carrier assignments and recognized naming writes certify positive
+use on confirmed accepted prompts. The same typed axis kernel owns count/generation
+and off-selection exclusion proof. Tuple identity is per field, never delimiter
+serialization; count does not allocate the Cartesian product. True/inert/missing
+choices and ambiguous carriers receive no invented proof. The owner validates every
+target/context/correlation, safe positive complete counts, explicit empty errors,
+unique indexes/prompt IDs and requested field sets before any adoption. It intersects
+all-target/all-permutation proof with compiler bindings and advances only captured
+eligible leaves. Off consumes only selection; unused values, filters, dormant
+templates, inactive filenames/Files and newer work remain protected. Editor text
+and File references/order are never normalized/replaced. Enqueue node-error partial
+acceptance or malformed success provides no complete proof or automatic resubmit.
+
+Queued counts, validated proof, adoption, remaining work and close eligibility are
+separate owner outcomes. The result explains when queued work cannot consume the
+draft. Clean acknowledged work can close manually without discard and use the
+existing three-second auto-close through the same ordinary leave guard. Private
+close generation/owner/revision/decision/ticket checks fence firing and future timer
+creation after Keep editing/manual leave/edits/new Run/disposal. Source/folder/filter/
+Back/Forward browsing retains the modal and captured targets.
+
+Each Variations text field is one literal template. Line breaks, blank paragraphs,
+indentation and surrounding whitespace are retained in every submitted value;
+formatting never creates extra variation axes. Only explicit `{{label}}` inputs
+expand a whole-template Cartesian product, with the same expansion used for the
+displayed count and Run payload. Missing referenced values keep that row inert;
+clearing the field yields one empty string. Unchanged multiline text still matches
+the exact current permutation and is excluded normally.
 
 ## 3. Judgment model
 

@@ -211,11 +211,11 @@ function publication(description) {
   const fixture = description.fixture === "bulk" ? { bytes: BULK_PNG, promptGraph: null }
     : fixtures.get(description.fixture ?? "flux-basic.png");
   if (!fixture) return null;
-  if (description.width || description.height || description.color || description.graphPrefix || description.lineage) {
+  if (description.width || description.height || description.color || description.graphPrefix || description.graph || description.lineage) {
     const width = description.width ?? new DataView(fixture.bytes.buffer, fixture.bytes.byteOffset).getUint32(16);
     const height = description.height ?? new DataView(fixture.bytes.buffer, fixture.bytes.byteOffset).getUint32(20);
     if (![width, height].every((n) => Number.isInteger(n) && n > 0 && n <= 2048)) return null;
-    const graph = fixture.promptGraph ? structuredClone(fixture.promptGraph) : null;
+    const graph = description.graph ? structuredClone(description.graph) : fixture.promptGraph ? structuredClone(fixture.promptGraph) : null;
     if (description.graphPrefix && graph) {
       for (const node of Object.values(graph)) if (node.class_type === "SaveImage") node.inputs.filename_prefix = description.graphPrefix;
     }
@@ -309,7 +309,14 @@ export const server = Deno.serve({ port }, async (req) => {
   if (p === "/__test/enqueues" && req.method === "GET") return Response.json(enqueues);
   if (p === "/api/prompt" && req.method === "POST" && captureEnqueue) {
     enqueues.push(await req.json());
-    return Response.json({ prompt_id: `captured-${enqueues.length}` });
+    return Response.json({ prompt_id: `captured-${enqueues.length}`, number: enqueues.length, node_errors: {} });
+  }
+  if (p === "/api/upload/image" && req.method === "POST") {
+    const form = await req.formData(), file = form.get("image");
+    if (!file || typeof file === "string" || !isEntryPath(file.name) || file.name.includes("/")) return new Response("bad input", { status: 400 });
+    if (publishedInputs.has(file.name)) return new Response("existing input", { status: 409 });
+    publishedInputs.set(file.name, { bytes: new Uint8Array(await file.arrayBuffer()), promptGraph: null });
+    return Response.json({ name: file.name, subfolder: "", type: "input" });
   }
   if (p === "/api/assets_plus/config" && req.method === "GET") {
     if (!extension) return new Response("extension unavailable", { status: 404 });

@@ -26,7 +26,7 @@ export function makeVariationSession({ read, write }) {
   }
   return {
     open(images, bulk) {
-      const captured = images.map(({ id, host, filename, meta }) => ({ id, host, filename, meta }));
+      const captured = images.map(({ id, host, filename, meta, origin }) => ({ id, host, filename, meta, ...(origin === undefined ? {} : { origin }) }));
       if (!captured.length) return outcome("stale");
       const key = bulk ? "batch:" + captured.map((image) => image.id).join("|") : captured[0].id;
       return request(read().open && read().key === key ? null : { images: captured, key });
