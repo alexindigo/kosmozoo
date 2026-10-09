@@ -14,6 +14,7 @@ import * as backings from "./backings/index.mjs";
 import { Ingest } from "./ingest.mjs";
 import { Prefetch } from "./prefetch.mjs";
 import { Jobs } from "./jobs.mjs";
+import { SourceActivity } from "./source-activity.mjs";
 import { PluginHost } from "./plugins.mjs";
 import { makeRouter } from "./routes.mjs";
 import { Cache } from "./cache.mjs";
@@ -53,6 +54,7 @@ export async function buildContext({ env = Deno.env.toObject(), fakes = {}, star
       }
     },
   });
+  const sourceActivity = fakes.sourceActivity ?? new SourceActivity({ store, hosts, inventory, jobs });
 
   // plugin routes are collected here and mounted once the router exists —
   // the context (plugin host included) is fully built before the router,
@@ -65,7 +67,7 @@ export async function buildContext({ env = Deno.env.toObject(), fakes = {}, star
   const discovered = plugins === fakes.plugins ? [] : await plugins.discover();
 
   const ctx = {
-    settings, store, hosts, backings, cache, ingest, prefetch, jobs, plugins,
+    settings, store, hosts, backings, cache, ingest, prefetch, jobs, sourceActivity, plugins,
     features: [],
     comfy, inventory,
     paths: { state: stateDir },

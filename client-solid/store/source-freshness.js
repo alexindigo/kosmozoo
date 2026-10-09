@@ -5,6 +5,7 @@ const sameTarget = (a, b) => !!a && !!b && a.epoch === b.epoch &&
 
 export function makeSourceFreshness() {
   let target = null, accepted = null, sequence = 0, acceptedSequence = 0;
+  let gap = 0, acceptedGap = 0;
   let retired = false;
   const issued = new WeakSet();
   return {
@@ -19,19 +20,22 @@ export function makeSourceFreshness() {
       return true;
     },
     target: () => target,
-    pending: () => !!target && !sameTarget(target, accepted),
+    pending: () => gap > acceptedGap || !!target && !sameTarget(target, accepted),
+    deliveryGap() { if (!retired) gap++; },
     capture() {
       if (retired) return null;
-      const ticket = Object.freeze({ target, sequence: ++sequence });
+      const ticket = Object.freeze({ target, gap, sequence: ++sequence });
       issued.add(ticket);
       return ticket;
     },
     accept(ticket) {
-      if (retired || !ticket || !issued.delete(ticket) || !ticket.target || ticket.sequence <= acceptedSequence) return false;
-      accepted = ticket.target;
+      if (retired || !ticket || !issued.delete(ticket) || ticket.sequence <= acceptedSequence ||
+          !ticket.target && ticket.gap <= acceptedGap) return false;
+      if (ticket.target) accepted = ticket.target;
+      acceptedGap = Math.max(acceptedGap, ticket.gap);
       acceptedSequence = ticket.sequence;
       return true;
     },
-    retire() { retired = true; target = null; accepted = null; },
+    retire() { retired = true; target = null; accepted = null; acceptedGap = gap; },
   };
 }

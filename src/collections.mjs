@@ -44,13 +44,13 @@ export async function capabilities(collection, { online = true, useAssetsPlus = 
 // KOZMOZOO_HOSTS: "name=host:port,name2=host2:port2" or "name=folder:/path"
 export function parseHosts(env = Deno.env.toObject()) {
   const raw = env.KOZMOZOO_HOSTS ?? "local=127.0.0.1:8188";
-  const hosts = {};
+  const hosts = [];
   for (const pair of raw.split(",")) {
     const eq = pair.indexOf("=");
     if (eq < 0) continue;
-    hosts[pair.slice(0, eq).trim()] = pair.slice(eq + 1).trim();
+    hosts.push([pair.slice(0, eq).trim(), pair.slice(eq + 1).trim()]);
   }
-  return hosts;
+  return Object.fromEntries(hosts);
 }
 
 // Env seeds the collection table on first boot; afterwards the table wins.
@@ -64,15 +64,14 @@ export async function loadCollections(store, env = Deno.env.toObject()) {
   return store.collectionMap();
 }
 
-// Registry mutations persist to the collection table AND patch the live map.
+// Store notifications own the live registry. These compatibility helpers write
+// only the canonical row; the context's one owner reconciles the map/lifetimes.
 export function addCollection(store, map, name, address, attributes = {}) {
   store.collectionAdd(name, address, attributes);
-  map[name] = address;
 }
 
 export function removeCollection(store, map, name) {
   store.collectionRemove(name);
-  delete map[name];
 }
 
 const NAME_RE = /^[\w][\w.-]*$/;

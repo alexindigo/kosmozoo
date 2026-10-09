@@ -35,7 +35,7 @@ async function withStore(run, judgment = initial) {
   api.activity = async () => ({ supported: false });
   api.setSettings = async () => ({});
   api.setJudgment = async () => ({});
-  const store = makeAppStore();
+  const store = makeAppStore({ subscribeSources: null });
   const requests = [];
   const holdWrites = () => {
     api.setJudgment = (host, file, patch) => {

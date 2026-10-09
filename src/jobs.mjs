@@ -75,6 +75,7 @@ const emptySnapshot = (epoch) => ({
 });
 
 export class Jobs {
+  #listeners = new Set();
   constructor({ hosts, client, onFinish = () => {}, clock = Date.now,
     setTimer = setTimeout, clearTimer = clearTimeout, epoch = () => crypto.randomUUID() }) {
     Object.assign(this, { hosts, client, onFinish, clock, setTimer, clearTimer, epoch });
@@ -116,6 +117,22 @@ export class Jobs {
     if (isFolderHost(address)) return { supported: false, reason: "No generation jobs for folder sources" };
     const snapshot = this.monitors.get(address)?.snapshot ?? emptySnapshot(null);
     return { ...snapshot, progress: snapshot.progress ? { ...snapshot.progress } : null };
+  }
+
+  subscribe(listener) {
+    this.#listeners.add(listener);
+    return () => this.#listeners.delete(listener);
+  }
+
+  #install(monitor, next) {
+    const semantic = ({ sampledAt: _sampledAt, ...fields }) => JSON.stringify(fields);
+    const changed = semantic(monitor.snapshot) !== semantic(next);
+    monitor.snapshot = next;
+    if (!changed) return;
+    for (const listener of this.#listeners) {
+      try { listener(monitor.address, new Set(monitor.sources), { ...next, progress: next.progress ? { ...next.progress } : null }); }
+      catch (error) { console.error("Source activity delivery failed:", error); }
+    }
   }
 
   start() {
@@ -218,7 +235,7 @@ export class Jobs {
         runningCount: running.length, queuedCount: pending.length,
         runningPromptId: prompt,
         progress: running.length === 1 ? progress : null, error: null });
-      monitor.snapshot = { ...s };
+      this.#install(monitor, { ...s });
       if (notifications) {
         notifications = 0;
         this.onFinish(monitor.address, monitor.sources, { ...s });
@@ -231,8 +248,8 @@ export class Jobs {
       monitor.errors++;
       monitor.progressController?.abort();
       monitor.logs.clear();
-      monitor.snapshot = { ...s, state: "disconnected", sampledAt: this.clock(),
-        runningPromptId: null, progress: null, error: error?.message ?? String(error) };
+      this.#install(monitor, { ...s, state: "disconnected", sampledAt: this.clock(),
+        runningPromptId: null, progress: null, error: error?.message ?? String(error) });
       if (notifications) this.onFinish(monitor.address, monitor.sources, { ...monitor.snapshot });
     }
   }
@@ -268,15 +285,15 @@ export class Jobs {
       if (!current()) return;
       if (after.running.length === 1 && after.running[0] === prompt && !monitor.seen.has(prompt)) {
         const progress = monitor.logs.sample(logs, prompt);
-        monitor.snapshot = { ...monitor.snapshot, progress };
+        this.#install(monitor, { ...monitor.snapshot, progress });
       } else {
         monitor.logs.clear();
-        monitor.snapshot = { ...monitor.snapshot, progress: null };
+        this.#install(monitor, { ...monitor.snapshot, progress: null });
       }
     } catch {
       if (!current()) return;
       monitor.logs.clear();
-      monitor.snapshot = { ...monitor.snapshot, progress: null };
+      this.#install(monitor, { ...monitor.snapshot, progress: null });
     }
   }
 

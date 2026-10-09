@@ -275,6 +275,9 @@ const kindFor = (address) => address?.startsWith("folder:") ? "folder" : "comfy"
 export class Store {
   #db;
   #q; // prepared statement registry (see STATEMENTS)
+  #ready = false;
+  #collectionListeners = new Set();
+  #collectionRevisions = new Map();
 
   static async open(stateDir, { settings, feedbackPath } = {}) {
     const s = new Store();
@@ -297,6 +300,7 @@ export class Store {
           ` ${stats.dropped} dropped`,
       );
     }
+    s.#ready = true;
     return s;
   }
 
@@ -551,29 +555,54 @@ export class Store {
     return this.#q.collectionGet.get(id) ?? null;
   }
 
+  subscribeCollections(listener) {
+    this.#collectionListeners.add(listener);
+    return () => this.#collectionListeners.delete(listener);
+  }
+
+  collectionRevision(id) { return this.#collectionRevisions.get(id) ?? 0; }
+
+  #collectionCommitted(id, row) {
+    // Boot imports use transactions and precede subscribers. Runtime statements
+    // are autocommitted before this boundary; delivery cannot roll SQL back.
+    if (!this.#ready) return;
+    const revision = this.collectionRevision(id) + 1;
+    this.#collectionRevisions.set(id, revision);
+    const event = Object.freeze({ id, row: row ? Object.freeze({ ...row }) : null, revision });
+    for (const listener of this.#collectionListeners) {
+      try { listener(event); }
+      catch (error) { console.error("Source collection delivery failed:", error); }
+    }
+  }
+
   // { id: address } — the { name: address } shape routes, ingest, prefetch
   // and the plugin host hold (collections with no address stay out).
   collectionMap() {
-    const out = {};
-    for (const r of this.collections()) if (r.address) out[r.id] = r.address;
-    return out;
+    return Object.fromEntries(this.collections().filter(r => r.address).map(r => [r.id, r.address]));
   }
 
   collectionAdd(id, address, { pinned = false, autoRefresh = false } = {}) {
+    const before = this.collectionGet(id);
     this.#q.collectionAdd.run(id, kindFor(address), address, Date.now(), pinned ? 1 : 0, autoRefresh ? 1 : 0);
+    if (!before) this.#collectionCommitted(id, this.collectionGet(id));
   }
 
   collectionPatch(id, patch) {
     if (patch.pinned === undefined && patch.autoRefresh === undefined) return this.collectionGet(id);
+    const before = this.collectionGet(id);
     this.#q.collectionPatch.run(
       patch.pinned === undefined ? null : Number(patch.pinned),
       patch.autoRefresh === undefined ? null : Number(patch.autoRefresh), id,
     );
-    return this.collectionGet(id);
+    const row = this.collectionGet(id);
+    if (row && (row.pinned !== before.pinned || row.auto_refresh !== before.auto_refresh)) this.#collectionCommitted(id, row);
+    return row;
   }
 
   collectionRemove(id) {
+    const before = this.collectionGet(id);
     this.#q.collectionRemove.run(id);
+    if (before) this.#collectionCommitted(id, null);
   }
 
   // --- node registry (discovered node types → their scalar input fields) ----
@@ -604,9 +633,11 @@ export class Store {
 
   // Entries can only exist under a real collection (FK). Writers call this
   // first: an unregistered collection gets an offline placeholder row, which
-  // collectionAdd later corrects (kind/address ON CONFLICT update).
+  // INSERT OR IGNORE preserves placeholders too; an add never rewrites them.
   #ensureCollection(id) {
+    const before = this.collectionGet(id);
     this.#q.ensureCollection.run(id, Date.now());
+    if (!before) this.#collectionCommitted(id, this.collectionGet(id));
   }
 
   // --- input-file cache index (entry kind='input' adapter) -------------------
@@ -914,6 +945,7 @@ export class Store {
   }
 
   close() {
+    this.#collectionListeners.clear();
     this.#db.close();
   }
 }

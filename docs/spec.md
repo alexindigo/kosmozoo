@@ -33,11 +33,12 @@ the resources; a collection's `capabilities` answer what its backing can do.
 
 | Route | Methods | Notes |
 |---|---|---|
-| `/api/collections` | GET | configured collections, online probe, `kind`, `pinned`/`autoRefresh` booleans, `capabilities` (`list`/`read`/`add`/`delete` ∈ `trash`/`unlink`/`hide`, `rename`, `subfolders: {supported,reason}`) |
+| `/api/collections` | GET | configured collections, captured `incarnation`/`sourceVersion` and flags, online probe, `kind`, `capabilities` (`list`/`read`/`add`/`delete` ∈ `trash`/`unlink`/`hide`, `rename`, `subfolders: {supported,reason}`) |
 | `/api/collections` | POST | add a source-backed collection `{name, address, pinned?, autoRefresh?}`; flags default false; repeating the same name/address preserves existing flags; different address is 409 |
-| `/api/collections/<id>` | PATCH | partial `{pinned?: boolean, autoRefresh?: boolean}`; validates the complete object before writing; invalid fields/types/null/arrays/malformed JSON are 400, unknown source is 404, empty object is a no-op; returns saved booleans without host/folder probing |
+| `/api/collections/<id>` | PATCH | partial `{pinned?: boolean, autoRefresh?: boolean}`; validates the complete object before writing; invalid fields/types/null/arrays/malformed JSON are 400, unknown source is 404, empty object is a no-op; returns saved booleans and their committed `sourceVersion` without host/folder probing |
 | `/api/collections/<id>` | DELETE | remove; refuses the last collection |
 | `/api/collections/<id>/activity` | GET | cached engine-owned activity plus canonical flags; never probes a host; unknown source is 404; folders return `supported:false` and a reason |
+| `/api/events` | GET | one native SSE delivery connection per app tab; complete version1 authoritative cached source maps, no upstream probe/list/monitor creation |
 | `/api/collections/<id>/entries` | GET | the feed listing: size, hash, state, meta, judgment, and dims — `COALESCE(content, entry)`, so an entry the dims pass reached carries width/height before it has a hash. Gone entries are excluded. `?inventory=1` returns the coherent output envelope described below; default remains an array. `?kind=input` lists the input dir instead |
 | `/api/collections/<id>/entries/<name>` | GET | one entry |
 | `/api/collections/<id>/entries` | POST | multipart upload into the input dir; **409 with the conflicting name, never an overwrite** |
@@ -244,8 +245,72 @@ lossless audit of erased history or pending jobs submitted/deleted between sampl
 Saved `autoRefresh` requests a prefetch relist on terminal/catch-up notifications;
 the existing worker discovers outputs and runs dimension/ingestion passes,
 honoring its pause/politeness behavior. Entry GETs remain side-effect-free.
-The browser polls cached activity independently of metadata work, with per-source
-single-flight/backoff and lifecycle fences. Enabled-source completion and manual
+The context's `SourceActivity` subscribes once to committed Store mutations and
+semantic Jobs snapshot installations, including independent auxiliary progress.
+Store emits only real committed insert/remove/flag changes, with a process-local
+attribute revision; transaction-bound boot import is covered by initial projection.
+Address-less placeholders never become configured sources or retire explicit fake
+backings. One synchronous registry boundary owns live hosts, inventory incarnation,
+Jobs membership and publication; same-ID/address remove/re-add cannot coalesce away
+retirement. Compatibility collection helpers persist only; they do not write the map.
+
+Source versions are `{epoch, incarnation, attributesRevision}`, distinct from Jobs
+and inventory versions and not stored in SQLite. Discovery/mutation replies capture
+the actual row/version before probing. Bootstrap and stream share the same source
+identity. SSE `sources` events carry `id: <epoch>:<revision>` and JSON
+`{version:1,epoch,revision,sources:{id:{address,kind,incarnation,pinned,autoRefresh,
+sourceVersion,activity}}}`. The entire source map is authoritative; absence removes
+a source, and revision jumps are legal latest snapshots. Whole-frame validation
+precedes any application. Unknown/incomplete/malformed frames retain accepted state
+and require controlled resynchronization. Exact own source keys are preserved.
+
+Every connect captures a current full cached projection synchronously with
+registration; no replay log or probing collections call. Publication excludes
+timestamp-only `sampledAt` churn; cached explicit reads retain current sample times.
+Each subscriber retains at most one active encoded frame and one latest pending
+snapshot. Demand-only high-water0 delivery chunks at16384 bytes, keeping the JS
+queue empty (at most one delivered chunk), stricter than the64KiB queue ceiling.
+Large maps are complete, never truncated. Slow readers do not block producers.
+Fifteen-second comment heartbeats are transport liveness, never source changes.
+Cancel, request abort, enqueue failure and stop share idempotent retirement. Stream
+admission/listeners/subscribers retire at shutdown entry, before the existing
+Jobs -> inventory -> prefetch -> HTTP -> Store shutdown sequence.
+
+The Store owns one injectable subscription, independent of sources, pins, folders,
+selection and component mounts. Normal boot, initial inventory and ordinary pages
+issue zero activity GETs; `api.activity`/`actions.hosts.pollActivity` remain explicit
+one-shot compatibility ports, fenced against newer stream acceptance. Native
+EventSource failure closes its retry machinery before one API-owned exponential,
+jittered retry capped30s. Only an accepted full snapshot establishes ready. No
+polling fallback. Pagehide suspends delivery; pageshow reestablishes it for bfcache.
+Whole-Store disposal retires adapter retries, page listeners and acquisition owners.
+Delivery disconnection is separate from upstream Jobs state: cached inventory/editors
+remain, while stale running fill is withheld with an honest disconnected label.
+
+Source-map acceptance preserves unchanged records/sessions, atomically reconciles
+membership, confirmed flags and activity, then reconciles selected work once.
+The private registry owns exact-ID membership in a Map and fixed-field reactive
+records. Source IDs never become Solid mutation paths; derived public host,
+activity and saving maps retain exact own keys, including prototype-named IDs.
+Incarnation/epoch changes retire old owners even with identical ID/address and a
+surviving Jobs alias. Probing discovery only enriches still-matching identities,
+never resurrects membership or rolls flags back. The serialized confirmed-only
+flag writer buffers the newest authoritative version during writes; events and
+HTTP acknowledgements reconcile causally after success/failure/drain. Queued
+toggles use latest confirmed values. Progress delivery continues during saves.
+Membership replies additionally capture `sourceCursor:{epoch,revision}`; removal
+acknowledges its retired sourceVersion as well. One private membership floor fences
+older complete maps against confirmed removal/replacement, so a queued active frame
+cannot resurrect retired ownership. This cursor orders delivery only, never inventory
+acceptance. Source writes refuse after shutdown admission retires, while cached
+compatibility projection remains readable through lifecycle drainage.
+
+HTTP1 has a small per-browser/origin connection pool. The Chromium fixture checks
+six live streams and queued ordinary HTTP until one is released, plus responsive
+API/bytes with two app tabs. One stream per tab is not unlimited-tab support;
+there is no implicit WebSocket/HTTP2/SharedWorker transport substitution.
+
+Enabled-source completion and manual
 refresh use one selected-session incremental merge lane; completions during a
 read leave a follow-up pending, and failures retain the target for retry.
 Each source's private freshness owner separates observed from accepted targets.
@@ -254,6 +319,12 @@ its captured epoch/terminal/resync tuple; unknown, forged, foreign, retired and
 older tickets cannot acknowledge newer accepted work. Initial/manual requested
 reads are separately retained, including an initial failure without any known
 activity. Failures retry at 1–30s; unchanged activity does not bypass backoff.
+The same private owner captures a delivery-gap generation in each issued ticket.
+Recovery marks one gap per genuine lost-delivery episode, not per frame/heartbeat
+or retry. A read acknowledges only its captured gap, even when the Jobs tuple is
+unchanged. A target-null ticket may acknowledge its captured gap without consuming
+Jobs first observed afterward. Disabled automatic work retains both obligations;
+reconnect never increments manual counts or fabricates Jobs resync revisions.
 Disabling auto-refresh pauses derived completion work without forgetting it;
 confirmed enablement reconciles already-observed pending work. Explicit refresh
 may request an immediate attempt.

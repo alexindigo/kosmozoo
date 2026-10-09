@@ -221,7 +221,7 @@ Deno.test("activity backing: validates GET shapes/status, strips graphs/client I
 Deno.test("activity context: constructed before router, start false and canonical relist preferences", async () => {
   const r = await mkStateRig("jobs-context");
   let starts = 0;
-  const jobs = { start() { starts++; }, snapshot: () => ({ state: "unknown" }) };
+  const jobs = { start() { starts++; }, reconcile() {}, subscribe: () => () => {}, snapshot: () => ({ state: "unknown" }) };
   try {
     const { ctx, router } = await buildContext({ start: false, env: { HOME: r.dir }, fakes: {
       stateDir: r.dir, settings: r.settings, store: r.store, cache: r.cache, ingest: r.ingest,

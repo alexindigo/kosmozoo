@@ -8,7 +8,7 @@ import { backingFor } from "../src/backings/index.mjs";
 import { comfyClient } from "../src/backings/comfy.mjs";
 import { makeRouter } from "../src/routes.mjs";
 import { Store } from "../src/store.mjs";
-import { mkStateRig, makeTestInventory } from "./helpers/rig.mjs";
+import { mkStateRig, makeTestInventory, sourceContext } from "./helpers/rig.mjs";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -47,7 +47,7 @@ Deno.test("hosts: POST adds + persists + probes; DELETE removes; last host guard
   const rig = await mkStateRig("hosts", { dir, feedbackPath: "feedback.json" });
   const { settings, store } = rig;
   const hosts = await loadCollections(store, { KOZMOZOO_HOSTS: "a=127.0.0.1:1" });
-  const router = makeRouter({ hosts, store, settings, plugins: null, inventory: makeTestInventory(hosts), jobs: { reconcile() {} } });
+  const router = makeRouter(sourceContext({ hosts, store, settings, plugins: null, inventory: makeTestInventory(hosts) }));
 
   // add
   const r = await router.handle(new Request("http://x/api/collections", {
@@ -121,18 +121,19 @@ Deno.test("sources: offline partial patches validate atomically, repeat POST pre
   const hosts = { a: "127.0.0.1:1", folder: "folder:/no-longer-present" };
   let reconciles = 0, probes = 0;
   for (const [id, address] of Object.entries(hosts)) rig.store.collectionAdd(id, address);
-  const router = makeRouter({ ...rig, hosts,
+  const router = makeRouter(sourceContext({ ...rig, hosts, inventory: makeTestInventory(hosts),
     comfy() { probes++; throw new Error("attribute writes must not probe"); },
-    jobs: { reconcile() { reconciles++; }, snapshot: () => ({ supported: true, state: "unknown", terminalRevision: 0 }) },
-  });
+    jobs: { reconcile() { reconciles++; }, subscribe: () => () => {}, snapshot: () => ({ supported: true, state: "unknown", terminalRevision: 0 }) },
+  }));
   const patch = (id, body) => router.handle(new Request(`http://x/api/collections/${id}`, {
     method: "PATCH", body: JSON.stringify(body),
   }));
   try {
-    assertEquals(await (await patch("a", { pinned: true })).json(), { id: "a", pinned: true, autoRefresh: false });
-    assertEquals(await (await patch("a", { autoRefresh: true })).json(), { id: "a", pinned: true, autoRefresh: true });
-    assertEquals(await (await patch("a", { pinned: false })).json(), { id: "a", pinned: false, autoRefresh: true });
-    assertEquals(await (await patch("a", {})).json(), { id: "a", pinned: false, autoRefresh: true });
+    const flags = async response => { const { sourceVersion, ...result } = await response.json(); assert(sourceVersion); return result; };
+    assertEquals(await flags(await patch("a", { pinned: true })), { id: "a", pinned: true, autoRefresh: false });
+    assertEquals(await flags(await patch("a", { autoRefresh: true })), { id: "a", pinned: true, autoRefresh: true });
+    assertEquals(await flags(await patch("a", { pinned: false })), { id: "a", pinned: false, autoRefresh: true });
+    assertEquals(await flags(await patch("a", {})), { id: "a", pinned: false, autoRefresh: true });
     assertEquals((await patch("folder", { pinned: true })).status, 200);
     for (const bad of [null, [], false, 1, "true", { pinned: 1 }, { autoRefresh: null }, { pinned: true, other: false }]) {
       assertEquals((await patch("a", bad)).status, 400);
@@ -148,9 +149,11 @@ Deno.test("sources: offline partial patches validate atomically, repeat POST pre
     assertEquals((await post({ name: "a", address: "127.0.0.1:2" })).status, 409);
     for (const bad of [null, [], { name: "b", address: "127.0.0.1:2", pinned: "yes" }]) assertEquals((await post(bad)).status, 400);
     const activity = await router.handle(new Request("http://x/api/collections/a/activity"));
-    assertEquals(await activity.json(), { supported: true, state: "unknown", terminalRevision: 0, pinned: false, autoRefresh: true });
+    const { sourceVersion, ...cached } = await activity.json();
+    assert(sourceVersion);
+    assertEquals(cached, { supported: true, state: "unknown", terminalRevision: 0, pinned: false, autoRefresh: true });
     assertEquals(probes, 0);
-    assertEquals(reconciles, 1);
+    assertEquals(reconciles, 4, "only actual committed mutations reconcile, never no-op POST/PATCH");
   } finally { await rig.close(); }
 });
 

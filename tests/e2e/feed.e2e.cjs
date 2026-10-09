@@ -117,6 +117,8 @@ async function railMotion(page) {
 (async () => {
   const page = await CDP.launch(9335, { windowSize: "1600,1200" });
   const pageErrors = await collectPageErrors(page);
+  const { observeSources, healthyTraffic } = require('./source-traffic.cjs');
+  const sourceTraffic = await observeSources(page);
 
   await page.goto(ENGINE + "/");
   await page.poll("!!document.querySelector('.card')", 20000);
@@ -127,6 +129,7 @@ async function railMotion(page) {
     if (kz.state.host() !== "fake") await kz.actions.hosts.select("fake");
   })()`);
   await page.poll(`(async () => ${KZ}.state.images.length > 3000)()`, 20000);
+  await healthyTraffic({ page, traffic: sourceTraffic, ENGINE, KZ, check });
   const dims = await page.evaluate(`(async () => (await (await fetch("/api/prefetch")).json()).dimsPending)()`);
   check("dims pass drained before the feed audit", dims === 0, `dimsPending=${dims}`);
   try { await railMotion(page); } catch(error) { check('rail scroll timing consumer',false,error.message); }
@@ -597,7 +600,6 @@ async function railMotion(page) {
       const s = ${KZ}; await s.actions.hosts.select('fake');
       s.actions.ui.setWorkspace('details');
       await s.actions.hosts.patch('fake', { pinned: true, autoRefresh: true });
-      await s.actions.hosts.pollActivity('fake');
       s.actions.current.set('fake', 'flux-basic.png');
       s.actions.feed.restoreToIndex(s.state.currentEntry().index);
       s.actions.selected.set('fake:flux-basic.png', true);
@@ -695,8 +697,7 @@ async function railMotion(page) {
     const nonce = await page.evaluate(`(async () => ${KZ}.state.feedMergeNonce())()`);
     await control({ finish: [{ id: 'feed-disabled-finish', output: 'e2e-source-disabled.png' }] });
     await page.poll(`(async () => {
-      const r = await (await fetch('/api/collections/fake/activity')).json();
-      return r.terminalRevision >= 2 && ${KZ}.state.sourceActivity.fake?.terminalRevision === r.terminalRevision;
+      return ${KZ}.state.sourceActivity.fake?.terminalRevision >= 2;
     })()`, 20000);
     check('auto-refresh off leaves feed unchanged through observed finish', await page.evaluate(`(async () =>
       !${KZ}.state.images.some((i) => i.filename === 'e2e-source-disabled.png') && ${KZ}.state.feedMergeNonce() === ${nonce})()`));
@@ -753,7 +754,7 @@ async function railMotion(page) {
     await control({ reset: true, publish: [{ name: 'scoped/seed.png', width: 96, height: 80 }] });
     await page.evaluate(`(async () => { const s = ${KZ}; s.actions.ui.setFilter('');
       await s.actions.hosts.select('fake'); await s.actions.ui.refresh(); s.actions.folders.select('scoped');
-      await s.actions.hosts.patch('fake', { autoRefresh: true }); await s.actions.hosts.pollActivity('fake'); })()`);
+      await s.actions.hosts.patch('fake', { autoRefresh: true }); })()`);
     await page.poll(`document.querySelector('.card.current[data-name="scoped/seed.png"] img')?.naturalWidth === 96`, 20000);
     await page.evaluate(`(async () => {
       const s = ${KZ}, { api } = await import('/js/api.mjs');
@@ -881,7 +882,7 @@ async function railMotion(page) {
     const audit = await page.evaluate(AUDIT);
     check('unified chronology: exact card heights after timestamp-only reorder', audit.maxDelta === 0 && audit.nullSize === 0, JSON.stringify(audit));
     await capture(page, 'chronology-timestamp-reorder-after');
-    await page.evaluate(`(async () => { const s=${KZ}; await s.actions.hosts.patch('fake', { autoRefresh:true }); await s.actions.hosts.pollActivity('fake'); })()`);
+    await page.evaluate(`(async () => { const s=${KZ}; await s.actions.hosts.patch('fake', { autoRefresh:true }); })()`);
     await control({ finish: [{ id:'chronology-root-finish', output:'chronology/deep/auto-root.png', width:512, height:512, mtime:2100000006 }] });
     await page.poll(`(async () => ${KZ}.state.images[0]?.filename === 'chronology/deep/auto-root.png')()`, 20000);
     await page.evaluate(`(async () => ${KZ}.actions.feed.scrollTop())()`);
@@ -924,7 +925,7 @@ async function railMotion(page) {
     await control({reset:true});
   }
 
-  await require('./auto-refresh.cjs')({ page, ENGINE, FAKE: FAKE_ACTIVITY, KZ, check });
+  await require('./auto-refresh.cjs')({ page, ENGINE, FAKE: FAKE_ACTIVITY, KZ, check, traffic: sourceTraffic });
 
   check("no uncaught page errors", pageErrors.length === 0, pageErrors[0] ?? "");
 

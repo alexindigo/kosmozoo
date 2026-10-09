@@ -47,10 +47,13 @@ async function withClient(run, prepare = () => {}) {
   let dispose;
   const store = createRoot((cleanup) => {
     dispose = cleanup;
-    return makeAppStore({ pollActivity: false, storage });
+    return makeAppStore({ subscribeSources: null, storage });
   });
   try {
     await prepare({ store, sources, activity, rows, row });
+    // Explicit compatibility fixture observations establish the read-entry target.
+    await store.actions.hosts.refresh();
+    await store.actions.hosts.pollActivity("h");
     const boot = store.actions.boot();
     await run({ store, sources, activity, rows, row, boot });
   } finally {

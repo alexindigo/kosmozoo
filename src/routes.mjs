@@ -6,7 +6,7 @@
 // reassigns or guards it (E1).
 
 import { backingFor, isFolderHost, EXT_MIME, validEntryName } from "./backings/index.mjs";
-import { capabilities, validateCollection, validateAttributes, sourceAttributes, addCollection, removeCollection } from "./collections.mjs";
+import { capabilities, validateCollection, validateAttributes, sourceAttributes } from "./collections.mjs";
 import { sniffMime } from "./extractor.mjs";
 
 export function makeRouter(ctx) {
@@ -87,24 +87,27 @@ export function makeRouter(ctx) {
 
   // --- collections -----------------------------------------------------------
 
+  add("GET", "/api/events", req => ctx.sourceActivity.open(req));
+
   add("GET", "/api/collections", async () => {
-    const out = {};
-    for (const [id, address] of Object.entries(ctx.hosts)) {
+    const out = [];
+    // Capture identity and committed attributes before any asynchronous probe.
+    for (const [id, source] of Object.entries(ctx.sourceActivity.snapshot().sources)) {
+      const { address, kind, pinned, autoRefresh, incarnation, sourceVersion } = source;
+      const c = { address, kind };
+      const comfy = ctx.inventory.binding(address);
       const online = await backingFor(address).probe(address);
-      const c = ctx.store.collectionGet(id) ?? { id, kind: isFolderHost(address) ? "folder" : "comfy", address };
-      out[id] = {
-        address,
-        kind: c.kind,
-        ...sourceAttributes(c),
+      out.push([id, {
+        address, kind, pinned, autoRefresh, incarnation, sourceVersion,
         online,
         capabilities: await capabilities(c, {
           online,
           useAssetsPlus: useAssetsPlus(),
-          comfy: ctx.comfy?.(id) ?? null,
+          comfy,
         }),
-      };
+      }]);
     }
-    return Response.json(out);
+    return Response.json(Object.fromEntries(out));
   });
 
   // Collections are user-managed at runtime (source-backed only in this plan).
@@ -121,6 +124,7 @@ export function makeRouter(ctx) {
     const { name, address, ...attributes } = body;
     const err = validateAttributes(attributes) ?? await validateCollection(name, address);
     if (err) return Response.json({ error: err }, { status: 400 });
+    if (!ctx.sourceActivity.acceptingChanges()) return Response.json({ error: "sources are stopping" }, { status: 503 });
     // an existing id with a different address is a conflict, not a silent
     // re-point (every entry/judgment under the id would change host)
     const existing = ctx.store.collectionGet(body.name);
@@ -130,15 +134,13 @@ export function makeRouter(ctx) {
         { status: 409 },
       );
     }
-    addCollection(ctx.store, ctx.hosts, body.name, body.address, attributes);
-    ctx.jobs.reconcile();
-    ctx.inventory.reconcile();
-    const c = ctx.store.collectionGet(body.name);
+    ctx.store.collectionAdd(body.name, body.address, attributes);
+    const { activity: _activity, ...source } = ctx.sourceActivity.source(body.name);
+    const sourceCursor = ctx.sourceActivity.cursor();
     return Response.json({
       name: body.name,
-      address: body.address,
-      kind: c.kind,
-      ...sourceAttributes(c),
+      ...source,
+      sourceCursor,
       online: await backingFor(body.address).probe(body.address),
     });
   });
@@ -149,25 +151,29 @@ export function makeRouter(ctx) {
     catch { return Response.json({ error: "source attributes must be JSON" }, { status: 400 }); }
     const error = validateAttributes(patch);
     if (error) return Response.json({ error }, { status: 400 });
+    if (!ctx.sourceActivity.acceptingChanges()) return Response.json({ error: "sources are stopping" }, { status: 503 });
     if (!ctx.store.collectionGet(id)) return Response.json({ error: "unknown collection" }, { status: 404 });
-    return Response.json({ id, ...sourceAttributes(ctx.store.collectionPatch(id, patch)) });
+    const row = ctx.store.collectionPatch(id, patch);
+    const sourceVersion = ctx.sourceActivity.source(id)?.sourceVersion ?? null;
+    return Response.json({ id, ...sourceAttributes(row), sourceVersion });
   });
 
   add("GET", "/api/collections/<id>/activity", (_req, { id }) => {
-    const source = ctx.store.collectionGet(id);
+    const source = ctx.sourceActivity.source(id);
     if (!source) return Response.json({ error: "unknown collection" }, { status: 404 });
-    return Response.json({ ...ctx.jobs.snapshot(id), ...sourceAttributes(source) });
+    return Response.json({ ...source.activity, pinned: source.pinned, autoRefresh: source.autoRefresh, sourceVersion: source.sourceVersion });
   });
 
   add("DELETE", "/api/collections/<id>", async (_req, { id }) => {
-    if (!(id in ctx.hosts)) return Response.json({ error: "unknown collection" }, { status: 404 });
+    if (!ctx.sourceActivity.acceptingChanges()) return Response.json({ error: "sources are stopping" }, { status: 503 });
+    if (!Object.hasOwn(ctx.hosts, id)) return Response.json({ error: "unknown collection" }, { status: 404 });
     if (Object.keys(ctx.hosts).length === 1) {
       return Response.json({ error: "cannot remove the last collection" }, { status: 400 });
     }
-    removeCollection(ctx.store, ctx.hosts, id);
-    ctx.jobs.reconcile();
-    ctx.inventory.reconcile();
-    return Response.json({ removed: id });
+    const before = ctx.sourceActivity.source(id);
+    ctx.store.collectionRemove(id);
+    return Response.json({ removed: id, sourceCursor: ctx.sourceActivity.cursor(),
+      sourceVersion: { ...before.sourceVersion, attributesRevision: ctx.store.collectionRevision(id) } });
   });
 
   // The portable judgment document, generated on demand per collection.

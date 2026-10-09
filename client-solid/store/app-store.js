@@ -14,7 +14,7 @@
 
 import { createSignal, createMemo, createEffect, on, onCleanup, getOwner, createContext, useContext, untrack, batch } from "solid-js";
 import { createStore, reconcile } from "solid-js/store";
-import { api } from "/js/api.mjs";
+import { api, compareSourceVersions, validSourceVersion, validSourceCursor, validateSourceSnapshot } from "/js/api.mjs";
 import { metaFromPngBytes } from "/shared/extractor.mjs";
 import { makeKeymap, comboFromEvent } from "/js/keys.mjs";
 import {
@@ -26,6 +26,7 @@ import {
 import { isEntryName, isFolderPath, inFolder } from "/shared/entry-path.mjs";
 import { makeSourceBrowse } from "./source-browse.js";
 import { makeSourceFreshness } from "./source-freshness.js";
+import { makeSourceRegistry, sameSourceIdentity } from "./source-registry.js";
 import { fieldList, nodeImages } from "./fields.js";
 import { pairSides } from "../features/diff/pair.mjs";
 import { makeImageWindow } from "./image-window.js";
@@ -39,7 +40,7 @@ import { makeInputPolicy } from "./input-policy.js";
 
 // stored host if still present, else first online, else first
 function initialHost(hosts, stored) {
-  if (stored && hosts[stored]) return stored;
+  if (stored && Object.hasOwn(hosts, stored)) return stored;
   const names = Object.keys(hosts);
   return names.find((n) => hosts[n].online) ?? names[0] ?? null;
 }
@@ -49,12 +50,9 @@ function initialHost(hosts, stored) {
 // routes through this
 export const clampSplit = (v) => Math.min(0.8, Math.max(0.2, v));
 
-export function makeAppStore({ pollActivity = typeof window !== "undefined", storage = () => globalThis.localStorage } = {}) {
+export function makeAppStore({ subscribeSources = typeof window !== "undefined" ? api.subscribeSources : null, storage = () => globalThis.localStorage } = {}) {
   // app data tree — engine-side state
   const [st, setSt] = createStore({
-    hosts: {},            // name -> { address, kind, online, capabilities }
-    sourceActivity: {},   // engine-owned ephemeral snapshots, never persisted
-    sourceSaving: {},     // confirmed source-attribute writer's pending rows
     nodesRegistry: {},    // discovered node types (/api/nodes)
     scraper: null,        // { enabled, paused, pending: {host: n} }
     deletePrefs: { useAssetsPlus: true },
@@ -90,6 +88,15 @@ export function makeAppStore({ pollActivity = typeof window !== "undefined", sto
     drafts: {},           // unsaved note text: { "<id>:<cls>": text } — session-only, NOT persisted
   });
 
+  const sourceRecords = makeSourceRegistry({
+    createRecord: (id, source) => ({ id, address: source.address, incarnation: source.incarnation,
+      epoch: source.sourceVersion?.epoch, writes: 0, revision: 0,
+      confirmed: { pinned: !!source.pinned, autoRefresh: !!source.autoRefresh, sourceVersion: source.sourceVersion },
+      writeTask: Promise.resolve(), task: null, freshness: makeSourceFreshness() }),
+    onRetire: record => record.freshness.retire(),
+  });
+  const hostsView = sourceRecords.hosts;
+
   // UI state tree — separate reactive graph, moves here as directed
   const [uiSt, setUiSt] = createStore({
     info: { split: 0.66 }, // info panel: images/nodes split, divider-adjusted
@@ -102,10 +109,11 @@ export function makeAppStore({ pollActivity = typeof window !== "undefined", sto
 
   // scalar atoms
   const [host, setHost] = createSignal(null);
+  const [sourceDelivery, setSourceDelivery] = createSignal(subscribeSources ? "connecting" : "explicit");
   const [acquisitionRevision, setAcquisitionRevision] = createSignal(0);
   let sourceSession = null, selectionGeneration = 0, disposed = false;
   const ownsSession = (s) => !!s && !disposed && sourceSession === s &&
-    host() === s.id && st.hosts[s.id]?.address === s.address && sourceRecords.get(s.id) === s.source;
+    host() === s.id && hostsView()[s.id]?.address === s.address && sourceRecords.get(s.id) === s.source;
 
   function beginSourceSession(id) {
     retireFeedScroll();
@@ -114,7 +122,7 @@ export function makeAppStore({ pollActivity = typeof window !== "undefined", sto
     wantSet.clear();
     metaVersion = 0;
     setSt("metaPending", 0);
-    sourceSession = { id, address: st.hosts[id]?.address, source: sourceRecords.get(id), generation: ++selectionGeneration,
+    sourceSession = { id, address: hostsView()[id]?.address, source: sourceRecords.get(id), generation: ++selectionGeneration,
       loading: true, requested: 1, completed: 0, refreshTask: null, retryTimer: null, errors: 0 };
     sizes_.setContext(sourceSession);
     setAcquisitionRevision((v) => v + 1);
@@ -314,7 +322,7 @@ export function makeAppStore({ pollActivity = typeof window !== "undefined", sto
     const prev = stack[stack.length - 1];
     persistBrowse();
     setCurrentStack(stack.slice(0, -1));
-    if (prev.remote !== host() && st.hosts[prev.remote]) {
+    if (prev.remote !== host() && Object.hasOwn(hostsView(), prev.remote)) {
       actions.hosts.select(prev.remote, { target: { ...rememberedTarget(prev.remote), current: prev.image, explicit: true }, historyMode: "replace" });
     } else {
       assignCurrent(prev, { push: false });
@@ -371,7 +379,7 @@ export function makeAppStore({ pollActivity = typeof window !== "undefined", sto
     // the source as "input:<host>"
     if (source.startsWith("input:")) {
       const h = source.slice("input:".length);
-      if (!st.hosts[h]) return null;
+      if (!Object.hasOwn(hostsView(), h)) return null;
       return {
         name: file,
         host: h,
@@ -379,7 +387,7 @@ export function makeAppStore({ pollActivity = typeof window !== "undefined", sto
         meta: null,
       };
     }
-    if (st.hosts[source]) {
+    if (Object.hasOwn(hostsView(), source)) {
       return {
         name: file,
         host: source,
@@ -711,7 +719,7 @@ export function makeAppStore({ pollActivity = typeof window !== "undefined", sto
   }
 
   function rememberedTarget(name) {
-    const saved = sourceBrowse.get(name, st.hosts[name]?.address);
+    const saved = sourceBrowse.get(name, hostsView()[name]?.address);
     return { folder: saved?.folder ?? "", current: saved ? saved.current : undefined, filter: "" };
   }
 
@@ -726,7 +734,7 @@ export function makeAppStore({ pollActivity = typeof window !== "undefined", sto
       browseRevision++;
       setAcquisitionRevision((v) => v + 1);
       setBrowseRestore(null);
-      browseTarget = { ...target, folder: st.hosts[host()]?.kind === "folder" ? "" : target.folder ?? "", filter: target.filter ?? "" };
+      browseTarget = { ...target, folder: hostsView()[host()]?.kind === "folder" ? "" : target.folder ?? "", filter: target.filter ?? "" };
       setSelectedFolder(browseTarget.folder); setFilter(browseTarget.filter);
     });
   }
@@ -773,7 +781,7 @@ export function makeAppStore({ pollActivity = typeof window !== "undefined", sto
     s.pendingBrowse = true;
     s.inventoryReady = false;
     setSt("inventory", { revision: null, coverage: null, folders: [""], loading: true,
-      subfolders: st.hosts[name]?.capabilities?.subfolders ?? { supported: null, reason: "Output inventory is loading" } });
+      subfolders: hostsView()[name]?.capabilities?.subfolders ?? { supported: null, reason: "Output inventory is loading" } });
     // a host switch must not leave the previous host's feed on screen —
     // and its per-entry error state dies with the list (id-keyed, cleared)
     // Compensation belongs to the outgoing feed, never the new feed's scroll.
@@ -784,17 +792,13 @@ export function makeAppStore({ pollActivity = typeof window !== "undefined", sto
     if (!name) return;
     actions.status.active("load", `loading image list from ${name}…`);
     const source = s.source;
-    // Inventory is independent of an unavailable/held telemetry response.
-    // A quick cached response may establish the read's target; a later one
-    // remains unacknowledged and reconciles through the same refresh lane.
-    if (source && !source.freshness.target()) readActivity(source);
-    await Promise.resolve();
+    // Initial inventory never waits for event delivery or issues an activity GET.
     if (!ownsSession(s)) return;
     const ticket = source?.freshness.capture(), requested = s.requested;
     let accepted = false;
     const read = judgments.beginRead(name);
     try {
-      const inventory = inventoryReply(await api.inventory(name), st.hosts[name]?.kind);
+      const inventory = inventoryReply(await api.inventory(name), hostsView()[name]?.kind);
       if (!ownsSession(s)) return;
       acceptInventory(s, inventory, read);
       await pollMetadata(s);
@@ -846,7 +850,7 @@ export function makeAppStore({ pollActivity = typeof window !== "undefined", sto
     try {
       const prevIds = new Set(st.images.map((i) => i.id));
       const before = new Map(st.images.map((i) => [i.id, { meta: i.meta, width: i.width, height: i.height }]));
-      const inventory = inventoryReply(await api.inventory(name), st.hosts[name]?.kind), entries = inventory.entries;
+      const inventory = inventoryReply(await api.inventory(name), hostsView()[name]?.kind), entries = inventory.entries;
       if (!ownsSession(s)) return false;
       acceptInventory(s, inventory, read, before);
       await pollMetadata(s);
@@ -879,7 +883,7 @@ export function makeAppStore({ pollActivity = typeof window !== "undefined", sto
   }
 
   const requiresRefresh = (s) => ownsSession(s) && (s.requested > s.completed ||
-    !!st.hosts[s.id]?.autoRefresh && !!s.source?.freshness.pending());
+    !!hostsView()[s.id]?.autoRefresh && !!s.source?.freshness.pending());
 
   function scheduleRefreshRetry(s) {
     if (!ownsSession(s) || s.retryTimer || !requiresRefresh(s)) return;
@@ -1214,98 +1218,207 @@ export function makeAppStore({ pollActivity = typeof window !== "undefined", sto
   const toHosts = (colls) => Object.fromEntries(Object.entries(colls ?? {}).map(([n, c]) => [n, {
     address: c.address, kind: c.kind, online: c.online,
     pinned: !!c.pinned, autoRefresh: !!c.autoRefresh,
+    incarnation: c.incarnation, sourceVersion: c.sourceVersion,
     capabilities: c.capabilities ?? null,
   }]));
 
-  const sourceRecords = new Map();
-  let registryRevision = 0, collectionRead = 0, activityStarted = false;
+  let registryRevision = 0, collectionRead = 0, streamEpoch = null, streamRevision = -1, streamSerial = 0;
+  let membershipFloor = null;
+  let deliveryStarted = false, deliverySuspended = false, deliveryGeneration = 0, deliveryDispose = null;
+  let everDelivered = false, deliveryGap = false, pageDispose = null;
+  const sameSource = sameSourceIdentity;
 
-  function reconcileSources() {
-    for (const [id, record] of sourceRecords) {
-      if (st.hosts[id]?.address === record.address && st.hosts[id]) continue;
-      clearTimeout(record.timer);
-      record.freshness.retire();
-      sourceRecords.delete(id);
-      setSt("sourceActivity", id, undefined);
-      setSt("sourceSaving", id, undefined);
-    }
-    for (const [id, source] of Object.entries(st.hosts)) {
-      if (sourceRecords.has(id)) continue;
-      const record = { id, address: source.address, writes: 0, revision: 0,
-        writeTask: Promise.resolve(), task: null, timer: null, errors: 0, freshness: makeSourceFreshness() };
-      sourceRecords.set(id, record);
-      if (activityStarted && pollActivity) scheduleActivity(record, 0);
-    }
+  function confirmAttributes(record, attributes, display = !record.writes) {
+    const before = record.confirmed;
+    if (validSourceVersion(before?.sourceVersion)) {
+      const order = compareSourceVersions(attributes.sourceVersion, before.sourceVersion);
+      if (order === null) return false;
+      if (order < 0) return true;
+      if (order === 0 && (before.pinned !== !!attributes.pinned || before.autoRefresh !== !!attributes.autoRefresh)) return false;
+    } else if (streamEpoch && !validSourceVersion(attributes.sourceVersion)) return false;
+    record.confirmed = { pinned: !!attributes.pinned, autoRefresh: !!attributes.autoRefresh, sourceVersion: attributes.sourceVersion };
+    if (display) record.patchHost(record.confirmed);
+    return true;
   }
+
+  function acceptActivity(record, snapshot) {
+    record.acceptActivity(snapshot);
+    record.freshness.observe(snapshot);
+  }
+
+  function acceptSourceSnapshot(input) {
+    const frame = validateSourceSnapshot(input);
+    if (disposed || deliverySuspended) return false;
+    if (membershipFloor && (frame.epoch === membershipFloor.epoch && frame.revision < membershipFloor.revision ||
+        frame.epoch === streamEpoch && membershipFloor.epoch !== streamEpoch)) return everDelivered;
+    if (membershipFloor && (frame.epoch !== membershipFloor.epoch || frame.revision >= membershipFloor.revision)) membershipFloor = null;
+    const previous = new Set(sourceRecords.values());
+    if (frame.epoch !== streamEpoch || frame.revision > streamRevision) {
+      // Preflight causal contradictions before any model write.
+      for (const [id, value] of Object.entries(frame.sources)) {
+        const record = sourceRecords.get(id);
+        if (!record || !sameSource(record, value)) continue;
+        const confirmed = record.confirmed;
+        if (compareSourceVersions(value.sourceVersion, confirmed.sourceVersion) === 0 &&
+            (confirmed.pinned !== value.pinned || confirmed.autoRefresh !== value.autoRefresh)) return false;
+      }
+      batch(() => {
+        const next = Object.fromEntries(Object.entries(frame.sources).map(([id, value]) => {
+          const record = sourceRecords.get(id), keep = record && sameSource(record, value);
+          const flags = keep ? record.confirmed : value;
+          return [id, { ...(keep ? hostsView()[id] : { online: null, capabilities: null }), address: value.address,
+            kind: value.kind, incarnation: value.incarnation,
+            pinned: flags.pinned, autoRefresh: flags.autoRefresh, sourceVersion: flags.sourceVersion }];
+        }));
+        sourceRecords.reconcile(next);
+        for (const [id, value] of Object.entries(frame.sources)) {
+          const record = sourceRecords.get(id);
+          confirmAttributes(record, value);
+          acceptActivity(record, value.activity);
+        }
+        streamEpoch = frame.epoch; streamRevision = frame.revision; streamSerial++; registryRevision++;
+      });
+    }
+    if (deliveryGap) {
+      for (const record of sourceRecords.values()) if (previous.has(record)) record.freshness.deliveryGap();
+      deliveryGap = false;
+    }
+    everDelivered = true;
+    if (sourceSession && !ownsSession(sourceSession)) {
+      const id = Object.hasOwn(hostsView(), host()) ? host() : Object.keys(hostsView())[0] ?? null;
+      actions.hosts.select(id, { force: true, historyMode: "replace" });
+    } else drainRefresh(sourceSession);
+    return true;
+  }
+
+  function acceptMembershipReply(reply, id, removed, capturedEpoch) {
+    const cursor = reply?.sourceCursor;
+    if (!validSourceCursor(cursor)) { if (streamEpoch) resyncSources(); return false; }
+    if (streamEpoch && cursor.epoch !== streamEpoch && capturedEpoch !== streamEpoch) return false;
+    if (cursor.epoch === streamEpoch && cursor.revision <= streamRevision) return false;
+    if (!validSourceVersion(reply.sourceVersion) || reply.sourceVersion.epoch !== cursor.epoch ||
+        !removed && (reply.name !== id || reply.sourceVersion.incarnation !== reply.incarnation || typeof reply.address !== "string" ||
+          !["comfy", "folder"].includes(reply.kind) || typeof reply.pinned !== "boolean" || typeof reply.autoRefresh !== "boolean")) {
+      resyncSources(); return false;
+    }
+    membershipFloor = membershipFloor?.epoch === cursor.epoch && membershipFloor.revision > cursor.revision ? membershipFloor : cursor;
+    batch(() => {
+      if (removed) sourceRecords.delete(id);
+      else {
+        const record = sourceRecords.get(id);
+        if (record && sameSource(record, reply)) {
+          if (!confirmAttributes(record, reply)) resyncSources();
+          record.patchHost({ online: reply.online });
+        } else sourceRecords.reconcile({ ...hostsView(), [id]: {
+          address: reply.address, kind: reply.kind, incarnation: reply.incarnation, sourceVersion: reply.sourceVersion,
+          pinned: reply.pinned, autoRefresh: reply.autoRefresh, online: reply.online, capabilities: null,
+        } });
+      }
+      registryRevision++;
+    });
+    if (sourceSession && !ownsSession(sourceSession)) {
+      actions.hosts.select(Object.hasOwn(hostsView(), host()) ? host() : Object.keys(hostsView())[0] ?? null,
+        { force: true, historyMode: "replace" });
+    }
+    return true;
+  }
+
+  function startDelivery() {
+    if (disposed || deliverySuspended || deliveryDispose || !subscribeSources) return;
+    deliveryStarted = true;
+    const own = ++deliveryGeneration;
+    const current = () => !disposed && !deliverySuspended && own === deliveryGeneration;
+    deliveryDispose = subscribeSources({
+      onSnapshot: frame => current() ? acceptSourceSnapshot(frame) : false,
+      onConnection(status) {
+        if (!current()) return;
+        if (status !== "ready" && everDelivered) deliveryGap = true;
+        setSourceDelivery(status === "connecting" && deliveryGap ? "reconnecting" : status);
+      },
+    });
+  }
+
+  function suspendDelivery() {
+    if (disposed || deliverySuspended) return;
+    deliverySuspended = true; deliveryGeneration++;
+    deliveryDispose?.(); deliveryDispose = null;
+    if (everDelivered) deliveryGap = true;
+    setSourceDelivery("suspended");
+  }
+
+  function resumeDelivery() {
+    if (disposed || !deliverySuspended) return;
+    deliverySuspended = false;
+    if (deliveryStarted) startDelivery();
+  }
+
+  function resyncSources() { deliveryDispose?.resync?.(); }
 
   async function refreshHosts() {
     const sequence = ++collectionRead, revision = registryRevision;
     const stamps = new Map([...sourceRecords].map(([id, r]) => [id, { record: r, revision: r.revision }]));
     const response = await api.collections();
-    if (disposed || sequence !== collectionRead || revision !== registryRevision) return;
-    const next = toHosts(response);
+    if (disposed || sequence !== collectionRead || !streamEpoch && revision !== registryRevision) return;
+    let next = toHosts(response);
+    if (streamEpoch) {
+      // Discovery enriches current stream identities; it never owns membership.
+      next = Object.fromEntries([...sourceRecords].map(([id, record]) => {
+        const discovered = next[id];
+        return [id, sameSource(record, discovered) ? { ...hostsView()[id], online: discovered.online,
+          capabilities: discovered.capabilities } : { ...hostsView()[id] }];
+      }));
+    }
     for (const [id, source] of Object.entries(next)) {
       const record = sourceRecords.get(id), stamp = stamps.get(id);
       if (record && (record !== stamp?.record || record.revision !== stamp.revision || record.writes)) {
-        source.pinned = st.hosts[id].pinned;
-        source.autoRefresh = st.hosts[id].autoRefresh;
+        source.pinned = hostsView()[id].pinned;
+        source.autoRefresh = hostsView()[id].autoRefresh;
       }
     }
-    setSt("hosts", reconcile(next));
-    reconcileSources();
+    sourceRecords.reconcile(next);
     drainRefresh(sourceSession);
-  }
-
-  function scheduleActivity(record, delay = 2000) {
-    clearTimeout(record.timer);
-    if (disposed || sourceRecords.get(record.id) !== record) return;
-    record.timer = setTimeout(() => readActivity(record), delay);
   }
 
   function readActivity(record) {
     if (!record || disposed || sourceRecords.get(record.id) !== record) return Promise.resolve();
     if (record.task) return record.task;
-    clearTimeout(record.timer);
-    const revision = record.revision;
+    const revision = record.revision, delivered = streamSerial;
     record.task = (async () => {
       try {
         const snapshot = await api.activity(record.id);
-        if (disposed || sourceRecords.get(record.id) !== record) return;
-        record.errors = 0;
+        if (disposed || sourceRecords.get(record.id) !== record || delivered !== streamSerial) return;
         if (revision === record.revision && !record.writes) {
-          setSt("hosts", record.id, "pinned", !!snapshot.pinned);
-          setSt("hosts", record.id, "autoRefresh", !!snapshot.autoRefresh);
+          if (!confirmAttributes(record, snapshot)) resyncSources();
         }
-        setSt("sourceActivity", record.id, reconcile(snapshot));
-        record.freshness.observe(snapshot);
+        acceptActivity(record, snapshot);
         if (ownsSession(sourceSession) && sourceSession.source === record) drainRefresh(sourceSession);
       } catch (error) {
-        if (disposed || sourceRecords.get(record.id) !== record) return;
-        record.errors++;
-        setSt("sourceActivity", record.id, { supported: true, state: "disconnected", progress: null, error: error.message });
+        if (disposed || sourceRecords.get(record.id) !== record || delivered !== streamSerial) return;
+        record.acceptActivity({ supported: true, state: "disconnected", progress: null, error: error.message });
       } finally {
         record.task = null;
-        if (activityStarted && pollActivity) scheduleActivity(record, Math.min(2000 * 2 ** record.errors, 30000));
       }
     })();
     return record.task;
   }
 
   function dispose() {
+    if (disposed) return;
     disposed = true;
+    deliveryGeneration++; deliveryDispose?.(); deliveryDispose = null; pageDispose?.(); pageDispose = null;
     batch(retireFeedScroll);
     window_.clear();
     sizes_.dispose();
     clearTimeout(metaPollTimer);
     clearTimeout(sourceSession?.retryTimer);
-    for (const record of sourceRecords.values()) { clearTimeout(record.timer); record.freshness.retire(); }
+    for (const record of sourceRecords.values()) record.freshness.retire();
   }
   if (getOwner()) onCleanup(dispose);
 
   // the loaded collection's record — the delete affordances read
   // capabilities.delete from HERE, never a derived mirror : indexing
   // hosts with the host SIGNAL function always read the "hide" fallback)
-  const currentCollection = createMemo(() => st.hosts[host()] ?? null);
+  const currentCollection = createMemo(() => Object.hasOwn(hostsView(), host()) ? hostsView()[host()] : null);
 
   // registered feature modules — a plain module-level list, not store
   // state: registration happens once at boot (before first render), and
@@ -1333,9 +1446,8 @@ export function makeAppStore({ pollActivity = typeof window !== "undefined", sto
     // api.hosts is deliberately not caught — a failed host list fails the
     // whole boot (the caller surfaces it).
     async boot() {
+      startDelivery();
       await refreshHosts();
-      activityStarted = true;
-      if (pollActivity) for (const record of sourceRecords.values()) scheduleActivity(record, 0);
       const ui = await api.settings("core.ui").catch(() => ({}));
       setSt("ui", ui);
       // persisted info-panel split hydrates the uiSt tree the details pane
@@ -1359,8 +1471,8 @@ export function makeAppStore({ pollActivity = typeof window !== "undefined", sto
       // the URL hash outranks the stored host: /#host[#filename] is shareable state
       const route = parseUrl();
       const urlHost = route.view === "diff" ? route.left?.source : route.host;
-      const h = urlHost && st.hosts[urlHost] ? urlHost : initialHost(st.hosts, st.ui.host);
-      const target = urlHost && st.hosts[urlHost] ? routeTarget(route) : { ...rememberedTarget(h), filter: route.filter ?? "" };
+      const h = urlHost && Object.hasOwn(hostsView(), urlHost) ? urlHost : initialHost(hostsView(), st.ui.host);
+      const target = urlHost && Object.hasOwn(hostsView(), urlHost) ? routeTarget(route) : { ...rememberedTarget(h), filter: route.filter ?? "" };
       if (h) await actions.hosts.select(h, { target, historyMode: "replace" });
       // a /diff URL boots into the workbench on the left side
       if (route.view === "diff") await actions.diff.openDiff(route.left, route.right);
@@ -1374,7 +1486,7 @@ export function makeAppStore({ pollActivity = typeof window !== "undefined", sto
         if (!force && !keepFile && !target && host() === name && ownsSession(sourceSession)) return sourceSession.loadTask;
         persistBrowse();
         target ??= keepFile ? routeTarget(parseUrl()) : rememberedTarget(name);
-        if (!isFolderPath(target.folder ?? "") || (target.current != null && !isEntryName(st.hosts[name]?.kind, target.current))) {
+        if (!isFolderPath(target.folder ?? "") || (target.current != null && !isEntryName(hostsView()[name]?.kind, target.current))) {
           actions.status.error("Invalid browsing address"); return;
         }
         batch(() => {
@@ -1393,8 +1505,10 @@ export function makeAppStore({ pollActivity = typeof window !== "undefined", sto
         name = (name ?? "").trim();
         addr = (addr ?? "").trim();
         if (!name || !addr) return { ok: false };
+        const capturedEpoch = streamEpoch;
         try {
-          await api.addCollection(name, addr);
+          const saved = await api.addCollection(name, addr);
+          acceptMembershipReply(saved, name, false, capturedEpoch);
           registryRevision++;
           await refreshHosts();
           return { ok: true };
@@ -1403,18 +1517,20 @@ export function makeAppStore({ pollActivity = typeof window !== "undefined", sto
         }
       },
       async remove(name) {
+        const record = sourceRecords.get(name);
+        const capturedEpoch = streamEpoch;
         try {
-          await api.removeCollection(name);
+          const saved = await api.removeCollection(name);
+          if (disposed || sourceRecords.get(name) !== record) return;
+          if (streamEpoch) {
+            acceptMembershipReply(saved, name, true, capturedEpoch);
+            await refreshHosts(); return;
+          }
           registryRevision++;
-          clearTimeout(sourceRecords.get(name)?.timer);
-          sourceRecords.get(name)?.freshness.retire();
           sourceRecords.delete(name);
-          setSt("hosts", name, undefined);
-          setSt("sourceActivity", name, undefined);
-          setSt("sourceSaving", name, undefined);
           await refreshHosts();
           if (host() === name) {
-            await actions.hosts.select(Object.keys(st.hosts)[0] ?? null);
+            await actions.hosts.select(Object.keys(hostsView())[0] ?? null);
           }
         } catch { /* surfaced by the status chrome once it lands */ }
       },
@@ -1428,17 +1544,14 @@ export function makeAppStore({ pollActivity = typeof window !== "undefined", sto
         const savedPatch = { ...patch };
         record.revision++;
         record.writes++;
-        setSt("sourceSaving", id, true);
+        record.setSaving(true);
         const task = record.writeTask.then(async () => {
           if (sourceRecords.get(id) !== record || disposed) return { ok: false };
           try {
-            const actualPatch = savedPatch.toggle ? { [savedPatch.toggle]: !st.hosts[id][savedPatch.toggle] } : savedPatch;
+            const actualPatch = savedPatch.toggle ? { [savedPatch.toggle]: !record.confirmed[savedPatch.toggle] } : savedPatch;
             const saved = await api.patchCollection(id, actualPatch);
             if (sourceRecords.get(id) !== record || disposed) return { ok: false };
-            batch(() => {
-              setSt("hosts", id, "pinned", !!saved.pinned);
-              setSt("hosts", id, "autoRefresh", !!saved.autoRefresh);
-            });
+            if (!confirmAttributes(record, saved, true)) resyncSources();
             record.revision++;
             if (sourceSession?.source === record) drainRefresh(sourceSession);
             return { ok: true };
@@ -1447,7 +1560,11 @@ export function makeAppStore({ pollActivity = typeof window !== "undefined", sto
             return { ok: false };
           } finally {
             record.writes--;
-            if (sourceRecords.get(id) === record && !record.writes) setSt("sourceSaving", id, undefined);
+            if (sourceRecords.get(id) === record && !record.writes) {
+              confirmAttributes(record, record.confirmed, true);
+              record.setSaving(undefined);
+              if (sourceSession?.source === record) drainRefresh(sourceSession);
+            }
           }
         });
         record.writeTask = task;
@@ -1455,10 +1572,26 @@ export function makeAppStore({ pollActivity = typeof window !== "undefined", sto
       },
     },
 
+    lifecycle: {
+      suspendDelivery, resumeDelivery,
+      registerPage(target) {
+        pageDispose?.();
+        target.addEventListener("pagehide", suspendDelivery);
+        target.addEventListener("pageshow", resumeDelivery);
+        const retire = () => {
+          target.removeEventListener("pagehide", suspendDelivery);
+          target.removeEventListener("pageshow", resumeDelivery);
+          if (pageDispose === retire) pageDispose = null;
+        };
+        pageDispose = retire;
+        return retire;
+      },
+    },
+
     folders: {
       select(folder) {
         if (!isFolderPath(folder) || folder === selectedFolder() || !host()) return;
-        if (st.hosts[host()]?.kind === "folder" && folder !== "") return;
+        if (hostsView()[host()]?.kind === "folder" && folder !== "") return;
         const c = current();
         const target = { folder, filter: filter(), current: c?.remote === host() ? c.image : undefined };
         if (sourceSession?.loading || !sourceSession?.inventoryReady) {
@@ -1658,7 +1791,7 @@ export function makeAppStore({ pollActivity = typeof window !== "undefined", sto
         return feedUrl(remote, image, { folder, filter: "", search: typeof location === "undefined" ? "" : location.search ?? "" });
       },
       async navigate(remote, image) {
-        if (!st.hosts[remote] || !isEntryName(st.hosts[remote]?.kind, image)) { actions.status.error("Image source or address is unavailable"); return false; }
+        if (!Object.hasOwn(hostsView(), remote) || !isEntryName(hostsView()[remote]?.kind, image)) { actions.status.error("Image source or address is unavailable"); return false; }
         const url = actions.current.linkUrl(remote, image);
         const previous = (location.pathname ?? "/") + (location.search ?? "") + (location.hash ?? "");
         if (previous === url) return true;
@@ -1806,7 +1939,7 @@ export function makeAppStore({ pollActivity = typeof window !== "undefined", sto
       openDiff(left, right, { push } = {}) {
         if (!left || !resolveSide(left)) return false;
         const remote = left.source ?? left.remote, image = left.file ?? left.image;
-        if (st.hosts[remote] && remote !== host()) {
+        if (Object.hasOwn(hostsView(), remote) && remote !== host()) {
           const context = typeof location === "undefined" ? { folder: "", filter: "" } : parseUrl();
           const loading = actions.hosts.select(remote, { target: { folder: context.folder ?? "", filter: context.filter ?? "", current: image, explicit: true }, historyMode: "none" });
           const intent = browseRevision;
@@ -1883,11 +2016,11 @@ export function makeAppStore({ pollActivity = typeof window !== "undefined", sto
       async changed() {
         const r = parseUrl();
         const remote = r.view === "diff" ? r.left?.source : r.host;
-        if (remote && !st.hosts[remote] && !remote.startsWith("input:") && remote !== "anchor") return;
-        const name = st.hosts[remote] ? remote : host();
+        if (remote && !Object.hasOwn(hostsView(), remote) && !remote.startsWith("input:") && remote !== "anchor") return;
+        const name = Object.hasOwn(hostsView(), remote) ? remote : host();
         if (!name || !isFolderPath(r.folder ?? "")) return;
         const target = routeTarget(r);
-        if (target.current != null && !isEntryName(st.hosts[name]?.kind, target.current)) return;
+        if (target.current != null && !isEntryName(hostsView()[name]?.kind, target.current)) return;
         let intent;
         if (name !== host() || !ownsSession(sourceSession)) {
           const loading = actions.hosts.select(name, { target, historyMode: "none" });
@@ -2144,9 +2277,10 @@ export function makeAppStore({ pollActivity = typeof window !== "undefined", sto
       (f.cardAction ? [{ ...f.cardAction, args: { ...f.cardAction.args, id: image.id } }] : [])),
     featureBulkActions: () => registeredFeatures.flatMap((f) =>
       (f.bulkAction ? [{ ...f.bulkAction, args: { ...f.bulkAction.args, target: "selected" } }] : [])),
-    get hosts() { return st.hosts; },
-    get sourceActivity() { return st.sourceActivity; },
-    get sourceSaving() { return st.sourceSaving; },
+    get hosts() { return sourceRecords.hosts(); },
+    get sourceActivity() { return sourceRecords.activities(); },
+    sourceDelivery,
+    get sourceSaving() { return sourceRecords.saving(); },
     get nodesRegistry() { return st.nodesRegistry; },
     get scraper() { return st.scraper; },
     get deletePrefs() { return st.deletePrefs; },
@@ -2234,7 +2368,7 @@ export function makeAppStore({ pollActivity = typeof window !== "undefined", sto
   };
 
   sourceBrowse = makeSourceBrowse({ storage, onError: (message) => actions.status.error(message),
-    validCurrent: (address, name) => isEntryName(Object.values(st.hosts).find((source) => source.address === address)?.kind, name) });
+    validCurrent: (address, name) => isEntryName(Object.values(hostsView()).find((source) => source.address === address)?.kind, name) });
   registerCoreCommands(handles, { ops: actions, state: stateObj });
   const publicActions = commandFacades(handles, actions, stateObj);
   inputPolicy = makeInputPolicy({ handles, state: stateObj, layers: keyLayers,

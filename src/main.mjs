@@ -45,6 +45,7 @@ let stopping = false;
 const shutdown = async () => {
   if (stopping) return;
   stopping = true;
+  ctx.sourceActivity.stop();
   await ctx.jobs.stop();
   await ctx.inventory.stop();
   await ctx.prefetch.stop();

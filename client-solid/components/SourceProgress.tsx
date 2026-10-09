@@ -3,11 +3,13 @@
 import { Show } from "solid-js";
 
 export function SourceProgress(props) {
-  const status = () => props.activity?.supported === false ? "idle" : props.activity?.state ?? "unknown";
+  const status = () => props.activity?.supported === false ? "idle" :
+    ["reconnecting", "suspended"].includes(props.delivery) ? "disconnected" : props.activity?.state ?? "unknown";
   const progress = () => status() === "running" ? props.activity?.progress : null;
   const label = () => {
     const p = progress();
     if (props.activity?.supported === false) return `${props.name}: ${props.activity.reason}`;
+    if (["reconnecting", "suspended"].includes(props.delivery)) return `${props.name}: activity delivery disconnected; cached upstream ${props.activity?.state ?? "unknown"}`;
     return `${props.name}: ${p ? `current operation ${p.value}/${p.max}` :
       status() === "running" ? "running; operation progress unavailable" : status()}`;
   };

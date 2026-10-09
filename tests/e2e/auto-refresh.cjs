@@ -1,6 +1,6 @@
 // Real upstream -> Jobs -> cached API -> Store -> decoded card, no rescue input.
 const assert = require('node:assert/strict');
-module.exports = async ({ page, ENGINE, FAKE, KZ, check }) => {
+module.exports = async ({ page, ENGINE, FAKE, KZ, check, traffic }) => {
   const control = async body => {
     const response = await fetch(FAKE + '/__test/activity', { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(body) });
     assert.equal(response.status,200); await response.json();
@@ -24,7 +24,7 @@ module.exports = async ({ page, ENGINE, FAKE, KZ, check }) => {
   })()`);
   let initialScript;
   try {
-    await page.evaluate(`(async()=>{const s=${KZ}; await s.actions.hosts.patch('fake',{autoRefresh:false});
+    await page.evaluate(`(async()=>{const s=${KZ}; await s.actions.hosts.patch('fake',{autoRefresh:false,pinned:true});
       s.actions.ui.setFilter('');s.actions.bulk.clear();s.actions.diff.hide();})()`);
     await control({reset:true,publish:[{name:'auto-flow/retained.png',width:128,height:72,mtime:2200000000}],
       running:['auto-flow-A'],pending:['auto-flow-B'],delays:{logs:8000}});
@@ -57,11 +57,32 @@ module.exports = async ({ page, ENGINE, FAKE, KZ, check }) => {
     await page.poll(`(async()=>{const source=${KZ}.state.sourceActivity.fake;return source?.terminalRevision>${revision}&&source.runningPromptId==='auto-flow-B';})()`,7000);
     await page.poll(`document.querySelector('.card[data-name="auto-flow/first.png"] img')?.naturalWidth===73`,7000);
     const firstMs=Date.now()-first;
+    if(traffic)assert(traffic.frames.some(event=>{
+      const frame=JSON.parse(event.data),activity=frame.sources.fake?.activity;
+      return activity?.terminalRevision>revision&&activity.runningPromptId==='auto-flow-B';
+    }),'completion reaches the real native event stream before decoded output');
     assert.deepEqual(await snapshot(),before);
     const source=await page.evaluate(`(async()=>({state:${KZ}.state.sourceActivity.fake.state,prompt:${KZ}.state.sourceActivity.fake.runningPromptId,
       terminal:${KZ}.state.sourceActivity.fake.terminalRevision}))()`);
     assert.equal(source.state,'running');assert.equal(source.prompt,'auto-flow-B');assert(source.terminal>revision);
     check('completion flow: decoded output while next job runs and optional progress is held, with exact editor/browse retention',true,JSON.stringify({firstMs,source}));
+
+    const connections=traffic?.streams().length;
+    await page.evaluate(`window.dispatchEvent(new PageTransitionEvent('pagehide',{persisted:true}))`);
+    await page.poll(`(async()=>${KZ}.state.sourceDelivery()==='suspended')()`);
+    assert(await page.evaluate(`(()=>{const svg=document.querySelector('.pinned-source[data-source="fake"] .source-progress');
+      return svg?.dataset.state==='disconnected'&&!svg.querySelector('.source-progress-fill')&&svg.getAttribute('aria-label').includes('cached upstream running');})()`),
+      'delivery disconnection withholds cached running fill and labels the independent upstream state');
+    assert.deepEqual(await snapshot(),before);
+    await control({publish:[{name:'auto-flow/gap.png',width:83,height:37,mtime:2199999997}]});
+    await page.evaluate(`window.dispatchEvent(new PageTransitionEvent('pageshow',{persisted:true}))`);
+    await page.poll(`(async()=>${KZ}.state.sourceDelivery()==='ready')()`);
+    await page.poll(`document.querySelector('.card[data-name="auto-flow/gap.png"] img')?.naturalWidth===83`,15000);
+    assert.deepEqual(await snapshot(),before);
+    assert.equal(await page.evaluate(`(async()=>${KZ}.state.sourceActivity.fake.terminalRevision)()`),source.terminal,
+      'gap freshness repair cannot fabricate a terminal event');
+    if(traffic)assert.equal(traffic.streams().length,connections+1);
+    check('completion flow: real output published during lifecycle delivery gap decodes after recovery with unchanged Jobs tuple and retained editing',true);
 
     await control({failures:{listing:503},running:['auto-flow-C'],pending:[],finish:[{id:'auto-flow-B',output:'auto-flow/retry.png',width:79,height:35,mtime:2199999998}]});
     await page.poll(`!![...document.querySelectorAll('#statusStack .error')].find(e=>e.textContent.includes('ComfyUI listing: 503'))`,15000);
@@ -100,12 +121,13 @@ module.exports = async ({ page, ENGINE, FAKE, KZ, check }) => {
       top:${KZ}.state.feedScrollEl().scrollTop}))()`);
     assert(restored.reads>=2);assert.equal(restored.current.image,'bulk-02500.png');assert(restored.top>10000);
     check('completion flow: cold deep restore recovers a failed initial read to decoded pixels without scroll/current rescue',true,JSON.stringify(restored));
+    if(traffic){traffic.save('source-traffic-final');await traffic.validate();assert.equal(traffic.activity().length,0);}
   } catch(error) { check('completion-to-decoded-output regression',false,error.stack??String(error));throw error; }
   finally {
     if(initialScript)await page.send('Page.removeScriptToEvaluateOnNewDocument',{identifier:initialScript});
     await page.evaluate(`(async()=>{const s=${KZ},{api}=await import('/js/api.mjs');window.__autoFlowRelease?.();
       if(window.__autoFlowOriginalWriter)api.setJudgment=window.__autoFlowOriginalWriter;
-      await s.actions.hosts.patch('fake',{autoRefresh:false});s.actions.ui.setFilter('');s.actions.folders.select('');s.actions.bulk.clear();})()`);
+      await s.actions.hosts.patch('fake',{autoRefresh:false,pinned:false});s.actions.ui.setFilter('');s.actions.folders.select('');s.actions.bulk.clear();})()`);
     await control({reset:true});
   }
 };

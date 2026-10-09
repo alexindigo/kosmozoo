@@ -93,7 +93,7 @@ async function withBrowse(run, { url = "/", saved = storage() } = {}) {
   api.activity = async () => ({ supported: false });
   api.meta = async () => ({ changed: false, pending: 0 }); api.want = async () => ({ pending: 0 });
   api.nodes = async () => ({}); api.settings = async () => ({}); api.setSettings = async () => ({}); api.prefetch = async () => ({});
-  const store = makeAppStore({ pollActivity: false, storage: saved });
+  const store = makeAppStore({ subscribeSources: null, storage: saved });
   try { await store.actions.boot(); await run({ store, saved, lists, row, navigation }); }
   finally {
     store.dispose(); store.actions.status.clear("transient"); Object.assign(api, oldApi);

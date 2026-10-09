@@ -15,11 +15,20 @@ import { Store } from "../../src/store.mjs";
 import { Cache } from "../../src/cache.mjs";
 import { Ingest } from "../../src/ingest.mjs";
 import { makeCollectionInventory } from "../../src/backings/index.mjs";
+import { Jobs } from "../../src/jobs.mjs";
+import { SourceActivity } from "../../src/source-activity.mjs";
 
 // Same injected inventory surface as the real context: driver dispatch stays
 // in the registry, state/config/scan flights belong to the address client.
 export function makeTestInventory(hosts) {
   return makeCollectionInventory(hosts);
+}
+
+// Explicit complete source-registry seam for router-only fixtures.
+export function sourceContext(ctx) {
+  const inventory = ctx.inventory ?? makeTestInventory(ctx.hosts);
+  const jobs = ctx.jobs ?? new Jobs({ hosts: ctx.hosts, client: inventory.binding });
+  return { ...ctx, inventory, jobs, sourceActivity: new SourceActivity({ store: ctx.store, hosts: ctx.hosts, inventory, jobs }) };
 }
 
 export async function mkStateRig(name, { hosts = {}, revalidateMs, feedbackPath, dir } = {}) {

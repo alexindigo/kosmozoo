@@ -164,7 +164,7 @@ export function Header() {
                 <button type="button" class={"pinned-source" + (store.state.host() === id ? " on" : "")}
                   data-source={id} aria-pressed={store.state.host() === id}
                   title={`Select ${id}`} onClick={() => store.handles.invoke("source.select", { id })}>
-                  <SourceProgress name={id} activity={store.state.sourceActivity[id]} />
+                  <SourceProgress name={id} activity={store.state.sourceActivity[id]} delivery={store.state.sourceDelivery()} />
                   <span>{id}</span>
                 </button>
               )}

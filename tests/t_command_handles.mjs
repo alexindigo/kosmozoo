@@ -107,7 +107,7 @@ Deno.test("keys: all twelve default identities/order and permissive programmatic
     ["wb.twoUp", "1", "workbench"], ["wb.oneUp", "2", "workbench"], ["wb.split", "3", "workbench"], ["wb.difference", "4", "workbench"],
     ["wb.colLeft", "ArrowLeft", "workbench"], ["wb.colRight", "ArrowRight", "workbench"], ["wb.prev", "ArrowUp", "workbench"], ["wb.next", "ArrowDown", "workbench"], ["wb.lock", "l", "workbench"],
   ]);
-  const store = makeAppStore({ pollActivity: false });
+  const store = makeAppStore({ subscribeSources: null });
   for (const binding of CORE_BINDINGS) store.actions.keys.register(binding);
   store.handles.invoke("workbench.mode", { mode: "split" });
   store.handles.invoke("workbench.column", { column: "right" });
@@ -119,7 +119,7 @@ Deno.test("keys: all twelve default identities/order and permissive programmatic
 });
 
 Deno.test("layers: stale same-ID disposer cannot erase a new owner", () => {
-  const store = makeAppStore({ pollActivity: false });
+  const store = makeAppStore({ subscribeSources: null });
   const values = [];
   store.handles.register({ id: "layer.old", execute: () => values.push("old") });
   store.handles.register({ id: "layer.new", execute: () => { values.push("new"); return false; } });
@@ -133,7 +133,7 @@ Deno.test("layers: stale same-ID disposer cannot erase a new owner", () => {
 });
 
 Deno.test("feature: dummy private capability/command/binding/affordance joins generically", () => {
-  const store = makeAppStore({ pollActivity: false });
+  const store = makeAppStore({ subscribeSources: null });
   let called = 0;
   store.actions.features.register({ name: "dummy", install: () => ({ commands: [{ id: "dummy.open", execute: () => called++ }], ports: {} }),
     bindings: [{ id: "dummy.key", key: "d", command: "dummy.open" }], cardAction: { command: "dummy.open" }, bulkAction: { command: "dummy.open" } });
@@ -227,7 +227,7 @@ Deno.test("keys: saved unknown/null overrides, missing/global collision distinct
 });
 
 Deno.test("commands: strict semantic validation and explicit null identity never fall back", () => {
-  const store = makeAppStore({ pollActivity: false });
+  const store = makeAppStore({ subscribeSources: null });
   for (const [id, args] of [
     ["workbench.mode", { mode: "invalid" }], ["workbench.lock", {}], ["workbench.column", { toggle: false }],
     ["image.download", { id: null }], ["image.delete.request", {}],
@@ -239,7 +239,7 @@ Deno.test("commands: strict semantic validation and explicit null identity never
 });
 
 Deno.test("commands: pointer/programmatic rejected Promise observed by injected adapter without wrapping", async () => {
-  const store = makeAppStore({ pollActivity: false });
+  const store = makeAppStore({ subscribeSources: null });
   const promise = Promise.reject(new Error("owned request failure"));
   store.handles.register({ id: "test.rejection", execute: () => promise });
   assertStrictEquals(store.handles.get("test.rejection").invoke(), promise);

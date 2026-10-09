@@ -1,5 +1,7 @@
 // client/js/api.mjs — engine API client. The SPA is one client of the
 // engine's public API (docs/spec.md ).
+import { subscribeSources } from "./source-events.mjs";
+export { compareSourceVersions, validSourceVersion, validSourceCursor, validateSourceSnapshot } from "./source-events.mjs";
 
 const BASE = ""; // same origin
 
@@ -49,6 +51,7 @@ const enc = encodeURIComponent;
 const entryUrl = (c, name) => `/api/collections/${enc(c)}/entries/${enc(name)}`;
 
 export const api = {
+  subscribeSources,
   collections: () => req("GET", "/api/collections"),
   addCollection: (name, address) => req("POST", "/api/collections", { name, address }),
   removeCollection: (name) => req("DELETE", `/api/collections/${enc(name)}`),

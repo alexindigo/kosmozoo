@@ -14,7 +14,7 @@ api.inventory = async (...args) => clientInventory(await api.entries(...args));
 const BOX = { w: 1000, h: 500 };
 
 Deno.test("store: workbench closed by default, current-image pointer null", () => {
-  const store = makeAppStore();
+  const store = makeAppStore({ subscribeSources: null });
   assertEquals(store.state.diff.open, false);
   assertEquals(store.state.current(), null);
 });
@@ -139,7 +139,7 @@ Deno.test("nodeImages: a LoadImage-from-output value is stripped of [output] and
 // --- current-image tracking -------------------------------------------------
 
 Deno.test("current: the replaced pointer goes onto the stack; pop walks it back", () => {
-  const store = makeAppStore();
+  const store = makeAppStore({ subscribeSources: null });
   const { assign, pop } = store.actions.current;
 
   // first pointer: nothing to push
@@ -176,7 +176,7 @@ Deno.test("current: the replaced pointer goes onto the stack; pop walks it back"
 });
 
 Deno.test("current: the stack is a bounded window", () => {
-  const store = makeAppStore();
+  const store = makeAppStore({ subscribeSources: null });
   const { assign } = store.actions.current;
   assign({ remote: "ark", image: "seed.png" });
   for (let i = 0; i < 210; i++) assign({ remote: "ark", image: `img-${i}.png` });
@@ -185,7 +185,7 @@ Deno.test("current: the stack is a bounded window", () => {
 });
 
 Deno.test("current: push:false moves the pointer without touching the stack", () => {
-  const store = makeAppStore();
+  const store = makeAppStore({ subscribeSources: null });
   const { assign } = store.actions.current;
   assign({ remote: "ark", image: "before.png" });
   assign({ remote: "ark", image: "gone.png" }); // stack: [before]
@@ -241,7 +241,7 @@ Deno.test("images.fillSize: HEAD probe fills the byte size on the right entry", 
   // globals for this process (no DOM in the unit suite)
   globalThis.location = { hash: "", pathname: "/" };
   globalThis.history = { state: null, replaceState() {}, pushState() {} };
-  const store = makeAppStore();
+  const store = makeAppStore({ subscribeSources: null });
   // fake the engine surface the store talks to (the module object is shared
   // — patched per test, restored after)
   const origEntries = api.entries;
@@ -288,7 +288,7 @@ Deno.test("current: a hidden current advances to the next visible entry (one gua
   const { api } = await import("../client/js/api.mjs");
   globalThis.location = { hash: "", pathname: "/" };
   globalThis.history = { state: null, replaceState() {}, pushState() {} };
-  const store = makeAppStore();
+  const store = makeAppStore({ subscribeSources: null });
   const origEntries = api.entries;
   const origMeta = api.meta;
   const origWant = api.want;
@@ -341,7 +341,7 @@ async function withBookmarkStore(run) {
   const saved = { ...api };
   globalThis.location = { hash: "", pathname: "/" };
   globalThis.history = { state: null, replaceState() {}, pushState() {} };
-  const store = makeAppStore();
+  const store = makeAppStore({ subscribeSources: null });
   let names = ["a.png", "b.png"];
   api.entries = async () => names.map((name) => ({
     name, size: 1, hash: null, state: "seen", meta: null, extracted: false,
@@ -492,7 +492,7 @@ Deno.test("refresh merges new entries into the feed — no wipe, pointer and nod
   const { api } = await import("../client/js/api.mjs");
   globalThis.location = { hash: "", pathname: "/" };
   globalThis.history = { state: null, replaceState() {}, pushState() {} };
-  const store = makeAppStore();
+  const store = makeAppStore({ subscribeSources: null });
   const origEntries = api.entries;
   const origMeta = api.meta;
   const origWant = api.want;
@@ -591,7 +591,7 @@ Deno.test("src window: a rendered card gets its src even when its image index is
   const { api } = await import("../client/js/api.mjs");
   globalThis.location = { hash: "", pathname: "/" };
   globalThis.history = { state: null, replaceState() {}, pushState() {} };
-  const store = makeAppStore();
+  const store = makeAppStore({ subscribeSources: null });
   const origEntries = api.entries;
   const origMeta = api.meta;
   const origWant = api.want;
@@ -759,8 +759,10 @@ async function withSourceStore(run, { initialUnknown = false } = {}) {
   api.settings = async () => ({});
   api.setSettings = async () => ({});
   api.prefetch = async () => ({ pending: {} });
-  const store = makeAppStore({ pollActivity: false });
+  const store = makeAppStore({ subscribeSources: null });
   try {
+    await store.actions.hosts.refresh();
+    for (const id of Object.keys(sources)) await store.actions.hosts.pollActivity(id);
     await store.actions.boot();
     await run({ store, api, sources, activity, lists, row });
   } finally {
