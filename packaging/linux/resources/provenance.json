@@ -1,0 +1,8 @@
+{
+  "kind": "source-development",
+  "commit": null,
+  "tree": null,
+  "sourceInputSha256": null,
+  "compiler": "2.9.6",
+  "target": "x86_64-unknown-linux-gnu"
+}

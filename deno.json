@@ -23,6 +23,7 @@
     "/js/zoomable.mjs": "./client/js/zoomable.mjs",
     "/js/rail.mjs": "./client/js/rail.mjs",
     "/js/keys.mjs": "./client/js/keys.mjs",
+    "/js/launch-notice.mjs": "./client/js/launch-notice.mjs",
     "/shared/extractor.mjs": "./src/extractor.mjs",
     "/shared/entry-path.mjs": "./src/entry-path.mjs",
     "/shared/source-origin.mjs": "./src/source-origin.mjs",

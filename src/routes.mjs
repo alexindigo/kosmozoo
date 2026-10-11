@@ -189,6 +189,12 @@ export function makeRouter(ctx) {
     });
   });
 
+  // Engine-owned cached identity only: no SQL/source/plugin inspection here.
+  add("GET", "/api/runtime", () => {
+    const runtime = ctx.runtime?.();
+    return runtime ? Response.json(runtime) : Response.json({ error: "Runtime identity unavailable" }, { status: 503 });
+  });
+
   // --- entries ----------------------------------------------------------------
 
   // The feed listing (kind=output, the default) or the input-dir listing

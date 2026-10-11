@@ -1,0 +1,12 @@
+[Unit]
+Description=Kosmozoo image engine
+
+[Service]
+Type=exec
+ExecStart=:/usr/bin/env -- {{EXECUTABLE}} serve
+EnvironmentFile=-{{ENVIRONMENT_FILE}}
+Restart=no
+TimeoutStopSec=30
+
+[Install]
+WantedBy=default.target

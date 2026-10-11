@@ -1,0 +1,13 @@
+[Desktop Entry]
+Type=Application
+Name=Kosmozoo
+Comment=Compare generated images and retain detailed feedback
+Exec=/usr/bin/env -- {{EXECUTABLE}} app
+Icon={{ICON}}
+Terminal=false
+Categories=Graphics;
+Actions=FirefoxSettings;
+
+[Desktop Action FirefoxSettings]
+Name=Dedicated Firefox settings
+Exec=/usr/bin/env -- {{EXECUTABLE}} browser-settings firefox

@@ -12,13 +12,14 @@
 
 import { readdir, stat } from "node:fs/promises";
 import { join } from "node:path";
+import { fileURLToPath, pathToFileURL } from "node:url";
 
 export function pluginDirs(env = Deno.env.toObject()) {
   const dirs = [];
   if (env.KOZMOZOO_PLUGINS) dirs.push(env.KOZMOZOO_PLUGINS);
   const xdg = env.XDG_DATA_HOME ?? join(env.HOME ?? ".", ".local", "share");
   dirs.push(join(xdg, "kosmozoo", "plugins"));
-  dirs.push(new URL("../plugins", import.meta.url).pathname); // repo-local dev tier
+  dirs.push(fileURLToPath(new URL("../plugins", import.meta.url))); // bundled/dev tier
   return dirs;
 }
 
@@ -73,7 +74,7 @@ export class PluginHost {
         if (!(await stat(candidate)).isFile()) continue;
       } catch { continue; }
       try {
-        const mod = await import(candidate);
+        const mod = await import(pathToFileURL(candidate).href);
         if (typeof mod.register === "function") await mod.register(kz);
       } catch (e) {
         console.error(`plugin ${name}: register failed —`, e.message);

@@ -1,0 +1,13 @@
+{
+  "version": 1,
+  "compilerVersion": "2.9.6",
+  "engine": "v8",
+  "target": "x86_64-unknown-linux-gnu",
+  "inputs": {
+    "compilerArchive": { "relativePath": "archives/deno-x86_64-unknown-linux-gnu.zip", "sha256": "394f07f4da2bebe6ce6f1e7ce0fa16429b29b08c35e3fac3fe25972676dff4b2" },
+    "runtimeArchive": { "relativePath": "archives/denort-x86_64-unknown-linux-gnu.zip", "sha256": "f5d889b7792cf9ad0993496e2ee5322516e7e1deba36c1a5a79a002bf00759bb" },
+    "compiler": { "relativePath": "deno/deno", "sha256": "bceb5b6a6239b0b010418406d8c77a508f67cf4337d94288f1c19fe71304aab0" },
+    "runtime": { "relativePath": "denort/denort", "sha256": "68a40ab06f919a99267138c7d154b4a4ed6c0ade035dbabc22d909d014dbf2d3" },
+    "sqlite": { "relativePath": "libsqlite3.so.0.8.6", "sha256": "2e6eef9a727f081f0d453b4e5e6cbd8b9ef8b6f86cbf7681cbad444d3b0b55c8", "package": "libsqlite3-0", "packageVersion": "3.40.1-2+deb12u2", "image": "sha256:276557be00abb1514f615b304b48cdcf9e91290b3831063ee480505d6cbf7a00" }
+  }
+}

@@ -2,18 +2,19 @@
 
 import { join, normalize, extname, relative } from "node:path";
 import { readFile } from "node:fs/promises";
+import { fileURLToPath } from "node:url";
 import { pluginDirs } from "./plugins.mjs";
 
-const CLIENT_ROOT = new URL("../client", import.meta.url).pathname;
+const CLIENT_ROOT = fileURLToPath(new URL("../client", import.meta.url));
 // The built Solid client (client-solid-dist/) is the app: it owns the shell
 // (/ and /diff) and the compiled modules; shared assets (css, vendor, the
 // framework-free /js modules, logos) still live in the client tree.
-const SOLID_ROOT = new URL("../client-solid-dist", import.meta.url).pathname;
+const SOLID_ROOT = fileURLToPath(new URL("../client-solid-dist", import.meta.url));
 
 // /shared/<name> exposes SELECTED src modules to the browser — one
 // implementation, engine and client. Allow-listed, never the whole dir.
 const SHARED_ALLOW = new Set(["extractor.mjs", "entry-path.mjs", "source-origin.mjs", "features/variations/shared.mjs"]);
-const SRC_ROOT = new URL("./", import.meta.url).pathname;
+const SRC_ROOT = fileURLToPath(new URL("./", import.meta.url));
 
 const MIME = {
   ".html": "text/html; charset=utf-8",

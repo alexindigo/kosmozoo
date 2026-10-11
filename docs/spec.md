@@ -33,6 +33,7 @@ the resources; a collection's `capabilities` answer what its backing can do.
 
 | Route | Methods | Notes |
 |---|---|---|
+| `/api/runtime` | GET | version1 cached engine identity: `protocol`, `version`, instance nonce, source-input version, mode, startup/ready/stopping status, actual binding and configured bind; no SQL/source/plugin work, no absolute state path; identity plumbing, not authentication |
 | `/api/collections` | GET | configured collections, captured `incarnation`/`sourceVersion` and flags, online probe, `kind`, `capabilities` (`list`/`read`/`add`/`delete` ∈ `trash`/`unlink`/`hide`, `rename`, `subfolders: {supported,reason}`) |
 | `/api/collections` | POST | add a source-backed collection `{name, address, pinned?, autoRefresh?}`; flags default false; repeating the same name/address preserves existing flags; different address is 409 |
 | `/api/collections/<id>` | PATCH | partial `{pinned?: boolean, autoRefresh?: boolean}`; validates the complete object before writing; invalid fields/types/null/arrays/malformed JSON are 400, unknown source is 404, empty object is a no-op; returns saved booleans and their committed `sourceVersion` without host/folder probing |
@@ -594,13 +595,17 @@ Non-obvious behaviour the rewrite must not rediscover one bug at a time.
   (no bundler, no `process` in the browser); `fetch-vendor-solid.sh`
   regenerates files and `client/vendor/CHECKSUMS` together, and
   `tests/t_vendor_pristine.mjs` fails a hand edit.
-- Native sqlite3 library comes from the system:
-  `DENO_SQLITE_PATH=/usr/lib/libsqlite3.so`.
+- Source/Docker native SQLite selection remains the explicit system library.
+  The Linux executable selects its included, pinned library before importing
+  the engine graph; a valid explicit `DENO_SQLITE_PATH` is retained. Invalid/
+  empty overrides and `DENO_SQLITE_LOCAL=1` fail without a download fallback.
+  Deno's included-native loader materializes the bytes beneath its actual temp
+  parent, which must be writable and permit executable mappings.
 - `feedback.json` is a portable judgment document, generated on demand per
   collection (`/api/collections/<id>/feedback.json`) — sqlite is canonical.
-- The supported packaged run is the [production container image](container.md),
-  with built UI, cached dependencies, native SQLite and persistent state/cache;
-  development stays one `deno run` away, and the devcontainer is for contributing.
+- Packaged runs are the [Linux executable](executable.md) and
+  [production container image](container.md), with complete built UI, native
+  SQLite and persistent state/cache; development stays one `deno run` away.
 - No ML runtime, model weights, or Python anywhere in core. Specialized
   capabilities live behind a plugin/service boundary.
 - Security deliberately deferred: no auth, no sandbox, no capability model.
@@ -615,9 +620,32 @@ an identity.
 State dir resolution: `KOZMOZOO_STATE` if set, else
 `$XDG_STATE_HOME/kosmozoo` (default `~/.local/state/kosmozoo`) — the repo
 working tree is never a state dir. Env overrides: `KOZMOZOO_PORT` (default
-2084), `KOZMOZOO_HOSTS` (first-boot seed), `KOZMOZOO_STATE`,
+2084), `KOZMOZOO_BIND`, `KOZMOZOO_HOSTS` (first-boot seed), `KOZMOZOO_STATE`,
 `KOZMOZOO_FEEDBACK` (migration import only), `KOZMOZOO_CACHE`,
 `KOZMOZOO_PLUGINS`, `KOZMOZOO_REVALIDATE_MS`.
+
+One pure bind/port resolver owns startup modes. Desktop app defaults to
+`127.0.0.1`; source development, foreground `serve` and Docker to
+`0.0.0.0`. Explicit bind/whole-port overrides win; malformed/empty values fail.
+Browser destinations normalize loopback/wildcards to localhost and retain an
+actually reachable explicitly selected interface (bracketed for IPv6).
+
+New engines acquire an awaited exclusive lock on a stable real-filesystem
+`engine.lock` before Store/workers. Private atomic metadata binds readiness to
+the held inode and nonce; aliases/host-container path namespaces need not have
+the same absolute path. App reuse requires the matching ready endpoint and
+refuses copied/unrelated state, legacy/unrelated listeners and explicit override
+conflicts without killing, port hopping, reconfiguration or reseeding. The lock
+inode is never unlinked. Factories retire resources they acquired on failure;
+borrowed test resources stay caller-owned. Normal/failure drainage fences source
+admission/streams first, then Jobs/inventory/prefetch/HTTP/Store and the lease.
+
+Native browser adapters use stable dedicated provider profiles and safe argv,
+outside engine Context/Store/plugins. Firefox native registration is additionally
+checked against the requested URI, preventing hostname-only reuse of an old
+port. Unavailable/unknown/conflicting native app capability uses the selected-port
+ordinary-browser URL with a whitelisted transient Store-owned status notice;
+no prefs/registry/profile/lock reset or notice persistence is performed.
 
 ### Schema (`metadata.db`, `PRAGMA user_version = 9`, ordered migrations)
 

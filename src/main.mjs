@@ -1,61 +1,75 @@
-// src/main.mjs — engine entry point.
-//
-// Running kosmozoo stays one `deno run` away:
-//   deno run --allow-all src/main.mjs
-//
-// Environment overrides: KOZMOZOO_PORT (default 2084), KOZMOZOO_HOSTS,
-// KOZMOZOO_STATE, KOZMOZOO_FEEDBACK (migration import only — sqlite is
-// canonical), KOZMOZOO_CACHE, KOZMOZOO_PLUGINS, KOZMOZOO_REVALIDATE_MS.
-
-import { CorruptStateError } from "./state.mjs";
+// One engine operation for compiled CLI, source development and the Deno image.
+import { resolveStateDir } from "./state.mjs";
 import { buildContext } from "./context.mjs";
 import { serveStatic } from "./static.mjs";
+import { resolveRuntime, browserOrigin } from "./runtime-config.mjs";
+import { acquireInstance, RUNTIME_PROTOCOL, RUNTIME_VERSION } from "./instance.mjs";
+import { reportStartupError } from "./startup-error.mjs";
+export { reportStartupError } from "./startup-error.mjs";
 
-const PORT = parseInt(Deno.env.get("KOZMOZOO_PORT") ?? "2084", 10);
-
-// A corrupt state file stops the boot: the bytes were quarantined by the
-// state layer; the human repairs or removes them and starts again.
-let ctx, router, discovered;
-try {
-  ({ ctx, router, discovered } = await buildContext({ env: Deno.env.toObject() }));
-} catch (e) {
-  if (e instanceof CorruptStateError) {
-    console.error(`kosmozoo: corrupt state file: ${e.path}`);
-    console.error(`kosmozoo: original bytes preserved at: ${e.quarantined}`);
-    console.error(`kosmozoo: repair the JSON and move it back, or delete it to start empty — the engine never overwrites an unreadable state file`);
-    Deno.exit(1);
+export async function startEngine({ mode = "source", env = Deno.env.toObject(), lease = null, sourceVersion = "source-development" } = {}) {
+  const config = resolveRuntime(mode, env);
+  const ownership = lease ?? await acquireInstance(resolveStateDir(env));
+  if (!ownership.owner) throw new Error("Another engine owns the selected state; use app mode to open its matching ready instance");
+  let server, context, handler, settleHandler, shutdownTask, runtime;
+  let httpFinished = false;
+  const handlerReady = new Promise(resolve => { settleHandler = resolve; });
+  const signals = [];
+  const drainHttp = async () => { if (server && !httpFinished) await server.shutdown(); };
+  const shutdown = () => {
+    if (shutdownTask) return shutdownTask;
+    if (runtime) runtime = Object.freeze({ ...runtime, status: "stopping" });
+    // Context owns its children and fences source admission synchronously.
+    const drainage = context ? context.close({ drainHttp }) : drainHttp();
+    shutdownTask = (async () => {
+      const failures = [];
+      try {
+        if (runtime) await ownership.publish(runtime);
+      } catch (error) { failures.push(error); }
+      try { await drainage; } catch (error) { failures.push(error); }
+      for (const signal of signals) Deno.removeSignalListener(signal, onSignal);
+      try { await ownership.release(); } catch (error) { failures.push(error); }
+      if (failures.length) throw new AggregateError(failures, "Engine shutdown failed");
+    })();
+    return shutdownTask;
+  };
+  const onSignal = () => { shutdown().catch(error => { reportStartupError(error); Deno.exitCode = 1; }); };
+  try {
+    // Reserve the requested port before Store/worker construction. A legacy or
+    // unrelated listener fails without first-boot seeding or a replacement writer.
+    server = Deno.serve({ ...config.binding, onListen() {} }, req => handler ? handler(req) : handlerReady.then(ready => ready(req)));
+    server.finished.then(() => { httpFinished = true; });
+    runtime = Object.freeze({ protocol: RUNTIME_PROTOCOL, version: RUNTIME_VERSION, instance: ownership.instance,
+      sourceVersion, mode, status: "starting", binding: { hostname: server.addr.hostname, port: server.addr.port }, configuredBind: config.binding.hostname });
+    await ownership.publish(runtime);
+    context = await buildContext({ env, runtime: () => runtime });
+    handler = async req => {
+      const url = new URL(req.url);
+      if (!url.pathname.startsWith("/api/")) return serveStatic(url.pathname);
+      try { return await context.router.handle(req); }
+      catch (error) { return Response.json({ error: String(error.message ?? error) }, { status: 500 }); }
+    };
+    runtime = Object.freeze({ ...runtime, status: "ready" });
+    await ownership.publish(runtime);
+    settleHandler(handler);
+    for (const signal of ["SIGINT", "SIGTERM"]) { Deno.addSignalListener(signal, onSignal); signals.push(signal); }
+    const browserURL = browserOrigin(runtime.binding);
+    const host = runtime.binding.hostname.includes(":") ? `[${runtime.binding.hostname}]` : runtime.binding.hostname;
+    console.log(`kosmozoo engine listening on ${host}:${runtime.binding.port}; browser: ${browserURL} (state: ${context.ctx.paths.state})`);
+    console.log(`collections: ${Object.keys(context.ctx.hosts).join(", ")}`);
+    if (context.discovered.length) console.log(`plugins: ${context.discovered.map(plugin => plugin.name).join(", ")}`);
+    const finished = server.finished.then(() => shutdown());
+    return Object.freeze({ server, browserURL, runtime: () => runtime, shutdown, finished });
+  } catch (error) {
+    handler = () => Response.json({ error: "Engine startup failed" }, { status: 503 });
+    settleHandler(handler);
+    try { await shutdown(); }
+    catch (cleanupError) { throw new AggregateError([error, cleanupError], "Engine initialization and cleanup failed", { cause: error }); }
+    throw error;
   }
-  throw e;
 }
 
-const server = Deno.serve({ port: PORT }, async (req) => {
-  const url = new URL(req.url);
-  if (url.pathname.startsWith("/api/")) {
-    try {
-      return await router.handle(req);
-    } catch (e) {
-      return Response.json({ error: String(e?.message ?? e) }, { status: 500 });
-    }
-  }
-  // static.mjs maps the SPA, /shared/*, and /plugins/<name>/client.js
-  return serveStatic(url.pathname);
-});
-
-let stopping = false;
-const shutdown = async () => {
-  if (stopping) return;
-  stopping = true;
-  ctx.sourceActivity.stop();
-  await ctx.jobs.stop();
-  await ctx.inventory.stop();
-  await ctx.prefetch.stop();
-  await server.shutdown();
-  ctx.store.close();
-};
-for (const signal of ["SIGINT", "SIGTERM"]) Deno.addSignalListener(signal, shutdown);
-
-console.log(`kosmozoo engine on http://127.0.0.1:${PORT} (state: ${ctx.paths.state})`);
-console.log(`collections: ${Object.keys(ctx.hosts).join(", ")}`);
-if (discovered.length) {
-  console.log(`plugins: ${discovered.map((p) => p.name).join(", ")}`);
+if (import.meta.main) {
+  try { const engine = await startEngine(); await engine.finished; }
+  catch (error) { reportStartupError(error); Deno.exitCode = 1; }
 }

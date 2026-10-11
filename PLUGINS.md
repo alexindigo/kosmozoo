@@ -15,7 +15,14 @@ Discovery checks, in order:
 
 1. `$KOZMOZOO_PLUGINS`
 2. `$XDG_DATA_HOME/kosmozoo/plugins/` (default `~/.local/share/kosmozoo/plugins/`)
-3. `./plugins/` in the repo — the development tier
+3. Module-relative bundled `plugins/` — the development repo tier or the selected
+   embedded/container tier
+
+The Linux executable preserves trusted local `.ts`, `.mjs` and `.js` drop-ins,
+including relative module imports; packaged bytes are not a reason to replace
+user plugin data. Its explicit payload contains the six selected engine/client
+files for hello, difference, detector and critic. Detector's Python service,
+worker and model assets remain external and are not embedded in core.
 
 ## Shape
 
@@ -35,12 +42,12 @@ What `register(kz)` can touch:
 
 | Call | Kind | Purpose |
 |---|---|---|
-| `kz.mode(id, def)` | capability | a composition mode (client half picks it up) |
-| `kz.alignment(id, def)` | capability | an alignment contribution (e.g. `face-anchored`) |
+| `kz.mode(id, def)` | capability | a composition-mode declaration; plugin client halves are not loaded by the current SPA, so that comparison axis is dormant |
+| `kz.alignment(id, def)` | capability | an alignment contribution (e.g. `face-anchored`); same current SPA client-half limitation |
 | `kz.route(method, path, handler)` | route | server route under `/api/plugins/<name><path>` |
 | `kz.settings.get/set(k, v)` / `.ns()` | persistence | namespaced `plugins.<name>.*` settings — core never sees them |
 | `kz.store.getField/setField(collection, name, field, v)` | persistence | plugin fields on the judgment record, namespaced |
-| `kz.judgments.get/set(collection, name, …)` / `.all()` | data | the core judgment record (notes/vote/favorite) |
+| `kz.judgments.get/set(collection, name, …)` / `.all()` | data | the core judgment record (notes/vote/favorite/bookmark) |
 | `kz.content.bytes(hash)` / `.graph(hash)` / `.bytesForEntry(collection, name)` | data | engine-mediated content access — no plugin talks to a host or the cache directly |
 | `kz.reason(status, error, reason)` | shape | the shared `{error, reason}` failure response |
 

@@ -283,25 +283,35 @@ export class Store {
     const s = new Store();
     const dbPath = join(stateDir, "metadata.db");
     s.#db = new Database(dbPath);
-    s.#db.exec("PRAGMA journal_mode = WAL");
-    // the schema declares ON DELETE CASCADE and entry→content references —
-    // without this pragma they are decoration
-    s.#db.exec("PRAGMA foreign_keys = ON");
-    s.#runMigrations();
-    s.#q = Object.fromEntries(
-      Object.entries(STATEMENTS).map(([k, sql]) => [k, s.#db.prepare(sql)]),
-    );
-    await s.#foldV7(settings);
-    const stats = await s.#importFeedbackV1(feedbackPath, settings);
-    if (stats) {
-      console.log(
-        `feedback v1 import: ${stats.applied} applied` +
-          ` (${stats.fannedOut} fanned out by hash, ${stats.orphansByRef} recovered via ref),` +
-          ` ${stats.dropped} dropped`,
+    try {
+      s.#db.exec("PRAGMA journal_mode = WAL");
+      // the schema declares ON DELETE CASCADE and entry→content references —
+      // without this pragma they are decoration
+      s.#db.exec("PRAGMA foreign_keys = ON");
+      s.#runMigrations();
+      s.#q = Object.fromEntries(
+        Object.entries(STATEMENTS).map(([k, sql]) => [k, s.#db.prepare(sql)]),
       );
+      await s.#foldV7(settings);
+      const stats = await s.#importFeedbackV1(feedbackPath, settings);
+      if (stats) {
+        console.log(
+          `feedback v1 import: ${stats.applied} applied` +
+            ` (${stats.fannedOut} fanned out by hash, ${stats.orphansByRef} recovered via ref),` +
+            ` ${stats.dropped} dropped`,
+        );
+      }
+      s.#ready = true;
+      return s;
+    } catch (error) {
+      // Ownership transfers only on return. The caller cannot close an
+      // unreturned Store; the binding also retires partially prepared statements.
+      try { s.close(); }
+      catch (cleanupError) {
+        throw new AggregateError([error, cleanupError], "Store initialization and resource cleanup failed", { cause: error });
+      }
+      throw error;
     }
-    s.#ready = true;
-    return s;
   }
 
   // --- feedback.json v1 → entry columns (one-time) -------------------------

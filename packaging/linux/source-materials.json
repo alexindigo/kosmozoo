@@ -1,0 +1,15 @@
+{
+  "version": 1,
+  "noticeFiles": {
+    "packaging/linux/resources/THIRD_PARTY_NOTICES.txt": "f247a003e604fa3ce1352449748cf6e20b9f711e1596f28b9caf423364b9acaf",
+    "packaging/linux/resources/NOTICE-SOURCES.json": "d2f35f74206be267cbabfe10cb9fb7ee1da5074fb64d66e28fd5f37c2d2641dc"
+  },
+  "materials": [
+    { "path": "assembled/denort-corresponding-dependency-source.tar.gz", "sha256": "676c3fbbe31501693c8d0493f2868d5b40fb2c0b149e0ad2b49ff306fd478569" },
+    { "path": "assembled/dependency-source-manifest.json", "sha256": "950707705e4bf7568a541e2e604dbe48e4eabae603a411426626c753850a542e" },
+    { "path": "sqlite-source/sqlite3_3.40.1-2+deb12u2.dsc", "sha256": "ee3459ae9d00939741c7708fc1b8ce1bde12d8c3fb1dfa005bbbc8651d884e23" },
+    { "path": "sqlite-source/sqlite3_3.40.1-2+deb12u2.debian.tar.xz", "sha256": "0843bc12e4364076477935ce313a6d0796fd899a989ff18ebb6545540e10e4ca" },
+    { "path": "sqlite-source/sqlite3_3.40.1.orig-www.tar.xz", "sha256": "a5e95a18d1b59729278860559ded78751b9163ffb5bb906c5cd24c015f71d5fd" },
+    { "path": "sqlite-source/sqlite3_3.40.1.orig.tar.xz", "sha256": "aaa776260ab4dc976db34aa7891819484c8676b5b2783123ebc6301e2ca5d655" }
+  ]
+}

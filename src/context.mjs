@@ -20,20 +20,39 @@ import { makeRouter } from "./routes.mjs";
 import { Cache } from "./cache.mjs";
 import { FEATURES } from "./features/index.mjs";
 
-export async function buildContext({ env = Deno.env.toObject(), fakes = {}, start = true } = {}) {
+export async function buildContext({ env = Deno.env.toObject(), fakes = {}, start = true, runtime = null } = {}) {
+  const owned = {};
+  let closeTask;
+  const remember = (name, value, borrowed) => { if (!borrowed) owned[name] = value; return value; };
+  const close = ({ drainHttp = async () => {} } = {}) => {
+    if (closeTask) return closeTask;
+    const failures = [];
+    // Fence source/Variations admission and streams synchronously at entry.
+    try { owned.sourceActivity?.stop(); } catch (error) { failures.push(error); }
+    closeTask = (async () => {
+      for (const name of ["jobs", "inventory", "prefetch"]) {
+        try { await owned[name]?.stop(); } catch (error) { failures.push(error); }
+      }
+      try { await drainHttp(); } catch (error) { failures.push(error); }
+      try { owned.store?.close(); } catch (error) { failures.push(error); }
+      if (failures.length) throw new AggregateError(failures, "Context resource cleanup failed");
+    })();
+    return closeTask;
+  };
+  try {
   const stateDir = fakes.stateDir ?? await ensureStateDir(resolveStateDir(env));
   const settings = fakes.settings ?? await Settings.open(stateDir);
-  const store = fakes.store ?? await Store.open(stateDir, {
+  const store = remember("store", fakes.store ?? await Store.open(stateDir, {
     settings,
     feedbackPath: settings.get("core", "feedbackPath", null)
       ?? env.KOZMOZOO_FEEDBACK
       ?? `${env.HOME}/Documents/kosmozoo_feedback.json`,
-  });
+  }), fakes.store != null);
   const hosts = fakes.hosts ?? await loadCollections(store, env);
   const cache = fakes.cache ?? new Cache(
     env.KOZMOZOO_CACHE ?? `${env.HOME ?? "/tmp"}/.local/share/kosmozoo/cache`,
   );
-  const inventory = fakes.inventory ?? backings.makeCollectionInventory(hosts);
+  const inventory = remember("inventory", fakes.inventory ?? backings.makeCollectionInventory(hosts), fakes.inventory != null);
   const ingest = fakes.ingest ?? new Ingest(store, hosts, {
     cache,
     capture: inventory.capture, isCurrent: inventory.isCurrent,
@@ -44,8 +63,8 @@ export async function buildContext({ env = Deno.env.toObject(), fakes = {}, star
   // same address owner and collection-incarnation validation seam.
   const clientAt = inventory.binding;
   const comfy = (collection) => clientAt(hosts[collection]);
-  const prefetch = fakes.prefetch ?? new Prefetch({ hosts, store, settings, ingest, inventory });
-  const jobs = fakes.jobs ?? new Jobs({
+  const prefetch = remember("prefetch", fakes.prefetch ?? new Prefetch({ hosts, store, settings, ingest, inventory }), fakes.prefetch != null);
+  const jobs = remember("jobs", fakes.jobs ?? new Jobs({
     hosts, client: clientAt,
     onFinish(address, sources) {
       clientAt(address).invalidateInventory();
@@ -53,8 +72,8 @@ export async function buildContext({ env = Deno.env.toObject(), fakes = {}, star
         if (store.collectionGet(id)?.auto_refresh) prefetch.requestRelist(id);
       }
     },
-  });
-  const sourceActivity = fakes.sourceActivity ?? new SourceActivity({ store, hosts, inventory, jobs });
+  }), fakes.jobs != null);
+  const sourceActivity = remember("sourceActivity", fakes.sourceActivity ?? new SourceActivity({ store, hosts, inventory, jobs }), fakes.sourceActivity != null);
 
   // plugin routes are collected here and mounted once the router exists —
   // the context (plugin host included) is fully built before the router,
@@ -67,7 +86,7 @@ export async function buildContext({ env = Deno.env.toObject(), fakes = {}, star
   const discovered = plugins === fakes.plugins ? [] : await plugins.discover();
 
   const ctx = {
-    settings, store, hosts, backings, cache, ingest, prefetch, jobs, sourceActivity, plugins,
+    settings, store, hosts, backings, cache, ingest, prefetch, jobs, sourceActivity, plugins, runtime,
     features: [],
     comfy, inventory,
     paths: { state: stateDir },
@@ -99,5 +118,12 @@ export async function buildContext({ env = Deno.env.toObject(), fakes = {}, star
   ctx.features = features.map((f) => f.name);
 
   if (start) { prefetch.start(); jobs.start(); }
-  return { ctx, router, discovered };
+  return { ctx, router, discovered, close };
+  } catch (error) {
+    try { await close(); }
+    catch (cleanupError) {
+      throw new AggregateError([error, cleanupError], "Context initialization and resource cleanup failed", { cause: error });
+    }
+    throw error;
+  }
 }

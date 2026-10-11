@@ -37,6 +37,7 @@ import { cardState } from "./card-state.js";
 import { makeCommandHandles } from "./command-handles.js";
 import { registerCoreCommands, commandFacades } from "./core-commands.js";
 import { makeInputPolicy } from "./input-policy.js";
+import { launchNotice } from "/js/launch-notice.mjs";
 
 // stored host if still present, else first online, else first
 function initialHost(hosts, stored) {
@@ -1446,6 +1447,17 @@ export function makeAppStore({ subscribeSources = typeof window !== "undefined" 
     // api.hosts is deliberately not caught — a failed host list fails the
     // whole boot (the caller surfaces it).
     async boot() {
+      // Whitelisted, browser-local presentation only. The existing status owner
+      // renders sticky plain text; no query text becomes commands or HTML.
+      if (typeof window !== "undefined" && window.location?.href) {
+        const url = new URL(window.location.href);
+        const message = launchNotice(url.searchParams.get("launchReason"), url.origin + "/");
+        if (message) {
+          actions.status.error(message);
+          url.searchParams.delete("launchReason");
+          window.history.replaceState(window.history.state, "", url.href);
+        }
+      }
       startDelivery();
       await refreshHosts();
       const ui = await api.settings("core.ui").catch(() => ({}));
