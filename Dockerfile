@@ -46,11 +46,14 @@ COPY --from=builder /app/client-solid-dist/ client-solid-dist/
 COPY --from=builder /app/deno.json /app/deno.lock ./
 COPY --from=builder /opt/kosmozoo/plugins/ /opt/kosmozoo/plugins/
 COPY --from=builder --chown=kosmozoo:kosmozoo /deno-dir/ /deno-dir/
+COPY LICENSE LICENSE.GPL /usr/share/doc/kosmozoo/
+COPY packaging/linux/resources/THIRD_PARTY_NOTICES.txt packaging/linux/resources/NOTICE-SOURCES.json /usr/share/doc/kosmozoo/
 ENV HOME=/data \
     KOZMOZOO_STATE=/data/state \
     KOZMOZOO_CACHE=/data/cache \
     KOZMOZOO_PLUGINS=/opt/kosmozoo/plugins \
     KOZMOZOO_PORT=2084 \
+    KOZMOZOO_BIND=0.0.0.0 \
     KOZMOZOO_HOSTS="" \
     DENO_SQLITE_PATH=/usr/lib/libsqlite3.so \
     DENO_DIR=/deno-dir

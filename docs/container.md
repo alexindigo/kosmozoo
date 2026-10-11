@@ -48,8 +48,9 @@ can be refilled from available sources; retain it when those sources may disappe
 Never use live production state for a proving run. Current schema/migration
 contracts are documented in [the spec](spec.md).
 
-`docker stop --timeout 30 kosmozoo-image` delivers SIGTERM. The engine stops
-jobs/inventory/prefetch, drains its HTTP server and closes SQLite before exiting.
+`docker stop --timeout 30 kosmozoo-image` delivers SIGTERM. The engine fences
+source admission and native event streams first, then stops jobs/inventory/prefetch,
+drains its HTTP server and closes SQLite and its cooperative state lease before exiting.
 Restart the same container with `docker start kosmozoo-image`, or recreate it
 using the same two volume names. Avoid force-removal when you want graceful close.
 
@@ -74,13 +75,14 @@ and source flags retain their existing semantics.
 | # | Environment variable | Image default / purpose |
 |---|---|---|
 | 1 | `KOZMOZOO_PORT` | `2084`, container listen port; update port publishing if overridden. |
-| 2 | `KOZMOZOO_HOSTS` | Empty; comma-separated `name=host:port` or `name=folder:/path` seed for an empty collection table. |
-| 3 | `KOZMOZOO_STATE` | `/data/state`. |
-| 4 | `KOZMOZOO_CACHE` | `/data/cache`. |
-| 5 | `KOZMOZOO_FEEDBACK` | Optional legacy v1 judgment import path, never a canonical output file. Mount the import document with the disposable/migrated state as appropriate. |
-| 6 | `KOZMOZOO_PLUGINS` | `/opt/kosmozoo/plugins`, packaged hello/difference/detector/critic modules. |
-| 7 | `KOZMOZOO_REVALIDATE_MS` | Engine default, cache revalidation debounce override. |
-| 8 | `DENO_SQLITE_PATH` | `/usr/lib/libsqlite3.so`, linked to Debian's native library. |
+| 2 | `KOZMOZOO_BIND` | `0.0.0.0`; explicit bind overrides use the same strict resolver as source and executable modes. |
+| 3 | `KOZMOZOO_HOSTS` | Empty; comma-separated `name=host:port` or `name=folder:/path` seed for an empty collection table. |
+| 4 | `KOZMOZOO_STATE` | `/data/state`. |
+| 5 | `KOZMOZOO_CACHE` | `/data/cache`. |
+| 6 | `KOZMOZOO_FEEDBACK` | Optional legacy v1 judgment import path, never a canonical output file. Mount the import document with the disposable/migrated state as appropriate. |
+| 7 | `KOZMOZOO_PLUGINS` | `/opt/kosmozoo/plugins`, packaged hello/difference/detector/critic modules. |
+| 8 | `KOZMOZOO_REVALIDATE_MS` | Engine default, cache revalidation debounce override. |
+| 9 | `DENO_SQLITE_PATH` | `/usr/lib/libsqlite3.so`, linked to Debian's native library. |
 
 Plugin discovery retains its existing tiers: the configured path, then
 `$XDG_DATA_HOME/kosmozoo/plugins` (default `/data/.local/share/kosmozoo/plugins`).
@@ -122,3 +124,35 @@ evidence, checks non-root execution and graceful shutdown, and refuses occupied
 test resources. `KOSMOZOO_IMAGE` overrides the default `kosmozoo:local` tag; the
 runner records and runs its resolved image ID. See [verification.md](verification.md)
 for the separate full staged-project pre-commit hook.
+
+`tests/release/verify-image.sh --image <immutable-id-or-tag> --evidence <fresh-dir>
+--rollback-source <prepared-old-source>` provides the separate cold/migration and
+rootless rehearsal. The old source has its own verified manifest and built client;
+only the retained old-deployment leg receives that source bind. Replacement
+engines receive image code and data-only mounts. It records actual system SQLite
+package/library bytes, Docker save config and uncompressed layer digests, imported
+Podman runtime identity, keep-id data writes, recreation, code rollback retaining
+new writes, and full-pair snapshot recovery into fresh disposable siblings.
+Stopped containers, images, archive and before/after state/cache remain available;
+the driver never prunes images or fixes ownership with recursive chown.
+
+Project and dependency licence notices accompany the image under
+`/usr/share/doc/kosmozoo/`. The source/build material and final clean-commit artifact
+identity remain separate distribution gates; mutable Debian inputs are measured,
+not represented as the executable's independently pinned native input.
+
+The cutover checkpoint has two additional VM-only helpers.
+`check-cutover-snapshot.sh --evidence <dir>` reads `snapshot-input.json` containing
+the stopped-writer receipt, complete state/cache path/hash/mode/ownership inventory
+and canonical SQLite/settings fingerprint; it requires schema9, integrity/FK
+checks and every content-addressed cache file. Prepare the stopped snapshot and
+seal that fresh baseline during the approved no-writer interval, not from a live
+database or historical user-data counts.
+`verify-deployed-readonly.sh --evidence <dir>` reads `readonly-input.json` with the
+expected four shared-module hashes, known cached-content hashes/sizes and current
+canonical source addresses/flags. Its fixed production origin is
+`http://architect.home:2084`; requests are only GETs for runtime identity, those
+shared modules, direct cached content and one120-second native SSE connection.
+It does not list upstream inventories or exercise SPA/generation/settings writes.
+The explicit `--fixture-origin` accepts only loopback for disposable guest proof;
+its receipt labels fixture evidence and cannot be presented as production proof.
