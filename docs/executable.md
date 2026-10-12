@@ -150,6 +150,12 @@ and license/source-rebuild material, checksums, measured ABI compatibility and
 actual executable/image consumer evidence. The packaging driver does not publish
 or create a release version/tag.
 
+Public application-source and global package consumers use the explicit
+[publication input/resource contract](../packaging/linux/PUBLICATION.md), backed
+by the same authenticated compile core as the guarded developer wrapper. Global
+resource rendering shares the self-installer's templates and escaping; pacman
+ownership never invokes that installer or activates services/profiles.
+
 ## Verification
 
 Release workloads run in the identified Kosmozoo VM, never on the editing host.

@@ -1,35 +1,18 @@
 // Optional user-local installation. Activation is one current-code symlink;
 // launcher/unit/menu/icon links all refer through it. Previous code is retained.
-import { join, isAbsolute } from "node:path";
+import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { getuid } from "node:process";
 import { desktopPaths, ownedDirectory, privateDirectory, privateJson, textOrMissing } from "./paths.mjs";
 import { resolveStateDir } from "../state.mjs";
 import { acquireInstance, matchingInstance, peekInstance } from "../instance.mjs";
 import { resolveRuntime } from "../runtime-config.mjs";
+import { renderResources } from "./resources.mjs";
+export { desktopArgument, systemdArgument, systemdPath } from "./resources.mjs";
 
 const UNIT = "kosmozoo-engine.service";
 const bytes = text => new TextEncoder().encode(text);
 const digest = async data => Array.from(new Uint8Array(await crypto.subtle.digest("SHA-256", data)), byte => byte.toString(16).padStart(2, "0")).join("");
-function pathText(path) {
-  if (!isAbsolute(path) || /[\x00-\x1f\x7f]/.test(path)) throw new Error("Managed paths must be absolute and have no control characters");
-  return path;
-}
-export function systemdArgument(path) {
-  return '"' + pathText(path).replace(/\\/g, "\\\\").replace(/"/g, '\\"').replace(/%/g, "%%") + '"';
-}
-export function systemdPath(path) {
-  // EnvironmentFile= is one path value, not ExecStart's argv grammar. Its
-  // parser expands specifiers but does not remove an argument quote envelope.
-  return pathText(path).replace(/%/g, "%%");
-}
-export function desktopArgument(path) {
-  pathText(path);
-  if (path.includes("=")) throw new Error("Desktop executable paths cannot contain '=' under the desktop-entry specification");
-  const quoted = '"' + path.replace(/[\\"`$]/g, match => "\\" + match).replace(/%/g, "%%") + '"';
-  return quoted.replace(/\\/g, "\\\\");
-}
-const desktopValue = path => pathText(path).replace(/\\/g, "\\\\");
 const resource = name => Deno.readTextFile(new URL(`../../packaging/linux/resources/${name}`, import.meta.url));
 
 async function info(path) {
@@ -127,8 +110,8 @@ export async function install({ env = Deno.env.toObject(), service = false, prov
   if (loaded.LoadState && loaded.LoadState !== "not-found" && !old) throw new Error("An unmanaged kosmozoo-engine.service is already loaded");
   const binary = await Deno.readFile(Deno.execPath());
   const executableSha256 = await digest(binary);
-  const unit = (await resource(UNIT + ".in")).replace("{{EXECUTABLE}}", systemdArgument(launcher)).replace("{{ENVIRONMENT_FILE}}", systemdPath(join(paths.config, "engine.env")));
-  const desktop = (await resource("kosmozoo.desktop.in")).replaceAll("{{EXECUTABLE}}", desktopArgument(launcher)).replace("{{ICON}}", desktopValue(icon));
+  const { unit, desktop } = renderResources({ unitTemplate: await resource(UNIT + ".in"), desktopTemplate: await resource("kosmozoo.desktop.in"),
+    executable: launcher, icon, environmentFile: join(paths.config, "engine.env") });
   const image = await Deno.readFile(new URL("../../client/logo-256.png", import.meta.url));
   const files = { kosmozoo: binary, [UNIT]: bytes(unit), "kosmozoo.desktop": bytes(desktop), "icon.png": image,
     "THIRD_PARTY_NOTICES.txt": bytes(await resource("THIRD_PARTY_NOTICES.txt")), "NOTICE-SOURCES.json": bytes(await resource("NOTICE-SOURCES.json")) };

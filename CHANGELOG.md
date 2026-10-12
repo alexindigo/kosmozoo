@@ -6,6 +6,15 @@ changelog is frozen with it on `main` (tag `python-final`).
 Entries below follow the rewrite's phases. Each entry names the contract it
 implements from `docs/spec.md`.
 
+## 0.2.0 — release preparation
+
+- Ordinary Deno Linux x86_64 single executable with complete client, authenticated
+  native inputs and source-traceable dependency/license material; installed-browser
+  app launch and optional receipt-managed user installation preserve persistent data.
+- Shared portable build/payload/global-resource contract for source and prebuilt
+  packaging, retaining the developer wrapper's strict VM guard. The official
+  executable checksum is recorded after the reviewed tagged artifact is frozen.
+
 ## Unreleased
 
 - Empty the tree; devcontainer (Deno + git, capped runArgs); spec
