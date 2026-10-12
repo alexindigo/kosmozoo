@@ -12,14 +12,19 @@ spec=spec_from_file_location('runtime_probe',Path(__file__).with_name('verify-ru
 probe=module_from_spec(spec);spec.loader.exec_module(probe)
 
 
-def main():
-    probe.require_vm()
+def main(publication_uuid=None):
+    if publication_uuid is None:
+        probe.require_vm()
+    else:
+        from publication_vm import require_vm as require_publication_vm
+        require_publication_vm(publication_uuid)
     parser=argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--binary',type=Path,required=True)
     parser.add_argument('--evidence',type=Path,required=True)
+    parser.add_argument('--inputs',type=Path)
     args=parser.parse_args()
     run=args.evidence.resolve();run.parent.resolve(strict=True);run.mkdir(mode=0o700)
-    inputs=Path('/home/tester/kosmozoo-linux-release-evidence/release-continuation/release-inputs')
+    inputs=args.inputs or Path('/home/tester/kosmozoo-linux-release-evidence/release-continuation/release-inputs')
     files={'denort':inputs/'denort/denort','sqlite':inputs/'libsqlite3.so.0.8.6','binary':args.binary.resolve(strict=True)}
     rows={}
     for name,path in files.items():

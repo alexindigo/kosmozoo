@@ -15,8 +15,12 @@ spec = spec_from_file_location('runtime_probe', Path(__file__).with_name('verify
 runtime_probe = module_from_spec(spec); spec.loader.exec_module(runtime_probe)
 
 
-def main():
-    runtime_probe.require_vm()
+def main(publication_uuid=None):
+    if publication_uuid is None:
+        runtime_probe.require_vm()
+    else:
+        from publication_vm import require_vm as require_publication_vm
+        require_publication_vm(publication_uuid)
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--binary', type=Path, required=True)
     parser.add_argument('--evidence', type=Path, required=True)
@@ -48,6 +52,16 @@ def main():
     with __import__('socket').socket() as sock:
         sock.bind(('127.0.0.1', 2084))
     unit = 'kz-native-chromium-' + run.name
+    ownership = None
+    if publication_uuid is not None:
+        from publication_owner import unit_state, retire_engine, close_owned_windows, verified_window
+        unit = 'kz-pub-chromium-' + hashlib.sha256(str(run).encode()).hexdigest()[:16]
+        assert unit_state(unit)['LoadState'] == 'not-found', 'Existing Chromium test unit must be preserved'
+        env['KZ_PUBLICATION_OWNER'] = hashlib.sha256((str(run) + runtime_probe.sha(binary)).encode()).hexdigest()
+        ownership = {'unit': unit, 'units': [unit], 'env': env, 'uiScopes': [str(run)],
+                     'publicationOwner': {'token': env['KZ_PUBLICATION_OWNER'], 'binary': str(binary),
+                                          'binarySha256': runtime_probe.sha(binary)}}
+        (run / 'ownership.json').write_text(json.dumps(ownership, indent=2) + '\n')
     assert subprocess.run(['systemctl', '--user', 'is-active', unit], capture_output=True).returncode != 0
     initial = json.loads(subprocess.check_output(['niri', 'msg', '--json', 'windows'], env=gui))
     initial_ids = {window['id'] for window in initial}
@@ -69,6 +83,8 @@ def main():
         return next((window for window in windows() if window['id'] not in initial_ids and window['title'] == 'kosmozoo'), None)
 
     def capture(name, window):
+        if ownership is not None and verified_window(ownership, window) is None:
+            raise RuntimeError('Native Chromium target ownership differs; preserve it')
         subprocess.run(['niri', 'msg', 'action', 'focus-window', '--id', str(window['id'])], env=gui, check=True)
         time.sleep(0.5)
         subprocess.run(['grim', str(run / (name + '.png'))], env=gui, check=True)
@@ -79,6 +95,8 @@ def main():
                    '--property=StandardOutput=file:' + str(run / 'launcher.log'),
                    '--property=StandardError=file:' + str(run / 'launcher.log')]
         command += ['--setenv=' + key + '=' + value for key, value in env.items()]
+        if publication_uuid is not None:
+            command += ['--property=RuntimeMaxSec=900', '--property=TimeoutStopSec=30', '--property=RemainAfterExit=yes']
         command += [str(binary), 'app', '--browser=/usr/bin/chromium']
         subprocess.run(command, env=gui, check=True)
         started = True
@@ -126,7 +144,13 @@ def main():
         subprocess.run(['niri', 'msg', 'action', 'close-window', '--id', str(repeated['id'])], env=gui, check=True)
         print('NATIVE CHROMIUM OUTCOMES: first/repeated window, private persistent profile, one surviving engine; review captures for app chrome')
     finally:
-        for window in windows():
+        if ownership is not None:
+            close_owned_windows(ownership, gui)
+            retire_engine(ownership, unit)
+            details = subprocess.check_output(['systemctl', '--user', 'show', unit, '--property=ExecMainStatus,Result,MainPID'], timeout=15).decode()
+            (run / 'unit-final.log').write_text(details)
+            assert 'ExecMainStatus=0' in details and 'Result=success' in details, details
+        for window in windows() if ownership is None else []:
             if window['id'] in initial_ids:
                 continue
             try:
@@ -135,7 +159,7 @@ def main():
                     subprocess.run(['niri', 'msg', 'action', 'close-window', '--id', str(window['id'])], env=gui, check=True)
             except FileNotFoundError:
                 pass
-        if started:
+        if started and ownership is None:
             subprocess.run(['systemctl', '--user', 'stop', unit], check=True)
             details = subprocess.check_output(['systemctl', '--user', 'show', unit, '--property=ExecMainStatus,Result,MainPID']).decode()
             (run / 'unit-final.log').write_text(details)

@@ -1,6 +1,7 @@
 // End-of-chain outcomes inside the existing cold variations suite.
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
+const { workPath } = require('./paths.cjs');
 const fileControl = '.vz-imgrow:not(.vz-enumrow):not(.vz-textrow) .vz-cb';
 const fileSetup = async (cdp) => {
   await cdp.poll(`!!document.querySelector(${JSON.stringify(fileControl)})`);
@@ -80,9 +81,9 @@ module.exports = async ({ cdp, check, FAKE, KZ }) => {
   const state = () => cdp.evaluate(`(()=>{const p=document.querySelector('.vz-panel');return {session:p?.dataset.session,url:location.href,
     values:[...p.querySelectorAll('input:not([type=file]),textarea,select')].map(e=>[e.value,e.checked]),labels:[...p.querySelectorAll('.vz-bound')].map(e=>e.textContent)}})()`);
   const shot = async (name) => {
-    fs.mkdirSync('/work/tests/e2e/.shots',{recursive:true});
+    fs.mkdirSync(workPath('tests/e2e/.shots'),{recursive:true});
     const image=await cdp.send('Page.captureScreenshot',{format:'png'});
-    fs.writeFileSync(`/work/tests/e2e/.shots/command-variations-${name}.png`,Buffer.from(image.data,'base64'));
+    fs.writeFileSync(workPath(`tests/e2e/.shots/command-variations-${name}.png`),Buffer.from(image.data,'base64'));
   };
   const test = async (name, run) => {
     try { await run(); check(name, true); }

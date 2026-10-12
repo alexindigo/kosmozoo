@@ -1,6 +1,7 @@
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const { CDP } = require('./cdp.cjs');
+const { workPath } = require('./paths.cjs');
 module.exports = async ({ page, ENGINE, KZ, check }) => {
   const invoke = (id,args={}) => page.evaluate(`(async()=>${KZ}.handles.invoke(${JSON.stringify(id)},${JSON.stringify(args)}))()`);
   const rendered = () => page.evaluate(`(async()=>{const s=${KZ};return{mode:s.state.diff.mode,col:s.state.diff.col,locked:s.state.diff.locked,
@@ -36,7 +37,7 @@ module.exports = async ({ page, ENGINE, KZ, check }) => {
   // Browser downloads prove JSON bytes at the consumer, not just an href/spy.
   // Own the download producer for exactly the lifetime of its private output.
   const resourcePage=await CDP.launch(9349);
-  const directory=fs.mkdtempSync('/work/tests/.tmp-command-downloads-');
+  const directory=fs.mkdtempSync(workPath('tests/.tmp-command-downloads-'));
   try {
     await resourcePage.goto(ENGINE+'/#fake');
     await resourcePage.poll(`(async()=>${KZ}.state.images.length>0)()`);

@@ -1,5 +1,6 @@
 const assert = require('node:assert/strict');
 const { CDP, sleep, collectPageErrors } = require('./cdp.cjs');
+const { workPath } = require('./paths.cjs');
 
 async function observeSources(page) {
   const requests = [], frames = [], responses = [];
@@ -15,15 +16,15 @@ async function observeSources(page) {
   const streams = () => requests.filter(r => new URL(r.url).pathname === '/api/events');
   const activity = () => requests.filter(r => new URL(r.url).pathname.endsWith('/activity'));
   const validate = async () => {
-    const { validateSourceSnapshot } = await import('/work/client/js/source-events.mjs');
+    const { validateSourceSnapshot } = await import(workPath('client/js/source-events.mjs'));
     for (const frame of frames) {
       assert.equal(frame.name,'sources'); const snapshot=validateSourceSnapshot(JSON.parse(frame.data));
       assert.equal(frame.eventId,`${snapshot.epoch}:${snapshot.revision}`);
     }
   };
   const save = name => {
-    const fs=require('node:fs');fs.mkdirSync('/work/tests/e2e/.shots',{recursive:true});
-    fs.writeFileSync(`/work/tests/e2e/.shots/${name}.json`,JSON.stringify({requests,frames,responses,
+    const fs=require('node:fs');fs.mkdirSync(workPath('tests/e2e/.shots'),{recursive:true});
+    fs.writeFileSync(workPath(`tests/e2e/.shots/${name}.json`),JSON.stringify({requests,frames,responses,
       streams:streams().length,activityGets:activity().length},null,2));
   };
   return { requests, frames, responses, streams, activity, validate, save };

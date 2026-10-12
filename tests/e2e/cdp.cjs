@@ -9,6 +9,7 @@ const { spawn } = require("node:child_process");
 const http = require("node:http");
 const fs = require("node:fs");
 const nodePath = require("node:path");
+const { temporaryPath } = require("./paths.cjs");
 
 // the browser comes from the Playwright image — its build dir is DISCOVERED
 // from the image's own /ms-playwright content, never hand-synced with the
@@ -49,7 +50,7 @@ class CDP {
       // must size the physical window to fit — Input events beyond it are
       // silently dropped (the diff suite passes 1600,1000 for its 1400×900)
       ...(windowSize ? [`--window-size=${windowSize}`] : []),
-      `--remote-debugging-port=${port}`, `--user-data-dir=/tmp/cdp-profile-${port}`,
+      `--remote-debugging-port=${port}`, `--user-data-dir=${temporaryPath(`cdp-profile-${port}`)}`,
       "about:blank",
     ], { stdio: "ignore" });
     for (let i = 0; i < 150; i++) {

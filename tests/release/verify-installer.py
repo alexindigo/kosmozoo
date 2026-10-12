@@ -7,6 +7,7 @@ import os
 from pathlib import Path
 import shutil
 import socket
+import secrets
 import subprocess
 import time
 from importlib.util import module_from_spec, spec_from_file_location
@@ -15,18 +16,26 @@ spec = spec_from_file_location('runtime_probe', Path(__file__).with_name('verify
 probe = module_from_spec(spec); spec.loader.exec_module(probe)
 
 
-def main():
-    probe.require_vm()
+def main(publication_uuid=None):
+    if publication_uuid is None:
+        probe.require_vm()
+    else:
+        from publication_vm import require_vm as require_publication_vm
+        require_publication_vm(publication_uuid)
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--binary', type=Path, required=True)
     parser.add_argument('--previous-binary', type=Path, required=True)
     parser.add_argument('--evidence', type=Path, required=True)
+    parser.add_argument('--native-node', action='store_true')
+    parser.add_argument('--isolated-config', action='store_true', help='Use documented XDG config and systemctl link, preserving canonical caller config')
     args = parser.parse_args()
     session = dict(line.split('=', 1) for line in subprocess.check_output(['systemctl', '--user', 'show-environment']).decode().splitlines())
     gui = {key: session[key] for key in ['XDG_RUNTIME_DIR', 'WAYLAND_DISPLAY', 'NIRI_SOCKET', 'DBUS_SESSION_BUS_ADDRESS', 'XDG_SESSION_TYPE', 'XDG_CURRENT_DESKTOP']}
     gui.update({'PATH': '/usr/local/bin:/usr/bin:/bin', 'LANG': 'en_US.UTF-8'})
     unit = 'kosmozoo-engine.service'
-    real_config = Path('/home/tester/.config')
+    run = args.evidence.resolve()
+    canonical_config = Path('/home/tester/.config')
+    real_config = run / 'config space % "quote"' if args.isolated_config else canonical_config
     env_file = real_config / 'kosmozoo/engine.env'
     unit_file = real_config / 'systemd/user' / unit
     def unit_state():
@@ -35,7 +44,11 @@ def main():
     assert unit_state()['LoadState'] == 'not-found', 'Existing unmanaged unit must be preserved'
     assert not unit_file.exists() and not unit_file.is_symlink()
     assert not env_file.exists() and not env_file.is_symlink()
-    run = args.evidence.resolve()
+    canonical_env = canonical_config / 'kosmozoo/engine.env'
+    canonical_before = canonical_env.read_bytes() if canonical_env.is_file() else None
+    canonical_unit = canonical_config / 'systemd/user' / unit
+    if args.isolated_config:
+        assert not canonical_unit.exists() and not canonical_unit.is_symlink(), 'Existing manager unit must be preserved'
     run.parent.resolve(strict=True); run.mkdir(mode=0o700)
     for name in ['home space % "quote"', 'data space % "quote"', 'state', 'cache', 'tmp', 'fixtures']:
         (run / name).mkdir(mode=0o700)
@@ -52,13 +65,16 @@ def main():
     env = {**gui, 'HOME': str(home), 'XDG_DATA_HOME': str(data), 'XDG_CONFIG_HOME': str(real_config),
         'TMPDIR': str(temporary), 'KOZMOZOO_STATE': str(run / 'state'), 'KOZMOZOO_CACHE': str(run / 'cache'),
         'KOZMOZOO_HOSTS': '', 'KOZMOZOO_PORT': str(port), 'KOZMOZOO_BIND': '127.0.0.1'}
-    # The real guest's user manager reads its canonical config location. Code/
-    # launcher/data paths contain spaces/%/quotes; the explicit engine env file
-    # keeps service state/cache/seed entirely on this disposable evidence tree.
-    env_file.parent.mkdir(mode=0o700, exist_ok=True)
+    if publication_uuid is not None:
+        env['KZ_PUBLICATION_OWNER'] = secrets.token_hex(24)
+    # Code/launcher/data/config paths exercise native spaces/%/quotes. The
+    # explicit environment file keeps service data on this retained run. For a
+    # documented non-default XDG root, systemctl link below exposes the actual
+    # generated unit to the same real manager without changing caller config.
+    env_file.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
     def quoted(value):
         return '"' + value.replace('\\', '\\\\').replace('"', '\\"') + '"'
-    content = '\n'.join(key + '=' + quoted(value) for key, value in env.items() if key.startswith(('KOZMOZOO_', 'XDG_DATA_HOME')) or key == 'TMPDIR') + '\n'
+    content = '\n'.join(key + '=' + quoted(value) for key, value in env.items() if key.startswith(('KOZMOZOO_', 'XDG_DATA_HOME')) or key in ['TMPDIR', 'KZ_PUBLICATION_OWNER']) + '\n'
     with env_file.open('x') as file: file.write(content)
     env_file.chmod(0o600)
     (run / 'engine-env-witness.txt').write_text(content)
@@ -66,6 +82,19 @@ def main():
     assert probe.sha(binary) != probe.sha(previous)
     launcher = home / '.local/bin/kosmozoo'
     root = data / 'kosmozoo/application'
+    ownership = None
+    dropin = None
+    if publication_uuid is not None:
+        from publication_owner import retire_engine, close_owned_windows
+        ownership = {'unit': unit, 'units': [unit], 'env': env, 'uiScopes': [str(run)],
+            'publicationOwner': {'token': env['KZ_PUBLICATION_OWNER'], 'binaryRoot': str(root), 'fragmentRoot': str(root),
+                                 'binaryHashes': [probe.sha(binary), probe.sha(previous)]}}
+        (run / 'ownership.json').write_text(json.dumps(ownership, indent=2) + '\n')
+        dropin_dir = canonical_config / 'systemd/user' / (unit + '.d')
+        assert not dropin_dir.exists(), 'Prior manager drop-ins must be preserved'
+        dropin_dir.mkdir(mode=0o700)
+        dropin = dropin_dir / ('publication-' + hashlib.sha256(str(run).encode()).hexdigest()[:16] + '.conf')
+        dropin.write_text('[Service]\nRuntimeMaxSec=900\nTimeoutStopSec=30\n')
     menu = data / 'applications/kosmozoo.desktop'
     icon = data / 'icons/hicolor/256x256/apps/kosmozoo.png'
     results = []
@@ -112,6 +141,13 @@ def main():
         record('unmanaged launcher refused with exact bytes preserved')
         assert launcher.read_bytes() == marker; launcher.unlink()
         cli(previous, ['install'], 'initial-install')
+        if args.isolated_config:
+            # Public systemd input for the product's documented custom XDG
+            # location. No parent mutation of installer receipt/unit contents.
+            # link rejects a symlink as its input unit file. The regular
+            # generated resource behind the stable current directory is the
+            # documented platform input; receipt-managed links stay untouched.
+            subprocess.run(['systemctl', '--user', 'link', str(root / 'current' / unit)], check=True, timeout=30)
         target_before = os.readlink(root / 'current')
         assert launcher.is_symlink() and menu.is_symlink() and icon.is_symlink() and unit_file.is_symlink()
         assert probe.sha(launcher) == probe.sha(previous)
@@ -157,12 +193,19 @@ def main():
                 if sock.connect_ex(('127.0.0.1', debug_port)) == 0: break
             time.sleep(.1)
         else: raise AssertionError('Native browser diagnostic endpoint absent')
-        subprocess.run(['docker', 'run', '--rm', '--pull=never', '--network', 'host',
-            '-v', str(source) + ':/work:ro', '-v', str(run) + ':/evidence',
-            '-e', 'NATIVE_CDP=http://127.0.0.1:' + str(debug_port), '-e', 'NATIVE_ORIGIN=http://localhost:' + str(port),
-            '-e', 'NATIVE_SOURCE=fixtures', '-e', 'NATIVE_RESULT=/evidence/native-menu-consumer.json',
-            '--entrypoint', 'node', 'sha256:70e367e0cbf60340a5b5fd562f6247a34eb3196efab9f88a3dd56482d9fe09d2',
-            '/work/tests/release/native-browser-read.cjs'], check=True)
+        if args.native_node:
+            subprocess.run(['/usr/bin/node', str(source / 'tests/release/native-browser-read.cjs')],
+                env={**gui, 'TMPDIR': str(run / 'tmp'), 'NATIVE_CDP': 'http://127.0.0.1:' + str(debug_port),
+                     'NATIVE_ORIGIN': 'http://localhost:' + str(port), 'NATIVE_SOURCE': 'fixtures',
+                     'NATIVE_NOTE': 'retained across installer update',
+                     'NATIVE_RESULT': str(run / 'native-menu-consumer.json')}, check=True, timeout=120)
+        else:
+            subprocess.run(['docker', 'run', '--rm', '--pull=never', '--network', 'host',
+                '-v', str(source) + ':/work:ro', '-v', str(run) + ':/evidence',
+                '-e', 'NATIVE_CDP=http://127.0.0.1:' + str(debug_port), '-e', 'NATIVE_ORIGIN=http://localhost:' + str(port),
+                '-e', 'NATIVE_SOURCE=fixtures', '-e', 'NATIVE_RESULT=/evidence/native-menu-consumer.json',
+                '--entrypoint', 'node', 'sha256:70e367e0cbf60340a5b5fd562f6247a34eb3196efab9f88a3dd56482d9fe09d2',
+                '/work/tests/release/native-browser-read.cjs'], check=True)
         subprocess.run(['grim', str(run / 'installed-menu-app.png')], env=gui, check=True)
         assert probe.request(origin, '/api/runtime')['instance'] == second['instance']
         close(window)
@@ -197,12 +240,27 @@ def main():
         assert (root / target_before).is_dir() and (root / target_after).is_dir()
         assert cookies.stat().st_ino == inode and quarantine[0].read_bytes() == corrupt
         assert (run / 'state/metadata.db').is_file() and (run / 'cache').is_dir()
+        if args.isolated_config:
+            assert not canonical_unit.exists() and not canonical_unit.is_symlink(), 'disable must retire only the linked test unit'
+            assert (canonical_env.read_bytes() if canonical_env.is_file() else None) == canonical_before
+            assert env_file.read_text() == content, 'Isolated user configuration must remain retained'
+            record('documented isolated XDG/systemd-link consumers retain exact canonical config and private test config')
         record('uninstall removes matching links only and retains data/cache/profiles/quarantine/previous versions', profileCookieInode=inode, databaseBeforeStopSha256=database_sha)
         print('NATIVE INSTALLER OUTCOMES PASS; final clean-tree release gates remain required')
     finally:
         # Stop only a unit whose installed fragment belongs to this owned root.
         state = unit_state()
-        if unit_file.is_symlink() and os.readlink(unit_file).startswith(str(root)):
+        if ownership is not None:
+            close_owned_windows(ownership, {**os.environ, **gui})
+            retire_engine(ownership, unit)
+            if dropin is not None:
+                assert dropin.read_text() == '[Service]\nRuntimeMaxSec=900\nTimeoutStopSec=30\n'
+                dropin.rename(run / 'retained-publication-unit-dropin.conf')
+                # Remove only the newly created empty manager input directory;
+                # exact test drop-in contents/data remain in the evidence tree.
+                dropin.parent.rmdir()
+                subprocess.run(['systemctl', '--user', 'daemon-reload'], check=True, timeout=30)
+        elif unit_file.is_symlink() and os.readlink(unit_file).startswith(str(root)) and int(state.get('MainPID', '0')) > 0:
             subprocess.run(['systemctl', '--user', 'stop', unit], check=True)
         (run / 'unit-final.json').write_text(json.dumps(unit_state(), indent=2) + '\n')
 

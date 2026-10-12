@@ -7,9 +7,10 @@
 // KOZMOZOO_REVALIDATE_MS=1500 and mounts this worktree, so the rewrites
 // here are visible to the engine immediately.
 const ENGINE = process.env.E2E_ENGINE;
-const FILE = "/work/tests/.tmp-mutable/flux-basic.png";
+const { workPath } = require('./paths.cjs');
+const FILE = workPath("tests/.tmp-mutable/flux-basic.png");
 const ID = "mut/flux-basic.png";
-const CFILE = "/work/tests/.tmp-comfy/mut.png";
+const CFILE = workPath("tests/.tmp-comfy/mut.png");
 const CID = "fake/mut.png";
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const ok = (m) => console.log("  [ ok ] " + m);

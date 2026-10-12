@@ -14,8 +14,12 @@ spec = spec_from_file_location('runtime_probe', Path(__file__).with_name('verify
 probe = module_from_spec(spec); spec.loader.exec_module(probe)
 
 
-def main():
-    probe.require_vm()
+def main(publication_uuid=None):
+    if publication_uuid is None:
+        probe.require_vm()
+    else:
+        from publication_vm import require_vm as require_publication_vm
+        require_publication_vm(publication_uuid)
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--binary', type=Path, required=True)
     parser.add_argument('--evidence', type=Path, required=True)
@@ -42,13 +46,31 @@ def main():
             'TMPDIR': str(temporary), 'KOZMOZOO_HOSTS': 'fixture=folder:' + str(run / 'fixtures'),
             'KOZMOZOO_BIND': '127.0.0.1', 'KOZMOZOO_PORT': str(port), 'BROWSER': '/usr/bin/firefox'}
         unit = 'kz-native-firefox-' + run.name
+        if publication_uuid is not None:
+            unit = 'kz-pub-firefox-' + hashlib.sha256(str(run).encode()).hexdigest()[:16]
+            env['KZ_PUBLICATION_OWNER'] = hashlib.sha256((str(run) + probe.sha(binary)).encode()).hexdigest()
         config = {'env': env, 'unit': unit, 'origin': f'http://127.0.0.1:{port}', 'binarySha256': probe.sha(binary)}
+        if publication_uuid is not None:
+            config['publicationOwner'] = {'token': env['KZ_PUBLICATION_OWNER'], 'binary': str(binary), 'binarySha256': probe.sha(binary)}
         (run / 'session.json').write_text(json.dumps(config, indent=2) + '\n')
     else:
         config = json.loads((run / 'session.json').read_text())
         if args.phase != 'port-change': assert probe.sha(binary) == config['binarySha256']
     env, unit, origin = config['env'], config['unit'], config['origin']
     profile = run / 'home/data/kosmozoo/browser/firefox'
+
+    def stop_owned(name):
+        if publication_uuid is not None:
+            from publication_owner import retire_engine
+            return retire_engine(config, name)
+        subprocess.run(['systemctl', '--user', 'stop', name], check=True, timeout=35)
+
+    def close_window(window):
+        if publication_uuid is not None:
+            from publication_owner import verified_window
+            if verified_window(config, window) is None:
+                raise RuntimeError('Unexpected native window; preserve it')
+        subprocess.run(['niri', 'msg', 'action', 'close-window', '--id', str(window['id'])], env=gui, check=True, timeout=15)
 
     def windows():
         return json.loads(subprocess.check_output(['niri', 'msg', '--json', 'windows'], env=gui))
@@ -83,6 +105,10 @@ def main():
         command = ['systemd-run', '--user', '--unit=' + unit, '--working-directory=' + str(run),
             '--property=StandardOutput=file:' + str(run / 'engine.log'), '--property=StandardError=file:' + str(run / 'engine.log')]
         command += ['--setenv=' + key + '=' + value for key, value in env.items()]
+        if publication_uuid is not None:
+            from publication_owner import unit_state
+            assert unit_state(unit)['LoadState'] == 'not-found', 'Existing test unit must be preserved'
+            command += ['--property=RuntimeMaxSec=900', '--property=TimeoutStopSec=30', '--property=RemainAfterExit=yes']
         subprocess.run([*command, str(binary), 'serve'], check=True, env=gui)
         def ready():
             try: return probe.request(origin, '/api/runtime')
@@ -105,7 +131,7 @@ def main():
         (run / 'disabled-result.json').write_text(json.dumps({'runtime': runtime, 'window': ordinary,
             'noDedicatedPreferenceWrites': True, 'fallbackLog': text}, indent=2) + '\n')
         for window in windows():
-            subprocess.run(['niri', 'msg', 'action', 'close-window', '--id', str(window['id'])], env=gui, check=True)
+            close_window(window)
         wait_for(lambda: not windows(), 'Fallback browser did not close')
         print('FIREFOX DISABLED FALLBACK OBSERVED; capture needs spatial review')
     elif args.phase == 'settings':
@@ -135,7 +161,7 @@ def main():
         registry = profile / 'taskbartabs/taskbartabs.json'
         wait_for(registry.exists, 'Firefox native registry was not created by the browser')
         registered = registry.read_bytes()
-        subprocess.run(['niri', 'msg', 'action', 'close-window', '--id', str(window['id'])], env=gui, check=True)
+        close_window(window)
         wait_for(lambda: not windows(), 'App window did not close')
         assert probe.request(origin, '/api/runtime')['instance'] == runtime['instance']
         cli(['app', '--browser=/usr/bin/firefox'], 'enabled-repeat')
@@ -146,7 +172,7 @@ def main():
         (run / 'enabled-result.json').write_text(json.dumps({'runtime': runtime, 'window': window, 'repeated': repeated,
             'nativeRegistrySha256': hashlib.sha256(registered).hexdigest(), 'profile': str(profile), 'result': 'observed; visual-review-required'}, indent=2) + '\n')
         for window in windows():
-            subprocess.run(['niri', 'msg', 'action', 'close-window', '--id', str(window['id'])], env=gui, check=True)
+            close_window(window)
         print('FIREFOX ENABLED NATIVE OUTCOMES OBSERVED: app/repeat/private profile/native registry and retained engine')
     elif args.phase == 'handoff':
         assert not windows()
@@ -157,6 +183,10 @@ def main():
             '--property=StandardOutput=file:' + str(run / 'handoff-engine.log'),
             '--property=StandardError=file:' + str(run / 'handoff-engine.log')]
         command += ['--setenv=' + key + '=' + value for key, value in env.items()]
+        if publication_uuid is not None:
+            from publication_owner import unit_state
+            assert unit_state(new_unit)['LoadState'] == 'not-found', 'Existing test unit must be preserved'
+            command += ['--property=RuntimeMaxSec=900', '--property=TimeoutStopSec=30', '--property=RemainAfterExit=yes']
         subprocess.run([*command, str(binary), 'serve'], env=gui, check=True)
         with (run / 'ordinary-browser.log').open('xb') as log:
             browser_process = subprocess.Popen(['/usr/bin/firefox', '--new-instance', '-profile', str(ordinary), '-new-window', 'about:blank'],
@@ -181,9 +211,9 @@ def main():
                 'dedicatedApps': apps, 'nativeRegistryUnchanged': True, 'ordinaryRegistryAbsent': True}, indent=2) + '\n')
             print('FIREFOX PROFILE HANDOFF PASS: separate ordinary process, one live dedicated process, repeated native apps and same engine')
         finally:
-            for window in windows(): subprocess.run(['niri', 'msg', 'action', 'close-window', '--id', str(window['id'])], env=gui, check=True)
+            for window in windows(): close_window(window)
             browser_process.wait(timeout=30)
-            subprocess.run(['systemctl', '--user', 'stop', new_unit], check=True)
+            stop_owned(new_unit)
     elif args.phase == 'port-change':
         assert not windows(), 'Port-change acceptance starts with owned windows closed'
         env = env.copy()
@@ -195,6 +225,10 @@ def main():
             '--property=StandardOutput=file:' + str(run / 'changed-port-engine.log'),
             '--property=StandardError=file:' + str(run / 'changed-port-engine.log')]
         command += ['--setenv=' + key + '=' + value for key, value in env.items()]
+        if publication_uuid is not None:
+            from publication_owner import unit_state
+            assert unit_state(new_unit)['LoadState'] == 'not-found', 'Existing test unit must be preserved'
+            command += ['--property=RuntimeMaxSec=900', '--property=TimeoutStopSec=30', '--property=RemainAfterExit=yes']
         subprocess.run([*command, str(binary), 'serve'], env=gui, check=True)
         try:
             def changed_ready():
@@ -209,13 +243,13 @@ def main():
             assert probe.request(origin, '/api/runtime')['instance'] == runtime['instance']
             (run / 'changed-port-result.json').write_text(json.dumps({'runtime': runtime, 'window': window,
                 'registryUnchanged': True, 'binarySha256': probe.sha(binary), 'reasonLog': text}, indent=2) + '\n')
-            for window in windows(): subprocess.run(['niri', 'msg', 'action', 'close-window', '--id', str(window['id'])], env=gui, check=True)
+            for window in windows(): close_window(window)
             print('FIREFOX PORT OWNERSHIP PASS: correct selected-origin fallback and preserved native registration')
         finally:
-            subprocess.run(['systemctl', '--user', 'stop', new_unit], check=True)
+            stop_owned(new_unit)
     else:
         assert not windows(), 'Close owned Firefox test windows before finishing'
-        subprocess.run(['systemctl', '--user', 'stop', unit], check=True)
+        stop_owned(unit)
         output = subprocess.check_output(['systemctl', '--user', 'show', unit, '--property=ExecMainStatus,Result,MainPID']).decode()
         (run / 'engine-final.log').write_text(output)
         assert 'ExecMainStatus=0' in output and 'Result=success' in output

@@ -10,6 +10,7 @@
 // Run via tests/e2e/run.sh.
 
 const { CDP, sleep, collectPageErrors } = require("./cdp.cjs");
+const { workPath } = require("./paths.cjs");
 
 const ENGINE = process.env.E2E_ENGINE ?? "http://127.0.0.1:18260";
 const FAKE = process.env.E2E_FAKE ?? "http://127.0.0.1:18261";
@@ -21,9 +22,9 @@ async function sourceControl(body) {
   if (!response.ok) throw new Error(`fixture control ${response.status}`);
 }
 async function sourceShot(page, name) {
-  fs.mkdirSync("/work/tests/e2e/.shots", { recursive: true });
+  fs.mkdirSync(workPath("tests/e2e/.shots"), { recursive: true });
   const shot = await page.send("Page.captureScreenshot", { format: "png" });
-  fs.writeFileSync(`/work/tests/e2e/.shots/${name}.png`, Buffer.from(shot.data, "base64"));
+  fs.writeFileSync(workPath(`tests/e2e/.shots/${name}.png`), Buffer.from(shot.data, "base64"));
 }
 
 // the app store is a plain ES-module singleton — importing the served URL

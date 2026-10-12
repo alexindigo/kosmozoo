@@ -42,8 +42,12 @@ def available_port():
         return sock.getsockname()[1]
 
 
-def main():
-    require_vm()
+def main(publication_uuid=None):
+    if publication_uuid is None:
+        require_vm()
+    else:
+        from publication_vm import require_vm as require_publication_vm
+        require_publication_vm(publication_uuid)
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--binary', type=Path, required=True)
     parser.add_argument('--evidence', type=Path, required=True)

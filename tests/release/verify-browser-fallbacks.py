@@ -12,8 +12,12 @@ spec = spec_from_file_location('runtime_probe', Path(__file__).with_name('verify
 probe = module_from_spec(spec); spec.loader.exec_module(probe)
 
 
-def main():
-    probe.require_vm()
+def main(publication_uuid=None):
+    if publication_uuid is None:
+        probe.require_vm()
+    else:
+        from publication_vm import require_vm as require_publication_vm
+        require_publication_vm(publication_uuid)
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--binary', type=Path, required=True)
     parser.add_argument('--evidence', type=Path, required=True)
@@ -26,6 +30,10 @@ def main():
     registry = profile/'taskbartabs/taskbartabs.json'; registry_before = registry.read_bytes()
     user = profile/'user.js'; assert not user.exists()
     unit = 'kz-native-browser-fallbacks-' + run.name
+    if publication_uuid is not None:
+        from publication_owner import unit_state, retire_engine, verified_window
+        unit = config['unit'] + '-browser-fallbacks'
+        assert unit_state(unit)['LoadState'] == 'not-found', 'Existing fallback test unit must be preserved'
     windows = lambda: json.loads(subprocess.check_output(['niri','msg','--json','windows'],env=env,text=True))
     assert not windows()
     binary = args.binary.resolve(strict=True); results = []
@@ -35,9 +43,14 @@ def main():
         print('PASS:',name,flush=True)
     def invoke(arguments, name, child_env=None):
         with (run/(name+'.log')).open('xb') as log:
-            result = subprocess.run([str(binary),*arguments],env=child_env or env,stdout=log,stderr=subprocess.STDOUT,timeout=30)
+            result = subprocess.run([str(binary),*arguments],env=child_env or env,cwd=run if publication_uuid is not None else None,stdout=log,stderr=subprocess.STDOUT,timeout=30)
         assert result.returncode == 0, (run/(name+'.log')).read_text()
         return (run/(name+'.log')).read_text()
+    def close(window):
+        if publication_uuid is not None and verified_window(config, window) is None:
+            raise RuntimeError('Foreign native fallback window; preserve it')
+        subprocess.run(['niri','msg','action','close-window','--id',str(window['id'])],env=env,check=True,timeout=15)
+
     def observe(name, reason):
         deadline=time.monotonic()+30
         while time.monotonic()<deadline:
@@ -48,13 +61,15 @@ def main():
         time.sleep(1)
         subprocess.run(['grim',str(run/(name+'.png'))],env=env,check=True)
         (run/(name+'-windows.json')).write_text(json.dumps(windows(),indent=2)+'\n')
-        for window in windows(): subprocess.run(['niri','msg','action','close-window','--id',str(window['id'])],env=env,check=True)
+        for window in windows(): close(window)
         deadline=time.monotonic()+10
         while windows() and time.monotonic()<deadline: time.sleep(.1)
         assert not windows()
     command=['systemd-run','--user','--unit='+unit,'--working-directory='+str(run),
         '--property=StandardOutput=file:'+str(run/'engine.log'),'--property=StandardError=file:'+str(run/'engine.log')]
     command += ['--setenv='+key+'='+value for key,value in env.items()]
+    if publication_uuid is not None:
+        command += ['--property=RuntimeMaxSec=900', '--property=TimeoutStopSec=30', '--property=RemainAfterExit=yes']
     subprocess.run([*command,str(binary),'serve'],env=env,check=True)
     try:
         deadline=time.monotonic()+15
@@ -105,8 +120,13 @@ def main():
         print('NATIVE BROWSER FALLBACK OUTCOMES PASS')
     finally:
         if user.exists() and user.read_bytes()==b'user_pref("browser.taskbarTabs.enabled", unknown_external_expression);\n': user.unlink()
-        for window in windows(): subprocess.run(['niri','msg','action','close-window','--id',str(window['id'])],env=env,check=True)
-        subprocess.run(['systemctl','--user','stop',unit],check=True)
+        if publication_uuid is not None:
+            from publication_owner import close_owned_windows
+            close_owned_windows(config, env)
+            retire_engine(config, unit)
+        else:
+            for window in windows(): close(window)
+            subprocess.run(['systemctl','--user','stop',unit],check=True,timeout=35)
         state=subprocess.check_output(['systemctl','--user','show',unit,'--property=ExecMainStatus,Result,MainPID'],text=True)
         (run/'engine-final.log').write_text(state)
         assert 'ExecMainStatus=0' in state and 'Result=success' in state

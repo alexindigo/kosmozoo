@@ -7,14 +7,15 @@
 // Run via tests/e2e/run.sh (step 7; the dims pass has drained by then).
 
 const { CDP, sleep, collectPageErrors } = require("./cdp.cjs");
+const { workPath, temporaryPath } = require("./paths.cjs");
 
 const ENGINE = process.env.E2E_ENGINE ?? "http://127.0.0.1:18260";
 const KZ = `(await import("/store/instance.js")).appStore`;
 async function capture(page, name) {
   const fs = require('node:fs');
-  fs.mkdirSync('/work/tests/e2e/.shots', { recursive: true });
+  fs.mkdirSync(workPath('tests/e2e/.shots'), { recursive: true });
   const shot = await page.send('Page.captureScreenshot', { format: 'png' });
-  fs.writeFileSync(`/work/tests/e2e/.shots/${name}.png`, Buffer.from(shot.data, 'base64'));
+  fs.writeFileSync(workPath(`tests/e2e/.shots/${name}.png`), Buffer.from(shot.data, 'base64'));
 }
 
 let failures = 0;
@@ -94,7 +95,7 @@ async function railMotion(page) {
     await page.poll(`(async()=>{const s=${KZ};return s.state.feedActivity()==='settled'&&s.state.current()?.image!==window.__railOriginal&&document.querySelector('#workspace .info-body .ws-head .ws-name')?.textContent===s.state.current()?.image&&document.querySelector('#feedRail .fr-tick.current')?.dataset.entryId===s.state.currentEntry()?.entry.id;})()`,20000);
     await page.poll(`window.__railRecord.frames.some(f=>f.activity==='settled'&&f.current!==window.__railRecord.frames[0].current)`);
     const record=await page.evaluate(`window.__railRecord.stop();({frames:window.__railRecord.frames,events:window.__railRecord.events})`);
-    require('node:fs').writeFileSync('/work/tests/e2e/.shots/rail-frames.json',JSON.stringify(record,null,2));
+    require('node:fs').writeFileSync(workPath('tests/e2e/.shots/rail-frames.json'),JSON.stringify(record,null,2));
     const original=record.frames[0],moving=record.frames.filter(f=>f.activity==='scrolling'&&f.marker&&f.marker!==original.marker);
     const unchanged=f=>['current','trail','url','memory','name'].every(k=>f[k]===original[k]);
     const eventGaps=record.events.slice(1).map((e,i)=>e.at-record.events[i].at);
@@ -108,7 +109,7 @@ async function railMotion(page) {
     await capture(page,'rail-idle-after');
   } finally {
     const record=await page.evaluate(`window.__railRecord?.stop();({frames:window.__railRecord?.frames??[],events:window.__railRecord?.events??[]})`);
-    require('node:fs').writeFileSync('/work/tests/e2e/.shots/rail-frames-final.json',JSON.stringify(record,null,2));
+    require('node:fs').writeFileSync(workPath('tests/e2e/.shots/rail-frames-final.json'),JSON.stringify(record,null,2));
     console.log('RAIL RECORDER',JSON.stringify({events:record.events.length,frames:record.frames.length,last:record.frames.at(-1)}));
     await page.evaluate(`delete window.__railRecord;delete window.__railFrame`);
   }
@@ -187,7 +188,7 @@ async function railMotion(page) {
       await page.evaluate(`document.querySelector('${card} .favorite').getAttribute('aria-pressed') === 'true'`));
 
     const fs = require('fs');
-    const dir = fs.mkdtempSync('/tmp/kz-card-download-');
+    const dir = fs.mkdtempSync(temporaryPath('kz-card-download-'));
     try {
       await page.send('Page.setDownloadBehavior', { behavior: 'allow', downloadPath: dir });
       await page.clickAt(card + ' .download');
