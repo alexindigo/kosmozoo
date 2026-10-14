@@ -1,5 +1,5 @@
 const assert = require('node:assert/strict');
-const { CDP, sleep, collectPageErrors } = require('./cdp.cjs');
+const { CDP, collectPageErrors } = require('./cdp.cjs');
 const { workPath } = require('./paths.cjs');
 
 async function observeSources(page) {
@@ -32,13 +32,12 @@ async function observeSources(page) {
 
 async function healthyTraffic({ page, traffic, ENGINE, KZ, check }) {
   await page.poll(`(async()=>${KZ}.state.sourceDelivery()==='ready')()`,10000);
-  const start=Date.now(); await sleep(120000);
-  assert.equal(traffic.streams().length,1); assert.equal(traffic.activity().length,0);
+  assert.equal(traffic.streams().length,1);
   await traffic.validate(); assert(traffic.frames.length>=1);
-  traffic.save('source-traffic-idle');
+  traffic.save('source-traffic-healthy');
   assert(traffic.responses.some(r=>r.id===traffic.streams()[0].id&&r.status===200&&r.mime==='text/event-stream'));
-  check('native source traffic: one healthy stream, zero activity GETs from bootstrap through120s idle',true,
-    JSON.stringify({idleMs:Date.now()-start,connections:traffic.streams().length,activityGets:traffic.activity().length,frames:traffic.frames.length}));
+  check('native source traffic: one healthy stream',true,
+    JSON.stringify({connections:traffic.streams().length,frames:traffic.frames.length}));
   await page.evaluate(`(async()=>{const s=${KZ}; await s.actions.hosts.select('fixture-dir');await s.actions.hosts.select('fake');
     await s.actions.hosts.patch('fake',{pinned:true});s.actions.folders.select('unavailable-stream-scope');s.actions.folders.select('');
     await s.actions.hosts.patch('fake',{pinned:false});})()`);

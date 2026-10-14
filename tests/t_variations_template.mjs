@@ -65,6 +65,14 @@ Deno.test("expandTextAxes: every occurrence of the label is substituted", () => 
   assertEquals(expandTextAxes("{{a}} and {{a}}", { a: ["x"] }), ["x and x"]);
 });
 
+Deno.test("multiline templates: labels across paragraphs expand one whole-template Cartesian product", () => {
+  const text = "A {{animal}}.\n\n{{style}} style.\nAgain: {{animal}}.";
+  assertEquals(expandTextAxes(text, { animal: ["cat", "dog"], style: ["oil", "", "ink"] }), [
+    "A cat.\n\noil style.\nAgain: cat.", "A cat.\n\n style.\nAgain: cat.", "A cat.\n\nink style.\nAgain: cat.",
+    "A dog.\n\noil style.\nAgain: dog.", "A dog.\n\n style.\nAgain: dog.", "A dog.\n\nink style.\nAgain: dog.",
+  ]);
+});
+
 Deno.test("expandTextAxes: a label without values inerts the whole row", () => {
   assertEquals(expandTextAxes("{{a}}", {}), []);
   assertEquals(expandTextAxes("{{a}}", { a: [] }), []);
@@ -96,4 +104,12 @@ Deno.test("sweep-to-empty: empty pick vs an already-empty current is a no-op", (
     "CLIPTextEncode#5.text": { enabled: true, values: [""] },
   });
   assertEquals(perms.length, 0);
+});
+
+Deno.test("multiline current text: enabling unchanged formatted text creates no novel current permutation", () => {
+  const current = "First paragraph.\n\nSecond paragraph.\n";
+  const values = expandTextAxes(current);
+  assertEquals(generatePermutations({}, { text: current }, { text: { enabled: true, values } }), []);
+  const edited = current + "Third paragraph.";
+  assertEquals(generatePermutations({}, { text: current }, { text: { enabled: true, values: expandTextAxes(edited) } }), [{ text: edited }]);
 });

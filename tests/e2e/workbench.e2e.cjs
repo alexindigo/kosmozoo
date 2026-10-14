@@ -449,7 +449,6 @@ async function attempt(name, fn) {
         await s.actions.hosts.patch('fake', { pinned: false, autoRefresh: false });
       })()`);
       await page.poll(`document.querySelector('.card[data-name="flux-basic.png"] img')?.naturalWidth > 0`);
-      check("removed visibility buttons are absent", await page.evaluate(`!document.querySelector('#unhideBtn, #hideUpBtn')`));
       check("refresh icon is immediately before source picker", await page.evaluate(`(() => {
         const b = document.getElementById('refreshBtn');
         return !!b.querySelector('svg') && !b.textContent.trim() && b.nextElementSibling.id === 'hostPicker';

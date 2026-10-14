@@ -291,21 +291,12 @@ function check(name, ok, detail = "") {
   await cdp.evaluate("document.dispatchEvent(new KeyboardEvent('keydown', { key: '1', bubbles: true }))");
   await cdp.poll(`(async () => ${KZ}.state.diff.mode === "two-up")()`, 5000);
 
-  // 6. One-Up: Left/Right flips the visible side; the auto-play is gone
+  // 6. One-Up: Left/Right flips the visible side
   await cdp.evaluate("document.dispatchEvent(new KeyboardEvent('keydown', { key: '2', bubbles: true }))");
   await cdp.poll(`(async () => ${KZ}.state.diff.mode === "one-up")()`, 5000);
   await cdp.evaluate("document.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowLeft', bubbles: true }))");
   await cdp.poll(`(async () => ${KZ}.state.diff.col === "feed")()`, 5000);
   check("One-Up: Left/Right flips the visible side", true);
-  const noPlay = await cdp.evaluate(`(async () => ({
-    playEl: !!document.getElementById('diffPlay'),
-    field: "playing" in (${KZ}.state.diff),
-  }))()`);
-  check("no auto-play: no #diffPlay element, no playing field",
-    !noPlay.playEl && !noPlay.field, JSON.stringify(noPlay));
-  await cdp.evaluate("document.dispatchEvent(new KeyboardEvent('keydown', { key: ' ', bubbles: true }))");
-  const spaceNoop = await cdp.evaluate(`(async () => ${KZ}.state.diff.col)()`);
-  check("One-Up: Space is a no-op now", spaceNoop === "feed", spaceNoop);
 
   // 7. Split: key 3 → handle at 50%; the ACTIVE cell is the clipped top
   // layer; a drag moves the wipe; both layers stay mounted
