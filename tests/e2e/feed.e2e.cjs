@@ -445,6 +445,24 @@ async function railMotion(page) {
   const prefetchCtl = (kv) => page.evaluate(`(async () => {
     await fetch("/api/prefetch", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(${JSON.stringify(kv)}) });
   })()`);
+  const paused = [], held = new Set(), steps = [];
+  const originalMessage = page.ws.onmessage;
+  page.ws.onmessage = (ev) => {
+    originalMessage(ev);
+    let msg;
+    try { msg = JSON.parse(ev.data); } catch { return; }
+    if (msg.method === "Fetch.requestPaused") {
+      paused.push(msg.params);
+      held.add(msg.params.requestId);
+    }
+  };
+  let gateEnabled = false, arrivals = 0, released = 0;
+  let b1 = null, b2 = null, metrics = null;
+  const invalid = (name, ok, detail) => {
+    if (ok) return;
+    check(name, false, detail);
+    throw Object.assign(new Error(name), { setupInvalid: true });
+  };
   try {
     const FAKE = process.env.E2E_FAKE ?? "http://127.0.0.1:18261";
     const fakeAddr = FAKE.replace(/^https?:\/\//, "");
@@ -467,6 +485,18 @@ async function railMotion(page) {
     const names = await page.evaluate(`(async () =>
       (await (await fetch("/api/collections/undim/entries")).json()).map((e) => e.name))()`);
     check("undim collection listed", names.length > 2000, `${names.length} entries`);
+    const windowNames = names.slice(1400, 1450);
+    // Install before selection as well as the jump: neither can fetch a
+    // window image before the baseline. All other traffic remains unheld.
+    await page.send("Fetch.enable", { patterns: windowNames.map((name) => ({
+      urlPattern: "*/api/collections/undim/entries/" + encodeURIComponent(name) + "/bytes*",
+      requestStage: "Request",
+    })) });
+    gateEnabled = true;
+    const knownWindow = `(async () => {
+      const kz = ${KZ}, names = new Set(${JSON.stringify(windowNames)});
+      return kz.state.entriesWithKnownSize().filter((i) => names.has(kz.state.images[i].filename)).length;
+    })()`;
     // dims for [0..1599] except the 50-name window [1400..1449] — the
     // behind window that must resolve before anything below it
     const wanted = names.filter((_, i) => i < 1600 && !(i >= 1400 && i < 1450));
@@ -483,10 +513,13 @@ async function railMotion(page) {
     await page.poll(`(async () =>
       (await (await fetch("/api/collections/undim/entries")).json())
         .filter((e) => e.width != null).length >= 1550)()`, 180000);
+    // Selection wants every missing size through the engine's priority lane.
+    // Freeze that second producer before selection; only gated bytes may land.
+    await prefetchCtl({ paused: true });
     await page.evaluate(`(async () => { await ${KZ}.actions.hosts.select("undim"); })()`);
     await page.poll(`(async () => ${KZ}.state.entriesWithKnownSize().length >= 1550)()`, 30000);
 
-    // scrub-jump deep into the list, settle, audit
+    // scrub-jump deep into the list and settle while the window is gated
     await page.evaluate(`(async () => {
       const kz = ${KZ};
       kz.actions.feed.restoreToIndex(kz.state.entriesWithKnownSize()[1500]);
@@ -497,25 +530,90 @@ async function railMotion(page) {
       await new Promise(r => setTimeout(r, 250));
       return a === c.scrollTop && !!document.querySelector(".card.current");
     })()`, 15000);
-    const b1 = await page.evaluate(AUDIT);
+    const waitPaused = async () => {
+      const deadline = Date.now() + 10000;
+      while (!paused.length && Date.now() < deadline) await sleep(50);
+      return paused.length > 0;
+    };
+    invalid("setup invalid: no window request paused", await waitPaused(), `paused=${paused.length}`);
+    const engineWindow = await page.evaluate(`(async () => {
+      const names = new Set(${JSON.stringify(windowNames)});
+      return (await (await fetch("/api/collections/undim/entries")).json()).filter((e) => names.has(e.name));
+    })()`);
+    invalid("setup invalid: window already dimmed in engine",
+      engineWindow.length === 50 && engineWindow.every((e) => e.width == null),
+      `entries=${engineWindow.length} dimmed=${engineWindow.filter((e) => e.width != null).length}`);
+    arrivals = await page.evaluate(knownWindow);
+    invalid("setup invalid: window already known in client", arrivals === 0, `known=${arrivals}`);
+    const baseline = await page.evaluate(`(async () => {
+      const { cardHeight, gridGapPx } = await import("/store/sizes.js");
+      const col = document.getElementById("candidatesCol");
+      return { audit: await ${AUDIT}, scrollTop: col.scrollTop, dpr: devicePixelRatio,
+        stride: cardHeight({ w: 640, h: 360 }, col.clientWidth) + gridGapPx() };
+    })()`);
+    b1 = baseline.audit;
+    metrics = baseline;
 
-    // the behind window lands above the fold — poll its two ends in
-    await page.poll(`(async () => {
-      const kz = ${KZ};
-      const known = new Set(kz.state.entriesWithKnownSize());
-      const imgs = kz.state.images;
-      return known.has(imgs.findIndex((i) => i.filename === ${JSON.stringify(names[1400])}))
-          && known.has(imgs.findIndex((i) => i.filename === ${JSON.stringify(names[1449])}));
-    })()`, 60000);
-    check("behind window landed above the fold", true);
-    const b2 = await page.evaluate(AUDIT);
+    // One released byte request must produce exactly one new known entry.
+    // Never release the next request while the previous arrival is pending.
+    while (arrivals < 50) {
+      invalid("gate stalled (setup invalid): no next paused request", await waitPaused(),
+        `arrivals=${arrivals} released=${released}`);
+      const request = paused.shift();
+      const before = await page.evaluate('document.getElementById("candidatesCol").scrollTop');
+      await page.send("Fetch.continueRequest", { requestId: request.requestId });
+      held.delete(request.requestId);
+      released++;
+      const previous = arrivals, deadline = Date.now() + 10000;
+      for (;;) {
+        arrivals = await page.evaluate(knownWindow);
+        invalid("setup invalid: known window count exceeds released count", arrivals <= released,
+          `known=${arrivals} released=${released}`);
+        if (arrivals === previous + 1) break;
+        invalid("gate stalled (setup invalid): released request did not arrive", Date.now() < deadline,
+          `known=${arrivals} released=${released}`);
+        await sleep(50);
+      }
+      const after = await page.evaluate(`(async () => {
+        await new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+        return document.getElementById("candidatesCol").scrollTop;
+      })()`);
+      steps.push({ name: decodeURIComponent(new URL(request.request.url).pathname.split("/").at(-2)), before, after });
+    }
+    check("50 gated arrivals exercised", arrivals === 50);
+    b2 = await page.evaluate(AUDIT);
     check("current card's top did not move across the landings",
       b1.currentTop !== null && b2.currentTop === b1.currentTop, `${b1.currentTop} -> ${b2.currentTop}`);
     check("heights still exact after the landings", b2.nullSize === 0 && b2.maxDelta === 0,
       `nullSize=${b2.nullSize} maxDelta=${b2.maxDelta}`);
   } catch (e) {
-    check("above-fold landings case", false, e.message.slice(0, 200));
+    if (!e.setupInvalid) check("above-fold landings case", false, e.message.slice(0, 200));
   } finally {
+    const loss = metrics ? steps.reduce((sum, step) => sum + metrics.stride - (step.after - step.before), 0) : null;
+    const drift = b1 && b2 ? b2.currentTop - b1.currentTop : null;
+    console.log("above-fold landings diagnostics", JSON.stringify({
+      dpr: metrics?.dpr ?? null, stride: metrics?.stride ?? null, arrivals, released,
+      expectedTotalShift: metrics ? 50 * metrics.stride : null,
+      actualScrollTopChange: b1 && b2 ? b2.scrollTop - metrics.scrollTop : null,
+      sumLoss: loss, drift, remainder: drift === null || loss === null ? null : drift - loss, steps,
+    }));
+    try {
+      if (gateEnabled) {
+        // Keep the hook active while draining, including requests queued by
+        // the loader as an earlier held request finishes.
+        while (held.size) {
+          const requestId = held.values().next().value;
+          await page.send("Fetch.continueRequest", { requestId });
+          held.delete(requestId);
+        }
+      }
+    } catch (e) {
+      check("above-fold landings gate cleanup", false, e.message.slice(0, 200));
+    } finally {
+      try { if (gateEnabled) await page.send("Fetch.disable"); }
+      catch (e) { check("above-fold landings gate disable", false, e.message.slice(0, 200)); }
+      page.ws.onmessage = originalMessage;
+    }
     // leave the engine as found: walk resumed, scratch collection gone
     try {
       await page.evaluate(`(async () => {
