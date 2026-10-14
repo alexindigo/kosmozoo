@@ -150,10 +150,6 @@ Deno.test("sources: offline partial patches validate atomically, repeat POST pre
     assertEquals(rig.store.collectionGet("a").pinned, 0);
     assertEquals((await post({ name: "a", address: "127.0.0.1:2" })).status, 409);
     for (const bad of [null, [], { name: "b", address: "127.0.0.1:2", pinned: "yes" }]) assertEquals((await post(bad)).status, 400);
-    const activity = await router.handle(new Request("http://x/api/collections/a/activity"));
-    const { sourceVersion, ...cached } = await activity.json();
-    assert(sourceVersion);
-    assertEquals(cached, { supported: true, state: "unknown", terminalRevision: 0, pinned: false, autoRefresh: true });
     assertEquals(probes, 0);
     assertEquals(reconciles, 4, "only actual committed mutations reconcile, never no-op POST/PATCH");
   } finally { await rig.close(); }

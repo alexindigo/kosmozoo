@@ -159,12 +159,6 @@ export function makeRouter(ctx) {
     return Response.json({ id, ...sourceAttributes(row), sourceVersion });
   });
 
-  add("GET", "/api/collections/<id>/activity", (_req, { id }) => {
-    const source = ctx.sourceActivity.source(id);
-    if (!source) return Response.json({ error: "unknown collection" }, { status: 404 });
-    return Response.json({ ...source.activity, pinned: source.pinned, autoRefresh: source.autoRefresh, sourceVersion: source.sourceVersion });
-  });
-
   add("DELETE", "/api/collections/<id>", async (_req, { id }) => {
     if (!ctx.sourceActivity.acceptingChanges()) return Response.json({ error: "sources are stopping" }, { status: 503 });
     if (!Object.hasOwn(ctx.hosts, id)) return Response.json({ error: "unknown collection" }, { status: 404 });

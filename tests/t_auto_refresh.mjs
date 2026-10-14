@@ -3,6 +3,7 @@ import { createRoot, createSignal } from "solid-js";
 import { makeAppStore } from "../client-solid/store/app-store.js";
 import { api } from "../client/js/api.mjs";
 import { clientInventory } from "./helpers/client-inventory.mjs";
+import { sourceFrame, injectedSourceStream } from "./helpers/source-stream.mjs";
 import { Jobs } from "../src/jobs.mjs";
 import { makeSourceFreshness } from "../client-solid/store/source-freshness.js";
 import { makeSizes, scheduleRetry, ERROR_RETRY_MS } from "../client-solid/store/sizes.js";
@@ -33,9 +34,20 @@ async function withClient(run, prepare = () => {}) {
   const activity = { supported: true, state: "idle", epoch: "E", terminalRevision: 0, resyncRevision: 0 };
   const row = (name) => ({ name, size: 100, hash: null, width: 100, height: 50, meta: null, judgment: null, extracted: false });
   const rows = [row("a.png"), row("b.png")];
+  let stream, revision = 0;
+  const frame = () => sourceFrame({ h: { ...sources.h, activity } }, revision++);
+  const emit = async (snapshot = null) => {
+    if (snapshot) Object.assign(activity, snapshot);
+    stream.snapshot(frame());
+    for (let i = 0; i < 30; i++) await Promise.resolve();
+  };
   api.collections = async () => structuredClone(sources);
-  api.activity = async () => ({ ...activity, pinned: sources.h.pinned, autoRefresh: sources.h.autoRefresh });
-  api.patchCollection = async (_id, patch) => { Object.assign(sources.h, patch); return { ...sources.h }; };
+  api.patchCollection = async (_id, patch) => {
+    Object.assign(sources.h, patch);
+    sources.h.attributesRevision = (sources.h.attributesRevision ?? 0) + 1;
+    sources.h.sourceVersion = sourceFrame(sources).sources.h.sourceVersion;
+    return { ...sources.h };
+  };
   api.entries = async () => structuredClone(rows);
   api.inventory = async (id) => clientInventory(await api.entries(id), { coverage: "recursive" });
   api.meta = async () => ({ changed: false, pending: 0 });
@@ -47,15 +59,15 @@ async function withClient(run, prepare = () => {}) {
   let dispose;
   const store = createRoot((cleanup) => {
     dispose = cleanup;
-    return makeAppStore({ subscribeSources: null, storage });
+    return makeAppStore({ subscribeSources: callbacks => stream.subscribe(callbacks), storage });
   });
   try {
     await prepare({ store, sources, activity, rows, row });
-    // Explicit compatibility fixture observations establish the read-entry target.
-    await store.actions.hosts.refresh();
-    await store.actions.hosts.pollActivity("h");
+    const initial = frame();
+    Object.assign(sources.h, { incarnation: initial.sources.h.incarnation, sourceVersion: initial.sources.h.sourceVersion });
+    stream = injectedSourceStream(initial);
     const boot = store.actions.boot();
-    await run({ store, sources, activity, rows, row, boot });
+    await run({ store, sources, activity, rows, row, boot, emit });
   } finally {
     store.actions.status.clear("transient");
     store.dispose(); dispose(); Object.assign(api, saved);
@@ -78,13 +90,13 @@ Deno.test("automatic freshness: a failed initial inventory remains pending and r
 });
 
 Deno.test("automatic freshness: enabling refresh reconciles an already-reported completion while another job runs", async () => {
-  await withClient(async ({ store, activity, rows, row, boot }) => {
+  await withClient(async ({ store, activity, rows, row, boot, emit }) => {
     await boot;
     const current = store.state.current();
     await store.actions.hosts.patch("h", { autoRefresh: false });
     rows.unshift(row("finished.png"));
     Object.assign(activity, { state: "running", runningCount: 1, runningPromptId: "next-job", terminalRevision: 1 });
-    await store.actions.hosts.pollActivity("h");
+    await emit();
     assert(!store.state.images.some((image) => image.filename === "finished.png"));
     await store.actions.hosts.patch("h", { autoRefresh: true });
     await waitFor(() => store.state.images.some((image) => image.filename === "finished.png"), 300);
@@ -120,20 +132,20 @@ Deno.test("automatic freshness: confirmed completion reaches the feed before opt
   await jobs.tick();
   let tick;
   try {
-    await withClient(async ({ store, rows, row, boot }) => {
+    await withClient(async ({ store, rows, row, boot, emit }) => {
       await boot;
       rows.unshift(row("first-job-output.png"));
       history.push({ id: "first-job", terminal: true, outcome: "success" });
       running = "next-job"; held = true;
       tick = jobs.tick();
       await waitFor(() => sampling, 300);
-      await store.actions.hosts.pollActivity("h");
+      await emit(jobs.snapshot("h"));
       await waitFor(() => store.state.images.some((image) => image.filename === "first-job-output.png"), 300);
       assertEquals(events.length, 1);
       assertEquals(jobs.snapshot("h").state, "running");
       assertEquals(jobs.snapshot("h").terminalRevision, 1);
-    }, ({ sources }) => {
-      api.activity = async () => ({ ...jobs.snapshot("h"), pinned: sources.h.pinned, autoRefresh: sources.h.autoRefresh });
+    }, ({ activity }) => {
+      Object.assign(activity, jobs.snapshot("h"));
     });
   } finally {
     progress.resolve({ entries: [], size: 0 }); await tick; await jobs.stop();
@@ -239,15 +251,15 @@ Deno.test("acquisition retry ownership: one shared timer retains each owner's wo
 });
 
 Deno.test("automatic freshness: unchanged observations retain backoff and disabled work catches up on enablement", async () => {
-  await withClient(async ({ store, rows, row, activity, boot }) => {
+  await withClient(async ({ store, rows, row, activity, boot, emit }) => {
     await boot;
     rows.unshift(row("pending.png"));
     let reads = 0;
     api.entries = async () => { reads++; if (reads === 1) throw new Error("refresh inventory 502"); return rows; };
     Object.assign(activity, { state: "running", terminalRevision: 1, runningCount: 1 });
-    await store.actions.hosts.pollActivity("h");
+    await emit();
     await waitFor(() => reads === 1);
-    for (let i = 0; i < 10; i++) await store.actions.hosts.pollActivity("h");
+    for (let i = 0; i < 10; i++) await emit();
     assertEquals(reads, 1, "no-op activity cannot turn retry backoff into rapid reads");
     await store.actions.hosts.patch("h", { autoRefresh: false });
     await new Promise((resolve) => setTimeout(resolve, 1100));

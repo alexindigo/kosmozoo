@@ -64,16 +64,6 @@ export async function loadCollections(store, env = Deno.env.toObject()) {
   return store.collectionMap();
 }
 
-// Store notifications own the live registry. These compatibility helpers write
-// only the canonical row; the context's one owner reconciles the map/lifetimes.
-export function addCollection(store, map, name, address, attributes = {}) {
-  store.collectionAdd(name, address, attributes);
-}
-
-export function removeCollection(store, map, name) {
-  store.collectionRemove(name);
-}
-
 const NAME_RE = /^[\w][\w.-]*$/;
 const ADDR_RE = /^[\w.-]+:\d+$/;
 

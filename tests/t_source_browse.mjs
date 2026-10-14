@@ -90,7 +90,6 @@ async function withBrowse(run, { url = "/", saved = storage() } = {}) {
     other: ["other/last.png", "other/first.png"].map(row), flat: [row("flat.png")] };
   api.collections = async () => hosts;
   api.inventory = async (id) => clientInventory(lists[id], { coverage: id === "flat" ? "root-only" : "recursive" });
-  api.activity = async () => ({ supported: false });
   api.meta = async () => ({ changed: false, pending: 0 }); api.want = async () => ({ pending: 0 });
   api.nodes = async () => ({}); api.settings = async () => ({}); api.setSettings = async () => ({}); api.prefetch = async () => ({});
   const store = makeAppStore({ subscribeSources: null, storage: saved });

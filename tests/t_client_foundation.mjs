@@ -8,6 +8,7 @@ import { assert, assertEquals } from "jsr:@std/assert";
 import { makeAppStore } from "../client-solid/store/app-store.js";
 import { api } from "../client/js/api.mjs";
 import { clientInventory } from "./helpers/client-inventory.mjs";
+import { sourceFrame, injectedSourceStream } from "./helpers/source-stream.mjs";
 
 api.inventory = async (...args) => clientInventory(await api.entries(...args));
 
@@ -352,7 +353,6 @@ async function withBookmarkStore(run) {
   api.nodes = async () => ({});
   api.collections = async () => ({ h: { address: "h:1", kind: "comfy", online: true },
     other: { address: "other:1", kind: "comfy", online: true } });
-  api.activity = async () => ({ supported: false });
   try {
     await store.actions.hosts.refresh();
     await store.actions.hosts.select("h");
@@ -749,9 +749,21 @@ async function withSourceStore(run, { initialUnknown = false } = {}) {
   const row = (name, extra = {}) => ({ name, size: null, hash: null, width: 100, height: 50,
     meta: null, judgment: null, extracted: false, ...extra });
   const lists = { h: [row("a.png"), row("b.png")], other: [row("other.png")] };
+  let revision = 0;
+  const frame = () => sourceFrame(Object.fromEntries(Object.entries(sources).map(([id, source]) =>
+    [id, { ...source, activity: activity[id] }])), revision++);
+  const initial = frame(), stream = injectedSourceStream(initial);
+  for (const [id, source] of Object.entries(initial.sources)) Object.assign(sources[id], {
+    incarnation: source.incarnation, sourceVersion: source.sourceVersion,
+  });
+  const emit = async () => { stream.snapshot(frame()); for (let i = 0; i < 30; i++) await Promise.resolve(); };
   api.collections = async () => structuredClone(sources);
-  api.activity = async (id) => ({ ...activity[id], pinned: sources[id].pinned, autoRefresh: sources[id].autoRefresh });
-  api.patchCollection = async (id, patch) => { Object.assign(sources[id], patch); return { ...sources[id] }; };
+  api.patchCollection = async (id, patch) => {
+    Object.assign(sources[id], patch);
+    sources[id].attributesRevision = (sources[id].attributesRevision ?? 0) + 1;
+    sources[id].sourceVersion = sourceFrame({ [id]: sources[id] }).sources[id].sourceVersion;
+    return { ...sources[id] };
+  };
   api.entries = async (id) => structuredClone(lists[id]);
   api.meta = async () => ({ v: 1, changed: false, pending: 0 });
   api.want = async () => ({ pending: 0 });
@@ -759,12 +771,10 @@ async function withSourceStore(run, { initialUnknown = false } = {}) {
   api.settings = async () => ({});
   api.setSettings = async () => ({});
   api.prefetch = async () => ({ pending: {} });
-  const store = makeAppStore({ subscribeSources: null });
+  const store = makeAppStore({ subscribeSources: stream.subscribe });
   try {
-    await store.actions.hosts.refresh();
-    for (const id of Object.keys(sources)) await store.actions.hosts.pollActivity(id);
     await store.actions.boot();
-    await run({ store, api, sources, activity, lists, row });
+    await run({ store, api, sources, activity, lists, row, emit });
   } finally {
     store.dispose();
     store.actions.status.clear("transient");
@@ -774,13 +784,11 @@ async function withSourceStore(run, { initialUnknown = false } = {}) {
   }
 }
 
-Deno.test("source flags: confirmed independent serialized writer and stale collection/activity fences", async () => {
+Deno.test("source flags: confirmed independent serialized writer and stale collection fences", async () => {
   await withSourceStore(async ({ store, api, sources }) => {
-    const collection = deferredSourceRead(), telemetry = deferredSourceRead(), writes = [];
+    const collection = deferredSourceRead(), writes = [];
     api.collections = () => collection.promise;
     const read = store.actions.hosts.refresh();
-    api.activity = () => telemetry.promise;
-    const poll = store.actions.hosts.pollActivity("h");
     api.patchCollection = (id, patch) => {
       const pending = deferredSourceRead(); writes.push({ id, patch, ...pending }); return pending.promise;
     };
@@ -790,15 +798,16 @@ Deno.test("source flags: confirmed independent serialized writer and stale colle
     assertEquals(store.state.sourceSaving.h, true);
     await Promise.resolve();
     assertEquals(writes.length, 1);
-    writes[0].resolve({ pinned: true, autoRefresh: true });
+    writes[0].resolve({ pinned: true, autoRefresh: true,
+      sourceVersion: { ...sources.h.sourceVersion, attributesRevision: 1 } });
     await pin;
     await Promise.resolve();
     assertEquals(writes[1].patch, { autoRefresh: false });
-    writes[1].resolve({ pinned: true, autoRefresh: false });
+    writes[1].resolve({ pinned: true, autoRefresh: false,
+      sourceVersion: { ...sources.h.sourceVersion, attributesRevision: 2 } });
     await refreshOff;
     collection.resolve(sources);
-    telemetry.resolve({ supported: true, epoch: "E", terminalRevision: 0, resyncRevision: 0, pinned: false, autoRefresh: true });
-    await Promise.all([read, poll]);
+    await read;
     assertEquals([store.state.hosts.h.pinned, store.state.hosts.h.autoRefresh], [true, false]);
     assertEquals(store.state.sourceSaving.h, undefined);
     api.patchCollection = async () => { throw new Error("offline"); };
@@ -809,7 +818,7 @@ Deno.test("source flags: confirmed independent serialized writer and stale colle
 });
 
 Deno.test("source refresh: completion during listing retains a follow-up, coalesces and preserves user state", async () => {
-  await withSourceStore(async ({ store, api, activity, row }) => {
+  await withSourceStore(async ({ store, api, activity, row, emit }) => {
     const original = store.state.images[0], reads = [];
     store.actions.selected.set(original.id, true);
     store.actions.ui.setFilter(".png");
@@ -819,10 +828,10 @@ Deno.test("source refresh: completion during listing retains a follow-up, coales
     const current = store.state.current(), trail = [...store.state.currentStack()];
     api.entries = () => { const read = deferredSourceRead(); reads.push(read); return read.promise; };
     activity.h.terminalRevision = 1;
-    await store.actions.hosts.pollActivity("h");
+    await emit();
     assertEquals(reads.length, 1);
     activity.h.terminalRevision = 3;
-    await store.actions.hosts.pollActivity("h");
+    await emit();
     assertEquals(reads.length, 1, "one refresh flight per loaded source session");
     reads[0].resolve([row("first.png"), row("a.png"), row("b.png")]);
     for (let i = 0; i < 30 && reads.length < 2; i++) await Promise.resolve();
@@ -842,26 +851,27 @@ Deno.test("source refresh: completion during listing retains a follow-up, coales
 });
 
 Deno.test("source refresh: failed target retries, disabled/unselected sources never merge or select", async () => {
-  await withSourceStore(async ({ store, api, activity, sources, lists, row }) => {
+  await withSourceStore(async ({ store, api, activity, sources, lists, row, emit }) => {
     let reads = 0;
     api.entries = async (id) => { reads++; if (reads === 1) throw new Error("listing offline"); return lists[id]; };
     lists.h.unshift(row("new.png"));
     activity.h.terminalRevision++;
-    await store.actions.hosts.pollActivity("h");
+    await emit();
     for (let i = 0; i < 20; i++) await Promise.resolve();
     assert(!store.state.images.some((i) => i.filename === "new.png"));
     await store.actions.ui.refresh();
     assert(store.state.images.some((i) => i.filename === "new.png"));
-    await store.actions.hosts.pollActivity("other");
+    await emit();
     lists.other.unshift(row("other-new.png"));
     activity.other.terminalRevision++;
-    await store.actions.hosts.pollActivity("other");
+    await emit();
     assertEquals(store.state.host(), "h");
     assert(store.state.images.every((i) => i.host === "h"));
     sources.h.autoRefresh = false;
+    sources.h.attributesRevision = (sources.h.attributesRevision ?? 0) + 1;
     activity.h.terminalRevision++;
     lists.h.unshift(row("disabled.png"));
-    await store.actions.hosts.pollActivity("h");
+    await emit();
     assert(!store.state.images.some((i) => i.filename === "disabled.png"));
     await store.actions.ui.refresh();
     assert(store.state.images.some((i) => i.filename === "disabled.png"));
@@ -985,50 +995,28 @@ Deno.test("source enrichment: metadata learned through polling during a listing 
 });
 
 Deno.test("source activity: engine epoch/recovery changes catch up the selected feed", async () => {
-  await withSourceStore(async ({ store, activity, lists, row }) => {
+  await withSourceStore(async ({ store, activity, lists, row, emit }) => {
     lists.h.unshift(row("recovered.png"));
     activity.h.epoch = "replacement-engine";
-    await store.actions.hosts.pollActivity("h");
+    await emit();
     for (let i = 0; i < 30; i++) await Promise.resolve();
     assertEquals(store.state.images[0].filename, "recovered.png");
     lists.h.unshift(row("gap-catchup.png"));
     activity.h.resyncRevision++;
-    await store.actions.hosts.pollActivity("h");
+    await emit();
     for (let i = 0; i < 30; i++) await Promise.resolve();
     assertEquals(store.state.images[0].filename, "gap-catchup.png");
   });
 });
 
 Deno.test("source activity: first known snapshot after the initial listing catches up without inventing terminal revisions", async () => {
-  await withSourceStore(async ({ store, activity, lists, row }) => {
+  await withSourceStore(async ({ store, activity, lists, row, emit }) => {
     assertEquals(store.state.sourceActivity.h.state, "unknown");
     lists.h.unshift(row("during-startup-baseline.png"));
     activity.h.state = "idle"; activity.h.sampledAt = 1;
-    await store.actions.hosts.pollActivity("h");
+    await emit();
     for (let i = 0; i < 30; i++) await Promise.resolve();
     assertEquals(store.state.images[0].filename, "during-startup-baseline.png");
     assertEquals(store.state.sourceActivity.h.terminalRevision, 0);
   }, { initialUnknown: true });
-});
-
-Deno.test("source lifecycle: an old activity response cannot configure a removed/re-added source ID", async () => {
-  await withSourceStore(async ({ store, api, sources }) => {
-    const old = deferredSourceRead();
-    const activity = api.activity;
-    api.activity = (id) => id === "h" ? old.promise : activity(id);
-    const poll = store.actions.hosts.pollActivity("h");
-    api.removeCollection = async (id) => { delete sources[id]; return { removed: id }; };
-    await store.actions.hosts.remove("h");
-    api.addCollection = async (id, address) => {
-      sources[id] = { address, kind: "comfy", online: true, pinned: false, autoRefresh: false };
-      return sources[id];
-    };
-    await store.actions.hosts.add("h", "h:1");
-    old.resolve({ supported: true, state: "running", epoch: "obsolete", terminalRevision: 99,
-      resyncRevision: 99, pinned: true, autoRefresh: true });
-    await poll;
-    assertEquals([store.state.hosts.h.pinned, store.state.hosts.h.autoRefresh], [false, false]);
-    assertEquals(store.state.sourceActivity.h, undefined);
-    assertEquals(store.state.host(), "other");
-  });
 });

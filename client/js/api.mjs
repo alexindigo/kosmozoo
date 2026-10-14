@@ -56,7 +56,6 @@ export const api = {
   addCollection: (name, address) => req("POST", "/api/collections", { name, address }),
   removeCollection: (name) => req("DELETE", `/api/collections/${enc(name)}`),
   patchCollection: (name, attributes) => req("PATCH", `/api/collections/${enc(name)}`, attributes),
-  activity: (name) => req("GET", `/api/collections/${enc(name)}/activity`),
   entries: (collection) => req("GET", `/api/collections/${enc(collection)}/entries`),
   inventory: (collection) => req("GET", `/api/collections/${enc(collection)}/entries?inventory=1`),
   entryBytesUrl: (collection, name) => `${BASE}${entryUrl(collection, name)}/bytes`,

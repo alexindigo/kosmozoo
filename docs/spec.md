@@ -38,7 +38,6 @@ the resources; a collection's `capabilities` answer what its backing can do.
 | `/api/collections` | POST | add a source-backed collection `{name, address, pinned?, autoRefresh?}`; flags default false; repeating the same name/address preserves existing flags; different address is 409 |
 | `/api/collections/<id>` | PATCH | partial `{pinned?: boolean, autoRefresh?: boolean}`; validates the complete object before writing; invalid fields/types/null/arrays/malformed JSON are 400, unknown source is 404, empty object is a no-op; returns saved booleans and their committed `sourceVersion` without host/folder probing |
 | `/api/collections/<id>` | DELETE | remove; refuses the last collection |
-| `/api/collections/<id>/activity` | GET | cached engine-owned activity plus canonical flags; never probes a host; unknown source is 404; folders return `supported:false` and a reason |
 | `/api/events` | GET | one native SSE delivery connection per app tab; complete version1 authoritative cached source maps, no upstream probe/list/monitor creation |
 | `/api/collections/<id>/entries` | GET | the feed listing: size, hash, state, meta, judgment, and dims — `COALESCE(content, entry)`, so an entry the dims pass reached carries width/height before it has a hash. Gone entries are excluded. `?inventory=1` returns the coherent output envelope described below; default remains an array. `?kind=input` lists the input dir instead |
 | `/api/collections/<id>/entries/<name>` | GET | one entry |
@@ -278,9 +277,8 @@ admission/listeners/subscribers retire at shutdown entry, before the existing
 Jobs -> inventory -> prefetch -> HTTP -> Store shutdown sequence.
 
 The Store owns one injectable subscription, independent of sources, pins, folders,
-selection and component mounts. Normal boot, initial inventory and ordinary pages
-issue zero activity GETs; `api.activity`/`actions.hosts.pollActivity` remain explicit
-one-shot compatibility ports, fenced against newer stream acceptance. Native
+selection and component mounts. Source activity is delivered exclusively through
+the event stream; there is no per-source activity GET route. Native
 EventSource failure closes its retry machinery before one API-owned exponential,
 jittered retry capped30s. Only an accepted full snapshot establishes ready. No
 polling fallback. Pagehide suspends delivery; pageshow reestablishes it for bfcache.

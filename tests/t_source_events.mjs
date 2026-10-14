@@ -182,14 +182,13 @@ async function withStreamClient(run, delayed = false, configured = { h: {} }) {
   globalThis.location = { pathname: "/", search: "", hash: "#h" };
   globalThis.history = { state: null, replaceState() {}, pushState() {} };
   const initial = sourceFrame(configured), stream = injectedSourceStream(delayed ? null : initial);
-  let reads = 0, activityReads = 0, cleanup;
+  let reads = 0, cleanup;
   api.collections = async () => structuredClone(initial.sources);
   api.inventory = async () => { reads++; return clientInventory([{ name: "a.png", width: 100, height: 50, hash: "content", judgment: null }], { coverage: "recursive" }); };
-  api.activity = async () => { activityReads++; throw Error("automatic activity GET is forbidden"); };
   api.meta = async () => ({ changed: false, pending: 0 }); api.want = async () => ({ pending: 0 });
   api.nodes = async () => ({}); api.settings = async () => ({}); api.setSettings = async () => ({}); api.prefetch = async () => ({});
   const store = createRoot(dispose => { cleanup = dispose; return makeAppStore({ subscribeSources: stream.subscribe, storage: null }); });
-  try { await store.actions.boot(); await run({ store, stream, initial, reads: () => reads }); assertEquals(activityReads, 0); }
+  try { await store.actions.boot(); await run({ store, stream, initial, reads: () => reads }); }
   finally { store.dispose(); cleanup(); store.actions.status.clear("transient"); Object.assign(api, oldApi);
     if (location === undefined) delete globalThis.location; else globalThis.location = location;
     if (history === undefined) delete globalThis.history; else globalThis.history = history; }
@@ -230,17 +229,16 @@ Deno.test("push Store: newer events beat HTTP replies, queued toggles use latest
 
 Deno.test("push Store: full-map replacement fences old reads/flags, late discovery cannot resurrect, page lifecycle has one owner", async () => {
   await withStreamClient(async ({ store, stream, initial }) => {
-    const discovery = deferred(), reply = deferred(); api.collections = () => discovery.promise;
-    const pending = store.actions.hosts.refresh(); api.activity = () => reply.promise;
-    const explicit = store.actions.hosts.pollActivity("h"), before = store.state.images[0];
+    const discovery = deferred(); api.collections = () => discovery.promise;
+    const pending = store.actions.hosts.refresh(), before = store.state.images[0];
     const target = new EventTarget(); store.actions.lifecycle.registerPage(target);
     target.dispatchEvent(new Event("pagehide")); assertEquals(stream.connections[0].cleanups, 1);
     assertEquals(store.state.images[0], before); target.dispatchEvent(new Event("pageshow"));
     assertEquals(stream.connections.length, 2);
     const replacement = sourceFrame({ h: { incarnation: "replacement", pinned: true } }, 5);
     stream.snapshot(replacement); await flush();
-    discovery.resolve(initial.sources); reply.resolve({ ...initial.sources.h.activity, pinned: false, autoRefresh: false });
-    await Promise.all([pending, explicit]);
+    discovery.resolve(initial.sources);
+    await pending;
     assertEquals(store.state.hosts.h.incarnation, "replacement"); assertEquals(store.state.hosts.h.pinned, true);
     stream.connections[0].callbacks.onSnapshot(sourceFrame({ h: { pinned: false } }, 99));
     assertEquals(store.state.hosts.h.incarnation, "replacement");

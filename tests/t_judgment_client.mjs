@@ -32,7 +32,6 @@ async function withStore(run, judgment = initial) {
   api.nodes = async () => ({});
   api.collections = async () => ({ h: { address: "folder:/fixture/h", kind: "folder", online: true },
     other: { address: "other:1", kind: "comfy", online: true } });
-  api.activity = async () => ({ supported: false });
   api.setSettings = async () => ({});
   api.setJudgment = async () => ({});
   const store = makeAppStore({ subscribeSources: null });

@@ -93,7 +93,7 @@ export function makeAppStore({ subscribeSources = typeof window !== "undefined" 
     createRecord: (id, source) => ({ id, address: source.address, incarnation: source.incarnation,
       epoch: source.sourceVersion?.epoch, writes: 0, revision: 0,
       confirmed: { pinned: !!source.pinned, autoRefresh: !!source.autoRefresh, sourceVersion: source.sourceVersion },
-      writeTask: Promise.resolve(), task: null, freshness: makeSourceFreshness() }),
+      writeTask: Promise.resolve(), freshness: makeSourceFreshness() }),
     onRetire: record => record.freshness.retire(),
   });
   const hostsView = sourceRecords.hosts;
@@ -1218,7 +1218,7 @@ export function makeAppStore({ subscribeSources = typeof window !== "undefined" 
     capabilities: c.capabilities ?? null,
   }]));
 
-  let registryRevision = 0, collectionRead = 0, streamEpoch = null, streamRevision = -1, streamSerial = 0;
+  let registryRevision = 0, collectionRead = 0, streamEpoch = null, streamRevision = -1;
   let membershipFloor = null;
   let deliveryStarted = false, deliverySuspended = false, deliveryGeneration = 0, deliveryDispose = null;
   let everDelivered = false, deliveryGap = false, pageDispose = null;
@@ -1272,7 +1272,7 @@ export function makeAppStore({ subscribeSources = typeof window !== "undefined" 
           confirmAttributes(record, value);
           acceptActivity(record, value.activity);
         }
-        streamEpoch = frame.epoch; streamRevision = frame.revision; streamSerial++; registryRevision++;
+        streamEpoch = frame.epoch; streamRevision = frame.revision; registryRevision++;
       });
     }
     if (deliveryGap) {
@@ -1373,29 +1373,6 @@ export function makeAppStore({ subscribeSources = typeof window !== "undefined" 
     }
     sourceRecords.reconcile(next);
     drainRefresh(sourceSession);
-  }
-
-  function readActivity(record) {
-    if (!record || disposed || sourceRecords.get(record.id) !== record) return Promise.resolve();
-    if (record.task) return record.task;
-    const revision = record.revision, delivered = streamSerial;
-    record.task = (async () => {
-      try {
-        const snapshot = await api.activity(record.id);
-        if (disposed || sourceRecords.get(record.id) !== record || delivered !== streamSerial) return;
-        if (revision === record.revision && !record.writes) {
-          if (!confirmAttributes(record, snapshot)) resyncSources();
-        }
-        acceptActivity(record, snapshot);
-        if (ownsSession(sourceSession) && sourceSession.source === record) drainRefresh(sourceSession);
-      } catch (error) {
-        if (disposed || sourceRecords.get(record.id) !== record || delivered !== streamSerial) return;
-        record.acceptActivity({ supported: true, state: "disconnected", progress: null, error: error.message });
-      } finally {
-        record.task = null;
-      }
-    })();
-    return record.task;
   }
 
   function dispose() {
@@ -1544,7 +1521,6 @@ export function makeAppStore({ subscribeSources = typeof window !== "undefined" 
       toggleMenu() { setHostMenuOpen(!hostMenuOpen()); },
       closeMenu() { setHostMenuOpen(false); },
       refresh: refreshHosts,
-      pollActivity(id) { return readActivity(sourceRecords.get(id)); },
       patch(id, patch) {
         const record = sourceRecords.get(id);
         if (!record) return Promise.resolve({ ok: false });
