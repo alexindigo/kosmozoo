@@ -210,6 +210,7 @@ Deno.test("probe + run routes: enumParams from the host's options, picks enqueue
           "LoraLoader#21.lora_name": { enabled: true, values: ["style.safetensors", "other.safetensors"] },
         },
         prefix: "v_", suffix: "",
+        context: body.context, acknowledgement: { version: 2, runId: crypto.randomUUID(), requestId: crypto.randomUUID() },
       }),
     }));
     assertEquals(rr.status, 200);

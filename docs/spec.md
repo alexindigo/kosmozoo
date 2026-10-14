@@ -491,11 +491,11 @@ Legacy callers retain the input array/`{name}` shapes. Local-file runs across di
 physical backends reject before writes; aliases sharing one backend retain separate
 target identities and matched upload-resource provenance.
 
-The updated editor sends `acknowledgement:{version:2,runId,requestId}` and captured
-context. The response echoes correlation, matched context, `target:{id,host,filename}`
+Run requires `acknowledgement:{version:2,runId,requestId}` and captured source/graph
+context. Missing or invalid acknowledgement/context and version1 requests reject
+before enqueue. The response echoes correlation, matched context, `target:{id,host,filename}`
 and complete indexed `accepted:[{index,promptId,applied:{ranges:[],imageParams:[]},
-selections:{ranges:[],imageParams:[]},naming:[]}]`. Version1 proof and counts-only
-request consumers remain compatible. UUIDs use native Web Crypto entropy on the
+selections:{ranges:[],imageParams:[]},naming:[]}]`. UUIDs use native Web Crypto entropy on the
 existing HTTP LAN origin; they are correlation, not retry/idempotency keys.
 
 Actual surviving carrier assignments and recognized naming writes certify positive

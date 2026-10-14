@@ -320,15 +320,15 @@ export function register(app) {
     if (!id || !host || !filename || !ranges) {
       return Response.json({ error: "missing required fields" }, { status: 400 });
     }
-    if (acknowledgement?.version === 2 && (!validContext(context) || context.origin.source !== host)) {
+    if (!validContext(context) || context.origin.source !== host) {
       return Response.json({ error: "Version2 requires the captured source/graph context" }, { status: 400 });
     }
-    if (acknowledgement !== undefined && (!validRunAcknowledgement(acknowledgement) || id !== `${host}:${filename}` ||
-        Object.keys(ranges).some(key => ranges[key]?.enabled && imageParams?.[key]?.enabled))) {
+    if (!validRunAcknowledgement(acknowledgement) || id !== `${host}:${filename}` ||
+        Object.keys(ranges).some(key => ranges[key]?.enabled && imageParams?.[key]?.enabled)) {
       return Response.json({ error: "invalid or ambiguous submission acknowledgement request" }, { status: 400 });
     }
 
-    const r = await inspect(host, filename, acknowledgement?.version === 2 ? context : null);
+    const r = await inspect(host, filename, context);
     if (r.error) return Response.json({ error: r.error }, { status: r.status });
     const { graph, addr, types, enums, outputClasses, token, backing } = r;
 
@@ -476,8 +476,7 @@ export function register(app) {
     if (errors.length) console.error(`[variations] ${host}:${filename} → submitted ${submitted}/${permutations.length}, ${errors.length} failed`);
     else console.log(`[variations] ${host}:${filename} → submitted ${submitted}/${permutations.length}`);
     return Response.json({ submitted, total: permutations.length, errors,
-      ...(acknowledgement === undefined ? {} : { acknowledgement: { ...acknowledgement,
-        target: { id, host, filename }, ...(acknowledgement.version === 2 ? { context: r.context } : {}), accepted } }),
+      acknowledgement: { ...acknowledgement, target: { id, host, filename }, context: r.context, accepted },
     });
   });
 }

@@ -131,6 +131,7 @@ Deno.test("probe + run routes: textParams from the graph, picks enqueued verbati
           "CLIPTextEncode#2.text": { enabled: true, values: ["a portrait, studio light", "a cyberpunk alley, rain"] },
         },
         prefix: "v_", suffix: "",
+        context: body.context, acknowledgement: { version: 2, runId: crypto.randomUUID(), requestId: crypto.randomUUID() },
       }),
     }));
     assertEquals(rr.status, 200);

@@ -465,11 +465,15 @@ async function main() {
     // params the graph lacks drop out instead of erroring.
     await attempt("relative run resolves offsets per image", async () => {
       const res = await cdp.evaluate(`(async () => {
+        const probe = await fetch("/api/features/variations/probe/" + encodeURIComponent("fake:flux-basic.png"));
+        if (!probe.ok) throw new Error("Run probe failed: " + probe.status);
+        const { context } = await probe.json();
         const r = await fetch("/api/features/variations/run", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
             id: "fake:flux-basic.png", host: "fake", filename: "flux-basic.png",
+            context, acknowledgement: { version: 2, runId: crypto.randomUUID(), requestId: crypto.randomUUID() },
             relative: true,
             ranges: {
               "BasicScheduler.steps": { enabled: true, min: -5, max: 5, increment: 1, clamp: [1, 150] },
@@ -527,11 +531,15 @@ async function main() {
     // resolves {lora_strength} from the permutation.
     await attempt("lora strength sweep hits every loader", async () => {
       const res = await cdp.evaluate(`(async () => {
+        const probe = await fetch("/api/features/variations/probe/" + encodeURIComponent("fake:flux-lora.png"));
+        if (!probe.ok) throw new Error("Run probe failed: " + probe.status);
+        const { context } = await probe.json();
         const r = await fetch("/api/features/variations/run", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
             id: "fake:flux-lora.png", host: "fake", filename: "flux-lora.png",
+            context, acknowledgement: { version: 2, runId: crypto.randomUUID(), requestId: crypto.randomUUID() },
             ranges: {
               "LoraLoader.strength_model": { enabled: true, min: 0.5, max: 1.0, increment: 0.5 },
             },
@@ -651,11 +659,15 @@ async function main() {
     // --- enum sweep run: picks enqueue on the right node ------------------------
     await attempt("enum sweep run enqueues the picks on the right node", async () => {
       const res = await cdp.evaluate(`(async () => {
+        const probe = await fetch("/api/features/variations/probe/" + encodeURIComponent("fake:flux-lora.png"));
+        if (!probe.ok) throw new Error("Run probe failed: " + probe.status);
+        const { context } = await probe.json();
         const r = await fetch("/api/features/variations/run", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
             id: "fake:flux-lora.png", host: "fake", filename: "flux-lora.png",
+            context, acknowledgement: { version: 2, runId: crypto.randomUUID(), requestId: crypto.randomUUID() },
             ranges: {
               "LoraLoader.strength_model": { enabled: true, min: 0.5, max: 1.0, increment: 0.5 },
             },
@@ -736,11 +748,15 @@ async function main() {
     // --- text sweep run: picks enqueue verbatim ----------------------------------
     await attempt("text sweep run enqueues the picked prompts", async () => {
       const res = await cdp.evaluate(`(async () => {
+        const probe = await fetch("/api/features/variations/probe/" + encodeURIComponent("fake:flux-basic.png"));
+        if (!probe.ok) throw new Error("Run probe failed: " + probe.status);
+        const { context } = await probe.json();
         const r = await fetch("/api/features/variations/run", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
             id: "fake:flux-basic.png", host: "fake", filename: "flux-basic.png",
+            context, acknowledgement: { version: 2, runId: crypto.randomUUID(), requestId: crypto.randomUUID() },
             ranges: {},
             imageParams: {
               "CLIPTextEncode#2.text": { enabled: true, values: ["a portrait, studio light", "a cyberpunk alley, rain"] },

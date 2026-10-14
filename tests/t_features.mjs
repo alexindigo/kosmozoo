@@ -75,12 +75,18 @@ Deno.test("features: run enqueues per permutation, caps at 413, no host# tag", a
   });
   await ctx.ingest.ensure("fake", "flux-lora.png");
 
+  const probe = await router.handle(new Request(
+    "http://x/api/features/variations/probe/" + encodeURIComponent("fake:flux-lora.png"),
+  ));
+  assertEquals(probe.status, 200);
+  const { context } = await probe.json();
   const run = (ranges) => router.handle(new Request("http://x/api/features/variations/run", {
     method: "POST", headers: { "Content-Type": "application/json" },
     body: JSON.stringify({
       id: "fake:flux-lora.png", host: "fake", filename: "flux-lora.png",
       ranges,
       prefix: "v_", suffix: "",
+      context, acknowledgement: { version: 2, runId: crypto.randomUUID(), requestId: crypto.randomUUID() },
     }),
   }));
 

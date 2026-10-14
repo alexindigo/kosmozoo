@@ -177,14 +177,14 @@ const record = (value) => value !== null && typeof value === "object" && !Array.
 const shape = (value, keys) => record(value) && Object.keys(value).length === keys.length && keys.every(key => Object.hasOwn(value, key));
 const uuid = (value) => typeof value === "string" && /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(value);
 export function validRunAcknowledgement(value) {
-  return shape(value, ["version", "runId", "requestId"]) && [1, 2].includes(value.version) && uuid(value.runId) && uuid(value.requestId);
+  return shape(value, ["version", "runId", "requestId"]) && value.version === 2 && uuid(value.runId) && uuid(value.requestId);
 }
 export function acknowledgedFields(request, response) {
   const correlation = request?.acknowledgement, ack = response?.acknowledgement;
-  const ackKeys = correlation?.version === 2 ? ["version", "runId", "requestId", "target", "context", "accepted"] : ["version", "runId", "requestId", "target", "accepted"];
+  const ackKeys = ["version", "runId", "requestId", "target", "context", "accepted"];
   if (!validRunAcknowledgement(correlation) || !shape(ack, ackKeys) ||
       ack.version !== correlation.version || ack.runId !== correlation.runId || ack.requestId !== correlation.requestId ||
-      correlation.version === 2 && !sameContext(request.context, ack.context) ||
+      !sameContext(request.context, ack.context) ||
       !shape(ack.target, ["id", "host", "filename"]) || ["id", "host", "filename"].some(key => ack.target[key] !== request[key]) ||
       !Number.isSafeInteger(response.total) || response.total <= 0 || response.submitted !== response.total ||
       !Array.isArray(response.errors) || response.errors.length || !Array.isArray(ack.accepted) || ack.accepted.length !== response.total) return null;

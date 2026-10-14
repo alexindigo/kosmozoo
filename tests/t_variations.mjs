@@ -662,10 +662,16 @@ Deno.test("nested variation route: exact source bytes/lineage and producing dire
   try {
     const file = "series/deep/output_00042_.png";
     await rig.ingest.ensure("h", file);
-    const run = (filename, prefix = "var_") => router.handle(new Request("http://x/api/features/variations/run", { method: "POST", body: JSON.stringify({
-      id: "h:" + filename, host: "h", filename, prefix, suffix: "_{KSampler.denoise}",
-      ranges: { "KSampler.denoise": { enabled: true, min: .5, max: .5, increment: .1 } },
-    }) }));
+    const run = async (filename, prefix = "var_") => {
+      const probe = await router.handle(new Request("http://x/api/features/variations/probe/" + encodeURIComponent("h:" + filename)));
+      assertEquals(probe.status, 200);
+      const { context } = await probe.json();
+      return router.handle(new Request("http://x/api/features/variations/run", { method: "POST", body: JSON.stringify({
+        id: "h:" + filename, host: "h", filename, prefix, suffix: "_{KSampler.denoise}",
+        ranges: { "KSampler.denoise": { enabled: true, min: .5, max: .5, increment: .1 } },
+        context, acknowledgement: { version: 2, runId: crypto.randomUUID(), requestId: crypto.randomUUID() },
+      }) }));
+    };
     const result = await run(file);
     assertEquals(result.status, 200); assertEquals((await result.json()).submitted, 1);
     assertEquals(enqueues[0].prompt["2"].inputs.filename_prefix, "series/deep/var_output_00042__0.5");
