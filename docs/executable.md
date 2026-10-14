@@ -9,9 +9,6 @@ artifact evidence, not a universal Linux or musl promise.
 
 ## Commands
 
-These are end-user operations; project builds and verification follow the
-VM-only workflow in [verification.md](verification.md).
-
 | # | Command | Behavior |
 |---|---|---|
 | 1 | `kosmozoo` or `kosmozoo app` | Start a loopback engine and request an installed-browser app window, or reuse the selected state's matching ready engine |
@@ -145,33 +142,10 @@ trusted local drop-ins. The detector's Python service/worker/model files are not
 embedded; comparison-plugin axes still have their documented dormant SPA status.
 
 Development candidates are labelled working inputs with no fictitious Git commit.
-Final distribution requires clean commit/tree/source identity, complete notices
-and license/source-rebuild material, checksums, measured ABI compatibility and
-actual executable/image consumer evidence. The packaging driver does not publish
-or create a release version/tag.
+The packaging driver does not publish or create a release version/tag.
 
 Public application-source and global package consumers use the explicit
-[publication input/resource contract](../packaging/linux/PUBLICATION.md), backed
-by the same authenticated compile core as the guarded developer wrapper. Global
+[publication input/resource contract](../packaging/linux/PUBLICATION.md). Global
 resource rendering shares the self-installer's templates and escaping; pacman
 ownership never invokes that installer or activates services/profiles.
 
-## Verification
-
-Release workloads run in the identified Kosmozoo VM, never on the editing host.
-`tests/e2e/run-executable.sh` drives all five browser suites against the actual
-binary with data-only engine mounts. `tests/release/verify-linux.sh` composes
-runtime, native browser, local-plugin, cold Bookworm, measured ABI and installer
-consumer gates. Its core phase requires `--binary`, a fresh `--evidence`,
-`--previous-binary` for upgrade/recovery, and `--image-input` for the characterized
-cold runtime.
-
-The native Firefox phases are `firefox-setup`, `firefox-fallback`,
-`firefox-settings`, `firefox-enabled`, `firefox-finish`, `firefox-handoff`, and
-`firefox-port-change`. Complete first-run UI before fallback observation; enable
-the preference through the dedicated settings UI and close Firefox before the
-enabled phase. Stop the initial engine with `firefox-finish` before independent
-handoff/port-change probes. `browser-fallbacks` additionally takes the verified
-archived executable through `--older-firefox`. `finish` checks the same binary's
-complete witnesses and emits `LINUX RELEASE ACCEPTANCE PASS`; screenshot spatial
-review and final clean-commit rebuild identity are separate required gates.

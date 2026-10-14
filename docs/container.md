@@ -14,7 +14,7 @@ Debian packages and locked Deno dependencies and compiles `client-solid/` with
 against `deno.lock`. Debian package repositories/base tags can change, so this
 is not a claim of bit-for-bit identical images across builds.
 
-Run development builds/tests inside your authorized VM. From its copied checkout:
+Build and run:
 
 ```sh
 docker build -t kosmozoo:local .
@@ -108,51 +108,7 @@ inventory supports the nested-path contract in [the spec](spec.md). Comfy addres
 must be reachable from the container; `127.0.0.1` on bridge networking denotes
 the container itself, not a host-side Comfy service.
 
-## Image verification
-
-In the authorized VM, after building:
-
-```sh
-mkdir -p "$HOME/kosmozoo-container-evidence"
-bash tests/e2e/run-image.sh
-```
-
-This runs the five existing suites against the built image. Only test data and
-state/cache volumes are mounted into the engine; fake-host/browser test source
-mounts belong to their separate containers. The runner retains engine mount/log
-evidence, checks non-root execution and graceful shutdown, and refuses occupied
-test resources. `KOSMOZOO_IMAGE` overrides the default `kosmozoo:local` tag; the
-runner records and runs its resolved image ID. See [verification.md](verification.md)
-for the separate full staged-project pre-commit hook.
-
-`tests/release/verify-image.sh --image <immutable-id-or-tag> --evidence <fresh-dir>
---rollback-source <prepared-old-source>` provides the separate cold/migration and
-rootless rehearsal. The old source has its own verified manifest and built client;
-only the retained old-deployment leg receives that source bind. Replacement
-engines receive image code and data-only mounts. It records actual system SQLite
-package/library bytes, Docker save config and uncompressed layer digests, imported
-Podman runtime identity, keep-id data writes, recreation, code rollback retaining
-new writes, and full-pair snapshot recovery into fresh disposable siblings.
-Stopped containers, images, archive and before/after state/cache remain available;
-the driver never prunes images or fixes ownership with recursive chown.
+## Licence notices
 
 Project and dependency licence notices accompany the image under
-`/usr/share/doc/kosmozoo/`. The source/build material and final clean-commit artifact
-identity remain separate distribution gates; mutable Debian inputs are measured,
-not represented as the executable's independently pinned native input.
-
-The cutover checkpoint has two additional VM-only helpers.
-`check-cutover-snapshot.sh --evidence <dir>` reads `snapshot-input.json` containing
-the stopped-writer receipt, complete state/cache path/hash/mode/ownership inventory
-and canonical SQLite/settings fingerprint; it requires schema9, integrity/FK
-checks and every content-addressed cache file. Prepare the stopped snapshot and
-seal that fresh baseline during the approved no-writer interval, not from a live
-database or historical user-data counts.
-`verify-deployed-readonly.sh --evidence <dir>` reads `readonly-input.json` with the
-expected four shared-module hashes, known cached-content hashes/sizes and current
-canonical source addresses/flags. Its fixed production origin is
-`http://architect.home:2084`; requests are only GETs for runtime identity, those
-shared modules, direct cached content and one120-second native SSE connection.
-It does not list upstream inventories or exercise SPA/generation/settings writes.
-The explicit `--fixture-origin` accepts only loopback for disposable guest proof;
-its receipt labels fixture evidence and cannot be presented as production proof.
+`/usr/share/doc/kosmozoo/`.

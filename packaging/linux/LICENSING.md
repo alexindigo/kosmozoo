@@ -40,7 +40,5 @@ and dependency notices accompany distribution. The optional installer retains
 the embedded notices with each managed version.
 
 MPL-covered dependency source is supplied rather than assuming a checksum or
-generic licence label satisfies source obligations. Notices/source archives do
-not replace consumer, ABI, clean-tree and artifact-identity gates. Private working
-candidates are not published releases; no version/tag or legal approval record
-is invented by the build driver.
+generic licence label satisfies source obligations. No version/tag or legal
+approval record is invented by the build driver.

@@ -8,7 +8,7 @@ dependencies. Installed browsers and GNU system/helper libraries remain external
 
 ## Explicit inputs and one build authority
 
-Run the following inside the authorized build VM for developer verification:
+Build:
 
 ```sh
 bash packaging/linux/build-publication.sh \
@@ -19,11 +19,8 @@ bash packaging/linux/build-publication.sh \
 
 All directories are explicit, disk-backed and outside the source checkout. Output
 must not exist. `--validate-inputs` performs the same complete source/native/material
-authentication without compiling or creating artifacts. This is the M01 seam;
-release artifacts are first built only after the reviewed Docker-first checkpoint.
-The public core has no fleet UUID/private path requirement. The developer-only
-`build-release.sh`/`build-release.py` retains its strict original VM/DMI and private
-evidence guard and invokes this same core. Neither route creates tags or publishes.
+authentication without compiling or creating artifacts.
+The core has no fleet UUID/private path requirement and does not create tags or publish.
 
 `source-input.py` records all committed source paths, modes and SHA-256 values plus
 commit/tree identity. The versioned source archive includes that manifest at its
@@ -59,8 +56,6 @@ SHA-256 record. Do not trust an unauthenticated downloaded checksum list as its 
 authority. Extract only safe regular-file/relative-directory entries into fresh
 private directories; never extract an archive over user state or a prior attempt.
 The builder rechecks every contained input against tracked pins before execution.
-Preseeded candidate caches are local evidence, not public-download proof. Actual
-fresh public acquisition is a later authorized publication gate.
 
 The original compiler/runtime upstream URLs are respectively
 `https://github.com/denoland/deno/releases/download/v2.9.6/deno-x86_64-unknown-linux-gnu.zip`
