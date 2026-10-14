@@ -16,3 +16,4 @@ image:
 ```
 docker run --rm --network host -v "$PWD":/work -w /work denoland/deno:latest test --allow-all tests/t_*.mjs
 ```
+`dev/hooks/pre-commit` is the standard gate: staged-tree unit tests + client build in the capped devcontainer image; install with `git config core.hooksPath dev/hooks`.

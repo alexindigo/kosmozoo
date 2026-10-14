@@ -1,0 +1,58 @@
+#!/usr/bin/env bash
+# Install once per clone: git config core.hooksPath dev/hooks
+set -euo pipefail
+
+snapshot=""
+cleanup() {
+  status=$?
+  if [[ -n "$snapshot" ]]; then rm -rf -- "$snapshot"; fi
+  if (( status != 0 )); then
+    printf '%s\n' 'Pre-commit failed; check the output above, fix the staged tree, and retry.' >&2
+  fi
+  exit "$status"
+}
+trap cleanup EXIT
+
+if command -v podman >/dev/null 2>&1; then
+  runtime=podman
+elif command -v docker >/dev/null 2>&1; then
+  runtime=docker
+else
+  printf '%s\n' 'Pre-commit requires Podman or Docker on PATH.' >&2
+  exit 1
+fi
+
+cd "$(git rev-parse --show-toplevel)"
+# Keep all inputs, including the image and resource caps, in the staged tree.
+snapshot="$(mktemp -d "$(git rev-parse --absolute-git-dir)/pre-commit.XXXXXX")"
+git checkout-index -a --prefix="$snapshot/"
+caps=()
+for name in memory memory-swap pids-limit cpus; do
+  matches=()
+  mapfile -t matches < <(grep -oE "\"--${name}=[^\"]+\"" "$snapshot/.devcontainer/devcontainer.json")
+  if (( ${#matches[@]} != 1 )); then
+    printf 'Pre-commit requires exactly one --%s=value in devcontainer.json.\n' "$name" >&2
+    exit 1
+  fi
+  value="${matches[0]}"
+  caps+=("${value:1:${#value}-2}")
+done
+
+hash="$(sha256sum "$snapshot/.devcontainer/Dockerfile")"
+image="kosmozoo-devcontainer:${hash:0:12}"
+if ! "$runtime" image inspect "$image" >/dev/null 2>&1; then
+  "$runtime" build -t "$image" "$snapshot/.devcontainer/"
+fi
+
+# Mount the existing image home so a new cache volume inherits its ownership.
+cache_mount='kosmozoo-deno-cache:/home/vscode'
+user_args=()
+if [[ "$runtime" == podman ]]; then
+  user_args+=(--userns=keep-id)
+  cache_mount+=':U'
+fi
+"$runtime" run --rm --network host "${caps[@]}" "${user_args[@]}" \
+  -v "$snapshot:/workspaces/kosmozoo:rw,Z" \
+  -v "$cache_mount" -e DENO_DIR=/home/vscode/.cache/deno \
+  -w /workspaces/kosmozoo "$image" \
+  sh -c 'deno test --allow-all tests/t_*.mjs && deno run --frozen --allow-all build.mjs'

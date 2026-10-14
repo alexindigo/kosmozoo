@@ -26,3 +26,11 @@ to loopback2084; service/source/Docker mode to0.0.0.0:2084, with explicit
 The Deno rewrite is functional: engine, feed, comparison workbench, and the
 plugin/feature tiers are live. `docs/spec.md` is the binding contract;
 `PLUGINS.md` covers the plugin surface.
+
+## Contributing
+
+Open the repository in its devcontainer and install the hook once per clone:
+`git config core.hooksPath dev/hooks`.
+The hook runs unit tests and the client build against the staged tree inside
+the devcontainer image, using its resource caps and Docker or Podman
+(Podman is preferred when available).
