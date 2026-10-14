@@ -13,8 +13,8 @@ toggles. Availability and reason derive from each mode's declared `needs`.
 
 | Axis | Exclusive | Values | Shipped today |
 |---|---|---|---|
-| **Alignment** | yes | `independent` / `shared` / `face-anchored` | `detector` plugin registers `face-anchored` from its client half; the SPA does not load plugin client halves, so the axis is dormant |
-| **Composition** | yes | `blend` / `split` / `difference` / `flicker` | `difference` plugin registers the mode from its client half; dormant for the same reason |
+| **Alignment** | yes | `independent` / `shared` / `face-anchored` | `detector` plugin declares `face-anchored` in the engine; no SPA consumer, so the axis is dormant |
+| **Composition** | yes | `blend` / `split` / `difference` / `flicker` | `difference` plugin declares the mode in the engine; dormant for the same reason |
 | **Attention (ROI)** | no | guides, region focus | not implemented |
 
 What IS shipped: the feed (virtualized grid), the workbench (the two-sided
@@ -406,9 +406,8 @@ length/glow, geometry, tape windowing and scrub handlers retain their contracts.
 
 Static surfaces: `/shared/<name>` serves the allow-listed `src/` modules
 (`extractor.mjs`, `features/variations/shared.mjs`, `entry-path.mjs`, `source-origin.mjs`) to the browser;
-`/plugins/<name>/client.js` serves a plugin's client half; `/` and `/diff`
-serve the Solid app from `client-solid-dist/`, with shared assets (`/css`,
-`/vendor`, `/js`, logos) from `client/`.
+`/` and `/diff` serve the Solid app from `client-solid-dist/`, with shared
+assets (`/css`, `/vendor`, `/js`, logos) from `client/`.
 
 ### Client commands and modal ownership
 
@@ -777,5 +776,4 @@ The `kz` object handed to `register(kz)`:
 Underscore accessors are gone: no plugin reaches engine internals. The
 variations feature moved to `src/features/variations/` (core feature, not a
 plugin); the export plugin was deleted (a generic export returns later on
-the entries API). A plugin may also ship `client.js`, served at
-`/plugins/<name>/client.js`; the SPA does not load these today (§1).
+the entries API). Plugin capabilities have no SPA consumer today (§1).

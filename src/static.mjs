@@ -3,7 +3,6 @@
 import { join, normalize, extname, relative } from "node:path";
 import { readFile } from "node:fs/promises";
 import { fileURLToPath } from "node:url";
-import { pluginDirs } from "./plugins.mjs";
 
 const CLIENT_ROOT = fileURLToPath(new URL("../client", import.meta.url));
 // The built Solid client (client-solid-dist/) is the app: it owns the shell
@@ -51,18 +50,6 @@ export async function serveStatic(pathname) {
     const name = pathname.slice("/shared/".length);
     if (!SHARED_ALLOW.has(name)) return new Response("not found", { status: 404 });
     return serveFrom(SRC_ROOT, name);
-  }
-
-  // /plugins/<name>/client.js serves a plugin's client half from its
-  // discovery directory. No traversal; name must be a bare identifier.
-  if (pathname.startsWith("/plugins/")) {
-    const rest = pathname.slice("/plugins/".length);
-    if (!/^[a-z0-9_-]+\/client\.js$/.test(rest)) return new Response("forbidden", { status: 403 });
-    for (const tier of pluginDirs()) {
-      const r = await serveFrom(tier, rest);
-      if (r.status !== 404) return r;
-    }
-    return new Response("not found", { status: 404 });
   }
 
   // / and the SPA route /diff serve the Solid app shell; compiled app

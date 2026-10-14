@@ -75,8 +75,3 @@ export async function revalidateNow(ctx, host, filename, { input = false } = {})
     changed: !!info?.hash,
   });
 }
-
-// test seam
-export function __resetRevalidateClocks() {
-  lastCheck.clear();
-}

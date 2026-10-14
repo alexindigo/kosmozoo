@@ -2,7 +2,6 @@
 // batch parameter sweep from a card. Exports the feature contract:
 // { install, Modal, cardAction, bulkAction }.
 
-import { IconButton } from "../../components/IconButton.js";
 import { iconSvg } from "/js/icons.mjs";
 import { VariationsModal } from "./VariationsModal.js";
 import * as api from "./api.js";
@@ -33,8 +32,6 @@ export function install(store) {
       services,
       registerOwner: broker.register,
       open: (image) => store.handles.invoke("variations.open", { id: image.id }),
-      openBulk: (images) => store.handles.invoke("variations.open", { ids: images.map((image) => image.id), bulk: true }),
-      close: () => store.handles.invoke("variations.close"),
     },
   };
 }
@@ -56,5 +53,3 @@ export const bulkAction = {
   title: "generate variations of all selected (one relative sweep, applied to each)",
   command: "variations.open", args: { bulk: true },
 };
-
-export { IconButton };

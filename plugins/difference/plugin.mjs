@@ -1,7 +1,5 @@
-// plugins/difference/plugin.mjs — server half of the difference plugin.
-// Client-only in behaviour (the blending is CSS in the browser); the server
-// half only announces the composition mode so /api/plugins advertises it and
-// the client host loads the client half.
+// plugins/difference/plugin.mjs — declares the difference composition mode
+// for /api/plugins. The SPA has no consumer for this capability today.
 
 export function register(kz) {
   kz.mode("difference", {

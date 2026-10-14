@@ -62,11 +62,6 @@ export function diffUrl(left, right, { folder = "", filter = "", search = "" } =
     + ":" + encodeURIComponent(right.source) + "#" + encodeURIComponent(right.file);
 }
 
-export function stripHostPrefix(host, filename) {
-  const pfx = host + "#";
-  return filename.startsWith(pfx) ? filename.slice(pfx.length) : filename;
-}
-
 // deep links carry the stripped name; the feed may hold either form
 export function matchesFile(image, host, file) {
   return image.filename === file || image.filename === host + "#" + file;

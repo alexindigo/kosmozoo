@@ -29,7 +29,6 @@ export function validEntryName(addr, name) {
     (backingFor(addr).validName ?? folder.assertSafeName)(name);
 }
 
-export const inventoryFor = (addr, options = {}) => options.binding ? options.binding(addr).inventory(options) : backingFor(addr).inventory(addr, options);
 export const createBindingFor = (addr, options) => backingFor(addr).createBinding(addr, options);
 
 export function makeCollectionLifecycle(hosts) {

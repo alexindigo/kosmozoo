@@ -87,8 +87,8 @@ and source flags retain their existing semantics.
 Plugin discovery retains its existing tiers: the configured path, then
 `$XDG_DATA_HOME/kosmozoo/plugins` (default `/data/.local/share/kosmozoo/plugins`).
 The image deliberately has no `/app/plugins` development tier to shadow user
-plugins. The runtime client does not load plugin client halves automatically;
-packaging them does not enable the dormant comparison axes.
+plugins. The packaged engine modules do not enable the dormant comparison
+axes; the runtime client has no consumer for those plugin capabilities.
 
 ## Folder collections
 

@@ -65,14 +65,11 @@ export const api = {
   deleteEntry: (collection, name) => req("DELETE", entryUrl(collection, name)),
   settings: (ns) => req("GET", `/api/settings/${enc(ns)}`),
   setSettings: (ns, kv) => req("PATCH", `/api/settings/${enc(ns)}`, kv),
-  plugins: () => req("GET", "/api/plugins"),
   prefetch: () => req("GET", "/api/prefetch"),
   nodes: () => req("GET", "/api/nodes"),
   setPrefetch: (kv) => req("POST", "/api/prefetch", kv),
   meta: (collection, since) => req("GET", `/api/collections/${enc(collection)}/meta?since=${since}`),
   want: (collection, files) => req("POST", `/api/collections/${enc(collection)}/want`, { files }),
-  // per-collection judgment export (generated on demand)
-  feedbackExportUrl: (collection) => `${BASE}/api/collections/${enc(collection)}/feedback.json`,
   // byte size isn't in every listing — a HEAD on the bytes route fills it;
   // resolves null when the entry is unknown
   entrySizeProbe: (collection, name) => fetch(`${BASE}${entryUrl(collection, name)}/bytes`, { method: "HEAD" })

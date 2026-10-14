@@ -26,8 +26,8 @@ COPY src/ src/
 COPY client/ client/
 COPY client-solid/ client-solid/
 COPY plugins/hello/*.mjs /opt/kosmozoo/plugins/hello/
-COPY plugins/difference/*.mjs plugins/difference/client.js /opt/kosmozoo/plugins/difference/
-COPY plugins/detector/*.mjs plugins/detector/client.js /opt/kosmozoo/plugins/detector/
+COPY plugins/difference/*.mjs /opt/kosmozoo/plugins/difference/
+COPY plugins/detector/*.mjs /opt/kosmozoo/plugins/detector/
 COPY plugins/critic/*.mjs /opt/kosmozoo/plugins/critic/
 RUN deno cache --frozen src/main.mjs build.mjs /opt/kosmozoo/plugins/*/plugin.mjs \
     && deno run --frozen --allow-all build.mjs \

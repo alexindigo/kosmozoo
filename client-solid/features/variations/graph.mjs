@@ -9,7 +9,7 @@
 // The slider row component is ./SliderRow.tsx beside this module; the
 // engine-side endpoints are the variations feature's /probe and /run.
 
-import { paramId, formatValue } from "/shared/features/variations/shared.mjs";
+import { formatValue } from "/shared/features/variations/shared.mjs";
 
 // --- slider tuning overrides ---------------------------------------------------
 //
@@ -92,25 +92,3 @@ export function snapTo(v, inc, decimals) {
 
 // Trim trailing zeros for display: the shared module's formatValue (F5)
 export const fmt = formatValue;
-
-// Fallback list when the probe endpoint isn't available (e.g. image not
-// ingested yet): build entries from the image's own meta.nodes — same shape
-// the probe returns.
-export function fallbackParams(meta) {
-  const out = [];
-  for (const n of meta?.nodes ?? []) {
-    for (const [key, v] of Object.entries(n.inputs ?? {})) {
-      if (typeof v !== "number") continue;
-      out.push({
-        id: paramId(n.type, key),
-        nodeId: n.id,
-        key,
-        type: n.type,
-        title: n.title ?? null,
-        current: v,
-        integer: Number.isInteger(v),
-      });
-    }
-  }
-  return out;
-}

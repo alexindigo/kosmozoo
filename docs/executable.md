@@ -1,7 +1,8 @@
 # Linux x86_64 executable
 
 The standalone entrypoint packages the current Solid client, shared browser
-modules, engine, four bundled plugins, SQLite and optional installer resources.
+modules, engine, four bundled plugin engine modules, SQLite and optional
+installer resources.
 It uses ordinary Deno 2.9.6/V8 compilation for `x86_64-unknown-linux-gnu`.
 Running it does not require a checkout, installed Deno or Docker. It targets
 GNU/Linux x86_64; portability and ABI assumptions belong to the accompanying

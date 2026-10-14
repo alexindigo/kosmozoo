@@ -23,8 +23,7 @@ PAYLOAD = [
     'client-solid-dist', 'client', 'src/extractor.mjs', 'src/entry-path.mjs',
     'src/source-origin.mjs', 'src/features/variations/shared.mjs',
     'plugins/hello/plugin.mjs', 'plugins/difference/plugin.mjs',
-    'plugins/difference/client.js', 'plugins/detector/plugin.mjs',
-    'plugins/detector/client.js', 'plugins/critic/plugin.mjs',
+    'plugins/detector/plugin.mjs', 'plugins/critic/plugin.mjs',
     'native/linux-x86_64/libsqlite3.so', 'packaging/linux/resources',
 ]
 

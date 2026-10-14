@@ -1040,18 +1040,13 @@ export function makeAppStore({ subscribeSources = typeof window !== "undefined" 
   const sizePending = (img) =>
     !!img && !((img.width && img.height) || (img.meta?.width && img.meta?.height)) && sizes_.sizeOf(img.id) === null && !sizes_.loadFailed(img.id);
   const entriesWithKnownSize = createMemo(() => view().filter((i) => sizeKnown(st.images[i])));
-  // the pending set as a COUNT and a lazy index iterator — never a
+  // the pending set as a COUNT — never a
   // 3000-element materialization per landing (RC8)
   const pendingSizeCount = createMemo(() => {
     let n = 0;
     for (const i of view()) if (sizePending(st.images[i])) n++;
     return n;
   });
-  function* pendingSizeIdx() {
-    for (let vp = 0; vp < view().length; vp++) {
-      if (sizePending(st.images[view()[vp]])) yield vp;
-    }
-  }
   // the feed-space conversions (see THE TWO INDEX SPACES above)
   const feedPosById = createMemo(() => {
     const m = new Map();
@@ -2366,7 +2361,6 @@ export function makeAppStore({ subscribeSources = typeof window !== "undefined" 
       return sizes_.sizeOf(img.id);
     },
     pendingSizeCount,
-    pendingSizeIdx,
     imageIdxById,
     feedEntryAt,
     feedPositionOf,

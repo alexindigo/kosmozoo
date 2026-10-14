@@ -20,8 +20,8 @@ Discovery checks, in order:
 
 The Linux executable preserves trusted local `.ts`, `.mjs` and `.js` drop-ins,
 including relative module imports; packaged bytes are not a reason to replace
-user plugin data. Its explicit payload contains the six selected engine/client
-files for hello, difference, detector and critic. Detector's Python service,
+user plugin data. Its explicit payload contains the four engine modules
+for hello, difference, detector and critic. Detector's Python service,
 worker and model assets remain external and are not embedded in core.
 
 ## Shape
@@ -29,7 +29,6 @@ worker and model assets remain external and are not embedded in core.
 ```
 plugins/<name>/
     plugin.ts    # (or .mjs / .js — discovery tries .ts first) export function register(kz) — engine hooks
-    client.js    # optional, served at /plugins/<name>/client.js — UI hooks
 ```
 
 A plugin is **trusted** and runs **in-process**. Security is deliberately
@@ -42,8 +41,8 @@ What `register(kz)` can touch:
 
 | Call | Kind | Purpose |
 |---|---|---|
-| `kz.mode(id, def)` | capability | a composition-mode declaration; plugin client halves are not loaded by the current SPA, so that comparison axis is dormant |
-| `kz.alignment(id, def)` | capability | an alignment contribution (e.g. `face-anchored`); same current SPA client-half limitation |
+| `kz.mode(id, def)` | capability | a composition-mode declaration; no current SPA consumer, so that comparison axis is dormant |
+| `kz.alignment(id, def)` | capability | an alignment contribution (e.g. `face-anchored`); no current SPA consumer |
 | `kz.route(method, path, handler)` | route | server route under `/api/plugins/<name><path>` |
 | `kz.settings.get/set(k, v)` / `.ns()` | persistence | namespaced `plugins.<name>.*` settings — core never sees them |
 | `kz.store.getField/setField(collection, name, field, v)` | persistence | plugin fields on the judgment record, namespaced |
@@ -66,7 +65,7 @@ axis. **Absent must look like absent, never like broken.** Capability
 
 Each proves a different shape:
 
-1. **difference** — client-only (a composition mode via `kz.mode`).
+1. **difference** — declares a composition mode via `kz.mode`; no current SPA consumer.
 2. **detector** — brings its own external dependency (a detection *service*,
    addressed like a ComfyUI host), and degrades to absent when unconfigured.
 3. **critic** — a thin proxy: routes forwarded to an external
