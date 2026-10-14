@@ -53,6 +53,43 @@ Deno.test("unified chronology: an actual dated nested output precedes an older r
   }
 });
 
+Deno.test("combined discovery: root metadata bomb stays listed while filtered descendants and hidden semantics remain correct", async () => {
+  const port = 18199;
+  const BASE = `http://127.0.0.1:${port}`;
+  const child = new Deno.Command(Deno.execPath(), { args: ["run", "--allow-net", "--allow-read",
+    new URL("./fake-comfy.mjs", import.meta.url).pathname, "--port", String(port)], stdout: "null", stderr: "null" }).spawn();
+  try {
+    let ready = false;
+    for (let i = 0; i < 50; i++) {
+      try { const r = await fetch(BASE + "/api/system_stats"); await r.arrayBuffer(); if (r.ok) { ready = true; break; } } catch { /* boot */ }
+      await new Promise((r) => setTimeout(r, 50));
+    }
+    assert(ready);
+    const control = async (body) => {
+      const r = await fetch(`${BASE}/__test/activity`, { method: "POST", body: JSON.stringify(body) });
+      assertEquals(r.status, 200); await r.arrayBuffer();
+    };
+    const client = comfyClient(BASE.replace("http://", ""));
+    try {
+      await control({ reset: true, publish: [
+        { name: "oversized-root.png", mtime: 2_000_000_001 },
+        { name: "assets-root-hidden.png" }, { name: "a/new.png" }, { name: "a/hidden.png" },
+      ], metadataBombs: ["oversized-root.png"], assetsHidden: ["assets-root-hidden.png", "a/hidden.png"], clearHistory: true });
+      const unfiltered = await fetch(`${BASE}/api/assets_plus/output/list?recursive=1&limit=200`);
+      assertEquals(unfiltered.status, 500); await unfiltered.arrayBuffer();
+      const inventory = await client.inventory();
+      assertEquals(inventory.coverage, "recursive");
+      assert(inventory.items.some((e) => e.name === "oversized-root.png"));
+      assert(inventory.items.some((e) => e.name === "assets-root-hidden.png"));
+      assert(inventory.items.some((e) => e.name === "a/new.png"));
+      assert(!inventory.items.some((e) => e.name === "a/hidden.png"));
+      assertEquals(inventory.folders, ["", "a"]);
+    } finally { await client.disposeInventory(); await control({ reset: true }); }
+  } finally {
+    child.kill("SIGTERM"); await child.status;
+  }
+});
+
 Deno.test("inventory: combined complete request includes roots and >200/deep/backdated/history-independent descendants", async () => {
   const rows = [item("parent/deep/same.png", -1), item("a/same.png", 10), item("b/same.png", 10),
     ...Array.from({ length: 250 }, (_, i) => item(`series/file-${i}.png`, 5))];

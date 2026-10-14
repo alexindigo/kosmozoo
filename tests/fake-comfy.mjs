@@ -199,10 +199,9 @@ const publishedInputs = new Map();
 const removed = new Set();
 let terminalHistory = history();
 let running = [], pending = [], logs = [], failures = {}, delays = {};
-let extension = true, listOverride = null, publishRevision = 0;
+let publishRevision = 0;
 let captureEnqueue = false, enqueues = [];
 let metadataBombs = new Set(), assetsHidden = new Set();
-let headOverrides = {}, headDelayMs = 0;
 const telemetryRequests = { queue: 0, history: 0, logs: 0 };
 const activeLogs = new Set();
 let logSequence = 0;
@@ -236,10 +235,9 @@ export const server = Deno.serve({ port }, async (req) => {
     const body = await req.json();
     if (body.reset) {
       published.clear(); terminalHistory = history();
-      removed.clear(); publishedInputs.clear(); extension = true; listOverride = null; publishRevision = 0;
+      removed.clear(); publishedInputs.clear(); publishRevision = 0;
       captureEnqueue = false; enqueues = [];
       metadataBombs = new Set(); assetsHidden = new Set();
-      headOverrides = {}; headDelayMs = 0;
       telemetryRequests.queue = 0; telemetryRequests.history = 0; telemetryRequests.logs = 0; activeLogs.clear();
       running = []; pending = []; logs = []; failures = {}; delays = {};
     }
@@ -250,24 +248,15 @@ export const server = Deno.serve({ port }, async (req) => {
     if (body.clearHistory) terminalHistory = {};
     if (body.failures) failures = { ...body.failures };
     if (body.delays) delays = { ...body.delays };
-    if (body.extension !== undefined) extension = body.extension;
-    if (body.listOverride !== undefined) listOverride = body.listOverride;
     if (body.captureEnqueue !== undefined) captureEnqueue = body.captureEnqueue;
     if (body.metadataBombs) metadataBombs = new Set(body.metadataBombs);
     if (body.assetsHidden) assetsHidden = new Set(body.assetsHidden);
-    if (body.headOverrides) headOverrides = body.headOverrides;
-    if (body.headDelayMs !== undefined) headDelayMs = body.headDelayMs;
     for (const name of body.remove ?? []) removed.add(name);
     for (const output of body.publish ?? []) {
       const fixture = publication(output);
       if (!fixture || !isEntryPath(output.name)) return new Response("invalid fixture output", { status: 400 });
       removed.delete(output.name);
       published.set(output.name, { ...fixture, mtime: output.mtime ?? 2_000_000_000 + ++publishRevision });
-    }
-    for (const input of body.publishInputs ?? []) {
-      const fixture = publication(input);
-      if (!fixture || !isEntryPath(input.name)) return new Response("invalid fixture input", { status: 400 });
-      publishedInputs.set(input.name, fixture);
     }
     for (const job of body.finish ?? []) {
       running = running.filter((id) => id !== job.id);
@@ -319,13 +308,10 @@ export const server = Deno.serve({ port }, async (req) => {
     return Response.json({ name: file.name, subfolder: "", type: "input" });
   }
   if (p === "/api/assets_plus/config" && req.method === "GET") {
-    if (!extension) return new Response("extension unavailable", { status: 404 });
     return Response.json({ allowed_extensions: [".png", ".jpg", ".jpeg", ".webp"],
       recursive: true, scan_depth: null, list_limit: 200 });
   }
   if (p === "/api/assets_plus/output/list" && req.method === "GET") {
-    if (!extension) return new Response("extension unavailable", { status: 404 });
-    if (listOverride !== null) return Response.json(listOverride);
     const recursive = !["0", "false", "False"].includes(url.searchParams.get("recursive") ?? "1");
     const depth = Number(url.searchParams.get("scan_depth") ?? -1);
     const extensions = new Set((url.searchParams.get("extensions") ?? "png,jpg,jpeg,webp").split(",").map((x) => x.replace(/^\./, "").toLowerCase()));
@@ -427,18 +413,6 @@ export const server = Deno.serve({ port }, async (req) => {
     if (!isEntryPath(name) || removed.has(name)) return new Response("not found", { status: 404 });
     if (name === MISSING) return new Response("not found", { status: 404 });
     const head = req.method === "HEAD";
-    if (head) {
-      if (headDelayMs) await new Promise((resolve) => setTimeout(resolve, headDelayMs));
-      const override = headOverrides[name];
-      if (override?.status && override.status !== 200) return new Response(null, { status: override.status });
-      if (override) {
-        const headers = new Headers(sourceHeaders(name));
-        for (const [key, value] of Object.entries(override.headers ?? {})) {
-          if (value === null) headers.delete(key); else headers.set(key, value);
-        }
-        return new Response(null, { headers });
-      }
-    }
     if (!head && !req.headers.get("range")) readOrder.push(name);
     // aiohttp-style ETag: "<mtime_ns_hex>-<size_hex>" (the engine's stamp).
     const etag = (mtimeNs, size) => `"${mtimeNs.toString(16)}-${size.toString(16)}"`;
