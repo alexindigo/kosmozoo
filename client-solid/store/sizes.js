@@ -99,19 +99,20 @@ export function measureGeometry(probe, colW) {
   setGeomChrome(cr.height - wr.height);
 }
 
-// Blink lays out in 1/64px units (its layout quantum) — rendered rects are
-// multiples of 1/64. The formula quantizes the same way so estimate ===
-// rect, exactly.
+// Blink lays out the image box in 1/64px units (its layout quantum).
 const q64 = (x) => Math.round(x * 64) / 64;
 
 // THE one card-height formula: image box from the aspect ratio (capped at
 // 16:9 — Zoomable's arStyle clamps the CSS variable the same way) + chrome.
-// estimateSize calls exactly this, and the feed audit checks against it.
+// Round the card step up to a whole CSS pixel so native scroll compensation
+// and spacers are exact. Grid's CardSlot gives the card this height; its
+// natural content is at most this tall. estimateSize and the feed audit use
+// exactly this formula.
 export function cardHeight(size, colW) {
   const ar = size.h > 0 ? size.w / size.h : 16 / 9;
   const inset = geomInset() ?? 0;
   const chrome = geomChrome() ?? chromeHeightPx();
-  return q64((colW - inset) / Math.min(ar, 16 / 9)) + chrome;
+  return Math.ceil(q64((colW - inset) / Math.min(ar, 16 / 9)) + chrome);
 }
 
 // Immutable identity-keyed offsets: old indices cannot describe old entries

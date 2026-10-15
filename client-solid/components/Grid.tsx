@@ -256,7 +256,7 @@ function CardSlot(props) {
     >
       <div
         class={"card" + (state().current ? " current" : "") + (isTall() ? " card--tall" : "")}
-        style={state().style}
+        style={{ ...state().style, height: `${cardHeight(store.state.cardSize(imgIdx()), store.state.feedScrollEl()?.clientWidth ?? 800)}px` }}
         data-treatment={state().treatment}
         data-idx={imgIdx()}
         data-name={image()?.filename}

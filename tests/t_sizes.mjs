@@ -19,9 +19,10 @@ Deno.test("cardHeight: 16:9 / tall / wide / zero-height", () => {
   measureGeometry(fakeProbe(383, 530, 383), 425); // inset 42, chrome 147
   const COLW = 425;
   // 16:9: image box = (colW - inset) / (16/9), plus chrome
-  assertEquals(cardHeight({ w: 1600, h: 900 }, COLW), Math.round((383 / (16 / 9)) * 64) / 64 + 147);
+  assertEquals(cardHeight({ w: 1600, h: 900 }, COLW), Math.ceil(Math.round((383 / (16 / 9)) * 64) / 64 + 147));
   // tall: the box uses the image's own aspect (taller than the 16:9 floor)
-  assertEquals(cardHeight({ w: 900, h: 1600 }, COLW), Math.round((383 / (900 / 1600)) * 64) / 64 + 147);
+  assertEquals(cardHeight({ w: 900, h: 1600 }, COLW), Math.ceil(Math.round((383 / (900 / 1600)) * 64) / 64 + 147));
+  assert(Number.isInteger(cardHeight({ w: 1600, h: 900 }, COLW)));
   // wide: the aspect is capped at 16:9 — never shorter than the floor
   assertEquals(cardHeight({ w: 3200, h: 900 }, COLW), cardHeight({ w: 1600, h: 900 }, COLW));
   // zero height: the formula must not divide by zero — the 16:9 floor stands
