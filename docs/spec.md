@@ -33,7 +33,7 @@ the resources; a collection's `capabilities` answer what its backing can do.
 
 | Route | Methods | Notes |
 |---|---|---|
-| `/api/runtime` | GET | version1 cached engine identity: `protocol`, `version`, instance nonce, source-input version, mode, startup/ready/stopping status, actual binding and configured bind; no SQL/source/plugin work, no absolute state path; identity plumbing, not authentication |
+| `/api/runtime` | GET | version1 cached engine identity: `protocol`, `version`, instance nonce, source-input version, mode, startup/ready/stopping status, actual binding and configured bind; plus `app: {version, revision}` from the startup-read `VERSION` and optional build revision (separate from the lease protocol); no SQL/source/plugin work, no absolute state path; identity plumbing, not authentication |
 | `/api/collections` | GET | configured collections, captured `incarnation`/`sourceVersion` and flags, online probe, `kind`, `capabilities` (`list`/`read`/`add`/`delete` ∈ `trash`/`unlink`/`hide`, `rename`, `subfolders: {supported,reason}`) |
 | `/api/collections` | POST | add a source-backed collection `{name, address, pinned?, autoRefresh?}`; flags default false; repeating the same name/address preserves existing flags; different address is 409 |
 | `/api/collections/<id>` | PATCH | partial `{pinned?: boolean, autoRefresh?: boolean}`; validates the complete object before writing; invalid fields/types/null/arrays/malformed JSON are 400, unknown source is 404, empty object is a no-op; returns saved booleans and their committed `sourceVersion` without host/folder probing |
@@ -403,7 +403,7 @@ shared card-state presentation; card neutrals, judgment colors/priorities, wave
 length/glow, geometry, tape windowing and scrub handlers retain their contracts.
 
 Static surfaces: `/shared/<name>` serves the allow-listed `src/` modules
-(`extractor.mjs`, `features/variations/shared.mjs`, `entry-path.mjs`, `source-origin.mjs`) to the browser;
+(`extractor.mjs`, `features/variations/shared.mjs`, `entry-path.mjs`, `source-origin.mjs`, `version.mjs`) to the browser;
 `/` and `/diff` serve the Solid app from `client-solid-dist/`, with shared
 assets (`/css`, `/vendor`, `/js`, logos) from `client/`.
 

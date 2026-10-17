@@ -27,6 +27,7 @@
     "/shared/extractor.mjs": "./src/extractor.mjs",
     "/shared/entry-path.mjs": "./src/entry-path.mjs",
     "/shared/source-origin.mjs": "./src/source-origin.mjs",
+    "/shared/version.mjs": "./src/version.mjs",
     "/shared/features/variations/shared.mjs": "./src/features/variations/shared.mjs"
   },
   "tasks": {

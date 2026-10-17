@@ -24,6 +24,7 @@ import {
   feedUrl,
 } from "/js/route-parse.mjs";
 import { isEntryName, isFolderPath, inFolder } from "/shared/entry-path.mjs";
+import { formatVersion } from "/shared/version.mjs";
 import { makeSourceBrowse } from "./source-browse.js";
 import { makeSourceFreshness } from "./source-freshness.js";
 import { makeSourceRegistry, sameSourceIdentity } from "./source-registry.js";
@@ -110,6 +111,7 @@ export function makeAppStore({ subscribeSources = typeof window !== "undefined" 
 
   // scalar atoms
   const [host, setHost] = createSignal(null);
+  const [appVersion, setAppVersion] = createSignal("");
   const [sourceDelivery, setSourceDelivery] = createSignal(subscribeSources ? "connecting" : "explicit");
   const [acquisitionRevision, setAcquisitionRevision] = createSignal(0);
   let sourceSession = null, selectionGeneration = 0, disposed = false;
@@ -1431,6 +1433,8 @@ export function makeAppStore({ subscribeSources = typeof window !== "undefined" 
         }
       }
       startDelivery();
+      const runtime = await api.runtime().catch(() => null);
+      if (!disposed) setAppVersion(formatVersion(runtime?.app ?? {}));
       await refreshHosts();
       const ui = await api.settings("core.ui").catch(() => ({}));
       setSt("ui", ui);
@@ -2263,6 +2267,7 @@ export function makeAppStore({ subscribeSources = typeof window !== "undefined" 
     get hosts() { return sourceRecords.hosts(); },
     get sourceActivity() { return sourceRecords.activities(); },
     sourceDelivery,
+    appVersion,
     get sourceSaving() { return sourceRecords.saving(); },
     get nodesRegistry() { return st.nodesRegistry; },
     get scraper() { return st.scraper; },

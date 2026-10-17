@@ -5,9 +5,11 @@ import { serveStatic } from "./static.mjs";
 import { resolveRuntime, browserOrigin } from "./runtime-config.mjs";
 import { acquireInstance, RUNTIME_PROTOCOL, RUNTIME_VERSION } from "./instance.mjs";
 import { reportStartupError } from "./startup-error.mjs";
+import { readAppVersion, formatVersion } from "./version.mjs";
 export { reportStartupError } from "./startup-error.mjs";
 
-export async function startEngine({ mode = "source", env = Deno.env.toObject(), lease = null, sourceVersion = "source-development" } = {}) {
+export async function startEngine({ mode = "source", env = Deno.env.toObject(), lease = null, sourceVersion = "source-development", appVersion = null } = {}) {
+  appVersion ??= readAppVersion({ env });
   const config = resolveRuntime(mode, env);
   const ownership = lease ?? await acquireInstance(resolveStateDir(env));
   if (!ownership.owner) throw new Error("Another engine owns the selected state; use app mode to open its matching ready instance");
@@ -42,7 +44,7 @@ export async function startEngine({ mode = "source", env = Deno.env.toObject(), 
     runtime = Object.freeze({ protocol: RUNTIME_PROTOCOL, version: RUNTIME_VERSION, instance: ownership.instance,
       sourceVersion, mode, status: "starting", binding: { hostname: server.addr.hostname, port: server.addr.port }, configuredBind: config.binding.hostname });
     await ownership.publish(runtime);
-    context = await buildContext({ env, runtime: () => runtime });
+    context = await buildContext({ env, runtime: () => runtime, appVersion });
     handler = async req => {
       const url = new URL(req.url);
       if (!url.pathname.startsWith("/api/")) return serveStatic(url.pathname);
@@ -55,6 +57,7 @@ export async function startEngine({ mode = "source", env = Deno.env.toObject(), 
     for (const signal of ["SIGINT", "SIGTERM"]) { Deno.addSignalListener(signal, onSignal); signals.push(signal); }
     const browserURL = browserOrigin(runtime.binding);
     const host = runtime.binding.hostname.includes(":") ? `[${runtime.binding.hostname}]` : runtime.binding.hostname;
+    console.log(`kosmozoo ${formatVersion(appVersion)}`);
     console.log(`kosmozoo engine listening on ${host}:${runtime.binding.port}; browser: ${browserURL} (state: ${context.ctx.paths.state})`);
     console.log(`collections: ${Object.keys(context.ctx.hosts).join(", ")}`);
     if (context.discovered.length) console.log(`plugins: ${context.discovered.map(plugin => plugin.name).join(", ")}`);

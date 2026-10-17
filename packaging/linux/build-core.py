@@ -20,7 +20,8 @@ inventory = module_from_spec(spec)
 spec.loader.exec_module(inventory)
 
 PAYLOAD = [
-    'client-solid-dist', 'client', 'src/extractor.mjs', 'src/entry-path.mjs',
+    'VERSION', 'client-solid-dist', 'client', 'src/extractor.mjs', 'src/entry-path.mjs',
+    'src/version.mjs',
     'src/source-origin.mjs', 'src/features/variations/shared.mjs',
     'plugins/hello/plugin.mjs', 'plugins/difference/plugin.mjs',
     'plugins/detector/plugin.mjs', 'plugins/critic/plugin.mjs',
@@ -111,6 +112,8 @@ def build(source_manifest, input_root, materials_root, cache, output, evidence, 
         shutil.copy2(SOURCE / row['path'], path, follow_symlinks=False)
     if [inventory.source_row(stage, row['path']) for row in rows] != rows:
         raise ValueError('Staging does not match source manifest')
+    if version is not None and version != (stage / 'VERSION').read_text().strip():
+        raise ValueError('Publication --version must equal staged VERSION')
     native = stage / 'native/linux-x86_64/libsqlite3.so'
     native.parent.mkdir(parents=True)
     shutil.copyfile(inputs['sqlite']['path'], native)

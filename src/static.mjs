@@ -12,7 +12,7 @@ const SOLID_ROOT = fileURLToPath(new URL("../client-solid-dist", import.meta.url
 
 // /shared/<name> exposes SELECTED src modules to the browser — one
 // implementation, engine and client. Allow-listed, never the whole dir.
-const SHARED_ALLOW = new Set(["extractor.mjs", "entry-path.mjs", "source-origin.mjs", "features/variations/shared.mjs"]);
+const SHARED_ALLOW = new Set(["extractor.mjs", "entry-path.mjs", "source-origin.mjs", "version.mjs", "features/variations/shared.mjs"]);
 const SRC_ROOT = fileURLToPath(new URL("./", import.meta.url));
 
 const MIME = {

@@ -29,7 +29,7 @@ COPY plugins/hello/*.mjs /opt/kosmozoo/plugins/hello/
 COPY plugins/difference/*.mjs /opt/kosmozoo/plugins/difference/
 COPY plugins/detector/*.mjs /opt/kosmozoo/plugins/detector/
 COPY plugins/critic/*.mjs /opt/kosmozoo/plugins/critic/
-RUN deno cache --frozen src/main.mjs build.mjs /opt/kosmozoo/plugins/*/plugin.mjs \
+RUN deno cache --frozen src/main.mjs src/cli.mjs build.mjs /opt/kosmozoo/plugins/*/plugin.mjs \
     && deno run --frozen --allow-all build.mjs \
     && deno task --frozen-lockfile setup
 
@@ -48,6 +48,10 @@ COPY --from=builder /opt/kosmozoo/plugins/ /opt/kosmozoo/plugins/
 COPY --from=builder --chown=kosmozoo:kosmozoo /deno-dir/ /deno-dir/
 COPY LICENSE LICENSE.GPL /usr/share/doc/kosmozoo/
 COPY packaging/linux/resources/THIRD_PARTY_NOTICES.txt packaging/linux/resources/NOTICE-SOURCES.json /usr/share/doc/kosmozoo/
+COPY packaging/linux/resources/provenance.json packaging/linux/resources/provenance.json
+COPY VERSION ./
+ARG KOZMOZOO_REVISION=
+ENV KOZMOZOO_REVISION=$KOZMOZOO_REVISION
 ENV HOME=/data \
     KOZMOZOO_STATE=/data/state \
     KOZMOZOO_CACHE=/data/cache \

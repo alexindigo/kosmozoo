@@ -52,6 +52,7 @@ const entryUrl = (c, name) => `/api/collections/${enc(c)}/entries/${enc(name)}`;
 
 export const api = {
   subscribeSources,
+  runtime: () => req("GET", "/api/runtime"),
   collections: () => req("GET", "/api/collections"),
   addCollection: (name, address) => req("POST", "/api/collections", { name, address }),
   removeCollection: (name) => req("DELETE", `/api/collections/${enc(name)}`),

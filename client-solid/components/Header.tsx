@@ -147,7 +147,7 @@ export function Header() {
     <header id="chrome" class="chrome-split" style={{ "--chrome-pane-width": `${store.state.anchorPaneWidth()}px` }}>
       <div class="chrome-feed">
         <div class="chrome-feed-inner">
-          <img class="logo" src="/logo-64.png" alt="kosmozoo" width={24} height={24} />
+          <img class="logo" src="/logo-64.png" alt="kosmozoo" width={24} height={24} title={store.state.appVersion() || undefined} />
           <h1>Kosmozoo</h1>
           <IconButton id="refreshBtn" chrome variant="refresh" title="Refresh sources and image list"
             icon={iconSvg("refresh", 16)} onAction={() => store.handles.invoke("source.refresh")} />

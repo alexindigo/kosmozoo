@@ -5,6 +5,7 @@ import { resolveRuntime } from "./runtime-config.mjs";
 import { acquireInstance, matchingInstance, RUNTIME_PROTOCOL, RUNTIME_VERSION } from "./instance.mjs";
 import { resolveStateDir } from "./state.mjs";
 import { reportStartupError } from "./startup-error.mjs";
+import { readAppVersion, formatVersion } from "./version.mjs";
 
 const provenancePath = new URL("../packaging/linux/resources/provenance.json", import.meta.url);
 async function provenance() { return JSON.parse(await Deno.readTextFile(provenancePath)); }
@@ -28,7 +29,8 @@ export async function runCommand(args = Deno.args, env = Deno.env.toObject()) {
     return;
   }
   const input = await provenance();
-  if (options.command === "version") { console.log(`kosmozoo ${input.commit ?? input.kind} (input ${input.sourceInputSha256 ?? "working-source"}; Deno ${input.compiler}; ${input.target})`); return; }
+  const appVersion = readAppVersion({ env, provenance: input });
+  if (options.command === "version") { console.log(`kosmozoo ${formatVersion(appVersion)} (input ${input.sourceInputSha256 ?? "working-source"}; Deno ${Deno.version.deno}; ${Deno.build.target})`); return; }
   if (options.command === "browser-settings") { const { firefoxSettings } = await import("./desktop/launcher.mjs"); await firefoxSettings(env); return; }
   if (options.command === "install" || options.command === "uninstall") {
     const helper = await import("./desktop/install.mjs");
@@ -52,7 +54,7 @@ export async function runCommand(args = Deno.args, env = Deno.env.toObject()) {
       mode: options.command, status: "starting", binding: config.binding, configuredBind: config.binding.hostname });
     await bootstrapNativeSqlite(env);
     const { startEngine } = await import("./main.mjs");
-    engine = await startEngine({ mode: options.command, env, lease, sourceVersion });
+    engine = await startEngine({ mode: options.command, env, lease, sourceVersion, appVersion });
     if (options.command === "app") {
       const { launchBrowser } = await import("./desktop/launcher.mjs");
       await launchBrowser(engine.browserURL, { env, browser: options.browser });

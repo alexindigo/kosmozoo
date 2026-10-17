@@ -20,7 +20,7 @@ import { makeRouter } from "./routes.mjs";
 import { Cache } from "./cache.mjs";
 import { FEATURES } from "./features/index.mjs";
 
-export async function buildContext({ env = Deno.env.toObject(), fakes = {}, start = true, runtime = null } = {}) {
+export async function buildContext({ env = Deno.env.toObject(), fakes = {}, start = true, runtime = null, appVersion = null } = {}) {
   const owned = {};
   let closeTask;
   const remember = (name, value, borrowed) => { if (!borrowed) owned[name] = value; return value; };
@@ -86,7 +86,7 @@ export async function buildContext({ env = Deno.env.toObject(), fakes = {}, star
   const discovered = plugins === fakes.plugins ? [] : await plugins.discover();
 
   const ctx = {
-    settings, store, hosts, backings, cache, ingest, prefetch, jobs, sourceActivity, plugins, runtime,
+    settings, store, hosts, backings, cache, ingest, prefetch, jobs, sourceActivity, plugins, runtime, appVersion,
     features: [],
     comfy, inventory,
     paths: { state: stateDir },

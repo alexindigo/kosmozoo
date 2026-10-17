@@ -50,6 +50,8 @@ async function attempt(name, fn) {
   await page.poll("!!document.querySelector('.card')", 20000);
   // the window is populated (no fixed settle sleep — poll the render)
   await page.poll("document.querySelectorAll('.card').length > 3", 10000);
+  const logoVersion = await page.evaluate("document.querySelector('header img.logo')?.title");
+  check("header logo title shows the app version", /^v\d+\.\d+(\.\d+)?(-dev| \([0-9a-f]{7}\))$/.test(logoVersion), logoVersion);
 
   const total = await page.evaluate(`(async () => (await (await fetch("/api/collections/fake/entries")).json()).length)()`);
   check("grid loaded images from engine", total > 3000, `${total} images`);
