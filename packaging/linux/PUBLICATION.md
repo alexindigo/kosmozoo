@@ -69,6 +69,10 @@ inputs.json; public consumers need no private image or evidence directory.
 
 ## Global package ownership and coexistence
 
+The AUR `kosmozoo` and `kosmozoo-git` packages run the application source with
+Arch's `deno` and `sqlite` packages instead of compiling. They are not the official
+executable and are not byte-identical to it.
+
 `render-resources.mjs` and the self-installer share `src/desktop/resources.mjs` and
 the original templates. Package resources target `/usr/bin/kosmozoo`, the global
 desktop/icon/licenses/docs and `/usr/lib/systemd/user/kosmozoo-engine.service`.

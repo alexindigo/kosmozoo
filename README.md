@@ -21,6 +21,27 @@ dependencies, native SQLite and persistent state/cache. Desktop mode defaults
 to loopback2084; service/source/Docker mode to0.0.0.0:2084, with explicit
 `KOZMOZOO_BIND`/`KOZMOZOO_PORT` overrides. The devcontainer is for contributing.
 
+## Install
+
+- Download the Linux x86_64 executable from the [GitHub releases](https://github.com/alexindigo/kosmozoo/releases).
+- Use the container image `ghcr.io/alexindigo/kosmozoo`.
+- On Arch, install an AUR package: `kosmozoo` (source, runs on Arch's `deno`),
+  `kosmozoo-bin` (official executable), or `kosmozoo-git` (latest source).
+
+## Features
+
+- The executable includes the client, opens in an installed browser, and offers
+  optional user-local installation. Downloads include build inputs, source and
+  dependency/license material; package and user installs preserve data.
+- Browse recursive source folders in a newest-first feed, with live source
+  activity and updates delivered through an event stream.
+- Edit Variations and submit runs while keeping control of unsaved work.
+- Keep your place while images arrive: dimensions are resolved before rendering,
+  and cards keep fixed, whole-pixel heights as the feed fills.
+- Save votes, favorites, notes and independent return-later bookmarks per image.
+- Keyboard shortcuts respect modal layers; engine settings and browser-local
+  browsing/layout preferences preserve your setup between visits.
+
 ## Status
 
 The Deno rewrite is functional: engine, feed, comparison workbench, and the
