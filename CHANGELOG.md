@@ -6,6 +6,7 @@ Kosmozoo 0.2.0 rewrites the Python v0.1.0 application with a Deno engine and
 a Solid client for reviewing and curating ComfyUI image output.
 
 See the [README](README.md) for installation options and features.
+Official `kosmozoo-linux-x86_64` SHA-256: `f8d0b95f104d75d4cb08565b3aab8dcdcc2e69c88b520f7ede162d751fa58f60`.
 
 Judgments migrate one-way from v0.1.0's `feedback.json` into per-entry SQLite
 records. The original is kept as `feedback.json.v1-backup-<ts>`; hash-based
