@@ -20,12 +20,22 @@ export function parseCommand(args) {
   if (command === "install" && (!rest.length || rest.length === 1 && rest[0] === "--service")) return { command, service: rest.length === 1 };
   if (command === "uninstall" && !rest.length) return { command };
   if (command === "browser-settings" && rest.length === 1 && rest[0] === "firefox") return { command, provider: "firefox" };
+  if (command === "package-resources" && rest.length === 2) {
+    const prefix = rest.find(arg => arg.startsWith("--prefix="))?.slice("--prefix=".length);
+    const destdir = rest.find(arg => arg.startsWith("--destdir="))?.slice("--destdir=".length);
+    if (prefix && destdir) return { command, prefix, destdir };
+  }
   throw new Error("Unknown command/options; use --help");
 }
 export async function runCommand(args = Deno.args, env = Deno.env.toObject()) {
   const options = parseCommand(args);
   if (options.command === "help") {
-    console.log("kosmozoo [app [--browser=/absolute/executable] | serve | install [--service] | uninstall | browser-settings firefox]\nApp defaults to loopback2084; serve/source/Docker to0.0.0.0:2084. Explicit KOZMOZOO_BIND/PORT win. Browser closure keeps submitted work running; stop the engine explicitly with SIGINT/SIGTERM or its managed user unit.");
+    console.log("kosmozoo [app [--browser=/absolute/executable] | serve | install [--service] | uninstall | browser-settings firefox | package-resources --prefix=/absolute/prefix --destdir=/absolute/staging]\nApp defaults to loopback2084; serve/source/Docker to0.0.0.0:2084. Explicit KOZMOZOO_BIND/PORT win. Browser closure keeps submitted work running; stop the engine explicitly with SIGINT/SIGTERM or its managed user unit.");
+    return;
+  }
+  if (options.command === "package-resources") {
+    const { writePackageResources } = await import("./desktop/package-resources.mjs");
+    await writePackageResources(options);
     return;
   }
   const input = await provenance();

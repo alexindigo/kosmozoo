@@ -21,7 +21,8 @@ spec.loader.exec_module(inventory)
 
 PAYLOAD = [
     'VERSION', 'client-solid-dist', 'client', 'src/extractor.mjs', 'src/entry-path.mjs',
-    'src/version.mjs',
+    'src/version.mjs', 'LICENSE', 'LICENSE.GPL', 'docs/executable.md',
+    'packaging/linux/PUBLICATION.md', 'packaging/linux/LICENSING.md',
     'src/source-origin.mjs', 'src/features/variations/shared.mjs',
     'plugins/hello/plugin.mjs', 'plugins/difference/plugin.mjs',
     'plugins/detector/plugin.mjs', 'plugins/critic/plugin.mjs',
