@@ -12,6 +12,8 @@ Arch users can choose `kosmozoo`, `kosmozoo-bin` or `kosmozoo-git` from the AUR.
 Release downloads now contain only the executable and its `SHA256SUMS`;
 project and dependency source links are documented in the licensing guide.
 
+Official `kosmozoo-linux-x86_64` SHA-256: `87b5f399598c61988f66c016327e189997432c3c4ad6a5102e227d32ca2b55d2`.
+
 ## 0.2.0 — 2026-10-16
 
 Kosmozoo 0.2.0 rewrites the Python v0.1.0 application with a Deno engine and
