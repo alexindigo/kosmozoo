@@ -14,7 +14,7 @@ Build:
 bash packaging/linux/build-publication.sh \
   --source-manifest /absolute/source-input.json \
   --inputs /absolute/build-inputs --materials /absolute/dependency-material \
-  --cache /absolute/deno-cache --output /absolute/new-output --version 0.2.0
+  --cache /absolute/deno-cache --output /absolute/new-output --version 0.2.1
 ```
 
 All directories are explicit, disk-backed and outside the source checkout. Output
@@ -35,37 +35,42 @@ new compiler substitution, unchecked tool download or Docker extraction is a pub
 build input. Dependency warming uses the frozen lock before network-disabled,
 cached-only client build/compile with the authenticated `DENORT_BIN`.
 
-## Acquisition and cache names
+## Release assets and build inputs
 
 The immutable publication base is
-`https://github.com/alexindigo/kosmozoo/releases/download/v0.2.0/`.
-These are intended release names, not claims that downloads already exist:
+`https://github.com/alexindigo/kosmozoo/releases/download/v0.2.1/`.
+Each release publishes exactly two assets:
 
-| # | Asset / cache alias | Contents / authority |
+| # | Asset | Contents / authority |
 |---|---|---|
-| 1 | `kosmozoo-linux-x86_64` | Official executable; exact frozen SHA256SUMS, artifact and provenance records |
-| 2 | `kosmozoo-0.2.0-source.tar.gz` | Exact tagged source plus source-input.json |
-| 3 | `kosmozoo-0.2.0-dependency-material.tar.gz` | Exact paths in source-materials.json plus that manifest |
-| 4 | `kosmozoo-0.2.0-build-inputs.tar.gz` | Exact paths in inputs.json plus that manifest |
-| 5 | `kosmozoo-0.2.0-resources.tar.gz` | Package-owned global resources plus resources.json |
-| 6 | `SHA256SUMS`, `artifact.json`, `provenance.json`, `source-input.json`, `resources.json` | Frozen asset and source identity records |
-| 7 | `THIRD_PARTY_NOTICES.txt`, `NOTICE-SOURCES.json` | Source-traceable notices, also present in source/resources |
+| 1 | `kosmozoo-linux-x86_64` | Official executable, including third-party notices and package resources |
+| 2 | `SHA256SUMS` | SHA-256 of that executable only |
 
-Before extraction, authenticate each archive against the reviewed frozen release
-SHA-256 record. Do not trust an unauthenticated downloaded checksum list as its own
-authority. Extract only safe regular-file/relative-directory entries into fresh
-private directories; never extract an archive over user state or a prior attempt.
-The builder rechecks every contained input against tracked pins before execution.
+Source, dependency-material, build-input and resource archives, manifests, notices
+and logs produced by the builder stay local as evidence; they are not uploaded as
+release assets. Package-owned files come from `package-resources`, not a separate
+resource download. Do not trust an unauthenticated downloaded checksum list as its
+own authority.
+
+Project source is the GitHub `v<version>` tag archive, for example
+[`v0.2.1`](https://github.com/alexindigo/kosmozoo/archive/refs/tags/v0.2.1.tar.gz).
+Dependency source is referenced upstream: [Deno v2.9.6](https://github.com/denoland/deno/tree/v2.9.6),
+its [Cargo.lock](https://github.com/denoland/deno/blob/v2.9.6/Cargo.lock) crates on
+[crates.io](https://crates.io/) (including MPL-2.0 dependencies), and the
+[Debian sqlite3 3.40.1-2+deb12u2 source package](https://snapshot.debian.org/package/sqlite3/3.40.1-2%2Bdeb12u2/).
+See LICENSING.md for the notice/source contract.
 
 The original compiler/runtime upstream URLs are respectively
 `https://github.com/denoland/deno/releases/download/v2.9.6/deno-x86_64-unknown-linux-gnu.zip`
 and
 `https://github.com/denoland/deno/releases/download/v2.9.6/denort-x86_64-unknown-linux-gnu.zip`.
 Use their tracked archive and extracted-binary hashes. The characterized Debian
-SQLite binary is supplied in the authenticated versioned input bundle at
-`libsqlite3.so.0.8.6`; its exact Debian 3.40.1-2+deb12u2 source/rebuild material is
-in the matching material bundle. The original image provenance is retained in
-inputs.json; public consumers need no private image or evidence directory.
+SQLite binary belongs at `libsqlite3.so.0.8.6` under the explicit input directory;
+its Debian package version and original image provenance remain in `inputs.json`.
+The builder requires the authenticated local source/rebuild material identified
+by `source-materials.json`. Before extraction, authenticate each input against
+the tracked pins and use fresh private directories, never user state or a prior
+attempt. The builder rechecks all inputs before execution.
 
 ## Global package ownership and coexistence
 
@@ -73,8 +78,13 @@ The AUR `kosmozoo` and `kosmozoo-git` packages run the application source with
 Arch's `deno` and `sqlite` packages instead of compiling. They are not the official
 executable and are not byte-identical to it.
 
-`render-resources.mjs` and the self-installer share `src/desktop/resources.mjs` and
-the original templates. Package resources target `/usr/bin/kosmozoo`, the global
+Packagers run `kosmozoo package-resources --prefix=/usr --destdir=/absolute/package-root`
+after installing the executable. Source-run packages invoke `src/cli.mjs
+package-resources` through their packaged Deno environment with the same options.
+Both paths and `render-resources.mjs` use `writePackageResources`, which shares
+`src/desktop/resources.mjs` and the original templates with the self-installer.
+The command requires absolute paths, refuses to overwrite files and does not use
+the network or HOME/XDG locations. Package resources target `/usr/bin/kosmozoo`, the global
 desktop/icon/licenses/docs and `/usr/lib/systemd/user/kosmozoo-engine.service`.
 The unit resolves `%E/kosmozoo/engine.env` in the actual user's manager and starts
 engine-only `serve`; defaults remain wildcard 0.0.0.0:2084, with explicit environment
@@ -96,8 +106,9 @@ data/profiles/versions; it is never an automatic package hook. Keep legacy
 `kosmozoo.service` and Python-era data for explicit reconciliation. A global unit
 is not a managed-local receipt and the self-installer may refuse that conflict.
 
-LGPL/GPL preferred project source, exact dependency/MPL/native source material and
-all notices must accompany release assets. See LICENSING.md. Compilation is not
+Notices travel in the executable and are emitted into packages by
+`package-resources`; project and dependency/MPL/native source is referenced at the
+upstream locations above rather than supplied as release assets. Compilation is not
 native/package acceptance or legal approval. Changelog records the official ELF
 SHA only after it is frozen; a later documentation commit does not alter that tag
 or assert it is the binary's embedded source.
