@@ -1,5 +1,17 @@
 # Changelog
 
+## 0.2.1 — 2026-10-18
+
+The README now shows the image feed and comparison workbench in five screenshots.
+
+`kosmozoo package-resources --prefix=/usr --destdir=/absolute/package-root`
+generates desktop, icon, user-service, license, notice and documentation files
+for packages without starting services or opening a browser.
+
+Arch users can choose `kosmozoo`, `kosmozoo-bin` or `kosmozoo-git` from the AUR.
+Release downloads now contain only the executable and its `SHA256SUMS`;
+project and dependency source links are documented in the licensing guide.
+
 ## 0.2.0 — 2026-10-16
 
 Kosmozoo 0.2.0 rewrites the Python v0.1.0 application with a Deno engine and
