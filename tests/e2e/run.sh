@@ -18,8 +18,8 @@ cleanup() {
   # explicit names only — the ONLY sanctioned docker rm. stderr stays
   # visible; the routine "No such container" noise on a clean start is
   # filtered, everything else prints (a failure must be learned from)
-  docker rm -f kz-e2e-fake kz-e2e-fake2 kz-e2e-engine 2>&1 | grep -v "No such container" || true
-  rm -rf "$WORK/tests/.tmp-mutable" "$WORK/tests/.tmp-comfy"
+  docker rm -f kz-e2e-fake kz-e2e-fake2 kz-e2e-engine kz-e2e-fresh-engine kz-e2e-fresh-install 2>&1 | grep -v "No such container" || true
+  rm -rf "$WORK/tests/.tmp-mutable" "$WORK/tests/.tmp-comfy" "$WORK/tests/.tmp-fresh"
 }
 trap cleanup EXIT
 cleanup
@@ -110,3 +110,34 @@ docker run --rm --network host -v "$WORK":/work -w /work \
   -e E2E_FAKE="http://127.0.0.1:$FAKE_PORT" \
   --entrypoint node "$PW_IMAGE" \
   /work/tests/e2e/feed.e2e.cjs
+
+# 8. fresh install: no source seed, then one unreachable source across retries.
+FRESH_ENGINE_PORT="${E2E_FRESH_ENGINE_PORT:-18263}"
+FRESH_USER="$(id -u):$(id -g)"
+timeout 30s mkdir -p "$WORK/tests/.tmp-fresh/tmp" "$WORK/tests/.tmp-fresh/home"
+timeout 30s chmod 1777 "$WORK/tests/.tmp-fresh/tmp"
+timeout 30s docker run -d --name kz-e2e-fresh-engine --user "$FRESH_USER" --network host -v "$WORK":/work -w /work \
+  -e KOZMOZOO_PORT="$FRESH_ENGINE_PORT" \
+  -e KOZMOZOO_STATE=/work/tests/.tmp-fresh/state \
+  -e KOZMOZOO_CACHE=/work/tests/.tmp-fresh/cache \
+  -e KOZMOZOO_PLUGINS=/work/plugins \
+  -e HOME=/work/tests/.tmp-fresh/home -e DENO_DIR=/work/tests/.tmp-fresh/deno-cache \
+  -e TMPDIR=/work/tests/.tmp-fresh/tmp \
+  denoland/deno:latest run --allow-all src/main.mjs >/dev/null
+
+for i in $(seq 1 60); do
+  timeout 5s curl -sf "http://127.0.0.1:$FRESH_ENGINE_PORT/api/collections" >/dev/null 2>&1 && break
+  sleep 0.5
+  [ "$i" = 60 ] && {
+    echo "timeout waiting for fresh engine"
+    timeout 15s docker logs kz-e2e-fresh-engine
+    exit 1
+  }
+done
+
+timeout 180s docker run --rm --name kz-e2e-fresh-install --user "$FRESH_USER" --network host -v "$WORK":/work -w /work \
+  -e E2E_ENGINE="http://127.0.0.1:$FRESH_ENGINE_PORT" \
+  -e E2E_FRESH_WAIT_MS=60000 -e E2E_UNREACHABLE=1 \
+  -e HOME=/work/tests/.tmp-fresh/home -e TMPDIR=/work/tests/.tmp-fresh/tmp \
+  --entrypoint node "$PW_IMAGE" \
+  /work/tests/e2e/fresh-install.e2e.cjs

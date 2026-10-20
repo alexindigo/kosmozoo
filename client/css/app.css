@@ -155,6 +155,14 @@ main { display: flex; flex: 1; min-height: 0; }
    native scroll anchoring re-clamps mid-transient and double-compensates */
   overflow-anchor: none; }
 #candidatesCol::-webkit-scrollbar { display: none; }
+#candidatesCol:has(.feed-empty) { display: flex; flex-direction: column; }
+.feed-empty { flex: 1; display: grid; place-items: center; padding: 24px;
+  color: var(--foreground-dim); text-align: center; }
+.feed-empty p { margin: 0; }
+.feed-empty button { background: none; border: 0; padding: 0; font: inherit;
+  color: var(--secondary); text-decoration: underline; cursor: pointer; }
+.feed-empty button:hover { color: var(--foreground); }
+#candidatesCol:has(.feed-empty) #grid { padding-block: 0; }
 /* ONE grab-strip pattern : the strip is --grab-w wide and its 1px line
  is centered by an inset derived from that one var — width and inset can
  never desync. Two instances: #divider (feed|workspace, negative margins

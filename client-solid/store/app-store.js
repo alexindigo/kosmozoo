@@ -98,6 +98,8 @@ export function makeAppStore({ subscribeSources = typeof window !== "undefined" 
     onRetire: record => record.freshness.retire(),
   });
   const hostsView = sourceRecords.hosts;
+  const [sourcesReady, setSourcesReady] = createSignal(false);
+  const noSources = createMemo(() => sourcesReady() && Object.keys(hostsView()).length === 0);
 
   // UI state tree — separate reactive graph, moves here as directed
   const [uiSt, setUiSt] = createStore({
@@ -1275,6 +1277,7 @@ export function makeAppStore({ subscribeSources = typeof window !== "undefined" 
           acceptActivity(record, value.activity);
         }
         streamEpoch = frame.epoch; streamRevision = frame.revision; registryRevision++;
+        setSourcesReady(true);
       });
     }
     if (deliveryGap) {
@@ -1374,6 +1377,7 @@ export function makeAppStore({ subscribeSources = typeof window !== "undefined" 
       }
     }
     sourceRecords.reconcile(next);
+    setSourcesReady(true);
     drainRefresh(sourceSession);
   }
 
@@ -1523,6 +1527,7 @@ export function makeAppStore({ subscribeSources = typeof window !== "undefined" 
         } catch { /* surfaced by the status chrome once it lands */ }
       },
       toggleMenu() { setHostMenuOpen(!hostMenuOpen()); },
+      openMenu() { setHostMenuOpen(true); },
       closeMenu() { setHostMenuOpen(false); },
       refresh: refreshHosts,
       patch(id, patch) {
@@ -2265,6 +2270,7 @@ export function makeAppStore({ subscribeSources = typeof window !== "undefined" 
     featureBulkActions: () => registeredFeatures.flatMap((f) =>
       (f.bulkAction ? [{ ...f.bulkAction, args: { ...f.bulkAction.args, target: "selected" } }] : [])),
     get hosts() { return sourceRecords.hosts(); },
+    noSources,
     get sourceActivity() { return sourceRecords.activities(); },
     sourceDelivery,
     appVersion,

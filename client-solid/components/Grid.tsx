@@ -163,6 +163,14 @@ export function Grid() {
       id="candidatesCol"
       ref={(el) => { col = el; }}
     >
+      <Show when={store.state.noSources()}>
+        <div class="feed-empty">
+          <p>No sources yet — <button type="button" onClick={(e) => {
+            e.stopPropagation();
+            store.handles.invoke("source.menu.open");
+          }}>add a ComfyUI host or folder</button></p>
+        </div>
+      </Show>
       <div id="grid">
         {/* the stable measuring card: styled by the card rule (class
  card--probe, so test/card selectors never see it) but never

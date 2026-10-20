@@ -114,6 +114,7 @@ export function registerCoreCommands(handles, { ops, state, clipboard = (text) =
   add("source.reload", {}, () => ops.images.reload());
   add("source.folder", { folder: text }, ({ folder }) => ops.folders.select(folder));
   add("source.menu.toggle", {}, () => ops.hosts.toggleMenu());
+  add("source.menu.open", {}, () => ops.hosts.openMenu());
   add("source.menu.close", {}, () => ops.hosts.closeMenu());
   add("feed.filter", { value: text }, ({ value }) => ops.ui.setFilter(value));
   add("feed.revealEntry", { id: string }, ({ id }) => {

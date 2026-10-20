@@ -6,6 +6,7 @@ import { onCleanup } from "solid-js";
 
 export function useClickOutside(getEl, onOutside) {
   const onDocClick = (e) => {
+    if (e.cancelBubble) return; // Solid delegates handlers to this same document.
     const el = getEl();
     if (el && !el.contains(e.target)) onOutside(e);
   };
