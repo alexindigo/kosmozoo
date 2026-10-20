@@ -107,6 +107,7 @@ user-owned environment file at
 `${XDG_CONFIG_HOME:-$HOME/.config}/kosmozoo/engine.env` can override bind/port and
 existing engine settings. No root installation, lingering, firewall change or
 unconditional restart loop is performed.
+The engine's user service restarts after a failure with a two-second delay.
 
 The environment file contains one `KEY=VALUE` assignment per line, for example:
 

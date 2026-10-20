@@ -5,7 +5,8 @@ Description=Kosmozoo image engine
 Type=exec
 ExecStart=:/usr/bin/env -- {{EXECUTABLE}} serve
 EnvironmentFile=-{{ENVIRONMENT_FILE}}
-Restart=no
+Restart=on-failure
+RestartSec=2
 TimeoutStopSec=30
 
 [Install]

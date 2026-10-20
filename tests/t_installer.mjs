@@ -18,7 +18,7 @@ Deno.test("installation resources: local rendering preserves exact templates and
   assertEquals(local.unit, unitTemplate.replace("{{EXECUTABLE}}", systemdArgument(executable)).replace("{{ENVIRONMENT_FILE}}", "/home/a space%%/engine.env"));
   assertEquals(local.desktop, desktopTemplate.replaceAll("{{EXECUTABLE}}", desktopArgument(executable)).replace("{{ICON}}", icon));
   const global = renderResources({ unitTemplate, desktopTemplate, executable: "/usr/bin/kosmozoo", icon: "/usr/share/icons/hicolor/256x256/apps/kosmozoo.png", userConfig: true });
-  assertEquals(global.unit.includes('ExecStart=:/usr/bin/env -- "/usr/bin/kosmozoo" serve\nEnvironmentFile=-%E/kosmozoo/engine.env\nRestart=no'), true);
+  assertEquals(global.unit.includes('ExecStart=:/usr/bin/env -- "/usr/bin/kosmozoo" serve\nEnvironmentFile=-%E/kosmozoo/engine.env\nRestart=on-failure\nRestartSec=2\n'), true);
   assertEquals(global.desktop.includes('Exec=/usr/bin/env -- "/usr/bin/kosmozoo" browser-settings firefox'), true);
   assertThrows(() => renderResources({ unitTemplate: "{{UNKNOWN}}", desktopTemplate, executable, icon, environmentFile }));
 });
