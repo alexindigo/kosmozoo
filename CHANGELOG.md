@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.2.2 — 2026-10-19
+
+Fresh installs start with no sources instead of assuming a local ComfyUI server.
+The empty feed offers a link to add a ComfyUI host or folder through the source
+picker. Explicit `KOZMOZOO_HOSTS` seeds and existing collections keep their behavior.
+
+Unreachable sources show as offline with one error per outage. Retries continue
+quietly, and a successful refresh clears the error and restores online status.
+The engine's user service now restarts the engine after a crash.
+
 ## 0.2.1 — 2026-10-18
 
 The README now shows the image feed and comparison workbench in five screenshots.
