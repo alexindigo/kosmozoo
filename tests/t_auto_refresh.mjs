@@ -1,7 +1,7 @@
 import { assert, assertEquals } from "jsr:@std/assert";
 import { createRoot, createSignal } from "solid-js";
 import { makeAppStore } from "../client-solid/store/app-store.js";
-import { api } from "../client/js/api.mjs";
+import { api, ApiError } from "../client/js/api.mjs";
 import { clientInventory } from "./helpers/client-inventory.mjs";
 import { sourceFrame, injectedSourceStream } from "./helpers/source-stream.mjs";
 import { Jobs } from "../src/jobs.mjs";
@@ -35,7 +35,8 @@ async function withClient(run, prepare = () => {}) {
   const row = (name) => ({ name, size: 100, hash: null, width: 100, height: 50, meta: null, judgment: null, extracted: false });
   const rows = [row("a.png"), row("b.png")];
   let stream, revision = 0;
-  const frame = () => sourceFrame({ h: { ...sources.h, activity } }, revision++);
+  const frame = () => sourceFrame(Object.fromEntries(Object.entries(sources).map(([id, source]) =>
+    [id, { ...source, ...(id === "h" ? { activity } : {}) }])), revision++);
   const emit = async (snapshot = null) => {
     if (snapshot) Object.assign(activity, snapshot);
     stream.snapshot(frame());
@@ -75,6 +76,80 @@ async function withClient(run, prepare = () => {}) {
     if (oldHistory === undefined) delete globalThis.history; else globalThis.history = oldHistory;
   }
 }
+
+Deno.test("source reachability: initial/retry failures dedupe by source, recovery clears and later outage reports again", async () => {
+  let offline = true, reads = 0;
+  await withClient(async ({ store, boot, emit }) => {
+    await boot;
+    const errors = () => store.state.chips.filter(chip => chip.kind === "error");
+    assertEquals(store.state.hosts.h.online, false);
+    assertEquals(errors().length, 1);
+    for (let i = 0; i < 3; i++) await store.actions.ui.refresh();
+    await emit();
+    assert(reads >= 4);
+    assertEquals(errors().length, 1, "neither inventory retry nor discovery/stream repeats the transition");
+    await store.actions.hosts.select("other");
+    await store.actions.hosts.select("h");
+    assertEquals(errors().length, 1, "navigation must not start a new outage episode");
+    offline = false;
+    await store.actions.ui.refresh();
+    assertEquals(store.state.images.length, 2);
+    assertEquals(store.state.hosts.h.online, true);
+    assertEquals(errors().length, 0, "successful owned inventory clears its error");
+    offline = true;
+    await store.actions.ui.refresh();
+    assertEquals(store.state.hosts.h.online, false);
+    assertEquals(errors().length, 1, "a new outage is a new transition");
+    store.actions.status.dismiss(errors()[0].slot);
+    await store.actions.ui.refresh();
+    assertEquals(errors().length, 0, "dismissal does not allow retries to re-emit the same episode");
+  }, ({ rows, sources }) => {
+    sources.other = { address: "other:1", kind: "comfy", online: true, autoRefresh: false };
+    api.entries = async id => {
+      if (id === "h") { reads++; if (offline) throw new ApiError("GET", "/api/collections/h/entries?inventory=1", 502, "collection unreachable: connection refused"); }
+      return rows;
+    };
+  });
+});
+
+Deno.test("source reachability: other HTTP and validation failures keep their reporting", async () => {
+  await withClient(async ({ store, boot }) => {
+    await boot;
+    for (let i = 0; i < 2; i++) await store.actions.ui.refresh();
+    assertEquals(store.state.chips.filter(chip => chip.kind === "error").length, 3);
+    assertEquals(store.state.hosts.h.online, true);
+  }, () => {
+    let reads = 0;
+    api.inventory = async () => {
+      if (++reads === 3) return {}; // malformed success remains a reporting error
+      throw new ApiError("GET", "/api/collections/h/entries?inventory=1", reads === 1 ? 500 : 502, "database failure");
+    };
+  });
+});
+
+Deno.test("source reachability: distinct sources retain independent outage and recovery", async () => {
+  let recover = false;
+  await withClient(async ({ store, boot }) => {
+    await boot;
+    await store.actions.hosts.select("other");
+    await store.actions.hosts.select("h");
+    const errors = () => store.state.chips.filter(chip => chip.kind === "error");
+    assertEquals(errors().length, 2);
+    assertEquals(store.state.hosts.other.online, false);
+    recover = true;
+    await store.actions.ui.refresh();
+    assertEquals(store.state.hosts.h.online, true);
+    assertEquals(store.state.hosts.other.online, false);
+    assertEquals(errors().length, 1);
+    assert(errors()[0].msg.includes("other"));
+  }, ({ sources, rows }) => {
+    sources.other = { address: "other:1", kind: "comfy", online: true, autoRefresh: false };
+    api.entries = async id => {
+      if (id === "h" && recover) return rows;
+      throw new ApiError("GET", `/api/collections/${id}/entries?inventory=1`, 502, "collection unreachable: connection refused");
+    };
+  });
+});
 
 Deno.test("automatic freshness: a failed initial inventory remains pending and recovers without a new completion", async () => {
   let reads = 0;

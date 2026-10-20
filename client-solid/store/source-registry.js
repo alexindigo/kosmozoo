@@ -10,9 +10,13 @@ export function makeSourceRegistry({ createRecord, onRetire }) {
   const [membership, setMembership] = createSignal(0);
   const changed = () => setMembership(value => value + 1);
   function makeRecord(id, source) {
-    const [state, setState] = createStore({ host: source, activity: undefined, saving: undefined });
+    const [state, setState] = createStore({ host: source, activity: undefined, saving: undefined, reachability: undefined });
+    // Inventory owns reachability once observed; discovery cannot undo it.
+    const host = createMemo(() => state.reachability === undefined ? state.host : { ...state.host, online: state.reachability });
     return { ...createRecord(id, source),
-      get host() { return state.host; },
+      get host() { return host(); },
+      get reachability() { return state.reachability; },
+      setReachability(value) { setState("reachability", value); },
       get activity() { return state.activity; },
       get saving() { return state.saving; },
       updateHost(value) { setState("host", reconcile(value)); },

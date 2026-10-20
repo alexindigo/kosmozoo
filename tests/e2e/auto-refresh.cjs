@@ -13,6 +13,19 @@ module.exports = async ({ page, ENGINE, FAKE, KZ, check, traffic }) => {
     throw Error('controlled auxiliary log request did not start');
   };
   const retained='.card[data-name="auto-flow/retained.png"]';
+  const sourceOutage=`(async()=>{const s=${KZ};return {
+    host:s.state.host(),online:s.state.hosts.fake?.online,
+    offline:!!document.querySelector('.hostpick.off[data-source="fake"]')&&!!document.querySelector('#hostBtn .hdot.off'),
+    errors:[...document.querySelectorAll('#statusStack .error')].map(e=>e.textContent)
+      .filter(text=>text.includes('GET /api/collections/fake/entries?inventory=1: 502 — collection unreachable:')),
+  };})()`;
+  const failedInventoryReads=()=>{
+    const ids=new Set(traffic.requests.filter(request=>{
+      const url=new URL(request.url);
+      return url.origin===ENGINE&&url.pathname==='/api/collections/fake/entries'&&url.searchParams.get('inventory')==='1';
+    }).map(request=>request.id));
+    return traffic.responses.filter(response=>response.status===502&&ids.has(response.id)).length;
+  };
   const snapshot=()=>page.evaluate(`(async()=>{
     const s=${KZ}, panel=document.querySelector('.vz-panel'), card=document.querySelector(${JSON.stringify(retained)});
     return {current:s.state.current(),trail:s.state.currentStack(),url:location.href,folder:s.state.selectedFolder(),
@@ -84,12 +97,28 @@ module.exports = async ({ page, ENGINE, FAKE, KZ, check, traffic }) => {
     if(traffic)assert.equal(traffic.streams().length,connections+1);
     check('completion flow: real output published during lifecycle delivery gap decodes after recovery with unchanged Jobs tuple and retained editing',true);
 
+    await page.poll(`(async()=>{const state=await ${sourceOutage};return state.host==='fake'&&state.online===true&&state.errors.length===0;})()`,15000);
+    const failedBefore=traffic?failedInventoryReads():0;
     await control({failures:{listing:503},running:['auto-flow-C'],pending:[],finish:[{id:'auto-flow-B',output:'auto-flow/retry.png',width:79,height:35,mtime:2199999998}]});
-    await page.poll(`!![...document.querySelectorAll('#statusStack .error')].find(e=>e.textContent.includes('ComfyUI listing: 503'))`,15000);
+    // The first failed wave can reach either root or descendant inventory.
+    // Later retries remain the same outage and must not manufacture another chip.
+    await page.poll(`(async()=>{const state=await ${sourceOutage};return state.errors.some(text=>/collection unreachable: ComfyUI (?:listing|inventory): 503$/.test(text));})()`,15000);
+    if(traffic){
+      const deadline=Date.now()+15000;
+      while(failedInventoryReads()-failedBefore<4&&Date.now()<deadline)await new Promise(resolve=>setTimeout(resolve,50));
+      assert(failedInventoryReads()-failedBefore>=4,'initial failure plus at least three automatic inventory retries');
+    }
+    const outage=await page.evaluate(sourceOutage);
+    assert.equal(outage.host,'fake');assert.equal(outage.online,false);assert(outage.offline);
+    assert.equal(outage.errors.length,1,'exactly one error for this source throughout the outage');
     assert.deepEqual(await snapshot(),before);
+    check('completion flow: injected source 503 stays one offline error across automatic retries',true,
+      JSON.stringify({...outage,failedReads:traffic?failedInventoryReads()-failedBefore:null}));
     await control({failures:{}});
     await page.poll(`document.querySelector('.card[data-name="auto-flow/retry.png"] img')?.naturalWidth===79`,15000);
+    await page.poll(`(async()=>{const state=await ${sourceOutage};return state.host==='fake'&&state.online===true&&!state.offline&&state.errors.length===0;})()`,15000);
     assert.deepEqual(await snapshot(),before);
+    check('completion flow: successful inventory recovery clears the source error and offline presentation',true);
     check('completion flow: failed inventory preserves work and autonomously retries the same target to decoded bytes',true);
 
     await page.evaluate(`(async()=>{const s=${KZ},{api}=await import('/js/api.mjs');window.__autoFlowRelease();

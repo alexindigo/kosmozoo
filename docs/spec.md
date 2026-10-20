@@ -367,6 +367,14 @@ method/path/status and at most 1024 characters of recognized engine JSON
 `error`/`reason` detail. Empty, malformed and foreign bodies remain HTTP failures;
 successful payloads keep their existing shape. Failure detail is text, never HTML.
 
+With no configured sources, the feed shows an inline centered message and a
+link-style action opening the existing source-picker add form. Initial inventory
+and refresh failures with HTTP502 `collection unreachable` share a source-record
+reachability owner: one error per outage, quiet retries at the existing cadence,
+and offline presentation in the picker. Successful inventory clears the error
+and restores online presentation. Discovery and navigation cannot reset an outage;
+source retirement clears it. Other errors retain their normal reporting.
+
 Feed-side topbar order: logo/wordmark, refresh icon, host dropdown, controlled
 native Output folder selector, separated pinned sources,
 flexible space, filename filter. Pinned buttons forward the dropdown's selection

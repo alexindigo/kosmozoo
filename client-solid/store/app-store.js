@@ -95,7 +95,10 @@ export function makeAppStore({ subscribeSources = typeof window !== "undefined" 
       epoch: source.sourceVersion?.epoch, writes: 0, revision: 0,
       confirmed: { pinned: !!source.pinned, autoRefresh: !!source.autoRefresh, sourceVersion: source.sourceVersion },
       writeTask: Promise.resolve(), freshness: makeSourceFreshness() }),
-    onRetire: record => record.freshness.retire(),
+    onRetire: record => {
+      record.freshness.retire();
+      if (record.offlineSlot) actions.status.clear(record.offlineSlot);
+    },
   });
   const hostsView = sourceRecords.hosts;
   const [sourcesReady, setSourcesReady] = createSignal(false);
@@ -686,6 +689,11 @@ export function makeAppStore({ subscribeSources = typeof window !== "undefined" 
     const name = s.id, wasReady = s.inventoryReady;
     let idx = -1;
     batch(() => {
+      if (s.source) {
+        s.source.setReachability(true);
+        if (s.source.offlineSlot) actions.status.clear(s.source.offlineSlot);
+        s.source.offlineSlot = null;
+      }
       setSt("images", reconcile(inventory.entries.map((e) => {
         const id = `${name}:${e.name}`, live = st.images[imageIdx(id)], start = before.get(id);
         const sameContent = live && !(e.hash && live.hash && e.hash !== live.hash);
@@ -826,7 +834,7 @@ export function makeAppStore({ subscribeSources = typeof window !== "undefined" 
       if (!ownsSession(s)) return;
       setSt("inventory", "loading", false);
       actions.status.clear("load");
-      actions.status.error(`couldn't load images from ${name}: ${err?.message ?? err}`);
+      inventoryFailure(s, err, `couldn't load images from ${name}: ${err?.message ?? err}`);
     } finally {
       judgments.endRead(read);
       s.loading = false;
@@ -847,6 +855,14 @@ export function makeAppStore({ subscribeSources = typeof window !== "undefined" 
   // merge; the feed's above-fold compensation (Grid's rule, fed by the
   // merge nonce) keeps the visible cards anchored across prepends.
   const [feedMergeNonce, setFeedMergeNonce] = createSignal(0);
+  function inventoryFailure(s, error, message) {
+    const source = s.source;
+    if (source && error?.status === 502 && error.detail?.startsWith("collection unreachable:")) {
+      if (source.reachability !== false) source.offlineSlot = actions.status.error(message);
+      source.setReachability(false);
+    } else actions.status.error(message);
+  }
+
   async function refreshImages(s) {
     if (!ownsSession(s)) return false;
     const name = s.id;
@@ -869,7 +885,7 @@ export function makeAppStore({ subscribeSources = typeof window !== "undefined" 
       if (!ownsSession(s)) return false;
       setSt("inventory", "loading", false);
       actions.status.clear("load");
-      actions.status.error(`couldn't refresh ${name}: ${err?.message ?? err}`);
+      inventoryFailure(s, err, `couldn't refresh ${name}: ${err?.message ?? err}`);
       return false;
     } finally {
       judgments.endRead(read);
@@ -1222,6 +1238,7 @@ export function makeAppStore({ subscribeSources = typeof window !== "undefined" 
     capabilities: c.capabilities ?? null,
   }]));
 
+  let booted = false;
   let registryRevision = 0, collectionRead = 0, streamEpoch = null, streamRevision = -1;
   let membershipFloor = null;
   let deliveryStarted = false, deliverySuspended = false, deliveryGeneration = 0, deliveryDispose = null;
@@ -1285,7 +1302,7 @@ export function makeAppStore({ subscribeSources = typeof window !== "undefined" 
       deliveryGap = false;
     }
     everDelivered = true;
-    if (sourceSession && !ownsSession(sourceSession)) {
+    if (sourceSession && !ownsSession(sourceSession) || booted && !host() && Object.keys(hostsView()).length) {
       const id = Object.hasOwn(hostsView(), host()) ? host() : Object.keys(hostsView())[0] ?? null;
       actions.hosts.select(id, { force: true, historyMode: "replace" });
     } else drainRefresh(sourceSession);
@@ -1378,6 +1395,10 @@ export function makeAppStore({ subscribeSources = typeof window !== "undefined" 
     }
     sourceRecords.reconcile(next);
     setSourcesReady(true);
+    if (booted && !host()) {
+      const first = initialHost(hostsView(), st.ui.host);
+      if (first) await actions.hosts.select(first, { historyMode: "replace" });
+    }
     drainRefresh(sourceSession);
   }
 
@@ -1468,6 +1489,7 @@ export function makeAppStore({ subscribeSources = typeof window !== "undefined" 
       if (h) await actions.hosts.select(h, { target, historyMode: "replace" });
       // a /diff URL boots into the workbench on the left side
       if (route.view === "diff") await actions.diff.openDiff(route.left, route.right);
+      booted = true;
     },
 
     hosts: {
@@ -2072,7 +2094,9 @@ export function makeAppStore({ subscribeSources = typeof window !== "undefined" 
         });
       },
       error(msg) {
-        setSt("chips", (chips) => [...chips, { slot: `err-${++errSeq}`, kind: "error", msg }]);
+        const slot = `err-${++errSeq}`;
+        setSt("chips", (chips) => [...chips, { slot, kind: "error", msg }]);
+        return slot;
       },
       clear(slot) {
         setSt("chips", (chips) => chips.filter((c) => c.slot !== slot));

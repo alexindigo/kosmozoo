@@ -12,6 +12,15 @@ function check(name, ok, detail = '') {
 (async () => {
   const page = await CDP.launch(9336, { windowSize: '1600,1200' });
   const errors = await collectPageErrors(page);
+  let unreachableReads = 0;
+  await page.send('Network.enable');
+  const receive = page.ws.onmessage;
+  page.ws.onmessage = event => {
+    receive(event);
+    const message = JSON.parse(event.data);
+    if (message.method === 'Network.responseReceived' &&
+        message.params.response.url.endsWith('/api/collections/unreachable/entries?inventory=1')) unreachableReads++;
+  };
   try {
     const collections = await (await fetch(ENGINE + '/api/collections')).json();
     check('fresh collections are empty', JSON.stringify(collections) === '{}', JSON.stringify(collections));
@@ -44,11 +53,25 @@ function check(name, ok, detail = '') {
     await page.clickAt('#workspace');
     await page.poll(`document.querySelector('#hostDrop').hidden`);
     check('fresh page has zero error status lines', await page.evaluate(`document.querySelectorAll('#statusStack .statuschip.error').length===0`));
+    if (process.env.E2E_UNREACHABLE === '1') {
+      const added = await fetch(ENGINE + '/api/collections', { method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ name: 'unreachable', address: '127.0.0.1:1' }) });
+      check('unreachable source added through the API', added.ok, String(added.status));
+      await page.poll(`(async()=>${KZ}.state.host()==='unreachable' && !document.querySelector('.feed-empty'))()`, 10000);
+      const deadline = Date.now() + 25000;
+      while (unreachableReads < 4 && Date.now() < deadline) await sleep(100);
+      check('unreachable source retries at least three refresh cycles', unreachableReads >= 4, `inventory responses=${unreachableReads}`);
+      await page.clickAt('#hostBtn');
+      await page.poll(`!document.querySelector('#hostDrop').hidden && !!document.querySelector('.hostpick.off[data-source="unreachable"]')`);
+      const offline = await page.evaluate(`({errors:[...document.querySelectorAll('#statusStack .statuschip.error')].map(el=>el.textContent),
+        row:document.querySelector('.hostpick[data-source="unreachable"]').textContent,
+        dot:document.querySelector('#hostBtn .hdot').classList.contains('off')})`);
+      check('unreachable source has exactly one error line and is presented offline', offline.errors.length === 1 && offline.row.includes('offline') && offline.dot, JSON.stringify(offline));
+    }
     check('fresh page has no uncaught exceptions', errors.length === 0, errors.join('; '));
   } catch (error) {
     console.error('Fresh-install probe failed:', error);
     console.error('Page exceptions:', errors);
-    console.error('Source control:', await page.evaluate(`({open:document.querySelector('#hostDrop')?.hidden, button:document.querySelector('.feed-empty button')?.outerHTML})`));
     throw error;
   } finally { await page.close(); }
   console.log(`\n${failures} FAIL`);
