@@ -3,7 +3,7 @@
 // last-host guard hold.
 
 import { assert, assertEquals } from "jsr:@std/assert";
-import { loadCollections, validateCollection } from "../src/collections.mjs";
+import { parseHosts, loadCollections, validateCollection } from "../src/collections.mjs";
 import { backingFor } from "../src/backings/index.mjs";
 import { comfyClient } from "../src/backings/comfy.mjs";
 import { makeRouter } from "../src/routes.mjs";
@@ -18,6 +18,19 @@ function fakeComfy(handler) {
   const srv = Deno.serve({ port: 0, hostname: "127.0.0.1" }, handler);
   return { addr: `127.0.0.1:${srv.addr.port}`, close: () => srv.shutdown() };
 }
+
+Deno.test("hosts: fresh state has no sources unless explicitly seeded", async () => {
+  const rig = await mkStateRig("hosts-empty");
+  try {
+    assertEquals(parseHosts({}), {});
+    assertEquals(parseHosts({ KOZMOZOO_HOSTS: "" }), {});
+    assertEquals(await loadCollections(rig.store, {}), {});
+    assertEquals(await loadCollections(rig.store, { KOZMOZOO_HOSTS: "" }), {});
+    assertEquals(rig.store.collectionMap(), {});
+    assertEquals(await loadCollections(rig.store, { KOZMOZOO_HOSTS: "studio=comfy:8188" }), { studio: "comfy:8188" });
+    assertEquals(await loadCollections(rig.store, {}), { studio: "comfy:8188" });
+  } finally { await rig.close(); }
+});
 
 Deno.test("hosts: env seeds first boot; collections win after that", async () => {
   const dir = await mkdtemp(join(tmpdir(), "kz-hosts-"));

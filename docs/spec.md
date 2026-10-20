@@ -621,6 +621,11 @@ working tree is never a state dir. Env overrides: `KOZMOZOO_PORT` (default
 `KOZMOZOO_FEEDBACK` (migration import only), `KOZMOZOO_CACHE`,
 `KOZMOZOO_PLUGINS`, `KOZMOZOO_REVALIDATE_MS`.
 
+Fresh state starts with no collections when `KOZMOZOO_HOSTS` is unset or empty.
+An explicit comma-separated `name=host:port` or `name=folder:/path` list seeds an
+empty collection table; existing nonempty collections always take precedence.
+There is no separate first-boot marker, so an empty table can be seeded later.
+
 One pure bind/port resolver owns startup modes. Desktop app defaults to
 `127.0.0.1`; source development, foreground `serve` and Docker to
 `0.0.0.0`. Explicit bind/whole-port overrides win; malformed/empty values fail.

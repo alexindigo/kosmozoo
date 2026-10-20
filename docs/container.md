@@ -56,9 +56,9 @@ using the same two volume names. Avoid force-removal when you want graceful clos
 
 ## Configuration and first boot
 
-The image sets `KOZMOZOO_HOSTS` to an empty string. A fresh state volume therefore
-starts with **no collections** (`GET /api/collections` returns `{}`), without a
-default `127.0.0.1:8188` source. Add collections through `POST /api/collections`
+Fresh installs start with **no collections** (`GET /api/collections` returns `{}`)
+unless `KOZMOZOO_HOSTS` explicitly lists sources. The image also sets it to an
+empty string. Add collections through `POST /api/collections`
 or supply a seed when creating the container:
 
 ```sh
@@ -68,7 +68,7 @@ or supply a seed when creating the container:
 
 Existing nonempty SQLite collections take precedence over that environment seed.
 An empty table can be seeded on a later boot too; there is no separate first-boot
-marker. Bare `deno task dev` keeps its development default. Background prefetch
+marker. Bare `deno task dev` also starts without sources. Background prefetch
 and source monitoring start on boot for configured collections; core preferences
 and source flags retain their existing semantics.
 

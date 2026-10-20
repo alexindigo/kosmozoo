@@ -43,7 +43,7 @@ export async function capabilities(collection, { online = true, useAssetsPlus = 
 
 // KOZMOZOO_HOSTS: "name=host:port,name2=host2:port2" or "name=folder:/path"
 export function parseHosts(env = Deno.env.toObject()) {
-  const raw = env.KOZMOZOO_HOSTS ?? "local=127.0.0.1:8188";
+  const raw = env.KOZMOZOO_HOSTS ?? "";
   const hosts = [];
   for (const pair of raw.split(",")) {
     const eq = pair.indexOf("=");

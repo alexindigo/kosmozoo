@@ -38,6 +38,9 @@ there is no added access-control layer.
 
 Existing `KOZMOZOO_STATE`, `KOZMOZOO_CACHE`, first-boot `KOZMOZOO_HOSTS`,
 migration-only `KOZMOZOO_FEEDBACK`, plugin and XDG precedence stay the same.
+Fresh state starts with no sources unless `KOZMOZOO_HOSTS` explicitly lists them
+(for example, `studio=comfy.example:8188`). Existing nonempty collections win
+over that seed. Add a ComfyUI host or folder through the source picker.
 One stable real-filesystem `engine.lock` protects cooperative new-engine
 ownership. Private atomic instance metadata and `/api/runtime` readiness use an
 instance nonce and lock identity; no absolute state path is published. The nonce
@@ -149,4 +152,3 @@ Public application-source and global package consumers use the explicit
 [publication input/resource contract](../packaging/linux/PUBLICATION.md). Global
 resource rendering shares the self-installer's templates and escaping; pacman
 ownership never invokes that installer or activates services/profiles.
-
