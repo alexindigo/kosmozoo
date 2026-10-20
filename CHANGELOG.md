@@ -10,6 +10,8 @@ Unreachable sources show as offline with one error per outage. Retries continue
 quietly, and a successful refresh clears the error and restores online status.
 The engine's user service now restarts the engine after a crash.
 
+Official `kosmozoo-linux-x86_64` SHA-256: `2a1470029a9b50a492a9c59885f0746ca8c95e3c386fe9c72414793aa139a804`.
+
 ## 0.2.1 — 2026-10-18
 
 The README now shows the image feed and comparison workbench in five screenshots.
