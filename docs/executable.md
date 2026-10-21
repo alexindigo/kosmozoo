@@ -131,8 +131,11 @@ Uninstall removes only matching managed links and retains data/profiles/versions
 `packaging/linux/inputs.json` separately authenticates compiler and denort
 archives/extracted binaries and the actual characterized SQLite library bytes.
 The build creates a frozen source staging tree, fresh complete client build and
-explicit resource payload. Dependency warming is separate from network-disabled,
-frozen/cached-only compilation with the verified `DENORT_BIN`.
+explicit resource payload. `deno task deps` acquires the complete frozen npm/jsr
+graph into the explicit cache as the sole networked module step; its output is
+retained in `deps.log`. Client build and compilation then run network-disabled,
+frozen/cached-only with the verified `DENORT_BIN`. `--validate-inputs` authenticates
+the supplied source/native/material inputs without acquiring modules or compiling.
 
 Native selection occurs before the literal dynamic engine import. A valid
 explicit `DENO_SQLITE_PATH` is retained. Empty/invalid overrides or

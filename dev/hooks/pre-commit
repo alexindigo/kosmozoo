@@ -55,4 +55,4 @@ fi
   -v "$snapshot:/workspaces/kosmozoo:rw,Z" \
   -v "$cache_mount" -e DENO_DIR=/home/vscode/.cache/deno \
   -w /workspaces/kosmozoo "$image" \
-  sh -c 'deno test --allow-all tests/t_*.mjs && deno run --frozen --allow-all build.mjs'
+  sh -c 'deno task deps && deno test --frozen --cached-only --allow-all tests/t_*.mjs && deno run --frozen --cached-only --allow-all build.mjs'

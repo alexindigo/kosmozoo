@@ -623,6 +623,14 @@ in `deno.json` and transitive integrity in `deno.lock`; HTTP module imports are
 forbidden by `tests/t_dependency_sources.mjs`. Only `deno task deps:update` may
 deliberately update the lock, whose diff must be reviewed.
 
+The staged-tree pre-commit hook, browser runner, Docker builder and publication
+builder all use that same acquisition task before frozen, cached-only execution.
+The browser runner mounts one prepared `DENO_DIR` in both engines and fakes;
+`E2E_DENO_DIR` optionally supplies a reusable caller-owned disk-backed cache.
+`deno task test` prepares the graph before running cached-only tests; `setup`
+requires an already prepared cache. Cached-only restricts module acquisition,
+not application HTTP traffic or native/toolchain input handling.
+
 ## 6. Storage (hash identity + sqlite + JSON documents)
 
 Identity is content hash (SHA-256). `collection:name` is an address, not

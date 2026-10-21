@@ -1,8 +1,9 @@
 .git
 .devcontainer
-dev
+dev/*
+!dev/vendor-browser.mjs
 docs
-tests
+tests/.tmp*
 client-solid-dist
 state
 cache

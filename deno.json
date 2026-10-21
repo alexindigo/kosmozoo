@@ -29,9 +29,9 @@
     "deps": "deno install --frozen --entrypoint build.mjs dev/vendor-browser.mjs src/main.mjs src/cli.mjs plugins/*/plugin.mjs tests/t_*.mjs",
     "deps:update": "deno install --entrypoint build.mjs dev/vendor-browser.mjs src/main.mjs src/cli.mjs plugins/*/plugin.mjs tests/t_*.mjs",
     "vendor": "deno run --frozen --cached-only --allow-read --allow-write=client/vendor dev/vendor-browser.mjs",
-    "setup": "deno eval 'import { Database } from \"@db/sqlite\"; new Database(\":memory:\").close();'",
+    "setup": "deno eval --frozen --cached-only 'import { Database } from \"@db/sqlite\"; new Database(\":memory:\").close();'",
     "dev": "deno run --allow-all src/main.mjs",
-    "test": "deno test --allow-all"
+    "test": "deno task deps && deno test --frozen --cached-only --allow-all"
   },
   "env": {
     "DENO_SQLITE_PATH": "/usr/lib/libsqlite3.so"

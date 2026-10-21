@@ -9,9 +9,11 @@ their Python/ML services are separate deployments and are not included.
 
 The Dockerfile builds an **amd64** Debian image using the SHA-256-verified Deno
 2.9.6 release pin shared with `.devcontainer/Dockerfile`. The build downloads
-Debian packages and locked Deno dependencies and compiles `client-solid/` with
-`build.mjs`; runtime needs no dependency downloads. Deno resolutions are frozen
-against `deno.lock`. Debian package repositories/base tags can change, so this
+Debian packages and runs `deno task deps` to acquire the locked npm/jsr graph.
+It then compiles `client-solid/` with `build.mjs` and initializes SQLite using
+`--frozen --cached-only`; missing modules fail instead of downloading. Runtime
+also runs cached-only and needs no dependency downloads. Deno resolutions are
+frozen against `deno.lock`. Debian package repositories/base tags can change, so this
 is not a claim of bit-for-bit identical images across builds.
 
 Build and run:

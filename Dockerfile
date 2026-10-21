@@ -25,13 +25,16 @@ COPY deno.json deno.lock build.mjs ./
 COPY src/ src/
 COPY client/ client/
 COPY client-solid/ client-solid/
+COPY dev/vendor-browser.mjs dev/vendor-browser.mjs
+COPY tests/ tests/
+COPY plugins/ plugins/
 COPY plugins/hello/*.mjs /opt/kosmozoo/plugins/hello/
 COPY plugins/difference/*.mjs /opt/kosmozoo/plugins/difference/
 COPY plugins/detector/*.mjs /opt/kosmozoo/plugins/detector/
 COPY plugins/critic/*.mjs /opt/kosmozoo/plugins/critic/
-RUN deno cache --frozen src/main.mjs src/cli.mjs build.mjs /opt/kosmozoo/plugins/*/plugin.mjs \
-    && deno run --frozen --allow-all build.mjs \
-    && deno task --frozen-lockfile setup
+RUN deno task deps \
+    && deno run --frozen --cached-only --allow-all build.mjs \
+    && deno task setup
 
 FROM system AS runtime
 COPY --from=deno-download /usr/local/bin/deno /usr/local/bin/deno

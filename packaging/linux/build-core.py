@@ -135,8 +135,8 @@ def build(source_manifest, input_root, materials_root, cache, output, evidence, 
            'DENO_NO_UPDATE_CHECK': '1', 'TMPDIR': str(temporary), 'DENO_SQLITE_PATH': inputs['sqlite']['path']}
     deno = inputs['compiler']['path']
     run([deno, '--version'], stage, env, output / 'compiler.log')
-    # Separate deliberate dependency warming from the network-disabled build.
-    run([deno, 'cache', '--frozen', 'build.mjs', 'src/cli.mjs', 'src/main.mjs'], stage, env, output / 'warm.log')
+    # The shared frozen acquisition task is the only networked module step.
+    run([deno, 'task', 'deps'], stage, env, output / 'deps.log')
     offline = ['unshare', '--user', '--map-root-user', '--net', '--']
     run([*offline, deno, 'run', '--frozen', '--cached-only', '--allow-all', 'build.mjs'], stage, env, output / 'client-build.log')
     payload_rows = []

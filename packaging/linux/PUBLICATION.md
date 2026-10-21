@@ -32,8 +32,13 @@ release. A final official build requires the accepted immutable source manifest.
 executables, plus the exact SQLite library. `source-materials.json` authenticates
 the source/license material and the unchanged notice files. No system-SQLite or
 new compiler substitution, unchecked tool download or Docker extraction is a public
-build input. Dependency warming uses the frozen lock before network-disabled,
-cached-only client build/compile with the authenticated `DENORT_BIN`.
+build input. The authenticated compiler runs the shared `deno task deps` entrypoint
+set (engine, plugins, compiler, browser generator and unit tests) against the frozen
+lock into the explicit cache. This is the only networked module-acquisition step;
+its output is retained in `deps.log`. The client build/compile then run
+network-disabled with frozen, cached-only resolution and the authenticated
+`DENORT_BIN`; a missing module fails rather than fetching. `--validate-inputs`
+retains its input-authentication-only behavior and does not populate the cache.
 
 ## Release assets and build inputs
 

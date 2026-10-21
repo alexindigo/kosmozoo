@@ -12,9 +12,11 @@
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
+deno task deps
+
 if [ -z "$(ls -A tests/fixtures 2>/dev/null)" ]; then
-  deno run --allow-read --allow-write tests/make-synthetic-fixtures.mjs
+  deno run --frozen --cached-only --allow-read --allow-write tests/make-synthetic-fixtures.mjs
 fi
 
 FILTER="${1:-}"
-deno test --allow-all ${FILTER:+--filter "$FILTER"} tests/t_*.mjs
+deno test --frozen --cached-only --allow-all ${FILTER:+--filter "$FILTER"} tests/t_*.mjs
