@@ -1,19 +1,19 @@
 // build.mjs — compile client-solid/ (.tsx) into client-solid-dist/.
 //
 // JSX transform: @babel/core + babel-preset-solid running right here in Deno
-// (build-time only, loaded from pinned esm.sh URLs, cached in DENO_DIR, locked
-// via deno.lock — `deno cache --lock=deno.lock build.mjs` before use). This is
+// (build-time only, from npm packages pinned in deno.json and integrity-locked
+// in deno.lock). Run `deno task deps` once, then build offline with
+// `deno run --frozen --cached-only --allow-all build.mjs`. This is
 // the exact transform vite-plugin-solid uses, without Vite: it emits Solid's
 // fine-grained runtime calls (reactive getters, insert, template hoisting),
-// which Deno's own swc transform cannot produce (see
-// ~/Documents/kosmozoo/plans/solid-migration/blocker-jsx-toolchain.md).
+// which Deno's own swc transform cannot produce.
 // The browser never sees Babel — emitted code imports only the vendored
 // solid-js dists, rewritten below to absolute /vendor/ paths.
 
 import { join, dirname, relative } from "node:path";
 
-import * as BabelNS from "https://esm.sh/@babel/core@7.26.0/es2022/core.mjs";
-import solidPresetImport from "https://esm.sh/babel-preset-solid@1.9.15";
+import * as BabelNS from "@babel/core";
+import solidPresetImport from "babel-preset-solid";
 
 const Babel = BabelNS.transformSync ? BabelNS : BabelNS.default;
 const solidPreset = solidPresetImport?.default ?? solidPresetImport;
@@ -21,19 +21,30 @@ const solidPreset = solidPresetImport?.default ?? solidPresetImport;
 const SRC = "client-solid";
 const DIST = "client-solid-dist";
 
-// Emitted bare specifiers -> vendored paths served by the engine
-// (path fix is a build-time concern, same pattern as preact's vendor.mjs).
-const VENDOR_REWRITES = [
+// Emitted bare specifiers -> vendored paths served by the engine.
+const VENDOR_REWRITES = new Map([
   ["solid-js/web", "/vendor/solid/web.mjs"],
   ["solid-js/store", "/vendor/solid/store.mjs"],
   ["solid-js", "/vendor/solid/solid.mjs"],
   ["@tanstack/solid-virtual", "/vendor/tanstack/solid-virtual.mjs"],
-];
+]);
 
 function rewriteSpecifiers(code) {
-  for (const [spec, path] of VENDOR_REWRITES) {
-    code = code.replaceAll(`"${spec}"`, `"${path}"`)
-      .replaceAll(`'${spec}'`, `'${path}'`);
+  const ast = Babel.parseSync(code, { babelrc: false, configFile: false });
+  const edits = [];
+  Babel.traverse(ast, {
+    StringLiteral({ node, parent }) {
+      const isSource = parent.source === node &&
+        ["ImportDeclaration", "ExportNamedDeclaration", "ExportAllDeclaration"].includes(parent.type);
+      const isDynamicImport = parent.type === "CallExpression" &&
+        parent.callee.type === "Import" && parent.arguments[0] === node;
+      const path = VENDOR_REWRITES.get(node.value);
+      if (path && (isSource || isDynamicImport)) edits.push([node.start, node.end, path]);
+    },
+  });
+  // Replace only the specifier contents, preserving quotes and surrounding bytes.
+  for (const [start, end, path] of edits.sort((a, b) => b[0] - a[0])) {
+    code = code.slice(0, start + 1) + path + code.slice(end - 1);
   }
   return code;
 }
@@ -46,7 +57,11 @@ async function* walk(dir) {
   }
 }
 
-await Deno.remove(DIST).catch(() => {});
+try {
+  await Deno.remove(DIST, { recursive: true });
+} catch (error) {
+  if (!(error instanceof Deno.errors.NotFound)) throw error;
+}
 await Deno.mkdir(DIST, { recursive: true });
 
 let compiled = 0, copied = 0;

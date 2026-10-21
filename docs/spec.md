@@ -592,8 +592,8 @@ Non-obvious behaviour the rewrite must not rediscover one bug at a time.
 - The engine is native ESM on Deno; the only engine dependency is
   `jsr:@db/sqlite@0.13.0`.
 - The client is **built**: Solid JSX compiled by
-  `deno run --allow-all build.mjs` (Babel + `babel-preset-solid` from pinned
-  esm.sh URLs, no Vite, no npm) from `client-solid/` into
+  `deno run --frozen --cached-only --allow-all build.mjs` (Babel +
+  `babel-preset-solid` from locked npm packages, no Vite) from `client-solid/` into
   `client-solid-dist/`; framework-free modules stay in `client/js/`.
   Solid, the virtualizer, and noUiSlider (ESM) are vendored dists with
   vendor-time path rewrites and the `process.env.NODE_ENV` substitution
@@ -614,6 +614,13 @@ Non-obvious behaviour the rewrite must not rediscover one bug at a time.
 - No ML runtime, model weights, or Python anywhere in core. Specialized
   capabilities live behind a plugin/service boundary.
 - Security deliberately deferred: no auth, no sandbox, no capability model.
+
+Run `deno task deps` to acquire the frozen engine, plugin, compiler and unit-test
+graph into `DENO_DIR` before offline builds or tests (`--frozen --cached-only`).
+Module dependencies come only from npm/jsr registries, with exact direct versions
+in `deno.json` and transitive integrity in `deno.lock`; HTTP module imports are
+forbidden by `tests/t_dependency_sources.mjs`. Only `deno task deps:update` may
+deliberately update the lock, whose diff must be reviewed.
 
 ## 6. Storage (hash identity + sqlite + JSON documents)
 
