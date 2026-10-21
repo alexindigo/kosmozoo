@@ -14,7 +14,6 @@
 
 import { createSignal, createMemo, createEffect, createResource, onCleanup, For, Show } from "solid-js";
 import { iconSvg } from "/js/icons.mjs";
-import { paramDef, defaultRange } from "./graph.mjs";
 import { templateLabels } from "/shared/features/variations/shared.mjs";
 import { sourceOrigin } from "/shared/source-origin.mjs";
 import { useAppStore } from "../../store/app-store.js";
@@ -154,7 +153,7 @@ function ModalBody(props) {
     editor.edit("numeric", key, "rawIncrement", rawIncrement);
   };
 
-  // LoadImage sweep: enabling auto-inserts the {LoadImage.image} token into
+  // LoadImage sweep: enabling auto-inserts its canonical per-node token into
   // the suffix (the output name must encode WHICH input image produced it);
   // disabling removes it. Same grammar as the numeric placeholder tokens.
   const onImgToggle = (id, checked) => {
@@ -246,14 +245,14 @@ function ModalBody(props) {
                   const r = () => imgRows()[id];
                   return (
                     <Show when={r()?.filesReady}>
-                      <div class={"vz-imgrow" + (r().enabled ? " on" : "")}>
+                      <div class={"vz-imgrow" + (r().enabled ? " on" : "")} data-image-id={id}>
                         <label class="vz-imgrow-head">
                           <input
                             type="checkbox" class="vz-cb"
                             checked={r().enabled}
                             onChange={(e) => onImgToggle(id, e.target.checked)}
                           />
-                          <span class="vz-imgrow-label">{`${r().label}.image`}</span>
+                          <span class="vz-imgrow-label">{r().label}</span>
                           <span class="vz-imgrow-cur" title={r().current}>{r().current}</span>
                         </label>
                         <Show when={r().enabled}>
@@ -347,12 +346,12 @@ function ModalBody(props) {
                       }
                       const key = itemId.slice(4);
                       const row0 = rows()[key];
-                      const p = paramDef(key, row0.current, row0.integer);
+                      const p = row0.tuning;
                       return (
                         <SliderRow
-                          param={{ ...p, label: row0.label ? `${row0.label}.${row0.input}` : p.label }}
+                          param={{ ...p, key, label: row0.label }}
                           current={() => rows()[key]?.current ?? null}
-                          defaults={batch ? { min: -p.spread, max: p.spread } : defaultRange(p, row0.current)}
+                          defaults={row0.defaults}
                           enabled={() => !!rows()[key]?.enabled}
                           increment={() => rows()[key]?.increment}
                           rawIncrement={() => rows()[key]?.rawIncrement ?? ""}

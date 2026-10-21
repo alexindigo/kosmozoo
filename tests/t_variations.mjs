@@ -175,15 +175,14 @@ Deno.test("templateReplace accepts bare keys too when labelMap prefixes exist", 
 
 // --- graph mutation ----------------------------------------------------------
 
-Deno.test("mutateGraph: KSampler denoise", async () => {
-  // Not exported — test through the module's internal path by checking
-  // that the permutation generates and the graph has the right shape.
-  // Direct mutation test needs the module to export mutateGraph.
-  // For now, verify the permutation engine produces the right values.
-  const perms = generatePermutations({ denoise: { min: 0.65, max: 0.70, enabled: true, increment: 0.05 } }, { denoise: 0.65 },
+Deno.test("mutateGraph: KSampler denoise", () => {
+  const graph = { "1": { class_type: "KSampler", inputs: { denoise: .65 } } };
+  const perms = generatePermutations({ "1.denoise": { min: 0.65, max: 0.70, enabled: true, increment: 0.05 } }, { "1.denoise": 0.65 },
   );
   assertEquals(perms.length, 1);
-  assertEquals(perms[0].denoise, 0.70);
+  assertEquals(perms[0]["1.denoise"], 0.70);
+  assertEquals(mutateGraph(graph, perms[0]).graph["1"].inputs.denoise, .70);
+  assertEquals(graph["1"].inputs.denoise, .65);
 });
 
 // --- SaveImage narrowing ------------------------------------------------------
@@ -343,7 +342,7 @@ Deno.test("clampBudget: 255 minus headroom minus pfx/sfx", () => {
 
 // --- inspectGraph: graph-driven param discovery -------------------------------
 // Generic: every numeric scalar input of every node instance is a param,
-// id = <class_type>.<input>, shared with the fields registry.
+// Identity is node/input; class/input keys are only host schema metadata.
 
 const byId = (params, id) => params.find((p) => p.id === id) ?? null;
 
@@ -354,12 +353,12 @@ Deno.test("inspectGraph: KSampler flow surfaces denoise/cfg/steps/seed", () => {
     } },
   };
   const params = inspectGraph(graph);
-  assertEquals(byId(params, "KSampler.denoise")?.current, 0.8);
-  assertEquals(byId(params, "KSampler.cfg")?.current, 7.5);
-  assertEquals(byId(params, "KSampler.steps")?.current, 20);
-  assertEquals(byId(params, "KSampler.seed")?.current, 12345);
-  assertEquals(byId(params, "KSampler.steps")?.integer, true);
-  assertEquals(byId(params, "KSampler.denoise")?.integer, false);
+  assertEquals(byId(params, "1.denoise")?.current, 0.8);
+  assertEquals(byId(params, "1.cfg")?.current, 7.5);
+  assertEquals(byId(params, "1.steps")?.current, 20);
+  assertEquals(byId(params, "1.seed")?.current, 12345);
+  assertEquals(byId(params, "1.steps")?.integer, true);
+  assertEquals(byId(params, "1.denoise")?.integer, false);
 });
 
 Deno.test("inspectGraph: FluxGuidance surfaces guidance with the node's title", () => {
@@ -370,8 +369,8 @@ Deno.test("inspectGraph: FluxGuidance surfaces guidance with the node's title", 
     "2": { class_type: "FluxGuidance", inputs: { guidance: 3.5, conditioning: ["3", 0] }, _meta: { title: "FluxGuidance 3.5" } },
   };
   const params = inspectGraph(graph);
-  assertEquals(byId(params, "FluxGuidance.guidance")?.current, 3.5);
-  assertEquals(byId(params, "FluxGuidance.guidance")?.title, "FluxGuidance 3.5");
+  assertEquals(byId(params, "2.guidance")?.current, 3.5);
+  assertEquals(byId(params, "2.guidance")?.title, "FluxGuidance 3.5");
 });
 
 Deno.test("inspectGraph: ModelSampling surfaces shift", () => {
@@ -382,7 +381,7 @@ Deno.test("inspectGraph: ModelSampling surfaces shift", () => {
     "2": { class_type: "ModelSamplingFlux", inputs: { shift: 1.15, model: ["3", 0] } },
   };
   const params = inspectGraph(graph);
-  assertEquals(byId(params, "ModelSamplingFlux.shift")?.current, 1.15);
+  assertEquals(byId(params, "2.shift")?.current, 1.15);
 });
 
 Deno.test("inspectGraph: ApplyPulid surfaces pulid weight", () => {
@@ -393,7 +392,7 @@ Deno.test("inspectGraph: ApplyPulid surfaces pulid weight", () => {
     "2": { class_type: "ApplyPulidFlux", inputs: { weight: 0.9, model: ["3", 0] } },
   };
   const params = inspectGraph(graph);
-  assertEquals(byId(params, "ApplyPulidFlux.weight")?.current, 0.9);
+  assertEquals(byId(params, "2.weight")?.current, 0.9);
 });
 
 Deno.test("inspectGraph: LoraLoaderModelOnly surfaces strength_model", () => {
@@ -406,8 +405,8 @@ Deno.test("inspectGraph: LoraLoaderModelOnly surfaces strength_model", () => {
     } },
   };
   const params = inspectGraph(graph);
-  assertEquals(byId(params, "LoraLoaderModelOnly.strength_model")?.current, 1.2);
-  assertEquals(byId(params, "LoraLoaderModelOnly.strength_clip"), null); // ModelOnly has no clip side
+  assertEquals(byId(params, "2.strength_model")?.current, 1.2);
+  assertEquals(byId(params, "2.strength_clip"), null); // ModelOnly has no clip side
 });
 
 Deno.test("inspectGraph: full LoraLoader surfaces both model and clip strength", () => {
@@ -421,11 +420,11 @@ Deno.test("inspectGraph: full LoraLoader surfaces both model and clip strength",
     } },
   };
   const params = inspectGraph(graph);
-  assertEquals(byId(params, "LoraLoader.strength_model")?.current, 0.8);
-  assertEquals(byId(params, "LoraLoader.strength_clip")?.current, 0.5);
+  assertEquals(byId(params, "2.strength_model")?.current, 0.8);
+  assertEquals(byId(params, "2.strength_clip")?.current, 0.5);
 });
 
-Deno.test("inspectGraph: multiple lora loaders — one param, all node ids, first-carrier current", () => {
+Deno.test("inspectGraph: multiple lora loaders — independent per-node parameters and currents", () => {
   const graph = {
     "1": { class_type: "KSampler", inputs: {
       seed: 1, steps: 20, cfg: 1.0, denoise: 1.0,
@@ -440,12 +439,13 @@ Deno.test("inspectGraph: multiple lora loaders — one param, all node ids, firs
     } },
   };
   const params = inspectGraph(graph);
-  const p = byId(params, "LoraLoader.strength_model");
-  assertEquals(p?.current, 0.8); // first carrier's value
-  assertEquals(p?.nodeIds, ["2", "3"]); // both carriers sweep together
+  const strengths = params.filter(p => p.type === "LoraLoader" && p.key === "strength_model");
+  assertEquals(strengths.map(p => [p.id, p.nodeIds, p.current]), [
+    ["2.strength_model", ["2"], .8], ["3.strength_model", ["3"], .5],
+  ]);
 });
 
-Deno.test("inspectGraph: mutateGraph sweeps every carrier of a multi-instance param", () => {
+Deno.test("inspectGraph: mutateGraph sweeps only the selected node of a multi-instance class", () => {
   const graph = {
     "1": { class_type: "KSampler", inputs: {
       seed: 1, steps: 20, cfg: 1.0, denoise: 1.0,
@@ -459,10 +459,10 @@ Deno.test("inspectGraph: mutateGraph sweeps every carrier of a multi-instance pa
       model: ["2", 0], clip: ["2", 1],
     } },
   };
-  const { graph: mutated, applied } = mutateGraph(graph, { "LoraLoader.strength_model": 0.1 });
-  assertEquals(applied, ["LoraLoader.strength_model"]);
+  const { graph: mutated, applied } = mutateGraph(graph, { "2.strength_model": 0.1 });
+  assertEquals(applied, ["2.strength_model"]);
   assertEquals(mutated["2"].inputs.strength_model, 0.1);
-  assertEquals(mutated["3"].inputs.strength_model, 0.1);
+  assertEquals(mutated["3"].inputs.strength_model, 0.5);
 });
 
 Deno.test("inspectGraph: integer params round on write", () => {
@@ -471,7 +471,7 @@ Deno.test("inspectGraph: integer params round on write", () => {
       seed: 1, steps: 20, cfg: 1.0, denoise: 1.0,
     } },
   };
-  const { graph: mutated } = mutateGraph(graph, { "KSampler.steps": 20.7 });
+  const { graph: mutated } = mutateGraph(graph, { "1.steps": 20.7 });
   assertEquals(mutated["1"].inputs.steps, 21); // integer-typed → rounded
 });
 
@@ -495,9 +495,9 @@ Deno.test("stringParams: LoadImage image inputs surface, other strings don't", (
   };
   const sp = stringParams(graph);
   assertEquals(sp.length, 2);
-  assertEquals(sp[0].id, "LoadImage.image");
+  assertEquals(sp[0].id, "1.image");
   assertEquals(sp[0].current, "a.png");
-  assertEquals(sp[1].id, "ImageOnlyLoadImage.image");
+  assertEquals(sp[1].id, "3.image");
   assertEquals(sp[1].current, "m.png");
 });
 
@@ -560,9 +560,9 @@ Deno.test("mutateGraph: a string param writes verbatim (no rounding)", () => {
     "2": { class_type: "KSampler", inputs: { seed: 1, steps: 20 } },
   };
   const params = [...inspectGraph(graph), ...stringParams(graph)];
-  const { graph: mutated, applied } = mutateGraph(graph, { "LoadImage.image": "chosen.png" }, params);
+  const { graph: mutated, applied } = mutateGraph(graph, { "1.image": "chosen.png" }, params);
   assertEquals(mutated["1"].inputs.image, "chosen.png");
-  assert(applied.includes("LoadImage.image"));
+  assert(applied.includes("1.image"));
 });
 
 Deno.test("templateReplace: the chosen filename fills {LoadImage.image} and {image}", () => {
@@ -585,6 +585,7 @@ Deno.test("stringParams: a LoadImage axis survives ComfyUI's [output] annotation
   };
   const rows = stringParams(graph);
   assertEquals(rows.length, 3);
+  assertEquals(new Set(rows.map(row => row.id)).size, 3);
   const byNode = Object.fromEntries(rows.map((r) => [r.nodeIds[0], r]));
   assertEquals(byNode["9"].current, "ark#var_alisa_impl_00014_.png");
   assertEquals(byNode["9"].fromOutput, true);
@@ -618,12 +619,12 @@ Deno.test("inspectGraph: declared FLOAT wins over an integer-looking current val
   ]);
   const params = inspectGraph(graph, types);
   const byId = (id) => params.find((p) => p.id === id);
-  assertEquals(byId("LoraLoaderModelOnly.strength_model").integer, false);
-  assertEquals(byId("KSampler.denoise").integer, false); // FLOAT, value 1 notwithstanding
-  assertEquals(byId("KSampler.steps").integer, true);
+  assertEquals(byId("1.strength_model").integer, false);
+  assertEquals(byId("9.denoise").integer, false); // FLOAT, value 1 notwithstanding
+  assertEquals(byId("9.steps").integer, true);
   // no types map → the old value-inference fallback
   const fallback = inspectGraph(graph);
-  assertEquals(fallback.find((p) => p.id === "KSampler.steps").integer, true);
+  assertEquals(fallback.find((p) => p.id === "9.steps").integer, true);
 });
 
 Deno.test("mutateGraph: a declared-FLOAT strength sweeps in floats, not rounded to int", () => {
@@ -632,7 +633,7 @@ Deno.test("mutateGraph: a declared-FLOAT strength sweeps in floats, not rounded 
   };
   const types = new Map([["LoraLoaderModelOnly.strength_model", "FLOAT"]]);
   const params = inspectGraph(graph, types);
-  const { graph: mutated } = mutateGraph(graph, { "LoraLoaderModelOnly.strength_model": 0.55 }, params);
+  const { graph: mutated } = mutateGraph(graph, { "1.strength_model": 0.55 }, params);
   assertEquals(mutated["1"].inputs.strength_model, 0.55);
 });
 
@@ -668,7 +669,7 @@ Deno.test("nested variation route: exact source bytes/lineage and producing dire
       const { context } = await probe.json();
       return router.handle(new Request("http://x/api/features/variations/run", { method: "POST", body: JSON.stringify({
         id: "h:" + filename, host: "h", filename, prefix, suffix: "_{KSampler.denoise}",
-        ranges: { "KSampler.denoise": { enabled: true, min: .5, max: .5, increment: .1 } },
+        ranges: { "1.denoise": { enabled: true, min: .5, max: .5, increment: .1 } },
         context, acknowledgement: { version: 2, runId: crypto.randomUUID(), requestId: crypto.randomUUID() },
       }) }));
     };

@@ -5,12 +5,12 @@ export function editorRig(overrides = {}) {
   let origin = { source: "fake", address: "fake:8188", kind: "comfy", epoch: "test-epoch", incarnation: "test-incarnation" };
   const context = { origin: { ...origin }, graphHash: "a".repeat(64) };
   const catalogue = { context,
-    params: [{ id: "BasicScheduler.denoise", key: "denoise", current: 1, integer: false, type: "BasicScheduler", nodeIds: ["n"] },
-      { id: "BasicScheduler.steps", key: "steps", current: 20, integer: true, type: "BasicScheduler", nodeIds: ["n"] }],
-    stringParams: [{ id: "LoadImage.image", key: "image", type: "LoadImage", current: "origin.png", nodeIds: ["image"] }],
-    enumParams: [{ id: "Choice#choice.value", key: "value", type: "Choice", current: "first", values: ["first", "second"], nodeIds: ["choice"] }],
-    textParams: [{ id: "Text#text.text", key: "text", type: "Text", current: "original", nodeIds: ["text"] },
-      { id: "Text#submit.text", key: "text", type: "Text", current: "other", nodeIds: ["submit"] }],
+    params: [{ id: "n.denoise", key: "denoise", current: 1, integer: false, type: "BasicScheduler", nodeIds: ["n"] },
+      { id: "n.steps", key: "steps", current: 20, integer: true, type: "BasicScheduler", nodeIds: ["n"] }],
+    stringParams: [{ id: "image.image", key: "image", type: "LoadImage", current: "origin.png", nodeIds: ["image"] }],
+    enumParams: [{ id: "choice.value", key: "value", type: "Choice", current: "first", values: ["first", "second"], nodeIds: ["choice"] }],
+    textParams: [{ id: "text.text", key: "text", type: "Text", current: "original", nodeIds: ["text"] },
+      { id: "submit.text", key: "text", type: "Text", current: "other", nodeIds: ["submit"] }],
   };
   const requests = [], uploads = [], timers = []; let closes = 0;
   const values = Object.fromEntries([...catalogue.params, ...catalogue.stringParams, ...catalogue.enumParams, ...catalogue.textParams].map(parameter => [parameter.id, parameter.current]));

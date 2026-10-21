@@ -97,15 +97,15 @@ Deno.test("enumParams: one row per node instance, options from THAT field only",
   const rows = enumParams(graph, enums);
   assertEquals(rows.length, 3);
   const byId = Object.fromEntries(rows.map((r) => [r.id, r]));
-  // per-NODE ids (unlike the multi-carrier numeric params)
-  assertEquals(byId["LoraLoader#20.lora_name"].current, "detail.safetensors");
-  assertEquals(byId["LoraLoader#20.lora_name"].values, LORA_OPTIONS);
-  assertEquals(byId["LoraLoader#20.lora_name"].nodeIds, ["20"]);
-  assertEquals(byId["LoraLoader#21.lora_name"].current, "style.safetensors");
-  assertEquals(byId["LoraLoader#21.lora_name"].title, "style lora");
-  assertEquals(byId["KSamplerSelect#8.sampler_name"].values, SAMPLER_OPTIONS);
+  // The same per-node identity contract as every other kind.
+  assertEquals(byId["20.lora_name"].current, "detail.safetensors");
+  assertEquals(byId["20.lora_name"].values, LORA_OPTIONS);
+  assertEquals(byId["20.lora_name"].nodeIds, ["20"]);
+  assertEquals(byId["21.lora_name"].current, "style.safetensors");
+  assertEquals(byId["21.lora_name"].title, "style lora");
+  assertEquals(byId["8.sampler_name"].values, SAMPLER_OPTIONS);
   // LoadImage.image excluded even though the host lists options for it
-  assertEquals(byId["LoadImage#30.image"], undefined);
+  assertEquals(byId["30.image"], undefined);
   // strings without a published option list get no row
   assert(rows.every((r) => r.key !== "text"));
 });
@@ -130,9 +130,9 @@ Deno.test("run path: a picked lora_name mutates ONLY its own node", () => {
   };
   const full = [...inspectGraph(graph), ...stringParams(graph), ...enumParams(graph, enums)];
   const { graph: mutated, applied } = mutateGraph(
-    graph, { "LoraLoader#21.lora_name": "other.safetensors" }, full,
+    graph, { "21.lora_name": "other.safetensors" }, full,
   );
-  assertEquals(applied, ["LoraLoader#21.lora_name"]);
+  assertEquals(applied, ["21.lora_name"]);
   assertEquals(mutated["21"].inputs.lora_name, "other.safetensors");
   assertEquals(mutated["20"].inputs.lora_name, "detail.safetensors"); // untouched
   assertEquals(graph["21"].inputs.lora_name, "style.safetensors"); // the source is cloned, not mutated
@@ -140,21 +140,21 @@ Deno.test("run path: a picked lora_name mutates ONLY its own node", () => {
 
 Deno.test("run path: enum axes multiply cartesian-style, all-current combo excluded", () => {
   const currentValues = {
-    "LoraLoader#20.lora_name": "detail.safetensors",
-    "LoraLoader#21.lora_name": "style.safetensors",
+    "20.lora_name": "detail.safetensors",
+    "21.lora_name": "style.safetensors",
   };
   const perms = generatePermutations({}, currentValues, {
-    "LoraLoader#20.lora_name": { enabled: true, values: ["detail.safetensors", "x.safetensors"] },
-    "LoraLoader#21.lora_name": { enabled: true, values: ["style.safetensors", "y.safetensors"] },
+    "20.lora_name": { enabled: true, values: ["detail.safetensors", "x.safetensors"] },
+    "21.lora_name": { enabled: true, values: ["style.safetensors", "y.safetensors"] },
   });
   // 2 × 2 = 4 minus (detail, style) — the current combo → 3
   assertEquals(perms.length, 3);
   assert(!perms.some((p) =>
-    p["LoraLoader#20.lora_name"] === "detail.safetensors" &&
-    p["LoraLoader#21.lora_name"] === "style.safetensors"));
+    p["20.lora_name"] === "detail.safetensors" &&
+    p["21.lora_name"] === "style.safetensors"));
   assert(perms.some((p) =>
-    p["LoraLoader#20.lora_name"] === "x.safetensors" &&
-    p["LoraLoader#21.lora_name"] === "y.safetensors"));
+    p["20.lora_name"] === "x.safetensors" &&
+    p["21.lora_name"] === "y.safetensors"));
 });
 
 // --- route level: the probe returns enumParams; the run enqueues the picks ----
@@ -192,12 +192,12 @@ Deno.test("probe + run routes: enumParams from the host's options, picks enqueue
     const body = await pr.json();
     const byId = Object.fromEntries((body.enumParams ?? []).map((p) => [p.id, p]));
     assertEquals(Object.keys(byId).sort(), [
-      "KSamplerSelect#8.sampler_name", "LoraLoader#20.lora_name", "LoraLoader#21.lora_name",
+      "20.lora_name", "21.lora_name", "8.sampler_name",
     ]);
-    assertEquals(byId["LoraLoader#20.lora_name"].values, LORA_OPTIONS);
-    assertEquals(byId["LoraLoader#20.lora_name"].current, "detail.safetensors");
-    assertEquals(byId["LoraLoader#21.lora_name"].current, "style.safetensors");
-    assertEquals(byId["KSamplerSelect#8.sampler_name"].values, SAMPLER_OPTIONS);
+    assertEquals(byId["20.lora_name"].values, LORA_OPTIONS);
+    assertEquals(byId["20.lora_name"].current, "detail.safetensors");
+    assertEquals(byId["21.lora_name"].current, "style.safetensors");
+    assertEquals(byId["8.sampler_name"].values, SAMPLER_OPTIONS);
 
     // run: sweep node 21's lora over [current, other] → only "other" enqueues,
     // on node 21 alone
@@ -207,7 +207,7 @@ Deno.test("probe + run routes: enumParams from the host's options, picks enqueue
         id: "fake:flux-lora.png", host: "fake", filename: "flux-lora.png",
         ranges: {},
         imageParams: {
-          "LoraLoader#21.lora_name": { enabled: true, values: ["style.safetensors", "other.safetensors"] },
+          "21.lora_name": { enabled: true, values: ["style.safetensors", "other.safetensors"] },
         },
         prefix: "v_", suffix: "",
         context: body.context, acknowledgement: { version: 2, runId: crypto.randomUUID(), requestId: crypto.randomUUID() },

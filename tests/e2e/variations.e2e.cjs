@@ -131,7 +131,7 @@ async function main() {
     // --- enabling a slider auto-inserts its placeholder into suffix ---
     // No trailing underscore in the token — ComfyUI's SaveImage adds its
     // own separator before the counter, so `_{key}` (leading only) is
-    // the right shape. The key is the full field id (ClassType.input).
+    // the right shape. The key is the full node/input identity.
     await attempt("enable auto-inserts _{key} into suffix", async () => {
       const suffix = await cdp.evaluate(`document.querySelector('.vz-suffix')?.value`);
       check("suffix auto-populated on enable",
@@ -476,9 +476,9 @@ async function main() {
             context, acknowledgement: { version: 2, runId: crypto.randomUUID(), requestId: crypto.randomUUID() },
             relative: true,
             ranges: {
-              "BasicScheduler.steps": { enabled: true, min: -5, max: 5, increment: 1, clamp: [1, 150] },
-              "FluxGuidance.guidance": { enabled: true, min: -1, max: 1, increment: 0.5, clamp: [0, 30] },
-              "CFGGuider.cfg": { enabled: true, min: -1, max: 1, increment: 0.5, clamp: [0, 30] },
+              "9.steps": { enabled: true, min: -5, max: 5, increment: 1, clamp: [1, 150] },
+              "5.guidance": { enabled: true, min: -1, max: 1, increment: 0.5, clamp: [0, 30] },
+              "absent.cfg": { enabled: true, min: -1, max: 1, increment: 0.5, clamp: [0, 30] },
             },
             prefix: "", suffix: "",
           }),
@@ -496,8 +496,7 @@ async function main() {
 
     // --- lora strength rows ----------------------------------------------------
     // flux-lora.png carries two LoraLoader nodes (model 0.8/clip 0.8 and
-    // model 0.5/clip 0.5): the panel must surface both strength params with
-    // the first carrier's current values.
+    // model 0.5/clip 0.5): each strength on each node has its own row/current.
     await attempt("lora strength rows surface on a lora graph", async () => {
       // make sure the fixture's bytes (and embedded graph) are ingested —
       // AWAITED: the probe right below needs the graph in the cache
@@ -512,24 +511,26 @@ async function main() {
       const info = await cdp.evaluate(`(() => {
         const out = {};
         for (const r of document.querySelectorAll('.vz-slider-row')) {
-          const label = r.querySelector('.vz-label')?.textContent;
-          out[label] = r.querySelector('.vz-current')?.textContent ?? null;
+          out[r.dataset.paramKey] = r.querySelector('.vz-current')?.textContent ?? null;
         }
         return out;
       })()`);
-      check("lora strength row with first-carrier current",
-        info["LoraLoader.strength_model"] != null && parseFloat(info["LoraLoader.strength_model"]) === 0.8,
+      check("lora strength row with node 20 current",
+        info["20.strength_model"] != null && parseFloat(info["20.strength_model"]) === 0.8,
         JSON.stringify(info));
-      check("lora clip strength row with first-carrier current",
-        info["LoraLoader.strength_clip"] != null && parseFloat(info["LoraLoader.strength_clip"]) === 0.8,
+      check("lora clip strength row with node 20 current",
+        info["20.strength_clip"] != null && parseFloat(info["20.strength_clip"]) === 0.8,
+        JSON.stringify(info));
+      check("second lora has independent model and clip strength rows",
+        parseFloat(info["21.strength_model"]) === .5 && parseFloat(info["21.strength_clip"]) === .5,
         JSON.stringify(info));
       await closeAndDiscard();
     });
 
-    // --- lora strength run mutates both carriers -------------------------------
-    // Both LoraLoader nodes get the swept strength_model; the filename suffix
+    // --- lora strength run targets one carrier --------------------------------
+    // Only the selected LoraLoader gets the swept strength_model; the filename suffix
     // resolves {lora_strength} from the permutation.
-    await attempt("lora strength sweep hits every loader", async () => {
+    await attempt("lora strength sweep addresses its selected node", async () => {
       const res = await cdp.evaluate(`(async () => {
         const probe = await fetch("/api/features/variations/probe/" + encodeURIComponent("fake:flux-lora.png"));
         if (!probe.ok) throw new Error("Run probe failed: " + probe.status);
@@ -541,9 +542,9 @@ async function main() {
             id: "fake:flux-lora.png", host: "fake", filename: "flux-lora.png",
             context, acknowledgement: { version: 2, runId: crypto.randomUUID(), requestId: crypto.randomUUID() },
             ranges: {
-              "LoraLoader.strength_model": { enabled: true, min: 0.5, max: 1.0, increment: 0.5 },
+              "20.strength_model": { enabled: true, min: 0.5, max: 1.0, increment: 0.5 },
             },
-            prefix: "", suffix: "_{LoraLoader.strength_model}",
+            prefix: "", suffix: "_{20.strength_model}",
           }),
         });
         return { status: r.status, body: await r.json() };
@@ -551,7 +552,7 @@ async function main() {
       // 0.5..1.0 step 0.5 → 0.5, 1.0 (current 0.8 excluded) → 2 permutations;
       // the fake host 404s each /api/prompt, but the permutation list must
       // carry the swept id with the swept values.
-      const perms = (res.body.errors ?? []).map((e) => e.permutation?.["LoraLoader.strength_model"]);
+      const perms = (res.body.errors ?? []).map((e) => e.permutation?.["20.strength_model"]);
       check("lora strength sweep produces the swept permutations",
         res.status === 200 && res.body.total === 2
           && perms.includes(0.5) && perms.includes(1.0),
@@ -583,12 +584,12 @@ async function main() {
       // LoraLoader < UNETLoader < VAELoader)
       check("one enum row per node instance, info-panel order",
         info.ids.join("|") === [
-          "BasicScheduler#9.scheduler",
-          "CLIPLoader#3.clip_name", "CLIPLoader#3.type",
-          "KSamplerSelect#8.sampler_name",
-          "LoraLoader#20.lora_name", "LoraLoader#21.lora_name",
-          "UNETLoader#1.unet_name", "UNETLoader#1.weight_dtype",
-          "VAELoader#13.vae_name",
+          "9.scheduler",
+          "3.clip_name", "3.type",
+          "8.sampler_name",
+          "20.lora_name", "21.lora_name",
+          "1.unet_name", "1.weight_dtype",
+          "13.vae_name",
         ].join("|"),
         JSON.stringify(info));
       check("per-node current values in the row heads",
@@ -600,8 +601,8 @@ async function main() {
         JSON.stringify(info.curs));
 
       // enable node 20's row: the host's options render, current pre-checked
-      await cdp.clickAt('.vz-enumrow[data-enum-id="LoraLoader#20.lora_name"] .vz-imgrow-head .vz-cb');
-      await cdp.poll(`document.querySelectorAll('.vz-enumrow[data-enum-id="LoraLoader#20.lora_name"] .vz-enum-opt').length === 3`, 5000);
+      await cdp.clickAt('.vz-enumrow[data-enum-id="20.lora_name"] .vz-imgrow-head .vz-cb');
+      await cdp.poll(`document.querySelectorAll('.vz-enumrow[data-enum-id="20.lora_name"] .vz-enum-opt').length === 3`, 5000);
       // the enabled enum row floats to the top — right after the auto-enabled
       // denoise row; the disabled rows keep info-panel order below
       const order = await cdp.evaluate(`(() => {
@@ -609,12 +610,12 @@ async function main() {
         return rows.map((r) => r.dataset.enumId ?? r.dataset.paramKey);
       })()`);
       check("enabled enum row floats to the top",
-        order[0] === "BasicScheduler.denoise"
-          && order[1] === "LoraLoader#20.lora_name"
-          && order.indexOf("KSamplerSelect#8.sampler_name") > 1,
+        order[0] === "9.denoise"
+          && order[1] === "20.lora_name"
+          && order.indexOf("8.sampler_name") > 1,
         JSON.stringify(order));
       const opts = await cdp.evaluate(`(() => {
-        const row = document.querySelector('.vz-enumrow[data-enum-id="LoraLoader#20.lora_name"]');
+        const row = document.querySelector('.vz-enumrow[data-enum-id="20.lora_name"]');
         const probe = document.createElement('span');
         probe.style.color = 'var(--attention)';
         document.body.appendChild(probe);
@@ -644,10 +645,10 @@ async function main() {
       // (denoise-only count + 1) × 2 − 1 (the current combo excluded once)
       const c0 = parseInt(await cdp.evaluate(`document.querySelector('.vz-count')?.textContent`), 10);
       const idx = await cdp.evaluate(`(() => {
-        const opts = [...document.querySelectorAll('.vz-enumrow[data-enum-id="LoraLoader#20.lora_name"] .vz-enum-opt')];
+        const opts = [...document.querySelectorAll('.vz-enumrow[data-enum-id="20.lora_name"] .vz-enum-opt')];
         return opts.findIndex((o) => o.querySelector('.vz-enum-opt-name')?.textContent === 'other.safetensors') + 1;
       })()`);
-      await cdp.clickAt(`.vz-enumrow[data-enum-id="LoraLoader#20.lora_name"] .vz-enum-list .vz-enum-opt:nth-of-type(${idx}) .vz-cb`);
+      await cdp.clickAt(`.vz-enumrow[data-enum-id="20.lora_name"] .vz-enum-list .vz-enum-opt:nth-of-type(${idx}) .vz-cb`);
       const expected = (c0 + 1) * 2 - 1;
       await cdp.poll(`parseInt(document.querySelector('.vz-count')?.textContent, 10) === ${expected}`, 5000);
       const c1 = parseInt(await cdp.evaluate(`document.querySelector('.vz-count')?.textContent`), 10);
@@ -669,10 +670,10 @@ async function main() {
             id: "fake:flux-lora.png", host: "fake", filename: "flux-lora.png",
             context, acknowledgement: { version: 2, runId: crypto.randomUUID(), requestId: crypto.randomUUID() },
             ranges: {
-              "LoraLoader.strength_model": { enabled: true, min: 0.5, max: 1.0, increment: 0.5 },
+              "20.strength_model": { enabled: true, min: 0.5, max: 1.0, increment: 0.5 },
             },
             imageParams: {
-              "LoraLoader#20.lora_name": { enabled: true, values: ["detail.safetensors", "other.safetensors"] },
+              "20.lora_name": { enabled: true, values: ["detail.safetensors", "other.safetensors"] },
             },
             prefix: "", suffix: "",
           }),
@@ -682,7 +683,7 @@ async function main() {
       // strength 0.5/1.0 (current 0.8 excluded) × lora detail/other = 4; the
       // all-current combo isn't among them (0.8 is out of range) → 4 total
       const perms = (res.body.errors ?? []).map((e) => e.permutation);
-      const loras = perms.map((p) => p?.["LoraLoader#20.lora_name"]);
+      const loras = perms.map((p) => p?.["20.lora_name"]);
       check("enum picks multiply the numeric range and enqueue",
         res.status === 200 && res.body.total === 4
           && loras.filter((v) => v === "detail.safetensors").length === 2
@@ -709,22 +710,22 @@ async function main() {
         };
       })()`);
       check("prompt text row present, output prefix absent",
-        info.ids.join() === "CLIPTextEncode#2.text"
+        info.ids.join() === "2.text"
           && info.curs[0] === "a portrait, studio light",
         JSON.stringify(info));
       check("prompt row sinks to the bottom (info-panel order)",
-        info.last === "CLIPTextEncode#2.text", info.last);
+        info.last === "2.text", info.last);
 
       // Enable -> one current template. Adding paragraphs changes that one
       // prompt; it does not introduce another text axis.
-      await cdp.clickAt('.vz-textrow[data-text-id="CLIPTextEncode#2.text"] .vz-imgrow-head .vz-cb');
-      await cdp.poll(`!!document.querySelector('.vz-textrow[data-text-id="CLIPTextEncode#2.text"] .vz-text-values')`, 5000);
-      const pre = await cdp.evaluate(`document.querySelector('.vz-textrow[data-text-id="CLIPTextEncode#2.text"] .vz-text-values').value`);
+      await cdp.clickAt('.vz-textrow[data-text-id="2.text"] .vz-imgrow-head .vz-cb');
+      await cdp.poll(`!!document.querySelector('.vz-textrow[data-text-id="2.text"] .vz-text-values')`, 5000);
+      const pre = await cdp.evaluate(`document.querySelector('.vz-textrow[data-text-id="2.text"] .vz-text-values').value`);
       check("textarea pre-filled with the current text",
         pre === "a portrait, studio light", JSON.stringify(pre));
       const c0 = parseInt(await cdp.evaluate(`document.querySelector('.vz-count')?.textContent`), 10);
       await cdp.evaluate(`(() => {
-        const t = document.querySelector('.vz-textrow[data-text-id="CLIPTextEncode#2.text"] .vz-text-values');
+        const t = document.querySelector('.vz-textrow[data-text-id="2.text"] .vz-text-values');
         t.value = t.value + "\\na cyberpunk alley, rain";
         t.dispatchEvent(new Event('input', { bubbles: true }));
       })()`);
@@ -740,7 +741,7 @@ async function main() {
         return rows.map((r) => r.dataset.textId ?? r.dataset.enumId ?? r.dataset.paramKey);
       })()`);
       check("enabled text row floats to the top",
-        order[0] === "BasicScheduler.denoise" && order[1] === "CLIPTextEncode#2.text",
+        order[0] === "9.denoise" && order[1] === "2.text",
         JSON.stringify(order));
       await closeAndDiscard();
     });
@@ -759,14 +760,14 @@ async function main() {
             context, acknowledgement: { version: 2, runId: crypto.randomUUID(), requestId: crypto.randomUUID() },
             ranges: {},
             imageParams: {
-              "CLIPTextEncode#2.text": { enabled: true, values: ["a portrait, studio light", "a cyberpunk alley, rain"] },
+              "2.text": { enabled: true, values: ["a portrait, studio light", "a cyberpunk alley, rain"] },
             },
             prefix: "", suffix: "",
           }),
         });
         return { status: r.status, body: await r.json() };
       })()`);
-      const texts = (res.body.errors ?? []).map((e) => e.permutation?.["CLIPTextEncode#2.text"]);
+      const texts = (res.body.errors ?? []).map((e) => e.permutation?.["2.text"]);
       check("text picks enqueue, current combo excluded",
         res.status === 200 && res.body.total === 1
           && texts.join() === "a cyberpunk alley, rain",
@@ -781,8 +782,8 @@ async function main() {
         document.querySelector('.card[data-idx="0"] .votebtn.variations').click()
       `);
       await cdp.poll(`document.querySelectorAll('.vz-slider-row').length > 0`, 5000);
-      await cdp.clickAt('.vz-textrow[data-text-id="CLIPTextEncode#2.text"] .vz-imgrow-head .vz-cb');
-      await cdp.poll(`!!document.querySelector('.vz-textrow[data-text-id="CLIPTextEncode#2.text"] .vz-text-values')`, 5000);
+      await cdp.clickAt('.vz-textrow[data-text-id="2.text"] .vz-imgrow-head .vz-cb');
+      await cdp.poll(`!!document.querySelector('.vz-textrow[data-text-id="2.text"] .vz-text-values')`, 5000);
       // spy on the run payload — the expansion is client-side, the POST body
       // is the honest record of what would be enqueued
       await cdp.evaluate(`(() => {
@@ -795,7 +796,7 @@ async function main() {
       })()`);
       // a two-label template spawns two substitution inputs, in order
       await cdp.evaluate(`(() => {
-        const t = document.querySelector('.vz-textrow[data-text-id="CLIPTextEncode#2.text"] .vz-text-values');
+        const t = document.querySelector('.vz-textrow[data-text-id="2.text"] .vz-text-values');
         t.value = "a {{animal}}, {{style}} style";
         t.dispatchEvent(new Event('input', { bubbles: true }));
       })()`);
@@ -833,7 +834,7 @@ async function main() {
       await cdp.poll(`(document.querySelector('.vz-error')?.textContent ?? '').length > 0`, 10000);
       const values = await cdp.evaluate(`(() => {
         const body = JSON.parse(window.__runBodies[0] ?? "{}");
-        return body.imageParams?.["CLIPTextEncode#2.text"]?.values ?? null;
+        return body.imageParams?.["2.text"]?.values ?? null;
       })()`);
       check("run payload carries the expanded texts (empty value included)",
         JSON.stringify(values) === JSON.stringify([
@@ -852,8 +853,8 @@ async function main() {
         document.querySelector('.card[data-idx="0"] .votebtn.variations').click()
       `);
       await cdp.poll(`document.querySelectorAll('.vz-slider-row').length > 0`, 5000);
-      await cdp.clickAt('.vz-textrow[data-text-id="CLIPTextEncode#2.text"] .vz-imgrow-head .vz-cb');
-      await cdp.poll(`!!document.querySelector('.vz-textrow[data-text-id="CLIPTextEncode#2.text"] .vz-text-values')`, 5000);
+      await cdp.clickAt('.vz-textrow[data-text-id="2.text"] .vz-imgrow-head .vz-cb');
+      await cdp.poll(`!!document.querySelector('.vz-textrow[data-text-id="2.text"] .vz-text-values')`, 5000);
       await cdp.evaluate(`(() => {
         const orig = window.fetch;
         window.__runBodies = [];
@@ -861,7 +862,7 @@ async function main() {
           if (String(a[0]).includes('/features/variations/run')) window.__runBodies.push(a[1]?.body);
           return orig(...a);
         };
-        const t = document.querySelector('.vz-textrow[data-text-id="CLIPTextEncode#2.text"] .vz-text-values');
+        const t = document.querySelector('.vz-textrow[data-text-id="2.text"] .vz-text-values');
         t.value = "";
         t.dispatchEvent(new Event('input', { bubbles: true }));
       })()`);
@@ -872,7 +873,7 @@ async function main() {
       await cdp.poll(`(document.querySelector('.vz-error')?.textContent ?? '').length > 0`, 10000);
       const body = await cdp.evaluate(`(() => {
         const b = JSON.parse(window.__runBodies[0] ?? "{}");
-        return { values: b.imageParams?.["CLIPTextEncode#2.text"]?.values ?? null };
+        return { values: b.imageParams?.["2.text"]?.values ?? null };
       })()`);
       check("run payload carries the empty string",
         JSON.stringify(body.values) === JSON.stringify([""]),
@@ -885,6 +886,7 @@ async function main() {
     await require('./variations-acknowledgement.cjs')({ cdp, check, FAKE, KZ });
     await require('./variations-selections.cjs')({ cdp, check, FAKE, KZ });
     await require('./variations-lifecycle.cjs')({ cdp, check, ENGINE, FAKE, KZ });
+    await require('./variations-identity.cjs')({ cdp, check, FAKE, KZ });
   } finally {
     await cdp.close();
   }

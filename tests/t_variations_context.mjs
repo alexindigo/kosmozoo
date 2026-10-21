@@ -43,11 +43,11 @@ Deno.test("source-bound v2: probe/context/accepted writes reach matching proof; 
     assert(sameOrigin(catalogue.context.origin, expected)); assertEquals(catalogue.context.graphHash.length, 64);
     const body = { id: "fake:file.png", host: "fake", filename: "file.png", context: catalogue.context,
       acknowledgement: { version: 2, runId: crypto.randomUUID(), requestId: crypto.randomUUID() },
-      ranges: { "Sampler.denoise": { enabled: true, min: .5, max: .5, increment: .1 } }, prefix: "v_", suffix: "" };
+      ranges: { "n.denoise": { enabled: true, min: .5, max: .5, increment: .1 } }, prefix: "v_", suffix: "" };
     const run = async value => r.call('/api/features/variations/run', { method: 'POST', body: JSON.stringify(value) });
     const response = await run(body), data = await response.json();
     assertEquals(response.status, 200); assertEquals(data.acknowledgement.context, catalogue.context);
-    assertEquals(acknowledgedFields(body, data).ranges, ["Sampler.denoise"]); assertEquals(r.jobs.length, 1);
+    assertEquals(acknowledgedFields(body, data).ranges, ["n.denoise"]); assertEquals(r.jobs.length, 1);
     assertEquals(r.jobs[0].prompt.n.inputs.denoise, .5);
     const wrongGraph = structuredClone(body); wrongGraph.context.graphHash = "b".repeat(64);
     assertEquals((await run(wrongGraph)).status, 412); assertEquals(r.jobs.length, 1);

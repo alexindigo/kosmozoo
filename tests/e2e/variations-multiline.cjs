@@ -1,8 +1,8 @@
 // Real typing -> shared count/Run expansion -> engine -> actual fake enqueue graphs.
 const assert=require('node:assert/strict');
 module.exports=async({cdp,FAKE,KZ,check,closeAndDiscard})=>{
-  const textField='.vz-textrow[data-text-id="CLIPTextEncode#2.text"] .vz-text-values';
-  const textToggle='.vz-textrow[data-text-id="CLIPTextEncode#2.text"] .vz-imgrow-head .vz-cb';
+  const textField='.vz-textrow[data-text-id="2.text"] .vz-text-values';
+  const textToggle='.vz-textrow[data-text-id="2.text"] .vz-imgrow-head .vz-cb';
   const control=async body=>{const response=await fetch(FAKE+'/__test/activity',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});assert.equal(response.status,200);};
   const enqueues=async()=>await(await fetch(FAKE+'/__test/enqueues')).json();
   const type=async(selector,text)=>{
@@ -14,7 +14,7 @@ module.exports=async({cdp,FAKE,KZ,check,closeAndDiscard})=>{
     await cdp.evaluate(`(async()=>{const s=${KZ};await s.actions.hosts.select('fake');
       await fetch('/api/collections/fake/entries/flux-basic.png/bytes');await s.handles.invoke('variations.open',{id:'fake:flux-basic.png'});})()`);
     await cdp.poll(`!!document.querySelector(${JSON.stringify(textToggle)})`,10000);
-    await cdp.clickAt('.vz-slider-row[data-param-key="BasicScheduler.denoise"] .vz-cb');
+    await cdp.clickAt('.vz-slider-row[data-param-key="9.denoise"] .vz-cb');
     await cdp.clickAt(textToggle);await cdp.poll(`!!document.querySelector(${JSON.stringify(textField)})`);
     const literal='  First paragraph.\n\nSecond paragraph.\n  Indented line.\n';
     await type(textField,literal);

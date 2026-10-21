@@ -26,14 +26,14 @@ module.exports=async({cdp,ENGINE,FAKE,KZ,check})=>{
     check('lifecycle: actual submitted work closes after clean late input defaults, without a synthetic edit or discard',true);
 
     await invoke('variations.open',{id:'fake:flux-controlnet.png'});await cdp.poll("!!document.querySelector('.vz-imgrow:not(.vz-enumrow):not(.vz-textrow) .vz-cb')");
-    await type('.vz-slider-row[data-param-key="BasicScheduler.denoise"] .vz-row-inc-input','1e-1');
-    await cdp.clickAt('.vz-slider-row[data-param-key="BasicScheduler.denoise"] .noUi-handle[data-handle="0"]');await cdp.keyTrusted('ArrowRight',{vk:39});
-    await cdp.clickAt('.vz-slider-row[data-param-key="BasicScheduler.denoise"] .noUi-handle[data-handle="1"]');await cdp.keyTrusted('ArrowLeft',{vk:37});
+    await type('.vz-slider-row[data-param-key="9.denoise"] .vz-row-inc-input','1e-1');
+    await cdp.clickAt('.vz-slider-row[data-param-key="9.denoise"] .noUi-handle[data-handle="0"]');await cdp.keyTrusted('ArrowRight',{vk:39});
+    await cdp.clickAt('.vz-slider-row[data-param-key="9.denoise"] .noUi-handle[data-handle="1"]');await cdp.keyTrusted('ArrowLeft',{vk:37});
     await cdp.clickAt('.vz-imgrow:not(.vz-enumrow):not(.vz-textrow) .vz-cb');
     await cdp.evaluate("(()=>{const e=document.querySelector('.vz-imgmode');e.value='files';e.dispatchEvent(new Event('change',{bubbles:true}))})()");await cdp.poll("!!document.querySelector('.vz-imgfilespick')");
     await cdp.evaluate("(()=>{const e=document.querySelector('.vz-imgfilespick'),dt=new DataTransfer();dt.items.add(new File(['a'],'lifecycle-combined-a.png',{type:'image/png'}));dt.items.add(new File(['b'],'lifecycle-combined-b.png',{type:'image/png'}));e.files=dt.files;e.dispatchEvent(new Event('change',{bubbles:true}));window.__combinedInput=e;window.__combinedFiles=[...e.files]})()");
-    await cdp.clickAt('.vz-enumrow[data-enum-id="BasicScheduler#9.scheduler"] .vz-imgrow-head .vz-cb');await cdp.clickAt('.vz-enumrow[data-enum-id="BasicScheduler#9.scheduler"] .vz-enum-opt:last-child .vz-cb');
-    await cdp.clickAt('.vz-textrow[data-text-id="CLIPTextEncode#2.text"] .vz-cb');await type('.vz-textrow[data-text-id="CLIPTextEncode#2.text"] .vz-text-values','  First {{used}}.\n\nSecond {{used}}.\n');
+    await cdp.clickAt('.vz-enumrow[data-enum-id="9.scheduler"] .vz-imgrow-head .vz-cb');await cdp.clickAt('.vz-enumrow[data-enum-id="9.scheduler"] .vz-enum-opt:last-child .vz-cb');
+    await cdp.clickAt('.vz-textrow[data-text-id="2.text"] .vz-cb');await type('.vz-textrow[data-text-id="2.text"] .vz-text-values','  First {{used}}.\n\nSecond {{used}}.\n');
     await cdp.poll("!!document.querySelector('.vz-tpl-input')");await type('.vz-tpl-input','cat; dog');await type('.vz-prefix','combined_');await type('.vz-suffix','_result');
     const combinedStart=(await http(FAKE,'/__test/enqueues')).length,combined=await invoke('variations.run');assert.equal(combined.status,'submitted');assert.equal(combined.adopted,true);
     const combinedJobs=(await http(FAKE,'/__test/enqueues')).slice(combinedStart);assert.equal(combinedJobs.length,16);
@@ -41,7 +41,7 @@ module.exports=async({cdp,ENGINE,FAKE,KZ,check})=>{
     assert.deepEqual([...new Set(combinedJobs.map(job=>job.prompt['2'].inputs.text))],['  First cat.\n\nSecond cat.\n','  First dog.\n\nSecond dog.\n']);
     assert.deepEqual([...new Set(combinedJobs.map(job=>job.prompt['9'].inputs.scheduler))],['simple','exponential']);
     assert(await cdp.evaluate("document.querySelector('.vz-imgfilespick')===window.__combinedInput&&[...window.__combinedInput.files].every((file,index)=>file===window.__combinedFiles[index])"));
-    assert.equal(await cdp.evaluate("document.querySelector('.vz-slider-row[data-param-key=\"BasicScheduler.denoise\"] .vz-row-inc-input').value"),'1e-1');
+    assert.equal(await cdp.evaluate("document.querySelector('.vz-slider-row[data-param-key=\"9.denoise\"] .vz-row-inc-input').value"),'1e-1');
     await cdp.poll("!document.querySelector('.vz-panel')",6000);check('lifecycle: one combined numeric/File/enum/multiline-template/naming configuration reaches 16 exact graphs and clean closure',true);
 
     // Reconstruct this known fixture's graph through its retained history/PNG source.
@@ -50,10 +50,10 @@ module.exports=async({cdp,ENGINE,FAKE,KZ,check})=>{
     assert(item);const graph=structuredClone(item.prompt[2]);graph['2'].inputs.text='a|b';graph['42'].inputs.text='c';
     await http(FAKE,'/__test/activity','POST',{publish:[{name:'lifecycle-tuple.png',fixture:'flux-controlnet.png',graph,mtime:2100000000}]});
     await cdp.evaluate("(async()=>{await fetch('/api/collections/fake/entries/lifecycle-tuple.png/bytes')})()");
-    await invoke('variations.open',{id:'fake:lifecycle-tuple.png'});await cdp.poll("!!document.querySelector('.vz-textrow[data-text-id=\"CLIPTextEncode#42.text\"]')");
-    await cdp.clickAt('.vz-slider-row[data-param-key="BasicScheduler.denoise"] .vz-cb');
-    for(const id of ['CLIPTextEncode#2.text','CLIPTextEncode#42.text'])await cdp.clickAt(`.vz-textrow[data-text-id="${id}"] .vz-cb`);
-    await type('.vz-textrow[data-text-id="CLIPTextEncode#2.text"] .vz-text-values','a');await type('.vz-textrow[data-text-id="CLIPTextEncode#42.text"] .vz-text-values','b|c');
+    await invoke('variations.open',{id:'fake:lifecycle-tuple.png'});await cdp.poll("!!document.querySelector('.vz-textrow[data-text-id=\"42.text\"]')");
+    await cdp.clickAt('.vz-slider-row[data-param-key="9.denoise"] .vz-cb');
+    for(const id of ['2.text','42.text'])await cdp.clickAt(`.vz-textrow[data-text-id="${id}"] .vz-cb`);
+    await type('.vz-textrow[data-text-id="2.text"] .vz-text-values','a');await type('.vz-textrow[data-text-id="42.text"] .vz-text-values','b|c');
     await cdp.poll("document.querySelector('.vz-count').textContent==='1'");const tupleStart=(await http(FAKE,'/__test/enqueues')).length;
     assert.equal((await invoke('variations.run')).submitted,1);
     const tupleJobs=(await http(FAKE,'/__test/enqueues')).slice(tupleStart);assert.equal(tupleJobs.length,1);assert.equal(tupleJobs[0].prompt['2'].inputs.text,'a');assert.equal(tupleJobs[0].prompt['42'].inputs.text,'b|c');

@@ -11,7 +11,7 @@
 
 import {
   generatePermutations, permutationAxes, permutationPlan, resolveRelativeRanges, templateReplaceWithProof,
-  paramId, formatValue, validRunAcknowledgement,
+  paramId, parameterIndex, catalogueParams, parameterAliases, validRunAcknowledgement,
 } from "./shared.mjs";
 import { validEntryName } from "../../backings/index.mjs";
 import { sourceOrigin, sameOrigin, validOrigin, validContext } from "../../source-origin.mjs";
@@ -27,112 +27,54 @@ const ANNOTATION = /^(.*)\s+\[([^\]]*)\]$/;
 
 // --- graph inspection (ComfyUI conventions) -----------------------------------
 
-// string-valued image inputs: every node whose type ends in "LoadImage",
-// whose `image` input names an image file. id = paramId(type, "image").
-export function stringParams(graph) {
-  const out = [];
-  for (const [id, n] of Object.entries(graph ?? {})) {
-    const type = String(n.class_type ?? "");
-    if (!/loadimage$/i.test(type)) continue;
-    const v = n.inputs?.image;
-    if (typeof v !== "string") continue;
-    const m = ANNOTATION.exec(v);
-    const file = m ? m[1] : v;
-    if (!IMG_FILE.test(file)) continue;
-    const title = n._meta?.title && n._meta.title !== type ? String(n._meta.title) : null;
-    out.push({
-      id: paramId(type, "image"), nodeIds: [id], key: "image", type, title,
-      current: file, fromOutput: m ? /^output$/i.test(m[2]) : false,
-    });
-  }
-  return out;
-}
-
-// Per-node enum params: every graph node input whose <type>.<input> the
-// host lists options for and whose graph value is a string. values = THAT
-// key's option list only — never mixed. One row per NODE instance (the id
-// carries the node id, unlike the multi-carrier numeric params). LoadImage
-// .image is excluded (the imgRows own it).
-export function enumParams(graph, enums) {
-  const out = [];
-  for (const [id, n] of Object.entries(graph ?? {})) {
-    const type = String(n.class_type ?? "");
-    for (const [key, v] of Object.entries(n.inputs ?? {})) {
-      if (typeof v !== "string") continue;
-      if (type.toLowerCase().endsWith("loadimage") && key === "image") continue;
-      const values = enums?.get(`${type}.${key}`);
-      if (!values?.length) continue;
-      out.push({
-        id: `${type}#${id}.${key}`,
-        nodeId: id, nodeIds: [id], key, type,
-        title: n._meta?.title && n._meta.title !== type ? String(n._meta.title) : null,
-        current: v, values,
-      });
-    }
-  }
-  return out;
-}
-
-// Per-node text params: string inputs that are neither enum-typed (the host
-// publishes an option list — the enum rows own those) nor LoadImage.image
-// (the imgRows own it). filename_prefix on output nodes is excluded too —
-// the run rewrites it per permutation, so a pick would never survive.
-// values are user-supplied at run time; the probe only reports the current
-// text.
-export function textParams(graph, enums, outputClasses) {
-  const out = [];
-  for (const [id, n] of Object.entries(graph ?? {})) {
-    const type = String(n.class_type ?? "");
-    const isOutput = outputClasses?.has(type) ?? false;
-    for (const [key, v] of Object.entries(n.inputs ?? {})) {
-      if (typeof v !== "string") continue;
-      if (type.toLowerCase().endsWith("loadimage") && key === "image") continue;
-      if (isOutput && key === "filename_prefix") continue;
-      if (enums?.get(`${type}.${key}`)?.length) continue;
-      out.push({
-        id: `${type}#${id}.${key}`,
-        nodeId: id, nodeIds: [id], key, type,
-        title: n._meta?.title && n._meta.title !== type ? String(n._meta.title) : null,
-        current: v,
-      });
-    }
-  }
-  return out;
-}
-
-// Every numeric scalar input of every node instance is a varyable parameter
-// (multi-carrier: same-type same-input instances share one param and sweep
-// together). The host's declared type wins over value inference for integer.
-export function inspectGraph(graph, types = null) {
-  const out = new Map();
-  for (const [id, n] of Object.entries(graph ?? {})) {
-    const type = String(n.class_type ?? "");
+// One walk, explicit classification precedence, one descriptor constructor.
+// Strategies supply only kind-specific metadata; identity/location is shared.
+const PARAMETER_KINDS = [
+  { kind: "numeric", channel: "params", accepts: p => typeof p.value === "number",
+    describe: p => ({ integer: p.declared ? p.declared === "INT" : Number.isInteger(p.value) }) },
+  { kind: "image", channel: "stringParams", accepts: p => p.image,
+    describe: p => {
+      const match = ANNOTATION.exec(p.value), file = match ? match[1] : p.value;
+      return IMG_FILE.test(file) ? { current: file, fromOutput: match ? /^output$/i.test(match[2]) : false } : null;
+    } },
+  { kind: "enum", channel: "enumParams", accepts: p => p.options?.length,
+    describe: p => ({ values: p.options }) },
+  { kind: "text", channel: "textParams", accepts: () => true, describe: () => ({}) },
+];
+export function parameterCatalogue(graph, { types = null, enums = null, outputClasses = null } = {}) {
+  const catalogue = Object.fromEntries(PARAMETER_KINDS.map(strategy => [strategy.channel, []]));
+  for (const [nodeId, node] of Object.entries(graph ?? {})) {
+    const type = String(node.class_type ?? "");
     if (!type) continue;
-    const title = n._meta?.title && n._meta.title !== type ? String(n._meta.title) : null;
-    for (const [key, v] of Object.entries(n.inputs ?? {})) {
-      if (typeof v !== "number") continue;
-      const pid = paramId(type, key);
-      const existing = out.get(pid);
-      if (existing) {
-        existing.nodeIds.push(id);
-      } else {
-        const declared = types?.get(pid);
-        out.set(pid, {
-          id: pid, nodeIds: [id], key, type, title, current: v,
-          integer: declared ? declared === "INT" : Number.isInteger(v),
-        });
-      }
+    const title = node._meta?.title && node._meta.title !== type ? String(node._meta.title) : null;
+    for (const [key, value] of Object.entries(node.inputs ?? {})) {
+      if (typeof value !== "number" && typeof value !== "string") continue;
+      if (typeof value === "string" && key === "filename_prefix" && outputClasses?.has(type)) continue;
+      const schemaKey = `${type}.${key}`;
+      const context = { value, declared: types?.get(schemaKey), options: enums?.get(schemaKey),
+        image: typeof value === "string" && /loadimage$/i.test(type) && key === "image" };
+      const strategy = PARAMETER_KINDS.find(strategy => strategy.accepts(context));
+      const metadata = strategy.describe(context);
+      if (!metadata) continue;
+      catalogue[strategy.channel].push({ id: paramId(nodeId, key), nodeId, nodeIds: [nodeId], key,
+        type, title, kind: strategy.kind, current: value, ...metadata });
     }
   }
-  return [...out.values()];
+  parameterIndex(catalogueParams(catalogue), graph);
+  return catalogue;
 }
+
+// Compatibility inspection ports all project the same descriptor pipeline.
+export const inspectGraph = (graph, types = null) => parameterCatalogue(graph, { types }).params;
+export const stringParams = graph => parameterCatalogue(graph).stringParams;
+export const enumParams = (graph, enums) => parameterCatalogue(graph, { enums }).enumParams;
+export const textParams = (graph, enums, outputClasses) => parameterCatalogue(graph, { enums, outputClasses }).textParams;
 
 // --- graph mutation --------------------------------------------------------------
 
 export function mutateGraph(graph, permutation, params) {
   const clone = structuredClone(graph);
-  const byId = new Map();
-  for (const p of params ?? inspectGraph(clone)) byId.set(p.id, p);
+  const byId = parameterIndex(params ?? inspectGraph(clone));
   const applied = [], writes = [];
   for (const [id, value] of Object.entries(permutation)) {
     const p = byId.get(id);
@@ -302,10 +244,7 @@ export function register(app) {
     const r = await inspect(collection, name, expected);
     if (r.error) return Response.json({ error: r.error }, { status: r.status });
     return Response.json({
-      params: inspectGraph(r.graph, r.types),
-      stringParams: stringParams(r.graph),
-      enumParams: enumParams(r.graph, r.enums),
-      textParams: textParams(r.graph, r.enums, r.outputClasses),
+      ...parameterCatalogue(r.graph, r),
       context: r.context,
     });
   });
@@ -330,37 +269,13 @@ export function register(app) {
 
     const r = await inspect(host, filename, context);
     if (r.error) return Response.json({ error: r.error }, { status: r.status });
-    const { graph, addr, types, enums, outputClasses, token, backing } = r;
+    const { graph, outputClasses, token, backing } = r;
 
     // Inspect once for current values + labels. Types come from the host's
     // object_info — the current value is not a reliable integer signal.
-    const inspection = inspectGraph(graph, types);
-    const currentValues = {};
-    const labelMap = {};
-    for (const p of inspection) {
-      currentValues[p.id] = p.current;
-      labelMap[p.id] = p.title ?? p.type;
-    }
-    const strParams = stringParams(graph);
-    for (const p of strParams) {
-      currentValues[p.id] = p.current;
-      labelMap[p.id] = p.title ?? p.type;
-    }
-    // enum axes (LoRA names, samplers, …): picks land on the right node via
-    // fullInspection; the current value feeds the current-combo exclusion
-    // and the prefix/suffix templating like every other axis
-    const enParams = enumParams(graph, enums);
-    for (const p of enParams) {
-      currentValues[p.id] = p.current;
-      labelMap[p.id] = p.title ?? p.type;
-    }
-    // text axes (prompts, …): same wiring — user-supplied values this time
-    const txtParams = textParams(graph, enums, outputClasses);
-    for (const p of txtParams) {
-      currentValues[p.id] = p.current;
-      labelMap[p.id] = p.title ?? p.type;
-    }
-    const fullInspection = [...inspection, ...strParams, ...enParams, ...txtParams];
+    const fullInspection = catalogueParams(parameterCatalogue(graph, r));
+    const currentValues = Object.fromEntries([...parameterIndex(fullInspection).values()].map(p => [p.id, p.current]));
+    const labelMap = parameterAliases(fullInspection);
 
     // Batch sweeps arrive as offsets from each image's own current value;
     // resolve them now that this graph's current values are known.
@@ -411,13 +326,8 @@ export function register(app) {
         continue;
       }
 
-      // {image} = the LoadImage filename chosen for this permutation (the
-      // prefixed {LoadImage.image} token resolves via currentValues too)
-      const imgAxes = Object.fromEntries(Object.entries(perm).filter(([k]) => k.endsWith(".image")));
-      const rawImage = Object.values(imgAxes)[0];
-      const tokenValues = rawImage != null ? { ...perm, image: rawImage } : perm;
-      const prefixProof = templateReplaceWithProof(pfxTpl, tokenValues, currentValues, labelMap);
-      const suffixProof = templateReplaceWithProof(sfxTpl, tokenValues, currentValues, labelMap);
+      const prefixProof = templateReplaceWithProof(pfxTpl, perm, currentValues, labelMap);
+      const suffixProof = templateReplaceWithProof(sfxTpl, perm, currentValues, labelMap);
       const pfx = prefixProof.text, sfx = suffixProof.text;
       if (filename.includes("/") && /[/\\]/.test(pfx + sfx)) {
         errors.push({ permutation: perm, error: "Prefix/suffix must stay within the producing directory's filename leaf" });

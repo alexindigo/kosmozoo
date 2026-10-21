@@ -7,13 +7,13 @@ const inputControl='.vz-imgrow:not(.vz-enumrow):not(.vz-textrow) .vz-cb';
 // complete control readiness before measuring any trusted pointer target.
 const selectionSetup=async(cdp,twoTexts=true)=>{
   await cdp.poll(`!!document.querySelector(${JSON.stringify(inputControl)})`);
-  await cdp.clickAt('.vz-slider-row[data-param-key="BasicScheduler.denoise"] .vz-cb');
-  await cdp.poll(`document.querySelector('.vz-slider-row[data-param-key="BasicScheduler.denoise"] .vz-cb').checked===false`);
-  await cdp.clickAt('.vz-textrow[data-text-id="CLIPTextEncode#2.text"] .vz-cb');
+  await cdp.clickAt('.vz-slider-row[data-param-key="9.denoise"] .vz-cb');
+  await cdp.poll(`document.querySelector('.vz-slider-row[data-param-key="9.denoise"] .vz-cb').checked===false`);
+  await cdp.clickAt('.vz-textrow[data-text-id="2.text"] .vz-cb');
   const type=(selector,text)=>typeText(cdp,selector,text);
-  await type('.vz-textrow[data-text-id="CLIPTextEncode#2.text"] .vz-text-values','First {{pick}}.\n\nSecond paragraph.');
+  await type('.vz-textrow[data-text-id="2.text"] .vz-text-values','First {{pick}}.\n\nSecond paragraph.');
   await cdp.poll("!!document.querySelector('.vz-tpl-input')");await type('.vz-tpl-input','one; two');
-  if(twoTexts){await cdp.clickAt('.vz-textrow[data-text-id="CLIPTextEncode#42.text"] .vz-cb');await type('.vz-textrow[data-text-id="CLIPTextEncode#42.text"] .vz-text-values','negative text');}
+  if(twoTexts){await cdp.clickAt('.vz-textrow[data-text-id="42.text"] .vz-cb');await type('.vz-textrow[data-text-id="42.text"] .vz-text-values','negative text');}
 };
 module.exports=async({cdp,FAKE,KZ,check})=>{
   const invoke=(id,args={})=>cdp.evaluate(`(async()=>${KZ}.handles.invoke(${JSON.stringify(id)},${JSON.stringify(args)}))()`);
@@ -21,7 +21,7 @@ module.exports=async({cdp,FAKE,KZ,check})=>{
   const jobs=async()=>await(await fetch(FAKE+'/__test/enqueues')).json();
   const open=async()=>{
     await cdp.evaluate(`(async()=>{await fetch('/api/collections/fake/entries/flux-controlnet.png/bytes');await ${KZ}.handles.invoke('variations.open',{id:'fake:flux-controlnet.png'})})()`);
-    await cdp.poll("!!document.querySelector('.vz-textrow[data-text-id=\"CLIPTextEncode#42.text\"]')");
+    await cdp.poll("!!document.querySelector('.vz-textrow[data-text-id=\"42.text\"]')");
   };
   const textOnly=(twoTexts=true)=>selectionSetup(cdp,twoTexts);
   await fetch(FAKE+'/__test/activity',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({captureEnqueue:true})});
@@ -35,15 +35,15 @@ module.exports=async({cdp,FAKE,KZ,check})=>{
       let task,setup='pending';const beforeReadyJobs=(await jobs()).length;
       try{
         await cdp.evaluate(`(async()=>{await fetch('/api/collections/fake/entries/flux-controlnet.png/bytes');await ${KZ}.handles.invoke('variations.open',${JSON.stringify(args)})})()`);
-        await cdp.poll(`!!document.querySelector('.vz-textrow[data-text-id="CLIPTextEncode#42.text"]')&&typeof window.__selectionRelease==='function'`);
+        await cdp.poll(`!!document.querySelector('.vz-textrow[data-text-id="42.text"]')&&typeof window.__selectionRelease==='function'`);
         task=textOnly(twoTexts).then(()=>{setup='complete'},error=>{setup='failed';throw error});
         assert.equal(await cdp.evaluate(`!!document.querySelector(${JSON.stringify(inputControl)})`),false);
         assert.equal(setup,'pending');
-        assert.equal(await cdp.evaluate(`document.querySelector('.vz-slider-row[data-param-key="BasicScheduler.denoise"] .vz-cb').checked`),true);
+        assert.equal(await cdp.evaluate(`document.querySelector('.vz-slider-row[data-param-key="9.denoise"] .vz-cb').checked`),true);
         assert.equal((await jobs()).length,beforeReadyJobs);
         await cdp.evaluate('window.__selectionRelease()');await task;
         assert.equal(setup,'complete');
-        assert.equal(await cdp.evaluate(`document.querySelector('.vz-slider-row[data-param-key="BasicScheduler.denoise"] .vz-cb').checked`),false);
+        assert.equal(await cdp.evaluate(`document.querySelector('.vz-slider-row[data-param-key="9.denoise"] .vz-cb').checked`),false);
         assert.equal((await jobs()).length,beforeReadyJobs);
         check(`selection setup owns late input layout: ${name}, trusted numeric-off and no submissions`,true);
       }finally{
@@ -70,15 +70,15 @@ module.exports=async({cdp,FAKE,KZ,check})=>{
     await cdp.clickAt('.vz-imgrow:not(.vz-enumrow):not(.vz-textrow) .vz-cb');
     await cdp.poll("!!document.querySelector('.vz-imgfile')");
     await cdp.evaluate("(()=>{const e=document.querySelector('.vz-imgfile');e.value='ref.png';e.dispatchEvent(new Event('change',{bubbles:true}))})()");
-    await cdp.clickAt('.vz-enumrow[data-enum-id="BasicScheduler#9.scheduler"] .vz-imgrow-head .vz-cb');
-    await cdp.clickAt('.vz-enumrow[data-enum-id="BasicScheduler#9.scheduler"] .vz-enum-opt:last-child .vz-cb');
-    await cdp.clickAt('.vz-textrow[data-text-id="CLIPTextEncode#2.text"] .vz-cb');
-    await type('.vz-textrow[data-text-id="CLIPTextEncode#2.text"] .vz-text-values','acknowledged text');
+    await cdp.clickAt('.vz-enumrow[data-enum-id="9.scheduler"] .vz-imgrow-head .vz-cb');
+    await cdp.clickAt('.vz-enumrow[data-enum-id="9.scheduler"] .vz-enum-opt:last-child .vz-cb');
+    await cdp.clickAt('.vz-textrow[data-text-id="2.text"] .vz-cb');
+    await type('.vz-textrow[data-text-id="2.text"] .vz-text-values','acknowledged text');
     assert.equal((await invoke('variations.run')).status,'submitted');
     // Previously acknowledged values are retained; only their on/off choices change.
     await cdp.clickAt('.vz-imgrow:not(.vz-enumrow):not(.vz-textrow) .vz-cb');
-    await cdp.clickAt('.vz-enumrow[data-enum-id="BasicScheduler#9.scheduler"] .vz-imgrow-head .vz-cb');
-    await cdp.clickAt('.vz-textrow[data-text-id="CLIPTextEncode#2.text"] .vz-cb');
+    await cdp.clickAt('.vz-enumrow[data-enum-id="9.scheduler"] .vz-imgrow-head .vz-cb');
+    await cdp.clickAt('.vz-textrow[data-text-id="2.text"] .vz-cb');
     const second=(await jobs()).length;assert.equal((await invoke('variations.run')).status,'submitted');
     const numeric=(await jobs()).slice(second);assert(numeric.length>0);
     assert(numeric.every(job=>job.prompt['43'].inputs.image==='canny.png'&&job.prompt['2'].inputs.text==='a portrait, studio light'&&job.prompt['9'].inputs.scheduler==='simple'));
@@ -86,7 +86,7 @@ module.exports=async({cdp,FAKE,KZ,check})=>{
     check('image/enum/text off selections after acknowledged values: only numeric jobs apply, and modal closes',true);
 
     await invoke('variations.open',{ids:['fake:flux-controlnet.png','fake:flux-basic.png'],bulk:true});
-    await cdp.poll("!!document.querySelector('.vz-textrow[data-text-id=\"CLIPTextEncode#42.text\"]')");
+    await cdp.poll("!!document.querySelector('.vz-textrow[data-text-id=\"42.text\"]')");
     await textOnly(false);const batchBefore=(await jobs()).length, batch=await invoke('variations.run');
     assert.equal(batch.status,'submitted');assert.equal(batch.submitted,4);assert.equal((await jobs()).length,batchBefore+4);
     await cdp.poll("!document.querySelector('.vz-panel')",6000);

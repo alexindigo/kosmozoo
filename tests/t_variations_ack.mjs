@@ -11,9 +11,9 @@ const graph = {
   output: { class_type: "SaveImage", inputs: { filename_prefix: "source", images: ["sampler", 0] } },
 };
 const request = () => ({ id: "fake:source_00001_.png", host: "fake", filename: "source_00001_.png",
-  ranges: { "Sampler.denoise": { enabled: true, min: .5, max: .5, increment: .1 } },
-  imageParams: { "Text#text.text": { enabled: true, values: ["  first\n\nsecond\n"] } },
-  prefix: "v_", suffix: "_{Sampler.denoise}",
+  ranges: { "sampler.denoise": { enabled: true, min: .5, max: .5, increment: .1 } },
+  imageParams: { "text.text": { enabled: true, values: ["  first\n\nsecond\n"] } },
+  prefix: "v_", suffix: "_{sampler.denoise}",
   acknowledgement: { version: 2, runId: crypto.randomUUID(), requestId: crypto.randomUUID() } });
 function rig({ source = graph, enqueue, inspect } = {}) {
   const hosts = { fake: "old:8188" }, lifecycle = makeCollectionLifecycle(hosts), jobs = [], routes = new Map();
@@ -38,7 +38,7 @@ function rig({ source = graph, enqueue, inspect } = {}) {
 }
 
 Deno.test("ack: mutation reports actual assignments, not absent descriptors/carriers", () => {
-  const result = mutateGraph(graph, { "Missing.value": 1 }, [{ id: "Missing.value", key: "value", nodeIds: ["gone"] }]);
+  const result = mutateGraph(graph, { "gone.value": 1 }, [{ id: "gone.value", key: "value", nodeIds: ["gone"] }]);
   assertEquals(result.applied, []);
 });
 
@@ -51,32 +51,48 @@ Deno.test("ack: real accepted final graph certifies numeric, literal text and ou
   assertEquals(data.acknowledgement, { ...body.acknowledgement,
     target: { id: body.id, host: body.host, filename: body.filename },
     context: body.context,
-    accepted: [{ index: 0, promptId: "prompt-1", applied: { ranges: ["Sampler.denoise"], imageParams: ["Text#text.text"] },
-      selections: { ranges: ["Sampler.denoise"], imageParams: ["Text#text.text"] }, naming: ["prefix", "suffix"] }] });
+    accepted: [{ index: 0, promptId: "prompt-1", applied: { ranges: ["sampler.denoise"], imageParams: ["text.text"] },
+      selections: { ranges: ["sampler.denoise"], imageParams: ["text.text"] }, naming: ["prefix", "suffix"] }] });
   assertEquals(r.jobs[0].extra_data.extra_pnginfo.kz.source, body.id);
 });
 
 Deno.test("ack: invalid correlation, wrong target and ambiguous channels reject before enqueue", async () => {
   for (const change of [body => body.acknowledgement.version = 1, body => delete body.acknowledgement,
     body => delete body.context, body => body.context.origin.source = "another", body => body.acknowledgement.runId = "old",
-    body => body.id = "different:source.png", body => body.imageParams["Sampler.denoise"] = { enabled: true, values: [.6] }]) {
+    body => body.id = "different:source.png", body => body.imageParams["sampler.denoise"] = { enabled: true, values: [.6] }]) {
     const r = rig(), body = await r.request(); change(body);
     assertEquals((await r.run(body)).status, 400); assertEquals(r.jobs.length, 0);
   }
 });
 
-Deno.test("ack: removed carriers, output rewrites and ambiguous LoadImage IDs cannot be certified", async () => {
+Deno.test("ack: removed carriers cannot be certified; surviving quality and images certify per node", async () => {
   const source = structuredClone(graph);
   source.other = { class_type: "SaveImage", inputs: { filename_prefix: "other", quality: 1, images: ["sampler", 0] } };
   source.output.inputs.quality = 1;
   source.first = { class_type: "LoadImage", inputs: { image: "first.png" } };
   source.second = { class_type: "LoadImage", inputs: { image: "second.png" } };
   const r = rig({ source }), body = await r.request();
-  body.ranges["SaveImage.quality"] = { enabled: true, min: .5, max: .5, increment: .1 };
-  body.imageParams["LoadImage.image"] = { enabled: true, values: ["new.png"] };
+  body.ranges["other.quality"] = { enabled: true, min: .5, max: .5, increment: .1 };
+  body.ranges["output.quality"] = { enabled: true, min: .5, max: .5, increment: .1 };
+  body.imageParams["first.image"] = { enabled: true, values: ["new-first.png"] };
+  body.imageParams["second.image"] = { enabled: true, values: ["new-second.png"] };
   const data = await (await r.run(body)).json();
   assertEquals(r.jobs.length, 1); assert(!Object.hasOwn(r.jobs[0].prompt, "other"));
-  assertEquals(data.acknowledgement.accepted[0].applied, { ranges: ["Sampler.denoise"], imageParams: ["Text#text.text"] });
+  assertEquals(r.jobs[0].prompt.first.inputs.image, "new-first.png");
+  assertEquals(r.jobs[0].prompt.second.inputs.image, "new-second.png");
+  assertEquals(data.acknowledgement.accepted[0].applied, { ranges: ["sampler.denoise", "output.quality"], imageParams: ["text.text", "first.image", "second.image"] });
+});
+
+Deno.test("ack: actual output-prefix rewriting never certifies the overwritten parameter assignment", async () => {
+  const source = structuredClone(graph);
+  // Numeric discovery historically includes every numeric input. The final
+  // output naming writer replaces this atypical carrier after the sweep write.
+  source.output.inputs.filename_prefix = 1;
+  const r = rig({ source }), body = await r.request();
+  body.ranges['output.filename_prefix'] = { enabled: true, min: .5, max: .5, increment: .1 };
+  const data = await (await r.run(body)).json();
+  assertEquals(r.jobs[0].prompt.output.inputs.filename_prefix, 'v_1_0.5');
+  assertEquals(data.acknowledgement.accepted[0].applied.ranges, ['sampler.denoise']);
 });
 
 Deno.test("ack: unknown naming tokens remain unacknowledged; recognized directory prefixes survive", async () => {
@@ -100,7 +116,7 @@ Deno.test("ack: source replacement during inspection or accepted enqueue fences 
     delete r.hosts.fake; r.lifecycle.reconcile(); r.hosts.fake = "replacement:8188";
     return { ok: true, acceptance: "confirmed", promptId: "old-accepted", nodeErrors: {} };
   } });
-  const body = await r.request(); body.ranges["Sampler.denoise"].max = .6;
+  const body = await r.request(); body.ranges["sampler.denoise"].max = .6;
   const data = await (await r.run(body)).json();
   assertEquals(r.jobs.length, 1); assertEquals(data.submitted, 1); assertEquals(data.total, 2);
   assertEquals(data.acknowledgement.accepted, []); assert(data.errors.length > 0);
@@ -116,8 +132,8 @@ Deno.test("ack: partial or uncertain upstream acceptance provides no footprint a
 
 Deno.test("ack: consumer rejects incomplete, foreign, duplicate and forged proof before baseline writes", async () => {
   const r = rig(), body = await r.request(), valid = await (await r.run(body)).json();
-  assertEquals(acknowledgedFields(body, valid), { ranges: ["Sampler.denoise"], imageParams: ["Text#text.text"], naming: ["prefix", "suffix"],
-    rangeSelections: ["Sampler.denoise"], imageSelections: ["Text#text.text"] });
+  assertEquals(acknowledgedFields(body, valid), { ranges: ["sampler.denoise"], imageParams: ["text.text"], naming: ["prefix", "suffix"],
+    rangeSelections: ["sampler.denoise"], imageSelections: ["text.text"] });
   for (const change of [data => delete data.acknowledgement, data => data.acknowledgement.version = 1,
     data => delete data.acknowledgement.context, data => data.acknowledgement.context.graphHash = "b".repeat(64),
     data => data.acknowledgement.context.origin.source = "another",
@@ -126,7 +142,7 @@ Deno.test("ack: consumer rejects incomplete, foreign, duplicate and forged proof
     data => data.errors = ["failed"], data => data.submitted = 0, data => data.total = Number.MAX_SAFE_INTEGER + 1,
     data => data.acknowledgement.accepted[0].index = 1, data => data.acknowledgement.accepted[0].promptId = "",
     data => data.acknowledgement.accepted[0].applied.ranges.push("disabled"),
-    data => data.acknowledgement.accepted[0].applied.imageParams.push("Text#text.text"),
+    data => data.acknowledgement.accepted[0].applied.imageParams.push("text.text"),
     data => data.acknowledgement.accepted[0].naming.push("filter"), data => data.acknowledgement.accepted = [],
     data => delete data.acknowledgement.accepted[0].selections,
     data => data.acknowledgement.accepted[0].selections.ranges.push("unrequested"),
@@ -147,22 +163,22 @@ Deno.test("ack: consumer rejects incomplete, foreign, duplicate and forged proof
 Deno.test("ack: compiler-owned consumption retains disabled/filter/dormant/inactive fields and native File identity", async () => {
   const a = new File(["a"], "a.png"), b = new File(["b"], "b.png");
   const { editor, requests } = editorRig();
-  editor.edit("numeric", "BasicScheduler.denoise", "rawIncrement", "1e-1");
-  editor.edit("numeric", "BasicScheduler.steps", "rawIncrement", "1e");
-  editor.edit("images", "LoadImage.image", "enabled", true); editor.edit("images", "LoadImage.image", "mode", "files");
-  editor.edit("images", "LoadImage.image", "file", "retained.png"); editor.edit("images", "LoadImage.image", "localFiles", [a, b]);
-  editor.edit("enums", "Choice#choice.value", "enabled", true); editor.edit("enums", "Choice#choice.value", "picks", ["second", "first"]);
-  editor.edit("enums", "Choice#choice.value", "filter", "search");
-  editor.edit("texts", "Text#text.text", "enabled", true); editor.edit("texts", "Text#text.text", "text", "one {{used}}\n\ntwo");
-  editor.template("Text#text.text", "used", "a; b"); editor.template("Text#text.text", "dormant", "kept");
+  editor.edit("numeric", "n.denoise", "rawIncrement", "1e-1");
+  editor.edit("numeric", "n.steps", "rawIncrement", "1e");
+  editor.edit("images", "image.image", "enabled", true); editor.edit("images", "image.image", "mode", "files");
+  editor.edit("images", "image.image", "file", "retained.png"); editor.edit("images", "image.image", "localFiles", [a, b]);
+  editor.edit("enums", "choice.value", "enabled", true); editor.edit("enums", "choice.value", "picks", ["second", "first"]);
+  editor.edit("enums", "choice.value", "filter", "search");
+  editor.edit("texts", "text.text", "enabled", true); editor.edit("texts", "text.text", "text", "one {{used}}\n\ntwo");
+  editor.template("text.text", "used", "a; b"); editor.template("text.text", "dormant", "kept");
   editor.edit("naming", "root", "prefix", "v_");
   assertEquals((await editor.run()).status, "submitted");
   const remaining = editor.remaining().map(item => `${item.domain}.${item.id}.${item.field}`);
-  assertEquals(remaining.sort(), ["numeric.BasicScheduler.steps.rawIncrement", "images.LoadImage.image.file", "enums.Choice#choice.value.filter", "texts.Text#text.text.tpl"].sort());
-  assertEquals(requests[0].ranges["BasicScheduler.denoise"].increment, .1);
-  assertEquals(requests[0].imageParams["Text#text.text"].values, ["one a\n\ntwo", "one b\n\ntwo"]);
-  assert(editor.rows("images")["LoadImage.image"].localFiles[0] === a && editor.rows("images")["LoadImage.image"].localFiles[1] === b);
-  assertEquals(editor.rows("numeric")["BasicScheduler.denoise"].rawIncrement, "1e-1");
+  assertEquals(remaining.sort(), ["numeric.n.steps.rawIncrement", "images.image.image.file", "enums.choice.value.filter", "texts.text.text.tpl"].sort());
+  assertEquals(requests[0].ranges["n.denoise"].increment, .1);
+  assertEquals(requests[0].imageParams["text.text"].values, ["one a\n\ntwo", "one b\n\ntwo"]);
+  assert(editor.rows("images")["image.image"].localFiles[0] === a && editor.rows("images")["image.image"].localFiles[1] === b);
+  assertEquals(editor.rows("numeric")["n.denoise"].rawIncrement, "1e-1");
   editor.dispose();
 });
 
@@ -192,13 +208,13 @@ Deno.test("ack: backing parses confirmed/partial/uncertain replies once and vali
 Deno.test("ack: off selections are certified without applying or blessing their dormant values", async () => {
   const source = structuredClone(graph); source.other = { class_type: "Text", inputs: { text: "another" } };
   const r = rig({ source }), body = await r.request();
-  body.ranges["Sampler.denoise"] = { enabled: false, min: 8, max: 9, increment: null };
-  body.imageParams["Text#text.text"] = { enabled: false, values: [] };
+  body.ranges["sampler.denoise"] = { enabled: false, min: 8, max: 9, increment: null };
+  body.imageParams["text.text"] = { enabled: false, values: [] };
   body.ranges["OtherTarget.value"] = { enabled: false, min: 1, max: 2, increment: 1 };
-  body.imageParams["Text#other.text"] = { enabled: true, values: ["submitted"] };
+  body.imageParams["other.text"] = { enabled: true, values: ["submitted"] };
   const data = await (await r.run(body)).json();
   const fields = acknowledgedFields(body, data);
-  assertEquals(fields.ranges, []); assertEquals(fields.rangeSelections, ["Sampler.denoise", "OtherTarget.value"]);
+  assertEquals(fields.ranges, []); assertEquals(fields.rangeSelections, ["sampler.denoise", "OtherTarget.value"]);
   assertEquals(r.jobs[0].prompt.sampler.inputs.denoise, 1); assertEquals(data.submitted, 1);
   assertEquals(r.jobs[0].prompt.text.inputs.text, "original"); assertEquals(r.jobs[0].prompt.other.inputs.text, "submitted");
   assertEquals(data.acknowledgement.accepted[0].applied.ranges, []);
@@ -212,10 +228,10 @@ Deno.test("ack: off selection proof rejects a conflicting on carrier and never i
   assert(fields.imageSelections.includes("unknown-off")); assert(!fields.imageSelections.includes("unknown-inert"));
   const forged = structuredClone(data); forged.acknowledgement.accepted[0].selections.imageParams.push("unknown-inert");
   assertEquals(acknowledgedFields(body, forged), null);
-  const collision = await r.request(); collision.ranges["Sampler.denoise"].enabled = false;
-  collision.imageParams["Sampler.denoise"] = { enabled: true, values: [.5] };
+  const collision = await r.request(); collision.ranges["sampler.denoise"].enabled = false;
+  collision.imageParams["sampler.denoise"] = { enabled: true, values: [.5] };
   const accepted = await (await r.run(collision)).json();
   assertEquals(acknowledgedFields(collision, accepted).rangeSelections, []);
-  accepted.acknowledgement.accepted[0].selections.ranges.push("Sampler.denoise");
+  accepted.acknowledgement.accepted[0].selections.ranges.push("sampler.denoise");
   assertEquals(acknowledgedFields(collision, accepted), null);
 });

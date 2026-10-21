@@ -3,7 +3,7 @@
 import { snapshotDraft, sameDraft, createRunId } from "./draft.js";
 import { paramDef, defaultRange } from "./graph.mjs";
 import { templateLabels, parseSemicolonList, expandTextAxes, permutationPlan,
-  resolveRelativeRanges, acknowledgedFields } from "/shared/features/variations/shared.mjs";
+  resolveRelativeRanges, acknowledgedFields, catalogueParams, parameterIndex, parameterLabel } from "/shared/features/variations/shared.mjs";
 import { validOrigin, sameOrigin, validContext, sameContext } from "/shared/source-origin.mjs";
 
 const field = (type, channel, wire = null) => Object.freeze({ type, channel, wire });
@@ -33,8 +33,24 @@ const freeze = value => {
 };
 const filename = value => typeof value === "string" && value.length > 0 && !/[\\/\x00-\x1f\x7f]/.test(value) && ![".", ".."].includes(value);
 const token = id => `_{${id}}`;
-const currentValues = catalogue => Object.fromEntries([...(catalogue.params ?? []), ...(catalogue.stringParams ?? []),
-  ...(catalogue.enumParams ?? []), ...(catalogue.textParams ?? [])].map(parameter => [parameter.id, parameter.current]));
+const currentValues = catalogue => Object.fromEntries([...parameterIndex(catalogueParams(catalogue)).values()]
+  .map(parameter => [parameter.id, parameter.current]));
+
+// Kind-specific defaults plug into one catalogue installation lifecycle. Labels,
+// identity validation and seeding always pass through the common owner boundary.
+const ROW_STRATEGIES = {
+  params: { domain: "numeric", initialize(parameter, { batch, denoise }) {
+    const tuning = paramDef(`${parameter.type}.${parameter.key}`, parameter.current, parameter.integer);
+    const defaults = batch ? { min: -tuning.spread, max: tuning.spread } : defaultRange(tuning, parameter.current);
+    return { metadata: { input: parameter.key, tuning, defaults, minIncrement: 10 ** -tuning.decimals,
+      defaultIncrement: tuning.defaultInc, clamp: tuning.clamp },
+    defaults: { enabled: parameter.id === denoise, ...defaults, rawIncrement: String(tuning.defaultInc) } };
+  } },
+  stringParams: { domain: "images", initialize: () => ({ metadata: { files: [], filesReady: false },
+    defaults: { enabled: false, mode: "new", file: null, localFiles: null } }) },
+  enumParams: { domain: "enums", initialize: p => ({ defaults: { enabled: false, picks: [p.current], filter: "" } }) },
+  textParams: { domain: "texts", initialize: p => ({ defaults: { enabled: false, text: p.current, tpl: {} } }) },
+};
 
 export function makeVariationEditor({ targets, services, currentOrigin, changed = () => {}, close = () => {},
   setTimer = setTimeout, clearTimer = clearTimeout }) {
@@ -210,25 +226,17 @@ export function makeVariationEditor({ targets, services, currentOrigin, changed 
       if (!validContext(data?.context) || !sameOrigin(data.context.origin, target.origin)) {
         publish({ text: "Source-bound catalogue unavailable; your edits have been kept.", ok: false, state: "unavailable" }); return;
       }
+      parameterIndex(catalogueParams(data));
       catalogues.set(target.id, freeze(snapshotDraft(data)));
       const denoise = data.params.find(parameter => parameter.key === "denoise")?.id;
-      for (const parameter of data.params) {
-        const tuning = paramDef(parameter.id, parameter.current, parameter.integer), defaults = batch ? { min: -tuning.spread, max: tuning.spread } : defaultRange(tuning, parameter.current);
-        seed("numeric", parameter.id, { ...parameter, input: parameter.key, label: parameter.title ?? parameter.type,
-          minIncrement: 10 ** -tuning.decimals, defaultIncrement: tuning.defaultInc, clamp: tuning.clamp },
-        { enabled: parameter.id === denoise, min: defaults.min, max: defaults.max, rawIncrement: String(tuning.defaultInc) });
+      for (const [channel, strategy] of Object.entries(ROW_STRATEGIES)) for (const parameter of data[channel] ?? []) {
+        const initialized = strategy.initialize(parameter, { batch, denoise });
+        seed(strategy.domain, parameter.id, { ...parameter, label: parameterLabel(parameter), ...initialized.metadata }, initialized.defaults);
       }
       if (denoise) {
         const entry = row("naming", "root"), suffix = entry.baseline.suffix;
         seed("naming", "root", {}, { suffix: suffix.includes(token(denoise)) ? suffix : suffix + token(denoise) });
       }
-      for (const parameter of data.stringParams ?? []) seed("images", parameter.id,
-        { ...parameter, label: parameter.title ?? parameter.type, files: [], filesReady: false },
-        { enabled: false, mode: "new", file: null, localFiles: null });
-      for (const parameter of data.enumParams ?? []) seed("enums", parameter.id,
-        { ...parameter, label: `${parameter.title ?? parameter.type}.${parameter.key}` }, { enabled: false, picks: [parameter.current], filter: "" });
-      for (const parameter of data.textParams ?? []) seed("texts", parameter.id,
-        { ...parameter, label: `${parameter.title ?? parameter.type}.${parameter.key}` }, { enabled: false, text: parameter.current, tpl: {} });
       catalogueReady = true; notify();
     },
     installInputs(data) {
@@ -264,6 +272,7 @@ export function makeVariationEditor({ targets, services, currentOrigin, changed 
           const data = target.id === capturedTargets[0].id ? catalogues.get(target.id) : await services.probe(target);
           check(ticket, target);
           if (!validContext(data?.context) || !sameOrigin(data.context.origin, target.origin)) throw new Error("Source-bound catalogue unavailable; your work has been kept.");
+          parameterIndex(catalogueParams(data));
           prepared.set(target.id, data);
         }
         const uploadTarget = ticket.targets[0];

@@ -42,10 +42,10 @@ Deno.test("textParams: free-text inputs surface per node; enums, LoadImage, outp
   };
   const rows = textParams(graph, enums, out);
   assertEquals(rows.length, 2);
-  assertEquals(rows[0].id, "CLIPTextEncode#2.text");
+  assertEquals(rows[0].id, "2.text");
   assertEquals(rows[0].current, "a portrait");
   assertEquals(rows[0].nodeIds, ["2"]);
-  assertEquals(rows[1].id, "CLIPTextEncode#3.text");
+  assertEquals(rows[1].id, "3.text");
   assertEquals(rows[1].title, "neg prompt");
 });
 
@@ -68,20 +68,20 @@ Deno.test("run path: a picked prompt lands verbatim on the right node", () => {
   };
   const full = [...inspectGraph(graph), ...stringParams(graph), ...textParams(graph, null, null)];
   const { graph: mutated, applied } = mutateGraph(
-    graph, { "CLIPTextEncode#3.text": "a cyberpunk alley" }, full,
+    graph, { "3.text": "a cyberpunk alley" }, full,
   );
-  assertEquals(applied, ["CLIPTextEncode#3.text"]);
+  assertEquals(applied, ["3.text"]);
   assertEquals(mutated["3"].inputs.text, "a cyberpunk alley");
   assertEquals(mutated["2"].inputs.text, "a portrait");
   assertEquals(graph["3"].inputs.text, "a landscape"); // the source is cloned, not mutated
 });
 
 Deno.test("run path: text axes multiply and exclude the all-current combo", () => {
-  const perms = generatePermutations({}, { "CLIPTextEncode#2.text": "a portrait" }, {
-    "CLIPTextEncode#2.text": { enabled: true, values: ["a portrait", "a cyberpunk alley"] },
+  const perms = generatePermutations({}, { "2.text": "a portrait" }, {
+    "2.text": { enabled: true, values: ["a portrait", "a cyberpunk alley"] },
   });
   assertEquals(perms.length, 1);
-  assertEquals(perms[0]["CLIPTextEncode#2.text"], "a cyberpunk alley");
+  assertEquals(perms[0]["2.text"], "a cyberpunk alley");
 });
 
 // --- route level: the probe returns textParams; the run enqueues the picks ----
@@ -117,7 +117,7 @@ Deno.test("probe + run routes: textParams from the graph, picks enqueued verbati
     ));
     assertEquals(pr.status, 200);
     const body = await pr.json();
-    assertEquals((body.textParams ?? []).map((p) => p.id), ["CLIPTextEncode#2.text"]);
+    assertEquals((body.textParams ?? []).map((p) => p.id), ["2.text"]);
     assertEquals(body.textParams[0].current, "a portrait, studio light");
 
     // run: sweep the prompt over [current, new] → only the new one enqueues,
@@ -128,7 +128,7 @@ Deno.test("probe + run routes: textParams from the graph, picks enqueued verbati
         id: "fake:flux-basic.png", host: "fake", filename: "flux-basic.png",
         ranges: {},
         imageParams: {
-          "CLIPTextEncode#2.text": { enabled: true, values: ["a portrait, studio light", "a cyberpunk alley, rain"] },
+          "2.text": { enabled: true, values: ["a portrait, studio light", "a cyberpunk alley, rain"] },
         },
         prefix: "v_", suffix: "",
         context: body.context, acknowledgement: { version: 2, runId: crypto.randomUUID(), requestId: crypto.randomUUID() },

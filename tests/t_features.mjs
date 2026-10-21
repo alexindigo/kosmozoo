@@ -38,7 +38,7 @@ Deno.test("features: probe reads the embedded graph through /api/features/variat
   const body = await r.json();
   assert(body.params.length > 0, "numeric params discovered");
   const ids = body.params.map((p) => p.id);
-  assert(ids.includes("BasicScheduler.steps"), `steps in ${ids}`);
+  assert(ids.includes("9.steps"), `steps in ${ids}`);
 
   // unknown image 404s
   const nf = await router.handle(new Request(
@@ -92,7 +92,7 @@ Deno.test("features: run enqueues per permutation, caps at 413, no host# tag", a
 
   // steps 20..21: the graph's CURRENT 20 is excluded (current-combo rule),
   // only 21 enqueues
-  let r = await run({ "BasicScheduler.steps": { enabled: true, min: 20, max: 21, increment: 1 } });
+  let r = await run({ "9.steps": { enabled: true, min: 20, max: 21, increment: 1 } });
   let body = await r.json();
   assertEquals(r.status, 200);
   assertEquals(body.submitted, 1);
@@ -100,11 +100,11 @@ Deno.test("features: run enqueues per permutation, caps at 413, no host# tag", a
   assertEquals(enqueued.length, 1);
 
   // over the cap → 413
-  r = await run({ "BasicScheduler.denoise": { enabled: true, min: 0, max: 1, increment: 0.001 } });
+  r = await run({ "9.denoise": { enabled: true, min: 0, max: 1, increment: 0.001 } });
   assertEquals(r.status, 413);
 
   // a range without increment → 400 (the legacy global fallback is gone)
-  r = await run({ "BasicScheduler.steps": { enabled: true, min: 20, max: 21 } });
+  r = await run({ "9.steps": { enabled: true, min: 20, max: 21 } });
   assertEquals(r.status, 400);
 
   await server.shutdown();

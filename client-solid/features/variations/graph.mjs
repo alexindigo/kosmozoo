@@ -13,7 +13,7 @@ import { formatValue } from "/shared/features/variations/shared.mjs";
 
 // --- slider tuning overrides ---------------------------------------------------
 //
-// id = "<class_type>.<input>" — the same identity the fields registry uses.
+// Schema tuning key = "<class_type>.<input>"; never an editable parameter ID.
 // Everything is inferred from the observed value when not listed here.
 const OVERRIDES = {
   "KSampler.denoise":               { clamp: [0, 1], decimals: 2, defaultInc: 0.05, spread: 0.15 },

@@ -472,6 +472,27 @@ is controlled by this owner and parsed once; view/child File/caret/gesture ident
 and stable row-ID mounting remain private. No whole row-object comparison or
 independently maintained acknowledgement path whitelist owns this flow.
 
+All variation kinds (numeric, enum, text and image) use the same node/input
+identity codec in `src/features/variations/shared.mjs`. IDs are `<nodeId>.<input>`
+(for example `76.image`, `81.image`, `20.strength_model`, `92:109.text`); segments
+are percent-encoded when needed, including literal dots. Class names and custom
+titles are display/schema metadata, never identity. One classified graph walk
+creates singleton descriptors and rejects duplicate or unresolved locations;
+probe and Run use that same catalogue. The editor rejects duplicates before
+seeding any rows, and every row controls exactly its own node/input. Numeric
+siblings are independent sliders, with independent currents and proof. Slider
+tuning still uses the class/input schema key. Readable labels include title or
+class, node ID and input, e.g. `Load Image #76 · image`.
+
+Naming tokens use those exact IDs (`_{76.image}_{81.image}`), through the same
+codec/parser. Unknown placeholder syntax remains literal and cannot certify
+naming consumption. Existing `{Class.input}`, custom-title/class label tokens
+and `{image}` are compatibility aliases for the first carrier in catalogue
+order; `{image}` selects the first image descriptor even if only a later image
+varies. Explicit IDs are required to address siblings independently. Variation
+drafts and parameter choices are session-private and are not persisted, so
+there are no saved legacy parameter keys to migrate.
+
 Run/button/handle input enters `variations.run` and the owner's requestRun. A private
 ticket captures all editable values/targets/revision/close generation before IO.
 The compiler emits the request and its raw-value consumption bindings in the same

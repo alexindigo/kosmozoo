@@ -56,14 +56,14 @@ module.exports=async({cdp,FAKE,KZ,check})=>{
     await stays();await dirtyClose();check('edits during the close countdown cancel it and stay dirty',true);
 
     await open();await type('.vz-prefix','active_');
-    await cdp.clickAt('.vz-slider-row[data-param-key="BasicScheduler.steps"] .vz-cb');
-    await type('.vz-slider-row[data-param-key="BasicScheduler.steps"] .vz-row-inc-input','1e');
-    await cdp.clickAt('.vz-slider-row[data-param-key="BasicScheduler.steps"] .vz-cb');
+    await cdp.clickAt('.vz-slider-row[data-param-key="9.steps"] .vz-cb');
+    await type('.vz-slider-row[data-param-key="9.steps"] .vz-row-inc-input','1e');
+    await cdp.clickAt('.vz-slider-row[data-param-key="9.steps"] .vz-cb');
     assert.equal((await invoke('variations.run')).status,'submitted');await stays();
-    assert.equal(await cdp.evaluate("document.querySelector('.vz-slider-row[data-param-key=\"BasicScheduler.steps\"] .vz-row-inc-input').value"),'1e');
+    assert.equal(await cdp.evaluate("document.querySelector('.vz-slider-row[data-param-key=\"9.steps\"] .vz-row-inc-input').value"),'1e');
     await dirtyClose();check('successful active configuration never acknowledges disabled incomplete editor text',true);
 
-    await open();await cdp.clickAt('.vz-textrow[data-text-id="CLIPTextEncode#2.text"] .vz-cb');
+    await open();await cdp.clickAt('.vz-textrow[data-text-id="2.text"] .vz-cb');
     await type('.vz-text-values','{{dormant}}');await cdp.poll("!!document.querySelector('.vz-tpl-input')");await type('.vz-tpl-input','one; two');
     await type('.vz-text-values','literal submitted text');assert.equal((await invoke('variations.run')).status,'submitted');
     await stays();await dirtyClose();check('dormant template values remain unsubmitted work after literal text succeeds',true);
@@ -84,8 +84,8 @@ module.exports=async({cdp,FAKE,KZ,check})=>{
     await invoke('variations.run');await stays();await cdp.evaluate("window.fetch=window.__ackFetch");await dirtyClose();
     check('one invalid captured target prevents every baseline acknowledgement in a batch',true);
 
-    await open();await type('.vz-slider-row[data-param-key="BasicScheduler.denoise"] .vz-row-inc-input','1e-1');
-    await cdp.clickAt('.vz-textrow[data-text-id="CLIPTextEncode#2.text"] .vz-cb');await type('.vz-text-values','First {{used}}.\n\nSecond {{used}}.\n');
+    await open();await type('.vz-slider-row[data-param-key="9.denoise"] .vz-row-inc-input','1e-1');
+    await cdp.clickAt('.vz-textrow[data-text-id="2.text"] .vz-cb');await type('.vz-text-values','First {{used}}.\n\nSecond {{used}}.\n');
     await cdp.poll("!!document.querySelector('.vz-tpl-input')");await type('.vz-tpl-input','cat; dog');
     const start=(await enqueues()).length;assert.equal((await invoke('variations.run')).status,'submitted');
     const templateJobs=(await enqueues()).slice(start);assert.deepEqual([...new Set(templateJobs.map(job=>job.prompt['2'].inputs.text))],['First cat.\n\nSecond cat.\n','First dog.\n\nSecond dog.\n']);
@@ -93,8 +93,8 @@ module.exports=async({cdp,FAKE,KZ,check})=>{
     await cdp.clickAt('.vz-close');await cdp.poll("!document.querySelector('.vz-panel')");
     check('valid raw increment spelling and contributing multiline-template entries are acknowledged without editor normalization',true);
 
-    await open('flux-lora.png');await cdp.clickAt('.vz-enumrow[data-enum-id="LoraLoader#20.lora_name"] .vz-imgrow-head .vz-cb');
-    await cdp.clickAt('.vz-enumrow[data-enum-id="LoraLoader#20.lora_name"] .vz-enum-opt:last-child .vz-cb');
+    await open('flux-lora.png');await cdp.clickAt('.vz-enumrow[data-enum-id="20.lora_name"] .vz-imgrow-head .vz-cb');
+    await cdp.clickAt('.vz-enumrow[data-enum-id="20.lora_name"] .vz-enum-opt:last-child .vz-cb');
     const enumStart=(await enqueues()).length;assert.equal((await invoke('variations.run')).status,'submitted');
     const enumJobs=(await enqueues()).slice(enumStart);assert.deepEqual([...new Set(enumJobs.map(job=>job.prompt['20'].inputs.lora_name))],['detail.safetensors','other.safetensors']);
     assert(enumJobs.every(job=>job.prompt['21'].inputs.lora_name==='style.safetensors'));
