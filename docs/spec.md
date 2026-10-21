@@ -597,9 +597,10 @@ Non-obvious behaviour the rewrite must not rediscover one bug at a time.
   `client-solid-dist/`; framework-free modules stay in `client/js/`.
   Solid, the virtualizer, and noUiSlider (ESM) are vendored dists with
   vendor-time path rewrites and the `process.env.NODE_ENV` substitution
-  (no bundler, no `process` in the browser); `fetch-vendor-solid.sh`
-  regenerates files and `client/vendor/CHECKSUMS` together, and
-  `tests/t_vendor_pristine.mjs` fails a hand edit.
+  (no bundler, no `process` in the browser); after `deno task deps`, run
+  `deno task vendor` to regenerate files and `client/vendor/CHECKSUMS` from
+  the locked npm cache, offline. `dev/vendor-browser.mjs` owns the file/transform
+  inventory; `tests/t_vendor_pristine.mjs` checks hashes and the complete file set.
 - Source/Docker native SQLite selection remains the explicit system library.
   The Linux executable selects its included, pinned library before importing
   the engine graph; a valid explicit `DENO_SQLITE_PATH` is retained. Invalid/
@@ -615,7 +616,7 @@ Non-obvious behaviour the rewrite must not rediscover one bug at a time.
   capabilities live behind a plugin/service boundary.
 - Security deliberately deferred: no auth, no sandbox, no capability model.
 
-Run `deno task deps` to acquire the frozen engine, plugin, compiler and unit-test
+Run `deno task deps` to acquire the frozen engine, plugin, compiler, browser and unit-test
 graph into `DENO_DIR` before offline builds or tests (`--frozen --cached-only`).
 Module dependencies come only from npm/jsr registries, with exact direct versions
 in `deno.json` and transitive integrity in `deno.lock`; HTTP module imports are

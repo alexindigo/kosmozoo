@@ -2,6 +2,10 @@
   "imports": {
     "@babel/core": "npm:@babel/core@7.26.0",
     "babel-preset-solid": "npm:babel-preset-solid@1.9.15",
+    "npm:solid-js": "npm:solid-js@1.9.15",
+    "npm:@tanstack/solid-virtual": "npm:@tanstack/solid-virtual@3.13.37",
+    "npm:@tanstack/virtual-core": "npm:@tanstack/virtual-core@3.17.8",
+    "npm:nouislider": "npm:nouislider@15.8.1",
     "@db/sqlite": "jsr:@db/sqlite@0.13.0",
     "jsr:@std/assert": "jsr:@std/assert@1.0.19",
     "solid-js": "./client/vendor/solid/solid.mjs",
@@ -22,8 +26,9 @@
     "/shared/features/variations/shared.mjs": "./src/features/variations/shared.mjs"
   },
   "tasks": {
-    "deps": "deno install --frozen --entrypoint build.mjs src/main.mjs src/cli.mjs plugins/*/plugin.mjs tests/t_*.mjs",
-    "deps:update": "deno install --entrypoint build.mjs src/main.mjs src/cli.mjs plugins/*/plugin.mjs tests/t_*.mjs",
+    "deps": "deno install --frozen --entrypoint build.mjs dev/vendor-browser.mjs src/main.mjs src/cli.mjs plugins/*/plugin.mjs tests/t_*.mjs",
+    "deps:update": "deno install --entrypoint build.mjs dev/vendor-browser.mjs src/main.mjs src/cli.mjs plugins/*/plugin.mjs tests/t_*.mjs",
+    "vendor": "deno run --frozen --cached-only --allow-read --allow-write=client/vendor dev/vendor-browser.mjs",
     "setup": "deno eval 'import { Database } from \"@db/sqlite\"; new Database(\":memory:\").close();'",
     "dev": "deno run --allow-all src/main.mjs",
     "test": "deno test --allow-all"
