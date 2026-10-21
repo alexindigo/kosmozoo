@@ -15,6 +15,7 @@ import {
 } from "./shared.mjs";
 import { validEntryName } from "../../backings/index.mjs";
 import { sourceOrigin, sameOrigin, validOrigin, validContext } from "../../source-origin.mjs";
+import { dependencyClosure, validateGraphLinks } from "./graph.mjs";
 
 // hard cap on permutations per run — a sweep is a human-scale batch, not a
 // fork bomb (F7). Above the cap the run answers 413.
@@ -167,12 +168,13 @@ export function clampBudget(pfx, sfx) {
   return 255 - HEADROOM - String(pfx).length - String(sfx).length;
 }
 
-// Wrap ONLY the producing node's filename_prefix with pfx/sfx and delete
-// every OTHER output node so the run produces one file, not N.
+// Wrap ONLY the producing node's filename_prefix. Other output nodes stay
+// only when the producer depends on them, including through lazy inputs.
 export function narrowToOneOutputNode(graph, producingId, basename, pfx, sfx, outputClasses) {
-  let dropped = 0;
+  const dependencies = dependencyClosure(graph, producingId);
+  let kept = 0, dropped = 0;
   for (const nid of outputNodeIndex(graph, outputClasses)) {
-    if (nid === producingId) continue;
+    if (dependencies.has(nid)) { kept++; continue; }
     delete graph[nid];
     dropped++;
   }
@@ -180,7 +182,7 @@ export function narrowToOneOutputNode(graph, producingId, basename, pfx, sfx, ou
   // both survive, at most NAME_MAX_WITHOUT_COUNTER chars total.
   const directory = outputPath(graph[producingId].inputs.filename_prefix).directory;
   graph[producingId].inputs.filename_prefix = directory + clampBasename(pfx + outputPath(basename).leaf + sfx, NAME_MAX_WITHOUT_COUNTER);
-  return { kept: 1, dropped };
+  return { kept, dropped };
 }
 
 // Fallback: wrap every output node's own prefix with the user's pfx/sfx.
@@ -346,6 +348,12 @@ export function register(app) {
           errors.push({ permutation: perm, error: "no output node in graph" });
           continue;
         }
+      }
+
+      try { validateGraphLinks(mutated); }
+      catch (e) {
+        errors.push({ permutation: perm, error: e.message });
+        continue;
       }
 
       const surviving = survivingAxes(mutated, writes, fullInspection);

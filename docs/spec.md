@@ -529,6 +529,8 @@ existing HTTP LAN origin; they are correlation, not retry/idempotency keys.
 
 Every Comfy backing enqueue builds its outgoing prompt through `freshSubmissionGraph`: clone the graph and remove only each node descriptor's execution-only `is_changed`, preserving inputs (including `inputs.is_changed`), all other fields and envelope lineage without cache-busting.
 
+Variation narrowing keeps the producer's complete transitive input-link closure (including every lazy input), removes only output-class nodes outside it, leaves non-output nodes untouched, and rejects dangling links before enqueue.
+
 Actual surviving carrier assignments and recognized naming writes certify positive
 use on confirmed accepted prompts. The same typed axis kernel owns count/generation
 and off-selection exclusion proof. Tuple identity is per field, never delimiter
