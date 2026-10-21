@@ -1,0 +1,13 @@
+{
+  "76": { "class_type": "LoadImage", "inputs": { "image": "content.jpg" }, "_meta": { "title": "Content", "is_changed": "keep metadata" }, "is_changed": ["old-content-hash"] },
+  "81": { "class_type": "LoadImage", "inputs": { "image": "style.png" }, "is_changed": ["old-style-hash"] },
+  "92:107": { "class_type": "UNETLoader", "inputs": { "unet_name": "flux-2-klein-4b-fp8.safetensors", "weight_dtype": "default" } },
+  "92:106": { "class_type": "RandomNoise", "inputs": { "noise_seed": 935310391640363 } },
+  "92:109": { "class_type": "CLIPTextEncode", "inputs": { "text": "Keep content; use the reference style.\n\nLiteral is_changed text." } },
+  "92:110": { "class_type": "VAELoader", "inputs": { "vae_name": "published-cases/flux2-vae.safetensors" } },
+  "92:112:116": { "class_type": "VAEEncode", "inputs": { "pixels": ["76", 0], "vae": ["92:110", 0] }, "is_changed": ["old-latent-hash"] },
+  "92:84:119": { "class_type": "VAEEncode", "inputs": { "pixels": ["81", 0], "vae": ["92:110", 0] }, "is_changed": null },
+  "92:105": { "class_type": "Custom", "inputs": { "content": ["92:112:116", 0], "style": ["92:84:119", 0], "model": ["92:107", 0], "noise": ["92:106", 0], "prompt": ["92:109", 0], "is_changed": { "is_changed": ["keep custom input"] } }, "custom_descriptor": { "is_changed": "keep arbitrary data" }, "is_changed": false },
+  "94": { "class_type": "SaveImage", "inputs": { "filename_prefix": "Flux2-Klein", "images": ["92:105", 0] } },
+  "95": { "class_type": "SaveImage", "inputs": { "filename_prefix": "other", "images": ["92:105", 0] } }
+}

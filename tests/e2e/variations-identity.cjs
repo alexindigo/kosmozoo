@@ -22,6 +22,8 @@ module.exports = async ({ cdp, FAKE, KZ, check }) => {
     const graph = structuredClone(source.prompt[2]);
     for (const id of ['76', '81']) graph[id] = { class_type: 'LoadImage', inputs: { image: `${id}.png` }, _meta: { title: 'Reference' } };
     graph['92:105'] = structuredClone(graph['2']); graph['92:105'].inputs.text = 'nested original';
+    for (const id of ['76', '81', '92:105', '20', '21']) graph[id].is_changed = [`archived-${id}`];
+    graph['92:105'].inputs.is_changed = 'custom input retained';
     for (const id of ['20', '21']) graph[id]._meta = { title: 'LoRA' };
     await http('/__test/activity', { publish: [{ name: 'identity-multiple.png', fixture: 'flux-lora.png', graph, mtime: 2100000001 }] });
     await cdp.evaluate("(async()=>{await fetch('/api/collections/fake/entries/identity-multiple.png/bytes')})()");
@@ -59,6 +61,8 @@ module.exports = async ({ cdp, FAKE, KZ, check }) => {
     assert.equal(new Set(jobs.map(job => job.prompt['20'].inputs.strength_model)).size, 3);
     assert.equal(new Set(jobs.map(job => job.prompt['20'].inputs.lora_name)).size, 2);
     for (const job of jobs) {
+      assert(Object.values(job.prompt).every(node => !Object.hasOwn(node, 'is_changed')));
+      assert.equal(job.prompt['92:105'].inputs.is_changed, 'custom input retained');
       assert.equal(job.prompt['21'].inputs.strength_model, graph['21'].inputs.strength_model);
       assert.equal(job.prompt['21'].inputs.lora_name, graph['21'].inputs.lora_name);
       assert.equal(job.prompt['76'].inputs.image, 'identity-content.png');

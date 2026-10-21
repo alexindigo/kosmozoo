@@ -499,6 +499,15 @@ export function comfyClient(addr, { fetcher = fetch, clock = () => performance.n
 
 export const createBinding = comfyClient;
 
+// Recorded executions may contain fingerprints that ComfyUI trusts instead of
+// recomputing. Every new submission owns a clone; only descriptor metadata is
+// execution-only, never an input (or arbitrary nested field) of the same name.
+export function freshSubmissionGraph(graph) {
+  const clone = structuredClone(graph);
+  for (const node of Object.values(clone)) delete node.is_changed;
+  return clone;
+}
+
 // Queue a prompt graph. Returns { ok, status, error? } — the caller owns
 // permutation-level error reporting. Failures log the host's FULL body to
 // the engine console: the response error is capped for display, but a
@@ -508,7 +517,7 @@ export async function enqueue(addr, prompt) {
     const resp = await fetch(`http://${addr}/api/prompt`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(prompt),
+      body: JSON.stringify({ ...prompt, prompt: freshSubmissionGraph(prompt.prompt) }),
       signal: AbortSignal.timeout(HOST_TIMEOUT_MS),
     });
     if (!resp.ok) {
