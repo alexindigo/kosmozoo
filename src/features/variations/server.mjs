@@ -182,22 +182,22 @@ export function narrowToOneOutputNode(graph, producingId, basename, pfx, sfx, ou
   // both survive, at most NAME_MAX_WITHOUT_COUNTER chars total.
   const directory = outputPath(graph[producingId].inputs.filename_prefix).directory;
   graph[producingId].inputs.filename_prefix = directory + clampBasename(pfx + outputPath(basename).leaf + sfx, NAME_MAX_WITHOUT_COUNTER);
-  return { kept, dropped };
+  return { kept, dropped, written: [producingId] };
 }
 
 // Fallback: wrap every output node's own prefix with the user's pfx/sfx.
 // The middle budget subtracts pfx/sfx so a long pfx/sfx can't push the
 // assembled prefix over NAME_MAX either.
 export function wrapAllOutputPrefixes(graph, pfx, sfx, outputClasses) {
-  let touched = 0;
-  for (const n of Object.values(graph)) {
+  const written = [];
+  for (const [nid, n] of Object.entries(graph)) {
     if (!outputClasses.has(String(n.class_type ?? ""))) continue;
     const orig = String(n.inputs?.filename_prefix ?? "");
     const { directory, leaf } = outputPath(orig);
     n.inputs.filename_prefix = directory + pfx + clampBasename(leaf, clampBudget(pfx, sfx)) + sfx;
-    touched++;
+    written.push(nid);
   }
-  return touched;
+  return written;
 }
 
 // The lineage tag: ComfyUI writes every extra_pnginfo key as a JSON-encoded
@@ -336,15 +336,17 @@ export function register(app) {
         continue;
       }
 
+      let namingWrites;
       if (producing) {
         const p = findProducingOutputNode(mutated, filename, outputClasses);
         if (!p) {
           errors.push({ permutation: perm, error: "producing output node lost after clone" });
           continue;
         }
-        narrowToOneOutputNode(mutated, p.id, originalBasename, pfx, sfx, outputClasses);
+        namingWrites = narrowToOneOutputNode(mutated, p.id, originalBasename, pfx, sfx, outputClasses).written;
       } else {
-        if (!wrapAllOutputPrefixes(mutated, pfx, sfx, outputClasses ?? new Set())) {
+        namingWrites = wrapAllOutputPrefixes(mutated, pfx, sfx, outputClasses ?? new Set());
+        if (!namingWrites.length) {
           errors.push({ permutation: perm, error: "no output node in graph" });
           continue;
         }
@@ -357,7 +359,9 @@ export function register(app) {
       }
 
       const surviving = survivingAxes(mutated, writes, fullInspection);
-      const outputs = outputNodeIndex(mutated, outputClasses ?? new Set()).map(nodeId => ({
+      // The writer owns naming targets; retained dependency outputs need not
+      // have received a prefix, even when object_info marks them as outputs.
+      const outputs = namingWrites.map(nodeId => ({
         value: mutated[nodeId].inputs?.filename_prefix,
         directory: outputPath(graph[nodeId].inputs?.filename_prefix ?? "").directory,
       }));

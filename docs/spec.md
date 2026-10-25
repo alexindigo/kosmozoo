@@ -531,6 +531,8 @@ Every Comfy backing enqueue builds its outgoing prompt through `freshSubmissionG
 
 Variation narrowing keeps the producer's complete transitive input-link closure (including every lazy input), removes only output-class nodes outside it, leaves non-output nodes untouched, and rejects dangling links before enqueue.
 
+Naming proof uses only the exact node IDs returned by the naming writer; no writes means no naming acknowledgement.
+
 Actual surviving carrier assignments and recognized naming writes certify positive
 use on confirmed accepted prompts. The same typed axis kernel owns count/generation
 and off-selection exclusion proof. Tuple identity is per field, never delimiter

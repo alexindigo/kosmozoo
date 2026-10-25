@@ -1,0 +1,14 @@
+{
+  "461": { "class_type": "SaveImageAdvanced", "inputs": { "filename_prefix": "Qwen_image_2.1", "images": ["459:457", 0] } },
+  "470": { "class_type": "LoadImage", "inputs": { "image": "reference.png" } },
+  "472": { "class_type": "ImageCompare", "inputs": { "image_a": ["470", 0], "image_b": ["461", 0] } },
+  "475": { "class_type": "LoadImage", "inputs": { "image": "original.jpg" } },
+  "502": { "class_type": "PrimitiveStringMultiline", "inputs": { "value": "Original prompt" } },
+  "503": { "class_type": "PreviewAny", "inputs": { "source": ["459:480", 0] } },
+  "459:457": { "class_type": "VAEDecode", "inputs": { "samples": ["459:458", 0] } },
+  "459:458": { "class_type": "KSampler", "inputs": { "positive": ["459:474", 0] } },
+  "459:474": { "class_type": "TextEncodeQwenImage21", "inputs": { "prompt": ["459:480", 0], "images.image_1": ["470", 0], "images.image_2": ["475", 0] } },
+  "459:480": { "class_type": "PreviewAny", "inputs": { "source": ["459:484", 0] } },
+  "459:484": { "class_type": "ComfySwitchNode", "inputs": { "switch": true, "on_false": ["502", 0], "on_true": ["459:500", 0] } },
+  "459:500": { "class_type": "TextGenerate", "inputs": { "prompt": ["502", 0] } }
+}

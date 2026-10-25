@@ -19,7 +19,7 @@ function assertLinksResolve(graph) {
 Deno.test("variation dependencies: real PreviewAny ancestor survives, unrelated ImageCompare drops, every link resolves", () => {
   const graph = structuredClone(fixture);
   const result = narrowToOneOutputNode(graph, "461", "Qwen_image_2.1_00036", "v_", "_edit", outputs);
-  assertEquals(result, { kept: 2, dropped: 1 });
+  assertEquals(result, { kept: 2, dropped: 1, written: ["461"] });
   assertEquals(graph["459:480"], fixture["459:480"]);
   assert(!Object.hasOwn(graph, "472"));
   assertEquals(graph["459:500"], fixture["459:500"], "inactive lazy branch remains intact");
@@ -38,7 +38,7 @@ Deno.test("variation dependencies: all lazy inputs, transitive output ancestors 
     other: { class_type: "PreviewAny", inputs: {} },
     disconnected: { class_type: "Text", inputs: { value: "kept", pair: ["literal", "text"], nested: { value: ["not-a-link", 0] } } },
   };
-  assertEquals(narrowToOneOutputNode(graph, "producer", "source_00001", "v_", "", new Set(["SaveImage", "PreviewAny"])), { kept: 3, dropped: 1 });
+  assertEquals(narrowToOneOutputNode(graph, "producer", "source_00001", "v_", "", new Set(["SaveImage", "PreviewAny"])), { kept: 3, dropped: 1, written: ["producer"] });
   assert(Object.hasOwn(graph, "preview")); assert(Object.hasOwn(graph, "7"));
   assert(Object.hasOwn(graph, "cycle:8")); assert(Object.hasOwn(graph, "disconnected"));
   assert(!Object.hasOwn(graph, "other"));
