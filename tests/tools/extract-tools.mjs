@@ -2,7 +2,7 @@
 // historyOutputMetas). Not shipped in src/extractor.mjs — tests and manual
 // harvest scripts import from here.
 
-import { extractMeta, metaFromPngBytes } from "../../src/extractor.mjs";
+import { extractMeta, metaFromBytes } from "../../src/extractor.mjs";
 import { readdir, readFile } from "node:fs/promises";
 import { join } from "node:path";
 
@@ -10,7 +10,7 @@ export async function extractDir(dir) {
   const out = {};
   for (const name of (await readdir(dir)).sort()) {
     if (!name.endsWith(".png")) continue;
-    const [meta] = await metaFromPngBytes(new Uint8Array(await readFile(join(dir, name))));
+    const [meta] = await metaFromBytes(new Uint8Array(await readFile(join(dir, name))), name);
     out[name] = meta ?? { nopng: true };
   }
   return out;

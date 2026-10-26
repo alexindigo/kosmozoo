@@ -43,14 +43,14 @@ the resources; a collection's `capabilities` answer what its backing can do.
 | `/api/collections/<id>/entries/<name>` | GET | one entry |
 | `/api/collections/<id>/entries` | POST | multipart upload into the input dir; **409 with the conflicting name, never an overwrite** |
 | `/api/collections/<id>/entries/<name>` | DELETE | per capability: folder → unlink; comfy + assets_plus → trash; otherwise → hide + history cleanup |
-| `/api/collections/<id>/entries/<name>/bytes` | GET | cache-first bytes (`?kind=input` for input-dir files); ETag is the content hash, `Cache-Control: no-cache` |
+| `/api/collections/<id>/entries/<name>/bytes` | GET | cache-first bytes (`?kind=input` for input-dir files); ETag is the content hash, `Cache-Control: no-cache`; single-byte ranges (§Serve path) |
 | `/api/collections/<id>/entries/<name>/bytes` | HEAD | 404 when the entry's bytes are unknown, else `content-length` |
 | `/api/collections/<id>/entries/<name>/judgment` | PATCH | whitelisted fields (`vote`/`favorite`/`bookmark`/`notes`/`plugins.<ns>.*`), defaults deep-pruned, one statement |
 | `/api/collections/<id>/feedback.json` | GET | the collection's judgments as a portable v2 document, generated on demand |
 | `/api/collections/<id>/meta` | GET | versioned poll `?since=<v>` → `{v, changed, items?, dims?, pending}` — extracted metas and entry dims ride the same channel |
 | `/api/collections/<id>/want` | POST | `{files}` — on-screen names jump the extraction queue; the whole name array validates before any queue mutation |
 | `/api/content/<hash>` | GET | the content record + `instances: [{collection, name}]` |
-| `/api/content/<hash>/bytes` | GET | cache bytes by hash (plugins, workbench) |
+| `/api/content/<hash>/bytes` | GET | cache bytes by hash (plugins, workbench); same single-byte-range semantics |
 | `/api/prefetch` | GET, POST | the two-pass background ingestion: `enabled`/`paused` toggles, per-collection ingest `pending`, the pass totals `dimsPending`/`ingestPending`, and each collection's `lastError` |
 | `/api/settings/<ns>` | GET, PATCH | namespaced settings (`core.*`, `plugins.<name>.*`) |
 | `/api/plugins` | GET | discovered plugins + their declared capabilities |
@@ -197,7 +197,7 @@ client's delete affordance alike):
 A folder collection's address is `folder:/abs/path`; it lists renderable
 extensions (png, jpg, jpeg, webp, gif, svg, avif, bmp), newest-first by
 mtime, basename-only (no subdirectories, no traversal); its bytes come
-straight from disk; the PNG extraction pipeline applies unchanged. A
+straight from disk; the shared media extraction pipeline applies unchanged. A
 non-directory `folder:` address is rejected at add time (400 with reason).
 
 Comfy source addresses accept `host[:port]` over HTTP only, without a URL scheme
@@ -434,7 +434,7 @@ shared card-state presentation; card neutrals, judgment colors/priorities, wave
 length/glow, geometry, tape windowing and scrub handlers retain their contracts.
 
 Static surfaces: `/shared/<name>` serves the allow-listed `src/` modules
-(`extractor.mjs`, `features/variations/shared.mjs`, `entry-path.mjs`, `source-origin.mjs`, `version.mjs`) to the browser;
+(`extractor.mjs`, `backings/mime.mjs`, `features/variations/shared.mjs`, `entry-path.mjs`, `source-origin.mjs`, `version.mjs`) to the browser;
 `/` and `/diff` serve the Solid app from `client-solid-dist/`, with shared
 assets (`/css`, `/vendor`, `/js`, logos) from `client/`.
 
@@ -796,6 +796,21 @@ output when the row's `ext` is stale) → entry (`hash`, `stamp`,
 revalidation is an `Ingest` method (stale-while-revalidate over every
 backing kind).
 
+`src/backings/mime.mjs` is the shared extension → `{mime, kind}` registry;
+`mediaKind(name)` classifies images, videos (mp4/mov/webm) and audio
+(flac/mp3/opus/wav). Classification does not imply feed admission: currently
+`RENDERABLE` admits the existing image extensions only. The input-folder /
+LoadImage list always uses the image-only set derived from this registry.
+
+`metaFromBytes(bytes, name)` owns metadata dispatch for ingestion and cached
+graph reads. It returns `[meta, hasWorkflow, graph]`, with the executed API prompt
+graph separate from the editor workflow. Hash-only readers select by signature.
+PNG text (including APNG `comf` chunks after IDAT), WebP EXIF prefix strings,
+QuickTime mdta keys/ilst and iTunes comment envelopes, and Matroska SimpleTags
+all produce the same metadata/lineage contract. Version5 re-extracts previously
+ingested content through the existing staleness owner. No ffmpeg/runtime decoder
+dependency is introduced.
+
 `Ingest.dims(collection, name)` is the pre-ingest half: dims live in a
 file's first bytes (PNG IHDR, GIF descriptor, WebP VP8*, JPEG SOF), so a
 64 KB ranged head read (`Range: bytes=0-65535`; full-read fallback on a
@@ -804,6 +819,10 @@ hash, no cache write, no extract. Known dims (content via the entry's
 hash, or the entry columns) short-circuit the read; a 404 head read tells
 the prefetch the source lost the file, and the prefetch marks the entry
 `gone`.
+
+Video dimensions use MP4/MOV video-track `tkhd` display dimensions (including
+quarter-turn rotation), or WebM video-track PixelWidth/PixelHeight. A 64KiB head
+may miss a trailing moov; full ingestion and browser measurement cover that case.
 
 The prefetch runs TWO passes over each collection's listing: pass 1 the
 dims head reads (10 ms inter-file — size-before-render on a fresh host is
@@ -822,6 +841,16 @@ per-collection backoff caps at 30 s; 404 ⇒ `entry.state='gone'`
 + debounced revalidation) → read-through ingestion → backing proxy as last
 resort (with background ingest). A busy ComfyUI host is not a read
 outage.
+
+Both entry and hash bytes routes advertise `Accept-Ranges: bytes`. A valid
+single `bytes=start-end`, `bytes=start-` or `bytes=-suffix` request returns206
+with exact inclusive bytes, Content-Length and Content-Range. Unsatisfiable
+ranges return416 with `Content-Range: bytes */<length>`. Malformed, multi-range
+or unsupported units are ignored (200). Matching If-None-Match takes precedence
+(304); If-Range must match the strong content ETag, otherwise full bytes return.
+The complete file still goes through hashing/cache before slicing: no streaming
+rewrite. Comfy byte reads have a ten-second **idle** deadline, reset by headers
+and body progress; a progressing large download has no total ten-second limit.
 
 ### Judgments
 

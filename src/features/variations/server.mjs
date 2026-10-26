@@ -227,7 +227,7 @@ export function register(app) {
     if (expected?.graphHash && expected.graphHash !== hash) return { error: "Graph catalogue changed; work was kept", status: 412 };
     const graph = await app.ingest.graph(hash);
     if (!app.backings.isCurrent(token)) return { error: "source changed during inspection", status: 409 };
-    if (!graph) return { error: "no embedded ComfyUI graph in this PNG", status: 422 };
+    if (!graph) return { error: "no embedded ComfyUI graph", status: 422 };
     const { types, enums, outputClasses } = await backing.objectInfo();
     if (!app.backings.isCurrent(token)) return { error: "source changed during inspection", status: 409 };
     return { graph, addr, types, enums, outputClasses, token, backing, context: { origin, graphHash: hash } };

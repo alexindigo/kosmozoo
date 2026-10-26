@@ -50,6 +50,25 @@ export function makeRouter(ctx) {
     h.set("Content-Length", String(bytes.length));
     h.set("ETag", etag);
     h.set("Cache-Control", "no-cache");
+    h.set("Accept-Ranges", "bytes");
+    const range = req.headers.get("Range");
+    const ifRange = req.headers.get("If-Range");
+    // Unsupported units/multiple ranges/malformed syntax are ignored (200).
+    // A valid but unsatisfiable single bytes range explicitly returns 416.
+    const match = range && (!ifRange || ifRange === etag) && /^bytes=(\d*)-(\d*)$/.exec(range);
+    if (match && (match[1] || match[2])) {
+      const size = bytes.length;
+      const start = match[1] ? Number(match[1]) : Math.max(0, size - Number(match[2]));
+      const end = match[1] && match[2] ? Math.min(size - 1, Number(match[2])) : size - 1;
+      if (!Number.isSafeInteger(start) || !Number.isSafeInteger(end) || start > end || start >= size) {
+        h.set("Content-Range", `bytes */${size}`);
+        h.set("Content-Length", "0");
+        return new Response(null, { status: 416, headers: h });
+      }
+      h.set("Content-Range", `bytes ${start}-${end}/${size}`);
+      h.set("Content-Length", String(end - start + 1));
+      return new Response(bytes.subarray(start, end + 1), { status: 206, headers: h });
+    }
     return new Response(bytes, { headers: h });
   };
 
@@ -363,13 +382,7 @@ export function makeRouter(ctx) {
   add("GET", "/api/content/<hash>/bytes", async (req, { hash }) => {
     const bytes = await ctx.cache.get(hash);
     if (!bytes) return new Response("not found", { status: 404 });
-    const etag = `"${hash}"`;
-    if (req.headers.get("If-None-Match") === etag) {
-      return new Response(null, { status: 304, headers: { ETag: etag, "Cache-Control": "no-cache" } });
-    }
-    const h = new Headers({ "Content-Length": String(bytes.length), ETag: etag, "Cache-Control": "no-cache" });
-    h.set("Content-Type", sniffMime(bytes) ?? "application/octet-stream");
-    return new Response(bytes, { headers: h });
+    return bytesResponse(req, bytes, hash, sniffMime(bytes) ?? "application/octet-stream");
   });
 
   // --- settings + nodes + plugins -------------------------------------------------

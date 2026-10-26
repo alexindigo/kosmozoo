@@ -1,7 +1,7 @@
 // src/backings/comfy.mjs — the ComfyUI backing: a host's output/input dirs
 // over HTTP. One timeout for every fetch; every fetch checks r.ok.
 
-import { RENDERABLE, EXT_MIME } from "./mime.mjs";
+import { RENDERABLE, IMAGE_EXTENSIONS, EXT_MIME } from "./mime.mjs";
 import { assertSafeName } from "./folder.mjs";
 import { isEntryPath, splitEntryPath, inventoryFolders } from "../entry-path.mjs";
 import { makeInventoryOwner } from "./inventory-owner.mjs";
@@ -49,7 +49,7 @@ export async function list(addr, kind = "output", options = {}) {
   if (kind === "input") {
     return raw
       .map((n) => parseListingEntry(n).name)
-      .filter((n) => RENDERABLE.has(n.split(".").pop().toLowerCase()) && assertSafeName(n));
+      .filter((n) => IMAGE_EXTENSIONS.has(n.split(".").pop().toLowerCase()) && assertSafeName(n));
   }
   return raw.map(parseListingEntry);
 }
@@ -76,18 +76,31 @@ export async function stat(addr, name, kind = "output") {
 // both. Upstream serves some files as application/octet-stream (with
 // nosniff) — the browser can't render those, so map the extension when the
 // upstream type is useless.
-export async function read(addr, name, kind = "output", { range } = {}) {
+export async function read(addr, name, kind = "output", { range, idleMs = HOST_TIMEOUT_MS } = {}) {
   if (!validName(name)) return { status: 400 };
+  const controller = new AbortController();
+  let timer;
+  const clear = () => clearTimeout(timer);
+  const progress = () => {
+    clear();
+    timer = setTimeout(() => controller.abort(new Error("ComfyUI byte read stalled")), idleMs);
+  };
+  progress();
   let r;
   try {
     r = await fetch(viewUrl(addr, name, kind), {
       headers: range ? { Range: `bytes=${range[0]}-${range[1]}` } : undefined,
-      signal: AbortSignal.timeout(HOST_TIMEOUT_MS),
+      signal: controller.signal,
     });
   } catch {
+    clear();
     return { status: 502 };
   }
-  if (!r.ok) return { status: r.status };
+  if (!r.ok) {
+    clear();
+    await r.body?.cancel();
+    return { status: r.status };
+  }
   const headers = new Headers();
   const mime = EXT_MIME[name.split(".").pop().toLowerCase()];
   const ct = r.headers.get("Content-Type");
@@ -95,7 +108,25 @@ export async function read(addr, name, kind = "output", { range } = {}) {
   else if (ct) headers.set("Content-Type", ct);
   const cl = r.headers.get("Content-Length");
   if (cl) headers.set("Content-Length", cl);
-  return { status: r.status, body: r.body, headers };
+  const reader = r.body?.getReader();
+  if (!reader) { clear(); return { status: r.status, body: null, headers }; }
+  progress();
+  const body = new ReadableStream({
+    async pull(stream) {
+      try {
+        const { value, done } = await reader.read();
+        if (done) { clear(); reader.releaseLock(); stream.close(); }
+        else { progress(); stream.enqueue(value); }
+      } catch (error) { clear(); reader.releaseLock(); stream.error(error); }
+    },
+    async cancel(reason) {
+      clear();
+      // Cancelling the native reader already cancels the fetch body. Aborting
+      // first errors that reader and turns ordinary cancellation into rejection.
+      try { await reader.cancel(reason); } finally { reader.releaseLock(); }
+    },
+  });
+  return { status: r.status, body, headers };
 }
 
 // Upload one image into the input dir (the same mechanism the ComfyUI web

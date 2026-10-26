@@ -8,7 +8,7 @@
 import { sha256 } from "./cache.mjs";
 import { backingFor, validEntryName, makeCollectionLifecycle } from "./backings/index.mjs";
 import { cancelled } from "./backings/inventory.mjs";
-import { metaFromPngBytes, imageDims, parsePngTextChunks, EXTRACTOR_VERSION } from "./extractor.mjs";
+import { metaFromBytes, imageDims, EXTRACTOR_VERSION } from "./extractor.mjs";
 
 const DEFAULT_REVALIDATE_MS = 60_000;
 // Dims live in the first bytes of the file: PNG IHDR at 16–24, GIF at 6–10,
@@ -125,7 +125,7 @@ export class Ingest {
     const hash = this.#store.hashFor(collection, name);
     const cur = hash ? this.#store.contentGet(hash) : null;
     if (cur && cur.ext >= EXTRACTOR_VERSION) return;
-    const [meta, hasWorkflow] = await metaFromPngBytes(bytes);
+    const [meta, hasWorkflow] = await metaFromBytes(bytes, name);
     this.#assertCurrent(token);
     await this.#store.metaPut(collection, name, meta, { hasWorkflow, ext: EXTRACTOR_VERSION });
   }
@@ -212,9 +212,8 @@ export class Ingest {
   async graph(hash) {
     const bytes = await this.#cache.get(hash);
     if (!bytes) return null;
-    const chunks = await parsePngTextChunks(bytes);
-    if (!chunks?.prompt) return null;
-    try { return JSON.parse(chunks.prompt); } catch { return null; }
+    const [, , graph] = await metaFromBytes(bytes);
+    return graph;
   }
 
   // --- revalidation (stale-while-revalidate over every backing kind) ---------

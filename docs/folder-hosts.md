@@ -15,8 +15,8 @@ path) and a plugin (a core source kind belongs in core's host abstraction).
   avif, bmp), dotfiles skipped, **newest first by mtime**, basename only —
   no subdirectories, no `..`.
 - **bytes**: read from the folder; traversal-guarded.
-- **history**: none — the engine's metadata comes from PNG text-chunk
-  extraction anyway (the shared extractor), so ComfyUI outputs in a folder
+- **history**: none — the engine's metadata comes from the shared container
+  reader (PNG/APNG, WebP EXIF, MP4/MOV and WebM), so ComfyUI outputs in a folder
   get the full pipeline (scrape → extract → live fields).
 
 ## Errors
