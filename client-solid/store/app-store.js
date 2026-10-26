@@ -1050,15 +1050,14 @@ export function makeAppStore({ subscribeSources = typeof window !== "undefined" 
       return img ? api.entryBytesUrl(img.host, img.filename) : null;
     },
     imageAt: (i) => st.images[i],
+    entryFor: (id) => st.images[imageIdxById().get(id)],
     identityFor: (id) => {
       const image = st.images[imageIdxById().get(id)];
       return image ? image.hash ?? "" : null;
     },
   });
-  const sizeKnown = (img) =>
-    !!img && (!!img.width && !!img.height || !!(img.meta?.width && img.meta?.height) || sizes_.sizeOf(img.id) !== null);
-  const sizePending = (img) =>
-    !!img && !((img.width && img.height) || (img.meta?.width && img.meta?.height)) && sizes_.sizeOf(img.id) === null && !sizes_.loadFailed(img.id);
+  const sizeKnown = (img) => sizes_.sizeFor(img) !== null;
+  const sizePending = (img) => !!img && !sizeKnown(img);
   const entriesWithKnownSize = createMemo(() => view().filter((i) => sizeKnown(st.images[i])));
   // the pending set as a COUNT — never a
   // 3000-element materialization per landing (RC8)
@@ -1115,7 +1114,14 @@ export function makeAppStore({ subscribeSources = typeof window !== "undefined" 
     };
     const items = frame?.items ?? [];
     if (frame?.ready === false || !Number.isFinite(frame?.width) || frame.width <= 0 ||
-        !Number.isFinite(frame?.height) || frame.height <= 0 || !items.length) return;
+        !Number.isFinite(frame?.height) || frame.height <= 0) return;
+    // An all-pending feed has no virtual items to stage from (including a
+    // deliberately null current). Bootstrap the same bounded measurement owner.
+    if (!known.length && pending) {
+      untrack(() => sizes_.resolveAhead(view(), 0, 0));
+      return;
+    }
+    if (!items.length) return;
     const ids = [];
     let previous = -1;
     for (const item of items) {
@@ -2361,16 +2367,12 @@ export function makeAppStore({ subscribeSources = typeof window !== "undefined" 
     feedVirtualizer,
     feedActivity,
     feedMarkerEntryId,
-    // a card's image size: the listing's content dims, else the extractor
-    // meta's dims, else the off-DOM loader's measurement — null = unknown
-    // (unknown = the card is NOT in the feed — the invariant)
+    // One owner supplies listing/meta/measured dimensions or the fixed terminal
+    // failure box. Only pending (null-size) entries stay out of the feed.
     cardSize(idx) {
-      const img = st.images[idx];
-      if (!img) return null;
-      if (img.width && img.height) return { w: img.width, h: img.height };
-      if (img.meta?.width && img.meta?.height) return { w: img.meta.width, h: img.meta.height };
-      return sizes_.sizeOf(img.id);
+      return sizes_.sizeFor(st.images[idx]);
     },
+    sizeFailed: (id) => sizes_.loadFailed(id),
     pendingSizeCount,
     imageIdxById,
     feedEntryAt,

@@ -263,9 +263,10 @@ main { display: flex; flex: 1; min-height: 0; }
  unlayered beats layered, so the img rule outranks the base .imgwrap img */
 .imgwrap.ic-error { min-height: 120px; display: grid; place-items: center; }
 .imgwrap.ic-error img { display: none; }
-.imgwrap.ic-error::after { content: "load failed — click to retry";
-  position: static; display: block; text-align: center;
-  color: var(--negative); font-size: 12px; }
+.media-failure { min-width: 0; max-width: 100%; padding: 16px;
+  display: flex; flex-direction: column; align-items: center; gap: 6px;
+  text-align: center; color: var(--negative); font-size: 12px; }
+.media-failure-name { max-width: 100%; overflow-wrap: anywhere; font-weight: 600; }
 /* the shared title row under the image: title left, actions right */
 .ctitle { display: flex; justify-content: space-between; align-items: flex-start;
   gap: 8px; margin: 8px 0 2px; font-weight: 600; color: var(--foreground-mid); }

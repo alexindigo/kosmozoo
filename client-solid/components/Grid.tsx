@@ -5,7 +5,7 @@
 // spacers, and scrollToIndex for deep jumps. The DOM only ever holds the
 // window — restore/step costs O(window), not O(scroll position).
 //
-// The feed's invariant: a card mounts only when its size is known and never
+// The feed's invariant: a card mounts at known or terminally failed size and never
 // changes height while mounted. estimateSize IS cardHeight — exact for
 // every mounted row — so the library's measurement pass is not wired and
 // no timer coordinates geometry. A size landing that inserts an entry above
@@ -218,7 +218,7 @@ export function Grid() {
             <div class="endoflist">
               {store.state.filter()
                 ? `— all ${count()} matching “${store.state.filter()}” —`
-                : `— all ${store.state.folderView().length} images —`}
+                : `— all ${count()} images —`}
             </div>
           </Show>
         </div>

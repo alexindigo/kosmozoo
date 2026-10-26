@@ -368,7 +368,22 @@ cached dimensions; content replacement retires stale resources before the six-sl
 concurrency gate. Late callbacks require matching context/slot/content. Measurement
 and src-error owners share one eight-second retry timer with retained callbacks and
 owner-specific cancellation, so one owner's work or retirement cannot erase another's.
-Store disposal releases measurement resources, the resize listener and retry work.
+Each measurement attempt has a 30-second deadline and exactly one delayed retry;
+waiting cannot be bypassed by reconciliation. Retained measurement interest drains
+within the six-slot bound even when no card can mount. A terminal measurement
+failure is a known 1024×1024 box, not an omitted entry. Only pending entries stay
+out of the feed. The size owner supplies the same dimensions to feed membership,
+pending counts and CardSlot geometry; a terminal box cannot change height when
+late metadata arrives. Learning an entry's first hash is same-content enrichment
+and preserves active measurements and terminal boxes; changing a known hash
+retires them. If authoritative dimensions arrive during an attempt, a subsequent
+measurement error settles with those dimensions rather than resizing the already
+ready card into a fallback. The box displays the filename and “can't display this file”,
+with normal judgment, notes, download and hide/delete controls available. The
+footer counts the same filtered, size-ready entries as the virtualizer (including
+failures), and separately reports pending measurements.
+Store disposal releases measurement resources, deadlines, queued interest, the
+resize listener and retry work.
 
 The shared browser JSON transport throws `ApiError` on non-success, retaining
 method/path/status and at most 1024 characters of recognized engine JSON

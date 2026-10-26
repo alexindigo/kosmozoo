@@ -26,9 +26,8 @@ export function Card(props) {
 
   // the box's aspect is DATA — the store's resolved size (meta, else the
   // off-DOM loader's natural measurement), never the in-card img's load.
-  // An unknown size renders the 16:9 floor placeholder; the img inserts
-  // only once the size is known (off-card resolution keeps it out of view
-  // until then)
+  // Pending entries stay out of the feed; terminal failures have the size
+  // owner's fixed square box and keep the same normal card controls.
   const sizeInfo = () => store.state.cardSize(imgIdx());
   const ar = () => {
     const s = sizeInfo();
@@ -36,7 +35,7 @@ export function Card(props) {
   };
   const src = () => {
     const img = image();
-    if (!img) return null;
+    if (!img || store.state.sizeFailed(props.entryId)) return null;
     // the card is only MOUNTED at known size — the img's src follows the
     // window's range membership, in FEED POSITIONS (the one index space the
     // window knows); broken bytes take the in-card error path
@@ -87,6 +86,7 @@ export function Card(props) {
     <>
       <Zoomable
         src={src()}
+        failed={store.state.sizeFailed(props.entryId)}
         alt={image()?.filename}
         ar={ar()}
         zoomKey={image()?.id}
@@ -95,7 +95,7 @@ export function Card(props) {
         onPhase={(p) => {
           if (p === "loading") store.state.window.markStarted(props.entryId);
           else if (p === "loaded") store.state.window.markLoaded(props.entryId);
-          else if (p === "error") store.state.window.markError(props.entryId);
+          else if (p === "error" && !store.state.sizeFailed(props.entryId)) store.state.window.markError(props.entryId);
         }}
       />
       {/* the vote/comment foot: sticky to the viewport's bottom while a

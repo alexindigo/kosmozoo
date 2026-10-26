@@ -1,18 +1,21 @@
 // client-solid/store/sizes.js — every card's size is DATA, resolved before
 // the card renders:
 //
-// a card mounts only when its size is known, and never changes height
-// while mounted.
+// a card mounts only when its size is known or terminally failed, and never
+// changes height while mounted.
 //
 // Sources, in order: the listing's content dims (free, engine-resolved) →
 // the extractor meta's dims → off-DOM Image measurement (zero layout
-// effect) → 'failed'. The virtualizer's estimateSize is cardHeight — exact
-// for every mounted row, so the virtualizer never compensates and no timer
-// coordinates geometry.
+// effect) → a terminal 1024×1024 failure box. The virtualizer's estimateSize
+// is cardHeight — exact for every mounted row, so the virtualizer never
+// compensates and no timer coordinates geometry.
 
 import { createSignal } from "solid-js";
 
 export const ERROR_RETRY_MS = 8000;
+export const MEASURE_TIMEOUT_MS = 30000;
+const FAILURE_SIZE = Object.freeze({ w: 1024, h: 1024 });
+const validDims = (w, h) => Number.isFinite(w) && w > 0 && Number.isFinite(h) && h > 0;
 const RESOLVE_AHEAD = 30;   // entries past the visible window's tail
 const RESOLVE_BEHIND = 10;  // and behind its head (when more are pending above)
 const MAX_INFLIGHT = 6;     // bounded off-DOM concurrency
@@ -127,7 +130,7 @@ export function feedOffsets(entries, heightOf) {
   return offsets;
 }
 
-export function makeSizes({ srcFor, imageAt, identityFor = (id) => id }) {
+export function makeSizes({ srcFor, imageAt, entryFor = () => null, identityFor = (id) => id }) {
   // the chrome height is read HERE (store creation — the CSS is applied by
   // now; never at module import) and re-read on every resize: it is the one
   // cardHeight input that can change without any entry changing
@@ -136,7 +139,10 @@ export function makeSizes({ srcFor, imageAt, identityFor = (id) => id }) {
   if (typeof window !== "undefined") window.addEventListener("resize", resize);
   const sizes = new Map();   // id -> { w, h }
   const failed = new Set();  // ids the loader gave up on (one retry schedule)
-  const retried = new Set(); // ids whose single retry already failed
+  const retried = new Set(); // ids that have consumed their first attempt
+  const waiting = new Set(); // first failures waiting for the shared retry deadline
+  const queued = new Set();  // retained interest drains even when no card can mount
+  const deadlines = new Map();
   const inFlight = new Set();
   // GC guard: the Image object is the ONLY holder of the load's onload/
   // onerror — if nothing references it, the collector aborts the load
@@ -146,22 +152,49 @@ export function makeSizes({ srcFor, imageAt, identityFor = (id) => id }) {
   const identities = new Map();
   let context = null, disposed = false;
   let cancelRetry = null;
-  const retrySizes = () => { if (!disposed) { cancelRetry = null; retried.clear(); bump(); } };
+  const retrySizes = () => {
+    cancelRetry = null;
+    if (disposed) return;
+    for (const id of waiting) queued.add(id);
+    waiting.clear();
+    drain();
+    bump();
+  };
   const [version, setVersion] = createSignal(0);
   // the bumper MUST change the value: a bare setVersion writes undefined
   // once and then never notifies again (undefined === undefined) — every
   // downstream memo/effect silently freezes (the entire feed drain stall)
   const bump = () => setVersion((v) => v + 1);
 
+  // identityFor: null retires an entry; "" means its hash is not known yet.
+  // Learning the first hash enriches the same content, matching inventory
+  // reconciliation. Only a change between known hashes retires measurements.
+  function matchesIdentity(id, identity = identityFor(id)) {
+    if (!identities.has(id)) return false;
+    if (identities.get(id) === "" && typeof identity === "string" && identity !== "") identities.set(id, identity);
+    return identities.get(id) === identity;
+  }
+
   // reactive read: sizeOf subscribes to landings
-  const sizeOf = (id) => { version(); return identities.get(id) === identityFor(id) ? sizes.get(id) ?? null : null; };
+  const sizeOf = (id) => { version(); return matchesIdentity(id) ? sizes.get(id) ?? null : null; };
 
   function loadFailed(id) {
     version();
-    return identities.get(id) === identityFor(id) && failed.has(id);
+    return matchesIdentity(id) && failed.has(id);
+  }
+
+  // One size derivation for feed membership, pending counts and card geometry.
+  // A terminal box stays square even if metadata arrives after it mounted.
+  function sizeFor(entry) {
+    if (!entry) return null;
+    if (loadFailed(entry.id)) return sizeOf(entry.id);
+    if (validDims(entry.width, entry.height)) return { w: entry.width, h: entry.height };
+    if (validDims(entry.meta?.width, entry.meta?.height)) return { w: entry.meta.width, h: entry.meta.height };
+    return sizeOf(entry.id);
   }
 
   function retireImage(id) {
+    clearTimeout(deadlines.get(id)); deadlines.delete(id);
     const image = loading.get(id);
     if (image) {
       image.onload = null; image.onerror = null;
@@ -176,14 +209,14 @@ export function makeSizes({ srcFor, imageAt, identityFor = (id) => id }) {
     context = next;
     cancelRetry?.(); cancelRetry = null;
     for (const id of [...loading.keys()]) retireImage(id);
-    sizes.clear(); failed.clear(); retried.clear(); identities.clear();
+    sizes.clear(); failed.clear(); retried.clear(); waiting.clear(); queued.clear(); identities.clear();
     bump();
   }
 
   function reconcileIdentity(id) {
     const identity = identityFor(id);
-    if (identities.get(id) !== identity) {
-      retireImage(id); sizes.delete(id); failed.delete(id); retried.delete(id);
+    if (!matchesIdentity(id, identity)) {
+      retireImage(id); sizes.delete(id); failed.delete(id); retried.delete(id); waiting.delete(id);
       identities.set(id, identity);
     }
     return identity;
@@ -193,36 +226,64 @@ export function makeSizes({ srcFor, imageAt, identityFor = (id) => id }) {
     if (disposed || typeof Image === "undefined") return; // headless (unit tests)
     const identity = reconcileIdentity(id), owner = context;
     if (identity == null) return;
-    if (sizes.has(id) || inFlight.has(id) || failed.has(id)) return;
+    if (sizes.has(id) || inFlight.has(id) || waiting.has(id)) return;
+    if (sizeFor(entryFor(id)) !== null) return;
     const src = srcFor(id);
-    if (!src) return;
+    if (!src) { sizes.set(id, FAILURE_SIZE); failed.add(id); bump(); return; }
     inFlight.add(id);
-    const img = new Image();
-    loading.set(id, img);
-    const current = () => !disposed && context === owner && loading.get(id) === img && identityFor(id) === identity;
-    img.onload = () => {
-      if (!current()) return;
-      inFlight.delete(id);
-      loading.delete(id);
-      sizes.set(id, { w: img.naturalWidth, h: img.naturalHeight });
-      bump();
-    };
-    img.onerror = () => {
-      if (!current()) return;
-      inFlight.delete(id);
-      loading.delete(id);
-      if (retried.has(id)) {
-        failed.add(id); // the single retry failed too — permanent
+    let img;
+    const fail = () => {
+      // Engine dimensions may have made the card ready during this attempt.
+      // Settle with those dimensions, never resize that card into a fallback.
+      const known = sizeFor(entryFor(id));
+      retireImage(id);
+      if (known) {
+        sizes.set(id, known);
+      } else if (retried.has(id)) {
+        sizes.set(id, FAILURE_SIZE);
+        failed.add(id);
       } else {
-        retried.add(id); // exactly one retry, in ERROR_RETRY_MS
+        retried.add(id);
+        waiting.add(id);
         cancelRetry = scheduleRetry(retrySizes);
       }
       bump();
+      drain();
     };
-    img.src = src;
+    try { img = new Image(); } catch { fail(); return; }
+    loading.set(id, img);
+    const current = () => !disposed && context === owner && loading.get(id) === img && matchesIdentity(id);
+    img.onload = () => {
+      if (!current()) return;
+      if (!validDims(img.naturalWidth, img.naturalHeight)) { fail(); return; }
+      sizes.set(id, { w: img.naturalWidth, h: img.naturalHeight });
+      retireImage(id);
+      bump();
+      drain();
+    };
+    img.onerror = () => {
+      if (!current()) return;
+      fail();
+    };
+    deadlines.set(id, setTimeout(() => {
+      if (current()) fail();
+      else if (loading.get(id) === img) { reconcileIdentity(id); drain(); }
+    }, MEASURE_TIMEOUT_MS));
+    try { img.src = src; } catch { if (current()) fail(); }
   }
 
-  const hasDims = (e) => (e.width && e.height) || (e.meta?.width && e.meta?.height);
+  let draining = false;
+  function drain() {
+    if (disposed || draining) return;
+    draining = true;
+    try {
+      for (const id of queued) {
+        if (inFlight.size >= MAX_INFLIGHT) break;
+        queued.delete(id);
+        resolve(id);
+      }
+    } finally { draining = false; }
+  }
 
   // Stage off-DOM measurements for VIEW entries around the visible window;
   // bounded concurrency. BEHIND FIRST: an entry above the viewport whose
@@ -239,18 +300,19 @@ export function makeSizes({ srcFor, imageAt, identityFor = (id) => id }) {
     let pendingAbove = 0;
     for (let i = 0; i < first; i++) {
       const e = imageAt(viewIdx[i]);
-      if (e && !hasDims(e) && !loadFailed(e.id)) pendingAbove++;
+      if (e && sizeFor(e) === null) pendingAbove++;
     }
     const behind = pendingAbove <= MAX_BEHIND_ALL ? first : RESOLVE_BEHIND;
     const from = Math.max(0, first - behind);
     const to = Math.min(viewIdx.length - 1, last + RESOLVE_AHEAD);
     const stage = (i) => {
       const e = imageAt(viewIdx[i]);
-      if (!e || hasDims(e) || loadFailed(e.id)) return;
-      resolve(e.id);
+      if (!e || sizeFor(e) !== null) return;
+      queued.add(e.id);
     };
-    for (let i = from; i < first && inFlight.size < MAX_INFLIGHT; i++) stage(i);
-    for (let i = first; i <= to && inFlight.size < MAX_INFLIGHT; i++) stage(i);
+    for (let i = from; i < first; i++) stage(i);
+    for (let i = first; i <= to; i++) stage(i);
+    drain();
   }
 
   function dispose() {
@@ -260,5 +322,5 @@ export function makeSizes({ srcFor, imageAt, identityFor = (id) => id }) {
     setContext(null);
   }
 
-  return { sizeOf, resolveAhead, loadFailed, setContext, dispose };
+  return { sizeOf, sizeFor, resolveAhead, loadFailed, setContext, dispose };
 }

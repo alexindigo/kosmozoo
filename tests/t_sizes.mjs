@@ -54,9 +54,11 @@ function fakeImageEnv() {
     }
     set src(v) {
       this._src = v;
+      this.requestedSrc = v;
       queueMicrotask(() => this.onload?.());
     }
     get src() { return this._src; }
+    removeAttribute() { this._src = undefined; }
   };
   return made;
 }
@@ -74,12 +76,12 @@ Deno.test("resolveAhead: behind-first order, MAX_INFLIGHT bound", async () => {
   // MAX_INFLIGHT: exactly 6 started, and they are the first 6 BEHIND entries
   assertEquals(made.length, 6);
   assertEquals(made.map((m) => m.src), entries.slice(0, 6).map((e) => `bytes:${e.id}`));
-  // landing those stages the next behind entries — still no ahead entry
+  // Landing automatically drains retained interest, behind entries first.
   for (const m of made.splice(0)) queueMicrotask(() => {});
   await new Promise((r) => setTimeout(r, 30));
-  const started = made.map((m) => m.src);
-  assert(started.every((s) => entries.slice(0, 50).some((e) => `bytes:${e.id}` === s)),
-    `only behind entries are in flight: ${started.join(",")}`);
+  const started = made.map((m) => m.requestedSrc);
+  assertEquals(started, entries.slice(6, 91).map((e) => `bytes:${e.id}`),
+    "retained interest drains all behind entries before the ahead window, without another staging call");
 
   // > 50 pending above → the behind window clamps to RESOLVE_BEHIND (10)
   const made2 = fakeImageEnv();
@@ -90,5 +92,6 @@ Deno.test("resolveAhead: behind-first order, MAX_INFLIGHT bound", async () => {
   sizes2.resolveAhead(viewIdx, 80, 90);
   assertEquals(made2.map((m) => m.src), entries.slice(70, 76).map((e) => `bytes:${e.id}`));
 
+  sizes.dispose(); sizes2.dispose();
   delete globalThis.Image;
 });

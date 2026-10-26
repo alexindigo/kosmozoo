@@ -133,6 +133,8 @@ async function railMotion(page) {
   await healthyTraffic({ page, traffic: sourceTraffic, ENGINE, KZ, check });
   const dims = await page.evaluate(`(async () => (await (await fetch("/api/prefetch")).json()).dimsPending)()`);
   check("dims pass drained before the feed audit", dims === 0, `dimsPending=${dims}`);
+  try { await require('./size-failures.cjs')({ page, ENGINE, KZ, check, capture }); }
+  catch (error) { check('visible size failures consumer', false, error.message); }
   try { await railMotion(page); } catch(error) { check('rail scroll timing consumer',false,error.message); }
 
   // Card actions use the disposable folder collection, never a real host.

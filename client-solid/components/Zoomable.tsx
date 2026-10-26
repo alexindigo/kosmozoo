@@ -13,7 +13,7 @@
 // Props are VALUES (callers pass accessor calls: ar={ar}) — no dual
 // value/function contract .
 
-import { createSignal, createMemo, createEffect, on, onCleanup } from "solid-js";
+import { createSignal, createMemo, createEffect, on, onCleanup, Show } from "solid-js";
 import { makeZoomable } from "/js/zoomable.mjs";
 import { useAppStore } from "../store/app-store.js";
 
@@ -35,6 +35,7 @@ export function Zoomable(props) {
   const [loaded, setLoaded] = createSignal(false);
   const [errored, setErrored] = createSignal(false);
   const phase = createMemo(() => {
+    if (props.failed) return "error";
     if (props.src == null) return "empty";
     if (errored()) return "error";
     return loaded() ? "loaded" : "loading";
@@ -74,7 +75,7 @@ export function Zoomable(props) {
       <img
         ref={imgEl}
         alt={props.alt}
-        src={props.src == null ? undefined : props.src}
+        src={props.failed || props.src == null ? undefined : props.src}
         style={{ transform: transform() || undefined }}
         onLoad={() => {
           // natural size is the box's aspect source; the image itself is
@@ -87,6 +88,13 @@ export function Zoomable(props) {
           setErrored(true);
         }}
       />
+      <Show when={phase() === "error"}>
+        <div class="media-failure" role="status">
+          <span class="media-failure-name">{props.alt}</span>
+          <span>can't display this file</span>
+          <Show when={!props.failed && props.onErrorClick}><span>click to retry</span></Show>
+        </div>
+      </Show>
     </div>
   );
 }

@@ -207,6 +207,9 @@ const activeLogs = new Set();
 let logSequence = 0;
 
 function publication(description) {
+  if (description.fixture === "undecodable") {
+    return { bytes: new TextEncoder().encode("not a decodable PNG\n"), promptGraph: null };
+  }
   const fixture = description.fixture === "bulk" ? { bytes: BULK_PNG, promptGraph: null }
     : fixtures.get(description.fixture ?? "flux-basic.png");
   if (!fixture) return null;
