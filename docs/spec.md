@@ -200,6 +200,14 @@ mtime, basename-only (no subdirectories, no traversal); its bytes come
 straight from disk; the PNG extraction pipeline applies unchanged. A
 non-directory `folder:` address is rejected at add time (400 with reason).
 
+Comfy source addresses accept `host[:port]` over HTTP only, without a URL scheme
+or IPv6 literal. Omitting the port means 80; explicit ports must be decimal whole
+numbers from 1 through 65535. One normalization owner in `src/collections.mjs`
+serves API admission and environment seeds. Only `host:port` is stored and shown
+in the picker: `comfy.home` becomes `comfy.home:80`. Repeating either spelling
+under the same name is the same source; a different port remains a 409 conflict.
+Existing stored addresses and source origins are unchanged.
+
 ### Source activity and chrome
 
 `Jobs` is context-owned; one single-flight read loop per distinct Comfy address
@@ -673,9 +681,11 @@ working tree is never a state dir. Env overrides: `KOZMOZOO_PORT` (default
 `KOZMOZOO_PLUGINS`, `KOZMOZOO_REVALIDATE_MS`.
 
 Fresh state starts with no collections when `KOZMOZOO_HOSTS` is unset or empty.
-An explicit comma-separated `name=host:port` or `name=folder:/path` list seeds an
+An explicit comma-separated `name=host[:port]` or `name=folder:/path` list seeds an
 empty collection table; existing nonempty collections always take precedence.
 There is no separate first-boot marker, so an empty table can be seeded later.
+Seeds use the same address normalization and collection validation as API adds;
+invalid entries fail startup with a `KOZMOZOO_HOSTS` error before any seed is stored.
 
 One pure bind/port resolver owns startup modes. Desktop app defaults to
 `127.0.0.1`; source development, foreground `serve` and Docker to

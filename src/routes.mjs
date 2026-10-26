@@ -6,7 +6,7 @@
 // reassigns or guards it (E1).
 
 import { backingFor, isFolderHost, EXT_MIME, validEntryName } from "./backings/index.mjs";
-import { capabilities, validateCollection, validateAttributes, sourceAttributes } from "./collections.mjs";
+import { capabilities, normalizeAddress, validateCollection, validateAttributes, sourceAttributes } from "./collections.mjs";
 import { sniffMime } from "./extractor.mjs";
 import { sourceOrigin, sameOrigin, expectedOrigin } from "./source-origin.mjs";
 
@@ -122,27 +122,28 @@ export function makeRouter(ctx) {
     if (!body || typeof body !== "object" || Array.isArray(body)) {
       return Response.json({ error: "JSON body: {name, address}" }, { status: 400 });
     }
-    const { name, address, ...attributes } = body;
-    const err = validateAttributes(attributes) ?? await validateCollection(name, address);
+    const { name, address: inputAddress, ...attributes } = body;
+    const { address, error } = normalizeAddress(inputAddress);
+    const err = validateAttributes(attributes) ?? error ?? await validateCollection(name, address);
     if (err) return Response.json({ error: err }, { status: 400 });
     if (!ctx.sourceActivity.acceptingChanges()) return Response.json({ error: "sources are stopping" }, { status: 503 });
     // an existing id with a different address is a conflict, not a silent
     // re-point (every entry/judgment under the id would change host)
-    const existing = ctx.store.collectionGet(body.name);
-    if (existing && existing.address !== body.address) {
+    const existing = ctx.store.collectionGet(name);
+    if (existing && existing.address !== address) {
       return Response.json(
-        { error: `collection "${body.name}" already exists with address ${existing.address}` },
+        { error: `collection "${name}" already exists with address ${existing.address}` },
         { status: 409 },
       );
     }
-    ctx.store.collectionAdd(body.name, body.address, attributes);
-    const { activity: _activity, ...source } = ctx.sourceActivity.source(body.name);
+    ctx.store.collectionAdd(name, address, attributes);
+    const { activity: _activity, ...source } = ctx.sourceActivity.source(name);
     const sourceCursor = ctx.sourceActivity.cursor();
     return Response.json({
-      name: body.name,
+      name,
       ...source,
       sourceCursor,
-      online: await backingFor(body.address).probe(body.address),
+      online: await backingFor(address).probe(address),
     });
   });
 

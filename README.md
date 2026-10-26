@@ -43,6 +43,12 @@ to loopback2084; service/source/Docker mode to0.0.0.0:2084, with explicit
 - Keyboard shortcuts respect modal layers; engine settings and browser-local
   browsing/layout preferences preserve your setup between visits.
 
+Add ComfyUI sources as `host[:port]` (HTTP only, no URL scheme), or local sources
+as `folder:/path`. The default HTTP port is 80: `comfy.home` is stored and shown
+as `comfy.home:80`; explicit ports must be whole numbers from 1 through 65535.
+The optional first-boot `KOZMOZOO_HOSTS` seed uses the same grammar, for example
+`studio=comfy.home,worker=worker.home:8188`.
+
 ## Screenshots
 
 ![Image feed beside a reference image and generation metadata](docs/screenshots/01-feed-and-info.png)

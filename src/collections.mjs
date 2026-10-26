@@ -41,14 +41,19 @@ export async function capabilities(collection, { online = true, useAssetsPlus = 
 
 // --- the registry ------------------------------------------------------------
 
-// KOZMOZOO_HOSTS: "name=host:port,name2=host2:port2" or "name=folder:/path"
+// KOZMOZOO_HOSTS: "name=host[:port],name2=host2[:port2]" or "name=folder:/path"
 export function parseHosts(env = Deno.env.toObject()) {
   const raw = env.KOZMOZOO_HOSTS ?? "";
+  if (!raw.trim()) return {};
   const hosts = [];
   for (const pair of raw.split(",")) {
     const eq = pair.indexOf("=");
-    if (eq < 0) continue;
-    hosts.push([pair.slice(0, eq).trim(), pair.slice(eq + 1).trim()]);
+    if (eq < 0) throw new Error(`KOZMOZOO_HOSTS: expected name=address: ${pair}`);
+    const name = pair.slice(0, eq).trim();
+    const normalized = normalizeAddress(pair.slice(eq + 1).trim());
+    const error = validateName(name) ?? normalized.error;
+    if (error) throw new Error(`KOZMOZOO_HOSTS: ${JSON.stringify(name)}: ${error}`);
+    hosts.push([name, normalized.address]);
   }
   return Object.fromEntries(hosts);
 }
@@ -60,12 +65,33 @@ export async function loadCollections(store, env = Deno.env.toObject()) {
   const existing = store.collectionMap();
   if (Object.keys(existing).length) return existing;
   const seed = parseHosts(env);
+  // Validate the complete seed (including folder IO) before the first write.
+  for (const [name, address] of Object.entries(seed)) {
+    const error = await validateCollection(name, address);
+    if (error) throw new Error(`KOZMOZOO_HOSTS: ${JSON.stringify(name)}: ${error}`);
+  }
   for (const [name, address] of Object.entries(seed)) store.collectionAdd(name, address);
   return store.collectionMap();
 }
 
 const NAME_RE = /^[\w][\w.-]*$/;
-const ADDR_RE = /^[\w.-]+:\d+$/;
+const ADDR_RE = /^[\w.-]+(?::(\d+))?$/;
+const validateName = name => typeof name === "string" && NAME_RE.test(name)
+  ? null : "bad name (word chars, dots, hyphens)";
+
+// The single address grammar/normalization owner. Folder existence stays at
+// the async collection admission boundary; canonical HTTP addresses are what
+// persistence, conflict checks and every downstream address consumer receive.
+export function normalizeAddress(address) {
+  if (typeof address === "string") {
+    if (address.startsWith("folder:")) return { address };
+    const match = ADDR_RE.exec(address);
+    if (match && (match[1] === undefined || (Number(match[1]) >= 1 && Number(match[1]) <= 65535))) {
+      return { address: match[1] === undefined ? `${address}:80` : address };
+    }
+  }
+  return { error: "bad address (host[:port] or folder:/path; HTTP port 1–65535, default 80)" };
+}
 
 // Source attributes have their own persistence boundary: no address/folder
 // validation or host probing for an edit to an existing source.
@@ -83,9 +109,11 @@ export const sourceAttributes = (record) => ({ pinned: !!record.pinned, autoRefr
 // Validate a new collection: name grammar + address grammar; a folder
 // collection must name an existing directory (spec ).
 export async function validateCollection(name, address) {
-  if (!name || !NAME_RE.test(name)) return "bad name (word chars, dots, hyphens)";
-  if (address?.startsWith("folder:")) {
-    const path = folderPath(address);
+  const normalized = normalizeAddress(address);
+  const error = validateName(name) ?? normalized.error;
+  if (error) return error;
+  if (normalized.address.startsWith("folder:")) {
+    const path = folderPath(normalized.address);
     if (!path?.trim()) return "folder: needs a path";
     try {
       const s = await stat(path);
@@ -95,7 +123,6 @@ export async function validateCollection(name, address) {
     }
     return null;
   }
-  if (!address || !ADDR_RE.test(address)) return "bad address (host:port or folder:/path)";
   return null;
 }
 

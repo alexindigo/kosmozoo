@@ -2,7 +2,7 @@
 // user-managed via settings; add/remove persist; validation and the
 // last-host guard hold.
 
-import { assert, assertEquals } from "jsr:@std/assert";
+import { assert, assertEquals, assertRejects, assertThrows } from "jsr:@std/assert";
 import { parseHosts, loadCollections, validateCollection } from "../src/collections.mjs";
 import { backingFor } from "../src/backings/index.mjs";
 import { comfyClient } from "../src/backings/comfy.mjs";
@@ -50,9 +50,103 @@ Deno.test("hosts: env seeds first boot; collections win after that", async () =>
 Deno.test("hosts: validation rejects malformed name/address", async () => {
   assert(await validateCollection("", "x:8188"));
   assert(await validateCollection("a b", "x:8188"));
-  assert(await validateCollection("ok", "no-port"));
+  assert(await validateCollection("ok", "not a host"));
   assert(await validateCollection("ok", ""));
   assertEquals(await validateCollection("ms-01", "comfyui.home:8188"), null);
+});
+
+Deno.test("hosts: HTTP address grammar accepts default port and rejects invalid ports and schemes", async () => {
+  for (const address of ["comfy.home", "localhost", "127.0.0.1", "comfy.home:80", "comfy.home:8188", "comfy.home:1", "comfy.home:65535"]) {
+    assertEquals(await validateCollection("studio", address), null, address);
+  }
+  for (const address of ["comfy.home:0", "comfy.home:65536", "comfy.home:-1", "comfy.home:1.5", "comfy.home:abc",
+    "comfy.home:", "http://comfy.home", "https://comfy.home", "[::1]:80", "comfy.home/path",
+    "comfy.home\n", "comfy.home:80\n", "comfy.home\r", "comfy.home:80\u2028", null, 80, {}, []]) {
+    assert(await validateCollection("studio", address), `reject ${JSON.stringify(address)}`);
+  }
+});
+
+Deno.test("hosts: seed canonicalizes bare hosts and preserves explicit ports and folder addresses", async () => {
+  const rig = await mkStateRig("hosts-default-seed");
+  try {
+    const folder = `folder:${rig.dir}`;
+    const env = { KOZMOZOO_HOSTS: ` studio = comfy.home , explicit=comfy.home:8188,files=${folder}` };
+    const expected = { studio: "comfy.home:80", explicit: "comfy.home:8188", files: folder };
+    assertEquals(parseHosts(env), expected);
+    assertEquals(await loadCollections(rig.store, env), expected);
+    assertEquals(await validateCollection("files", folder), null);
+    assertEquals(rig.store.collectionGet("files").address, folder);
+  } finally { await rig.close(); }
+});
+
+Deno.test("hosts: invalid seeds fail clearly before any collection is stored", async () => {
+  const rig = await mkStateRig("hosts-invalid-seed");
+  try {
+    for (const pair of ["broken", "=comfy.home", "bad name=comfy.home", "bad=", "bad=comfy.home:0",
+      "bad=comfy.home:65536", "bad=comfy.home:abc", "bad=https://comfy.home"]) {
+      const env = { KOZMOZOO_HOSTS: `good=comfy.home:8188,${pair}` };
+      assertThrows(() => parseHosts(env), Error, "KOZMOZOO_HOSTS");
+      await assertRejects(() => loadCollections(rig.store, env), Error, "KOZMOZOO_HOSTS");
+      assertEquals(rig.store.collectionMap(), {}, pair);
+    }
+    for (const address of ["folder:", `folder:${rig.dir}/missing`]) {
+      await assertRejects(() => loadCollections(rig.store, {
+        KOZMOZOO_HOSTS: `good=comfy.home:8188,bad=${address}`,
+      }), Error, "KOZMOZOO_HOSTS");
+      assertEquals(rig.store.collectionMap(), {}, "folder validation precedes all seed writes");
+    }
+  } finally { await rig.close(); }
+});
+
+Deno.test("hosts: loading existing explicit-port rows leaves every stored field untouched", async () => {
+  const rig = await mkStateRig("hosts-existing-port");
+  try {
+    rig.store.collectionAdd("studio", "comfy.home:8188", { pinned: true, autoRefresh: true });
+    const before = rig.store.collectionGet("studio");
+    assertEquals(await loadCollections(rig.store, { KOZMOZOO_HOSTS: "invalid seed ignored for a nonempty table" }), { studio: "comfy.home:8188" });
+    assertEquals(rig.store.collectionGet("studio"), before);
+  } finally { await rig.close(); }
+});
+
+Deno.test("hosts: real add route canonicalizes before persistence, identity comparison and probing", async () => {
+  const rig = await mkStateRig("hosts-default-route");
+  const context = sourceContext(rig);
+  const router = makeRouter(context);
+  const originalFetch = globalThis.fetch, probes = [];
+  // No real upstream access: observe the exact address used by the backing.
+  globalThis.fetch = (url) => {
+    probes.push(String(url));
+    return Promise.resolve(Response.json({}));
+  };
+  const post = address => router.handle(new Request("http://engine/api/collections", {
+    method: "POST", body: JSON.stringify({ name: "studio", address, pinned: true }),
+  }));
+  try {
+    const added = await post("comfy.home");
+    assertEquals(added.status, 200);
+    const source = await added.json();
+    assertEquals(source.address, "comfy.home:80");
+    assertEquals(source.online, true);
+    assertEquals(rig.store.collectionGet("studio").address, "comfy.home:80");
+    assertEquals(rig.hosts.studio, "comfy.home:80");
+    const before = rig.store.collectionGet("studio");
+    const repeated = await post("comfy.home:80");
+    assertEquals(repeated.status, 200);
+    assertEquals((await repeated.json()).incarnation, source.incarnation);
+    assertEquals((await post("comfy.home")).status, 200, "bare address also matches an existing canonical row");
+    assertEquals((await post("comfy.home:8188")).status, 409);
+    assertEquals(rig.store.collectionGet("studio"), before);
+    assertEquals(probes, Array(3).fill("http://comfy.home:80/api/system_stats"));
+    for (const address of ["comfy.home:0", "comfy.home:65536", "comfy.home:nope", 80, {}]) {
+      assertEquals((await post(address)).status, 400);
+    }
+    assertEquals(rig.store.collectionGet("studio"), before);
+  } finally {
+    globalThis.fetch = originalFetch;
+    context.sourceActivity.stop();
+    await context.jobs.stop();
+    await rig.close();
+  }
 });
 
 Deno.test("hosts: POST adds + persists + probes; DELETE removes; last host guarded", async () => {

@@ -87,7 +87,7 @@ export function HostPicker() {
             value={name()} onInput={(e) => setName(e.target.value)}
           />
           <input
-            type="text" id="hostAddr" placeholder="host:port or folder:/path" spellcheck={false}
+            type="text" id="hostAddr" placeholder="host[:port] or folder:/path" spellcheck={false}
             value={addr()} onInput={(e) => setAddr(e.target.value)}
             onKeyDown={(e) => { if (e.key === "Enter") submitAdd(); }}
           />
