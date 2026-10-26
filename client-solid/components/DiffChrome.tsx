@@ -62,7 +62,7 @@ function VSlider(props) {
   );
 }
 
-export function DiffChrome() {
+export function DiffChrome(props) {
   const store = useAppStore();
   const d = () => store.state.diff;
   const hasB = () => !!store.state.diffPair().b;
@@ -111,7 +111,7 @@ export function DiffChrome() {
             innerHTML={iconSvg(d().locked ? "lock" : "lock-open", 14)}
           />
           <VSlider
-            icon="opacity" title="active image opacity" class="dz-active-op"
+            icon="opacity" title={`active ${props.mediaWord ?? "image"} opacity`} class="dz-active-op"
             value={() => d().activeOpacity}
             disabled={!hasB()}
             open={() => openCtl() === "active"}
@@ -144,8 +144,8 @@ export function DiffChrome() {
             {([key, m, label, icon]) => (
               <button
                 class={"dz-segbtn" + (d().mode === m ? " on" : "")}
-                disabled={!hasB() || undefined}
-                title={`${label} (${key})`}
+                disabled={!hasB() || (m === "difference" && !!props.differenceReason) || undefined}
+                title={m === "difference" && props.differenceReason ? props.differenceReason : `${label} (${key})`}
                 onClick={() => store.handles.invoke("workbench.mode", { mode: m })}
                 innerHTML={iconSvg(icon, 16)}
               />

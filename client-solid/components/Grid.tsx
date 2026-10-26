@@ -242,6 +242,7 @@ export function Grid() {
 // appears once, at its final height. No 16:9 floor box, no shrink, no jump.
 function CardSlot(props) {
   const store = useAppStore();
+  let cardEl;
   const imgIdx = () => store.state.imageIdxById().get(props.entryId);
   const image = () => store.state.images[imgIdx()];
   const ready = () => imgIdx() != null && store.state.cardSize(imgIdx()) != null;
@@ -263,6 +264,8 @@ function CardSlot(props) {
       fallback={<div class="card--slot-gap" style={`height:${Math.max(0, (props.slotSize ?? 0) - gridGapPx())}px`} />}
     >
       <div
+        ref={cardEl} tabIndex={-1}
+        onPointerDown={() => cardEl.focus({ preventScroll: true })}
         class={"card" + (state().current ? " current" : "") + (isTall() ? " card--tall" : "")}
         style={{ ...state().style, height: `${cardHeight(store.state.cardSize(imgIdx()), store.state.feedScrollEl()?.clientWidth ?? 800)}px` }}
         data-treatment={state().treatment}
@@ -272,7 +275,7 @@ function CardSlot(props) {
         data-favorite={state().active.favorite ? "1" : undefined}
         data-bookmark={state().active.bookmark ? "1" : undefined}
       >
-        <Card entryId={props.entryId} />
+        <Card entryId={props.entryId} focused={() => cardEl?.contains(document.activeElement)} />
       </div>
     </Show>
   );

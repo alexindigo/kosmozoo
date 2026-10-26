@@ -15,6 +15,7 @@ import { flash } from "../lib/flash.js";
 import { Zoomable } from "./Zoomable.js";
 import { IconButton } from "./IconButton.js";
 import { NoteBox } from "./NoteBox.js";
+import { mediaKind } from "/shared/backings/mime.mjs";
 
 export function Card(props) {
   const store = useAppStore();
@@ -23,6 +24,7 @@ export function Card(props) {
   const image = () => store.state.images[imgIdx()];
   const meta = () => image()?.meta ?? null;
   const state = () => store.state.cardState(props.entryId);
+  const word = () => mediaKind(image()?.filename) === "audio" ? "audio file" : mediaKind(image()?.filename) ?? "image";
 
   // the box's aspect is DATA — the store's resolved size (meta, else the
   // off-DOM loader's natural measurement), never the in-card img's load.
@@ -90,6 +92,7 @@ export function Card(props) {
         alt={image()?.filename}
         ar={ar()}
         zoomKey={image()?.id}
+        focused={props.focused}
         onOpen={() => store.handles.invoke("workbench.openEntry", { id: props.entryId })}
         onErrorClick={() => store.state.window.retry(props.entryId)}
         onPhase={(p) => {
@@ -138,12 +141,12 @@ export function Card(props) {
             />
             <IconButton
               icon={iconSvg("bookmark")} variant="bookmark" active={state().active.bookmark}
-              title="bookmark - return to this image later"
+              title={`bookmark - return to this ${word()} later`}
               onAction={() => store.handles.invoke("judgment.apply", { id: props.entryId, intent: { type: "toggle", field: "bookmark" } })}
             />
             <IconButton
               icon={iconSvg("download")} variant="download"
-              title="download this image"
+              title={`download this ${word()}`}
               onAction={() => store.handles.invoke("image.download", { id: props.entryId })}
             />
             <Show when={del()}>

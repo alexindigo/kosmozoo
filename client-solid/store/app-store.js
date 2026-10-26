@@ -32,6 +32,8 @@ import { fieldList, nodeImages } from "./fields.js";
 import { pairSides } from "../features/diff/pair.mjs";
 import { makeImageWindow } from "./image-window.js";
 import { makeSizes } from "./sizes.js";
+import { makeMediaPlayers } from "./media-players.js";
+import { mediaKind } from "/shared/backings/mime.mjs";
 import { snapTidy, SNAP_QUIET_MS } from "./scroll-snap.js";
 import { makeJudgments } from "./judgments.js";
 import { cardState } from "./card-state.js";
@@ -240,6 +242,9 @@ export function makeAppStore({ subscribeSources = typeof window !== "undefined" 
     infoSource: st.diff.infoSource,
     host: host(),
   }));
+  const differenceReason = createMemo(() => [diffPair().a, diffPair().b].some(side =>
+    side && (mediaKind(side.file ?? side.image) ?? "image") !== "image") ? "difference mode compares still images" : null);
+  createEffect(() => { if (differenceReason() && st.diff.mode === "difference") setSt("diff", "mode", "two-up"); });
 
   // a B side pinned to the current graph's node images dies with that graph:
   // when the feed current moves to a DIFFERENT image, a stale infoFile
@@ -1159,6 +1164,8 @@ export function makeAppStore({ subscribeSources = typeof window !== "undefined" 
   // signal fans mutations out to the keys panel.
   let inputPolicy;
   const handles = makeCommandHandles({ observe: (result) => inputPolicy?.observe(result) });
+  const players = makeMediaPlayers({ workbenchOpen: () => st.diff.open,
+    onError: error => actions.status.error(`playback failed: ${error?.message ?? error}`) });
   const keymap = makeKeymap({
     describe: (id) => handles.get(id).description,
     request: (binding) => inputPolicy.request(binding),
@@ -1415,6 +1422,7 @@ export function makeAppStore({ subscribeSources = typeof window !== "undefined" 
     batch(retireFeedScroll);
     window_.clear();
     sizes_.dispose();
+    players.dispose();
     clearTimeout(metaPollTimer);
     clearTimeout(sourceSession?.retryTimer);
     for (const record of sourceRecords.values()) record.freshness.retire();
@@ -1847,6 +1855,7 @@ export function makeAppStore({ subscribeSources = typeof window !== "undefined" 
       close() { setConfirmDelete(null); },
     },
 
+    media: { register: player => players.register(player), toggle: () => players.toggle(), report: error => players.report(error) },
     diff: {
       // read-only model query the workbench surface derives its src from
       resolve: resolveSide,
@@ -1859,6 +1868,7 @@ export function makeAppStore({ subscribeSources = typeof window !== "undefined" 
       hide() { batch(() => { retireFeedScroll(); setSt("diff", "open", false); }); },
       // --- comparator session state (all session-only) -------------------------
       setMode(mode) {
+        if (mode === "difference" && differenceReason()) return false;
         if (mode === "two-up" || mode === "one-up" || mode === "split" || mode === "difference") {
           setSt("diff", "mode", mode);
         }
@@ -2373,6 +2383,7 @@ export function makeAppStore({ subscribeSources = typeof window !== "undefined" 
       return sizes_.sizeFor(st.images[idx]);
     },
     sizeFailed: (id) => sizes_.loadFailed(id),
+    differenceReason,
     pendingSizeCount,
     imageIdxById,
     feedEntryAt,

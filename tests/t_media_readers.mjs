@@ -5,12 +5,12 @@ import { mkStateRig } from "./helpers/rig.mjs";
 
 const fixture = name => Deno.readFile(new URL(`./fixtures/media/${name}`, import.meta.url));
 
-Deno.test("media registry: classification is shared; admission and LoadImage stay image-only", () => {
+Deno.test("media registry: feed admits image/video; LoadImage stays image-only", () => {
   for (const [ext, { mime, kind }] of Object.entries(MEDIA)) {
     assertEquals(mediaKind(`nested/FILE.${ext.toUpperCase()}`), kind);
     assertEquals(EXT_MIME[ext], mime);
     assertEquals(IMAGE_EXTENSIONS.has(ext), kind === "image");
-    assertEquals(RENDERABLE.has(ext), kind === "image");
+    assertEquals(RENDERABLE.has(ext), kind === "image" || kind === "video");
   }
   assertEquals(mediaKind("file.unknown"), null);
   assertEquals(mediaKind("file.constructor"), null);

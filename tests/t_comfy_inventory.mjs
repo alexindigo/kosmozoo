@@ -107,7 +107,7 @@ Deno.test("inventory: combined complete request includes roots and >200/deep/bac
     assertEquals(u.searchParams.get("recursive"), "1");
     assertEquals(u.searchParams.get("scan_depth"), "-1");
     assertEquals(u.searchParams.get("limit"), "0");
-    assertEquals(u.searchParams.get("extensions"), "png,jpg,jpeg,webp,gif,svg,avif,bmp");
+    assertEquals(u.searchParams.get("extensions"), "png,jpg,jpeg,webp,gif,svg,avif,bmp,mp4,mov,webm");
     assertEquals(u.searchParams.get("query"), "/");
     for (const key of ["cursor", "since", "q"]) assertEquals(u.searchParams.has(key), false);
     calls++;

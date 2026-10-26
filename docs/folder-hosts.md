@@ -12,7 +12,7 @@ path) and a plugin (a core source kind belongs in core's host abstraction).
 
 - **probe (online dot)**: the directory exists → online.
 - **list**: files with a renderable extension (png, jpg, jpeg, webp, gif, svg,
-  avif, bmp), dotfiles skipped, **newest first by mtime**, basename only —
+  avif, bmp, mp4, webm, mov), dotfiles skipped, **newest first by mtime**, basename only —
   no subdirectories, no `..`.
 - **bytes**: read from the folder; traversal-guarded.
 - **history**: none — the engine's metadata comes from the shared container

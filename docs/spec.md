@@ -195,7 +195,7 @@ client's delete affordance alike):
 | `virtual` | schema slot only (future) | | | | |
 
 A folder collection's address is `folder:/abs/path`; it lists renderable
-extensions (png, jpg, jpeg, webp, gif, svg, avif, bmp), newest-first by
+extensions (png, jpg, jpeg, webp, gif, svg, avif, bmp, mp4, webm, mov), newest-first by
 mtime, basename-only (no subdirectories, no traversal); its bytes come
 straight from disk; the shared media extraction pipeline applies unchanged. A
 non-directory `folder:` address is rejected at add time (400 with reason).
@@ -362,7 +362,7 @@ acquisition without later gaining browsing permission. Active gestures freeze
 new src admission; the existing 150ms settle, compensation suppression and
 one navigation restore remain.
 
-The private size factory owns measurement images, slots and ephemeral dimensions
+The private size factory owns per-kind native measurements, slots and ephemeral dimensions
 by source context and content identity. Context retirement disposes resources and
 cached dimensions; content replacement retires stale resources before the six-slot
 concurrency gate. Late callbacks require matching context/slot/content. Measurement
@@ -384,6 +384,32 @@ footer counts the same filtered, size-ready entries as the virtualizer (includin
 failures), and separately reports pending measurements.
 Store disposal releases measurement resources, deadlines, queued interest, the
 resize listener and retry work.
+
+Images measure off-DOM with `Image`; videos use a retained
+`<video preload="metadata">` and `videoWidth`/`videoHeight`, inside that same
+six-slot owner, with the same context/content guards, deadline and retry.
+Listing/extractor dimensions still take precedence. Retirement pauses video,
+removes its source and resets the native consumer before releasing capacity.
+
+`MediaBox` owns native display/load/zoom and player state; `Zoomable` is its
+store adapter for feed/details/anchors. The comparator also renders MediaBox,
+with its existing stage-owned entangled zoom. One shared controls component
+provides play/pause, seek, elapsed/duration, mute, per-player loop (off by
+default, never persisted) and open-in-viewer. Videos never autoplay; paused
+players show a centered play affordance over the first decoded frame. Surface
+click toggles playback, while pan drags suppress their trailing click. Images
+retain click-to-open and animated-image behavior. A per-store capability owner
+pauses every other registered player on a native play event, and disposal or
+src-window retirement pauses/unloads the consumer.
+Native load lifetime follows source value and element identity, not unrelated
+reactive window invalidations; zoom bindings follow element/key identity.
+
+Workbench guards accept video only after `loadeddata` and images after decode;
+accepted source, kind and filename stay together through a failed swap, retaining
+the last good side. Closing retires pending guards and native sources. Two-up,
+one-up and split allow video without synchronization. Non-image pairs disable
+Difference with “difference mode compares still images”; the semantic mode
+command enforces the same restriction. Hidden one-up players pause.
 
 The shared browser JSON transport throws `ApiError` on non-success, retaining
 method/path/status and at most 1024 characters of recognized engine JSON
@@ -447,8 +473,11 @@ Definitions validate data (not events/DOM/functions), preserving action results/
 Promises. Covered compatibility actions delegate to handles; mechanical/read/
 editor/lifecycle ports are explicitly classified. Ordered bindings reference
 commands with constant arguments/context/routing through one injected adapter.
-All twelve IDs/defaults/descriptions/matching/conflicts/saved-reset behavior remain.
-KeysPanel edits mappings; no new shortcut or command-launch control is introduced.
+The twelve existing IDs/defaults/order retain their behavior. `media.toggle`
+adds a persisted, rebindable Space binding through the same dispatcher. It routes
+to the player containing keyboard focus, or the workbench's active player;
+typing and modal layers retain priority. Accepted playback keys prevent native
+scrolling. KeysPanel displays Space by name and edits mappings.
 
 Payload/binding records use own enumerable data properties and dense arrays;
 accessors, symbol properties, hidden callbacks and cycles reject before execution
@@ -799,7 +828,7 @@ backing kind).
 `src/backings/mime.mjs` is the shared extension → `{mime, kind}` registry;
 `mediaKind(name)` classifies images, videos (mp4/mov/webm) and audio
 (flac/mp3/opus/wav). Classification does not imply feed admission: currently
-`RENDERABLE` admits the existing image extensions only. The input-folder /
+`RENDERABLE` admits the existing image extensions plus mp4/mov/webm. The input-folder /
 LoadImage list always uses the image-only set derived from this registry.
 
 `metaFromBytes(bytes, name)` owns metadata dispatch for ingestion and cached

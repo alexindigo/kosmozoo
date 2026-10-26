@@ -11,6 +11,7 @@
 // compensates and no timer coordinates geometry.
 
 import { createSignal } from "solid-js";
+import { mediaKind } from "/shared/backings/mime.mjs";
 
 export const ERROR_RETRY_MS = 8000;
 export const MEASURE_TIMEOUT_MS = 30000;
@@ -198,7 +199,10 @@ export function makeSizes({ srcFor, imageAt, entryFor = () => null, identityFor 
     const image = loading.get(id);
     if (image) {
       image.onload = null; image.onerror = null;
+      image.onloadedmetadata = null;
+      if (image.tagName === "VIDEO") image.pause();
       image.removeAttribute("src");
+      if (image.tagName === "VIDEO") image.load();
       loading.delete(id);
     }
     inFlight.delete(id);
@@ -250,17 +254,23 @@ export function makeSizes({ srcFor, imageAt, entryFor = () => null, identityFor 
       bump();
       drain();
     };
-    try { img = new Image(); } catch { fail(); return; }
+    const video = mediaKind(entryFor(id)?.filename ?? entryFor(id)?.name) === "video";
+    try {
+      img = video ? document.createElement("video") : new Image();
+      if (video) img.preload = "metadata";
+    } catch { fail(); return; }
     loading.set(id, img);
     const current = () => !disposed && context === owner && loading.get(id) === img && matchesIdentity(id);
-    img.onload = () => {
+    const loaded = () => {
       if (!current()) return;
-      if (!validDims(img.naturalWidth, img.naturalHeight)) { fail(); return; }
-      sizes.set(id, { w: img.naturalWidth, h: img.naturalHeight });
+      const w = video ? img.videoWidth : img.naturalWidth, h = video ? img.videoHeight : img.naturalHeight;
+      if (!validDims(w, h)) { fail(); return; }
+      sizes.set(id, { w, h });
       retireImage(id);
       bump();
       drain();
     };
+    if (video) img.onloadedmetadata = loaded; else img.onload = loaded;
     img.onerror = () => {
       if (!current()) return;
       fail();

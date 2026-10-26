@@ -10,31 +10,48 @@
 // two-up (key 1), one-up blink (2), split wipe (3), difference mask (4).
 // No pair (no B) → single image, like a one-file Kaleidoscope.
 
-import { createMemo, createResource, createEffect, on, onMount, onCleanup, Show } from "solid-js";
+import { createMemo, createSignal, createEffect, on, onMount, onCleanup, Show } from "solid-js";
 import { useAppStore } from "../store/app-store.js";
 import { makeZoomable } from "/js/zoomable.mjs";
 import { differenceMask, viewRect } from "../features/diff/mask.mjs";
 import { hitLayer } from "../features/diff/hit.mjs";
 import { DiffChrome } from "./DiffChrome.js";
+import { MediaBox } from "./MediaBox.js";
+import { mediaKind } from "/shared/backings/mime.mjs";
 
 // one decode-guarded src per side: the visible src swaps only once the new
 // image decodes; a failed decode RESOLVES to the last good src
 function useSideSrc(store, sideFn) {
   let lastGood = null;
-  const [src] = createResource(
-    () => (store.state.diff.open && sideFn() ? store.actions.diff.resolve(sideFn())?.src ?? null : null),
-    async (url) => {
-      const img = new Image();
-      img.src = url;
-      try {
-        await img.decode();
-        lastGood = url;
-        return url;
-      } catch {
-        return lastGood;
-      }
-    },
-  );
+  const [src, setSrc] = createSignal(null);
+  const candidate = createMemo(() => {
+    const side = sideFn(), resolved = store.state.diff.open && side ? store.actions.diff.resolve(side) : null;
+    return resolved ? { src: resolved.src, name: resolved.name, kind: mediaKind(resolved.name) ?? "image" } : null;
+  }, undefined, { equals: (a, b) => a?.src === b?.src && a?.name === b?.name });
+  createEffect(() => {
+    const next = candidate();
+    if (!next) { setSrc(null); return; }
+    let retired = false;
+    const video = next.kind === "video", el = video ? document.createElement("video") : new Image();
+    const settle = ok => {
+      if (retired) return;
+      if (ok) lastGood = next;
+      setSrc(ok ? next : lastGood ?? { ...next, failed: true });
+      release();
+    };
+    const release = () => {
+      clearTimeout(deadline); el.onload = el.onerror = el.onloadeddata = null;
+      if (video) el.pause();
+      el.removeAttribute("src");
+      if (video) el.load();
+    };
+    const deadline = setTimeout(() => settle(false), 30000);
+    el.onerror = () => settle(false);
+    if (video) { el.preload = "auto"; el.onloadeddata = () => settle(true); }
+    el.src = next.src;
+    if (!video) el.decode().then(() => settle(true), () => settle(false));
+    onCleanup(() => { retired = true; release(); });
+  });
   return src;
 }
 
@@ -58,6 +75,9 @@ export function DiffStage() {
   const srcB = useSideSrc(store, () => pair().b);
   const d = () => store.state.diff;
   const hasB = () => !!pair().b;
+  const differenceReason = () => store.state.differenceReason() ||
+    ([srcA(), srcB()].some(side => side && side.kind !== "image") ? "difference mode compares still images" : null);
+  const mode = () => d().mode === "difference" && differenceReason() ? "two-up" : d().mode;
 
   // TWO view states, one per side. Each layer's transform derives from its
   // own key in the store's views (view-fraction space; the layer's own box
@@ -83,12 +103,12 @@ export function DiffStage() {
   // itself is the box the mask draws against.
   const targetFor = (e) => {
     const layer = hitLayer({
-      mode: d().mode, col: d().col, splitT: d().splitT,
+      mode: mode(), col: d().col, splitT: d().splitT,
       x: e.clientX,
       cellBRect: hasB() ? cellBEl.getBoundingClientRect() : null,
       stageRect: stageEl.getBoundingClientRect(),
     });
-    const box = d().mode === "difference" ? stageEl : (layer === "b" ? cellBEl : cellAEl);
+    const box = mode() === "difference" ? stageEl : (layer === "b" ? cellBEl : cellAEl);
     return { key: layer === "b" ? keyB() : keyA(), box };
   };
   const alsoFor = (t) => {
@@ -142,12 +162,12 @@ export function DiffStage() {
   // diffAbs, or diffOpacity changes; keeps its last paint (never blanks).
   let canvasEl;
   createEffect(() => {
-    const aUrl = srcA(), bUrl = srcB();
+    const aUrl = srcA()?.src, bUrl = srcB()?.src;
     const absolute = d().diffAbs, opacity = d().diffOpacity, baseIsA = d().col === "feed";
     const baseOpacity = d().activeOpacity, threshold = d().diffThreshold;
     const vA = keyA() ? store.state.views[keyA()] : null;
     const vB = keyB() ? store.state.views[keyB()] : null;
-    if (d().mode !== "difference" || !hasB() || !aUrl || !bUrl || !canvasEl) return;
+    if (mode() !== "difference" || differenceReason() || !hasB() || !aUrl || !bUrl || !canvasEl) return;
     let cancelled = false;
     (async () => {
       const load = (u) => new Promise((res) => {
@@ -178,24 +198,30 @@ export function DiffStage() {
 
   return (
     <div id="diff" hidden={!d().open}>
-      <DiffChrome />
+      <DiffChrome differenceReason={differenceReason()} mediaWord={(d().col === "right" ? srcB() : srcA())?.kind ?? "image"} />
       <div
         id="diffStage" ref={stageEl}
-        data-mode={d().mode} data-col={d().col}
+        data-mode={mode()} data-col={d().col}
         style={{ "--split": d().splitT, "--active-op": d().activeOpacity }}
       >
         <div class="dz-cell dz-a" ref={cellAEl}>
-          <img class="dz-img" src={srcA() ?? undefined} alt="" style={{ transform: tA() || undefined }} />
+          <MediaBox workbench src={srcA()?.src} kind={srcA()?.kind} alt={srcA()?.name} failed={srcA()?.failed}
+            transform={tA()} active={d().open && (mode() !== "one-up" || d().col === "feed" || !hasB())} primary={d().col === "feed" || !hasB()}
+            registerPlayer={store.actions.media.register} onPlaybackError={store.actions.media.report}
+            onOpen={() => store.handles.invoke("workbench.open")} />
         </div>
         <Show when={hasB()}>
           <div class="dz-cell dz-b" ref={cellBEl}>
-            <img class="dz-img" src={srcB() ?? undefined} alt="" style={{ transform: tB() || undefined }} />
+            <MediaBox workbench src={srcB()?.src} kind={srcB()?.kind} alt={srcB()?.name} failed={srcB()?.failed}
+              transform={tB()} active={d().open && (mode() !== "one-up" || d().col === "right")} primary={d().col === "right"}
+              registerPlayer={store.actions.media.register} onPlaybackError={store.actions.media.report}
+              onOpen={() => store.handles.invoke("workbench.open")} />
           </div>
-          <Show when={d().mode === "split"}>
+          <Show when={mode() === "split"}>
             <Wipe onDown={onSplitDown} />
           </Show>
         </Show>
-        <Show when={hasB() && d().mode === "difference"}>
+        <Show when={hasB() && mode() === "difference"}>
           <div class="dz-cell dz-canvas-cell">
             <canvas class="dz-canvas" ref={canvasEl} />
           </div>

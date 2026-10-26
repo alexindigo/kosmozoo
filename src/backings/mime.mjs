@@ -12,6 +12,6 @@ export const MEDIA = Object.freeze(Object.fromEntries(Object.entries({
 export const mediaExtension = name => String(name ?? "").split(".").pop().toLowerCase();
 export const mediaKind = name => Object.hasOwn(MEDIA, mediaExtension(name)) ? MEDIA[mediaExtension(name)].kind : null;
 export const IMAGE_EXTENSIONS = new Set(Object.keys(MEDIA).filter(ext => MEDIA[ext].kind === "image"));
-export const RENDERABLE = new Set(IMAGE_EXTENSIONS);
+export const RENDERABLE = new Set(Object.keys(MEDIA).filter(ext => MEDIA[ext].kind !== "audio"));
 
 export const EXT_MIME = Object.freeze(Object.fromEntries(Object.entries(MEDIA).map(([ext, { mime }]) => [ext, mime])));

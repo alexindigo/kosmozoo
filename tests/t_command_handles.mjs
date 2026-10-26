@@ -101,11 +101,12 @@ Deno.test("input: capture popup precedence, blocking scope, select/typing and re
   assertEquals(r.errors.length, 1);
 });
 
-Deno.test("keys: all twelve default identities/order and permissive programmatic setup", () => {
+Deno.test("keys: preserved default identities/order plus media playback and permissive programmatic setup", () => {
   assertEquals(CORE_BINDINGS.map(({ id, key, ctx }) => [id, key, ctx]), [
     ["app.keys", "?", "global"], ["keys.close", "Escape", "keys"], ["wb.close", "Escape", "workbench"],
     ["wb.twoUp", "1", "workbench"], ["wb.oneUp", "2", "workbench"], ["wb.split", "3", "workbench"], ["wb.difference", "4", "workbench"],
     ["wb.colLeft", "ArrowLeft", "workbench"], ["wb.colRight", "ArrowRight", "workbench"], ["wb.prev", "ArrowUp", "workbench"], ["wb.next", "ArrowDown", "workbench"], ["wb.lock", "l", "workbench"],
+    ["media.toggle", " ", "global"],
   ]);
   const store = makeAppStore({ subscribeSources: null });
   for (const binding of CORE_BINDINGS) store.actions.keys.register(binding);

@@ -65,6 +65,7 @@ export function registerCoreCommands(handles, { ops, state, clipboard = (text) =
   add("keys.panel.toggle", {}, () => ops.keys.togglePanel(), "actions & keys panel");
   add("keys.panel.close", {}, () => ops.keys.closePanel(), "close panel");
   add("keys.capture.cancel", {}, () => ops.keys.cancelCapture());
+  add("media.toggle", {}, () => ops.media.toggle(), "play/pause focused media");
   handles.register({ id: "judgment.apply", validate: (a) => shape({ ...identity, intent: judgmentIntent })(a) &&
     ["id", "ids", "target"].filter((key) => Object.hasOwn(a, key)).length === 1,
     execute(a) {
@@ -158,6 +159,7 @@ export function commandFacades(handles, ops, state) {
     }
   };
   const facade = Object.fromEntries(Object.entries(ops).map(([key, value]) => [key, typeof value === "object" ? { ...value } : value]));
+  facade.media.toggle = () => invoke("media.toggle");
   facade.collections.downloadFeedback = (source) => invoke("collection.feedback.download", { source });
   Object.assign(facade.diff, {
     setMode: (mode) => invoke("workbench.mode", { mode }),

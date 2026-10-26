@@ -29,6 +29,8 @@ import { statSync } from "node:fs";
 import { join, basename } from "node:path";
 import { isEntryPath, splitEntryPath } from "../src/entry-path.mjs";
 import { testPng } from "./helpers/png.mjs";
+import { MEDIA, EXT_MIME, mediaExtension } from "../src/backings/mime.mjs";
+import { metaFromBytes } from "../src/extractor.mjs";
 
 // ---------------------------------------------------------------------------
 // Minimal PNG tEXt chunk reader — just enough to pull the embedded
@@ -90,7 +92,7 @@ const mutableDir = values["mutable-dir"];
 const fixtures = new Map();
 try {
   for (const f of await readdir(fixtureDir)) {
-    if (!f.endsWith(".png") && !f.endsWith(".svg")) continue;
+    if (!Object.hasOwn(MEDIA, mediaExtension(f))) continue;
     const bytes = await readFile(join(fixtureDir, f));
     let promptGraph = null;
     if (f.endsWith(".png")) {
@@ -111,6 +113,13 @@ try {
 
 // One filename that must 404, to drive the permanent-failure path.
 const MISSING = "missing-404.png";
+// Publication-only fixtures never change the default image suite inventory.
+const mediaFixtures = new Map();
+for (const name of ["workflow.webm", "workflow.mp4", "workflow.mov"]) {
+  const bytes = await readFile(new URL(`./fixtures/media/${name}`, import.meta.url));
+  const [, , promptGraph] = await metaFromBytes(bytes, name);
+  mediaFixtures.set(`media/${name}`, { bytes, promptGraph });
+}
 const fixtureTimes = new Map([...fixtures.keys()].map((name, i) => [name, (1_900_000_000 - i) * 1000]));
 
 // One stable per-file model, independent of enumeration/arrival order.
@@ -211,7 +220,7 @@ function publication(description) {
     return { bytes: new TextEncoder().encode("not a decodable PNG\n"), promptGraph: null };
   }
   const fixture = description.fixture === "bulk" ? { bytes: BULK_PNG, promptGraph: null }
-    : fixtures.get(description.fixture ?? "flux-basic.png");
+    : fixtures.get(description.fixture ?? "flux-basic.png") ?? mediaFixtures.get(description.fixture);
   if (!fixture) return null;
   if (description.width || description.height || description.color || description.graphPrefix || description.graph || description.lineage) {
     const width = description.width ?? new DataView(fixture.bytes.buffer, fixture.bytes.byteOffset).getUint32(16);
@@ -388,6 +397,7 @@ export const server = Deno.serve({ port }, async (req) => {
       KSampler: def({ seed: INT, steps: INT, cfg: FLOAT, denoise: FLOAT }),
       // the feature identifies output nodes by this flag (F4)
       SaveImage: { output_node: true, input: { required: { filename_prefix: ["STRING", {}] } } },
+      SaveVideo: { output_node: true, input: { required: { filename_prefix: ["STRING", {}] } } },
     });
   }
 
@@ -464,7 +474,7 @@ export const server = Deno.serve({ port }, async (req) => {
     if (fixtures.has(name) || published.has(name)) {
       const bytes = (published.get(name) ?? fixtures.get(name)).bytes;
       // Real ComfyUI serves SVG (and sometimes everything) as octet-stream.
-      const type = name.endsWith(".svg") ? "application/octet-stream" : "image/png";
+      const type = name.endsWith(".svg") ? "application/octet-stream" : EXT_MIME[mediaExtension(name)] ?? "application/octet-stream";
       if (head) {
         return new Response(null, {
           headers: {
