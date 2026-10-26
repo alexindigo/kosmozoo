@@ -131,6 +131,19 @@ export function feedOffsets(entries, heightOf) {
   return offsets;
 }
 
+// The entry under a scroll position in one identity-keyed layout: each entry
+// spans from its offset to the next one's, so it is the last entry whose
+// offset is at or above `top` (the first entry when `top` precedes them all).
+// order lists the layout's ids in feed order; offsets is its feedOffsets map.
+export function feedEntryAtOffset(order, offsets, top) {
+  let lo = 0, hi = order.length - 1, found = order[0] ?? null;
+  while (lo <= hi) {
+    const mid = (lo + hi) >> 1;
+    if (offsets.get(order[mid]) <= top) { found = order[mid]; lo = mid + 1; } else hi = mid - 1;
+  }
+  return found;
+}
+
 export function makeSizes({ srcFor, imageAt, entryFor = () => null, identityFor = (id) => id }) {
   // the chrome height is read HERE (store creation — the CSS is applied by
   // now; never at module import) and re-read on every resize: it is the one

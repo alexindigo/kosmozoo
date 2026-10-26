@@ -4,7 +4,7 @@
 // loader without a DOM).
 
 import { assert, assertEquals } from "jsr:@std/assert";
-import { cardHeight, feedOffsets, makeSizes, measureGeometry, invalidateGeometry } from "../client-solid/store/sizes.js";
+import { cardHeight, feedOffsets, feedEntryAtOffset, makeSizes, measureGeometry, invalidateGeometry } from "../client-solid/store/sizes.js";
 
 // measureGeometry reads the probe's rects — fake the element shape it reads
 function fakeProbe(wrapW, cardH, wrapH) {
@@ -41,6 +41,27 @@ Deno.test("feed offsets: heterogeneous insertions, removals and replacements pre
   const replaced = feedOffsets([X, B, C, T], heights);
   assertEquals(replaced.get("T") - original.get("T"), -59.375);
   assertEquals(original.get("T"), 1800, "old snapshot never follows mutated indices");
+});
+
+Deno.test("feed anchor: the entry under the actual scroll offset in one layout", () => {
+  const A = { id: "A", height: 700 }, B = { id: "B", height: 500 };
+  const C = { id: "C", height: 600 }, T = { id: "T", height: 900 };
+  const X = { id: "X", height: 640 };
+  const heights = (entry) => entry.height;
+  const order = ["A", "B", "C", "T"], offsets = feedOffsets([A, B, C, T], heights);
+  assertEquals(feedEntryAtOffset(order, offsets, 0), "A");
+  assertEquals(feedEntryAtOffset(order, offsets, 699), "A");
+  assertEquals(feedEntryAtOffset(order, offsets, 700), "B", "an entry starts exactly at its offset");
+  assertEquals(feedEntryAtOffset(order, offsets, 1250.5), "C");
+  assertEquals(feedEntryAtOffset(order, offsets, 99999), "T", "the end spacer belongs to the last entry");
+  assertEquals(feedEntryAtOffset(order, offsets, -1), "A");
+  assertEquals(feedEntryAtOffset([], new Map(), 10), null);
+  // An insertion between A and B leaves a viewport inside A in place; only an
+  // anchor read at the feed's actual position (not where it last was) says so.
+  const inserted = feedOffsets([A, X, B, C, T], heights);
+  const at = (top) => inserted.get(feedEntryAtOffset(order, offsets, top)) - offsets.get(feedEntryAtOffset(order, offsets, top));
+  assertEquals(at(146), 0, "jumped to A: the landing below it compensates nothing");
+  assertEquals(at(1300), 640, "still at C: the landing above it compensates its height");
 });
 
 // A fake Image: construction registers; the test fires onload/onerror by hand

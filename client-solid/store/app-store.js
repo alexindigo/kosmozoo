@@ -430,10 +430,10 @@ export function makeAppStore({ subscribeSources = typeof window !== "undefined" 
   const scrollQuiet = () => Date.now() < programmaticScrollUntil();
   const quietScrolls = (ms = SNAP_QUIET_MS) =>
     setProgrammaticScrollUntil(Math.max(programmaticScrollUntil(), Date.now() + ms));
-  // a COMPENSATION scroll (landing/merge) is quieter than quiet: the settle
-  // it triggers must not reassign current at all — the scroll exists to
-  // preserve position, and with sub-card estimate error the viewport-middle
-  // pick would hop. Restores keep their snap-quiet but DO track current.
+  // a COMPENSATION scroll (landing/merge) is not motion at all: the settle
+  // it triggers must not reassign current — the scroll exists to preserve
+  // position, and with sub-card estimate error the viewport-middle pick
+  // would hop. Restores keep their snap-quiet but DO track current.
   const [suppressSettleCurrent, setSuppressSettleCurrent] = createSignal(false);
   let feedSettleTimer = 0;
   let pendingFeedSettle = null; // ownership of this debounce, never a preview ID
@@ -539,6 +539,21 @@ export function makeAppStore({ subscribeSources = typeof window !== "undefined" 
     }
     // The owned readiness reconciliation observes the final stopped geometry.
     setAcquisitionRevision((v) => v + 1);
+  }
+
+  // A COMPENSATION (landing/merge) re-bases the feed's coordinates so the
+  // content under the viewport does not move. It is never gesture travel:
+  // the store applies it and moves the gesture origin by exactly the applied
+  // displacement, so the settle's net travel stays the user's own however late
+  // its timer runs — a landing can never invite the snap tidy. No wall-clock
+  // window takes part; the settle it triggers keeps current.
+  function compensateFeed(delta) {
+    const col = feedScrollEl();
+    if (!col || !delta) return;
+    setSuppressSettleCurrent(true);
+    const before = col.scrollTop;
+    col.scrollTop = before + delta;
+    if (gestureStart != null) gestureStart += col.scrollTop - before;
   }
 
   function restoreToIndex(idx) {
@@ -2020,12 +2035,12 @@ export function makeAppStore({ subscribeSources = typeof window !== "undefined" 
         };
       },
       restoreToIndex,
-      // a programmatic scroll must not invite the snap — compensation and
-      // restores call this so the next settle does not re-tidy
+      // a programmatic scroll in flight must not invite the snap — restores
+      // call this so the next settle does not re-tidy
       quiet: quietScrolls,
-      // a COMPENSATION scroll (landing/merge): snap-quiet AND the settle
-      // must not reassign current — it exists to preserve position
-      compensating() { quietScrolls(); setSuppressSettleCurrent(true); },
+      // a COMPENSATION scroll (landing/merge): applied here, never travel,
+      // and the settle must not reassign current — it preserves position
+      compensate: compensateFeed,
       // the single scroll entry point — the store owns the activity state
       // and the settle pipeline; the model never moves mid-gesture
       scrolled: feedScrolled,

@@ -337,7 +337,7 @@ Deno.test("rail special motion: sparse known positions, compensation, quiet rest
     store.actions.current.set("h", "root.png");
     store.actions.feed.restoreToIndex(0);col.scrollTop=50;store.actions.feed.scrolled(50);
     assertEquals(store.state.feedMarkerEntryId(), "h:a/deep/image.png", "snap quiet does not block live target");
-    store.actions.feed.compensating();assertEquals(store.state.feedMarkerEntryId(), "h:root.png");
+    store.actions.feed.compensate(100);assertEquals(store.state.feedMarkerEntryId(), "h:root.png");
     await new Promise(r=>setTimeout(r,180));assertEquals(store.state.current().image,"root.png");
     store.actions.diff.open();col.scrollTop=150;store.actions.feed.scrolled(150);
     assertEquals(store.state.feedMarkerEntryId(),"h:root.png");

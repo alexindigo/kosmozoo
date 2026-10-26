@@ -472,15 +472,13 @@ Deno.test("feed: compensation preserves current but cannot suppress the new coll
     };
     try {
       store.actions.current.set("h", "a.png");
-      store.actions.feed.compensating();
-      col.scrollTop = 110;
+      store.actions.feed.compensate(110);
       store.actions.feed.scrolled(col.scrollTop);
       await settled();
       assertEquals(store.state.current(), { remote: "h", image: "a.png" },
         "compensation in the same feed preserves its current entry");
 
-      store.actions.feed.compensating();
-      col.scrollTop = 120;
+      store.actions.feed.compensate(10);
       store.actions.feed.scrolled(col.scrollTop);
       await store.actions.hosts.select("other");
       store.actions.current.set("other", "a.png");
@@ -489,6 +487,77 @@ Deno.test("feed: compensation preserves current but cannot suppress the new coll
       await settled();
       assertEquals(store.state.current(), { remote: "other", image: "b.png" },
         "the new feed's first scroll selects its viewport entry");
+    } finally {
+      store.state.window.freeze();
+    }
+  });
+});
+
+Deno.test("feed: compensation re-bases the gesture origin, so a landing is never travel however late settle runs", async () => {
+  await withBookmarkStore(async (store, api) => {
+    api.setSettings = async () => ({});
+    const tidy = [];
+    const col = { scrollTop: 0, clientHeight: 100, scrollTo(options) { tidy.push(options); } };
+    store.actions.feed.register({
+      scrollEl: col,
+      virtualizer: {
+        scrollToIndex() {},
+        getVirtualItems: () => store.state.images.map((im, index) => ({
+          key: im.id, index, start: index * 100, end: (index + 1) * 100,
+        })),
+      },
+    });
+    const settled = async () => {
+      for (let i = 0; i < 100 && store.state.feedActivity() !== "settled"; i++) {
+        await new Promise((resolve) => setTimeout(resolve, 10));
+      }
+      assertEquals(store.state.feedActivity(), "settled");
+    };
+    try {
+      store.actions.current.set("h", "a.png");
+      // Two landings inside one settle debounce: their scroll events form one
+      // "gesture" whose raw travel (10 → 40) would point the tidy at b.png's top.
+      store.actions.feed.compensate(10);
+      store.actions.feed.scrolled(col.scrollTop);
+      store.actions.feed.compensate(30);
+      store.actions.feed.scrolled(col.scrollTop);
+      assertEquals(col.scrollTop, 40, "compensation applies exactly its delta");
+      // A busy main thread runs the settle long after both landings.
+      const until = Date.now() + 700;
+      while (Date.now() < until) { /* stalled frame */ }
+      await settled();
+      assertEquals(tidy, [], "compensation travel never invites the settle tidy");
+      assertEquals(col.scrollTop, 40);
+      assertEquals(store.state.current(), { remote: "h", image: "a.png" },
+        "a compensation-only settle keeps current");
+
+      // A real gesture keeps exactly its own travel across a landing:
+      // 45 → 75 is 30px, of which 5px is compensation, so 25px ≥ the floor.
+      col.scrollTop = 45;
+      store.actions.feed.scrolled(col.scrollTop);
+      store.actions.feed.compensate(5);
+      store.actions.feed.scrolled(col.scrollTop);
+      col.scrollTop = 75;
+      store.actions.feed.scrolled(col.scrollTop);
+      await settled();
+      assertEquals(tidy, [{ top: 100, behavior: "smooth" }], "the user's own travel still tidies");
+
+      // and a gesture whose travel is all but compensation stays a wiggle:
+      // 5 → 45 with 30px compensated is 10px < the floor. (Outlast the
+      // tidy's own quiet window first, so only the travel rule decides.)
+      col.scrollTop = 0;
+      store.actions.feed.scrolled(col.scrollTop);
+      await settled();
+      await new Promise((resolve) => setTimeout(resolve, 600));
+      tidy.length = 0;
+      col.scrollTop = 5;
+      store.actions.feed.scrolled(col.scrollTop);
+      store.actions.feed.compensate(30);
+      store.actions.feed.scrolled(col.scrollTop);
+      col.scrollTop = 45;
+      store.actions.feed.scrolled(col.scrollTop);
+      await settled();
+      assertEquals(tidy, [], "compensated px never count toward the travel floor");
     } finally {
       store.state.window.freeze();
     }
@@ -590,6 +659,37 @@ Deno.test("image window: a started load survives the next settle; a loaded one i
   w.markLoaded("e5");
   w.settle(22, 21, 23);
   assert(!has(5), "a loaded id is reaped by the next settle");
+});
+
+Deno.test("image window: a settle keeps loaded srcs inside its range and releases only leavers", async () => {
+  const { makeImageWindow } = await import("../client-solid/store/image-window.js");
+  const w = makeImageWindow({
+    entryAt: (p) => ({ id: `e${p}`, host: "h", filename: `f${p}.png` }),
+    count: () => 60,
+    rippleMs: 5,
+  });
+  const has = (p) => w.getSrc(p, { id: `e${p}`, host: "h", filename: `f${p}.png` }) != null;
+  const loadAll = (...ps) => { for (const p of ps) { w.markStarted(`e${p}`); w.markLoaded(`e${p}`); } };
+  w.settle(5, 4, 6);
+  await new Promise((r) => setTimeout(r, 200));      // ripple covers 0..16
+  assert(has(0) && has(16), "the first ripple covers the range ± pad");
+  loadAll(0, 3, 5, 9, 16);
+  w.settle(9, 9, 10);                                 // new range ± pad: 0..20
+  // synchronously, before any ring: every loaded member in range is still a member
+  for (const p of [0, 3, 5, 9, 16]) assert(has(p), `loaded e${p} keeps its src across the settle`);
+  assert(!has(1) && !has(2), "assigned-but-not-loaded members are re-rippled, not kept");
+  await new Promise((r) => setTimeout(r, 200));
+  assert(has(1) && has(20), "the ripple only adds the rest of the new range");
+
+  loadAll(20);
+  w.settle(40, 39, 41);                               // new range 29..51: everything above leaves
+  for (const p of [0, 3, 5, 9, 16, 20]) assert(!has(p), `e${p} outside the new range is released`);
+  w.freeze();
+  // a released id forgets its loaded state: coming back it waits for its ring
+  w.settle(10, 10, 10);
+  assert(!has(5), "a released id is not kept by a later settle");
+  assert(has(10), "the anchor fires in step 0");
+  w.freeze();
 });
 
 // --- the drag primitive's anchor-edge fraction -------------------------------

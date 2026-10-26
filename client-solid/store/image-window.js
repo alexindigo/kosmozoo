@@ -7,7 +7,10 @@
 //   - AT SETTLE / CURRENT CHANGE: the window ripples out from the current
 //     card in priority order — C, C+1, C-1, C+2, C-2, … — one ring per
 //     RIPPLE_MS until the stopped range ± WINDOW_PAD is covered, so the
-//     current image's bytes arrive first.
+//     current image's bytes arrive first. Loaded srcs still inside the new
+//     range ± pad stay members from the start (a settle never unloads and
+//     reloads what it covers); the ripple only adds the rest of the range
+//     and other members are released.
 //   - WHILE IDLE: cards that newly appear (size landings) are covered by a
 //     range union, not a re-ripple.
 //
@@ -30,6 +33,7 @@ const RIPPLE_MS = 40;
 export function makeImageWindow({ entryAt, count, rippleMs = RIPPLE_MS }) {
   const members = new Set();      // entry ids with an assigned src
   const startedIds = new Set();   // ids assigned but not settled (loaded/errored)
+  const loadedIds = new Set();    // members whose current src has loaded
   const errored = new Set();      // entry ids whose bytes failed
   const retryNonce = new Map();   // id -> cache-bust nonce
 
@@ -58,10 +62,19 @@ export function makeImageWindow({ entryAt, count, rippleMs = RIPPLE_MS }) {
   // ± pad is covered. In-flight ids stay members throughout.
   function settle(anchor, coverFirst, coverLast) {
     freeze();
-    members.clear();
-    for (const id of startedIds) members.add(id);
     const lo = Math.max(0, coverFirst - WINDOW_PAD);
     const hi = Math.min(count() - 1, coverLast + WINDOW_PAD);
+    // In-flight ids stay; loaded members inside the new range keep their src.
+    const kept = new Set(startedIds);
+    for (let p = lo; p <= hi; p++) {
+      const id = entryAt(p)?.id;
+      if (id != null && loadedIds.has(id) && members.has(id)) kept.add(id);
+    }
+    let released = false;
+    for (const id of members) if (!kept.has(id)) { members.delete(id); released = true; }
+    for (const id of kept) members.add(id);
+    for (const id of loadedIds) if (!members.has(id)) loadedIds.delete(id);
+    if (released) bump();
     let k = 0;
     const step = () => {
       rippleTimer = 0;
@@ -101,10 +114,14 @@ export function makeImageWindow({ entryAt, count, rippleMs = RIPPLE_MS }) {
     return api.entryBytesUrl(img.host, img.filename) + (nonce ? `?_r=${nonce}` : "");
   };
 
-  const markStarted = (id) => { startedIds.add(id); };
-  const markLoaded = (id) => { startedIds.delete(id); errored.delete(id); };
+  const markStarted = (id) => { startedIds.add(id); loadedIds.delete(id); };
+  const markLoaded = (id) => {
+    startedIds.delete(id); errored.delete(id);
+    if (members.has(id)) loadedIds.add(id);
+  };
   const markError = (id) => {
     startedIds.delete(id);
+    loadedIds.delete(id);
     errored.add(id);
     cancelRetry = scheduleRetry(requeueErrored);
   };
@@ -141,6 +158,7 @@ export function makeImageWindow({ entryAt, count, rippleMs = RIPPLE_MS }) {
     cancelRetry?.(); cancelRetry = null;
     members.clear();
     startedIds.clear();
+    loadedIds.clear();
     errored.clear();
     retryNonce.clear();
   };

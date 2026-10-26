@@ -356,9 +356,11 @@ positive viewport dimensions and identity-keyed virtual items. One Store
 reconciliation stages sizes/wants and admits a coherent settled range; empty,
 zero or stale-key geometry stays pending. Range/size/readiness changes can acquire
 images without scrolling or another current change. Current-first ripple remains;
-idle coverage extends by union. Acquisition permission is separate from permission
-to commit scroll-derived current/trail/URL: loading-time motion can settle
-acquisition without later gaining browsing permission. Active gestures freeze
+idle coverage extends by union. A settle keeps in-flight srcs and loaded srcs still
+inside its new range ± pad; its ripple re-admits the rest of the range and other
+members are released. Acquisition permission is separate from permission to commit
+scroll-derived current/trail/URL: loading-time motion can settle acquisition without
+later gaining browsing permission. Active gestures freeze
 new src admission; the existing 150ms settle, compensation suppression and
 one navigation restore remain.
 
@@ -455,6 +457,10 @@ settle policy. Debounce callbacks belong to their source session, browse intent
 and registered seams; explicit context/current/diff navigation retires old work.
 Settle batches current and marker reconnection. Compensation and an open workbench
 retain committed marker/current; snap-quiet restore/scrub/top track actual motion.
+The feed reads each compensation's anchor from the actual scroll position in the layout
+it showed, never a remembered one; the Store applies the compensation and moves the
+settle's gesture origin by the same applied displacement, so compensation is never
+gesture travel and cannot invite the settle tidy, however late the settle timer runs.
 Ordinary rail ticks use the existing subdued `--foreground-dim` neutral through
 shared card-state presentation; card neutrals, judgment colors/priorities, wave
 length/glow, geometry, tape windowing and scrub handlers retain their contracts.
