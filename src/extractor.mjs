@@ -363,13 +363,18 @@ const jsonValue = value => {
 export async function metaFromBytes(buf, name) {
   const mime = sniffMime(buf);
   const ext = name == null ? ({ "image/png": "png", "image/webp": "webp",
-    "video/mp4": "mp4", "video/quicktime": "mov", "video/webm": "webm" })[mime] : mediaExtension(name);
+    "video/mp4": "mp4", "video/quicktime": "mov", "video/webm": "webm",
+    "audio/flac": "flac", "audio/ogg": "opus", "audio/mpeg": "mp3", "audio/wav": "wav" })[mime] : mediaExtension(name);
   const kind = mediaKind(`media.${ext}`);
   let tags = null;
   if (kind === "image" && ext === "png") tags = await parsePngTextChunks(buf, { allChunks: true });
   else if (kind === "image" && ext === "webp") tags = webpTags(buf);
   else if (kind === "video" && (ext === "mp4" || ext === "mov")) tags = quickTime(buf).tags;
   else if (kind === "video" && ext === "webm") tags = matroska(buf).tags;
+  else if (kind === "audio" && ext === "flac") tags = flacTags(buf);
+  else if (kind === "audio" && ext === "opus") tags = opusTags(buf);
+  else if (kind === "audio" && ext === "mp3") tags = id3Tags(buf);
+  else if (kind === "audio" && ext === "wav") tags = waveTags(buf);
   const hasWorkflow = tags != null && Object.hasOwn(tags, "workflow");
   const graph = jsonValue(tags?.prompt);
   if (!graph || typeof graph !== "object" || Array.isArray(graph)) return [null, hasWorkflow, null];
@@ -494,6 +499,136 @@ function putTag(tags, key, value) {
       }
     }
   }
+}
+
+// Vorbis comments are shared by native FLAC metadata block 4 and OpusTags.
+// Every length is checked before decoding; unrelated audio payloads are skipped.
+function vorbisTags(buf, tags) {
+  const dv = view(buf);
+  if (buf.length < 8) return;
+  let at = 4 + dv.getUint32(0, true);
+  if (at > buf.length - 4) return;
+  const count = dv.getUint32(at, true); at += 4;
+  for (let i = 0; i < count && at + 4 <= buf.length; i++) {
+    const length = dv.getUint32(at, true); at += 4;
+    if (length > buf.length - at) break;
+    if (length <= PNG_READ_CAP) {
+      const text = utf8(buf.subarray(at, at + length)), split = text.indexOf("=");
+      if (split > 0) putTag(tags, text.slice(0, split), text.slice(split + 1));
+    }
+    at += length;
+  }
+}
+
+function flacTags(buf) {
+  const tags = Object.create(null);
+  if (ascii(buf, 0, 4) !== "fLaC") return tags;
+  for (let at = 4; at + 4 <= buf.length;) {
+    const header = buf[at], length = buf[at + 1] * 65536 + buf[at + 2] * 256 + buf[at + 3];
+    at += 4;
+    if (length > buf.length - at) break;
+    if ((header & 127) === 4) vorbisTags(buf.subarray(at, at + length), tags);
+    at += length;
+    if (header & 128) break;
+  }
+  return tags;
+}
+
+function opusTags(buf) {
+  const tags = Object.create(null), dv = view(buf);
+  let serial = null, sequence = null, parts = [], length = 0, packets = 0;
+  for (let at = 0; at + 27 <= buf.length && packets < 2;) {
+    if (ascii(buf, at, 4) !== "OggS" || buf[at + 4] !== 0) break;
+    const count = buf[at + 26], start = at + 27 + count;
+    if (start > buf.length) break;
+    const id = dv.getUint32(at + 14, true), seq = dv.getUint32(at + 18, true);
+    let end = start;
+    for (let i = 0; i < count; i++) end += buf[at + 27 + i];
+    if (end > buf.length) break;
+    if (serial == null) serial = id;
+    if (id === serial) {
+      if ((sequence != null && seq !== ((sequence + 1) >>> 0)) || !!(buf[at + 5] & 1) !== (length > 0)) break;
+      sequence = seq;
+      let pos = start;
+      for (let i = 0; i < count && packets < 2; i++) {
+        const size = buf[at + 27 + i];
+        length += size;
+        if (length > PNG_READ_CAP) return tags;
+        parts.push(buf.subarray(pos, pos + size)); pos += size;
+        if (size === 255) continue;
+        const packet = new Uint8Array(length); let offset = 0;
+        for (const part of parts) { packet.set(part, offset); offset += part.length; }
+        if (packets === 0 && ascii(packet, 0, 8) !== "OpusHead") return tags;
+        if (packets === 1 && ascii(packet, 0, 8) === "OpusTags") vorbisTags(packet.subarray(8), tags);
+        packets++; parts = []; length = 0;
+      }
+    }
+    at = end;
+  }
+  return tags;
+}
+
+const synchsafe = (buf, at) => {
+  if (at + 4 > buf.length || buf.subarray(at, at + 4).some(byte => byte & 128)) return null;
+  return buf[at] * 2097152 + buf[at + 1] * 16384 + buf[at + 2] * 128 + buf[at + 3];
+};
+const deunsync = buf => buf.filter((byte, i) => !(byte === 0 && i > 0 && buf[i - 1] === 255));
+function id3Tags(buf) {
+  const tags = Object.create(null), version = buf[3];
+  if (buf.length < 10 || ascii(buf, 0, 3) !== "ID3" || ![3, 4].includes(version)) return tags;
+  const size = synchsafe(buf, 6);
+  if (size == null || size > buf.length - 10) return tags;
+  let data = buf.subarray(10, 10 + size);
+  if (version === 3 && (buf[5] & 128)) data = deunsync(data);
+  const dv = view(data);
+  let at = 0;
+  if (buf[5] & 64) { // extended header sizes differ between ID3v2.3 and 2.4
+    if (data.length < 4) return tags;
+    at = version === 4 ? synchsafe(data, 0) : 4 + dv.getUint32(0);
+    if (at == null || at < 4 || at > data.length) return tags;
+  }
+  for (; at + 10 <= data.length;) {
+    const id = ascii(data, at, 4), n = version === 4 ? synchsafe(data, at + 4) : dv.getUint32(at + 4);
+    const flags = data[at + 9]; at += 10;
+    if (n == null || n > data.length - at) break;
+    let frame = data.subarray(at, at + n); at += n;
+    if (id !== "TXXX" || n > PNG_READ_CAP || !n || (flags & (version === 4 ? 0x0c : 0xc0))) continue;
+    if (version === 4 && ((flags & 2) || (buf[5] & 128))) frame = deunsync(frame);
+    if (flags & (version === 4 ? 0x40 : 0x20)) frame = frame.subarray(1); // grouping identity
+    if (version === 4 && (flags & 1)) frame = frame.subarray(4); // data length indicator
+    const encoding = frame[0], text = frame.subarray(1), wide = encoding === 1 || encoding === 2;
+    if (encoding > 3) continue;
+    let split = -1;
+    for (let i = 0; i < text.length - (wide ? 1 : 0); i += wide ? 2 : 1) {
+      if (text[i] === 0 && (!wide || text[i + 1] === 0)) { split = i; break; }
+    }
+    if (split < 0) continue;
+    const label = encoding === 0 ? "latin1" : encoding === 3 ? "utf-8" :
+      encoding === 2 || (text[0] === 254 && text[1] === 255) ? "utf-16be" : "utf-16le";
+    const decode = bytes => new TextDecoder(label).decode(bytes).replace(/\0+$/, "");
+    putTag(tags, decode(text.subarray(0, split)), decode(text.subarray(split + (wide ? 2 : 1))));
+  }
+  return tags;
+}
+
+function waveTags(buf) {
+  const tags = Object.create(null);
+  if (buf.length < 12 || ascii(buf, 0, 4) !== "RIFF" || ascii(buf, 8, 4) !== "WAVE") return tags;
+  const dv = view(buf), end = Math.min(buf.length, dv.getUint32(4, true) + 8);
+  for (let at = 12; at + 8 <= end;) {
+    const n = dv.getUint32(at + 4, true), start = at + 8;
+    if (n > end - start) break;
+    if (ascii(buf, at, 4) === "LIST" && n >= 4 && ascii(buf, start, 4) === "INFO") {
+      for (let p = start + 4; p + 8 <= start + n;) {
+        const length = dv.getUint32(p + 4, true), value = p + 8;
+        if (length > start + n - value) break;
+        if (ascii(buf, p, 4) === "ICMT" && length <= PNG_READ_CAP) putTag(tags, "comment", utf8(buf.subarray(value, value + length)));
+        p = value + length + (length & 1);
+      }
+    }
+    at = start + n + (n & 1);
+  }
+  return tags;
 }
 
 function webpTags(buf) {

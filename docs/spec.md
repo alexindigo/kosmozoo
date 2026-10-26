@@ -195,7 +195,7 @@ client's delete affordance alike):
 | `virtual` | schema slot only (future) | | | | |
 
 A folder collection's address is `folder:/abs/path`; it lists renderable
-extensions (png, jpg, jpeg, webp, gif, svg, avif, bmp, mp4, webm, mov), newest-first by
+extensions (png, jpg, jpeg, webp, gif, svg, avif, bmp, mp4, webm, mov, flac, mp3, opus, wav), newest-first by
 mtime, basename-only (no subdirectories, no traversal); its bytes come
 straight from disk; the shared media extraction pipeline applies unchanged. A
 non-directory `folder:` address is rejected at add time (400 with reason).
@@ -392,24 +392,31 @@ Images measure off-DOM with `Image`; videos use a retained
 six-slot owner, with the same context/content guards, deadline and retry.
 Listing/extractor dimensions still take precedence. Retirement pauses video,
 removes its source and resets the native consumer before releasing capacity.
+Audio is immediately size-ready with the fixed 1024×320 box, without measurement
+or a size read. Its aspect is not subject to the image/video 16:9 cap; the shared
+geometry policy supplies both the virtualizer and rendered box. Late dimensions
+and decode errors cannot resize audio cards.
 
 `MediaBox` owns native display/load/zoom and player state; `Zoomable` is its
 store adapter for feed/details/anchors. The comparator also renders MediaBox,
 with its existing stage-owned entangled zoom. One shared controls component
 provides play/pause, seek, elapsed/duration, mute, per-player loop (off by
-default, never persisted) and open-in-viewer. Videos never autoplay; paused
-players show a centered play affordance over the first decoded frame. Surface
+default, never persisted) and open-in-viewer. Video and audio never autoplay; paused
+video players show a centered play affordance over the first decoded frame. Surface
 click toggles playback, while pan drags suppress their trailing click. Images
 retain click-to-open and animated-image behavior. A per-store capability owner
 pauses every other registered player on a native play event, and disposal or
 src-window retirement pauses/unloads the consumer.
 Native load lifetime follows source value and element identity, not unrelated
 reactive window invalidations; zoom bindings follow element/key identity.
+Audio uses the same controls, focus/Space semantics and arbitration, without a
+picture: its filename and paused play button are centered inside the fixed box.
+No waveform or runtime transcode is involved. Tooltips call it an “audio file”.
 
-Workbench guards accept video only after `loadeddata` and images after decode;
+Workbench guards accept video/audio only after `loadeddata` and images after decode;
 accepted source, kind and filename stay together through a failed swap, retaining
 the last good side. Closing retires pending guards and native sources. Two-up,
-one-up and split allow video without synchronization. Non-image pairs disable
+one-up and split allow video/audio without synchronization. Non-image pairs disable
 Difference with “difference mode compares still images”; the semantic mode
 command enforces the same restriction. Hidden one-up players pause.
 
@@ -833,8 +840,8 @@ backing kind).
 
 `src/backings/mime.mjs` is the shared extension → `{mime, kind}` registry;
 `mediaKind(name)` classifies images, videos (mp4/mov/webm) and audio
-(flac/mp3/opus/wav). Classification does not imply feed admission: currently
-`RENDERABLE` admits the existing image extensions plus mp4/mov/webm. The input-folder /
+(flac/mp3/opus/wav). `RENDERABLE` admits the existing image extensions plus
+mp4/mov/webm and flac/mp3/opus/wav. The input-folder /
 LoadImage list always uses the image-only set derived from this registry.
 
 `metaFromBytes(bytes, name)` owns metadata dispatch for ingestion and cached
@@ -845,6 +852,17 @@ QuickTime mdta keys/ilst and iTunes comment envelopes, and Matroska SimpleTags
 all produce the same metadata/lineage contract. Version5 re-extracts previously
 ingested content through the existing staleness owner. No ffmpeg/runtime decoder
 dependency is introduced.
+
+Audio readers normalize FLAC Vorbis-comment blocks, Ogg Opus `OpusTags` packets
+(including continuation across pages), MP3 ID3v2.3/v2.4 `TXXX` frames and WAV
+`LIST/INFO/ICMT` JSON comment envelopes through that same dispatcher. ffmpeg/PyAV
+preserve named `prompt`, `workflow` and `kz` dictionary keys in FLAC/Opus/MP3.
+WAV's ffmpeg INFO writer has a fixed vocabulary and drops those arbitrary keys:
+write `comment={"prompt":…, "workflow":…, "kz":…}` to retain them in `ICMT`.
+Without embedded metadata a WAV is still listed/playable, with no invented graph.
+Current stock ComfyUI SaveAudio writes FLAC/MP3/Opus, not WAV. Readers check record
+bounds, skip unsupported ID3 compression/encryption and never search encoded audio
+payloads for JSON. Audio adds no further extractor-version bump (version remains 5).
 
 `Ingest.dims(collection, name)` is the pre-ingest half: dims live in a
 file's first bytes (PNG IHDR, GIF descriptor, WebP VP8*, JPEG SOF), so a

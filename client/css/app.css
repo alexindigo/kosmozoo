@@ -286,6 +286,17 @@ main { display: flex; flex: 1; min-height: 0; }
 .media-time { white-space: nowrap; font-variant-numeric: tabular-nums; }
 .media-box:focus-visible { outline: 2px solid var(--secondary); outline-offset: -2px; }
 .media-stage > .media-controls { inset: 12px 48px auto 12px; }
+.media-box > audio { display: none; }
+.media-play-boundary { pointer-events: auto; }
+.media-audio-name { max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  text-align: center; color: var(--foreground-mid); font-size: 12px; }
+.media-box[data-kind="audio"] { cursor: pointer; min-height: 0; display: grid; grid-template-rows: minmax(0, 1fr) auto; }
+.media-box[data-kind="audio"] > .media-audio-face { position: static; grid-area: 1 / 1; min-height: 0; min-width: 0;
+  display: flex; flex-direction: column; justify-content: center; align-items: center; gap: 4px; padding: 4px 12px; }
+.media-audio-face .media-play { width: 36px; height: 36px; }
+.media-box[data-kind="audio"] > .media-controls { position: static; grid-area: 2 / 1; }
+.media-stage[data-kind="audio"] { width: min(100%, 1024px); height: auto; aspect-ratio: 1024 / 320;
+  max-height: 100%; align-self: center; justify-self: center; background: var(--background-stage); }
 /* the shared title row under the image: title left, actions right */
 .ctitle { display: flex; justify-content: space-between; align-items: flex-start;
   gap: 8px; margin: 8px 0 2px; font-weight: 600; color: var(--foreground-mid); }

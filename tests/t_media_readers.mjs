@@ -5,12 +5,12 @@ import { mkStateRig } from "./helpers/rig.mjs";
 
 const fixture = name => Deno.readFile(new URL(`./fixtures/media/${name}`, import.meta.url));
 
-Deno.test("media registry: feed admits image/video; LoadImage stays image-only", () => {
+Deno.test("media registry: feed admits image/video/audio; LoadImage stays image-only", () => {
   for (const [ext, { mime, kind }] of Object.entries(MEDIA)) {
     assertEquals(mediaKind(`nested/FILE.${ext.toUpperCase()}`), kind);
     assertEquals(EXT_MIME[ext], mime);
     assertEquals(IMAGE_EXTENSIONS.has(ext), kind === "image");
-    assertEquals(RENDERABLE.has(ext), kind === "image" || kind === "video");
+    assertEquals(RENDERABLE.has(ext), true);
   }
   assertEquals(mediaKind("file.unknown"), null);
   assertEquals(mediaKind("file.constructor"), null);
@@ -54,7 +54,7 @@ Deno.test("media reader: truncation and unknown bytes never invent metadata or t
   assertEquals(await metaFromBytes(new Uint8Array(32), "unknown.mp4"), [null, false, null]);
 });
 
-Deno.test("media sniff: audio signatures are recognized before audio feed admission", () => {
+Deno.test("media sniff: audio signatures and MP3 frame sync exclude AAC", () => {
   const encode = s => new TextEncoder().encode(s);
   for (const [bytes, mime] of [[encode("fLaC"), "audio/flac"], [encode("OggS"), "audio/ogg"],
     [encode("ID3\0"), "audio/mpeg"], [new Uint8Array([255, 251, 144, 0]), "audio/mpeg"],

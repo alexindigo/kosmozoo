@@ -115,7 +115,7 @@ try {
 const MISSING = "missing-404.png";
 // Publication-only fixtures never change the default image suite inventory.
 const mediaFixtures = new Map();
-for (const name of ["workflow.webm", "workflow.mp4", "workflow.mov"]) {
+for (const name of ["workflow.webm", "workflow.mp4", "workflow.mov", "workflow.flac", "workflow.mp3", "workflow.opus", "workflow.wav"]) {
   const bytes = await readFile(new URL(`./fixtures/media/${name}`, import.meta.url));
   const [, , promptGraph] = await metaFromBytes(bytes, name);
   mediaFixtures.set(`media/${name}`, { bytes, promptGraph });
@@ -398,6 +398,7 @@ export const server = Deno.serve({ port }, async (req) => {
       // the feature identifies output nodes by this flag (F4)
       SaveImage: { output_node: true, input: { required: { filename_prefix: ["STRING", {}] } } },
       SaveVideo: { output_node: true, input: { required: { filename_prefix: ["STRING", {}] } } },
+      SaveAudio: { output_node: true, input: { required: { filename_prefix: ["STRING", {}] } } },
     });
   }
 

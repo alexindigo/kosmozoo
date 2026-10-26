@@ -24,3 +24,22 @@ node92), editor workflow and `kz` lineage.
 
 The real user-provided MiniMax video is external evidence and is never part
 of the fixtures or repository.
+
+Audio fixtures are generated separately inside the VM with
+`python tests/make-audio-fixtures.py` (ffmpeg/ffprobe only). They are three-second
+440 Hz mono tones, each below 100 KB, carrying a ComfyUI-shaped SaveAudio prompt
+(seed42, text “A singing cosmic zoo”), editor workflow and the same `kz` lineage.
+
+| File | Container metadata |
+|---|---|
+| workflow.flac | Native FLAC block4 Vorbis comments: prompt/workflow/kz |
+| workflow.mp3 | ID3v2.4 TXXX, encoding3 (UTF8), description=prompt/workflow/kz |
+| workflow.opus | Ogg OpusTags vendor/count/length-prefixed comments: prompt/workflow/kz |
+| workflow.wav | RIFF LIST/INFO/ICMT NUL-terminated UTF8 JSON envelope with prompt/workflow/kz |
+
+The generator supplies `-metadata prompt=… -metadata workflow=… -metadata kz=…`.
+For WAV it also supplies `-metadata comment=<envelope>` because ffmpeg's fixed
+RIFF INFO vocabulary drops arbitrary keys. ffprobe read-back confirms the three
+named tags in FLAC/MP3, stream tags in Opus, and the `comment` envelope in WAV.
+Stock ComfyUI AudioSaveHelper sets the same named PyAV container metadata for
+FLAC/MP3/Opus; it currently does not offer WAV.

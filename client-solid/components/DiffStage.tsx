@@ -32,7 +32,7 @@ function useSideSrc(store, sideFn) {
     const next = candidate();
     if (!next) { setSrc(null); return; }
     let retired = false;
-    const video = next.kind === "video", el = video ? document.createElement("video") : new Image();
+    const playable = next.kind !== "image", el = playable ? document.createElement(next.kind) : new Image();
     const settle = ok => {
       if (retired) return;
       if (ok) lastGood = next;
@@ -41,15 +41,15 @@ function useSideSrc(store, sideFn) {
     };
     const release = () => {
       clearTimeout(deadline); el.onload = el.onerror = el.onloadeddata = null;
-      if (video) el.pause();
+      if (playable) el.pause();
       el.removeAttribute("src");
-      if (video) el.load();
+      if (playable) el.load();
     };
     const deadline = setTimeout(() => settle(false), 30000);
     el.onerror = () => settle(false);
-    if (video) { el.preload = "auto"; el.onloadeddata = () => settle(true); }
+    if (playable) { el.preload = "auto"; el.onloadeddata = () => settle(true); }
     el.src = next.src;
-    if (!video) el.decode().then(() => settle(true), () => settle(false));
+    if (!playable) el.decode().then(() => settle(true), () => settle(false));
     onCleanup(() => { retired = true; release(); });
   });
   return src;
@@ -198,7 +198,7 @@ export function DiffStage() {
 
   return (
     <div id="diff" hidden={!d().open}>
-      <DiffChrome differenceReason={differenceReason()} mediaWord={(d().col === "right" ? srcB() : srcA())?.kind ?? "image"} />
+      <DiffChrome differenceReason={differenceReason()} mediaWord={((d().col === "right" ? srcB() : srcA())?.kind ?? "image").replace("audio", "audio file")} />
       <div
         id="diffStage" ref={stageEl}
         data-mode={mode()} data-col={d().col}

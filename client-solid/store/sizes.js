@@ -5,17 +5,19 @@
 // changes height while mounted.
 //
 // Sources, in order: the listing's content dims (free, engine-resolved) →
-// the extractor meta's dims → off-DOM Image measurement (zero layout
-// effect) → a terminal 1024×1024 failure box. The virtualizer's estimateSize
+// the extractor meta's dims → off-DOM per-kind measurement (zero layout
+// effect) → a terminal 1024×1024 failure box. Audio needs no measurement,
+// using its fixed 1024×320 strategy. The virtualizer's estimateSize
 // is cardHeight — exact for every mounted row, so the virtualizer never
 // compensates and no timer coordinates geometry.
 
 import { createSignal } from "solid-js";
-import { mediaKind } from "/shared/backings/mime.mjs";
+import { mediaKind, mediaAspect } from "/shared/backings/mime.mjs";
 
 export const ERROR_RETRY_MS = 8000;
 export const MEASURE_TIMEOUT_MS = 30000;
 const FAILURE_SIZE = Object.freeze({ w: 1024, h: 1024 });
+const AUDIO_SIZE = Object.freeze({ w: 1024, h: 320, kind: "audio" });
 const validDims = (w, h) => Number.isFinite(w) && w > 0 && Number.isFinite(h) && h > 0;
 const RESOLVE_AHEAD = 30;   // entries past the visible window's tail
 const RESOLVE_BEHIND = 10;  // and behind its head (when more are pending above)
@@ -107,7 +109,8 @@ export function measureGeometry(probe, colW) {
 const q64 = (x) => Math.round(x * 64) / 64;
 
 // THE one card-height formula: image box from the aspect ratio (capped at
-// 16:9 — Zoomable's arStyle clamps the CSS variable the same way) + chrome.
+// 16:9 for images/video, uncapped for audio — Zoomable uses the same shared
+// geometry policy for the CSS variable) + chrome.
 // Round the card step up to a whole CSS pixel so native scroll compensation
 // and spacers are exact. Grid's CardSlot gives the card this height; its
 // natural content is at most this tall. estimateSize and the feed audit use
@@ -116,7 +119,7 @@ export function cardHeight(size, colW) {
   const ar = size.h > 0 ? size.w / size.h : 16 / 9;
   const inset = geomInset() ?? 0;
   const chrome = geomChrome() ?? chromeHeightPx();
-  return Math.ceil(q64((colW - inset) / Math.min(ar, 16 / 9)) + chrome);
+  return Math.ceil(q64((colW - inset) / mediaAspect(ar, 1, size.kind)) + chrome);
 }
 
 // Immutable identity-keyed offsets: old indices cannot describe old entries
@@ -201,6 +204,7 @@ export function makeSizes({ srcFor, imageAt, entryFor = () => null, identityFor 
   // A terminal box stays square even if metadata arrives after it mounted.
   function sizeFor(entry) {
     if (!entry) return null;
+    if (mediaKind(entry.filename ?? entry.name) === "audio") return AUDIO_SIZE;
     if (loadFailed(entry.id)) return sizeOf(entry.id);
     if (validDims(entry.width, entry.height)) return { w: entry.width, h: entry.height };
     if (validDims(entry.meta?.width, entry.meta?.height)) return { w: entry.meta.width, h: entry.meta.height };

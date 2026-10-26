@@ -28,7 +28,7 @@ export function MediaControls(props) {
       aria-label={props.muted ? "unmute" : "mute"} aria-pressed={props.muted} onClick={props.onMute} innerHTML={iconSvg(props.muted ? "volume-off" : "volume", 16)} />
     <button type="button" class="media-loop" title="loop" aria-label="loop" aria-pressed={props.loop}
       onClick={props.onLoop} innerHTML={iconSvg("repeat", 16)} />
-    <button type="button" class="media-open" title={`open ${props.kind} in viewer`} aria-label={`open ${props.kind} in viewer`}
+    <button type="button" class="media-open" title={`open ${props.kind === "audio" ? "audio file" : props.kind} in viewer`} aria-label={`open ${props.kind === "audio" ? "audio file" : props.kind} in viewer`}
       onClick={props.onOpen} innerHTML={iconSvg("open-viewer", 16)} />
   </MediaControlBoundary>;
 }
