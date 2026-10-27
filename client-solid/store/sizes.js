@@ -12,12 +12,11 @@
 // compensates and no timer coordinates geometry.
 
 import { createSignal } from "solid-js";
-import { mediaKind, mediaAspect } from "/shared/backings/mime.mjs";
+import { mediaKind } from "/shared/backings/mime.mjs";
+import { mediaGeometry, AUDIO_SIZE, FAILURE_SIZE } from "./media-geometry.js";
 
 export const ERROR_RETRY_MS = 8000;
 export const MEASURE_TIMEOUT_MS = 30000;
-const FAILURE_SIZE = Object.freeze({ w: 1024, h: 1024 });
-const AUDIO_SIZE = Object.freeze({ w: 1024, h: 160, kind: "audio" });
 const validDims = (w, h) => Number.isFinite(w) && w > 0 && Number.isFinite(h) && h > 0;
 const RESOLVE_AHEAD = 30;   // entries past the visible window's tail
 const RESOLVE_BEHIND = 10;  // and behind its head (when more are pending above)
@@ -80,6 +79,7 @@ export function gridGapPx() {
 // the estimates.
 const [geomInset, setGeomInset] = createSignal(null);
 const [geomChrome, setGeomChrome] = createSignal(null);
+const [geomControls, setGeomControls] = createSignal(0);
 
 export function geometryMeasured() {
   return geomInset() !== null && geomChrome() !== null;
@@ -103,23 +103,24 @@ export function measureGeometry(probe, colW) {
   if (!cr.height || !wr?.width) return;
   setGeomInset(colW - wr.width);
   setGeomChrome(cr.height - wr.height);
+  setGeomControls(probe.querySelector(".media-controls")?.getBoundingClientRect().height ?? 0);
 }
 
 // Blink lays out the image box in 1/64px units (its layout quantum).
 const q64 = (x) => Math.round(x * 64) / 64;
 
-// THE one card-height formula: image box from the aspect ratio (capped at
-// 16:9 for images/video, uncapped for audio — Zoomable uses the same shared
-// geometry policy for the CSS variable) + chrome.
+// THE one card-height formula: the shared media model + an in-flow playable
+// controls row + measured chrome. Natural dimensions are never discarded.
 // Round the card step up to a whole CSS pixel so native scroll compensation
 // and spacers are exact. Grid's CardSlot gives the card this height; its
 // natural content is at most this tall. estimateSize and the feed audit use
 // exactly this formula.
 export function cardHeight(size, colW) {
-  const ar = size.h > 0 ? size.w / size.h : 16 / 9;
   const inset = geomInset() ?? 0;
   const chrome = geomChrome() ?? chromeHeightPx();
-  return Math.ceil(q64((colW - inset) / mediaAspect(ar, 1, size.kind)) + chrome);
+  const box = mediaGeometry({ width: colW - inset, size });
+  const controls = size.kind === "video" || size.kind === "audio" ? geomControls() : 0;
+  return Math.ceil(q64(box.height) + controls + chrome);
 }
 
 // Immutable identity-keyed offsets: old indices cannot describe old entries
@@ -204,11 +205,13 @@ export function makeSizes({ srcFor, imageAt, entryFor = () => null, identityFor 
   // A terminal box stays square even if metadata arrives after it mounted.
   function sizeFor(entry) {
     if (!entry) return null;
-    if (mediaKind(entry.filename ?? entry.name) === "audio") return AUDIO_SIZE;
-    if (loadFailed(entry.id)) return sizeOf(entry.id);
-    if (validDims(entry.width, entry.height)) return { w: entry.width, h: entry.height };
-    if (validDims(entry.meta?.width, entry.meta?.height)) return { w: entry.meta.width, h: entry.meta.height };
-    return sizeOf(entry.id);
+    const kind = mediaKind(entry.filename ?? entry.name) ?? "image";
+    if (kind === "audio") return AUDIO_SIZE;
+    const size = loadFailed(entry.id) ? sizeOf(entry.id)
+      : validDims(entry.width, entry.height) ? { w: entry.width, h: entry.height }
+      : validDims(entry.meta?.width, entry.meta?.height) ? { w: entry.meta.width, h: entry.meta.height }
+      : sizeOf(entry.id);
+    return size ? { ...size, ...(kind === "video" ? { kind } : {}), ...(loadFailed(entry.id) ? { failed: true } : {}) } : null;
   }
 
   function retireImage(id) {

@@ -9,7 +9,7 @@ import { cardHeight, feedOffsets, feedEntryAtOffset, makeSizes, measureGeometry,
 // measureGeometry reads the probe's rects — fake the element shape it reads
 function fakeProbe(wrapW, cardH, wrapH) {
   return {
-    querySelector: () => ({ getBoundingClientRect: () => ({ width: wrapW, height: wrapH }) }),
+    querySelector: selector => selector === ".imgwrap" ? { getBoundingClientRect: () => ({ width: wrapW, height: wrapH }) } : null,
     getBoundingClientRect: () => ({ height: cardH }),
   };
 }

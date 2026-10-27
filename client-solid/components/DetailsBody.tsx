@@ -93,7 +93,7 @@ export function DetailsBody() {
                           <Zoomable
                             src={image.src}
                             alt={image.file}
-                            ar={s() !== "failed" ? `${s().w} / ${s().h}` : null}
+                            size={s() !== "failed" ? s() : { w: 1024, h: 1024, failed: true }}
                             zoomKey={`input:${im()?.host}:${image.file}`}
                             onOpen={() => store.handles.invoke("workbench.pickInput", { source: im()?.host, file: image.file, fromOutput: !!image.fromOutput })}
                           />

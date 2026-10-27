@@ -115,7 +115,7 @@ try {
 const MISSING = "missing-404.png";
 // Publication-only fixtures never change the default image suite inventory.
 const mediaFixtures = new Map();
-for (const name of ["workflow.webm", "workflow.mp4", "workflow.mov", "workflow.flac", "workflow.mp3", "workflow.opus", "workflow.wav"]) {
+for (const name of ["workflow.webm", "workflow.mp4", "workflow.mov", "workflow.flac", "workflow.mp3", "workflow.opus", "workflow.wav", "geometry.webm", "square.png", "wide.png"]) {
   const bytes = await readFile(new URL(`./fixtures/media/${name}`, import.meta.url));
   const [, , promptGraph] = await metaFromBytes(bytes, name);
   mediaFixtures.set(`media/${name}`, { bytes, promptGraph });

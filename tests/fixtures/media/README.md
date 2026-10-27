@@ -43,3 +43,10 @@ RIFF INFO vocabulary drops arbitrary keys. ffprobe read-back confirms the three
 named tags in FLAC/MP3, stream tags in Opus, and the `comment` envelope in WAV.
 Stock ComfyUI AudioSaveHelper sets the same named PyAV container metadata for
 FLAC/MP3/Opus; it currently does not offer WAV.
+# Geometry fixtures
+
+`geometry.webm` is a 640×640 VP8 recording of a two-colour canvas, generated
+with Chromium MediaRecorder inside the media-types VM (no H.264 dependency).
+`square.png` (1024×1024) and `wide.png` (2048×512) are canvas PNGs generated
+in that same run. The retained generator is `probe-m5.py` beside the external
+media-types plan; no generation or decoder dependency is needed at runtime.

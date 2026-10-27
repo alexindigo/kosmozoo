@@ -60,7 +60,7 @@ Deno.test("video measurement uses the retained six-slot owner and retires native
     assertEquals(made.length, 6); assert(made.every(el => el.preload === "metadata"));
     const stale = made[1].onloadedmetadata;
     made[0].onloadedmetadata(); assertEquals(made.length, 7);
-    assertEquals(sizes.sizeFor(entries[0]), { w: 320, h: 180 });
+    assertEquals(sizes.sizeFor(entries[0]), { w: 320, h: 180, kind: "video" });
     assertEquals(made[0].src, null); assertEquals(made[0].pauses, 1); assertEquals(made[0].loads, 1);
     sizes.setContext({}); stale(); assertEquals(sizes.sizeOf("1"), null);
     assert(made.every(el => !el.src && el.onloadedmetadata === null));

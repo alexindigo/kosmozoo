@@ -177,7 +177,8 @@ export function Grid() {
  btnwrap's icon button drives the title row's height, and the
  notes rows' real labels wrap exactly like a live card's. */}
         <div class="card--probe" aria-hidden="true" ref={(el) => { probe = el; }}>
-          <div class="imgwrap" />
+          <div class="imgwrap" style={{ height: "1px" }} />
+          <div class="media-controls media-controls-probe" />
           <div class="ctitle">
             <span class="ctitle-left">
               <input type="checkbox" class="selcb" tabindex="-1" />

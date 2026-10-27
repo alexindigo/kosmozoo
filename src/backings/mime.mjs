@@ -14,7 +14,4 @@ export const mediaKind = name => Object.hasOwn(MEDIA, mediaExtension(name)) ? ME
 export const IMAGE_EXTENSIONS = new Set(Object.keys(MEDIA).filter(ext => MEDIA[ext].kind === "image"));
 export const RENDERABLE = new Set(Object.keys(MEDIA));
 
-// Shared geometry policy: audio has no picture to constrain to the image lane.
-export const mediaAspect = (width, height, kind) => kind === "audio" ? width / height : Math.min(width / height, 16 / 9);
-
 export const EXT_MIME = Object.freeze(Object.fromEntries(Object.entries(MEDIA).map(([ext, { mime }]) => [ext, mime])));

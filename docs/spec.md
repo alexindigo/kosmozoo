@@ -392,10 +392,15 @@ Images measure off-DOM with `Image`; videos use a retained
 six-slot owner, with the same context/content guards, deadline and retry.
 Listing/extractor dimensions still take precedence. Retirement pauses video,
 removes its source and resets the native consumer before releasing capacity.
-Audio is immediately size-ready with the fixed 1024×160 box, without measurement
-or a size read. Its aspect is not subject to the image/video 16:9 cap; the shared
-geometry policy supplies both the virtualizer and rendered box. Late dimensions
-and decode errors cannot resize audio cards.
+Audio is immediately size-ready with the fixed 1024×160 face, without measurement
+or a size read. Late dimensions and decode errors cannot resize audio cards.
+One pure media-geometry model retains natural dimensions across feed, details
+and anchors. Images/video scale down to available width, never enlarge; the box
+height is max(displayed media height, available width × 9/16). Media is centred;
+above the minimum the box hugs it vertically. Terminal failures keep their square
+box and audio keeps its fixed face aspect. Playable controls occupy a separate
+adjacent row below that box; its stable measured height is included in cardHeight,
+virtualizer estimates and landing compensation, even while src is absent or failed.
 
 `MediaBox` owns native display/load/zoom and player state; `Zoomable` is its
 store adapter for feed/details/anchors. The comparator also renders MediaBox,

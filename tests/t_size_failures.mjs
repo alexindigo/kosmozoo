@@ -159,14 +159,14 @@ Deno.test("feed failure contract: known + pending partitions the view and termin
     env.made[0].onerror(); env.advance(ERROR_RETRY_MS);
     assertEquals(env.made.length, 2);
     env.made[1].onerror();
-    assertEquals(store.state.cardSize(0), { w: 1024, h: 1024 });
+    assertEquals(store.state.cardSize(0), { w: 1024, h: 1024, failed: true });
     assertEquals(store.state.entriesWithKnownSize(), [0, 1]);
     assertEquals(store.state.pendingSizeCount(), 0);
     assertEquals(store.state.entriesWithKnownSize().length + store.state.pendingSizeCount(), store.state.view().length);
     rows[0].width = 300; rows[0].height = 100; rows[0].hash = "first-known-hash";
     await store.actions.ui.refresh();
     assertEquals(store.state.images[0].hash, "first-known-hash", "the actual inventory enrichment was accepted");
-    assertEquals(store.state.cardSize(0), { w: 1024, h: 1024 }, "late dims cannot resize a mounted failure card");
+    assertEquals(store.state.cardSize(0), { w: 1024, h: 1024, failed: true }, "late dims cannot resize a mounted failure card");
   } finally {
     store.dispose(); store.actions.status.clear("transient"); Object.assign(api, saved);
     if (location === undefined) delete globalThis.location; else globalThis.location = location;

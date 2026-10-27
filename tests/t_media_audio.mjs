@@ -1,7 +1,7 @@
 import { assert, assertEquals } from "jsr:@std/assert";
 import { metaFromBytes, imageDims, sniffMime, EXTRACTOR_VERSION } from "../src/extractor.mjs";
 import { makeSizes } from "../client-solid/store/sizes.js";
-import { mediaAspect } from "../src/backings/mime.mjs";
+import { mediaGeometry } from "../client-solid/store/media-geometry.js";
 import { mkStateRig } from "./helpers/rig.mjs";
 
 const fixture = ext => Deno.readFile(new URL(`./fixtures/media/workflow.${ext}`, import.meta.url));
@@ -37,8 +37,8 @@ Deno.test("audio geometry: immediately ready, fixed across late dimensions, no n
       assertEquals(sizes.loadFailed(entry.id), false);
     }
     sizes.resolveAhead([0, 1, 2, 3], 0, 3);
-    assertEquals(mediaAspect(1024, 160, "audio"), 6.4);
-    assertEquals(mediaAspect(1024, 160, "image"), 16 / 9);
+    assertEquals(mediaGeometry({ width: 1024, size: { w: 1024, h: 160, kind: "audio" } }).height, 160);
+    assertEquals(mediaGeometry({ width: 1024, size: { w: 1024, h: 160 } }).height, 576);
     sizes.setContext({});
     assertEquals(sizes.sizeFor(entries[0]), { w: 1024, h: 160, kind: "audio" });
   } finally { sizes.dispose(); }

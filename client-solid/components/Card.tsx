@@ -31,10 +31,6 @@ export function Card(props) {
   // Pending entries stay out of the feed; terminal failures have the size
   // owner's fixed square box and keep the same normal card controls.
   const sizeInfo = () => store.state.cardSize(imgIdx());
-  const ar = () => {
-    const s = sizeInfo();
-    return s ? `${s.w} / ${s.h}` : null;
-  };
   const src = () => {
     const img = image();
     if (!img || store.state.sizeFailed(props.entryId)) return null;
@@ -90,7 +86,7 @@ export function Card(props) {
         src={src()}
         failed={store.state.sizeFailed(props.entryId)}
         alt={image()?.filename}
-        ar={ar()}
+        size={sizeInfo()}
         zoomKey={image()?.id}
         focused={props.focused}
         onOpen={() => store.handles.invoke("workbench.openEntry", { id: props.entryId })}
