@@ -107,6 +107,7 @@ Deno.test("keys: preserved default identities/order plus media playback and perm
     ["wb.twoUp", "1", "workbench"], ["wb.oneUp", "2", "workbench"], ["wb.split", "3", "workbench"], ["wb.difference", "4", "workbench"],
     ["wb.colLeft", "ArrowLeft", "workbench"], ["wb.colRight", "ArrowRight", "workbench"], ["wb.prev", "ArrowUp", "workbench"], ["wb.next", "ArrowDown", "workbench"], ["wb.lock", "l", "workbench"],
     ["media.toggle", " ", "global"],
+    ["wb.full", "f", "workbench"],
   ]);
   const store = makeAppStore({ subscribeSources: null });
   for (const binding of CORE_BINDINGS) store.actions.keys.register(binding);

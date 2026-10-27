@@ -280,7 +280,6 @@ main { display: flex; flex: 1; min-height: 0; }
 .media-seek { min-width: 24px; flex: 1; accent-color: var(--secondary); background: var(--border); }
 .media-time { white-space: nowrap; font-variant-numeric: tabular-nums; }
 .media-box:focus-visible { outline: 2px solid var(--secondary); outline-offset: -2px; }
-.media-stage > .media-controls { inset: 12px 48px auto 12px; }
 .media-box > audio { display: none; }
 .media-play-boundary { pointer-events: auto; }
 .media-duration { color: var(--foreground-mid); font-variant-numeric: tabular-nums; }
@@ -546,8 +545,15 @@ body:has(#diff:not([hidden])) #statusCol { bottom: 56px; }
  Both sides stay mounted (views change layout/visibility/clip only); the
  shared zoom binds to the stage box and the same transform copies onto every
  visible layer. The stage clips the overflow; --split owns the wipe position. */
-#diff { position: fixed; inset: 0; background: var(--black); z-index: var(--z-overlay); }
-#diffStage { position: absolute; inset: 0; display: flex; overflow: hidden; }
+#diff { position: fixed; inset: 0; background: var(--black); z-index: var(--z-overlay);
+  display: flex; flex-direction: column; }
+#diffStage { position: relative; flex: 1; min-height: 0; display: flex; overflow: hidden; }
+#diffMedia { display: flex; flex: 0 0 auto; width: 100%; background: var(--background-stage);
+  border-top: 1px solid var(--border); }
+.media-dock-slot { flex: 1; min-width: 0; }
+.media-dock-slot > div { display: contents; } /* Solid Portal's wrapper */
+.media-dock-slot .media-controls { position: static; width: 100%; }
+.media-side { color: var(--foreground-mid); font-weight: 600; padding-inline: 6px; }
 .dz-cell { flex: 1; min-width: 0; min-height: 0; overflow: hidden;
   display: flex; align-items: center; justify-content: center; }
 /* the fit rule is shared with the mask's viewRect: contain-fit + centered,
@@ -624,7 +630,7 @@ body:has(#diff:not([hidden])) #statusCol { bottom: 56px; }
 /* ONE bottom panel holding all the buttons: the controls strip at the left,
  the 1–4 mode buttons centered, the keys button at the right — one shared
  translucent backdrop over the stage image */
-#diffBar { position: absolute; left: 0; right: 0; bottom: 0;
+#diffBar { position: relative; flex: 0 0 auto; width: 100%;
   display: flex; align-items: center; gap: 10px;
   background: color-mix(in srgb, var(--surface) 60%, transparent);
   backdrop-filter: blur(6px);

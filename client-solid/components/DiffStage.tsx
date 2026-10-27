@@ -33,10 +33,10 @@ function useSideSrc(store, sideFn) {
     if (!next) { setSrc(null); return; }
     let retired = false;
     const playable = next.kind !== "image", el = playable ? document.createElement(next.kind) : new Image();
-    const settle = ok => {
+    const settle = (ok, failureCode) => {
       if (retired) return;
       if (ok) lastGood = next;
-      setSrc(ok ? next : lastGood ?? { ...next, failed: true });
+      setSrc(ok ? next : lastGood ?? { ...next, failed: true, failureCode });
       release();
     };
     const release = () => {
@@ -46,10 +46,10 @@ function useSideSrc(store, sideFn) {
       if (playable) el.load();
     };
     const deadline = setTimeout(() => settle(false), 30000);
-    el.onerror = () => settle(false);
+    el.onerror = () => settle(false, playable ? el.error?.code : "decode");
     if (playable) { el.preload = "auto"; el.onloadeddata = () => settle(true); }
     el.src = next.src;
-    if (!playable) el.decode().then(() => settle(true), () => settle(false));
+    if (!playable) el.decode().then(() => settle(true), () => settle(false, "decode"));
     onCleanup(() => { retired = true; release(); });
   });
   return src;
@@ -71,13 +71,16 @@ function Wipe(props) {
 export function DiffStage() {
   const store = useAppStore();
   const pair = () => store.state.diffPair();
-  const srcA = useSideSrc(store, () => pair().a);
-  const srcB = useSideSrc(store, () => pair().b);
   const d = () => store.state.diff;
-  const hasB = () => !!pair().b && mediaKind(pair().a?.file) !== "audio";
+  const srcA = useSideSrc(store, () => pair().a);
+  const srcB = useSideSrc(store, () => d().mode === "full" || store.state.diffKind() === "audio" ? null : pair().b);
+  const hasB = () => !!pair().b && store.state.diffKind() !== "audio" && mode() !== "full";
   const differenceReason = () => store.state.differenceReason() ||
     ([srcA(), srcB()].some(side => side && side.kind !== "image") ? "difference mode compares still images" : null);
-  const mode = () => mediaKind(pair().a?.file) === "audio" || (d().mode === "difference" && differenceReason()) ? "two-up" : d().mode;
+  const mode = () => d().mode === "difference" && differenceReason() ? "two-up" : d().mode;
+  const playableA = () => srcA() && srcA().kind !== "image";
+  const playableB = () => hasB() && srcB() && srcB().kind !== "image";
+  const [dockA, setDockA] = createSignal(null), [dockB, setDockB] = createSignal(null);
 
   // TWO view states, one per side. Each layer's transform derives from its
   // own key in the store's views (view-fraction space; the layer's own box
@@ -198,21 +201,22 @@ export function DiffStage() {
 
   return (
     <div id="diff" hidden={!d().open}>
-      <DiffChrome singleView={mediaKind(pair().a?.file) === "audio"} differenceReason={differenceReason()} mediaWord={((d().col === "right" ? srcB() : srcA())?.kind ?? "image").replace("audio", "audio file")} />
       <div
         id="diffStage" ref={stageEl}
         data-mode={mode()} data-col={d().col}
         style={{ "--split": d().splitT, "--active-op": d().activeOpacity }}
       >
         <div class="dz-cell dz-a" ref={cellAEl}>
-          <MediaBox workbench src={srcA()?.src} kind={srcA()?.kind} alt={srcA()?.name} failed={srcA()?.failed}
+          <MediaBox workbench src={srcA()?.src} kind={srcA()?.kind} alt={srcA()?.name} failed={srcA()?.failed} failureCode={srcA()?.failureCode}
+            controlsMount={dockA()} controlLabel="A"
             transform={tA()} active={d().open && (mode() !== "one-up" || d().col === "feed" || !hasB())} primary={d().col === "feed" || !hasB()}
             registerPlayer={store.actions.media.register} onPlaybackError={store.actions.media.report}
             onOpen={() => store.handles.invoke("workbench.open")} />
         </div>
         <Show when={hasB()}>
           <div class="dz-cell dz-b" ref={cellBEl}>
-            <MediaBox workbench src={srcB()?.src} kind={srcB()?.kind} alt={srcB()?.name} failed={srcB()?.failed}
+            <MediaBox workbench src={srcB()?.src} kind={srcB()?.kind} alt={srcB()?.name} failed={srcB()?.failed} failureCode={srcB()?.failureCode}
+              controlsMount={dockB()} controlLabel="B"
               transform={tB()} active={d().open && (mode() !== "one-up" || d().col === "right")} primary={d().col === "right"}
               registerPlayer={store.actions.media.register} onPlaybackError={store.actions.media.report}
               onOpen={() => store.handles.invoke("workbench.open")} />
@@ -227,6 +231,11 @@ export function DiffStage() {
           </div>
         </Show>
       </div>
+      <div id="diffMedia" hidden={!playableA() && !playableB()}>
+        <div class="media-dock-slot" ref={setDockA} hidden={!playableA()} />
+        <div class="media-dock-slot" ref={setDockB} hidden={!playableB()} />
+      </div>
+      <DiffChrome differenceReason={differenceReason()} mediaWord={((hasB() && d().col === "right" ? srcB() : srcA())?.kind ?? "image").replace("audio", "audio file")} />
     </div>
   );
 }

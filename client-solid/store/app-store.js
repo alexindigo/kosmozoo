@@ -30,6 +30,7 @@ import { makeSourceFreshness } from "./source-freshness.js";
 import { makeSourceRegistry, sameSourceIdentity } from "./source-registry.js";
 import { fieldList, nodeImages } from "./fields.js";
 import { pairSides } from "../features/diff/pair.mjs";
+import { workbenchViews, defaultWorkbenchView } from "../features/diff/views.mjs";
 import { makeImageWindow } from "./image-window.js";
 import { makeSizes } from "./sizes.js";
 import { makeMediaPlayers } from "./media-players.js";
@@ -72,7 +73,7 @@ export function makeAppStore({ subscribeSources = typeof window !== "undefined" 
     // right-pane current (session-only); modes and mask prefs are session-only.
     diff: {
       open: false,
-      mode: "two-up",       // two-up | one-up | split | difference
+      mode: "two-up",       // full | two-up | one-up | split | difference
       col: "feed",          // active column (One-Up visible side, primary in every view)
       locked: true,         // entangled zoom: a gesture's delta writes BOTH view keys
       splitT: 0.5,          // wipe position, 0..1 of stage width
@@ -244,7 +245,19 @@ export function makeAppStore({ subscribeSources = typeof window !== "undefined" 
   }));
   const differenceReason = createMemo(() => [diffPair().a, diffPair().b].some(side =>
     side && (mediaKind(side.file ?? side.image) ?? "image") !== "image") ? "difference mode compares still images" : null);
-  createEffect(() => { if (differenceReason() && st.diff.mode === "difference") setSt("diff", "mode", "two-up"); });
+  const diffKind = createMemo(() => mediaKind(diffPair().a?.file) ?? "image");
+  const diffViews = createMemo(() => workbenchViews(diffKind()));
+  createEffect(() => {
+    if (!diffViews().some(view => view.mode === st.diff.mode) || (differenceReason() && st.diff.mode === "difference")) {
+      setSt("diff", "mode", defaultWorkbenchView(diffKind()));
+    }
+  });
+  const prepareDiffOpen = () => {
+    if (diffKind() !== "image") {
+      setSt("diff", "mode", defaultWorkbenchView(diffKind()));
+      setSt("diff", "col", "feed");
+    }
+  };
 
   // a B side pinned to the current graph's node images dies with that graph:
   // when the feed current moves to a DIFFERENT image, a stale infoFile
@@ -1877,17 +1890,19 @@ export function makeAppStore({ subscribeSources = typeof window !== "undefined" 
       // open the workbench on the current pointer
       open() {
         if (!current() || !resolveSide(current())) return false;
-        batch(() => { retireFeedScroll(); setSt("diff", "open", true); });
+        batch(() => { retireFeedScroll(); prepareDiffOpen(); setSt("diff", "open", true); });
         return true;
       },
       hide() { batch(() => { retireFeedScroll(); setSt("diff", "open", false); }); },
       // --- comparator session state (all session-only) -------------------------
       setMode(mode) {
-        if (mediaKind(diffPair().a?.file) === "audio") return false;
+        if (!diffViews().some(view => view.mode === mode)) return false;
+        if (diffKind() === "video" && mode !== "full" && !diffPair().b) return false;
         if (mode === "difference" && differenceReason()) return false;
-        if (mode === "two-up" || mode === "one-up" || mode === "split" || mode === "difference") {
+        batch(() => {
           setSt("diff", "mode", mode);
-        }
+          if (mode === "full") setSt("diff", "col", "feed");
+        });
       },
       setCol(col) { if (col === "feed" || col === "right") setSt("diff", "col", col); },
       setLocked(x) { setSt("diff", "locked", !!x); },
@@ -2008,6 +2023,7 @@ export function makeAppStore({ subscribeSources = typeof window !== "undefined" 
             actions.ui.setWorkspace("details");
           }
         }
+        prepareDiffOpen();
         setSt("diff", "open", true);
         });
         if (push && right) history.pushState({ kz: 1 }, "", diffUrl(left, right,
@@ -2351,6 +2367,8 @@ export function makeAppStore({ subscribeSources = typeof window !== "undefined" 
     get anchors() { return st.anchors; },
     get diff() { return st.diff; },
     diffPair,
+    diffKind,
+    diffViews,
     get variations() { return st.variations; },
     get infoOverlay() { return st.infoOverlay; },
     get chips() { return st.chips; },

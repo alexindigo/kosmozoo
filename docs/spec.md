@@ -18,7 +18,7 @@ toggles. Availability and reason derive from each mode's declared `needs`.
 | **Attention (ROI)** | no | guides, region focus | not implemented |
 
 What IS shipped: the feed (virtualized grid), the workbench (the two-sided
-comparator — feed current × right-pane current, Kaleidoscope's four views
+comparator — feed current × right-pane current, per-kind views
 with shared pan/zoom; pair URL live), notes/vote/favorite/bookmark, anchor pane, and
 the variations feature (server route + modal). The three plugin axes
 (alignment / composition-as-plugins / ROI) stay dormant — Difference-the-view
@@ -422,10 +422,24 @@ video format.” or “…audio format.”; image decode errors say “This imag
 be decoded.” Unknown causes keep the generic reason. Every failure adds
 “Download it to open elsewhere.”, with ordinary card download still available.
 Audio's viewer has one view and no switcher or B side.
+The per-kind workbench view catalogue owns opening defaults, command admission
+and the toolbar. Video opens in Full (A only), and offers Split (two-up),
+Overlay (one-up/blink) and Slider (wipe); Difference is absent. Audio has only
+Full. Images retain Two-Up/One-Up/Split/Difference and the existing default.
+Video comparison choices require the existing anchor/node-image B pair.
+The persisted, rebindable `wb.full` binding defaults to `f`; keys1–4keep
+their existing mode meanings. Full is unavailable to image A sides.
+The viewer is a structural column: media area flexes above an ordered A/B
+controls row, followed immediately by the existing bottom toolbar. One
+playable side spans the dock; two playable sides get equal side-by-side bars
+labelled A/B. MediaBox retains player state and receives its controls mount
+as a presentation input; controls never participate in image pan/wipe layout.
 
 Workbench guards accept video/audio only after `loadeddata` and images after decode;
 accepted source, kind and filename stay together through a failed swap, retaining
-the last good side. Closing retires pending guards and native sources. Two-up,
+the last good side. Without a last-good side, a failed guard carries its native
+media error code or image decode cause to the same MediaBox failure formatter;
+unknown guard timeouts stay generic. Closing retires pending guards and native sources. Two-up,
 one-up and split allow video/audio without synchronization. Non-image pairs disable
 Difference with “difference mode compares still images”; the semantic mode
 command enforces the same restriction. Hidden one-up players pause.
@@ -501,6 +515,8 @@ adds a persisted, rebindable Space binding through the same dispatcher. It route
 to the player containing keyboard focus, or the workbench's active player;
 typing and modal layers retain priority. Accepted playback keys prevent native
 scrolling. KeysPanel displays Space by name and edits mappings.
+`wb.full` adds the persisted/rebindable full-view shortcut `f`, via that same
+dispatcher; typing and modal priority are unchanged.
 
 Payload/binding records use own enumerable data properties and dense arrays;
 accessors, symbol properties, hidden callbacks and cycles reject before execution

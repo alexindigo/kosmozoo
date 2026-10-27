@@ -13,4 +13,5 @@ export const CORE_BINDINGS = Object.freeze([
   { id: "wb.next", key: "ArrowDown", ctx: "workbench", route: "workbench", command: "workbench.step", args: { direction: 1 }, desc: "comparator: step forward" },
   { id: "wb.lock", key: "l", ctx: "workbench", route: "workbench-pair", command: "workbench.lock", args: { toggle: true }, desc: "comparator: lock/unlock entangled zoom" },
   { id: "media.toggle", key: " ", ctx: "global", route: "media", command: "media.toggle", desc: "play/pause focused media (Space)" },
+  { id: "wb.full", key: "f", ctx: "workbench", route: "workbench", command: "workbench.mode", args: { mode: "full" }, desc: "viewer: Full" },
 ]);

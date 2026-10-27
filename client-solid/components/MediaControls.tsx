@@ -1,4 +1,5 @@
 import { onMount, onCleanup, Show } from "solid-js";
+import { Portal } from "solid-js/web";
 import { iconSvg } from "/js/icons.mjs";
 import { IconButton } from "./IconButton.js";
 
@@ -19,7 +20,8 @@ export function MediaControlBoundary(props) {
 }
 
 export function MediaControls(props) {
-  return <MediaControlBoundary class="media-controls">
+  const bar = () => <MediaControlBoundary class="media-controls">
+    <Show when={props.label}><span class="media-side">{props.label}</span></Show>
     <IconButton variant="play media-toggle" title={props.paused ? "play" : "pause"}
       onAction={props.onToggle} icon={iconSvg(props.paused ? "player-play" : "player-pause", 20)} />
     <input class="media-seek" type="range" aria-label="seek" min="0" max={props.duration || 0} step="0.01"
@@ -32,4 +34,7 @@ export function MediaControls(props) {
     <Show when={props.onOpen}><IconButton variant="media-open" title="open full screen"
       onAction={props.onOpen} icon={iconSvg("full-screen", 16)} /></Show>
   </MediaControlBoundary>;
+  // Mount is an explicit presentation input; native player state stays with
+  // MediaBox. The viewer provides ordered A/B slots outside the media area.
+  return props.docked ? <Show when={props.mount}><Portal mount={props.mount}>{bar()}</Portal></Show> : bar();
 }

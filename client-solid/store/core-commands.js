@@ -39,7 +39,7 @@ export function registerCoreCommands(handles, { ops, state, clipboard = (text) =
   const identity = { id: optional(string), ids: optional(ids), target: optional(target) };
   const hasIdentity = (args) => shape(identity)(args) && ["id", "ids", "target"].filter((key) => Object.hasOwn(args, key)).length === 1;
   const entry = (id) => state.images[state.imageIdxById().get(id)];
-  add("workbench.mode", { mode: oneOf("two-up", "one-up", "split", "difference") }, ({ mode }) => ops.diff.setMode(mode), "comparator view");
+  add("workbench.mode", { mode: oneOf("full", "two-up", "one-up", "split", "difference") }, ({ mode }) => ops.diff.setMode(mode), "comparator view");
   add("workbench.column", (a) => shape({ column: optional(oneOf("feed", "right")), toggle: optional(bool) })(a) &&
     (a.toggle === true ? a.column === undefined : a.column !== undefined && a.toggle === undefined), (a) => ops.diff.setCol(a.toggle ? state.diff.col === "feed" ? "right" : "feed" : a.column));
   add("workbench.lock", (a) => shape({ value: optional(bool), toggle: optional(bool) })(a) &&

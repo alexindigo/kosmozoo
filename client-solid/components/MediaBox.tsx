@@ -53,7 +53,7 @@ export function MediaBox(props) {
     if (!playable() || !el || !props.registerPlayer) return;
     const owner = props.registerPlayer({
       workbench: !!props.workbench,
-      focused: () => props.focused?.() || box?.contains(document.activeElement),
+      focused: () => props.focused?.() || box?.contains(document.activeElement) || props.controlsMount?.contains(document.activeElement),
       primary: () => !!props.primary,
       available: () => props.src != null && !props.failed && props.active !== false && phase() !== "error",
       toggle, pause: () => el.pause(),
@@ -97,13 +97,14 @@ export function MediaBox(props) {
           </MediaControlBoundary></Show>
           <Show when={props.kind === "audio"}><span class="media-duration">{mediaTime(duration())}</span></Show>
         </div></Show>
-        <MediaControls kind={props.kind} paused={paused()} current={current()} duration={duration()} muted={muted()} loop={loop()}
+        <MediaControls kind={props.kind} docked={props.workbench} mount={props.controlsMount} label={props.controlLabel}
+          paused={paused()} current={current()} duration={duration()} muted={muted()} loop={loop()}
           onToggle={toggle} onSeek={n => { surface().currentTime = n; }} onMute={() => setMuted(v => !v)}
           onLoop={() => setLoop(v => !v)} onOpen={props.workbench ? undefined : props.onOpen} />
       </Show>
     </Show>
     <Show when={phase() === "error"}><div class="media-failure" role="status">
-      <span class="media-failure-name">{props.alt}</span><span>{mediaFailure(props.kind ?? "image", error())}</span>
+      <span class="media-failure-name">{props.alt}</span><span>{mediaFailure(props.kind ?? "image", props.failed ? props.failureCode : error())}</span>
       <span>Download it to open elsewhere.</span>
       <Show when={!props.failed && props.onErrorClick}><span>click to retry</span></Show>
     </div></Show>
