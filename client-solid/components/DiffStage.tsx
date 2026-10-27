@@ -4,9 +4,8 @@
 // Both sides stay MOUNTED and decode-guarded (one resource per side; a
 // failed decode resolves to the last good src, never blanks) — the views
 // only change layout, visibility, or clip, so a blink never reloads.
-// Shared zoom: ONE view state, bound to the stage box and copied onto every
-// visible layer; the key is the feed side's "<source>:<file>" (the same key
-// the feed card and info panel use — a crop carries across views). Views:
+// Viewer-session zoom is resource-keyed, isolated from card/inline persistence
+// and reset on open. Per-side crops entangle by delta when locked. Views:
 // two-up (key 1), one-up blink (2), split wipe (3), difference mask (4).
 // No pair (no B) → single image, like a one-file Kaleidoscope.
 
@@ -82,20 +81,29 @@ export function DiffStage() {
   const playableB = () => hasB() && srcB() && srcB().kind !== "image";
   const [dockA, setDockA] = createSignal(null), [dockB, setDockB] = createSignal(null);
 
-  // TWO view states, one per side. Each layer's transform derives from its
-  // own key in the store's views (view-fraction space; the layer's own box
+  // TWO view states, one per resource. Each layer's transform derives from its
+  // own viewer-session key (view-fraction space; the layer's own box
   // turns fractions into px). Locked = the gesture's delta also writes the
   // peer key (entangle, never copy); unlocked = only the target's key.
   const keyA = () => (pair().a ? `${pair().a.source}:${pair().a.file}` : null);
   const keyB = () => (pair().b ? `${pair().b.source}:${pair().b.file}` : null);
   const layerT = (el, key) => {
-    const v = key ? store.state.views[key] : null;
+    allocation(); // resize/mode layout is an input, not an untracked DOM read
+    const v = key ? d().views[key] : null;
     if (!el || !v || !(v.s > 1 || v.txf || v.tyf)) return "";
     return `translate(${v.txf * el.offsetWidth}px, ${v.tyf * el.offsetHeight}px) scale(${v.s})`;
   };
-  let stageEl, cellAEl, cellBEl;
-  const tA = createMemo(() => layerT(cellAEl, keyA()));
-  const tB = createMemo(() => layerT(cellBEl, keyB()));
+  let stageEl;
+  const [cellAEl, setCellAEl] = createSignal(null), [cellBEl, setCellBEl] = createSignal(null);
+  const [allocation, setAllocation] = createSignal(0);
+  createEffect(() => {
+    const a = cellAEl(), b = hasB() ? cellBEl() : null;
+    const observer = new ResizeObserver(() => setAllocation(n => n + 1));
+    for (const el of [stageEl, a, b]) if (el) observer.observe(el);
+    onCleanup(() => observer.disconnect());
+  });
+  const tA = createMemo(() => layerT(cellAEl(), keyA()));
+  const tB = createMemo(() => layerT(cellBEl(), keyB()));
 
   // one binding on the stage box; the gesture's target is the layer VISIBLE
   // at the pointer (hitLayer — derived from the same layout state the
@@ -108,15 +116,16 @@ export function DiffStage() {
     const layer = hitLayer({
       mode: mode(), col: d().col, splitT: d().splitT,
       x: e.clientX,
-      cellBRect: hasB() ? cellBEl.getBoundingClientRect() : null,
+      cellBRect: hasB() ? cellBEl()?.getBoundingClientRect() : null,
       stageRect: stageEl.getBoundingClientRect(),
     });
-    const box = mode() === "difference" ? stageEl : (layer === "b" ? cellBEl : cellAEl);
+    const box = mode() === "difference" ? stageEl : (layer === "b" ? cellBEl() : cellAEl());
     return { key: layer === "b" ? keyB() : keyA(), box };
   };
   const alsoFor = (t) => {
     if (!d().locked || !hasB()) return null;
-    return t.key === keyA() ? keyB() : keyA();
+    const peer = t.key === keyA() ? keyB() : keyA();
+    return peer === t.key ? null : peer;
   };
   let binding = null;
   createEffect(on(
@@ -129,8 +138,8 @@ export function DiffStage() {
         target: targetFor,
         also: alsoFor,
         panAlways: true, // the comparator pans at any zoom; cards keep zoomed-only pan
-        getView: store.actions.views.get,
-        setView: store.actions.views.set,
+        getView: store.actions.diff.views.get,
+        setView: store.actions.diff.views.set,
       });
     },
   ));
@@ -165,11 +174,12 @@ export function DiffStage() {
   // diffAbs, or diffOpacity changes; keeps its last paint (never blanks).
   let canvasEl;
   createEffect(() => {
+    allocation();
     const aUrl = srcA()?.src, bUrl = srcB()?.src;
     const absolute = d().diffAbs, opacity = d().diffOpacity, baseIsA = d().col === "feed";
     const baseOpacity = d().activeOpacity, threshold = d().diffThreshold;
-    const vA = keyA() ? store.state.views[keyA()] : null;
-    const vB = keyB() ? store.state.views[keyB()] : null;
+    const vA = keyA() ? d().views[keyA()] : null;
+    const vB = keyB() ? d().views[keyB()] : null;
     if (mode() !== "difference" || differenceReason() || !hasB() || !aUrl || !bUrl || !canvasEl) return;
     let cancelled = false;
     (async () => {
@@ -206,7 +216,7 @@ export function DiffStage() {
         data-mode={mode()} data-col={d().col}
         style={{ "--split": d().splitT, "--active-op": d().activeOpacity }}
       >
-        <div class="dz-cell dz-a" ref={cellAEl}>
+        <div class="dz-cell dz-a" ref={setCellAEl}>
           <MediaBox workbench src={srcA()?.src} kind={srcA()?.kind} alt={srcA()?.name} failed={srcA()?.failed} failureCode={srcA()?.failureCode}
             controlsMount={dockA()} controlLabel="A"
             transform={tA()} active={d().open && (mode() !== "one-up" || d().col === "feed" || !hasB())} primary={d().col === "feed" || !hasB()}
@@ -214,7 +224,7 @@ export function DiffStage() {
             onOpen={() => store.handles.invoke("workbench.open")} />
         </div>
         <Show when={hasB()}>
-          <div class="dz-cell dz-b" ref={cellBEl}>
+          <div class="dz-cell dz-b" ref={setCellBEl}>
             <MediaBox workbench src={srcB()?.src} kind={srcB()?.kind} alt={srcB()?.name} failed={srcB()?.failed} failureCode={srcB()?.failureCode}
               controlsMount={dockB()} controlLabel="B"
               transform={tB()} active={d().open && (mode() !== "one-up" || d().col === "right")} primary={d().col === "right"}

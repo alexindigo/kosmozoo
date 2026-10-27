@@ -16,6 +16,16 @@ module.exports = async ({ page, ENGINE, KZ, check, capture, control }) => {
       await page.poll(`!!document.querySelector('[data-failure-probe="${kind}"] .media-failure')`);
       const reason = kind==='image' ? "This image can't be decoded." : `Your browser can't play this ${kind} format.`;
       check(`${kind}: native decode failure renders its specific reason and download guidance`, await page.evaluate(`(()=>{const t=document.querySelector('[data-failure-probe="${kind}"] .media-failure').textContent;return t.includes(${JSON.stringify(reason)})&&t.includes('Download it to open elsewhere.')})()`));
+      const colours = await page.evaluate(`(()=>{
+        const root=document.querySelector('[data-failure-probe="${kind}"]'),box=root.querySelector('.media-box'),probe=document.createElement('span');
+        root.appendChild(probe);probe.style.color='var(--error)';const error=getComputedStyle(probe).color;
+        probe.style.color='var(--secondary)';const flash=getComputedStyle(probe).color;
+        const before=getComputedStyle(box).outlineColor;
+        root.classList.add('infoimg','flash');const after=getComputedStyle(box).outlineColor;
+        root.classList.remove('infoimg','flash');probe.remove();return{before,after,error,flash};
+      })()`);
+      check(`${kind}: error outline retains the semantic error colour`,colours.before===colours.error,JSON.stringify(colours));
+      check(`${kind}: activity flash outranks error through the shared colour layers`,colours.after===colours.flash,JSON.stringify(colours));
     }
   } finally {
     await page.evaluate(`window.__failureProbes.forEach(dispose=>dispose())`);

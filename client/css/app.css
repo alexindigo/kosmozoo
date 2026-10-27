@@ -238,15 +238,11 @@ main { display: flex; flex: 1; min-height: 0; }
 .card--probe { position: absolute; inset-inline: var(--grid-pad); top: 0; visibility: hidden;
   pointer-events: none; border-color: transparent; }
 
-/* image box: aspect-true, reserved before pixels land.
- Default rule: image width = column width, height = derived from aspect-ratio
- with a 16:9 floor (taller for tall images). The image inside is scale-down
- + centered — never upscaled, never rendered in a corner.
- --ar-num/--ar-den default to 16:9 so a meta-less box renders at the same
- aspect the virtualizer's estimateSize assumes (no first-measure jump). */
+/* The model supplies box/content dimensions. CSS only centres the layers:
+   constrained grid tracks cannot expand from native replaced-element aspect. */
 .imgwrap { position: relative; display: grid; place-items: center;
   grid-template: minmax(0, 1fr) / minmax(0, 1fr); width: 100%;
-  background: var(--background-stage); outline: 1px solid transparent; outline-offset: -1px; border-radius: 4px;
+  background: var(--background-stage); outline-width: 1px; outline-style: solid; outline-offset: -1px; border-radius: 4px;
   overflow: hidden; }
 /* the image box's own layer stack (same model as the card's): base is
  transparent; error is the load-lifecycle state; the link-target flash
@@ -277,9 +273,10 @@ main { display: flex; flex: 1; min-height: 0; }
 .media-controls-probe { position: absolute; visibility: hidden; }
 .imgwrap .media-play-overlay { position: static; }
 .media-box.ic-error :is(img, video) { display: none; }
-.media-stage { width: 100%; height: 100%; min-width: 0; min-height: 0; display: grid; place-items: center; }
-.media-stage > :is(img, video) { grid-area: 1 / 1; }
-.media-stage > video { width: 100%; height: 100%; object-fit: scale-down; }
+.media-stage { width: 100%; height: 100%; min-width: 0; min-height: 0;
+  display: grid; place-items: center; grid-template: minmax(0, 1fr) / minmax(0, 1fr); }
+.media-stage > :is(img, video, .media-audio-face, .media-failure) { grid-area: 1 / 1; }
+.media-stage > :is(img, video) { min-width: 0; min-height: 0; object-fit: contain; }
 .media-play-overlay { position: absolute; inset: 0; display: grid; place-items: center; pointer-events: none; }
 .media-controls { height: var(--media-controls-h); display: flex; align-items: center; gap: 6px;
   padding: 6px; background: color-mix(in srgb, var(--background-stage) 92%, transparent);
@@ -293,9 +290,7 @@ main { display: flex; flex: 1; min-height: 0; }
 .media-box[data-kind="audio"] { cursor: pointer; min-height: 0; display: grid; }
 .media-box[data-kind="audio"] > .media-audio-face { position: static; grid-area: 1 / 1; min-height: 0; min-width: 0;
   display: flex; justify-content: center; align-items: center; gap: 12px; padding: 4px 12px; }
-.media-box[data-kind="audio"] > .media-controls { position: static; grid-area: 2 / 1; }
-.media-stage[data-kind="audio"] { width: min(100%, 1024px); height: auto; aspect-ratio: 1024 / 160;
-  max-height: 100%; align-self: center; justify-self: center; background: var(--background-stage); }
+.media-stage[data-kind="audio"] .media-audio-face { background: var(--background-stage); }
 /* the shared title row under the image: title left, actions right */
 .ctitle { display: flex; justify-content: space-between; align-items: flex-start;
   gap: 8px; margin: 8px 0 2px; font-weight: 600; color: var(--foreground-mid); }
@@ -565,7 +560,7 @@ body:has(#diff:not([hidden])) #statusCol { bottom: 56px; }
   display: flex; align-items: center; justify-content: center; }
 /* the fit rule is shared with the mask's viewRect: contain-fit + centered,
  NEVER upscaled (a small photo renders at natural size with margins) */
-.dz-img { max-width: 100%; max-height: 100%; object-fit: contain;
+.dz-img { object-fit: contain;
   user-select: none; -webkit-user-drag: none; }
 /* the ACTIVE column's photo fades by --active-op (Split: the top layer
  lets the bottom show through; Two-Up/One-Up: against the stage) */

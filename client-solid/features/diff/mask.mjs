@@ -7,6 +7,7 @@
 // mixes OVER the base pixel (the mask always reads as a photo, never a
 // flat color field).
 
+import { mediaViewRect } from "../../store/media-geometry.js";
 export const HIGHLIGHT = [255, 136, 0];
 
 // The destination rect of one photo drawn the way the on-screen img is laid
@@ -16,12 +17,7 @@ export const HIGHLIGHT = [255, 136, 0];
 // own view ({s, txf, tyf} — scale about the stage center, then translate by
 // the view fractions of the stage box). Pure: the canvas draw uses this.
 export function viewRect(imgW, imgH, view, stageW, stageH) {
-  const fit = Math.min(1, stageW / imgW, stageH / imgH);
-  const fw = imgW * fit, fh = imgH * fit;
-  const v = view ?? { s: 1, txf: 0, tyf: 0 };
-  const cx = stageW / 2 + v.txf * stageW;
-  const cy = stageH / 2 + v.tyf * stageH;
-  return { dx: cx - (fw * v.s) / 2, dy: cy - (fh * v.s) / 2, dw: fw * v.s, dh: fh * v.s };
+  return mediaViewRect({ w: imgW, h: imgH }, view, stageW, stageH);
 }
 
 // Real photos carry a noise floor (JPEG recompression, AI re-synthesis):

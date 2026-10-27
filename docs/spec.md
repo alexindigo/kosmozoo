@@ -407,7 +407,7 @@ store adapter for feed/details/anchors. The comparator also renders MediaBox,
 with its existing stage-owned entangled zoom. One shared controls component
 provides play/pause, seek, elapsed/duration, mute, per-player loop (off by
 default, never persisted) and open-in-viewer. Video and audio never autoplay; paused
-video players show a centered play affordance over the first decoded frame. Surface
+card video players show a play affordance centred on the displayed first decoded frame. Surface
 click toggles playback, while pan drags suppress their trailing click. Images
 retain click-to-open and animated-image behavior. A per-store capability owner
 pauses every other registered player on a native play event, and disposal or
@@ -430,15 +430,25 @@ Audio's viewer has one view and no switcher or B side.
 The per-kind workbench view catalogue owns opening defaults, command admission
 and the toolbar. Video opens in Full (A only), and offers Split (two-up),
 Overlay (one-up/blink) and Slider (wipe); Difference is absent. Audio has only
-Full. Images retain Two-Up/One-Up/Split/Difference and the existing default.
+Full. Images offer Full/Two-Up/One-Up/Split/Difference. Every kind opens in Full,
+with A only, on every open (including explicit pairs and deep links).
 Video comparison choices require the existing anchor/node-image B pair.
 The persisted, rebindable `wb.full` binding defaults to `f`; keys1–4keep
-their existing mode meanings. Full is unavailable to image A sides.
+their existing mode meanings. Full is available for every asset kind.
 The viewer is a structural column: media area flexes above an ordered A/B
 controls row, followed immediately by the existing bottom toolbar. One
 playable side spans the dock; two playable sides get equal side-by-side bars
 labelled A/B. MediaBox retains player state and receives its controls mount
 as a presentation input; controls never participate in image pan/wipe layout.
+Every native layer and the Difference canvas derive contain-fit geometry from
+the same pure media-geometry model, using the actual media-area allocation;
+constrained grid tracks cannot grow to a native element's intrinsic aspect.
+Viewer crops are resource-keyed session state, separate from the persisted
+feed/details/anchor views. Every open resets viewer crops to centred/fitted;
+mode switches preserve only the viewer's own crops and locked-delta semantics.
+Allocation changes rederive transforms and the Difference draw. Viewer gestures
+never alter persisted card crops. There is no centred viewer play button for
+any kind; its docked play button is the visible playback affordance.
 
 Workbench guards accept video/audio only after `loadeddata` and images after decode;
 accepted source, kind and filename stay together through a failed swap, retaining

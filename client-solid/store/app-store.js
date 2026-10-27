@@ -73,7 +73,8 @@ export function makeAppStore({ subscribeSources = typeof window !== "undefined" 
     // right-pane current (session-only); modes and mask prefs are session-only.
     diff: {
       open: false,
-      mode: "two-up",       // full | two-up | one-up | split | difference
+      mode: "full",         // full | two-up | one-up | split | difference
+      views: {},             // viewer-session crops; never persisted/shared with cards
       col: "feed",          // active column (One-Up visible side, primary in every view)
       locked: true,         // entangled zoom: a gesture's delta writes BOTH view keys
       splitT: 0.5,          // wipe position, 0..1 of stage width
@@ -253,10 +254,9 @@ export function makeAppStore({ subscribeSources = typeof window !== "undefined" 
     }
   });
   const prepareDiffOpen = () => {
-    if (diffKind() !== "image") {
-      setSt("diff", "mode", defaultWorkbenchView(diffKind()));
-      setSt("diff", "col", "feed");
-    }
+    setSt("diff", "mode", defaultWorkbenchView(diffKind()));
+    setSt("diff", "col", "feed");
+    setSt("diff", "views", reconcile({}));
   };
 
   // a B side pinned to the current graph's node images dies with that graph:
@@ -1885,6 +1885,12 @@ export function makeAppStore({ subscribeSources = typeof window !== "undefined" 
 
     media: { register: player => players.register(player), toggle: () => players.toggle(), report: error => players.report(error) },
     diff: {
+      // Mechanical zoom port, local to the viewer session. Card/inline keys
+      // retain their own persisted owner; opening never consumes those crops.
+      views: {
+        get: key => st.diff.views[key] ?? null,
+        set: (key, view) => setSt("diff", "views", key, view ?? undefined),
+      },
       // read-only model query the workbench surface derives its src from
       resolve: resolveSide,
       // open the workbench on the current pointer

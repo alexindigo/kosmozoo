@@ -42,7 +42,7 @@ export function MediaBox(props) {
   // window/size getter that happens to return that same URL.
   const source = createMemo(() => props.failed ? null : props.src);
   const geometry = createMemo(() => mediaGeometry({ ...allocation(),
-    size: props.size ?? (props.kind === "audio" ? AUDIO_SIZE : natural()) }));
+    size: props.size ?? (props.kind === "audio" ? AUDIO_SIZE : natural()), surface: props.workbench ? "viewer" : "card" }));
   const measureNatural = el => setNatural({ w: el.videoWidth || el.naturalWidth, h: el.videoHeight || el.naturalHeight });
   createEffect(on(() => [surface(), source()], ([el, src]) => {
     setLoaded(false); setError(false); setCurrent(0); setDuration(0);
@@ -87,7 +87,7 @@ export function MediaBox(props) {
     else props.onOpen?.();
   };
   const style = () => ({ transform: props.transform || transform() || undefined,
-    ...(!props.workbench ? { width: `${geometry().mediaWidth}px`, height: `${geometry().mediaHeight}px` } : {}) });
+    width: `${geometry().mediaWidth}px`, height: `${geometry().mediaHeight}px` });
   const controls = () => <MediaControls kind={props.kind} docked={props.workbench} mount={props.controlsMount} label={props.controlLabel}
     paused={paused()} current={current()} duration={duration()} muted={muted()} loop={loop()}
     onToggle={toggle} onSeek={n => { surface().currentTime = n; }} onMute={() => setMuted(v => !v)}
@@ -107,8 +107,8 @@ export function MediaBox(props) {
         onEnded={() => setPaused(true)} onVolumeChange={e => setMuted(e.currentTarget.muted)}
         onError={e => { if (props.src != null) setError(e.currentTarget.error?.code || "unknown"); }} />
       <Show when={props.src != null && phase() !== "error"}>
-        <Show when={paused() || props.kind === "audio"}><div style={!props.workbench && props.kind !== "audio" ? style() : undefined} class={`media-play-overlay ${props.kind === "audio" ? "media-audio-face" : ""}`}>
-          <Show when={paused() || props.kind === "audio"}><MediaControlBoundary class="media-play-boundary">
+        <Show when={(!props.workbench && paused()) || props.kind === "audio"}><div style={props.workbench || props.kind !== "audio" ? style() : undefined} class={`media-play-overlay ${props.kind === "audio" ? "media-audio-face" : ""}`}>
+          <Show when={!props.workbench}><MediaControlBoundary class="media-play-boundary">
             <IconButton variant="play prominent media-play" title={`${paused() ? "play" : "pause"} ${word()}`}
               onAction={toggle} icon={iconSvg(paused() ? "player-play" : "player-pause", 28)} />
           </MediaControlBoundary></Show>

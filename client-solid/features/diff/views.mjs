@@ -3,6 +3,7 @@
 const view = (mode, key, label, icon) => Object.freeze({ mode, key, label, icon });
 const full = view("full", "f", "Full", "full-screen");
 const images = Object.freeze([
+  full,
   view("two-up", "1", "Two-Up", "view-two-up"),
   view("one-up", "2", "One-Up", "view-one-up"),
   view("split", "3", "Split", "view-split"),

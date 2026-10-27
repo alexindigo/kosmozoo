@@ -32,14 +32,15 @@ function check(name, ok, detail = "") {
   await cdp.send("Emulation.setDeviceMetricsOverride", { width: 1400, height: 900, deviceScaleFactor: 1, mobile: false });
 
   // 1. pasted pair URL boots the comparator with BOTH sides — left is the
-  // feed current, right the right-pane current; Two-Up is the default view
+  // feed current, right the right-pane current; Full is the default view
   await cdp.goto(ENGINE + "/diff#fake#flux-basic.png:another#flux-basic.png");
   await cdp.poll(`(async () => !!${KZ}.state.diff.open)()`, 20000);
   await cdp.poll(`document.querySelector('.dz-a .dz-img')?.src.includes('/fake/')`, 10000);
-  await cdp.poll(`document.querySelector('.dz-b .dz-img')?.src.includes('/another/')`, 10000);
-  check("boot: pair URL opens with both sides", true);
+  check("boot: pair URL retains both sides in the model", await cdp.evaluate(`(async()=>${KZ}.state.diffPair().b.source==='another')()`));
   const bootMode = await cdp.evaluate(`(async () => ${KZ}.state.diff.mode)()`);
-  check("boot: Two-Up is the default view", bootMode === "two-up", bootMode);
+  check("boot: Full is the default view", bootMode === "full", bootMode);
+  await cdp.key('1');
+  await cdp.poll(`document.querySelector('.dz-b .dz-img')?.src.includes('/another/')`, 10000);
 
   // 1b. Two-Up geometry: two cells on a shared horizontal midline, A left
   const twoUpGeom = await cdp.evaluate(`(() => {
@@ -100,8 +101,8 @@ function check(name, ok, detail = "") {
     };
   })()`);
   check("chrome: icon-only segmented pill, active highlighted with the accent",
-    seg.n === 4 && seg.noLabels && seg.icons
-      && seg.titles.every((t) => /\(\d\)$/.test(t))
+    seg.n === 5 && seg.noLabels && seg.icons
+      && seg.titles.every((t) => /\([f1-4]\)$/.test(t))
       && seg.activeBg === seg.accent && seg.pillRadius >= 20,
     JSON.stringify(seg));
 
@@ -129,7 +130,7 @@ function check(name, ok, detail = "") {
   // prior suites/runs can't leak a crop in — session-level, settings untouched.)
   await cdp.evaluate(`(async () => {
     const kz = ${KZ};
-    for (const k of Object.keys(kz.state.views)) kz.actions.views.set(k, null, { persist: false });
+    for (const k of Object.keys(kz.state.diff.views)) kz.actions.diff.views.set(k, null);
     ${KZ}.actions.diff.setLocked(false);
   })()`);
   const cellB = await cdp.evaluate(`(() => {
@@ -140,18 +141,18 @@ function check(name, ok, detail = "") {
   // view ({s:1, txf≠0}), and only the target's
   await cdp.drag(cellB.x, cellB.y, cellB.x + 40, cellB.y + 20);
   const pan1 = await cdp.evaluate(`(async () => ({
-    a: ${KZ}.state.views["fake:flux-basic.png"] ?? null,
-    b: JSON.parse(JSON.stringify(${KZ}.state.views["another:flux-basic.png"] ?? "null")),
+    a: ${KZ}.state.diff.views["fake:flux-basic.png"] ?? null,
+    b: JSON.parse(JSON.stringify(${KZ}.state.diff.views["another:flux-basic.png"] ?? "null")),
     tb: document.querySelector('.dz-b .dz-img').style.transform,
   }))()`);
   check("pan works at zoom 1 (drag moves the view, scale stays 1)",
     pan1.a === null && pan1.b && pan1.b.s === 1 && pan1.b.txf !== 0 && pan1.tb.includes("translate("),
     JSON.stringify(pan1));
   await cdp.mouse("mouseWheel", cellB.x, cellB.y, { deltaY: -40, modifiers: 2 });
-  await cdp.poll(`(async () => !!${KZ}.state.views["another:flux-basic.png"])()`, 5000);
+  await cdp.poll(`(async () => !!${KZ}.state.diff.views["another:flux-basic.png"])()`, 5000);
   const twoStates = await cdp.evaluate(`(async () => ({
-    a: ${KZ}.state.views["fake:flux-basic.png"] ?? null,
-    b: JSON.parse(JSON.stringify(${KZ}.state.views["another:flux-basic.png"])),
+    a: ${KZ}.state.diff.views["fake:flux-basic.png"] ?? null,
+    b: JSON.parse(JSON.stringify(${KZ}.state.diff.views["another:flux-basic.png"])),
     ta: document.querySelector('.dz-a .dz-img').style.transform,
     tb: document.querySelector('.dz-b .dz-img').style.transform,
   }))()`);
@@ -160,10 +161,10 @@ function check(name, ok, detail = "") {
     JSON.stringify(twoStates));
   // pan B (drag) — A's view still untouched
   await cdp.drag(cellB.x, cellB.y, cellB.x + 40, cellB.y + 20);
-  await cdp.poll(`(async () => (${KZ}.state.views["another:flux-basic.png"]?.txf ?? 0) !== 0)()`, 5000);
+  await cdp.poll(`(async () => (${KZ}.state.diff.views["another:flux-basic.png"]?.txf ?? 0) !== 0)()`, 5000);
   const afterPan = await cdp.evaluate(`(async () => ({
-    a: ${KZ}.state.views["fake:flux-basic.png"] ?? null,
-    b: JSON.parse(JSON.stringify(${KZ}.state.views["another:flux-basic.png"])),
+    a: ${KZ}.state.diff.views["fake:flux-basic.png"] ?? null,
+    b: JSON.parse(JSON.stringify(${KZ}.state.diff.views["another:flux-basic.png"])),
   }))()`);
   check("two states: pan writes B only — A's view stays empty",
     afterPan.a === null && afterPan.b.txf !== 0, JSON.stringify(afterPan));
@@ -171,14 +172,14 @@ function check(name, ok, detail = "") {
   // 3. lock entangles: one gesture's delta writes BOTH keys — never a copy
   await cdp.evaluate(`(async () => { ${KZ}.actions.diff.setLocked(true); })()`);
   const beforeLock = await cdp.evaluate(`(async () => ({
-    a: ${KZ}.state.views["fake:flux-basic.png"] ?? null,
-    b: JSON.parse(JSON.stringify(${KZ}.state.views["another:flux-basic.png"])),
+    a: ${KZ}.state.diff.views["fake:flux-basic.png"] ?? null,
+    b: JSON.parse(JSON.stringify(${KZ}.state.diff.views["another:flux-basic.png"])),
   }))()`);
   await cdp.mouse("mouseWheel", cellB.x, cellB.y, { deltaY: -40, modifiers: 2 });
-  await cdp.poll(`(async () => !!${KZ}.state.views["fake:flux-basic.png"])()`, 5000);
+  await cdp.poll(`(async () => !!${KZ}.state.diff.views["fake:flux-basic.png"])()`, 5000);
   const locked = await cdp.evaluate(`(async () => ({
-    a: JSON.parse(JSON.stringify(${KZ}.state.views["fake:flux-basic.png"])),
-    b: JSON.parse(JSON.stringify(${KZ}.state.views["another:flux-basic.png"])),
+    a: JSON.parse(JSON.stringify(${KZ}.state.diff.views["fake:flux-basic.png"])),
+    b: JSON.parse(JSON.stringify(${KZ}.state.diff.views["another:flux-basic.png"])),
   }))()`);
   const dsA = locked.a.s / (beforeLock.a?.s ?? 1);
   const dsB = locked.b.s / beforeLock.b.s;
@@ -192,8 +193,8 @@ function check(name, ok, detail = "") {
   const stayA = JSON.stringify(locked.a), stayB = JSON.stringify(locked.b);
   await cdp.evaluate(`(async () => { ${KZ}.actions.diff.setLocked(false); })()`);
   const stayed = await cdp.evaluate(`(async () => ({
-    a: JSON.stringify(${KZ}.state.views["fake:flux-basic.png"]),
-    b: JSON.stringify(${KZ}.state.views["another:flux-basic.png"]),
+    a: JSON.stringify(${KZ}.state.diff.views["fake:flux-basic.png"]),
+    b: JSON.stringify(${KZ}.state.diff.views["another:flux-basic.png"]),
   }))()`);
   check("unlock: no jump — both crops stay put", stayed.a === stayA && stayed.b === stayB);
 
@@ -202,8 +203,8 @@ function check(name, ok, detail = "") {
   await cdp.evaluate("document.dispatchEvent(new KeyboardEvent('keydown', { key: '3', bubbles: true }))");
   await cdp.poll(`(async () => ${KZ}.state.diff.mode === "split")()`, 5000);
   const readViews = `(async () => ({
-    a: JSON.stringify(${KZ}.state.views["fake:flux-basic.png"] ?? null),
-    b: JSON.stringify(${KZ}.state.views["another:flux-basic.png"] ?? null),
+    a: JSON.stringify(${KZ}.state.diff.views["fake:flux-basic.png"] ?? null),
+    b: JSON.stringify(${KZ}.state.diff.views["another:flux-basic.png"] ?? null),
   }))()`;
   // col is "feed" → A is the top layer (right of the wipe), B underneath (left)
   const hitBefore = await cdp.evaluate(readViews);
@@ -341,8 +342,11 @@ function check(name, ok, detail = "") {
   await cdp.poll(`(async () => ${KZ}.state.diff.open === false)()`, 5000);
   check("back: closes the workbench", true);
   await cdp.evaluate("history.forward()");
-  await cdp.poll(`(async () => ${KZ}.state.diff.open && !!document.querySelector('.dz-b .dz-img'))()`, 5000);
-  check("forward: re-opens the workbench with both sides", true);
+  await cdp.poll(`(async () => ${KZ}.state.diff.open && ${KZ}.state.diff.mode==='full' && ${KZ}.state.diffPair().b?.source==='another')()`, 5000);
+  check("forward: re-opens Full while retaining the exact B pair", !await cdp.evaluate(`!!document.querySelector('.dz-b')`));
+  await cdp.key('1');
+  await cdp.poll(`!!document.querySelector('.dz-b .dz-img')`, 5000);
+  check("forward: selecting Two-Up mounts the retained B", true);
   // X closes too
   await cdp.evaluate(`document.getElementById('diffClose').click()`);
   await cdp.poll(`(async () => ${KZ}.state.diff.open === false)()`, 5000);
@@ -360,11 +364,12 @@ function check(name, ok, detail = "") {
   const single = await cdp.evaluate(`(() => ({
     a: !!document.querySelector('.dz-a .dz-img'),
     b: !!document.querySelector('.dz-b'),
-    inert: [...document.querySelectorAll('.dz-segbtn')].every((b) => b.disabled),
+    inert: [...document.querySelectorAll('.dz-segbtn:not([data-view="full"])')].every((b) => b.disabled),
+    full: document.querySelector('.dz-segbtn[data-view="full"]')?.disabled === false,
     lock: document.querySelector('.dz-lockbtn')?.disabled ?? null,
   }))()`);
   check("single-image: one img, the 1–4 control inert",
-    single.a && !single.b && single.inert, JSON.stringify(single));
+    single.a && !single.b && single.inert && single.full, JSON.stringify(single));
   check("single-image: the lock is inert too", single.lock === true, JSON.stringify(single));
   const lockedBefore = await cdp.evaluate(`(async () => ${KZ}.state.diff.locked)()`);
   await cdp.evaluate("document.dispatchEvent(new KeyboardEvent('keydown', { key: 'l', bubbles: true }))");
@@ -400,7 +405,7 @@ function check(name, ok, detail = "") {
   // for this one — A is zoomed from the lock checks.)
   await cdp.evaluate(`(async () => {
     const kz = ${KZ};
-    for (const k of Object.keys(kz.state.views)) kz.actions.views.set(k, null, { persist: false });
+    for (const k of Object.keys(kz.state.diff.views)) kz.actions.diff.views.set(k, null);
   })()`);
   const marginOrange = await cdp.poll(`(() => {
     const c = document.querySelector('.dz-canvas');
@@ -436,7 +441,7 @@ function check(name, ok, detail = "") {
   // regression: a gesture in mode 4 must never poison the view with NaN
   // (the cells are display:none there — a 0×0 reference box divided by zero)
   const finite = await cdp.evaluate(`(async () => {
-    const v = ${KZ}.state.views["fake:flux-basic.png"];
+    const v = ${KZ}.state.diff.views["fake:flux-basic.png"];
     return v ? { txf: v.txf, finite: Number.isFinite(v.txf) && Number.isFinite(v.tyf) } : null;
   })()`);
   check("Difference: a drag in mode 4 keeps the view finite (no NaN)",
@@ -555,10 +560,22 @@ function check(name, ok, detail = "") {
   // (mode 4 diffs the crops: same bytes under different crops still lights up)
   await cdp.evaluate(`(async () => {
     const kz = ${KZ};
-    for (const k of Object.keys(kz.state.views)) kz.actions.views.set(k, null, { persist: false });
+    for (const k of Object.keys(kz.state.diff.views)) kz.actions.diff.views.set(k, null);
     ${KZ}.actions.diff.openDiff({ source: "fake", file: "flux-basic.png" }, { source: "another", file: "flux-basic.png" });
   })()`);
   await cdp.poll(`(async () => ${KZ}.state.diff.open)()`, 5000);
+  await cdp.key('4');
+  // Full retires the old comparison canvas. A fresh canvas's default empty
+  // buffer also has no orange, so observe an actual stage-sized base paint
+  // before treating "no highlight" as a rendered identical comparison.
+  await cdp.poll(`(() => {
+    const c = document.querySelector('.dz-canvas'), s = document.getElementById('diffStage').getBoundingClientRect();
+    if (!c || c.width !== Math.round(s.width) || c.height !== Math.round(s.height)) return false;
+    const d = c.getContext('2d').getImageData(0, 0, c.width, c.height).data;
+    for (let i = 0; i < d.length; i += 40) if (d[i] > 0) return true;
+    return false;
+  })()`, 10000);
+  check("Difference: reopened comparison paints the base before testing identical pixels", true);
   const identical = await cdp.poll(`(() => {
     const c = document.querySelector('.dz-canvas');
     if (!c || !c.width) return false;

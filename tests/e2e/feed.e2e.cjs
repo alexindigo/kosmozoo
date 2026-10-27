@@ -708,7 +708,7 @@ async function railMotion(page) {
       const blob = await (await fetch('/api/collections/fake/entries/flux-basic.png/bytes')).blob();
       await s.actions.anchors.addFiles([new File([blob], 'source-refresh-anchor.png', { type: 'image/png' })]);
       s.actions.ui.setWorkspace('anchors');
-      s.actions.diff.setMode('split'); s.actions.diff.setSplit(.37);
+      s.actions.diff.setSplit(.37);
       s.actions.views.set('fake:flux-basic.png', { s: 2, txf: .1, tyf: .2 }, { persist: false });
       s.actions.views.set('anchor:source-refresh-anchor.png', { s: 2, txf: .1, tyf: .2 }, { persist: false });
       const { api } = await import('/js/api.mjs');
@@ -744,10 +744,14 @@ async function railMotion(page) {
     })()`);
     const before = await page.evaluate(`(async () => {
       const s = ${KZ}; s.handles.invoke('workbench.openEntry', { id: s.state.currentEntry().entry.id });
+      s.handles.invoke('workbench.mode', { mode: 'split' });
+      s.actions.diff.views.set('fake:flux-basic.png', { s: 1.5, txf: .05, tyf: -.1 });
+      s.actions.diff.views.set('anchor:source-refresh-anchor.png', { s: 2.5, txf: -.15, tyf: .25 });
       window.__sourceCard = document.querySelector('${origin}');
       return { current: s.state.current(), trail: s.state.currentStack(), url: location.href,
         top: window.__sourceCard.getBoundingClientRect().top, pair: s.state.diffPair(),
         view: JSON.stringify({ feed: s.state.views['fake:flux-basic.png'], right: s.state.views['anchor:source-refresh-anchor.png'] }), anchors: s.state.anchors.map((a) => a.name),
+        viewer: JSON.stringify({ feed: s.state.diff.views['fake:flux-basic.png'], right: s.state.diff.views['anchor:source-refresh-anchor.png'] }),
         draft: s.state.drafts['fake:flux-basic.png:pos'], field: window.__sourceField.value };
     })()`);
     await capture(page, 'source-edited-session-before');
@@ -759,6 +763,7 @@ async function railMotion(page) {
       return { current: s.state.current(), trail: s.state.currentStack(), url: location.href,
         top: document.querySelector('${origin}').getBoundingClientRect().top, pair: s.state.diffPair(),
         view: JSON.stringify({ feed: s.state.views['fake:flux-basic.png'], right: s.state.views['anchor:source-refresh-anchor.png'] }), anchors: s.state.anchors.map((a) => a.name),
+        viewer: JSON.stringify({ feed: s.state.diff.views['fake:flux-basic.png'], right: s.state.diff.views['anchor:source-refresh-anchor.png'] }),
         draft: s.state.drafts['fake:flux-basic.png:pos'], field: window.__sourceField.value,
         sameCard: window.__sourceCard === document.querySelector('${origin}'),
         sameModal: window.__sourceModal === document.querySelector('.vz-panel'),
@@ -770,9 +775,10 @@ async function railMotion(page) {
     check('completion insertion preserves mounted card/modal, pending notes/judgment, pair/crops, URL and viewport',
       preserved.sameCard && preserved.sameModal && preserved.sameField && preserved.selected && preserved.bookmark &&
       JSON.parse(before.view).feed?.s > 1 && JSON.parse(before.view).right?.s > 1 &&
+      JSON.parse(before.viewer).feed?.s > 1 && JSON.parse(before.viewer).right?.s > 1 &&
       preserved.filter === '.png' && preserved.split === .37 && preserved.mode === 'split' &&
       Math.abs(preserved.top - before.top) <= 1 &&
-      ['current', 'trail', 'url', 'pair', 'view', 'anchors', 'draft', 'field'].every((key) => JSON.stringify(preserved[key]) === JSON.stringify(before[key])),
+      ['current', 'trail', 'url', 'pair', 'view', 'viewer', 'anchors', 'draft', 'field'].every((key) => JSON.stringify(preserved[key]) === JSON.stringify(before[key])),
       JSON.stringify({ before, after: preserved }));
     check('new output begins unknown-sized and is promoted through real want/dimension acquisition', preserved.unknown && preserved.wanted);
     await capture(page, 'source-edited-session-after');
