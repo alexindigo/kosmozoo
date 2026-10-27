@@ -1883,6 +1883,7 @@ export function makeAppStore({ subscribeSources = typeof window !== "undefined" 
       hide() { batch(() => { retireFeedScroll(); setSt("diff", "open", false); }); },
       // --- comparator session state (all session-only) -------------------------
       setMode(mode) {
+        if (mediaKind(diffPair().a?.file) === "audio") return false;
         if (mode === "difference" && differenceReason()) return false;
         if (mode === "two-up" || mode === "one-up" || mode === "split" || mode === "difference") {
           setSt("diff", "mode", mode);

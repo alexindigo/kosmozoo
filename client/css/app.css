@@ -274,28 +274,21 @@ main { display: flex; flex: 1; min-height: 0; }
 .media-stage > :is(img, video) { grid-area: 1 / 1; }
 .media-stage > video { width: 100%; height: 100%; object-fit: scale-down; }
 .media-play-overlay { position: absolute; inset: 0; display: grid; place-items: center; pointer-events: none; }
-.media-play-overlay .media-play { pointer-events: auto; border-radius: 50%; width: 54px; height: 54px;
-  display: grid; place-items: center; border: 1px solid var(--foreground-dim); background: #101014b8;
-  color: var(--foreground); font-size: 24px; cursor: pointer; }
 .media-controls { position: absolute; inset: auto 0 0; display: flex; align-items: center; gap: 6px;
-  padding: 6px; background: #101014e8; color: var(--foreground); font-size: 11px; }
-.media-controls button { flex: 0 0 auto; width: 28px; height: 28px; padding: 0; display: grid; place-items: center;
-  border: 1px solid var(--border); border-radius: 4px; color: inherit; background: transparent; cursor: pointer; }
-.media-controls button[aria-pressed="true"] { color: var(--secondary); border-color: var(--secondary); }
-.media-seek { min-width: 24px; flex: 1; accent-color: var(--secondary); }
+  padding: 6px; background: color-mix(in srgb, var(--background-stage) 92%, transparent);
+  color: var(--foreground); font-size: 11px; }
+.media-seek { min-width: 24px; flex: 1; accent-color: var(--secondary); background: var(--border); }
 .media-time { white-space: nowrap; font-variant-numeric: tabular-nums; }
 .media-box:focus-visible { outline: 2px solid var(--secondary); outline-offset: -2px; }
 .media-stage > .media-controls { inset: 12px 48px auto 12px; }
 .media-box > audio { display: none; }
 .media-play-boundary { pointer-events: auto; }
-.media-audio-name { max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
-  text-align: center; color: var(--foreground-mid); font-size: 12px; }
+.media-duration { color: var(--foreground-mid); font-variant-numeric: tabular-nums; }
 .media-box[data-kind="audio"] { cursor: pointer; min-height: 0; display: grid; grid-template-rows: minmax(0, 1fr) auto; }
 .media-box[data-kind="audio"] > .media-audio-face { position: static; grid-area: 1 / 1; min-height: 0; min-width: 0;
-  display: flex; flex-direction: column; justify-content: center; align-items: center; gap: 4px; padding: 4px 12px; }
-.media-audio-face .media-play { width: 36px; height: 36px; }
+  display: flex; justify-content: center; align-items: center; gap: 12px; padding: 4px 12px; }
 .media-box[data-kind="audio"] > .media-controls { position: static; grid-area: 2 / 1; }
-.media-stage[data-kind="audio"] { width: min(100%, 1024px); height: auto; aspect-ratio: 1024 / 320;
+.media-stage[data-kind="audio"] { width: min(100%, 1024px); height: auto; aspect-ratio: 1024 / 160;
   max-height: 100%; align-self: center; justify-self: center; background: var(--background-stage); }
 /* the shared title row under the image: title left, actions right */
 .ctitle { display: flex; justify-content: space-between; align-items: flex-start;
@@ -351,6 +344,13 @@ main { display: flex; flex: 1; min-height: 0; }
 .votebtn:hover { color: var(--btn-c); border-color: var(--btn-c); }
 .votebtn.on { color: var(--btn-c); }
 .votebtn.on svg path:not([stroke="none"]) { fill: currentColor; }
+/* Shared playback variants: hierarchy belongs to the button library, not to
+   any one player surface. Secondary media controls use the default variant. */
+.votebtn.play { --btn-c: var(--primary); color: var(--foreground-bright);
+  background: color-mix(in srgb, var(--primary) 24%, var(--lifted));
+  display: grid; place-items: center; padding: 4px 8px; }
+.votebtn.prominent { width: 48px; height: 48px; padding: 0; border-radius: 50%; }
+.votebtn:focus-visible { outline: 2px solid var(--secondary); outline-offset: 2px; }
 
 /* Keep actions reachable on a narrow feed: a separate wrapping row, mirrored
  by the geometry probe, rather than letting fixed controls escape the card. */

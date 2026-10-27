@@ -31,16 +31,16 @@ Deno.test("audio geometry: immediately ready, fixed across late dimensions, no n
     imageAt: i => entries[i], entryFor: id => entries.find(e => e.id === id) });
   try {
     for (const entry of entries) {
-      assertEquals(sizes.sizeFor(entry), { w: 1024, h: 320, kind: "audio" });
+      assertEquals(sizes.sizeFor(entry), { w: 1024, h: 160, kind: "audio" });
       entry.width = 1; entry.height = 1; entry.meta = { width: 40, height: 90 };
-      assertEquals(sizes.sizeFor(entry), { w: 1024, h: 320, kind: "audio" });
+      assertEquals(sizes.sizeFor(entry), { w: 1024, h: 160, kind: "audio" });
       assertEquals(sizes.loadFailed(entry.id), false);
     }
     sizes.resolveAhead([0, 1, 2, 3], 0, 3);
-    assertEquals(mediaAspect(1024, 320, "audio"), 3.2);
-    assertEquals(mediaAspect(1024, 320, "image"), 16 / 9);
+    assertEquals(mediaAspect(1024, 160, "audio"), 6.4);
+    assertEquals(mediaAspect(1024, 160, "image"), 16 / 9);
     sizes.setContext({});
-    assertEquals(sizes.sizeFor(entries[0]), { w: 1024, h: 320, kind: "audio" });
+    assertEquals(sizes.sizeFor(entries[0]), { w: 1024, h: 160, kind: "audio" });
   } finally { sizes.dispose(); }
 });
 

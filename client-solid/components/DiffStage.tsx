@@ -74,10 +74,10 @@ export function DiffStage() {
   const srcA = useSideSrc(store, () => pair().a);
   const srcB = useSideSrc(store, () => pair().b);
   const d = () => store.state.diff;
-  const hasB = () => !!pair().b;
+  const hasB = () => !!pair().b && mediaKind(pair().a?.file) !== "audio";
   const differenceReason = () => store.state.differenceReason() ||
     ([srcA(), srcB()].some(side => side && side.kind !== "image") ? "difference mode compares still images" : null);
-  const mode = () => d().mode === "difference" && differenceReason() ? "two-up" : d().mode;
+  const mode = () => mediaKind(pair().a?.file) === "audio" || (d().mode === "difference" && differenceReason()) ? "two-up" : d().mode;
 
   // TWO view states, one per side. Each layer's transform derives from its
   // own key in the store's views (view-fraction space; the layer's own box
@@ -198,7 +198,7 @@ export function DiffStage() {
 
   return (
     <div id="diff" hidden={!d().open}>
-      <DiffChrome differenceReason={differenceReason()} mediaWord={((d().col === "right" ? srcB() : srcA())?.kind ?? "image").replace("audio", "audio file")} />
+      <DiffChrome singleView={mediaKind(pair().a?.file) === "audio"} differenceReason={differenceReason()} mediaWord={((d().col === "right" ? srcB() : srcA())?.kind ?? "image").replace("audio", "audio file")} />
       <div
         id="diffStage" ref={stageEl}
         data-mode={mode()} data-col={d().col}

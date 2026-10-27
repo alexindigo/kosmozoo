@@ -7,7 +7,7 @@
 // Sources, in order: the listing's content dims (free, engine-resolved) →
 // the extractor meta's dims → off-DOM per-kind measurement (zero layout
 // effect) → a terminal 1024×1024 failure box. Audio needs no measurement,
-// using its fixed 1024×320 strategy. The virtualizer's estimateSize
+// using its fixed 1024×160 strategy. The virtualizer's estimateSize
 // is cardHeight — exact for every mounted row, so the virtualizer never
 // compensates and no timer coordinates geometry.
 
@@ -17,7 +17,7 @@ import { mediaKind, mediaAspect } from "/shared/backings/mime.mjs";
 export const ERROR_RETRY_MS = 8000;
 export const MEASURE_TIMEOUT_MS = 30000;
 const FAILURE_SIZE = Object.freeze({ w: 1024, h: 1024 });
-const AUDIO_SIZE = Object.freeze({ w: 1024, h: 320, kind: "audio" });
+const AUDIO_SIZE = Object.freeze({ w: 1024, h: 160, kind: "audio" });
 const validDims = (w, h) => Number.isFinite(w) && w > 0 && Number.isFinite(h) && h > 0;
 const RESOLVE_AHEAD = 30;   // entries past the visible window's tail
 const RESOLVE_BEHIND = 10;  // and behind its head (when more are pending above)

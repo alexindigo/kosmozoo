@@ -42,6 +42,7 @@ module.exports = async ({ page, ENGINE, KZ, check, capture, control }) => {
         visible:r.width>0&&r.height>0&&r.top<innerHeight, pixels:[...ctx.getImageData(0,0,c.width,c.height).data].some((x,i)=>i%4!==3&&x>40) }; })()`);
     check('video first frame: actual decoded pixels, metadata preload, paused at zero, no autoplay/loop', first.paused && first.time === 0 && !first.loop && !first.autoplay && first.preload === 'metadata' && first.visible && first.pixels && first.w === 160 && first.h === 96, JSON.stringify(first));
     await capture(page, 'video-card-paused');
+    check('card open uses the shared full-screen four-corner icon', await page.evaluate(`(async()=>{const b=document.querySelector('${card(a)} .media-open'),{iconSvg}=await import('/js/icons.mjs'),t=document.createElement('template');t.innerHTML=iconSvg('full-screen',16);return b.title==='open full screen'&&b.classList.contains('votebtn')&&b.innerHTML===t.innerHTML})()`));
     const center = await page.evaluate(`(() => { const box=document.querySelector('${card(a)} .media-box').getBoundingClientRect(), play=document.querySelector('${card(a)} .media-play').getBoundingClientRect();
       return Math.max(Math.abs((play.left+play.right-box.left-box.right)/2),Math.abs((play.top+play.bottom-box.top-box.bottom)/2)); })()`);
     check('video play affordance shares the box center structurally', center < 0.6, String(center));
@@ -153,6 +154,8 @@ module.exports = async ({ page, ENGINE, KZ, check, capture, control }) => {
     await page.evaluate(`(async()=>${KZ}.actions.ui.setFilter('e2e-media-broken'))()`);
     await page.poll(`!!document.querySelector('${card(broken)} .media-failure')`, 80000);
     check('undecodable video remains visible with filename/reason and card actions', await page.evaluate(`document.querySelector('${card(broken)} .media-failure').textContent.includes(${JSON.stringify(broken)})&&!!document.querySelector('${card(broken)} .download')`));
+    check('unknown video failure keeps the generic reason with download guidance', await page.evaluate(`(()=>{const t=document.querySelector('${card(broken)} .media-failure').textContent;return t.includes("Can't display this file.")&&t.includes('Download it to open elsewhere.')})()`));
+    await capture(page, 'failure-card');
   } catch (error) {
     console.log('VIDEO FAILURE BEFORE CLEANUP', JSON.stringify(await page.evaluate(`({events:window.__videoEvents.slice(-120),videos:[...document.querySelectorAll('video')].map(el=>({src:el.getAttribute('src'),ready:el.readyState,time:el.currentTime,paused:el.paused,error:el.error?.message,phase:el.parentElement.className})),text:document.body.innerText.slice(-1800)})`)));
     await capture(page, 'video-failure-before-cleanup');

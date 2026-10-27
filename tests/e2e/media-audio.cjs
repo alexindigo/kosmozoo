@@ -41,7 +41,7 @@ module.exports = async ({ page, ENGINE, KZ, check, capture, control }) => {
       // CDP returnByValue does not materialize nested Solid proxies. Read the
       // lineage scalar at its consumer, alongside the rendered geometry.
       const shape = await page.evaluate(`(async()=>{const s=${KZ},e=s.state.images.find(e=>e.filename===${JSON.stringify(name)}),n=s.state.imageIdxById().get(e.id),size=s.state.cardSize(n),r=document.querySelector('${card(name)} .media-box').getBoundingClientRect(),cr=document.querySelector('${card(name)}').getBoundingClientRect(),m=await import('/store/sizes.js');return{size,ratio:r.width/r.height,height:cr.height,expected:m.cardHeight(size,s.state.feedScrollEl().clientWidth),prompt:e.meta.prompt,lineageSource:e.meta.lineage?.source,word:document.querySelector('${card(name)} .download').title}})()`);
-      check(`${ext}: listing/metadata/lineage and fixed 1024×320 geometry reach the rendered card`, shape.size.w===1024 && shape.size.h===320 && Math.abs(shape.ratio-3.2)<.01 && Math.abs(shape.height-shape.expected)<.1 && shape.prompt==='A singing cosmic zoo' && shape.lineageSource==='fake:original.png' && shape.word.includes('audio file'), JSON.stringify(shape));
+      check(`${ext}: listing/metadata/lineage and fixed 1024×160 geometry reach the rendered card`, shape.size.w===1024 && shape.size.h===160 && Math.abs(shape.ratio-6.4)<.01 && Math.abs(shape.height-shape.expected)<.1 && shape.prompt==='A singing cosmic zoo' && shape.lineageSource==='fake:original.png' && shape.word.includes('audio file'), JSON.stringify(shape));
       await page.poll(`${audio(name)}.readyState>=2 || !!${audio(name)}.error`, 20000);
       const state = await page.evaluate(`({ready:${audio(name)}.readyState,error:${audio(name)}.error?.message,canPlay:${audio(name)}.canPlayType(${JSON.stringify(mime)}),paused:${audio(name)}.paused,time:${audio(name)}.currentTime,loop:${audio(name)}.loop,autoplay:${audio(name)}.autoplay})`);
       console.log('AUDIO DECODE', ext, JSON.stringify(state));
@@ -52,6 +52,7 @@ module.exports = async ({ page, ENGINE, KZ, check, capture, control }) => {
       }
       decoded.push(name);
       check(`${ext}: paused at zero, no autoplay, loop defaults off`, state.paused && state.time===0 && !state.loop && !state.autoplay, JSON.stringify(state));
+      check(`${ext}: compact face shows primary play beside duration, without duplicate filename`, await page.evaluate(`(()=>{const f=document.querySelector('${card(name)} .media-audio-face'),p=f.querySelector('.media-play'),t=f.querySelector('.media-duration'),a=p.getBoundingClientRect(),b=t.getBoundingClientRect();return p.classList.contains('votebtn')&&t.textContent==='0:03'&&!f.textContent.includes(${JSON.stringify(name)})&&a.right<b.left&&Math.abs((a.top+a.bottom-b.top-b.bottom)/2)<1})()`));
       if (ext==='flac') await capture(page,'audio-card-paused');
       await page.clickAt(card(name)+' .media-play');
       await page.poll(`!${audio(name)}.paused&&${audio(name)}.currentTime>.1`);
@@ -78,7 +79,8 @@ module.exports = async ({ page, ENGINE, KZ, check, capture, control }) => {
       check(`${ext}: seek/time/mute/loop controls reach native audio`, await page.evaluate(`document.querySelector('${card(name)} .media-time').textContent.includes('0:03')`));
       await page.clickAt(card(name)+' .media-loop');await page.poll(`!${audio(name)}.loop`);
       await page.clickAt(card(name)+' .media-open');await page.poll(`document.querySelector('.dz-a audio')?.readyState>=2`);
-      check(`${ext}: viewer contains audio and disables Difference with the exact reason`, await page.evaluate(`(()=>{const b=document.querySelector('#diffModes button:last-child');return !document.getElementById('diff').hidden&&b.disabled&&b.title==='difference mode compares still images'})()`));
+      check(`${ext}: audio viewer has no view switcher or open button`, await page.evaluate(`!document.getElementById('diff').hidden&&!document.querySelector('#diffModes')&&!document.querySelector('#diff .media-open')`));
+      check(`${ext}: single audio panel is centered and never inherits a clipped comparison layout`, await page.evaluate(`(()=>{const s=document.getElementById('diffStage').getBoundingClientRect(),c=document.querySelector('.dz-a'),r=c.getBoundingClientRect(),b=c.querySelector('.media-box').getBoundingClientRect();return getComputedStyle(c).clipPath==='none'&&Math.abs((b.left+b.right-s.left-s.right)/2)<1&&b.left>=r.left&&b.right<=r.right})()`));
       await page.keyTrusted(' ',{code:'Space',vk:32});await page.poll(`!document.querySelector('.dz-a audio').paused&&document.querySelector('.dz-a audio').currentTime>.05`);
       if(ext==='flac')await capture(page,'audio-workbench');
       check(`${ext}: workbench Space advances audio`,true);
@@ -117,17 +119,18 @@ module.exports = async ({ page, ENGINE, KZ, check, capture, control }) => {
     await page.evaluate(`(async()=>${KZ}.state.window.coverRange(0,6))()`);await page.poll(`${audio(name)}.readyState>=2`);
     await page.clickAt(card(name)+' .media-play');await page.poll(`!${audio(name)}.paused`);
     await invoke('workbench.openPair',{left:{source:'fake',file:name},right:{source:'fake',file:peer}});
-    await page.poll(`document.querySelector('.dz-b audio')?.readyState>=2`);
+    await page.poll(`document.querySelector('.dz-a audio')?.readyState>=2`);
     for(const mode of ['two-up','one-up','split']){
-      await invoke('workbench.mode',{mode});await page.poll(`document.getElementById('diffStage').dataset.mode===${JSON.stringify(mode)}`);
-      check(`audio workbench ${mode}: independent retained players`,await page.evaluate(`document.querySelectorAll('#diffStage audio').length===2`));
+      const before=await page.evaluate(`(async()=>${KZ}.state.diff.mode)()`);
+      await invoke('workbench.mode',{mode});
+      check(`audio viewer rejects ${mode} and retains its single player`,await page.evaluate(`(async()=>${KZ}.state.diff.mode===${JSON.stringify(before)}&&document.querySelectorAll('#diffStage audio').length===1)()`));
     }
     await invoke('workbench.mode',{mode:'difference'});
     check('Difference semantic command rejects audio pairs',await page.evaluate(`(async()=>${KZ}.state.diff.mode!=='difference')()`));
     await invoke('workbench.close');
     await page.evaluate(`(async()=>${KZ}.actions.ui.setFilter('e2e-audio-broken'))()`);
     await page.poll(`!!document.querySelector('${card(broken)} .media-failure')`,20000);
-    check('broken audio stays in its fixed box with filename/reason/actions and matching footer count',await page.evaluate(`(async()=>{const s=${KZ},e=s.state.images.find(e=>e.filename===${JSON.stringify(broken)}),r=document.querySelector('${card(broken)} .media-box').getBoundingClientRect();return s.state.entriesWithKnownSize().length===1&&s.state.pendingSizeCount()===0&&s.state.cardSize(s.state.imageIdxById().get(e.id)).h===320&&Math.abs(r.width/r.height-3.2)<.01&&document.querySelectorAll('.card[data-name]').length===1&&document.querySelector('.endoflist').textContent.includes('all 1 matching')&&!!document.querySelector('${card(broken)} .download')&&document.querySelector('${card(broken)} .media-failure').textContent.includes(${JSON.stringify(broken)})})()`));
+    check('broken audio stays in its fixed box with specific reason/actions and matching footer count',await page.evaluate(`(async()=>{const s=${KZ},e=s.state.images.find(e=>e.filename===${JSON.stringify(broken)}),r=document.querySelector('${card(broken)} .media-box').getBoundingClientRect(),text=document.querySelector('${card(broken)} .media-failure').textContent;return s.state.entriesWithKnownSize().length===1&&s.state.pendingSizeCount()===0&&s.state.cardSize(s.state.imageIdxById().get(e.id)).h===160&&Math.abs(r.width/r.height-6.4)<.01&&document.querySelectorAll('.card[data-name]').length===1&&document.querySelector('.endoflist').textContent.includes('all 1 matching')&&!!document.querySelector('${card(broken)} .download')&&text.includes(${JSON.stringify(broken)})&&text.includes("Your browser can't play this audio format.")&&text.includes('Download it to open elsewhere.')})()`));
     check('unmount retires the original audio consumer',await page.evaluate(`window.__retiredAudio.paused&&!window.__retiredAudio.getAttribute('src')&&!window.__retiredAudio.isConnected`));
   } catch(error) {
     console.log('AUDIO FAILURE BEFORE CLEANUP',JSON.stringify(await page.evaluate(`({events:window.__audioEvents.slice(-100),players:[...document.querySelectorAll('audio')].map(e=>({src:e.getAttribute('src'),ready:e.readyState,time:e.currentTime,paused:e.paused,error:e.error?.message})),body:document.body.innerText.slice(-3000)})`)));

@@ -4,7 +4,9 @@
 import { createSignal, createMemo, createEffect, on, onMount, onCleanup, Show } from "solid-js";
 import { Dynamic } from "solid-js/web";
 import { makeZoomable } from "/js/zoomable.mjs";
-import { MediaControls, MediaControlBoundary } from "./MediaControls.js";
+import { MediaControls, MediaControlBoundary, mediaTime } from "./MediaControls.js";
+import { IconButton } from "./IconButton.js";
+import { mediaFailure } from "../store/media-failure.js";
 import { iconSvg } from "/js/icons.mjs";
 
 export function MediaBox(props) {
@@ -79,28 +81,30 @@ export function MediaBox(props) {
     data-kind={props.kind ?? "image"} style={props.boxStyle} onClick={click}>
     <Show when={playable()} fallback={<img ref={setSurface} class={props.workbench ? "dz-img" : undefined}
       alt={props.alt} style={style()} onLoad={() => setLoaded(true)}
-      onError={() => { if (props.src != null) setError(true); }} />}>
+      onError={() => { if (props.src != null) setError("decode"); }} />}>
       <Dynamic component={props.kind} ref={setSurface} class={props.workbench ? "dz-img" : undefined} preload="metadata" playsinline
         aria-label={props.alt} style={style()} loop={loop()} muted={muted()}
         onLoadedData={() => setLoaded(true)} onLoadedMetadata={e => setDuration(e.currentTarget.duration)}
         onDurationChange={e => setDuration(e.currentTarget.duration)} onTimeUpdate={e => setCurrent(e.currentTarget.currentTime)}
         onPlay={() => { registration?.started(); setPaused(false); }} onPause={() => setPaused(true)}
         onEnded={() => setPaused(true)} onVolumeChange={e => setMuted(e.currentTarget.muted)}
-        onError={() => { if (props.src != null) setError(true); }} />
+        onError={e => { if (props.src != null) setError(e.currentTarget.error?.code || "unknown"); }} />
       <Show when={props.src != null && phase() !== "error"}>
         <Show when={paused() || props.kind === "audio"}><div class={`media-play-overlay ${props.kind === "audio" ? "media-audio-face" : ""}`}>
-          <Show when={props.kind === "audio"}><span class="media-audio-name">{props.alt}</span></Show>
-          <Show when={paused()}><MediaControlBoundary class="media-play-boundary">
-            <button type="button" class="media-play" title={`play ${word()}`} aria-label={`play ${word()}`} onClick={toggle} innerHTML={iconSvg("player-play", 28)} />
+          <Show when={paused() || props.kind === "audio"}><MediaControlBoundary class="media-play-boundary">
+            <IconButton variant="play prominent media-play" title={`${paused() ? "play" : "pause"} ${word()}`}
+              onAction={toggle} icon={iconSvg(paused() ? "player-play" : "player-pause", 28)} />
           </MediaControlBoundary></Show>
+          <Show when={props.kind === "audio"}><span class="media-duration">{mediaTime(duration())}</span></Show>
         </div></Show>
         <MediaControls kind={props.kind} paused={paused()} current={current()} duration={duration()} muted={muted()} loop={loop()}
           onToggle={toggle} onSeek={n => { surface().currentTime = n; }} onMute={() => setMuted(v => !v)}
-          onLoop={() => setLoop(v => !v)} onOpen={props.onOpen} />
+          onLoop={() => setLoop(v => !v)} onOpen={props.workbench ? undefined : props.onOpen} />
       </Show>
     </Show>
     <Show when={phase() === "error"}><div class="media-failure" role="status">
-      <span class="media-failure-name">{props.alt}</span><span>can't display this file</span>
+      <span class="media-failure-name">{props.alt}</span><span>{mediaFailure(props.kind ?? "image", error())}</span>
+      <span>Download it to open elsewhere.</span>
       <Show when={!props.failed && props.onErrorClick}><span>click to retry</span></Show>
     </div></Show>
   </div>;

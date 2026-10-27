@@ -380,7 +380,7 @@ late metadata arrives. Learning an entry's first hash is same-content enrichment
 and preserves active measurements and terminal boxes; changing a known hash
 retires them. If authoritative dimensions arrive during an attempt, a subsequent
 measurement error settles with those dimensions rather than resizing the already
-ready card into a fallback. The box displays the filename and “can't display this file”,
+ready card into a fallback. The box displays the filename and “Can't display this file.”,
 with normal judgment, notes, download and hide/delete controls available. The
 footer counts the same filtered, size-ready entries as the virtualizer (including
 failures), and separately reports pending measurements.
@@ -392,7 +392,7 @@ Images measure off-DOM with `Image`; videos use a retained
 six-slot owner, with the same context/content guards, deadline and retry.
 Listing/extractor dimensions still take precedence. Retirement pauses video,
 removes its source and resets the native consumer before releasing capacity.
-Audio is immediately size-ready with the fixed 1024×320 box, without measurement
+Audio is immediately size-ready with the fixed 1024×160 box, without measurement
 or a size read. Its aspect is not subject to the image/video 16:9 cap; the shared
 geometry policy supplies both the virtualizer and rendered box. Late dimensions
 and decode errors cannot resize audio cards.
@@ -410,8 +410,18 @@ src-window retirement pauses/unloads the consumer.
 Native load lifetime follows source value and element identity, not unrelated
 reactive window invalidations; zoom bindings follow element/key identity.
 Audio uses the same controls, focus/Space semantics and arbitration, without a
-picture: its filename and paused play button are centered inside the fixed box.
+picture: its primary play/pause button and duration share a centered row inside
+the fixed box, without repeating the filename already in the card title.
 No waveform or runtime transcode is involved. Tooltips call it an “audio file”.
+Every playback button uses the shared IconButton contract, with primary play
+and quiet mute/loop toggles using the shared active state. Surfaces and seek
+use semantic palette tokens. Card open uses a four-corner full-screen icon,
+titled “open full screen”; viewer media controls have no open button.
+Native decode/unsupported-format errors say “Your browser can't play this
+video format.” or “…audio format.”; image decode errors say “This image can't
+be decoded.” Unknown causes keep the generic reason. Every failure adds
+“Download it to open elsewhere.”, with ordinary card download still available.
+Audio's viewer has one view and no switcher or B side.
 
 Workbench guards accept video/audio only after `loadeddata` and images after decode;
 accepted source, kind and filename stay together through a failed swap, retaining

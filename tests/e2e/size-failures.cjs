@@ -59,7 +59,7 @@ module.exports = async function sizeFailures({ page, ENGINE, KZ, check, capture 
       terminal.size?.w === 1024 && terminal.size?.h === 1024 && terminal.failed &&
       terminal.ready === 3 && terminal.cards === 3 && terminal.pending === 0 && terminal.footer.includes('all 3 matching'), JSON.stringify(terminal));
     check('failure presentation: filename and reason centered inside a square, exact virtual height, normal controls/notes',
-      terminal.reason.includes(names[0]) && terminal.reason.includes("can't display this file") &&
+      terminal.reason.includes(names[0]) && terminal.reason.includes("Can't display this file.") &&
       terminal.square < 1 && terminal.centered < 1 && terminal.heightDelta === 0 && terminal.controls && terminal.notes === 2, JSON.stringify(terminal));
     await page.clickAt(card + ' .bookmark');
     await page.clickAt(card + ' textarea.pos');

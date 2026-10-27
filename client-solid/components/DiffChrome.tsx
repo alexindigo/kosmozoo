@@ -65,7 +65,7 @@ function VSlider(props) {
 export function DiffChrome(props) {
   const store = useAppStore();
   const d = () => store.state.diff;
-  const hasB = () => !!store.state.diffPair().b;
+  const hasB = () => !!store.state.diffPair().b && !props.singleView;
 
   // one popup open at a time; Esc closes it (never the workbench), and a
   // pointerdown outside any control closes it too
@@ -139,7 +139,7 @@ export function DiffChrome(props) {
             />
           </Show>
         </div>
-        <div id="diffModes" class="dz-seg">
+        <Show when={!props.singleView}><div id="diffModes" class="dz-seg">
           <For each={MODES}>
             {([key, m, label, icon]) => (
               <button
@@ -151,7 +151,7 @@ export function DiffChrome(props) {
               />
             )}
           </For>
-        </div>
+        </div></Show>
         <button
           id="diffKeysBtn" title="actions & keys (?)"
           onClick={() => store.handles.invoke("keys.panel.toggle")}
