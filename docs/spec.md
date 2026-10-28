@@ -595,8 +595,8 @@ and stable row-ID mounting remain private. No whole row-object comparison or
 independently maintained acknowledgement path whitelist owns this flow.
 
 Each Load Image row owns one ordered image set, initially empty. Existing ComfyUI
-input names and native browser Files can be added over multiple turns and mixed;
-identity deduplication uses input name or exact File identity, never filename-only
+input names, native browser Files and engine-host image paths can be added over multiple turns and mixed;
+identity deduplication uses input name, exact File identity or absolute engine path, never filename-only
 deduplication of Files. Removal changes that same set. The chosen thumbnail grid
 is above persistent acquisition controls, even when the axis is off. “ComfyUI
 inputs” opens a searchable, virtualized, multi-select list; arrows/Enter select
@@ -606,6 +606,23 @@ register near the viewport as foreground displays of the Store's one acquisition
 policy, sharing its capacity; a source change does not retire them, their owner's
 unmount does. “Add files…” uses the browser's multi-file picker;
 there is no browser-directory input or mutually exclusive image mode.
+The persistent folder path field and Add action recursively acquire engine-host
+images, including subfolders. The feature filesystem owner skips symlink traversal,
+returns sorted canonical absolute paths and rejects more than 500 images with an
+explicit message instead of silently truncating. Directory paths use the same
+engine-host trust boundary as `folder:` sources, not the browser's filesystem.
+
+`POST /api/features/variations/folder-images` accepts `{path}` and returns
+`{path,items:[{kind:"server-path",name,path}],limit:500}`. `GET /folder-image?path=...`
+serves an image-only regular file for its thumbnail, with `Cache-Control:no-store`.
+`POST /inspect-path/<host>` accepts `{path,current,kind,names?}` plus captured origin
+and returns the same readonly hash evidence as `inspect-image`. `POST /upload-path/<host>`
+accepts `{path,hash}` plus that origin, rechecks the inspected bytes, and sends them
+through the existing backing upload itself; browser bytes are never required.
+Changed files reject with 409 and retain work; remove/add refreshes their comparison.
+Stale source contexts reject with 412, including completed old-origin upload detail
+when retirement occurred during a write. Real returned names, not preview names,
+still own Run provenance. Path items join the same compiler/adoption leaf as Files.
 The native popup joins the modal's owned suspend/resume seam: a blocking leave
 decision hides its top-layer surface without replacing search DOM or losing
 query/caret. Both Keep editing and Escape restore it before focus restoration.

@@ -12,13 +12,14 @@
 import {
   generatePermutations, permutationAxes, permutationPlan, resolveRelativeRanges, templateReplaceWithProof,
   paramId, parameterIndex, catalogueParams, parameterAliases, validRunAcknowledgement,
-  uploadFamily,
 } from "./shared.mjs";
-import { validEntryName } from "../../backings/index.mjs";
+import { validEntryName, backingFor } from "../../backings/index.mjs";
 import { sourceOrigin, sameOrigin, validOrigin, validContext, expectedOrigin } from "../../source-origin.mjs";
 import { dependencyClosure, validateGraphLinks } from "./graph.mjs";
 import { sha256 } from "../../cache.mjs";
 import { IMAGE_EXTENSIONS, mediaExtension } from "../../backings/mime.mjs";
+import { listImages, readImage, folderError } from "./folder-images.mjs";
+import { inspectImage } from "./image-inspection.mjs";
 
 // hard cap on permutations per run — a sweep is a human-scale batch, not a
 // fork bomb (F7). Above the cap the run answers 413.
@@ -216,6 +217,42 @@ export function lineageTag(source, params) {
 // app: { store, cache, hosts, ingest, comfy, backings } — the engine surface
 // for features.
 export function register(app) {
+  const source = (req, host) => {
+    const origin = expectedOrigin(req), token = app.backings.capture(host);
+    if (!origin || !token || !sameOrigin(origin, sourceOrigin(host, app.backings.source(host))) || !app.backings.accepting()) throw Object.assign(new Error("Source origin changed"), { status: 412 });
+    return { origin, token };
+  };
+  app.route("POST", "/folder-images", async req => {
+    try { return Response.json(await listImages((await req.json()).path)); }
+    catch (error) { return folderError(error); }
+  });
+  app.route("GET", "/folder-image", async req => {
+    try {
+      const { bytes, mime } = await readImage(new URL(req.url).searchParams.get("path"));
+      return new Response(bytes, { headers: { "Content-Type": mime, "Cache-Control": "no-store" } });
+    } catch (error) { return folderError(error); }
+  });
+  app.route("POST", "/inspect-path/<host>", async (req, { host }) => {
+    try {
+      const { origin, token } = source(req, host), body = await req.json(), file = await readImage(body.path);
+      return await inspectImage(app, token, host, { ...body, ...file }, origin);
+    } catch (error) { return folderError(error); }
+  });
+  app.route("POST", "/upload-path/<host>", async (req, { host }) => {
+    try {
+      const { origin, token } = source(req, host), body = await req.json();
+      if (!/^[a-f0-9]{64}$/.test(body.hash)) return Response.json({ error: "Inspected image hash required" }, { status: 400 });
+      const file = await readImage(body.path);
+      if (await sha256(file.bytes) !== body.hash) return Response.json({ error: "Image changed since it was added. Remove and add it again." }, { status: 409 });
+      if (!app.backings.isCurrent(token)) return Response.json({ error: "Source origin changed before upload" }, { status: 412 });
+      const backing = backingFor(token.address);
+      if (!backing.write) return Response.json({ error: "This source cannot upload images" }, { status: 400 });
+      const receipt = await backing.write(token.address, file.name, file.bytes);
+      if (!receipt.ok) return Response.json({ error: receipt.error }, { status: receipt.status });
+      if (!app.backings.isCurrent(token)) return Response.json({ error: "Source changed after upload; no follow-up was authorized", uploaded: { name: receipt.name, origin } }, { status: 412 });
+      return Response.json({ name: receipt.name, origin });
+    } catch (error) { return folderError(error); }
+  });
   // Readonly comparison through the existing byte/hash owner. This deliberately
   // does not upload to ComfyUI or create another input cache.
   app.route("POST", "/inspect-image/<host>", async (req, { host }) => {
@@ -229,20 +266,7 @@ export function register(app) {
     if (!(file instanceof File) || !IMAGE_EXTENSIONS.has(mediaExtension(file.name)) || !validEntryName(token.address, current) || !["input", "output"].includes(kind)) return Response.json({ error: "Image and current input required" }, { status: 400 });
     let names;
     try { names = JSON.parse(form.get("names") ?? "[]"); } catch { return Response.json({ error: "Input names must be an array" }, { status: 400 }); }
-    if (!Array.isArray(names) || names.some(name => typeof name !== "string" || !validEntryName(token.address, name))) return Response.json({ error: "Invalid input names" }, { status: 400 });
-    if (!app.backings.isCurrent(token)) return Response.json({ error: "Source origin changed" }, { status: 412 });
-    const bytes = await app.ingest.ensure(host, current, kind, { priority: "high" });
-    if (bytes.status !== 200) return Response.json({ error: "Current image bytes unavailable; cannot compare" }, { status: 422 });
-    const hash = await sha256(new Uint8Array(await file.arrayBuffer()));
-    const existing = [];
-    for (const name of new Set(uploadFamily(file.name, names))) {
-      if (!app.backings.isCurrent(token)) return Response.json({ error: "Source origin changed" }, { status: 412 });
-      const candidate = name === current && kind === "input" ? bytes : await app.ingest.ensure(host, name, "input", { priority: "high" });
-      if (candidate.status === 200) existing.push({ name, hash: candidate.hash });
-      else if (candidate.status !== 404) return Response.json({ error: "Existing input bytes unavailable; cannot compare" }, { status: 422 });
-    }
-    if (!app.backings.isCurrent(token)) return Response.json({ error: "Source origin changed" }, { status: 412 });
-    return Response.json({ hash, currentHash: bytes.hash, existing, origin });
+    return inspectImage(app, token, host, { name: file.name, bytes: new Uint8Array(await file.arrayBuffer()), current, kind, names }, origin);
   });
   const inspect = async (collection, name, expected = null) => {
     if (!app.backings.accepting()) return { error: "Sources are stopping; no new operation was admitted", status: 503 };

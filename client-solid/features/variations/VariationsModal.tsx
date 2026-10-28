@@ -251,6 +251,7 @@ function ModalBody(props) {
                         onAdd={items => editor.addImages(id, items)} onRemove={item => editor.removeImage(id, item)}
                         thumbnail={name => services.inputThumbnail(image.host, name, image.origin)}
                         registerThumbnail={services.registerThumbnail}
+                        pathThumbnail={services.pathThumbnail} onAddFolder={path => editor.addFolder(id, path)}
                         registerPopup={registerImagePopup} registerEditor={registerEditor} rememberFocus={rememberFocus} />
                     </Show>
                   );

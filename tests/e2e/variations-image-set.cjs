@@ -70,6 +70,56 @@ module.exports = async ({ cdp, FAKE, KZ, check }) => {
     assert.deepEqual([...new Set(jobs.map(job => job.prompt['43'].inputs.image))], ['picker-0550.png', 'picked-upload.png']);
     await cdp.poll("!document.querySelector('.vz-panel')", 6000);
     check('image set: 553 inputs stay virtual/lazy, anchored search and keyboard multi-selection mix with repeated File additions, removal, exact count and acknowledged auto-close', true);
+
+    // A second run exercises the actual engine filesystem, not a mocked list.
+    const folder = workPath('artifacts', 'engine-folder');
+    fs.mkdirSync(folder + '/nested', { recursive: true });
+    fs.writeFileSync(folder + '/nested/turn-folder.png', image);
+    fs.writeFileSync(folder + '/ignore.mp4', 'not an image');
+    fs.writeFileSync(folder + '/same-current.png', Buffer.from(await cdp.evaluate("(async()=>Array.from(new Uint8Array(await(await fetch('/api/collections/fake/entries/canny.png/bytes?kind=input')).arrayBuffer())))()")));
+    await invoke('variations.open', { id: 'fake:flux-controlnet.png' });
+    await cdp.poll("!!document.querySelector('.vz-folder-path')");
+    await cdp.clickAt('.vz-image-set .vz-cb');
+    await cdp.clickAt('[data-param-key="9.denoise"] .vz-cb');
+    await pickInput(cdp, 'picker-0550.png');
+    await cdp.evaluate(`(async()=>{const bytes=await(await fetch('/api/collections/fake/entries/flux-lora.png/bytes')).arrayBuffer();const input=document.querySelector('.vz-imgfilespick'),data=new DataTransfer();data.items.add(new File([bytes],'turn-browser.png',{type:'image/png'}));input.files=data.files;input.dispatchEvent(new Event('change',{bubbles:true}))})()`);
+    const addFolder = async value => {
+      await cdp.evaluate(`(()=>{const input=document.querySelector('.vz-folder-path');input.value=${JSON.stringify(value)};input.dispatchEvent(new Event('input',{bubbles:true}))})()`);
+      await cdp.clickAt('.vz-folder-add');
+      await cdp.poll("document.querySelector('.vz-folder-add').textContent==='Add'");
+    };
+    await addFolder(folder);
+    await cdp.poll("document.querySelectorAll('.vz-image-tile').length===4&&!document.querySelector('.vz-image-check')");
+    assert.equal(await cdp.evaluate("document.querySelectorAll('.vz-image-same').length"), 1);
+    assert.equal(await cdp.evaluate("document.querySelector('.vz-count').textContent"), '3');
+    await addFolder(folder); // same paths do not duplicate the set
+    assert.equal(await cdp.evaluate("document.querySelectorAll('.vz-image-tile').length"), 4);
+    await addFolder('relative');
+    await cdp.poll("document.querySelector('.vz-folder [role=status]')?.textContent.includes('absolute')");
+    assert.equal(await cdp.evaluate("document.querySelectorAll('.vz-image-tile').length"), 4);
+    await addFolder(folder);
+    await cdp.clickAt('.vz-image-tile[data-image-name="turn-folder.png"] .chrome-icon');
+    await cdp.poll("document.querySelector('.vz-count').textContent==='2'");
+    await addFolder(folder);
+    await cdp.poll("document.querySelector('.vz-count').textContent==='3'&&!document.querySelector('.vz-image-check')");
+    await cdp.poll("[...document.querySelectorAll('.vz-image-tile img')].every(img=>img.complete&&img.naturalWidth>0)");
+    const folderGeometry = await cdp.evaluate(`(()=>{const input=document.querySelector('.vz-folder-path').getBoundingClientRect(),add=document.querySelector('.vz-folder-add').getBoundingClientRect(),footer=document.querySelector('.vz-image-add').getBoundingClientRect(),grid=document.querySelector('.vz-image-grid').getBoundingClientRect();return {center:Math.abs((input.top+input.bottom-add.top-add.bottom)/2),order:input.right<=add.left&&grid.bottom<footer.top,contained:input.left>=footer.left&&add.right<=footer.right}})()`);
+    assert(folderGeometry.center < 1 && folderGeometry.order && folderGeometry.contained, JSON.stringify(folderGeometry));
+    await cdp.send('Emulation.setDeviceMetricsOverride', { width: 1280, height: 900, deviceScaleFactor: 1, mobile: false });
+    try {
+      await cdp.evaluate("document.querySelector('.vz-sliders').scrollTop=0");
+      await capture('image-set-inputs-files-folder');
+      await cdp.send('Emulation.setDeviceMetricsOverride', { width: 500, height: 820, deviceScaleFactor: 1, mobile: false });
+      await cdp.evaluate("document.querySelector('.vz-body').scrollTop=0");
+      const narrow = await cdp.evaluate(`(()=>{const element=document.querySelector('.vz-folder-path'),input=element.getBoundingClientRect(),add=document.querySelector('.vz-folder-add').getBoundingClientRect(),footer=document.querySelector('.vz-image-add').getBoundingClientRect(),list=document.querySelector('.vz-sliders').getBoundingClientRect(),right=document.querySelector('.vz-right').getBoundingClientRect();return{center:Math.abs((input.top+input.bottom-add.top-add.bottom)/2),contained:input.left>=footer.left&&add.right<=footer.right&&footer.right<=innerWidth,visible:input.top>=0&&add.bottom<=innerHeight,hit:document.elementFromPoint(input.left+input.width/2,input.top+input.height/2)===element,ordered:right.top>=list.bottom-1}})()`);
+      assert(narrow.center < 1 && narrow.contained && narrow.visible && narrow.hit && narrow.ordered, JSON.stringify(narrow));
+    } finally { await cdp.send('Emulation.clearDeviceMetricsOverride'); }
+    const beforeFolder = (await (await fetch(FAKE + '/__test/enqueues')).json()).length;
+    const folderRun = await invoke('variations.run'); assert.equal(folderRun.submitted, 3); assert.equal(folderRun.adopted, true);
+    const folderJobs = (await (await fetch(FAKE + '/__test/enqueues')).json()).slice(beforeFolder);
+    assert.deepEqual([...new Set(folderJobs.map(job => job.prompt['43'].inputs.image))], ['picker-0550.png', 'turn-browser.png', 'turn-folder.png']);
+    await cdp.poll("!document.querySelector('.vz-panel')", 6000);
+    check('image set: recursive engine folder mixes with inputs and Files across turns; path dedupe, same-current bytes, errors, removal, real thumbnails, geometry, exact submissions and acknowledged auto-close', true);
   } finally {
     if (await cdp.evaluate("!!document.querySelector('.vz-panel')")) {
       await cdp.evaluate(`(async()=>{${KZ}.handles.invoke('variations.close');return true})()`);

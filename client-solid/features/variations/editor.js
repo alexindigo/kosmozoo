@@ -138,7 +138,8 @@ export function makeVariationEditor({ targets, services, currentOrigin, changed 
       inspectionQueue.push(async () => {
         try {
           if (!alive || !originCurrent(target)) throw new Error("Source origin changed; your images were kept");
-          const result = await services.inspectImage(target.host, item.file, entry.metadata.current, entry.metadata.fromOutput ? "output" : "input", target.origin, uploadFamily(item.name, entry.metadata.files));
+          const inspect = item.kind === "server-path" ? services.inspectPath : services.inspectImage;
+          const result = await inspect(target.host, item.kind === "server-path" ? item.path : item.file, entry.metadata.current, entry.metadata.fromOutput ? "output" : "input", target.origin, uploadFamily(item.name, entry.metadata.files));
           if (!alive || !originCurrent(target) || !sameOrigin(result?.origin, target.origin)) throw new Error("Source origin changed; your images were kept");
           if (!/^[a-f0-9]{64}$/.test(result.hash) || !/^[a-f0-9]{64}$/.test(result.currentHash)) throw new Error("Image comparison unavailable");
           const existing = result.existing ?? [];
@@ -158,12 +159,13 @@ export function makeVariationEditor({ targets, services, currentOrigin, changed 
     for (const [id, entry] of Object.entries(snapshot.images)) {
       if (!entry.values.enabled) continue;
       for (const item of entry.values.items) {
-        if (item.kind === "input" || imageView(id, item, entry.metadata).sameCurrent || names.has(item.file)) continue;
+        const identity = imageIdentity(item);
+        if (item.kind === "input" || imageView(id, item, entry.metadata).sameCurrent || names.has(identity)) continue;
         const hash = evidence(id, item)?.hash;
-        if (!hash) { names.set(item.file, `\0pending-${names.size}`); continue; }
+        if (!hash) { names.set(identity, `\0pending-${names.size}`); continue; }
         let name = item.name, index = 0;
         while (occupied.has(name) && occupied.get(name) !== hash) name = uploadCandidate(item.name, ++index);
-        occupied.set(name, hash); names.set(item.file, name);
+        occupied.set(name, hash); names.set(identity, name);
       }
     }
     return names;
@@ -206,10 +208,11 @@ export function makeVariationEditor({ targets, services, currentOrigin, changed 
           if (state.sameCurrent) values.push(entry.metadata.current);
           else if (item.kind === "input") values.push(item.name);
           else {
-            uploads.push(item.file);
-            uploadHashes.set(item.file, evidence(id, item)?.hash);
-            if (preview) values.push(uploadPreview.get(item.file));
-            else if (uploadReceipts?.has(item.file)) values.push(uploadReceipts.get(item.file).name);
+            const identity = imageIdentity(item);
+            uploads.push(item);
+            uploadHashes.set(identity, evidence(id, item)?.hash);
+            if (preview) values.push(uploadPreview.get(identity));
+            else if (uploadReceipts?.has(identity)) values.push(uploadReceipts.get(identity).name);
           }
         }
         imageParams[id].values = [...new Set(values)];
@@ -221,7 +224,7 @@ export function makeVariationEditor({ targets, services, currentOrigin, changed 
       }
     }
     return { payload: { ranges, imageParams, prefix: read("naming", "root", "prefix"), suffix: read("naming", "root", "suffix"), ...(batch ? { relative: true } : {}) },
-      bindings, uploads: [...new Set(uploads)], uploadHashes };
+      bindings, uploads: [...new Map(uploads.map(item => [imageIdentity(item), item])).values()], uploadHashes };
   };
   const count = (payload, catalogue) => {
     const values = currentValues(catalogue);
@@ -274,7 +277,19 @@ export function makeVariationEditor({ targets, services, currentOrigin, changed 
     addImages(id, items) {
       const entry = row("images", id);
       if (!entry) throw new Error("Unknown image row");
+      // Unlike immutable Files, a removed disk path may now contain new bytes.
+      for (const item of items) if (item.kind === "server-path" && !entry.values.items.some(other => sameImage(item, other))) imageChecks.get(id)?.delete(imageIdentity(item));
       return this.edit("images", id, "items", mergeImages(entry.values.items, items));
+    },
+    async addFolder(id, path) {
+      if (!alive || deciding || running) throw new Error("Finish the current action before adding a folder");
+      const target = capturedTargets[0];
+      if (!originCurrent(target)) throw new Error("Source origin changed; your images were kept");
+      const result = await services.listFolder(path);
+      if (!alive || deciding || running || !originCurrent(target)) throw new Error("The editor changed while reading the folder. Add it again when ready.");
+      if (!validImageSet(result?.items) || result.items.some(item => item.kind !== "server-path")) throw new Error("Invalid folder image listing");
+      this.addImages(id, result.items);
+      return { count: result.items.length };
     },
     removeImage(id, item) {
       return this.edit("images", id, "items", row("images", id).values.items.filter(other => !sameImage(item, other)));
@@ -353,15 +368,20 @@ export function makeVariationEditor({ targets, services, currentOrigin, changed 
           prepared.set(target.id, data);
         }
         const uploadTarget = ticket.targets[0];
-        for (const file of operation.compiled.uploads) {
+        for (const item of operation.compiled.uploads) {
           check(ticket, uploadTarget);
           try {
-            const form = new FormData(); form.append("image", file, file.name);
-            const receipt = await services.uploadInput(uploadTarget.host, form, uploadTarget.origin);
+            const identity = imageIdentity(item), hash = operation.compiled.uploadHashes.get(identity);
+            let receipt;
+            if (item.kind === "server-path") receipt = await services.uploadPath(uploadTarget.host, item.path, hash, uploadTarget.origin);
+            else {
+              const form = new FormData(); form.append("image", item.file, item.name);
+              receipt = await services.uploadInput(uploadTarget.host, form, uploadTarget.origin);
+            }
             check(ticket, uploadTarget);
-            if (!filename(receipt?.name) || !sameOrigin(receipt.origin, uploadTarget.origin)) throw new Error(`${file.name}: upload acknowledgement unavailable; your File was kept`);
-            uploads.set(file, freeze(snapshotDraft(receipt)));
-            confirmedUploads.set(receipt.name, operation.compiled.uploadHashes.get(file));
+            if (!filename(receipt?.name) || !sameOrigin(receipt.origin, uploadTarget.origin)) throw new Error(`${item.name}: upload acknowledgement unavailable; your image was kept`);
+            uploads.set(identity, freeze(snapshotDraft(receipt)));
+            confirmedUploads.set(receipt.name, hash);
           } catch (error) { check(ticket, uploadTarget); failures.push(error.message); }
         }
         operation.compiled = compile(ticket.snapshot, uploads);

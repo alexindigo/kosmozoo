@@ -1134,3 +1134,15 @@ body:has(#diff:not([hidden])) #statusCol { bottom: 56px; }
   border-radius: 4px; background: var(--lifted); color: var(--foreground); cursor: pointer; }
 .vz-discard-actions .vz-discard-confirm { color: var(--negative); }
 .vz-discard-actions button:focus-visible { outline: 2px solid var(--secondary); outline-offset: 2px; }
+
+.vz-folder { flex: 1 1 250px; min-width: 0; display: flex; flex-direction: column; gap: 4px; }
+.vz-folder-controls { display: flex; align-items: center; gap: 4px; }
+.vz-folder-path { flex: 1; min-width: 0; width: 100%; padding: 5px 8px; font: inherit; color: var(--foreground); background: var(--background); border: 1px solid var(--border); border-radius: 4px; }
+.vz-folder-path:focus-visible { outline: 2px solid var(--secondary); outline-offset: 2px; }
+.vz-folder-help { color: var(--foreground-mid); font-size: 11px; }
+.vz-image-action:disabled { opacity: .5; cursor: default; }
+.vz-image-add { align-items: start; }
+
+@media (max-width: 620px) {
+  .vz-left { flex: 0 0 auto; }
+}

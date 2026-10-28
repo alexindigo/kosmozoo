@@ -5,6 +5,7 @@ import { UPLOAD_IMG_EXT } from "../../store/fields.js";
 import { focusMemory } from "./draft.js";
 import { imageIdentity, uploadImage } from "./image-set.js";
 import { InputPicker } from "./InputPicker.js";
+import { FolderImages } from "./FolderImages.js";
 import { useImageDisplay } from "../../lib/img-measure.js";
 
 export function ImageSetPanel(props) {
@@ -22,7 +23,7 @@ export function ImageSetPanel(props) {
         <div class="vz-image-grid">
           <For each={row().items.map(imageIdentity)}>{identity => {
             const item = () => row().images.find(item => imageIdentity(item) === identity);
-            return <ImageTile item={item} thumbnail={props.thumbnail} registerThumbnail={props.registerThumbnail} onRemove={() => props.onRemove(item())} />;
+            return <ImageTile item={item} thumbnail={props.thumbnail} pathThumbnail={props.pathThumbnail} registerThumbnail={props.registerThumbnail} onRemove={() => props.onRemove(item())} />;
           }}</For>
         </div>
         <p class="vz-image-summary">{row().items.length} images{row().images.some(item => item.sameCurrent) ? ` · ${row().images.filter(item => item.sameCurrent).length} same as current` : ""}</p>
@@ -34,6 +35,7 @@ export function ImageSetPanel(props) {
         <input type="file" ref={fileInput} class="vz-imgfilespick" hidden multiple accept="image/*" onChange={e =>
           props.onAdd([...e.currentTarget.files].filter(file => UPLOAD_IMG_EXT.test(file.name)).map(uploadImage))} />
         <button type="button" class="vz-image-action" {...focusMemory(props.rememberFocus)} onClick={() => fileInput.click()}>Add files…</button>
+        <FolderImages onAdd={props.onAddFolder} rememberFocus={props.rememberFocus} />
       </div>
     </div>
   </div>;
@@ -41,10 +43,10 @@ export function ImageSetPanel(props) {
 
 function ImageTile(props) {
   const [url, setUrl] = createSignal("");
-  const file = createMemo(() => props.item()?.file), name = createMemo(() => props.item()?.name);
+  const file = createMemo(() => props.item()?.file), name = createMemo(() => props.item()?.name), path = createMemo(() => props.item()?.path);
   createEffect(() => {
     if (!name()) return;
-    if (!file()) { setUrl(props.thumbnail(name())); return; }
+    if (!file()) { setUrl(path() ? props.pathThumbnail(path()) : props.thumbnail(name())); return; }
     const src = URL.createObjectURL(file()); setUrl(src); onCleanup(() => URL.revokeObjectURL(src));
   });
   // Local File previews are object URLs; engine thumbnails are admitted
@@ -54,7 +56,7 @@ function ImageTile(props) {
     () => preview, { lazy: true });
   return <figure class="vz-image-tile" data-image-name={props.item()?.name}>
     <div class="vz-image-preview"><img ref={preview} src={display.read().src ?? undefined} alt="" onLoad={display.loaded} onError={display.loaded} /></div>
-    <figcaption><span class="vz-image-name" title={props.item()?.name}>{props.item()?.name}</span>
+    <figcaption><span class="vz-image-name" title={props.item()?.path ?? props.item()?.name}>{props.item()?.name}</span>
       <IconButton chrome variant="neutral" icon={iconSvg("x", 12)} title={`Remove ${props.item()?.name}`} onAction={props.onRemove} />
     </figcaption>
     <Show when={props.item()?.sameCurrent}><span class="vz-image-same">Same as current</span></Show>

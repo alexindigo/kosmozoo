@@ -10,6 +10,20 @@ export const probe = (image) =>
 // carry per-permutation detail the modal parses
 export const run = (payload) => postRaw("/api/features/variations/run", payload);
 
+const pathRequest = async (route, body, origin) => {
+  const response = await fetch(`/api/features/variations/${route}`, { method: "POST", body: JSON.stringify(body),
+    headers: { "Content-Type": "application/json", ...(origin ? { "X-Kosmozoo-Origin": JSON.stringify(origin) } : {}) } });
+  const data = await response.json();
+  if (!response.ok) throw new Error(data.error || "Folder images unavailable");
+  return data;
+};
+export const listFolder = path => pathRequest("folder-images", { path });
+export const pathThumbnail = path => `/api/features/variations/folder-image?path=${encodeURIComponent(path)}`;
+export const inspectPath = (collection, path, current, kind, origin, names = []) =>
+  pathRequest(`inspect-path/${encodeURIComponent(collection)}`, { path, current, kind, names }, origin);
+export const uploadPath = (collection, path, hash, origin) =>
+  pathRequest(`upload-path/${encodeURIComponent(collection)}`, { path, hash }, origin);
+
 export const inputThumbnail = (collection, name, origin, kind = "input") =>
   `/api/collections/${encodeURIComponent(collection)}/entries/${encodeURIComponent(name)}/bytes?kind=${kind}&origin=${encodeURIComponent(JSON.stringify(origin))}`;
 

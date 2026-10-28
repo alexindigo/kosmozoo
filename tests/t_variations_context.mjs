@@ -121,3 +121,41 @@ Deno.test("source-bound operation admission: shutdown retires new uploads/probes
     assertEquals(r.uploaded.length, 0); assertEquals(r.jobs.length, 0);
   } finally { await r.close(); }
 });
+
+Deno.test("engine folder routes: recursive listing and bytes reach the consumer; comparison is readonly and upload requires unchanged hash and origin", async () => {
+  const r = await contextRig(), dir = await Deno.makeTempDir({ prefix: "folder-routes-" });
+  try {
+    await Deno.mkdir(`${dir}/nested`); await Deno.writeTextFile(`${dir}/nested/pick.png`, "engine bytes");
+    const path = `${dir}/nested/pick.png`, origin = r.origin();
+    const post = (route, body, expected = origin) => r.call(`/api/features/variations/${route}`, { method: "POST", headers: { "X-Kosmozoo-Origin": JSON.stringify(expected) }, body: JSON.stringify(body) });
+    const listing = await (await post("folder-images", { path: dir })).json();
+    assertEquals(listing.items, [{ kind: "server-path", name: "pick.png", path }]);
+    const thumb = await r.call(`/api/features/variations/folder-image?path=${encodeURIComponent(path)}`);
+    assertEquals(await thumb.text(), "engine bytes"); assertEquals(thumb.headers.get("content-type"), "image/png");
+    const inspection = await (await post("inspect-path/fake", { path, current: "input.png", kind: "input" })).json();
+    assertEquals(inspection.hash.length, 64); assert(sameOrigin(inspection.origin, origin)); assertEquals(r.uploaded.length, 0);
+    assertEquals((await post("upload-path/fake", { path, hash: "a".repeat(64) })).status, 409); assertEquals(r.uploaded.length, 0);
+    const receipt = await (await post("upload-path/fake", { path, hash: inspection.hash })).json();
+    assertEquals(receipt.name, "pick.png"); assert(sameOrigin(receipt.origin, origin));
+    assertEquals(r.uploaded, [{ name: "pick.png", bytes: "engine bytes" }]);
+    await Deno.writeTextFile(path, "changed");
+    assertEquals((await post("upload-path/fake", { path, hash: inspection.hash })).status, 409);
+    r.replace(); assertEquals((await post("inspect-path/fake", { path, current: "input.png", kind: "input" })).status, 412);
+    assertEquals((await post("upload-path/fake", { path, hash: inspection.hash })).status, 412);
+    assertEquals(r.uploaded.length, 1);
+    assertEquals((await post("folder-images", { path: "relative" })).status, 400);
+  } finally { await Deno.remove(dir, { recursive: true }); await r.close(); }
+});
+
+Deno.test("engine path upload: retirement during the actual write reports completed origin and authorizes no follow-up", async () => {
+  const r = await contextRig(), dir = await Deno.makeTempDir({ prefix: "path-retirement-" });
+  try {
+    const path = `${dir}/pick.png`; await Deno.writeTextFile(path, "engine bytes");
+    const origin = r.origin(), headers = { "X-Kosmozoo-Origin": JSON.stringify(origin) };
+    const data = await (await r.call("/api/features/variations/inspect-path/fake", { method: "POST", headers, body: JSON.stringify({ path, current: "input.png", kind: "input" }) })).json();
+    r.hold(); const pending = r.call("/api/features/variations/upload-path/fake", { method: "POST", headers, body: JSON.stringify({ path, hash: data.hash }) });
+    while (!r.pending()) await new Promise(resolve => setTimeout(resolve, 0));
+    r.replace(); r.release(); const response = await pending, receipt = await response.json();
+    assertEquals(response.status, 412); assertEquals(receipt.uploaded, { name: "pick.png", origin }); assertEquals(r.jobs.length, 0);
+  } finally { await Deno.remove(dir, { recursive: true }); await r.close(); }
+});
