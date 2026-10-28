@@ -47,8 +47,8 @@ the resources; a collection's `capabilities` answer what its backing can do.
 | `/api/collections/<id>/entries/<name>/bytes` | HEAD | 404 when the entry's bytes are unknown, else `content-length` |
 | `/api/collections/<id>/entries/<name>/judgment` | PATCH | whitelisted fields (`vote`/`favorite`/`bookmark`/`notes`/`plugins.<ns>.*`), defaults deep-pruned, one statement |
 | `/api/collections/<id>/feedback.json` | GET | the collection's judgments as a portable v2 document, generated on demand |
-| `/api/collections/<id>/meta` | GET | versioned poll `?since=<v>` → `{v, changed, items?, dims?, pending}` — extracted metas and entry dims ride the same channel |
-| `/api/collections/<id>/want` | POST | `{files}` — on-screen names jump the extraction queue; the whole name array validates before any queue mutation |
+| `/api/collections/<id>/meta` | GET | versioned identity delta `?since=<v>` → `{v, changed, items?, dims?, pending}`; no cursor gives a full snapshot; pending includes dimension work |
+| `/api/collections/<id>/want` | POST | `{files, interest?:"full"\|"dimensions", priority?:"foreground"\|"background"}`; legacy defaults full/foreground; all names/options validate before queue mutation; reply `{pending, items, dims}` carries the named entries' already-known metadata (full interest only) and dimensions |
 | `/api/content/<hash>` | GET | the content record + `instances: [{collection, name}]` |
 | `/api/content/<hash>/bytes` | GET | cache bytes by hash (plugins, workbench); same single-byte-range semantics |
 | `/api/prefetch` | GET, POST | the two-pass background ingestion: `enabled`/`paused` toggles, per-collection ingest `pending`, the pass totals `dimsPending`/`ingestPending`, and each collection's `lastError` |
@@ -954,6 +954,15 @@ the prefetch the source lost the file, and the prefetch marks the entry
 Video dimensions use MP4/MOV video-track `tkhd` display dimensions (including
 quarter-turn rotation), or WebM video-track PixelWidth/PixelHeight. A 64KiB head
 may miss a trailing moov; full ingestion and browser measurement cover that case.
+Metadata writes advance one durable cursor per write. A bounded session-local
+change index delivers only changed identities/fields, including content's output
+aliases across collections. Absent, invalid, future or older-than-retained cursors
+receive the full snapshot (including after restart); equal cursors omit payloads
+but still report pending dimension/ingest work. Dimension-only writes never resend
+unchanged graph metadata. Delivery history does not change the database schema.
+A delta cannot be re-requested by cursor once acknowledged, so a want's reply
+carries its names' current state: a reader that had not yet listed an entry when
+its change arrived recovers it by demanding that identity.
 
 The prefetch runs TWO passes over each collection's listing: pass 1 the
 dims head reads (10 ms inter-file — size-before-render on a fresh host is
@@ -962,7 +971,9 @@ fast), pass 2 the full ingestion above at the existing politeness
 delays and backoff — one host's outage never stalls another; a worker's
 failure is logged, surfaced as its `lastError` on `/api/prefetch`, and the
 worker restarts after the backoff cap. The dims queue drains before
-ingestion starts; `want` (on-screen names) promotes in both queues;
+ingestion starts; full foreground `want` promotes in both queues, while dimension
+interest only queues dimension reads. Whole-library walking is explicitly low
+priority; prio lanes pass high priority to the existing Ingest executor;
 per-collection backoff caps at 30 s; 404 ⇒ `entry.state='gone'`
 (permanent); the pause gate holds both passes.
 
@@ -982,6 +993,12 @@ or unsupported units are ignored (200). Matching If-None-Match takes precedence
 The complete file still goes through hashing/cache before slicing: no streaming
 rewrite. Comfy byte reads have a ten-second **idle** deadline, reset by headers
 and body progress; a progressing large download has no total ten-second limit.
+Bytes requests default to foreground; `?priority=background` keeps off-window
+read-through in Ingest's low lane. Invalid priority rejects before acquisition.
+All backing read paths (dimensions, bytes and revalidation) share the address gate:
+four total reads, at most three background, with a slot retained through complete
+body buffering. Foreground takes the next available slot; a queued low single-flight
+can be promoted. Cached responses retain the existing validators/revalidation.
 
 ### Judgments
 

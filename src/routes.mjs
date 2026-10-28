@@ -338,6 +338,8 @@ export function makeRouter(ctx) {
     const token = ctx.inventory.capture?.(id);
     if (!ctx.hosts[id]) return new Response("unknown collection", { status: 404 });
     const error = byteOriginError(req, id); if (error) return error;
+    const priority = url.searchParams.get("priority") ?? "foreground";
+    if (!["foreground", "background"].includes(priority)) return Response.json({ error: "bad priority" }, { status: 400 });
     const kind = url.searchParams.get("kind") === "input" ? "input" : "output";
     const mime = EXT_MIME[name.split(".").pop().toLowerCase()];
     const makeResponse = (bytes, hash) => bytesResponse(req, bytes, hash, mime);
@@ -356,11 +358,11 @@ export function makeRouter(ctx) {
       }
     }
 
-    // Read through ingestion — the one ingestion path. A human is waiting
-    // on this exact image: the read gate serves it before background work.
+    // Read through the one ingestion path. Explicit background intent stays
+    // low; legacy/foreground callers retain the reserved high lane.
     // A failing backing is a 502 carrying the reason; no direct backing
     // read in a route, no swallowed errors.
-    const got = await ctx.ingest.ensure(id, name, kind, { priority: "high" });
+    const got = await ctx.ingest.ensure(id, name, kind, { priority: priority === "background" ? "low" : "high" });
     if (token && !ctx.inventory.isCurrent(token)) return Response.json({ error: "Source incarnation changed" }, { status: 409 });
     if (got.status === 200) return makeResponse(got.bytes, got.hash);
     if (got.status === 400) return new Response("bad filename", { status: 400 });
@@ -463,19 +465,10 @@ export function makeRouter(ctx) {
   // answer says whether anything moved; items ship only when it did.
   add("GET", "/api/collections/<id>/meta", async (_req, { id }, url) => {
     if (!ctx.hosts[id]) return Response.json({ error: "unknown collection" }, { status: 404 });
-    const v = ctx.store.metaVersion;
     const since = url.searchParams.get("since");
-    if (since !== null && Number(since) === v) {
-      return Response.json({ v, changed: false });
-    }
     return Response.json({
-      v,
-      changed: true,
-      items: ctx.store.metaForHost(id),
-      // dims ride the same poll — an entry the dims pass reached gets its
-      // width/height patched into the client before extraction finishes
-      dims: ctx.store.dimsForHost(id),
-      pending: ctx.prefetch.pending(id),
+      ...ctx.store.metadataSince(id, since),
+      pending: ctx.prefetch.pending(id) + ctx.prefetch.dimsPending(id),
     });
   });
 
@@ -488,11 +481,20 @@ export function makeRouter(ctx) {
     catch { return Response.json({ error: "files must be JSON" }, { status: 400 }); }
     const files = body?.files;
     if (!Array.isArray(files)) return Response.json({ error: "files must be an array" }, { status: 400 });
+    const interest = body.interest === undefined ? "full" : body.interest;
+    const priority = body.priority === undefined ? "foreground" : body.priority;
+    if (!["full", "dimensions"].includes(interest) || !["foreground", "background"].includes(priority)) {
+      return Response.json({ error: "bad interest or priority" }, { status: 400 });
+    }
     if (files.some((name) => !validEntryName(ctx.hosts[id], name))) {
       return Response.json({ error: "bad entry path" }, { status: 400 });
     }
-    const pending = ctx.prefetch.feed(id, files, true);
-    return Response.json({ pending });
+    ctx.prefetch.feed(id, files, priority === "foreground", { interest });
+    // Legacy full wants retain their ingest count; dimension interest must
+    // keep polling even when it has no ingestion obligation. The reply also
+    // acknowledges with the demanded names' already-known state.
+    return Response.json({ pending: interest === "dimensions" ? ctx.prefetch.dimsPending(id) : ctx.prefetch.pending(id),
+      ...ctx.store.metadataFor(id, files, { meta: interest === "full" }) });
   });
 
   return {

@@ -278,6 +278,10 @@ export class Store {
   #ready = false;
   #collectionListeners = new Set();
   #collectionRevisions = new Map();
+  // Session-local change index over the durable cursor. Older/restarted
+  // cursors receive a full snapshot; no delivery history enters the schema.
+  #metaFloor = 0;
+  #metaChanges = new Map();
 
   static async open(stateDir, { settings, feedbackPath } = {}) {
     const s = new Store();
@@ -301,6 +305,7 @@ export class Store {
             ` ${stats.dropped} dropped`,
         );
       }
+      s.#metaFloor = s.metaVersion;
       s.#ready = true;
       return s;
     } catch (error) {
@@ -551,8 +556,59 @@ export class Store {
   }
 
   // bumped in the same transaction style as the meta write it versions
-  #bumpMeta() {
+  #bumpMeta(host, name, hash = null, { meta = true, dims = true, aliasMeta = meta, aliasDims = dims } = {}) {
     this.#q.bumpMeta.run();
+    const v = this.metaVersion;
+    const entries = hash && (aliasMeta || aliasDims) ? this.#q.entriesByHash.all(hash) : [{ collection: host, name }];
+    for (const entry of entries) {
+      const target = entry.collection === host && entry.name === name;
+      const changedMeta = target ? meta : aliasMeta, changedDims = target ? dims : aliasDims;
+      if (!changedMeta && !changedDims) continue;
+      const key = `${entry.collection}\0${entry.name}`;
+      const previous = this.#metaChanges.get(key);
+      this.#metaChanges.set(key, { ...entry,
+        meta: changedMeta ? v : previous?.meta ?? 0, dims: changedDims ? v : previous?.dims ?? 0 });
+    }
+    // Bounded history: a reader behind this floor safely resynchronizes.
+    if (this.#metaChanges.size > 10000) { this.#metaFloor = v; this.#metaChanges.clear(); }
+  }
+
+  // The current state of demanded identities, independent of any cursor: a
+  // want acknowledgement carries what the engine already knows, so a delta a
+  // reader could not yet apply (its inventory lacked the entry) is never lost.
+  metadataFor(host, names, { meta = true } = {}) {
+    const items = {}, dims = {};
+    for (const name of names) {
+      const row = this.entryJoined(host, name);
+      if (!row) continue;
+      if (meta && row.meta !== null) {
+        try { items[row.name] = JSON.parse(row.meta); } catch { /* corrupt row skipped */ }
+      }
+      if (row.width != null && row.height != null) dims[row.name] = { width: row.width, height: row.height };
+    }
+    return { items, dims };
+  }
+
+  metadataSince(host, since = null) {
+    const v = this.metaVersion;
+    if (since !== null && Number(since) === v) return { v, changed: false };
+    const cursor = since === null || since === "" ? NaN : Number(since);
+    if (!Number.isSafeInteger(cursor) || cursor < this.#metaFloor || cursor > v) {
+      return { v, changed: true, items: this.metaForHost(host), dims: this.dimsForHost(host) };
+    }
+    const items = {}, dims = {};
+    for (const change of this.#metaChanges.values()) {
+      if (change.collection !== host || Math.max(change.meta, change.dims) <= cursor) continue;
+      const row = this.entryJoined(host, change.name);
+      if (!row) continue;
+      if (change.meta > cursor && row.meta !== null) {
+        try { items[row.name] = JSON.parse(row.meta); } catch { /* corrupt row skipped */ }
+      }
+      if (change.dims > cursor && row.width != null && row.height != null) {
+        dims[row.name] = { width: row.width, height: row.height };
+      }
+    }
+    return { v, changed: true, items, dims };
   }
 
   // --- collections ------------------------------------------------------------
@@ -688,6 +744,7 @@ export class Store {
     this.#ensureCollection(host);
     const now = Date.now();
     const old = this.#q.hashFor.value(host, filename)?.[0] ?? null;
+    const content = this.contentGet(hash);
 
     // the content row exists as soon as the bytes do (meta filled by metaPut;
     // inserted BEFORE the entry — entry.hash references content.hash). Dims
@@ -704,7 +761,8 @@ export class Store {
       const refs = this.#q.contentRefs.value(old)[0];
       if (refs === 0) this.#q.contentDelete.run(old);
     }
-    this.#bumpMeta();
+    this.#bumpMeta(host, filename, hash, { aliasMeta: false,
+      aliasDims: !!dims && (content?.width !== dims.width || content?.height !== dims.height) });
   }
 
   // Same content, newer source stamp (a touch, or a new ETag over identical
@@ -784,7 +842,7 @@ export class Store {
     if (!hash) return;
     if (meta) this.#mergeNodeRegistry(meta.nodes);
     this.#q.metaPut.run(hash, meta ? JSON.stringify(meta) : null, hasWorkflow ? 1 : 0, ext, Date.now());
-    this.#bumpMeta();
+    this.#bumpMeta(host, filename, hash, { meta: true, dims: false });
   }
 
   metaForHost(host) {
@@ -920,7 +978,7 @@ export class Store {
     this.#ensureCollection(collection);
     const now = Date.now();
     this.#q.entryDimsPut.run(collection, name, dims?.width ?? null, dims?.height ?? null, now, now);
-    this.#bumpMeta();
+    this.#bumpMeta(collection, name, null, { meta: false, dims: true });
   }
 
   // Names whose dims are known (either source) — the dims-pass queue gate.

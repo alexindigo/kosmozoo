@@ -108,7 +108,7 @@ export class Prefetch {
   // stale (pass 2). priority=true promotes in BOTH queues: already prio'd is
   // skipped; sitting in a walk lane MOVES to the prio lane (want actually
   // promotes — E12).
-  feed(collection, names, priority = false) {
+  feed(collection, names, priority = false, { interest = "full" } = {}) {
     if (!names?.length) return this.pending(collection);
     const fresh = this.store.metaFresh(collection, EXTRACTOR_VERSION);
     const dimmed = this.store.dimsKnown(collection);
@@ -125,7 +125,7 @@ export class Prefetch {
           w.dimsWalk.push(name); w.dimsWalkSet.add(name);
         }
       }
-      if (fresh.has(name) || w.prioSet.has(name)) continue;
+      if (interest === "dimensions" || fresh.has(name) || w.prioSet.has(name)) continue;
       if (priority) {
         if (w.walkSet.delete(name)) w.walk = w.walk.filter((n) => n !== name);
         w.prio.push(name); w.prioSet.add(name);
@@ -243,7 +243,7 @@ export class Prefetch {
     if (lane === "dimsPrio" || lane === "dimsWalk") {
       w.dimsInflight = name;
       try {
-        const r = await this.ingest.dims(collection, name);
+        const r = await this.ingest.dims(collection, name, "output", { priority: lane === "dimsPrio" ? "high" : "low" });
         if (!this.#current(collection, w) || r.cancelled) return false;
         if (r.status === 404) {
           // gone from the source — the same signal pass 2 acts on (C5),
@@ -265,7 +265,7 @@ export class Prefetch {
 
     w.inflight = name;
     try {
-      const r = await this.ingest.ensure(collection, name, "output");
+      const r = await this.ingest.ensure(collection, name, "output", { priority: lane === "prio" ? "high" : "low" });
       if (!this.#current(collection, w) || r.cancelled) return false;
       if (r.status === 404) {
         // gone from the source: an entry state, permanent (C5)

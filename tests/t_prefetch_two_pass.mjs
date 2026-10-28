@@ -34,6 +34,11 @@ Deno.test("prefetch: dims queue drains before ingest starts; want promotes in bo
   const rig = await mkStateRig("2pass", { dir });
   const { settings, store, cache } = rig;
   const ingest = new Ingest(store, { local: addr }, { cache });
+  const priorities = [];
+  for (const method of ["dims", "ensure"]) {
+    const execute = ingest[method].bind(ingest);
+    ingest[method] = (...args) => { priorities.push([method, args[1], args[3].priority]); return execute(...args); };
+  }
   const pf = new Prefetch({
     hosts: { local: addr }, store, settings, ingest,
     interFileDelayMs: 2, dimsInterFileDelayMs: 1, listRefreshMs: 3_600_000,
@@ -64,6 +69,9 @@ Deno.test("prefetch: dims queue drains before ingest starts; want promotes in bo
   // want promoted in both: the first head read AND the first full read are a.png
   assertEquals(order[0], "dims:a.png");
   assertEquals(order[firstIngest], "ingest:a.png");
+  assertEquals(priorities.filter(([, name]) => name === "a.png").map(([method, , priority]) => [method, priority]),
+    [["dims", "high"], ["ensure", "high"]]);
+  assert(priorities.filter(([, name]) => name !== "a.png").every(([, , priority]) => priority === "low"), "whole-library work stays low in both passes");
   // every entry carries dims and a hash at the end
   for (const n of ["a.png", "b.png", "c.png"]) {
     assert(store.entryDims("local", n), `dims for ${n}`);

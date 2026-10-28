@@ -18,6 +18,7 @@ const DEFAULT_REVALIDATE_MS = 60_000;
 const DIMS_HEAD_BYTES = 65_536;
 // per-host cap on concurrent backing reads (the read gate below)
 const MAX_INFLIGHT_PER_HOST = 4;
+const MAX_BACKGROUND_PER_HOST = MAX_INFLIGHT_PER_HOST - 1;
 
 export class Ingest {
   #store;
@@ -29,7 +30,8 @@ export class Ingest {
   // the read gate: one lane per backing address, two classes. "high" is a
   // human waiting on this exact image (the bytes route); "low" is
   // background work (prefetch, revalidation). The next free slot always
-  // goes to a high-class waiter — "the engine is busy" becomes latency on
+  // goes to a high-class waiter; low bodies cannot occupy the fourth slot.
+  // "the engine is busy" becomes latency on
   // background work, never an error on a user-visible image.
   #lanes = new Map(); // addr -> { high: [], low: [], inflight: 0 }
   #capture;
@@ -51,7 +53,7 @@ export class Ingest {
   #lane(addr) {
     let l = this.#lanes.get(addr);
     if (!l) {
-      l = { high: [], low: [], inflight: 0 };
+      l = { high: [], low: [], inflight: 0, background: 0 };
       this.#lanes.set(addr, l);
     }
     return l;
@@ -60,14 +62,17 @@ export class Ingest {
   #pump(addr) {
     const l = this.#lane(addr);
     while (l.inflight < MAX_INFLIGHT_PER_HOST) {
-      const job = l.high.shift() ?? l.low.shift();
+      const job = l.high.shift() ?? (l.background < MAX_BACKGROUND_PER_HOST ? l.low.shift() : null);
       if (!job) return;
       l.inflight++;
+      const background = job.priority === "low";
+      if (background) l.background++;
       Promise.resolve()
         .then(job.fn)
         .then(job.resolve, job.reject)
         .finally(() => {
           l.inflight--;
+          if (background) l.background--;
           this.#pump(addr);
         });
     }
@@ -79,13 +84,21 @@ export class Ingest {
   #readGated(addr, name, kind, opts, priority, flight = null, token = null) {
     const l = this.#lane(addr);
     return new Promise((resolve, reject) => {
-      const job = { fn: () => token && !this.#isCurrent(token) ? this.#cancelled() : backingFor(addr).read(addr, name, kind, opts), resolve, reject };
+      const job = { priority, resolve, reject, fn: async () => {
+        if (token && !this.#isCurrent(token)) return this.#cancelled();
+        const reply = await backingFor(addr).read(addr, name, kind, opts);
+        // The slot owns the body too: response headers do not complete a
+        // backing read. All read paths consume through this same gate.
+        const bytes = new Uint8Array(await new Response(reply.body).arrayBuffer());
+        return { ...reply, bytes };
+      } };
       l[priority].push(job);
       if (flight) {
         flight.upgrade = () => {
           const i = l.low.indexOf(job);
           if (i < 0) return; // already started (or already upgraded)
           l.low.splice(i, 1);
+          job.priority = "high";
           l.high.push(job);
           flight.priority = "high";
           this.#pump(addr);
@@ -135,17 +148,17 @@ export class Ingest {
   // ranged head read → imageDims → stored on the entry. No hash, no cache
   // write, no extract. status 404 means the source lost the file (the
   // prefetch acts on it exactly like pass 2 would).
-  async dims(collection, name, kind = "output") {
+  async dims(collection, name, kind = "output", { priority = "low" } = {}) {
     const token = this.#capture(collection), addr = token?.address;
     if (!token || !this.#isCurrent(token)) return { ...this.#cancelled(), dims: null };
     if (!validEntryName(addr, name)) return { status: 400, dims: null };
     const known = this.#store.entryDims(collection, name);
     if (known) return { status: 200, dims: known };
     if (!addr) return { status: 404, dims: null };
-    const r = await this.#readGated(addr, name, kind, { range: [0, DIMS_HEAD_BYTES - 1] }, "low", null, token);
+    const r = await this.#readGated(addr, name, kind, { range: [0, DIMS_HEAD_BYTES - 1] }, priority, null, token);
     if (!this.#isCurrent(token)) return { ...this.#cancelled(), dims: null };
     if (r.status !== 200 && r.status !== 206) return { status: r.status, dims: null };
-    const bytes = new Uint8Array(await new Response(r.body).arrayBuffer());
+    const bytes = r.bytes;
     if (!this.#isCurrent(token)) return { ...this.#cancelled(), dims: null };
     const dims = imageDims(bytes);
     if (dims) this.#store.entryDimsPut(collection, name, dims);
@@ -193,7 +206,7 @@ export class Ingest {
     const r = await this.#readGated(addr, name, kind, undefined, flight.priority, flight, token);
     if (!this.#isCurrent(token)) return this.#cancelled();
     if (r.status !== 200) return { status: r.status };
-    const bytes = new Uint8Array(await new Response(r.body).arrayBuffer());
+    const bytes = r.bytes;
     if (!this.#isCurrent(token)) return this.#cancelled();
     const stamp = (await backingFor(addr).stat(addr, name, kind))?.stamp ?? null;
     if (!this.#isCurrent(token)) return this.#cancelled();
@@ -255,7 +268,7 @@ export class Ingest {
     const r = await this.#readGated(addr, name, input ? "input" : "output", undefined, "low", null, token);
     if (!this.#isCurrent(token)) return this.#cancelled();
     if (r.status !== 200) return; // unreadable right now — keep what we have
-    const bytes = new Uint8Array(await new Response(r.body).arrayBuffer());
+    const bytes = r.bytes;
     const hash = await sha256(bytes);
     if (!this.#isCurrent(token)) return this.#cancelled();
     if (!input && info.hash === hash) {
