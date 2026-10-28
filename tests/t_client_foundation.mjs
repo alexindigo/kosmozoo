@@ -9,6 +9,7 @@ import { makeAppStore } from "../client-solid/store/app-store.js";
 import { api } from "../client/js/api.mjs";
 import { clientInventory } from "./helpers/client-inventory.mjs";
 import { sourceFrame, injectedSourceStream } from "./helpers/source-stream.mjs";
+import { installImageResource } from "./helpers/image-resource.mjs";
 
 api.inventory = async (...args) => clientInventory(await api.entries(...args));
 
@@ -575,6 +576,7 @@ Deno.test("src window: a rendered card gets its src even when its image index is
   const origMeta = api.meta;
   const origWant = api.want;
   const origNodes = api.nodes;
+  let restoreImage;
   // 30 entries; dims known only for image indices 0, 25, 28 — a SPARSE
   // known list: image index ≠ feed position
   api.entries = async () => Array.from({ length: 30 }, (_, i) => ({
@@ -590,6 +592,7 @@ Deno.test("src window: a rendered card gets its src even when its image index is
     await store.actions.hosts.select("h");
     assertEquals(store.state.entriesWithKnownSize(), [0, 25, 28]);
     assertEquals(store.state.feedPositionOf("h:f28.png"), 2);
+    restoreImage = installImageResource();
     // the rendered window covers feed positions 1..2; its bounds pad to
     // [0, 12] in FEED POSITIONS — a membership check in image indices would
     // wrongly exclude image index 28 (> 12)
@@ -600,7 +603,7 @@ Deno.test("src window: a rendered card gets its src even when its image index is
           { index: 2, start: 100, end: 200, key: "h:f28.png" },
         ],
       },
-      scrollEl: null,
+      scrollEl: { clientWidth: 100, clientHeight: 200, scrollTop: 0 },
     });
     const img = store.state.images[28];
     // the settle-driven window: nothing fires until a settle ripples out
@@ -609,6 +612,8 @@ Deno.test("src window: a rendered card gets its src even when its image index is
     const src = store.state.window.getSrc(store.state.feedPositionOf(img.id), img);
     assert(src && src.includes(encodeURIComponent("f28.png")), `rendered card must get its src, got ${src}`);
   } finally {
+    store.dispose();
+    restoreImage?.();
     api.entries = origEntries;
     api.meta = origMeta;
     api.want = origWant;
@@ -625,6 +630,7 @@ Deno.test("image window: settle ripples C, C+1, C-1, … and freeze stops it", a
   const w = makeImageWindow({
     entryAt: (p) => ({ id: `e${p}`, host: "h", filename: `f${p}.png` }),
     count: () => 11,
+    admit: (entry, publish) => publish({ src: api.entryBytesUrl(entry.host, entry.filename), priority: "foreground" }),
     rippleMs: 10,
   });
   const has = (p) => w.getSrc(p, { id: `e${p}`, host: "h", filename: `f${p}.png` }) != null;
@@ -648,6 +654,7 @@ Deno.test("image window: a started load survives the next settle; a loaded one i
   const w = makeImageWindow({
     entryAt: (p) => ({ id: `e${p}`, host: "h", filename: `f${p}.png` }),
     count: () => 30,
+    admit: (entry, publish) => publish({ src: api.entryBytesUrl(entry.host, entry.filename), priority: "foreground" }),
     rippleMs: 5,
   });
   const has = (p) => w.getSrc(p, { id: `e${p}`, host: "h", filename: `f${p}.png` }) != null;
@@ -666,6 +673,7 @@ Deno.test("image window: a settle keeps loaded srcs inside its range and release
   const w = makeImageWindow({
     entryAt: (p) => ({ id: `e${p}`, host: "h", filename: `f${p}.png` }),
     count: () => 60,
+    admit: (entry, publish) => publish({ src: api.entryBytesUrl(entry.host, entry.filename), priority: "foreground" }),
     rippleMs: 5,
   });
   const has = (p) => w.getSrc(p, { id: `e${p}`, host: "h", filename: `f${p}.png` }) != null;

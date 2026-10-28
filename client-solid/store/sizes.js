@@ -13,34 +13,13 @@
 
 import { createSignal } from "solid-js";
 import { mediaKind } from "/shared/backings/mime.mjs";
-import { mediaGeometry, AUDIO_SIZE, FAILURE_SIZE } from "./media-geometry.js";
-
-export const ERROR_RETRY_MS = 8000;
-export const MEASURE_TIMEOUT_MS = 30000;
-const validDims = (w, h) => Number.isFinite(w) && w > 0 && Number.isFinite(h) && h > 0;
+import { mediaGeometry, AUDIO_SIZE } from "./media-geometry.js";
+import { makeAcquisition } from "./acquisition.js";
+import { makeImageMeasurements, validDims } from "../lib/img-measure.js";
+export { scheduleRetry, ERROR_RETRY_MS, MEASURE_TIMEOUT_MS } from "../lib/img-measure.js";
 const RESOLVE_AHEAD = 30;   // entries past the visible window's tail
 const RESOLVE_BEHIND = 10;  // and behind its head (when more are pending above)
-const MAX_INFLIGHT = 6;     // bounded off-DOM concurrency
 const MAX_BEHIND_ALL = 50;  // "resolve every pending entry above the fold" cap
-
-// The retry scheduler lives HERE and only here: one timer; when the
-// window opens the callback re-queues whatever it owns (the loader's failed
-// ids, the image window's errored srcs).
-let retryTimer = null;
-const retryCallbacks = new Set();
-export function scheduleRetry(cb) {
-  if (cb) retryCallbacks.add(cb);
-  if (!retryTimer) retryTimer = setTimeout(() => {
-    retryTimer = null;
-    const callbacks = [...retryCallbacks];
-    retryCallbacks.clear();
-    for (const callback of callbacks) callback();
-  }, ERROR_RETRY_MS);
-  return () => {
-    retryCallbacks.delete(cb);
-    if (!retryCallbacks.size && retryTimer) { clearTimeout(retryTimer); retryTimer = null; }
-  };
-}
 
 // Chrome under the image box (padding + title row + notes pair) is declared
 // in CSS as --card-chrome-h — the pre-measure value, read once and re-read
@@ -148,184 +127,49 @@ export function feedEntryAtOffset(order, offsets, top) {
   return found;
 }
 
-export function makeSizes({ srcFor, imageAt, entryFor = () => null, identityFor = (id) => id }) {
+const entryKind = (entry) => mediaKind(entry?.filename ?? entry?.name) ?? "image";
+const entryDims = (entry) => !entry ? null
+  : validDims(entry.width, entry.height) ? { w: entry.width, h: entry.height }
+  : validDims(entry.meta?.width, entry.meta?.height) ? { w: entry.meta.width, h: entry.meta.height }
+  : null;
+
+// acquisition is the Store's one admission policy. A standalone size owner
+// has no viewport projection to rank candidates by, so its private policy
+// admits every staged candidate in the foreground lane (six resource slots).
+export function makeSizes({ acquisition, srcFor, imageAt, entryFor = () => null, identityFor = (id) => id }) {
+  const ownedAcquisition = acquisition ? null : makeAcquisition({ fallbackPriority: "foreground" });
+  acquisition ??= ownedAcquisition;
   // the chrome height is read HERE (store creation — the CSS is applied by
   // now; never at module import) and re-read on every resize: it is the one
   // cardHeight input that can change without any entry changing
   chromeHeightPx();
   const resize = () => { chromePx = null; chromeHeightPx(); };
   if (typeof window !== "undefined") window.addEventListener("resize", resize);
-  const sizes = new Map();   // id -> { w, h }
-  const failed = new Set();  // ids the loader gave up on (one retry schedule)
-  const retried = new Set(); // ids that have consumed their first attempt
-  const waiting = new Set(); // first failures waiting for the shared retry deadline
-  const queued = new Set();  // retained interest drains even when no card can mount
-  const deadlines = new Map();
-  const inFlight = new Set();
-  // GC guard: the Image object is the ONLY holder of the load's onload/
-  // onerror — if nothing references it, the collector aborts the load
-  // mid-flight and the inFlight slot leaks forever ( stalls at
-  // MAX_INFLIGHT). Keep every loading image referenced until it settles.
-  const loading = new Map();
-  const identities = new Map();
-  let context = null, disposed = false;
-  let cancelRetry = null;
-  const retrySizes = () => {
-    cancelRetry = null;
-    if (disposed) return;
-    for (const id of waiting) queued.add(id);
-    waiting.clear();
-    drain();
-    bump();
-  };
-  const [version, setVersion] = createSignal(0);
-  // the bumper MUST change the value: a bare setVersion writes undefined
-  // once and then never notifies again (undefined === undefined) — every
-  // downstream memo/effect silently freezes (the entire feed drain stall)
-  const bump = () => setVersion((v) => v + 1);
-
-  // identityFor: null retires an entry; "" means its hash is not known yet.
-  // Learning the first hash enriches the same content, matching inventory
-  // reconciliation. Only a change between known hashes retires measurements.
-  function matchesIdentity(id, identity = identityFor(id)) {
-    if (!identities.has(id)) return false;
-    if (identities.get(id) === "" && typeof identity === "string" && identity !== "") identities.set(id, identity);
-    return identities.get(id) === identity;
-  }
-
-  // reactive read: sizeOf subscribes to landings
-  const sizeOf = (id) => { version(); return matchesIdentity(id) ? sizes.get(id) ?? null : null; };
-
-  function loadFailed(id) {
-    version();
-    return matchesIdentity(id) && failed.has(id);
-  }
+  const measurements = makeImageMeasurements({ acquisition, srcFor, identityFor,
+    kindOf: (id) => entryKind(entryFor(id)), knownSize: (id) => entryDims(entryFor(id)) });
+  const { sizeOf, loadFailed } = measurements;
+  let disposed = false;
 
   // One size derivation for feed membership, pending counts and card geometry.
   // A terminal box stays square even if metadata arrives after it mounted.
   function sizeFor(entry) {
     if (!entry) return null;
-    const kind = mediaKind(entry.filename ?? entry.name) ?? "image";
+    const kind = entryKind(entry);
     if (kind === "audio") return AUDIO_SIZE;
-    const size = loadFailed(entry.id) ? sizeOf(entry.id)
-      : validDims(entry.width, entry.height) ? { w: entry.width, h: entry.height }
-      : validDims(entry.meta?.width, entry.meta?.height) ? { w: entry.meta.width, h: entry.meta.height }
-      : sizeOf(entry.id);
-    return size ? { ...size, ...(kind === "video" ? { kind } : {}), ...(loadFailed(entry.id) ? { failed: true } : {}) } : null;
+    const failed = loadFailed(entry.id);
+    const size = failed ? sizeOf(entry.id) : entryDims(entry) ?? sizeOf(entry.id);
+    return size ? { ...size, ...(kind === "video" ? { kind } : {}), ...(failed ? { failed: true } : {}) } : null;
   }
 
-  function retireImage(id) {
-    clearTimeout(deadlines.get(id)); deadlines.delete(id);
-    const image = loading.get(id);
-    if (image) {
-      image.onload = null; image.onerror = null;
-      image.onloadedmetadata = null;
-      if (image.tagName === "VIDEO") image.pause();
-      image.removeAttribute("src");
-      if (image.tagName === "VIDEO") image.load();
-      loading.delete(id);
-    }
-    inFlight.delete(id);
-  }
-
-  function setContext(next) {
-    if (context === next && !disposed) return;
-    context = next;
-    cancelRetry?.(); cancelRetry = null;
-    for (const id of [...loading.keys()]) retireImage(id);
-    sizes.clear(); failed.clear(); retried.clear(); waiting.clear(); queued.clear(); identities.clear();
-    bump();
-  }
-
-  function reconcileIdentity(id) {
-    const identity = identityFor(id);
-    if (!matchesIdentity(id, identity)) {
-      retireImage(id); sizes.delete(id); failed.delete(id); retried.delete(id); waiting.delete(id);
-      identities.set(id, identity);
-    }
-    return identity;
-  }
-
-  function resolve(id) {
-    if (disposed || typeof Image === "undefined") return; // headless (unit tests)
-    const identity = reconcileIdentity(id), owner = context;
-    if (identity == null) return;
-    if (sizes.has(id) || inFlight.has(id) || waiting.has(id)) return;
-    if (sizeFor(entryFor(id)) !== null) return;
-    const src = srcFor(id);
-    if (!src) { sizes.set(id, FAILURE_SIZE); failed.add(id); bump(); return; }
-    inFlight.add(id);
-    let img;
-    const fail = () => {
-      // Engine dimensions may have made the card ready during this attempt.
-      // Settle with those dimensions, never resize that card into a fallback.
-      const known = sizeFor(entryFor(id));
-      retireImage(id);
-      if (known) {
-        sizes.set(id, known);
-      } else if (retried.has(id)) {
-        sizes.set(id, FAILURE_SIZE);
-        failed.add(id);
-      } else {
-        retried.add(id);
-        waiting.add(id);
-        cancelRetry = scheduleRetry(retrySizes);
-      }
-      bump();
-      drain();
-    };
-    const video = mediaKind(entryFor(id)?.filename ?? entryFor(id)?.name) === "video";
-    try {
-      img = video ? document.createElement("video") : new Image();
-      if (video) img.preload = "metadata";
-    } catch { fail(); return; }
-    loading.set(id, img);
-    const current = () => !disposed && context === owner && loading.get(id) === img && matchesIdentity(id);
-    const loaded = () => {
-      if (!current()) return;
-      const w = video ? img.videoWidth : img.naturalWidth, h = video ? img.videoHeight : img.naturalHeight;
-      if (!validDims(w, h)) { fail(); return; }
-      sizes.set(id, { w, h });
-      retireImage(id);
-      bump();
-      drain();
-    };
-    if (video) img.onloadedmetadata = loaded; else img.onload = loaded;
-    img.onerror = () => {
-      if (!current()) return;
-      fail();
-    };
-    deadlines.set(id, setTimeout(() => {
-      if (current()) fail();
-      else if (loading.get(id) === img) { reconcileIdentity(id); drain(); }
-    }, MEASURE_TIMEOUT_MS));
-    try { img.src = src; } catch { if (current()) fail(); }
-  }
-
-  let draining = false;
-  function drain() {
-    if (disposed || draining) return;
-    draining = true;
-    try {
-      for (const id of queued) {
-        if (inFlight.size >= MAX_INFLIGHT) break;
-        queued.delete(id);
-        resolve(id);
-      }
-    } finally { draining = false; }
-  }
-
-  // Stage off-DOM measurements for VIEW entries around the visible window;
-  // bounded concurrency. BEHIND FIRST: an entry above the viewport whose
-  // size lands inserts a card above the fold — when the pending-above count
-  // is small (≤ 50) every one of them resolves before anything below, so
-  // the common case never has pending entries above the fold. viewIdx is
-  // view's index list and images come via imageAt — nothing materializes
-  // the listing per call.
+  // Enumerate VIEW candidates behind first to keep above-fold insertions
+  // moving: when the pending-above count is small (<= 50) every one of them
+  // is staged before anything below. This is candidate order, not an
+  // independent admission window: the shared policy starts foreground
+  // identities first, bounds idle background resources and retains staged
+  // interest until it drains, even when no card can mount.
   function resolveAhead(viewIdx, first, last) {
-    // Retire old content BEFORE capacity is tested: otherwise six stale
-    // slots can make identity reconciliation in resolve unreachable.
-    for (const id of loading.keys()) reconcileIdentity(id);
+    // Retire old content before the shared capacity gate can block it.
+    measurements.reconcile();
     if (!viewIdx.length) return;
     let pendingAbove = 0;
     for (let i = 0; i < first; i++) {
@@ -338,19 +182,19 @@ export function makeSizes({ srcFor, imageAt, entryFor = () => null, identityFor 
     const stage = (i) => {
       const e = imageAt(viewIdx[i]);
       if (!e || sizeFor(e) !== null) return;
-      queued.add(e.id);
+      measurements.request(e.id);
     };
     for (let i = from; i < first; i++) stage(i);
     for (let i = first; i <= to; i++) stage(i);
-    drain();
   }
 
   function dispose() {
     if (disposed) return;
     disposed = true;
     if (typeof window !== "undefined") window.removeEventListener("resize", resize);
-    setContext(null);
+    measurements.dispose();
+    ownedAcquisition?.dispose();
   }
 
-  return { sizeOf, sizeFor, resolveAhead, loadFailed, setContext, dispose };
+  return { ...measurements, sizeFor, resolveAhead, dispose };
 }

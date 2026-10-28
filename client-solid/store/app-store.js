@@ -35,6 +35,8 @@ import { makeImageWindow } from "./image-window.js";
 import { makeSizes } from "./sizes.js";
 import { makeMediaPlayers } from "./media-players.js";
 import { mediaKind } from "/shared/backings/mime.mjs";
+import { makeAcquisition } from "./acquisition.js";
+import { makeMetadata } from "./metadata.js";
 import { snapTidy, SNAP_QUIET_MS } from "./scroll-snap.js";
 import { makeJudgments } from "./judgments.js";
 import { cardState } from "./card-state.js";
@@ -130,12 +132,12 @@ export function makeAppStore({ subscribeSources = typeof window !== "undefined" 
   function beginSourceSession(id) {
     retireFeedScroll();
     clearTimeout(sourceSession?.retryTimer);
-    clearTimeout(metaPollTimer);
-    wantSet.clear();
-    metaVersion = 0;
     setSt("metaPending", 0);
     sourceSession = { id, address: hostsView()[id]?.address, source: sourceRecords.get(id), generation: ++selectionGeneration,
       loading: true, requested: 1, completed: 0, refreshTask: null, retryTimer: null, errors: 0 };
+    acquisition.setContext(sourceSession);
+    metadata.setContext(sourceSession);
+    inlineTargets.clear();
     sizes_.setContext(sourceSession);
     setAcquisitionRevision((v) => v + 1);
     return sourceSession;
@@ -576,6 +578,10 @@ export function makeAppStore({ subscribeSources = typeof window !== "undefined" 
     // entry's size is known)
     const knownPos = entriesWithKnownSize().indexOf(idx);
     if (knownPos < 0) return;
+    // The core resolves a jump from its measurement memo, refreshed only when
+    // read; a known-list change in this same turn would otherwise leave the
+    // one scrollToIndex looking up a stale (or absent) item and silently not move.
+    seams.virtualizer?.getMeasurements?.();
     seams.virtualizer?.scrollToIndex(knownPos, { align: "center" });
     // a programmatic center, not user scrolling — keep the snap from
     // immediately pulling the centered card back to the top edge
@@ -583,106 +589,71 @@ export function makeAppStore({ subscribeSources = typeof window !== "undefined" 
     wantRangeNow();
   }
 
-  // --- metadata channel: want + poll + patch in place ---------------------------
-  let metaVersion = 0;
-  const wantSet = new Set();
-  let metaPollTimer = null;
-
-  // wants only collect — the flush rides the settle debounce : no timer
-  // of its own; feedSettle calls flushWant after wantRangeNow)
-  function wantMeta(image) {
-    if (image.meta || wantSet.has(image.filename)) return;
-    wantSet.add(image.filename);
-  }
-
-  async function flushWant(s = sourceSession) {
-    if (!ownsSession(s)) return;
-    const files = [...wantSet];
-    wantSet.clear();
-    if (!files.length) return;
-    try {
-      const r = await api.want(s.id, files);
-      if (!ownsSession(s)) return;
-      if (typeof r.pending === "number") {
-        setSt("metaPending", r.pending);
-        if (r.pending > 0) scheduleMetaPoll(1000, s);
-      }
-    } catch { /* next sweep re-wants */ }
-  }
-
-  function scheduleMetaPoll(delay = 5000, s = sourceSession) {
-    if (!ownsSession(s)) return;
-    clearTimeout(metaPollTimer);
-    metaPollTimer = setTimeout(() => pollMetadata(s), delay);
-  }
-
-  function pollMetadata(s = sourceSession) {
-    if (!ownsSession(s)) return Promise.resolve();
-    if (s.metaTask) return s.metaTask;
-    s.metaTask = readMetadata(s).finally(() => { s.metaTask = null; });
-    return s.metaTask;
-  }
-
-  async function readMetadata(s) {
-    try {
-      const r = await api.meta(s.id, metaVersion);
-      if (!ownsSession(s)) return;
-      if (r.pending !== undefined) setSt("metaPending", r.pending);
-      if (r.changed) {
-        metaVersion = r.v;
-        const byId = imageIdxById();
-        for (const [name, meta] of Object.entries(r.items ?? {})) {
-          const idx = byId.get(`${s.id}:${name}`);
-          if (idx === undefined || st.images[idx].meta) continue;
-          // meta patches never change geometry (size is listing data) — they
-          // apply on arrival; the settle buffer is dead 
-          setSt("images", idx, "meta", meta);
-        }
-        // dims ride the same poll : an entry the dims pass reached
-        // after the listing loaded gets its width/height patched in — the
-        // size-known view extends without a reload
-        for (const [name, d] of Object.entries(r.dims ?? {})) {
-          const idx = byId.get(`${s.id}:${name}`);
-          if (idx === undefined || !d) continue;
-          const img = st.images[idx];
-          if (img.width && img.height) continue;
-          setSt("images", idx, "width", d.width);
-          setSt("images", idx, "height", d.height);
-        }
-        // the node registry grows as the engine extracts — refresh it
-        // alongside so newly discovered node types materialize without a
-        // reload (a fresh engine boots with an empty registry)
-        api.nodes().then((reg) => { if (ownsSession(s)) setSt("nodesRegistry", reg); }).catch(() => {});
-      }
-    } catch { /* transient; next poll retries */ }
-    if (ownsSession(s) && st.metaPending > 0) scheduleMetaPoll(1000, s);
-  }
-
-  // the scraper status poll (the menu row reads it) lives ONLY while ingest
-  // work is pending — the forever-setInterval is dead ; the effect owns
-  // its timer and cleans it up
+  // --- shared acquisition and metadata lane -----------------------------------
+  const acquisition = makeAcquisition();
   createEffect(() => {
-    if (!(st.metaPending > 0)) return;
-    const t = setInterval(async () => {
-      setSt("scraper", reconcile(await api.prefetch().catch(() => st.scraper)));
-    }, 2000);
-    onCleanup(() => clearInterval(t));
+    const active = feedActivity() !== "settled" || resizing();
+    untrack(() => acquisition.setGesture(active));
+  });
+  const metadata = makeMetadata({ acquisition, owns: ownsSession, batch,
+    want: (...args) => api.want(...args), meta: (...args) => api.meta(...args),
+    nodes: options => api.nodes(options), status: options => api.prefetch(options),
+    priorityFor: item => item.priority === "background" ? "background" : acquisition.priority(item.id),
+    setPending: value => setSt("metaPending", value),
+    setNodes: registry => setSt("nodesRegistry", registry),
+    setStatus: value => setSt("scraper", reconcile(value)),
+    // The identities a reply may publish into: every entry, or the named ones.
+    capture: (names) => {
+      if (!names) return new Map(st.images.map(image => [image.filename, image.hash]));
+      const byId = imageIdxById(), out = new Map();
+      for (const name of names) {
+        const idx = byId.get(`${sourceSession.id}:${name}`);
+        if (idx !== undefined) out.set(name, st.images[idx].hash);
+      }
+      return out;
+    },
+    apply(name, meta, dims, owner, snapshot) {
+      const idx = imageIdxById().get(`${owner.id}:${name}`);
+      if (idx === undefined) return false;
+      const image = st.images[idx];
+      if (!snapshot.has(name) || snapshot.get(name) !== image.hash) return false;
+      let graphChanged = false;
+      if (meta && !image.meta) { setSt("images", idx, { meta, extracted: true }); graphChanged = true; }
+      if (dims?.width && dims?.height && !(image.width && image.height)) {
+        setSt("images", idx, { width: dims.width, height: dims.height });
+      }
+      return graphChanged;
+    },
   });
 
-  // meta-want follows the viewport: from a little behind the current window
-  // to a few screens ahead of it, so most sizes resolve BEFORE those cards
-  // render. Called at settle, at restore, and after a load — the scroll-path
-  // throttle is folded into the settle debounce .
-  const WANT_LOOKAHEAD = 60, WANT_BEHIND = 10;
+  function pollMetadata(s = sourceSession) {
+    // An accepted inventory requests the selected window's metadata immediately.
+    // Subsequent autonomous polls use the metadata lane's background default.
+    return ownsSession(s) ? metadata.poll({ priority: "foreground" }) : Promise.resolve();
+  }
 
-  function wantRangeNow() {
-    const v = view();
-    const vz = feedVirtualizer();
-    const startIdx = vz?.getVirtualItems()[0]?.index ?? 0;
-    const from = Math.max(0, startIdx - WANT_BEHIND);
-    for (let i = from; i < Math.min(startIdx + WANT_LOOKAHEAD, v.length); i++) {
-      const image = st.images[v[i]];
-      if (image) wantMeta(image);
+  function wantRangeNow(viewportIds = [], { renew = false } = {}) {
+    if (!ownsSession(sourceSession) || !sourceSession.inventoryReady) return [];
+    const ids = view().map(index => st.images[index].id);
+    const foreground = acquisition.setWindow({ ids, currentId: currentEntry()?.entry.id, viewportIds });
+    const images = foreground.map(id => st.images[imageIdx(id)]).filter(Boolean);
+    metadata.request(images, { renew });
+    // Stage the complete foreground in one current-first order: known-size
+    // srcs and unknown-size measurements share the same retained resources,
+    // so neither adapter can consume every foreground slot ahead of the other.
+    // Before the feed viewport is ready nothing can display: only a pending
+    // browse restore's unknown sizes are measured, in that same order.
+    const ready = untrack(() => feedFrame(feedRegistration())), restoring = untrack(browseRestore);
+    for (const image of images) if (ready || restoring && !sizeKnown(image)) sizes_.request(image.id);
+    return foreground;
+  }
+
+  async function requestBackgroundDimensions(s, entries) {
+    for (let position = 0; position < entries.length && ownsSession(s); position += 200) {
+      const result = await acquisition.submit({ key: Symbol("dimension-interest"), resource: false,
+        valid: () => ownsSession(s), run: () => metadata.request(entries.slice(position, position + 200),
+          { interest: "dimensions", priority: "background" }) });
+      if (result?.retired) return;
     }
   }
 
@@ -754,9 +725,8 @@ export function makeAppStore({ subscribeSources = typeof window !== "undefined" 
     mirrorCurrentHash();
     if (!wasReady) restoreBrowse(idx);
     else if (browseRestore()) restoreBrowse(findByFile(current()?.image));
-    wantRangeNow();
-    for (const image of st.images) if (!image.width || !image.height) wantSet.add(image.filename);
-    flushWant(s);
+    wantRangeNow([], { renew: true });
+    requestBackgroundDimensions(s, st.images.slice());
   }
 
   function liveBrowseTarget() {
@@ -775,6 +745,10 @@ export function makeAppStore({ subscribeSources = typeof window !== "undefined" 
   }
 
   function beginBrowse(target) {
+    // The view change may make the browser clamp the scroll position; that
+    // scroll is the navigation's own consequence, never user travel that
+    // cancels its pending restore.
+    quietScrolls();
     batch(() => {
       retireFeedScroll();
       browseRevision++;
@@ -807,8 +781,7 @@ export function makeAppStore({ subscribeSources = typeof window !== "undefined" 
     if (position < 0) return;
     if (sizeKnown(image)) { restoreToIndex(idx); return; }
     setBrowseRestore({ id: image.id, session: sourceSession, revision: browseRevision });
-    wantSet.add(image.filename);
-    flushWant(sourceSession);
+    wantRangeNow();
     sizes_.resolveAhead(view(), position, position);
   }
   createEffect(() => {
@@ -907,7 +880,9 @@ export function makeAppStore({ subscribeSources = typeof window !== "undefined" 
       const inventory = inventoryReply(await api.inventory(name), hostsView()[name]?.kind), entries = inventory.entries;
       if (!ownsSession(s)) return false;
       acceptInventory(s, inventory, read, before);
-      await pollMetadata(s);
+      // Inventory freshness acknowledges its captured read, independently of
+      // the acquisition lane's network/publication latency.
+      pollMetadata(s);
       if (!ownsSession(s)) return false;
       setSt("inventory", "loading", false);
       actions.status.clear("load");
@@ -1077,14 +1052,18 @@ export function makeAppStore({ subscribeSources = typeof window !== "undefined" 
     }
     return m;
   });
+  const inlineTargets = new Map();
   const sizes_ = makeSizes({
+    acquisition,
     srcFor: (id) => {
+      if (inlineTargets.has(id)) return inlineTargets.get(id).src;
       const img = st.images[imageIdxById().get(id)];
       return img ? api.entryBytesUrl(img.host, img.filename) : null;
     },
     imageAt: (i) => st.images[i],
     entryFor: (id) => st.images[imageIdxById().get(id)],
     identityFor: (id) => {
+      if (inlineTargets.has(id)) return inlineTargets.get(id).identity;
       const image = st.images[imageIdxById().get(id)];
       return image ? image.hash ?? "" : null;
     },
@@ -1132,7 +1111,26 @@ export function makeAppStore({ subscribeSources = typeof window !== "undefined" 
   const window_ = makeImageWindow({
     entryAt: feedEntryAt,
     count: () => entriesWithKnownSize().length,
+    admit: (entry, onStart, { valid, nonce }) => {
+      const s = sourceSession, hash = entry.hash;
+      const live = () => ownsSession(s) && valid() && st.images[imageIdx(entry.id)]?.hash === hash;
+      acquisition.submit({ key: Symbol("feed-src-admission"), id: entry.id, resource: false, valid: live,
+        run: () => {
+          const interest = { onStart, valid: live, nonce };
+          if (nonce) sizes_.retry(entry.id, interest); else sizes_.request(entry.id, interest);
+        } });
+    },
   });
+  // A registered feed's frame, or null while its geometry is not ready.
+  function feedFrame(registration) {
+    if (!registration) return null;
+    const frame = registration.viewport ? registration.viewport() : {
+      width: registration.scrollEl?.clientWidth, height: registration.scrollEl?.clientHeight,
+      items: registration.virtualizer?.getVirtualItems() ?? [],
+    };
+    return frame?.ready === false || !Number.isFinite(frame?.width) || frame.width <= 0 ||
+      !Number.isFinite(frame?.height) || frame.height <= 0 ? null : frame;
+  }
   // ONE readiness -> acquisition reconciliation. Geometry/range changes are
   // real dependencies, independent of permission to commit scrolling state.
   createEffect(() => {
@@ -1141,13 +1139,9 @@ export function makeAppStore({ subscribeSources = typeof window !== "undefined" 
     const ce = currentEntry(), known = entriesWithKnownSize(), pending = pendingSizeCount();
     const loading = st.inventory.loading;
     if (disposed || !ownsSession(s) || !s.inventoryReady || s.pendingBrowse || loading || feedActivity() !== "settled" || !registration) return;
-    const frame = registration.viewport ? registration.viewport() : {
-      width: registration.scrollEl?.clientWidth, height: registration.scrollEl?.clientHeight,
-      items: registration.virtualizer?.getVirtualItems() ?? [],
-    };
-    const items = frame?.items ?? [];
-    if (frame?.ready === false || !Number.isFinite(frame?.width) || frame.width <= 0 ||
-        !Number.isFinite(frame?.height) || frame.height <= 0) return;
+    const frame = feedFrame(registration);
+    if (!frame) return;
+    const items = frame.items ?? [];
     // An all-pending feed has no virtual items to stage from (including a
     // deliberately null current). Bootstrap the same bounded measurement owner.
     if (!known.length && pending) {
@@ -1174,10 +1168,12 @@ export function makeAppStore({ subscribeSources = typeof window !== "undefined" 
     const coverageChanged = contextChanged || lastAcquisition.width !== frame.width || lastAcquisition.height !== frame.height ||
       ids.length !== lastAcquisition.ids.length || ids.some((id, index) => id !== lastAcquisition.ids[index]);
     untrack(() => {
+      const top = registration.scrollEl?.scrollTop ?? feedScrollTop();
+      const viewportIds = items.filter(item => item.end > top && item.start < top + frame.height).map(item => item.key);
+      wantRangeNow(viewportIds);
       if (contextChanged) window_.settle(anchor, first, last);
       else if (coverageChanged) window_.coverRange(first, last);
       if (pending) stageResolveAhead();
-      wantRangeNow(); flushWant(s);
       lastAcquisition = { session: s, registration, revision: browseRevision, currentId, anchorId,
         width: frame.width, height: frame.height, ids };
     });
@@ -1451,7 +1447,8 @@ export function makeAppStore({ subscribeSources = typeof window !== "undefined" 
     window_.clear();
     sizes_.dispose();
     players.dispose();
-    clearTimeout(metaPollTimer);
+    metadata.dispose();
+    acquisition.dispose();
     clearTimeout(sourceSession?.retryTimer);
     for (const record of sourceRecords.values()) record.freshness.retire();
   }
@@ -1467,13 +1464,20 @@ export function makeAppStore({ subscribeSources = typeof window !== "undefined" 
   // store array proxies can't support flatMap/map chains on function-valued
   // items (the Symbol(solid-proxy) defineProperty trap)
   const registeredFeatures = [];
+  // A modal surface's image (e.g. a Load Image input thumbnail) is user-visible
+  // foreground work outside any source entry: it shares the same policy and
+  // capacity, and only its owner's disposal retires it. Features receive this
+  // port at installation; they never reach into the Store's actions.
+  function surfaceDisplay(input) {
+    return sizes_.display({ ...input, foregroundId: null, priority: "foreground", scoped: false });
+  }
   const actions = {
     features: {
       // Feature installation defines private operations/owner ports and semantic
       // commands before data bindings/affordances join the registry.
       register(f) {
         if (registeredFeatures.some((x) => x.name === f.name)) return;
-        const installed = f.install?.({ state: stateObj, handles, setSt, reconcile });
+        const installed = f.install?.({ state: stateObj, handles, setSt, reconcile, surfaceDisplay });
         if (installed) {
           for (const command of installed.commands ?? []) handles.register(command);
           for (const command of installed.ownedCommands ?? []) handles.registerOwned(command);
@@ -1662,11 +1666,32 @@ export function makeAppStore({ subscribeSources = typeof window !== "undefined" 
           restoreBrowse(idx);
         }
         mirrorCurrentHash("push");
-        wantRangeNow(); flushWant();
+        wantRangeNow();
       },
     },
 
     images: {
+      display: input => sizes_.display(input),
+      // A modal surface's image (e.g. a Load Image input thumbnail) is user-
+      // visible foreground work outside any source entry: it shares the same
+      // policy and capacity, and only its owner's disposal retires it.
+      surface: input => surfaceDisplay(input),
+      inline({ src, identity, foregroundId }) {
+        const s = sourceSession;
+        let active = true;
+        let id = [...inlineTargets].find(([, target]) => target.src === src && target.identity === identity && target.foregroundId === foregroundId)?.[0];
+        if (!id) { id = Symbol("inline-image"); inlineTargets.set(id, { src, identity, foregroundId, leases: 0 }); }
+        const target = inlineTargets.get(id);
+        target.leases++;
+        const valid = () => active && ownsSession(s) && inlineTargets.get(id) === target;
+        let admitted = null;
+        acquisition.submit({ key: Symbol("inline-admission"), id: foregroundId, resource: false, valid,
+          run: () => sizes_.request(id, { foregroundId, valid, onStart: request => { admitted = request; } }) });
+        return {
+          read() { const size = sizes_.sizeOf(id); return { id, foregroundId, size: size ?? (sizes_.loadFailed(id) ? "failed" : "pending"), src: admitted?.src, priority: admitted?.priority }; },
+          dispose() { if (!active) return; active = false; if (--target.leases === 0) { inlineTargets.delete(id); sizes_.reconcile(); } },
+        };
+      },
       reload() { return actions.hosts.select(host(), { target: liveBrowseTarget(), force: true, historyMode: "replace" }); },
       delete(images) { return deleteImages(images); },
       // byte size isn't in every host's listing — a HEAD on the bytes route fills it
@@ -1676,9 +1701,11 @@ export function makeAppStore({ subscribeSources = typeof window !== "undefined" 
         if (idx < 0 || st.images[idx].size != null) return;
         const img = st.images[idx];
         const hash = img.hash;
-        const size = await api.entrySizeProbe(img.host, img.filename);
+        const size = await acquisition.submit({ key: `byte-size:${id}`, id,
+          valid: () => ownsSession(s) && st.images[imageIdx(id)]?.hash === hash,
+          run: ({ priority }) => api.entrySizeProbe(img.host, img.filename, { priority }) });
         const resolved = imageIdx(id);
-        if (ownsSession(s) && resolved >= 0 && st.images[resolved].hash === hash && size != null) setSt("images", resolved, "size", size);
+        if (ownsSession(s) && resolved >= 0 && st.images[resolved].hash === hash && typeof size === "number") setSt("images", resolved, "size", size);
       },
       // download via a transient anchor (plain download — the "saved"
       // indicator was removed with the feature, Q3)
@@ -2058,6 +2085,9 @@ export function makeAppStore({ subscribeSources = typeof window !== "undefined" 
         };
       },
       restoreToIndex,
+      // Reveal one entry: immediately when its size is known, else once it is
+      // (the same single navigation restore, fenced by source and intent).
+      reveal: restoreBrowse,
       // a programmatic scroll in flight must not invite the snap — restores
       // call this so the next settle does not re-tidy
       quiet: quietScrolls,

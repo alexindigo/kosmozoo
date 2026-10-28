@@ -22,7 +22,7 @@ cleanup() {
   # explicit names only — the ONLY sanctioned docker rm. stderr stays
   # visible; the routine "No such container" noise on a clean start is
   # filtered, everything else prints (a failure must be learned from)
-  docker rm -f kz-e2e-deps kz-e2e-fake kz-e2e-fake2 kz-e2e-engine kz-e2e-fresh-engine kz-e2e-fresh-install 2>&1 | grep -v "No such container" || true
+  docker rm -f kz-e2e-deps kz-e2e-fake kz-e2e-fake2 kz-e2e-engine kz-e2e-fresh-engine kz-e2e-fresh-install kz-e2e-perf-engine kz-e2e-perf-fake kz-e2e-load-window 2>&1 | grep -v "No such container" || true
   rm -rf "$WORK/tests/.tmp-mutable" "$WORK/tests/.tmp-comfy" "$WORK/tests/.tmp-fresh" "$RUN_DIR"
   if [[ -z "${E2E_DENO_DIR:-}" ]]; then rm -rf "$DENO_CACHE"; fi
 }
@@ -170,3 +170,34 @@ timeout 180s docker run --rm --name kz-e2e-fresh-install --user "$FRESH_USER" --
   -e HOME=/work/tests/.tmp-fresh/home -e TMPDIR=/work/tests/.tmp-fresh/tmp \
   --entrypoint node "$PW_IMAGE" \
   /work/tests/e2e/fresh-install.e2e.cjs
+
+# 9. Large-source loading must remain interactive. Its initially empty engine
+#    and dimensionless fake are isolated from all preceding suites/state.
+timeout 40s docker stop -t 5 kz-e2e-engine kz-e2e-fake kz-e2e-fake2 kz-e2e-fresh-engine >/dev/null
+PERF_ENGINE_PORT="${E2E_PERF_ENGINE_PORT:-18264}"
+PERF_FAKE_PORT="${E2E_PERF_FAKE_PORT:-18265}"
+timeout 30s mkdir -p "$RUN_DIR/perf/home" "$RUN_DIR/perf/tmp" "$WORK/tests/e2e/.shots"
+timeout 30s chmod 1777 "$RUN_DIR/perf/tmp"
+timeout 30s docker run -d --name kz-e2e-perf-fake --network host -v "$WORK":/work -w /work \
+  --memory=256m --memory-swap=256m --pids-limit=128 --cpus=1 \
+  "${deno_args[@]}" denoland/deno:latest run --frozen --cached-only --allow-net --allow-read \
+  tests/fake-comfy.mjs --port "$PERF_FAKE_PORT" --bulk 5000 --bulk-unique >/dev/null
+timeout 30s docker run -d --name kz-e2e-perf-engine --network host -v "$WORK":/work -w /work \
+  --memory=768m --memory-swap=768m --pids-limit=256 --cpus=2 \
+  "${deno_args[@]}" -e KOZMOZOO_PORT="$PERF_ENGINE_PORT" \
+  -e KOZMOZOO_STATE=/work/tests/.tmp-runtime/perf/state \
+  -e KOZMOZOO_CACHE=/work/tests/.tmp-runtime/perf/cache \
+  -e KOZMOZOO_PLUGINS=/work/plugins -e HOME=/work/tests/.tmp-runtime/perf/home \
+  denoland/deno:latest run --frozen --cached-only --allow-all src/main.mjs >/dev/null
+for url in "http://127.0.0.1:$PERF_ENGINE_PORT/api/collections" "http://127.0.0.1:$PERF_FAKE_PORT/api/system_stats"; do
+  for i in $(seq 1 60); do
+    timeout 5s curl -sf "$url" >/dev/null 2>&1 && break
+    sleep 0.5
+    [ "$i" = 60 ] && { echo "timeout waiting for perf stack: $url"; exit 1; }
+  done
+done
+timeout 160s docker run --rm --name kz-e2e-load-window --user "$RUN_USER" --network host -v "$WORK":/work -w /work \
+  --memory=1800m --memory-swap=1800m --pids-limit=256 --cpus=3 \
+  -e HOME=/work/tests/.tmp-runtime/perf/home -e TMPDIR=/work/tests/.tmp-runtime/perf/tmp \
+  -e E2E_ENGINE="http://127.0.0.1:$PERF_ENGINE_PORT" -e E2E_FAKE="http://127.0.0.1:$PERF_FAKE_PORT" \
+  --entrypoint node "$PW_IMAGE" /work/tests/e2e/load-window.e2e.cjs

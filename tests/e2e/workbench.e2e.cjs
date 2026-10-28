@@ -613,8 +613,13 @@ async function attempt(name, fn) {
         const s = ${KZ}, img = document.querySelector('.card[data-name="a/visible.png"] img'), r = img.getBoundingClientRect();
         return s.state.host() === 'fake' && s.state.view().every(i => s.state.images[i].filename.startsWith('a/')) &&
           s.state.view().some(i => s.state.images[i].filename === 'a/deep/image.png') &&
-          !s.state.view().some(i => s.state.images[i].filename.startsWith('ab/')) && img.naturalHeight === 96 && r.width > 0 && r.bottom > 0 && r.top < innerHeight;
-      })()`));
+           !s.state.view().some(i => s.state.images[i].filename.startsWith('ab/')) && img.naturalHeight === 96 && r.width > 0 && r.bottom > 0 && r.top < innerHeight;
+       })()`), JSON.stringify(await page.evaluate(`(async () => {
+         const s = ${KZ}, img = document.querySelector('.card[data-name="a/visible.png"] img'), r = img?.getBoundingClientRect();
+         return { host: s.state.host(), folder: s.state.selectedFolder(), view: s.state.view().map(i => s.state.images[i].filename),
+           dimensions: [img?.naturalWidth, img?.naturalHeight], rect: r && { top: r.top, bottom: r.bottom, width: r.width },
+           viewport: innerHeight, scrollTop: document.getElementById('candidatesCol').scrollTop, current: s.state.current() };
+       })()`)));
       await page.evaluate(`(async () => { const s = ${KZ}; s.actions.current.set('fake', 'a/visible.png'); s.actions.feed.restoreToIndex(s.state.currentEntry().index); })()`);
       await page.poll(`!!document.querySelector('.ws-lineage-src[href]')`, 20000);
       if (await page.evaluate(`document.getElementById('filter').hidden`)) await page.clickAt('#filterBtn');

@@ -5,6 +5,7 @@
 
 import { assert, assertEquals } from "jsr:@std/assert";
 import { cardHeight, feedOffsets, feedEntryAtOffset, makeSizes, measureGeometry, invalidateGeometry } from "../client-solid/store/sizes.js";
+import { makeAcquisition } from "../client-solid/store/acquisition.js";
 
 // measureGeometry reads the probe's rects — fake the element shape it reads
 function fakeProbe(wrapW, cardH, wrapH) {
@@ -87,7 +88,16 @@ function fakeImageEnv() {
 Deno.test("resolveAhead: behind-first order, MAX_INFLIGHT bound", async () => {
   const made = fakeImageEnv();
   const entries = Array.from({ length: 100 }, (_, i) => ({ id: `h:f${i}.png` }));
+  // The behind identities are foreground; beyond them drains in the shared
+  // policy's background idle turns (run here as microtasks).
+  const acquisition = makeAcquisition({ scheduleIdle: callback => {
+    let live = true;
+    queueMicrotask(() => { if (live) callback({ timeRemaining: () => 8 }); });
+    return () => { live = false; };
+  } });
+  acquisition.setWindow({ ids: entries.slice(0, 50).map(entry => entry.id), currentId: entries[0].id, limit: 50 });
   const sizes = makeSizes({
+    acquisition,
     srcFor: (id) => `bytes:${id}`,
     imageAt: (i) => entries[i],
   });
@@ -101,12 +111,16 @@ Deno.test("resolveAhead: behind-first order, MAX_INFLIGHT bound", async () => {
   for (const m of made.splice(0)) queueMicrotask(() => {});
   await new Promise((r) => setTimeout(r, 30));
   const started = made.map((m) => m.requestedSrc);
-  assertEquals(started, entries.slice(6, 91).map((e) => `bytes:${e.id}`),
+  assertEquals(started, [...entries.slice(6, 50).map((e) => `bytes:${e.id}`),
+    ...entries.slice(50, 91).map((e) => `bytes:${e.id}?priority=background`)],
     "retained interest drains all behind entries before the ahead window, without another staging call");
 
   // > 50 pending above → the behind window clamps to RESOLVE_BEHIND (10)
   const made2 = fakeImageEnv();
+  const acquisition2 = makeAcquisition({ scheduleIdle: () => () => {} });
+  acquisition2.setWindow({ ids: entries.slice(70, 80).map(entry => entry.id), currentId: entries[70].id, limit: 10 });
   const sizes2 = makeSizes({
+    acquisition: acquisition2,
     srcFor: (id) => `bytes:${id}`,
     imageAt: (i) => entries[i],
   });
@@ -114,5 +128,6 @@ Deno.test("resolveAhead: behind-first order, MAX_INFLIGHT bound", async () => {
   assertEquals(made2.map((m) => m.src), entries.slice(70, 76).map((e) => `bytes:${e.id}`));
 
   sizes.dispose(); sizes2.dispose();
+  acquisition.dispose(); acquisition2.dispose();
   delete globalThis.Image;
 });

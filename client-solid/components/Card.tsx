@@ -85,6 +85,8 @@ export function Card(props) {
       <Zoomable
         src={src()}
         failed={store.state.sizeFailed(props.entryId)}
+        resourceId={props.entryId}
+        identity={image()?.hash}
         alt={image()?.filename}
         size={sizeInfo()}
         zoomKey={image()?.id}

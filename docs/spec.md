@@ -353,26 +353,42 @@ does not remount retained cards.
 
 Grid's registered, owner-disposed seam publishes reactive measured readiness,
 positive viewport dimensions and identity-keyed virtual items. One Store
-reconciliation stages sizes/wants and admits a coherent settled range; empty,
-zero or stale-key geometry stays pending. Range/size/readiness changes can acquire
-images without scrolling or another current change. Current-first ripple remains;
-idle coverage extends by union. A settle keeps in-flight srcs and loaded srcs still
-inside its new range ± pad; its ripple re-admits the rest of the range and other
-members are released. Acquisition permission is separate from permission to commit
-scroll-derived current/trail/URL: loading-time motion can settle acquisition without
-later gaining browsing permission. Active gestures freeze
+reconciliation projects actual viewport identities (without overscan) and current into
+one approximately twenty-entry foreground window. The Store-owned acquisition policy
+admits sizes, feed src, inline images, metadata wants/reads/publication, node refresh
+and scraper status; beyond-window work uses idle quanta of at most eight ms and two
+shared background resource slots, and waits while foreground work is pending.
+Foreground resources use at most six slots. Wants are retained, acknowledged and
+single-flight; outstanding lane heads are identity-indexed, so scheduler queries never
+scan the acknowledged library. Projection changes reindex only affected foreground
+identities. Metadata dimensions publish atomically in batches of at most 200
+entries/eight ms. Empty, zero or stale-key geometry stays pending. Range/size/readiness
+changes can acquire images without scrolling or another current change. Current-first
+ripple remains; idle coverage extends by union. A settle keeps in-flight srcs and
+loaded srcs still inside its new range ± pad; its ripple re-admits the rest of the
+range and other members are released. Acquisition permission is separate from
+permission to commit scroll-derived current/trail/URL: loading-time motion can settle
+acquisition without later gaining browsing permission. Active gestures freeze
 new src admission; the existing 150ms settle, compensation suppression and
 one navigation restore remain.
 
-The private size factory owns per-kind native measurements, slots and ephemeral dimensions
-by source context and content identity. Context retirement disposes resources and
-cached dimensions; content replacement retires stale resources before the six-slot
-concurrency gate. Late callbacks require matching context/slot/content. Measurement
-and src-error owners share one eight-second retry timer with retained callbacks and
-owner-specific cancellation, so one owner's work or retirement cannot erase another's.
-Each measurement attempt has a 30-second deadline and exactly one delayed retry;
-waiting cannot be bypassed by reconciliation. Retained measurement interest drains
-within the six-slot bound even when no card can mount. A terminal measurement
+The private size factory composes one retained native resource owner shared by feed
+dimensions/src and owner-disposed inline registrations, admitted by that policy. Views
+only register inputs and render its read-only results. Mounted feed and inline image
+displays register their own load/error lifetimes with that same owner and policy: a
+ready measurement does not exempt later DOM cache validation from capacity.
+Retirement aborts the native consumer before releasing its slot. Resources and
+ephemeral dimensions carry source context/content identity; context retirement
+disposes resources and cached dimensions, and content replacement retires stale
+resources and releases aborted capacity before replacement admission. Late callbacks
+require matching context/resource/content. Completion is context/resource/content
+owned, independent of whether its starting interest survives a re-window. Background
+Images request low browser priority and explicit background engine intent; decoding is
+async. Measurement and src-error owners share one eight-second retry timer with
+retained callbacks and owner-specific cancellation, so one owner's work or retirement
+cannot erase another's. Each measurement attempt has a 30-second deadline and exactly
+one delayed retry; waiting blocks every early staging trigger. Retained measurement
+interest drains through the policy even when no card can mount. A terminal measurement
 failure is a known 1024×1024 box, not an omitted entry. Only pending entries stay
 out of the feed. The size owner supplies the same dimensions to feed membership,
 pending counts and CardSlot geometry; a terminal box cannot change height when
@@ -389,11 +405,11 @@ resize listener and retry work.
 
 Images measure off-DOM with `Image`; videos use a retained
 `<video preload="metadata">` and `videoWidth`/`videoHeight`, inside that same
-six-slot owner, with the same context/content guards, deadline and retry.
+owner and policy, with the same context/content guards, deadline and retry.
 Listing/extractor dimensions still take precedence. Retirement pauses video,
 removes its source and resets the native consumer before releasing capacity.
 Audio is immediately size-ready with the fixed 1024×160 face, without measurement
-or a size read. Late dimensions and decode errors cannot resize audio cards.
+or a size read; audio and known-size video srcs start without a native probe. Late dimensions and decode errors cannot resize audio cards.
 One pure media-geometry model retains natural dimensions across feed, details
 and anchors. Images/video scale down to available width, never enlarge; the box
 height is max(displayed media height, available width × 9/16). Media is centred;
@@ -585,7 +601,10 @@ deduplication of Files. Removal changes that same set. The chosen thumbnail grid
 is above persistent acquisition controls, even when the axis is off. “ComfyUI
 inputs” opens a searchable, virtualized, multi-select list; arrows/Enter select
 and Escape closes its owned popup before the modal. Only visible input rows load
-engine input-byte thumbnails. “Add files…” uses the browser's multi-file picker;
+engine input-byte thumbnails. Engine thumbnails in the list and the chosen grid
+register near the viewport as foreground displays of the Store's one acquisition
+policy, sharing its capacity; a source change does not retire them, their owner's
+unmount does. “Add files…” uses the browser's multi-file picker;
 there is no browser-directory input or mutually exclusive image mode.
 The native popup joins the modal's owned suspend/resume seam: a blocking leave
 decision hides its top-layer surface without replacing search DOM or losing

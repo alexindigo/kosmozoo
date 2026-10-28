@@ -97,7 +97,9 @@ export function MediaBox(props) {
     class={`media-box ${props.workbench ? "media-stage" : "imgwrap"} ic-${phase()}`}
     data-kind={props.kind ?? "image"} style={!props.workbench ? { height: `${geometry().height}px` } : undefined} onClick={click}>
     <Show when={playable()} fallback={<img ref={setSurface} class={props.workbench ? "dz-img" : undefined}
-      alt={props.alt} style={style()} onLoad={e => { measureNatural(e.currentTarget); setLoaded(true); }}
+      alt={props.alt} style={style()} decoding={props.workbench ? undefined : "async"}
+      fetchpriority={props.fetchPriority === "background" ? "low" : "auto"}
+      onLoad={e => { measureNatural(e.currentTarget); setLoaded(true); }}
       onError={() => { if (props.src != null) setError("decode"); }} />}>
       <Dynamic component={props.kind} ref={setSurface} class={props.workbench ? "dz-img" : undefined} preload="metadata" playsinline
         aria-label={props.alt} style={style()} loop={loop()} muted={muted()}

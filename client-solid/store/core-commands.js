@@ -120,7 +120,7 @@ export function registerCoreCommands(handles, { ops, state, clipboard = (text) =
   add("feed.filter", { value: text }, ({ value }) => ops.ui.setFilter(value));
   add("feed.revealEntry", { id: string }, ({ id }) => {
     const index = state.imageIdxById().get(id);
-    if (index !== undefined) return ops.feed.restoreToIndex(index);
+    if (index !== undefined) return ops.feed.reveal(index);
   });
   add("feed.top", {}, () => ops.feed.scrollTop());
   add("workspace.select", { space: oneOf("details", "anchors") }, ({ space }) => ops.ui.setWorkspace(space));

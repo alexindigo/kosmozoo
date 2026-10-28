@@ -20,6 +20,9 @@ export function install(store) {
     uploadInput(hostName, form, origin) { return api.uploadInput(hostName, form, origin); },
     inspectImage: api.inspectImage,
     inputThumbnail: api.inputThumbnail,
+    // Thumbnail bytes share the feed's engine route and browser connections:
+    // they join the Store's one acquisition policy as foreground displays.
+    registerThumbnail: input => store.surfaceDisplay(input),
     async run(payload) {
       const { ok, status, text } = await api.run(payload);
       let data = null;

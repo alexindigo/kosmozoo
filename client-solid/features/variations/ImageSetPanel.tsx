@@ -5,6 +5,7 @@ import { UPLOAD_IMG_EXT } from "../../store/fields.js";
 import { focusMemory } from "./draft.js";
 import { imageIdentity, uploadImage } from "./image-set.js";
 import { InputPicker } from "./InputPicker.js";
+import { useImageDisplay } from "../../lib/img-measure.js";
 
 export function ImageSetPanel(props) {
   let fileInput;
@@ -21,13 +22,13 @@ export function ImageSetPanel(props) {
         <div class="vz-image-grid">
           <For each={row().items.map(imageIdentity)}>{identity => {
             const item = () => row().images.find(item => imageIdentity(item) === identity);
-            return <ImageTile item={item} thumbnail={props.thumbnail} onRemove={() => props.onRemove(item())} />;
+            return <ImageTile item={item} thumbnail={props.thumbnail} registerThumbnail={props.registerThumbnail} onRemove={() => props.onRemove(item())} />;
           }}</For>
         </div>
         <p class="vz-image-summary">{row().items.length} images{row().images.some(item => item.sameCurrent) ? ` · ${row().images.filter(item => item.sameCurrent).length} same as current` : ""}</p>
       </Show>
       <div class="vz-image-add">
-        <InputPicker files={row().files} current={row().fromOutput ? null : row().current} selected={selected} thumbnail={props.thumbnail}
+        <InputPicker files={row().files} current={row().fromOutput ? null : row().current} selected={selected} thumbnail={props.thumbnail} registerThumbnail={props.registerThumbnail}
           onToggle={name => selected(name) ? props.onRemove({ kind: "input", name }) : props.onAdd([{ kind: "input", name }])}
           registerPopup={props.registerPopup} registerEditor={props.registerEditor} rememberFocus={props.rememberFocus} />
         <input type="file" ref={fileInput} class="vz-imgfilespick" hidden multiple accept="image/*" onChange={e =>
@@ -46,8 +47,13 @@ function ImageTile(props) {
     if (!file()) { setUrl(props.thumbnail(name())); return; }
     const src = URL.createObjectURL(file()); setUrl(src); onCleanup(() => URL.revokeObjectURL(src));
   });
+  // Local File previews are object URLs; engine thumbnails are admitted
+  // displays, registered only while the tile is near the viewport.
+  let preview;
+  const display = useImageDisplay(props.registerThumbnail, () => ({ id: file() || !url() ? null : url(), src: url() }),
+    () => preview, { lazy: true });
   return <figure class="vz-image-tile" data-image-name={props.item()?.name}>
-    <div class="vz-image-preview"><img src={url()} alt="" loading="lazy" /></div>
+    <div class="vz-image-preview"><img ref={preview} src={display.read().src ?? undefined} alt="" onLoad={display.loaded} onError={display.loaded} /></div>
     <figcaption><span class="vz-image-name" title={props.item()?.name}>{props.item()?.name}</span>
       <IconButton chrome variant="neutral" icon={iconSvg("x", 12)} title={`Remove ${props.item()?.name}`} onAction={props.onRemove} />
     </figcaption>

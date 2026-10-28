@@ -9,7 +9,8 @@
 //
 // Modes:
 //   --fixtures <dir>     serve the PNG fixtures found in <dir> (default tests/fixtures)
-//   --bulk <N>           additionally serve N synthetic 1x1 images
+//   --bulk <N>           additionally serve N synthetic 640x360 images
+//   --bulk-unique        deterministic unique pixels, uncompressed (~900 KiB)
 //   --port <n>           listen port (default 8188)
 //   --mutable-dir <dir>  serve any file found in <dir> straight from disk,
 //                        with a stat-derived ETag — the reused-filename
@@ -78,6 +79,7 @@ const { values } = parseArgs({
   options: {
     fixtures: { type: "string", default: new URL("./fixtures", import.meta.url).pathname },
     bulk: { type: "string", default: "0" },
+    "bulk-unique": { type: "boolean", default: false },
     port: { type: "string", default: "8188" },
     "mutable-dir": { type: "string", default: "" },
   },
@@ -87,6 +89,15 @@ const fixtureDir = values.fixtures;
 const bulkCount = parseInt(values.bulk, 10);
 const port = parseInt(values.port, 10);
 const mutableDir = values["mutable-dir"];
+// Level zero gives every generated color exactly the same encoded length,
+// so listing/HEAD metadata never needs to generate 5,000 pixel buffers.
+const uniqueBulkSize = values["bulk-unique"] ? testPng(640, 360, undefined, null, null, { compressionLevel: 0 }).length : 0;
+const bulkSize = uniqueBulkSize || BULK_PNG.length;
+function bulkBytes(name) {
+  if (!values["bulk-unique"]) return BULK_PNG;
+  const index = Number(name.slice(5, 10));
+  return testPng(640, 360, [index & 255, (index >> 8) & 255, index * 17 & 255, 255], null, null, { compressionLevel: 0 });
+}
 
 // Load fixtures once at startup: filename -> { bytes, promptGraph|null }
 const fixtures = new Map();
@@ -135,7 +146,7 @@ function fileMetadata(name) {
   return {
     timeMs: publishedFile ? publishedFile.mtime * 1000 : fixtureTimes.get(name) ??
       (bulk ? (1_800_000_000 - Number(bulk[1])) * 1000 : 1_700_000_000_000),
-    size: (publishedFile ?? fixtures.get(name))?.bytes.length ?? (name === MISSING ? 0 : BULK_PNG.length),
+    size: (publishedFile ?? fixtures.get(name))?.bytes.length ?? (name === MISSING ? 0 : bulkSize),
   };
 }
 
@@ -180,7 +191,7 @@ function fileList() {
     .filter(({ name }) => !name.includes("/"))
     .sort((a, b) => b.timeMs - a.timeMs || (a.name < b.name ? -1 : a.name > b.name ? 1 : 0))
     .map(({ name: n }) => n + " [" +
-    ((published.get(n) ?? fixtures.get(n))?.bytes.length ?? (n === MISSING ? 0 : BULK_PNG.length)) + "]");
+    ((published.get(n) ?? fixtures.get(n))?.bytes.length ?? (n === MISSING ? 0 : bulkSize)) + "]");
 }
 
 function history() {
@@ -495,12 +506,12 @@ export const server = Deno.serve({ port }, async (req) => {
         return new Response(null, {
           headers: {
             "Content-Type": "image/png",
-            "Content-Length": String(BULK_PNG.length),
+            "Content-Length": String(bulkSize),
             ...sourceHeaders(name),
           },
         });
       }
-      return ranged(req, BULK_PNG, {
+      return ranged(req, bulkBytes(name), {
         "Content-Type": "image/png",
           ...sourceHeaders(name),
       });

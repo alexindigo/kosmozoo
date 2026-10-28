@@ -2,11 +2,12 @@ import { createSignal, createMemo, createEffect, createUniqueId, onMount, onClea
 import { createVirtualizer } from "@tanstack/solid-virtual";
 import { useClickOutside } from "../../lib/click-outside.js";
 import { focusMemory } from "./draft.js";
+import { useImageDisplay } from "../../lib/img-measure.js";
 
 const ROW_HEIGHT = 48;
 
-// Presentation only: catalogue, selection, thumbnail addresses and popup scope
-// registration are injected. The child owns focus, search and virtual geometry.
+// Presentation only: catalogue, selection, thumbnail addresses, thumbnail
+// display registration and popup scope registration are injected. The child owns focus, search and virtual geometry.
 export function InputPicker(props) {
   const [open, setOpen] = createSignal(false), [query, setQuery] = createSignal("");
   const id = `vz-image-input-${createUniqueId().replace(/[^\w-]/g, "")}`, anchor = `--${id}`;
@@ -28,7 +29,7 @@ export function InputPicker(props) {
       aria-expanded={open()} aria-haspopup="listbox" aria-controls={id} {...focusMemory(props.rememberFocus)} onClick={() => setOpen(!open())}>ComfyUI inputs ▾</button>
     <Show when={open()}>
       <InputOptions id={id} anchor={anchor} query={query} onQuery={setQuery} files={props.files} selected={props.selected}
-        current={props.current} thumbnail={props.thumbnail} onToggle={props.onToggle} rememberFocus={props.rememberFocus} registerSurface={registerSurface} />
+        current={props.current} thumbnail={props.thumbnail} registerThumbnail={props.registerThumbnail} onToggle={props.onToggle} rememberFocus={props.rememberFocus} registerSurface={registerSurface} />
     </Show>
   </div>;
 }
@@ -70,10 +71,13 @@ function InputOptions(props) {
       <div class="vz-input-window" style={{ height: `${virtualizer.getTotalSize()}px` }}>
         <For each={virtualizer.getVirtualItems()}>{virtual => {
           const name = () => filtered()[virtual.index];
+          let thumb;
+          const display = useImageDisplay(props.registerThumbnail, () => ({ id: props.thumbnail(name()), src: props.thumbnail(name()) }),
+            () => thumb, { lazy: true });
           return <button type="button" role="option" tabindex="-1" id={`${props.id}-option-${virtual.index}`} aria-selected={props.selected(name())} data-input-name={name()}
             class={"vz-input-option" + (active() === virtual.index ? " vz-input-active" : "")}
             style={{ transform: `translateY(${virtual.start}px)` }} onClick={() => { setActive(virtual.index); props.onToggle(name()); search.focus(); }}>
-            <img src={props.thumbnail(name())} loading="lazy" alt="" />
+            <img ref={thumb} src={display.read().src ?? undefined} alt="" onLoad={display.loaded} onError={display.loaded} />
             <span class="vz-input-name" title={name()}>{name()}</span>
             <Show when={name() === props.current}><span class="vz-image-same">Current</span></Show>
             <span class="vz-input-selected" aria-hidden="true">{props.selected(name()) ? "✓" : ""}</span>

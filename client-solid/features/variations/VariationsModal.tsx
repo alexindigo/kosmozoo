@@ -250,6 +250,7 @@ function ModalBody(props) {
                       <ImageSetPanel id={id} row={r} onEnable={checked => onImgToggle(id, checked)}
                         onAdd={items => editor.addImages(id, items)} onRemove={item => editor.removeImage(id, item)}
                         thumbnail={name => services.inputThumbnail(image.host, name, image.origin)}
+                        registerThumbnail={services.registerThumbnail}
                         registerPopup={registerImagePopup} registerEditor={registerEditor} rememberFocus={rememberFocus} />
                     </Show>
                   );
