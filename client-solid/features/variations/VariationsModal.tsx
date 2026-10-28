@@ -17,12 +17,12 @@ import { iconSvg } from "/js/icons.mjs";
 import { templateLabels } from "/shared/features/variations/shared.mjs";
 import { sourceOrigin } from "/shared/source-origin.mjs";
 import { useAppStore } from "../../store/app-store.js";
-import { UPLOAD_IMG_EXT } from "../../store/fields.js";
 import { SliderRow } from "./SliderRow.js";
 import { Modal } from "../../components/Modal.js";
 import { snapshotDraft, makeLeaveGuard, focusMemory } from "./draft.js";
 import { makeVariationEditor } from "./editor.js";
 import { VariationDiscardConfirmation } from "./VariationDiscardConfirmation.js";
+import { ImageSetPanel } from "./ImageSetPanel.js";
 
 export function VariationsModal() {
   const store = useAppStore();
@@ -159,8 +159,10 @@ function ModalBody(props) {
   const onImgToggle = (id, checked) => {
     editor.edit("images", id, "enabled", checked);
   };
-  const onImgField = (id, field, value) => {
-    editor.edit("images", id, field, value);
+  const registerImagePopup = close => {
+    const disown = store.handles.own("variations.images.close", close);
+    const unlayer = store.actions.keys.pushLayer({ id: "variations-images", command: "variations.images.close", phase: "capture" });
+    return () => { unlayer(); disown(); };
   };
 
   // enum sweep rows: the master checkbox arms the axis (its picks ride the
@@ -239,63 +241,16 @@ function ModalBody(props) {
         <div class="vz-body">
           <div class="vz-left">
             <div class="vz-sliders">
-              {/* LoadImage sweep axes: pick a new image or the full input dir */}
+              {/* One chosen set, independent of how each image was acquired. */}
               <For each={strParams()}>
                 {(id) => {
                   const r = () => imgRows()[id];
                   return (
                     <Show when={r()?.filesReady}>
-                      <div class={"vz-imgrow" + (r().enabled ? " on" : "")} data-image-id={id}>
-                        <label class="vz-imgrow-head">
-                          <input
-                            type="checkbox" class="vz-cb"
-                            checked={r().enabled}
-                            onChange={(e) => onImgToggle(id, e.target.checked)}
-                          />
-                          <span class="vz-imgrow-label">{r().label}</span>
-                          <span class="vz-imgrow-cur" title={r().current}>{r().current}</span>
-                        </label>
-                        <Show when={r().enabled}>
-                          <div class="vz-imgrow-body">
-                            <select
-                              {...focusMemory(rememberFocus)}
-                              class="vz-imgmode" value={r().mode}
-                              onChange={(e) => onImgField(id, "mode", e.target.value)}
-                            >
-                              <option value="new">new image…</option>
-                              <option value="local">local directory…</option>
-                              <option value="files">local files…</option>
-                            </select>
-                            <Show when={r().mode === "new"}>
-                              <select
-                                {...focusMemory(rememberFocus)}
-                                class="vz-imgfile" value={r().file ?? ""}
-                                onChange={(e) => onImgField(id, "file", e.target.value)}
-                              >
-                                <For each={r().files}>{(f) => <option value={f}>{f}</option>}</For>
-                              </select>
-                            </Show>
-                            {/* local directory: whole picked folder; local files: a
- multi-picked subset. Both read into localFiles. */}
-                            <Show when={r().mode === "local"}>
-                              <FilePick
-                                rememberFocus={rememberFocus}
-                                inputAttrs={{ class: "vz-imgdirpick", webkitdirectory: true, multiple: true }}
-                                label={() => (r().localFiles?.length ? `${r().localFiles.length} files picked` : "pick a folder…")}
-                                onPick={(fl) => onImgField(id, "localFiles", fl)}
-                              />
-                            </Show>
-                            <Show when={r().mode === "files"}>
-                              <FilePick
-                                rememberFocus={rememberFocus}
-                                inputAttrs={{ class: "vz-imgfilespick", multiple: true, accept: "image/*" }}
-                                label={() => (r().localFiles?.length ? `${r().localFiles.length} files picked` : "pick files…")}
-                                onPick={(fl) => onImgField(id, "localFiles", fl)}
-                              />
-                            </Show>
-                          </div>
-                        </Show>
-                      </div>
+                      <ImageSetPanel id={id} row={r} onEnable={checked => onImgToggle(id, checked)}
+                        onAdd={items => editor.addImages(id, items)} onRemove={item => editor.removeImage(id, item)}
+                        thumbnail={name => services.inputThumbnail(image.host, name, image.origin)}
+                        registerPopup={registerImagePopup} registerEditor={registerEditor} rememberFocus={rememberFocus} />
                     </Show>
                   );
                 }}
@@ -514,23 +469,5 @@ function TextRow(props) {
         </div>
       </Show>
     </div>
-  );
-}
-
-// one hidden file input + its trigger button : the directory and files
-// pickers were copy-paste twins differing only in input attributes)
-function FilePick(props) {
-  let el;
-  return (
-    <span class="vz-imglocal">
-      <input
-        type="file" style="display:none" ref={el}
-        {...props.inputAttrs}
-        onChange={(e) => {
-          props.onPick([...(e.target.files ?? [])].filter((f) => UPLOAD_IMG_EXT.test(f.name)));
-        }}
-      />
-      <button class="vz-imgdirbtn" {...focusMemory(props.rememberFocus)} onClick={() => el?.click()}>{props.label()}</button>
-    </span>
   );
 }

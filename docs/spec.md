@@ -578,6 +578,43 @@ is controlled by this owner and parsed once; view/child File/caret/gesture ident
 and stable row-ID mounting remain private. No whole row-object comparison or
 independently maintained acknowledgement path whitelist owns this flow.
 
+Each Load Image row owns one ordered image set, initially empty. Existing ComfyUI
+input names and native browser Files can be added over multiple turns and mixed;
+identity deduplication uses input name or exact File identity, never filename-only
+deduplication of Files. Removal changes that same set. The chosen thumbnail grid
+is above persistent acquisition controls, even when the axis is off. “ComfyUI
+inputs” opens a searchable, virtualized, multi-select list; arrows/Enter select
+and Escape closes its owned popup before the modal. Only visible input rows load
+engine input-byte thumbnails. “Add files…” uses the browser's multi-file picker;
+there is no browser-directory input or mutually exclusive image mode.
+The native popup joins the modal's owned suspend/resume seam: a blocking leave
+decision hides its top-layer surface without replacing search DOM or losing
+query/caret. Both Keep editing and Escape restore it before focus restoration.
+The blocking decision consumes its pointer clicks, which cannot dismiss an
+underlying popup as outside-click side effects.
+Thumbnail GET/HEAD URLs may carry `origin=<JSON>` so native image elements retain
+the captured source boundary too. Header/query origin validation has one owner;
+conflicting origins reject, and stale byte requests reject before cache/backing IO.
+
+`POST /api/features/variations/inspect-image/<host>` accepts multipart `image`,
+`current`, `kind` (input/output), and optional JSON `names` for the requested
+filename's known collision family, with the captured `X-Kosmozoo-Origin`. It returns
+`{hash,currentHash,existing:[{name,hash}],origin}` using Ingest's existing cache/read owner. Comparison
+never uploads to ComfyUI. The editor retains readonly comparison evidence outside
+editable leaves, marks byte-identical Files “Same as current” and compiles them to
+the current name without upload. The shared axis kernel owns exact current-tuple
+exclusion in both displayed count and Run; mixed numeric/text axes still retain
+their existing Cartesian semantics. Pending/failed comparison is visible and
+cannot authorize an unverified upload. Actual uploads still occur only at Run.
+The prepared count also projects stock ComfyUI's name/byte dedupe and collision
+sequence (`stem (n).ext`) over the selected set in upload order. Only relevant
+known collision-family bytes are read, not the whole input catalogue. Confirmed
+upload names remain readonly session evidence across later remove/add turns.
+Predictions are used only for counting; graph values and provenance always come
+from actual upload receipts, including returned renamed files.
+One compiler-generated image-set consumption binding replaces the old mode/file/
+localFiles leaves, so a fully acknowledged set has no dormant acquisition work.
+
 All variation kinds (numeric, enum, text and image) use the same node/input
 identity codec in `src/features/variations/shared.mjs`. IDs are `<nodeId>.<input>`
 (for example `76.image`, `81.image`, `20.strength_model`, `92:109.text`); segments

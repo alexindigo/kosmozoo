@@ -97,6 +97,22 @@ export function permutationAxes(ranges, imageParams = {}) {
   } };
 }
 
+// Stock ComfyUI preserves the requested name, then tries "stem (n).ext";
+// each occupied candidate is a byte-dedupe opportunity, not just a conflict.
+// This is count preparation only. Run always uses actual upload receipts.
+export function uploadCandidate(name, index = 0) {
+  if (!Number.isSafeInteger(index) || index < 0) throw new Error("Invalid upload candidate index");
+  if (!index) return name;
+  const dot = name.lastIndexOf("."), split = dot > 0 ? dot : name.length;
+  return `${name.slice(0, split)} (${index})${name.slice(split)}`;
+}
+export function uploadFamily(name, names) {
+  const dot = name.lastIndexOf("."), split = dot > 0 ? dot : name.length;
+  const prefix = name.slice(0, split) + " (", suffix = ")" + name.slice(split);
+  return names.filter(candidate => candidate === name || candidate.startsWith(prefix) && candidate.endsWith(suffix) &&
+    /^[1-9]\d*$/.test(candidate.slice(prefix.length, -suffix.length)) && Number.isSafeInteger(Number(candidate.slice(prefix.length, -suffix.length))));
+}
+
 export function generatePermutations(ranges, currentValues, imageParams = {}) {
   const plan = permutationPlan(ranges, currentValues, imageParams);
   if (!plan.axes.length || plan.total === 0) return [];

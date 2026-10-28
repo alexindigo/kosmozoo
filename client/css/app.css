@@ -730,15 +730,6 @@ body:has(#diff:not([hidden])) #statusCol { bottom: 56px; }
 .vz-imgrow-cur { color: var(--foreground-dim); font-size: 11px; margin-left: auto;
   overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 45%; }
 .vz-imgrow-body { display: flex; gap: 8px; margin-top: 8px; padding-left: 26px; }
-.vz-imgrow-body select { background: var(--lifted); color: var(--foreground);
-  border: 1px solid var(--border-strong); border-radius: 4px; font-size: 12px;
-  padding: 3px 6px; max-width: 100%; }
-.vz-imgrow-body .vz-imgfile { flex: 1; min-width: 0; }
-.vz-imgrow-body .vz-imglocal { flex: 1; min-width: 0; display: flex; }
-.vz-imgrow-body .vz-imgdirbtn { background: var(--lifted); color: var(--foreground);
-  border: 1px solid var(--border-strong); border-radius: 4px; font-size: 12px;
-  padding: 3px 10px; cursor: pointer; }
-.vz-imgrow-body .vz-imgdirbtn:hover { border-color: var(--foreground-dim); }
 
 /* enum sweep rows (LoRA names, samplers, …): same card as the imgRows, the
  options as a scrollable checkbox list below the head. The current value is
@@ -1090,7 +1081,48 @@ body:has(#diff:not([hidden])) #statusCol { bottom: 56px; }
 
 /* The decision is contained by its owner; its editor never unmounts. */
 .vz-panel { position: relative; }
-.vz-editor { display: flex; flex-direction: column; flex: 1; min-height: 0; }
+
+/* Image curation: a contact sheet above a quiet, persistent acquisition row. */
+.vz-image-set { transition: none; }
+.vz-image-set:not(.on) { opacity: 1; }
+.vz-image-content { display: flex; flex-direction: column; gap: 8px; margin-top: 10px; }
+.vz-image-grid { display: grid; grid-template-columns: repeat(auto-fill, 112px); gap: 10px; }
+.vz-image-tile { margin: 0; min-width: 0; display: flex; flex-direction: column; gap: 3px; }
+.vz-image-preview { height: 84px; display: grid; place-items: center; background: var(--background-stage); border-radius: 4px; overflow: hidden; }
+.vz-image-preview img { width: 100%; height: 100%; object-fit: contain; }
+.vz-image-tile figcaption { display: flex; align-items: center; gap: 4px; }
+.vz-image-name, .vz-input-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.vz-image-tile .chrome-icon { flex: 0 0 auto; }
+.vz-image-name, .vz-image-same, .vz-image-check, .vz-image-error, .vz-image-summary { font-size: 11px; }
+.vz-image-same { color: var(--attention); }
+.vz-image-check, .vz-image-empty, .vz-image-summary { color: var(--foreground-mid); }
+.vz-image-error { color: var(--error); overflow-wrap: anywhere; }
+.vz-image-empty, .vz-image-summary { margin: 0; }
+.vz-image-add { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; padding-top: 8px; border-top: 1px solid var(--border); }
+.vz-image-action { background: var(--lifted); color: var(--foreground); border: 1px solid var(--border-strong); border-radius: 4px; padding: 5px 8px; font: inherit; cursor: pointer; }
+.vz-image-action:hover { border-color: var(--foreground-dim); }
+.vz-image-action:focus-visible, .vz-input-search:focus-visible, .vz-input-option:focus-visible { outline: 2px solid var(--secondary); outline-offset: 2px; }
+.vz-input-picker { position: relative; }
+.vz-input-popover { position: fixed; inset: auto; top: anchor(bottom); left: anchor(left); position-try-fallbacks: flip-block, flip-inline;
+  margin: 4px 0; padding: 8px; width: min(380px, 90vw); background: var(--focused-background); color: var(--foreground);
+  border: 1px solid var(--border-strong); border-radius: 6px; box-shadow: 0 8px 24px var(--backdrop); }
+.vz-input-popover:popover-open { display: flex; flex-direction: column; gap: 6px; }
+.vz-input-search { width: 100%; padding: 6px 8px; background: var(--background); color: var(--foreground); border: 1px solid var(--border); border-radius: 4px; font: inherit; }
+.vz-input-list { height: min(240px, 40vh); overflow-y: auto; }
+.vz-input-window { position: relative; width: 100%; }
+.vz-input-option { position: absolute; inset: 0 0 auto; width: 100%; height: var(--vz-input-row-height); display: flex; align-items: center; gap: 8px;
+  border: 0; border-radius: 4px; padding: 4px; background: transparent; color: var(--foreground); font: inherit; text-align: left; cursor: pointer; }
+.vz-input-option img { width: 40px; height: 40px; object-fit: contain; background: var(--background-stage); flex: 0 0 auto; }
+.vz-input-option:hover, .vz-input-option.vz-input-active { background: var(--lifted); }
+.vz-input-selected { width: 14px; color: var(--secondary); flex: 0 0 auto; }
+@media (max-width: 620px) {
+  .vz-panel { padding: 16px 12px; }
+  .vz-body { flex-direction: column; gap: 12px; overflow-y: auto; }
+  .vz-sliders { overflow-y: visible; flex: 0 0 auto; }
+  .vz-divider { display: none; }
+  .vz-right { width: auto; }
+}
+.vz-editor { display: flex; flex-direction: column; flex: 1; min-height: 0; isolation: isolate; }
 .vz-discard-overlay { position: absolute; inset: 0; display: flex; align-items: center;
   justify-content: center; background: var(--backdrop); border-radius: inherit; z-index: 1; }
 .vz-discard { width: min(360px, 85%); padding: 24px; border: 1px solid var(--border-strong);

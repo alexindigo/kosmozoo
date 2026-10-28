@@ -6,7 +6,6 @@ const fileControl = '.vz-imgrow:not(.vz-enumrow):not(.vz-textrow) .vz-cb';
 const fileSetup = async (cdp) => {
   await cdp.poll(`!!document.querySelector(${JSON.stringify(fileControl)})`);
   await cdp.clickAt(fileControl);
-  await cdp.evaluate(`(()=>{const e=document.querySelector('.vz-imgmode');e.value='files';e.dispatchEvent(new Event('change',{bubbles:true}))})()`);
   await cdp.poll(`!!document.querySelector('.vz-imgfilespick')`);
   await cdp.evaluate(`(()=>{const e=document.querySelector('.vz-imgfilespick'),dt=new DataTransfer();dt.items.add(new File(['a'],'a.png',{type:'image/png'}));dt.items.add(new File(['b'],'b.png',{type:'image/png'}));e.files=dt.files;e.dispatchEvent(new Event('change',{bubbles:true}));window.__fileInput=e;window.__files=[...e.files]})()`);
 };
@@ -22,7 +21,7 @@ async function verifyFileReadiness({ cdp, KZ, check }) {
     await cdp.evaluate(`(()=>{
       window.__fileReadyFetch=window.fetch;window.__fileReadyRelease=null;window.__fileReadyResponse=null;window.__fileReadyEffects=[];
       window.fetch=async(url,options)=>{
-        if(options?.body instanceof FormData || String(url).includes('/features/variations/run'))window.__fileReadyEffects.push(String(url));
+        if(options?.body instanceof FormData && String(url).includes('/collections/') || String(url).includes('/features/variations/run'))window.__fileReadyEffects.push(String(url));
         const response=await window.__fileReadyFetch(url,options);
         if(!String(url).includes('/entries?kind=input'))return response;
         window.__fileReadyResponse={status:response.status,body:await response.clone().json(),origin:JSON.parse(options.headers['X-Kosmozoo-Origin'])};

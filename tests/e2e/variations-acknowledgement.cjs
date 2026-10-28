@@ -1,5 +1,6 @@
 // Real edited configuration -> actual fake enqueue -> clean close, never a second Run.
 const assert=require('node:assert/strict');
+const { pickInput } = require('./image-picker-helpers.cjs');
 module.exports=async({cdp,FAKE,KZ,check})=>{
   const invoke=(id,args={})=>cdp.evaluate(`(async()=>${KZ}.handles.invoke(${JSON.stringify(id)},${JSON.stringify(args)}))()`);
   const open=async(file='flux-basic.png')=>{await invoke('variations.open',{id:'fake:'+file});await cdp.poll("document.querySelectorAll('.vz-slider-row').length>0");};
@@ -103,15 +104,13 @@ module.exports=async({cdp,FAKE,KZ,check})=>{
 
     await open('flux-controlnet.png');await cdp.poll("!!document.querySelector('.vz-imgrow:not(.vz-enumrow):not(.vz-textrow) .vz-cb')");
     await cdp.clickAt('.vz-imgrow:not(.vz-enumrow):not(.vz-textrow) .vz-cb');
-    await cdp.poll("!!document.querySelector('.vz-imgfile')");
-    await cdp.evaluate("(()=>{const e=document.querySelector('.vz-imgfile');e.value='ref.png';e.dispatchEvent(new Event('change',{bubbles:true}))})()");
+    await pickInput(cdp, 'ref.png');
     const newStart=(await enqueues()).length;assert.equal((await invoke('variations.run')).status,'submitted');
     assert((await enqueues()).slice(newStart).every(job=>job.prompt['43'].inputs.image==='ref.png'));
     await cdp.clickAt('.vz-close');await cdp.poll("!document.querySelector('.vz-panel')");
     check('actual selected existing input filename is acknowledged and permits clean close',true);
 
     await open('flux-controlnet.png');await cdp.poll("!!document.querySelector('.vz-imgrow:not(.vz-enumrow):not(.vz-textrow) .vz-cb')");await cdp.clickAt('.vz-imgrow:not(.vz-enumrow):not(.vz-textrow) .vz-cb');
-    await cdp.evaluate("(()=>{const mode=document.querySelector('.vz-imgmode');mode.value='files';mode.dispatchEvent(new Event('change',{bubbles:true}))})()");
     await cdp.poll("!!document.querySelector('.vz-imgfilespick')");
     await cdp.evaluate("(()=>{const e=document.querySelector('.vz-imgfilespick'),data=new DataTransfer();data.items.add(new File(['a'],'ack-a.png',{type:'image/png'}));data.items.add(new File(['b'],'ack-b.png',{type:'image/png'}));e.files=data.files;e.dispatchEvent(new Event('change',{bubbles:true}));window.__ackFiles=[...e.files];window.__ackInput=e})()");
     const fileStart=(await enqueues()).length;assert.equal((await invoke('variations.run')).status,'submitted');

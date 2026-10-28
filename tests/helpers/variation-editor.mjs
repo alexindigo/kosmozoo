@@ -15,6 +15,7 @@ export function editorRig(overrides = {}) {
   const requests = [], uploads = [], timers = []; let closes = 0;
   const values = Object.fromEntries([...catalogue.params, ...catalogue.stringParams, ...catalogue.enumParams, ...catalogue.textParams].map(parameter => [parameter.id, parameter.current]));
   const services = {
+    inspectImage: async (_host, _file, _current, _kind, origin) => ({ hash: "b".repeat(64), currentHash: "a".repeat(64), origin }),
     probe: async () => catalogue,
     uploadInput: async (_host, form, expected) => {
       const file = form.get("image"); uploads.push({ file, origin: expected });

@@ -10,6 +10,18 @@ export const probe = (image) =>
 // carry per-permutation detail the modal parses
 export const run = (payload) => postRaw("/api/features/variations/run", payload);
 
+export const inputThumbnail = (collection, name, origin, kind = "input") =>
+  `/api/collections/${encodeURIComponent(collection)}/entries/${encodeURIComponent(name)}/bytes?kind=${kind}&origin=${encodeURIComponent(JSON.stringify(origin))}`;
+
+export const inspectImage = async (collection, file, current, kind, origin, names = []) => {
+  const form = new FormData(); form.append("image", file, file.name); form.append("current", current); form.append("kind", kind);
+  form.append("names", JSON.stringify(names));
+  const response = await fetch(`/api/features/variations/inspect-image/${encodeURIComponent(collection)}`, {
+    method: "POST", headers: { "X-Kosmozoo-Origin": JSON.stringify(origin) }, body: form,
+  });
+  const data = await response.json(); if (!response.ok) throw new Error(data.error || "Image comparison unavailable"); return data;
+};
+
 export const inputList = (collection, origin) =>
   fetch(`/api/collections/${encodeURIComponent(collection)}/entries?kind=input`, { headers: { "X-Kosmozoo-Origin": JSON.stringify(origin) } })
     .then(async response => { if (!response.ok) throw new Error(`Input catalogue: ${response.status}`); return response.json(); });

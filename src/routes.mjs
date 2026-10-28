@@ -37,6 +37,12 @@ export function makeRouter(ctx) {
   };
 
   const useAssetsPlus = () => ctx.settings.get("core.delete", "useAssetsPlus", true);
+  const byteOriginError = (req, id) => {
+    let expected;
+    try { expected = expectedOrigin(req); } catch (error) { return Response.json({ error: error.message }, { status: 400 }); }
+    if (expected && !sameOrigin(expected, sourceOrigin(id, ctx.sourceActivity.source(id)))) return Response.json({ error: "Source origin changed" }, { status: 412 });
+    return null;
+  };
 
   // One bytes response builder for every bytes route (E4): validators are
   // the content hash + no-cache (the URL never changes on a remap).
@@ -314,8 +320,9 @@ export function makeRouter(ctx) {
     return Response.json({ deleted: true, mode: "hide", historyCleared });
   });
 
-  add("HEAD", "/api/collections/<id>/entries/<name>/bytes", async (_req, { id, name }, url) => {
+  add("HEAD", "/api/collections/<id>/entries/<name>/bytes", async (req, { id, name }, url) => {
     if (!ctx.hosts[id]) return new Response(null, { status: 404 });
+    const error = byteOriginError(req, id); if (error) return error;
     const e = ctx.store.entryGet(id, name, url.searchParams.get("kind") === "input" ? "input" : "output");
     if (!e?.hash) return new Response(null, { status: 404 }); // E7: unknown says so
     const c = ctx.store.contentGet(e.hash);
@@ -330,6 +337,7 @@ export function makeRouter(ctx) {
   add("GET", "/api/collections/<id>/entries/<name>/bytes", async (req, { id, name }, url) => {
     const token = ctx.inventory.capture?.(id);
     if (!ctx.hosts[id]) return new Response("unknown collection", { status: 404 });
+    const error = byteOriginError(req, id); if (error) return error;
     const kind = url.searchParams.get("kind") === "input" ? "input" : "output";
     const mime = EXT_MIME[name.split(".").pop().toLowerCase()];
     const makeResponse = (bytes, hash) => bytesResponse(req, bytes, hash, mime);

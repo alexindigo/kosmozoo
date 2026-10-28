@@ -30,7 +30,7 @@ module.exports=async({cdp,ENGINE,FAKE,KZ,check})=>{
     await cdp.clickAt('.vz-slider-row[data-param-key="9.denoise"] .noUi-handle[data-handle="0"]');await cdp.keyTrusted('ArrowRight',{vk:39});
     await cdp.clickAt('.vz-slider-row[data-param-key="9.denoise"] .noUi-handle[data-handle="1"]');await cdp.keyTrusted('ArrowLeft',{vk:37});
     await cdp.clickAt('.vz-imgrow:not(.vz-enumrow):not(.vz-textrow) .vz-cb');
-    await cdp.evaluate("(()=>{const e=document.querySelector('.vz-imgmode');e.value='files';e.dispatchEvent(new Event('change',{bubbles:true}))})()");await cdp.poll("!!document.querySelector('.vz-imgfilespick')");
+    await cdp.poll("!!document.querySelector('.vz-imgfilespick')");
     await cdp.evaluate("(()=>{const e=document.querySelector('.vz-imgfilespick'),dt=new DataTransfer();dt.items.add(new File(['a'],'lifecycle-combined-a.png',{type:'image/png'}));dt.items.add(new File(['b'],'lifecycle-combined-b.png',{type:'image/png'}));e.files=dt.files;e.dispatchEvent(new Event('change',{bubbles:true}));window.__combinedInput=e;window.__combinedFiles=[...e.files]})()");
     await cdp.clickAt('.vz-enumrow[data-enum-id="9.scheduler"] .vz-imgrow-head .vz-cb');await cdp.clickAt('.vz-enumrow[data-enum-id="9.scheduler"] .vz-enum-opt:last-child .vz-cb');
     await cdp.clickAt('.vz-textrow[data-text-id="2.text"] .vz-cb');await type('.vz-textrow[data-text-id="2.text"] .vz-text-values','  First {{used}}.\n\nSecond {{used}}.\n');
@@ -65,7 +65,6 @@ module.exports=async({cdp,ENGINE,FAKE,KZ,check})=>{
     await cdp.evaluate("(async()=>{await fetch('/api/collections/lifecycle-owner/entries/flux-controlnet.png/bytes')})()");
     await invoke('variations.open',{id:'lifecycle-owner:flux-controlnet.png'});await cdp.poll("!!document.querySelector('.vz-imgrow:not(.vz-enumrow):not(.vz-textrow) .vz-cb')");
     await cdp.clickAt('.vz-imgrow:not(.vz-enumrow):not(.vz-textrow) .vz-cb');
-    await cdp.evaluate("(()=>{const mode=document.querySelector('.vz-imgmode');mode.value='files';mode.dispatchEvent(new Event('change',{bubbles:true}))})()");
     await cdp.poll("!!document.querySelector('.vz-imgfilespick')");
     await cdp.evaluate("(()=>{const e=document.querySelector('.vz-imgfilespick'),dt=new DataTransfer();dt.items.add(new File(['origin-A'],'lifecycle-handoff.png',{type:'image/png'}));e.files=dt.files;e.dispatchEvent(new Event('change',{bubbles:true}));window.__lifecycleInput=e;window.__lifecycleFiles=[...e.files]})()");
     const form=new FormData();form.append('image',new Blob(['origin-B']),'lifecycle-handoff.png');assert((await fetch(OTHER+'/api/upload/image',{method:'POST',body:form})).ok);

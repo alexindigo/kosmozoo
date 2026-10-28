@@ -57,6 +57,7 @@ Deno.test("naming proof: registered run consumes the local-file editor work thro
   const r = await rig(), uploads = [], timers = [];
   const editor = makeVariationEditor({ targets: [r.target], currentOrigin: () => r.target.origin,
     services: { probe: async () => r.catalogue, run: r.run,
+      inspectImage: async (_host, _file, _current, _kind, origin) => ({ hash: "b".repeat(64), currentHash: "a".repeat(64), origin }),
       uploadInput: async (_host, form, origin) => { const file = form.get("image"); uploads.push(file.name); return { name: file.name, origin }; } },
     setTimer: callback => { timers.push(callback); return callback; }, clearTimer() {} });
   try {
@@ -64,8 +65,7 @@ Deno.test("naming proof: registered run consumes the local-file editor work thro
     editor.installInputs({ origin: r.target.origin, files: ["original.jpg"] });
     const localFiles = files.map(name => new File(["fixture"], name, { type: "image/png" }));
     editor.edit("images", "475.image", "enabled", true);
-    editor.edit("images", "475.image", "mode", "files");
-    editor.edit("images", "475.image", "localFiles", localFiles);
+    editor.addImages("475.image", localFiles.map(file => ({ kind: "upload", name: file.name, file })));
     editor.edit("texts", "502.value", "enabled", true);
     editor.edit("texts", "502.value", "text", editedText);
     editor.edit("naming", "root", "suffix", "_{475.image}");
@@ -77,7 +77,7 @@ Deno.test("naming proof: registered run consumes the local-file editor work thro
     assertEquals(editor.remaining(), []);
     assertEquals(editor.result().state, "adopted");
     assertEquals(timers.length, 1);
-    assert(editor.rows("images")["475.image"].localFiles[0] === localFiles[0]);
+    assert(editor.rows("images")["475.image"].items[0].file === localFiles[0]);
   } finally { editor.dispose(); }
 });
 

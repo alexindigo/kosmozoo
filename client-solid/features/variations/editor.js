@@ -3,15 +3,15 @@
 import { snapshotDraft, sameDraft, createRunId } from "./draft.js";
 import { paramDef, defaultRange } from "./graph.mjs";
 import { templateLabels, parseSemicolonList, expandTextAxes, permutationPlan,
-  resolveRelativeRanges, acknowledgedFields, catalogueParams, parameterIndex, parameterLabel } from "/shared/features/variations/shared.mjs";
+  resolveRelativeRanges, acknowledgedFields, catalogueParams, parameterIndex, parameterLabel, uploadCandidate, uploadFamily } from "/shared/features/variations/shared.mjs";
 import { validOrigin, sameOrigin, validContext, sameContext } from "/shared/source-origin.mjs";
+import { validImageSet, mergeImages, sameImage, imageIdentity } from "./image-set.js";
 
 const field = (type, channel, wire = null) => Object.freeze({ type, channel, wire });
 export const EDITOR_FIELDS = Object.freeze({
   numeric: Object.freeze({ enabled: field("boolean", "rangeSelections", "enabled"), min: field("number", "ranges", "min"),
     max: field("number", "ranges", "max"), rawIncrement: field("string", "ranges", "increment") }),
-  images: Object.freeze({ enabled: field("boolean", "imageSelections", "enabled"), mode: field("mode", "imageParams"),
-    file: field("filename", "imageParams"), localFiles: field("files", "imageParams") }),
+  images: Object.freeze({ enabled: field("boolean", "imageSelections", "enabled"), items: field("image-set", "imageParams") }),
   enums: Object.freeze({ enabled: field("boolean", "imageSelections", "enabled"), picks: field("strings", "imageParams"), filter: field("string", null) }),
   texts: Object.freeze({ enabled: field("boolean", "imageSelections", "enabled"), text: field("string", "imageParams"), tpl: field("templates", "imageParams") }),
   naming: Object.freeze({ prefix: field("string", "naming"), suffix: field("string", "naming") }),
@@ -19,10 +19,8 @@ export const EDITOR_FIELDS = Object.freeze({
 const validValue = (type, value) => {
   if (["boolean", "string"].includes(type)) return typeof value === type;
   if (type === "number") return Number.isFinite(value);
-  if (type === "mode") return ["new", "local", "files"].includes(value);
-  if (type === "filename") return value === null || typeof value === "string";
+  if (type === "image-set") return validImageSet(value);
   if (type === "strings") return Array.isArray(value) && value.every(item => typeof item === "string");
-  if (type === "files") return value === null || Array.isArray(value) && value.every(item => item instanceof File);
   if (type === "templates") return value && typeof value === "object" && !Array.isArray(value) && Object.values(value).every(item => typeof item === "string");
   return false;
 };
@@ -47,7 +45,7 @@ const ROW_STRATEGIES = {
     defaults: { enabled: parameter.id === denoise, ...defaults, rawIncrement: String(tuning.defaultInc) } };
   } },
   stringParams: { domain: "images", initialize: () => ({ metadata: { files: [], filesReady: false },
-    defaults: { enabled: false, mode: "new", file: null, localFiles: null } }) },
+    defaults: { enabled: false, items: [] } }) },
   enumParams: { domain: "enums", initialize: p => ({ defaults: { enabled: false, picks: [p.current], filter: "" } }) },
   textParams: { domain: "texts", initialize: p => ({ defaults: { enabled: false, text: p.current, tpl: {} } }) },
 };
@@ -57,10 +55,17 @@ export function makeVariationEditor({ targets, services, currentOrigin, changed 
   const groups = new Map(Object.keys(EDITOR_FIELDS).map(domain => [domain, new Map()]));
   const capturedTargets = freeze(snapshotDraft(targets));
   const catalogues = new Map(), issued = new WeakMap();
+  const imageChecks = new Map(), confirmedUploads = new Map();
   const batch = capturedTargets.length > 1;
   let alive = true, editRevision = 0, closeGeneration = 0, deciding = false, active = null, timer = null;
   let result = null, running = false, catalogueReady = false;
   const row = (domain, id) => groups.get(domain)?.get(id);
+  const evidence = (id, item) => imageChecks.get(id)?.get(imageIdentity(item));
+  const imageView = (id, item, metadata) => {
+    const check = item.kind === "input" ? null : evidence(id, item);
+    return { ...item, sameCurrent: item.kind === "input" ? !metadata.fromOutput && item.name === metadata.current
+      : !!check?.hash && check.hash === check.currentHash, pending: item.kind !== "input" && (!check || !!check.pending), error: check?.error ?? "" };
+  };
   const descriptor = (domain, name) => {
     const definition = EDITOR_FIELDS[domain]?.[name];
     if (!definition) throw new Error(`Unclassified editable field: ${domain}.${name}`);
@@ -90,7 +95,8 @@ export function makeVariationEditor({ targets, services, currentOrigin, changed 
     return Number.isFinite(value) && value >= entry.metadata.minIncrement ? value : null;
   };
   const view = domain => Object.freeze(Object.fromEntries([...groups.get(domain)].map(([id, entry]) => [id,
-    freeze(snapshotDraft({ ...entry.metadata, ...entry.values, ...(domain === "numeric" ? { increment: increment(entry) } : {}) }))])));
+     freeze({ ...entry.metadata, ...snapshotDraft(entry.values), ...(domain === "numeric" ? { increment: increment(entry) } : {}),
+       ...(domain === "images" ? { images: entry.values.items.map(item => imageView(id, item, entry.metadata)) } : {}) })])));
   const remaining = () => {
     const output = [];
     for (const [domain, entries] of groups) for (const [id, entry] of entries) for (const name of Object.keys(EDITOR_FIELDS[domain])) {
@@ -112,11 +118,62 @@ export function makeVariationEditor({ targets, services, currentOrigin, changed 
     if (!originCurrent(target)) throw Object.assign(new Error("Source origin changed; no follow-up was authorized. Your work has been kept."), { stale: true });
   };
   const physicalMatch = (a, b) => validOrigin(a) && validOrigin(b) && a.address === b.address && a.kind === b.kind && a.epoch === b.epoch;
+  const inspectionQueue = [], pendingInspections = new Set();
+  let inspecting = 0;
+  const pumpInspections = () => {
+    while (inspecting < 4 && inspectionQueue.length) {
+      const task = inspectionQueue.shift(); inspecting++;
+      task().finally(() => { inspecting--; pumpInspections(); });
+    }
+  };
+  const inspectItems = id => {
+    const entry = row("images", id), target = capturedTargets[0];
+    if (!imageChecks.has(id)) imageChecks.set(id, new Map());
+    const checks = imageChecks.get(id);
+    for (const item of entry.values.items) {
+      if (item.kind === "input" || checks.has(imageIdentity(item))) continue;
+      const check = { pending: true }, identity = imageIdentity(item); checks.set(identity, check);
+      let finish;
+      const pending = new Promise(resolve => { finish = resolve; }); pendingInspections.add(pending);
+      inspectionQueue.push(async () => {
+        try {
+          if (!alive || !originCurrent(target)) throw new Error("Source origin changed; your images were kept");
+          const result = await services.inspectImage(target.host, item.file, entry.metadata.current, entry.metadata.fromOutput ? "output" : "input", target.origin, uploadFamily(item.name, entry.metadata.files));
+          if (!alive || !originCurrent(target) || !sameOrigin(result?.origin, target.origin)) throw new Error("Source origin changed; your images were kept");
+          if (!/^[a-f0-9]{64}$/.test(result.hash) || !/^[a-f0-9]{64}$/.test(result.currentHash)) throw new Error("Image comparison unavailable");
+          const existing = result.existing ?? [];
+          if (!Array.isArray(existing) || existing.some(item => !filename(item?.name) || !/^[a-f0-9]{64}$/.test(item.hash))) throw new Error("Upload comparison unavailable");
+          Object.assign(check, { hash: result.hash, currentHash: result.currentHash, existing });
+        } catch (error) { check.error = error.message; }
+        finally { check.pending = false; pendingInspections.delete(pending); finish(); notify(); }
+      });
+    }
+    pumpInspections();
+  };
+  const previewUploads = snapshot => {
+    const names = new Map(), occupied = new Map(confirmedUploads);
+    for (const [id, entry] of Object.entries(snapshot.images)) for (const item of entry.values.items) {
+      for (const record of evidence(id, item)?.existing ?? []) occupied.set(record.name, record.hash);
+    }
+    for (const [id, entry] of Object.entries(snapshot.images)) {
+      if (!entry.values.enabled) continue;
+      for (const item of entry.values.items) {
+        if (item.kind === "input" || imageView(id, item, entry.metadata).sameCurrent || names.has(item.file)) continue;
+        const hash = evidence(id, item)?.hash;
+        if (!hash) { names.set(item.file, `\0pending-${names.size}`); continue; }
+        let name = item.name, index = 0;
+        while (occupied.has(name) && occupied.get(name) !== hash) name = uploadCandidate(item.name, ++index);
+        occupied.set(name, hash); names.set(item.file, name);
+      }
+    }
+    return names;
+  };
 
   // This compiler is the only reader that attaches producer channels to editor
   // leaves. Dirty tracking uses the same declarations, never whole row objects.
   const compile = (snapshot, uploadReceipts = null, preview = false) => {
-    const bindings = [], uploads = [], ranges = {}, imageParams = {};
+    const bindings = [], uploads = [], uploadHashes = new Map(), ranges = {}, imageParams = {};
+    const uploadPreview = preview ? previewUploads(snapshot) : null;
     const read = (domain, id, name, label) => {
       const definition = descriptor(domain, name), entry = snapshot[domain][id];
       const path = label === undefined ? [domain, id, name] : [domain, id, name, label];
@@ -142,14 +199,20 @@ export function makeVariationEditor({ targets, services, currentOrigin, changed 
       const enabled = read(domain, id, "enabled"); imageParams[id] = { enabled, values: [] };
       if (!enabled) continue;
       if (domain === "images") {
-        const mode = read(domain, id, "mode");
-        if (mode === "new") { const file = read(domain, id, "file"); if (file) imageParams[id].values = [file]; }
-        else {
-          const files = read(domain, id, "localFiles") ?? [];
-          uploads.push(...files);
-          imageParams[id].values = preview ? files.map(file => `${file.name} [local preview]`)
-            : files.flatMap(file => uploadReceipts?.has(file) ? [uploadReceipts.get(file).name] : []);
+        const values = [];
+        for (const item of read(domain, id, "items")) {
+          const state = imageView(id, item, entry.metadata);
+          if (!preview && (state.pending || state.error)) throw new Error(state.error || "Checking image bytes; your work was kept.");
+          if (state.sameCurrent) values.push(entry.metadata.current);
+          else if (item.kind === "input") values.push(item.name);
+          else {
+            uploads.push(item.file);
+            uploadHashes.set(item.file, evidence(id, item)?.hash);
+            if (preview) values.push(uploadPreview.get(item.file));
+            else if (uploadReceipts?.has(item.file)) values.push(uploadReceipts.get(item.file).name);
+          }
         }
+        imageParams[id].values = [...new Set(values)];
       } else if (domain === "enums") imageParams[id].values = [...read(domain, id, "picks")];
       else {
         const text = read(domain, id, "text"), substitutions = {};
@@ -158,7 +221,7 @@ export function makeVariationEditor({ targets, services, currentOrigin, changed 
       }
     }
     return { payload: { ranges, imageParams, prefix: read("naming", "root", "prefix"), suffix: read("naming", "root", "suffix"), ...(batch ? { relative: true } : {}) },
-      bindings, uploads: [...new Set(uploads)] };
+      bindings, uploads: [...new Set(uploads)], uploadHashes };
   };
   const count = (payload, catalogue) => {
     const values = currentValues(catalogue);
@@ -201,12 +264,22 @@ export function makeVariationEditor({ targets, services, currentOrigin, changed 
     edit(domain, id, name, value) {
       if (!alive || deciding) return false;
       write(domain, id, name, value);
+      if (domain === "images" && name === "items") inspectItems(id);
       if (name === "enabled" && ["numeric", "images"].includes(domain)) {
         const current = row("naming", "root").values.suffix;
         write("naming", "root", "suffix", value ? current.includes(token(id)) ? current : current + token(id) : current.split(token(id)).join(""));
       }
       editRevision++; invalidateClose(); notify(); return true;
     },
+    addImages(id, items) {
+      const entry = row("images", id);
+      if (!entry) throw new Error("Unknown image row");
+      return this.edit("images", id, "items", mergeImages(entry.values.items, items));
+    },
+    removeImage(id, item) {
+      return this.edit("images", id, "items", row("images", id).values.items.filter(other => !sameImage(item, other)));
+    },
+    inspectImages: () => Promise.all([...pendingInspections]),
     range(id, { min, max }) {
       if (!alive || deciding) return false;
       if (!validValue("number", min) || !validValue("number", max) || !row("numeric", id)) throw new Error("Invalid range edit");
@@ -242,13 +315,15 @@ export function makeVariationEditor({ targets, services, currentOrigin, changed 
     installInputs(data) {
       if (!alive || !sameOrigin(data?.origin, capturedTargets[0].origin) || !Array.isArray(data.files)) return;
       const files = data.files.map(file => typeof file === "string" ? file : file.name).filter(filename);
-      for (const [id] of groups.get("images")) seed("images", id, { files, filesReady: true }, { file: files[0] ?? null });
+      for (const [id] of groups.get("images")) seed("images", id, { files, filesReady: true }, {});
     },
     preview() {
       if (!catalogueReady) return { n: 0, perImage: 0, anyEnabled: false, exact: false };
       const compiled = compile(captureRows(), null, true), first = catalogues.get(capturedTargets[0].id);
       const perImage = count(compiled.payload, first);
-      const exact = !batch && compiled.uploads.length === 0;
+      const exact = !batch && ![...groups.get("images")].some(([id, entry]) => entry.values.enabled && entry.values.items.some(item => {
+        const state = imageView(id, item, entry.metadata); return state.pending || state.error;
+      }));
       return { n: perImage * capturedTargets.length, perImage, anyEnabled: Object.values(compiled.payload.ranges).some(axis => axis.enabled) || Object.values(compiled.payload.imageParams).some(axis => axis.enabled && axis.values.length), exact };
     },
     async run() {
@@ -261,11 +336,13 @@ export function makeVariationEditor({ targets, services, currentOrigin, changed 
       issued.set(ticket, operation); active = ticket;
       let submitted = 0, total = 0, countsComplete = true;
       const failures = [], uploads = new Map();
+      running = true; result = null; notify();
       try {
+        await Promise.all([...pendingInspections]);
+        for (const target of ticket.targets) check(ticket, target);
         operation.compiled = compile(ticket.snapshot);
         if (operation.compiled.uploads.length && new Set(ticket.targets.map(target => target.origin?.address)).size > 1) throw new Error("Local-file variations across different backends are unsupported. Your files and edits have been kept.");
         for (const target of ticket.targets) check(ticket, target);
-        running = true; result = null; notify();
         const prepared = new Map();
         for (const target of ticket.targets) {
           check(ticket, target);
@@ -284,6 +361,7 @@ export function makeVariationEditor({ targets, services, currentOrigin, changed 
             check(ticket, uploadTarget);
             if (!filename(receipt?.name) || !sameOrigin(receipt.origin, uploadTarget.origin)) throw new Error(`${file.name}: upload acknowledgement unavailable; your File was kept`);
             uploads.set(file, freeze(snapshotDraft(receipt)));
+            confirmedUploads.set(receipt.name, operation.compiled.uploadHashes.get(file));
           } catch (error) { check(ticket, uploadTarget); failures.push(error.message); }
         }
         operation.compiled = compile(ticket.snapshot, uploads);

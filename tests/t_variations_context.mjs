@@ -84,6 +84,30 @@ Deno.test("source-bound upload: retirement after actual write reports completed 
   } finally { await r.close(); }
 });
 
+Deno.test("source-bound image comparison: engine hashes bytes through Ingest without upload; stale and malformed requests reject", async () => {
+  const r = await contextRig();
+  try {
+    const origin = r.origin(), current = await r.rig.ingest.ensure("fake", "input.png", "input");
+    const inspect = (bytes, name = "copy.png", expected = origin) => {
+      const form = new FormData(); form.append("image", new File([bytes], name)); form.append("current", "input.png"); form.append("kind", "input");
+      form.append("names", JSON.stringify(["copy.png", "copy (1).png", "unrelated.png"]));
+      return r.call("/api/features/variations/inspect-image/fake", { method: "POST", body: form, headers: { "X-Kosmozoo-Origin": JSON.stringify(expected) } });
+    };
+    const response = await inspect(current.bytes), data = await response.json();
+    assertEquals(response.status, 200); assertEquals(data.hash, current.hash); assertEquals(data.currentHash, current.hash); assert(sameOrigin(data.origin, origin));
+    assertEquals(data.existing, [{ name: "copy.png", hash: current.hash }, { name: "copy (1).png", hash: current.hash }]);
+    assertEquals(r.rig.store.inputCacheGet("fake", "unrelated.png"), null);
+    assert((await (await inspect("different")).json()).hash !== current.hash);
+    assertEquals((await inspect("audio", "a.mp3")).status, 400);
+    const path = "/api/collections/fake/entries/input.png/bytes?kind=input&origin=" + encodeURIComponent(JSON.stringify(origin));
+    assertEquals((await r.call(path)).status, 200); assertEquals((await r.call(path, { method: "HEAD" })).status, 200);
+    assertEquals((await r.call(path + "invalid")).status, 400);
+    r.replace(); assertEquals((await inspect(current.bytes)).status, 412);
+    assertEquals((await r.call(path)).status, 412); assertEquals((await r.call(path, { method: "HEAD" })).status, 412);
+    assertEquals(r.uploaded.length, 0); assertEquals(r.jobs.length, 0);
+  } finally { await r.close(); }
+});
+
 Deno.test("source-bound operation admission: shutdown retires new uploads/probes/runs before backing IO", async () => {
   const r = await contextRig();
   try {

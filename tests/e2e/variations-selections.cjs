@@ -1,5 +1,6 @@
 // Terminal closure after submitted on/off choices, with actual captured prompts.
 const assert=require('node:assert/strict');
+const { pickInput } = require('./image-picker-helpers.cjs');
 const typeText=async(cdp,selector,text)=>{await cdp.clickAt(selector);await cdp.evaluate(`(()=>{const e=document.querySelector(${JSON.stringify(selector)});e.focus();e.select()})()`);await cdp.send('Input.insertText',{text});await cdp.poll(`document.querySelector(${JSON.stringify(selector)}).value===${JSON.stringify(text)}`);};
 const inputControl='.vz-imgrow:not(.vz-enumrow):not(.vz-textrow) .vz-cb';
 // This setup operates on ControlNet graphs. Its numeric/text rows can mount
@@ -68,8 +69,7 @@ module.exports=async({cdp,FAKE,KZ,check})=>{
 
     await open();await cdp.poll("!!document.querySelector('.vz-imgrow:not(.vz-enumrow):not(.vz-textrow) .vz-cb')");
     await cdp.clickAt('.vz-imgrow:not(.vz-enumrow):not(.vz-textrow) .vz-cb');
-    await cdp.poll("!!document.querySelector('.vz-imgfile')");
-    await cdp.evaluate("(()=>{const e=document.querySelector('.vz-imgfile');e.value='ref.png';e.dispatchEvent(new Event('change',{bubbles:true}))})()");
+    await pickInput(cdp, 'ref.png');
     await cdp.clickAt('.vz-enumrow[data-enum-id="9.scheduler"] .vz-imgrow-head .vz-cb');
     await cdp.clickAt('.vz-enumrow[data-enum-id="9.scheduler"] .vz-enum-opt:last-child .vz-cb');
     await cdp.clickAt('.vz-textrow[data-text-id="2.text"] .vz-cb');

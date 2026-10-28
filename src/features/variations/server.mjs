@@ -12,10 +12,13 @@
 import {
   generatePermutations, permutationAxes, permutationPlan, resolveRelativeRanges, templateReplaceWithProof,
   paramId, parameterIndex, catalogueParams, parameterAliases, validRunAcknowledgement,
+  uploadFamily,
 } from "./shared.mjs";
 import { validEntryName } from "../../backings/index.mjs";
-import { sourceOrigin, sameOrigin, validOrigin, validContext } from "../../source-origin.mjs";
+import { sourceOrigin, sameOrigin, validOrigin, validContext, expectedOrigin } from "../../source-origin.mjs";
 import { dependencyClosure, validateGraphLinks } from "./graph.mjs";
+import { sha256 } from "../../cache.mjs";
+import { IMAGE_EXTENSIONS, mediaExtension } from "../../backings/mime.mjs";
 
 // hard cap on permutations per run — a sweep is a human-scale batch, not a
 // fork bomb (F7). Above the cap the run answers 413.
@@ -213,6 +216,34 @@ export function lineageTag(source, params) {
 // app: { store, cache, hosts, ingest, comfy, backings } — the engine surface
 // for features.
 export function register(app) {
+  // Readonly comparison through the existing byte/hash owner. This deliberately
+  // does not upload to ComfyUI or create another input cache.
+  app.route("POST", "/inspect-image/<host>", async (req, { host }) => {
+    let origin;
+    try { origin = expectedOrigin(req); } catch (error) { return Response.json({ error: error.message }, { status: 400 }); }
+    const token = app.backings.capture(host);
+    if (!origin || !token || !sameOrigin(origin, sourceOrigin(host, app.backings.source(host))) || !app.backings.accepting()) return Response.json({ error: "Source origin changed" }, { status: 412 });
+    let form;
+    try { form = await req.formData(); } catch { return Response.json({ error: "Multipart image required" }, { status: 400 }); }
+    const file = form.get("image"), current = form.get("current"), kind = form.get("kind");
+    if (!(file instanceof File) || !IMAGE_EXTENSIONS.has(mediaExtension(file.name)) || !validEntryName(token.address, current) || !["input", "output"].includes(kind)) return Response.json({ error: "Image and current input required" }, { status: 400 });
+    let names;
+    try { names = JSON.parse(form.get("names") ?? "[]"); } catch { return Response.json({ error: "Input names must be an array" }, { status: 400 }); }
+    if (!Array.isArray(names) || names.some(name => typeof name !== "string" || !validEntryName(token.address, name))) return Response.json({ error: "Invalid input names" }, { status: 400 });
+    if (!app.backings.isCurrent(token)) return Response.json({ error: "Source origin changed" }, { status: 412 });
+    const bytes = await app.ingest.ensure(host, current, kind, { priority: "high" });
+    if (bytes.status !== 200) return Response.json({ error: "Current image bytes unavailable; cannot compare" }, { status: 422 });
+    const hash = await sha256(new Uint8Array(await file.arrayBuffer()));
+    const existing = [];
+    for (const name of new Set(uploadFamily(file.name, names))) {
+      if (!app.backings.isCurrent(token)) return Response.json({ error: "Source origin changed" }, { status: 412 });
+      const candidate = name === current && kind === "input" ? bytes : await app.ingest.ensure(host, name, "input", { priority: "high" });
+      if (candidate.status === 200) existing.push({ name, hash: candidate.hash });
+      else if (candidate.status !== 404) return Response.json({ error: "Existing input bytes unavailable; cannot compare" }, { status: 422 });
+    }
+    if (!app.backings.isCurrent(token)) return Response.json({ error: "Source origin changed" }, { status: 412 });
+    return Response.json({ hash, currentHash: bytes.hash, existing, origin });
+  });
   const inspect = async (collection, name, expected = null) => {
     if (!app.backings.accepting()) return { error: "Sources are stopping; no new operation was admitted", status: 503 };
     const token = app.backings.capture(collection);
