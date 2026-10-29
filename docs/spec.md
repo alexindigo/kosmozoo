@@ -277,6 +277,17 @@ whole completed-step portion of done), "current step V/M (live)" or "(from log)"
 Only the engine's other-client reason adds "queued from another ComfyUI tab";
 other missing data has a generic unavailable explanation.
 
+Immediately left of the ring, the same flex-centred chip displays the source's
+outstanding queue size (`runningCount + queuedCount`). Tabular 12px numerals use
+the shared muted foreground token and reserve at least two digit columns, so
+1→12 does not resize the chip. Values through 999 display literally, larger
+values display `999+`. Zero, unsupported, unknown, upstream-disconnected and
+delivery-disconnected states show no number or retained allocation. Pending-only
+queues still show their positive count even though no prompt is running. The
+chip and instrument share one snapshot-derived label, adding e.g. "3 in queue
+(1 running, 2 waiting)" with the uncapped total. No separate count state or fetch
+is introduced.
+
 Startup establishes full retained-history baseline without replaying old finishes.
 Regular history reads start at 64 and expand until the previous completion
 boundary is found or retained history is exhausted. Distinct terminal IDs advance

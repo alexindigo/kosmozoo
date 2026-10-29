@@ -1049,6 +1049,10 @@ body:has(#diff:not([hidden])) #statusCol { bottom: 56px; }
 #chrome .source-progress-workflow { stroke: var(--secondary); }
 #chrome .source-progress-workflow.unavailable { stroke: var(--foreground-dim);
   transform-origin: center; animation: source-workflow-turn 2.5s linear infinite; }
+#chrome .source-queue-count { display: inline-grid; flex: 0 0 auto; text-align: end;
+  font-variant-numeric: tabular-nums; color: var(--foreground-mid); }
+#chrome .source-queue-count::before { content: "00"; visibility: hidden; }
+#chrome .source-queue-count > span, #chrome .source-queue-count::before { grid-area: 1 / 1; }
 @keyframes source-workflow-turn { from { transform: rotate(-90deg); } to { transform: rotate(270deg); } }
 /* Density follows the topbar's feed allocation, including divider resizing. */
 @container chrome-feed (max-width: 220px) {
