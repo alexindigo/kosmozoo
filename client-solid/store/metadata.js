@@ -4,7 +4,8 @@ export function makeMetadata({ acquisition, owns, want, meta, nodes, status,
   setPending, setNodes, setStatus, apply, batch, capture = () => null,
   priorityFor = item => item.priority, now = () => performance.now() }) {
   let context = null, version = 0, retired = false;
-  let nodesDirty = false;
+  const nodesDirty = new Map();
+  let nodeRevision = 0;
   let wantTask = null, pollTask = null, statusTask = null, flushQueued = false;
   let retryTimer = null, pollTimer = null, statusTimer = null, failures = 0, pending = 0;
   const demand = new Map();
@@ -13,6 +14,7 @@ export function makeMetadata({ acquisition, owns, want, meta, nodes, status,
   let projectionVersion = -1, foreground = new Set();
   const current = owner => !retired && context === owner && owns(owner);
   const signature = item => `${item.interest}:${priorityFor(item)}`;
+  const entryForName = name => demand.get(name) ?? { id: `${context.id}:${name}` };
 
   function index(item) {
     if (item.lane) lanes.get(item.lane).delete(item);
@@ -54,7 +56,7 @@ export function makeMetadata({ acquisition, owns, want, meta, nodes, status,
   }
 
   function setContext(next) {
-    context = next; version = 0; pending = 0; failures = 0; nodesDirty = false;
+    context = next; version = 0; pending = 0; failures = 0; nodesDirty.clear();
     clearTimeout(retryTimer); clearTimeout(pollTimer); clearTimeout(statusTimer);
     retryTimer = pollTimer = statusTimer = null;
     wantTask = pollTask = statusTask = null; flushQueued = false; demand.clear(); byId.clear();
@@ -103,7 +105,7 @@ export function makeMetadata({ acquisition, owns, want, meta, nodes, status,
     if (!current(owner) || wantTask || retryTimer) return;
     if (!first()) return;
     let sent = [], snapshot = null;
-    const task = acquisition.submit({ key: Symbol("metadata-want"), priority: () => first()?.lane.split(":")[1] ?? "background",
+    const task = acquisition.submit({ key: Symbol("metadata-want"), resourceClass: "control", priority: () => first()?.lane.split(":")[1] ?? "background",
       valid: () => current(owner) && !!first(), run: () => {
         const head = first(), options = { interest: head.interest, priority: priorityFor(head) };
         const items = [];
@@ -135,12 +137,20 @@ export function makeMetadata({ acquisition, owns, want, meta, nodes, status,
   }
 
   async function refreshNodes(owner) {
-    if (!nodesDirty || !current(owner)) return;
-    await acquisition.submit({ key: "metadata-nodes", valid: () => current(owner),
-      run: async ({ current: live, priority }) => {
-        const registry = await nodes({ priority });
-        if (live()) { setNodes(registry); nodesDirty = false; }
-      } });
+    while (nodesDirty.size && current(owner)) {
+      const result = await acquisition.submit({ key: "metadata-nodes", resourceClass: "control",
+        priority: () => laneOf([...nodesDirty.keys()].map(entryForName)), valid: () => current(owner),
+        run: async ({ current: live, priority }) => {
+          const captured = new Map(nodesDirty);
+          const registry = await nodes({ priority });
+          if (live()) {
+            setNodes(registry);
+            // A graph landing during this read still needs a later registry.
+            for (const [name, revision] of captured) if (nodesDirty.get(name) === revision) nodesDirty.delete(name);
+          }
+        } });
+      if (result?.retired) return;
+    }
   }
 
   async function accept(reply, owner, snapshot = capture()) {
@@ -157,19 +167,19 @@ export function makeMetadata({ acquisition, owns, want, meta, nodes, status,
     if (!unique.length || !current(owner)) return current(owner);
     // Foreground identities publish first, in the foreground lane.
     syncProjection();
-    const isForeground = name => foreground.has(demand.get(name)?.id);
+    const isForeground = name => foreground.has(entryForName(name).id);
     const names = [...unique.filter(isForeground), ...unique.filter(name => !isForeground(name))];
-    let position = 0, graphChanged = false;
+    let position = 0;
     while (position < names.length && current(owner)) {
-      const result = await acquisition.submit({ key: Symbol("metadata-publication"), resource: false,
-        priority: () => laneOf(names.slice(position, position + 200).map(name => demand.get(name))),
+      const result = await acquisition.submit({ key: Symbol("metadata-publication"), resource: false, resourceClass: "control",
+        priority: () => laneOf(names.slice(position, position + 200).map(entryForName)),
         valid: () => current(owner), run: () => {
           const started = now();
           batch(() => {
             let count = 0;
             do {
               const name = names[position++];
-              graphChanged = apply(name, itemsByName?.[name], dimsByName?.[name], owner, snapshot) || graphChanged;
+              if (apply(name, itemsByName?.[name], dimsByName?.[name], owner, snapshot)) nodesDirty.set(name, ++nodeRevision);
               const item = demand.get(name);
               if (item && (item.interest === "full" ? itemsByName?.[name] !== undefined : !!dimsByName?.[name])) item.delivered = true;
               count++;
@@ -180,7 +190,6 @@ export function makeMetadata({ acquisition, owns, want, meta, nodes, status,
     }
     if (!current(owner)) return false;
     // Dimension-only landings cannot change the discovered node schema.
-    nodesDirty ||= graphChanged;
     await refreshNodes(owner);
     return true;
   }
@@ -199,7 +208,7 @@ export function makeMetadata({ acquisition, owns, want, meta, nodes, status,
       try {
         const snapshot = capture();
         // A poll is foreground while a foreground identity awaits its result.
-        const reply = await acquisition.submit({ key: "metadata-poll",
+        const reply = await acquisition.submit({ key: "metadata-poll", resourceClass: "control",
           priority: () => awaiting().length ? "foreground" : priority, valid: () => current(owner),
           run: ({ priority }) => meta(owner.id, version, { priority }) });
         if (!current(owner) || reply?.retired) return;
@@ -221,7 +230,7 @@ export function makeMetadata({ acquisition, owns, want, meta, nodes, status,
     statusTimer = setTimeout(() => {
       statusTimer = null;
       if (!current(owner) || pending <= 0) return;
-      const task = acquisition.submit({ key: "metadata-status", valid: () => current(owner),
+      const task = acquisition.submit({ key: "metadata-status", resourceClass: "control", valid: () => current(owner),
         run: async ({ current: live, priority }) => { const reply = await status({ priority }); if (live()) setStatus(reply); } });
       statusTask = task;
       task.catch(() => {}).finally(() => {

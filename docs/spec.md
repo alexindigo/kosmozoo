@@ -404,9 +404,19 @@ positive viewport dimensions and identity-keyed virtual items. One Store
 reconciliation projects actual viewport identities (without overscan) and current into
 one approximately twenty-entry foreground window. The Store-owned acquisition policy
 admits sizes, feed src, inline images, metadata wants/reads/publication, node refresh
-and scraper status; beyond-window work uses idle quanta of at most eight ms and two
-shared background resource slots, and waits while foreground work is pending.
-Foreground resources use at most six slots. Wants are retained, acknowledged and
+and scraper status. The policy alone defines bounded resource classes: native images
+retain six foreground/two background slots; control (wants, polls, required node
+registry refresh, byte-size HEAD and scraper status) has three foreground/one
+background slots that native transfers cannot consume. Beyond-window work uses idle
+quanta of at most eight ms. Background images wait while foreground work is pending;
+background control follows its own class so an unfinished native image cannot strand
+the metadata channel. The app-origin HTTP/1 transport budget is six connections:
+one source-delivery stream, one reserved control connection and the derived four
+native transfers, shared across both image lanes. Native measurement/display owners
+declare their actual URL; other origins and non-HTTP resources retain the global
+image ceilings. Native completion/abort releases both budgets together, without
+preempting active images. Required registry refresh follows the graph identities it
+serves and acknowledges only the changes captured by its accepted read. Wants are retained, acknowledged and
 single-flight; outstanding lane heads are identity-indexed, so scheduler queries never
 scan the acknowledged library. Projection changes reindex only affected foreground
 identities. Metadata dimensions publish atomically in batches of at most 200

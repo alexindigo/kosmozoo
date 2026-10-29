@@ -1712,7 +1712,7 @@ export function makeAppStore({ subscribeSources = typeof window !== "undefined" 
         if (idx < 0 || st.images[idx].size != null) return;
         const img = st.images[idx];
         const hash = img.hash;
-        const size = await acquisition.submit({ key: `byte-size:${id}`, id,
+        const size = await acquisition.submit({ key: `byte-size:${id}`, id, resourceClass: "control",
           valid: () => ownsSession(s) && st.images[imageIdx(id)]?.hash === hash,
           run: ({ priority }) => api.entrySizeProbe(img.host, img.filename, { priority }) });
         const resolved = imageIdx(id);

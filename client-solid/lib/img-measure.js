@@ -124,7 +124,7 @@ export function makeImageMeasurements({ acquisition, srcFor, identityFor = id =>
     const src = srcFor(id);
     if (!src) { record.size = FAILURE_SIZE; record.state = "failed"; bump(); return; }
     record.state = "queued";
-    acquisition.submit({ key: record.key, id: interest.foregroundId ?? id,
+    acquisition.submit({ key: record.key, id: interest.foregroundId ?? id, url: src,
       priority: interest.priority, valid: () => current(record) && (record.state === "loading" || interested(record)),
       run: ({ priority, release }) => new Promise(resolve => {
         const video = kind === "video";
@@ -198,7 +198,7 @@ export function makeImageMeasurements({ acquisition, srcFor, identityFor = id =>
     }, current: live };
     if (!active || identity == null || !src) return lease;
     displays.add(lease);
-    acquisition.submit({ key, id: foregroundId, priority, scoped, valid: live,
+    acquisition.submit({ key, id: foregroundId, url: src, priority, scoped, valid: live,
       run: ({ priority, release }) => new Promise(resolve => {
         finish = () => { release(); resolve(); };
         publish({ src: imageRequestUrl(src, priority), priority });

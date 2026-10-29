@@ -4,14 +4,14 @@ import { makeImageMeasurements, useImageDisplay, ERROR_RETRY_MS, MEASURE_TIMEOUT
 import { createRoot, createSignal } from "solid-js";
 
 const flush = async () => { for (let i = 0; i < 30; i++) await Promise.resolve(); };
-function fixture() {
+function fixture(policyOptions = {}) {
   const original = globalThis.Image, images = [], idle = new Map();
   let sequence = 0;
   globalThis.Image = class {
     constructor() { images.push(this); this.naturalWidth = 640; this.naturalHeight = 360; }
     removeAttribute() { this.src = ""; }
   };
-  const acquisition = makeAcquisition({ scheduleIdle: callback => { const key = ++sequence; idle.set(key, callback); return () => idle.delete(key); } });
+  const acquisition = makeAcquisition({ scheduleIdle: callback => { const key = ++sequence; idle.set(key, callback); return () => idle.delete(key); }, ...policyOptions });
   const context = {}, identities = new Map();
   acquisition.setContext(context);
   acquisition.setWindow({ ids: ["front"], currentId: "front" });
@@ -223,4 +223,19 @@ Deno.test("surface displays: features receive the Store's one display port at in
     if (location === undefined) delete globalThis.location; else globalThis.location = location;
     if (history === undefined) delete globalThis.history; else globalThis.history = history;
   }
+});
+
+Deno.test("image resources: probes and mounted/thumbnail displays share the app-origin transport budget", async () => {
+  const f = fixture({ appOrigin: "http://engine.test" }), displays = [];
+  try {
+    f.acquisition.setWindow({ ids: ["a", "b", "c", "d"], currentId: "a" });
+    for (const id of ["a", "b", "c", "d"]) f.measurements.request(id);
+    assertEquals(f.images.length, 4);
+    displays.push(f.measurements.display({ id: "thumb", src: "/thumb.png", priority: "foreground", scoped: false }));
+    assertEquals(displays[0].read().src, null, "a display cannot bypass four active native probes");
+    f.images[0].onload(); await flush();
+    assertEquals(displays[0].read().src, "/thumb.png");
+    displays.push(f.measurements.display({ id: "foreign", src: "http://other.test/img.png", priority: "foreground", scoped: false }));
+    assertEquals(displays[1].read().src, "http://other.test/img.png");
+  } finally { displays.forEach(display => display.dispose()); f.dispose(); }
 });

@@ -210,3 +210,28 @@ Deno.test("metadata lanes: work for a foreground identity never queues behind pe
     assertEquals(applied[0], "cur.png", "the current entry's acknowledged demand is polled and published in the foreground lane, first");
   } finally { f.dispose(); }
 });
+
+for (const [count, position] of [[25, 0], [25, 12], [25, 24], [1, 0]]) {
+  Deno.test(`metadata control: want/poll/registry reach fields at position ${position} of ${count} while six native resources remain held`, async () => {
+    const images = Array.from({ length: count }, (_, i) => ({ id: `source:${i}`, filename: `${i}.png` }));
+    const applied = [], calls = [], native = Array.from({ length: 6 }, deferred);
+    let f;
+    f = fixture({
+      priorityFor: item => f.acquisition.priority(item.id),
+      want: async (_id, names, options) => { calls.push(["want", options.priority]); return { pending: 1, items: {}, dims: {} }; },
+      meta: async (_id, _version, options) => { calls.push(["poll", options.priority]); return { pending: 0, changed: true, v: 1,
+        items: { [`${position}.png`]: { nodes: [{ type: "NewType", inputs: { token: "visible-value" } }] } } }; },
+      nodes: async options => { calls.push(["nodes", options.priority]); return { NewType: { inputs: { token: "string" } } }; },
+      apply: (_name, meta) => { if (meta) applied.push(meta); return !!meta; },
+    }, { scheduleIdle: () => () => {} });
+    try {
+      f.acquisition.setWindow({ ids: images.map(image => image.id), currentId: images[position].id, limit: 1 });
+      native.forEach((hold, i) => f.acquisition.submit({ key: `native-${i}`, priority: "foreground", run: () => hold.promise }));
+      f.channel.request([images[position]]); await flush();
+      assertEquals(calls, [["want", "foreground"]]);
+      f.channel.poll(); await flush(); await flush();
+      assertEquals(calls, [["want", "foreground"], ["poll", "foreground"], ["nodes", "foreground"]]);
+      assertEquals(applied[0]?.nodes[0].inputs.token, "visible-value");
+    } finally { f.dispose(); native.forEach(hold => hold.resolve()); await flush(); }
+  });
+}

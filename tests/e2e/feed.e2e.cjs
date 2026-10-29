@@ -1034,6 +1034,8 @@ async function railMotion(page) {
 
   await require('./auto-refresh.cjs')({ page, ENGINE, FAKE: FAKE_ACTIVITY, KZ, check, traffic: sourceTraffic });
 
+  await require('./metadata-position.cjs')({ ENGINE, FAKE: FAKE_ACTIVITY, check });
+
   check("no uncaught page errors", pageErrors.length === 0, pageErrors[0] ?? "");
 
   await page.close();
