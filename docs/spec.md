@@ -617,6 +617,18 @@ Ordinary rail ticks use the existing subdued `--foreground-dim` neutral through
 shared card-state presentation; card neutrals, judgment colors/priorities, wave
 length/glow, geometry, tape windowing and scrub handlers retain their contracts.
 
+New inventory identities in the current source, or entries newer than the seen
+floor captured before opening another source, light their rail ticks once for
+1400ms. Store inventory acceptance owns event publication and its accepted sequence
+independently of source-stream seen advancement. The rail takes the entire event
+once when candidates become size-ready, including identities outside its filter/tape window;
+scrolling, rerendering and remounting cannot replay it. Source navigation/disposal
+retires pending events. The rail owns its native animations and cancels on tick
+identity replacement/unmount. Only brightness/light fades; reduced motion uses
+color alone. No tick dimensions, wave/scrub geometry or browsing state changes.
+Size-pending candidates wait for the existing size owner's feed admission; removed
+entries and retired sessions discard them. A ready off-tape tick never waits.
+
 Static surfaces: `/shared/<name>` serves the allow-listed `src/` modules
 (`extractor.mjs`, `backings/mime.mjs`, `features/variations/shared.mjs`, `entry-path.mjs`, `source-origin.mjs`, `version.mjs`) to the browser;
 `/` and `/diff` serve the Solid app from `client-solid-dist/`, with shared

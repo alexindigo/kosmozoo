@@ -28,6 +28,7 @@ import { formatVersion } from "/shared/version.mjs";
 import { makeSourceBrowse } from "./source-browse.js";
 import { makeSourceFreshness } from "./source-freshness.js";
 import { makeSourceRegistry, sameSourceIdentity } from "./source-registry.js";
+import { makeRailArrivals } from "./rail-arrivals.js";
 import { fieldList, nodeImages } from "./fields.js";
 import { pairSides } from "../features/diff/pair.mjs";
 import { workbenchViews, defaultWorkbenchView } from "../features/diff/views.mjs";
@@ -127,10 +128,12 @@ export function makeAppStore({ subscribeSources = typeof window !== "undefined" 
   const [sourceDelivery, setSourceDelivery] = createSignal(subscribeSources ? "connecting" : "explicit");
   const [acquisitionRevision, setAcquisitionRevision] = createSignal(0);
   let sourceSession = null, selectionGeneration = 0, disposed = false;
+  const railArrivals = makeRailArrivals();
   const ownsSession = (s) => !!s && !disposed && sourceSession === s &&
     host() === s.id && hostsView()[s.id]?.address === s.address && sourceRecords.get(s.id) === s.source;
 
   function beginSourceSession(id) {
+    railArrivals.retire();
     retireFeedScroll();
     clearTimeout(sourceSession?.retryTimer);
     setSt("metaPending", 0);
@@ -692,6 +695,7 @@ export function makeAppStore({ subscribeSources = typeof window !== "undefined" 
   // The first accepted read owns initial restoration, including after retry.
   function acceptInventory(s, inventory, read, before = new Map()) {
     const name = s.id, wasReady = s.inventoryReady;
+    const floor = s.acceptedArrivalSeq ?? s.arrivalFloor;
     let idx = -1;
     batch(() => {
       if (s.source) {
@@ -722,6 +726,10 @@ export function makeAppStore({ subscribeSources = typeof window !== "undefined" 
       const c = current();
       if (!c || c.remote === name) idx = applyBrowseTarget(wasReady ? { ...browseTarget, ...liveBrowseTarget() } : browseTarget);
       if (wasReady) setFeedMergeNonce((n) => n + 1);
+      s.acceptedArrivalSeq = inventory.arrivals?.sequence ?? null;
+      if (floor != null) railArrivals.stage(st.images
+        .filter(image => image.arrivalSeq > floor && !["hidden", "gone"].includes(image.state))
+        .map(image => image.id));
     });
     judgments.endRead(read);
     s.source?.acceptArrivals(inventory.arrivals, true);
@@ -798,8 +806,9 @@ export function makeAppStore({ subscribeSources = typeof window !== "undefined" 
     untrack(() => { setBrowseRestore(null); restoreToIndex(idx); });
   });
 
-  async function loadImages(name) {
+  async function loadImages(name, arrivalFloor) {
     const s = beginSourceSession(name);
+    s.arrivalFloor = arrivalFloor;
     s.pendingBrowse = true;
     s.inventoryReady = false;
     setSt("inventory", { revision: null, coverage: null, folders: [""], loading: true,
@@ -1074,6 +1083,13 @@ export function makeAppStore({ subscribeSources = typeof window !== "undefined" 
   const sizeKnown = (img) => sizes_.sizeFor(img) !== null;
   const sizePending = (img) => !!img && !sizeKnown(img);
   const entriesWithKnownSize = createMemo(() => view().filter((i) => sizeKnown(st.images[i])));
+  createEffect(() => {
+    const waiting = railArrivals.waiting();
+    if (!waiting.length) return;
+    const present = new Map(st.images.map(image => [image.id, image]));
+    const ready = waiting.filter(id => present.has(id) && sizeKnown(present.get(id)));
+    untrack(() => railArrivals.resolve(ready, present));
+  });
   // the pending set as a COUNT — never a
   // 3000-element materialization per landing (RC8)
   const pendingSizeCount = createMemo(() => {
@@ -1456,6 +1472,7 @@ export function makeAppStore({ subscribeSources = typeof window !== "undefined" 
   function dispose() {
     if (disposed) return;
     disposed = true;
+    railArrivals.retire();
     deliveryGeneration++; deliveryDispose?.(); deliveryDispose = null; pageDispose?.(); pageDispose = null;
     batch(retireFeedScroll);
     window_.clear();
@@ -1563,6 +1580,7 @@ export function makeAppStore({ subscribeSources = typeof window !== "undefined" 
         if (!isFolderPath(target.folder ?? "") || (target.current != null && !isEntryName(hostsView()[name]?.kind, target.current))) {
           actions.status.error("Invalid browsing address"); return;
         }
+        const arrivalFloor = sourceRecords.get(name)?.seenSeq;
         batch(() => {
           setSt("inventory", "loading", true);
           sourceRecords.get(name)?.markSeen();
@@ -1572,7 +1590,7 @@ export function makeAppStore({ subscribeSources = typeof window !== "undefined" 
         });
         if (historyMode !== "none") mirrorCurrentHash(historyMode);
         api.setSettings("core.ui", { host: name }).catch(() => {});
-        const task = loadImages(name);
+        const task = loadImages(name, arrivalFloor);
         if (sourceSession?.id === name) sourceSession.loadTask = task;
         await task;
       },
@@ -2082,6 +2100,7 @@ export function makeAppStore({ subscribeSources = typeof window !== "undefined" 
     },
 
     feed: {
+      takeArrivals: railArrivals.take,
       register(seamsIn) {
         const registration = seamsIn ? { ...seamsIn } : null;
         batch(() => {
@@ -2400,6 +2419,7 @@ export function makeAppStore({ subscribeSources = typeof window !== "undefined" 
       return host() !== id && !!sourceRecords.get(id)?.hasNew;
     },
     sourceDelivery,
+    railArrivalEvent: railArrivals.event,
     appVersion,
     get sourceSaving() { return sourceRecords.saving(); },
     get nodesRegistry() { return st.nodesRegistry; },

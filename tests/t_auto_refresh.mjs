@@ -136,6 +136,45 @@ Deno.test("source reachability: initial/retry failures dedupe by source, recover
   });
 });
 
+Deno.test("rail arrivals: capture before seen on switch, accepted inventory owns current arrivals despite earlier stream", async () => {
+  await withClient(async ({ store, boot, sources, rows, row, emit }) => {
+    const take = async () => {
+      for (let i = 0; i < 10; i++) await Promise.resolve();
+      return store.actions.feed.takeArrivals(store.state.railArrivalEvent());
+    };
+    await boot;
+    assertEquals(await take(), [], "baseline inventory stays quiet");
+    rows.push({ ...row("current.png"), arrivalSeq: 3 });
+    sources.h.arrivals = { sequence: 3, latestVisibleSeq: 3 }; await emit();
+    assertEquals(store.state.sourceHasNew("h"), false);
+    await store.actions.ui.refresh();
+    assertEquals(await take(), ["h:current.png"], "stream seen advancement cannot swallow an inventory arrival");
+    await store.actions.ui.refresh();
+    assertEquals(await take(), [], "relists cannot replay");
+    await store.actions.hosts.select("other");
+    rows.push({ ...row("switch.png"), arrivalSeq: 4 }, { ...row("gone.png"), arrivalSeq: 5, state: "gone" });
+    sources.h.arrivals = { sequence: 5, latestVisibleSeq: 4 }; await emit();
+    assertEquals(store.state.sourceHasNew("h"), true);
+    await store.actions.hosts.select("h");
+    assertEquals(store.state.sourceHasNew("h"), false);
+    assertEquals(await take(), ["h:switch.png"], "switch captured the pre-markSeen floor; gone is excluded");
+    rows.push({ ...row("retired.png"), arrivalSeq: 6 });
+    sources.h.arrivals = { sequence: 6, latestVisibleSeq: 6 };
+    await store.actions.ui.refresh();
+    const old = store.state.railArrivalEvent();
+    await store.actions.hosts.select("other");
+    assertEquals(store.actions.feed.takeArrivals(old), [], "navigation retires an untaken event");
+    await store.actions.hosts.select("h");
+    assertEquals(await take(), [], "seen arrivals do not replay on return");
+  }, ({ rows, sources }) => {
+    rows.forEach((entry, i) => entry.arrivalSeq = i + 1);
+    sources.h.arrivals = { sequence: 2, latestVisibleSeq: 2 };
+    sources.other = { address: "other:1", kind: "comfy", online: true, autoRefresh: false };
+    api.inventory = async id => ({ ...clientInventory(id === "h" ? structuredClone(rows) : [], { coverage: "recursive" }),
+      arrivals: sources[id].arrivals });
+  });
+});
+
 Deno.test("source reachability: other HTTP and validation failures keep their reporting", async () => {
   await withClient(async ({ store, boot }) => {
     await boot;
