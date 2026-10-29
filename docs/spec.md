@@ -466,6 +466,20 @@ Allocation changes rederive transforms and the Difference draw. Viewer gestures
 never alter persisted card crops. There is no centred viewer play button for
 any kind; its docked play button is the visible playback affordance.
 
+Every crop uses the shared version2 model `{version:2,s,cx,cy,fh,fv,rot}`:
+`cx`/`cy` are normalized image coordinates under the allocation centre; `s` is
+relative to the existing natural-size-capped fit. Centres remain unbounded for
+pan. Native transforms and Difference destinations derive from that same model
+on every fit/allocation change, independently of element binding time. A missing
+or zero fit is pending and cannot authorize a gesture or compatible-read write.
+Persisted and viewer-session view ports convert legacy `{s,txf,tyf,…}` records
+once, in the first valid fitted frame supplied to the owner. Old records did not
+store their historical reference box; that first frame defines their compatible
+interpretation. The persisted owner saves the version2 conversion through its
+normal debounce; subsequent restore/resize reads never write derived views back.
+Binding lifetime remains element/key-owned, with active drag listeners retired
+on disposal. Wheel/pan deltas, scale limits and the viewer open-centred rule remain.
+
 Workbench guards accept video/audio only after `loadeddata` and images after decode;
 accepted source, kind and filename stay together through a failed swap, retaining
 the last good side. Without a last-good side, a failed guard carries its native

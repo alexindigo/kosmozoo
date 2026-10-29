@@ -138,7 +138,7 @@ function check(name, ok, detail = "") {
     return { x: r.left + r.width / 2, y: r.top + r.height / 2 };
   })()`);
   // pan works at zoom 1 (not only when zoomed): a drag at identity moves the
-  // view ({s:1, txf≠0}), and only the target's
+  // view ({s:1, cx≠.5}), and only the target's
   await cdp.drag(cellB.x, cellB.y, cellB.x + 40, cellB.y + 20);
   const pan1 = await cdp.evaluate(`(async () => ({
     a: ${KZ}.state.diff.views["fake:flux-basic.png"] ?? null,
@@ -146,7 +146,7 @@ function check(name, ok, detail = "") {
     tb: document.querySelector('.dz-b .dz-img').style.transform,
   }))()`);
   check("pan works at zoom 1 (drag moves the view, scale stays 1)",
-    pan1.a === null && pan1.b && pan1.b.s === 1 && pan1.b.txf !== 0 && pan1.tb.includes("translate("),
+    pan1.a === null && pan1.b && pan1.b.s === 1 && pan1.b.cx !== .5 && pan1.tb.includes("translate("),
     JSON.stringify(pan1));
   await cdp.mouse("mouseWheel", cellB.x, cellB.y, { deltaY: -40, modifiers: 2 });
   await cdp.poll(`(async () => !!${KZ}.state.diff.views["another:flux-basic.png"])()`, 5000);
@@ -161,13 +161,13 @@ function check(name, ok, detail = "") {
     JSON.stringify(twoStates));
   // pan B (drag) — A's view still untouched
   await cdp.drag(cellB.x, cellB.y, cellB.x + 40, cellB.y + 20);
-  await cdp.poll(`(async () => (${KZ}.state.diff.views["another:flux-basic.png"]?.txf ?? 0) !== 0)()`, 5000);
+  await cdp.poll(`(async () => (${KZ}.state.diff.views["another:flux-basic.png"]?.cx ?? .5) !== .5)()`, 5000);
   const afterPan = await cdp.evaluate(`(async () => ({
     a: ${KZ}.state.diff.views["fake:flux-basic.png"] ?? null,
     b: JSON.parse(JSON.stringify(${KZ}.state.diff.views["another:flux-basic.png"])),
   }))()`);
   check("two states: pan writes B only — A's view stays empty",
-    afterPan.a === null && afterPan.b.txf !== 0, JSON.stringify(afterPan));
+    afterPan.a === null && afterPan.b.cx !== .5, JSON.stringify(afterPan));
 
   // 3. lock entangles: one gesture's delta writes BOTH keys — never a copy
   await cdp.evaluate(`(async () => { ${KZ}.actions.diff.setLocked(true); })()`);
@@ -442,7 +442,7 @@ function check(name, ok, detail = "") {
   // (the cells are display:none there — a 0×0 reference box divided by zero)
   const finite = await cdp.evaluate(`(async () => {
     const v = ${KZ}.state.diff.views["fake:flux-basic.png"];
-    return v ? { txf: v.txf, finite: Number.isFinite(v.txf) && Number.isFinite(v.tyf) } : null;
+    return v ? { cx: v.cx, finite: Number.isFinite(v.cx) && Number.isFinite(v.cy) } : null;
   })()`);
   check("Difference: a drag in mode 4 keeps the view finite (no NaN)",
     finite?.finite === true, JSON.stringify(finite));

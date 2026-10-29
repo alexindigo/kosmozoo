@@ -14,8 +14,8 @@ export const HIGHLIGHT = [255, 136, 0];
 // out. THE FIT RULE IS SHARED WITH THE LAYOUT (.dz-img): contain-fitted and
 // centered, NEVER UPSCALED (fit caps at 1 — a small photo renders at
 // natural size, with the stage showing margins around it). Then the side's
-// own view ({s, txf, tyf} — scale about the stage center, then translate by
-// the view fractions of the stage box). Pure: the canvas draw uses this.
+// own image-space crop (version2 centre and fit-relative scale). The shared
+// model also accepts a legacy view in this frame. Pure: the canvas uses this.
 export function viewRect(imgW, imgH, view, stageW, stageH) {
   return mediaViewRect({ w: imgW, h: imgH }, view, stageW, stageH);
 }

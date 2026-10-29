@@ -677,6 +677,7 @@ async function attempt(name, fn) {
   await attempt('audio playback contract', () => require('./media-audio.cjs')({ page, ENGINE, KZ, check, capture: sourceShot, control: sourceControl }));
   await attempt('native failure messages', () => require('./media-failures.cjs')({ page, ENGINE, KZ, check, capture: sourceShot, control: sourceControl }));
   await attempt('media geometry contract', () => require('./media-geometry.cjs')({ page, ENGINE, KZ, check, capture: sourceShot, control: sourceControl }));
+  await attempt('image-relative zoom views contract', () => require('./zoom-views.cjs')({ page, KZ, check, capture: sourceShot, control: sourceControl }));
   check("no uncaught page errors", pageErrors.length === 0, pageErrors[0] ?? "");
 
   await page.close();

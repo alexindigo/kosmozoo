@@ -3,39 +3,46 @@
 // Ctrl+wheel zooms toward the cursor; drag pans while zoomed. A drag
 // suppresses its trailing click (a pan must not open the workbench). View
 // persistence is caller-provided (getView/setView — the app store owns the
-// views and their debounced save), so a crop made here carries into the
-// workbench and back — and reloads restore it.
+// views and their debounced save). Viewer session crops have a distinct owner.
 //
 // The binding has a lifecycle: makeZoomable returns { dispose } — the
 // component rebinds when its target key changes : a retargeted box must
 // not carry the previous image's transform or pan).
 //
 // Views are read FRESH per gesture (never cached between events): a peer
-// write can never go stale. `target(ev)` picks the gesture's { key, box }
+// write can never go stale. `target(ev)` picks { key, box, geometry }
 // (the comparator's Two-Up aims at the cell under the pointer; the default
 // is the bound element's own key + parent box — the card path). `also(t)`
-// names an entangled peer key: the gesture's delta ({ds, dtxf, dtyf}) is
+// supplies a peer { key, geometry }: the gesture's box-fraction delta is
 // applied to that key's stored view too — entangle, never copy; one writer
 // per gesture, so no recursion. Render state (the transform CSS, the zoomed
-// flag) is emitted through onTransform and rendered by the component — the
-// behavior never writes element style or classes itself.
+// flag) derives reactively from the shared image-space model in the renderer.
+// The behavior never caches transforms or restores against binding-time DOM.
+
+import { readZoomView, zoomViewPixels, readyViewGeometry, isIdentityView } from "./zoom-view.mjs";
 
 const IDENTITY = { s: 1, txf: 0, tyf: 0 };
 
-export function makeZoomable(el, { key, target, also, panAlways = false, getView, setView, onZoomChange, onTransform } = {}) {
+export function makeZoomable(el, { key, geometry, target, also, panAlways = false, getView, setView } = {}) {
   let dragMoved = 0;
+  let endDrag = () => {};
 
-  const targetFor = (ev) => target ? target(ev) : { key, box: el.parentElement };
+  const targetFor = (ev) => target ? target(ev) : { key, box: el.parentElement, geometry };
+  const frameFor = t => typeof t.geometry === "function" ? t.geometry() : t.geometry;
+  const measuredFrame = t => {
+    const g = frameFor(t), r = t.box?.getBoundingClientRect();
+    // A cached fit cannot authorize a gesture during hidden/layout transitions.
+    return readyViewGeometry(g) && r?.width > 0 && r?.height > 0
+      && Math.abs(g.width-r.width) < 1 && Math.abs(g.height-r.height) < 1 ? g : null;
+  };
   // SNAPSHOT the stored view: getView may hand back a live store proxy —
   // after the target's write lands, a proxy reads the NEW value and the
   // peer's delta would compute against it (ds = 1, the no-op entangle).
   // Non-finite fields are sanitized: a NaN that ever reached a persisted
   // view (a zero-box gesture) reads as identity, never as poison.
-  const read = (k) => {
-    const v = k && getView ? getView(k) : null;
-    if (!v) return { ...IDENTITY };
-    const num = (x) => (Number.isFinite(x) ? x : 0);
-    return { s: num(v.s) || 1, txf: num(v.txf), tyf: num(v.tyf) };
+  const read = (t, g) => {
+    const p = zoomViewPixels(t.key && getView ? getView(t.key, g) : null, g);
+    return { s: p.s, txf: p.tx / g.width, tyf: p.ty / g.height };
   };
 
   const clampView = (v) => {
@@ -45,46 +52,30 @@ export function makeZoomable(el, { key, target, also, panAlways = false, getView
     if (!panAlways && s <= 1.001) return { ...IDENTITY };
     return { s, txf: v.txf, tyf: v.tyf };
   };
-  const storeView = (k, v) => {
-    if (!k || !setView) return;
-    setView(k, v.s > 1 || v.txf || v.tyf
-      ? { s: v.s, txf: v.txf, tyf: v.tyf, fh: false, fv: false, rot: 0 }
-      : null);
+  const storeView = (t, v, g) => {
+    if (!t.key || !setView) return;
+    const crop = readZoomView(v, g);
+    setView(t.key, isIdentityView(crop) ? null : crop);
   };
-  const transformFor = (v, box) => (v.s === 1 && !v.txf && !v.tyf)
-    ? ""
-    : `translate(${v.txf * box.offsetWidth}px, ${v.tyf * box.offsetHeight}px) scale(${v.s})`;
 
   // one writer per gesture: the target key gets the new view; the entangled
   // peer (when locked) gets the same DELTA against its own stored view —
   // never the target's absolute crop
-  const write = (t, prev, next) => {
+  const write = (t, prev, next, g) => {
     next = clampView(next);
-    storeView(t.key, next);
-    const otherKey = also?.(t);
-    if (otherKey && getView) {
+    // Snapshot the peer before either write (ports may return live proxies).
+    const other = also?.(t), og = other && frameFor(other);
+    const o = other?.key !== t.key && readyViewGeometry(og) && getView ? read(other, og) : null;
+    storeView(t, next, g);
+    if (o) {
       const ds = next.s / prev.s;
-      const o = read(otherKey);
-      storeView(otherKey, clampView({
+      storeView(other, clampView({
         s: o.s * ds,
         txf: o.txf + (next.txf - prev.txf),
         tyf: o.tyf + (next.tyf - prev.tyf),
-      }));
+      }), og);
     }
-    onZoomChange?.(next.s > 1);
-    onTransform?.(transformFor(next, t.box), next.s > 1);
   };
-
-  // restore-on-bind: the card path renders the stored view's transform
-  // immediately (no write — a remount must not dirty the store)
-  if (key && getView && setView) {
-    const stored = getView(key);
-    if (stored) {
-      const v = clampView(stored);
-      onZoomChange?.(v.s > 1);
-      onTransform?.(transformFor(v, el.parentElement), v.s > 1);
-    }
-  }
 
   const onWheel = (e) => {
     if (!e.ctrlKey) return;
@@ -92,8 +83,9 @@ export function makeZoomable(el, { key, target, also, panAlways = false, getView
     const t = targetFor(e);
     // a zero-sized reference box is never a valid target (a hidden element
     // would divide by zero and poison the view with NaN)
-    if (!t.box || t.box.offsetWidth === 0 || t.box.offsetHeight === 0) return;
-    const cur = read(t.key);
+    const g = measuredFrame(t);
+    if (!g) return;
+    const cur = read(t, g);
     const next = Math.min(12, Math.max(1, cur.s * Math.exp(-e.deltaY * 0.012)));
     if (next === cur.s) return;
     // zoom toward the cursor, in the target box's frame
@@ -104,38 +96,43 @@ export function makeZoomable(el, { key, target, also, panAlways = false, getView
       s: next,
       txf: cur.txf + k * ((e.clientX - ox) / r.width - cur.txf),
       tyf: cur.tyf + k * ((e.clientY - oy) / r.height - cur.tyf),
-    });
+    }, g);
   };
 
   const onDown = (e) => {
     dragMoved = 0;
     const t = targetFor(e);
-    const start = read(t.key);
+    const g = measuredFrame(t);
+    if (!g) return;
+    const start = read(t, g);
     // the drag pans at any zoom when panAlways — otherwise zoomed-only
     if (!panAlways && start.s <= 1) return;
     // a zero-sized reference box is never a valid target (see onWheel)
-    if (!t.box || t.box.offsetWidth === 0 || t.box.offsetHeight === 0) return;
+    endDrag();
     e.preventDefault();
     e.stopPropagation();
     el.setPointerCapture(e.pointerId);
     let lx = e.clientX, ly = e.clientY;
-    let cur = start;
     const move = (ev) => {
+      const g = measuredFrame(t);
+      if (!g) return;
+      const cur = read(t, g);
       dragMoved += Math.abs(ev.clientX - lx) + Math.abs(ev.clientY - ly);
       const next = {
         s: cur.s,
-        txf: cur.txf + (ev.clientX - lx) / (cur.s * t.box.offsetWidth),
-        tyf: cur.tyf + (ev.clientY - ly) / (cur.s * t.box.offsetHeight),
+        txf: cur.txf + (ev.clientX - lx) / (cur.s * g.width),
+        tyf: cur.tyf + (ev.clientY - ly) / (cur.s * g.height),
       };
-      write(t, cur, next);
-      cur = next;
+      write(t, cur, next, g);
       lx = ev.clientX; ly = ev.clientY;
     };
     const up = () => {
       el.removeEventListener("pointermove", move);
       el.removeEventListener("pointerup", up);
       el.removeEventListener("pointercancel", up);
+      endDrag = () => {};
     };
+    endDrag = up;
     el.addEventListener("pointermove", move);
     el.addEventListener("pointerup", up);
     el.addEventListener("pointercancel", up);
@@ -157,6 +154,7 @@ export function makeZoomable(el, { key, target, also, panAlways = false, getView
 
   return {
     dispose() {
+      endDrag();
       el.removeEventListener("wheel", onWheel);
       el.removeEventListener("pointerdown", onDown);
       el.removeEventListener("click", onClick, true);

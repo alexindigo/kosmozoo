@@ -44,6 +44,7 @@ import { makeCommandHandles } from "./command-handles.js";
 import { registerCoreCommands, commandFacades } from "./core-commands.js";
 import { makeInputPolicy } from "./input-policy.js";
 import { launchNotice } from "/js/launch-notice.mjs";
+import { readZoomView, readyViewGeometry } from "/js/zoom-view.mjs";
 
 // stored host if still present, else first online, else first
 function initialHost(hosts, stored) {
@@ -70,7 +71,7 @@ export function makeAppStore({ subscribeSources = typeof window !== "undefined" 
       subfolders: { supported: null, reason: "Output inventory has not loaded" } },
     selected: {},         // id -> true (bulk actions; session-only)
     anchors: [],          // [{ name, src(dataURL), meta? }] — local drops, persisted
-    views: {},            // per-image zoom views — key -> { s, txf, tyf, … } ( fold)
+    views: {},            // per-resource version2 image-space crops (legacy read below)
     // workbench: the two-sided comparator. The pair is feed current ×
     // right-pane current (session-only); modes and mask prefs are session-only.
     diff: {
@@ -1213,9 +1214,19 @@ export function makeAppStore({ subscribeSources = typeof window !== "undefined" 
   // --- per-image zoom views (folded from views.mjs — : no second
   // module-level store; the state lives in the tree and the debounced
   // persistence lives here). Keys are image ids ("host:filename") for
-  // candidates, "anchor:<name>" for anchors; box-fraction units;
+  // candidates, "anchor:<name>" for anchors; normalized image-space centres;
   // default-absent (an untouched view is absent, not a default object).
   const viewDirty = new Set();
+  // Compatibility belongs to the owning port, not to individual renderers.
+  // A legacy value is retained untouched until a real fit is available; the
+  // first compatible read replaces it once, so resize never reinterprets it.
+  function viewFor(views, key, geometry, write) {
+    const v = views[key] ?? null;
+    if (!v || v.version === 2 || !readyViewGeometry(geometry)) return v;
+    const converted = readZoomView(v, geometry);
+    write(key, converted);
+    return converted;
+  }
   let viewsTimer = null;
   async function flushViews() {
     clearTimeout(viewsTimer);
@@ -1758,11 +1769,11 @@ export function makeAppStore({ subscribeSources = typeof window !== "undefined" 
         for (const [k, v] of Object.entries(stored)) if (v) clean[k] = v;
         setSt("views", reconcile(clean));
       },
-      get(key) { return st.views[key] ?? null; },
+      get(key, geometry) { return viewFor(st.views, key, geometry, actions.views.set); },
       // persist:false — a restore writing the stored view back is a read,
       // not a write: it must not schedule a settings PATCH
       set(key, v, { persist = true } = {}) {
-        if (v) setSt("views", key, v);
+        if (v) setSt("views", key, reconcile(v));
         else setSt("views", key, undefined);
         if (!persist) return;
         viewDirty.add(key);
@@ -1915,8 +1926,8 @@ export function makeAppStore({ subscribeSources = typeof window !== "undefined" 
       // Mechanical zoom port, local to the viewer session. Card/inline keys
       // retain their own persisted owner; opening never consumes those crops.
       views: {
-        get: key => st.diff.views[key] ?? null,
-        set: (key, view) => setSt("diff", "views", key, view ?? undefined),
+        get: (key, geometry) => viewFor(st.diff.views, key, geometry, actions.diff.views.set),
+        set: (key, view) => setSt("diff", "views", key, view ? reconcile(view) : undefined),
       },
       // read-only model query the workbench surface derives its src from
       resolve: resolveSide,

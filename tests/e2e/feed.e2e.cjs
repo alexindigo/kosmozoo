@@ -709,8 +709,8 @@ async function railMotion(page) {
       await s.actions.anchors.addFiles([new File([blob], 'source-refresh-anchor.png', { type: 'image/png' })]);
       s.actions.ui.setWorkspace('anchors');
       s.actions.diff.setSplit(.37);
-      s.actions.views.set('fake:flux-basic.png', { s: 2, txf: .1, tyf: .2 }, { persist: false });
-      s.actions.views.set('anchor:source-refresh-anchor.png', { s: 2, txf: .1, tyf: .2 }, { persist: false });
+      s.actions.views.set('fake:flux-basic.png', { version: 2, s: 2, cx: .4, cy: .3 }, { persist: false });
+      s.actions.views.set('anchor:source-refresh-anchor.png', { version: 2, s: 2, cx: .4, cy: .3 }, { persist: false });
       const { api } = await import('/js/api.mjs');
       let release; const gate = new Promise((r) => release = r);
       window.__sourceApi = { setJudgment: api.setJudgment, inventory: api.inventory, want: api.want };
@@ -745,8 +745,8 @@ async function railMotion(page) {
     const before = await page.evaluate(`(async () => {
       const s = ${KZ}; s.handles.invoke('workbench.openEntry', { id: s.state.currentEntry().entry.id });
       s.handles.invoke('workbench.mode', { mode: 'split' });
-      s.actions.diff.views.set('fake:flux-basic.png', { s: 1.5, txf: .05, tyf: -.1 });
-      s.actions.diff.views.set('anchor:source-refresh-anchor.png', { s: 2.5, txf: -.15, tyf: .25 });
+      s.actions.diff.views.set('fake:flux-basic.png', { version: 2, s: 1.5, cx: .45, cy: .6 });
+      s.actions.diff.views.set('anchor:source-refresh-anchor.png', { version: 2, s: 2.5, cx: .65, cy: .25 });
       window.__sourceCard = document.querySelector('${origin}');
       return { current: s.state.current(), trail: s.state.currentStack(), url: location.href,
         top: window.__sourceCard.getBoundingClientRect().top, pair: s.state.diffPair(),

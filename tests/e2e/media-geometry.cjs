@@ -28,7 +28,7 @@ module.exports = async ({ page, KZ, check, capture, control }) => {
       ['image',names[1],['full','two-up','one-up','split','difference']],
       ['audio',names[3],['full']],
     ]) {
-      await page.evaluate(`(async()=>${KZ}.actions.views.set('fake:${name}',{s:3,txf:.1,tyf:.5},{persist:false}))()`);
+      await page.evaluate(`(async()=>${KZ}.actions.views.set('fake:${name}',{version:2,s:3,cx:.4,cy:.25},{persist:false}))()`);
       await invoke('workbench.openPair',{left:{source:'fake',file:name},right:{source:'fake',file:name}});
       await page.poll(`document.querySelector('.dz-a ${kind==='image'?'img':kind}')?.${kind==='image'?'naturalWidth>0':'readyState>=2'}`);
       check(kind+': every open defaults to A-only Full despite persisted card pan/zoom',await page.evaluate(`(async()=>{const s=${KZ};return s.state.diff.mode==='full'&&!document.querySelector('.dz-b')&&Object.keys(s.state.diff.views).length===0&&s.state.views['fake:${name}'].s===3&&document.querySelector('.dz-a .dz-img').style.transform===''})()`));
@@ -52,8 +52,8 @@ module.exports = async ({ page, KZ, check, capture, control }) => {
         await invoke('workbench.mode',{mode:'full'});
         const p=await page.evaluate(`(()=>{const r=document.getElementById('diffStage').getBoundingClientRect();return{x:r.x+r.width/2,y:r.y+r.height/2}})()`);
         await page.drag(p.x,p.y,p.x+40,p.y+20);
-        await page.poll(`(async()=>!!${KZ}.state.diff.views['fake:${name}']?.txf)()`);
-        check(kind+': viewer gesture leaves persisted card crop intact',await page.evaluate(`(async()=>{const v=${KZ}.state.views['fake:${name}'];return v.s===3&&v.txf===.1&&v.tyf===.5})()`));
+        await page.poll(`(async()=>${KZ}.state.diff.views['fake:${name}']?.cx!==undefined&&${KZ}.state.diff.views['fake:${name}'].cx!==.5)()`);
+        check(kind+': viewer gesture leaves persisted card crop intact',await page.evaluate(`(async()=>{const v=${KZ}.state.views['fake:${name}'];return v.s===3&&v.cx===.4&&v.cy===.25})()`));
       }
       await invoke('workbench.close');
       await invoke('workbench.openPair',{left:{source:'fake',file:name},right:{source:'fake',file:name}});
