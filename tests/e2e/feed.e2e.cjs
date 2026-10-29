@@ -625,14 +625,15 @@ async function railMotion(page) {
     } catch { /* engine teardown handles it */ }
   }
 
-  // The topbar-only split retains the feed boundary; the filter immediately
-  // follows the folder and precedes the pins across expansion and real drag.
+  // The topbar's sections size from content (not the pane divider); the filter
+  // immediately follows the folder and precedes the pins, and the feed section
+  // never overlaps the workspace section, across expansion and a real drag.
   try {
     await page.evaluate(`(async () => {
       const s = ${KZ}; await s.actions.hosts.select('fake'); s.actions.ui.setFilter('');
     })()`);
     const geometry = `(() => {
-      const region = document.getElementById('candidatesCol').getBoundingClientRect();
+      const region = document.querySelector('#chrome .chrome-workspace').getBoundingClientRect();
       const icon = document.getElementById('filterBtn').getBoundingClientRect();
       const control = document.querySelector('.feed-filter').getBoundingClientRect();
       const input = document.getElementById('filter').getBoundingClientRect();
@@ -642,8 +643,8 @@ async function railMotion(page) {
       const gap = parseFloat(getComputedStyle(row).columnGap);
       const inset = parseFloat(getComputedStyle(document.getElementById('chrome')).getPropertyValue('--chrome-inset'));
       return { delta: Math.max(Math.abs(control.left - folder.right - gap), Math.abs(pins.left - control.right - gap),
-          Math.abs(row.getBoundingClientRect().right - (region.right - inset))), icon: icon.right,
-        inputLeft: input.left, inputRight: input.right, iconLeft: icon.left, boundary: region.right,
+          Math.max(0, row.getBoundingClientRect().right + inset - region.left)), icon: icon.right,
+        inputLeft: input.left, inputRight: input.right, iconLeft: icon.left, boundary: region.left,
         barRight: document.getElementById('wsBar').getBoundingClientRect().right, viewport: innerWidth };
     })()`;
     for (const width of [1400, 780, 480]) {
@@ -655,7 +656,7 @@ async function railMotion(page) {
         await page.clickAt('#filterBtn');
         await page.poll(`!document.getElementById('filter').hidden && document.activeElement.id === 'filter'`);
         const after = await page.evaluate(geometry);
-        check(`filter geometry ${width}/${space}: after folder, before pins, input left, within feed boundary`,
+        check(`filter geometry ${width}/${space}: after folder, before pins, input left, clear of the workspace section`,
           before.delta <= 1 && after.delta <= 1 && after.inputRight <= after.iconLeft && after.barRight <= after.viewport,
           JSON.stringify({ before, after }));
         await page.evaluate(`(async () => {
@@ -663,7 +664,7 @@ async function railMotion(page) {
           await s.actions.hosts.patch('another', { pinned: true }); s.actions.folders.select('geometry/long-caption');
         })()`);
         await page.poll(`(${geometry}).delta <= 1`);
-        check(`folder/pin geometry ${width}/${space}: filter precedes separated scroll strip within the feed boundary`, await page.evaluate(`(() => {
+        check(`folder/pin geometry ${width}/${space}: filter precedes separated scroll strip clear of the workspace section`, await page.evaluate(`(() => {
           const filter = document.querySelector('.feed-filter').getBoundingClientRect();
           const folder = document.getElementById('outputFolder').getBoundingClientRect();
           const separator = document.querySelector('.pinned-separator').getBoundingClientRect();
@@ -682,14 +683,14 @@ async function railMotion(page) {
         })()`);
         await page.drag(divider.x, divider.y, Math.max(40, divider.x - 30), divider.y);
         await page.poll(`(${geometry}).delta <= 1`);
-        check(`filter geometry ${width}/${space}: follows trusted pane drag`, (await page.evaluate(geometry)).delta <= 1);
+        check(`filter geometry ${width}/${space}: unchanged by a trusted pane drag`, (await page.evaluate(geometry)).delta <= 1);
         await page.key('Escape');
         await page.poll(`document.getElementById('filter').hidden`);
       }
     }
     await page.send('Emulation.setDeviceMetricsOverride', { width: 1400, height: 900, deviceScaleFactor: 1, mobile: false });
     await page.evaluate(`(async () => ${KZ}.actions.anchors.setPaneWidth(300))()`);
-  } catch (error) { check('topbar JS-synchronized geometry', false, error.message); }
+  } catch (error) { check('topbar content-sized geometry', false, error.message); }
 
   // End-of-chain proof: real external completion -> listing -> real image
   // acquisition -> decoded card, while the incremental merge retains edits.

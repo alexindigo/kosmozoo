@@ -146,7 +146,7 @@ export function Header() {
   });
 
   return (
-    <header id="chrome" class="chrome-split" style={{ "--chrome-pane-width": `${store.state.anchorPaneWidth()}px` }}>
+    <header id="chrome" class="chrome-split">
       <div class="chrome-feed">
         <div class="chrome-feed-inner">
           <img class="logo" src="/logo-64.png" alt="kosmozoo" width={24} height={24} title={store.state.appVersion() || undefined} />

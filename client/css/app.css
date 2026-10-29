@@ -1003,13 +1003,13 @@ body:has(#diff:not([hidden])) #statusCol { bottom: 56px; }
   padding: 4px; }
 .vz-close:hover { color: var(--foreground); }
 
-/* The topbar has its own split. JS supplies the existing store-owned pane
-   width; these tracks mirror the main pane's bounds and net divider/bar
-   footprint without changing the main composition or measuring its DOM. */
-#chrome.chrome-split { --chrome-inset: 8px; display: grid; gap: 0; padding: 0;
-  grid-template-columns: minmax(0, 1fr) calc(clamp(220px, var(--chrome-pane-width), 70vw) + 27px); }
+/* The topbar's two sections size from their own content: the feed section
+   takes the remaining width, the workspace section keeps its content width.
+   Neither follows the main pane divider. */
+#chrome.chrome-split { --chrome-inset: 8px; display: flex; gap: 0; padding: 0; }
 #chrome .chrome-feed, #chrome .chrome-workspace { min-width: 0; padding-inline: var(--chrome-inset); }
-#chrome .chrome-feed { height: 100%; container: chrome-feed / inline-size; }
+#chrome .chrome-feed { flex: 1 1 auto; height: 100%; container: chrome-feed / inline-size; }
+#chrome .chrome-workspace { flex: 0 1 auto; }
 #chrome .chrome-feed-inner, #chrome .chrome-workspace { display: flex; gap: 8px;
   align-items: center; min-width: 0; height: 100%; }
 #chrome .chrome-workspace { justify-content: flex-end; }

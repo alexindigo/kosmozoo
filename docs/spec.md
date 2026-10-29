@@ -587,10 +587,10 @@ fill. Source-row pin and auto-refresh toggles save independently without selecti
 or closing the dropdown. Folder refresh controls are disabled with an explicit
 reason; pinned folders have a grey circle labelled with their no-generation reason.
 The filter opens/focuses immediately left of its icon; click/Escape collapses
-without clearing its query. Header owns a separate split synchronized through
-the existing store-owned pane width, with scoped bounds matching the main pane
-and its adjacent divider/bar footprint. Main composition and its layout styles
-are unchanged; expanding the filter pushes the scrollable pins right. Unhide/Hide up-voted
+without clearing its query. The header's feed and workspace sections size from
+their own content: the feed section takes the remaining width and the workspace
+section its content width; neither follows the main pane divider. Main
+composition and its layout styles are unchanged; expanding the filter pushes the scrollable pins right. Unhide/Hide up-voted
 chrome buttons are removed; their session visibility actions and judgment
 preferences remain available to existing non-chrome consumers.
 
