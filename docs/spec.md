@@ -266,6 +266,17 @@ bracketed stable prompt identity and content continuity; stale/ambiguous counter
 are indeterminate, and disconnect/idle/prompt replacement clears fill. A slow
 unchanged operation count remains valid. Transfer-byte counters are excluded.
 
+Pinned sources render one 24px concentric SVG: the existing current-step sector
+inside a thin workflow arc, clockwise from 12 o'clock. Known workflow progress
+uses the shared secondary token; unavailable workflow data uses a muted half arc
+turning linearly every 2.5s (static with reduced motion). The faint outer track
+and arc exist only while running. Idle, unknown and disconnected states have no
+outer arc; disconnected activity delivery withholds both measures. Tooltip and
+accessible label share plain wording: "workflow about N of M steps" (N is the
+whole completed-step portion of done), "current step V/M (live)" or "(from log)".
+Only the engine's other-client reason adds "queued from another ComfyUI tab";
+other missing data has a generic unavailable explanation.
+
 Startup establishes full retained-history baseline without replaying old finishes.
 Regular history reads start at 64 and expand until the previous completion
 boundary is found or retained history is exhausted. Distinct terminal IDs advance

@@ -436,6 +436,8 @@ async function attempt(name, fn) {
     check("scroll to end loads tail images", true);
   });
 
+  await attempt('workflow progress instrument', () => require('./workflow-progress.cjs')({ page, FAKE, KZ, check, capture: sourceShot, control: sourceControl }));
+
   await attempt("source chrome: pointer paths, shared persistence, progress and filter layer", async () => {
     const pin = '#hostList [data-source="fake"] .pin';
     const auto = '#hostList [data-source="fake"] .auto-refresh';

@@ -1044,6 +1044,12 @@ body:has(#diff:not([hidden])) #statusCol { bottom: 56px; }
 #chrome .source-progress.unknown { color: var(--warning); }
 #chrome .source-progress.disconnected { color: var(--error); }
 #chrome .source-progress-mark { fill: none; stroke: currentColor; stroke-width: 1.5; stroke-linecap: round; }
+#chrome .source-progress-track, #chrome .source-progress-workflow { fill: none; stroke-width: 1.5; }
+#chrome .source-progress-track { stroke: var(--border); }
+#chrome .source-progress-workflow { stroke: var(--secondary); }
+#chrome .source-progress-workflow.unavailable { stroke: var(--foreground-dim);
+  transform-origin: center; animation: source-workflow-turn 2.5s linear infinite; }
+@keyframes source-workflow-turn { from { transform: rotate(-90deg); } to { transform: rotate(270deg); } }
 /* Density follows the topbar's feed allocation, including divider resizing. */
 @container chrome-feed (max-width: 220px) {
   #chrome .chrome-feed-inner { gap: 1px; }
@@ -1058,6 +1064,7 @@ body:has(#diff:not([hidden])) #statusCol { bottom: 56px; }
 }
 @media (prefers-reduced-motion: reduce) {
   #chrome .source-progress, #chrome .chrome-icon { transition: none; }
+  #chrome .source-progress-workflow.unavailable { animation: none; }
 }
 
 /* Folder scope and pin-group allocation remain inside Header's own split. */
