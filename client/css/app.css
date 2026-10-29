@@ -1146,3 +1146,6 @@ body:has(#diff:not([hidden])) #statusCol { bottom: 56px; }
 @media (max-width: 620px) {
   .vz-left { flex: 0 0 auto; }
 }
+
+.vz-folder-chooser { display: flex; align-items: center; flex: 0 0 auto; }
+.vz-folder-chooser button:focus-visible { outline: 2px solid var(--secondary); outline-offset: 2px; }

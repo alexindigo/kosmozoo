@@ -6,6 +6,7 @@
 // (https://github.com/tabler/tabler-icons/blob/master/LICENSE)
 
 const PATHS = {
+  "folder": `<path d="M5 4h4l3 3h7a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2z" />`,
   "volume": `<path d="M4 9h4l5-4v14l-5-4H4z" /><path d="M17 8a6 6 0 0 1 0 8M20 5a10 10 0 0 1 0 14" />`,
   "volume-off": `<path d="M4 9h4l5-4v14l-5-4H4zM17 9l5 6M22 9l-5 6" />`,
   "repeat": `<path d="M4 10V7h15l-3-3M20 14v3H5l3 3M19 7l-3 3M5 17l3-3" />`,

@@ -18,6 +18,14 @@ const pathRequest = async (route, body, origin) => {
   return data;
 };
 export const listFolder = path => pathRequest("folder-images", { path });
+export const folderCapability = () => req("GET", "/api/features/variations/folder-chooser");
+export const chooseFolder = async (path, signal) => {
+  const response = await fetch("/api/features/variations/choose-folder", { method: "POST", signal,
+    headers: { "Content-Type": "application/json" }, body: JSON.stringify({ path }) });
+  const result = await response.json();
+  if (!response.ok) throw new Error(result.error || "Folder chooser unavailable");
+  return result;
+};
 export const pathThumbnail = path => `/api/features/variations/folder-image?path=${encodeURIComponent(path)}`;
 export const inspectPath = (collection, path, current, kind, origin, names = []) =>
   pathRequest(`inspect-path/${encodeURIComponent(collection)}`, { path, current, kind, names }, origin);

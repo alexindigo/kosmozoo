@@ -24,6 +24,8 @@ export function install(store) {
     // they join the Store's one acquisition policy as foreground displays.
     registerThumbnail: input => store.surfaceDisplay(input),
     listFolder: api.listFolder,
+    folderCapability: api.folderCapability,
+    chooseFolder: api.chooseFolder,
     pathThumbnail: api.pathThumbnail,
     inspectPath: api.inspectPath,
     uploadPath: api.uploadPath,

@@ -117,6 +117,7 @@ function ModalBody(props) {
   // exists in this image's graph render (writeOnly params — widget-only
   // custom seed nodes etc. — are skipped for now).
   const [probe] = createResource(() => services.probe(image));
+  const [folderCapability] = createResource(() => services.folderCapability());
 
   let initializedProbe = false;
   createEffect(() => {
@@ -252,6 +253,7 @@ function ModalBody(props) {
                         thumbnail={name => services.inputThumbnail(image.host, name, image.origin)}
                         registerThumbnail={services.registerThumbnail}
                         pathThumbnail={services.pathThumbnail} onAddFolder={path => editor.addFolder(id, path)}
+                        folderCapability={() => folderCapability.error ? null : folderCapability()} onChooseFolder={services.chooseFolder}
                         registerPopup={registerImagePopup} registerEditor={registerEditor} rememberFocus={rememberFocus} />
                     </Show>
                   );

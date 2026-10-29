@@ -35,7 +35,8 @@ export function ImageSetPanel(props) {
         <input type="file" ref={fileInput} class="vz-imgfilespick" hidden multiple accept="image/*" onChange={e =>
           props.onAdd([...e.currentTarget.files].filter(file => UPLOAD_IMG_EXT.test(file.name)).map(uploadImage))} />
         <button type="button" class="vz-image-action" {...focusMemory(props.rememberFocus)} onClick={() => fileInput.click()}>Add files…</button>
-        <FolderImages onAdd={props.onAddFolder} rememberFocus={props.rememberFocus} />
+        <FolderImages onAdd={props.onAddFolder} capability={props.folderCapability} onChoose={props.onChooseFolder}
+          registerEditor={props.registerEditor} rememberFocus={props.rememberFocus} />
       </div>
     </div>
   </div>;

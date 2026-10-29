@@ -612,6 +612,23 @@ returns sorted canonical absolute paths and rejects more than 500 images with an
 explicit message instead of silently truncating. Directory paths use the same
 engine-host trust boundary as `folder:` sources, not the browser's filesystem.
 
+The shared folder icon immediately to the path field's right asks the **engine**
+to open the desktop portal directory chooser; it never uses browser directory
+selection. `GET /api/features/variations/folder-chooser` returns `{available,reason}`.
+Only app mode with a reachable session bus and FileChooser version 3+ enables it;
+serve/container/no-portal cases disable it with “Folder chooser needs the desktop
+app”, without disabling the typed path or Add. `POST /choose-folder` accepts
+`{path:""|absolutePath}` and returns `{path,cancelled:false}` or
+`{path:null,cancelled:true}`. Selection fills the path; Add still explicitly acquires
+the recursive set. Cancel/errors preserve the draft, and later typing wins over
+late chooser results. Editor suspension/unmount aborts the request.
+The context-owned desktop service uses an in-project Deno Unix-socket D-Bus client
+(SASL EXTERNAL, Hello, Properties.Get, pre-call signal subscription, OpenFile with
+`directory:true`, Response). It adds no runtime dependency. Each operation owns a
+connection; responses match the portal's unique sender and returned handle, including
+early signals/legacy handles. Only one local file URI is accepted and decoded once.
+Abort, five-minute timeout and engine shutdown close the request and connection.
+
 `POST /api/features/variations/folder-images` accepts `{path}` and returns
 `{path,items:[{kind:"server-path",name,path}],limit:500}`. `GET /folder-image?path=...`
 serves an image-only regular file for its thumbnail, with `Cache-Control:no-store`.

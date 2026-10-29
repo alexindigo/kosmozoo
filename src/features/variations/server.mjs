@@ -217,6 +217,14 @@ export function lineageTag(source, params) {
 // app: { store, cache, hosts, ingest, comfy, backings } — the engine surface
 // for features.
 export function register(app) {
+  app.route("GET", "/folder-chooser", async () => Response.json(await app.desktop.capability()));
+  app.route("POST", "/choose-folder", async req => {
+    let body;
+    try { body = await req.json(); } catch { return Response.json({ error: "Folder path required" }, { status: 400 }); }
+    if (!body || typeof body.path !== "string") return Response.json({ error: "Folder path required" }, { status: 400 });
+    try { return Response.json(await app.desktop.choose({ path: body.path, signal: req.signal })); }
+    catch (error) { return Response.json({ error: error.message }, { status: error.status ?? 502 }); }
+  });
   const source = (req, host) => {
     const origin = expectedOrigin(req), token = app.backings.capture(host);
     if (!origin || !token || !sameOrigin(origin, sourceOrigin(host, app.backings.source(host))) || !app.backings.accepting()) throw Object.assign(new Error("Source origin changed"), { status: 412 });
