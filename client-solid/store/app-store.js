@@ -712,6 +712,7 @@ export function makeAppStore({ subscribeSources = typeof window !== "undefined" 
           width: enriched?.width && enriched.width !== start?.width ? enriched.width : e.width ?? enriched?.width ?? null,
           height: enriched?.height && enriched.height !== start?.height ? enriched.height : e.height ?? enriched?.height ?? null,
           modified: e.modified ?? null,
+          arrivalSeq: e.arrivalSeq ?? null,
         };
       })));
       s.inventoryReady = true;
@@ -723,6 +724,7 @@ export function makeAppStore({ subscribeSources = typeof window !== "undefined" 
       if (wasReady) setFeedMergeNonce((n) => n + 1);
     });
     judgments.endRead(read);
+    s.source?.acceptArrivals(inventory.arrivals, true);
     mirrorCurrentHash();
     if (!wasReady) restoreBrowse(idx);
     else if (browseRestore()) restoreBrowse(findByFile(current()?.image));
@@ -1340,6 +1342,7 @@ export function makeAppStore({ subscribeSources = typeof window !== "undefined" 
           const record = sourceRecords.get(id);
           confirmAttributes(record, value);
           acceptActivity(record, value.activity);
+          record.acceptArrivals(value.arrivals, host() === id);
         }
         streamEpoch = frame.epoch; streamRevision = frame.revision; registryRevision++;
         setSourcesReady(true);
@@ -1562,6 +1565,7 @@ export function makeAppStore({ subscribeSources = typeof window !== "undefined" 
         }
         batch(() => {
           setSt("inventory", "loading", true);
+          sourceRecords.get(name)?.markSeen();
           setHost(name);
           beginBrowse(target);
           assignCurrent(target.current ? { remote: name, image: target.current } : null, { persist: false, intent: false });
@@ -2391,6 +2395,10 @@ export function makeAppStore({ subscribeSources = typeof window !== "undefined" 
     get hosts() { return sourceRecords.hosts(); },
     noSources,
     get sourceActivity() { return sourceRecords.activities(); },
+    sourceHasNew(id) {
+      hostsView(); // membership is reactive; exact IDs stay private Map keys.
+      return host() !== id && !!sourceRecords.get(id)?.hasNew;
+    },
     sourceDelivery,
     appVersion,
     get sourceSaving() { return sourceRecords.saving(); },

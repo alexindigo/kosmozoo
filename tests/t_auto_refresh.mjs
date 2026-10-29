@@ -37,8 +37,12 @@ async function withClient(run, prepare = () => {}) {
   const row = (name) => ({ name, size: 100, hash: null, width: 100, height: 50, meta: null, judgment: null, extracted: false });
   const rows = [row("a.png"), row("b.png")];
   let stream, revision = 0;
-  const frame = () => sourceFrame(Object.fromEntries(Object.entries(sources).map(([id, source]) =>
-    [id, { ...source, ...(id === "h" ? { activity } : {}) }])), revision++);
+  const frame = () => {
+    const snapshot = sourceFrame(Object.fromEntries(Object.entries(sources).map(([id, source]) =>
+      [id, { ...source, ...(id === "h" ? { activity } : {}) }])), revision++);
+    for (const [id, source] of Object.entries(sources)) if (source.arrivals) snapshot.sources[id].arrivals = source.arrivals;
+    return snapshot;
+  };
   const emit = async (snapshot = null) => {
     if (snapshot) Object.assign(activity, snapshot);
     stream.snapshot(frame());
@@ -78,6 +82,24 @@ async function withClient(run, prepare = () => {}) {
     if (oldHistory === undefined) delete globalThis.history; else globalThis.history = oldHistory;
   }
 }
+
+Deno.test("source seen: session-only attention follows unselected arrivals, viewing and opening", async () => {
+  await withClient(async ({ store, boot, sources, emit }) => {
+    await boot;
+    assertEquals(store.state.sourceHasNew("h"), false);
+    sources.h.arrivals = { sequence: 3, latestVisibleSeq: 3 }; await emit();
+    await store.actions.hosts.select("other");
+    assertEquals(store.state.sourceHasNew("h"), false, "viewed source continuously keeps its session cursor current");
+    sources.h.arrivals = { sequence: 4, latestVisibleSeq: 4 }; await emit();
+    assertEquals(store.state.sourceHasNew("h"), true);
+    await store.actions.hosts.select("h");
+    await store.actions.hosts.select("other");
+    assertEquals(store.state.sourceHasNew("h"), false, "opening clears without a network cursor write");
+  }, ({ sources }) => {
+    sources.other = { address: "other:1", kind: "comfy", online: true, autoRefresh: false };
+    sources.h.arrivals = { sequence: 2, latestVisibleSeq: 2 };
+  });
+});
 
 Deno.test("source reachability: initial/retry failures dedupe by source, recovery clears and later outage reports again", async () => {
   let offline = true, reads = 0;

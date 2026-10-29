@@ -437,6 +437,7 @@ async function attempt(name, fn) {
   });
 
   await attempt('workflow progress instrument', () => require('./workflow-progress.cjs')({ page, FAKE, KZ, check, capture: sourceShot, control: sourceControl }));
+  await attempt('source new content', () => require('./source-new-content.cjs')({ page, ENGINE, FAKE, KZ, check, capture: sourceShot }));
 
   await attempt("source chrome: pointer paths, shared persistence, progress and filter layer", async () => {
     const pin = '#hostList [data-source="fake"] .pin';

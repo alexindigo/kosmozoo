@@ -54,7 +54,9 @@ export async function buildContext({ env = Deno.env.toObject(), fakes = {}, star
   const cache = fakes.cache ?? new Cache(
     env.KOZMOZOO_CACHE ?? `${env.HOME ?? "/tmp"}/.local/share/kosmozoo/cache`,
   );
-  const inventory = remember("inventory", fakes.inventory ?? backings.makeCollectionInventory(hosts), fakes.inventory != null);
+  const inventory = remember("inventory", fakes.inventory ?? backings.makeCollectionInventory(hosts, {
+    onSnapshot: (id, _address, snapshot) => store.arrivals.observe(id, snapshot.items.map(item => item.name)),
+  }), fakes.inventory != null);
   const ingest = fakes.ingest ?? new Ingest(store, hosts, {
     cache,
     capture: inventory.capture, isCurrent: inventory.isCurrent,
@@ -75,7 +77,9 @@ export async function buildContext({ env = Deno.env.toObject(), fakes = {}, star
       }
     },
   }), fakes.jobs != null);
-  const sourceActivity = remember("sourceActivity", fakes.sourceActivity ?? new SourceActivity({ store, hosts, inventory, jobs }), fakes.sourceActivity != null);
+  const sourceActivity = remember("sourceActivity", fakes.sourceActivity ?? new SourceActivity({ store, hosts, inventory, jobs,
+    onMembership: () => prefetch.reconcile?.(),
+  }), fakes.sourceActivity != null);
   const desktop = remember("desktop", fakes.desktop ?? directoryPortal({ mode: () => runtime?.()?.mode, env }), fakes.desktop != null);
 
   // plugin routes are collected here and mounted once the router exists —

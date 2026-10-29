@@ -251,9 +251,12 @@ export function makeRouter(ctx) {
       return !r || (r.state !== "gone" && r.hidden !== 1);
     });
     const entries = visible.map((f) => entryShape(id, f.name, f.size, rows.get(f.name), f.modified));
+    const arrivals = ctx.store.arrivals.inventory(id);
+    for (const entry of entries) entry.arrivalSeq = arrivals?.sequences[entry.name] ?? null;
     return Response.json(url.searchParams.get("inventory") === "1"
       ? { revision: inventory.revision, generation: inventory.generation, coverage: inventory.coverage, subfolders: inventory.subfolders,
-         folders: inventory.folders, unavailable: inventory.unavailable, chronology: inventory.chronology, entries } : entries);
+          folders: inventory.folders, unavailable: inventory.unavailable, chronology: inventory.chronology,
+          arrivals: arrivals ? { sequence: arrivals.sequence, latestVisibleSeq: arrivals.latestVisibleSeq } : null, entries } : entries);
   });
 
   add("GET", "/api/collections/<id>/entries/<name>", async (_req, { id, name }) => {
@@ -313,6 +316,7 @@ export function makeRouter(ctx) {
     if (caps.delete === "unlink" || caps.delete === "trash") {
       const res = await backing.remove(addr, name);
       if (!res.ok) return Response.json({ error: res.detail }, { status: 409 });
+      ctx.store.arrivals.remove(id, name);
       return Response.json({ deleted: true, mode: res.mode });
     }
     ctx.store.entryHide(id, name);

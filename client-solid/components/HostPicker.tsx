@@ -11,6 +11,7 @@ import { useAppStore } from "../store/app-store.js";
 import { useClickOutside } from "../lib/click-outside.js";
 import { IconButton } from "./IconButton.js";
 import { FeedbackLink } from "./FeedbackLink.js";
+import { sourceNewContent } from "../lib/source-new-content.js";
 
 export function HostPicker() {
   const store = useAppStore();
@@ -48,11 +49,13 @@ export function HostPicker() {
           <For each={Object.keys(store.state.hosts)}>
             {(n) => {
               const h = () => store.state.hosts[n];
+              const label = () => `Select ${n}. ${sourceNewContent(store.state.sourceHasNew(n))}${h().address}${h().online ? "" : " (offline)"}`;
               return (
                 <div
                   class={"hostpick" + (n === store.state.host() ? " current" : "") + (h().online ? "" : " off")}
+                  classList={{ "has-new": store.state.sourceHasNew(n) }}
                   data-source={n}
-                  title={`${n} — ${h().address}` + (h().online ? "" : " (offline)")}
+                  title={label()} aria-label={label()}
                   onClick={() => store.handles.invoke("source.select", { id: n })}
                 >
                   <span class={"hdot" + (h().online ? "" : " off")} />

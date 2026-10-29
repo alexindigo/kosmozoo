@@ -77,7 +77,7 @@ backing boundary. Hide-history matching also includes output type and directory.
 
 ### Output inventory and folder scope
 
-`?inventory=1` returns `{revision, generation, coverage, subfolders, folders, entries, unavailable, chronology}`.
+`?inventory=1` returns `{revision, generation, coverage, subfolders, folders, entries, unavailable, chronology, arrivals}`.
 `revision` is an ephemeral address-owner epoch plus scan revision; `coverage` is
 `recursive` or `root-only`; `subfolders` is `{supported, reason}`. `folders`
 contains root `""` and every discovered image-directory ancestor. It is derived
@@ -131,6 +131,24 @@ Prefetch relist counters acknowledge only the captured successful request; faile
 or concurrently newer requests remain pending with bounded retry.
 Listing schedules no ingestion writes; the existing worker/want paths acquire
 dimensions and bytes.
+
+Complete inventory acceptance observes visible names in memory, independently
+of file timestamps and ingestion. Each name gets a per-source session sequence
+once; relists/revalidation do not manufacture arrivals. The existing source stream
+delivers only `{sequence,latestVisibleSeq}` to all browsers, or null before the
+first complete inventory. Missing/hidden/gone/deleted entries do not contribute
+to `latestVisibleSeq`; deletion retires membership immediately. Inventory entries
+carry their `arrivalSeq`. Source retirement discards this in-memory history.
+
+Each browser baselines its own in-memory seen value at the first projection,
+keeps its viewed source current, and clears attention when opening another source.
+An unselected source is new while its latest visible sequence exceeds that value.
+Reload starts quiet; nothing is persisted or written back to the engine. Selected
+sources never show orange. Pills and picker entries consume the same state and
+“New images.” wording, using `--attention` for text/edge without pulsing or layout
+change. There is no extra transport or browser inventory poll.
+Runtime source membership reconciles the existing headless workers as boot does,
+so a new unselected source does not await browser demand to join observation.
 
 The API overlay and browser folder/filter/judgment/known-size projections preserve
 the finalized sequence as subsequences. The store retains `modified` in both load
@@ -315,7 +333,7 @@ and inventory versions and not stored in SQLite. Discovery/mutation replies capt
 the actual row/version before probing. Bootstrap and stream share the same source
 identity. SSE `sources` events carry `id: <epoch>:<revision>` and JSON
 `{version:1,epoch,revision,sources:{id:{address,kind,incarnation,pinned,autoRefresh,
-sourceVersion,activity}}}`. The entire source map is authoritative; absence removes
+sourceVersion,activity,arrivals}}}`. The entire source map is authoritative; absence removes
 a source, and revision jumps are legal latest snapshots. Whole-frame validation
 precedes any application. Unknown/incomplete/malformed frames retain accepted state
 and require controlled resynchronization. Exact own source keys are preserved.

@@ -10,7 +10,8 @@ export function makeSourceRegistry({ createRecord, onRetire }) {
   const [membership, setMembership] = createSignal(0);
   const changed = () => setMembership(value => value + 1);
   function makeRecord(id, source) {
-    const [state, setState] = createStore({ host: source, activity: undefined, saving: undefined, reachability: undefined });
+    const [state, setState] = createStore({ host: source, activity: undefined, saving: undefined, reachability: undefined,
+      arrivals: null, seenSeq: null });
     // Inventory owns reachability once observed; discovery cannot undo it.
     const host = createMemo(() => state.reachability === undefined ? state.host : { ...state.host, online: state.reachability });
     return { ...createRecord(id, source),
@@ -18,6 +19,17 @@ export function makeSourceRegistry({ createRecord, onRetire }) {
       get reachability() { return state.reachability; },
       setReachability(value) { setState("reachability", value); },
       get activity() { return state.activity; },
+      get arrivals() { return state.arrivals; },
+      get seenSeq() { return state.seenSeq; },
+      get hasNew() { return state.arrivals !== null && state.arrivals.latestVisibleSeq > state.seenSeq; },
+      markSeen() { if (state.arrivals) setState("seenSeq", state.arrivals.sequence); },
+      acceptArrivals(value, viewed = false) {
+        if (!value) return;
+        const previous = state.arrivals;
+        if (previous && value.sequence < previous.sequence) return;
+        setState("arrivals", reconcile(value));
+        if (state.seenSeq === null || viewed) setState("seenSeq", value.sequence);
+      },
       get saving() { return state.saving; },
       updateHost(value) { setState("host", reconcile(value)); },
       patchHost(value) { setState("host", reconcile({ ...state.host, ...value })); },

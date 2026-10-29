@@ -13,6 +13,8 @@ export function validSourceVersion(value) {
 }
 
 export const validSourceCursor = value => shape(value, ["epoch", "revision"]) && text(value.epoch) && integer(value.revision);
+export const validArrivals = value => value === null || shape(value, ["sequence", "latestVisibleSeq"]) &&
+  integer(value.sequence) && integer(value.latestVisibleSeq) && value.latestVisibleSeq <= value.sequence;
 
 export function compareSourceVersions(a, b) {
   if (!validSourceVersion(a) || !validSourceVersion(b) || a.epoch !== b.epoch || a.incarnation !== b.incarnation) return null;
@@ -24,7 +26,8 @@ export function validateSourceSnapshot(frame) {
   if (!shape(frame, ["version", "epoch", "revision", "sources"]) || frame.version !== 1 || !text(frame.epoch) ||
       !integer(frame.revision) || !record(frame.sources)) invalid();
   for (const [id, source] of Object.entries(frame.sources)) {
-    if (!text(id) || !shape(source, ["address", "kind", "incarnation", "pinned", "autoRefresh", "sourceVersion", "activity"]) ||
+    const fields = ["address", "kind", "incarnation", "pinned", "autoRefresh", "sourceVersion", "activity"];
+    if (!text(id) || !(shape(source, fields) || shape(source, [...fields, "arrivals"]) && validArrivals(source.arrivals)) ||
         !text(source.address) || !["folder", "comfy"].includes(source.kind) || !text(source.incarnation) ||
         typeof source.pinned !== "boolean" || typeof source.autoRefresh !== "boolean" || !validSourceVersion(source.sourceVersion) ||
         source.sourceVersion.epoch !== frame.epoch || source.sourceVersion.incarnation !== source.incarnation ||
@@ -34,10 +37,10 @@ export function validateSourceSnapshot(frame) {
       if (!shape(a, ["supported", "reason"]) || a.supported !== false || !text(a.reason)) invalid();
       continue;
     }
-    const fields = ["epoch", "supported", "state", "sampledAt", "runningCount", "queuedCount", "runningPromptId", "progress",
+    const activityFields = ["epoch", "supported", "state", "sampledAt", "runningCount", "queuedCount", "runningPromptId", "progress",
       "terminalRevision", "resyncRevision", "historyGap", "error"];
-    const enriched = shape(a, [...fields, "progressBasis", "workflow", "workflowReason"]);
-    if (!(shape(a, fields) || enriched) || a.supported !== true || !text(a.epoch) ||
+    const enriched = shape(a, [...activityFields, "progressBasis", "workflow", "workflowReason"]);
+    if (!(shape(a, activityFields) || enriched) || a.supported !== true || !text(a.epoch) ||
         !["unknown", "idle", "running", "disconnected"].includes(a.state) ||
         !(a.sampledAt === null || Number.isFinite(a.sampledAt)) || !integer(a.runningCount) || !integer(a.queuedCount) ||
         !(a.runningPromptId === null || text(a.runningPromptId)) || !integer(a.terminalRevision) || !integer(a.resyncRevision) ||

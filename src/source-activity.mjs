@@ -12,17 +12,19 @@ export class SourceActivity {
   #subscribers = new Set();
   #unsubscribeStore;
   #unsubscribeJobs;
+  #unsubscribeArrivals;
   #stopped = false;
   #finalSnapshot = null;
-  constructor({ store, hosts, inventory, jobs, epoch = crypto.randomUUID(),
+  constructor({ store, hosts, inventory, jobs, arrivals = store.arrivals, onMembership = () => {}, epoch = crypto.randomUUID(),
     setHeartbeat = setInterval, clearHeartbeat = clearInterval, report = error => console.error("Source stream delivery failed:", error) }) {
-    Object.assign(this, { store, hosts, inventory, jobs, epoch, setHeartbeat, clearHeartbeat, report });
+    Object.assign(this, { store, hosts, inventory, jobs, arrivals, onMembership, epoch, setHeartbeat, clearHeartbeat, report });
     this.revision = 0;
     // Explicitly injected host maps are valid fixtures, even with an empty Store.
     for (const [id, address] of Object.entries(hosts)) this.#rows.set(id,
       { pinned: 0, auto_refresh: 0, ...store.collectionGet(id), id, address, kind: isFolderHost(address) ? "folder" : "comfy" });
     this.#unsubscribeStore = store.subscribeCollections(event => this.#committed(event));
     this.#unsubscribeJobs = jobs.subscribe(() => this.#publish());
+    this.#unsubscribeArrivals = arrivals.subscribe(() => this.#publish());
   }
 
   #committed({ id, row }) {
@@ -36,10 +38,12 @@ export class SourceActivity {
     } else {
       this.#rows.delete(id);
       delete this.hosts[id];
+      this.arrivals.forget(id);
     }
     // This synchronous boundary cannot coalesce away a remove/re-add lifetime.
     this.inventory.reconcile();
     this.jobs.reconcile();
+    this.onMembership();
     this.#publish();
   }
 
@@ -50,7 +54,7 @@ export class SourceActivity {
     const incarnation = this.inventory.capture(id).incarnation;
     return { address: row.address, kind: row.kind, incarnation, ...sourceAttributes(row),
       sourceVersion: { epoch: this.epoch, incarnation, attributesRevision: this.store.collectionRevision(id) },
-      activity: this.jobs.snapshot(id) };
+      activity: this.jobs.snapshot(id), arrivals: this.arrivals.projection(id) };
   }
 
   snapshot() {
@@ -126,7 +130,7 @@ export class SourceActivity {
     if (this.#stopped) return;
     this.#finalSnapshot = this.snapshot();
     this.#stopped = true;
-    this.#unsubscribeStore(); this.#unsubscribeJobs();
+    this.#unsubscribeStore(); this.#unsubscribeJobs(); this.#unsubscribeArrivals();
     for (const subscriber of [...this.#subscribers]) subscriber.retire(true);
   }
 }

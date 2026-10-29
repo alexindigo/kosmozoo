@@ -58,8 +58,9 @@ export function makeCollectionLifecycle(hosts) {
 }
 
 // Context/test rigs share this registry-owned address dispatcher and lifetime.
-export function makeCollectionInventory(hosts, { bindingFactory = createBindingFor } = {}) {
+export function makeCollectionInventory(hosts, { bindingFactory = createBindingFor, onSnapshot = () => {} } = {}) {
   const bindings = new Map(), lifecycle = makeCollectionLifecycle(hosts); let stopped = false;
+  const accepted = new WeakMap();
   const binding = (address) => {
     if (stopped) throw cancelled("Address bindings stopped");
     if (!bindings.has(address)) bindings.set(address, bindingFactory(address));
@@ -70,6 +71,10 @@ export function makeCollectionInventory(hosts, { bindingFactory = createBindingF
     if (!token?.address) throw cancelled("Unknown collection");
     const snapshot = await binding(token.address).inventory(options);
     if (!lifecycle.isCurrent(token)) throw cancelled();
+    if (accepted.get(token) !== snapshot) {
+      onSnapshot(id, token.address, snapshot);
+      accepted.set(token, snapshot);
+    }
     return snapshot;
   };
   inventory.binding = binding;

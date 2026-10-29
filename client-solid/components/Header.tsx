@@ -14,6 +14,7 @@ import { SourceProgress } from "./SourceProgress.js";
 import { FolderPicker } from "./FolderPicker.js";
 import { FeedbackLink } from "./FeedbackLink.js";
 import { sourceProgress } from "../lib/source-progress.js";
+import { sourceNewContent } from "../lib/source-new-content.js";
 
 // layout-switcher icons (icons.mjs): a square with one divider — vertical
 // right of center (wide images / narrow text), horizontal (stacked),
@@ -163,9 +164,10 @@ export function Header() {
             <For each={pins()}>
               {(id) => {
                 const presentation = createMemo(() => sourceProgress(id, store.state.sourceActivity[id], store.state.sourceDelivery()));
-                const label = () => `Select ${id}. ${presentation().label}`;
+                const label = () => `Select ${id}. ${sourceNewContent(store.state.sourceHasNew(id))}${presentation().label}`;
                 return (
                   <button type="button" class={"pinned-source" + (store.state.host() === id ? " on" : "")}
+                    classList={{ "has-new": store.state.sourceHasNew(id) }}
                     data-source={id} aria-pressed={store.state.host() === id}
                     title={label()} aria-label={label()} onClick={() => store.handles.invoke("source.select", { id })}>
                     <SourceProgress presentation={presentation()} />
