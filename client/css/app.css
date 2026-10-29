@@ -1036,7 +1036,7 @@ body:has(#diff:not([hidden])) #statusCol { bottom: 56px; }
 .hostpick.has-new { box-shadow: inset 0 0 0 1px var(--attention); }
 .hostpick.has-new .hname { color: var(--attention); }
 #chrome .feed-filter { display: flex; align-items: center; gap: 6px; min-width: 26px;
-  flex: 0 1 auto; max-width: 220px; margin-left: auto; }
+  flex: 0 1 auto; max-width: 220px; }
 #chrome .feed-filter input { width: 180px; min-width: 0; flex: 1 1 auto; font: inherit; }
 #chrome .source-progress { flex: 0 0 auto; color: var(--foreground-dim); }
 #chrome .source-progress-base { fill: var(--foreground-dim); }

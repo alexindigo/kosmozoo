@@ -605,10 +605,11 @@ async function attempt(name, fn) {
         s.actions.folders.select(''); await s.actions.ui.refresh(); await s.actions.hosts.patch('fake', { pinned: true });
       })()`);
       await page.poll(`(async () => ${KZ}.state.inventory.folders.includes('a/deep'))()`, 20000);
-      check('folder picker is between host and separated pinned group', await page.evaluate(`(() => {
+      check('header order is host, folder, filter, separated pinned group', await page.evaluate(`(() => {
         const host = document.getElementById('hostPicker'), folder = document.getElementById('folderPicker');
-        return host.nextElementSibling === folder && folder.nextElementSibling.classList.contains('pinned-source-group') &&
-          !!folder.nextElementSibling.querySelector('.pinned-separator') && document.querySelector('#outputFolder').getAttribute('aria-label') === 'Output folder';
+        const filter = folder.nextElementSibling, pins = filter.nextElementSibling;
+        return host.nextElementSibling === folder && filter.classList.contains('feed-filter') && pins.classList.contains('pinned-source-group') &&
+          !!pins.querySelector('.pinned-separator') && document.querySelector('#outputFolder').getAttribute('aria-label') === 'Output folder';
       })()`));
       await nativeFolder('a');
       await page.poll(`document.querySelector('.card[data-name="a/visible.png"] img')?.naturalWidth === 128`, 20000);

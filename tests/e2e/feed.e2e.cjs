@@ -625,8 +625,8 @@ async function railMotion(page) {
     } catch { /* engine teardown handles it */ }
   }
 
-  // The topbar-only split must follow the actual feed edge without changing
-  // the main composition: two workspace modes, widths, expansion and real drag.
+  // The topbar-only split retains the feed boundary; the filter immediately
+  // follows the folder and precedes the pins across expansion and real drag.
   try {
     await page.evaluate(`(async () => {
       const s = ${KZ}; await s.actions.hosts.select('fake'); s.actions.ui.setFilter('');
@@ -636,8 +636,13 @@ async function railMotion(page) {
       const icon = document.getElementById('filterBtn').getBoundingClientRect();
       const control = document.querySelector('.feed-filter').getBoundingClientRect();
       const input = document.getElementById('filter').getBoundingClientRect();
+      const folder = document.querySelector('.folder-picker').getBoundingClientRect();
+      const pins = document.querySelector('.pinned-source-group').getBoundingClientRect();
+      const row = document.querySelector('.chrome-feed-inner');
+      const gap = parseFloat(getComputedStyle(row).columnGap);
       const inset = parseFloat(getComputedStyle(document.getElementById('chrome')).getPropertyValue('--chrome-inset'));
-      return { delta: Math.max(Math.abs(control.right - (region.right - inset)), Math.abs(icon.right - (region.right - inset))), icon: icon.right,
+      return { delta: Math.max(Math.abs(control.left - folder.right - gap), Math.abs(pins.left - control.right - gap),
+          Math.abs(row.getBoundingClientRect().right - (region.right - inset))), icon: icon.right,
         inputLeft: input.left, inputRight: input.right, iconLeft: icon.left, boundary: region.right,
         barRight: document.getElementById('wsBar').getBoundingClientRect().right, viewport: innerWidth };
     })()`;
@@ -650,26 +655,26 @@ async function railMotion(page) {
         await page.clickAt('#filterBtn');
         await page.poll(`!document.getElementById('filter').hidden && document.activeElement.id === 'filter'`);
         const after = await page.evaluate(geometry);
-        check(`filter geometry ${width}/${space}: same feed edge, input left, icon stationary`,
-          after.delta <= 1 && Math.abs(before.icon - after.icon) < 1 && after.inputRight <= after.iconLeft && after.barRight <= after.viewport,
+        check(`filter geometry ${width}/${space}: after folder, before pins, input left, within feed boundary`,
+          before.delta <= 1 && after.delta <= 1 && after.inputRight <= after.iconLeft && after.barRight <= after.viewport,
           JSON.stringify({ before, after }));
         await page.evaluate(`(async () => {
           const s = ${KZ}; await s.actions.hosts.patch('fake', { pinned: true });
           await s.actions.hosts.patch('another', { pinned: true }); s.actions.folders.select('geometry/long-caption');
         })()`);
         await page.poll(`(${geometry}).delta <= 1`);
-        check(`folder/pin geometry ${width}/${space}: caption and separated scroll strip retain the feed boundary`, await page.evaluate(`(() => {
-          const icon = document.getElementById('filterBtn').getBoundingClientRect();
+        check(`folder/pin geometry ${width}/${space}: filter precedes separated scroll strip within the feed boundary`, await page.evaluate(`(() => {
+          const filter = document.querySelector('.feed-filter').getBoundingClientRect();
           const folder = document.getElementById('outputFolder').getBoundingClientRect();
           const separator = document.querySelector('.pinned-separator').getBoundingClientRect();
           const strip = document.querySelector('.pinned-sources').getBoundingClientRect();
-          return (${geometry}).delta <= 1 && Math.abs(icon.right - ${after.icon}) <= 1 && folder.width > 0 &&
+          return (${geometry}).delta <= 1 && filter.right <= separator.left && strip.right <= (${geometry}).boundary && folder.width > 0 &&
             separator.right <= strip.left + 1 && document.getElementById('outputFolder').title.includes('geometry/long-caption');
         })()`));
         await page.evaluate(`(async () => { const s = ${KZ}; s.actions.folders.select('');
           await s.actions.hosts.patch('fake', { pinned: false }); await s.actions.hosts.patch('another', { pinned: false }); })()`);
         await page.poll(`(${geometry}).delta <= 1 && !document.querySelector('.pinned-separator')`);
-        check(`empty-pin geometry ${width}/${space}: no separator and unchanged flexible boundary`, (await page.evaluate(geometry)).delta <= 1);
+        check(`empty-pin geometry ${width}/${space}: no separator and retained folder/filter/pin order`, (await page.evaluate(geometry)).delta <= 1);
         await capture(page, `filter-expanded-${width}-${space}`);
         const divider = await page.evaluate(`(() => {
           const r = document.getElementById('divider').getBoundingClientRect();

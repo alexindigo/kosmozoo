@@ -579,8 +579,8 @@ and restores online presentation. Discovery and navigation cannot reset an outag
 source retirement clears it. Other errors retain their normal reporting.
 
 Feed-side topbar order: logo/wordmark, refresh icon, host dropdown, controlled
-native Output folder selector, separated pinned sources,
-flexible space, filename filter. Pinned buttons forward the dropdown's selection
+native Output folder selector, filename filter, separated pinned sources,
+flexible space. Pinned buttons forward the dropdown's selection
 action; circles are grey idle, filled SVG sectors for available counters, distinct
 active outlines when indeterminate, and warning/unknown treatments without stale
 fill. Source-row pin and auto-refresh toggles save independently without selecting
@@ -590,7 +590,7 @@ The filter opens/focuses immediately left of its icon; click/Escape collapses
 without clearing its query. Header owns a separate split synchronized through
 the existing store-owned pane width, with scoped bounds matching the main pane
 and its adjacent divider/bar footprint. Main composition and its layout styles
-are unchanged; the filter follows the actual feed edge. Unhide/Hide up-voted
+are unchanged; expanding the filter pushes the scrollable pins right. Unhide/Hide up-voted
 chrome buttons are removed; their session visibility actions and judgment
 preferences remain available to existing non-chrome consumers.
 

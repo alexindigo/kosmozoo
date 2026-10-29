@@ -158,6 +158,9 @@ export function Header() {
             supported={store.state.inventory.subfolders.supported} reason={store.state.inventory.subfolders.reason}
             loading={store.state.inventory.loading} unavailable={!store.state.inventory.folders.includes(store.state.selectedFolder())}
             onSelect={(folder) => store.handles.invoke("source.folder", { folder })} />
+          <FeedFilter value={store.state.filter()} onInput={(value) => store.handles.invoke("feed.filter", { value })}
+            handles={store.handles} pushLayer={store.actions.keys.pushLayer}
+            canEscape={() => !store.state.keysPanelOpen() && !store.state.diff.open} />
           <div class="pinned-source-group" classList={{ "has-pins": pins().length > 0 }}>
             <Show when={pins().length > 0}><span class="pinned-separator" role="separator" aria-orientation="vertical" /></Show>
             <div class="pinned-sources" aria-label="Pinned sources">
@@ -178,9 +181,6 @@ export function Header() {
             </For>
             </div>
           </div>
-          <FeedFilter value={store.state.filter()} onInput={(value) => store.handles.invoke("feed.filter", { value })}
-            handles={store.handles} pushLayer={store.actions.keys.pushLayer}
-            canEscape={() => !store.state.keysPanelOpen() && !store.state.diff.open} />
         </div>
       </div>
       <div class="chrome-workspace">
