@@ -200,7 +200,8 @@ Deno.test("activity backing: validates GET shapes/status, strips graphs/client I
     requests.push({ url, options });
     return Promise.resolve(Response.json(payload));
   } });
-  assertEquals(await client.queue(), { running: ["prompt"], pending: [] });
+  assertEquals(await client.queue(), { running: ["prompt"], pending: [],
+    prompts: new Map([["prompt", { graph: {}, outputs: null, otherClient: true }]]) });
   assertEquals(requests[0].url, "http://fake:8188/api/queue");
   payload = { prompt: { prompt: [1, "prompt", { graph: true }], status: { completed: false, status_str: "error", messages: [["execution_interrupted", {}]] } } };
   assertEquals(await client.history({ maxItems: 64 }), [done("prompt", "interrupted")]);

@@ -225,6 +225,8 @@ let metadataBombs = new Set(), assetsHidden = new Set();
 const telemetryRequests = { queue: 0, history: 0, logs: 0 };
 const activeLogs = new Set();
 let logSequence = 0;
+const sockets = new Map();
+let promptData = {}, customObjectInfo = null;
 
 function publication(description) {
   if (description.fixture === "undecodable") {
@@ -247,12 +249,23 @@ function publication(description) {
 }
 
 function queueRows(ids) {
-  return ids.map((id, index) => [index, id, {}, { client_id: "external-fixture-client" }, []]);
+  return ids.map((id, index) => {
+    const data = promptData[id];
+    return [index, id, data?.graph ?? {}, { client_id: data ? data.clientId : "external-fixture-client" }, data?.outputs ?? []];
+  });
 }
 
 export const server = Deno.serve({ port }, async (req) => {
   const url = new URL(req.url);
   const p = url.pathname;
+
+  if (p === "/ws") {
+    const { socket, response } = Deno.upgradeWebSocket(req);
+    const sid = url.searchParams.get("clientId") || crypto.randomUUID();
+    socket.onopen = () => { sockets.set(sid, socket); socket.send(JSON.stringify({ type: "status", data: { sid } })); };
+    socket.onclose = () => sockets.delete(sid);
+    return response;
+  }
 
   if (p === "/__test/activity" && req.method === "POST") {
     const body = await req.json();
@@ -263,8 +276,18 @@ export const server = Deno.serve({ port }, async (req) => {
       metadataBombs = new Set(); assetsHidden = new Set();
       telemetryRequests.queue = 0; telemetryRequests.history = 0; telemetryRequests.logs = 0; activeLogs.clear();
       running = []; pending = []; logs = []; failures = {}; delays = {};
+      promptData = {}; customObjectInfo = null;
     }
     if (body.running) running = [...body.running];
+    if (body.prompts) promptData = structuredClone(body.prompts);
+    if (body.objectInfo) customObjectInfo = body.objectInfo;
+    if (body.closeSockets) for (const socket of sockets.values()) socket.close();
+    for (const message of body.messages ?? []) {
+      for (const [sid, socket] of sockets) {
+        if (message.sid && sid !== message.sid) continue;
+        socket.send(JSON.stringify({ type: message.type, data: message.data }));
+      }
+    }
     if (body.pending) pending = [...body.pending];
     if (body.logs) logs = body.logs.map((entry) => ({ ...entry }));
     if (body.appendLogs) logs.push(...body.appendLogs.map((entry) => ({ ...entry })));
@@ -381,6 +404,7 @@ export const server = Deno.serve({ port }, async (req) => {
   // values (denoise=1, strength=1) are not mistaken for integers. Combo
   // widgets carry their option list (the variations enum sweep axes).
   if (p === "/api/object_info") {
+    if (customObjectInfo) return Response.json(customObjectInfo);
     const INT = ["INT", {}], FLOAT = ["FLOAT", {}];
     // the fixture graphs' loras, plus one the graphs don't use (a pick target)
     const LORAS = [["detail.safetensors", "style.safetensors", "other.safetensors"], {}];

@@ -15,7 +15,7 @@ import {
 } from "./shared.mjs";
 import { validEntryName, backingFor } from "../../backings/index.mjs";
 import { sourceOrigin, sameOrigin, validOrigin, validContext, expectedOrigin } from "../../source-origin.mjs";
-import { dependencyClosure, validateGraphLinks } from "./graph.mjs";
+import { dependencyClosure, validateGraphLinks } from "../../graph.mjs";
 import { sha256 } from "../../cache.mjs";
 import { IMAGE_EXTENSIONS, mediaExtension } from "../../backings/mime.mjs";
 import { listImages, readImage, folderError } from "./folder-images.mjs";

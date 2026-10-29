@@ -1,7 +1,8 @@
-// Engine-owned, GET-only source telemetry. Preferences stay on collection;
+// Engine-owned, read-only source telemetry. Preferences stay on collection;
 // this cache is ephemeral and shared only by aliases of the same address.
 import { isFolderHost } from "./backings/index.mjs";
 import { bounded } from "./backings/inventory.mjs";
+import { WorkflowProgress, ProgressConnection } from "./workflow-progress.mjs";
 
 const clean = (text) => text.replace(/\x1b\[[0-?]*[ -/]*[@-~]/g, "");
 
@@ -71,6 +72,7 @@ export class ProgressLog {
 const emptySnapshot = (epoch) => ({
   epoch, supported: true, state: "unknown", sampledAt: null,
   runningCount: 0, queuedCount: 0, runningPromptId: null, progress: null,
+  progressBasis: null, workflow: null, workflowReason: "unavailable",
   terminalRevision: 0, resyncRevision: 0, historyGap: false, error: null,
 });
 
@@ -96,6 +98,8 @@ export class Jobs {
       this.clearTimer(monitor.timer);
       monitor.controller?.abort();
       monitor.progressController?.abort();
+      monitor.infoController?.abort();
+      monitor.connection?.stop();
       this.monitors.delete(address);
     }
     for (const [address, sources] of addresses) {
@@ -104,9 +108,11 @@ export class Jobs {
         monitor = { address, sources, snapshot: emptySnapshot(this.epoch()),
           baseline: false, seen: new Set(), boundary: null, tracked: new Set(),
           logs: new ProgressLog(), errors: 0, timer: null, task: null, controller: null,
-          progressTask: null, progressPhysicalTask: null, progressController: null };
+          progressTask: null, progressPhysicalTask: null, progressController: null,
+          live: new WorkflowProgress(), connection: null, infoTask: null, infoController: null,
+          otherClient: false };
         this.monitors.set(address, monitor);
-        if (this.running) this.#schedule(monitor, 0);
+        if (this.running) { this.#connect(monitor); this.#schedule(monitor, 0); }
       }
       monitor.sources = sources;
     }
@@ -116,7 +122,49 @@ export class Jobs {
     const address = this.hosts[id];
     if (isFolderHost(address)) return { supported: false, reason: "No generation jobs for folder sources" };
     const snapshot = this.monitors.get(address)?.snapshot ?? emptySnapshot(null);
-    return { ...snapshot, progress: snapshot.progress ? { ...snapshot.progress } : null };
+    return this.#copy(snapshot);
+  }
+
+  #copy(snapshot) {
+    return { ...snapshot, progress: snapshot.progress ? { ...snapshot.progress } : null,
+      workflow: snapshot.workflow ? { ...snapshot.workflow } : null };
+  }
+
+  #enrich(monitor, snapshot) {
+    const active = snapshot.state === "running" && snapshot.runningCount === 1;
+    const exact = active ? monitor.live.operation() : null;
+    const progress = active ? exact ?? monitor.logs.progress : null;
+    return { ...snapshot, progress, progressBasis: progress ? exact ? "exact" : "log" : null,
+      workflow: active ? monitor.live.workflow() : null,
+      workflowReason: monitor.otherClient ? "other-client" : "unavailable" };
+  }
+
+  #connect(monitor) {
+    const open = this.client(monitor.address).progressSocket;
+    if (monitor.connection || !open) return;
+    const current = () => this.running && this.monitors.get(monitor.address) === monitor;
+    monitor.connection = new ProgressConnection({ open, setTimer: this.setTimer, clearTimer: this.clearTimer,
+      receive: message => {
+        if (!current()) return;
+        monitor.live.receive(message);
+        this.#install(monitor, this.#enrich(monitor, monitor.snapshot));
+      },
+      lost: () => {
+        if (!current()) return;
+        monitor.live.disconnect();
+        this.#install(monitor, this.#enrich(monitor, monitor.snapshot));
+      } });
+  }
+
+  #readInfo(monitor) {
+    if (monitor.infoTask || !this.client(monitor.address).objectInfo) return;
+    const controller = new AbortController(); monitor.infoController = controller;
+    monitor.infoTask = bounded(() => this.client(monitor.address).objectInfo({ signal: controller.signal }),
+      { signal: controller.signal }).then(info => {
+        if (controller.signal.aborted || this.monitors.get(monitor.address) !== monitor) return;
+        monitor.live.info = info;
+        this.#install(monitor, this.#enrich(monitor, monitor.snapshot));
+      }).catch(() => {}).finally(() => { monitor.infoTask = null; monitor.infoController = null; });
   }
 
   subscribe(listener) {
@@ -130,7 +178,7 @@ export class Jobs {
     monitor.snapshot = next;
     if (!changed) return;
     for (const listener of this.#listeners) {
-      try { listener(monitor.address, new Set(monitor.sources), { ...next, progress: next.progress ? { ...next.progress } : null }); }
+      try { listener(monitor.address, new Set(monitor.sources), this.#copy(next)); }
       catch (error) { console.error("Source activity delivery failed:", error); }
     }
   }
@@ -139,7 +187,7 @@ export class Jobs {
     if (this.running) return;
     this.running = true;
     this.reconcile();
-    for (const monitor of this.monitors.values()) this.#schedule(monitor, 0);
+    for (const monitor of this.monitors.values()) { this.#connect(monitor); this.#schedule(monitor, 0); }
   }
 
   #schedule(monitor, delay) {
@@ -229,27 +277,30 @@ export class Jobs {
         monitor.progressController?.abort();
         monitor.logs.clear();
       }
+      monitor.live.configure(prompt, queue.prompts?.get(prompt));
+      monitor.otherClient = !!queue.prompts?.get(prompt)?.otherClient;
       if (monitor.errors) { s.resyncRevision++; notifications++; }
       monitor.errors = 0;
       Object.assign(s, { state: running.length ? "running" : "idle", sampledAt: this.clock(),
         runningCount: running.length, queuedCount: pending.length,
         runningPromptId: prompt,
         progress: running.length === 1 ? progress : null, error: null });
-      this.#install(monitor, { ...s });
+      this.#install(monitor, this.#enrich(monitor, s));
       if (notifications) {
         notifications = 0;
-        this.onFinish(monitor.address, monitor.sources, { ...s });
+        this.onFinish(monitor.address, monitor.sources, this.#copy(monitor.snapshot));
       }
       // Completion publication and the next authoritative poll never await a
       // best-effort progress read. One independent flight brackets that data.
-      if (prompt) this.#startProgress(monitor, prompt);
+      if (prompt) { this.#readInfo(monitor); this.#startProgress(monitor, prompt); }
     } catch (error) {
       if (!alive()) return;
       monitor.errors++;
       monitor.progressController?.abort();
       monitor.logs.clear();
+      monitor.live.disconnect();
       this.#install(monitor, { ...s, state: "disconnected", sampledAt: this.clock(),
-        runningPromptId: null, progress: null, error: error?.message ?? String(error) });
+        runningPromptId: null, progress: null, progressBasis: null, workflow: null, error: error?.message ?? String(error) });
       if (notifications) this.onFinish(monitor.address, monitor.sources, { ...monitor.snapshot });
     }
   }
@@ -284,16 +335,17 @@ export class Jobs {
       const after = await client.queue(options);
       if (!current()) return;
       if (after.running.length === 1 && after.running[0] === prompt && !monitor.seen.has(prompt)) {
-        const progress = monitor.logs.sample(logs, prompt);
-        this.#install(monitor, { ...monitor.snapshot, progress });
+        monitor.logs.sample(logs, prompt);
+        this.#install(monitor, this.#enrich(monitor, monitor.snapshot));
       } else {
         monitor.logs.clear();
-        this.#install(monitor, { ...monitor.snapshot, progress: null });
+        monitor.live.disconnect(prompt);
+        this.#install(monitor, this.#enrich(monitor, monitor.snapshot));
       }
     } catch {
       if (!current()) return;
       monitor.logs.clear();
-      this.#install(monitor, { ...monitor.snapshot, progress: null });
+      this.#install(monitor, this.#enrich(monitor, monitor.snapshot));
     }
   }
 
@@ -303,7 +355,10 @@ export class Jobs {
       this.clearTimer(monitor.timer);
       monitor.controller?.abort();
       monitor.progressController?.abort();
+      monitor.infoController?.abort();
+      monitor.connection?.stop();
     }
-    await Promise.allSettled([...this.monitors.values()].flatMap((m) => [m.task, m.progressTask]).filter(Boolean));
+    await Promise.allSettled([...this.monitors.values()].flatMap((m) => [m.task, m.progressTask, m.infoTask, m.connection?.closed]).filter(Boolean));
+    for (const monitor of this.monitors.values()) monitor.connection = null;
   }
 }

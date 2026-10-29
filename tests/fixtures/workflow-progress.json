@@ -1,0 +1,2056 @@
+{
+  "comfyCommit": "35060f0156181ae78a86b10f098f67ce8e83697f",
+  "description": "Stock CPU-only ComfyUI messages, received by the independent engine socket; no custom nodes.",
+  "objectInfo": {
+    "LoadImage": {
+      "input": {
+        "required": {
+          "image": [
+            [
+              "example.png",
+              "workflow-progress.png"
+            ],
+            {
+              "image_upload": true
+            }
+          ]
+        }
+      },
+      "input_order": {
+        "required": [
+          "image"
+        ]
+      },
+      "is_input_list": false,
+      "output": [
+        "IMAGE",
+        "MASK"
+      ],
+      "output_is_list": [
+        false,
+        false
+      ],
+      "output_name": [
+        "IMAGE",
+        "MASK"
+      ],
+      "name": "LoadImage",
+      "display_name": "Load Image",
+      "description": "",
+      "python_module": "nodes",
+      "category": "image",
+      "output_node": false,
+      "has_intermediate_output": false,
+      "search_aliases": [
+        "load image",
+        "open image",
+        "import image",
+        "image input",
+        "upload image",
+        "read image",
+        "image loader"
+      ],
+      "essentials_category": "Basics"
+    },
+    "ImageScale": {
+      "input": {
+        "required": {
+          "image": [
+            "IMAGE"
+          ],
+          "upscale_method": [
+            [
+              "nearest-exact",
+              "bilinear",
+              "area",
+              "bicubic",
+              "lanczos"
+            ]
+          ],
+          "width": [
+            "INT",
+            {
+              "default": 512,
+              "min": 0,
+              "max": 16384,
+              "step": 1
+            }
+          ],
+          "height": [
+            "INT",
+            {
+              "default": 512,
+              "min": 0,
+              "max": 16384,
+              "step": 1
+            }
+          ],
+          "crop": [
+            [
+              "disabled",
+              "center"
+            ]
+          ]
+        }
+      },
+      "input_order": {
+        "required": [
+          "image",
+          "upscale_method",
+          "width",
+          "height",
+          "crop"
+        ]
+      },
+      "is_input_list": false,
+      "output": [
+        "IMAGE"
+      ],
+      "output_is_list": [
+        false
+      ],
+      "output_name": [
+        "IMAGE"
+      ],
+      "name": "ImageScale",
+      "display_name": "Upscale Image",
+      "description": "",
+      "python_module": "nodes",
+      "category": "image/upscaling",
+      "output_node": false,
+      "has_intermediate_output": false,
+      "search_aliases": [
+        "resize",
+        "resize image",
+        "scale image",
+        "image resize",
+        "zoom",
+        "zoom in",
+        "change size"
+      ],
+      "essentials_category": "Image Tools"
+    },
+    "SaveImage": {
+      "input": {
+        "required": {
+          "images": [
+            "IMAGE",
+            {
+              "tooltip": "The images to save."
+            }
+          ],
+          "filename_prefix": [
+            "STRING",
+            {
+              "default": "ComfyUI",
+              "tooltip": "The prefix for the file to save. This may include formatting information such as %date:yyyy-MM-dd% or %Empty Latent Image.width% to include values from nodes."
+            }
+          ]
+        },
+        "hidden": {
+          "prompt": "PROMPT",
+          "extra_pnginfo": "EXTRA_PNGINFO"
+        }
+      },
+      "input_order": {
+        "required": [
+          "images",
+          "filename_prefix"
+        ],
+        "hidden": [
+          "prompt",
+          "extra_pnginfo"
+        ]
+      },
+      "is_input_list": false,
+      "output": [
+        "IMAGE"
+      ],
+      "output_is_list": [
+        false
+      ],
+      "output_name": [
+        "images"
+      ],
+      "name": "SaveImage",
+      "display_name": "Save Image",
+      "description": "Saves the input images to your ComfyUI output directory.",
+      "python_module": "nodes",
+      "category": "image",
+      "output_node": true,
+      "has_intermediate_output": false,
+      "search_aliases": [
+        "save",
+        "save image",
+        "export image",
+        "output image",
+        "write image",
+        "download"
+      ],
+      "essentials_category": "Basics"
+    },
+    "RepeatImageBatch": {
+      "input": {
+        "required": {
+          "image": [
+            "IMAGE",
+            {}
+          ],
+          "amount": [
+            "INT",
+            {
+              "default": 1,
+              "min": 1,
+              "max": 4096
+            }
+          ]
+        }
+      },
+      "input_order": {
+        "required": [
+          "image",
+          "amount"
+        ]
+      },
+      "is_input_list": false,
+      "output": [
+        "IMAGE"
+      ],
+      "output_is_list": [
+        false
+      ],
+      "output_name": [
+        "IMAGE"
+      ],
+      "output_tooltips": [
+        null
+      ],
+      "output_matchtypes": null,
+      "name": "RepeatImageBatch",
+      "display_name": "Repeat Image Batch",
+      "description": "",
+      "python_module": "comfy_extras.nodes_images",
+      "category": "image/batch",
+      "output_node": false,
+      "deprecated": false,
+      "experimental": false,
+      "dev_only": false,
+      "api_node": false,
+      "price_badge": null,
+      "search_aliases": [
+        "duplicate image",
+        "clone image"
+      ],
+      "essentials_category": null,
+      "has_intermediate_output": false
+    },
+    "ColorTransfer": {
+      "input": {
+        "required": {
+          "image_target": [
+            "IMAGE",
+            {
+              "tooltip": "Image(s) to apply the color transform to."
+            }
+          ],
+          "image_ref": [
+            "IMAGE",
+            {
+              "tooltip": "Reference image(s) to match colors to."
+            }
+          ],
+          "method": [
+            "COMBO",
+            {
+              "multiselect": false,
+              "options": [
+                "reinhard_lab",
+                "mkl_lab",
+                "histogram"
+              ]
+            }
+          ],
+          "source_stats": [
+            "COMFY_DYNAMICCOMBO_V3",
+            {
+              "tooltip": "per_frame: each frame matched to image_ref individually. uniform: pool stats across all source frames as baseline, match to image_ref. target_frame: use one chosen frame as the baseline for the transform to image_ref, applied uniformly to all frames (preserves relative differences)",
+              "options": [
+                {
+                  "key": "per_frame",
+                  "inputs": {
+                    "required": {}
+                  }
+                },
+                {
+                  "key": "uniform",
+                  "inputs": {
+                    "required": {}
+                  }
+                },
+                {
+                  "key": "target_frame",
+                  "inputs": {
+                    "required": {
+                      "target_index": [
+                        "INT",
+                        {
+                          "tooltip": "Frame index used as the source baseline for computing the transform to image_ref",
+                          "default": 0,
+                          "min": 0,
+                          "max": 10000
+                        }
+                      ]
+                    }
+                  }
+                }
+              ]
+            }
+          ],
+          "strength": [
+            "FLOAT",
+            {
+              "default": 1,
+              "min": 0,
+              "max": 10,
+              "step": 0.01
+            }
+          ]
+        }
+      },
+      "input_order": {
+        "required": [
+          "image_target",
+          "image_ref",
+          "method",
+          "source_stats",
+          "strength"
+        ]
+      },
+      "is_input_list": false,
+      "output": [
+        "IMAGE"
+      ],
+      "output_is_list": [
+        false
+      ],
+      "output_name": [
+        "image"
+      ],
+      "output_tooltips": [
+        null
+      ],
+      "output_matchtypes": null,
+      "name": "ColorTransfer",
+      "display_name": "Transfer Color",
+      "description": "Match the colors of one image to another using various algorithms.",
+      "python_module": "comfy_extras.nodes_post_processing",
+      "category": "image/filters",
+      "output_node": false,
+      "deprecated": false,
+      "experimental": false,
+      "dev_only": false,
+      "api_node": false,
+      "price_badge": null,
+      "search_aliases": [
+        "color match",
+        "color grading",
+        "color correction",
+        "match colors",
+        "color transform",
+        "mkl",
+        "reinhard",
+        "histogram"
+      ],
+      "essentials_category": null,
+      "has_intermediate_output": false
+    },
+    "ComfySwitchNode": {
+      "input": {
+        "required": {
+          "switch": [
+            "BOOLEAN",
+            {}
+          ]
+        },
+        "optional": {
+          "on_false": [
+            "COMFY_MATCHTYPE_V3",
+            {
+              "lazy": true,
+              "template": {
+                "template_id": "switch",
+                "allowed_types": "*"
+              }
+            }
+          ],
+          "on_true": [
+            "COMFY_MATCHTYPE_V3",
+            {
+              "lazy": true,
+              "template": {
+                "template_id": "switch",
+                "allowed_types": "*"
+              }
+            }
+          ]
+        }
+      },
+      "input_order": {
+        "required": [
+          "switch"
+        ],
+        "optional": [
+          "on_false",
+          "on_true"
+        ]
+      },
+      "is_input_list": false,
+      "output": [
+        "COMFY_MATCHTYPE_V3"
+      ],
+      "output_is_list": [
+        false
+      ],
+      "output_name": [
+        "output"
+      ],
+      "output_tooltips": [
+        null
+      ],
+      "output_matchtypes": [
+        "switch"
+      ],
+      "name": "ComfySwitchNode",
+      "display_name": "If/Else Switch",
+      "description": "",
+      "python_module": "comfy_extras.nodes_logic",
+      "category": "utilities/logic",
+      "output_node": false,
+      "deprecated": false,
+      "experimental": true,
+      "dev_only": false,
+      "api_node": false,
+      "price_badge": null,
+      "search_aliases": [
+        "if",
+        "then",
+        "switch",
+        "conditional",
+        "branch"
+      ],
+      "essentials_category": null,
+      "has_intermediate_output": false
+    }
+  },
+  "cases": {
+    "plain-chain": {
+      "graph": {
+        "1": {
+          "class_type": "LoadImage",
+          "inputs": {
+            "image": "workflow-progress.png"
+          }
+        },
+        "2": {
+          "class_type": "ImageScale",
+          "inputs": {
+            "image": [
+              "1",
+              0
+            ],
+            "upscale_method": "bilinear",
+            "width": 512,
+            "height": 512,
+            "crop": "disabled"
+          }
+        },
+        "3": {
+          "class_type": "SaveImage",
+          "inputs": {
+            "images": [
+              "2",
+              0
+            ],
+            "filename_prefix": "workflow-progress/chain"
+          }
+        }
+      },
+      "outputs": [
+        "3"
+      ],
+      "messages": [
+        {
+          "type": "progress_state",
+          "data": {
+            "prompt_id": "5c6e6e51-7240-4d96-a76a-0e8f0e995e31",
+            "nodes": {
+              "1": {
+                "value": 0,
+                "max": 1,
+                "state": "running",
+                "node_id": "1",
+                "prompt_id": "5c6e6e51-7240-4d96-a76a-0e8f0e995e31",
+                "display_node_id": "1",
+                "parent_node_id": null,
+                "real_node_id": "1"
+              }
+            }
+          }
+        },
+        {
+          "type": "progress_state",
+          "data": {
+            "prompt_id": "5c6e6e51-7240-4d96-a76a-0e8f0e995e31",
+            "nodes": {
+              "1": {
+                "value": 1,
+                "max": 1,
+                "state": "finished",
+                "node_id": "1",
+                "prompt_id": "5c6e6e51-7240-4d96-a76a-0e8f0e995e31",
+                "display_node_id": "1",
+                "parent_node_id": null,
+                "real_node_id": "1"
+              }
+            }
+          }
+        },
+        {
+          "type": "progress_state",
+          "data": {
+            "prompt_id": "5c6e6e51-7240-4d96-a76a-0e8f0e995e31",
+            "nodes": {
+              "1": {
+                "value": 1,
+                "max": 1,
+                "state": "finished",
+                "node_id": "1",
+                "prompt_id": "5c6e6e51-7240-4d96-a76a-0e8f0e995e31",
+                "display_node_id": "1",
+                "parent_node_id": null,
+                "real_node_id": "1"
+              },
+              "2": {
+                "value": 0,
+                "max": 1,
+                "state": "running",
+                "node_id": "2",
+                "prompt_id": "5c6e6e51-7240-4d96-a76a-0e8f0e995e31",
+                "display_node_id": "2",
+                "parent_node_id": null,
+                "real_node_id": "2"
+              }
+            }
+          }
+        },
+        {
+          "type": "progress_state",
+          "data": {
+            "prompt_id": "5c6e6e51-7240-4d96-a76a-0e8f0e995e31",
+            "nodes": {
+              "1": {
+                "value": 1,
+                "max": 1,
+                "state": "finished",
+                "node_id": "1",
+                "prompt_id": "5c6e6e51-7240-4d96-a76a-0e8f0e995e31",
+                "display_node_id": "1",
+                "parent_node_id": null,
+                "real_node_id": "1"
+              },
+              "2": {
+                "value": 1,
+                "max": 1,
+                "state": "finished",
+                "node_id": "2",
+                "prompt_id": "5c6e6e51-7240-4d96-a76a-0e8f0e995e31",
+                "display_node_id": "2",
+                "parent_node_id": null,
+                "real_node_id": "2"
+              }
+            }
+          }
+        },
+        {
+          "type": "progress_state",
+          "data": {
+            "prompt_id": "5c6e6e51-7240-4d96-a76a-0e8f0e995e31",
+            "nodes": {
+              "1": {
+                "value": 1,
+                "max": 1,
+                "state": "finished",
+                "node_id": "1",
+                "prompt_id": "5c6e6e51-7240-4d96-a76a-0e8f0e995e31",
+                "display_node_id": "1",
+                "parent_node_id": null,
+                "real_node_id": "1"
+              },
+              "2": {
+                "value": 1,
+                "max": 1,
+                "state": "finished",
+                "node_id": "2",
+                "prompt_id": "5c6e6e51-7240-4d96-a76a-0e8f0e995e31",
+                "display_node_id": "2",
+                "parent_node_id": null,
+                "real_node_id": "2"
+              },
+              "3": {
+                "value": 0,
+                "max": 1,
+                "state": "running",
+                "node_id": "3",
+                "prompt_id": "5c6e6e51-7240-4d96-a76a-0e8f0e995e31",
+                "display_node_id": "3",
+                "parent_node_id": null,
+                "real_node_id": "3"
+              }
+            }
+          }
+        },
+        {
+          "type": "progress_state",
+          "data": {
+            "prompt_id": "5c6e6e51-7240-4d96-a76a-0e8f0e995e31",
+            "nodes": {
+              "1": {
+                "value": 1,
+                "max": 1,
+                "state": "finished",
+                "node_id": "1",
+                "prompt_id": "5c6e6e51-7240-4d96-a76a-0e8f0e995e31",
+                "display_node_id": "1",
+                "parent_node_id": null,
+                "real_node_id": "1"
+              },
+              "2": {
+                "value": 1,
+                "max": 1,
+                "state": "finished",
+                "node_id": "2",
+                "prompt_id": "5c6e6e51-7240-4d96-a76a-0e8f0e995e31",
+                "display_node_id": "2",
+                "parent_node_id": null,
+                "real_node_id": "2"
+              },
+              "3": {
+                "value": 1,
+                "max": 1,
+                "state": "finished",
+                "node_id": "3",
+                "prompt_id": "5c6e6e51-7240-4d96-a76a-0e8f0e995e31",
+                "display_node_id": "3",
+                "parent_node_id": null,
+                "real_node_id": "3"
+              }
+            }
+          }
+        }
+      ]
+    },
+    "broadcast-batch": {
+      "graph": {
+        "1": {
+          "class_type": "LoadImage",
+          "inputs": {
+            "image": "workflow-progress.png"
+          }
+        },
+        "2": {
+          "class_type": "ImageScale",
+          "inputs": {
+            "image": [
+              "1",
+              0
+            ],
+            "upscale_method": "bilinear",
+            "width": 512,
+            "height": 512,
+            "crop": "disabled"
+          }
+        },
+        "3": {
+          "class_type": "SaveImage",
+          "inputs": {
+            "images": [
+              "5",
+              0
+            ],
+            "filename_prefix": "workflow-progress/batch"
+          }
+        },
+        "4": {
+          "class_type": "RepeatImageBatch",
+          "inputs": {
+            "image": [
+              "2",
+              0
+            ],
+            "amount": 32
+          }
+        },
+        "5": {
+          "class_type": "ColorTransfer",
+          "inputs": {
+            "image_target": [
+              "4",
+              0
+            ],
+            "image_ref": [
+              "2",
+              0
+            ],
+            "method": "histogram",
+            "source_stats": "per_frame",
+            "strength": 0.9
+          }
+        }
+      },
+      "outputs": [
+        "3"
+      ],
+      "messages": [
+        {
+          "type": "progress_state",
+          "data": {
+            "prompt_id": "83c2b495-237f-4f2a-888f-a8ca40237304",
+            "nodes": {
+              "4": {
+                "value": 0,
+                "max": 1,
+                "state": "running",
+                "node_id": "4",
+                "prompt_id": "83c2b495-237f-4f2a-888f-a8ca40237304",
+                "display_node_id": "4",
+                "parent_node_id": null,
+                "real_node_id": "4"
+              }
+            }
+          }
+        },
+        {
+          "type": "progress_state",
+          "data": {
+            "prompt_id": "83c2b495-237f-4f2a-888f-a8ca40237304",
+            "nodes": {
+              "4": {
+                "value": 1,
+                "max": 1,
+                "state": "finished",
+                "node_id": "4",
+                "prompt_id": "83c2b495-237f-4f2a-888f-a8ca40237304",
+                "display_node_id": "4",
+                "parent_node_id": null,
+                "real_node_id": "4"
+              }
+            }
+          }
+        },
+        {
+          "type": "progress_state",
+          "data": {
+            "prompt_id": "83c2b495-237f-4f2a-888f-a8ca40237304",
+            "nodes": {
+              "4": {
+                "value": 1,
+                "max": 1,
+                "state": "finished",
+                "node_id": "4",
+                "prompt_id": "83c2b495-237f-4f2a-888f-a8ca40237304",
+                "display_node_id": "4",
+                "parent_node_id": null,
+                "real_node_id": "4"
+              },
+              "5": {
+                "value": 0,
+                "max": 1,
+                "state": "running",
+                "node_id": "5",
+                "prompt_id": "83c2b495-237f-4f2a-888f-a8ca40237304",
+                "display_node_id": "5",
+                "parent_node_id": null,
+                "real_node_id": "5"
+              }
+            }
+          }
+        },
+        {
+          "type": "progress_state",
+          "data": {
+            "prompt_id": "83c2b495-237f-4f2a-888f-a8ca40237304",
+            "nodes": {
+              "4": {
+                "value": 1,
+                "max": 1,
+                "state": "finished",
+                "node_id": "4",
+                "prompt_id": "83c2b495-237f-4f2a-888f-a8ca40237304",
+                "display_node_id": "4",
+                "parent_node_id": null,
+                "real_node_id": "4"
+              },
+              "5": {
+                "value": 1,
+                "max": 32,
+                "state": "running",
+                "node_id": "5",
+                "prompt_id": "83c2b495-237f-4f2a-888f-a8ca40237304",
+                "display_node_id": "5",
+                "parent_node_id": null,
+                "real_node_id": "5"
+              }
+            }
+          }
+        },
+        {
+          "type": "progress",
+          "data": {
+            "value": 1,
+            "max": 32,
+            "prompt_id": "83c2b495-237f-4f2a-888f-a8ca40237304",
+            "node": "5"
+          }
+        },
+        {
+          "type": "progress_state",
+          "data": {
+            "prompt_id": "83c2b495-237f-4f2a-888f-a8ca40237304",
+            "nodes": {
+              "4": {
+                "value": 1,
+                "max": 1,
+                "state": "finished",
+                "node_id": "4",
+                "prompt_id": "83c2b495-237f-4f2a-888f-a8ca40237304",
+                "display_node_id": "4",
+                "parent_node_id": null,
+                "real_node_id": "4"
+              },
+              "5": {
+                "value": 14,
+                "max": 32,
+                "state": "running",
+                "node_id": "5",
+                "prompt_id": "83c2b495-237f-4f2a-888f-a8ca40237304",
+                "display_node_id": "5",
+                "parent_node_id": null,
+                "real_node_id": "5"
+              }
+            }
+          }
+        },
+        {
+          "type": "progress",
+          "data": {
+            "value": 14,
+            "max": 32,
+            "prompt_id": "83c2b495-237f-4f2a-888f-a8ca40237304",
+            "node": "5"
+          }
+        },
+        {
+          "type": "progress_state",
+          "data": {
+            "prompt_id": "83c2b495-237f-4f2a-888f-a8ca40237304",
+            "nodes": {
+              "4": {
+                "value": 1,
+                "max": 1,
+                "state": "finished",
+                "node_id": "4",
+                "prompt_id": "83c2b495-237f-4f2a-888f-a8ca40237304",
+                "display_node_id": "4",
+                "parent_node_id": null,
+                "real_node_id": "4"
+              },
+              "5": {
+                "value": 28,
+                "max": 32,
+                "state": "running",
+                "node_id": "5",
+                "prompt_id": "83c2b495-237f-4f2a-888f-a8ca40237304",
+                "display_node_id": "5",
+                "parent_node_id": null,
+                "real_node_id": "5"
+              }
+            }
+          }
+        },
+        {
+          "type": "progress",
+          "data": {
+            "value": 28,
+            "max": 32,
+            "prompt_id": "83c2b495-237f-4f2a-888f-a8ca40237304",
+            "node": "5"
+          }
+        },
+        {
+          "type": "progress_state",
+          "data": {
+            "prompt_id": "83c2b495-237f-4f2a-888f-a8ca40237304",
+            "nodes": {
+              "4": {
+                "value": 1,
+                "max": 1,
+                "state": "finished",
+                "node_id": "4",
+                "prompt_id": "83c2b495-237f-4f2a-888f-a8ca40237304",
+                "display_node_id": "4",
+                "parent_node_id": null,
+                "real_node_id": "4"
+              },
+              "5": {
+                "value": 32,
+                "max": 32,
+                "state": "running",
+                "node_id": "5",
+                "prompt_id": "83c2b495-237f-4f2a-888f-a8ca40237304",
+                "display_node_id": "5",
+                "parent_node_id": null,
+                "real_node_id": "5"
+              }
+            }
+          }
+        },
+        {
+          "type": "progress",
+          "data": {
+            "value": 32,
+            "max": 32,
+            "prompt_id": "83c2b495-237f-4f2a-888f-a8ca40237304",
+            "node": "5"
+          }
+        },
+        {
+          "type": "progress_state",
+          "data": {
+            "prompt_id": "83c2b495-237f-4f2a-888f-a8ca40237304",
+            "nodes": {
+              "4": {
+                "value": 1,
+                "max": 1,
+                "state": "finished",
+                "node_id": "4",
+                "prompt_id": "83c2b495-237f-4f2a-888f-a8ca40237304",
+                "display_node_id": "4",
+                "parent_node_id": null,
+                "real_node_id": "4"
+              },
+              "5": {
+                "value": 32,
+                "max": 32,
+                "state": "finished",
+                "node_id": "5",
+                "prompt_id": "83c2b495-237f-4f2a-888f-a8ca40237304",
+                "display_node_id": "5",
+                "parent_node_id": null,
+                "real_node_id": "5"
+              }
+            }
+          }
+        },
+        {
+          "type": "progress_state",
+          "data": {
+            "prompt_id": "83c2b495-237f-4f2a-888f-a8ca40237304",
+            "nodes": {
+              "3": {
+                "value": 0,
+                "max": 1,
+                "state": "running",
+                "node_id": "3",
+                "prompt_id": "83c2b495-237f-4f2a-888f-a8ca40237304",
+                "display_node_id": "3",
+                "parent_node_id": null,
+                "real_node_id": "3"
+              },
+              "4": {
+                "value": 1,
+                "max": 1,
+                "state": "finished",
+                "node_id": "4",
+                "prompt_id": "83c2b495-237f-4f2a-888f-a8ca40237304",
+                "display_node_id": "4",
+                "parent_node_id": null,
+                "real_node_id": "4"
+              },
+              "5": {
+                "value": 32,
+                "max": 32,
+                "state": "finished",
+                "node_id": "5",
+                "prompt_id": "83c2b495-237f-4f2a-888f-a8ca40237304",
+                "display_node_id": "5",
+                "parent_node_id": null,
+                "real_node_id": "5"
+              }
+            }
+          }
+        },
+        {
+          "type": "progress_state",
+          "data": {
+            "prompt_id": "83c2b495-237f-4f2a-888f-a8ca40237304",
+            "nodes": {
+              "3": {
+                "value": 1,
+                "max": 1,
+                "state": "finished",
+                "node_id": "3",
+                "prompt_id": "83c2b495-237f-4f2a-888f-a8ca40237304",
+                "display_node_id": "3",
+                "parent_node_id": null,
+                "real_node_id": "3"
+              },
+              "4": {
+                "value": 1,
+                "max": 1,
+                "state": "finished",
+                "node_id": "4",
+                "prompt_id": "83c2b495-237f-4f2a-888f-a8ca40237304",
+                "display_node_id": "4",
+                "parent_node_id": null,
+                "real_node_id": "4"
+              },
+              "5": {
+                "value": 32,
+                "max": 32,
+                "state": "finished",
+                "node_id": "5",
+                "prompt_id": "83c2b495-237f-4f2a-888f-a8ca40237304",
+                "display_node_id": "5",
+                "parent_node_id": null,
+                "real_node_id": "5"
+              }
+            }
+          }
+        }
+      ]
+    },
+    "cached-prefix": {
+      "graph": {
+        "1": {
+          "class_type": "LoadImage",
+          "inputs": {
+            "image": "workflow-progress.png"
+          }
+        },
+        "2": {
+          "class_type": "ImageScale",
+          "inputs": {
+            "image": [
+              "1",
+              0
+            ],
+            "upscale_method": "bilinear",
+            "width": 512,
+            "height": 512,
+            "crop": "disabled"
+          }
+        },
+        "3": {
+          "class_type": "SaveImage",
+          "inputs": {
+            "images": [
+              "5",
+              0
+            ],
+            "filename_prefix": "workflow-progress/cached-prefix"
+          }
+        },
+        "4": {
+          "class_type": "RepeatImageBatch",
+          "inputs": {
+            "image": [
+              "2",
+              0
+            ],
+            "amount": 32
+          }
+        },
+        "5": {
+          "class_type": "ColorTransfer",
+          "inputs": {
+            "image_target": [
+              "4",
+              0
+            ],
+            "image_ref": [
+              "2",
+              0
+            ],
+            "method": "histogram",
+            "source_stats": "per_frame",
+            "strength": 0.9
+          }
+        }
+      },
+      "outputs": [
+        "3"
+      ],
+      "messages": [
+        {
+          "type": "progress_state",
+          "data": {
+            "prompt_id": "7f4c6ac9-6854-4760-8d78-3ff4c405d8be",
+            "nodes": {
+              "3": {
+                "value": 0,
+                "max": 1,
+                "state": "running",
+                "node_id": "3",
+                "prompt_id": "7f4c6ac9-6854-4760-8d78-3ff4c405d8be",
+                "display_node_id": "3",
+                "parent_node_id": null,
+                "real_node_id": "3"
+              }
+            }
+          }
+        },
+        {
+          "type": "progress_state",
+          "data": {
+            "prompt_id": "7f4c6ac9-6854-4760-8d78-3ff4c405d8be",
+            "nodes": {
+              "3": {
+                "value": 1,
+                "max": 1,
+                "state": "finished",
+                "node_id": "3",
+                "prompt_id": "7f4c6ac9-6854-4760-8d78-3ff4c405d8be",
+                "display_node_id": "3",
+                "parent_node_id": null,
+                "real_node_id": "3"
+              }
+            }
+          }
+        }
+      ]
+    },
+    "lazy-switch": {
+      "graph": {
+        "1": {
+          "class_type": "LoadImage",
+          "inputs": {
+            "image": "workflow-progress.png"
+          }
+        },
+        "2": {
+          "class_type": "ImageScale",
+          "inputs": {
+            "image": [
+              "1",
+              0
+            ],
+            "upscale_method": "bilinear",
+            "width": 512,
+            "height": 512,
+            "crop": "disabled"
+          }
+        },
+        "3": {
+          "class_type": "SaveImage",
+          "inputs": {
+            "images": [
+              "6",
+              0
+            ],
+            "filename_prefix": "workflow-progress/lazy"
+          }
+        },
+        "4": {
+          "class_type": "RepeatImageBatch",
+          "inputs": {
+            "image": [
+              "2",
+              0
+            ],
+            "amount": 32
+          }
+        },
+        "5": {
+          "class_type": "ColorTransfer",
+          "inputs": {
+            "image_target": [
+              "4",
+              0
+            ],
+            "image_ref": [
+              "2",
+              0
+            ],
+            "method": "histogram",
+            "source_stats": "per_frame",
+            "strength": 0.9
+          }
+        },
+        "6": {
+          "class_type": "ComfySwitchNode",
+          "inputs": {
+            "switch": true,
+            "on_true": [
+              "5",
+              0
+            ],
+            "on_false": [
+              "2",
+              0
+            ]
+          }
+        }
+      },
+      "outputs": [
+        "3"
+      ],
+      "messages": [
+        {
+          "type": "progress_state",
+          "data": {
+            "prompt_id": "363d12f2-79f4-4bf0-9762-ec9fceb4f8b0",
+            "nodes": {
+              "6": {
+                "value": 0,
+                "max": 1,
+                "state": "running",
+                "node_id": "6",
+                "prompt_id": "363d12f2-79f4-4bf0-9762-ec9fceb4f8b0",
+                "display_node_id": "6",
+                "parent_node_id": null,
+                "real_node_id": "6"
+              }
+            }
+          }
+        },
+        {
+          "type": "progress_state",
+          "data": {
+            "prompt_id": "363d12f2-79f4-4bf0-9762-ec9fceb4f8b0",
+            "nodes": {
+              "6": {
+                "value": 0,
+                "max": 1,
+                "state": "running",
+                "node_id": "6",
+                "prompt_id": "363d12f2-79f4-4bf0-9762-ec9fceb4f8b0",
+                "display_node_id": "6",
+                "parent_node_id": null,
+                "real_node_id": "6"
+              }
+            }
+          }
+        },
+        {
+          "type": "progress_state",
+          "data": {
+            "prompt_id": "363d12f2-79f4-4bf0-9762-ec9fceb4f8b0",
+            "nodes": {
+              "6": {
+                "value": 1,
+                "max": 1,
+                "state": "finished",
+                "node_id": "6",
+                "prompt_id": "363d12f2-79f4-4bf0-9762-ec9fceb4f8b0",
+                "display_node_id": "6",
+                "parent_node_id": null,
+                "real_node_id": "6"
+              }
+            }
+          }
+        },
+        {
+          "type": "progress_state",
+          "data": {
+            "prompt_id": "363d12f2-79f4-4bf0-9762-ec9fceb4f8b0",
+            "nodes": {
+              "3": {
+                "value": 0,
+                "max": 1,
+                "state": "running",
+                "node_id": "3",
+                "prompt_id": "363d12f2-79f4-4bf0-9762-ec9fceb4f8b0",
+                "display_node_id": "3",
+                "parent_node_id": null,
+                "real_node_id": "3"
+              },
+              "6": {
+                "value": 1,
+                "max": 1,
+                "state": "finished",
+                "node_id": "6",
+                "prompt_id": "363d12f2-79f4-4bf0-9762-ec9fceb4f8b0",
+                "display_node_id": "6",
+                "parent_node_id": null,
+                "real_node_id": "6"
+              }
+            }
+          }
+        },
+        {
+          "type": "progress_state",
+          "data": {
+            "prompt_id": "363d12f2-79f4-4bf0-9762-ec9fceb4f8b0",
+            "nodes": {
+              "3": {
+                "value": 1,
+                "max": 1,
+                "state": "finished",
+                "node_id": "3",
+                "prompt_id": "363d12f2-79f4-4bf0-9762-ec9fceb4f8b0",
+                "display_node_id": "3",
+                "parent_node_id": null,
+                "real_node_id": "3"
+              },
+              "6": {
+                "value": 1,
+                "max": 1,
+                "state": "finished",
+                "node_id": "6",
+                "prompt_id": "363d12f2-79f4-4bf0-9762-ec9fceb4f8b0",
+                "display_node_id": "6",
+                "parent_node_id": null,
+                "real_node_id": "6"
+              }
+            }
+          }
+        }
+      ]
+    },
+    "foreign-client": {
+      "graph": {
+        "1": {
+          "class_type": "LoadImage",
+          "inputs": {
+            "image": "workflow-progress.png"
+          }
+        },
+        "2": {
+          "class_type": "ImageScale",
+          "inputs": {
+            "image": [
+              "1",
+              0
+            ],
+            "upscale_method": "bilinear",
+            "width": 512,
+            "height": 512,
+            "crop": "disabled"
+          }
+        },
+        "3": {
+          "class_type": "SaveImage",
+          "inputs": {
+            "images": [
+              "5",
+              0
+            ],
+            "filename_prefix": "workflow-progress/batch"
+          }
+        },
+        "4": {
+          "class_type": "RepeatImageBatch",
+          "inputs": {
+            "image": [
+              "2",
+              0
+            ],
+            "amount": 32
+          }
+        },
+        "5": {
+          "class_type": "ColorTransfer",
+          "inputs": {
+            "image_target": [
+              "4",
+              0
+            ],
+            "image_ref": [
+              "2",
+              0
+            ],
+            "method": "histogram",
+            "source_stats": "per_frame",
+            "strength": 0.8
+          }
+        }
+      },
+      "outputs": [
+        "3"
+      ],
+      "messages": []
+    },
+    "after-restart": {
+      "graph": {
+        "1": {
+          "class_type": "LoadImage",
+          "inputs": {
+            "image": "workflow-progress.png"
+          }
+        },
+        "2": {
+          "class_type": "ImageScale",
+          "inputs": {
+            "image": [
+              "1",
+              0
+            ],
+            "upscale_method": "bilinear",
+            "width": 512,
+            "height": 512,
+            "crop": "disabled"
+          }
+        },
+        "3": {
+          "class_type": "SaveImage",
+          "inputs": {
+            "images": [
+              "5",
+              0
+            ],
+            "filename_prefix": "workflow-progress/batch"
+          }
+        },
+        "4": {
+          "class_type": "RepeatImageBatch",
+          "inputs": {
+            "image": [
+              "2",
+              0
+            ],
+            "amount": 32
+          }
+        },
+        "5": {
+          "class_type": "ColorTransfer",
+          "inputs": {
+            "image_target": [
+              "4",
+              0
+            ],
+            "image_ref": [
+              "2",
+              0
+            ],
+            "method": "histogram",
+            "source_stats": "per_frame",
+            "strength": 0.9
+          }
+        }
+      },
+      "outputs": [
+        "3"
+      ],
+      "messages": [
+        {
+          "type": "progress_state",
+          "data": {
+            "prompt_id": "4e6816a2-0368-41b9-9eab-ebdc3325872f",
+            "nodes": {
+              "1": {
+                "value": 0,
+                "max": 1,
+                "state": "running",
+                "node_id": "1",
+                "prompt_id": "4e6816a2-0368-41b9-9eab-ebdc3325872f",
+                "display_node_id": "1",
+                "parent_node_id": null,
+                "real_node_id": "1"
+              }
+            }
+          }
+        },
+        {
+          "type": "progress_state",
+          "data": {
+            "prompt_id": "4e6816a2-0368-41b9-9eab-ebdc3325872f",
+            "nodes": {
+              "1": {
+                "value": 1,
+                "max": 1,
+                "state": "finished",
+                "node_id": "1",
+                "prompt_id": "4e6816a2-0368-41b9-9eab-ebdc3325872f",
+                "display_node_id": "1",
+                "parent_node_id": null,
+                "real_node_id": "1"
+              }
+            }
+          }
+        },
+        {
+          "type": "progress_state",
+          "data": {
+            "prompt_id": "4e6816a2-0368-41b9-9eab-ebdc3325872f",
+            "nodes": {
+              "1": {
+                "value": 1,
+                "max": 1,
+                "state": "finished",
+                "node_id": "1",
+                "prompt_id": "4e6816a2-0368-41b9-9eab-ebdc3325872f",
+                "display_node_id": "1",
+                "parent_node_id": null,
+                "real_node_id": "1"
+              },
+              "2": {
+                "value": 0,
+                "max": 1,
+                "state": "running",
+                "node_id": "2",
+                "prompt_id": "4e6816a2-0368-41b9-9eab-ebdc3325872f",
+                "display_node_id": "2",
+                "parent_node_id": null,
+                "real_node_id": "2"
+              }
+            }
+          }
+        },
+        {
+          "type": "progress_state",
+          "data": {
+            "prompt_id": "4e6816a2-0368-41b9-9eab-ebdc3325872f",
+            "nodes": {
+              "1": {
+                "value": 1,
+                "max": 1,
+                "state": "finished",
+                "node_id": "1",
+                "prompt_id": "4e6816a2-0368-41b9-9eab-ebdc3325872f",
+                "display_node_id": "1",
+                "parent_node_id": null,
+                "real_node_id": "1"
+              },
+              "2": {
+                "value": 1,
+                "max": 1,
+                "state": "finished",
+                "node_id": "2",
+                "prompt_id": "4e6816a2-0368-41b9-9eab-ebdc3325872f",
+                "display_node_id": "2",
+                "parent_node_id": null,
+                "real_node_id": "2"
+              }
+            }
+          }
+        },
+        {
+          "type": "progress_state",
+          "data": {
+            "prompt_id": "4e6816a2-0368-41b9-9eab-ebdc3325872f",
+            "nodes": {
+              "1": {
+                "value": 1,
+                "max": 1,
+                "state": "finished",
+                "node_id": "1",
+                "prompt_id": "4e6816a2-0368-41b9-9eab-ebdc3325872f",
+                "display_node_id": "1",
+                "parent_node_id": null,
+                "real_node_id": "1"
+              },
+              "2": {
+                "value": 1,
+                "max": 1,
+                "state": "finished",
+                "node_id": "2",
+                "prompt_id": "4e6816a2-0368-41b9-9eab-ebdc3325872f",
+                "display_node_id": "2",
+                "parent_node_id": null,
+                "real_node_id": "2"
+              },
+              "4": {
+                "value": 0,
+                "max": 1,
+                "state": "running",
+                "node_id": "4",
+                "prompt_id": "4e6816a2-0368-41b9-9eab-ebdc3325872f",
+                "display_node_id": "4",
+                "parent_node_id": null,
+                "real_node_id": "4"
+              }
+            }
+          }
+        },
+        {
+          "type": "progress_state",
+          "data": {
+            "prompt_id": "4e6816a2-0368-41b9-9eab-ebdc3325872f",
+            "nodes": {
+              "1": {
+                "value": 1,
+                "max": 1,
+                "state": "finished",
+                "node_id": "1",
+                "prompt_id": "4e6816a2-0368-41b9-9eab-ebdc3325872f",
+                "display_node_id": "1",
+                "parent_node_id": null,
+                "real_node_id": "1"
+              },
+              "2": {
+                "value": 1,
+                "max": 1,
+                "state": "finished",
+                "node_id": "2",
+                "prompt_id": "4e6816a2-0368-41b9-9eab-ebdc3325872f",
+                "display_node_id": "2",
+                "parent_node_id": null,
+                "real_node_id": "2"
+              },
+              "4": {
+                "value": 1,
+                "max": 1,
+                "state": "finished",
+                "node_id": "4",
+                "prompt_id": "4e6816a2-0368-41b9-9eab-ebdc3325872f",
+                "display_node_id": "4",
+                "parent_node_id": null,
+                "real_node_id": "4"
+              }
+            }
+          }
+        },
+        {
+          "type": "progress_state",
+          "data": {
+            "prompt_id": "4e6816a2-0368-41b9-9eab-ebdc3325872f",
+            "nodes": {
+              "1": {
+                "value": 1,
+                "max": 1,
+                "state": "finished",
+                "node_id": "1",
+                "prompt_id": "4e6816a2-0368-41b9-9eab-ebdc3325872f",
+                "display_node_id": "1",
+                "parent_node_id": null,
+                "real_node_id": "1"
+              },
+              "2": {
+                "value": 1,
+                "max": 1,
+                "state": "finished",
+                "node_id": "2",
+                "prompt_id": "4e6816a2-0368-41b9-9eab-ebdc3325872f",
+                "display_node_id": "2",
+                "parent_node_id": null,
+                "real_node_id": "2"
+              },
+              "4": {
+                "value": 1,
+                "max": 1,
+                "state": "finished",
+                "node_id": "4",
+                "prompt_id": "4e6816a2-0368-41b9-9eab-ebdc3325872f",
+                "display_node_id": "4",
+                "parent_node_id": null,
+                "real_node_id": "4"
+              },
+              "5": {
+                "value": 0,
+                "max": 1,
+                "state": "running",
+                "node_id": "5",
+                "prompt_id": "4e6816a2-0368-41b9-9eab-ebdc3325872f",
+                "display_node_id": "5",
+                "parent_node_id": null,
+                "real_node_id": "5"
+              }
+            }
+          }
+        },
+        {
+          "type": "progress_state",
+          "data": {
+            "prompt_id": "4e6816a2-0368-41b9-9eab-ebdc3325872f",
+            "nodes": {
+              "1": {
+                "value": 1,
+                "max": 1,
+                "state": "finished",
+                "node_id": "1",
+                "prompt_id": "4e6816a2-0368-41b9-9eab-ebdc3325872f",
+                "display_node_id": "1",
+                "parent_node_id": null,
+                "real_node_id": "1"
+              },
+              "2": {
+                "value": 1,
+                "max": 1,
+                "state": "finished",
+                "node_id": "2",
+                "prompt_id": "4e6816a2-0368-41b9-9eab-ebdc3325872f",
+                "display_node_id": "2",
+                "parent_node_id": null,
+                "real_node_id": "2"
+              },
+              "4": {
+                "value": 1,
+                "max": 1,
+                "state": "finished",
+                "node_id": "4",
+                "prompt_id": "4e6816a2-0368-41b9-9eab-ebdc3325872f",
+                "display_node_id": "4",
+                "parent_node_id": null,
+                "real_node_id": "4"
+              },
+              "5": {
+                "value": 1,
+                "max": 32,
+                "state": "running",
+                "node_id": "5",
+                "prompt_id": "4e6816a2-0368-41b9-9eab-ebdc3325872f",
+                "display_node_id": "5",
+                "parent_node_id": null,
+                "real_node_id": "5"
+              }
+            }
+          }
+        },
+        {
+          "type": "progress",
+          "data": {
+            "value": 1,
+            "max": 32,
+            "prompt_id": "4e6816a2-0368-41b9-9eab-ebdc3325872f",
+            "node": "5"
+          }
+        },
+        {
+          "type": "progress_state",
+          "data": {
+            "prompt_id": "4e6816a2-0368-41b9-9eab-ebdc3325872f",
+            "nodes": {
+              "1": {
+                "value": 1,
+                "max": 1,
+                "state": "finished",
+                "node_id": "1",
+                "prompt_id": "4e6816a2-0368-41b9-9eab-ebdc3325872f",
+                "display_node_id": "1",
+                "parent_node_id": null,
+                "real_node_id": "1"
+              },
+              "2": {
+                "value": 1,
+                "max": 1,
+                "state": "finished",
+                "node_id": "2",
+                "prompt_id": "4e6816a2-0368-41b9-9eab-ebdc3325872f",
+                "display_node_id": "2",
+                "parent_node_id": null,
+                "real_node_id": "2"
+              },
+              "4": {
+                "value": 1,
+                "max": 1,
+                "state": "finished",
+                "node_id": "4",
+                "prompt_id": "4e6816a2-0368-41b9-9eab-ebdc3325872f",
+                "display_node_id": "4",
+                "parent_node_id": null,
+                "real_node_id": "4"
+              },
+              "5": {
+                "value": 14,
+                "max": 32,
+                "state": "running",
+                "node_id": "5",
+                "prompt_id": "4e6816a2-0368-41b9-9eab-ebdc3325872f",
+                "display_node_id": "5",
+                "parent_node_id": null,
+                "real_node_id": "5"
+              }
+            }
+          }
+        },
+        {
+          "type": "progress",
+          "data": {
+            "value": 14,
+            "max": 32,
+            "prompt_id": "4e6816a2-0368-41b9-9eab-ebdc3325872f",
+            "node": "5"
+          }
+        },
+        {
+          "type": "progress_state",
+          "data": {
+            "prompt_id": "4e6816a2-0368-41b9-9eab-ebdc3325872f",
+            "nodes": {
+              "1": {
+                "value": 1,
+                "max": 1,
+                "state": "finished",
+                "node_id": "1",
+                "prompt_id": "4e6816a2-0368-41b9-9eab-ebdc3325872f",
+                "display_node_id": "1",
+                "parent_node_id": null,
+                "real_node_id": "1"
+              },
+              "2": {
+                "value": 1,
+                "max": 1,
+                "state": "finished",
+                "node_id": "2",
+                "prompt_id": "4e6816a2-0368-41b9-9eab-ebdc3325872f",
+                "display_node_id": "2",
+                "parent_node_id": null,
+                "real_node_id": "2"
+              },
+              "4": {
+                "value": 1,
+                "max": 1,
+                "state": "finished",
+                "node_id": "4",
+                "prompt_id": "4e6816a2-0368-41b9-9eab-ebdc3325872f",
+                "display_node_id": "4",
+                "parent_node_id": null,
+                "real_node_id": "4"
+              },
+              "5": {
+                "value": 29,
+                "max": 32,
+                "state": "running",
+                "node_id": "5",
+                "prompt_id": "4e6816a2-0368-41b9-9eab-ebdc3325872f",
+                "display_node_id": "5",
+                "parent_node_id": null,
+                "real_node_id": "5"
+              }
+            }
+          }
+        },
+        {
+          "type": "progress",
+          "data": {
+            "value": 29,
+            "max": 32,
+            "prompt_id": "4e6816a2-0368-41b9-9eab-ebdc3325872f",
+            "node": "5"
+          }
+        },
+        {
+          "type": "progress_state",
+          "data": {
+            "prompt_id": "4e6816a2-0368-41b9-9eab-ebdc3325872f",
+            "nodes": {
+              "1": {
+                "value": 1,
+                "max": 1,
+                "state": "finished",
+                "node_id": "1",
+                "prompt_id": "4e6816a2-0368-41b9-9eab-ebdc3325872f",
+                "display_node_id": "1",
+                "parent_node_id": null,
+                "real_node_id": "1"
+              },
+              "2": {
+                "value": 1,
+                "max": 1,
+                "state": "finished",
+                "node_id": "2",
+                "prompt_id": "4e6816a2-0368-41b9-9eab-ebdc3325872f",
+                "display_node_id": "2",
+                "parent_node_id": null,
+                "real_node_id": "2"
+              },
+              "4": {
+                "value": 1,
+                "max": 1,
+                "state": "finished",
+                "node_id": "4",
+                "prompt_id": "4e6816a2-0368-41b9-9eab-ebdc3325872f",
+                "display_node_id": "4",
+                "parent_node_id": null,
+                "real_node_id": "4"
+              },
+              "5": {
+                "value": 32,
+                "max": 32,
+                "state": "running",
+                "node_id": "5",
+                "prompt_id": "4e6816a2-0368-41b9-9eab-ebdc3325872f",
+                "display_node_id": "5",
+                "parent_node_id": null,
+                "real_node_id": "5"
+              }
+            }
+          }
+        },
+        {
+          "type": "progress",
+          "data": {
+            "value": 32,
+            "max": 32,
+            "prompt_id": "4e6816a2-0368-41b9-9eab-ebdc3325872f",
+            "node": "5"
+          }
+        },
+        {
+          "type": "progress_state",
+          "data": {
+            "prompt_id": "4e6816a2-0368-41b9-9eab-ebdc3325872f",
+            "nodes": {
+              "1": {
+                "value": 1,
+                "max": 1,
+                "state": "finished",
+                "node_id": "1",
+                "prompt_id": "4e6816a2-0368-41b9-9eab-ebdc3325872f",
+                "display_node_id": "1",
+                "parent_node_id": null,
+                "real_node_id": "1"
+              },
+              "2": {
+                "value": 1,
+                "max": 1,
+                "state": "finished",
+                "node_id": "2",
+                "prompt_id": "4e6816a2-0368-41b9-9eab-ebdc3325872f",
+                "display_node_id": "2",
+                "parent_node_id": null,
+                "real_node_id": "2"
+              },
+              "4": {
+                "value": 1,
+                "max": 1,
+                "state": "finished",
+                "node_id": "4",
+                "prompt_id": "4e6816a2-0368-41b9-9eab-ebdc3325872f",
+                "display_node_id": "4",
+                "parent_node_id": null,
+                "real_node_id": "4"
+              },
+              "5": {
+                "value": 32,
+                "max": 32,
+                "state": "finished",
+                "node_id": "5",
+                "prompt_id": "4e6816a2-0368-41b9-9eab-ebdc3325872f",
+                "display_node_id": "5",
+                "parent_node_id": null,
+                "real_node_id": "5"
+              }
+            }
+          }
+        },
+        {
+          "type": "progress_state",
+          "data": {
+            "prompt_id": "4e6816a2-0368-41b9-9eab-ebdc3325872f",
+            "nodes": {
+              "1": {
+                "value": 1,
+                "max": 1,
+                "state": "finished",
+                "node_id": "1",
+                "prompt_id": "4e6816a2-0368-41b9-9eab-ebdc3325872f",
+                "display_node_id": "1",
+                "parent_node_id": null,
+                "real_node_id": "1"
+              },
+              "2": {
+                "value": 1,
+                "max": 1,
+                "state": "finished",
+                "node_id": "2",
+                "prompt_id": "4e6816a2-0368-41b9-9eab-ebdc3325872f",
+                "display_node_id": "2",
+                "parent_node_id": null,
+                "real_node_id": "2"
+              },
+              "3": {
+                "value": 0,
+                "max": 1,
+                "state": "running",
+                "node_id": "3",
+                "prompt_id": "4e6816a2-0368-41b9-9eab-ebdc3325872f",
+                "display_node_id": "3",
+                "parent_node_id": null,
+                "real_node_id": "3"
+              },
+              "4": {
+                "value": 1,
+                "max": 1,
+                "state": "finished",
+                "node_id": "4",
+                "prompt_id": "4e6816a2-0368-41b9-9eab-ebdc3325872f",
+                "display_node_id": "4",
+                "parent_node_id": null,
+                "real_node_id": "4"
+              },
+              "5": {
+                "value": 32,
+                "max": 32,
+                "state": "finished",
+                "node_id": "5",
+                "prompt_id": "4e6816a2-0368-41b9-9eab-ebdc3325872f",
+                "display_node_id": "5",
+                "parent_node_id": null,
+                "real_node_id": "5"
+              }
+            }
+          }
+        },
+        {
+          "type": "progress_state",
+          "data": {
+            "prompt_id": "4e6816a2-0368-41b9-9eab-ebdc3325872f",
+            "nodes": {
+              "1": {
+                "value": 1,
+                "max": 1,
+                "state": "finished",
+                "node_id": "1",
+                "prompt_id": "4e6816a2-0368-41b9-9eab-ebdc3325872f",
+                "display_node_id": "1",
+                "parent_node_id": null,
+                "real_node_id": "1"
+              },
+              "2": {
+                "value": 1,
+                "max": 1,
+                "state": "finished",
+                "node_id": "2",
+                "prompt_id": "4e6816a2-0368-41b9-9eab-ebdc3325872f",
+                "display_node_id": "2",
+                "parent_node_id": null,
+                "real_node_id": "2"
+              },
+              "3": {
+                "value": 1,
+                "max": 1,
+                "state": "finished",
+                "node_id": "3",
+                "prompt_id": "4e6816a2-0368-41b9-9eab-ebdc3325872f",
+                "display_node_id": "3",
+                "parent_node_id": null,
+                "real_node_id": "3"
+              },
+              "4": {
+                "value": 1,
+                "max": 1,
+                "state": "finished",
+                "node_id": "4",
+                "prompt_id": "4e6816a2-0368-41b9-9eab-ebdc3325872f",
+                "display_node_id": "4",
+                "parent_node_id": null,
+                "real_node_id": "4"
+              },
+              "5": {
+                "value": 32,
+                "max": 32,
+                "state": "finished",
+                "node_id": "5",
+                "prompt_id": "4e6816a2-0368-41b9-9eab-ebdc3325872f",
+                "display_node_id": "5",
+                "parent_node_id": null,
+                "real_node_id": "5"
+              }
+            }
+          }
+        }
+      ]
+    }
+  }
+}

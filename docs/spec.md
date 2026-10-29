@@ -218,6 +218,14 @@ aborts its reads. Re-add has a fresh epoch. `start:false` starts no timers;
 shutdown stops/aborts monitoring. Cadence is 2s active/queued, 5s idle, failure
 backoff capped at 30s. Folder sources invoke no generation telemetry.
 
+The same address monitor owns one receive-only ComfyUI `/ws` connection with
+an independent random clientId, a 10s connection deadline and 1–30s reconnect
+backoff. It never sends messages or submits work. Binary previews and oversized
+or malformed text frames are ignored. Last-alias removal and engine stop close
+the socket and retire callbacks/retries. Queue/history remain authoritative:
+socket loss clears optional live enrichment without changing running/idle or
+delaying completion. No socket starts under `start:false`.
+
 The authoritative lane uses GET `/api/queue` and retained/targeted `/api/history`.
 It installs completion snapshots and notifies relisting without awaiting optional
 progress. A separate prompt-owned flight reads best-effort `/internal/logs/raw`
@@ -234,6 +242,24 @@ Supported snapshots contain `epoch`, `state` (`unknown`, `idle`, `running`,
 `disconnected`), `sampledAt`, `runningCount`, `queuedCount`, `runningPromptId`,
 `progress` (null or `{value,max,fraction}`), `terminalRevision`, `resyncRevision`,
 `historyGap` and `error`. Before successful observation the state is unknown.
+The additive enrichment group is `progressBasis` (`exact`, `log` or null),
+`workflow` and `workflowReason` (`other-client` or `unavailable`). The client
+validates this group atomically; the original version1 shape remains readable.
+One operation field prefers an exact websocket `progress` counter over the
+bracketed log counter; log flight settlement cannot overwrite live exact data.
+`workflow` is null or `{promptId,done,total,fraction,basis:"graph+events"}`.
+Its static denominator is the dependency closure of the running queue item's
+output targets, using the same engine graph traversal as Variations. Finished
+nodes and non-lazy ancestors of observed running/finished nodes count done;
+lazy flags come from the backing's existing cached object_info. A running
+node contributes its bounded operation fraction unless already counted done.
+Runtime-expanded IDs outside the static closure are ignored. The result is
+monotone within the prompt and capped below 1 while still queued/running;
+only the authoritative poll ends activity. The UI calls this **about** N of M
+steps, not an exact prediction of future execution. A missing graph, targets,
+catalogue or observable matching node state leaves workflow unavailable. Other
+tabs' client-addressed events cannot be observed; no identity is impersonated.
+Raw queue graphs, node catalogues and submitting client IDs stay engine-private.
 Counters are best-effort **current-operation** progress, not workflow percentage
 or proof that outputs finished saving. Log snapshots are associated only with
 bracketed stable prompt identity and content continuity; stale/ambiguous counters

@@ -300,19 +300,23 @@ export async function inventory(addr, { client, ...options } = {}) {
   finally { owner.disposeInventory(); }
 }
 
-export async function objectInfo(addr, cache = new Map()) {
+export async function objectInfo(addr, cache = new Map(), { fetcher = fetch, signal } = {}) {
   const c = cache.get(addr);
   if (c && Date.now() - c.t < OBJECT_INFO_TTL_MS) return c;
-  let out = { types: null, outputClasses: null, enums: null };
+  let out = { types: null, outputClasses: null, enums: null, lazyInputs: null };
   try {
-    const r = await fetch(`http://${addr}/api/object_info`, { signal: AbortSignal.timeout(HOST_TIMEOUT_MS) });
+    const timeout = AbortSignal.timeout(HOST_TIMEOUT_MS);
+    const r = await fetcher(`http://${addr}/api/object_info`, { signal: signal ? AbortSignal.any([signal, timeout]) : timeout });
     if (r.ok) {
       const info = await r.json();
-      out = { types: new Map(), outputClasses: new Set(), enums: new Map() };
+      if (!info || typeof info !== "object" || Array.isArray(info)) throw new Error("Invalid object_info");
+      out = { types: new Map(), outputClasses: new Set(), enums: new Map(), lazyInputs: new Map() };
       for (const [type, def] of Object.entries(info)) {
+        out.lazyInputs.set(type, new Set());
         if (def?.output_node) out.outputClasses.add(type);
         for (const section of ["required", "optional"]) {
           for (const [key, spec] of Object.entries(def?.input?.[section] ?? {})) {
+            if (Array.isArray(spec) && spec[1]?.lazy === true) out.lazyInputs.get(type).add(key);
             const t = Array.isArray(spec) ? spec[0] : spec;
             if (t === "INT" || t === "FLOAT") out.types.set(`${type}.${key}`, t);
             // combo widget: the host publishes THIS field's option list —
@@ -480,7 +484,8 @@ export function comfyClient(addr, { fetcher = fetch, clock = () => performance.n
       await Promise.allSettled([configTask].filter(Boolean));
     },
     hasAssetsPlus: () => hasAssetsPlus(addr, assetsPlus),
-    objectInfo: () => objectInfo(addr, objectInfoCache),
+    objectInfo: (options) => objectInfo(addr, objectInfoCache, { fetcher, ...options }),
+    progressSocket: () => new WebSocket(`ws://${addr}/ws?clientId=${crypto.randomUUID()}`),
     enqueue: (prompt) => enqueue(addr, prompt),
     async queue({ signal } = {}) {
       const d = await telemetry("/api/queue", signal);
@@ -490,7 +495,12 @@ export function comfyClient(addr, { fetcher = fetch, clock = () => performance.n
         }
         return rows.map((r) => r[1]);
       };
-      return { running: ids(d?.queue_running), pending: ids(d?.queue_pending) };
+      return { running: ids(d?.queue_running), pending: ids(d?.queue_pending),
+        prompts: new Map(d.queue_running.map(row => [row[1], {
+          graph: object(row[2]) ? row[2] : null,
+          outputs: Array.isArray(row[4]) ? row[4] : null,
+          otherClient: !!row[3]?.client_id,
+        }])) };
     },
     async history({ maxItems, promptId, signal } = {}) {
       const path = promptId ? `/api/history/${encodeURIComponent(promptId)}`
