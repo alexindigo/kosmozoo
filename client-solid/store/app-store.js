@@ -601,6 +601,7 @@ export function makeAppStore({ subscribeSources = typeof window !== "undefined" 
   });
   const metadata = makeMetadata({ acquisition, owns: ownsSession, batch,
     want: (...args) => api.want(...args), meta: (...args) => api.meta(...args),
+    entry: (...args) => api.entryMeta(...args),
     nodes: options => api.nodes(options), status: options => api.prefetch(options),
     priorityFor: item => item.priority === "background" ? "background" : acquisition.priority(item.id),
     setPending: value => setSt("metaPending", value),
@@ -628,6 +629,27 @@ export function makeAppStore({ subscribeSources = typeof window !== "undefined" 
       }
       return graphChanged;
     },
+    // A shown entry's own record, fenced by the content identity it was read
+    // for: a listing that knows different content refuses it.
+    adopt(name, record, owner, identity) {
+      const idx = imageIdxById().get(`${owner.id}:${name}`);
+      if (idx === undefined) return false;
+      const image = st.images[idx];
+      if ((image.hash ?? "") !== identity || image.hash && record.hash && record.hash !== image.hash) return false;
+      const patch = {};
+      if (record.meta && !image.meta) patch.meta = record.meta;
+      if ((record.meta || record.extracted) && !image.extracted) patch.extracted = true;
+      if (record.width && record.height && !(image.width && image.height)) Object.assign(patch, { width: record.width, height: record.height });
+      if (Object.keys(patch).length) setSt("images", idx, patch);
+      return patch.meta ? "graph" : "applied";
+    },
+  });
+  // The consumers of one entry — Details' current and its comparison — own
+  // that entry's record through the metadata owner's direct path.
+  createEffect(() => {
+    const entries = [currentEntry()?.entry, entryFor(currentStack().at(-1) ?? null)?.entry]
+      .filter(Boolean).map(({ id, filename, hash, meta, extracted }) => ({ id, filename, hash, meta: !!meta, extracted: !!extracted }));
+    untrack(() => metadata.show(entries));
   });
 
   function pollMetadata(s = sourceSession) {

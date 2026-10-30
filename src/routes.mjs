@@ -10,6 +10,9 @@ import { capabilities, normalizeAddress, validateCollection, validateAttributes,
 import { sniffMime } from "./extractor.mjs";
 import { sourceOrigin, sameOrigin, expectedOrigin } from "./source-origin.mjs";
 
+// The bounded wait of one shown entry's record for its own ingestion.
+const ENTRY_META_WAIT_MS = 8000;
+
 export function makeRouter(ctx) {
   const routes = [];
 
@@ -372,6 +375,26 @@ export function makeRouter(ctx) {
     if (got.status === 400) return new Response("bad filename", { status: 400 });
     if (got.status === 404) return new Response("not found", { status: 404 });
     return Response.json({ error: `backing read failed: status ${got.status}` }, { status: 502 });
+  });
+
+  // One shown entry's metadata record, independent of the collection delta
+  // stream: an entry not yet ingested is ingested through the one single-flight
+  // path (the high lane a human-visible image uses), for a bounded wait. The
+  // reply is always the entry's current record; `extracted:false` means the
+  // record is not available yet (unreachable source, or the wait elapsed).
+  add("GET", "/api/collections/<id>/entries/<name>/meta", async (_req, { id, name }) => {
+    const token = ctx.inventory.capture?.(id);
+    if (!ctx.hosts[id]) return Response.json({ error: "unknown collection" }, { status: 404 });
+    if (!ctx.store.entryJoined(id, name)?.hash) {
+      let timer;
+      const waited = new Promise((resolve) => { timer = setTimeout(resolve, ENTRY_META_WAIT_MS); });
+      try {
+        await Promise.race([ctx.ingest.ensure(id, name, "output", { priority: "high" }).catch(() => null), waited]);
+      } finally { clearTimeout(timer); }
+      if (token && !ctx.inventory.isCurrent(token)) return Response.json({ error: "Source incarnation changed" }, { status: 409 });
+    }
+    const { name: entry, hash, extracted, meta, width, height } = entryShape(id, name, null, ctx.store.entryJoined(id, name), null);
+    return Response.json({ name: entry, hash, extracted, meta, width, height });
   });
 
   // --- judgments (entry columns) ------------------------------------------------

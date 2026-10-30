@@ -22,7 +22,7 @@ cleanup() {
   # explicit names only — the ONLY sanctioned docker rm. stderr stays
   # visible; the routine "No such container" noise on a clean start is
   # filtered, everything else prints (a failure must be learned from)
-  docker rm -f kz-e2e-deps kz-e2e-fake kz-e2e-fake2 kz-e2e-engine kz-e2e-fresh-engine kz-e2e-fresh-install kz-e2e-perf-engine kz-e2e-perf-fake kz-e2e-load-window 2>&1 | grep -v "No such container" || true
+  docker rm -f kz-e2e-deps kz-e2e-fake kz-e2e-fake2 kz-e2e-engine kz-e2e-fresh-engine kz-e2e-fresh-install kz-e2e-perf-engine kz-e2e-perf-fake kz-e2e-load-window kz-e2e-scale-seed kz-e2e-scale-sources kz-e2e-scale-engine kz-e2e-metadata-scale 2>&1 | grep -v "No such container" || true
   rm -rf "$WORK/tests/.tmp-mutable" "$WORK/tests/.tmp-comfy" "$WORK/tests/.tmp-fresh" "$RUN_DIR"
   if [[ -z "${E2E_DENO_DIR:-}" ]]; then rm -rf "$DENO_CACHE"; fi
 }
@@ -201,3 +201,40 @@ timeout 160s docker run --rm --name kz-e2e-load-window --user "$RUN_USER" --netw
   -e HOME=/work/tests/.tmp-runtime/perf/home -e TMPDIR=/work/tests/.tmp-runtime/perf/tmp \
   -e E2E_ENGINE="http://127.0.0.1:$PERF_ENGINE_PORT" -e E2E_FAKE="http://127.0.0.1:$PERF_FAKE_PORT" \
   --entrypoint node "$PW_IMAGE" /work/tests/e2e/load-window.e2e.cjs
+
+# 10. The shown entry's metadata at real scale: four sources of a real
+#     installation's size seeded through the engine's own ingestion, thousands
+#     re-extracting continuously, one source with failing reads.
+timeout 40s docker stop -t 5 kz-e2e-perf-engine kz-e2e-perf-fake >/dev/null
+SCALE_ENGINE_PORT="${E2E_SCALE_ENGINE_PORT:-18266}"
+SCALE_SPECS=(comfyui=18267 anton=18268 acropolis=18269 ark=18270)
+timeout 30s mkdir -p "$RUN_DIR/scale/home" "$RUN_DIR/scale/tmp" "$RUN_DIR/scale/state"
+timeout 30s chmod 1777 "$RUN_DIR/scale/tmp"
+timeout 600s docker run --rm --name kz-e2e-scale-seed --network host -v "$WORK":/work -w /work \
+  --memory=1g --memory-swap=1g --pids-limit=128 --cpus=2 \
+  "${deno_args[@]}" denoland/deno:latest run --frozen --cached-only --allow-all tests/e2e/metadata-scale-sources.mjs \
+  seed /work/tests/.tmp-runtime/scale/state /work/tests/.tmp-runtime/scale/cache "${SCALE_SPECS[@]}"
+timeout 30s docker run -d --name kz-e2e-scale-sources --network host -v "$WORK":/work -w /work \
+  --memory=512m --memory-swap=512m --pids-limit=128 --cpus=1 \
+  "${deno_args[@]}" denoland/deno:latest run --frozen --cached-only --allow-all tests/e2e/metadata-scale-sources.mjs \
+  serve "${SCALE_SPECS[@]:0:3}" "${SCALE_SPECS[3]}=failing" >/dev/null
+timeout 30s docker run -d --name kz-e2e-scale-engine --network host -v "$WORK":/work -w /work \
+  --memory=1200m --memory-swap=1200m --pids-limit=256 --cpus=2 \
+  "${deno_args[@]}" -e KOZMOZOO_PORT="$SCALE_ENGINE_PORT" \
+  -e KOZMOZOO_STATE=/work/tests/.tmp-runtime/scale/state \
+  -e KOZMOZOO_CACHE=/work/tests/.tmp-runtime/scale/cache \
+  -e KOZMOZOO_PLUGINS=/work/plugins -e HOME=/work/tests/.tmp-runtime/scale/home \
+  denoland/deno:latest run --frozen --cached-only --allow-all src/main.mjs >/dev/null
+for url in "http://127.0.0.1:$SCALE_ENGINE_PORT/api/collections" "http://127.0.0.1:18270/api/system_stats"; do
+  for i in $(seq 1 60); do
+    timeout 5s curl -sf "$url" >/dev/null 2>&1 && break
+    sleep 0.5
+    [ "$i" = 60 ] && { echo "timeout waiting for scale stack: $url"; exit 1; }
+  done
+done
+timeout 300s docker run --rm --name kz-e2e-metadata-scale --user "$RUN_USER" --network host -v "$WORK":/work -w /work \
+  --memory=1600m --memory-swap=1600m --pids-limit=256 --cpus=2 \
+  -e HOME=/work/tests/.tmp-runtime/scale/home -e TMPDIR=/work/tests/.tmp-runtime/scale/tmp \
+  -e E2E_ENGINE="http://127.0.0.1:$SCALE_ENGINE_PORT" \
+  -e E2E_SCALE_SOURCES='{"comfyui":"http://127.0.0.1:18267","anton":"http://127.0.0.1:18268","acropolis":"http://127.0.0.1:18269","ark":"http://127.0.0.1:18270"}' \
+  --entrypoint node "$PW_IMAGE" /work/tests/e2e/metadata-scale.cjs

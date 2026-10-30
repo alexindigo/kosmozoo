@@ -41,6 +41,7 @@ the resources; a collection's `capabilities` answer what its backing can do.
 | `/api/events` | GET | one native SSE delivery connection per app tab; complete version1 authoritative cached source maps, no upstream probe/list/monitor creation |
 | `/api/collections/<id>/entries` | GET | the feed listing: size, hash, state, meta, judgment, and dims — `COALESCE(content, entry)`, so an entry the dims pass reached carries width/height before it has a hash. Gone entries are excluded. `?inventory=1` returns the coherent output envelope described below; default remains an array. `?kind=input` lists the input dir instead |
 | `/api/collections/<id>/entries/<name>` | GET | one entry |
+| `/api/collections/<id>/entries/<name>/meta` | GET | one shown entry's record `{name, hash, extracted, meta, width, height}`, independent of the delta stream; an entry without a hash is first ingested through the single-flight high lane for at most 8 s; `extracted:false` means not available yet (unreadable source or the wait elapsed) |
 | `/api/collections/<id>/entries` | POST | multipart upload into the input dir; **409 with the conflicting name, never an overwrite** |
 | `/api/collections/<id>/entries/<name>` | DELETE | per capability: folder → unlink; comfy + assets_plus → trash; otherwise → hide + history cleanup |
 | `/api/collections/<id>/entries/<name>/bytes` | GET | cache-first bytes (`?kind=input` for input-dir files); ETag is the content hash, `Cache-Control: no-cache`; single-byte ranges (§Serve path) |
@@ -421,8 +422,8 @@ Grid's registered, owner-disposed seam publishes reactive measured readiness,
 positive viewport dimensions and identity-keyed virtual items. One Store
 reconciliation projects actual viewport identities (without overscan) and current into
 one approximately twenty-entry foreground window. The Store-owned acquisition policy
-admits sizes, feed src, inline images, metadata wants/reads/publication, node refresh
-and scraper status. The policy alone defines bounded resource classes: native images
+admits sizes, feed src, inline images, metadata wants/reads/publication, shown-entry
+record reads, node refresh and scraper status. The policy alone defines bounded resource classes: native images
 retain six foreground/two background slots; control (wants, polls, required node
 registry refresh, byte-size HEAD and scraper status) has three foreground/one
 background slots that native transfers cannot consume. Beyond-window work uses idle
@@ -1123,6 +1124,12 @@ unchanged graph metadata. Delivery history does not change the database schema.
 A delta cannot be re-requested by cursor once acknowledged, so a want's reply
 carries its names' current state: a reader that had not yet listed an entry when
 its change arrived recovers it by demanding that identity.
+The stream serves the feed; it is never the path of an entry a consumer shows.
+Each shown identity (Details' current and its comparison entry) has one direct,
+bounded record read (`entries/<name>/meta`), retried with backoff while it is
+shown and applied only to the same source session, name and content hash, so
+collection size, churn, publication order, delivery fences and the cursor cannot
+delay or drop it.
 
 The prefetch runs TWO passes over each collection's listing: pass 1 the
 dims head reads (10 ms inter-file — size-before-render on a fresh host is

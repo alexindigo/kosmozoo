@@ -1,8 +1,12 @@
 // Metadata is a retained, acknowledged demand lane. The acquisition owner
 // supplies admission for wants, reads, publication, node refresh and status.
-export function makeMetadata({ acquisition, owns, want, meta, nodes, status,
-  setPending, setNodes, setStatus, apply, batch, capture = () => null,
-  priorityFor = item => item.priority, now = () => performance.now() }) {
+// Shown identities (the entries a consumer displays) additionally own a
+// direct, bounded record read: it never waits on the collection's snapshot,
+// deltas, publication or cursor, and retries while its identity is shown.
+export function makeMetadata({ acquisition, owns, want, meta, nodes, status, entry,
+  setPending, setNodes, setStatus, apply, adopt, batch, capture = () => null,
+  priorityFor = item => item.priority, now = () => performance.now(),
+  retryDelay = attempt => Math.min(500 * 2 ** attempt, 8000) }) {
   let context = null, version = 0, retired = false;
   const nodesDirty = new Map();
   let nodeRevision = 0;
@@ -10,6 +14,8 @@ export function makeMetadata({ acquisition, owns, want, meta, nodes, status,
   let retryTimer = null, pollTimer = null, statusTimer = null, failures = 0, pending = 0;
   const demand = new Map();
   const byId = new Map();
+  // id → { id, name, identity, attempt, task, timer, settled }: one record flight each.
+  const shown = new Map();
   const lanes = new Map(["full:foreground", "dimensions:foreground", "full:background", "dimensions:background"].map(key => [key, new Set()]));
   let projectionVersion = -1, foreground = new Set();
   const current = owner => !retired && context === owner && owns(owner);
@@ -56,6 +62,8 @@ export function makeMetadata({ acquisition, owns, want, meta, nodes, status,
   }
 
   function setContext(next) {
+    for (const item of shown.values()) clearTimeout(item.timer);
+    shown.clear();
     context = next; version = 0; pending = 0; failures = 0; nodesDirty.clear();
     clearTimeout(retryTimer); clearTimeout(pollTimer); clearTimeout(statusTimer);
     retryTimer = pollTimer = statusTimer = null;
@@ -194,6 +202,51 @@ export function makeMetadata({ acquisition, owns, want, meta, nodes, status,
     return true;
   }
 
+  // The shown identities' own record path. `entries` are the consumers'
+  // entries ({id, filename, hash, meta, extracted}); one that has its record
+  // needs no flight. A changed content identity or an entry no longer shown
+  // retires its flight: a late reply cannot apply and its retry is cancelled.
+  function show(entries) {
+    const owner = context;
+    if (!current(owner)) return;
+    const wanted = new Map();
+    for (const image of entries) if (image && !(image.meta || image.extracted)) wanted.set(image.id, image);
+    for (const [id, item] of shown) {
+      const image = wanted.get(id);
+      if (!image || (image.hash ?? "") !== item.identity) { clearTimeout(item.timer); shown.delete(id); }
+    }
+    for (const [id, image] of wanted) {
+      if (shown.has(id)) continue;
+      const item = { id, name: image.filename, identity: image.hash ?? "", attempt: 0, task: null, timer: null, settled: false };
+      shown.set(id, item);
+      readShown(item, owner);
+    }
+  }
+
+  function readShown(item, owner) {
+    const live = () => current(owner) && shown.get(item.id) === item;
+    if (!live() || item.task || item.timer || item.settled) return;
+    const task = acquisition.submit({ key: `metadata-shown:${item.id}`, resourceClass: "control", priority: "foreground",
+      valid: live, run: () => entry(owner.id, item.name, { priority: "foreground" }) });
+    item.task = task;
+    task.then(async record => {
+      item.task = null;
+      if (!live() || record?.retired) return;
+      if (!record?.meta && !record?.extracted) { retryShown(item, owner); return; }
+      // One identity-fenced application; a refused record (the listing knows
+      // different content) settles this identity until the listing moves on.
+      let outcome = false;
+      batch(() => { outcome = adopt(item.name, record, owner, item.identity); });
+      item.settled = true;
+      if (outcome === "graph") { nodesDirty.set(item.name, ++nodeRevision); await refreshNodes(owner); }
+    }, () => { item.task = null; retryShown(item, owner); });
+  }
+
+  function retryShown(item, owner) {
+    if (!current(owner) || shown.get(item.id) !== item) return;
+    item.timer = setTimeout(() => { item.timer = null; readShown(item, owner); }, retryDelay(item.attempt++));
+  }
+
   function schedulePoll(delay = 1000, owner = context) {
     if (!current(owner) || pollTimer) return;
     pollTimer = setTimeout(() => { pollTimer = null; poll().catch(() => {}); }, delay);
@@ -241,6 +294,6 @@ export function makeMetadata({ acquisition, owns, want, meta, nodes, status,
     }, 2000);
   }
 
-  return { setContext, request, poll, accept,
+  return { setContext, request, poll, accept, show,
     dispose() { setContext(null); retired = true; } };
 }

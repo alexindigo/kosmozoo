@@ -71,6 +71,8 @@ export const api = {
   setPrefetch: (kv) => req("POST", "/api/prefetch", kv),
   meta: (collection, since, options) => req("GET", `/api/collections/${enc(collection)}/meta?since=${since}`, undefined, options),
   want: (collection, files, options = {}) => req("POST", `/api/collections/${enc(collection)}/want`, { files, ...options }, options),
+  // one shown entry's record: {name, hash, extracted, meta, width, height}
+  entryMeta: (collection, name, options) => req("GET", `${entryUrl(collection, name)}/meta`, undefined, options),
   // byte size isn't in every listing — a HEAD on the bytes route fills it;
   // resolves null when the entry is unknown
   entrySizeProbe: (collection, name, { priority } = {}) => fetch(`${BASE}${entryUrl(collection, name)}/bytes`, {
