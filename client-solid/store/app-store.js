@@ -1495,6 +1495,8 @@ export function makeAppStore({ subscribeSources = typeof window !== "undefined" 
   function dispose() {
     if (disposed) return;
     disposed = true;
+    for (const disposeFeature of featureDisposals) disposeFeature();
+    featureDisposals.clear();
     railArrivals.retire();
     deliveryGeneration++; deliveryDispose?.(); deliveryDispose = null; pageDispose?.(); pageDispose = null;
     batch(retireFeedScroll);
@@ -1518,6 +1520,7 @@ export function makeAppStore({ subscribeSources = typeof window !== "undefined" 
   // store array proxies can't support flatMap/map chains on function-valued
   // items (the Symbol(solid-proxy) defineProperty trap)
   const registeredFeatures = [];
+  const featureDisposals = new Set();
   // A modal surface's image (e.g. a Load Image input thumbnail) defaults to
   // foreground work outside any source entry; ahead-of-viewport demand can
   // declare background intent. Both share the same policy/capacity, and only
@@ -1534,6 +1537,7 @@ export function makeAppStore({ subscribeSources = typeof window !== "undefined" 
         if (registeredFeatures.some((x) => x.name === f.name)) return;
         const installed = f.install?.({ state: stateObj, handles, setSt, reconcile, surfaceDisplay });
         if (installed) {
+          if (installed.dispose) featureDisposals.add(installed.dispose);
           for (const command of installed.commands ?? []) handles.register(command);
           for (const command of installed.ownedCommands ?? []) handles.registerOwned(command);
           publicActions[f.name] = installed.ports;

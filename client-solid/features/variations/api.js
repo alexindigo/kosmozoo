@@ -14,7 +14,7 @@ const pathRequest = async (route, body, origin) => {
   const response = await fetch(`/api/features/variations/${route}`, { method: "POST", body: JSON.stringify(body),
     headers: { "Content-Type": "application/json", ...(origin ? { "X-Kosmozoo-Origin": JSON.stringify(origin) } : {}) } });
   const data = await response.json();
-  if (!response.ok) throw new Error(data.error || "Folder images unavailable");
+  if (!response.ok) throw Object.assign(new Error(data.error || "Folder images unavailable"), { uploaded: data.uploaded });
   return data;
 };
 export const listFolder = path => pathRequest("folder-images", { path });
@@ -53,7 +53,10 @@ export const uploadInput = (collection, form, origin) =>
   fetch(`/api/collections/${encodeURIComponent(collection)}/entries`, { method: "POST", body: form, headers: { "X-Kosmozoo-Origin": JSON.stringify(origin) } })
     .then(async (r) => {
       if (r.ok) return r.json();
-      if (r.status === 412) throw new Error("Source changed during upload; no follow-up was authorized. Your files have been kept.");
+      if (r.status === 412) {
+        const data = await r.json().catch(() => ({}));
+        throw Object.assign(new Error("Source changed during upload; no follow-up was authorized. Your files have been kept."), { uploaded: data.uploaded });
+      }
       if (r.status === 409) {
         const d = await r.json().catch(() => ({}));
         throw new Error(`already exists on the host: ${d.name ?? "name conflict"}`);

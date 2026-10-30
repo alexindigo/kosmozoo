@@ -681,8 +681,15 @@ originating source and actual v2 JSON download, without duplicate activation or
 synthetic outside-click propagation. Features contribute command definitions,
 data bindings and affordances through the registry, without feature-name dispatch.
 
-Variations owns form/baselines/File references/order, dirty comparison, decision,
-focus/caret and Run state. Its bridge contains opening metadata, a fresh scalar
+Variations retains feature-private recipe workspaces for the app session, keyed
+by the captured target set and origin, including raw values, checkpoints and exact
+File references/order. Reopening restores them; A→B→A never overwrites A. There is
+no silent eviction or disk persistence. An old-origin recipe remains visibly
+recoverable, review-only, without automatic retargeting; “New recipe for current
+source” explicitly opens a separate workspace. “Discard recipe” asks for explicit
+confirmation even when clean; committed Discard removes that workspace. App
+disposal releases all retained workspaces. Mounted components own decision,
+focus/caret, widgets, timers and Run leases. Its bridge contains opening metadata, a fresh scalar
 session and owner-safe request capabilities only. Dirty close/replacement shows
 **“Discard your changes?”**, **“Keep editing”** and **“Discard changes”** inside
 the still-mounted panel, outside its inert editor. Escape cancels only the decision;
@@ -707,7 +714,9 @@ independently maintained acknowledgement path whitelist owns this flow.
 Each Load Image row owns one ordered image set, initially empty. Existing ComfyUI
 input names, native browser Files and engine-host image paths can be added over multiple turns and mixed;
 identity deduplication uses input name, exact File identity or absolute engine path, never filename-only
-deduplication of Files. Removal changes that same set. The chosen thumbnail grid
+deduplication of Files. Removal changes that same set. Each chosen tile reserves
+one comparison-status line, so pending/current/ready/error settlement cannot move
+the acquisition controls. Single-line statuses retain full native tooltips. The chosen thumbnail grid
 is above persistent acquisition controls, even when the axis is off. “ComfyUI
 inputs” opens a searchable, virtualized, multi-select list; arrows/Enter select
 and Escape closes its owned popup before the modal. The input grid mounts three
@@ -803,10 +812,26 @@ full-value native tooltip, including labels, current values, options, captions a
 numeric readouts. Consumers provide presentation and callbacks, not a second
 truncation/tooltip implementation. Literal native editors retain their full raw
 values; multiline/help text wraps within its allocation.
+The dialog owns a bounded grid row shared by the scrolling parameter pane and
+the fixed sidebar at every width. The sidebar has intrinsic count and naming
+rows, one zero-minimum scrollable message row, and Run in the final row. Results,
+preflight errors and recovery notices share that message owner; their length
+cannot resize the dialog or push Run outside it. The big count keeps its natural
+font line box. Presentation overflow never changes recipe state or Run admission.
+The native input popup uses the shared environment-pure viewport placement owner
+(`client-solid/lib/popover-placement.js`), preferring the side with more room and
+clamping horizontal position and available height. The picker reads its own
+trigger and receives preferred-size/application capabilities from its child;
+neither component reads the other's DOM. Passive ancestor-scroll and resize
+notifications coalesce into one animation frame and are removed on close or
+suspension. Popup/list resizing cannot schedule placement, and placement never
+writes scroll position. Suspension retains geometry and widget identity while
+interaction waits for the resumed placement frame. The search stays intrinsic
+and the existing list consumes its bounded viewport.
 
 Naming tokens use those exact IDs (`_{76.image}_{81.image}`), through the same
-codec/parser. Unknown placeholder syntax remains literal and cannot certify
-naming consumption. Existing `{Class.input}`, custom-title/class label tokens
+codec/parser. Unknown/unbalanced placeholder syntax remains editable but rejects
+Run before any enqueue with an actionable naming error. Existing `{Class.input}`, custom-title/class label tokens
 and `{image}` are compatibility aliases for the first carrier in catalogue
 order; `{image}` selects the first image descriptor even if only a later image
 varies. Explicit IDs are required to address siblings independently. Variation
@@ -815,13 +840,18 @@ there are no saved legacy parameter keys to migrate.
 
 Run/button/handle input enters `variations.run` and the owner's requestRun. A private
 ticket captures all editable values/targets/revision/close generation before IO.
+It also captures the existing image-inspection cohort before awaits and freezes
+that cohort's settled evidence for every compilation of this Run. Later path
+removal/readdition or reinspection cannot change the captured graph values;
+actual upload receipts remain the authority for uploaded names.
 The compiler emits the immutable request, operation identities and exhaustive raw
 dispositions with its consumption bindings in the same read/encode operation.
 Each captured leaf/map entry is active or retained; unknown or overlapping
 classification rejects before effects. Source-independent handles/broker retain opening metadata
 and owner capabilities only. Running/pending-decision input is busy. Clean metadata
 settling during a Run cannot strand captured submitted work. Newer/edit-and-revert
-revisions, pending decisions and genuinely unused values still prevent adoption.
+revisions and pending decisions still prevent checkpointing. Disabled and dormant
+values are retained recipe content, not unsubmitted graph operations.
 
 Opening/probe/Run retain an `Origin:{source,address,kind,epoch,incarnation}`; pin and
 refresh attribute revisions are not operation identity. Probe optionally accepts
@@ -848,6 +878,13 @@ before enqueue. The response echoes correlation, matched context, `target:{id,ho
 and complete indexed `accepted:[{index,promptId,applied:{ranges:[],imageParams:[]},
 selections:{ranges:[],imageParams:[]},naming:[]}]`. UUIDs use native Web Crypto entropy on the
 existing HTTP LAN origin; they are correlation, not retry/idempotency keys.
+The request-derived immutable target plan records operation IDs and explicit
+apply/off/absent-relative-numeric dispositions. Heterogeneous relative numeric
+absence is the documented exclusion; other positive missing carriers reject.
+The client captures all target plans before dispatch; the engine returns its
+effective `operations` alongside the envelope. The existing v2 correlation and
+context bind each target request; exact final write coverage, never a digest or
+count alone, proves its acceptance.
 
 Every Comfy backing enqueue builds its outgoing prompt through `freshSubmissionGraph`: clone the graph and remove only each node descriptor's execution-only `is_changed`, preserving inputs (including `inputs.is_changed`), all other fields and envelope lineage without cache-busting.
 
@@ -855,16 +892,25 @@ Variation narrowing keeps the producer's complete transitive input-link closure 
 
 Naming proof uses only the exact node IDs returned by the naming writer; no writes means no naming acknowledgement.
 
+The engine prepares every final prompt before the first enqueue, using the actual
+mutation, narrowing and naming writers. Enabled-empty axes, missing template values,
+unresolved naming, pruned/overwritten active assignments and affixes lost by folding
+reject with a clear message and zero enqueues for that target plan. Existing
+basename middle folding remains valid when both affixes survive completely.
 Actual surviving carrier assignments and recognized naming writes certify positive
 use on confirmed accepted prompts. The same typed axis kernel owns count/generation
 and off-selection exclusion proof. Tuple identity is per field, never delimiter
 serialization; count does not allocate the Cartesian product. True/inert/missing
 choices and ambiguous carriers receive no invented proof. The owner validates every
 target/context/correlation, safe positive complete counts, explicit empty errors,
-unique indexes/prompt IDs and requested field sets before any adoption. It intersects
-all-target/all-permutation proof with compiler bindings and advances only captured
-eligible leaves. Off consumes only selection; unused values, dormant
-templates, inactive filenames/Files and newer work remain protected. Editor text
+unique indexes/prompt IDs and **exact** requested operation coverage before any
+checkpoint. Subset naming, selection or applied receipts reject. After every target
+fully accepts the captured plan, the same recipe revision/current origins and no
+pending decision permit one atomic checkpoint of the entire captured recipe.
+Off never claims its dormant values executed: they remain recoverable settings,
+including disabled raw text, enum picks, substitutions and native Files. Dirty
+means recipe changes since that checkpoint. Newer/edit-and-revert work remains
+protected as a whole, with no partial baseline advancement. Editor text
 and File references/order are never normalized/replaced. Enqueue node-error partial
 acceptance or malformed success provides no complete proof or automatic resubmit.
 
@@ -880,9 +926,14 @@ Each Variations text field is one literal template. Line breaks, blank paragraph
 indentation and surrounding whitespace are retained in every submitted value;
 formatting never creates extra variation axes. Only explicit `{{label}}` inputs
 expand a whole-template Cartesian product, with the same expansion used for the
-displayed count and Run payload. Missing referenced values keep that row inert;
+displayed count and Run payload. Missing referenced values do not contribute a
+preview axis and reject Run before effects;
 clearing the field yields one empty string. Unchanged multiline text still matches
 the exact current permutation and is excluded normally.
+Label dictionaries contain explicit own entries only, through the same shared
+lookup in controls, compilation and expansion. Prototype-named labels remain
+valid when configured; inherited object properties never supply alternatives or
+make an unconfigured axis executable.
 
 ## 3. Judgment model
 

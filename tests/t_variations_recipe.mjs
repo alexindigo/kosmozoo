@@ -8,10 +8,10 @@ Deno.test("recipe owner: raw resources survive snapshots and a captured checkpoi
   recipe.edited();
   const captured = recipe.capture();
   assert(captured.images["i.image"].values.items[0].file === file);
-  recipe.checkpoint(captured);
+  assertEquals(recipe.checkpoint(captured, 1), true);
   assertEquals(recipe.remaining(), []);
   recipe.write("images", "i.image", "enabled", true); recipe.edited();
-  recipe.checkpoint(captured);
+  assertEquals(recipe.checkpoint(captured, 1), false);
   assertEquals(recipe.row("images", "i.image").values.enabled, true);
   assertEquals(recipe.remaining(), [{ domain: "images", id: "i.image", field: "enabled" }]);
   assertEquals(recipe.revision(), 2);

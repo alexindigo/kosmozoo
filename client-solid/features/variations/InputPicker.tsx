@@ -4,6 +4,7 @@ import { useClickOutside } from "../../lib/click-outside.js";
 import { focusMemory } from "./draft.js";
 import { useImageDisplay } from "../../lib/img-measure.js";
 import { SingleLineText } from "../../components/SingleLineText.js";
+import { popoverPlacement } from "../../lib/popover-placement.js";
 
 const TILE_SIZE = 96, GAP = 6, ROW_HEIGHT = TILE_SIZE + GAP, OVERSCAN_ROWS = 3;
 
@@ -11,32 +12,70 @@ const TILE_SIZE = 96, GAP = 6, ROW_HEIGHT = TILE_SIZE + GAP, OVERSCAN_ROWS = 3;
 // display registration and popup scope registration are injected. The child owns focus, search and virtual geometry.
 export function InputPicker(props) {
   const [open, setOpen] = createSignal(false), [query, setQuery] = createSignal("");
-  const id = `vz-image-input-${createUniqueId().replace(/[^\w-]/g, "")}`, anchor = `--${id}`;
-  let root, trigger, surface = null, suspended = false;
+  const [suspended, setSuspended] = createSignal(false);
+  const id = `vz-image-input-${createUniqueId().replace(/[^\w-]/g, "")}`;
+  let root, trigger, surface = null, requestPlacement = () => {};
   const close = () => { setOpen(false); trigger?.focus(); };
-  useClickOutside(() => root, () => { if (!suspended) setOpen(false); });
+  useClickOutside(() => root, () => { if (!suspended()) setOpen(false); });
   const registerSurface = capability => {
     surface = capability;
-    if (suspended) capability.suspend();
+    if (suspended()) capability.suspend();
+    else requestPlacement();
     return () => { if (surface === capability) surface = null; };
   };
   onCleanup(props.registerEditor({
-    suspend() { suspended = true; surface?.suspend(); },
-    resume() { suspended = false; surface?.resume(); },
+    suspend() { setSuspended(true); surface?.suspend(); },
+    resume() { surface?.resume(); setSuspended(false); },
   }));
+  createEffect(() => {
+    if (!open() || suspended()) return;
+    let frame = null, alive = true, previous = null;
+    const update = () => {
+      frame = null;
+      if (!alive || !trigger.isConnected || !surface) return;
+      const size = surface.measure();
+      if (!size) return;
+      const placed = popoverPlacement(trigger.getBoundingClientRect(), { width: innerWidth, height: innerHeight }, size);
+      if (!placed) { if (previous) surface.place(null); previous = null; return; }
+      if (previous && Object.keys(placed).every(key => placed[key] === previous[key])) return;
+      previous = placed; surface.place(placed);
+    };
+    const schedule = () => { if (alive && frame === null) frame = requestAnimationFrame(update); };
+    requestPlacement = schedule;
+    // Only the trigger is observed. Popover/list resizing cannot feed placement
+    // back into itself, and a scroll inside the popup is not ancestor travel.
+    const observer = new ResizeObserver(schedule); observer.observe(trigger);
+    const onScroll = event => {
+      if (event.target === window || event.target === document || event.target?.contains?.(trigger)) schedule();
+    };
+    window.addEventListener("resize", schedule, { passive: true });
+    window.addEventListener("scroll", onScroll, { capture: true, passive: true });
+    schedule();
+    onCleanup(() => {
+      alive = false; if (frame !== null) cancelAnimationFrame(frame);
+      observer.disconnect(); window.removeEventListener("resize", schedule);
+      window.removeEventListener("scroll", onScroll, true);
+      if (requestPlacement === schedule) requestPlacement = () => {};
+    });
+  });
+  // The caller supplies presentation invalidation as data, never a DOM node.
+  createEffect(() => { props.positionRevision; requestPlacement(); });
   createEffect(() => { if (open()) onCleanup(props.registerPopup(close)); });
   return <div class="vz-input-picker" ref={root}>
-    <button type="button" class="vz-image-action vz-input-trigger" ref={trigger} style={{ "anchor-name": anchor }}
+    <button type="button" class="vz-image-action vz-input-trigger" ref={trigger}
       aria-expanded={open()} aria-haspopup="listbox" aria-controls={id} {...focusMemory(props.rememberFocus)} onClick={() => setOpen(!open())}><SingleLineText value="ComfyUI inputs ▾" /></button>
     <Show when={open()}>
-      <InputOptions id={id} anchor={anchor} query={query} onQuery={setQuery} files={props.files} selected={props.selected}
-        current={props.current} thumbnail={props.thumbnail} registerThumbnail={props.registerThumbnail} onToggle={props.onToggle} rememberFocus={props.rememberFocus} registerSurface={registerSurface} />
+      <InputOptions id={id} query={query} onQuery={setQuery} files={props.files} selected={props.selected}
+        current={props.current} thumbnail={props.thumbnail} registerThumbnail={props.registerThumbnail}
+        onToggle={name => { props.onToggle(name); requestPlacement(); }} rememberFocus={props.rememberFocus} registerSurface={registerSurface} />
     </Show>
   </div>;
 }
 
 function InputOptions(props) {
   let panel, search, scrollElement;
+  const [placement, setPlacement] = createSignal(null);
+  const [placed, setPlaced] = createSignal(false);
   const [scroll, setScroll] = createSignal(null), [active, setActive] = createSignal(0), [columns, setColumns] = createSignal(3);
   const [pendingFocus, setPendingFocus] = createSignal(null);
   const [direction, setDirection] = createSignal(1), [aheadRows, setAheadRows] = createSignal(0);
@@ -81,12 +120,23 @@ function InputOptions(props) {
     measure();
     const observer = new ResizeObserver(measure);
     observer.observe(panel); observer.observe(scrollElement); onCleanup(() => observer.disconnect());
-    setScroll(scrollElement);
     onCleanup(props.registerSurface({
-      suspend() { if (panel.matches(":popover-open")) panel.hidePopover(); setScroll(null); },
+      measure() {
+        if (!panel.isConnected || !panel.matches(":popover-open")) return null;
+        const style = getComputedStyle(panel), list = getComputedStyle(scrollElement);
+        const width = parseFloat(style.maxWidth), listHeight = parseFloat(list.maxHeight);
+        if (!Number.isFinite(width) || !Number.isFinite(listHeight)) return null;
+        const chrome = search.getBoundingClientRect().height + ["paddingTop", "paddingBottom", "borderTopWidth", "borderBottomWidth", "rowGap"]
+          .reduce((sum, key) => sum + (parseFloat(style[key]) || 0), 0);
+        return { width, height: chrome + listHeight, minHeight: chrome + TILE_SIZE };
+      },
+      place(value) { setPlacement(value); setPlaced(!!value); setScroll(value ? scrollElement : null); },
+      // Retain intrinsic geometry/rows across the blocking decision. Readiness
+      // gates interaction until the next placement frame, not widget identity.
+      suspend() { setPlaced(false); if (panel.matches(":popover-open")) panel.hidePopover(); setScroll(null); },
       resume() { if (!panel.matches(":popover-open")) panel.showPopover(); setScroll(scrollElement); },
     }));
-    search.focus();
+    search.focus({ preventScroll: true });
   });
   const move = event => {
     if (!["ArrowLeft", "ArrowRight", "ArrowDown", "ArrowUp", "Enter"].includes(event.key)) return;
@@ -104,9 +154,16 @@ function InputOptions(props) {
     }
   };
   return <div ref={panel} id={props.id} popover="manual" class="vz-input-popover"
-    style={{ "position-anchor": props.anchor, "--vz-input-tile-size": `${TILE_SIZE}px`, "--vz-input-gap": `${GAP}px` }} onKeyDown={move}>
+    data-side={placement()?.side}
+    style={{ "--vz-input-tile-size": `${TILE_SIZE}px`, "--vz-input-gap": `${GAP}px`,
+      left: `${placement()?.left ?? 0}px`, top: `${placement()?.top ?? 0}px`,
+      width: placement() ? `${placement().width}px` : undefined,
+      height: placement() ? `${placement().height}px` : undefined,
+      "max-height": placement() ? `${placement().maxHeight}px` : undefined,
+      "min-height": placement() ? `${placement().minHeight}px` : undefined,
+      opacity: placed() ? 1 : 0, "pointer-events": placed() ? "auto" : "none" }} onKeyDown={move}>
     <input ref={search} type="search" role="combobox" aria-expanded="true" aria-autocomplete="list" aria-controls={`${props.id}-list`}
-      aria-activedescendant={filtered().length ? `${props.id}-option-${active()}` : undefined}
+      aria-activedescendant={placement() && filtered().length ? `${props.id}-option-${active()}` : undefined}
       class="vz-input-search" placeholder="Search inputs…" aria-label="Search ComfyUI inputs"
       {...focusMemory(props.rememberFocus)} value={props.query()} onInput={e => props.onQuery(e.currentTarget.value)} />
     <div class="vz-input-list" id={`${props.id}-list`} ref={scrollElement} role="listbox" aria-label="ComfyUI inputs" aria-multiselectable="true"
@@ -116,7 +173,7 @@ function InputOptions(props) {
         lastOffset = offset;
       }}>
       <div class="vz-input-window" style={{ height: `${Math.max(0, virtualizer.getTotalSize() - GAP)}px` }}>
-        <For each={virtualizer.getVirtualItems()}>{virtual =>
+        <For each={placement() ? virtualizer.getVirtualItems() : []}>{virtual =>
           <div class="vz-input-row" role="presentation" style={{ transform: `translateY(${virtual.start}px)` }}>
             <For each={rows()[virtual.index]}>{(name, offset) => {
               const index = () => virtual.index * columns() + offset();

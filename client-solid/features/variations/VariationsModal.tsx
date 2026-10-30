@@ -14,7 +14,7 @@
 
 import { createSignal, createMemo, createEffect, createResource, onCleanup, For, Show } from "solid-js";
 import { iconSvg } from "/js/icons.mjs";
-import { templateLabels } from "/shared/features/variations/shared.mjs";
+import { templateLabels, templateValue } from "/shared/features/variations/shared.mjs";
 import { sourceOrigin } from "/shared/source-origin.mjs";
 import { useAppStore } from "../../store/app-store.js";
 import { SliderRow } from "./SliderRow.js";
@@ -24,6 +24,7 @@ import { makeVariationEditor } from "./editor.js";
 import { VariationDiscardConfirmation } from "./VariationDiscardConfirmation.js";
 import { ImageSetPanel } from "./ImageSetPanel.js";
 import { SingleLineText } from "../../components/SingleLineText.js";
+import { workspaceCurrent } from "./workspaces.js";
 
 export function VariationsModal() {
   const store = useAppStore();
@@ -45,15 +46,22 @@ export function VariationsModal() {
 }
 
 function ModalBody(props) {
+  const store = useAppStore(), workspaces = store.actions.variations.workspaces;
+  const [workspace, setWorkspace] = createSignal(workspaces.open(props.images));
+  return <Show when={workspace()} keyed>{selected => <RecipeBody {...props} workspace={selected}
+    workspaces={workspaces} selectWorkspace={setWorkspace} readOnly={!workspaceCurrent(selected, props.images)} />}</Show>;
+}
+
+function RecipeBody(props) {
   const store = useAppStore();
   const services = store.actions.variations.services;
-  const image = props.images[0];
+  const image = props.workspace.targets[0];
   // batch = more than one image: ranges become RELATIVE offsets from each
   // image's own current value (resolved by the plugin at run time), and the
   // count shows the total across the whole selection.
   const batch = props.images.length > 1;
   const [version, setVersion] = createSignal(0);
-  const editor = makeVariationEditor({ targets: props.images, services,
+  const editor = makeVariationEditor({ targets: props.workspace.targets, recipe: props.workspace.recipe, readOnly: props.readOnly, services,
     currentOrigin: host => sourceOrigin(host, store.state.hosts[host]),
     changed: () => setVersion(value => value + 1),
     close: () => store.handles.invoke("variations.close", { automatic: true, session: props.session }) });
@@ -79,9 +87,17 @@ function ModalBody(props) {
   const guard = makeLeaveGuard({ dirty: editor.dirty,
     suspend: () => { for (const child of children) child.suspend(); },
     restore: () => { for (const child of children) child.resume(); restoreFocus(); },
-    decision: value => { setDecision(value); editor.decision(value); }, invalidate: editor.invalidateClose });
+    decision: value => { setDecision(value); editor.decision(value); }, invalidate: editor.invalidateClose,
+    discarded: () => props.workspaces.remove(props.workspace) });
+  const switchRecipe = (next, discard = false) => guard.request({ intent: { type: "recipe", key: next?.id ?? "new", discard },
+    requireDiscard: discard, cancel: () => {}, permit: () => {
+      if (discard) props.workspaces.remove(props.workspace);
+      props.selectWorkspace(next ?? props.workspaces.fresh(props.images));
+      return { status: "applied" };
+    } });
   onCleanup(store.actions.variations.registerOwner(props.session, { requestLeave: guard.request, requestRun: editor.run }));
   onCleanup(() => { editor.dispose(); guard.dispose(); });
+  onCleanup(props.workspaces.lease(() => { editor.dispose(); guard.dispose(); }));
   // refs exist solely to read the live selection and restore the caret
   // after a label-click insert
   let prefixEl, suffixEl;
@@ -117,11 +133,12 @@ function ModalBody(props) {
   // The graph is the source of truth: only parameters whose target node
   // exists in this image's graph render (writeOnly params — widget-only
   // custom seed nodes etc. — are skipped for now).
-  const [probe] = createResource(() => services.probe(image));
+  const [probe] = createResource(() => !props.readOnly, () => services.probe(image));
   const [folderCapability] = createResource(() => services.folderCapability());
 
   let initializedProbe = false;
   createEffect(() => {
+    if (props.readOnly) return;
     if (probe.loading) return;
     if (initializedProbe) return;
     initializedProbe = true;
@@ -130,7 +147,7 @@ function ModalBody(props) {
   });
 
   const [inputFiles] = createResource(
-    () => read(() => editor.ready() && strParams().length && image.host ? image.host : null),
+    () => read(() => !props.readOnly && editor.ready() && strParams().length && image.host ? image.host : null),
     (hostName) => services.inputList(hostName, image.origin),
   );
   let initializedImages = false;
@@ -138,6 +155,9 @@ function ModalBody(props) {
     const sp = strParams();
     if (!sp.length || inputFiles.loading) return;
     if (initializedImages) return;
+    // Retained rows can exist before this mount's probe starts its input read.
+    // Only a resolved resource (or its terminal error) may consume installation.
+    if (!inputFiles.error && !inputFiles()) return;
     initializedImages = true;
     if (inputFiles.error) editor.catalogueFailure(inputFiles.error);
     else editor.installInputs(inputFiles());
@@ -238,6 +258,27 @@ function ModalBody(props) {
         <div class="vz-body">
           <div class="vz-left">
             <div class="vz-sliders">
+              <div class="vz-workspace-tools">
+                <label class="vz-workspace-label" for={`recipe-${props.session}`}>Recipe workspace</label>
+                <div class="vz-workspace-actions">
+                  <select id={`recipe-${props.session}`} class="vz-workspace" value={props.workspace.id}
+                    onChange={event => {
+                      const next = props.workspaces.options(props.images).find(item => item.id === event.currentTarget.value);
+                      event.currentTarget.value = props.workspace.id;
+                      switchRecipe(next);
+                    }}>
+                    <For each={props.workspaces.options(props.images)}>{item => <option value={item.id}>
+                      {workspaceCurrent(item, props.images) ? "Current source recipe" : `Previous source · ${item.targets[0].origin.address} (${item.id})`}
+                    </option>}</For>
+                  </select>
+                  <button class="vz-workspace-discard" onClick={() => switchRecipe(null, true)}>Discard recipe</button>
+                </div>
+                <Show when={props.readOnly}>
+                  <button class="vz-workspace-new" onClick={() => switchRecipe(null)}>New recipe for current source</button>
+                </Show>
+              </div>
+              <Show when={props.readOnly}><RetainedRecipe values={editor.retainedValues()} /></Show>
+              <Show when={!props.readOnly}>
               {/* One chosen set, independent of how each image was acquired. */}
               <For each={strParams()}>
                 {(id) => {
@@ -305,7 +346,7 @@ function ModalBody(props) {
                         <SliderRow
                           param={{ ...p, key, label: row0.label }}
                           current={() => rows()[key]?.current ?? null}
-                          defaults={row0.defaults}
+                          defaults={{ min: row0.min, max: row0.max }}
                           enabled={() => !!rows()[key]?.enabled}
                           increment={() => rows()[key]?.increment}
                           rawIncrement={() => rows()[key]?.rawIncrement ?? ""}
@@ -322,38 +363,46 @@ function ModalBody(props) {
                   </For>
                 </Show>
               </Show>
+              </Show>
             </div>
           </div>
           <div class="vz-divider" />
           <div class="vz-right">
-            <SingleLineText class="vz-rlabel" value="variations" />
-            <SingleLineText class={"vz-count" + (tally().n > 1000 ? " vz-count-hot" : tally().n > 100 ? " vz-count-warn" : "")} value={tally().n} />
-            <Show when={batch && tally().anyEnabled}>
-              <SingleLineText class="vz-count-sub" value={`${tally().perImage} variants × ${props.images.length} images`} />
-            </Show>
-            <SingleLineText class="vz-rlabel" value="prefix" />
-            <input
-              type="text" class="vz-tinput vz-prefix" ref={prefixEl}
-              value={prefix()}
-              title="click a slider label to insert its {placeholder}"
-              {...focus} onFocus={(e) => { setFocused("prefix"); focus.onFocus(e); }}
-              onInput={(e) => editor.edit("naming", "root", "prefix", e.currentTarget.value)}
-            />
-            <SingleLineText class="vz-rlabel" value="suffix" />
-            <input
-              type="text" class="vz-tinput vz-suffix" ref={suffixEl}
-              value={suffix()}
-              title="click a slider label to insert its {placeholder} (enabled sliders auto-append)"
-              {...focus} onFocus={(e) => { setFocused("suffix"); focus.onFocus(e); }}
-              onInput={(e) => editor.edit("naming", "root", "suffix", e.currentTarget.value)}
-            />
-            {/* spacer pushes the result + Run to the BOTTOM of the right
- column — the result message sits above the button, centered on it,
- and the button is the column's last element */}
-            <div class="vz-rspacer" />
-            <div class={"vz-error" + (result()?.ok ? " vz-ok" : "")}>{result()?.text ?? ""}</div>
+            <div class="vz-count-group">
+              <SingleLineText class="vz-rlabel" value="variations" />
+              <SingleLineText class={"vz-count" + (tally().n > 1000 ? " vz-count-hot" : tally().n > 100 ? " vz-count-warn" : "")} value={tally().n} />
+              <Show when={batch && tally().anyEnabled}>
+                <SingleLineText class="vz-count-sub" value={`${tally().perImage} variants × ${props.images.length} images`} />
+              </Show>
+            </div>
+            <div class="vz-naming-group">
+              <SingleLineText class="vz-rlabel" value="prefix" />
+              <input
+                type="text" class="vz-tinput vz-prefix" ref={prefixEl} disabled={props.readOnly}
+                value={prefix()}
+                title="click a slider label to insert its {placeholder}"
+                {...focus} onFocus={(e) => { setFocused("prefix"); focus.onFocus(e); }}
+                onInput={(e) => editor.edit("naming", "root", "prefix", e.currentTarget.value)}
+              />
+              <SingleLineText class="vz-rlabel" value="suffix" />
+              <input
+                type="text" class="vz-tinput vz-suffix" ref={suffixEl} disabled={props.readOnly}
+                value={suffix()}
+                title="click a slider label to insert its {placeholder} (enabled sliders auto-append)"
+                {...focus} onFocus={(e) => { setFocused("suffix"); focus.onFocus(e); }}
+                onInput={(e) => editor.edit("naming", "root", "suffix", e.currentTarget.value)}
+              />
+            </div>
+            <div class="vz-messages" role="status">
+              <div class="vz-message-content">
+                <Show when={props.readOnly && !result()?.text}>
+                  <p class="vz-workspace-status">Recipe from a previous source. Review only; images and values have not been retargeted.</p>
+                </Show>
+                <div class={"vz-error" + (result()?.ok ? " vz-ok" : "")}>{result()?.text ?? ""}</div>
+              </div>
+            </div>
             <button
-              class="vz-run" disabled={running() || undefined} onClick={() => store.handles.invoke("variations.run")}
+              class="vz-run" disabled={running() || props.readOnly || undefined} onClick={() => store.handles.invoke("variations.run")}
             ><SingleLineText value={running() ? "Running…" : "Run"} /></button>
           </div>
         </div>
@@ -367,6 +416,19 @@ function ModalBody(props) {
       </Show>
     </div>
   );
+}
+
+// Every raw value is inspectable on a retired source, including disabled rows
+// and dormant template keys. This consumer has no edit/acquisition callbacks.
+function RetainedRecipe(props) {
+  const display = value => typeof value === "string" ? value : JSON.stringify(value,
+    (_key, item) => item instanceof File ? `${item.name} (${item.size} bytes, native File)` : item, 2);
+  return <div class="vz-retained-values"><For each={props.values}>{entry => <section>
+    <h3>{entry.id} · {entry.domain}</h3>
+    <dl><For each={Object.entries(entry.values)}>{([name, value]) => <>
+      <dt>{name}</dt><dd><pre>{display(value)}</pre></dd>
+    </>}</For></dl>
+  </section>}</For></div>;
 }
 
 // one enum sweep row: master checkbox + label + the orange current value;
@@ -459,7 +521,7 @@ function TextRow(props) {
                 <input
                   {...focus}
                   type="text" class="vz-tpl-input"
-                  value={r().tpl?.[lab] ?? ""}
+                  value={templateValue(r().tpl, lab) ?? ""}
                   placeholder="values; separated; by; semicolons"
                   onInput={(e) => props.onTpl(props.p.id, lab, e.currentTarget.value)}
                 />

@@ -91,9 +91,9 @@ Deno.test("variation dependencies: dangling links fail before enqueue in produce
     const graph = structuredClone(fixture);
     graph["459:474"].inputs.prompt = ["missing:480", 0];
     const r = rig(graph, outputs, filename), response = await r.run(), result = await response.json();
-    assertEquals(response.status, 200); assertEquals(result.total, 4); assertEquals(result.submitted, 0);
+    assertEquals(response.status, 400); assertEquals(result.total, 4); assertEquals(result.submitted, 0);
     assertEquals(r.jobs, []); assertEquals(result.acknowledgement.accepted, []);
-    assertEquals(result.errors.length, 4);
+    assertEquals(result.errors.length, 4); // Every tuple has a rejected-plan disposition, with no dispatch attempts.
     for (const { error } of result.errors) {
       assert(error.includes("459:474.prompt")); assert(error.includes("missing:480"));
     }

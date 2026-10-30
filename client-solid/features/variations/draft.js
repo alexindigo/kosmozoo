@@ -23,13 +23,13 @@ export function sameDraft(a, b) {
   return keys.length === Object.keys(b).length && keys.every((key) => Object.hasOwn(b, key) && sameDraft(a[key], b[key]));
 }
 
-export function makeLeaveGuard({ dirty, suspend, restore, decision, invalidate }) {
+export function makeLeaveGuard({ dirty, suspend, restore, decision, invalidate, discarded = () => {} }) {
   let pending = null, alive = true;
   const settle = (record, status) => {
     if (pending === record) { pending = null; decision(null); }
     record.resolve(status);
   };
-  const commit = (record) => {
+  const commit = (record, discard = false) => {
     if (!alive || pending !== record) return;
     record.committing = true;
     // Consume before permit: unmount cleanup cannot cancel an applied transition.
@@ -37,6 +37,7 @@ export function makeLeaveGuard({ dirty, suspend, restore, decision, invalidate }
     decision(null);
     try {
       const result = record.permit();
+      if (result.status === "applied" && discard) discarded();
       if (result.status !== "applied" && record.suspended) restore();
       record.resolve(result);
     } catch (error) { if (record.suspended) restore(); record.reject(error); }
@@ -51,7 +52,7 @@ export function makeLeaveGuard({ dirty, suspend, restore, decision, invalidate }
       const record = { ...request, key, committing: false };
       record.promise = new Promise((resolve, reject) => { record.resolve = resolve; record.reject = reject; });
       pending = record;
-      if (!dirty()) commit(record);
+      if (!dirty() && !request.requireDiscard) commit(record);
       else { record.suspended = true; suspend(); decision(record.intent); }
       return record.promise;
     },
@@ -62,7 +63,7 @@ export function makeLeaveGuard({ dirty, suspend, restore, decision, invalidate }
       try { record.cancel(); settle(record, { status: "cancelled" }); restore(); }
       catch (error) { pending = null; decision(null); record.reject(error); }
     },
-    discard() { if (pending) commit(pending); },
+    discard() { if (pending) commit(pending, true); },
     dispose() {
       alive = false;
       if (pending && !pending.committing) settle(pending, { status: "stale" });

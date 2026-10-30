@@ -81,6 +81,7 @@ Deno.test("editor contract: source replacement after a confirmed upload stops ev
   const pending = editor.run(); while (!release) await new Promise(resolve => setTimeout(resolve, 0));
   rig.replaceSource(); release(); assertEquals((await pending).status, "stale");
   assertEquals(rig.requests.length, 0); assert(editor.dirty()); assert(editor.rows("images")["image.image"].items[0].file === file);
+  assertEquals(editor.result().effects.uploads, [{ name: file.name, origin: rig.context.origin }]);
   assert(editor.result().text.includes("origin changed")); rig.fireTimers(); assertEquals(rig.closeCount(), 0); editor.dispose();
 });
 
@@ -89,6 +90,41 @@ Deno.test("editor contract: malformed or old proof consumes no work and performs
   const { editor } = rig; editor.edit("naming", "root", "prefix", "kept_");
   await editor.run(); assert(editor.dirty()); assertEquals(editor.result().adopted, false); assert(editor.result().text.includes("acknowledgement unavailable"));
   rig.fireTimers(); assertEquals(rig.closeCount(), 0); editor.dispose();
+});
+
+Deno.test("editor contract: a lost Run response is explicit uncertain evidence, preserves recipe and never retries", async () => {
+  let calls = 0;
+  const rig = editorRig({ run: async () => { calls++; throw new Error("response lost after dispatch"); } });
+  rig.editor.edit("naming", "root", "prefix", "kept_");
+  assertEquals((await rig.editor.run()).adopted, false);
+  assertEquals(calls, 1); assert(rig.editor.dirty());
+  assertEquals(rig.editor.result().outcome, "uncertain-effects");
+  assertEquals(rig.editor.result().effects.targets[0].outcome, "uncertain");
+  rig.fireTimers(); assertEquals(rig.closeCount(), 0); rig.editor.dispose();
+});
+
+Deno.test("editor preflight: every enabled-empty axis and unconfigured template rejects before uploads or requests", async () => {
+  for (const [domain, id, name, value] of [["images", "image.image", "items", []],
+    ["enums", "choice.value", "picks", []], ["texts", "text.text", "text", "{{missing}}"],
+    ...["constructor", "hasOwnProperty", "__proto__"].map(label => ["texts", "text.text", "text", `{{${label}}}`])]) {
+    const rig = editorRig(); rig.editor.edit(domain, id, "enabled", true); rig.editor.edit(domain, id, name, value);
+    assertEquals((await rig.editor.run()).status, "invalid");
+    assertEquals(rig.requests, []); assertEquals(rig.uploads, []); assert(rig.editor.dirty());
+    assert(rig.editor.result().text.includes(domain === "texts" ? "every template label" : "at least one")); rig.editor.dispose();
+  }
+});
+
+Deno.test("editor templates: explicitly configured prototype-named labels reach the captured consumer as ordinary alternatives", async () => {
+  for (const label of ["constructor", "hasOwnProperty", "__proto__"]) {
+    const rig = editorRig();
+    try {
+      rig.editor.edit("texts", "text.text", "enabled", true);
+      rig.editor.edit("texts", "text.text", "text", `{{${label}}}`);rig.editor.template("text.text", label, "one; two");
+      assertEquals((await rig.editor.run()).adopted, true);
+      assertEquals(rig.requests[0].imageParams["text.text"].values, ["one", "two"]);
+      assertEquals(rig.editor.remaining(), []);
+    } finally { rig.editor.dispose(); }
+  }
 });
 
 Deno.test("editor contract: disposal retires a pending ticket without publishing or closing another owner", async () => {

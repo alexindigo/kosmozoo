@@ -2,6 +2,7 @@
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const { workPath } = require('./paths.cjs');
+const { discardRecipe } = require('./recipe-helpers.cjs');
 const fileControl = '.vz-imgrow:not(.vz-enumrow):not(.vz-textrow) .vz-cb';
 const fileSetup = async (cdp) => {
   await cdp.poll(`!!document.querySelector(${JSON.stringify(fileControl)})`);
@@ -65,6 +66,7 @@ module.exports = async ({ cdp, check, FAKE, KZ }) => {
   const open = async (file = 'flux-basic.png') => {
     await invoke('variations.open', { id: `fake:${file}` });
     await cdp.poll(`document.querySelectorAll('.vz-slider-row').length>0`);
+    await discardRecipe(cdp);
   };
   const requestClose = () => cdp.evaluate(`(async()=>{window.__leave=${KZ}.handles.invoke('variations.close');return true})()`);
   const discard = async () => {

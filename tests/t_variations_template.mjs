@@ -4,7 +4,7 @@
 
 import { assertEquals } from "jsr:@std/assert";
 import {
-  templateLabels, parseSemicolonList, expandTextAxes,
+  templateLabels, templateValue, parseSemicolonList, expandTextAxes,
   generatePermutations,
 } from "../src/features/variations/shared.mjs";
 
@@ -80,6 +80,14 @@ Deno.test("expandTextAxes: a label without values inerts the whole row", () => {
   assertEquals(expandTextAxes("{{a}} {{b}}", { a: ["x"] }), []);
   // the whole template remains inert while a referenced label is unconfigured
   assertEquals(expandTextAxes("plain line\n{{a}}", {}), []);
+});
+
+Deno.test("template maps: prototype-named labels require explicit own values and expand normally when configured", () => {
+  for (const label of ["constructor", "hasOwnProperty", "__proto__"]) {
+    assertEquals(templateValue({}, label), undefined);
+    assertEquals(expandTextAxes(`{{${label}}}`, {}), []);
+    assertEquals(expandTextAxes(`{{${label}}}`, Object.fromEntries([[label, ["one", "two"]]])), ["one", "two"]);
+  }
 });
 
 // --- sweep-to-empty: a blank text is ONE value — the empty string --------------

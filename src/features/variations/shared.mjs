@@ -166,6 +166,10 @@ export function permutationPlan(ranges, currentValues, imageParams = {}) {
 
 // --- text template axes ({{label}} substitutions) ------------------------------
 
+// Label dictionaries are own-entry maps. Object prototype names are valid
+// labels only when explicitly configured, never implicit substitution values.
+export const templateValue = (entries, label) => entries != null && Object.hasOwn(entries, label) ? entries[label] : undefined;
+
 // Distinct {{label}} names in first-appearance order. The name is trimmed;
 // empty names ({{ }}) are not labels.
 export function templateLabels(text) {
@@ -197,8 +201,9 @@ export function parseSemicolonList(raw) {
 export function expandTextAxes(text, tplValues = {}) {
   const template = String(text ?? "");
   const labels = templateLabels(template);
-  if (labels.some((l) => !(tplValues[l]?.length > 0))) return [];
-  return cartesianProduct(labels.map(label => tplValues[label])).map(combo => {
+  const axes = labels.map(label => templateValue(tplValues, label));
+  if (axes.some(values => !Array.isArray(values) || !values.length)) return [];
+  return cartesianProduct(axes).map(combo => {
     const values = Object.fromEntries(labels.map((label, index) => [label, combo[index]]));
     return template.replace(/\{\{([^{}]+?)\}\}/g, (match, name) => values[name.trim()] ?? match);
   });
@@ -239,6 +244,49 @@ const uuid = (value) => typeof value === "string" && /^[0-9a-f]{8}-[0-9a-f]{4}-4
 export function validRunAcknowledgement(value) {
   return shape(value, ["version", "runId", "requestId"]) && value.version === 2 && uuid(value.runId) && uuid(value.requestId);
 }
+
+// Exact effective operations, derived from the request rather than a second
+// acknowledgement whitelist. Enabled-empty is invalid, never an omitted axis.
+export function runOperationFields(request) {
+  const fields = { ranges: [], imageParams: [], naming: ["prefix", "suffix"], rangeSelections: [], imageSelections: [] };
+  for (const [channel, selections] of [["ranges", "rangeSelections"], ["imageParams", "imageSelections"]]) {
+    if (!record(request[channel] ?? {})) throw new Error(`Invalid ${channel} plan`);
+    for (const [id, axis] of Object.entries(request[channel] ?? {})) {
+      if (!record(axis) || typeof axis.enabled !== "boolean") throw new Error(`Choose whether ${id} is enabled`);
+      if (Object.hasOwn(request[channel === "ranges" ? "imageParams" : "ranges"] ?? {}, id)) throw new Error(`Ambiguous operation: ${id}`);
+      fields[selections].push(id);
+      if (!axis.enabled) continue;
+      if (channel === "imageParams" && (!Array.isArray(axis.values) || !axis.values.length)) throw new Error(`${id}: choose at least one value before Run`);
+      fields[channel].push(id);
+    }
+  }
+  return fields;
+}
+
+// The captured transaction records every target's applicability. Only the
+// documented relative numeric absence is an exclusion; positive other kinds
+// must find a carrier. Raw recipe dispositions remain a separate representation.
+export function targetRunPlan(payload, catalogue) {
+  const index = parameterIndex(catalogueParams(catalogue));
+  const ranges = {}, operations = [];
+  for (const [id, axis] of Object.entries(payload.ranges)) {
+    const applicable = !(payload.relative && axis.enabled && !index.has(id));
+    operations.push({ id: `rangeSelections:${id}`, parameter: id, channel: "rangeSelections", disposition: applicable ? axis.enabled ? "apply" : "off" : "absent-relative-numeric" });
+    if (axis.enabled) operations.push({ id: `ranges:${id}`, parameter: id, channel: "ranges", disposition: applicable ? "apply" : "absent-relative-numeric" });
+    if (applicable) ranges[id] = axis;
+    if (applicable && axis.enabled && !catalogue.params.some(p => p.id === id)) throw new Error(`${id}: numeric parameter is missing from this target`);
+  }
+  for (const [id, axis] of Object.entries(payload.imageParams)) {
+    operations.push({ id: `imageSelections:${id}`, parameter: id, channel: "imageSelections", disposition: axis.enabled ? "apply" : "off" });
+    if (axis.enabled) operations.push({ id: `imageParams:${id}`, parameter: id, channel: "imageParams", disposition: "apply" });
+    if (axis.enabled && (!index.has(id) || catalogue.params.some(p => p.id === id))) throw new Error(`${id}: parameter is missing from this target`);
+  }
+  operations.push(...["prefix", "suffix"].map(parameter => ({ id: `naming:${parameter}`, parameter, channel: "naming", disposition: "apply" })));
+  const request = { ...payload, ranges };
+  runOperationFields(request);
+  return { payload: request, operations };
+}
+
 export function acknowledgedFields(request, response) {
   const correlation = request?.acknowledgement, ack = response?.acknowledgement;
   const ackKeys = ["version", "runId", "requestId", "target", "context", "accepted"];
@@ -248,13 +296,11 @@ export function acknowledgedFields(request, response) {
       !shape(ack.target, ["id", "host", "filename"]) || ["id", "host", "filename"].some(key => ack.target[key] !== request[key]) ||
       !Number.isSafeInteger(response.total) || response.total <= 0 || response.submitted !== response.total ||
       !Array.isArray(response.errors) || response.errors.length || !Array.isArray(ack.accepted) || ack.accepted.length !== response.total) return null;
-  const ranges = Object.keys(request.ranges ?? {}).filter(id => request.ranges[id]?.enabled === true);
-  const imageParams = Object.keys(request.imageParams ?? {}).filter(id => request.imageParams[id]?.enabled === true && request.imageParams[id]?.values?.length);
-  const rangeSelections = Object.keys(request.ranges ?? {}).filter(id => typeof request.ranges[id]?.enabled === "boolean");
-  const imageSelections = Object.keys(request.imageParams ?? {}).filter(id => typeof request.imageParams[id]?.enabled === "boolean");
-  if (ranges.some(id => imageParams.includes(id))) return null;
+  let expected;
+  try { expected = runOperationFields(request); } catch { return null; }
+  const { ranges, imageParams, rangeSelections, imageSelections } = expected;
   const indexes = new Set(), prompts = new Set();
-  const list = (values, allowed) => Array.isArray(values) && new Set(values).size === values.length && values.every(value => allowed.includes(value));
+  const list = (values, allowed) => Array.isArray(values) && values.length === allowed.length && new Set(values).size === values.length && values.every(value => allowed.includes(value));
   for (const accepted of ack.accepted) {
     if (!shape(accepted, ["index", "promptId", "applied", "selections", "naming"]) || !Number.isSafeInteger(accepted.index) ||
         accepted.index < 0 || accepted.index >= response.total || indexes.has(accepted.index) ||

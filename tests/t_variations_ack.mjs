@@ -37,6 +37,15 @@ function rig({ source = graph, enqueue, inspect } = {}) {
   }, run: (body) => routes.get("POST/run")(new Request("http://x/run", { method: "POST", body: JSON.stringify(body) })) };
 }
 
+Deno.test("plan preflight: an invalid later permutation rejects the entire plan with zero enqueues", async () => {
+  const r = rig(), body = await r.request();
+  body.imageParams["text.text"].values = ["short", "x".repeat(450)];
+  body.suffix = "_{text.text}";
+  const response = await r.run(body), data = await response.json();
+  assertEquals(response.status, 400); assertEquals(r.jobs.length, 0);
+  assert(data.error.includes("naming"));
+});
+
 Deno.test("ack: mutation reports actual assignments, not absent descriptors/carriers", () => {
   const result = mutateGraph(graph, { "gone.value": 1 }, [{ id: "gone.value", key: "value", nodeIds: ["gone"] }]);
   assertEquals(result.applied, []);
@@ -76,6 +85,10 @@ Deno.test("ack: removed carriers cannot be certified; surviving quality and imag
   body.ranges["output.quality"] = { enabled: true, min: .5, max: .5, increment: .1 };
   body.imageParams["first.image"] = { enabled: true, values: ["new-first.png"] };
   body.imageParams["second.image"] = { enabled: true, values: ["new-second.png"] };
+  const rejected = await r.run(body);
+  assertEquals(rejected.status, 400); assertEquals(r.jobs.length, 0);
+  assert((await rejected.json()).error.includes("pruned"));
+  delete body.ranges["other.quality"];
   const data = await (await r.run(body)).json();
   assertEquals(r.jobs.length, 1); assert(!Object.hasOwn(r.jobs[0].prompt, "other"));
   assertEquals(r.jobs[0].prompt.first.inputs.image, "new-first.png");
@@ -90,19 +103,20 @@ Deno.test("ack: actual output-prefix rewriting never certifies the overwritten p
   source.output.inputs.filename_prefix = 1;
   const r = rig({ source }), body = await r.request();
   body.ranges['output.filename_prefix'] = { enabled: true, min: .5, max: .5, increment: .1 };
-  const data = await (await r.run(body)).json();
-  assertEquals(r.jobs[0].prompt.output.inputs.filename_prefix, 'v_1_0.5');
-  assertEquals(data.acknowledgement.accepted[0].applied.ranges, ['sampler.denoise']);
+  const response = await r.run(body), data = await response.json();
+  assertEquals(response.status, 400); assertEquals(r.jobs.length, 0);
+  assert(data.error.includes("overwritten"));
 });
 
-Deno.test("ack: unknown naming tokens remain unacknowledged; recognized directory prefixes survive", async () => {
+Deno.test("ack: unknown naming tokens reject before dispatch; recognized directory prefixes survive", async () => {
   const r = rig(), body = await r.request(); body.prefix = "v_{unknown}_";
-  const data = await (await r.run(body)).json();
-  assertEquals(data.acknowledgement.accepted[0].naming, ["suffix"]);
+  const response = await r.run(body), data = await response.json();
+  assertEquals(response.status, 400); assertEquals(r.jobs.length, 0);
+  assert(data.error.includes("naming token"));
   body.prefix = "variants/v_";
   const nested = await (await r.run(body)).json();
   assertEquals(nested.acknowledgement.accepted[0].naming, ["prefix", "suffix"]);
-  assert(r.jobs[1].prompt.output.inputs.filename_prefix.startsWith("variants/v_"));
+  assert(r.jobs[0].prompt.output.inputs.filename_prefix.startsWith("variants/v_"));
 });
 
 Deno.test("ack: source replacement during inspection or accepted enqueue fences old ownership", async () => {
@@ -146,7 +160,9 @@ Deno.test("ack: consumer rejects incomplete, foreign, duplicate and forged proof
     data => data.acknowledgement.accepted[0].naming.push("filter"), data => data.acknowledgement.accepted = [],
     data => delete data.acknowledgement.accepted[0].selections,
     data => data.acknowledgement.accepted[0].selections.ranges.push("unrequested"),
-    data => data.acknowledgement.accepted[0].applied.ranges = []]) {
+    data => data.acknowledgement.accepted[0].applied.ranges = [],
+    data => data.acknowledgement.accepted[0].naming = ["prefix"],
+    data => data.acknowledgement.accepted[0].selections.imageParams = []]) {
     const data = structuredClone(valid); change(data); assertEquals(acknowledgedFields(body, data), null);
   }
   const multi = structuredClone(valid); multi.submitted = multi.total = 2;
@@ -157,10 +173,10 @@ Deno.test("ack: consumer rejects incomplete, foreign, duplicate and forged proof
   multi.acknowledgement.accepted[1].promptId = "different";
   multi.acknowledgement.accepted[1].applied.ranges = [];
   multi.acknowledgement.accepted[1].selections.ranges = [];
-  assertEquals(acknowledgedFields(body, multi).ranges, []);
+  assertEquals(acknowledgedFields(body, multi), null);
 });
 
-Deno.test("ack: compiler-owned consumption retains disabled/dormant/inactive fields and native File identity", async () => {
+Deno.test("ack: whole-recipe checkpoint retains disabled/dormant/inactive fields and native File identity", async () => {
   const a = new File(["a"], "a.png"), b = new File(["b"], "b.png");
   const { editor, requests } = editorRig();
   editor.edit("numeric", "n.denoise", "rawIncrement", "1e-1");
@@ -172,8 +188,9 @@ Deno.test("ack: compiler-owned consumption retains disabled/dormant/inactive fie
   editor.template("text.text", "used", "a; b"); editor.template("text.text", "dormant", "kept");
   editor.edit("naming", "root", "prefix", "v_");
   assertEquals((await editor.run()).status, "submitted");
-  const remaining = editor.remaining().map(item => `${item.domain}.${item.id}.${item.field}`);
-  assertEquals(remaining.sort(), ["numeric.n.steps.rawIncrement", "texts.text.text.tpl"].sort());
+  assertEquals(editor.remaining(), []);
+  assertEquals(editor.rows("numeric")["n.steps"].rawIncrement, "1e");
+  assertEquals(editor.rows("texts")["text.text"].tpl.dormant, "kept");
   assertEquals(requests[0].ranges["n.denoise"].increment, .1);
   assertEquals(requests[0].imageParams["text.text"].values, ["one a\n\ntwo", "one b\n\ntwo"]);
   assert(editor.rows("images")["image.image"].items[0].file === a && editor.rows("images")["image.image"].items[1].file === b);
@@ -223,14 +240,16 @@ Deno.test("ack: off selection proof rejects a conflicting on carrier and never i
   const r = rig(), body = await r.request();
   body.imageParams["unknown-inert"] = { enabled: true, values: [] };
   body.imageParams["unknown-off"] = { enabled: false, values: [] };
+  const invalid = await r.run(body);
+  assertEquals(invalid.status, 400); assertEquals(r.jobs.length, 0);
+  delete body.imageParams["unknown-inert"];
   const data = await (await r.run(body)).json(), fields = acknowledgedFields(body, data);
-  assert(fields.imageSelections.includes("unknown-off")); assert(!fields.imageSelections.includes("unknown-inert"));
+  assert(fields.imageSelections.includes("unknown-off"));
   const forged = structuredClone(data); forged.acknowledgement.accepted[0].selections.imageParams.push("unknown-inert");
   assertEquals(acknowledgedFields(body, forged), null);
   const collision = await r.request(); collision.ranges["sampler.denoise"].enabled = false;
   collision.imageParams["sampler.denoise"] = { enabled: true, values: [.5] };
-  const accepted = await (await r.run(collision)).json();
-  assertEquals(acknowledgedFields(collision, accepted).rangeSelections, []);
-  accepted.acknowledgement.accepted[0].selections.ranges.push("sampler.denoise");
-  assertEquals(acknowledgedFields(collision, accepted), null);
+  const count = r.jobs.length, rejected = await r.run(collision);
+  assertEquals(rejected.status, 400); assertEquals(r.jobs.length, count);
+  assertEquals(acknowledgedFields(collision, await rejected.json()), null);
 });

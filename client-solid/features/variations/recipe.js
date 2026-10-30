@@ -34,7 +34,7 @@ export function recipeField(domain, name) {
 
 export function makeVariationRecipe() {
   const groups = new Map(Object.keys(RECIPE_FIELDS).map(domain => [domain, new Map()]));
-  let revision = 0;
+  let revision = 0, acceptance = null;
   const row = (domain, id) => groups.get(domain)?.get(id);
   const capture = () => Object.fromEntries([...groups].map(([domain, entries]) => [domain,
     Object.fromEntries([...entries].map(([id, entry]) => [id, snapshotDraft(entry)]))]));
@@ -62,15 +62,20 @@ export function makeVariationRecipe() {
       }
       return output;
     },
-    // The caller must establish revision/source/decision eligibility. Only the
-    // captured baseline changes here; live raw values/resources are never reset.
-    checkpoint(snapshot) {
+    // One revision-atomic recipe checkpoint, never graph-field adoption. Clean
+    // untouched default settlement is not an edit and remains clean, not rewound.
+    acceptance: () => acceptance,
+    checkpoint(snapshot, expectedRevision, receipt = null) {
+      if (revision !== expectedRevision) return false;
       for (const [domain, entries] of Object.entries(snapshot)) for (const [id, captured] of Object.entries(entries)) {
         const entry = row(domain, id);
         for (const [name, value] of Object.entries(captured.values)) {
-          if (sameDraft(entry.values[name], value)) entry.baseline[name] = snapshotDraft(value);
+          if (!entry.touched.includes(name) && sameDraft(entry.values[name], entry.baseline[name])) continue;
+          entry.baseline[name] = snapshotDraft(value);
         }
       }
+      acceptance = receipt ? freezeRecipe(snapshotDraft({ revision, ...receipt })) : null;
+      return true;
     },
   };
 }

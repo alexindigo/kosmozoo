@@ -2,6 +2,7 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const { workPath } = require('./paths.cjs');
 const { pickInput } = require('./image-picker-helpers.cjs');
+const { discardRecipe } = require('./recipe-helpers.cjs');
 
 module.exports = async ({ cdp, FAKE, KZ, check }) => {
   const invoke = (id, args = {}) => cdp.evaluate(`(async()=>${KZ}.handles.invoke(${JSON.stringify(id)},${JSON.stringify(args)}))()`);
@@ -20,6 +21,7 @@ module.exports = async ({ cdp, FAKE, KZ, check }) => {
   try {
     await invoke('variations.open', { id: 'fake:flux-controlnet.png' });
     await cdp.poll("!!document.querySelector('.vz-image-set')");
+    await discardRecipe(cdp);await cdp.poll("!!document.querySelector('.vz-image-set')");
     assert.equal(await cdp.evaluate("document.querySelector('.vz-image-empty').textContent"), 'No images added yet.');
     assert(await cdp.evaluate("!!document.querySelector('.vz-input-trigger')&&!!document.querySelector('.vz-imgfilespick')&&!document.querySelector('[webkitdirectory]')"));
     await cdp.poll("document.querySelector('.vz-folder-chooser button')?.disabled===true");
@@ -70,7 +72,7 @@ module.exports = async ({ cdp, FAKE, KZ, check }) => {
       assert(await cdp.evaluate("document.querySelector('.vz-input-search')===window.__pickerSearch&&document.activeElement===window.__pickerSearch&&window.__pickerSearch.selectionStart===1&&window.__pickerSearch.selectionEnd===4"));
     }
     await cdp.evaluate("window.__pickerSearch.setSelectionRange(window.__pickerSearch.value.length,window.__pickerSearch.value.length)");
-    const alignment = await cdp.evaluate(`(()=>{const button=document.querySelector('.vz-input-trigger').getBoundingClientRect(),popup=document.querySelector('.vz-input-popover').getBoundingClientRect(),tiles=[...document.querySelectorAll('.vz-input-option')].map(tile=>tile.getBoundingClientRect()),tile=tiles[0],img=document.querySelector('.vz-input-option img').getBoundingClientRect();return {anchor:Math.abs(button.left-popup.left),center:Math.abs((img.top+img.bottom-tile.top-tile.bottom)/2),grid:tiles.length===3&&tiles.every(rect=>Math.abs(rect.top-tile.top)<1)&&tiles[1].left>=tile.right&&tiles[2].left>=tiles[1].right,size:tile.width===96&&tile.height===96,visible:popup.left>=0&&popup.right<=innerWidth&&popup.top>=0&&popup.bottom<=innerHeight}})()`);
+    const alignment = await cdp.evaluate(`(()=>{const button=document.querySelector('.vz-input-trigger').getBoundingClientRect(),popup=document.querySelector('.vz-input-popover').getBoundingClientRect(),tiles=[...document.querySelectorAll('.vz-input-option')].map(tile=>tile.getBoundingClientRect()),tile=tiles[0],img=document.querySelector('.vz-input-option img').getBoundingClientRect();return {anchor:Math.abs(button.left-popup.left),center:Math.abs((img.top+img.bottom-tile.top-tile.bottom)/2),grid:tiles.length===3&&tiles.every(rect=>Math.abs(rect.top-tile.top)<1)&&tiles[1].left>=tile.right&&tiles[2].left>=tiles[1].right,size:tile.width===96&&tile.height===96,visible:popup.left>=0&&popup.right<=innerWidth&&popup.top>=0&&popup.bottom<=innerHeight,bounds:{trigger:[button.left,button.top,button.right,button.bottom],popup:[popup.left,popup.top,popup.right,popup.bottom],viewport:[innerWidth,innerHeight]}}})()`);
     assert(alignment.anchor < 1 && alignment.center < 1 && alignment.grid && alignment.size && alignment.visible, JSON.stringify(alignment));
     await cdp.keyTrusted('Enter', { vk: 13 });
     await cdp.poll("document.querySelectorAll('.vz-image-tile').length===1");
@@ -111,6 +113,7 @@ module.exports = async ({ cdp, FAKE, KZ, check }) => {
     fs.writeFileSync(folder + '/same-current.png', Buffer.from(await cdp.evaluate("(async()=>Array.from(new Uint8Array(await(await fetch('/api/collections/fake/entries/canny.png/bytes?kind=input')).arrayBuffer())))()")));
     await invoke('variations.open', { id: 'fake:flux-controlnet.png' });
     await cdp.poll("!!document.querySelector('.vz-folder-path')");
+    await discardRecipe(cdp);await cdp.poll("!!document.querySelector('.vz-folder-path')");
     await cdp.clickAt('.vz-image-set .vz-cb');
     await cdp.clickAt('[data-param-key="9.denoise"] .vz-cb');
     await pickInput(cdp, 'picker-0550.png');
@@ -142,8 +145,10 @@ module.exports = async ({ cdp, FAKE, KZ, check }) => {
       await cdp.evaluate("document.querySelector('.vz-sliders').scrollTop=0");
       await capture('image-set-inputs-files-folder');
       await cdp.send('Emulation.setDeviceMetricsOverride', { width: 500, height: 820, deviceScaleFactor: 1, mobile: false });
-      await cdp.evaluate("document.querySelector('.vz-body').scrollTop=0");
-      const narrow = await cdp.evaluate(`(()=>{const element=document.querySelector('.vz-folder-path'),input=element.getBoundingClientRect(),add=document.querySelector('.vz-folder-add').getBoundingClientRect(),footer=document.querySelector('.vz-image-add').getBoundingClientRect(),list=document.querySelector('.vz-sliders').getBoundingClientRect(),right=document.querySelector('.vz-right').getBoundingClientRect();return{center:Math.abs((input.top+input.bottom-add.top-add.bottom)/2),contained:input.left>=footer.left&&add.right<=footer.right&&footer.right<=innerWidth,visible:input.top>=0&&add.bottom<=innerHeight,hit:document.elementFromPoint(input.left+input.width/2,input.top+input.height/2)===element,ordered:right.top>=list.bottom-1}})()`);
+      // The approved two-column layout keeps a bounded left scroller at this
+      // width too. Reveal the field as a user would before probing its hit box.
+      await cdp.evaluate("document.querySelector('.vz-folder-path').scrollIntoView({block:'center',inline:'nearest'})");
+      const narrow = await cdp.evaluate(`(()=>{const element=document.querySelector('.vz-folder-path'),input=element.getBoundingClientRect(),add=document.querySelector('.vz-folder-add').getBoundingClientRect(),footer=document.querySelector('.vz-image-add').getBoundingClientRect(),list=document.querySelector('.vz-sliders').getBoundingClientRect(),right=document.querySelector('.vz-right').getBoundingClientRect();return{center:Math.abs((input.top+input.bottom-add.top-add.bottom)/2),contained:input.left>=footer.left&&add.right<=footer.right&&footer.right<=innerWidth,visible:input.top>=0&&add.bottom<=innerHeight,hit:document.elementFromPoint(input.left+input.width/2,input.top+input.height/2)===element,ordered:right.left>=list.right&&Math.abs(right.top-list.top)<1&&Math.abs(right.bottom-list.bottom)<1}})()`);
       assert(narrow.center < 1 && narrow.contained && narrow.visible && narrow.hit && narrow.ordered, JSON.stringify(narrow));
     } finally { await cdp.send('Emulation.clearDeviceMetricsOverride'); }
     const beforeFolder = (await (await fetch(FAKE + '/__test/enqueues')).json()).length;

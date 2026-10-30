@@ -1,9 +1,10 @@
 // Real edited configuration -> actual fake enqueue -> clean close, never a second Run.
 const assert=require('node:assert/strict');
 const { pickInput } = require('./image-picker-helpers.cjs');
+const { discardRecipe } = require('./recipe-helpers.cjs');
 module.exports=async({cdp,FAKE,KZ,check})=>{
   const invoke=(id,args={})=>cdp.evaluate(`(async()=>${KZ}.handles.invoke(${JSON.stringify(id)},${JSON.stringify(args)}))()`);
-  const open=async(file='flux-basic.png')=>{await invoke('variations.open',{id:'fake:'+file});await cdp.poll("document.querySelectorAll('.vz-slider-row').length>0");};
+  const open=async(file='flux-basic.png',fresh=true)=>{await invoke('variations.open',{id:'fake:'+file});await cdp.poll("document.querySelectorAll('.vz-slider-row').length>0");if(fresh)await discardRecipe(cdp);};
   const type=async(selector,text)=>{await cdp.clickAt(selector);await cdp.evaluate(`(()=>{const e=document.querySelector(${JSON.stringify(selector)});e.focus();e.select()})()`);await cdp.send('Input.insertText',{text});await cdp.poll(`document.querySelector(${JSON.stringify(selector)}).value===${JSON.stringify(text)}`);};
   const enqueues=async()=>await(await fetch(FAKE+'/__test/enqueues')).json();
   const close=async()=>{
@@ -74,14 +75,18 @@ module.exports=async({cdp,FAKE,KZ,check})=>{
     await cdp.clickAt('.vz-slider-row[data-param-key="9.steps"] .vz-cb');
     await type('.vz-slider-row[data-param-key="9.steps"] .vz-row-inc-input','1e');
     await cdp.clickAt('.vz-slider-row[data-param-key="9.steps"] .vz-cb');
-    assert.equal((await invoke('variations.run')).status,'submitted');await stays();
+    assert.equal((await invoke('variations.run')).status,'submitted');await cdp.poll("!document.querySelector('.vz-panel')",6000);
+    await open('flux-basic.png',false);
     assert.equal(await cdp.evaluate("document.querySelector('.vz-slider-row[data-param-key=\"9.steps\"] .vz-row-inc-input').value"),'1e');
-    await dirtyClose();check('successful active configuration never acknowledges disabled incomplete editor text',true);
+    await cdp.clickAt('.vz-close');await cdp.poll("!document.querySelector('.vz-panel')");check('accepted whole recipe closes and recovers disabled incomplete editor text at the reopened control',true);
 
     await open();await cdp.clickAt('.vz-textrow[data-text-id="2.text"] .vz-cb');
     await type('.vz-text-values','{{dormant}}');await cdp.poll("!!document.querySelector('.vz-tpl-input')");await type('.vz-tpl-input','one; two');
     await type('.vz-text-values','literal submitted text');assert.equal((await invoke('variations.run')).status,'submitted');
-    await stays();await dirtyClose();check('dormant template values remain unsubmitted work after literal text succeeds',true);
+    await cdp.poll("!document.querySelector('.vz-panel')",6000);await open('flux-basic.png',false);
+    await type('.vz-text-values','{{dormant}}');await cdp.poll("!!document.querySelector('.vz-tpl-input')");
+    assert.equal(await cdp.evaluate("document.querySelector('.vz-tpl-input').value"),'one; two');
+    await dirtyClose();check('accepted literal text closes while dormant values recover through their reopened template controls',true);
 
     await open();await type('.vz-prefix','uncorrelated_');
     await cdp.evaluate(`(()=>{window.__ackFetch=window.fetch;window.fetch=(url,options)=>window.__ackFetch(url,options).then(async response=>{

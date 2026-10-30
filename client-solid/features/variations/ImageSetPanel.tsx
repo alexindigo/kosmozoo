@@ -30,7 +30,7 @@ export function ImageSetPanel(props) {
         <SingleLineText class="vz-image-summary" value={`${row().items.length} images${row().images.some(item => item.sameCurrent) ? ` · ${row().images.filter(item => item.sameCurrent).length} same as current` : ""}`} />
       </Show>
       <div class="vz-image-add">
-        <InputPicker files={row().files} current={row().fromOutput ? null : row().current} selected={selected} thumbnail={props.thumbnail} registerThumbnail={props.registerThumbnail}
+        <InputPicker files={row().files} current={row().fromOutput ? null : row().current} selected={selected} positionRevision={row().images} thumbnail={props.thumbnail} registerThumbnail={props.registerThumbnail}
           onToggle={name => selected(name) ? props.onRemove({ kind: "input", name }) : props.onAdd([{ kind: "input", name }])}
           registerPopup={props.registerPopup} registerEditor={props.registerEditor} rememberFocus={props.rememberFocus} />
         <input type="file" ref={fileInput} class="vz-imgfilespick" hidden multiple accept="image/*" onChange={e =>
@@ -61,8 +61,10 @@ function ImageTile(props) {
     <figcaption><SingleLineText class="vz-image-name" value={props.item()?.name} hint={props.item()?.path} />
       <IconButton chrome variant="neutral" icon={iconSvg("x", 12)} title={`Remove ${props.item()?.name}`} onAction={props.onRemove} />
     </figcaption>
-    <Show when={props.item()?.sameCurrent}><SingleLineText class="vz-image-same" value="Same as current" /></Show>
-    <Show when={props.item()?.pending}><SingleLineText class="vz-image-check" value="Checking image…" /></Show>
-    <Show when={props.item()?.error}><span class="vz-image-error" role="status">{props.item().error}</span></Show>
+    <div class="vz-image-status">
+      <SingleLineText role="status"
+        class={props.item()?.error ? "vz-image-error" : props.item()?.pending ? "vz-image-check" : props.item()?.sameCurrent ? "vz-image-same" : ""}
+        value={props.item()?.error || (props.item()?.pending ? "Checking image…" : props.item()?.sameCurrent ? "Same as current" : "")} />
+    </div>
   </figure>;
 }
