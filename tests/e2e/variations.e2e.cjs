@@ -888,6 +888,7 @@ async function main() {
     await require('./variations-lifecycle.cjs')({ cdp, check, ENGINE, FAKE, KZ });
     await require('./variations-identity.cjs')({ cdp, check, FAKE, KZ });
     await require('./variations-image-set.cjs')({ cdp, check, FAKE, KZ });
+    await require('./variations-overflow.cjs')({ cdp, check, ENGINE, FAKE, KZ });
   } finally {
     await cdp.close();
   }

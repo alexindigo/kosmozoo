@@ -3,6 +3,7 @@ import { createVirtualizer, defaultRangeExtractor } from "@tanstack/solid-virtua
 import { useClickOutside } from "../../lib/click-outside.js";
 import { focusMemory } from "./draft.js";
 import { useImageDisplay } from "../../lib/img-measure.js";
+import { SingleLineText } from "../../components/SingleLineText.js";
 
 const TILE_SIZE = 96, GAP = 6, ROW_HEIGHT = TILE_SIZE + GAP, OVERSCAN_ROWS = 3;
 
@@ -26,7 +27,7 @@ export function InputPicker(props) {
   createEffect(() => { if (open()) onCleanup(props.registerPopup(close)); });
   return <div class="vz-input-picker" ref={root}>
     <button type="button" class="vz-image-action vz-input-trigger" ref={trigger} style={{ "anchor-name": anchor }}
-      aria-expanded={open()} aria-haspopup="listbox" aria-controls={id} {...focusMemory(props.rememberFocus)} onClick={() => setOpen(!open())}>ComfyUI inputs ▾</button>
+      aria-expanded={open()} aria-haspopup="listbox" aria-controls={id} {...focusMemory(props.rememberFocus)} onClick={() => setOpen(!open())}><SingleLineText value="ComfyUI inputs ▾" /></button>
     <Show when={open()}>
       <InputOptions id={id} anchor={anchor} query={query} onQuery={setQuery} files={props.files} selected={props.selected}
         current={props.current} thumbnail={props.thumbnail} registerThumbnail={props.registerThumbnail} onToggle={props.onToggle} rememberFocus={props.rememberFocus} registerSurface={registerSurface} />
@@ -127,8 +128,8 @@ function InputOptions(props) {
                 onClick={() => { setActive(index()); props.onToggle(name); search.focus(); }}>
                 <InputThumbnail name={name} thumbnail={props.thumbnail} registerThumbnail={props.registerThumbnail}
                   background={virtual.index < virtualizer.range.startIndex - OVERSCAN_ROWS || virtual.index > virtualizer.range.endIndex + OVERSCAN_ROWS} />
-                <Show when={name === props.current}><span class="vz-image-same" aria-hidden="true">Current</span></Show>
-                <Show when={props.selected(name)}><span class="vz-input-selected" aria-hidden="true">✓</span></Show>
+                <Show when={name === props.current}><SingleLineText class="vz-image-same" aria-hidden="true" value="Current" /></Show>
+                <Show when={props.selected(name)}><SingleLineText class="vz-input-selected" aria-hidden="true" value="✓" /></Show>
               </button>;
             }}</For>
           </div>

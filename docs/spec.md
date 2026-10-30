@@ -793,6 +793,15 @@ siblings are independent sliders, with independent currents and proof. Slider
 tuning still uses the class/input schema key. Readable labels include title or
 class, node ID and input, e.g. `Load Image #76 · image`.
 
+The Variations dialog root constrains every layout descendant to a shrinkable,
+bounded inline allocation, including its modal shell; individual component class
+names do not opt into containment. Flexible grid tracks use zero-minimum tracks.
+The shared `SingleLineText` component owns single-line display truncation and its
+full-value native tooltip, including labels, current values, options, captions and
+numeric readouts. Consumers provide presentation and callbacks, not a second
+truncation/tooltip implementation. Literal native editors retain their full raw
+values; multiline/help text wraps within its allocation.
+
 Naming tokens use those exact IDs (`_{76.image}_{81.image}`), through the same
 codec/parser. Unknown placeholder syntax remains literal and cannot certify
 naming consumption. Existing `{Class.input}`, custom-title/class label tokens

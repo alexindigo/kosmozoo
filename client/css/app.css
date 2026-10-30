@@ -684,13 +684,17 @@ body:has(#diff:not([hidden])) #statusCol { bottom: 56px; }
   font-size: 12px; color: var(--foreground);
   box-shadow: 0 12px 40px var(--backdrop); }
 
+/* The dialog owns shrinkability for its entire layout tree, including future
+   components and the shared modal shell. Text cannot negotiate a wider box. */
+.vz-root :where(*) { min-width: 0; max-width: 100%; }
+
 /* title */
 .vz-title { font-size: 15px; color: var(--foreground-bright); text-align: center;
   margin: 0 0 20px; font-weight: 500; }
 
 /* two-column body */
 .vz-body { display: flex; gap: 20px; align-items: stretch; flex: 1; min-height: 0; }
-.vz-left { flex: 1; min-width: 0; display: flex; flex-direction: column;
+.vz-left { flex: 1; display: flex; flex-direction: column;
   min-height: 0; }
 /* only the field list scrolls; the panel itself stays put */
 .vz-sliders { display: flex; flex-direction: column; gap: 10px;
@@ -700,7 +704,7 @@ body:has(#diff:not([hidden])) #statusCol { bottom: 56px; }
  ones sit below — the ordered memo's reactive sort, no DOM
  manipulation. */
 .vz-slider-row { display: grid;
-  grid-template-columns: 18px 1fr 110px;
+  grid-template-columns: 18px minmax(0, 1fr) 110px;
   gap: 12px; align-items: start;
   padding: 10px 12px;
   background: var(--surface); border: 1px solid var(--lifted);
@@ -726,9 +730,9 @@ body:has(#diff:not([hidden])) #statusCol { bottom: 56px; }
 .vz-imgrow:not(.on) { opacity: 0.55; }
 .vz-imgrow-head { display: flex; align-items: center; gap: 10px; cursor: pointer; }
 .vz-imgrow-head .vz-cb { margin: 0; }
-.vz-imgrow-label { color: var(--foreground); font-size: 13px; }
+.vz-imgrow-label { flex: 1; color: var(--foreground); font-size: 13px; }
 .vz-imgrow-cur { color: var(--foreground-dim); font-size: 11px; margin-left: auto;
-  overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 45%; }
+  max-width: 45%; }
 .vz-imgrow-body { display: flex; gap: 8px; margin-top: 8px; padding-left: 26px; }
 
 /* enum sweep rows (LoRA names, samplers, …): same card as the imgRows, the
@@ -745,7 +749,6 @@ body:has(#diff:not([hidden])) #statusCol { bottom: 56px; }
 .vz-enum-opt { display: flex; align-items: center; gap: 8px; cursor: pointer;
   font-size: 12px; color: var(--foreground); padding: 1px 0; }
 .vz-enum-opt .vz-cb { margin: 0; width: 14px; height: 14px; flex: 0 0 auto; }
-.vz-enum-opt-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .vz-enum-current .vz-enum-opt-name { color: var(--attention); }
 
 /* text sweep rows (prompts, …): the values textarea — one value per line */
@@ -759,8 +762,8 @@ body:has(#diff:not([hidden])) #statusCol { bottom: 56px; }
 .vz-tpl-row { display: flex; align-items: center; gap: 8px; }
 .vz-tpl-label { color: var(--foreground-dim); font-size: 11px;
   font-family: ui-monospace, monospace; flex: 0 0 auto;
-  overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 40%; }
-.vz-tpl-input { flex: 1; min-width: 0; background: var(--background);
+  max-width: 40%; }
+.vz-tpl-input { flex: 1; background: var(--background);
   color: var(--foreground); border: 1px solid var(--border-strong);
   border-radius: 4px; font-size: 12px; padding: 3px 6px;
   font-family: ui-monospace, monospace; }
@@ -773,7 +776,7 @@ body:has(#diff:not([hidden])) #statusCol { bottom: 56px; }
   cursor: pointer; margin: 8px 0 0; }
 .vz-cb:checked { background: var(--attention); }
 
-.vz-slider-inner { min-width: 0; display: flex; flex-direction: column; gap: 4px; }
+.vz-slider-inner { display: flex; flex-direction: column; gap: 4px; }
 .vz-label { color: var(--foreground); font-size: 13px; font-weight: 400;
   cursor: pointer; align-self: flex-start; }
 .vz-label:hover { color: var(--secondary); }
@@ -794,8 +797,7 @@ body:has(#diff:not([hidden])) #statusCol { bottom: 56px; }
 .vz-lane-labels { position: relative; height: 14px; margin: 0 var(--thumb-inset) 2px; }
 .vz-bound { position: absolute; top: 0; transform: translateX(-50%);
   color: var(--foreground); font-size: 11px;
-  font-family: ui-monospace, monospace; pointer-events: none;
-  white-space: nowrap; }
+  font-family: ui-monospace, monospace; }
 
 .vz-marker-inset { position: absolute; inset: 0 var(--thumb-inset);
   pointer-events: none; }
@@ -851,8 +853,7 @@ body:has(#diff:not([hidden])) #statusCol { bottom: 56px; }
 .vz-lane-current { position: relative; height: 14px; margin: 2px var(--thumb-inset) 0; }
 .vz-current { position: absolute; top: 0; transform: translateX(-50%);
   color: var(--attention); font-size: 11px;
-  font-family: ui-monospace, monospace; pointer-events: none;
-  white-space: nowrap; }
+  font-family: ui-monospace, monospace; }
 
 /* per-row increment stepper (right of the slider).
  Self-centers against the row — no top arithmetic. The checkbox still
@@ -1102,11 +1103,11 @@ body:has(#diff:not([hidden])) #statusCol { bottom: 56px; }
 .vz-image-set:not(.on) { opacity: 1; }
 .vz-image-content { display: flex; flex-direction: column; gap: 8px; margin-top: 10px; }
 .vz-image-grid { display: grid; grid-template-columns: repeat(auto-fill, 112px); gap: 10px; }
-.vz-image-tile { margin: 0; min-width: 0; display: flex; flex-direction: column; gap: 3px; }
+.vz-image-tile { margin: 0; display: flex; flex-direction: column; gap: 3px; }
 .vz-image-preview { height: 84px; display: grid; place-items: center; background: var(--background-stage); border-radius: 4px; overflow: hidden; }
 .vz-image-preview img { width: 100%; height: 100%; object-fit: contain; }
 .vz-image-tile figcaption { display: flex; align-items: center; gap: 4px; }
-.vz-image-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.vz-image-name { flex: 1; }
 .vz-image-tile .chrome-icon { flex: 0 0 auto; }
 .vz-image-name, .vz-image-same, .vz-image-check, .vz-image-error, .vz-image-summary { font-size: 11px; }
 .vz-image-same { color: var(--attention); }
@@ -1159,9 +1160,9 @@ body:has(#diff:not([hidden])) #statusCol { bottom: 56px; }
 .vz-discard-actions .vz-discard-confirm { color: var(--negative); }
 .vz-discard-actions button:focus-visible { outline: 2px solid var(--secondary); outline-offset: 2px; }
 
-.vz-folder { flex: 1 1 250px; min-width: 0; display: flex; flex-direction: column; gap: 4px; }
+.vz-folder { flex: 1 1 250px; display: flex; flex-direction: column; gap: 4px; }
 .vz-folder-controls { display: flex; align-items: center; gap: 4px; }
-.vz-folder-path { flex: 1; min-width: 0; width: 100%; padding: 5px 8px; font: inherit; color: var(--foreground); background: var(--background); border: 1px solid var(--border); border-radius: 4px; }
+.vz-folder-path { flex: 1; width: 100%; padding: 5px 8px; font: inherit; color: var(--foreground); background: var(--background); border: 1px solid var(--border); border-radius: 4px; }
 .vz-folder-path:focus-visible { outline: 2px solid var(--secondary); outline-offset: 2px; }
 .vz-folder-help { color: var(--foreground-mid); font-size: 11px; }
 .vz-image-action:disabled { opacity: .5; cursor: default; }
@@ -1173,3 +1174,11 @@ body:has(#diff:not([hidden])) #statusCol { bottom: 56px; }
 
 .vz-folder-chooser { display: flex; align-items: center; flex: 0 0 auto; }
 .vz-folder-chooser button:focus-visible { outline: 2px solid var(--secondary); outline-offset: 2px; }
+
+.vz-imgrow-head .vz-cb { flex: 0 0 auto; }
+.vz-folder-help { overflow-wrap: anywhere; }
+
+/* Shared display-text primitive; zero specificity leaves allocation, type and
+   color to the consumer. Tooltip ownership lives with SingleLineText. */
+:where(.single-line-text) { display: block; min-width: 0; max-width: 100%;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }

@@ -23,6 +23,7 @@ import { snapshotDraft, makeLeaveGuard, focusMemory } from "./draft.js";
 import { makeVariationEditor } from "./editor.js";
 import { VariationDiscardConfirmation } from "./VariationDiscardConfirmation.js";
 import { ImageSetPanel } from "./ImageSetPanel.js";
+import { SingleLineText } from "../../components/SingleLineText.js";
 
 export function VariationsModal() {
   const store = useAppStore();
@@ -234,11 +235,9 @@ function ModalBody(props) {
   return (
     <div class="vz-panel" data-session={props.session}>
       <div class="vz-editor" inert={!!decision()}>
-        <div class="vz-title">
-          {batch
+        <SingleLineText class="vz-title" value={batch
             ? `Generate image variations · applying to ${props.images.length} images`
-            : "Generate image variations"}
-        </div>
+            : "Generate image variations"} />
         <div class="vz-body">
           <div class="vz-left">
             <div class="vz-sliders">
@@ -263,11 +262,11 @@ function ModalBody(props) {
  the rest follow the info panel's order (enum + numeric rows interleave) */}
               <Show
                 when={params() !== null}
-                fallback={<div class="vz-loading">inspecting graph…</div>}
+                fallback={<SingleLineText class="vz-loading" value="inspecting graph…" />}
               >
                 <Show
                   when={orderedItems().length > 0}
-                  fallback={<div class="vz-loading">this graph exposes no varyable parameters</div>}
+                  fallback={<SingleLineText class="vz-loading" value="this graph exposes no varyable parameters" />}
                 >
                   <For each={orderedItems()}>
                     {(itemId) => {
@@ -331,12 +330,12 @@ function ModalBody(props) {
           </div>
           <div class="vz-divider" />
           <div class="vz-right">
-            <div class="vz-rlabel">variations</div>
-            <div class={"vz-count" + (tally().n > 1000 ? " vz-count-hot" : tally().n > 100 ? " vz-count-warn" : "")}>{() => String(tally().n)}</div>
+            <SingleLineText class="vz-rlabel" value="variations" />
+            <SingleLineText class={"vz-count" + (tally().n > 1000 ? " vz-count-hot" : tally().n > 100 ? " vz-count-warn" : "")} value={tally().n} />
             <Show when={batch && tally().anyEnabled}>
-              <div class="vz-count-sub">{`${tally().perImage} variants × ${props.images.length} images`}</div>
+              <SingleLineText class="vz-count-sub" value={`${tally().perImage} variants × ${props.images.length} images`} />
             </Show>
-            <div class="vz-rlabel">prefix</div>
+            <SingleLineText class="vz-rlabel" value="prefix" />
             <input
               type="text" class="vz-tinput vz-prefix" ref={prefixEl}
               value={prefix()}
@@ -344,7 +343,7 @@ function ModalBody(props) {
               {...focus} onFocus={(e) => { setFocused("prefix"); focus.onFocus(e); }}
               onInput={(e) => editor.edit("naming", "root", "prefix", e.currentTarget.value)}
             />
-            <div class="vz-rlabel">suffix</div>
+            <SingleLineText class="vz-rlabel" value="suffix" />
             <input
               type="text" class="vz-tinput vz-suffix" ref={suffixEl}
               value={suffix()}
@@ -359,7 +358,7 @@ function ModalBody(props) {
             <div class={"vz-error" + (result()?.ok ? " vz-ok" : "")}>{result()?.text ?? ""}</div>
             <button
               class="vz-run" disabled={running() || undefined} onClick={() => store.handles.invoke("variations.run")}
-            >{running() ? "Running…" : "Run"}</button>
+            ><SingleLineText value={running() ? "Running…" : "Run"} /></button>
           </div>
         </div>
         <button
@@ -394,8 +393,8 @@ function EnumRow(props) {
           checked={r().enabled}
           onChange={(e) => props.onToggle(props.p.id, e.target.checked)}
         />
-        <span class="vz-imgrow-label">{r().label}</span>
-        <span class="vz-imgrow-cur vz-enum-cur" title={r().current}>{r().current}</span>
+        <SingleLineText class="vz-imgrow-label" value={r().label} />
+        <SingleLineText class="vz-imgrow-cur vz-enum-cur" value={r().current} />
       </label>
       <Show when={r().enabled}>
         <div class="vz-imgrow-body vz-enum-body">
@@ -417,7 +416,7 @@ function EnumRow(props) {
                     checked={r().picks.includes(v)}
                     onChange={(e) => props.onPick(props.p.id, v, e.target.checked)}
                   />
-                  <span class="vz-enum-opt-name" title={v}>{v}</span>
+                  <SingleLineText class="vz-enum-opt-name" value={v} />
                 </label>
               )}
             </For>
@@ -444,8 +443,8 @@ function TextRow(props) {
           checked={r().enabled}
           onChange={(e) => props.onToggle(props.p.id, e.target.checked)}
         />
-        <span class="vz-imgrow-label">{r().label}</span>
-        <span class="vz-imgrow-cur vz-enum-cur" title={r().current}>{r().current}</span>
+        <SingleLineText class="vz-imgrow-label" value={r().label} />
+        <SingleLineText class="vz-imgrow-cur vz-enum-cur" value={r().current} />
       </label>
       <Show when={r().enabled}>
         <div class="vz-imgrow-body vz-enum-body">
@@ -459,7 +458,7 @@ function TextRow(props) {
           <For each={templateLabels(r().text)}>
             {(lab) => (
               <div class="vz-tpl-row">
-                <span class="vz-tpl-label" title={lab}>{lab}</span>
+                <SingleLineText class="vz-tpl-label" value={lab} />
                 <input
                   {...focus}
                   type="text" class="vz-tpl-input"

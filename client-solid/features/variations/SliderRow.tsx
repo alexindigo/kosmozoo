@@ -30,6 +30,7 @@ import noUiSlider from "/vendor/nouislider.mjs";
 import { snapTo, fmt } from "./graph.mjs";
 import { makeSliderGesture } from "./slider-gesture.js";
 import { focusMemory } from "./draft.js";
+import { SingleLineText } from "../../components/SingleLineText.js";
 
 const fmtSigned = (v) => (v > 0 ? "+" : "") + fmt(v);
 
@@ -149,9 +150,10 @@ export function SliderRow(props) {
         onChange={(e) => props.onToggle(props.param.key, e.target.checked)}
       />
       <div class="vz-slider-inner">
-        <div
+        <SingleLineText
           class="vz-label"
-          title={"click to insert {" + props.placeholderKey + "} into prefix/suffix"}
+          value={props.param.label}
+          hint={"click to insert {" + props.placeholderKey + "} into prefix/suffix"}
           onMouseDown={(e) => {
             // the label never touches the parent's inputs — it emits and
             // the parent inserts (it owns prefix/suffix state)
@@ -159,11 +161,11 @@ export function SliderRow(props) {
             e.preventDefault(); // keep the input's focus/selection
             props.onInsertPlaceholder(props.placeholderKey);
           }}
-        >{props.param.label}</div>
+        />
         <div class="vz-rangewrap">
           <div class="vz-lane vz-lane-labels">
-            <div class="vz-bound vz-min-lbl" style={{ left: minLbl().left }}>{minLbl().text}</div>
-            <div class="vz-bound vz-max-lbl" style={{ left: maxLbl().left }}>{maxLbl().text}</div>
+            <SingleLineText class="vz-bound vz-min-lbl" style={{ left: minLbl().left }} value={minLbl().text} />
+            <SingleLineText class="vz-bound vz-max-lbl" style={{ left: maxLbl().left }} value={maxLbl().text} />
           </div>
           <div class="vz-lane vz-lane-track">
             {/* the full-range track line spans the inset span, so its ends are
@@ -182,10 +184,10 @@ export function SliderRow(props) {
             <div class="vz-slider" ref={sliderEl} />
           </div>
           <div class="vz-lane vz-lane-current">
-            <div
+            <SingleLineText
               class="vz-current"
               style={markerPct() != null ? { left: markerPct() + "%" } : { display: "none" }}
-            >{markerPct() != null ? (props.relative ? "X" : fmt(props.current())) : ""}</div>
+              value={markerPct() != null ? (props.relative ? "X" : fmt(props.current())) : ""} />
           </div>
         </div>
       </div>
@@ -193,7 +195,7 @@ export function SliderRow(props) {
         <button
           class="vz-step-btn" title="smaller step" disabled={!props.enabled() || undefined}
           onClick={() => commitInc(Math.max(fineStep, props.increment() / 2))}
-        >−</button>
+        ><SingleLineText value="−" /></button>
         <input
           type="text" inputMode="decimal" role="spinbutton" aria-label={`${props.param.label} increment`}
           aria-valuemin={fineStep} aria-valuenow={props.increment() ?? undefined}
@@ -214,7 +216,7 @@ export function SliderRow(props) {
         <button
           class="vz-step-btn" title="larger step" disabled={!props.enabled() || undefined}
           onClick={() => commitInc(props.increment() * 2)}
-        >+</button>
+        ><SingleLineText value="+" /></button>
       </div>
     </div>
   );
