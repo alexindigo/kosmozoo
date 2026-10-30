@@ -1,34 +1,14 @@
-// Modal-private editable work and owner-issued Run tickets. Catalogue data is
-// readonly context; the compiler records consumption as it reads typed leaves.
+// Mount-private Run lease over a feature-private raw recipe. Catalogue and image
+// evidence are readonly context; compilation classifies every captured leaf.
 import { snapshotDraft, sameDraft, createRunId } from "./draft.js";
 import { paramDef, defaultRange } from "./graph.mjs";
 import { templateLabels, parseSemicolonList, expandTextAxes, permutationPlan,
   resolveRelativeRanges, acknowledgedFields, catalogueParams, parameterIndex, parameterLabel, uploadCandidate, uploadFamily } from "/shared/features/variations/shared.mjs";
 import { validOrigin, sameOrigin, validContext, sameContext } from "/shared/source-origin.mjs";
 import { validImageSet, mergeImages, sameImage, imageIdentity } from "./image-set.js";
-
-const field = (type, channel, wire = null) => Object.freeze({ type, channel, wire });
-export const EDITOR_FIELDS = Object.freeze({
-  numeric: Object.freeze({ enabled: field("boolean", "rangeSelections", "enabled"), min: field("number", "ranges", "min"),
-    max: field("number", "ranges", "max"), rawIncrement: field("string", "ranges", "increment") }),
-  images: Object.freeze({ enabled: field("boolean", "imageSelections", "enabled"), items: field("image-set", "imageParams") }),
-  enums: Object.freeze({ enabled: field("boolean", "imageSelections", "enabled"), picks: field("strings", "imageParams"), filter: field("string", null) }),
-  texts: Object.freeze({ enabled: field("boolean", "imageSelections", "enabled"), text: field("string", "imageParams"), tpl: field("templates", "imageParams") }),
-  naming: Object.freeze({ prefix: field("string", "naming"), suffix: field("string", "naming") }),
-});
-const validValue = (type, value) => {
-  if (["boolean", "string"].includes(type)) return typeof value === type;
-  if (type === "number") return Number.isFinite(value);
-  if (type === "image-set") return validImageSet(value);
-  if (type === "strings") return Array.isArray(value) && value.every(item => typeof item === "string");
-  if (type === "templates") return value && typeof value === "object" && !Array.isArray(value) && Object.values(value).every(item => typeof item === "string");
-  return false;
-};
-const freeze = value => {
-  if (!value || typeof value !== "object" || value instanceof File) return value;
-  for (const item of Object.values(value)) freeze(item);
-  return Object.freeze(value);
-};
+import { RECIPE_FIELDS as EDITOR_FIELDS, makeVariationRecipe, recipeField as descriptor,
+  validRecipeValue as validValue, freezeRecipe as freeze, recipeDispositions } from "./recipe.js";
+export { RECIPE_FIELDS as EDITOR_FIELDS } from "./recipe.js";
 const filename = value => typeof value === "string" && value.length > 0 && !/[\\/\x00-\x1f\x7f]/.test(value) && ![".", ".."].includes(value);
 const token = id => `_{${id}}`;
 const currentValues = catalogue => Object.fromEntries([...parameterIndex(catalogueParams(catalogue)).values()]
@@ -46,71 +26,47 @@ const ROW_STRATEGIES = {
   } },
   stringParams: { domain: "images", initialize: () => ({ metadata: { files: [], filesReady: false },
     defaults: { enabled: false, items: [] } }) },
-  enumParams: { domain: "enums", initialize: p => ({ defaults: { enabled: false, picks: [p.current], filter: "" } }) },
+  enumParams: { domain: "enums", initialize: p => ({ defaults: { enabled: false, picks: [p.current] } }) },
   textParams: { domain: "texts", initialize: p => ({ defaults: { enabled: false, text: p.current, tpl: {} } }) },
 };
 
 export function makeVariationEditor({ targets, services, currentOrigin, changed = () => {}, close = () => {},
-  setTimer = setTimeout, clearTimer = clearTimeout }) {
-  const groups = new Map(Object.keys(EDITOR_FIELDS).map(domain => [domain, new Map()]));
+  setTimer = setTimeout, clearTimer = clearTimeout, recipe = makeVariationRecipe() }) {
   const capturedTargets = freeze(snapshotDraft(targets));
   const catalogues = new Map(), issued = new WeakMap();
   const imageChecks = new Map(), confirmedUploads = new Map();
   const batch = capturedTargets.length > 1;
-  let alive = true, editRevision = 0, closeGeneration = 0, deciding = false, active = null, timer = null;
+  let alive = true, closeGeneration = 0, deciding = false, active = null, timer = null;
   let result = null, running = false, catalogueReady = false;
-  const row = (domain, id) => groups.get(domain)?.get(id);
+  const row = recipe.row;
   const evidence = (id, item) => imageChecks.get(id)?.get(imageIdentity(item));
   const imageView = (id, item, metadata) => {
     const check = item.kind === "input" ? null : evidence(id, item);
     return { ...item, sameCurrent: item.kind === "input" ? !metadata.fromOutput && item.name === metadata.current
       : !!check?.hash && check.hash === check.currentHash, pending: item.kind !== "input" && (!check || !!check.pending), error: check?.error ?? "" };
   };
-  const descriptor = (domain, name) => {
-    const definition = EDITOR_FIELDS[domain]?.[name];
-    if (!definition) throw new Error(`Unclassified editable field: ${domain}.${name}`);
-    return definition;
-  };
   const notify = () => { if (alive) changed(); };
   const invalidateClose = () => { closeGeneration++; if (timer !== null) clearTimer(timer); timer = null; };
   const seed = (domain, id, metadata, defaults) => {
     if (!alive) return;
-    let entry = row(domain, id);
-    if (!entry) { entry = { metadata: {}, values: {}, baseline: {}, touched: new Set() }; groups.get(domain).set(id, entry); }
-    entry.metadata = freeze(snapshotDraft({ ...entry.metadata, ...metadata }));
-    for (const [name, value] of Object.entries(defaults)) {
-      const definition = descriptor(domain, name);
-      if (!validValue(definition.type, value)) throw new Error(`Invalid default: ${domain}.${name}`);
-      if (!entry.touched.has(name)) { entry.values[name] = snapshotDraft(value); entry.baseline[name] = snapshotDraft(value); }
-    }
+    recipe.seed(domain, id, metadata, defaults);
     notify();
   };
-  const write = (domain, id, name, value) => {
-    const definition = descriptor(domain, name), entry = row(domain, id);
-    if (!entry || !validValue(definition.type, value)) throw new Error(`Invalid editable value: ${domain}.${name}`);
-    entry.values[name] = snapshotDraft(value); entry.touched.add(name);
-  };
+  const write = recipe.write;
   const increment = (entry, values = entry.values) => {
     const raw = values.rawIncrement, value = raw?.trim() ? Number(raw) : NaN;
     return Number.isFinite(value) && value >= entry.metadata.minIncrement ? value : null;
   };
-  const view = domain => Object.freeze(Object.fromEntries([...groups.get(domain)].map(([id, entry]) => [id,
+  const view = domain => Object.freeze(Object.fromEntries([...recipe.entries(domain)].map(([id, entry]) => [id,
      freeze({ ...entry.metadata, ...snapshotDraft(entry.values), ...(domain === "numeric" ? { increment: increment(entry) } : {}),
        ...(domain === "images" ? { images: entry.values.items.map(item => imageView(id, item, entry.metadata)) } : {}) })])));
-  const remaining = () => {
-    const output = [];
-    for (const [domain, entries] of groups) for (const [id, entry] of entries) for (const name of Object.keys(EDITOR_FIELDS[domain])) {
-      if (!sameDraft(entry.values[name], entry.baseline[name])) output.push({ domain, id, field: name });
-    }
-    return output;
-  };
+  const remaining = recipe.remaining;
   const getLeaf = path => {
     const [domain, id, name, label] = path, entry = row(domain, id);
     if (!entry) return undefined;
     return label === undefined ? entry.values[name] : entry.values[name]?.[label];
   };
-  const captureRows = () => Object.fromEntries([...groups].map(([domain, entries]) => [domain,
-    Object.fromEntries([...entries].map(([id, entry]) => [id, { values: snapshotDraft(entry.values), metadata: snapshotDraft(entry.metadata), baseline: snapshotDraft(entry.baseline) }]))]));
+  const captureRows = recipe.capture;
   const owns = ticket => alive && issued.has(ticket) && active === ticket;
   const originCurrent = target => validOrigin(target.origin) && sameOrigin(target.origin, currentOrigin(target.host));
   const check = (ticket, target) => {
@@ -180,7 +136,7 @@ export function makeVariationEditor({ targets, services, currentOrigin, changed 
       const definition = descriptor(domain, name), entry = snapshot[domain][id];
       const path = label === undefined ? [domain, id, name] : [domain, id, name, label];
       const value = label === undefined ? entry.values[name] : entry.values[name]?.[label];
-      if (definition.channel) bindings.push({ channel: definition.channel, id: domain === "naming" ? name : id, path, value: snapshotDraft(value) });
+      if (definition.channel && (label === undefined || Object.hasOwn(entry.values[name], label))) bindings.push({ channel: definition.channel, id: domain === "naming" ? name : id, path, value: snapshotDraft(value) });
       return value;
     };
     for (const [id, entry] of Object.entries(snapshot.numeric)) {
@@ -223,20 +179,23 @@ export function makeVariationEditor({ targets, services, currentOrigin, changed 
         imageParams[id].values = expandTextAxes(text, substitutions);
       }
     }
-    return { payload: { ranges, imageParams, prefix: read("naming", "root", "prefix"), suffix: read("naming", "root", "suffix"), ...(batch ? { relative: true } : {}) },
-      bindings, uploads: [...new Map(uploads.map(item => [imageIdentity(item), item])).values()], uploadHashes };
+    const payload = freeze({ ranges, imageParams, prefix: read("naming", "root", "prefix"), suffix: read("naming", "root", "suffix"), ...(batch ? { relative: true } : {}) });
+    return { payload, bindings: freeze(bindings), dispositions: recipeDispositions(snapshot, bindings),
+      operations: freeze([...new Map(bindings.map(binding => [`${binding.channel}:${binding.id}`, {
+        id: `${binding.channel}:${binding.id}`, channel: binding.channel, parameter: binding.id,
+      }])).values()]), uploads: [...new Map(uploads.map(item => [imageIdentity(item), item])).values()], uploadHashes };
   };
   const count = (payload, catalogue) => {
     const values = currentValues(catalogue);
     return permutationPlan(batch ? resolveRelativeRanges(payload.ranges, values) : payload.ranges, values, payload.imageParams).total;
   };
-  const compatible = ticket => owns(ticket) && ticket.editRevision === editRevision && !deciding &&
+  const compatible = ticket => owns(ticket) && ticket.editRevision === recipe.revision() && !deciding &&
     ticket.targets.every(originCurrent) && issued.get(ticket).compiled.bindings.every(binding => {
       if (sameDraft(getLeaf(binding.path), binding.value)) return true;
       // A clean untouched default may have settled since capture. It is not
       // user work and must neither block other adoption nor be rewound.
       const entry = row(binding.path[0], binding.path[1]), name = binding.path[2];
-      return !entry.touched.has(name) && sameDraft(entry.values[name], entry.baseline[name]);
+      return !entry.touched.includes(name) && sameDraft(entry.values[name], entry.baseline[name]);
     });
   const adopt = (ticket, fields) => {
     for (const binding of issued.get(ticket).compiled.bindings) {
@@ -272,7 +231,7 @@ export function makeVariationEditor({ targets, services, currentOrigin, changed 
         const current = row("naming", "root").values.suffix;
         write("naming", "root", "suffix", value ? current.includes(token(id)) ? current : current + token(id) : current.split(token(id)).join(""));
       }
-      editRevision++; invalidateClose(); notify(); return true;
+      recipe.edited(); invalidateClose(); notify(); return true;
     },
     addImages(id, items) {
       const entry = row("images", id);
@@ -299,14 +258,14 @@ export function makeVariationEditor({ targets, services, currentOrigin, changed 
       if (!alive || deciding) return false;
       if (!validValue("number", min) || !validValue("number", max) || !row("numeric", id)) throw new Error("Invalid range edit");
       write("numeric", id, "min", min); write("numeric", id, "max", max);
-      editRevision++; invalidateClose(); notify(); return true;
+      recipe.edited(); invalidateClose(); notify(); return true;
     },
     template(id, label, value) {
       if (!alive || deciding) return false;
       if (typeof label !== "string" || !label.length || typeof value !== "string" || !row("texts", id)) throw new Error("Invalid template edit");
       const entry = row("texts", id);
       write("texts", id, "tpl", { ...entry.values.tpl, [label]: value });
-      editRevision++; invalidateClose(); notify(); return true;
+      recipe.edited(); invalidateClose(); notify(); return true;
     },
     installCatalogue(data) {
       if (!alive) return;
@@ -330,13 +289,13 @@ export function makeVariationEditor({ targets, services, currentOrigin, changed 
     installInputs(data) {
       if (!alive || !sameOrigin(data?.origin, capturedTargets[0].origin) || !Array.isArray(data.files)) return;
       const files = data.files.map(file => typeof file === "string" ? file : file.name).filter(filename);
-      for (const [id] of groups.get("images")) seed("images", id, { files, filesReady: true }, {});
+      for (const [id] of recipe.entries("images")) seed("images", id, { files, filesReady: true }, {});
     },
     preview() {
       if (!catalogueReady) return { n: 0, perImage: 0, anyEnabled: false, exact: false };
       const compiled = compile(captureRows(), null, true), first = catalogues.get(capturedTargets[0].id);
       const perImage = count(compiled.payload, first);
-      const exact = !batch && ![...groups.get("images")].some(([id, entry]) => entry.values.enabled && entry.values.items.some(item => {
+      const exact = !batch && ![...recipe.entries("images")].some(([id, entry]) => entry.values.enabled && entry.values.items.some(item => {
         const state = imageView(id, item, entry.metadata); return state.pending || state.error;
       }));
       return { n: perImage * capturedTargets.length, perImage, anyEnabled: Object.values(compiled.payload.ranges).some(axis => axis.enabled) || Object.values(compiled.payload.imageParams).some(axis => axis.enabled && axis.values.length), exact };
@@ -346,7 +305,7 @@ export function makeVariationEditor({ targets, services, currentOrigin, changed 
       if (running || deciding) return { status: "busy" };
       if (!catalogueReady) { publish({ text: "Inspecting source context; your edits have been kept.", ok: false, state: "unavailable" }); return { status: "invalid" }; }
       invalidateClose();
-      const ticket = Object.freeze({ runId: createRunId(), editRevision, closeGeneration, snapshot: freeze(captureRows()), targets: capturedTargets });
+      const ticket = Object.freeze({ runId: createRunId(), editRevision: recipe.revision(), closeGeneration, snapshot: freeze(captureRows()), targets: capturedTargets });
       const operation = { compiled: null, adopted: false, replies: [] };
       issued.set(ticket, operation); active = ticket;
       let submitted = 0, total = 0, countsComplete = true;
@@ -418,7 +377,7 @@ export function makeVariationEditor({ targets, services, currentOrigin, changed 
         }
         const outstanding = remaining();
         const summary = batch ? `submitted ${submitted}/${total} across ${ticket.targets.length} images` : `submitted ${submitted}/${total}`;
-        const reason = failures[0] ?? (!eligible ? deciding ? "leave decision pending; your edits have been kept" : editRevision !== ticket.editRevision ? "newer edits have been kept" : "operation context changed; your edits have been kept"
+        const reason = failures[0] ?? (!eligible ? deciding ? "leave decision pending; your edits have been kept" : recipe.revision() !== ticket.editRevision ? "newer edits have been kept" : "operation context changed; your edits have been kept"
           : outstanding.length ? "unsubmitted edits remain" : "");
         publish({ text: submitted || total ? summary + (reason ? ` — ${reason}` : "") : reason || "nothing submitted", ok: complete,
           state: eligible ? outstanding.length ? "remaining" : "adopted" : complete ? "kept" : "unavailable", submitted, total, remaining: outstanding, adopted: eligible });

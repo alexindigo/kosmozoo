@@ -160,7 +160,7 @@ Deno.test("ack: consumer rejects incomplete, foreign, duplicate and forged proof
   assertEquals(acknowledgedFields(body, multi).ranges, []);
 });
 
-Deno.test("ack: compiler-owned consumption retains disabled/filter/dormant/inactive fields and native File identity", async () => {
+Deno.test("ack: compiler-owned consumption retains disabled/dormant/inactive fields and native File identity", async () => {
   const a = new File(["a"], "a.png"), b = new File(["b"], "b.png");
   const { editor, requests } = editorRig();
   editor.edit("numeric", "n.denoise", "rawIncrement", "1e-1");
@@ -168,13 +168,12 @@ Deno.test("ack: compiler-owned consumption retains disabled/filter/dormant/inact
   editor.edit("images", "image.image", "enabled", true);
   editor.addImages("image.image", [a, b].map(file => ({ kind: "upload", name: file.name, file })));
   editor.edit("enums", "choice.value", "enabled", true); editor.edit("enums", "choice.value", "picks", ["second", "first"]);
-  editor.edit("enums", "choice.value", "filter", "search");
   editor.edit("texts", "text.text", "enabled", true); editor.edit("texts", "text.text", "text", "one {{used}}\n\ntwo");
   editor.template("text.text", "used", "a; b"); editor.template("text.text", "dormant", "kept");
   editor.edit("naming", "root", "prefix", "v_");
   assertEquals((await editor.run()).status, "submitted");
   const remaining = editor.remaining().map(item => `${item.domain}.${item.id}.${item.field}`);
-  assertEquals(remaining.sort(), ["numeric.n.steps.rawIncrement", "enums.choice.value.filter", "texts.text.text.tpl"].sort());
+  assertEquals(remaining.sort(), ["numeric.n.steps.rawIncrement", "texts.text.text.tpl"].sort());
   assertEquals(requests[0].ranges["n.denoise"].increment, .1);
   assertEquals(requests[0].imageParams["text.text"].values, ["one a\n\ntwo", "one b\n\ntwo"]);
   assert(editor.rows("images")["image.image"].items[0].file === a && editor.rows("images")["image.image"].items[1].file === b);

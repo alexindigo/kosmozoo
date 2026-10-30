@@ -174,9 +174,6 @@ function ModalBody(props) {
   const onEnumToggle = (id, checked) => {
     editor.edit("enums", id, "enabled", checked);
   };
-  const onEnumField = (id, field, value) => {
-    editor.edit("enums", id, field, value);
-  };
   const onEnumPick = (id, v, checked) => {
     const r = enumRows()[id];
     editor.edit("enums", id, "picks", checked ? [...r.picks, v] : r.picks.filter(value => value !== v));
@@ -280,7 +277,6 @@ function ModalBody(props) {
                               row={() => enumRows()[id]}
                               onToggle={onEnumToggle}
                               onPick={onEnumPick}
-                              onField={onEnumField}
                               rememberFocus={rememberFocus}
                             />
                           </Show>
@@ -380,9 +376,10 @@ function ModalBody(props) {
 // callbacks — the row never reaches into its parent.
 function EnumRow(props) {
   const focus = focusMemory(props.rememberFocus);
+  const [filter, setFilter] = createSignal("");
   const r = () => props.row();
   const filtered = () => {
-    const f = r().filter.trim().toLowerCase();
+    const f = filter().trim().toLowerCase();
     return f ? r().values.filter((v) => v.toLowerCase().includes(f)) : r().values;
   };
   return (
@@ -402,8 +399,8 @@ function EnumRow(props) {
             <input
               {...focus}
               type="text" class="vz-enum-filter" placeholder="filter…"
-              value={r().filter}
-              onInput={(e) => props.onField(props.p.id, "filter", e.currentTarget.value)}
+              value={filter()}
+              onInput={(e) => setFilter(e.currentTarget.value)}
             />
           </Show>
           <div class="vz-enum-list">

@@ -6,7 +6,7 @@ import { generatePermutations, permutationPlan } from "../src/features/variation
 const cases = {
   numeric: { id: "n.denoise", values: { enabled: false, min: .9, max: .95, rawIncrement: "1e-1" } },
   images: { id: "image.image", values: { enabled: true, items: [{ kind: "upload", name: "a.png", file: new File(["a"], "a.png") }] } },
-  enums: { id: "choice.value", values: { enabled: true, picks: ["second"], filter: "retained" } },
+  enums: { id: "choice.value", values: { enabled: true, picks: ["second"] } },
   texts: { id: "text.text", values: { enabled: true, text: "first\n\nsecond", tpl: { kept: "one; two" } } },
   naming: { id: "root", values: { prefix: "prefix_", suffix: "_suffix" } },
 };
@@ -23,6 +23,7 @@ Deno.test("editor contract: every declared editable field participates in dirty 
   }
   const { editor } = editorRig();
   assertThrows(() => editor.edit("numeric", "n.denoise", "invented", 1)); assert(!editor.dirty());
+  assertThrows(() => editor.edit("enums", "choice.value", "filter", "query")); assert(!editor.dirty());
   assertThrows(() => editor.edit("numeric", "n.denoise", "min", "wrong type")); assert(!editor.dirty()); editor.dispose();
 });
 

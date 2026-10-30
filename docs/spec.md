@@ -692,10 +692,12 @@ error paths settle safely. Raw incomplete increment text survives blur unchanged
 SliderRow retires active widget listeners with the matching original-target
 terminal adaptation and quarantines that physical gesture through release/cancel.
 
-One modal-private `makeVariationEditor` owns registered editable fields, clean
-baselines, codecs, compilation/consumption bindings, issued immutable Run tickets,
-results and close eligibility. Catalogue metadata is readonly and separate from
-editable work. Unknown edits reject before mutation. Dirty compares only declared
+The feature-private `makeVariationRecipe` owns registered raw editable fields,
+clean baselines, codecs and the global recipe revision. The mounted
+`makeVariationEditor` owns compilation, issued immutable Run tickets, results and
+close eligibility. Enum search belongs to the mounted row, like input search;
+presentation never participates in recipe dirtiness or revisions. Catalogue
+metadata is readonly and separate from editable work. Unknown edits reject before mutation. Dirty compares only declared
 editable leaves; initialization seeds untouched clean defaults without overwriting
 early typed naming or manufacturing a user-edit revision. SliderRow's raw increment
 is controlled by this owner and parsed once; view/child File/caret/gesture identity
@@ -813,8 +815,10 @@ there are no saved legacy parameter keys to migrate.
 
 Run/button/handle input enters `variations.run` and the owner's requestRun. A private
 ticket captures all editable values/targets/revision/close generation before IO.
-The compiler emits the request and its raw-value consumption bindings in the same
-read/encode operation. Source-independent handles/broker retain opening metadata
+The compiler emits the immutable request, operation identities and exhaustive raw
+dispositions with its consumption bindings in the same read/encode operation.
+Each captured leaf/map entry is active or retained; unknown or overlapping
+classification rejects before effects. Source-independent handles/broker retain opening metadata
 and owner capabilities only. Running/pending-decision input is busy. Clean metadata
 settling during a Run cannot strand captured submitted work. Newer/edit-and-revert
 revisions, pending decisions and genuinely unused values still prevent adoption.
@@ -859,7 +863,7 @@ choices and ambiguous carriers receive no invented proof. The owner validates ev
 target/context/correlation, safe positive complete counts, explicit empty errors,
 unique indexes/prompt IDs and requested field sets before any adoption. It intersects
 all-target/all-permutation proof with compiler bindings and advances only captured
-eligible leaves. Off consumes only selection; unused values, filters, dormant
+eligible leaves. Off consumes only selection; unused values, dormant
 templates, inactive filenames/Files and newer work remain protected. Editor text
 and File references/order are never normalized/replaced. Enqueue node-error partial
 acceptance or malformed success provides no complete proof or automatic resubmit.

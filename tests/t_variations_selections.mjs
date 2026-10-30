@@ -23,7 +23,7 @@ Deno.test("selection ack: acknowledging off never acknowledges unused values or 
   activate(editor); await editor.run(); deactivate(editor);
   editor.edit("numeric", "n.denoise", "rawIncrement", "1e");
   editor.addImages("image.image", [{ kind: "input", name: "unused.png" }, { kind: "upload", name: file.name, file }]);
-  editor.edit("enums", "choice.value", "picks", ["second"]); editor.edit("enums", "choice.value", "filter", "retained filter");
+  editor.edit("enums", "choice.value", "picks", ["second"]);
   editor.edit("texts", "text.text", "text", "unused edit"); editor.template("text.text", "dormant", "kept");
   assertEquals((await editor.run()).status, "submitted");
   assertEquals(editor.rows("numeric")["n.denoise"].enabled, false);

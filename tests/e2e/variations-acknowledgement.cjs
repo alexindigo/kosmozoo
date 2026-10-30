@@ -33,6 +33,20 @@ module.exports=async({cdp,FAKE,KZ,check})=>{
     assert.equal(await cdp.evaluate("!!document.querySelector('.vz-discard')"),false);
     check('acknowledged edited submission manually closes without discard confirmation',true);
 
+    // Widen only the displayed catalogue so the real enum search is available;
+    // the selected value and every submitted graph still use the stock fixture.
+    await cdp.evaluate(`(()=>{window.__presentationFetch=window.fetch;window.fetch=(url,options)=>window.__presentationFetch(url,options).then(async response=>{
+      if(!String(url).includes('/features/variations/probe/'))return response;const data=await response.json();
+      for(const row of data.enumParams??[])row.values=[...row.values,...Array.from({length:11},(_,i)=>'search-only-'+i)];
+      return new Response(JSON.stringify(data),{status:response.status})})})()`);
+    await open('flux-lora.png');await cdp.clickAt('.vz-enumrow[data-enum-id="20.lora_name"] .vz-cb');
+    await held();await type('.vz-enum-filter','search-only-3');
+    assert.equal(await cdp.evaluate("document.querySelectorAll('.vz-enumrow[data-enum-id=\"20.lora_name\"] .vz-enum-opt').length"),1);
+    assert.equal((await release()).adopted,true);
+    await cdp.poll("!document.querySelector('.vz-panel')",6000);
+    await cdp.evaluate("window.fetch=window.__presentationFetch;window.__presentationFetch=null");
+    check('enum search during a held Run is presentation only and cannot block checkpoint or automatic close',true);
+
     await open();await type('.vz-prefix','before-held_');await held();await type('.vz-prefix','newer-edit_');
     assert.equal((await release()).status,'submitted');await stays();
     assert.equal(await cdp.evaluate("document.querySelector('.vz-prefix').value"),'newer-edit_');await dirtyClose();
@@ -120,6 +134,7 @@ module.exports=async({cdp,FAKE,KZ,check})=>{
     check('actual validated uploads and accepted LoadImage writes acknowledge ordered native Files without replacing them',true);
   }finally{
     await cdp.evaluate("if(window.__ackFetch)window.fetch=window.__ackFetch");
+    await cdp.evaluate("if(window.__presentationFetch)window.fetch=window.__presentationFetch");
     if(await cdp.evaluate("!!document.querySelector('.vz-panel')"))await close();
     await fetch(FAKE+'/__test/activity',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({captureEnqueue:false})});
   }
