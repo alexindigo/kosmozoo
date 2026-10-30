@@ -740,11 +740,15 @@ exactly once; Comfy listing annotations are removed only at ingress. The engine'
 Comfy view URL owner separately encodes its filename/subfolder query contract.
 “Add files…” uses the browser's multi-file picker;
 there is no browser-directory input or mutually exclusive image mode.
-The persistent folder path field and Add action recursively acquire engine-host
+The persistent “Folder on the engine computer” path field and “Add folder” action recursively acquire engine-host
 images, including subfolders. The feature filesystem owner skips symlink traversal,
 returns sorted canonical absolute paths and rejects more than 500 images with an
 explicit message instead of silently truncating. Directory paths use the same
 engine-host trust boundary as `folder:` sources, not the browser's filesystem.
+The form explains “Includes subfolders. Maximum 500 images per folder import.”
+Its typed path stays available without the chooser. The picker has a selected
+count and distinguishes an empty input catalogue from no search matches; image
+counts use singular/plural grammar, and the empty chosen set invites adding images.
 
 The shared folder icon immediately to the path field's right asks the **engine**
 to open the desktop portal directory chooser; it never uses browser directory
@@ -811,8 +815,20 @@ creates singleton descriptors and rejects duplicate or unresolved locations;
 probe and Run use that same catalogue. The editor rejects duplicates before
 seeding any rows, and every row controls exactly its own node/input. Numeric
 siblings are independent sliders, with independent currents and proof. Slider
-tuning still uses the class/input schema key. Readable labels include title or
-class, node ID and input, e.g. `Load Image #76 · image`.
+tuning still uses the class/input schema key. Readable labels put the human-readable
+input name first, with title/class and node ID secondary; the complete canonical
+label, e.g. `Load Image #76 · image`, remains in the tooltip and checkbox description.
+One shared parameter-row shell owns checkbox/name/current/context alignment for
+numeric, image, enum and text rows. Disabled numeric rows occupy one compact line
+with their current value; enabling reveals labelled From/To/Step editors and the
+existing rail without remounting its native widget. Step actions explicitly
+halve/double the increment, while thumb arrow keys retain fine nudging. Numeric
+field writes and release snapping are immediate: the slider integration disables
+animated placement, whose native tap-transition state would reject the next
+physical gesture after an otherwise finished edit. Current
+enum options say “Current”, and batch numeric controls describe offsets from each
+image's current value. Enabled rows still float first and retain the existing
+registry/input ordering.
 
 The Variations dialog root constrains every layout descendant to a shrinkable,
 bounded inline allocation, including its modal shell; individual component class
@@ -823,11 +839,32 @@ numeric readouts. Consumers provide presentation and callbacks, not a second
 truncation/tooltip implementation. Literal native editors retain their full raw
 values; multiline/help text wraps within its allocation.
 The dialog owns a bounded grid row shared by the scrolling parameter pane and
-the fixed sidebar at every width. The sidebar has intrinsic count and naming
-rows, one zero-minimum scrollable message row, and Run in the final row. Results,
-preflight errors and recovery notices share that message owner; their length
-cannot resize the dialog or push Run outside it. The big count keeps its natural
-font line box. Presentation overflow never changes recipe state or Run admission.
+the fixed sidebar at every width. Sidebar rows are a `minmax(0, 1fr)` body,
+an intrinsic bounded message lane and Run in the final row. The body owns vertical
+scrolling for the big count, wrapping factor breakdown, naming fields and example;
+its children retain intrinsic content height. Results, preflight errors and
+recovery notices sit directly above Run, capped at the lesser of 40% of the sidebar
+or eight text lines, scrolling internally when long. Content cannot resize the
+dialog or push Run outside it. The big count keeps its natural font line box.
+Presentation overflow never changes recipe state or Run admission.
+The big number has a small breakdown of each contributing axis and the unchanged
+tuple exclusion. The fixed sidebar's body makes its complete explanation reachable
+even when a short viewport cannot show all of the count/naming content at once.
+The editor owns this projection using the same typed
+axis kernel as Run, not a second product calculation in the view. Checking images,
+multi-target estimates and unsafe integer precision are explicitly provisional;
+invalid enabled Step/template/empty selections do not display a default-backed
+valid total. Large totals use a bounded readable notation with the full approximate
+value available in their tooltip. Existing engine limits and Run admission remain.
+Prefix and Suffix have associated labels. A keyboard-native “Insert parameter”
+selector inserts exact canonical IDs at the last naming caret (Suffix by default).
+Row labels exclusively toggle their associated enable checkbox; insertion does
+not share that label's pointer event. A representative output-name example resolves
+through the shared naming-token
+formatter. It does not promise final upload collision names, producer names or
+output counters. “Queue variations” becomes “Submitting…” during preparation and
+submission. The polite result reports “Queued N of N jobs”, with kept-edit reasons
+in neutral text and actual failures in the error role's color.
 The native input popup uses the shared environment-pure viewport placement owner
 (`client-solid/lib/popover-placement.js`), preferring the side with more room and
 clamping horizontal position and available height. The picker reads its own
@@ -936,8 +973,8 @@ Each Variations text field is one literal template. Line breaks, blank paragraph
 indentation and surrounding whitespace are retained in every submitted value;
 formatting never creates extra variation axes. Only explicit `{{label}}` inputs
 expand a whole-template Cartesian product, with the same expansion used for the
-displayed count and Run payload. Missing referenced values do not contribute a
-preview axis and reject Run before effects;
+displayed count and Run payload. Missing referenced values visibly invalidate the
+preview and reject Run before effects;
 clearing the field yields one empty string. Unchanged multiline text still matches
 the exact current permutation and is excluded normally.
 Label dictionaries contain explicit own entries only, through the same shared

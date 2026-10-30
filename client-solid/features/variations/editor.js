@@ -3,7 +3,8 @@
 import { snapshotDraft, sameDraft, createRunId } from "./draft.js";
 import { paramDef, defaultRange } from "./graph.mjs";
 import { templateLabels, templateValue, parseSemicolonList, expandTextAxes, permutationPlan,
-  resolveRelativeRanges, acknowledgedFields, targetRunPlan, catalogueParams, parameterIndex, parameterLabel, uploadCandidate, uploadFamily } from "/shared/features/variations/shared.mjs";
+  resolveRelativeRanges, acknowledgedFields, targetRunPlan, catalogueParams, parameterIndex, parameterLabel, parameterAliases,
+  templateReplaceWithProof, uploadCandidate, uploadFamily } from "/shared/features/variations/shared.mjs";
 import { validOrigin, sameOrigin, validContext, sameContext } from "/shared/source-origin.mjs";
 import { validImageSet, mergeImages, sameImage, imageIdentity } from "./image-set.js";
 import { RECIPE_FIELDS as EDITOR_FIELDS, makeVariationRecipe, recipeField as descriptor,
@@ -218,7 +219,7 @@ export function makeVariationEditor({ targets, services, currentOrigin, changed 
     running: () => running,
     result: () => {
       if (!result?.adopted || !remaining().length || result.state === "remaining") return result;
-      return { ...result, state: "remaining", text: `submitted ${result.submitted}/${result.total} — newer edits have been kept`, remaining: remaining() };
+      return { ...result, state: "remaining", reason: "Newer edits have been kept.", text: `submitted ${result.submitted}/${result.total} — newer edits have been kept`, remaining: remaining() };
     },
     ready: () => catalogueReady,
     catalogueFailure(error) { publish({ text: `Catalogue unavailable: ${error.message ?? error}. Your edits have been kept.`, ok: false, state: "unavailable" }); },
@@ -293,13 +294,68 @@ export function makeVariationEditor({ targets, services, currentOrigin, changed 
       for (const [id] of recipe.entries("images")) { seed("images", id, { files, filesReady: true }, {}); inspectItems(id); }
     },
     preview() {
-      if (!catalogueReady || readOnly) return { n: 0, perImage: 0, anyEnabled: false, exact: false };
-      const compiled = compile(captureRows(), null, true), first = catalogues.get(capturedTargets[0].id);
-      const perImage = count(compiled.payload, first);
-      const exact = !batch && ![...recipe.entries("images")].some(([id, entry]) => entry.values.enabled && entry.values.items.some(item => {
-        const state = imageView(id, item, entry.metadata); return state.pending || state.error;
-      }));
-      return { n: perImage * capturedTargets.length, perImage, anyEnabled: Object.values(compiled.payload.ranges).some(axis => axis.enabled) || Object.values(compiled.payload.imageParams).some(axis => axis.enabled && axis.values.length), exact };
+      const unavailable = (status, message) => ({ n: null, display: "—", fullCount: message, perImage: 0,
+        anyEnabled: false, exact: false, status, message, breakdown: "", axes: [], excluded: 0, naming: { example: "", complete: false } });
+      if (!catalogueReady || readOnly) return unavailable("reading", readOnly ? "Previous source recipe · review only" : "Reading workflow…");
+      const snapshot = captureRows(), first = catalogues.get(capturedTargets[0].id);
+      for (const [id, entry] of Object.entries(snapshot.numeric)) if (entry.values.enabled && increment(entry) === null) {
+        return unavailable("invalid", `${entry.metadata.label}: enter a valid positive Step. Your text is kept.`);
+      }
+      try {
+        const compiled = compile(snapshot, null, true), payload = compiled.payload;
+        for (const [id, axis] of Object.entries(payload.imageParams)) if (axis.enabled && !axis.values.length) {
+          const entry = snapshot.images[id] ?? snapshot.enums[id] ?? snapshot.texts[id];
+          return unavailable("invalid", `${entry.metadata.label}: ${snapshot.images[id] ? "add at least one image" : snapshot.enums[id] ? "choose at least one value" : "enter values for every template label"}.`);
+        }
+        const values = currentValues(first), ranges = batch ? resolveRelativeRanges(payload.ranges, values) : payload.ranges;
+        const plan = permutationPlan(ranges, values, payload.imageParams);
+        const axes = plan.axes.map(axis => {
+          const entry = snapshot.numeric[axis.id] ?? snapshot.images[axis.id] ?? snapshot.enums[axis.id] ?? snapshot.texts[axis.id];
+          return { id: axis.id, count: axis.length, name: entry.metadata.key.replace(/_/g, " "),
+            kind: snapshot.images[axis.id] ? "images" : "values", label: entry.metadata.label };
+        });
+        const selected = [...recipe.entries("images")].filter(([, entry]) => entry.values.enabled)
+          .flatMap(([id, entry]) => entry.values.items.map(item => imageView(id, item, entry.metadata)));
+        const pending = selected.some(item => item.pending), error = selected.find(item => item.error)?.error;
+        const perImage = plan.total, n = perImage * capturedTargets.length, safe = Number.isSafeInteger(n);
+        const exact = !batch && !pending && !error && safe;
+        const excluded = plan.axes.length ? plan.axes.reduce((number, axis) => number * axis.matches, 1) : 0;
+        // One representative non-current tuple from the kernel, without allocating
+        // the Cartesian product. Numeric matches form a contiguous interval.
+        const sample = Object.fromEntries(plan.axes.map(axis => [axis.id, axis.at(0)]));
+        if (plan.total && plan.axes.every(axis => axis.isCurrent(sample[axis.id]))) {
+          const axis = plan.axes.find(axis => axis.matches < axis.length);
+          if (axis) {
+            let index = axis.matches;
+            if (axis.isCurrent(axis.at(index))) index = 0;
+            while (axis.isCurrent(axis.at(index))) index++;
+            sample[axis.id] = axis.at(index);
+          }
+        }
+        // Pending upload names are not resolved receipts and are never displayed
+        // as real names. No sample or count authorizes an upload/graph assignment.
+        const aliases = parameterAliases(catalogueParams(first));
+        const prefix = templateReplaceWithProof(payload.prefix, sample, values, aliases);
+        const suffix = templateReplaceWithProof(payload.suffix, sample, values, aliases);
+        const basename = capturedTargets[0].filename.split("/").pop().replace(/\.[^.]+$/, "");
+        const naming = { complete: prefix.complete && suffix.complete,
+          example: (prefix.text + basename + suffix.text).replace(/\0pending-\d+/g, "[upload name pending]"),
+          help: "Representative example; final producer name, upload collision names and output counter may differ." };
+        const factors = [...axes].sort((a, b) => (a.kind !== "images") - (b.kind !== "images")).map(axis =>
+          `${axis.count.toLocaleString("en-US")} ${axis.kind === "images" ? `input image${axis.count === 1 ? "" : "s"}` : `${axis.name} value${axis.count === 1 ? "" : "s"}`}`);
+        const breakdown = factors.join(" × ") + (excluded ? ` · ${excluded} unchanged combination${excluded === 1 ? "" : "s"} excluded` : "")
+          + (batch && axes.length ? ` · first-image estimate × ${capturedTargets.length} target images` : "");
+        const status = !naming.complete || error ? "invalid" : pending ? "checking" : "ready";
+        const message = !naming.complete ? "Unresolved naming token: check Prefix and Suffix." : error ? `Image comparison failed: ${error}`
+          : pending ? "Checking images…" : !n ? "Choose a different value or image to create variations."
+          : !safe ? "Estimate exceeds safe integer precision; the full value is approximate."
+          : batch ? "Estimated from the first image; each target is checked before submission."
+          : n > 100 ? "Large sweep: this many jobs will be queued. The engine validates its existing per-run limit." : "";
+        return { n, perImage, anyEnabled: axes.length > 0, exact: exact && naming.complete, status, message, axes, excluded, breakdown, naming,
+          display: n >= 1e6 ? n < 1e15 ? new Intl.NumberFormat("en-US", { notation: "compact", maximumSignificantDigits: 4 }).format(n)
+            : n.toExponential(2).replace("e+", " × 10^") : n.toLocaleString("en-US"),
+          fullCount: `${n.toLocaleString("en-US", { maximumFractionDigits: 0 })}${exact ? " variations" : " variations (estimate)"}` };
+      } catch (error) { return unavailable("invalid", error.message); }
     },
     async run() {
       if (!alive) return { status: "stale" };
@@ -413,7 +469,7 @@ export function makeVariationEditor({ targets, services, currentOrigin, changed 
         const summary = batch ? `submitted ${submitted}/${total} across ${ticket.targets.length} images` : `submitted ${submitted}/${total}`;
         const reason = failures[0] ?? (!eligible ? deciding ? "leave decision pending; your edits have been kept" : recipe.revision() !== ticket.editRevision ? "newer edits have been kept" : "operation context changed; your edits have been kept"
           : outstanding.length ? "unsubmitted edits remain" : "");
-        publish({ text: submitted || total ? summary + (reason ? ` — ${reason}` : "") : reason || "nothing submitted", ok: complete,
+        publish({ text: submitted || total ? summary + (reason ? ` — ${reason}` : "") : reason || "nothing submitted", reason, ok: complete,
           state: eligible ? outstanding.length ? "remaining" : "adopted" : complete ? "kept" : "unavailable", submitted, total, remaining: outstanding, adopted: eligible,
           effects: freeze(snapshotDraft(effects)), outcome: complete ? "accepted-plan" : !ticket.targets.every(originCurrent) ? "retired" : uncertain ? "uncertain-effects" : submitted ? "partial-effects" : "rejected",
           reconciliation: eligible ? "checkpointed" : deciding ? "decision-pending" : recipe.revision() !== ticket.editRevision ? "kept-newer" : "not-checkpointed" });

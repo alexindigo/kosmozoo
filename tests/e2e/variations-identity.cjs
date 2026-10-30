@@ -34,7 +34,7 @@ module.exports = async ({ cdp, FAKE, KZ, check }) => {
     await cdp.evaluate("(async()=>{await fetch('/api/collections/fake/entries/identity-multiple.png/bytes')})()");
     await invoke('variations.open', { id: 'fake:identity-multiple.png' });
     await cdp.poll("document.querySelectorAll('[data-image-id]').length===2&&!!document.querySelector('[data-text-id=\"92:105.text\"]')");
-    const labels = await cdp.evaluate("[...document.querySelectorAll('[data-image-id] .vz-imgrow-label')].map(e=>e.textContent)");
+    const labels = await cdp.evaluate("[...document.querySelectorAll('[data-image-id] .vz-imgrow-label')].map(e=>e.title.split('\\n').at(-1))");
     assert.deepEqual(labels, ['Reference #76 · image', 'Reference #81 · image']);
     for (const id of ['20', '21']) assert(await cdp.evaluate(`!!document.querySelector('[data-param-key="${id}.strength_model"]')`));
     await cdp.clickAt('[data-param-key="9.denoise"] .vz-cb');

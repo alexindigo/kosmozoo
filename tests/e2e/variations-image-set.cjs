@@ -1,7 +1,7 @@
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const { workPath } = require('./paths.cjs');
-const { pickInput } = require('./image-picker-helpers.cjs');
+const { pickInput, waitForSelectedPreviews } = require('./image-picker-helpers.cjs');
 const { discardRecipe } = require('./recipe-helpers.cjs');
 
 module.exports = async ({ cdp, FAKE, KZ, check }) => {
@@ -22,7 +22,7 @@ module.exports = async ({ cdp, FAKE, KZ, check }) => {
     await invoke('variations.open', { id: 'fake:flux-controlnet.png' });
     await cdp.poll("!!document.querySelector('.vz-image-set')");
     await discardRecipe(cdp);await cdp.poll("!!document.querySelector('.vz-image-set')");
-    assert.equal(await cdp.evaluate("document.querySelector('.vz-image-empty').textContent"), 'No images added yet.');
+    assert.equal(await cdp.evaluate("document.querySelector('.vz-image-empty').textContent"), 'Add images to vary this input.');
     assert(await cdp.evaluate("!!document.querySelector('.vz-input-trigger')&&!!document.querySelector('.vz-imgfilespick')&&!document.querySelector('[webkitdirectory]')"));
     await cdp.poll("document.querySelector('.vz-folder-chooser button')?.disabled===true");
     assert.equal(await cdp.evaluate("document.querySelector('.vz-folder-chooser button').title"), 'Folder chooser needs the desktop app');
@@ -121,7 +121,7 @@ module.exports = async ({ cdp, FAKE, KZ, check }) => {
     const addFolder = async value => {
       await cdp.evaluate(`(()=>{const input=document.querySelector('.vz-folder-path');input.value=${JSON.stringify(value)};input.dispatchEvent(new Event('input',{bubbles:true}))})()`);
       await cdp.clickAt('.vz-folder-add');
-      await cdp.poll("document.querySelector('.vz-folder-add').textContent==='Add'");
+      await cdp.poll("document.querySelector('.vz-folder-add').textContent==='Add folder'");
     };
     await addFolder(folder);
     await cdp.poll("document.querySelectorAll('.vz-image-tile').length===4&&!document.querySelector('.vz-image-check')");
@@ -137,7 +137,7 @@ module.exports = async ({ cdp, FAKE, KZ, check }) => {
     await cdp.poll("document.querySelector('.vz-count').textContent==='2'");
     await addFolder(folder);
     await cdp.poll("document.querySelector('.vz-count').textContent==='3'&&!document.querySelector('.vz-image-check')");
-    await cdp.poll("[...document.querySelectorAll('.vz-image-tile img')].every(img=>img.complete&&img.naturalWidth>0)");
+    await waitForSelectedPreviews(cdp);
     const folderGeometry = await cdp.evaluate(`(()=>{const input=document.querySelector('.vz-folder-path').getBoundingClientRect(),chooser=document.querySelector('.vz-folder-chooser button').getBoundingClientRect(),add=document.querySelector('.vz-folder-add').getBoundingClientRect(),footer=document.querySelector('.vz-image-add').getBoundingClientRect(),grid=document.querySelector('.vz-image-grid').getBoundingClientRect();return {center:Math.abs((input.top+input.bottom-add.top-add.bottom)/2),chooserCenter:Math.abs((input.top+input.bottom-chooser.top-chooser.bottom)/2),order:input.right<=chooser.left&&chooser.right<=add.left&&grid.bottom<footer.top,contained:input.left>=footer.left&&add.right<=footer.right}})()`);
     assert(folderGeometry.center < 1 && folderGeometry.chooserCenter < 1 && folderGeometry.order && folderGeometry.contained, JSON.stringify(folderGeometry));
     await cdp.send('Emulation.setDeviceMetricsOverride', { width: 1280, height: 900, deviceScaleFactor: 1, mobile: false });

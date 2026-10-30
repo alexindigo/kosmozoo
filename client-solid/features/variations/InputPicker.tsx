@@ -73,7 +73,7 @@ export function InputPicker(props) {
 }
 
 function InputOptions(props) {
-  let panel, search, scrollElement;
+  let panel, search, scrollElement, summary;
   const [placement, setPlacement] = createSignal(null);
   const [placed, setPlaced] = createSignal(false);
   const [scroll, setScroll] = createSignal(null), [active, setActive] = createSignal(0), [columns, setColumns] = createSignal(3);
@@ -126,7 +126,7 @@ function InputOptions(props) {
         const style = getComputedStyle(panel), list = getComputedStyle(scrollElement);
         const width = parseFloat(style.maxWidth), listHeight = parseFloat(list.maxHeight);
         if (!Number.isFinite(width) || !Number.isFinite(listHeight)) return null;
-        const chrome = search.getBoundingClientRect().height + ["paddingTop", "paddingBottom", "borderTopWidth", "borderBottomWidth", "rowGap"]
+        const chrome = search.getBoundingClientRect().height + summary.getBoundingClientRect().height + (parseFloat(style.rowGap) || 0) + ["paddingTop", "paddingBottom", "borderTopWidth", "borderBottomWidth", "rowGap"]
           .reduce((sum, key) => sum + (parseFloat(style[key]) || 0), 0);
         return { width, height: chrome + listHeight, minHeight: chrome + TILE_SIZE };
       },
@@ -196,7 +196,8 @@ function InputOptions(props) {
           </div>
         }</For>
       </div>
-      <Show when={!filtered().length}><p class="vz-image-empty">No matching inputs.</p></Show>
+      <Show when={!filtered().length}><p class="vz-image-empty">{files().length ? `No inputs match “${props.query()}”.` : "No ComfyUI inputs available."}</p></Show>
     </div>
+    <p ref={summary} class="vz-input-summary" role="status">{files().filter(name => props.selected(name)).length} selected</p>
   </div>;
 }

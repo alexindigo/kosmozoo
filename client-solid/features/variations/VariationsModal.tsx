@@ -7,7 +7,7 @@
 // right: variations count (big), prefix, suffix, Run.
 //
 // Slider rows are populated once the probe returns — the graph decides which
-// parameters have a target node, and only those render. The label click
+// parameters have a target node, and only those render. The naming selector
 // inserts the per-graph placeholder key into whichever prefix/suffix input
 // was last focused. Prefix/suffix WRAP the original filename basename in the
 // submission (they don't replace it).
@@ -25,6 +25,7 @@ import { VariationDiscardConfirmation } from "./VariationDiscardConfirmation.js"
 import { ImageSetPanel } from "./ImageSetPanel.js";
 import { SingleLineText } from "../../components/SingleLineText.js";
 import { workspaceCurrent } from "./workspaces.js";
+import { ParameterRow, parameterName } from "./ParameterRow.js";
 
 export function VariationsModal() {
   const store = useAppStore();
@@ -99,22 +100,19 @@ function RecipeBody(props) {
   onCleanup(() => { editor.dispose(); guard.dispose(); });
   onCleanup(props.workspaces.lease(() => { editor.dispose(); guard.dispose(); }));
   // refs exist solely to read the live selection and restore the caret
-  // after a label-click insert
+  // after an explicit parameter insert.
   let prefixEl, suffixEl;
-  // the input a label click inserts into — ONE focus signal replaces the
-  // four-listener tracking on each input ; the label's mousedown
-  // preventDefault keeps the focus (and the selection) alive through the
-  // click
+  // One focus signal remembers the naming target while the native parameter
+  // selector is focused; each input retains its own live caret selection.
   const [focused, setFocused] = createSignal(null); // "prefix" | "suffix"
-  // a slider label click inserts its {placeholder} at the focused input's
+  // The parameter action inserts its {placeholder} at the naming input's
   // selection. The live value+selection are read at click time — direct
   // programmatic sets bypass onInput, so the signal adopts the buffer here,
   // then the write goes through the signal (the only writer). Solid's
   // signal write is synchronous outside a batch, so the caret restores
   // right after it — no microtask hop.
   const onInsertPlaceholder = (key) => {
-    const which = focused();
-    if (!which) return;
+    const which = focused() ?? "suffix";
     const el = which === "prefix" ? prefixEl : suffixEl;
     if (!el) return;
     const cur = el.value;
@@ -300,7 +298,7 @@ function RecipeBody(props) {
  the rest follow the info panel's order (enum + numeric rows interleave) */}
               <Show
                 when={params() !== null}
-                fallback={<SingleLineText class="vz-loading" value="inspecting graph…" />}
+                fallback={<SingleLineText class="vz-loading" value="Reading workflow…" />}
               >
                 <Show
                   when={orderedItems().length > 0}
@@ -344,6 +342,7 @@ function RecipeBody(props) {
                       const p = row0.tuning;
                       return (
                         <SliderRow
+                          row={() => rows()[key]}
                           param={{ ...p, key, label: row0.label }}
                           current={() => rows()[key]?.current ?? null}
                           defaults={{ min: row0.min, max: row0.max }}
@@ -355,7 +354,6 @@ function RecipeBody(props) {
                           onToggle={onToggle}
                           onRange={onRange}
                           onIncrement={onIncrement}
-                          onInsertPlaceholder={onInsertPlaceholder}
                           registerEditor={registerEditor} rememberFocus={rememberFocus}
                         />
                       );
@@ -368,42 +366,62 @@ function RecipeBody(props) {
           </div>
           <div class="vz-divider" />
           <div class="vz-right">
+            <div class="vz-sidebar-body">
             <div class="vz-count-group">
-              <SingleLineText class="vz-rlabel" value="variations" />
-              <SingleLineText class={"vz-count" + (tally().n > 1000 ? " vz-count-hot" : tally().n > 100 ? " vz-count-warn" : "")} value={tally().n} />
-              <Show when={batch && tally().anyEnabled}>
-                <SingleLineText class="vz-count-sub" value={`${tally().perImage} variants × ${props.images.length} images`} />
-              </Show>
+              <span class="vz-rlabel">{tally().exact ? "Variations" : tally().status === "invalid" ? "Check the recipe" : "Estimated variations"}</span>
+              <SingleLineText class={"vz-count" + (tally().n >= 1e15 ? " vz-count-large" : "") + (tally().n > 1000 ? " vz-count-hot" : tally().n > 100 ? " vz-count-warn" : "")}
+                value={tally().status === "invalid" ? "—" : tally().display} hint={tally().fullCount} />
+              <p class="vz-count-sub">{tally().breakdown}</p>
             </div>
             <div class="vz-naming-group">
-              <SingleLineText class="vz-rlabel" value="prefix" />
+              <span class="vz-rlabel">Output names</span>
+              <label for={`prefix-${props.session}`}>Prefix</label>
               <input
-                type="text" class="vz-tinput vz-prefix" ref={prefixEl} disabled={props.readOnly}
+                id={`prefix-${props.session}`} aria-describedby={`naming-help-${props.session}`} type="text" class="vz-tinput vz-prefix" ref={prefixEl} disabled={props.readOnly}
                 value={prefix()}
-                title="click a slider label to insert its {placeholder}"
+                title="Use Insert parameter to insert a canonical naming token at the caret"
                 {...focus} onFocus={(e) => { setFocused("prefix"); focus.onFocus(e); }}
                 onInput={(e) => editor.edit("naming", "root", "prefix", e.currentTarget.value)}
               />
-              <SingleLineText class="vz-rlabel" value="suffix" />
+              <label for={`suffix-${props.session}`}>Suffix</label>
               <input
-                type="text" class="vz-tinput vz-suffix" ref={suffixEl} disabled={props.readOnly}
+                id={`suffix-${props.session}`} aria-describedby={`naming-help-${props.session}`} type="text" class="vz-tinput vz-suffix" ref={suffixEl} disabled={props.readOnly}
                 value={suffix()}
-                title="click a slider label to insert its {placeholder} (enabled sliders auto-append)"
+                title="Use Insert parameter to insert a canonical naming token (enabled sliders auto-append)"
                 {...focus} onFocus={(e) => { setFocused("suffix"); focus.onFocus(e); }}
                 onInput={(e) => editor.edit("naming", "root", "suffix", e.currentTarget.value)}
               />
+              <select class="vz-insert-parameter" aria-label="Insert parameter into output name" value="" disabled={props.readOnly}
+                onChange={event => { const id = event.currentTarget.value; event.currentTarget.value = ""; if (id) onInsertPlaceholder(id); }}>
+                <option value="">Insert parameter…</option>
+                <For each={[...Object.values(imgRows()), ...Object.values(rows()), ...enumList(), ...textList()]}>{row =>
+                  <option value={row.id}>{parameterName(row)} · {row.label}</option>
+                }</For>
+              </select>
+              <span id={`naming-help-${props.session}`} hidden>Original filename stays between prefix and suffix. {tally().naming.help}</span>
+              <Show when={tally().naming.example}><div class="vz-name-example">Example:
+                <SingleLineText value={tally().naming.example} hint={tally().naming.help} />
+              </div></Show>
+              <span class="vz-name-help">Representative example</span>
+            </div>
             </div>
             <div class="vz-messages" role="status">
               <div class="vz-message-content">
+                <Show when={tally().message && !result()}><p class={tally().status === "invalid" ? "vz-readiness-error" : "vz-field-help"}>{tally().message}</p></Show>
                 <Show when={props.readOnly && !result()?.text}>
                   <p class="vz-workspace-status">Recipe from a previous source. Review only; images and values have not been retargeted.</p>
                 </Show>
-                <div class={"vz-error" + (result()?.ok ? " vz-ok" : "")}>{result()?.text ?? ""}</div>
+                <Show when={result()}>{value => <>
+                  <Show when={Number.isSafeInteger(value().submitted) && value().total > 0}>
+                    <p class={value().ok ? "vz-queued vz-ok" : "vz-queued"}>Queued {value().submitted} of {value().total} jobs</p>
+                  </Show>
+                </>}</Show>
+                <p class={"vz-error" + (result()?.ok ? " vz-neutral" : "")}>{result()?.reason ?? result()?.text ?? ""}</p>
               </div>
             </div>
             <button
               class="vz-run" disabled={running() || props.readOnly || undefined} onClick={() => store.handles.invoke("variations.run")}
-            ><SingleLineText value={running() ? "Running…" : "Run"} /></button>
+            ><SingleLineText value={running() ? "Submitting…" : "Queue variations"} /></button>
           </div>
         </div>
         <button
@@ -445,22 +463,15 @@ function EnumRow(props) {
     return f ? r().values.filter((v) => v.toLowerCase().includes(f)) : r().values;
   };
   return (
-    <div class={"vz-imgrow vz-enumrow" + (r().enabled ? " on" : "")} data-enum-id={props.p.id}>
-      <label class="vz-imgrow-head">
-        <input
-          type="checkbox" class="vz-cb"
-          checked={r().enabled}
-          onChange={(e) => props.onToggle(props.p.id, e.target.checked)}
-        />
-        <SingleLineText class="vz-imgrow-label" value={r().label} />
-        <SingleLineText class="vz-imgrow-cur vz-enum-cur" value={r().current} />
-      </label>
+    <ParameterRow class="vz-imgrow vz-enumrow" row={r} enabled={() => r().enabled}
+      attributes={{ "data-enum-id": props.p.id }} onEnable={checked => props.onToggle(props.p.id, checked)}>
       <Show when={r().enabled}>
         <div class="vz-imgrow-body vz-enum-body">
           <Show when={r().values.length > 10}>
             <input
               {...focus}
               type="text" class="vz-enum-filter" placeholder="filter…"
+              aria-label={`Filter ${r().label} options`}
               value={filter()}
               onInput={(e) => setFilter(e.currentTarget.value)}
             />
@@ -476,13 +487,15 @@ function EnumRow(props) {
                     onChange={(e) => props.onPick(props.p.id, v, e.target.checked)}
                   />
                   <SingleLineText class="vz-enum-opt-name" value={v} />
+                  <Show when={v === r().current}><span class="vz-field-help">Current</span></Show>
                 </label>
               )}
             </For>
+            <Show when={!filtered().length}><p class="vz-field-help">No options match “{filter()}”.</p></Show>
           </div>
         </div>
       </Show>
-    </div>
+    </ParameterRow>
   );
 }
 
@@ -495,32 +508,28 @@ function TextRow(props) {
   const focus = focusMemory(props.rememberFocus);
   const r = () => props.row();
   return (
-    <div class={"vz-imgrow vz-textrow" + (r().enabled ? " on" : "")} data-text-id={props.p.id}>
-      <label class="vz-imgrow-head">
-        <input
-          type="checkbox" class="vz-cb"
-          checked={r().enabled}
-          onChange={(e) => props.onToggle(props.p.id, e.target.checked)}
-        />
-        <SingleLineText class="vz-imgrow-label" value={r().label} />
-        <SingleLineText class="vz-imgrow-cur vz-enum-cur" value={r().current} />
-      </label>
+    <ParameterRow class="vz-imgrow vz-textrow" row={r} enabled={() => r().enabled}
+      attributes={{ "data-text-id": props.p.id }} onEnable={checked => props.onToggle(props.p.id, checked)}>
       <Show when={r().enabled}>
         <div class="vz-imgrow-body vz-enum-body">
           <textarea
             {...focus}
             class="vz-text-values" rows="4"
+            aria-label={`${r().label} template`} aria-describedby={`template-help-${props.p.id}`}
             placeholder="text template — {{label}} adds a substitution axis"
             value={r().text}
             onInput={(e) => props.onField(props.p.id, "text", e.currentTarget.value)}
           />
+          <p class="vz-field-help" id={`template-help-${props.p.id}`}>Use {"{{subject}}"} for alternatives. Enter its values below, separated by semicolons. Line breaks stay in the prompt.</p>
           <For each={templateLabels(r().text)}>
             {(lab) => (
               <div class="vz-tpl-row">
                 <SingleLineText class="vz-tpl-label" value={lab} />
                 <input
                   {...focus}
-                  type="text" class="vz-tpl-input"
+                   type="text" class="vz-tpl-input"
+                  aria-label={`${r().label}: ${lab} alternatives`} aria-describedby={`template-help-${props.p.id}`}
+                  aria-invalid={!String(templateValue(r().tpl, lab) ?? "").trim()}
                   value={templateValue(r().tpl, lab) ?? ""}
                   placeholder="values; separated; by; semicolons"
                   onInput={(e) => props.onTpl(props.p.id, lab, e.currentTarget.value)}
@@ -530,6 +539,6 @@ function TextRow(props) {
           </For>
         </div>
       </Show>
-    </div>
+    </ParameterRow>
   );
 }

@@ -28,6 +28,7 @@ export function NoteBox(props) {
     <div class="boxcol">
       <textarea
         class={props.sign}
+        aria-label={props.sign === "neg" ? "Negative feedback" : "Positive feedback"}
         placeholder={props.placeholder}
         value={text()}
         onInput={onInput}

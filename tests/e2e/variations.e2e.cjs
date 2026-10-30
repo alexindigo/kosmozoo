@@ -90,7 +90,7 @@ async function main() {
       await cdp.poll(`document.querySelectorAll('.vz-slider-row').length > 0`, 5000);
       const info = await cdp.evaluate(`(() => {
         const rows = document.querySelectorAll('.vz-slider-row');
-        const labels = [...rows].map((r) => r.querySelector('.vz-label')?.textContent);
+        const labels = [...rows].map((r) => r.dataset.paramKey);
         return { count: rows.length, labels };
       })()`);
       check("panel renders graph-appropriate params",
@@ -106,8 +106,8 @@ async function main() {
     await attempt("probe fills in seed current value", async () => {
       const cur = await cdp.evaluate(`(() => {
         for (const r of document.querySelectorAll('.vz-slider-row')) {
-          if (/seed$/.test(r.querySelector('.vz-label')?.textContent ?? "")) {
-            return r.querySelector('.vz-current')?.textContent;
+          if (/seed$/.test(r.dataset.paramKey ?? "")) {
+            return r.querySelector('.vz-parameter-current')?.textContent;
           }
         }
         return null;
@@ -221,14 +221,14 @@ async function main() {
       await cdp.send("Input.insertText", { text: "0.1" });
       await cdp.evaluate(`document.querySelector('${rowSel} .vz-row-inc-input').blur()`);
       await cdp.poll(`document.querySelector('${rowSel} .vz-row-inc-input').value === "0.1"`, 5000);
-      const before = await cdp.evaluate(`document.querySelector('${rowSel} .vz-max-lbl')?.textContent ?? ""`);
+      const before = await cdp.evaluate(`document.querySelector('${rowSel} .vz-range-field:nth-child(2) input').value`);
       const h1 = await cdp.evaluate(`(() => {
         const r = document.querySelector('${rowSel} .noUi-handle[data-handle="1"]').getBoundingClientRect();
         return { x: r.left + r.width / 2, y: r.top + r.height / 2 };
       })()`);
       await cdp.drag(h1.x, h1.y, h1.x - 37, h1.y); // left: the value decreases
-      await cdp.poll(`(document.querySelector('${rowSel} .vz-max-lbl')?.textContent ?? "") !== ${JSON.stringify(before)}`, 5000);
-      const after = await cdp.evaluate(`document.querySelector('${rowSel} .vz-max-lbl')?.textContent`);
+      await cdp.poll(`document.querySelector('${rowSel} .vz-range-field:nth-child(2) input').value !== ${JSON.stringify(before)}`, 5000);
+      const after = await cdp.evaluate(`document.querySelector('${rowSel} .vz-range-field:nth-child(2) input').value`);
       const v = parseFloat(after);
       const snapped = Math.abs(v / 0.1 - Math.round(v / 0.1)) < 1e-6;
       check("drag lands on an increment multiple", snapped, `${before} -> ${after}`);
@@ -242,12 +242,12 @@ async function main() {
       const h0 = '.vz-slider-row[data-param-key$="denoise"] .noUi-handle[data-handle="0"]';
       // the row's own min label carries the full-precision value (the aria
       // valuenow is one-decimal — a 0.01 nudge would be invisible there)
-      const lbl = '.vz-slider-row[data-param-key$="denoise"] .vz-min-lbl';
+      const lbl = '.vz-slider-row[data-param-key$="denoise"] .vz-range-field:first-child input';
       await cdp.evaluate(`document.querySelector('${h0}').focus()`);
-      const before = parseFloat(await cdp.evaluate(`document.querySelector('${lbl}').textContent`));
+      const before = parseFloat(await cdp.evaluate(`document.querySelector('${lbl}').value`));
       await cdp.keyTrusted("ArrowUp", { vk: 38 });
-      await cdp.poll(`parseFloat(document.querySelector('${lbl}').textContent) !== ${before}`, 5000);
-      const after = parseFloat(await cdp.evaluate(`document.querySelector('${lbl}').textContent`));
+      await cdp.poll(`parseFloat(document.querySelector('${lbl}').value) !== ${before}`, 5000);
+      const after = parseFloat(await cdp.evaluate(`document.querySelector('${lbl}').value`));
       const step = Math.round((after - before) * 1000) / 1000;
       check("arrow key nudges by the fine step (0.01)", step === 0.01, `${before} -> ${after}`);
       const a = await cdp.evaluate(`(() => {
@@ -318,8 +318,8 @@ async function main() {
         near(v.h1r, v.railR), `thumbRight=${v.h1r} railRight=${v.railR}`);
     });
 
-    // --- disabled rows keep rail + marker (context for the current value) ---
-    await attempt("disabled row shows rail and marker, hides slider", async () => {
+    // Inactive rows keep their Current summary and native widget, without rails.
+    await attempt("disabled row is compact with current context and a retained slider", async () => {
       const v = await cdp.evaluate(`(() => {
         const row = [...document.querySelectorAll('.vz-slider-row')].find(r => r.classList.contains('vz-off'));
         if (!row) return { error: 'no off row' };
@@ -328,14 +328,17 @@ async function main() {
           rail: vis(row.querySelector('.vz-rail')),
           marker: vis(row.querySelector('.vz-marker')),
           sliderHidden: !vis(row.querySelector('.vz-slider')),
+          current: row.querySelector('.vz-parameter-current').textContent,
+          compact: row.getBoundingClientRect().height <= 44,
+          widgetRetained: !!row.querySelector('.vz-slider').noUiSlider,
         };
       })()`);
-      check("off row: rail+marker visible, slider hidden",
-        v.rail === true && v.marker === true && v.sliderHidden === true, JSON.stringify(v));
+      check("off row: one-line Current summary, hidden rails and retained native widget",
+        !v.rail && !v.marker && v.sliderHidden && v.current.startsWith('Current ') && v.compact && v.widgetRetained, JSON.stringify(v));
     });
 
-    // --- label click inserts {key} into focused suffix ---
-    await attempt("slider label click inserts {key} at cursor", async () => {
+    // The explicit naming action owns insertion; row labels own enablement.
+    await attempt("parameter selector inserts {key} at cursor", async () => {
       const result = await cdp.evaluate(`(() => {
         const row = document.querySelector('.vz-slider-row');
         const suffix = document.querySelector('.vz-suffix');
@@ -344,11 +347,12 @@ async function main() {
         suffix.setSelectionRange(4, 4);
         suffix.dispatchEvent(new Event('focus'));
         suffix.dispatchEvent(new Event('mouseup'));
-        const label = row.querySelector('.vz-label');
-        label.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, cancelable: true }));
+        const selector = document.querySelector('.vz-insert-parameter');
+        selector.value = row.dataset.paramKey;
+        selector.dispatchEvent(new Event('change', { bubbles: true }));
         return { value: suffix.value };
       })()`);
-      // the label click inserts the row's own placeholder — the auto-enabled
+      // the selector inserts the row's own placeholder — the auto-enabled
       // denoise row floats to the top, so the first row's key ends in denoise
       const ok = /^pre_\{[\w.]*denoise\}_post$/.test(result.value);
       check("suffix contains graph-appropriate {denoise} at cursor",
@@ -511,7 +515,7 @@ async function main() {
       const info = await cdp.evaluate(`(() => {
         const out = {};
         for (const r of document.querySelectorAll('.vz-slider-row')) {
-          out[r.dataset.paramKey] = r.querySelector('.vz-current')?.textContent ?? null;
+          out[r.dataset.paramKey] = r.querySelector('.vz-parameter-current')?.textContent.replace(/^Current /, '') ?? null;
         }
         return out;
       })()`);
@@ -576,7 +580,7 @@ async function main() {
         return {
           ids: rows.map((r) => r.dataset.enumId),
           labels: rows.map((r) => r.querySelector('.vz-imgrow-label')?.textContent),
-          curs: rows.map((r) => r.querySelector('.vz-enum-cur')?.textContent),
+          curs: rows.map((r) => r.querySelector('.vz-parameter-current')?.textContent.replace(/^Current /, '')),
         };
       })()`);
       // info-panel order: class_type, then input; per-instance rows in graph
@@ -705,7 +709,7 @@ async function main() {
         const last = all.at(-1);
         return {
           ids: rows.map((r) => r.dataset.textId),
-          curs: rows.map((r) => r.querySelector('.vz-enum-cur')?.textContent),
+          curs: rows.map((r) => r.querySelector('.vz-parameter-current')?.textContent.replace(/^Current /, '')),
           last: last?.dataset.textId ?? last?.dataset.enumId ?? last?.dataset.paramKey,
         };
       })()`);
@@ -813,11 +817,11 @@ async function main() {
           inp.dispatchEvent(new Event('input', { bubbles: true }));
         })()`);
       };
-      // a label without values inerts the row — the count is denoise-only
-      const c0 = parseInt(await cdp.evaluate(`document.querySelector('.vz-count')?.textContent`), 10);
+      // An incomplete enabled template is invalid, never a default-backed count.
+      const c0 = 3; // the fixture's unchanged denoise-only sweep
       await setTpl(0, "cat; dog");
-      const cInert = parseInt(await cdp.evaluate(`document.querySelector('.vz-count')?.textContent`), 10);
-      check("unconfigured label inerts the row", cInert === c0, `c0=${c0} got=${cInert}`);
+      const incomplete = await cdp.evaluate(`document.querySelector('.vz-count').textContent==='—' && document.querySelector('.vz-messages').textContent.includes('every template label')`);
+      check("unconfigured label has an explicit invalid-plan explanation", incomplete);
       // both labels configured: 2×2 cartesian; the current text is NOT among
       // the picks (it has no placeholders), so no current-combo exclusion
       await setTpl(1, "oil; ink");

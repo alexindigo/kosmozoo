@@ -10,7 +10,7 @@
 // spans (.imgref) report clicks through the optional onImageRef(file)
 // callback — the component never leaks its internals to a parent.
 
-import { createMemo, For, Show } from "solid-js";
+import { createMemo, createUniqueId, For, Show } from "solid-js";
 import { useAppStore } from "../store/app-store.js";
 import { fullFieldRows, valueDiffer, nodeImages, NODE_IMG_EXT } from "../store/fields.js";
 import { useMeasuredSrc, useImageDisplay } from "../lib/img-measure.js";
@@ -47,8 +47,8 @@ export function MetaBody(props) {
         fallback={
           <div class="info-none">
             {props.meta?.nodes?.length
-              ? "This image has no scalar node fields."
-              : "This image has no embedded parameters."}
+              ? "No scalar generation parameters"
+              : "No embedded generation parameters"}
           </div>
         }
       >
@@ -103,6 +103,7 @@ export function MetaBody(props) {
 }
 
 function InfoGroup(props) {
+  const id = `metadata-group-${createUniqueId()}`;
   // short values first; text prompts (long values) render below them
   const shortRows = () => props.grows.filter(([, , long]) => !long);
   const longRows = () => props.grows.filter(([, , long]) => long);
@@ -112,12 +113,13 @@ function InfoGroup(props) {
       <button
         class="infogroup-head"
         title={props.isCollapsed() ? "expand" : "collapse"}
+        aria-expanded={!props.isCollapsed()} aria-controls={id}
         onClick={props.onToggle}
       >
         {props.group}
         <span class="chev">▾</span>
       </button>
-      <div class="infogroup-body">
+      <div class="infogroup-body" id={id}>
         <div class="props">
           <For each={shortRows()}>
             {([input, v]) => {

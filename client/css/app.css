@@ -702,39 +702,11 @@ body:has(#diff:not([hidden])) #statusCol { bottom: 56px; }
 .vz-sliders { display: flex; flex-direction: column; gap: 10px;
   overflow-y: auto; min-height: 0; flex: 1; padding-right: 4px; }
 
-/* Each param is a little card. Enabled cards float to the top; disabled
- ones sit below — the ordered memo's reactive sort, no DOM
- manipulation. */
-.vz-slider-row { display: grid;
-  grid-template-columns: 18px minmax(0, 1fr) 110px;
-  gap: 12px; align-items: start;
-  padding: 10px 12px;
-  background: var(--surface); border: 1px solid var(--lifted);
-  border-radius: 8px;
-  transition: opacity .15s ease, border-color .15s ease, background .15s ease; }
-.vz-slider-row:not(.vz-off) { border-color: var(--secondary); }
-.vz-slider-row.vz-off { opacity: 0.55;
-  background: color-mix(in srgb, var(--surface) 85%, transparent); }
-/* When a row is disabled the range picker chrome fades away, but the
- orange "current value" tick and its numeric label STAY visible so the
- image's actual value is legible on every row (enabled or not). */
-.vz-slider-row.vz-off .vz-min-lbl,
-.vz-slider-row.vz-off .vz-max-lbl,
-.vz-slider-row.vz-off .vz-slider { visibility: hidden; }
+/* ParameterRow owns the common heading/editor allocation below. Enabled rows
+   retain the existing memo's ordering; native widgets stay mounted when hidden. */
 .vz-loading { color: var(--foreground-mid); font-size: 12px; padding: 20px 4px;
   text-align: center; font-style: italic; }
 
-/* LoadImage sweep row: same card treatment as the slider rows */
-.vz-imgrow { padding: 10px 12px; background: var(--surface);
-  border: 1px solid var(--lifted); border-radius: 8px;
-  transition: border-color .15s ease, opacity .15s ease; }
-.vz-imgrow.on { border-color: var(--secondary); }
-.vz-imgrow:not(.on) { opacity: 0.55; }
-.vz-imgrow-head { display: flex; align-items: center; gap: 10px; cursor: pointer; }
-.vz-imgrow-head .vz-cb { margin: 0; }
-.vz-imgrow-label { flex: 1; color: var(--foreground); font-size: 13px; }
-.vz-imgrow-cur { color: var(--foreground-dim); font-size: 11px; margin-left: auto;
-  max-width: 45%; }
 .vz-imgrow-body { display: flex; gap: 8px; margin-top: 8px; padding-left: 26px; }
 
 /* enum sweep rows (LoRA names, samplers, …): same card as the imgRows, the
@@ -751,9 +723,11 @@ body:has(#diff:not([hidden])) #statusCol { bottom: 56px; }
 .vz-enum-opt { display: flex; align-items: center; gap: 8px; cursor: pointer;
   font-size: 12px; color: var(--foreground); padding: 1px 0; }
 .vz-enum-opt .vz-cb { margin: 0; width: 14px; height: 14px; flex: 0 0 auto; }
+.vz-enum-opt-name { flex: 1; }
+.vz-enum-opt > .vz-field-help { flex: 0 0 auto; white-space: nowrap; }
 .vz-enum-current .vz-enum-opt-name { color: var(--attention); }
 
-/* text sweep rows (prompts, …): the values textarea — one value per line */
+/* Text is a literal template; line breaks never separate alternatives. */
 .vz-text-values { background: var(--background); color: var(--foreground);
   border: 1px solid var(--border-strong); border-radius: 4px; font-size: 12px;
   padding: 4px 6px; font-family: ui-monospace, monospace;
@@ -778,28 +752,17 @@ body:has(#diff:not([hidden])) #statusCol { bottom: 56px; }
   cursor: pointer; margin: 8px 0 0; }
 .vz-cb:checked { background: var(--attention); }
 
-.vz-slider-inner { display: flex; flex-direction: column; gap: 4px; }
 .vz-label { color: var(--foreground); font-size: 13px; font-weight: 400;
   cursor: pointer; align-self: flex-start; }
 .vz-label:hover { color: var(--secondary); }
 
-/* Dual-thumb slider layout: three stacked lanes.
- Lane 1: min/max labels. Lane 2: noUiSlider (renders track, thumbs,
- connect band). Lane 3: current-value label. The slider library handles
- the internal alignment — thumbs, track, and connect band share the
- same centerline by the library's own layout. */
+/* Dual-thumb rail below allocated numeric fields. The native track, thumbs,
+   connect band and current marker retain their shared centerline. */
 .vz-rangewrap { position: relative; margin-top: 2px;
   /* the half-thumb inset is owned once, here; the rail, the marker's
  reference box, and the slider all read the same var, so their spans
  match and thumbs attach to the rail ends instead of hanging off them */
   --thumb-w: 14px; --thumb-inset: calc(var(--thumb-w) / 2); }
-
-/* Lane 1: min/max labels above the track — the horizontal inset matches the
- track's, so a bound at 0%/100% centers on the thumb at that end. */
-.vz-lane-labels { position: relative; height: 14px; margin: 0 var(--thumb-inset) 2px; }
-.vz-bound { position: absolute; top: 0; transform: translateX(-50%);
-  color: var(--foreground); font-size: 11px;
-  font-family: ui-monospace, monospace; }
 
 .vz-marker-inset { position: absolute; inset: 0 var(--thumb-inset);
   pointer-events: none; }
@@ -850,12 +813,6 @@ body:has(#diff:not([hidden])) #statusCol { bottom: 56px; }
 .vz-marker { position: absolute; width: 2px; height: 20px;
   top: 50%; transform: translate(-50%, -50%);
   background: var(--attention); pointer-events: none; z-index: var(--z-chrome); }
-
-/* Lane 3: current-value label below the track — same horizontal inset. */
-.vz-lane-current { position: relative; height: 14px; margin: 2px var(--thumb-inset) 0; }
-.vz-current { position: absolute; top: 0; transform: translateX(-50%);
-  color: var(--attention); font-size: 11px;
-  font-family: ui-monospace, monospace; }
 
 /* per-row increment stepper (right of the slider).
  Self-centers against the row — no top arithmetic. The checkbox still
@@ -965,12 +922,14 @@ body:has(#diff:not([hidden])) #statusCol { bottom: 56px; }
 /* vertical divider */
 .vz-divider { width: 1px; background: var(--foreground-dim); flex: 0 0 auto; }
 
-/* Both columns inherit the dialog's bounded row. Only the message row grows;
-   count, naming and Run always retain their full intrinsic content height. */
-.vz-right { display: grid; grid-template-rows: auto auto minmax(0, 1fr) auto;
-  gap: 10px; min-height: 0; }
+/* The sidebar owns content overflow separately from the pinned message/action.
+   Its body scrolls; messages have a bounded lane directly above Queue. */
+.vz-right { display: grid; grid-template-rows: minmax(0, 1fr) auto auto;
+  gap: 10px; min-height: 0; container-type: size; }
+.vz-sidebar-body { display: flex; flex-direction: column; gap: 12px; min-height: 0; overflow-y: auto; }
+.vz-sidebar-body > * { flex: 0 0 auto; }
 .vz-count-group, .vz-naming-group { display: grid; gap: 4px; align-content: start; }
-.vz-messages { display: flex; flex-direction: column; min-height: 0; overflow-y: auto; }
+.vz-messages { display: flex; flex-direction: column; min-height: 0; max-height: min(40cqb, 8lh); overflow-y: auto; }
 .vz-message-content { flex: 0 0 auto; margin-block-start: auto; }
 .vz-rlabel { color: var(--foreground); font-size: 12px; font-weight: 400;
   margin-top: 10px; }
@@ -1207,6 +1166,63 @@ body:has(#diff:not([hidden])) #statusCol { bottom: 56px; }
 .vz-workspace-actions { display: flex; align-items: center; gap: 8px; }
 .vz-workspace-actions select { flex: 1; min-width: 0; }
 .vz-workspace-new { align-self: flex-start; }
+
+/* One quiet row vocabulary: only enabled editors earn vertical space. Current
+   values and node identity remain readable without opacity-dimming whole rows. */
+.vz-parameter { display: block; padding: 10px 0; background: transparent;
+  border: 0; border-bottom: 1px solid var(--border); border-radius: 0; opacity: 1; transition: none; }
+.vz-parameter-heading.vz-imgrow-head { display: grid;
+  grid-template-columns: 16px minmax(60px, 1fr) minmax(0, 1fr) minmax(0, 1fr);
+  gap: 8px; align-items: center; cursor: default; }
+.vz-parameter-heading .vz-cb { margin: 0; }
+.vz-parameter-name { min-width: 0; cursor: pointer; }
+.vz-parameter-name .vz-label { font: 500 13px/18px system-ui; }
+.vz-parameter-identity { color: var(--foreground-mid); font: 12px/18px system-ui; }
+.vz-parameter-current.vz-imgrow-cur { margin: 0; max-width: 100%; color: var(--attention);
+  text-align: right; font: 12px/18px system-ui; font-variant-numeric: tabular-nums; }
+.vz-numeric-editor { display: grid; gap: 8px; margin: 12px 0 0 24px; }
+.vz-numeric-editor[hidden] { display: none; }
+.vz-range-fields { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) minmax(110px, 1.35fr); gap: 8px; }
+.vz-range-field { display: flex; flex-direction: column; gap: 4px; color: var(--foreground-mid); font: 12px/16px system-ui; }
+.vz-range-field > input, .vz-range-field .vz-row-inc-input { width: 100%; box-sizing: border-box;
+  background: var(--background); color: var(--foreground); border: 1px solid var(--border-strong);
+  border-radius: 4px; padding: 4px; font: 12px/18px ui-monospace, monospace; text-align: left; }
+.vz-range-field .vz-row-inc { display: flex; gap: 4px; align-self: stretch; }
+.vz-range-field .vz-step-btn { width: 26px; height: 28px; flex: 0 0 auto; font: 11px/16px system-ui; }
+.vz-field-help { margin: 0; color: var(--foreground-mid); font: 12px/16px system-ui; overflow-wrap: anywhere; }
+.vz-parameter .vz-imgrow-body { padding-left: 24px; }
+.vz-parameter .vz-rangewrap { margin-top: 0; }
+.vz-input-summary { margin: 0; color: var(--foreground-mid); font: 12px/16px system-ui; }
+.vz-folder { flex-basis: 100%; }
+.vz-root :is(input, textarea, select, button):focus-visible { outline: 2px solid var(--secondary); outline-offset: 2px; }
+.vz-root input[aria-invalid="true"] { border-color: var(--error); }
+.vz-left { container: variation-fields / inline-size; }
+@container variation-fields (max-width: 420px) {
+  .vz-parameter-heading.vz-imgrow-head { grid-template-columns: 16px minmax(0, 1fr) minmax(0, 1fr); }
+  .vz-parameter-identity { display: none; }
+  .vz-range-fields { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .vz-range-field:last-child { grid-column: 1 / -1; }
+}
+
+.vz-count-sub { margin: 0; line-height: 16px; overflow-wrap: anywhere; }
+.vz-count-large { font-size: 23px; }
+.vz-naming-group { grid-template-columns: 38px minmax(0, 1fr); align-items: center; }
+.vz-naming-group :is(.vz-rlabel, .vz-insert-parameter, .vz-name-example, .vz-name-help) { grid-column: 1 / -1; }
+.vz-naming-group label { color: var(--foreground-mid); margin: 0; }
+.vz-naming-group .vz-tinput { width: 100%; box-sizing: border-box; padding-inline: 4px; }
+.vz-insert-parameter { width: 100%; padding: 4px; background: var(--background); color: var(--foreground);
+  border: 1px solid var(--border-strong); border-radius: 4px; font: inherit; }
+.vz-name-example { margin: 4px 0 0; overflow-wrap: anywhere; font: 12px/16px system-ui; }
+.vz-name-example span { font-family: ui-monospace, monospace; }
+.vz-name-help { color: var(--foreground-mid); font: 11px/15px system-ui; }
+.vz-queued { margin: 0 0 8px; font: 13px/18px system-ui; }
+.vz-ok { color: var(--positive); }
+.vz-messages .vz-error { text-align: left; margin: 0; font: 12px/16px system-ui; }
+.vz-messages .vz-neutral { color: var(--foreground-mid); }
+.vz-readiness-error { color: var(--error); margin: 0; font: 12px/16px system-ui; overflow-wrap: anywhere; }
+.boxcol textarea:focus-visible { outline: 2px solid var(--secondary); outline-offset: 2px; }
+.metabody .props { font-family: system-ui; }
+.metabody :is(.info-none, .plabel), .infogroup-head { color: var(--foreground-mid); }
 .vz-workspace, .vz-workspace-new, .vz-workspace-discard { font: inherit; font-size: 11px;
   color: var(--foreground); background: var(--background); border: 1px solid var(--border-strong);
   border-radius: 4px; padding: 5px; text-align: left; cursor: pointer; }

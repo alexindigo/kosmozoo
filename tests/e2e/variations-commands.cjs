@@ -80,7 +80,7 @@ module.exports = async ({ cdp, check, FAKE, KZ }) => {
     await cdp.poll(`document.querySelector(${JSON.stringify(selector)}).value===${JSON.stringify(text)}`);
   };
   const state = () => cdp.evaluate(`(()=>{const p=document.querySelector('.vz-panel');return {session:p?.dataset.session,url:location.href,
-    values:[...p.querySelectorAll('input:not([type=file]),textarea,select')].map(e=>[e.value,e.checked]),labels:[...p.querySelectorAll('.vz-bound')].map(e=>e.textContent)}})()`);
+    values:[...p.querySelectorAll('input:not([type=file]),textarea,select')].map(e=>[e.value,e.checked]),bounds:[...p.querySelectorAll('.vz-range-field > input')].map(e=>e.value)}})()`);
   const shot = async (name) => {
     fs.mkdirSync(workPath('tests/e2e/.shots'),{recursive:true});
     const image=await cdp.send('Page.captureScreenshot',{format:'png'});
@@ -184,7 +184,7 @@ module.exports = async ({ cdp, check, FAKE, KZ }) => {
     await cdp.send('Input.dispatchMouseEvent', { type: 'mouseReleased', x:p.x-100, y:p.y, button:'left', buttons:0 });
     assert.deepEqual(await state(), before);
     p=await point(); await cdp.drag(p.x,p.y,p.x-25,p.y);
-    assert.notDeepEqual((await state()).labels,before.labels);
+    assert.notDeepEqual((await state()).bounds,before.bounds);
     await cdp.send('Emulation.setTouchEmulationEnabled',{enabled:true});
     p=await point();
     await cdp.send('Input.dispatchTouchEvent',{type:'touchStart',touchPoints:[{...p,id:7}]});
@@ -198,7 +198,7 @@ module.exports = async ({ cdp, check, FAKE, KZ }) => {
     await cdp.send('Input.dispatchTouchEvent',{type:'touchStart',touchPoints:[{...p,id:8}]});
     await cdp.send('Input.dispatchTouchEvent',{type:'touchMove',touchPoints:[{x:p.x-23,y:p.y,id:8}]});
     await cdp.send('Input.dispatchTouchEvent',{type:'touchEnd',touchPoints:[]});
-    assert.notDeepEqual((await state()).labels,touchBefore.labels);
+    assert.notDeepEqual((await state()).bounds,touchBefore.bounds);
     await cdp.send('Emulation.setTouchEmulationEnabled',{enabled:false});
     await discard();
   });

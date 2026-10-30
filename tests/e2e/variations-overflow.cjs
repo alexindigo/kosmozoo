@@ -4,6 +4,7 @@ const fs = require('node:fs');
 const path = require('node:path');
 const { CDP, collectPageErrors } = require('./cdp.cjs');
 const { workPath } = require('./paths.cjs');
+const { waitForSelectedPreviews } = require('./image-picker-helpers.cjs');
 
 // One generator for every scalar catalogue kind. Numeric values stay numeric;
 // their labels/keys and raw increment editors carry the hostile spelling too.
@@ -94,7 +95,7 @@ module.exports = async ({ cdp, ENGINE, FAKE, KZ, check }) => {
     await type('.vz-prefix', hostile('prefix'));
     await type('.vz-suffix', hostile('suffix'));
     await cdp.evaluate('document.activeElement.blur()');
-    await cdp.poll("[...document.querySelectorAll('.vz-image-tile img')].every(img=>img.complete&&img.naturalWidth>0)");
+    await waitForSelectedPreviews(cdp);
 
     for (const width of [1280, 768, 500]) {
       await cdp.send('Emulation.setDeviceMetricsOverride', { width, height: 900, deviceScaleFactor: 1, mobile: false });

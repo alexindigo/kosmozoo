@@ -132,11 +132,12 @@ export function DiffChrome(props) {
             />
           </Show>
         </div>
-        <Show when={store.state.diffViews().length > 1}><div id="diffModes" class="dz-seg">
+        <Show when={store.state.diffViews().length > 1}><div id="diffModes" class="dz-seg" role="group" aria-label="Comparison view">
           <For each={store.state.diffViews()}>
             {({key, mode: m, label, icon}) => (
               <button
                 data-view={label.toLowerCase()}
+                aria-pressed={d().mode === m} aria-label={label}
                 class={"dz-segbtn" + (d().mode === m ? " on" : "")}
                 disabled={(m !== "full" && (!store.state.diffPair().b || (m === "difference" && !!props.differenceReason))) || undefined}
                 title={m === "difference" && props.differenceReason ? props.differenceReason : `${label} (${key})`}

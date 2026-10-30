@@ -38,6 +38,7 @@ export function HostPicker() {
       <button
         id="hostBtn"
         title="choose host"
+        aria-expanded={store.state.hostMenuOpen()} aria-controls="hostDrop"
         onClick={() => store.handles.invoke("source.menu.toggle")}
       >
         <span class={"hdot" + (store.state.hosts[store.state.host()]?.online ? "" : " off")} />
