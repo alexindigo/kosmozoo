@@ -755,6 +755,7 @@ export function makeAppStore({ subscribeSources = typeof window !== "undefined" 
     });
     judgments.endRead(read);
     s.source?.acceptArrivals(inventory.arrivals, true);
+    if (!wasReady) metadata.resume(inventory.metaVersion, s);
     mirrorCurrentHash();
     if (!wasReady) restoreBrowse(idx);
     else if (browseRestore()) restoreBrowse(findByFile(current()?.image));

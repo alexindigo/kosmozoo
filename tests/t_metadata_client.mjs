@@ -338,3 +338,21 @@ Deno.test("metadata shown record: independent of a held collection snapshot and 
     assert(f.store.get("x.png").meta, "the shown record applied while the snapshot was held");
   } finally { f.release({ v: 2, changed: false, pending: 0 }); f.dispose(); }
 });
+
+Deno.test("metadata cursor: a session continues the delta stream from its first listing's version, never a full snapshot", async () => {
+  const f = fixture();
+  try {
+    f.channel.resume(41, f.owner);
+    await f.channel.poll();
+    f.channel.resume(7, f.owner);
+    f.channel.resume(99, { id: "other" });
+    await f.channel.poll();
+    assertEquals(f.reads, [41, 41], "only the session's first listing sets the cursor; other owners cannot");
+    const g = fixture();
+    try {
+      for (const invalid of [undefined, null, 0, -1, 1.5, "41"]) g.channel.resume(invalid, g.owner);
+      await g.channel.poll();
+      assertEquals(g.reads, [0], "a listing without a version keeps the full-snapshot fallback");
+    } finally { g.dispose(); }
+  } finally { f.dispose(); }
+});

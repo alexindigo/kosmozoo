@@ -248,6 +248,9 @@ export function makeRouter(ctx) {
     catch (error) { return Response.json({ error: `collection unreachable: ${error.message}` }, { status: 502 }); }
     if (token && !ctx.inventory.isCurrent(token)) return Response.json({ error: "Source incarnation changed" }, { status: 409 });
     const list = inventory.items;
+    // The rows below reflect every metadata write up to this version: a reader
+    // that accepted this listing continues the delta stream from it.
+    const metaVersion = ctx.store.metaVersion;
     const rows = new Map(ctx.store.entriesForCollection(id).map((r) => [r.name, r]));
     const visible = list.filter((f) => {
       const r = rows.get(f.name);
@@ -258,7 +261,7 @@ export function makeRouter(ctx) {
     for (const entry of entries) entry.arrivalSeq = arrivals?.sequences[entry.name] ?? null;
     return Response.json(url.searchParams.get("inventory") === "1"
       ? { revision: inventory.revision, generation: inventory.generation, coverage: inventory.coverage, subfolders: inventory.subfolders,
-          folders: inventory.folders, unavailable: inventory.unavailable, chronology: inventory.chronology,
+          folders: inventory.folders, unavailable: inventory.unavailable, chronology: inventory.chronology, metaVersion,
           arrivals: arrivals ? { sequence: arrivals.sequence, latestVisibleSeq: arrivals.latestVisibleSeq } : null, entries } : entries);
   });
 

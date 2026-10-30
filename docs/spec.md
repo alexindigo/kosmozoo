@@ -78,7 +78,8 @@ backing boundary. Hide-history matching also includes output type and directory.
 
 ### Output inventory and folder scope
 
-`?inventory=1` returns `{revision, generation, coverage, subfolders, folders, entries, unavailable, chronology, arrivals}`.
+`?inventory=1` returns `{revision, generation, coverage, subfolders, folders, entries, unavailable, chronology, arrivals, metaVersion}`.
+`metaVersion` is the metadata version the entries' rows reflect (read with them, in one turn).
 `revision` is an ephemeral address-owner epoch plus scan revision; `coverage` is
 `recursive` or `root-only`; `subfolders` is `{supported, reason}`. `folders`
 contains root `""` and every discovered image-directory ancestor. It is derived
@@ -477,6 +478,10 @@ ready card into a fallback. The box displays the filename and “Can't display t
 with normal judgment, notes, download and hide/delete controls available. The
 footer counts the same filtered, size-ready entries as the virtualizer (including
 failures), and separately reports pending measurements.
+A settled measurement notifies the shared size readers only when it can change a
+derivation (a failure, or a size the listing does not already fix); a probe of an
+entry with authoritative dimensions notifies only that identity's own size readers,
+so per-image settlement recomputes no feed-wide derivation.
 Store disposal releases measurement resources, deadlines, queued interest, the
 resize listener and retry work.
 
@@ -1123,7 +1128,9 @@ but still report pending dimension/ingest work. Dimension-only writes never rese
 unchanged graph metadata. Delivery history does not change the database schema.
 A delta cannot be re-requested by cursor once acknowledged, so a want's reply
 carries its names' current state: a reader that had not yet listed an entry when
-its change arrived recovers it by demanding that identity.
+its change arrived recovers it by demanding that identity. A client session
+continues the stream from its first accepted listing's `metaVersion`; the full
+snapshot remains only for absent, invalid, future or older-than-retained cursors.
 The stream serves the feed; it is never the path of an entry a consumer shows.
 Each shown identity (Details' current and its comparison entry) has one direct,
 bounded record read (`entries/<name>/meta`), retried with backoff while it is

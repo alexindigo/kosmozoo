@@ -275,3 +275,26 @@ Deno.test("entry meta: a shown entry's record ingests that one entry on demand; 
     assertEquals([missing.extracted, missing.hash, missing.meta], [false, null, null]);
   } finally { await rig.close(); await rm(dir, { recursive: true, force: true }); }
 });
+
+Deno.test("listing envelope: its metadata version continues the delta stream with exactly the later writes", async () => {
+  const dir = await mkdtemp(join(tmpdir(), "kz-listing-version-"));
+  const folder = join(dir, "images");
+  await mkdir(folder);
+  for (const name of ["a.png", "b.png"]) await writeFile(join(folder, name), "x");
+  const rig = await mkStateRig("listing-version", { dir: join(dir, "state"), hosts: { local: `folder:${folder}` } });
+  const router = makeRouter({ hosts: rig.hosts, inventory: rig.inventory, store: rig.store, settings: rig.settings, plugins: null, cache: rig.cache, ingest: rig.ingest,
+    prefetch: { pending: () => 0, dimsPending: () => 0 } });
+  const get = async path => (await router.handle(new Request(`http://x${path}`))).json();
+  try {
+    await rig.store.ingestFile("local", "a.png", "aa".repeat(32), 1);
+    await rig.store.metaPut("local", "a.png", { seed: 1 }, { ext: 1 });
+    const listing = await get("/api/collections/local/entries?inventory=1");
+    assertEquals(listing.metaVersion, rig.store.metaVersion);
+    assertEquals(listing.entries.find(entry => entry.name === "a.png").meta, { seed: 1 });
+    assertEquals(await get(`/api/collections/local/meta?since=${listing.metaVersion}`), { v: listing.metaVersion, changed: false, pending: 0 });
+    await rig.store.ingestFile("local", "b.png", "bb".repeat(32), 1);
+    await rig.store.metaPut("local", "b.png", { seed: 2 }, { ext: 1 });
+    const delta = await get(`/api/collections/local/meta?since=${listing.metaVersion}`);
+    assertEquals(delta.items, { "b.png": { seed: 2 } }, "only the write after the listing; never the collection");
+  } finally { await rig.close(); await rm(dir, { recursive: true, force: true }); }
+});

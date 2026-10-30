@@ -254,3 +254,39 @@ Deno.test("image resources: probes and mounted/thumbnail displays share the app-
     assertEquals(displays[1].read().src, "http://other.test/img.png");
   } finally { displays.forEach(display => display.dispose()); f.dispose(); }
 });
+
+Deno.test("image resources: a probe of an already sized entry notifies only its own size readers, never a feed-wide derivation", async () => {
+  const f = fixture();
+  const { createMemo } = await import("solid-js");
+  const ids = Array.from({ length: 2000 }, (_, i) => `entry-${i}`);
+  const known = new Set(ids.slice(1)); // every entry but one has authoritative listing dimensions
+  const m = makeImageMeasurements({ acquisition: f.acquisition, srcFor: id => `/bytes/${id}`,
+    knownSize: id => known.has(id) ? { w: 640, h: 360 } : null });
+  m.setContext({});
+  let wide = 0, own = 0, dispose;
+  try {
+    createRoot(cleanup => {
+      dispose = cleanup;
+      // sizeFor's shape: failure first, then the listing's dimensions, else the measurement.
+      createMemo(() => { wide++; return ids.filter(id => !m.loadFailed(id) && (known.has(id) || m.sizeOf(id))).length; });
+      createMemo(() => { own++; return m.sizeOf("entry-7"); });
+    });
+    f.acquisition.setWindow({ ids, currentId: ids[0], limit: 20 });
+    for (const id of ids.slice(0, 20)) m.request(id);
+    await flush();
+    const [wideBefore, ownBefore] = [wide, own];
+    // listing-sized entries' probes settle as capacity frees; entry-0 stays loading
+    for (let done = 1, guard = 0; done < 20 && guard < 50; guard++) {
+      const started = f.images.length;
+      for (const image of f.images.slice(done, started)) image.onload();
+      done = started; await flush();
+    }
+    assertEquals(f.images.length, 20);
+    assertEquals(wide, wideBefore, "a probe of an already sized entry changes nothing the feed derives");
+    assertEquals(own, ownBefore + 1, "that entry's own size readers are notified");
+    f.images[0].onload();                                    // the one unsized entry becomes ready
+    assertEquals(wide, wideBefore + 1, "a real readiness change recomputes once");
+    m.setContext({});                                        // a new context re-reads everything
+    assertEquals(wide, wideBefore + 2);
+  } finally { dispose?.(); m.dispose(); f.dispose(); }
+});

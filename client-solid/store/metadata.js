@@ -72,6 +72,13 @@ export function makeMetadata({ acquisition, owns, want, meta, nodes, status, ent
     projectionVersion = -1; foreground.clear();
   }
 
+  // A session's first accepted listing already carries every record up to its
+  // metadata version: the delta stream continues from there, never from a
+  // full snapshot that would re-send (and re-publish) the whole collection.
+  function resume(listed, owner) {
+    if (current(owner) && version === 0 && Number.isSafeInteger(listed) && listed > 0) version = listed;
+  }
+
   function observePending(value, owner) {
     if (!current(owner) || typeof value !== "number") return;
     pending = value; setPending(value);
@@ -294,6 +301,6 @@ export function makeMetadata({ acquisition, owns, want, meta, nodes, status, ent
     }, 2000);
   }
 
-  return { setContext, request, poll, accept, show,
+  return { setContext, resume, request, poll, accept, show,
     dispose() { setContext(null); retired = true; } };
 }
