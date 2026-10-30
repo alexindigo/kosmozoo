@@ -728,7 +728,17 @@ further directional rows use its background ceiling and low browser priority,
 retaining their native lifetime as they move into view. Both share its image
 and app-origin capacity, preserving the reserved metadata connection, and decode
 asynchronously. A source change does not retire them, their owner's
-unmount does. “Add files…” uses the browser's multi-file picker;
+unmount does. Picker names remain tooltip-only with exact accessible names. One
+thumbnail component presents pending, decoded and failed previews for both grids,
+including browser File and engine-path selections. Native broken-image glyphs are
+never shown. A failed preview says “Preview failed” with a separate “Retry preview
+for <name>” action; retry reacquires through the same display policy, without
+toggling selection or changing byte-comparison evidence. It introduces no retry
+timer. All client entry paths (including input listing/upload, thumbnails, Details,
+feed and HEAD requests) use the shared entry URL serializer. Raw names are encoded
+exactly once; Comfy listing annotations are removed only at ingress. The engine's
+Comfy view URL owner separately encodes its filename/subfolder query contract.
+“Add files…” uses the browser's multi-file picker;
 there is no browser-directory input or mutually exclusive image mode.
 The persistent folder path field and Add action recursively acquire engine-host
 images, including subfolders. The feature filesystem owner skips symlink traversal,

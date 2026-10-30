@@ -6,7 +6,7 @@ import { focusMemory } from "./draft.js";
 import { imageIdentity, uploadImage } from "./image-set.js";
 import { InputPicker } from "./InputPicker.js";
 import { FolderImages } from "./FolderImages.js";
-import { useImageDisplay } from "../../lib/img-measure.js";
+import { Thumbnail } from "./Thumbnail.js";
 import { SingleLineText } from "../../components/SingleLineText.js";
 
 export function ImageSetPanel(props) {
@@ -24,7 +24,7 @@ export function ImageSetPanel(props) {
         <div class="vz-image-grid">
           <For each={row().items.map(imageIdentity)}>{identity => {
             const item = () => row().images.find(item => imageIdentity(item) === identity);
-            return <ImageTile item={item} thumbnail={props.thumbnail} pathThumbnail={props.pathThumbnail} registerThumbnail={props.registerThumbnail} onRemove={() => props.onRemove(item())} />;
+            return <ImageTile item={item} thumbnail={props.thumbnail} pathThumbnail={props.pathThumbnail} registerThumbnail={props.registerThumbnail} rememberFocus={props.rememberFocus} onRemove={() => props.onRemove(item())} />;
           }}</For>
         </div>
         <SingleLineText class="vz-image-summary" value={`${row().items.length} images${row().images.some(item => item.sameCurrent) ? ` · ${row().images.filter(item => item.sameCurrent).length} same as current` : ""}`} />
@@ -53,11 +53,8 @@ function ImageTile(props) {
   });
   // Local File previews are object URLs; engine thumbnails are admitted
   // displays, registered only while the tile is near the viewport.
-  let preview;
-  const display = useImageDisplay(props.registerThumbnail, () => ({ id: file() || !url() ? null : url(), src: url() }),
-    () => preview, { lazy: true });
   return <figure class="vz-image-tile" data-image-name={props.item()?.name}>
-    <div class="vz-image-preview"><img ref={preview} src={display.read().src ?? undefined} alt="" onLoad={display.loaded} onError={display.loaded} /></div>
+    <div class="vz-image-preview"><Thumbnail src={url()} name={name()} local={!!file()} lazy register={props.registerThumbnail} rememberFocus={props.rememberFocus} /></div>
     <figcaption><SingleLineText class="vz-image-name" value={props.item()?.name} hint={props.item()?.path} />
       <IconButton chrome variant="neutral" icon={iconSvg("x", 12)} title={`Remove ${props.item()?.name}`} onAction={props.onRemove} />
     </figcaption>

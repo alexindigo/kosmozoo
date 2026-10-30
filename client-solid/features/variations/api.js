@@ -1,7 +1,7 @@
 // client-solid/features/variations/api.js — the feature's endpoint paths.
 // The transport itself is the shared one from /js/api.mjs.
 
-import { req, postRaw } from "/js/api.mjs";
+import { req, postRaw, collectionEntriesUrl, entryBytesUrl } from "/js/api.mjs";
 
 export const probe = (image) =>
   req("GET", `/api/features/variations/probe/${encodeURIComponent(image.id)}${image.origin ? `?origin=${encodeURIComponent(JSON.stringify(image.origin))}` : ""}`);
@@ -33,7 +33,7 @@ export const uploadPath = (collection, path, hash, origin) =>
   pathRequest(`upload-path/${encodeURIComponent(collection)}`, { path, hash }, origin);
 
 export const inputThumbnail = (collection, name, origin, kind = "input") =>
-  `/api/collections/${encodeURIComponent(collection)}/entries/${encodeURIComponent(name)}/bytes?kind=${kind}&origin=${encodeURIComponent(JSON.stringify(origin))}`;
+  entryBytesUrl(collection, name, { kind, origin });
 
 export const inspectImage = async (collection, file, current, kind, origin, names = []) => {
   const form = new FormData(); form.append("image", file, file.name); form.append("current", current); form.append("kind", kind);
@@ -45,12 +45,12 @@ export const inspectImage = async (collection, file, current, kind, origin, name
 };
 
 export const inputList = (collection, origin) =>
-  fetch(`/api/collections/${encodeURIComponent(collection)}/entries?kind=input`, { headers: { "X-Kosmozoo-Origin": JSON.stringify(origin) } })
+  fetch(`${collectionEntriesUrl(collection)}?kind=input`, { headers: { "X-Kosmozoo-Origin": JSON.stringify(origin) } })
     .then(async response => { if (!response.ok) throw new Error(`Input catalogue: ${response.status}`); return response.json(); });
 
 // multipart upload — a 409 carries the conflicting name (never an overwrite)
 export const uploadInput = (collection, form, origin) =>
-  fetch(`/api/collections/${encodeURIComponent(collection)}/entries`, { method: "POST", body: form, headers: { "X-Kosmozoo-Origin": JSON.stringify(origin) } })
+  fetch(collectionEntriesUrl(collection), { method: "POST", body: form, headers: { "X-Kosmozoo-Origin": JSON.stringify(origin) } })
     .then(async (r) => {
       if (r.ok) return r.json();
       if (r.status === 412) {

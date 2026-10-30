@@ -1144,6 +1144,24 @@ body:has(#diff:not([hidden])) #statusCol { bottom: 56px; }
 .vz-input-option .vz-image-same, .vz-input-selected { grid-area: 1 / 1; margin: 4px; padding: 1px 4px; border-radius: 3px; background: var(--backdrop); }
 .vz-input-option .vz-image-same { align-self: end; justify-self: start; }
 .vz-input-selected { align-self: start; justify-self: end; color: var(--secondary); font-weight: 600; }
+/* The picture/selection share one cell; Retry is a separate sibling action.
+   Fixed allocation is also the virtualizer's tile/row geometry contract. */
+.vz-thumbnail { display: grid; min-width: 0; min-height: 0; width: 100%; height: 100%; }
+.vz-thumbnail-surface { display: grid; min-width: 0; min-height: 0; grid-area: 1 / 1; }
+.vz-thumbnail img { grid-area: 1 / 1; width: 100%; height: 100%; min-height: 0; object-fit: contain; }
+.vz-input-tile { width: var(--vz-input-tile-size); height: var(--vz-input-tile-size); }
+.vz-input-tile .vz-input-option { grid-area: 1 / 1; }
+.vz-thumbnail-pending { grid-area: 1 / 1; align-self: center; justify-self: center;
+  padding: 4px; text-align: center; font: 11px/14px system-ui; color: var(--foreground-mid); }
+.vz-thumbnail-failure { grid-area: 1 / 1; z-index: 1; min-height: 0; display: flex; flex-direction: column;
+  align-items: center; padding: 6px; pointer-events: none; }
+.vz-thumbnail-failure[hidden] { display: none; }
+.vz-thumbnail-failed { flex: 1; display: grid; place-items: center; text-align: center; font: 11px/14px system-ui; color: var(--error); }
+.vz-thumbnail-retry { pointer-events: auto;
+  padding: 3px 8px; font: 11px/14px system-ui; border: 1px solid var(--border-strong);
+  border-radius: 4px; background: var(--lifted); color: var(--foreground); cursor: pointer; }
+.vz-thumbnail-retry:hover { border-color: var(--foreground-dim); }
+.vz-thumbnail-retry:focus-visible { outline: 2px solid var(--secondary); outline-offset: 2px; }
 @media (max-width: 380px) { .vz-input-popover { --vz-input-columns: 2; } }
 @media (max-width: 270px) { .vz-input-popover { --vz-input-columns: 1; } }
 @media (max-width: 620px) {

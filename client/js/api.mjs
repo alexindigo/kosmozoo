@@ -1,6 +1,8 @@
 // client/js/api.mjs — engine API client. The SPA is one client of the
 // engine's public API (docs/spec.md ).
 import { subscribeSources } from "./source-events.mjs";
+import { collectionEntriesUrl, entryUrl, entryBytesUrl } from "./entry-url.mjs";
+export { collectionEntriesUrl, entryUrl, entryBytesUrl } from "./entry-url.mjs";
 export { compareSourceVersions, validSourceVersion, validSourceCursor, validateSourceSnapshot } from "./source-events.mjs";
 
 const BASE = ""; // same origin
@@ -49,7 +51,6 @@ export async function postRaw(path, body) {
 }
 
 const enc = encodeURIComponent;
-const entryUrl = (c, name) => `/api/collections/${enc(c)}/entries/${enc(name)}`;
 
 export const api = {
   subscribeSources,
@@ -58,10 +59,10 @@ export const api = {
   addCollection: (name, address) => req("POST", "/api/collections", { name, address }),
   removeCollection: (name) => req("DELETE", `/api/collections/${enc(name)}`),
   patchCollection: (name, attributes) => req("PATCH", `/api/collections/${enc(name)}`, attributes),
-  entries: (collection) => req("GET", `/api/collections/${enc(collection)}/entries`),
-  inventory: (collection) => req("GET", `/api/collections/${enc(collection)}/entries?inventory=1`),
-  entryBytesUrl: (collection, name) => `${BASE}${entryUrl(collection, name)}/bytes`,
-  inputBytesUrl: (collection, name) => `${BASE}${entryUrl(collection, name)}/bytes?kind=input`,
+  entries: (collection) => req("GET", collectionEntriesUrl(collection)),
+  inventory: (collection) => req("GET", `${collectionEntriesUrl(collection)}?inventory=1`),
+  entryBytesUrl,
+  inputBytesUrl: (collection, name) => entryBytesUrl(collection, name, { kind: "input" }),
   setJudgment: (collection, name, fields) => req("PATCH", `${entryUrl(collection, name)}/judgment`, fields),
   deleteEntry: (collection, name) => req("DELETE", entryUrl(collection, name)),
   settings: (ns) => req("GET", `/api/settings/${enc(ns)}`),
@@ -75,7 +76,7 @@ export const api = {
   entryMeta: (collection, name, options) => req("GET", `${entryUrl(collection, name)}/meta`, undefined, options),
   // byte size isn't in every listing — a HEAD on the bytes route fills it;
   // resolves null when the entry is unknown
-  entrySizeProbe: (collection, name, { priority } = {}) => fetch(`${BASE}${entryUrl(collection, name)}/bytes`, {
+  entrySizeProbe: (collection, name, { priority } = {}) => fetch(entryBytesUrl(collection, name), {
     method: "HEAD", priority: priority === "background" ? "low" : "auto",
   })
     .then((r) => (r.ok ? Number(r.headers.get("content-length")) || null : null))

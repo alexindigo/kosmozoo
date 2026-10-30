@@ -2,7 +2,7 @@ import { createSignal, createMemo, createEffect, createUniqueId, onMount, onClea
 import { createVirtualizer, defaultRangeExtractor } from "@tanstack/solid-virtual";
 import { useClickOutside } from "../../lib/click-outside.js";
 import { focusMemory } from "./draft.js";
-import { useImageDisplay } from "../../lib/img-measure.js";
+import { Thumbnail } from "./Thumbnail.js";
 import { SingleLineText } from "../../components/SingleLineText.js";
 import { popoverPlacement } from "../../lib/popover-placement.js";
 
@@ -139,6 +139,7 @@ function InputOptions(props) {
     search.focus({ preventScroll: true });
   });
   const move = event => {
+    if (event.target.closest?.(".vz-thumbnail-retry")) return;
     if (!["ArrowLeft", "ArrowRight", "ArrowDown", "ArrowUp", "Enter"].includes(event.key)) return;
     event.preventDefault();
     if (event.key === "Enter") { const name = filtered()[active()]; if (name) props.onToggle(name); }
@@ -178,16 +179,19 @@ function InputOptions(props) {
             <For each={rows()[virtual.index]}>{(name, offset) => {
               const index = () => virtual.index * columns() + offset();
               const memory = focusMemory(props.rememberFocus);
-              return <button type="button" role="option" tabindex="-1" id={`${props.id}-option-${index()}`}
+              // Admission class belongs to this keyed native lifetime, even
+              // when a preloaded background tile scrolls into view.
+              const priority = virtual.index < virtualizer.range.startIndex - OVERSCAN_ROWS || virtual.index > virtualizer.range.endIndex + OVERSCAN_ROWS ? "background" : "foreground";
+              return <Thumbnail class="vz-input-tile" name={name} src={props.thumbnail(name)} register={props.registerThumbnail}
+                priority={priority} rememberFocus={props.rememberFocus} surface={picture => <button type="button" role="option" tabindex="-1" id={`${props.id}-option-${index()}`}
                 aria-label={name} title={name} aria-selected={props.selected(name)} data-input-name={name}
                 class={"vz-input-option" + (active() === index() ? " vz-input-active" : "")}
                 {...memory} onFocus={event => { setActive(index()); memory.onFocus(event); }}
                 onClick={() => { setActive(index()); props.onToggle(name); search.focus(); }}>
-                <InputThumbnail name={name} thumbnail={props.thumbnail} registerThumbnail={props.registerThumbnail}
-                  background={virtual.index < virtualizer.range.startIndex - OVERSCAN_ROWS || virtual.index > virtualizer.range.endIndex + OVERSCAN_ROWS} />
+                {picture}
                 <Show when={name === props.current}><SingleLineText class="vz-image-same" aria-hidden="true" value="Current" /></Show>
                 <Show when={props.selected(name)}><SingleLineText class="vz-input-selected" aria-hidden="true" value="✓" /></Show>
-              </button>;
+              </button>} />;
             }}</For>
           </div>
         }</For>
@@ -195,15 +199,4 @@ function InputOptions(props) {
       <Show when={!filtered().length}><p class="vz-image-empty">No matching inputs.</p></Show>
     </div>
   </div>;
-}
-
-function InputThumbnail(props) {
-  let thumb;
-  // Admission class belongs to this native lifetime. A background image
-  // finishes there even as scrolling brings its tile into view.
-  const priority = props.background ? "background" : "foreground";
-  const display = useImageDisplay(props.registerThumbnail, () => ({ id: props.thumbnail(props.name), src: props.thumbnail(props.name),
-    priority }), () => thumb);
-  return <img ref={thumb} src={display.read().src ?? undefined} alt="" decoding="async"
-    fetchpriority={display.read().priority === "background" ? "low" : "auto"} onLoad={display.loaded} onError={display.loaded} />;
 }
