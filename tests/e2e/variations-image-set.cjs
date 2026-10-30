@@ -30,11 +30,11 @@ module.exports = async ({ cdp, FAKE, KZ, check }) => {
     await cdp.clickAt('[data-param-key="9.denoise"] .vz-cb');
     await cdp.clickAt('.vz-input-trigger');
     await cdp.poll("document.querySelectorAll('.vz-input-option').length>0");
-    assert(await cdp.evaluate("document.querySelectorAll('.vz-input-row').length<=3&&document.querySelectorAll('.vz-input-option').length<=9"));
-    assert(await cdp.evaluate("performance.getEntriesByType('resource').filter(r=>r.name.includes('picker-')&&r.name.includes('/bytes')).length<=9"));
+    assert(await cdp.evaluate("document.querySelectorAll('.vz-input-row').length<=9&&document.querySelectorAll('.vz-input-option').length<=27"));
+    assert(await cdp.evaluate("performance.getEntriesByType('resource').filter(r=>r.name.includes('picker-')&&r.name.includes('/bytes')).length<=36"));
     await cdp.evaluate("document.querySelector('.vz-input-list').scrollTop=1e6");
     await cdp.poll("!!document.querySelector('[data-input-name=\"picker-0552.png\"]')");
-    assert(await cdp.evaluate("document.querySelectorAll('.vz-input-option').length<=12"));
+    assert(await cdp.evaluate("document.querySelectorAll('.vz-input-option').length<=36"));
     await cdp.send('Input.insertText', { text: 'PICKER-05' });
     await cdp.poll("!!document.querySelector('[data-input-name=\"picker-0500.png\"]')");
     const activeName = () => cdp.evaluate("document.getElementById(document.querySelector('.vz-input-search').getAttribute('aria-activedescendant')).dataset.inputName");
@@ -46,7 +46,7 @@ module.exports = async ({ cdp, FAKE, KZ, check }) => {
     for (let row = 0; row < 12; row++) await cdp.keyTrusted('ArrowDown', { vk: 40 });
     await cdp.poll("document.activeElement.dataset.inputName==='picker-0536.png'");
     assert.equal(await activeName(), 'picker-0536.png');
-    assert(await cdp.evaluate("document.activeElement.dataset.inputName==='picker-0536.png'&&document.querySelectorAll('.vz-input-option').length<=12"));
+    assert(await cdp.evaluate("document.activeElement.dataset.inputName==='picker-0536.png'&&document.querySelectorAll('.vz-input-option').length<=36"));
     for (let row = 0; row < 12; row++) await cdp.keyTrusted('ArrowUp', { vk: 38 });
     await cdp.poll("document.activeElement.dataset.inputName==='picker-0500.png'");
     assert.equal(await activeName(), 'picker-0500.png');

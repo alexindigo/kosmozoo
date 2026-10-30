@@ -1,10 +1,10 @@
 import { createSignal, createMemo, createEffect, createUniqueId, onMount, onCleanup, For, Show } from "solid-js";
-import { createVirtualizer } from "@tanstack/solid-virtual";
+import { createVirtualizer, defaultRangeExtractor } from "@tanstack/solid-virtual";
 import { useClickOutside } from "../../lib/click-outside.js";
 import { focusMemory } from "./draft.js";
 import { useImageDisplay } from "../../lib/img-measure.js";
 
-const TILE_SIZE = 96, GAP = 6, ROW_HEIGHT = TILE_SIZE + GAP;
+const TILE_SIZE = 96, GAP = 6, ROW_HEIGHT = TILE_SIZE + GAP, OVERSCAN_ROWS = 3;
 
 // Presentation only: catalogue, selection, thumbnail addresses, thumbnail
 // display registration and popup scope registration are injected. The child owns focus, search and virtual geometry.
@@ -38,13 +38,27 @@ function InputOptions(props) {
   let panel, search, scrollElement;
   const [scroll, setScroll] = createSignal(null), [active, setActive] = createSignal(0), [columns, setColumns] = createSignal(3);
   const [pendingFocus, setPendingFocus] = createSignal(null);
+  const [direction, setDirection] = createSignal(1), [aheadRows, setAheadRows] = createSignal(0);
+  let lastOffset = 0;
   const files = createMemo(() => props.files);
   const filtered = createMemo(() => files().filter(name => name.toLowerCase().includes(props.query().toLowerCase())));
   const rows = createMemo(() => Array.from({ length: Math.ceil(filtered().length / columns()) }, (_, row) =>
     filtered().slice(row * columns(), (row + 1) * columns())));
   const virtualizer = createVirtualizer({ get count() { return rows().length; }, getScrollElement: scroll,
-    get getItemKey() { const groups = rows(); return index => groups[index][0]; }, estimateSize: () => ROW_HEIGHT, overscan: 0 });
-  createEffect(() => { filtered(); setPendingFocus(null); setActive(0); virtualizer.scrollToOffset(0); });
+    get getItemKey() { const groups = rows(); return index => groups[index][0]; }, estimateSize: () => ROW_HEIGHT, overscan: OVERSCAN_ROWS,
+    // Keep preload and display on the SAME keyed native element: moving into
+    // the mounted-ahead band must not abort/re-fetch a background image.
+    get rangeExtractor() {
+      const ahead = aheadRows(), forward = direction() > 0;
+      return range => {
+        const mounted = defaultRangeExtractor(range);
+        const start = forward ? mounted[mounted.length - 1] + 1 : Math.max(0, mounted[0] - ahead);
+        const end = forward ? Math.min(range.count, start + ahead) : mounted[0];
+        const extra = Array.from({ length: end - start }, (_, i) => start + i);
+        return forward ? [...mounted, ...extra] : [...extra, ...mounted];
+      };
+    } });
+  createEffect(() => { filtered(); setPendingFocus(null); setActive(0); lastOffset = 0; setDirection(1); virtualizer.scrollToOffset(0); });
   createEffect(() => {
     const index = pendingFocus();
     if (index == null || !virtualizer.getVirtualItems().some(row => row.index === Math.floor(index / columns()))) return;
@@ -59,10 +73,13 @@ function InputOptions(props) {
   // attach its native resize/scroll observers to the real document.
   onMount(() => {
     panel.showPopover();
-    const measureColumns = () => setColumns(Number(getComputedStyle(panel).getPropertyValue("--vz-input-columns")));
-    measureColumns();
-    const observer = new ResizeObserver(measureColumns);
-    observer.observe(panel); onCleanup(() => observer.disconnect());
+    const measure = () => {
+      setColumns(Number(getComputedStyle(panel).getPropertyValue("--vz-input-columns")));
+      setAheadRows(Math.ceil(scrollElement.clientHeight / ROW_HEIGHT));
+    };
+    measure();
+    const observer = new ResizeObserver(measure);
+    observer.observe(panel); observer.observe(scrollElement); onCleanup(() => observer.disconnect());
     setScroll(scrollElement);
     onCleanup(props.registerSurface({
       suspend() { if (panel.matches(":popover-open")) panel.hidePopover(); setScroll(null); },
@@ -91,22 +108,25 @@ function InputOptions(props) {
       aria-activedescendant={filtered().length ? `${props.id}-option-${active()}` : undefined}
       class="vz-input-search" placeholder="Search inputs…" aria-label="Search ComfyUI inputs"
       {...focusMemory(props.rememberFocus)} value={props.query()} onInput={e => props.onQuery(e.currentTarget.value)} />
-    <div class="vz-input-list" id={`${props.id}-list`} ref={scrollElement} role="listbox" aria-label="ComfyUI inputs" aria-multiselectable="true">
+    <div class="vz-input-list" id={`${props.id}-list`} ref={scrollElement} role="listbox" aria-label="ComfyUI inputs" aria-multiselectable="true"
+      onScroll={event => {
+        const offset = event.currentTarget.scrollTop;
+        if (offset !== lastOffset) setDirection(offset > lastOffset ? 1 : -1);
+        lastOffset = offset;
+      }}>
       <div class="vz-input-window" style={{ height: `${Math.max(0, virtualizer.getTotalSize() - GAP)}px` }}>
         <For each={virtualizer.getVirtualItems()}>{virtual =>
           <div class="vz-input-row" role="presentation" style={{ transform: `translateY(${virtual.start}px)` }}>
             <For each={rows()[virtual.index]}>{(name, offset) => {
               const index = () => virtual.index * columns() + offset();
               const memory = focusMemory(props.rememberFocus);
-              let thumb;
-              const display = useImageDisplay(props.registerThumbnail, () => ({ id: props.thumbnail(name), src: props.thumbnail(name) }),
-                () => thumb, { lazy: true });
               return <button type="button" role="option" tabindex="-1" id={`${props.id}-option-${index()}`}
                 aria-label={name} title={name} aria-selected={props.selected(name)} data-input-name={name}
                 class={"vz-input-option" + (active() === index() ? " vz-input-active" : "")}
                 {...memory} onFocus={event => { setActive(index()); memory.onFocus(event); }}
                 onClick={() => { setActive(index()); props.onToggle(name); search.focus(); }}>
-                <img ref={thumb} src={display.read().src ?? undefined} alt="" onLoad={display.loaded} onError={display.loaded} />
+                <InputThumbnail name={name} thumbnail={props.thumbnail} registerThumbnail={props.registerThumbnail}
+                  background={virtual.index < virtualizer.range.startIndex - OVERSCAN_ROWS || virtual.index > virtualizer.range.endIndex + OVERSCAN_ROWS} />
                 <Show when={name === props.current}><span class="vz-image-same" aria-hidden="true">Current</span></Show>
                 <Show when={props.selected(name)}><span class="vz-input-selected" aria-hidden="true">✓</span></Show>
               </button>;
@@ -117,4 +137,15 @@ function InputOptions(props) {
       <Show when={!filtered().length}><p class="vz-image-empty">No matching inputs.</p></Show>
     </div>
   </div>;
+}
+
+function InputThumbnail(props) {
+  let thumb;
+  // Admission class belongs to this native lifetime. A background image
+  // finishes there even as scrolling brings its tile into view.
+  const priority = props.background ? "background" : "foreground";
+  const display = useImageDisplay(props.registerThumbnail, () => ({ id: props.thumbnail(props.name), src: props.thumbnail(props.name),
+    priority }), () => thumb);
+  return <img ref={thumb} src={display.read().src ?? undefined} alt="" decoding="async"
+    fetchpriority={display.read().priority === "background" ? "low" : "auto"} onLoad={display.loaded} onError={display.loaded} />;
 }

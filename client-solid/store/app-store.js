@@ -1495,12 +1495,13 @@ export function makeAppStore({ subscribeSources = typeof window !== "undefined" 
   // store array proxies can't support flatMap/map chains on function-valued
   // items (the Symbol(solid-proxy) defineProperty trap)
   const registeredFeatures = [];
-  // A modal surface's image (e.g. a Load Image input thumbnail) is user-visible
-  // foreground work outside any source entry: it shares the same policy and
-  // capacity, and only its owner's disposal retires it. Features receive this
+  // A modal surface's image (e.g. a Load Image input thumbnail) defaults to
+  // foreground work outside any source entry; ahead-of-viewport demand can
+  // declare background intent. Both share the same policy/capacity, and only
+  // their owner's disposal retires them. Features receive this
   // port at installation; they never reach into the Store's actions.
   function surfaceDisplay(input) {
-    return sizes_.display({ ...input, foregroundId: null, priority: "foreground", scoped: false });
+    return sizes_.display({ ...input, foregroundId: null, priority: input.priority === "background" ? "background" : "foreground", scoped: false });
   }
   const actions = {
     features: {

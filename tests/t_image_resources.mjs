@@ -208,6 +208,10 @@ Deno.test("display seam: re-binding a settled element to the same URL holds no c
 Deno.test("surface displays: features receive the Store's one display port at installation", async () => {
   const { makeAppStore } = await import("../client-solid/store/app-store.js");
   const location = globalThis.location, history = globalThis.history;
+  const requestIdle = globalThis.requestIdleCallback, cancelIdle = globalThis.cancelIdleCallback;
+  const idle = new Map(); let sequence = 0;
+  globalThis.requestIdleCallback = callback => { const id = ++sequence; idle.set(id, callback); return id; };
+  globalThis.cancelIdleCallback = id => idle.delete(id);
   globalThis.location = { pathname: "/", search: "", hash: "" };
   globalThis.history = { state: null, replaceState() {}, pushState() {} };
   const store = makeAppStore({ subscribeSources: null });
@@ -217,11 +221,22 @@ Deno.test("surface displays: features receive the Store's one display port at in
     assertEquals(typeof port, "function");
     const lease = port({ id: "/thumb.png", src: "/thumb.png" });
     assertEquals(lease.read(), { src: "/thumb.png", priority: "foreground" }, "admitted as user-visible foreground work");
-    lease.loaded(); lease.dispose();
+    const preloads = [0, 1, 2].map(i => port({ id: `/ahead-${i}`, src: `/ahead-${i}`, priority: "background" }));
+    assert(preloads.every(item => item.read().src === null), "surface preloads wait behind foreground demand");
+    lease.loaded(); await flush();
+    const [id, callback] = idle.entries().next().value;
+    idle.delete(id); callback({ timeRemaining: () => 8 });
+    assertEquals(preloads.map(item => item.read().src), ["/ahead-0?priority=background", "/ahead-1?priority=background", null],
+      "the feature port preserves background intent and the two-slot ceiling");
+    preloads.forEach(item => item.dispose()); lease.dispose();
+    for (const [id, callback] of idle) { idle.delete(id); callback({ timeRemaining: () => 8 }); }
+    assert(preloads.every(item => item.read().src === null), "retired owners cannot start in a pending idle turn");
   } finally {
     store.dispose();
     if (location === undefined) delete globalThis.location; else globalThis.location = location;
     if (history === undefined) delete globalThis.history; else globalThis.history = history;
+    if (requestIdle === undefined) delete globalThis.requestIdleCallback; else globalThis.requestIdleCallback = requestIdle;
+    if (cancelIdle === undefined) delete globalThis.cancelIdleCallback; else globalThis.cancelIdleCallback = cancelIdle;
   }
 });
 

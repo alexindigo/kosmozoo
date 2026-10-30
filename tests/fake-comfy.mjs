@@ -331,6 +331,7 @@ export const server = Deno.serve({ port }, async (req) => {
 
   const channel = p === "/api/queue" ? "queue" : p.startsWith("/api/history") ? "history"
     : p === "/internal/logs/raw" ? "logs"
+    : p === "/api/view" && url.searchParams.get("type") === "input" ? "inputBytes"
     : p === "/internal/files/output" || p === "/api/assets_plus/output/list" ? "listing" : null;
   if (channel && req.method === "GET") {
     if (channel in telemetryRequests) telemetryRequests[channel]++;

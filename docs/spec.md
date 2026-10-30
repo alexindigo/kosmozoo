@@ -702,10 +702,15 @@ identity deduplication uses input name, exact File identity or absolute engine p
 deduplication of Files. Removal changes that same set. The chosen thumbnail grid
 is above persistent acquisition controls, even when the axis is off. “ComfyUI
 inputs” opens a searchable, virtualized, multi-select list; arrows/Enter select
-and Escape closes its owned popup before the modal. Only visible input rows load
-engine input-byte thumbnails. Engine thumbnails in the list and the chosen grid
-register near the viewport as foreground displays of the Store's one acquisition
-policy, sharing its capacity; a source change does not retire them, their owner's
+and Escape closes its owned popup before the modal. The input grid mounts three
+extra rows on each side to acquire thumbnails before visibility, and declares one
+further viewport in the scroll direction as background image demand. Search, close
+and range changes retire obsolete demand. Visible/three-row-ahead thumbnails and
+the chosen grid register foreground displays of the Store's one acquisition policy;
+further directional rows use its background ceiling and low browser priority,
+retaining their native lifetime as they move into view. Both share its image
+and app-origin capacity, preserving the reserved metadata connection, and decode
+asynchronously. A source change does not retire them, their owner's
 unmount does. “Add files…” uses the browser's multi-file picker;
 there is no browser-directory input or mutually exclusive image mode.
 The persistent folder path field and Add action recursively acquire engine-host
