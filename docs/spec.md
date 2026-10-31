@@ -811,6 +811,17 @@ decision hides its top-layer surface without replacing search DOM or losing
 query/caret. Both Keep editing and Escape restore it before focus restoration.
 The blocking decision consumes its pointer clicks, which cannot dismiss an
 underlying popup as outside-click side effects.
+The shared outside-click owner considers both the originating pointer press and
+the final click target. A press inside a surface cannot dismiss it merely because
+placement moved it before release. A subsequent genuine outside click still
+closes it; cancelled/foreign pointers and keyboard clicks cannot inherit an old
+inside press. All owned document listeners retire with the component.
+The chosen-image grid's gesture lifetime follows ordered image identities, not
+readonly thumbnail/comparison records. Comparison settlement during a held drag
+preserves the gesture; membership/order changes, cancellation and editor suspension
+still retire it. Popup focus/caret restoration is observed only after the surface's
+placement-ready class is committed and it is no longer inert, not merely after
+the native popover opens.
 Thumbnail GET/HEAD URLs may carry `origin=<JSON>` so native image elements retain
 the captured source boundary too. Header/query origin validation has one owner;
 conflicting origins reject, and stale byte requests reject before cache/backing IO.

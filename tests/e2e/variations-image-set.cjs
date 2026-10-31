@@ -1,7 +1,7 @@
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const { workPath } = require('./paths.cjs');
-const { pickInput, waitForSelectedPreviews, openImageAdd, openImageFolder } = require('./image-picker-helpers.cjs');
+const { pickInput, waitForSelectedPreviews, openImageAdd, openImageFolder, waitForInputPicker } = require('./image-picker-helpers.cjs');
 const { discardRecipe } = require('./recipe-helpers.cjs');
 
 module.exports = async ({ cdp, FAKE, KZ, check }) => {
@@ -34,6 +34,7 @@ module.exports = async ({ cdp, FAKE, KZ, check }) => {
     await cdp.clickAt('[data-param-key="9.denoise"] .checkbox');
     await openImageAdd(cdp);
     await cdp.clickAt('.vz-input-trigger');
+    await waitForInputPicker(cdp);
     await cdp.poll("document.querySelectorAll('.vz-input-option').length>0");
     assert(await cdp.evaluate("document.querySelectorAll('.vz-input-row').length<=9&&document.querySelectorAll('.vz-input-option').length<=27"));
     assert(await cdp.evaluate("performance.getEntriesByType('resource').filter(r=>r.name.includes('picker-')&&r.name.includes('/bytes')).length<=36"));
@@ -72,6 +73,9 @@ module.exports = async ({ cdp, FAKE, KZ, check }) => {
       assert(await cdp.evaluate("document.querySelector('.vz-input-search')===window.__pickerSearch&&window.__pickerSearch.value==='PICKER-055'"));
       if (cancel === 'button') await cdp.clickAt('.vz-keep'); else await cdp.keyTrusted('Escape', { vk: 27 });
       await cdp.poll("!document.querySelector('.vz-discard')&&!!document.querySelector('.vz-input-popover:popover-open')");
+      // Opening a native popover precedes the placement frame. D2 deliberately
+      // defers caret restoration while it is inert; observe its committed ready point.
+      await waitForInputPicker(cdp);
       assert(await cdp.evaluate("document.querySelector('.vz-input-search')===window.__pickerSearch&&document.activeElement===window.__pickerSearch&&window.__pickerSearch.selectionStart===1&&window.__pickerSearch.selectionEnd===4"));
     }
     await cdp.evaluate("window.__pickerSearch.setSelectionRange(window.__pickerSearch.value.length,window.__pickerSearch.value.length)");

@@ -54,7 +54,12 @@ function ImageGrid(props) {
   let grid, drag = null, frame = null;
   const refs = new Map(), animations = new Map();
   const [preview, setPreview] = createSignal(null), [lifted, setLifted] = createSignal(null);
-  const order = () => preview() ?? props.images.map(imageIdentity);
+  // Readonly thumbnail/comparison updates replace view records, not the user's
+  // ordered set. Only a real membership/order change can retire its held gesture.
+  const identities = createMemo(() => props.images.map(imageIdentity), [], {
+    equals: (before, after) => before.length === after.length && before.every((key, index) => key === after[index]),
+  });
+  const order = () => preview() ?? identities();
   const reduced = () => matchMedia('(prefers-reduced-motion: reduce)').matches;
   const stopAnimations = () => { for (const animation of animations.values()) animation.cancel(); animations.clear(); };
   const reorder = keys => {
@@ -108,7 +113,7 @@ function ImageGrid(props) {
   };
   onCleanup(() => finish(false));
   onCleanup(props.registerEditor({ suspend() { finish(false); }, resume() {} }));
-  createEffect(() => { props.images; if (drag) finish(false); });
+  createEffect(() => { identities(); if (drag) finish(false); });
   return <div class="vz-image-grid" ref={grid}
     onPointerMove={event => { if (!drag || drag.pointer !== event.pointerId) return; drag.x = event.clientX; drag.y = event.clientY;
       if (!drag.active && Math.hypot(drag.x - drag.startX, drag.y - drag.startY) > 5) { drag.active = true; setLifted(drag.key); } }}
