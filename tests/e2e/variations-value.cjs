@@ -23,7 +23,7 @@ module.exports = async ({ cdp, check, KZ, FAKE }) => {
     await open(); await discardRecipe(cdp);
     await cdp.poll(`!!document.querySelector('${row} .vz-range-fields')`);
     const layout = await cdp.evaluate(`(()=>{const r=document.querySelector('${row}'),rect=s=>r.querySelector(s).getBoundingClientRect(),cy=s=>{const x=rect(s);return x.y+x.height/2};
-      const controls=r.querySelector('.vz-numeric-controls'),parts=[...controls.querySelectorAll('.vz-numeric-mode,.vz-range-field')].map(el=>el.getBoundingClientRect());
+      const controls=r.querySelector('.vz-numeric-controls'),parts=[...controls.querySelectorAll('.mode-switch,.vz-range-field')].map(el=>el.getBoundingClientRect());
       return {center:[cy('.vz-rail'),cy('.noUi-handle'),cy('.noUi-connect'),cy('.vz-marker')],
         line:parts.map(p=>p.y+p.height/2), track:rect('.vz-rangewrap').bottom,controls:rect('.vz-numeric-controls').top,
         right:rect('.vz-range-fields').right,step:rect('.vz-range-field:last-child').right,
@@ -37,7 +37,7 @@ module.exports = async ({ cdp, check, KZ, FAKE }) => {
     check('numeric modes: full-width track shares rail/band/thumb/current centerline, orange label only; one controls line and right-aligned Step', true, JSON.stringify(layout));
     await field(`${row} .vz-range-field:first-child input`, '0.7');
     await field(`${row} .vz-row-inc-input`, '0.1');
-    await cdp.clickAt(`${row} .vz-numeric-mode button[title="Value"]`);
+    await cdp.clickAt(`${row} .mode-switch button[title="Value"]`);
     assert.equal(await cdp.evaluate(`document.querySelectorAll('${row} [role="slider"]').length`),1);
     assert.equal(await cdp.evaluate("document.querySelector('.vz-count').textContent"),'0');
     await field(`${row} .vz-value-field input`, '0.9');
@@ -57,10 +57,10 @@ module.exports = async ({ cdp, check, KZ, FAKE }) => {
     await field(`${row} .vz-value-field input`, '0.9');
     await cdp.clickAt(`${row} .checkbox`); await cdp.clickAt(`${row} .checkbox`);
     assert.equal(await cdp.evaluate(`document.querySelector('${row} .vz-value-field input').value`),'0.9');
-    await cdp.clickAt(`${row} .vz-numeric-mode button[title="Range"]`);
+    await cdp.clickAt(`${row} .mode-switch button[title="Range"]`);
     assert.equal(await cdp.evaluate(`document.querySelector('${row} .vz-range-field:first-child input').value`),'0.7');
     assert.equal(await cdp.evaluate(`document.querySelector('${row} .vz-row-inc-input').value`),'0.1');
-    await cdp.clickAt(`${row} .vz-numeric-mode button[title="Value"]`);
+    await cdp.clickAt(`${row} .mode-switch button[title="Value"]`);
     check('numeric modes: collapse and mode changes preserve independent Value and Range settings', true);
     // Run establishes an accepted checkpoint, so close/reopen reloads the retained
     // recipe without a discard. Observe the terminal graph, not just a payload.
@@ -99,7 +99,7 @@ module.exports = async ({ cdp, check, KZ, FAKE }) => {
       {name:'value-batch-second.png',fixture:'flux-controlnet.png',graph:second}]})});
     await cdp.evaluate(`(async()=>{for(const name of ['value-batch-first.png','value-batch-second.png'])await fetch('/api/collections/fake/entries/'+name+'/bytes');await ${KZ}.handles.invoke('variations.open',{ids:['fake:value-batch-first.png','fake:value-batch-second.png'],bulk:true})})()`);
     await cdp.poll(`!!document.querySelector('${row} .vz-numeric-editor')`);
-    await cdp.clickAt(`${row} .vz-numeric-mode button[title="Value"]`);
+    await cdp.clickAt(`${row} .mode-switch button[title="Value"]`);
     await field(`${row} .vz-value-field input`,'0.9');
     await cdp.poll("document.querySelector('.vz-count').textContent==='2'");
     const batchStart = (await (await fetch(FAKE+'/__test/enqueues')).json()).length;

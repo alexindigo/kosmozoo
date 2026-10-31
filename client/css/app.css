@@ -1137,7 +1137,6 @@ body:has(#diff:not([hidden])) #statusCol { bottom: 56px; }
 .vz-numeric-editor { display: grid; gap: 8px; margin: 12px 0 0 24px; }
 .vz-editor-current { color: var(--attention); font-variant-numeric: tabular-nums; }
 .vz-numeric-controls { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; min-width: 0; }
-.vz-numeric-mode { flex: 0 0 auto; }
 .vz-range-fields { display: flex; align-items: center; flex: 1; flex-wrap: wrap; gap: 8px; min-width: 0; }
 .vz-range-field { display: flex; align-items: center; gap: 4px; color: var(--foreground-mid); font: 12px/16px system-ui; }
 .vz-range-field > input, .vz-range-field .vz-row-inc-input { width: 58px; min-width: 0; box-sizing: border-box;
@@ -1224,6 +1223,7 @@ body:has(#diff:not([hidden])) #statusCol { bottom: 56px; }
   padding: 0; line-height: 1; }
 .icon-button > svg { display: block; width: var(--control-icon-size); height: var(--control-icon-size); }
 /* The exclusive-mode component owns text allocation; IconButton stays square. */
+.mode-switch { flex: 0 0 auto; }
 .mode-switch > .mode-label { width: auto; padding-inline: 8px; font: 12px/18px system-ui; white-space: nowrap; }
 .chrome-icon { background: var(--lifted); color: var(--foreground-mid); border: 1px solid var(--border-strong);
   border-radius: 4px; cursor: pointer; }

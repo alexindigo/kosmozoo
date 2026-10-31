@@ -148,7 +148,7 @@ function NumericEditor(props) {
           </div>
         </div>
         <div class="vz-numeric-controls">
-          <ModeSwitch class="vz-numeric-mode" label={`${parameterName(props.row())} mode`} value={props.mode}
+          <ModeSwitch label={`${parameterName(props.row())} mode`} value={props.mode}
             options={[{ value: "range", label: "Range" }, { value: "value", label: "Value" }]}
             onChange={mode => props.onField(props.param.key, "mode", mode)} />
           <Show when={single} fallback={<div class="vz-range-fields">

@@ -62,7 +62,7 @@ module.exports = async ({ cdp, check, KZ, FAKE }) => {
     await discardRecipe(cdp);
     await cdp.clickAt(`${denoise} .checkbox`);
     await cdp.clickAt(`${steps} .checkbox`);
-    await cdp.clickAt(`${steps} .vz-numeric-mode button[title="Value"]`);
+    await cdp.clickAt(`${steps} .mode-switch button[title="Value"]`);
     await field(`${steps} .vz-value-field input`, '21');
     await field(`${steps} .vz-value-field input`, '');
     await invalid(steps, 'Value');
