@@ -46,17 +46,29 @@ const PARAMETER_KINDS = [
     describe: p => ({ values: p.options }) },
   { kind: "text", channel: "textParams", accepts: () => true, describe: () => ({}) },
 ];
-export function parameterCatalogue(graph, { types = null, enums = null, outputClasses = null } = {}) {
+export function parameterCatalogue(graph, { types = null, enums = null, outputClasses = null, dynamicCombos = null } = {}) {
   const catalogue = Object.fromEntries(PARAMETER_KINDS.map(strategy => [strategy.channel, []]));
   for (const [nodeId, node] of Object.entries(graph ?? {})) {
     const type = String(node.class_type ?? "");
     if (!type) continue;
     const title = node._meta?.title && node._meta.title !== type ? String(node._meta.title) : null;
+    const nodeTypes = new Map(types), nodeEnums = new Map(enums);
+    const selectBranches = combos => {
+      for (const [name, options] of combos ?? []) {
+        if (!name.startsWith(type + ".")) continue;
+        const branch = options.get(node.inputs?.[name.slice(type.length + 1)]);
+        if (!branch) continue;
+        for (const [key, value] of branch.types) nodeTypes.set(key, value);
+        for (const [key, value] of branch.enums) nodeEnums.set(key, value);
+        selectBranches(branch.dynamicCombos);
+      }
+    };
+    selectBranches(dynamicCombos);
     for (const [key, value] of Object.entries(node.inputs ?? {})) {
       if (typeof value !== "number" && typeof value !== "string") continue;
       if (typeof value === "string" && key === "filename_prefix" && outputClasses?.has(type)) continue;
       const schemaKey = `${type}.${key}`;
-      const context = { value, declared: types?.get(schemaKey), options: enums?.get(schemaKey),
+      const context = { value, declared: nodeTypes.get(schemaKey), options: nodeEnums.get(schemaKey),
         image: typeof value === "string" && /loadimage$/i.test(type) && key === "image" };
       const strategy = PARAMETER_KINDS.find(strategy => strategy.accepts(context));
       const metadata = strategy.describe(context);
@@ -77,9 +89,38 @@ export const textParams = (graph, enums, outputClasses) => parameterCatalogue(gr
 
 // --- graph mutation --------------------------------------------------------------
 
-export function mutateGraph(graph, permutation, params) {
+export function mutateGraph(graph, permutation, params, dynamicCombos = null) {
   const clone = structuredClone(graph);
   const byId = parameterIndex(params ?? inspectGraph(clone));
+  // Prepare branch switches before explicit scalar writes, independent of axis
+  // order. An inactive child cannot be reintroduced by a later assignment.
+  for (const [nodeId, node] of Object.entries(clone)) {
+    const type = String(node.class_type ?? ""), inputs = node.inputs;
+    if (!inputs) continue;
+    const selections = new Map(Object.entries(permutation).flatMap(([id, value]) => {
+      const p = byId.get(id);
+      return p?.nodeIds.includes(nodeId) ? [[p.key, value]] : [];
+    }));
+    const prepare = combos => {
+      for (const [name, options] of combos ?? []) {
+        if (!name.startsWith(type + ".")) continue;
+        const key = name.slice(type.length + 1);
+        if (!Object.hasOwn(inputs, key)) continue;
+        const value = selections.has(key) ? selections.get(key) : inputs[key], branch = options.get(value);
+        if (selections.has(key) && !branch) throw new Error(`Unknown dynamic option for ${nodeId}.${key}: ${value}`);
+        if (!branch) continue;
+        if (!Object.is(inputs[key], value)) {
+          for (const child of Object.keys(inputs)) if (child.startsWith(key + ".")) delete inputs[child];
+          for (const [child, value] of branch.defaults) {
+            if (value === undefined) throw new Error(`No object_info default for ${nodeId}.${child.slice(type.length + 1)}`);
+            inputs[child.slice(type.length + 1)] = structuredClone(value);
+          }
+        }
+        prepare(branch.dynamicCombos);
+      }
+    };
+    prepare(dynamicCombos);
+  }
   const applied = [], writes = [];
   for (const [id, value] of Object.entries(permutation)) {
     const p = byId.get(id);
@@ -291,9 +332,9 @@ export function register(app) {
     const graph = await app.ingest.graph(hash);
     if (!app.backings.isCurrent(token)) return { error: "source changed during inspection", status: 409 };
     if (!graph) return { error: "no embedded ComfyUI graph", status: 422 };
-    const { types, enums, outputClasses } = await backing.objectInfo();
+    const { types, enums, outputClasses, dynamicCombos } = await backing.objectInfo();
     if (!app.backings.isCurrent(token)) return { error: "source changed during inspection", status: 409 };
-    return { graph, addr, types, enums, outputClasses, token, backing, context: { origin, graphHash: hash } };
+    return { graph, addr, types, enums, outputClasses, dynamicCombos, token, backing, context: { origin, graphHash: hash } };
   };
 
   app.route("GET", "/probe/<id>", async (_req, { id }) => {
@@ -390,7 +431,10 @@ export function register(app) {
       if (!app.backings.isCurrent(token)) {
         return rejectPlan("source changed; no jobs were submitted");
       }
-      const { graph: mutated, applied, writes } = mutateGraph(graph, perm, fullInspection);
+      let mutation;
+      try { mutation = mutateGraph(graph, perm, fullInspection, r.dynamicCombos); }
+      catch (error) { return rejectPlan(error.message); }
+      const { graph: mutated, applied, writes } = mutation;
       if (applied.length === 0) {
         return rejectPlan("No applicable nodes found; no jobs were submitted");
       }

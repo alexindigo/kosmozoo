@@ -907,6 +907,7 @@ async function main() {
     await require('./variations-row-frame.cjs')({ cdp, check, KZ });
     await require('./variations-value.cjs')({ cdp, check, KZ, FAKE });
     await require('./variations-enum-text.cjs')({ cdp, check, ENGINE, FAKE, KZ });
+    await require('./variations-dynamic.cjs')({ cdp, check, ENGINE, FAKE, KZ });
   } finally {
     await cdp.close();
   }

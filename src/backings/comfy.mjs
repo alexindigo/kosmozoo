@@ -249,7 +249,8 @@ export async function historyDelete(addr, name) {
 
 // object_info cache for one address: { types: Map<paramId,"INT"|"FLOAT"> |
 // null, outputClasses: Set<class_type> | null, enums:
-// Map<"<type>.<input>", string[]> | null, t }. TTL'd (a host's node set
+// Map<"<type>.<input>", string[]> | null, dynamicCombos: Map<schemaKey,
+// Map<optionKey, branch schema>> | null, t }. TTL'd (a host's node set
 // is stable per version); misses are not cached forever.
 const OBJECT_INFO_TTL_MS = 60_000;
 
@@ -300,36 +301,56 @@ export async function inventory(addr, { client, ...options } = {}) {
   finally { owner.disposeInventory(); }
 }
 
+// Keep dynamic branches, their declared defaults and their input types together.
+// Dotted child names are ComfyUI's prompt keys, not variation parameter IDs.
+function inputSchema(input, prefix) {
+  const schema = { types: new Map(), enums: new Map(), dynamicCombos: new Map(), defaults: new Map(), lazy: new Set() };
+  for (const section of ["required", "optional"]) {
+    for (const [key, spec] of Object.entries(input?.[section] ?? {})) {
+      const name = `${prefix}.${key}`, t = Array.isArray(spec) ? spec[0] : spec;
+      const config = Array.isArray(spec) ? spec[1] : null;
+      if (config?.lazy === true) schema.lazy.add(name);
+      if (config && Object.hasOwn(config, "default")) schema.defaults.set(name, config.default);
+      else if (section === "required") schema.defaults.set(name, undefined);
+      if (t === "INT" || t === "FLOAT") schema.types.set(name, t);
+      let raw = Array.isArray(t) ? t : t === "COMBO" ? config?.options : null;
+      if (t === "COMFY_DYNAMICCOMBO_V3" && Array.isArray(config?.options)) {
+        const branches = new Map();
+        for (const option of config.options) {
+          if (typeof option?.key !== "string") continue;
+          const branch = inputSchema(option.inputs, name);
+          branches.set(option.key, branch);
+          // Flat type/enum lookups also describe existing dotted prompt inputs.
+          for (const channel of ["types", "enums"]) for (const [k, v] of branch[channel]) schema[channel].set(k, v);
+        }
+        schema.dynamicCombos.set(name, branches);
+        raw = [...branches.keys()];
+      }
+      if (Array.isArray(raw) && raw.length) {
+        const list = [...new Set(raw.filter(v => typeof v === "string"))];
+        if (list.length) schema.enums.set(name, list);
+      }
+    }
+  }
+  return schema;
+}
+
 export async function objectInfo(addr, cache = new Map(), { fetcher = fetch, signal } = {}) {
   const c = cache.get(addr);
   if (c && Date.now() - c.t < OBJECT_INFO_TTL_MS) return c;
-  let out = { types: null, outputClasses: null, enums: null, lazyInputs: null };
+  let out = { types: null, outputClasses: null, enums: null, lazyInputs: null, dynamicCombos: null };
   try {
     const timeout = AbortSignal.timeout(HOST_TIMEOUT_MS);
     const r = await fetcher(`http://${addr}/api/object_info`, { signal: signal ? AbortSignal.any([signal, timeout]) : timeout });
     if (r.ok) {
       const info = await r.json();
       if (!info || typeof info !== "object" || Array.isArray(info)) throw new Error("Invalid object_info");
-      out = { types: new Map(), outputClasses: new Set(), enums: new Map(), lazyInputs: new Map() };
+      out = { types: new Map(), outputClasses: new Set(), enums: new Map(), lazyInputs: new Map(), dynamicCombos: new Map() };
       for (const [type, def] of Object.entries(info)) {
-        out.lazyInputs.set(type, new Set());
+        const schema = inputSchema(def?.input, type);
+        out.lazyInputs.set(type, new Set([...schema.lazy].map(key => key.slice(type.length + 1))));
         if (def?.output_node) out.outputClasses.add(type);
-        for (const section of ["required", "optional"]) {
-          for (const [key, spec] of Object.entries(def?.input?.[section] ?? {})) {
-            if (Array.isArray(spec) && spec[1]?.lazy === true) out.lazyInputs.get(type).add(key);
-            const t = Array.isArray(spec) ? spec[0] : spec;
-            if (t === "INT" || t === "FLOAT") out.types.set(`${type}.${key}`, t);
-            // combo widget: the host publishes THIS field's option list —
-            // either as the spec type itself ([["a","b"], {}]) or as
-            // "COMBO" with an options list in the widget config
-            const raw = Array.isArray(t) ? t
-              : (Array.isArray(spec) && t === "COMBO" ? spec[1]?.options : null);
-            if (Array.isArray(raw) && raw.length) {
-              const list = [...new Set(raw.filter((v) => typeof v === "string"))];
-              if (list.length) out.enums.set(`${type}.${key}`, list);
-            }
-          }
-        }
+        for (const channel of ["types", "enums", "dynamicCombos"]) for (const [key, value] of schema[channel]) out[channel].set(key, value);
       }
     }
   } catch { /* offline — the null maps stand */ }
