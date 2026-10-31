@@ -53,7 +53,13 @@ module.exports = async ({ cdp, check, KZ }) => {
     assert(await cdp.evaluate("[...document.querySelectorAll('.vz-parameter.on')].length===4&&[...document.querySelectorAll('.vz-parameter.on')].every(row=>getComputedStyle(row).opacity==='1')"));
     check('row frame: each expanded kind is full strength and mounts its editor', true);
     const numeric = '[data-param-key="9.denoise"]';
-    await cdp.evaluate(`(()=>{const input=document.querySelector('${numeric} .vz-range-field:first-child input');input.value='0.7';input.dispatchEvent(new Event('change',{bubbles:true}));const step=document.querySelector('${numeric} .vz-row-inc-input');step.value='0.1';step.dispatchEvent(new Event('input',{bubbles:true}))})()`);
+    for (const [selector, value] of [[`${numeric} .vz-range-field:first-child input`, '0.7'], [`${numeric} .vz-row-inc-input`, '0.1']]) {
+      await cdp.clickAt(selector);
+      await cdp.evaluate(`document.querySelector(${JSON.stringify(selector)}).select()`);
+      await cdp.send('Input.insertText', { text: value });
+      await cdp.keyTrusted('Tab', { vk: 9 });
+      await cdp.poll(`document.querySelector(${JSON.stringify(selector)}).value===${JSON.stringify(value)}`);
+    }
     const text = '.vz-textrow .vz-text-values';
     await cdp.evaluate(`(()=>{const input=document.querySelector('${text}');input.value='retained template';input.dispatchEvent(new Event('input',{bubbles:true}))})()`);
     await cdp.clickAt('.vz-enumrow.on .vz-enum-opt:last-child .checkbox');

@@ -1,7 +1,7 @@
 // Recipe-owned numeric mode and values; only the native widget/gesture lifetime
 // belongs to the expanded body. Batch ranges use offsets; a Value is always fixed.
 
-import { Show, createSignal, createEffect, onMount, onCleanup } from "solid-js";
+import { Show, createEffect, onMount, onCleanup } from "solid-js";
 import noUiSlider from "/vendor/nouislider.mjs";
 import { snapTo, fmt } from "./graph.mjs";
 import { makeSliderGesture } from "./slider-gesture.js";
@@ -9,8 +9,6 @@ import { focusMemory } from "./draft.js";
 import { ParameterRow, parameterName } from "./ParameterRow.js";
 import { SingleLineText } from "../../components/SingleLineText.js";
 import { IconButton } from "../../components/IconButton.js";
-
-const fmtSigned = (v) => (v > 0 ? "+" : "") + fmt(v);
 
 export function SliderRow(props) {
   return <ParameterRow class="vz-slider-row" row={props.row} enabled={props.enabled}
@@ -26,7 +24,6 @@ export function SliderRow(props) {
 function NumericEditor(props) {
   let sliderEl;
   let gesture;
-  let setBound;
   const rawIncrement = () => props.rawIncrement();
   const focus = focusMemory(props.rememberFocus);
   let wasDragging = false;
@@ -34,10 +31,6 @@ function NumericEditor(props) {
   const fineStep = Math.pow(10, -props.param.decimals);
   const single = props.mode === "value";
   const relative = props.relative && !single;
-
-  // Bound values render in allocated input cells, never around moving thumbs.
-  const [minLbl, setMinLbl] = createSignal({ text: "" });
-  const [maxLbl, setMaxLbl] = createSignal({ text: "" });
 
   // absolute: the param's clamp; relative: ±(spread×10) around the current
   const lo = relative ? -(props.param.spread ?? 1) * 10 : props.param.clamp[0];
@@ -52,7 +45,10 @@ function NumericEditor(props) {
     // read props live (Solid's props proxy), so the current increment is
     // always the one that snaps.
     const slider = noUiSlider.create(sliderEl, {
-      start: single ? [props.row().value] : [props.row().min, props.row().max],
+      // Invalid text has no numeric position. This fallback only places a newly
+      // mounted widget; it never writes a value back into the raw recipe.
+      start: single ? [props.row().numbers.value ?? props.current() ?? lo]
+        : [props.row().numbers.min ?? lo, props.row().numbers.max ?? hi],
       connect: !single,
       range: { min: lo, max: hi },
       step: fineStep,
@@ -74,25 +70,17 @@ function NumericEditor(props) {
     const disposeEditor = props.registerEditor?.({ suspend: gesture.suspend, resume: gesture.resume });
     const rememberWidget = (event) => focus.onFocus({ currentTarget: event.target });
     sliderEl.addEventListener("focusin", rememberWidget);
-    // `update` tracks the bound LABELS live (it also fires on programmatic
-    // set — the row's state is only ever written by user gestures)
-    slider.on("update", (values) => {
-      const [a, b] = values.map(Number);
-      setMinLbl({ text: relative ? fmtSigned(a) : fmt(a) });
-      setMaxLbl({ text: relative ? fmtSigned(b) : fmt(b) });
-    });
+    // The widget projects parsed recipe values; null leaves that handle in
+    // place. Programmatic projection never replaces the user's raw text.
+    createEffect(() => slider.set(single ? [props.row().numbers.value]
+      : [props.row().numbers.min, props.row().numbers.max]));
     // onRange fires ONLY from slide/change (user gestures) — never from
     // `update`, which would re-report every programmatic set 
     const report = () => {
       if (gesture.suppressed()) return;
       const vals = [slider.get()].flat().map(Number);
-      if (single) props.onField(props.param.key, "value", vals[0]);
-      else props.onRange(props.param.key, { min: Math.min(vals[0], vals[1]), max: Math.max(vals[0], vals[1]) });
-    };
-    setBound = (index, raw) => {
-      if (!raw.trim() || !Number.isFinite(Number(raw)) || gesture.suppressed()) return;
-      const values = [slider.get()].flat().map(Number); values[index] = Number(raw);
-      slider.set(values); report();
+      if (single) props.onField(props.param.key, "value", fmt(vals[0]));
+      else props.onRange(props.param.key, { min: fmt(Math.min(vals[0], vals[1])), max: fmt(Math.max(vals[0], vals[1])) });
     };
     // The snap lands on RELEASE, never mid-drag: a set during an active
     // drag puts the widget in its tap-transition state, which rejects the
@@ -163,10 +151,12 @@ function NumericEditor(props) {
             <IconButton viewer icon="Value" title="Value" active={single} onAction={() => props.onField(props.param.key, "mode", "value")} />
           </div>
           <Show when={single} fallback={<div class="vz-range-fields">
-          <label class="vz-range-field">from<input type="number" step="any" aria-label={`${props.param.label} From`}
-            value={Number(minLbl().text)} {...focus} onChange={event => setBound(0, event.currentTarget.value)} /></label>
-          <label class="vz-range-field">to<input type="number" step="any" aria-label={`${props.param.label} To`}
-            value={Number(maxLbl().text)} {...focus} onChange={event => setBound(1, event.currentTarget.value)} /></label>
+          <label class="vz-range-field">from<input type="text" inputMode="decimal" aria-label={`${props.param.label} From`}
+            value={props.row().min} aria-invalid={props.row().numbers.min === null} {...focus}
+            onInput={event => props.onField(props.param.key, "min", event.currentTarget.value)} /></label>
+          <label class="vz-range-field">to<input type="text" inputMode="decimal" aria-label={`${props.param.label} To`}
+            value={props.row().max} aria-invalid={props.row().numbers.max === null} {...focus}
+            onInput={event => props.onField(props.param.key, "max", event.currentTarget.value)} /></label>
           <div class="vz-range-field"><label for={`step-${props.placeholderKey}`}>step</label>
             <div class="vz-row-inc">
               <button type="button" class="vz-step-btn" title="Halve step" aria-label={`${props.param.label}: Halve step`}
@@ -187,8 +177,9 @@ function NumericEditor(props) {
             </div>
           </div>
           </div>}>
-            <label class="vz-range-field vz-value-field">value<input type="number" step="any" aria-label={`${props.param.label} Value`}
-              value={Number(minLbl().text)} {...focus} onChange={event => setBound(0, event.currentTarget.value)} /></label>
+            <label class="vz-range-field vz-value-field">value<input type="text" inputMode="decimal" aria-label={`${props.param.label} Value`}
+              value={props.row().value} aria-invalid={props.row().numbers.value === null} {...focus}
+              onInput={event => props.onField(props.param.key, "value", event.currentTarget.value)} /></label>
           </Show>
         </div>
       </div>

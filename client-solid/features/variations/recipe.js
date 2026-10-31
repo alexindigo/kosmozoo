@@ -13,9 +13,9 @@ export function moveRecipeImage(items, item, index) {
   return ordered;
 }
 export const RECIPE_FIELDS = Object.freeze({
-  numeric: Object.freeze({ enabled: field("boolean", "rangeSelections", "enabled"), min: field("number", "ranges", "min"),
-    max: field("number", "ranges", "max"), rawIncrement: field("string", "ranges", "increment"),
-    mode: field("numeric-mode", "ranges"), value: field("number", "ranges") }),
+  numeric: Object.freeze({ enabled: field("boolean", "rangeSelections", "enabled"), min: field("string", "ranges", "min"),
+    max: field("string", "ranges", "max"), rawIncrement: field("string", "ranges", "increment"),
+    mode: field("numeric-mode", "ranges"), value: field("string", "ranges") }),
   images: Object.freeze({ enabled: field("boolean", "imageSelections", "enabled"), items: field("image-set", "imageParams") }),
   enums: Object.freeze({ enabled: field("boolean", "imageSelections", "enabled"), picks: field("strings", "imageParams") }),
   texts: Object.freeze({ enabled: field("boolean", "imageSelections", "enabled"), text: field("string", "imageParams"), tpl: field("templates", "imageParams") }),

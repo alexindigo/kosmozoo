@@ -14,6 +14,12 @@ const filename = value => typeof value === "string" && value.length > 0 && !/[\\
 const token = id => `_{${id}}`;
 const currentValues = catalogue => Object.fromEntries([...parameterIndex(catalogueParams(catalogue)).values()]
   .map(parameter => [parameter.id, parameter.current]));
+// Raw numeric spelling belongs to the recipe; all numeric consumers share this
+// parser. Empty/incomplete text is never coerced to zero or an earlier value.
+const numberText = raw => {
+  const value = raw?.trim() ? Number(raw) : NaN;
+  return Number.isFinite(value) ? value : null;
+};
 
 // Kind-specific defaults plug into one catalogue installation lifecycle. Labels,
 // identity validation and seeding always pass through the common owner boundary.
@@ -23,8 +29,8 @@ const ROW_STRATEGIES = {
     const defaults = batch ? { min: -tuning.spread, max: tuning.spread } : defaultRange(tuning, parameter.current);
     return { metadata: { input: parameter.key, tuning, defaults, minIncrement: 10 ** -tuning.decimals,
       defaultIncrement: tuning.defaultInc, clamp: tuning.clamp },
-    defaults: { enabled: parameter.id === denoise, ...defaults, rawIncrement: String(tuning.defaultInc),
-      mode: "range", value: parameter.current } };
+    defaults: { enabled: parameter.id === denoise, min: String(defaults.min), max: String(defaults.max), rawIncrement: String(tuning.defaultInc),
+      mode: "range", value: String(parameter.current) } };
   } },
   stringParams: { domain: "images", initialize: () => ({ metadata: { files: [], filesReady: false },
     defaults: { enabled: false, items: [] } }) },
@@ -57,11 +63,12 @@ export function makeVariationEditor({ targets, services, currentOrigin, changed 
   };
   const write = recipe.write;
   const increment = (entry, values = entry.values) => {
-    const raw = values.rawIncrement, value = raw?.trim() ? Number(raw) : NaN;
+    const value = numberText(values.rawIncrement);
     return Number.isFinite(value) && value >= entry.metadata.minIncrement ? value : null;
   };
   const view = domain => Object.freeze(Object.fromEntries([...recipe.entries(domain)].map(([id, entry]) => [id,
-     freeze({ ...entry.metadata, ...snapshotDraft(entry.values), ...(domain === "numeric" ? { increment: increment(entry) } : {}),
+     freeze({ ...entry.metadata, ...snapshotDraft(entry.values), ...(domain === "numeric" ? { increment: increment(entry),
+       numbers: Object.fromEntries(["min", "max", "value"].map(name => [name, numberText(entry.values[name])])) } : {}),
        ...(domain === "images" ? { images: entry.values.items.map(item => imageView(id, item, entry.metadata)) } : {}) })])));
   const remaining = recipe.remaining;
   const getLeaf = path => {
@@ -147,7 +154,8 @@ export function makeVariationEditor({ targets, services, currentOrigin, changed 
       if (!enabled) continue;
       const mode = read("numeric", id, "mode");
       if (mode === "value") {
-        const value = read("numeric", id, "value");
+        const value = numberText(read("numeric", id, "value"));
+        if (value === null) throw new Error(`${entry.metadata.label}: Enter a number for Value. Your text is kept.`);
         Object.assign(ranges[id], { min: value, max: value, increment: entry.metadata.minIncrement,
           ...(batch ? { absolute: true } : {}) });
       } else for (const [name, definition] of Object.entries(EDITOR_FIELDS.numeric)) if (definition.wire && definition.channel === "ranges") {
@@ -156,7 +164,11 @@ export function makeVariationEditor({ targets, services, currentOrigin, changed 
           const parsed = increment(entry);
           if (parsed === null && !preview) throw new Error("Enter a valid positive increment; incomplete text has been kept.");
           ranges[id][definition.wire] = parsed ?? entry.metadata.defaultIncrement;
-        } else ranges[id][definition.wire] = value;
+        } else {
+          const parsed = numberText(value);
+          if (parsed === null) throw new Error(`${entry.metadata.label}: Enter a number for ${name === "min" ? "From" : "To"}. Your text is kept.`);
+          ranges[id][definition.wire] = parsed;
+        }
       }
       if (ranges[id].min > ranges[id].max) throw new Error("Minimum exceeds maximum; your values have been kept.");
       if (batch) ranges[id].clamp = [...entry.metadata.clamp];
@@ -268,7 +280,7 @@ export function makeVariationEditor({ targets, services, currentOrigin, changed 
     inspectImages: () => Promise.all([...pendingInspections]),
     range(id, { min, max }) {
       if (!alive || deciding || readOnly) return false;
-      if (!validValue("number", min) || !validValue("number", max) || !row("numeric", id)) throw new Error("Invalid range edit");
+      if (!validValue("string", min) || !validValue("string", max) || !row("numeric", id)) throw new Error("Invalid range edit");
       write("numeric", id, "min", min); write("numeric", id, "max", max);
       recipe.edited(); invalidateClose(); notify(); return true;
     },

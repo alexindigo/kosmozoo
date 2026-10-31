@@ -4,7 +4,7 @@ import { editorRig } from "./helpers/variation-editor.mjs";
 import { generatePermutations, permutationPlan } from "../src/features/variations/shared.mjs";
 
 const cases = {
-  numeric: { id: "n.denoise", values: { enabled: false, min: .9, max: .95, rawIncrement: "1e-1", mode: "value", value: .9 } },
+  numeric: { id: "n.denoise", values: { enabled: false, min: "0.9", max: "0.95", rawIncrement: "1e-1", mode: "value", value: "0.9" } },
   images: { id: "image.image", values: { enabled: true, items: [{ kind: "upload", name: "a.png", file: new File(["a"], "a.png") }] } },
   enums: { id: "choice.value", values: { enabled: true, picks: ["second"] } },
   texts: { id: "text.text", values: { enabled: true, text: "first\n\nsecond", tpl: { kept: "one; two" } } },
@@ -24,12 +24,12 @@ Deno.test("editor contract: every declared editable field participates in dirty 
   const { editor } = editorRig();
   assertThrows(() => editor.edit("numeric", "n.denoise", "invented", 1)); assert(!editor.dirty());
   assertThrows(() => editor.edit("enums", "choice.value", "filter", "query")); assert(!editor.dirty());
-  assertThrows(() => editor.edit("numeric", "n.denoise", "min", "wrong type")); assert(!editor.dirty()); editor.dispose();
+  assertThrows(() => editor.edit("numeric", "n.denoise", "min", .9)); assert(!editor.dirty()); editor.dispose();
 });
 
 Deno.test("editor contract: one combined configuration consumes all eligible declared fields and reaches owned closure", async () => {
   const rig = editorRig(), { editor } = rig, file = new File(["exact"], "exact.png");
-  editor.range("n.denoise", { min: .5, max: .7 }); editor.edit("numeric", "n.denoise", "rawIncrement", "1e-1");
+  editor.range("n.denoise", { min: "0.5", max: "0.7" }); editor.edit("numeric", "n.denoise", "rawIncrement", "1e-1");
   editor.edit("images", "image.image", "enabled", true); editor.addImages("image.image", [{ kind: "upload", name: file.name, file }]);
   editor.edit("enums", "choice.value", "enabled", true); editor.edit("enums", "choice.value", "picks", ["second", "first"]);
   editor.edit("texts", "text.text", "enabled", true); editor.edit("texts", "text.text", "text", "  {{used}}\n\nend\n"); editor.template("text.text", "used", "one; two");

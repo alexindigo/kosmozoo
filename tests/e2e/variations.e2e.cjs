@@ -909,6 +909,7 @@ async function main() {
     await require('./variations-enum-text.cjs')({ cdp, check, ENGINE, FAKE, KZ });
     await require('./variations-dynamic.cjs')({ cdp, check, ENGINE, FAKE, KZ });
     await require('./variations-image-order.cjs')({ cdp, check, FAKE, KZ });
+    await require('./variations-numeric-text.cjs')({ cdp, check, FAKE, KZ });
   } finally {
     await cdp.close();
   }
