@@ -460,8 +460,8 @@ function check(name, ok, detail = "") {
     const groups = [...document.querySelectorAll('#diffCtl .dz-vslider')];
     return {
       n: groups.length,
-      icons: groups.every((g) => !!g.querySelector('.dz-vbtn svg')),
-      titles: groups.map((g) => g.title),
+      icons: groups.every((g) => !!g.querySelector('button.dz-vbtn svg')),
+      titles: groups.map((g) => g.querySelector('button.dz-vbtn')?.title ?? ""),
     };
   })()`);
   check("controls: each slider is an icon button with a tooltip",
