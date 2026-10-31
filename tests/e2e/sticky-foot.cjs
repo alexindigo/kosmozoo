@@ -38,7 +38,7 @@ module.exports = async ({ page, KZ, check, capture, control }) => {
         const expected = cardHeight(s.state.cardSize(Number(card.dataset.idx)), col.clientWidth);
         const item = s.state.feedVirtualizer().getVirtualItems().find(it => it.key === s.state.images[Number(card.dataset.idx)].id);
         return { viewport: v, card: r(card), foot: f, bar, expected, stride: item?.size, gap: gridGapPx(),
-          tall: card.classList.contains('card--tall'), delta: Math.abs(f.bottom - v.bottom),
+          tall: card.getBoundingClientRect().height > col.clientHeight, delta: Math.abs(f.bottom - v.bottom),
           rows: card.querySelectorAll('.media-controls-slot').length,
           owned: !!controls && foot.firstElementChild?.classList.contains('media-controls-slot') && foot.firstElementChild.contains(controls),
           visible: !!bar && bar.top >= v.top && bar.bottom <= v.bottom && bar.top >= f.top && bar.bottom <= f.bottom,

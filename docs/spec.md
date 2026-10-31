@@ -500,7 +500,11 @@ box and audio keeps its fixed face aspect. Playable controls occupy a separate
 adjacent row below that box; its stable measured height is included in cardHeight,
 virtualizer estimates and landing compensation, even while src is absent or failed.
 Feed cards mount that row first inside their single feedback foot, above the title
-and notes, so playback and feedback stick together on taller-than-viewport cards.
+and notes. The foot is always sticky by layout: playback and feedback stay together
+at the viewport bottom while their natural bottom is below it, including fitting
+cards entering from below. Native containment clamps the foot to its card's content
+edge when less than a foot-height is visible. No tall-card flag gates this behavior;
+the in-flow allocation, cardHeight and virtual stride remain unchanged.
 
 `MediaBox` owns native display/load/zoom and player state; `Zoomable` is its
 store adapter for feed/details/anchors. The comparator also renders MediaBox,

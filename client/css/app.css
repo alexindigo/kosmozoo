@@ -364,16 +364,17 @@ main { display: flex; flex: 1; min-height: 0; }
 /* the notes pair row: negatives left, positives right */
 .pair { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-top: 6px; }
 
-/* the vote/comment foot: sticky to the viewport's bottom ONLY on a card
-   taller than the viewport (.card--tall) — a fitting card keeps it at the
-   card's bottom. In-flow (adds no height, so the card-height invariant is
-   untouched). The ::before panel carries the pinned look: the card's
+/* The playback/feedback foot sticks whenever its natural bottom is below
+   the viewport, including fitting cards entering from below. Native sticky
+   containment clamps it to its card's content edge on first entry. In-flow
+   (adds no height, so the card-height invariant is untouched).
+   The ::before panel carries the pinned look: the card's
    background extended past the title row and the notes, so the pinned
    text/buttons have breathing room against the image and the viewport's
    edge — again with zero layout height. */
-.card--tall .card-foot { position: sticky; bottom: 0; z-index: var(--z-chrome);
+.card-foot { position: sticky; bottom: 0; z-index: var(--z-chrome);
   box-shadow: 0 -10px 14px -10px var(--backdrop); }
-.card--tall .card-foot::before { content: ""; position: absolute; z-index: -1;
+.card-foot::before { content: ""; position: absolute; z-index: -1;
   inset: -8px -12px -12px; background: var(--focused-background); border-radius: 8px; }
 
 .props { color: var(--foreground-dim); font-size: 12px; }
