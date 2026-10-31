@@ -591,6 +591,8 @@ body:has(#diff:not([hidden])) #statusCol { bottom: 56px; }
  layers stay mounted out of view */
 #diffStage[data-mode="difference"] .dz-a,
 #diffStage[data-mode="difference"] .dz-b { display: none; }
+/* Full displays the viewer's subject, without moving identities between slots. */
+#diffStage[data-mode="full"][data-col="right"] .dz-a { display: none; }
 .dz-canvas-cell { position: absolute; inset: 0; }
 .dz-canvas { max-width: 100%; max-height: 100%; object-fit: contain; }
 /* icon button + its vertical slider popup (Kaleidoscope idiom): the popup

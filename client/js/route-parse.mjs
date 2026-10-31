@@ -9,7 +9,7 @@ export function parseUrl() {
   const query = new URLSearchParams(location.search ?? "");
   const folder = query.get("folder") ?? "", filter = query.get("filter") ?? "";
   if (location.pathname === "/diff") {
-    return { view: "diff", folder, filter, ...parseDiffHash(location.hash.replace(/^#/, "")) };
+    return { view: "diff", folder, filter, subject: query.get("subject") === "b" ? "b" : "a", ...parseDiffHash(location.hash.replace(/^#/, "")) };
   }
   const h = location.hash.replace(/^#/, "");
   if (!h) return { view: "feed", host: null, file: null, folder, filter };
@@ -57,8 +57,10 @@ function parseSide(side) {
   return source && file ? { source, file } : null;
 }
 
-export function diffUrl(left, right, { folder = "", filter = "", search = "" } = {}) {
-  return "/diff" + browsingQuery(folder, filter, search) + "#" + encodeURIComponent(left.source) + "#" + encodeURIComponent(left.file)
+export function diffUrl(left, right, { folder = "", filter = "", search = "", subject = "a" } = {}) {
+  const query = new URLSearchParams(browsingQuery(folder, filter, search));
+  if (subject === "b") query.set("subject", "b"); else query.delete("subject");
+  return "/diff" + (query.size ? "?" + query : "") + "#" + encodeURIComponent(left.source) + "#" + encodeURIComponent(left.file)
     + ":" + encodeURIComponent(right.source) + "#" + encodeURIComponent(right.file);
 }
 

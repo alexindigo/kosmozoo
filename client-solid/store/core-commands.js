@@ -46,7 +46,7 @@ export function registerCoreCommands(handles, { ops, state, clipboard = (text) =
     (a.toggle === true ? a.value === undefined : a.value !== undefined && a.toggle === undefined), (a) => ops.diff.setLocked(a.toggle ? !state.diff.locked : a.value));
   add("workbench.step", { direction: oneOf(-1, 1) }, ({ direction }) => ops.diff.step(direction));
   add("workbench.close", {}, () => ops.diff.close());
-  add("workbench.open", {}, () => ops.diff.open());
+  add("workbench.open", { subject: optional(oneOf("a", "b")), pair: optional((v) => !!v && shape({ a: side, b: optional(side) })(v)) }, (a) => ops.diff.open(a));
   add("workbench.hide", {}, () => ops.diff.hide());
   add("workbench.openEntry", { id: string }, ({ id }) => {
     const index = state.imageIdxById().get(id);
@@ -54,7 +54,7 @@ export function registerCoreCommands(handles, { ops, state, clipboard = (text) =
   });
   add("workbench.pickInput", { source: string, file: string, fromOutput: optional(bool) }, (a) => ops.diff.openInput(a.source, a.file, a.fromOutput));
   add("workbench.pickAnchor", { name: string }, ({ name }) => ops.diff.openFromAnchor(state.anchors.findIndex((anchor) => anchor.name === name)));
-  add("workbench.openPair", { left: side, right: optional(side), push: optional(bool) }, (a) => ops.diff.openDiff(a.left, a.right, { push: a.push }));
+  add("workbench.openPair", { left: side, right: optional(side), push: optional(bool), subject: optional(oneOf("a", "b")) }, (a) => ops.diff.openDiff(a.left, a.right, { push: a.push, subject: a.subject }));
   const parameters = {
     split: ops.diff.setSplit, activeOpacity: ops.diff.setActiveOpacity,
     absolute: ops.diff.setDiffAbs, opacity: ops.diff.setDiffOpacity, threshold: ops.diff.setDiffThreshold,
@@ -166,11 +166,11 @@ export function commandFacades(handles, ops, state) {
     setCol: (column) => invoke("workbench.column", { column }),
     setLocked: (value) => invoke("workbench.lock", { value }),
     step: (direction) => invoke("workbench.step", { direction }),
-    open: () => invoke("workbench.open"), hide: () => invoke("workbench.hide"), close: () => invoke("workbench.close"),
+    open: (intent = {}) => invoke("workbench.open", intent), hide: () => invoke("workbench.hide"), close: () => invoke("workbench.close"),
     openFromFeed: (index) => state.images[index] ? invoke("workbench.openEntry", { id: state.images[index].id }) : undefined,
     openInput: (source, file, fromOutput = false) => invoke("workbench.pickInput", { source, file, fromOutput }),
     openFromAnchor: (index) => state.anchors[index] ? invoke("workbench.pickAnchor", { name: state.anchors[index].name }) : undefined,
-    openDiff: (left, right, { push = false } = {}) => invoke("workbench.openPair", { left, ...(right ? { right } : {}), push }),
+    openDiff: (left, right, { push = false, subject = "a" } = {}) => invoke("workbench.openPair", { left, ...(right ? { right } : {}), push, subject }),
   });
   for (const [method, parameter] of Object.entries({ setSplit: "split", setActiveOpacity: "activeOpacity", setDiffAbs: "absolute", setDiffOpacity: "opacity", setDiffThreshold: "threshold" }))
     facade.diff[method] = (value) => invoke("workbench.parameters", { parameter, value });

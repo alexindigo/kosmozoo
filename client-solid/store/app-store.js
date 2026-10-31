@@ -79,7 +79,8 @@ export function makeAppStore({ subscribeSources = typeof window !== "undefined" 
       open: false,
       mode: "full",         // full | two-up | one-up | split | difference
       views: {},             // viewer-session crops; never persisted/shared with cards
-      col: "feed",          // active column (One-Up visible side, primary in every view)
+      subject: "a",         // viewer-owned side: Full displays it; comparisons make it active
+      get col() { return this.subject === "b" ? "right" : "feed"; },
       locked: true,         // entangled zoom: a gesture's delta writes BOTH view keys
       splitT: 0.5,          // wipe position, 0..1 of stage width
       activeOpacity: 1,     // the active column's photo opacity (every mode)
@@ -252,6 +253,7 @@ export function makeAppStore({ subscribeSources = typeof window !== "undefined" 
   }));
   const differenceReason = createMemo(() => [diffPair().a, diffPair().b].some(side =>
     side && (mediaKind(side.file ?? side.image) ?? "image") !== "image") ? "difference mode compares still images" : null);
+  const diffSubject = createMemo(() => diffPair()[st.diff.subject]);
   const diffKind = createMemo(() => mediaKind(diffPair().a?.file) ?? "image");
   const diffViews = createMemo(() => workbenchViews(diffKind()));
   createEffect(() => {
@@ -261,7 +263,6 @@ export function makeAppStore({ subscribeSources = typeof window !== "undefined" 
   });
   const prepareDiffOpen = () => {
     setSt("diff", "mode", defaultWorkbenchView(diffKind()));
-    setSt("diff", "col", "feed");
     setSt("diff", "views", reconcile({}));
   };
 
@@ -373,7 +374,7 @@ export function makeAppStore({ subscribeSources = typeof window !== "undefined" 
     if (location.pathname === "/diff") {
       if (!st.diff.open) return; // route adoption establishes both sides first
       const pair = diffPair();
-      if (pair.a && pair.b) want = diffUrl(pair.a, pair.b, context);
+      if (pair.a && pair.b) want = diffUrl(pair.a, pair.b, { ...context, subject: st.diff.subject });
       else return;
     } else want = feedUrl(host(), c?.remote === host() ? c.image : null, context);
     if ((location.pathname ?? "/") + (location.search ?? "") + (location.hash ?? "") !== want) {
@@ -1592,8 +1593,8 @@ export function makeAppStore({ subscribeSources = typeof window !== "undefined" 
       const h = urlHost && Object.hasOwn(hostsView(), urlHost) ? urlHost : initialHost(hostsView(), st.ui.host);
       const target = urlHost && Object.hasOwn(hostsView(), urlHost) ? routeTarget(route) : { ...rememberedTarget(h), filter: route.filter ?? "" };
       if (h) await actions.hosts.select(h, { target, historyMode: "replace" });
-      // a /diff URL boots into the workbench on the left side
-      if (route.view === "diff") await actions.diff.openDiff(route.left, route.right);
+      // a /diff URL boots its pair with the route's subject
+      if (route.view === "diff") await actions.diff.openDiff(route.left, route.right, { subject: route.subject });
       booted = true;
     },
 
@@ -1981,10 +1982,31 @@ export function makeAppStore({ subscribeSources = typeof window !== "undefined" 
       },
       // read-only model query the workbench surface derives its src from
       resolve: resolveSide,
-      // open the workbench on the current pointer
-      open() {
-        if (!current() || !resolveSide(current())) return false;
-        batch(() => { retireFeedScroll(); prepareDiffOpen(); setSt("diff", "open", true); });
+      // All openers supply a subject and pair to this single session owner.
+      // An omitted B retains the right pane's ordinary current/default.
+      open({ subject = "a", pair = { a: diffPair().a } } = {}) {
+        if (!pair.a || !resolveSide(pair.a) || (subject === "b" && (!pair.b || !resolveSide(pair.b)))) return false;
+        batch(() => {
+          retireFeedScroll();
+          const remote = pair.a.source ?? pair.a.remote, image = pair.a.file ?? pair.a.image;
+          if (pair.b) setSt("diff", "pairedWith", `${remote}:${image}`);
+          if (current()?.remote !== remote || current()?.image !== image) assignCurrent({ remote, image });
+          if (pair.b) {
+            const source = pair.b.source ?? pair.b.remote, file = pair.b.file ?? pair.b.image;
+            if (source === "anchor") {
+              setSt("diff", "anchorName", file);
+              actions.ui.setWorkspace("anchors");
+            } else {
+              setSt("diff", "infoFile", file);
+              setSt("diff", "infoSource", source);
+              actions.ui.setWorkspace("details");
+            }
+          }
+          actions.diff.ensureRightDefault();
+          setSt("diff", "subject", subject);
+          prepareDiffOpen();
+          setSt("diff", "open", true);
+        });
         return true;
       },
       hide() { batch(() => { retireFeedScroll(); setSt("diff", "open", false); }); },
@@ -1993,12 +2015,14 @@ export function makeAppStore({ subscribeSources = typeof window !== "undefined" 
         if (!diffViews().some(view => view.mode === mode)) return false;
         if (diffKind() === "video" && mode !== "full" && !diffPair().b) return false;
         if (mode === "difference" && differenceReason()) return false;
-        batch(() => {
-          setSt("diff", "mode", mode);
-          if (mode === "full") setSt("diff", "col", "feed");
-        });
+        setSt("diff", "mode", mode);
       },
-      setCol(col) { if (col === "feed" || col === "right") setSt("diff", "col", col); },
+      setCol(col) {
+        if (col === "feed" || col === "right") {
+          setSt("diff", "subject", col === "right" ? "b" : "a");
+          mirrorCurrentHash();
+        }
+      },
       setLocked(x) { setSt("diff", "locked", !!x); },
       setSplit(t) { setSt("diff", "splitT", Math.min(1, Math.max(0, t))); },
       setActiveOpacity(x) { setSt("diff", "activeOpacity", Math.min(1, Math.max(0, x))); },
@@ -2065,63 +2089,39 @@ export function makeAppStore({ subscribeSources = typeof window !== "undefined" 
       openFromFeed(imgIdx) {
         const im = st.images[imgIdx];
         if (!im) return;
-        batch(() => { retireFeedScroll(); assignCurrent({ remote: im.host, image: im.filename }); });
+        actions.diff.open({ subject: "a", pair: { a: { source: im.host, file: im.filename } } });
         mirrorCurrentHash();
-        actions.diff.ensureRightDefault();
-        actions.diff.open();
       },
       // discovered image click: that node image becomes the right side (B) —
       // the feed current stays; the pair is the generated image × its source
       openInput(h, file, fromOutput = false) {
         if (!h || !file) return;
-        setSt("diff", "infoFile", file);
-        setSt("diff", "infoSource", null); // pane-picked: derived from nodeImages
-        actions.diff.open();
+        return actions.diff.open({ subject: "b", pair: { a: diffPair().a, b: { source: fromOutput ? h : `input:${h}`, file } } });
       },
       // anchor thumb click: that anchor becomes the right side (B) — the
       // feed current stays; the pair is feed current × that anchor
       openFromAnchor(anchorIdx) {
         const anchor = st.anchors[anchorIdx];
         if (!anchor) return;
-        setSt("diff", "anchorName", anchor.name);
-        actions.diff.open();
+        return actions.diff.open({ subject: "b", pair: { a: diffPair().a, b: { source: "anchor", file: anchor.name } } });
       },
       // /diff deep links: both sides apply — left sets the feed current,
       // right sets the right current by source (anchor → the anchors pane;
       // anything else → the details pane, with its source kept for
       // resolution). A push entry keeps the /diff URL so browser
       // back/forward close/re-open via the route.
-      openDiff(left, right, { push } = {}) {
+      openDiff(left, right, { push, subject = "a" } = {}) {
         if (!left || !resolveSide(left)) return false;
         const remote = left.source ?? left.remote, image = left.file ?? left.image;
         if (Object.hasOwn(hostsView(), remote) && remote !== host()) {
           const context = typeof location === "undefined" ? { folder: "", filter: "" } : parseUrl();
           const loading = actions.hosts.select(remote, { target: { folder: context.folder ?? "", filter: context.filter ?? "", current: image, explicit: true }, historyMode: "none" });
           const intent = browseRevision;
-          return loading.then(() => intent === browseRevision && host() === remote ? actions.diff.openDiff(left, right, { push }) : false);
+          return loading.then(() => intent === browseRevision && host() === remote ? actions.diff.openDiff(left, right, { push, subject }) : false);
         }
-        batch(() => {
-        retireFeedScroll();
-        // the reset must not fire on THIS establishing pointer move
-        setSt("diff", "pairedWith", `${remote}:${image}`);
-        assignCurrent({ remote, image });
-        if (right) {
-          const src = right.source ?? right.remote;
-          const file = right.file ?? right.image;
-          if (src === "anchor") {
-            setSt("diff", "anchorName", file);
-            actions.ui.setWorkspace("anchors");
-          } else {
-            setSt("diff", "infoFile", file);
-            setSt("diff", "infoSource", src);
-            actions.ui.setWorkspace("details");
-          }
-        }
-        prepareDiffOpen();
-        setSt("diff", "open", true);
-        });
+        if (!actions.diff.open({ subject, pair: { a: left, ...(right ? { b: right } : {}) } })) return false;
         if (push && right) history.pushState({ kz: 1 }, "", diffUrl(left, right,
-          { folder: selectedFolder(), filter: filter(), search: location.search ?? "" }));
+          { folder: selectedFolder(), filter: filter(), search: location.search ?? "", subject }));
         else mirrorCurrentHash();
         return true;
       },
@@ -2212,7 +2212,7 @@ export function makeAppStore({ subscribeSources = typeof window !== "undefined" 
           }
         }
         if (intent !== browseRevision || host() !== name) return;
-        if (r.view === "diff") await actions.diff.openDiff(r.left, r.right);
+        if (r.view === "diff") await actions.diff.openDiff(r.left, r.right, { subject: r.subject });
         else {
           if (st.diff.open) setSt("diff", "open", false);
           mirrorCurrentHash();
@@ -2470,6 +2470,7 @@ export function makeAppStore({ subscribeSources = typeof window !== "undefined" 
     get anchors() { return st.anchors; },
     get diff() { return st.diff; },
     diffPair,
+    diffSubject,
     diffKind,
     diffViews,
     get variations() { return st.variations; },

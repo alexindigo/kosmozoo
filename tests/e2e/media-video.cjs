@@ -149,10 +149,10 @@ module.exports = async ({ page, ENGINE, KZ, check, capture, control }) => {
     await invoke('workbench.pickInput',{source:'fake',file:'canny.png'});
     await invoke('workbench.mode',{mode:'two-up'});
     await page.poll(`document.querySelector('.dz-b img')?.naturalWidth>0`);
-    check('video split uses the existing node-input pair, side-by-side with matching boundaries',await page.evaluate(`(async()=>{const p=${KZ}.state.diffPair(),a=document.querySelector('.dz-a').getBoundingClientRect(),b=document.querySelector('.dz-b').getBoundingClientRect();return p.b.source==='input:fake'&&p.b.file==='canny.png'&&Math.abs(a.right-b.left)<1&&Math.abs(a.height-b.height)<1&&Math.abs(a.width-b.width)<1})()`));
+    check('video split uses the existing node-input pair, subject B first with matching boundaries',await page.evaluate(`(async()=>{const p=${KZ}.state.diffPair(),a=document.querySelector('.dz-a').getBoundingClientRect(),b=document.querySelector('.dz-b').getBoundingClientRect();return p.b.source==='input:fake'&&p.b.file==='canny.png'&&Math.abs(b.right-a.left)<1&&Math.abs(a.height-b.height)<1&&Math.abs(a.width-b.width)<1})()`));
     await capture(page,'video-viewer-split-node');
-    await page.keyTrusted('f',{code:'KeyF',vk:70});await page.poll(`document.getElementById('diffStage').dataset.mode==='full'&&!document.querySelector('.dz-b')`);
-    check('f selects the A-only full view through the existing dispatcher',true);
+    await page.keyTrusted('f',{code:'KeyF',vk:70});await page.poll(`document.getElementById('diffStage').dataset.mode==='full'&&document.getElementById('diffStage').dataset.col==='right'&&document.querySelector('.dz-b img')?.src.includes('canny.png')`);
+    check('f selects Full on subject B through the existing dispatcher',await page.evaluate(`document.querySelector('.dz-a').getBoundingClientRect().width===0&&document.querySelector('.dz-b').getBoundingClientRect().width>0`));
     await invoke('keys.panel.toggle');
     await page.poll(`!![...document.querySelectorAll('.keyrow')].find(e=>e.textContent.includes('viewer: Full'))`);
     await page.evaluate(`[...document.querySelectorAll('.keyrow')].find(e=>e.textContent.includes('viewer: Full')).querySelector('button').click()`);
@@ -163,12 +163,15 @@ module.exports = async ({ page, ENGINE, KZ, check, capture, control }) => {
     await page.keyTrusted('q',{code:'KeyQ',vk:81});await page.poll(`document.getElementById('diffStage').dataset.mode==='full'`);
     check('wb.full rebind is persisted and selects full',await page.evaluate(`fetch('/api/settings/core.keys').then(r=>r.json()).then(s=>s['wb.full']==='q')`));
     await page.evaluate(`(async()=>${KZ}.actions.keys.resetOne('wb.full'))()`);
+    // Restore an explicit video subject before checking video Space playback.
+    // The metadata image above is now correctly the Full-view subject.
+    await invoke('workbench.openPair', { left: { source: 'fake', file: a }, right: { source: 'fake', file: b } });
+    await page.poll(`document.querySelector('.dz-a video')?.readyState>=2`);
+    check('opening an explicit video pair still defaults to A-only full',await page.evaluate(`document.getElementById('diffStage').dataset.mode==='full'&&!document.querySelector('.dz-b')`));
     await page.keyTrusted(' ', { code: 'Space', vk: 32 });
     await page.poll(`!document.querySelector('.dz-a video').paused`);
     check('workbench Space toggles its player', true);
     await capture(page, 'video-workbench');
-    await invoke('workbench.openPair', { left: { source: 'fake', file: a }, right: { source: 'fake', file: b } });
-    check('opening an explicit video pair still defaults to A-only full',await page.evaluate(`document.getElementById('diffStage').dataset.mode==='full'&&!document.querySelector('.dz-b')`));
     await invoke('workbench.mode',{mode:'two-up'});
     await page.poll(`document.querySelector('.dz-b video')?.readyState>=2`);
     for (const mode of ['two-up', 'one-up', 'split']) {

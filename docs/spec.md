@@ -532,10 +532,15 @@ be decoded.” Unknown causes keep the generic reason. Every failure adds
 “Download it to open elsewhere.”, with ordinary card download still available.
 Audio's viewer has one view and no switcher or B side.
 The per-kind workbench view catalogue owns opening defaults, command admission
-and the toolbar. Video opens in Full (A only), and offers Split (two-up),
+and the toolbar. Video opens in Full, and offers Split (two-up),
 Overlay (one-up/blink) and Slider (wipe); Difference is absent. Audio has only
 Full. Images offer Full/Two-Up/One-Up/Split/Difference. Every kind opens in Full,
-with A only, on every open (including explicit pairs and deep links).
+on the clicked image, on every open. The open intent names its subject and pair;
+the viewer owns that subject, derives its active column from it, and Full shows
+only that side. Comparison modes retain the pair with the subject active.
+Feed opens target A; metadata images and anchors target B. Explicit pairs and
+`/diff` links default to A and can target B with `subject=b` (the URL query).
+A plain image click inside the viewer never reopens or resets its session.
 Video comparison choices require the existing anchor/node-image B pair.
 The persisted, rebindable `wb.full` binding defaults to `f`; keys1–4keep
 their existing mode meanings. Full is available for every asset kind.

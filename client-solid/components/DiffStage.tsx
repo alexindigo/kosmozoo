@@ -74,14 +74,16 @@ export function DiffStage() {
   const store = useAppStore();
   const pair = () => store.state.diffPair();
   const d = () => store.state.diff;
-  const srcA = useSideSrc(store, () => pair().a);
-  const srcB = useSideSrc(store, () => d().mode === "full" || store.state.diffKind() === "audio" ? null : pair().b);
+  const fullB = () => d().mode === "full" && d().subject === "b";
+  const srcA = useSideSrc(store, () => fullB() ? null : pair().a);
+  const srcB = useSideSrc(store, () => (d().mode === "full" ? fullB() : store.state.diffKind() !== "audio") ? pair().b : null);
   const hasB = () => !!pair().b && store.state.diffKind() !== "audio" && mode() !== "full";
+  const showB = () => fullB() || hasB();
   const differenceReason = () => store.state.differenceReason() ||
     ([srcA(), srcB()].some(side => side && side.kind !== "image") ? "difference mode compares still images" : null);
   const mode = () => d().mode === "difference" && differenceReason() ? "two-up" : d().mode;
   const playableA = () => srcA() && srcA().kind !== "image";
-  const playableB = () => hasB() && srcB() && srcB().kind !== "image";
+  const playableB = () => showB() && srcB() && srcB().kind !== "image";
   const [dockA, setDockA] = createSignal(null), [dockB, setDockB] = createSignal(null);
 
   // TWO view states, one per resource. Each layer's transform derives from its
@@ -106,7 +108,7 @@ export function DiffStage() {
   const [cellAEl, setCellAEl] = createSignal(null), [cellBEl, setCellBEl] = createSignal(null);
   const [allocation, setAllocation] = createSignal(0);
   createEffect(() => {
-    const a = cellAEl(), b = hasB() ? cellBEl() : null;
+    const a = fullB() ? null : cellAEl(), b = showB() ? cellBEl() : null;
     const observer = new ResizeObserver(() => setAllocation(n => n + 1));
     for (const el of [stageEl, a, b]) if (el) observer.observe(el);
     onCleanup(() => observer.disconnect());
@@ -125,7 +127,7 @@ export function DiffStage() {
     const layer = hitLayer({
       mode: mode(), col: d().col, splitT: d().splitT,
       x: e.clientX,
-      cellBRect: hasB() ? cellBEl()?.getBoundingClientRect() : null,
+      cellBRect: showB() ? cellBEl()?.getBoundingClientRect() : null,
       stageRect: stageEl.getBoundingClientRect(),
     });
     const box = mode() === "difference" ? stageEl : (layer === "b" ? cellBEl() : cellAEl());
@@ -231,18 +233,16 @@ export function DiffStage() {
           <MediaBox workbench src={srcA()?.src} kind={srcA()?.kind} alt={srcA()?.name} failed={srcA()?.failed} failureCode={srcA()?.failureCode}
             size={srcA()?.size}
             controlsMount={dockA()} controlLabel="A"
-            transform={tA()} active={d().open && (mode() !== "one-up" || d().col === "feed" || !hasB())} primary={d().col === "feed" || !hasB()}
-            registerPlayer={store.actions.media.register} onPlaybackError={store.actions.media.report}
-            onOpen={() => store.handles.invoke("workbench.open")} />
+            transform={tA()} active={d().open && !fullB() && (mode() !== "one-up" || d().col === "feed" || !hasB())} primary={d().col === "feed"}
+            registerPlayer={store.actions.media.register} onPlaybackError={store.actions.media.report} />
         </div>
-        <Show when={hasB()}>
+        <Show when={showB()}>
           <div class="dz-cell dz-b" ref={setCellBEl}>
             <MediaBox workbench src={srcB()?.src} kind={srcB()?.kind} alt={srcB()?.name} failed={srcB()?.failed} failureCode={srcB()?.failureCode}
               size={srcB()?.size}
               controlsMount={dockB()} controlLabel="B"
               transform={tB()} active={d().open && (mode() !== "one-up" || d().col === "right")} primary={d().col === "right"}
-              registerPlayer={store.actions.media.register} onPlaybackError={store.actions.media.report}
-              onOpen={() => store.handles.invoke("workbench.open")} />
+              registerPlayer={store.actions.media.register} onPlaybackError={store.actions.media.report} />
           </div>
           <Show when={mode() === "split"}>
             <Wipe onDown={onSplitDown} />
@@ -258,7 +258,7 @@ export function DiffStage() {
         <div class="media-dock-slot" ref={setDockA} hidden={!playableA()} />
         <div class="media-dock-slot" ref={setDockB} hidden={!playableB()} />
       </div>
-      <DiffChrome differenceReason={differenceReason()} mediaWord={((hasB() && d().col === "right" ? srcB() : srcA())?.kind ?? "image").replace("audio", "audio file")} />
+      <DiffChrome differenceReason={differenceReason()} mediaWord={((d().col === "right" ? srcB() : srcA())?.kind ?? "image").replace("audio", "audio file")} />
     </div>
   );
 }
