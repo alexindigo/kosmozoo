@@ -25,6 +25,8 @@ export function Card(props) {
   const meta = () => image()?.meta ?? null;
   const state = () => store.state.cardState(props.entryId);
   const word = () => mediaKind(image()?.filename) === "audio" ? "audio file" : mediaKind(image()?.filename) ?? "image";
+  const playable = () => ["video", "audio"].includes(mediaKind(image()?.filename));
+  const [controlsMount, setControlsMount] = createSignal(null);
 
   // the box's aspect is DATA — the store's resolved size (meta, else the
   // off-DOM loader's natural measurement), never the in-card img's load.
@@ -91,6 +93,7 @@ export function Card(props) {
         size={sizeInfo()}
         zoomKey={image()?.id}
         focused={props.focused}
+        controlsMount={controlsMount()}
         onOpen={() => store.handles.invoke("workbench.openEntry", { id: props.entryId })}
         onErrorClick={() => store.state.window.retry(props.entryId)}
         onPhase={(p) => {
@@ -99,10 +102,11 @@ export function Card(props) {
           else if (p === "error" && !store.state.sizeFailed(props.entryId)) store.state.window.markError(props.entryId);
         }}
       />
-      {/* the vote/comment foot: sticky to the viewport's bottom while a
-          taller-than-viewport card scrolls — voting stays reachable
-          without chasing the card's end (in-flow: no height added) */}
+      {/* One in-flow foot keeps playback and feedback together while a tall
+          card scrolls. The playable row reserves the same measured height
+          even when its native source is absent or failed. */}
       <div class="card-foot">
+        <Show when={playable()}><div class="media-controls-slot" ref={setControlsMount} /></Show>
         <div class="ctitle">
           <span class="ctitle-left">
             <input

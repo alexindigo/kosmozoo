@@ -101,6 +101,7 @@ export function MediaBox(props) {
     paused={paused()} current={current()} duration={duration()} muted={muted()} loop={loop()}
     onToggle={toggle} onSeek={n => { surface().currentTime = n; }} onMute={() => setMuted(v => !v)}
     onLoop={() => setLoop(v => !v)} onOpen={props.workbench ? undefined : props.onOpen} />;
+  const feedControls = () => <Show when={props.src != null && phase() !== "error"}>{controls()}</Show>;
   return <div ref={block} class={`media-block ${props.workbench ? "media-block-stage" : ""}`}>
     <div ref={box} tabIndex={playable() ? 0 : undefined}
     class={`media-box ${props.workbench ? "media-stage" : "imgwrap"} ic-${phase()}`}
@@ -134,8 +135,10 @@ export function MediaBox(props) {
       <Show when={!props.failed && props.onErrorClick}><span>click to retry</span></Show>
     </div></Show>
     </div>
-    <Show when={!props.workbench && playable()}><div class="media-controls-slot">
-      <Show when={props.src != null && phase() !== "error"}>{controls()}</Show>
-    </div></Show>
+    <Show when={!props.workbench && playable()}>
+      <Show when={props.controlsMount} fallback={<div class="media-controls-slot">{feedControls()}</div>}>
+        {feedControls()}
+      </Show>
+    </Show>
   </div>;
 }

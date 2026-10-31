@@ -130,6 +130,15 @@ async function railMotion(page) {
     if (kz.state.host() !== "fake") await kz.actions.hosts.select("fake");
   })()`);
   await page.poll(`(async () => ${KZ}.state.images.length > 3000)()`, 20000);
+  try {
+    const control = async body => {
+      const response = await fetch((process.env.E2E_FAKE ?? 'http://127.0.0.1:18261') + '/__test/activity', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body),
+      });
+      if (!response.ok) throw new Error('sticky-foot fixture control failed');
+    };
+    await require('./sticky-foot.cjs')({ page, KZ, check, capture, control });
+  } catch (error) { check('sticky feed foot consumer', false, error.message); }
   await healthyTraffic({ page, traffic: sourceTraffic, ENGINE, KZ, check });
   const dims = await page.evaluate(`(async () => (await (await fetch("/api/prefetch")).json()).dimsPending)()`);
   check("dims pass drained before the feed audit", dims === 0, `dimsPending=${dims}`);

@@ -499,6 +499,8 @@ above the minimum the box hugs it vertically. Terminal failures keep their squar
 box and audio keeps its fixed face aspect. Playable controls occupy a separate
 adjacent row below that box; its stable measured height is included in cardHeight,
 virtualizer estimates and landing compensation, even while src is absent or failed.
+Feed cards mount that row first inside their single feedback foot, above the title
+and notes, so playback and feedback stick together on taller-than-viewport cards.
 
 `MediaBox` owns native display/load/zoom and player state; `Zoomable` is its
 store adapter for feed/details/anchors. The comparator also renders MediaBox,

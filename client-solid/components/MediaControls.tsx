@@ -42,7 +42,10 @@ export function MediaControls(props) {
     <Show when={props.onOpen}><IconButton variant="media-open" title="open full screen"
       onAction={props.onOpen} icon={iconSvg("full-screen", 16)} /></Show>
   </MediaControlBoundary>;
-  // Mount is an explicit presentation input; native player state stays with
-  // MediaBox. The viewer provides ordered A/B slots outside the media area.
-  return props.docked ? <Show when={props.mount}><Portal mount={props.mount}>{bar()}</Portal></Show> : bar();
+  // Placement and button presentation are independent. Feed feet and viewer
+  // docks supply slots; native player state stays with MediaBox. A viewer
+  // waits for its dock, while ordinary inline media keep their local bar.
+  return <Show when={props.mount} fallback={props.docked ? undefined : bar()}>
+    <Portal mount={props.mount}>{bar()}</Portal>
+  </Show>;
 }
