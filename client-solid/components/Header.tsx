@@ -13,6 +13,7 @@ import { FeedFilter } from "./FeedFilter.js";
 import { SourceProgress } from "./SourceProgress.js";
 import { FolderPicker } from "./FolderPicker.js";
 import { FeedbackLink } from "./FeedbackLink.js";
+import { SingleLineText } from "./SingleLineText.js";
 import { sourceProgress } from "../lib/source-progress.js";
 import { sourceNewContent } from "../lib/source-new-content.js";
 
@@ -104,6 +105,18 @@ function Menu() {
                 />
                 <span class="track" />
                 down-vote hides
+              </label>
+            </div>
+          </Show>
+          <Show when={matches("Add source name to copied and saved file names")}>
+            <div class="menurow">
+              <label class="switchwrap">
+                <input
+                  id="sourcePrefix" type="checkbox" checked={store.state.filePrefs.sourcePrefix}
+                  onChange={(e) => store.handles.invoke("preference.sourcePrefix", { value: e.target.checked })}
+                />
+                <span class="track" />
+                <SingleLineText value="Add source name to copied and saved file names" />
               </label>
             </div>
           </Show>

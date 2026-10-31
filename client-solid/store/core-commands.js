@@ -131,6 +131,7 @@ export function registerCoreCommands(handles, { ops, state, clipboard = (text) =
   add("prefetch.enabled", { value: bool }, ({ value }) => ops.menu.scraperToggle(value));
   add("prefetch.pause", {}, () => ops.menu.scraperPause());
   add("preference.downvoteHides", { value: bool }, ({ value }) => ops.judgments.setDownvoteHides(value));
+  add("preference.sourcePrefix", { value: bool }, ({ value }) => ops.menu.sourcePrefix(value));
   add("preference.deleteAssetsPlus", { value: bool }, ({ value }) => ops.menu.deleteAssetsPlus(value));
   add("preference.revealDown", {}, () => ops.judgments.toggleReveal());
   add("preference.hideUp", {}, () => ops.judgments.toggleHideUp());
@@ -221,6 +222,7 @@ export function commandFacades(handles, ops, state) {
   });
   Object.assign(facade.menu, {
     scraperToggle: (value) => invoke("prefetch.enabled", { value }), scraperPause: () => invoke("prefetch.pause"),
+    sourcePrefix: (value) => invoke("preference.sourcePrefix", { value }),
     deleteAssetsPlus: (value) => invoke("preference.deleteAssetsPlus", { value }),
   });
   return facade;

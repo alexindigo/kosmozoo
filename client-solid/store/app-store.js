@@ -46,6 +46,7 @@ import { registerCoreCommands, commandFacades } from "./core-commands.js";
 import { makeInputPolicy } from "./input-policy.js";
 import { launchNotice } from "/js/launch-notice.mjs";
 import { readZoomView, readyViewGeometry } from "/js/zoom-view.mjs";
+import { entryNames } from "./entry-names.js";
 
 // stored host if still present, else first online, else first
 function initialHost(hosts, stored) {
@@ -67,6 +68,7 @@ export function makeAppStore({ subscribeSources = typeof window !== "undefined" 
     deletePrefs: { useAssetsPlus: true },
     ui: {},               // core.ui settings (stored host, ...)
     judgmentPrefs: { downvoteHides: true, revealThumbedDown: false, hideUp: false },
+    filePrefs: { sourcePrefix: true },
     images: [],           // [{ id, host, filename, size, meta, judgment }]
     inventory: { revision: null, coverage: null, folders: [""], loading: false,
       subfolders: { supported: null, reason: "Output inventory has not loaded" } },
@@ -1031,12 +1033,7 @@ export function makeAppStore({ subscribeSources = typeof window !== "undefined" 
 
   const imageIdx = (id) => imageIdxById().get(id) ?? -1;
 
-  // the ONE download-name convention : <host>#<filename>, unless the
-  // filename already carries the tag
-  function downloadName(img) {
-    const leaf = img.filename.split("/").at(-1);
-    return leaf.startsWith(img.host + "#") ? leaf : img.host + "#" + leaf;
-  }
+  const namesFor = (img) => entryNames(img, st.filePrefs);
   // the ONE transient-anchor download : download and bulk.save share it
   function triggerDownload(url, name) {
     const a = document.createElement("a");
@@ -1581,6 +1578,8 @@ export function makeAppStore({ subscribeSources = typeof window !== "undefined" 
       setSt("deletePrefs", { useAssetsPlus: del.useAssetsPlus ?? true });
       const jns = await api.settings("core.judgment").catch(() => ({}));
       setSt("judgmentPrefs", "downvoteHides", jns.downvoteHides ?? true);
+      const files = await api.settings("core.files").catch(() => ({}));
+      setSt("filePrefs", "sourcePrefix", files.sourcePrefix ?? true);
       setSt("scraper", reconcile(await api.prefetch().catch(() => null)));
       actions.anchors.load();
       await actions.keys.loadSaved();
@@ -1775,7 +1774,7 @@ export function makeAppStore({ subscribeSources = typeof window !== "undefined" 
         const idx = imageIdx(id);
         if (idx < 0) return;
         const img = st.images[idx];
-        triggerDownload(api.entryBytesUrl(img.host, img.filename), downloadName(img));
+        triggerDownload(api.entryBytesUrl(img.host, img.filename), namesFor(img).download);
       },
     },
 
@@ -2408,7 +2407,7 @@ export function makeAppStore({ subscribeSources = typeof window !== "undefined" 
       save() {
         const images = actions.bulk.images();
         for (const img of images) {
-          triggerDownload(api.entryBytesUrl(img.host, img.filename), downloadName(img));
+          triggerDownload(api.entryBytesUrl(img.host, img.filename), namesFor(img).download);
         }
         actions.status.info(`saving ${images.length} image${images.length > 1 ? "s" : ""}`);
       },
@@ -2417,6 +2416,10 @@ export function makeAppStore({ subscribeSources = typeof window !== "undefined" 
     // --- menu / settings rows -----------------------------------------------------
     menu: {
       setFilter(v) { setMenuFilter(v); },
+      async sourcePrefix(on) {
+        setSt("filePrefs", "sourcePrefix", on);
+        await api.setSettings("core.files", { sourcePrefix: on }).catch(() => {});
+      },
       async scraperToggle(on) {
         await api.setPrefetch({ enabled: on });
         setSt("scraper", reconcile(await api.prefetch().catch(() => st.scraper)));
@@ -2455,9 +2458,10 @@ export function makeAppStore({ subscribeSources = typeof window !== "undefined" 
     get deletePrefs() { return st.deletePrefs; },
     get ui() { return st.ui; },
     get judgmentPrefs() { return st.judgmentPrefs; },
+    get filePrefs() { return st.filePrefs; },
     resizing,
-    downloadName,
-    referenceName: (image) => `${image.host}#${image.filename}`,
+    downloadName: (image) => namesFor(image).download,
+    referenceName: (image) => namesFor(image).reference,
     get images() { return st.images; },
     get inventory() { return st.inventory; },
     selectedFolder,

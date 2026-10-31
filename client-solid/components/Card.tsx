@@ -118,7 +118,7 @@ export function Card(props) {
                 store.handles.invoke("selection.set", { id: props.entryId, value: e.target.checked });
               }}
             />
-            <span class="copyable" classList={{ copied: copiedOn() }} title={`${image()?.filename} — click to copy host#full-path`} onClick={copyName}>
+            <span class="copyable" classList={{ copied: copiedOn() }} title="Copy the image file name and folder path" onClick={copyName}>
               {image()?.filename}
             </span>
           </span>
