@@ -49,7 +49,7 @@ module.exports = async ({ cdp, FAKE, KZ, check }) => {
     // an empty popup. Placement observes ancestor travel, never writes it.
     await require('./image-picker-helpers.cjs').openImageAdd(cdp, '[data-image-id="81.image"]');
     await cdp.clickAt('[data-image-id="81.image"] .vz-input-trigger');
-    await cdp.poll("!!document.querySelector('.vz-input-search')");
+    await cdp.poll("document.activeElement.matches('.vz-input-search') && getComputedStyle(document.querySelector('.vz-input-popover')).opacity === '1'");
     await cdp.evaluate("document.querySelector('.vz-input-search').select()");await cdp.send('Input.insertText',{text:'ref.png'});
     const placedRow = async () => {
       await cdp.poll("!!document.querySelector('.vz-input-option[data-input-name=\"ref.png\"]')");
@@ -92,7 +92,7 @@ module.exports = async ({ cdp, FAKE, KZ, check }) => {
     await type('.vz-suffix', '_{76.image}_{81.image}_{20.strength_model}_{20.lora_name}_{2.text}_{92:105.text}');
     const start = (await http('/__test/enqueues')).length;
     const result = await invoke('variations.run');
-    assert.equal(result.status, 'submitted'); assert.equal(result.adopted, true);
+    assert.equal(result.status, 'submitted', JSON.stringify({ result, message: await cdp.evaluate("document.querySelector('.vz-messages').textContent") })); assert.equal(result.adopted, true);
     const jobs = (await http('/__test/enqueues')).slice(start);
     assert.equal(jobs.length, 6);
     assert.equal(new Set(jobs.map(job => job.prompt['20'].inputs.strength_model)).size, 3);

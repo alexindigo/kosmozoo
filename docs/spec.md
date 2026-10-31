@@ -904,7 +904,12 @@ notifications coalesce into one animation frame and are removed on close or
 suspension. Popup/list resizing cannot schedule placement, and placement never
 writes scroll position. Suspension retains geometry and widget identity while
 interaction waits for the resumed placement frame. The search stays intrinsic
-and the existing list consumes its bounded viewport.
+and the existing list consumes its bounded viewport. The popup is inert until
+its placement-ready class is committed; its own lifetime gates both first focus
+and retained focus/caret restoration until then. Popup readiness, thumbnail decode
+visibility and unavailable current markers use shared class bindings; measured
+geometry stays inline. User template labels and selection summaries use the
+foreground token, as do the available Discard recipe and image-add actions.
 
 Naming tokens use those exact IDs (`_{76.image}_{81.image}`), through the same
 codec/parser. Unknown/unbalanced placeholder syntax remains editable but rejects

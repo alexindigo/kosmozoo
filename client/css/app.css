@@ -688,7 +688,7 @@ body:has(#diff:not([hidden])) #statusCol { bottom: 56px; }
 .vz-enum-body { flex-direction: column; }
 .vz-enum-filter-line { display: flex; align-items: center; gap: 8px; }
 .vz-enum-filter-line .vz-enum-filter { flex: 1; min-width: 0; }
-.vz-enum-selected { flex: 0 0 auto; color: var(--foreground-mid); font-variant-numeric: tabular-nums; }
+.vz-enum-selected { flex: 0 0 auto; color: var(--foreground); font-variant-numeric: tabular-nums; }
 .vz-enum-filter { background: var(--background); color: var(--foreground);
   border: 1px solid var(--border-strong); border-radius: 4px; font-size: 12px;
   padding: 3px 6px; }
@@ -714,7 +714,7 @@ body:has(#diff:not([hidden])) #statusCol { bottom: 56px; }
 
 /* {{label}} substitution inputs: one row per label detected in the text */
 .vz-tpl-row { display: flex; align-items: center; gap: 8px; }
-.vz-tpl-label { color: var(--foreground-dim); font-size: 11px;
+.vz-tpl-label { color: var(--foreground); font-size: 11px;
   font-family: ui-monospace, monospace; flex: 0 0 auto;
   max-width: 40%; }
 .vz-tpl-input { flex: 1; background: var(--background);
@@ -1014,7 +1014,7 @@ body:has(#diff:not([hidden])) #statusCol { bottom: 56px; }
 .vz-image-remove { position: absolute; top: 4px; right: 4px; opacity: 0; }
 .vz-image-tile:hover .vz-image-remove, .vz-image-tile:focus-within .vz-image-remove { opacity: 1; }
 .vz-image-dragging { z-index: 2; cursor: grabbing; box-shadow: 0 8px 24px var(--backdrop); }
-.vz-image-plus { border: 1px dashed var(--border-strong); color: var(--foreground-mid); background: transparent; font: inherit; font-size: 28px; cursor: pointer; }
+.vz-image-plus { border: 1px dashed var(--border-strong); color: var(--foreground); background: transparent; font: inherit; font-size: 28px; cursor: pointer; }
 .vz-image-plus:hover { color: var(--foreground); border-color: var(--foreground-dim); }
 .vz-image-ratio-source { position: absolute; width: 1px; height: 1px; opacity: 0; overflow: hidden; pointer-events: none; }
 .vz-image-check { position: absolute; inset: 0; display: grid; place-items: center; background: var(--backdrop); pointer-events: none; }
@@ -1150,7 +1150,7 @@ body:has(#diff:not([hidden])) #statusCol { bottom: 56px; }
 .vz-field-help { margin: 0; color: var(--foreground-mid); font: 12px/16px system-ui; overflow-wrap: anywhere; }
 .vz-parameter .vz-imgrow-body { padding-left: 24px; }
 .vz-parameter .vz-rangewrap { margin-top: 0; }
-.vz-input-summary { margin: 0; color: var(--foreground-mid); font: 12px/16px system-ui; }
+.vz-input-summary { margin: 0; color: var(--foreground); font: 12px/16px system-ui; }
 .vz-folder { flex-basis: 100%; }
 .vz-root :is(input, textarea, select, button):focus-visible { outline: 2px solid var(--secondary); outline-offset: 2px; }
 .vz-root input[aria-invalid="true"] { border-color: var(--error); }
@@ -1174,7 +1174,6 @@ body:has(#diff:not([hidden])) #statusCol { bottom: 56px; }
 .vz-workspace-new, .vz-workspace-discard { font: inherit; font-size: 11px;
   color: var(--foreground); background: var(--background); border: 1px solid var(--border-strong);
   border-radius: 4px; padding: 5px; text-align: left; cursor: pointer; }
-.vz-workspace-discard { color: var(--foreground-mid); background: transparent; }
 .vz-workspace-status { color: var(--warning); font-size: 11px; line-height: 1.4; margin: 4px 0; }
 
 /* Availability belongs to the owner. Empty slots contain no focusable control,
@@ -1250,6 +1249,14 @@ body:has(#diff:not([hidden])) #statusCol { bottom: 56px; }
   box-shadow: inset 0 0 0 1px var(--border-strong); font: inherit; cursor: pointer; }
 .select-trigger > .single-line-text { padding-inline-start: 8px; }
 .select-trigger:hover { box-shadow: inset 0 0 0 1px var(--foreground-dim); }
+
+/* Readiness and native decode state use Solid's shared class bindings. Geometry
+   remains inline, owned by the surface that measures it. */
+.vz-input-popover { opacity: 0; pointer-events: none; }
+.vz-input-popover.is-placed { opacity: 1; pointer-events: auto; }
+.vz-thumbnail img { visibility: hidden; }
+.vz-thumbnail img.vz-thumbnail-loaded { visibility: visible; }
+.vz-current-point.vz-current-unavailable { display: none; }
 .search-control { flex: 0 0 auto; }
 .search-control > input { grid-area: 1 / 1 / 2 / -1; }
 .search-control > .icon-button { grid-area: 1 / 2; }

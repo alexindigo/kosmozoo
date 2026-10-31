@@ -139,7 +139,8 @@ function NumericEditor(props) {
           <div class="vz-lane vz-lane-track">
             <div class="vz-rail" />
             <div class="vz-marker-inset">
-              <div class="vz-current-point" style={markerPct() != null ? { left: markerPct() + "%" } : { display: "none" }}>
+              <div class="vz-current-point" classList={{ "vz-current-unavailable": markerPct() == null }}
+                style={{ left: markerPct() != null ? markerPct() + "%" : undefined }}>
                 <div class="vz-marker" />
                 <SingleLineText class="vz-editor-current" value={relative ? "varies by image" : fmt(props.current())} />
               </div>
