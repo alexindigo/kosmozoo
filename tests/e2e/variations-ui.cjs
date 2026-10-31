@@ -35,16 +35,16 @@ async function main() {
     console.log('PASS compact inactive numeric rows ' + JSON.stringify(compact));
     assert.equal(await cdp.evaluate(`document.querySelector('${denoise} .vz-parameter-name').textContent`), 'Denoise');
     assert(await cdp.evaluate(`document.querySelector('${denoise} .vz-label').title.includes('#9')`));
-    const identity = await cdp.evaluate(`(()=>{window.__uiWidget=document.querySelector('${denoise} .vz-slider');const cb=document.querySelector('${denoise} .vz-cb');return {name:cb.labels[0].textContent,description:document.getElementById(cb.getAttribute('aria-describedby')).textContent,thumbs:[...document.querySelectorAll('${denoise} [role="slider"]')].map(e=>e.getAttribute('aria-label'))}})()`);
+    const identity = await cdp.evaluate(`(()=>{window.__uiWidget=document.querySelector('${denoise} .vz-slider');const cb=document.querySelector('${denoise} .checkbox');return {name:cb.labels[0].textContent,description:document.getElementById(cb.getAttribute('aria-describedby')).textContent,thumbs:[...document.querySelectorAll('${denoise} [role="slider"]')].map(e=>e.getAttribute('aria-label'))}})()`);
     assert.equal(identity.name, 'Denoise'); assert.equal(identity.description, 'BasicScheduler #9 · denoise'); assert(identity.thumbs[0].includes('lower')); assert(identity.thumbs[1].includes('upper'));
-    await cdp.clickAt(`${denoise} .vz-cb`); await cdp.clickAt(`${denoise} .vz-cb`);
+    await cdp.clickAt(`${denoise} .checkbox`); await cdp.clickAt(`${denoise} .checkbox`);
     assert(await cdp.evaluate(`window.__uiWidget===document.querySelector('${denoise} .vz-slider')`));
     const suffixBeforeLabel = await cdp.evaluate("document.querySelector('.vz-suffix').value");
     await cdp.clickAt('[data-param-key="9.steps"] .vz-parameter-name');
-    await cdp.poll("document.querySelector('[data-param-key=\"9.steps\"] .vz-cb').checked");
+    await cdp.poll("document.querySelector('[data-param-key=\"9.steps\"] .checkbox').checked");
     assert.equal(await cdp.evaluate("document.querySelector('.vz-suffix').value"), suffixBeforeLabel+'_{9.steps}', 'associated name toggles once without also inserting a second naming token');
     await cdp.clickAt('[data-param-key="9.steps"] .vz-parameter-name');
-    await cdp.poll("!document.querySelector('[data-param-key=\"9.steps\"] .vz-cb').checked");
+    await cdp.poll("!document.querySelector('[data-param-key=\"9.steps\"] .checkbox').checked");
     assert.equal(await cdp.evaluate("document.querySelector('.vz-suffix').value"), suffixBeforeLabel);
     await cdp.clickAt(`${denoise} .vz-range-field:first-child input`);
     await type(`${denoise} .vz-range-field:first-child input`, '.85');
@@ -74,7 +74,7 @@ async function main() {
     await type(upper, '1'); await cdp.keyTrusted('Tab', { vk:9 });
     console.log('PASS numeric writes admit the next real touch immediately, without a tap-transition gate');
 
-    await cdp.clickAt('.vz-image-set .vz-cb');
+    await cdp.clickAt('.vz-image-set .checkbox');
     for (const name of ['canny.png', 'ref.png', 'third.png']) await pickInput(cdp, name);
     await cdp.poll("document.querySelector('.vz-count').textContent==='11'");
     assert(await cdp.evaluate("document.querySelector('.vz-count-sub').textContent.includes('3 input images × 4 denoise values · 1 unchanged combination excluded')"));
@@ -91,17 +91,17 @@ async function main() {
     console.log('PASS exact tuple explanation, labelled acquisition, canonical naming sample and insertion');
     await shot('populated');
 
-    await cdp.clickAt('[data-enum-id="9.scheduler"] .vz-cb');
+    await cdp.clickAt('[data-enum-id="9.scheduler"] .checkbox');
     assert(await cdp.evaluate("[...document.querySelectorAll('[data-enum-id=\"9.scheduler\"] .vz-enum-opt')].some(e=>e.textContent.includes('Current'))"));
-    await cdp.clickAt('[data-text-id="2.text"] .vz-cb');
+    await cdp.clickAt('[data-text-id="2.text"] .checkbox');
     await type('[data-text-id="2.text"] .vz-text-values', 'A portrait of {{subject}}.\nLine breaks stay.');
     await cdp.poll("document.querySelector('.vz-count').textContent==='—'");
     assert(await cdp.evaluate("document.querySelector('.vz-tpl-input').getAttribute('aria-invalid')==='true'"));
     await type('.vz-tpl-input', 'a person; a cat');
     await cdp.poll("document.querySelector('.vz-count').textContent==='24'");
     await shot('text-and-enum');
-    await cdp.clickAt('[data-text-id="2.text"] .vz-imgrow-head .vz-cb');
-    await cdp.clickAt('[data-enum-id="9.scheduler"] .vz-imgrow-head .vz-cb');
+    await cdp.clickAt('[data-text-id="2.text"] .vz-imgrow-head .checkbox');
+    await cdp.clickAt('[data-enum-id="9.scheduler"] .vz-imgrow-head .checkbox');
     await cdp.poll("document.querySelector('.vz-count').textContent==='11'");
     console.log('PASS current enum semantics and persistent template syntax/invalid-value associations');
 
@@ -185,7 +185,7 @@ async function main() {
       } }] }) }); assert(published.ok);
     await cdp.evaluate(`(async()=>{await fetch('/api/collections/fake/entries/summary-large.png/bytes');return ${KZ}.handles.invoke('variations.open',{id:'fake:summary-large.png'})})()`);
     await cdp.poll("document.querySelectorAll('.vz-slider-row').length===3");
-    for (const key of ['a','b','c']) await cdp.clickAt(`[data-param-key="91.${key}"] .vz-cb`);
+    for (const key of ['a','b','c']) await cdp.clickAt(`[data-param-key="91.${key}"] .checkbox`);
     await cdp.poll("document.querySelector('.vz-count').title.includes('(estimate)')");
     assert(await cdp.evaluate("document.querySelector('.vz-count').textContent.includes('10^')&&document.querySelector('.vz-messages').textContent.includes('precision')"));
     assert.equal(await cdp.evaluate("document.querySelector('.vz-run').disabled"), false);

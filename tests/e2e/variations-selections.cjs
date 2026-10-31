@@ -3,19 +3,19 @@ const assert=require('node:assert/strict');
 const { pickInput } = require('./image-picker-helpers.cjs');
 const { discardRecipe } = require('./recipe-helpers.cjs');
 const typeText=async(cdp,selector,text)=>{await cdp.clickAt(selector);await cdp.evaluate(`(()=>{const e=document.querySelector(${JSON.stringify(selector)});e.focus();e.select()})()`);await cdp.send('Input.insertText',{text});await cdp.poll(`document.querySelector(${JSON.stringify(selector)}).value===${JSON.stringify(text)}`);};
-const inputControl='.vz-imgrow:not(.vz-enumrow):not(.vz-textrow) .vz-cb';
+const inputControl='.vz-imgrow:not(.vz-enumrow):not(.vz-textrow) .checkbox';
 // This setup operates on ControlNet graphs. Its numeric/text rows can mount
 // before the independently fetched input row, which inserts above them. Own
 // complete control readiness before measuring any trusted pointer target.
 const selectionSetup=async(cdp,twoTexts=true)=>{
   await cdp.poll(`!!document.querySelector(${JSON.stringify(inputControl)})`);
-  await cdp.clickAt('.vz-slider-row[data-param-key="9.denoise"] .vz-cb');
-  await cdp.poll(`document.querySelector('.vz-slider-row[data-param-key="9.denoise"] .vz-cb').checked===false`);
-  await cdp.clickAt('.vz-textrow[data-text-id="2.text"] .vz-cb');
+  await cdp.clickAt('.vz-slider-row[data-param-key="9.denoise"] .checkbox');
+  await cdp.poll(`document.querySelector('.vz-slider-row[data-param-key="9.denoise"] .checkbox').checked===false`);
+  await cdp.clickAt('.vz-textrow[data-text-id="2.text"] .checkbox');
   const type=(selector,text)=>typeText(cdp,selector,text);
   await type('.vz-textrow[data-text-id="2.text"] .vz-text-values','First {{pick}}.\n\nSecond paragraph.');
   await cdp.poll("!!document.querySelector('.vz-tpl-input')");await type('.vz-tpl-input','one; two');
-  if(twoTexts){await cdp.clickAt('.vz-textrow[data-text-id="42.text"] .vz-cb');await type('.vz-textrow[data-text-id="42.text"] .vz-text-values','negative text');}
+  if(twoTexts){await cdp.clickAt('.vz-textrow[data-text-id="42.text"] .checkbox');await type('.vz-textrow[data-text-id="42.text"] .vz-text-values','negative text');}
 };
 module.exports=async({cdp,FAKE,KZ,check})=>{
   const invoke=(id,args={})=>cdp.evaluate(`(async()=>${KZ}.handles.invoke(${JSON.stringify(id)},${JSON.stringify(args)}))()`);
@@ -45,11 +45,11 @@ module.exports=async({cdp,FAKE,KZ,check})=>{
         task=textOnly(twoTexts).then(()=>{setup='complete'},error=>{setup='failed';throw error});
         assert.equal(await cdp.evaluate(`!!document.querySelector(${JSON.stringify(inputControl)})`),false);
         assert.equal(setup,'pending');
-        assert.equal(await cdp.evaluate(`document.querySelector('.vz-slider-row[data-param-key="9.denoise"] .vz-cb').checked`),true);
+        assert.equal(await cdp.evaluate(`document.querySelector('.vz-slider-row[data-param-key="9.denoise"] .checkbox').checked`),true);
         assert.equal((await jobs()).length,beforeReadyJobs);
         await cdp.evaluate('window.__selectionRelease()');await task;
         assert.equal(setup,'complete');
-        assert.equal(await cdp.evaluate(`document.querySelector('.vz-slider-row[data-param-key="9.denoise"] .vz-cb').checked`),false);
+        assert.equal(await cdp.evaluate(`document.querySelector('.vz-slider-row[data-param-key="9.denoise"] .checkbox').checked`),false);
         assert.equal((await jobs()).length,beforeReadyJobs);
         check(`selection setup owns late input layout: ${name}, trusted numeric-off and no submissions`,true);
       }finally{
@@ -72,18 +72,18 @@ module.exports=async({cdp,FAKE,KZ,check})=>{
     assert.equal(await cdp.evaluate("!!document.querySelector('.vz-discard')"),false);
     check('numeric-off + two submitted text axes: immediate manual close has no discard decision',true);
 
-    await open();await cdp.poll("!!document.querySelector('.vz-imgrow:not(.vz-enumrow):not(.vz-textrow) .vz-cb')");
-    await cdp.clickAt('.vz-imgrow:not(.vz-enumrow):not(.vz-textrow) .vz-cb');
+    await open();await cdp.poll("!!document.querySelector('.vz-imgrow:not(.vz-enumrow):not(.vz-textrow) .checkbox')");
+    await cdp.clickAt('.vz-imgrow:not(.vz-enumrow):not(.vz-textrow) .checkbox');
     await pickInput(cdp, 'ref.png');
-    await cdp.clickAt('.vz-enumrow[data-enum-id="9.scheduler"] .vz-imgrow-head .vz-cb');
-    await cdp.clickAt('.vz-enumrow[data-enum-id="9.scheduler"] .vz-enum-opt:last-child .vz-cb');
-    await cdp.clickAt('.vz-textrow[data-text-id="2.text"] .vz-cb');
+    await cdp.clickAt('.vz-enumrow[data-enum-id="9.scheduler"] .vz-imgrow-head .checkbox');
+    await cdp.clickAt('.vz-enumrow[data-enum-id="9.scheduler"] .vz-enum-opt:last-child .checkbox');
+    await cdp.clickAt('.vz-textrow[data-text-id="2.text"] .checkbox');
     await type('.vz-textrow[data-text-id="2.text"] .vz-text-values','acknowledged text');
     assert.equal((await invoke('variations.run')).status,'submitted');
     // Previously acknowledged values are retained; only their on/off choices change.
-    await cdp.clickAt('.vz-imgrow:not(.vz-enumrow):not(.vz-textrow) .vz-cb');
-    await cdp.clickAt('.vz-enumrow[data-enum-id="9.scheduler"] .vz-imgrow-head .vz-cb');
-    await cdp.clickAt('.vz-textrow[data-text-id="2.text"] .vz-cb');
+    await cdp.clickAt('.vz-imgrow:not(.vz-enumrow):not(.vz-textrow) .checkbox');
+    await cdp.clickAt('.vz-enumrow[data-enum-id="9.scheduler"] .vz-imgrow-head .checkbox');
+    await cdp.clickAt('.vz-textrow[data-text-id="2.text"] .checkbox');
     const second=(await jobs()).length;assert.equal((await invoke('variations.run')).status,'submitted');
     const numeric=(await jobs()).slice(second);assert(numeric.length>0);
     assert(numeric.every(job=>job.prompt['43'].inputs.image==='canny.png'&&job.prompt['2'].inputs.text==='a portrait, studio light'&&job.prompt['9'].inputs.scheduler==='simple'));

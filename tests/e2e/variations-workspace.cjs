@@ -56,17 +56,17 @@ module.exports = async ({ cdp, ENGINE, FAKE, KZ, check }) => {
     await cdp.evaluate("(async()=>{await fetch('/api/collections/fake/entries/recipe-b.png/bytes')})()");await invoke('variations.open',{id:'fake:recipe-b.png'});await cdp.poll("document.querySelectorAll('.vz-slider-row').length>0");await close();
     await open();assert.equal(await cdp.evaluate("document.querySelector('.vz-suffix').value"),'_naming-suffix');
     await cdp.poll("document.querySelectorAll('.vz-image-set').length===2");
-    await cdp.clickAt('[data-param-key="9.steps"] .vz-cb');
+    await cdp.clickAt('[data-param-key="9.steps"] .checkbox');
     await cdp.clickAt('[data-param-key="9.steps"] .noUi-handle[data-handle="0"]');await cdp.keyTrusted('ArrowRight',{vk:39});
     await cdp.evaluate("window.__recipeRange=document.querySelector('[data-param-key=\"9.steps\"] .noUi-handle[data-handle=\"0\"]').getAttribute('aria-valuenow')");
-    await type('[data-param-key="9.steps"] .vz-row-inc-input','1e');await cdp.clickAt('[data-param-key="9.steps"] .vz-cb');
-    await cdp.clickAt('[data-enum-id="9.scheduler"] .vz-imgrow-head .vz-cb');await cdp.clickAt('[data-enum-id="9.scheduler"] .vz-enum-opt:last-child .vz-cb');await cdp.clickAt('[data-enum-id="9.scheduler"] .vz-imgrow-head .vz-cb');
-    await cdp.clickAt('[data-text-id="2.text"] .vz-cb');await type('.vz-text-values','{{parked}}');await type('.vz-tpl-input','one; two');await type('.vz-text-values','literal submitted');
+    await type('[data-param-key="9.steps"] .vz-row-inc-input','1e');await cdp.clickAt('[data-param-key="9.steps"] .checkbox');
+    await cdp.clickAt('[data-enum-id="9.scheduler"] .vz-imgrow-head .checkbox');await cdp.clickAt('[data-enum-id="9.scheduler"] .vz-enum-opt:last-child .checkbox');await cdp.clickAt('[data-enum-id="9.scheduler"] .vz-imgrow-head .checkbox');
+    await cdp.clickAt('[data-text-id="2.text"] .checkbox');await type('.vz-text-values','{{parked}}');await type('.vz-tpl-input','one; two');await type('.vz-text-values','literal submitted');
     await cdp.evaluate(`(async()=>{const bytes=await(await fetch('/api/collections/fake/entries/flux-lora.png/bytes')).arrayBuffer();
       window.__recipeFiles=['#%.png','question?.png','spaces Ω [input].png'].map(name=>new File([bytes],name,{type:'image/png'}));
       window.__recipeDormant=new File([bytes],'dormant.png',{type:'image/png'});
       for(const [id,files] of [['470.image',window.__recipeFiles],['475.image',[window.__recipeDormant]]]){const input=document.querySelector('[data-image-id="'+id+'"] .vz-imgfilespick'),dt=new DataTransfer();files.forEach(file=>dt.items.add(file));input.files=dt.files;input.dispatchEvent(new Event('change',{bubbles:true}))}})()`);
-    await cdp.clickAt('[data-image-id="470.image"] .vz-cb');await cdp.clickAt('[data-param-key="9.denoise"] .vz-cb');
+    await cdp.clickAt('[data-image-id="470.image"] .checkbox');await cdp.clickAt('[data-param-key="9.denoise"] .checkbox');
     await type('.vz-suffix','_{470.image}');await cdp.poll("!document.querySelector('.vz-image-check')");
     await capture('recipe-captured');const before=(await jobs()).length;
     assert.equal((await invoke('variations.run')).adopted,true);
@@ -79,23 +79,23 @@ module.exports = async ({ cdp, ENGINE, FAKE, KZ, check }) => {
     const urlStart=await cdp.evaluate('window.__recipeURLs.length');await open();await cdp.poll("document.querySelectorAll('.vz-image-tile').length===4&&!document.querySelector('.vz-image-check')");
     assert(await cdp.evaluate(`window.__recipeFiles.concat(window.__recipeDormant).every(file=>window.__recipeURLs.slice(${urlStart}).some(item=>item.file===file))`));
     assert.equal(await cdp.evaluate("document.querySelector('[data-param-key=\"9.steps\"] .vz-row-inc-input').value"),'1e');
-    assert.equal(await cdp.evaluate("document.querySelector('[data-param-key=\"9.steps\"] .vz-cb').checked"),false);
+    assert.equal(await cdp.evaluate("document.querySelector('[data-param-key=\"9.steps\"] .checkbox').checked"),false);
     assert(await cdp.evaluate("document.querySelector('[data-param-key=\"9.steps\"] .noUi-handle[data-handle=\"0\"]').getAttribute('aria-valuenow')===window.__recipeRange"));
     await capture('recipe-recovered');await type('.vz-text-values','{{parked}}');assert.equal(await cdp.evaluate("document.querySelector('.vz-tpl-input').value"),'one; two');
     await type('.vz-text-values','literal submitted');
-    await cdp.clickAt('[data-enum-id="9.scheduler"] .vz-imgrow-head .vz-cb');assert.equal(await cdp.evaluate("document.querySelector('[data-enum-id=\"9.scheduler\"] .vz-enum-opt:last-child .vz-cb').checked"),true);await cdp.clickAt('[data-enum-id="9.scheduler"] .vz-imgrow-head .vz-cb');
-    await cdp.poll("document.querySelector('[data-enum-id=\"9.scheduler\"] .vz-imgrow-head .vz-cb').checked===false");
+    await cdp.clickAt('[data-enum-id="9.scheduler"] .vz-imgrow-head .checkbox');assert.equal(await cdp.evaluate("document.querySelector('[data-enum-id=\"9.scheduler\"] .vz-enum-opt:last-child .checkbox').checked"),true);await cdp.clickAt('[data-enum-id="9.scheduler"] .vz-imgrow-head .checkbox');
+    await cdp.poll("document.querySelector('[data-enum-id=\"9.scheduler\"] .vz-imgrow-head .checkbox').checked===false");
     check('recipe scenarios 2–3: disabled raw controls, enum picks, dormant templates and identical native Files recover after 3 exact hostile-name graphs and automatic close; object URLs retire',true);
 
     // Enabled-empty and unresolved naming reject without a single fake enqueue.
-    await cdp.clickAt('[data-image-id="475.image"] .vz-cb');await cdp.poll("document.querySelector('[data-image-id=\"475.image\"] .vz-cb').checked===true");await cdp.clickAt('[data-image-id="475.image"] .vz-image-tile .chrome-icon');
+    await cdp.clickAt('[data-image-id="475.image"] .checkbox');await cdp.poll("document.querySelector('[data-image-id=\"475.image\"] .checkbox').checked===true");await cdp.clickAt('[data-image-id="475.image"] .vz-image-tile .chrome-icon');
     await cdp.poll("document.querySelectorAll('[data-image-id=\"475.image\"] .vz-image-tile').length===0");
     let count=(await jobs()).length;assert.equal((await invoke('variations.run')).adopted,false);assert.equal((await jobs()).length,count);
     assert(await cdp.evaluate("document.querySelector('.vz-error').textContent.includes('at least one image')"));
-    await cdp.clickAt('[data-image-id="475.image"] .vz-cb');await cdp.poll("document.querySelector('[data-image-id=\"475.image\"] .vz-cb').checked===false");
+    await cdp.clickAt('[data-image-id="475.image"] .checkbox');await cdp.poll("document.querySelector('[data-image-id=\"475.image\"] .checkbox').checked===false");
     // The fake intentionally returns 409 for repeated names (unlike stock byte
     // dedupe). These independent preflight cases must not retry accepted Files.
-    await cdp.clickAt('[data-image-id="470.image"] .vz-cb');await cdp.poll("document.querySelector('[data-image-id=\"470.image\"] .vz-cb').checked===false");await type('.vz-suffix','_{unknown}');
+    await cdp.clickAt('[data-image-id="470.image"] .checkbox');await cdp.poll("document.querySelector('[data-image-id=\"470.image\"] .checkbox').checked===false");await type('.vz-suffix','_{unknown}');
     count=(await jobs()).length;await invoke('variations.run');assert.equal((await jobs()).length,count);
     assert(await cdp.evaluate("document.querySelector('.vz-error').textContent.includes('naming token')"),await cdp.evaluate("document.querySelector('.vz-error').textContent"));
     await fixedSummary();await capture('recipe-preflight');
@@ -106,7 +106,7 @@ module.exports = async ({ cdp, ENGINE, FAKE, KZ, check }) => {
     await type('.vz-suffix','_{470.image}');
     for(let remaining=3;remaining>0;remaining--){await cdp.clickAt('[data-image-id="470.image"] .vz-image-tile .chrome-icon');await cdp.poll(`document.querySelectorAll('[data-image-id="470.image"] .vz-image-tile').length===${remaining-1}`)}
     await cdp.evaluate(`(async()=>{const bytes=await(await fetch('/api/collections/fake/entries/flux-lora.png/bytes')).arrayBuffer(),input=document.querySelector('[data-image-id="470.image"] .vz-imgfilespick'),dt=new DataTransfer();dt.items.add(new File([bytes],'x'.repeat(196)+'.png',{type:'image/png'}));input.files=dt.files;input.dispatchEvent(new Event('change',{bubbles:true}))})()`);
-    await cdp.clickAt('[data-image-id="470.image"] .vz-cb');await cdp.poll("document.querySelector('[data-image-id=\"470.image\"] .vz-cb').checked===true&&!document.querySelector('.vz-image-check')");count=(await jobs()).length;await invoke('variations.run');assert.equal((await jobs()).length,count);
+    await cdp.clickAt('[data-image-id="470.image"] .checkbox');await cdp.poll("document.querySelector('[data-image-id=\"470.image\"] .checkbox').checked===true&&!document.querySelector('.vz-image-check')");count=(await jobs()).length;await invoke('variations.run');assert.equal((await jobs()).length,count);
     assert(await cdp.evaluate("document.querySelector('.vz-error').textContent.includes('naming would be folded')"));
     await cdp.clickAt('.vz-close');await cdp.poll("!!document.querySelector('.vz-discard')");await cdp.clickAt('.vz-discard-confirm');await cdp.poll("!document.querySelector('.vz-panel')");
     check('recipe preflight: enabled-empty, unknown naming and a 200-character filename reject clearly with zero jobs',true);
@@ -115,7 +115,7 @@ module.exports = async ({ cdp, ENGINE, FAKE, KZ, check }) => {
     await http(FAKE,'/__test/activity','POST',{publish:[{name:'recipe-batch-full.png',fixture:'flux-basic.png',graph},{name:'recipe-batch-missing.png',fixture:'flux-basic.png',graph:missing}]});
     await cdp.evaluate("(async()=>{for(const name of ['recipe-batch-full.png','recipe-batch-missing.png'])await fetch('/api/collections/fake/entries/'+name+'/bytes')})()");
     await invoke('variations.open',{ids:['fake:recipe-batch-full.png','fake:recipe-batch-missing.png'],bulk:true});await cdp.poll("document.querySelectorAll('.vz-slider-row').length>0");
-    await cdp.clickAt('[data-param-key="9.steps"] .vz-cb');await type('.vz-suffix','');
+    await cdp.clickAt('[data-param-key="9.steps"] .checkbox');await type('.vz-suffix','');
     count=(await jobs()).length;const batch=await invoke('variations.run');assert.equal(batch.adopted,true);
     const batchJobs=(await jobs()).slice(count);assert.equal(batchJobs.length,batch.submitted);
     const fullJobs=batchJobs.filter(job=>job.extra_data.extra_pnginfo.kz.source==='fake:recipe-batch-full.png'),missingJobs=batchJobs.filter(job=>job.extra_data.extra_pnginfo.kz.source==='fake:recipe-batch-missing.png');

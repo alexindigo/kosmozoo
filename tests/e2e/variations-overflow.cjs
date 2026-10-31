@@ -70,7 +70,7 @@ module.exports = async ({ cdp, ENGINE, FAKE, KZ, check }) => {
     check('hostile generator covers integer, float, image, enum and text catalogue fields', true);
     await invoke('variations.open', { id: `${source}:${filename}` });
     await cdp.poll("!!document.querySelector('.vz-image-set')&&!!document.querySelector('.vz-enumrow')&&!!document.querySelector('.vz-textrow')&&!!document.querySelector('.vz-slider-row')");
-    await cdp.clickAt('.vz-image-set .vz-cb');
+    await cdp.clickAt('.vz-image-set .checkbox');
     await cdp.clickAt('.vz-input-trigger');
     await cdp.poll("document.querySelectorAll('.vz-input-option').length>0");
     await type('.vz-input-search', inputName);
@@ -79,16 +79,16 @@ module.exports = async ({ cdp, ENGINE, FAKE, KZ, check }) => {
     await cdp.clickAt('.vz-input-option');
     await cdp.poll("document.querySelectorAll('.vz-image-tile').length===1");
     await cdp.keyTrusted('Escape', { vk: 27 });
-    await cdp.clickAt('.vz-enumrow .vz-imgrow-head .vz-cb');
+    await cdp.clickAt('.vz-enumrow .vz-imgrow-head .checkbox');
     await cdp.poll("document.querySelectorAll('.vz-enum-opt').length===12");
     await type('.vz-enum-filter', fields.find(field => field.type === 'ENUM').value);
     await cdp.poll("document.querySelectorAll('.vz-enum-opt').length===12");
-    await cdp.clickAt('.vz-textrow .vz-imgrow-head .vz-cb');
+    await cdp.clickAt('.vz-textrow .vz-imgrow-head .checkbox');
     await cdp.poll("!!document.querySelector('.vz-tpl-input')");
     await type('.vz-tpl-input', hostile('substitution'));
     for (const field of fields.filter(field => ['INT', 'FLOAT'].includes(field.type))) {
       const row = `[data-param-key=${JSON.stringify('81.' + encodeURIComponent(field.key))}]`;
-      await cdp.clickAt(row + ' .vz-cb');
+      await cdp.clickAt(row + ' .checkbox');
       await type(row + ' .vz-row-inc-input', hostile(field.type + '_increment'));
     }
     await type('.vz-folder-path', '/engine/' + hostile('folder') + '/' + hostile('subfolder'));

@@ -3,7 +3,7 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const { workPath } = require('./paths.cjs');
 const { discardRecipe } = require('./recipe-helpers.cjs');
-const fileControl = '.vz-imgrow:not(.vz-enumrow):not(.vz-textrow) .vz-cb';
+const fileControl = '.vz-imgrow:not(.vz-enumrow):not(.vz-textrow) .checkbox';
 const fileSetup = async (cdp) => {
   await cdp.poll(`!!document.querySelector(${JSON.stringify(fileControl)})`);
   await cdp.clickAt(fileControl);
@@ -145,11 +145,11 @@ module.exports = async ({ cdp, check, FAKE, KZ }) => {
   await test('editable domains and exact File objects survive Cancel and SPA navigation', async () => {
     await open('flux-controlnet.png');
     await fileSetup(cdp);
-    await cdp.clickAt('.vz-textrow .vz-imgrow-head .vz-cb');
+    await cdp.clickAt('.vz-textrow .vz-imgrow-head .checkbox');
     await type('.vz-text-values', 'a {{kept}} template');
     await type('.vz-tpl-input', 'first; second');
-    await cdp.clickAt('.vz-enumrow .vz-imgrow-head .vz-cb');
-    await cdp.clickAt('.vz-enumrow.on .vz-enum-opt:last-child .vz-cb');
+    await cdp.clickAt('.vz-enumrow .vz-imgrow-head .checkbox');
+    await cdp.clickAt('.vz-enumrow.on .vz-enum-opt:last-child .checkbox');
     await type('.vz-prefix', 'files-kept');
     const before = await state();
     await requestClose();
@@ -247,7 +247,7 @@ module.exports = async ({ cdp, check, FAKE, KZ }) => {
 
   await test('Run snapshots before upload; stale A completion cannot publish or auto-close B', async () => {
     await open('flux-controlnet.png'); await fileSetup(cdp);
-    await cdp.clickAt('.vz-textrow .vz-imgrow-head .vz-cb');
+    await cdp.clickAt('.vz-textrow .vz-imgrow-head .checkbox');
     await type('.vz-text-values','before upload text');
     await cdp.evaluate(`(()=>{window.__originalFetch=window.fetch;window.__bodies=[];window.fetch=(url,options)=>{
       if(options?.body instanceof FormData)return new Promise(resolve=>window.__upload=()=>resolve(new Response(JSON.stringify({name:options.body.get('image').name,origin:JSON.parse(options.headers['X-Kosmozoo-Origin'])}),{status:200})));

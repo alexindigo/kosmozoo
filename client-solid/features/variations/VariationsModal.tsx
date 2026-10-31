@@ -24,6 +24,7 @@ import { makeVariationEditor } from "./editor.js";
 import { VariationDiscardConfirmation } from "./VariationDiscardConfirmation.js";
 import { ImageSetPanel } from "./ImageSetPanel.js";
 import { SingleLineText } from "../../components/SingleLineText.js";
+import { Checkbox } from "../../components/Checkbox.js";
 import { workspaceCurrent } from "./workspaces.js";
 import { ParameterRow, parameterName } from "./ParameterRow.js";
 
@@ -480,11 +481,11 @@ function EnumRow(props) {
             <For each={filtered()}>
               {(v) => (
                 <label class={"vz-enum-opt" + (v === r().current ? " vz-enum-current" : "")}>
-                  <input
+                  <Checkbox
                     {...focus}
-                    type="checkbox" class="vz-cb"
+                    size="option"
                     checked={r().picks.includes(v)}
-                    onChange={(e) => props.onPick(props.p.id, v, e.target.checked)}
+                    onChange={checked => props.onPick(props.p.id, v, checked)}
                   />
                   <SingleLineText class="vz-enum-opt-name" value={v} />
                   <Show when={v === r().current}><span class="vz-field-help">Current</span></Show>

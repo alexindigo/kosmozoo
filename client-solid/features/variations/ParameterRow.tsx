@@ -1,5 +1,6 @@
 import { createUniqueId } from "solid-js";
 import { SingleLineText } from "../../components/SingleLineText.js";
+import { Checkbox } from "../../components/Checkbox.js";
 
 // Presentation only: identity, current context, enable intent and editor slot.
 // Catalogue IDs remain opaque; a readable name never becomes a token ID.
@@ -11,8 +12,8 @@ export function ParameterRow(props) {
   const context = () => `${props.row().title ?? props.row().type} #${props.row().nodeIds[0]}`;
   return <div class={`vz-parameter ${props.class ?? ""}${props.enabled() ? " on" : " vz-off"}`} {...props.attributes}>
     <div class="vz-parameter-heading vz-imgrow-head">
-      <input id={id} type="checkbox" class="vz-cb" checked={props.enabled()}
-        aria-describedby={`${id}-identity`} onChange={event => props.onEnable(event.currentTarget.checked)} />
+      <Checkbox id={id} checked={props.enabled()}
+        aria-describedby={`${id}-identity`} onChange={checked => props.onEnable(checked)} />
       <label for={id} class="vz-parameter-name"><SingleLineText class="vz-label vz-imgrow-label"
         value={parameterName(props.row())} hint={props.row().label} /></label>
       <SingleLineText class="vz-parameter-identity" value={context()} hint={props.row().label} />

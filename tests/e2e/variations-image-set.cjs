@@ -28,8 +28,8 @@ module.exports = async ({ cdp, FAKE, KZ, check }) => {
     assert.equal(await cdp.evaluate("document.querySelector('.vz-folder-chooser button').title"), 'Folder chooser needs the desktop app');
     assert.equal(await cdp.evaluate("document.querySelector('.vz-folder-path').disabled"), false);
     await capture('image-set-empty');
-    await cdp.clickAt('.vz-image-set .vz-cb');
-    await cdp.clickAt('[data-param-key="9.denoise"] .vz-cb');
+    await cdp.clickAt('.vz-image-set .checkbox');
+    await cdp.clickAt('[data-param-key="9.denoise"] .checkbox');
     await cdp.clickAt('.vz-input-trigger');
     await cdp.poll("document.querySelectorAll('.vz-input-option').length>0");
     assert(await cdp.evaluate("document.querySelectorAll('.vz-input-row').length<=9&&document.querySelectorAll('.vz-input-option').length<=27"));
@@ -114,8 +114,8 @@ module.exports = async ({ cdp, FAKE, KZ, check }) => {
     await invoke('variations.open', { id: 'fake:flux-controlnet.png' });
     await cdp.poll("!!document.querySelector('.vz-folder-path')");
     await discardRecipe(cdp);await cdp.poll("!!document.querySelector('.vz-folder-path')");
-    await cdp.clickAt('.vz-image-set .vz-cb');
-    await cdp.clickAt('[data-param-key="9.denoise"] .vz-cb');
+    await cdp.clickAt('.vz-image-set .checkbox');
+    await cdp.clickAt('[data-param-key="9.denoise"] .checkbox');
     await pickInput(cdp, 'picker-0550.png');
     await cdp.evaluate(`(async()=>{const bytes=await(await fetch('/api/collections/fake/entries/flux-lora.png/bytes')).arrayBuffer();const input=document.querySelector('.vz-imgfilespick'),data=new DataTransfer();data.items.add(new File([bytes],'turn-browser.png',{type:'image/png'}));input.files=data.files;input.dispatchEvent(new Event('change',{bubbles:true}))})()`);
     const addFolder = async value => {

@@ -22,21 +22,21 @@ module.exports=async({cdp,ENGINE,FAKE,KZ,check})=>{
     const before=(await http(FAKE,'/__test/enqueues')).length;
     await cdp.evaluate(`(async()=>{window.__lifecycleRun=${KZ}.handles.invoke('variations.run');return true})()`);
     await cdp.poll("typeof window.__finish==='function'");await cdp.evaluate('window.__inputs()');
-    await cdp.poll("!!document.querySelector('.vz-imgrow:not(.vz-enumrow):not(.vz-textrow) .vz-cb')");
+    await cdp.poll("!!document.querySelector('.vz-imgrow:not(.vz-enumrow):not(.vz-textrow) .checkbox')");
     await cdp.evaluate('window.__finish();window.fetch=window.__lifecycleFetch');
     assert.equal((await cdp.evaluate('window.__lifecycleRun')).status,'submitted');
     await cdp.poll("!document.querySelector('.vz-panel')",6000);assert((await http(FAKE,'/__test/enqueues')).length>before);
     check('lifecycle: actual submitted work closes after clean late input defaults, without a synthetic edit or discard',true);
 
-    await invoke('variations.open',{id:'fake:flux-controlnet.png'});await cdp.poll("!!document.querySelector('.vz-imgrow:not(.vz-enumrow):not(.vz-textrow) .vz-cb')");
+    await invoke('variations.open',{id:'fake:flux-controlnet.png'});await cdp.poll("!!document.querySelector('.vz-imgrow:not(.vz-enumrow):not(.vz-textrow) .checkbox')");
     await type('.vz-slider-row[data-param-key="9.denoise"] .vz-row-inc-input','1e-1');
     await cdp.clickAt('.vz-slider-row[data-param-key="9.denoise"] .noUi-handle[data-handle="0"]');await cdp.keyTrusted('ArrowRight',{vk:39});
     await cdp.clickAt('.vz-slider-row[data-param-key="9.denoise"] .noUi-handle[data-handle="1"]');await cdp.keyTrusted('ArrowLeft',{vk:37});
-    await cdp.clickAt('.vz-imgrow:not(.vz-enumrow):not(.vz-textrow) .vz-cb');
+    await cdp.clickAt('.vz-imgrow:not(.vz-enumrow):not(.vz-textrow) .checkbox');
     await cdp.poll("!!document.querySelector('.vz-imgfilespick')");
     await cdp.evaluate("(()=>{const e=document.querySelector('.vz-imgfilespick'),dt=new DataTransfer();dt.items.add(new File(['a'],'lifecycle-combined-a.png',{type:'image/png'}));dt.items.add(new File(['b'],'lifecycle-combined-b.png',{type:'image/png'}));e.files=dt.files;e.dispatchEvent(new Event('change',{bubbles:true}));window.__combinedInput=e;window.__combinedFiles=[...e.files]})()");
-    await cdp.clickAt('.vz-enumrow[data-enum-id="9.scheduler"] .vz-imgrow-head .vz-cb');await cdp.clickAt('.vz-enumrow[data-enum-id="9.scheduler"] .vz-enum-opt:last-child .vz-cb');
-    await cdp.clickAt('.vz-textrow[data-text-id="2.text"] .vz-cb');await type('.vz-textrow[data-text-id="2.text"] .vz-text-values','  First {{used}}.\n\nSecond {{used}}.\n');
+    await cdp.clickAt('.vz-enumrow[data-enum-id="9.scheduler"] .vz-imgrow-head .checkbox');await cdp.clickAt('.vz-enumrow[data-enum-id="9.scheduler"] .vz-enum-opt:last-child .checkbox');
+    await cdp.clickAt('.vz-textrow[data-text-id="2.text"] .checkbox');await type('.vz-textrow[data-text-id="2.text"] .vz-text-values','  First {{used}}.\n\nSecond {{used}}.\n');
     await cdp.poll("!!document.querySelector('.vz-tpl-input')");await type('.vz-tpl-input','cat; dog');await type('.vz-prefix','combined_');await type('.vz-suffix','_result');
     const combinedStart=(await http(FAKE,'/__test/enqueues')).length,combined=await invoke('variations.run');assert.equal(combined.status,'submitted');assert.equal(combined.adopted,true);
     const combinedJobs=(await http(FAKE,'/__test/enqueues')).slice(combinedStart);assert.equal(combinedJobs.length,16);
@@ -54,8 +54,8 @@ module.exports=async({cdp,ENGINE,FAKE,KZ,check})=>{
     await http(FAKE,'/__test/activity','POST',{publish:[{name:'lifecycle-tuple.png',fixture:'flux-controlnet.png',graph,mtime:2100000000}]});
     await cdp.evaluate("(async()=>{await fetch('/api/collections/fake/entries/lifecycle-tuple.png/bytes')})()");
     await invoke('variations.open',{id:'fake:lifecycle-tuple.png'});await cdp.poll("!!document.querySelector('.vz-textrow[data-text-id=\"42.text\"]')");
-    await cdp.clickAt('.vz-slider-row[data-param-key="9.denoise"] .vz-cb');
-    for(const id of ['2.text','42.text'])await cdp.clickAt(`.vz-textrow[data-text-id="${id}"] .vz-cb`);
+    await cdp.clickAt('.vz-slider-row[data-param-key="9.denoise"] .checkbox');
+    for(const id of ['2.text','42.text'])await cdp.clickAt(`.vz-textrow[data-text-id="${id}"] .checkbox`);
     await type('.vz-textrow[data-text-id="2.text"] .vz-text-values','a');await type('.vz-textrow[data-text-id="42.text"] .vz-text-values','b|c');
     await cdp.poll("document.querySelector('.vz-count').textContent==='1'");const tupleStart=(await http(FAKE,'/__test/enqueues')).length;
     assert.equal((await invoke('variations.run')).submitted,1);
@@ -66,8 +66,8 @@ module.exports=async({cdp,ENGINE,FAKE,KZ,check})=>{
     await http(ENGINE,'/api/collections','POST',{name:'lifecycle-owner',address});alias=true;
     await cdp.poll(`(async()=>${KZ}.state.hosts['lifecycle-owner']?.address===${JSON.stringify(address)})()`);
     await cdp.evaluate("(async()=>{await fetch('/api/collections/lifecycle-owner/entries/flux-controlnet.png/bytes')})()");
-    await invoke('variations.open',{id:'lifecycle-owner:flux-controlnet.png'});await cdp.poll("!!document.querySelector('.vz-imgrow:not(.vz-enumrow):not(.vz-textrow) .vz-cb')");
-    await cdp.clickAt('.vz-imgrow:not(.vz-enumrow):not(.vz-textrow) .vz-cb');
+    await invoke('variations.open',{id:'lifecycle-owner:flux-controlnet.png'});await cdp.poll("!!document.querySelector('.vz-imgrow:not(.vz-enumrow):not(.vz-textrow) .checkbox')");
+    await cdp.clickAt('.vz-imgrow:not(.vz-enumrow):not(.vz-textrow) .checkbox');
     await cdp.poll("!!document.querySelector('.vz-imgfilespick')");
     await cdp.evaluate("(()=>{const e=document.querySelector('.vz-imgfilespick'),dt=new DataTransfer();dt.items.add(new File(['origin-A'],'lifecycle-handoff.png',{type:'image/png'}));e.files=dt.files;e.dispatchEvent(new Event('change',{bubbles:true}));window.__lifecycleInput=e;window.__lifecycleFiles=[...e.files]})()");
     const form=new FormData();form.append('image',new Blob(['origin-B']),'lifecycle-handoff.png');assert((await fetch(OTHER+'/api/upload/image',{method:'POST',body:form})).ok);

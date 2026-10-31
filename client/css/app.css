@@ -693,7 +693,6 @@ body:has(#diff:not([hidden])) #statusCol { bottom: 56px; }
   max-height: 180px; overflow-y: auto; }
 .vz-enum-opt { display: flex; align-items: center; gap: 8px; cursor: pointer;
   font-size: 12px; color: var(--foreground); padding: 1px 0; }
-.vz-enum-opt .vz-cb { margin: 0; width: 14px; height: 14px; flex: 0 0 auto; }
 .vz-enum-opt-name { flex: 1; }
 .vz-enum-opt > .vz-field-help { flex: 0 0 auto; white-space: nowrap; }
 .vz-enum-current .vz-enum-opt-name { color: var(--attention); }
@@ -715,13 +714,6 @@ body:has(#diff:not([hidden])) #statusCol { bottom: 56px; }
   border-radius: 4px; font-size: 12px; padding: 3px 6px;
   font-family: ui-monospace, monospace; }
 .vz-tpl-input:focus { outline: none; border-color: var(--secondary); }
-
-/* checkbox — orange square (matches the mockup) */
-.vz-cb { -webkit-appearance: none; appearance: none;
-  width: 16px; height: 16px; border-radius: 3px;
-  background: transparent; border: 2px solid var(--attention);
-  cursor: pointer; margin: 8px 0 0; }
-.vz-cb:checked { background: var(--attention); }
 
 .vz-label { color: var(--foreground); font-size: 13px; font-weight: 400;
   cursor: pointer; align-self: flex-start; }
@@ -1122,7 +1114,6 @@ body:has(#diff:not([hidden])) #statusCol { bottom: 56px; }
 .vz-folder-chooser { display: flex; align-items: center; flex: 0 0 auto; }
 .vz-folder-chooser button:focus-visible { outline: 2px solid var(--secondary); outline-offset: 2px; }
 
-.vz-imgrow-head .vz-cb { flex: 0 0 auto; }
 .vz-folder-help { overflow-wrap: anywhere; }
 
 /* Shared display-text primitive; zero specificity leaves allocation, type and
@@ -1145,7 +1136,6 @@ body:has(#diff:not([hidden])) #statusCol { bottom: 56px; }
 .vz-parameter-heading.vz-imgrow-head { display: grid;
   grid-template-columns: 16px minmax(60px, 1fr) minmax(0, 1fr) minmax(0, 1fr);
   gap: 8px; align-items: center; cursor: default; }
-.vz-parameter-heading .vz-cb { margin: 0; }
 .vz-parameter-name { min-width: 0; cursor: pointer; }
 .vz-parameter-name .vz-label { font: 500 13px/18px system-ui; }
 .vz-parameter-identity { color: var(--foreground-mid); font: 12px/18px system-ui; }
@@ -1207,3 +1197,13 @@ body:has(#diff:not([hidden])) #statusCol { bottom: 56px; }
 .vz-retained-values dt { color: var(--foreground-mid); font-size: 12px; }
 .vz-retained-values dd { margin: 0; }
 .vz-retained-values pre { white-space: pre-wrap; overflow-wrap: anywhere; margin: 0; font-size: 12px; }
+
+/* Shared native checkbox: the border and transparent gap never change state. */
+.checkbox { -webkit-appearance: none; appearance: none; box-sizing: border-box; position: relative;
+  width: 16px; height: 16px; flex: 0 0 auto; margin: 0; padding: 0;
+  border: 2px solid var(--attention); border-radius: 3px;
+  background: transparent; cursor: pointer; }
+.checkbox-option { width: 14px; height: 14px; }
+.checkbox:checked::after { content: ""; position: absolute; inset: 2px; background: var(--attention); }
+.checkbox:focus-visible { outline: 2px solid var(--secondary); outline-offset: 2px; }
+.checkbox:disabled { cursor: default; opacity: 0.55; }

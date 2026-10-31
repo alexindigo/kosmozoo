@@ -103,6 +103,11 @@ async function main() {
     });
 
     // --- probe fills in seed current value ---
+    await attempt("row checkbox geometry and native interaction", async () => {
+      await require('./variations-checkbox.cjs')({ cdp, check,
+        selector: '.vz-slider-row[data-param-key$="denoise"] .checkbox', size: 16 });
+    });
+
     await attempt("probe fills in seed current value", async () => {
       const cur = await cdp.evaluate(`(() => {
         for (const r of document.querySelectorAll('.vz-slider-row')) {
@@ -147,7 +152,7 @@ async function main() {
         const rows = document.querySelectorAll('.vz-slider-row');
         return rows.length > 1 ? rows[rows.length - 1].dataset.paramKey : null;
       })()`);
-      await cdp.clickAt(`.vz-slider-row[data-param-key="${lastKey}"] .vz-cb`);
+      await cdp.clickAt(`.vz-slider-row[data-param-key="${lastKey}"] .checkbox`);
       await cdp.poll(`document.querySelectorAll('.vz-slider-row:not(.vz-off)').length >= 2`, 5000);
       const order = await cdp.evaluate(`(() => {
         const rows = [...document.querySelectorAll('.vz-slider-row')];
@@ -185,7 +190,7 @@ async function main() {
         check("suffix shrank after disable", false, "no enabled non-denoise row to disable");
         return;
       }
-      await cdp.clickAt(`.vz-slider-row[data-param-key="${key}"] .vz-cb`);
+      await cdp.clickAt(`.vz-slider-row[data-param-key="${key}"] .checkbox`);
       await cdp.poll(`document.querySelector('.vz-suffix').value.length < ${JSON.stringify(before ?? "").length}`, 5000);
       const after = await cdp.evaluate(`document.querySelector('.vz-suffix')?.value`);
       check("suffix shrank after disable", after.length < before.length,
@@ -605,8 +610,14 @@ async function main() {
         JSON.stringify(info.curs));
 
       // enable node 20's row: the host's options render, current pre-checked
-      await cdp.clickAt('.vz-enumrow[data-enum-id="20.lora_name"] .vz-imgrow-head .vz-cb');
+      await cdp.clickAt('.vz-enumrow[data-enum-id="20.lora_name"] .vz-imgrow-head .checkbox');
       await cdp.poll(`document.querySelectorAll('.vz-enumrow[data-enum-id="20.lora_name"] .vz-enum-opt').length === 3`, 5000);
+      await require('./variations-checkbox.cjs')({ cdp, check,
+        selector: '.vz-enumrow[data-enum-id="20.lora_name"] .vz-enum-opt .checkbox', size: 14 });
+      if (process.env.E2E_CHECKBOX_SHOT) {
+        const shot = await cdp.send('Page.captureScreenshot', { format: 'png' });
+        require('node:fs').writeFileSync(process.env.E2E_CHECKBOX_SHOT, Buffer.from(shot.data, 'base64'));
+      }
       // the enabled enum row floats to the top — right after the auto-enabled
       // denoise row; the disabled rows keep info-panel order below
       const order = await cdp.evaluate(`(() => {
@@ -652,7 +663,7 @@ async function main() {
         const opts = [...document.querySelectorAll('.vz-enumrow[data-enum-id="20.lora_name"] .vz-enum-opt')];
         return opts.findIndex((o) => o.querySelector('.vz-enum-opt-name')?.textContent === 'other.safetensors') + 1;
       })()`);
-      await cdp.clickAt(`.vz-enumrow[data-enum-id="20.lora_name"] .vz-enum-list .vz-enum-opt:nth-of-type(${idx}) .vz-cb`);
+      await cdp.clickAt(`.vz-enumrow[data-enum-id="20.lora_name"] .vz-enum-list .vz-enum-opt:nth-of-type(${idx}) .checkbox`);
       const expected = (c0 + 1) * 2 - 1;
       await cdp.poll(`parseInt(document.querySelector('.vz-count')?.textContent, 10) === ${expected}`, 5000);
       const c1 = parseInt(await cdp.evaluate(`document.querySelector('.vz-count')?.textContent`), 10);
@@ -722,7 +733,7 @@ async function main() {
 
       // Enable -> one current template. Adding paragraphs changes that one
       // prompt; it does not introduce another text axis.
-      await cdp.clickAt('.vz-textrow[data-text-id="2.text"] .vz-imgrow-head .vz-cb');
+      await cdp.clickAt('.vz-textrow[data-text-id="2.text"] .vz-imgrow-head .checkbox');
       await cdp.poll(`!!document.querySelector('.vz-textrow[data-text-id="2.text"] .vz-text-values')`, 5000);
       const pre = await cdp.evaluate(`document.querySelector('.vz-textrow[data-text-id="2.text"] .vz-text-values').value`);
       check("textarea pre-filled with the current text",
@@ -786,7 +797,7 @@ async function main() {
         document.querySelector('.card[data-idx="0"] .votebtn.variations').click()
       `);
       await cdp.poll(`document.querySelectorAll('.vz-slider-row').length > 0`, 5000);
-      await cdp.clickAt('.vz-textrow[data-text-id="2.text"] .vz-imgrow-head .vz-cb');
+      await cdp.clickAt('.vz-textrow[data-text-id="2.text"] .vz-imgrow-head .checkbox');
       await cdp.poll(`!!document.querySelector('.vz-textrow[data-text-id="2.text"] .vz-text-values')`, 5000);
       // spy on the run payload — the expansion is client-side, the POST body
       // is the honest record of what would be enqueued
@@ -857,7 +868,7 @@ async function main() {
         document.querySelector('.card[data-idx="0"] .votebtn.variations').click()
       `);
       await cdp.poll(`document.querySelectorAll('.vz-slider-row').length > 0`, 5000);
-      await cdp.clickAt('.vz-textrow[data-text-id="2.text"] .vz-imgrow-head .vz-cb');
+      await cdp.clickAt('.vz-textrow[data-text-id="2.text"] .vz-imgrow-head .checkbox');
       await cdp.poll(`!!document.querySelector('.vz-textrow[data-text-id="2.text"] .vz-text-values')`, 5000);
       await cdp.evaluate(`(() => {
         const orig = window.fetch;

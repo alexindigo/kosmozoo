@@ -37,10 +37,10 @@ module.exports = async ({ cdp, FAKE, KZ, check }) => {
     const labels = await cdp.evaluate("[...document.querySelectorAll('[data-image-id] .vz-imgrow-label')].map(e=>e.title.split('\\n').at(-1))");
     assert.deepEqual(labels, ['Reference #76 · image', 'Reference #81 · image']);
     for (const id of ['20', '21']) assert(await cdp.evaluate(`!!document.querySelector('[data-param-key="${id}.strength_model"]')`));
-    await cdp.clickAt('[data-param-key="9.denoise"] .vz-cb');
-    await cdp.clickAt('[data-param-key="20.strength_model"] .vz-cb');
+    await cdp.clickAt('[data-param-key="9.denoise"] .checkbox');
+    await cdp.clickAt('[data-param-key="20.strength_model"] .checkbox');
     await type('[data-param-key="20.strength_model"] .vz-row-inc-input', '0.3');
-    for (const id of ['76.image', '81.image']) await cdp.clickAt(`[data-image-id="${id}"] .vz-cb`);
+    for (const id of ['76.image', '81.image']) await cdp.clickAt(`[data-image-id="${id}"] .checkbox`);
     await cdp.poll("!!document.querySelector('[data-image-id=\"76.image\"] .vz-imgfilespick')");
     await cdp.evaluate(`(()=>{const input=document.querySelector('[data-image-id="76.image"] .vz-imgfilespick'),dt=new DataTransfer();
       dt.items.add(new File(['content'],'identity-content.png',{type:'image/png'}));input.files=dt.files;
@@ -80,11 +80,11 @@ module.exports = async ({ cdp, FAKE, KZ, check }) => {
     check('placement: scrolled 81.image has a visible tile row; resize bursts coalesce, ancestor travel is read-only, no measure/write loop and close removes observers',true);
     await pickInput(cdp, 'ref.png', '[data-image-id="81.image"]');
     for (const [id, value] of [['2.text', 'positive-own'], ['92:105.text', 'negative-own']]) {
-      await cdp.clickAt(`[data-text-id="${id}"] .vz-cb`);
+      await cdp.clickAt(`[data-text-id="${id}"] .checkbox`);
       await type(`[data-text-id="${id}"] .vz-text-values`, value);
     }
-    await cdp.clickAt('[data-enum-id="20.lora_name"] .vz-imgrow-head .vz-cb');
-    await cdp.clickAt('[data-enum-id="20.lora_name"] .vz-enum-opt:last-child .vz-cb');
+    await cdp.clickAt('[data-enum-id="20.lora_name"] .vz-imgrow-head .checkbox');
+    await cdp.clickAt('[data-enum-id="20.lora_name"] .vz-enum-opt:last-child .checkbox');
     // Changing every other kind must preserve the first image's exact native File.
     assert(await cdp.evaluate("document.querySelector('[data-image-id=\"76.image\"] .vz-imgfilespick')===window.__identityInput&&window.__identityInput.files[0]===window.__identityFile&&!!document.querySelector('[data-image-id=\"81.image\"] [data-image-name=\"ref.png\"]')"));
     await type('.vz-prefix', 'identity_');

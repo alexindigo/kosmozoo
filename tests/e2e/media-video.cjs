@@ -152,7 +152,7 @@ module.exports = async ({ page, ENGINE, KZ, check, capture, control }) => {
     check('video Variations probe opens editable parameters', true);
     // The fixture has no denoise default axis. Explicitly enable steps so Run
     // requests non-current permutations rather than just renaming an empty set.
-    await page.clickAt('.vz-slider-row[data-param-key="2.steps"] .vz-cb');
+    await page.clickAt('.vz-slider-row[data-param-key="2.steps"] .checkbox');
     await page.poll(`Number(document.querySelector('.vz-count').textContent)>0`);
     await page.evaluate(`(() => { const el=document.querySelector('.vz-prefix'); if(!el)throw new Error('prefix missing'); el.value='video-test_';el.dispatchEvent(new Event('input',{bubbles:true})); })()`);
     const run = await invoke('variations.run');
