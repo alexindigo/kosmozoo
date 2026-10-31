@@ -9,7 +9,7 @@ const { workPath } = require('./paths.cjs');
 const ENGINE = process.env.E2E_ENGINE || 'http://127.0.0.1:18960';
 const FAKE = process.env.E2E_FAKE || 'http://127.0.0.1:18961';
 const KZ = `(await import('/store/instance.js')).appStore`;
-const LABEL = 'Add source name to copied and saved file names';
+const LABEL = 'Filename includes source';
 const files = ['plain.png', 'day/nested.png', 'copysave#tagged.png'];
 
 (async () => {

@@ -108,7 +108,7 @@ function Menu() {
               </label>
             </div>
           </Show>
-          <Show when={matches("Add source name to copied and saved file names")}>
+          <Show when={matches("Filename includes source")}>
             <div class="menurow">
               <label class="switchwrap">
                 <input
@@ -116,7 +116,7 @@ function Menu() {
                   onChange={(e) => store.handles.invoke("preference.sourcePrefix", { value: e.target.checked })}
                 />
                 <span class="track" />
-                <SingleLineText value="Add source name to copied and saved file names" />
+                <SingleLineText value="Filename includes source" />
               </label>
             </div>
           </Show>

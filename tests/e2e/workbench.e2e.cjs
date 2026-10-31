@@ -56,6 +56,28 @@ async function attempt(name, fn) {
   const total = await page.evaluate(`(async () => (await (await fetch("/api/collections/fake/entries")).json()).length)()`);
   check("grid loaded images from engine", total > 3000, `${total} images`);
 
+  await attempt("source-name setting uses its label as filter keywords", async () => {
+    await page.clickAt('#menuBtn');
+    await page.poll(`!!document.querySelector('#sourcePrefix')`);
+    const label = 'Filename includes source';
+    check("source-name setting label is Filename includes source",
+      await page.evaluate(`document.querySelector('label:has(#sourcePrefix)').textContent.trim()`) === label);
+    for (const query of ['Filename includes source', 'filename', 'includes', 'source', 'no matching setting']) {
+      await page.clickAt('#menuSearch');
+      await page.evaluate(`document.querySelector('#menuSearch').select()`);
+      await page.send('Input.insertText', { text: query });
+      const expected = query !== 'no matching setting';
+      await page.poll(`!!document.querySelector('#sourcePrefix') === ${expected}`);
+      check(`settings filter: ${query}`, true);
+    }
+    await page.clickAt('#menuSearch');
+    await page.evaluate(`document.querySelector('#menuSearch').select()`);
+    await page.keyTrusted('Backspace', { vk: 8 });
+    await page.poll(`!!document.querySelector('#sourcePrefix')`);
+    await page.clickAt('#menuBtn');
+    await page.poll(`!document.querySelector('#menu')`);
+  });
+
   // anchor = same bytes as candidate 0 (an identical pair for difference)
   await attempt("anchor dropped locally (blob, never uploaded)", async () => {
     const n = await page.evaluate(`(async () => {
