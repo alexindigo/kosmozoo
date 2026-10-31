@@ -4,7 +4,7 @@ import { editorRig } from "./helpers/variation-editor.mjs";
 import { generatePermutations, permutationPlan } from "../src/features/variations/shared.mjs";
 
 const cases = {
-  numeric: { id: "n.denoise", values: { enabled: false, min: .9, max: .95, rawIncrement: "1e-1" } },
+  numeric: { id: "n.denoise", values: { enabled: false, min: .9, max: .95, rawIncrement: "1e-1", mode: "value", value: .9 } },
   images: { id: "image.image", values: { enabled: true, items: [{ kind: "upload", name: "a.png", file: new File(["a"], "a.png") }] } },
   enums: { id: "choice.value", values: { enabled: true, picks: ["second"] } },
   texts: { id: "text.text", values: { enabled: true, text: "first\n\nsecond", tpl: { kept: "one; two" } } },

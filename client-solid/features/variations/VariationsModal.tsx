@@ -361,6 +361,7 @@ function RecipeBody(props) {
                           onToggle={onToggle}
                           onRange={onRange}
                           onIncrement={onIncrement}
+                          onField={(key, name, value) => editor.edit("numeric", key, name, value)}
                           onInsert={onInsertPlaceholder} summary={valueSummary(key)}
                           registerEditor={registerEditor} rememberFocus={rememberFocus}
                         />

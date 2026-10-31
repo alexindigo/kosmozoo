@@ -23,7 +23,8 @@ const ROW_STRATEGIES = {
     const defaults = batch ? { min: -tuning.spread, max: tuning.spread } : defaultRange(tuning, parameter.current);
     return { metadata: { input: parameter.key, tuning, defaults, minIncrement: 10 ** -tuning.decimals,
       defaultIncrement: tuning.defaultInc, clamp: tuning.clamp },
-    defaults: { enabled: parameter.id === denoise, ...defaults, rawIncrement: String(tuning.defaultInc) } };
+    defaults: { enabled: parameter.id === denoise, ...defaults, rawIncrement: String(tuning.defaultInc),
+      mode: "range", value: parameter.current } };
   } },
   stringParams: { domain: "images", initialize: () => ({ metadata: { files: [], filesReady: false },
     defaults: { enabled: false, items: [] } }) },
@@ -144,7 +145,12 @@ export function makeVariationEditor({ targets, services, currentOrigin, changed 
     for (const [id, entry] of Object.entries(snapshot.numeric)) {
       const enabled = read("numeric", id, "enabled"); ranges[id] = { enabled };
       if (!enabled) continue;
-      for (const [name, definition] of Object.entries(EDITOR_FIELDS.numeric)) if (definition.channel === "ranges") {
+      const mode = read("numeric", id, "mode");
+      if (mode === "value") {
+        const value = read("numeric", id, "value");
+        Object.assign(ranges[id], { min: value, max: value, increment: entry.metadata.minIncrement,
+          ...(batch ? { absolute: true } : {}) });
+      } else for (const [name, definition] of Object.entries(EDITOR_FIELDS.numeric)) if (definition.wire && definition.channel === "ranges") {
         const value = read("numeric", id, name);
         if (name === "rawIncrement") {
           const parsed = increment(entry);
@@ -298,7 +304,7 @@ export function makeVariationEditor({ targets, services, currentOrigin, changed 
         anyEnabled: false, exact: false, status, message, breakdown: "", axes: [], excluded: 0, naming: { example: "", complete: false } });
       if (!catalogueReady || readOnly) return unavailable("reading", readOnly ? "Previous source recipe · review only" : "Reading workflow…");
       const snapshot = captureRows(), first = catalogues.get(capturedTargets[0].id);
-      for (const [id, entry] of Object.entries(snapshot.numeric)) if (entry.values.enabled && increment(entry) === null) {
+      for (const [id, entry] of Object.entries(snapshot.numeric)) if (entry.values.enabled && entry.values.mode === "range" && increment(entry) === null) {
         return unavailable("invalid", `${entry.metadata.label}: enter a valid positive Step. Your text is kept.`);
       }
       try {

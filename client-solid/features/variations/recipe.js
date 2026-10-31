@@ -7,7 +7,8 @@ import { templateLabels } from "/shared/features/variations/shared.mjs";
 const field = (type, channel, wire = null) => Object.freeze({ type, channel, wire });
 export const RECIPE_FIELDS = Object.freeze({
   numeric: Object.freeze({ enabled: field("boolean", "rangeSelections", "enabled"), min: field("number", "ranges", "min"),
-    max: field("number", "ranges", "max"), rawIncrement: field("string", "ranges", "increment") }),
+    max: field("number", "ranges", "max"), rawIncrement: field("string", "ranges", "increment"),
+    mode: field("numeric-mode", "ranges"), value: field("number", "ranges") }),
   images: Object.freeze({ enabled: field("boolean", "imageSelections", "enabled"), items: field("image-set", "imageParams") }),
   enums: Object.freeze({ enabled: field("boolean", "imageSelections", "enabled"), picks: field("strings", "imageParams") }),
   texts: Object.freeze({ enabled: field("boolean", "imageSelections", "enabled"), text: field("string", "imageParams"), tpl: field("templates", "imageParams") }),
@@ -16,6 +17,7 @@ export const RECIPE_FIELDS = Object.freeze({
 export const validRecipeValue = (type, value) => {
   if (["boolean", "string"].includes(type)) return typeof value === type;
   if (type === "number") return Number.isFinite(value);
+  if (type === "numeric-mode") return value === "range" || value === "value";
   if (type === "image-set") return validImageSet(value);
   if (type === "strings") return Array.isArray(value) && value.every(item => typeof item === "string");
   if (type === "templates") return value && typeof value === "object" && !Array.isArray(value) && Object.values(value).every(item => typeof item === "string");
@@ -102,7 +104,9 @@ export function recipeDispositions(snapshot, bindings) {
         for (const path of paths) {
           const binding = active.get(key(path));
           active.delete(key(path));
-          const required = domain === "naming" || name === "enabled" || entry.values.enabled &&
+          const numericActive = domain !== "numeric" || name === "mode" ||
+            (entry.values.mode === "value" ? name === "value" : name !== "value");
+          const required = domain === "naming" || name === "enabled" || entry.values.enabled && numericActive &&
             (name !== "tpl" || path.length === 4 && templateLabels(entry.values.text).includes(path[3]));
           if (!binding && required) {
             throw new Error(`Unclassified active recipe value: ${key(path)}`);

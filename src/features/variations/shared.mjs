@@ -334,6 +334,9 @@ export function resolveRelativeRanges(ranges, currentValues) {
   for (const [key, r] of Object.entries(ranges)) {
     const cur = currentValues[key];
     if (cur == null || !Array.isArray(r.clamp)) continue;
+    // A fixed Value axis is absolute even when neighbouring batch axes are
+    // offsets. Retain the numeric channel and its target applicability proof.
+    if (r.absolute === true) { out[key] = { ...r }; continue; }
     const [clo, chi] = r.clamp;
     const lo = Math.min(Math.max(cur + r.min, clo), chi);
     const hi = Math.min(Math.max(cur + r.max, clo), chi);

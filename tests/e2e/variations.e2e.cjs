@@ -282,8 +282,7 @@ async function main() {
       })()`);
       const near = (a, b) => Math.abs(a - b) < 0.75;
       // the rail is inset by half the thumb width on each side — that's the
-      // span thumb centers travel, and the thumbs' outer edges attach to the
-      // rail ends at min/max
+      // span thumb centers travel, including both rail endpoints.
       check("rail is inset by half the thumb width on each side",
         near(g.rail.w, g.lane.w - 14), `rail=${g.rail.w} lane=${g.lane.w}`);
       check("rail centered on the lane", near(g.rail.center, g.lane.center), `rail=${g.rail.center} lane=${g.lane.center}`);
@@ -318,10 +317,10 @@ async function main() {
         return { railL: rail.left, railR: rail.right, h0l: h0.left, h0r: h0.right, h1l: h1.left, h1r: h1.right };
       })()`);
       const near = (a, b) => Math.abs(a - b) < 1.2;
-      check("min thumb attaches to the rail's left end",
-        near(v.h0l, v.railL), `thumbLeft=${v.h0l} railLeft=${v.railL}`);
-      check("max thumb attaches to the rail's right end",
-        near(v.h1r, v.railR), `thumbRight=${v.h1r} railRight=${v.railR}`);
+      check("min thumb center attaches to the rail's left end",
+        near((v.h0l + v.h0r) / 2, v.railL), `thumbCenter=${(v.h0l + v.h0r) / 2} railLeft=${v.railL}`);
+      check("max thumb center attaches to the rail's right end",
+        near((v.h1l + v.h1r) / 2, v.railR), `thumbCenter=${(v.h1l + v.h1r) / 2} railRight=${v.railR}`);
     });
 
     // Inactive rows expose their current value, without mounting an editor.
@@ -906,6 +905,7 @@ async function main() {
     await require('./variations-overflow.cjs')({ cdp, check, ENGINE, FAKE, KZ });
     await require('./variations-workspace.cjs')({ cdp, check, ENGINE, FAKE, KZ });
     await require('./variations-row-frame.cjs')({ cdp, check, KZ });
+    await require('./variations-value.cjs')({ cdp, check, KZ, FAKE });
   } finally {
     await cdp.close();
   }
