@@ -15,6 +15,7 @@ import { iconSvg } from "/js/icons.mjs";
 import { IconButton } from "./IconButton.js";
 import { ModeSwitch } from "./ModeSwitch.js";
 import { viewerSide } from "../features/diff/views.mjs";
+import { keyHint } from "../lib/key-hint.js";
 
 function VSlider(props) {
   let trackEl;
@@ -87,7 +88,7 @@ export function DiffChrome(props) {
   return (
     <>
       <span class="viewer-group viewer-close"><IconButton viewer
-        id="diffClose" title="close (Esc)"
+        id="diffClose" title={keyHint(store.state.bindings(), "close", "workbench.close")}
         onAction={() => store.handles.invoke("workbench.close")}
         icon={iconSvg("x", 16)}
       /></span>
@@ -96,12 +97,12 @@ export function DiffChrome(props) {
       <div id="diffBar">
         <div id="diffCtl">
           <span class="viewer-control-slot viewer-side-slot"><Show when={hasB()}><span class="viewer-group"><button
-            class="viewer-btn dz-sidebtn" title="active side — primary in every view (ArrowLeft/Right)"
+            class="viewer-btn dz-sidebtn" title={keyHint(store.state.bindings(), "active side — primary in every view", "workbench.column")}
             onClick={() => store.handles.invoke("workbench.column", { toggle: true })}
           >{viewerSide[d().subject].label}</button></span></Show></span>
           <span class="viewer-control-slot"><Show when={hasB()}><span class="viewer-group"><IconButton viewer
             variant="dz-lockbtn"
-            title={d().locked ? "locked — gestures move both (l)" : "unlocked — gestures move the target (l)"}
+            title={keyHint(store.state.bindings(), d().locked ? "locked — gestures move both" : "unlocked — gestures move the target", "workbench.lock")}
             active={d().locked}
             onAction={() => store.handles.invoke("workbench.lock", { toggle: true })}
             icon={iconSvg(d().locked ? "lock" : "lock-open", 14)}
@@ -141,12 +142,12 @@ export function DiffChrome(props) {
           </Show></span>
         </div>
         <div class="viewer-modes-slot"><Show when={modes().length > 1}><ModeSwitch id="diffModes" label="Comparison view" value={d().mode}
-          options={modes().map(({ key, mode, label, icon }) => ({
+          options={modes().map(({ mode, label, icon }) => ({
             value: mode, label, view: label.toLowerCase(), variant: "dz-segbtn", icon: iconSvg(icon),
-            title: `${label} (${key})`,
+            title: keyHint(store.state.bindings(), label, "workbench.mode", { mode }),
           }))} onChange={mode => store.handles.invoke("workbench.mode", { mode })} /></Show></div>
         <span class="viewer-group viewer-keys"><IconButton viewer
-          id="diffKeysBtn" title="actions & keys (?)"
+          id="diffKeysBtn" title={keyHint(store.state.bindings(), "actions & keys", "keys.panel.toggle")}
           onAction={() => store.handles.invoke("keys.panel.toggle")}
           icon={iconSvg("keyboard", 18)}
         /></span>
