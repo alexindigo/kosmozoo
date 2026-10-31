@@ -16,6 +16,7 @@
 
 import { EXTRACTOR_VERSION } from "./extractor.mjs";
 import { makeCollectionInventory, makeCollectionLifecycle } from "./backings/index.mjs";
+import { waitFor } from "./lifetime.mjs";
 
 const INTER_FILE_DELAY = 100;      // ms between ingest reads (pass 2)
 const DIMS_INTER_FILE_DELAY = 10;  // ms between head reads (pass 1 — 64 KB is cheap)
@@ -23,11 +24,9 @@ const MAX_BACKOFF = 30_000;     // backoff cap
 const LIST_REFRESH_MS = 60_000; // re-list each collection at most this often
 const IDLE_MS = 1000;           // re-check cadence when a worker has nothing to do
 
-const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
-
 export class Prefetch {
   // hosts: { name: "host:port" }; enabled/paused come from settings.
-  constructor({ hosts, store, settings, ingest, inventory, interFileDelayMs = INTER_FILE_DELAY, dimsInterFileDelayMs = DIMS_INTER_FILE_DELAY, listRefreshMs = LIST_REFRESH_MS, clock = () => performance.now() }) {
+  constructor({ hosts, store, settings, ingest, inventory, signal, interFileDelayMs = INTER_FILE_DELAY, dimsInterFileDelayMs = DIMS_INTER_FILE_DELAY, listRefreshMs = LIST_REFRESH_MS, clock = () => performance.now() }) {
     this.hosts = hosts;
     this.store = store;
     this.settings = settings;
@@ -45,7 +44,11 @@ export class Prefetch {
     // prio, prioSet, walk, walkSet, inflight, errors, task, lastError }
     this.workers = new Map();
     this.running = false;
+    this.signal = signal;
+    this.stopController = new AbortController();
   }
+
+  #sleep(ms) { return waitFor(ms, this.signal ? AbortSignal.any([this.signal, this.stopController.signal]) : this.stopController.signal); }
 
   // collection -> Set of names whose head read yielded no dims. In-memory
   // only: a listing refresh must not re-read them every round, and the full
@@ -70,7 +73,7 @@ export class Prefetch {
     return this.#w(collection).tried;
   }
 
-  #current(collection, w) { return this.workers.get(collection) === w && this.isCurrent(w.token); }
+  #current(collection, w) { return !this.signal?.aborted && this.workers.get(collection) === w && this.isCurrent(w.token); }
 
   #log(collection, e, w = this.workers.get(collection)) {
     if (!w || !this.#current(collection, w)) return;
@@ -138,6 +141,8 @@ export class Prefetch {
 
   async start() {
     if (this.running) return;
+    if (this.signal?.aborted) return;
+    this.stopController = new AbortController();
     this.running = true;
     this.reconcile();
   }
@@ -159,7 +164,7 @@ export class Prefetch {
     try {
       while (this.running && collection in this.hosts && this.#current(collection, w)) {
         try {
-          if (!(await this.#step(collection, w))) await sleep(IDLE_MS);
+          if (!(await this.#step(collection, w))) await this.#sleep(IDLE_MS);
         } catch (e) {
           // a worker must never die: log + report, restart after the cap
           this.#log(collection, e, w);
@@ -228,7 +233,7 @@ export class Prefetch {
       else if (result.kind !== "present") throw new Error(`Source availability check failed: ${task.name}`);
       if (!this.#current(collection, w)) return false;
       w.checkedUnavailable.add(task.name); w.unavailable.shift();
-      await sleep(this.dimsInterFileDelayMs);
+      await this.#sleep(this.dimsInterFileDelayMs);
       }
     }
 
@@ -264,7 +269,7 @@ export class Prefetch {
         if (this.#current(collection, w)) this.#dequeue(w, lane);
         w.dimsInflight = null;
       }
-      await sleep(this.dimsInterFileDelayMs);
+      await this.#sleep(this.dimsInterFileDelayMs);
       return true;
     }
 
@@ -283,7 +288,7 @@ export class Prefetch {
       } else {
         throw new Error(`status ${r.status}`);
       }
-      await sleep(this.interFileDelayMs);
+      await this.#sleep(this.interFileDelayMs);
     } catch (e) {
       // backing stalled/down: requeue at the tail, back off this
       // collection only (the outage never stalls another host)
@@ -303,7 +308,7 @@ export class Prefetch {
   async #sleepUntil(ms) {
     const end = Date.now() + ms;
     while (this.running && Date.now() < end) {
-      await sleep(Math.min(100, end - Date.now()));
+      await this.#sleep(Math.min(100, end - Date.now()));
     }
   }
 
@@ -329,6 +334,7 @@ export class Prefetch {
 
   async stop() {
     this.running = false;
+    this.stopController.abort();
     if (this.ownsInventory) await this.inventory.stop();
     await Promise.allSettled(
       [...this.workers.values()].map((w) => w.task).filter(Boolean),

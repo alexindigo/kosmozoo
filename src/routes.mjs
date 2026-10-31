@@ -5,16 +5,18 @@
 // The context arrives fully built (plugins included) — makeRouter never
 // reassigns or guards it (E1).
 
-import { backingFor, isFolderHost, EXT_MIME, validEntryName } from "./backings/index.mjs";
+import { backingFor as defaultBackingFor, isFolderHost, EXT_MIME, validEntryName } from "./backings/index.mjs";
 import { capabilities, normalizeAddress, validateCollection, validateAttributes, sourceAttributes } from "./collections.mjs";
 import { sniffMime } from "./extractor.mjs";
 import { sourceOrigin, sameOrigin, expectedOrigin } from "./source-origin.mjs";
+import { waitFor } from "./lifetime.mjs";
 
 // The bounded wait of one shown entry's record for its own ingestion.
 const ENTRY_META_WAIT_MS = 8000;
 
 export function makeRouter(ctx) {
   const routes = [];
+  const backingFor = ctx.backings?.backingFor ?? defaultBackingFor;
 
   const add = (method, pattern, handler) => {
     // pattern: "/api/collections/<id>/entries/<name>" — segments, "<x>" captures one segment
@@ -389,11 +391,11 @@ export function makeRouter(ctx) {
     const token = ctx.inventory.capture?.(id);
     if (!ctx.hosts[id]) return Response.json({ error: "unknown collection" }, { status: 404 });
     if (!ctx.store.entryJoined(id, name)?.hash) {
-      let timer;
-      const waited = new Promise((resolve) => { timer = setTimeout(resolve, ENTRY_META_WAIT_MS); });
+      const done = new AbortController();
+      const signal = ctx.signal ? AbortSignal.any([ctx.signal, done.signal]) : done.signal;
       try {
-        await Promise.race([ctx.ingest.ensure(id, name, "output", { priority: "high" }).catch(() => null), waited]);
-      } finally { clearTimeout(timer); }
+        await Promise.race([ctx.ingest.ensure(id, name, "output", { priority: "high" }).catch(() => null), waitFor(ENTRY_META_WAIT_MS, signal)]);
+      } finally { done.abort(); }
       if (token && !ctx.inventory.isCurrent(token)) return Response.json({ error: "Source incarnation changed" }, { status: 409 });
     }
     const { name: entry, hash, extracted, meta, width, height } = entryShape(id, name, null, ctx.store.entryJoined(id, name), null);

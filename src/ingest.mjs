@@ -6,7 +6,7 @@
 // demand. Revalidation is a method here (instance clock, no module globals).
 
 import { sha256 } from "./cache.mjs";
-import { backingFor, validEntryName, makeCollectionLifecycle } from "./backings/index.mjs";
+import { backingFor as defaultBackingFor, validEntryName, makeCollectionLifecycle } from "./backings/index.mjs";
 import { cancelled } from "./backings/inventory.mjs";
 import { metaFromBytes, imageDims, EXTRACTOR_VERSION } from "./extractor.mjs";
 
@@ -36,15 +36,20 @@ export class Ingest {
   #lanes = new Map(); // addr -> { high: [], low: [], inflight: 0 }
   #capture;
   #isCurrent;
+  #backingFor;
+  #lifetime;
 
-  constructor(store, hosts, { cache, revalidateMs = DEFAULT_REVALIDATE_MS, capture, isCurrent }) {
+  constructor(store, hosts, { cache, revalidateMs = DEFAULT_REVALIDATE_MS, capture, isCurrent, backingFor = defaultBackingFor, lifetime }) {
     this.#store = store;
     this.#hosts = hosts;
     this.#cache = cache;
     this.#revalidateMs = revalidateMs;
     const lifecycle = capture && isCurrent ? null : makeCollectionLifecycle(hosts);
     this.#capture = capture ?? lifecycle.capture;
-    this.#isCurrent = isCurrent ?? lifecycle.isCurrent;
+    const current = isCurrent ?? lifecycle.isCurrent;
+    this.#isCurrent = token => !lifetime?.signal.aborted && current(token);
+    this.#backingFor = backingFor;
+    this.#lifetime = lifetime;
   }
 
   #assertCurrent(token) { if (!this.#isCurrent(token)) throw cancelled(); }
@@ -86,7 +91,7 @@ export class Ingest {
     return new Promise((resolve, reject) => {
       const job = { priority, resolve, reject, fn: async () => {
         if (token && !this.#isCurrent(token)) return this.#cancelled();
-        const reply = await backingFor(addr).read(addr, name, kind, opts);
+        const reply = await this.#backingFor(addr).read(addr, name, kind, opts);
         // The slot owns the body too: response headers do not complete a
         // backing read. All read paths consume through this same gate.
         const bytes = new Uint8Array(await new Response(reply.body).arrayBuffer());
@@ -148,7 +153,12 @@ export class Ingest {
   // ranged head read → imageDims → stored on the entry. No hash, no cache
   // write, no extract. status 404 means the source lost the file (the
   // prefetch acts on it exactly like pass 2 would).
-  async dims(collection, name, kind = "output", { priority = "low" } = {}) {
+  dims(collection, name, kind = "output", options = {}) {
+    const run = () => this.#dims(collection, name, kind, options);
+    return this.#lifetime ? this.#lifetime.run(`dimensions ${collection}/${name}`, run) : run();
+  }
+
+  async #dims(collection, name, kind, { priority = "low" } = {}) {
     const token = this.#capture(collection), addr = token?.address;
     if (!token || !this.#isCurrent(token)) return { ...this.#cancelled(), dims: null };
     if (!validEntryName(addr, name)) return { status: 400, dims: null };
@@ -183,7 +193,8 @@ export class Ingest {
       return existing.promise;
     }
     const flight = { priority, promise: null, upgrade: null, token };
-    const p = this.#ensureInner(collection, name, kind, flight)
+    const run = () => this.#ensureInner(collection, name, kind, flight);
+    const p = (this.#lifetime ? this.#lifetime.run(`ingest ${collection}/${name}`, run) : run())
       .catch((error) => { if (error.code === "cancelled") return this.#cancelled(); throw error; })
       .finally(() => this.#inflight.delete(key));
     flight.promise = p;
@@ -208,7 +219,7 @@ export class Ingest {
     if (r.status !== 200) return { status: r.status };
     const bytes = r.bytes;
     if (!this.#isCurrent(token)) return this.#cancelled();
-    const stamp = (await backingFor(addr).stat(addr, name, kind))?.stamp ?? null;
+    const stamp = (await this.#backingFor(addr).stat(addr, name, kind))?.stamp ?? null;
     if (!this.#isCurrent(token)) return this.#cancelled();
     const hash = await this.ingest(collection, name, kind, { bytes, stamp, token });
     if (!this.#isCurrent(token)) return this.#cancelled();
@@ -251,11 +262,17 @@ export class Ingest {
   // Exported for tests and the scheduler: compare the source stamp against
   // the recorded one; on mismatch re-read and remap. Same content with a
   // newer stamp (a touch) only refreshes the stamp.
-  async revalidateNow(collection, name, { input = false, token = this.#capture(collection) } = {}) {
+  revalidateNow(collection, name, options = {}) {
+    const run = () => this.#revalidateNow(collection, name, options);
+    return this.#lifetime ? this.#lifetime.run(`revalidate ${collection}/${name}`, run) : run();
+  }
+
+  async #revalidateNow(collection, name, { input = false, token = this.#capture(collection) } = {}) {
+    if (!this.#isCurrent(token)) return this.#cancelled();
     const addr = token?.address;
     if (!addr) return;
     if (!validEntryName(addr, name)) return;
-    const stamp = (await backingFor(addr).stat(addr, name, input ? "input" : "output"))?.stamp ?? null;
+    const stamp = (await this.#backingFor(addr).stat(addr, name, input ? "input" : "output"))?.stamp ?? null;
     if (!this.#isCurrent(token)) return this.#cancelled();
     if (stamp == null) return; // gone/unreachable — keep what we have
 

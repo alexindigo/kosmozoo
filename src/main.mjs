@@ -6,6 +6,8 @@ import { resolveRuntime, browserOrigin } from "./runtime-config.mjs";
 import { acquireInstance, RUNTIME_PROTOCOL, RUNTIME_VERSION } from "./instance.mjs";
 import { reportStartupError } from "./startup-error.mjs";
 import { readAppVersion, formatVersion } from "./version.mjs";
+import { EngineLifetime } from "./lifetime.mjs";
+import { waitFor } from "./lifetime.mjs";
 export { reportStartupError } from "./startup-error.mjs";
 
 export async function startEngine({ mode = "source", env = Deno.env.toObject(), lease = null, sourceVersion = "source-development", appVersion = null } = {}) {
@@ -17,12 +19,31 @@ export async function startEngine({ mode = "source", env = Deno.env.toObject(), 
   let httpFinished = false;
   const handlerReady = new Promise(resolve => { settleHandler = resolve; });
   const signals = [];
-  const drainHttp = async () => { if (server && !httpFinished) await server.shutdown(); };
+  const lifetime = new EngineLifetime();
+  const httpController = new AbortController();
+  let httpDrain;
+  const drainHttp = () => httpDrain ??= (async () => {
+    if (!server || httpFinished) return;
+    // Deno 2.9 cannot abort a server after shutdown(): graceful close has
+    // already consumed its resource ID. Use only its abortable serve lifetime.
+    // Admission is fenced synchronously; give terminal frames one bounded turn.
+    await waitFor(100);
+    if (!httpFinished) httpController.abort();
+    await server.finished;
+  })();
   const shutdown = () => {
     if (shutdownTask) return shutdownTask;
     if (runtime) runtime = Object.freeze({ ...runtime, status: "stopping" });
+    // Stop admission immediately. Let owners send their terminal responses,
+    // then actively interrupt every remaining HTTP body/slow reader together.
+    const deadline = setTimeout(() => {
+      console.warn(`Engine shutdown grace expired; still open: ${lifetime.pending().join(", ") || "HTTP/resources"}`);
+      Deno.exit(0);
+    }, 4000);
+    drainHttp();
     // Context owns its children and fences source admission synchronously.
-    const drainage = context ? context.close({ drainHttp }) : drainHttp();
+    const drainage = lifetime.track("context/HTTP cleanup", context ? context.close({ drainHttp }) : drainHttp());
+    lifetime.stop();
     shutdownTask = (async () => {
       const failures = [];
       try {
@@ -31,6 +52,7 @@ export async function startEngine({ mode = "source", env = Deno.env.toObject(), 
       try { await drainage; } catch (error) { failures.push(error); }
       for (const signal of signals) Deno.removeSignalListener(signal, onSignal);
       try { await ownership.release(); } catch (error) { failures.push(error); }
+      clearTimeout(deadline);
       if (failures.length) throw new AggregateError(failures, "Engine shutdown failed");
     })();
     return shutdownTask;
@@ -39,12 +61,16 @@ export async function startEngine({ mode = "source", env = Deno.env.toObject(), 
   try {
     // Reserve the requested port before Store/worker construction. A legacy or
     // unrelated listener fails without first-boot seeding or a replacement writer.
-    server = Deno.serve({ ...config.binding, onListen() {} }, req => handler ? handler(req) : handlerReady.then(ready => ready(req)));
+    server = Deno.serve({ ...config.binding, signal: httpController.signal, onListen() {} }, (req, info) => {
+      if (lifetime.signal.aborted) return new Response("Engine stopping", { status: 503, headers: { Connection: "close" } });
+      lifetime.track(`${req.method} ${new URL(req.url).pathname} response`, info.completed.catch(() => {}));
+      return lifetime.run(`${req.method} ${new URL(req.url).pathname} handler`, () => handler ? handler(req) : handlerReady.then(ready => ready(req)));
+    });
     server.finished.then(() => { httpFinished = true; });
     runtime = Object.freeze({ protocol: RUNTIME_PROTOCOL, version: RUNTIME_VERSION, instance: ownership.instance,
       sourceVersion, mode, status: "starting", binding: { hostname: server.addr.hostname, port: server.addr.port }, configuredBind: config.binding.hostname });
     await ownership.publish(runtime);
-    context = await buildContext({ env, runtime: () => runtime, appVersion });
+    context = await buildContext({ env, runtime: () => runtime, appVersion, lifetime });
     handler = async req => {
       const url = new URL(req.url);
       if (!url.pathname.startsWith("/api/")) return serveStatic(url.pathname);

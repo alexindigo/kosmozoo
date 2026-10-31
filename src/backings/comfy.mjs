@@ -20,9 +20,10 @@ export function viewUrl(addr, name, kind) {
 }
 
 // Online probe: only the status code of /api/system_stats is inspected.
-export async function probe(addr) {
+export async function probe(addr, { fetcher = fetch } = {}) {
   try {
-    const r = await fetch(`http://${addr}/api/system_stats`, { signal: AbortSignal.timeout(HOST_TIMEOUT_MS) });
+    const r = await fetcher(`http://${addr}/api/system_stats`, { signal: AbortSignal.timeout(HOST_TIMEOUT_MS) });
+    await r.body?.cancel();
     return r.status === 200;
   } catch {
     return false;
@@ -43,7 +44,7 @@ export function parseListingEntry(n) {
 // (LoadImage sweep sources, renderable only).
 export async function list(addr, kind = "output", options = {}) {
   if (kind === "output") return (await inventory(addr, options)).items;
-  const r = await fetch(`http://${addr}/internal/files/${kind}`, { signal: AbortSignal.timeout(HOST_TIMEOUT_MS) });
+  const r = await (options.fetcher ?? fetch)(`http://${addr}/internal/files/${kind}`, { signal: AbortSignal.timeout(HOST_TIMEOUT_MS) });
   if (!r.ok) throw new Error(`ComfyUI listing: ${r.status}`); // E8: a down host is not an empty dir
   const raw = await r.json();
   if (kind === "input") {
@@ -58,10 +59,10 @@ export async function list(addr, kind = "output", options = {}) {
 // is rewritten under the same name — the revalidation signal. ComfyUI's
 // ETag (aiohttp derives it from mtime_ns+size; fallback Last-Modified|CL).
 // Compare for equality only — stamps are never ordered.
-export async function stat(addr, name, kind = "output") {
+export async function stat(addr, name, kind = "output", { fetcher = fetch } = {}) {
   if (!validName(name)) return null;
   try {
-    const r = await fetch(viewUrl(addr, name, kind), { method: "HEAD", signal: AbortSignal.timeout(HOST_TIMEOUT_MS) });
+    const r = await fetcher(viewUrl(addr, name, kind), { method: "HEAD", signal: AbortSignal.timeout(HOST_TIMEOUT_MS) });
     if (!r.ok) return null;
     const { stamp, size } = interpretHeaders(r);
     return stamp == null && size == null ? null : { stamp, size: Number.isNaN(size) ? null : size };
@@ -76,7 +77,7 @@ export async function stat(addr, name, kind = "output") {
 // both. Upstream serves some files as application/octet-stream (with
 // nosniff) — the browser can't render those, so map the extension when the
 // upstream type is useless.
-export async function read(addr, name, kind = "output", { range, idleMs = HOST_TIMEOUT_MS } = {}) {
+export async function read(addr, name, kind = "output", { range, idleMs = HOST_TIMEOUT_MS, fetcher = fetch } = {}) {
   if (!validName(name)) return { status: 400 };
   const controller = new AbortController();
   let timer;
@@ -88,7 +89,7 @@ export async function read(addr, name, kind = "output", { range, idleMs = HOST_T
   progress();
   let r;
   try {
-    r = await fetch(viewUrl(addr, name, kind), {
+    r = await fetcher(viewUrl(addr, name, kind), {
       headers: range ? { Range: `bytes=${range[0]}-${range[1]}` } : undefined,
       signal: controller.signal,
     });
@@ -133,12 +134,12 @@ export async function read(addr, name, kind = "output", { range, idleMs = HOST_T
 // UI uses). No overwrite flag: stock Comfy may choose a collision-free name.
 // The engine's input route forwards backing conflicts; use the returned name,
 // never invent successful upload provenance from the requested filename.
-export async function write(addr, name, bytes) {
+export async function write(addr, name, bytes, { fetcher = fetch } = {}) {
   if (!validName(name) || !assertSafeName(name)) return { ok: false, status: 400, error: "bad filename" };
   const form = new FormData();
   form.append("image", new Blob([bytes]), name);
   try {
-    const r = await fetch(`http://${addr}/api/upload/image`, {
+    const r = await fetcher(`http://${addr}/api/upload/image`, {
       method: "POST", body: form, signal: AbortSignal.timeout(HOST_TIMEOUT_MS),
     });
     if (!r.ok) return { ok: false, status: r.status, error: `ComfyUI ${r.status}` };
@@ -165,11 +166,11 @@ export async function write(addr, name, bytes) {
 // a 60 s TTL; network errors and odd shapes fall through uncached.
 const ASSETS_PLUS_TTL_MS = 60_000;
 
-export async function hasAssetsPlus(addr, cache = new Map()) {
+export async function hasAssetsPlus(addr, cache = new Map(), { fetcher = fetch } = {}) {
   const c = cache.get(addr);
   if (c && Date.now() - c.t < ASSETS_PLUS_TTL_MS) return c.v;
   try {
-    const r = await fetch(`http://${addr}/api/assets_plus/output/delete`, {
+    const r = await fetcher(`http://${addr}/api/assets_plus/output/delete`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ relpaths: ["__kosmozoo_capability_probe__"], mode: "trash" }),
@@ -189,11 +190,11 @@ export async function hasAssetsPlus(addr, cache = new Map()) {
 }
 
 // Trash one image via assets_plus. { ok, mode, detail }.
-export async function remove(addr, name) {
+export async function remove(addr, name, { fetcher = fetch } = {}) {
   if (!validName(name)) return { ok: false, mode: null, detail: "bad filename" };
   let r;
   try {
-    r = await fetch(`http://${addr}/api/assets_plus/output/delete`, {
+    r = await fetcher(`http://${addr}/api/assets_plus/output/delete`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ relpaths: [name], mode: "trash" }),
@@ -215,10 +216,10 @@ export async function remove(addr, name) {
 // Best-effort history cleanup for the hide path: find the prompt that
 // produced the file and delete its history entry. The file itself is
 // untouched — this only tidies Comfy's own history panel.
-export async function historyDelete(addr, name) {
+export async function historyDelete(addr, name, { fetcher = fetch } = {}) {
   if (!validName(name)) return false;
   try {
-    const r = await fetch(`http://${addr}/api/history`, { signal: AbortSignal.timeout(HOST_TIMEOUT_MS) });
+    const r = await fetcher(`http://${addr}/api/history`, { signal: AbortSignal.timeout(HOST_TIMEOUT_MS) });
     if (!r.ok) return false;
     const history = await r.json();
     let promptId = null;
@@ -233,7 +234,7 @@ export async function historyDelete(addr, name) {
       if (promptId) break;
     }
     if (!promptId) return false;
-    const dr = await fetch(`http://${addr}/api/history`, {
+    const dr = await fetcher(`http://${addr}/api/history`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ delete: [promptId] }),
@@ -296,7 +297,7 @@ export async function inventory(addr, { client, ...options } = {}) {
   if (client) return client(addr).inventory(options);
   // Compatibility for stateless standalone driver consumers. Production
   // discovery receives the context's existing address owner.
-  const owner = comfyClient(addr);
+  const owner = comfyClient(addr, { fetcher: options.fetcher });
   try { return await owner.inventory(options); }
   finally { owner.disposeInventory(); }
 }
@@ -504,10 +505,10 @@ export function comfyClient(addr, { fetcher = fetch, clock = () => performance.n
       metadata.dispose();
       await Promise.allSettled([configTask].filter(Boolean));
     },
-    hasAssetsPlus: () => hasAssetsPlus(addr, assetsPlus),
+    hasAssetsPlus: () => hasAssetsPlus(addr, assetsPlus, { fetcher }),
     objectInfo: (options) => objectInfo(addr, objectInfoCache, { fetcher, ...options }),
     progressSocket: () => new WebSocket(`ws://${addr}/ws?clientId=${crypto.randomUUID()}`),
-    enqueue: (prompt) => enqueue(addr, prompt),
+    enqueue: (prompt) => enqueue(addr, prompt, { fetcher }),
     async queue({ signal } = {}) {
       const d = await telemetry("/api/queue", signal);
       const ids = (rows) => {
@@ -561,6 +562,20 @@ export function comfyClient(addr, { fetcher = fetch, clock = () => performance.n
 
 export const createBinding = comfyClient;
 
+export function createDriver(fetcher) {
+  return {
+    validName,
+    probe: addr => probe(addr, { fetcher }),
+    list: (addr, kind, options) => list(addr, kind, { ...options, fetcher }),
+    stat: (addr, name, kind) => stat(addr, name, kind, { fetcher }),
+    read: (addr, name, kind, options) => read(addr, name, kind, { ...options, fetcher }),
+    write: (addr, name, bytes) => write(addr, name, bytes, { fetcher }),
+    remove: (addr, name) => remove(addr, name, { fetcher }),
+    historyDelete: (addr, name) => historyDelete(addr, name, { fetcher }),
+    createBinding: (addr, options) => comfyClient(addr, { ...options, fetcher }),
+  };
+}
+
 // Recorded executions may contain fingerprints that ComfyUI trusts instead of
 // recomputing. Every new submission owns a clone; only descriptor metadata is
 // execution-only, never an input (or arbitrary nested field) of the same name.
@@ -574,9 +589,9 @@ export function freshSubmissionGraph(graph) {
 // permutation-level error reporting. Failures log the host's FULL body to
 // the engine console: the response error is capped for display, but a
 // validation detail truncated at the boundary is undiagnosable.
-export async function enqueue(addr, prompt) {
+export async function enqueue(addr, prompt, { fetcher = fetch } = {}) {
   try {
-    const resp = await fetch(`http://${addr}/api/prompt`, {
+    const resp = await fetcher(`http://${addr}/api/prompt`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ ...prompt, prompt: freshSubmissionGraph(prompt.prompt) }),

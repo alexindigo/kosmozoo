@@ -38,6 +38,8 @@ export class SerializedWriter {
     this.#tail = task.catch(() => {}); // keep the chain alive past a failure
     return task;
   }
+
+  flush() { return this.#tail; }
 }
 
 // The process-wide registry: even unrelated call sites into the same path
@@ -52,3 +54,5 @@ export function writeSerialized(path, bytes) {
   }
   return w.write(bytes);
 }
+
+export function flushSerialized(path) { return writers.get(path)?.flush() ?? Promise.resolve(); }

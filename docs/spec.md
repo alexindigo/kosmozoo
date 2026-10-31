@@ -351,8 +351,14 @@ queue empty (at most one delivered chunk), stricter than the64KiB queue ceiling.
 Large maps are complete, never truncated. Slow readers do not block producers.
 Fifteen-second comment heartbeats are transport liveness, never source changes.
 Cancel, request abort, enqueue failure and stop share idempotent retirement. Stream
-admission/listeners/subscribers retire at shutdown entry, before the existing
-Jobs -> inventory -> prefetch -> HTTP -> Store shutdown sequence.
+admission/listeners/subscribers retire at shutdown entry. One engine lifetime
+aborts all backing transport and wakes worker/metadata waits; Jobs, inventory
+and prefetch begin retirement together before any child is awaited. HTTP admission
+closes immediately; terminal frames have a bounded 100ms delivery turn before
+the serve signal interrupts all remaining responses and slow readers. Tracked
+handlers/ingestion drain before settings flush, Store close and lease release.
+A four-second process deadline logs remaining owners and exits even if an owner
+ignores cancellation. No route chooses its own shutdown policy.
 
 The Store owns one injectable subscription, independent of sources, pins, folders,
 selection and component mounts. Source activity is delivered exclusively through
@@ -1185,7 +1191,8 @@ refuses copied/unrelated state, legacy/unrelated listeners and explicit override
 conflicts without killing, port hopping, reconfiguration or reseeding. The lock
 inode is never unlinked. Factories retire resources they acquired on failure;
 borrowed test resources stay caller-owned. Normal/failure drainage fences source
-admission/streams first, then Jobs/inventory/prefetch/HTTP/Store and the lease.
+admission/streams first, then cancels and drains the shared engine lifetime,
+flushes settings, closes Store and releases the lease (bounded shutdown above).
 
 Native browser adapters use stable dedicated provider profiles and safe argv,
 outside engine Context/Store/plugins. Firefox native registration is additionally

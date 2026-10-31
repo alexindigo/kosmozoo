@@ -20,8 +20,9 @@ import { makeRouter } from "./routes.mjs";
 import { Cache } from "./cache.mjs";
 import { FEATURES } from "./features/index.mjs";
 import { directoryPortal } from "./desktop/portal.mjs";
+import { EngineLifetime } from "./lifetime.mjs";
 
-export async function buildContext({ env = Deno.env.toObject(), fakes = {}, start = true, runtime = null, appVersion = null } = {}) {
+export async function buildContext({ env = Deno.env.toObject(), fakes = {}, start = true, runtime = null, appVersion = null, lifetime = new EngineLifetime() } = {}) {
   const owned = {};
   let closeTask;
   const remember = (name, value, borrowed) => { if (!borrowed) owned[name] = value; return value; };
@@ -31,19 +32,28 @@ export async function buildContext({ env = Deno.env.toObject(), fakes = {}, star
     // Fence source/Variations admission and streams synchronously at entry.
     try { owned.sourceActivity?.stop(); } catch (error) { failures.push(error); }
     try { owned.desktop?.stop(); } catch (error) { failures.push(error); }
+    lifetime.stop();
+    // Start every child's retirement before waiting for any one child. A
+    // worker waiting on another owner must never delay that owner's abort.
+    const stops = ["jobs", "inventory", "prefetch"].map(name => {
+      try { return lifetime.track(`${name} cleanup`, owned[name]?.stop()); }
+      catch (error) { failures.push(error); }
+    });
     closeTask = (async () => {
-      for (const name of ["jobs", "inventory", "prefetch"]) {
-        try { await owned[name]?.stop(); } catch (error) { failures.push(error); }
-      }
+      for (const result of await Promise.allSettled(stops)) if (result.status === "rejected") failures.push(result.reason);
       try { await drainHttp(); } catch (error) { failures.push(error); }
+      try { await lifetime.drain(); } catch (error) { failures.push(error); }
+      try { await settings?.flush?.(); } catch (error) { failures.push(error); }
       try { owned.store?.close(); } catch (error) { failures.push(error); }
       if (failures.length) throw new AggregateError(failures, "Context resource cleanup failed");
     })();
     return closeTask;
   };
+  let settings;
+  const scopedBackings = backings.withTransport(lifetime.fetch);
   try {
   const stateDir = fakes.stateDir ?? await ensureStateDir(resolveStateDir(env));
-  const settings = fakes.settings ?? await Settings.open(stateDir);
+  settings = fakes.settings ?? await Settings.open(stateDir);
   const store = remember("store", fakes.store ?? await Store.open(stateDir, {
     settings,
     feedbackPath: settings.get("core", "feedbackPath", null)
@@ -55,10 +65,12 @@ export async function buildContext({ env = Deno.env.toObject(), fakes = {}, star
     env.KOZMOZOO_CACHE ?? `${env.HOME ?? "/tmp"}/.local/share/kosmozoo/cache`,
   );
   const inventory = remember("inventory", fakes.inventory ?? backings.makeCollectionInventory(hosts, {
+    bindingFactory: scopedBackings.createBindingFor,
     onSnapshot: (id, _address, snapshot) => store.arrivals.observe(id, snapshot.items.map(item => item.name)),
   }), fakes.inventory != null);
   const ingest = fakes.ingest ?? new Ingest(store, hosts, {
     cache,
+    backingFor: scopedBackings.backingFor, lifetime,
     capture: inventory.capture, isCurrent: inventory.isCurrent,
     // the default lives in ingest.mjs; the env override is the only knob
     ...(env.KOZMOZOO_REVALIDATE_MS == null ? {} : { revalidateMs: Number(env.KOZMOZOO_REVALIDATE_MS) }),
@@ -67,7 +79,7 @@ export async function buildContext({ env = Deno.env.toObject(), fakes = {}, star
   // same address owner and collection-incarnation validation seam.
   const clientAt = inventory.binding;
   const comfy = (collection) => clientAt(hosts[collection]);
-  const prefetch = remember("prefetch", fakes.prefetch ?? new Prefetch({ hosts, store, settings, ingest, inventory }), fakes.prefetch != null);
+  const prefetch = remember("prefetch", fakes.prefetch ?? new Prefetch({ hosts, store, settings, ingest, inventory, signal: lifetime.signal }), fakes.prefetch != null);
   const jobs = remember("jobs", fakes.jobs ?? new Jobs({
     hosts, client: clientAt,
     onFinish(address, sources) {
@@ -93,7 +105,7 @@ export async function buildContext({ env = Deno.env.toObject(), fakes = {}, star
   const discovered = plugins === fakes.plugins ? [] : await plugins.discover();
 
   const ctx = {
-    settings, store, hosts, backings, cache, ingest, prefetch, jobs, sourceActivity, plugins, runtime, appVersion,
+    settings, store, hosts, backings: scopedBackings, cache, ingest, prefetch, jobs, sourceActivity, plugins, runtime, appVersion, signal: lifetime.signal,
     features: [],
     comfy, inventory,
     paths: { state: stateDir },
@@ -107,6 +119,7 @@ export async function buildContext({ env = Deno.env.toObject(), fakes = {}, star
     // a backing bound to one collection (engine-mediated; the feature never
     // fetches a host directly)
     backings: {
+      backingFor: scopedBackings.backingFor,
       comfy: (collection) => comfy(collection),
       capture: inventory.capture,
       isCurrent: token => sourceActivity.acceptingChanges() && inventory.isCurrent(token),

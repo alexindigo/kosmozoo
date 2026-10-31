@@ -14,7 +14,7 @@ import {
   paramId, parameterIndex, catalogueParams, parameterAliases, validRunAcknowledgement, runOperationFields, targetRunPlan,
   outputName,
 } from "./shared.mjs";
-import { validEntryName, backingFor } from "../../backings/index.mjs";
+import { validEntryName, backingFor as defaultBackingFor } from "../../backings/index.mjs";
 import { sourceOrigin, sameOrigin, validOrigin, validContext, expectedOrigin } from "../../source-origin.mjs";
 import { dependencyClosure, validateGraphLinks } from "../../graph.mjs";
 import { sha256 } from "../../cache.mjs";
@@ -237,6 +237,7 @@ export function lineageTag(source, params) {
 // app: { store, cache, hosts, ingest, comfy, backings } — the engine surface
 // for features.
 export function register(app) {
+  const backingFor = app.backings?.backingFor ?? defaultBackingFor;
   app.route("GET", "/folder-chooser", async () => Response.json(await app.desktop.capability()));
   app.route("POST", "/choose-folder", async req => {
     let body;
