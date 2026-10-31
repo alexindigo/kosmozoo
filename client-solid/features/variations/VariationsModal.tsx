@@ -291,6 +291,8 @@ function RecipeBody(props) {
                       <ImageSetPanel id={id} row={r} onEnable={checked => onImgToggle(id, checked)}
                         onInsert={onInsertPlaceholder}
                         onAdd={items => editor.addImages(id, items)} onRemove={item => editor.removeImage(id, item)}
+                        onMove={(item, index) => editor.moveImage(id, item, index)}
+                        currentThumbnail={services.inputThumbnail(image.host, r().current, image.origin, r().fromOutput ? "output" : "input")}
                         thumbnail={name => services.inputThumbnail(image.host, name, image.origin)}
                         registerThumbnail={services.registerThumbnail}
                         pathThumbnail={services.pathThumbnail} onAddFolder={path => editor.addFolder(id, path)}

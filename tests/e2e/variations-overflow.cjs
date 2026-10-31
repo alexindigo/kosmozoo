@@ -71,6 +71,7 @@ module.exports = async ({ cdp, ENGINE, FAKE, KZ, check }) => {
     await invoke('variations.open', { id: `${source}:${filename}` });
     await cdp.poll("!!document.querySelector('.vz-image-set')&&!!document.querySelector('.vz-enumrow')&&!!document.querySelector('.vz-textrow')&&!!document.querySelector('.vz-slider-row')");
     await cdp.clickAt('.vz-image-set .checkbox');
+    await require('./image-picker-helpers.cjs').openImageAdd(cdp);
     await cdp.clickAt('.vz-input-trigger');
     await cdp.poll("document.querySelectorAll('.vz-input-option').length>0");
     await type('.vz-input-search', inputName);
@@ -91,6 +92,7 @@ module.exports = async ({ cdp, ENGINE, FAKE, KZ, check }) => {
       await cdp.clickAt(row + ' .checkbox');
       await type(row + ' .vz-row-inc-input', hostile(field.type + '_increment'));
     }
+    await require('./image-picker-helpers.cjs').openImageFolder(cdp);
     await type('.vz-folder-path', '/engine/' + hostile('folder') + '/' + hostile('subfolder'));
     await type('.vz-prefix', hostile('prefix'));
     await type('.vz-suffix', hostile('suffix'));
@@ -131,6 +133,7 @@ module.exports = async ({ cdp, ENGINE, FAKE, KZ, check }) => {
       await measure('editors');
       await cdp.evaluate("document.querySelector('.vz-sliders').scrollTop=0;document.querySelector('.vz-body').scrollTop=0");
       await capture(width);
+      await require('./image-picker-helpers.cjs').openImageAdd(cdp);
       await cdp.clickAt('.vz-input-trigger');
       await cdp.poll("!!document.querySelector('.vz-input-popover:popover-open')");
       await measure('input picker');

@@ -1,5 +1,15 @@
 // Drive the real acquisition surface; no synthetic mode/select compatibility.
+exports.openImageAdd = async (cdp, row = '.vz-image-set') => {
+  if (!await cdp.evaluate(`document.querySelector(${JSON.stringify(row + ' .vz-image-plus')}).getAttribute('aria-expanded')==='true'`))
+    await cdp.clickAt(row + ' .vz-image-plus');
+};
+exports.openImageFolder = async (cdp, row = '.vz-image-set') => {
+  await exports.openImageAdd(cdp, row);
+  if (!await cdp.evaluate(`document.querySelector(${JSON.stringify(row + ' .vz-folder-trigger')}).getAttribute('aria-expanded')==='true'`))
+    await cdp.clickAt(row + ' .vz-folder-trigger');
+};
 exports.pickInput = async (cdp, name, row = '.vz-image-set') => {
+  await exports.openImageAdd(cdp, row);
   await cdp.clickAt(row + ' .vz-input-trigger');
   await cdp.poll("!!document.querySelector('.vz-input-search')");
   await cdp.evaluate("document.querySelector('.vz-input-search').select()");

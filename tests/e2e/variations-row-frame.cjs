@@ -84,6 +84,8 @@ module.exports = async ({ cdp, check, KZ }) => {
   } finally {
     await cdp.send('Emulation.clearDeviceMetricsOverride');
     await cdp.evaluate(`(async()=>{${KZ}.handles.invoke('variations.close');return true})()`);
+    // A close request is asynchronous; wait for its decision before confirming.
+    await cdp.poll("!!document.querySelector('.vz-discard')||!document.querySelector('.vz-panel')");
     if (await cdp.evaluate("!!document.querySelector('.vz-discard')")) await cdp.clickAt('.vz-discard-confirm');
     await cdp.poll("!document.querySelector('.vz-panel')");
   }

@@ -1,10 +1,17 @@
 // Feature-private raw recipe ownership. Presentation, IO evidence and mount
 // leases never enter this representation. Native Files are opaque resources.
 import { snapshotDraft, sameDraft } from "./draft.js";
-import { validImageSet } from "./image-set.js";
+import { validImageSet, sameImage } from "./image-set.js";
 import { templateLabels } from "/shared/features/variations/shared.mjs";
 
 const field = (type, channel, wire = null) => Object.freeze({ type, channel, wire });
+export function moveRecipeImage(items, item, index) {
+  const from = items.findIndex(other => sameImage(item, other));
+  if (from < 0 || !Number.isInteger(index) || index < 0 || index >= items.length || from === index) return items;
+  const ordered = [...items];
+  ordered.splice(index, 0, ...ordered.splice(from, 1));
+  return ordered;
+}
 export const RECIPE_FIELDS = Object.freeze({
   numeric: Object.freeze({ enabled: field("boolean", "rangeSelections", "enabled"), min: field("number", "ranges", "min"),
     max: field("number", "ranges", "max"), rawIncrement: field("string", "ranges", "increment"),

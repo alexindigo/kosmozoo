@@ -8,7 +8,7 @@ import { templateLabels, templateValue, parseSemicolonList, expandTextAxes, perm
 import { validOrigin, sameOrigin, validContext, sameContext } from "/shared/source-origin.mjs";
 import { validImageSet, mergeImages, sameImage, imageIdentity } from "./image-set.js";
 import { RECIPE_FIELDS as EDITOR_FIELDS, makeVariationRecipe, recipeField as descriptor,
-  validRecipeValue as validValue, freezeRecipe as freeze, recipeDispositions } from "./recipe.js";
+  validRecipeValue as validValue, freezeRecipe as freeze, recipeDispositions, moveRecipeImage } from "./recipe.js";
 export { RECIPE_FIELDS as EDITOR_FIELDS } from "./recipe.js";
 const filename = value => typeof value === "string" && value.length > 0 && !/[\\/\x00-\x1f\x7f]/.test(value) && ![".", ".."].includes(value);
 const token = id => `_{${id}}`;
@@ -260,6 +260,10 @@ export function makeVariationEditor({ targets, services, currentOrigin, changed 
     },
     removeImage(id, item) {
       return this.edit("images", id, "items", row("images", id).values.items.filter(other => !sameImage(item, other)));
+    },
+    moveImage(id, item, index) {
+      const items = row("images", id).values.items, ordered = moveRecipeImage(items, item, index);
+      return ordered !== items && this.edit("images", id, "items", ordered);
     },
     inspectImages: () => Promise.all([...pendingInspections]),
     range(id, { min, max }) {

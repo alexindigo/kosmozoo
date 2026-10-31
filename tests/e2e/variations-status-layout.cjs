@@ -10,6 +10,7 @@ module.exports = async ({ cdp, KZ, check }) => {
   try {
     await cdp.evaluate(`(async()=>{const bytes=await(await fetch('/api/collections/fake/entries/flux-lora.png/bytes')).arrayBuffer(),input=document.querySelector('.vz-imgfilespick'),data=new DataTransfer();data.items.add(new File([bytes],'stable-status.png',{type:'image/png'}));input.files=data.files;input.dispatchEvent(new Event('change',{bubbles:true}))})()`);
     await cdp.poll("typeof window.__statusRelease==='function'&&!!document.querySelector('.vz-image-check')");
+    await require('./image-picker-helpers.cjs').openImageFolder(cdp);
     const before=await cdp.evaluate("document.querySelector('.vz-folder-add').getBoundingClientRect().toJSON()");
     await cdp.evaluate('window.__statusRelease()');await cdp.poll("!document.querySelector('.vz-image-check')");
     assert.equal(await cdp.evaluate("!!document.querySelector('.vz-image-error')"),false);

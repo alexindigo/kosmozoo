@@ -1,7 +1,7 @@
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const { workPath } = require('./paths.cjs');
-const { pickInput, waitForSelectedPreviews } = require('./image-picker-helpers.cjs');
+const { pickInput, waitForSelectedPreviews, openImageAdd, openImageFolder } = require('./image-picker-helpers.cjs');
 const { discardRecipe } = require('./recipe-helpers.cjs');
 
 module.exports = async ({ cdp, FAKE, KZ, check }) => {
@@ -24,6 +24,7 @@ module.exports = async ({ cdp, FAKE, KZ, check }) => {
     await discardRecipe(cdp);await cdp.poll("!!document.querySelector('.vz-image-set')");
     assert.equal(await cdp.evaluate("!!document.querySelector('.vz-image-content')"), false);
     await cdp.clickAt('.vz-image-set .checkbox');
+    await openImageFolder(cdp);
     assert.equal(await cdp.evaluate("document.querySelector('.vz-image-empty').textContent"), 'Add images to vary this input.');
     assert(await cdp.evaluate("!!document.querySelector('.vz-input-trigger')&&!!document.querySelector('.vz-imgfilespick')&&!document.querySelector('[webkitdirectory]')"));
     await cdp.poll("document.querySelector('.vz-folder-chooser button')?.disabled===true");
@@ -31,6 +32,7 @@ module.exports = async ({ cdp, FAKE, KZ, check }) => {
     assert.equal(await cdp.evaluate("document.querySelector('.vz-folder-path').disabled"), false);
     await capture('image-set-empty');
     await cdp.clickAt('[data-param-key="9.denoise"] .checkbox');
+    await openImageAdd(cdp);
     await cdp.clickAt('.vz-input-trigger');
     await cdp.poll("document.querySelectorAll('.vz-input-option').length>0");
     assert(await cdp.evaluate("document.querySelectorAll('.vz-input-row').length<=9&&document.querySelectorAll('.vz-input-option').length<=27"));
@@ -86,6 +88,7 @@ module.exports = async ({ cdp, FAKE, KZ, check }) => {
     await cdp.keyTrusted('Escape', { vk: 27 });
     await cdp.poll("!document.querySelector('.vz-input-search')&&!!document.querySelector('.vz-panel')");
     await pickInput(cdp, 'canny.png');
+    await openImageAdd(cdp);
     await cdp.clickAt('.vz-input-trigger');
     await cdp.poll("!!document.querySelector('[data-input-name=\"canny.png\"] .vz-image-same')");
     assert(await cdp.evaluate("document.querySelector('[data-input-name=\"canny.png\"]').getAttribute('aria-selected')==='true'&&document.querySelector('[data-input-name=\"canny.png\"] .vz-input-selected').textContent==='✓'"));
@@ -120,6 +123,7 @@ module.exports = async ({ cdp, FAKE, KZ, check }) => {
     await pickInput(cdp, 'picker-0550.png');
     await cdp.evaluate(`(async()=>{const bytes=await(await fetch('/api/collections/fake/entries/flux-lora.png/bytes')).arrayBuffer();const input=document.querySelector('.vz-imgfilespick'),data=new DataTransfer();data.items.add(new File([bytes],'turn-browser.png',{type:'image/png'}));input.files=data.files;input.dispatchEvent(new Event('change',{bubbles:true}))})()`);
     const addFolder = async value => {
+      await openImageFolder(cdp);
       await cdp.evaluate(`(()=>{const input=document.querySelector('.vz-folder-path');input.value=${JSON.stringify(value)};input.dispatchEvent(new Event('input',{bubbles:true}))})()`);
       await cdp.clickAt('.vz-folder-add');
       await cdp.poll("document.querySelector('.vz-folder-add').textContent==='Add folder'");
@@ -139,7 +143,8 @@ module.exports = async ({ cdp, FAKE, KZ, check }) => {
     await addFolder(folder);
     await cdp.poll("document.querySelector('.vz-count').textContent==='3'&&!document.querySelector('.vz-image-check')");
     await waitForSelectedPreviews(cdp);
-    const folderGeometry = await cdp.evaluate(`(()=>{const input=document.querySelector('.vz-folder-path').getBoundingClientRect(),chooser=document.querySelector('.vz-folder-chooser button').getBoundingClientRect(),add=document.querySelector('.vz-folder-add').getBoundingClientRect(),footer=document.querySelector('.vz-image-add').getBoundingClientRect(),grid=document.querySelector('.vz-image-grid').getBoundingClientRect();return {center:Math.abs((input.top+input.bottom-add.top-add.bottom)/2),chooserCenter:Math.abs((input.top+input.bottom-chooser.top-chooser.bottom)/2),order:input.right<=chooser.left&&chooser.right<=add.left&&grid.bottom<footer.top,contained:input.left>=footer.left&&add.right<=footer.right}})()`);
+    await openImageFolder(cdp);
+    const folderGeometry = await cdp.evaluate(`(()=>{const input=document.querySelector('.vz-folder-path').getBoundingClientRect(),chooser=document.querySelector('.vz-folder-chooser button').getBoundingClientRect(),add=document.querySelector('.vz-folder-add').getBoundingClientRect(),footer=document.querySelector('.vz-image-add').getBoundingClientRect(),grid=document.querySelector('.vz-image-grid').getBoundingClientRect();return {center:Math.abs((input.top+input.bottom-add.top-add.bottom)/2),chooserCenter:Math.abs((input.top+input.bottom-chooser.top-chooser.bottom)/2),order:input.right<=chooser.left&&chooser.right<=add.left&&grid.bottom<=footer.top,contained:input.left>=footer.left&&add.right<=footer.right}})()`);
     assert(folderGeometry.center < 1 && folderGeometry.chooserCenter < 1 && folderGeometry.order && folderGeometry.contained, JSON.stringify(folderGeometry));
     await cdp.send('Emulation.setDeviceMetricsOverride', { width: 1280, height: 900, deviceScaleFactor: 1, mobile: false });
     try {

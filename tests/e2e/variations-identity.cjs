@@ -47,6 +47,7 @@ module.exports = async ({ cdp, FAKE, KZ, check }) => {
       input.dispatchEvent(new Event('change',{bubbles:true}));window.__identityInput=input;window.__identityFile=input.files[0]})()`);
     // A scrolled second trigger must admit a real visible row, not merely create
     // an empty popup. Placement observes ancestor travel, never writes it.
+    await require('./image-picker-helpers.cjs').openImageAdd(cdp, '[data-image-id="81.image"]');
     await cdp.clickAt('[data-image-id="81.image"] .vz-input-trigger');
     await cdp.poll("!!document.querySelector('.vz-input-search')");
     await cdp.evaluate("document.querySelector('.vz-input-search').select()");await cdp.send('Input.insertText',{text:'ref.png'});

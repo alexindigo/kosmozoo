@@ -1022,22 +1022,35 @@ body:has(#diff:not([hidden])) #statusCol { bottom: 56px; }
 /* The decision is contained by its owner; its editor never unmounts. */
 .vz-panel { position: relative; }
 
-/* Image curation inside the checked card: a contact sheet above acquisition. */
-.vz-image-content { display: flex; flex-direction: column; gap: 8px; margin-top: 10px; }
-.vz-image-grid { display: grid; grid-template-columns: repeat(auto-fill, 112px); gap: 10px; }
-.vz-image-tile { margin: 0; display: flex; flex-direction: column; gap: 3px; }
-.vz-image-preview { height: 84px; display: grid; place-items: center; background: var(--background-stage); border-radius: 4px; overflow: hidden; }
-.vz-image-preview img { width: 100%; height: 100%; object-fit: contain; }
-.vz-image-tile figcaption { display: flex; align-items: center; gap: 4px; }
-.vz-image-name { flex: 1; }
-.vz-image-tile .chrome-icon { flex: 0 0 auto; }
-.vz-image-name, .vz-image-same, .vz-image-check, .vz-image-error, .vz-image-summary { font-size: 11px; }
-.vz-image-status { min-block-size: 1lh; font-size: 11px; }
+/* Image curation: one quiet sheet; presentation order commits through the recipe. */
+.vz-image-content { position: relative; display: flex; flex-direction: column; gap: 8px; margin-top: 10px; }
+.vz-image-grid { position: relative; display: grid; grid-template-columns: repeat(auto-fill, minmax(112px, 1fr)); gap: 6px; }
+.vz-image-tile, .vz-image-plus { position: relative; min-width: 0; aspect-ratio: var(--vz-image-ratio); border-radius: 4px; }
+.vz-image-tile { touch-action: none; cursor: grab; outline-offset: 2px; }
+.vz-image-tile:focus-visible, .vz-image-plus:focus-visible { outline: 2px solid var(--secondary); }
+.vz-image-preview { position: absolute; inset: 0; background: var(--background-stage); border-radius: inherit; overflow: hidden; }
+.vz-image-preview .vz-thumbnail img { object-fit: cover; }
+.vz-image-tile > .vz-image-same { position: absolute; inset: 0; border-radius: inherit; box-shadow: inset 0 0 0 2px var(--attention); pointer-events: none; }
+.vz-image-remove { position: absolute; top: 4px; right: 4px; opacity: 0; }
+.vz-image-tile:hover .vz-image-remove, .vz-image-tile:focus-within .vz-image-remove { opacity: 1; }
+.vz-image-remove .chrome-icon { border-radius: 50%; background: var(--backdrop); color: var(--foreground-bright); }
+.vz-image-dragging { z-index: 2; cursor: grabbing; box-shadow: 0 8px 24px var(--backdrop); }
+.vz-image-plus { border: 1px dashed var(--border-strong); color: var(--foreground-mid); background: transparent; font: inherit; font-size: 28px; cursor: pointer; }
+.vz-image-plus:hover { color: var(--foreground); border-color: var(--foreground-dim); }
+.vz-image-ratio-source { position: absolute; width: 1px; height: 1px; opacity: 0; overflow: hidden; pointer-events: none; }
+.vz-image-check { position: absolute; inset: 0; display: grid; place-items: center; background: var(--backdrop); pointer-events: none; }
+.vz-image-check::after { content: ""; width: 16px; height: 16px; border: 2px solid var(--foreground-dim); border-top-color: var(--foreground); border-radius: 50%; animation: vz-image-spin .8s linear infinite; }
+@keyframes vz-image-spin { to { transform: rotate(360deg); } }
+@media (prefers-reduced-motion: reduce) { .vz-image-check::after { animation: none; } }
+.vz-image-inspection-error { position: absolute; inset: auto 0 0; padding: 4px; background: var(--backdrop); }
+.vz-image-error { font-size: 11px; }
 .vz-image-same { color: var(--attention); }
-.vz-image-check, .vz-image-empty, .vz-image-summary { color: var(--foreground-mid); }
+.vz-image-empty { color: var(--foreground-mid); }
 .vz-image-error { color: var(--error); overflow-wrap: anywhere; }
-.vz-image-empty, .vz-image-summary { margin: 0; }
-.vz-image-add { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; padding-top: 8px; border-top: 1px solid var(--border); }
+.vz-image-empty { margin: 0; }
+.vz-image-add { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; padding: 8px; background: var(--focused-background); border: 1px solid var(--border); border-radius: 4px; }
+.vz-image-add[hidden], .vz-image-folder[hidden] { display: none; }
+.vz-image-folder { width: 100%; min-width: 0; }
 .vz-image-action { background: var(--lifted); color: var(--foreground); border: 1px solid var(--border-strong); border-radius: 4px; padding: 5px 8px; font: inherit; cursor: pointer; }
 .vz-image-action:hover { border-color: var(--foreground-dim); }
 .vz-image-action:focus-visible, .vz-input-search:focus-visible, .vz-input-option:focus-visible { outline: 2px solid var(--secondary); outline-offset: 2px; }
