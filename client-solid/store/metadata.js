@@ -210,14 +210,17 @@ export function makeMetadata({ acquisition, owns, want, meta, nodes, status, ent
   }
 
   // The shown identities' own record path. `entries` are the consumers'
-  // entries ({id, filename, hash, meta, extracted}); one that has its record
-  // needs no flight. A changed content identity or an entry no longer shown
+  // entries ({id, filename, hash, meta, extracted}); populated metadata needs
+  // no flight. A collection's extracted-but-empty snapshot is not this
+  // consumer's record: its later delta may have been consumed before the
+  // identity was listed. Verify absence once through the direct record too.
+  // A changed content identity or an entry no longer shown
   // retires its flight: a late reply cannot apply and its retry is cancelled.
   function show(entries) {
     const owner = context;
     if (!current(owner)) return;
     const wanted = new Map();
-    for (const image of entries) if (image && !(image.meta || image.extracted)) wanted.set(image.id, image);
+    for (const image of entries) if (image && !image.meta) wanted.set(image.id, image);
     for (const [id, item] of shown) {
       const image = wanted.get(id);
       if (!image || (image.hash ?? "") !== item.identity) { clearTimeout(item.timer); shown.delete(id); }

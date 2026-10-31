@@ -1320,6 +1320,9 @@ bounded record read (`entries/<name>/meta`), retried with backoff while it is
 shown and applied only to the same source session, name and content hash, so
 collection size, churn, publication order, delivery fences and the cursor cannot
 delay or drop it.
+Populated metadata satisfies that consumer immediately; an extracted-but-empty
+collection snapshot still requires its own direct read. A negative reply from
+that record settles once for the shown content identity, without a polling loop.
 
 The prefetch runs TWO passes over each collection's listing: pass 1 the
 dims head reads (10 ms inter-file — size-before-render on a fresh host is

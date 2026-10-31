@@ -285,6 +285,37 @@ Deno.test("metadata shown record: a delta consumed by a pre-listing snapshot can
   } finally { f.dispose(); }
 });
 
+Deno.test("metadata shown record: a listed negative cannot suppress the entry's own read after its delta was consumed", async () => {
+  const f = shownFixture();
+  try {
+    const name = "video/long # name%2F_".padEnd(180, "x") + ".mp4";
+    const poll = f.channel.poll(); await flush(); // the target is not listed yet
+    f.release({ v: 2, changed: true, items: { [name]: { nodes: [] } }, pending: 0 });
+    await poll;
+    const x = f.list({ id: `source:${name}`, filename: name, hash: "hx", meta: null, extracted: true });
+    f.channel.show([x]); await flush();
+    assertEquals(f.records, [name], "collection-level absence is not the shown record's delivery");
+    assertEquals(x.meta?.nodes[0].inputs.token, name);
+    f.channel.show([x]); await flush();
+    assertEquals(f.records.length, 1, "a populated record needs no repeated read");
+  } finally { f.dispose(); }
+});
+
+Deno.test("metadata shown record: authoritative absence settles once per shown content identity", async () => {
+  const f = shownFixture({ record: name => ({ name, hash: "hx", extracted: true, meta: null }) });
+  try {
+    const x = f.list({ id: "source:bare.webm", filename: "bare.webm", hash: "hx", meta: null, extracted: true });
+    f.channel.show([x]); await flush();
+    assertEquals(f.records, [x.filename], "verify the negative through the entry record");
+    for (let i = 0; i < 3; i++) { f.channel.show([x]); await flush(); }
+    assertEquals(f.records.length, 1, "a verified negative does not become a poll loop");
+    f.channel.show([]); f.channel.show([x]); await flush();
+    assertEquals(f.records.length, 2, "showing it again owns a fresh record read");
+    f.channel.show([{ ...x, hash: "new" }]); await flush();
+    assertEquals(f.records.length, 3, "changed content retires the old negative");
+  } finally { f.dispose(); }
+});
+
 Deno.test("metadata shown record: unextracted replies retry while shown; hiding or replacing the identity retires the flight", async () => {
   let ready = false;
   const f = shownFixture({ record: name => ready ? { name, hash: "h1", extracted: true, meta: null } : { name, hash: null, extracted: false, meta: null } });
