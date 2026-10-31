@@ -7,7 +7,7 @@
 // right: variations count (big), prefix, suffix, Run.
 //
 // Slider rows are populated once the probe returns — the graph decides which
-// parameters have a target node, and only those render. The naming selector
+// parameters have a target node, and only those render. Each parameter name
 // inserts the per-graph placeholder key into whichever prefix/suffix input
 // was last focused. Prefix/suffix WRAP the original filename basename in the
 // submission (they don't replace it).
@@ -26,7 +26,7 @@ import { ImageSetPanel } from "./ImageSetPanel.js";
 import { SingleLineText } from "../../components/SingleLineText.js";
 import { Checkbox } from "../../components/Checkbox.js";
 import { workspaceCurrent } from "./workspaces.js";
-import { ParameterRow, parameterName } from "./ParameterRow.js";
+import { ParameterRow } from "./ParameterRow.js";
 
 export function VariationsModal() {
   const store = useAppStore();
@@ -103,8 +103,8 @@ function RecipeBody(props) {
   // refs exist solely to read the live selection and restore the caret
   // after an explicit parameter insert.
   let prefixEl, suffixEl;
-  // One focus signal remembers the naming target while the native parameter
-  // selector is focused; each input retains its own live caret selection.
+  // Remember the naming target while a parameter name is focused; each input
+  // retains its own live caret selection.
   const [focused, setFocused] = createSignal(null); // "prefix" | "suffix"
   // The parameter action inserts its {placeholder} at the naming input's
   // selection. The live value+selection are read at click time — direct
@@ -247,6 +247,10 @@ function RecipeBody(props) {
   });
 
   const tally = createMemo(() => read(editor.preview));
+  const valueSummary = id => {
+    const count = tally().axes.find(axis => axis.id === id)?.count ?? "—";
+    return `${count} ${count === 1 ? "value" : "values"}`;
+  };
 
   return (
     <div class="vz-panel" data-session={props.session}>
@@ -285,6 +289,7 @@ function RecipeBody(props) {
                   return (
                     <Show when={r()?.filesReady}>
                       <ImageSetPanel id={id} row={r} onEnable={checked => onImgToggle(id, checked)}
+                        onInsert={onInsertPlaceholder}
                         onAdd={items => editor.addImages(id, items)} onRemove={item => editor.removeImage(id, item)}
                         thumbnail={name => services.inputThumbnail(image.host, name, image.origin)}
                         registerThumbnail={services.registerThumbnail}
@@ -317,6 +322,7 @@ function RecipeBody(props) {
                               row={() => enumRows()[id]}
                               onToggle={onEnumToggle}
                               onPick={onEnumPick}
+                              onInsert={onInsertPlaceholder}
                               rememberFocus={rememberFocus}
                             />
                           </Show>
@@ -333,6 +339,7 @@ function RecipeBody(props) {
                               onToggle={onTextToggle}
                               onField={onTextField}
                               onTpl={onTextTpl}
+                              onInsert={onInsertPlaceholder} summary={valueSummary(id)}
                               rememberFocus={rememberFocus}
                             />
                           </Show>
@@ -346,7 +353,6 @@ function RecipeBody(props) {
                           row={() => rows()[key]}
                           param={{ ...p, key, label: row0.label }}
                           current={() => rows()[key]?.current ?? null}
-                          defaults={{ min: row0.min, max: row0.max }}
                           enabled={() => !!rows()[key]?.enabled}
                           increment={() => rows()[key]?.increment}
                           rawIncrement={() => rows()[key]?.rawIncrement ?? ""}
@@ -355,6 +361,7 @@ function RecipeBody(props) {
                           onToggle={onToggle}
                           onRange={onRange}
                           onIncrement={onIncrement}
+                          onInsert={onInsertPlaceholder} summary={valueSummary(key)}
                           registerEditor={registerEditor} rememberFocus={rememberFocus}
                         />
                       );
@@ -378,32 +385,20 @@ function RecipeBody(props) {
               <span class="vz-rlabel">Output names</span>
               <label for={`prefix-${props.session}`}>Prefix</label>
               <input
-                id={`prefix-${props.session}`} aria-describedby={`naming-help-${props.session}`} type="text" class="vz-tinput vz-prefix" ref={prefixEl} disabled={props.readOnly}
+                id={`prefix-${props.session}`} type="text" class="vz-tinput vz-prefix" ref={prefixEl} disabled={props.readOnly}
                 value={prefix()}
-                title="Use Insert parameter to insert a canonical naming token at the caret"
+                title="Click a parameter name to insert its token at the caret"
                 {...focus} onFocus={(e) => { setFocused("prefix"); focus.onFocus(e); }}
                 onInput={(e) => editor.edit("naming", "root", "prefix", e.currentTarget.value)}
               />
               <label for={`suffix-${props.session}`}>Suffix</label>
               <input
-                id={`suffix-${props.session}`} aria-describedby={`naming-help-${props.session}`} type="text" class="vz-tinput vz-suffix" ref={suffixEl} disabled={props.readOnly}
+                id={`suffix-${props.session}`} type="text" class="vz-tinput vz-suffix" ref={suffixEl} disabled={props.readOnly}
                 value={suffix()}
-                title="Use Insert parameter to insert a canonical naming token (enabled sliders auto-append)"
+                title="Click a parameter name to insert its token (enabled sliders auto-append)"
                 {...focus} onFocus={(e) => { setFocused("suffix"); focus.onFocus(e); }}
                 onInput={(e) => editor.edit("naming", "root", "suffix", e.currentTarget.value)}
               />
-              <select class="vz-insert-parameter" aria-label="Insert parameter into output name" value="" disabled={props.readOnly}
-                onChange={event => { const id = event.currentTarget.value; event.currentTarget.value = ""; if (id) onInsertPlaceholder(id); }}>
-                <option value="">Insert parameter…</option>
-                <For each={[...Object.values(imgRows()), ...Object.values(rows()), ...enumList(), ...textList()]}>{row =>
-                  <option value={row.id}>{parameterName(row)} · {row.label}</option>
-                }</For>
-              </select>
-              <span id={`naming-help-${props.session}`} hidden>Original filename stays between prefix and suffix. {tally().naming.help}</span>
-              <Show when={tally().naming.example}><div class="vz-name-example">Example:
-                <SingleLineText value={tally().naming.example} hint={tally().naming.help} />
-              </div></Show>
-              <span class="vz-name-help">Representative example</span>
             </div>
             </div>
             <div class="vz-messages" role="status">
@@ -422,7 +417,7 @@ function RecipeBody(props) {
             </div>
             <button
               class="vz-run" disabled={running() || props.readOnly || undefined} onClick={() => store.handles.invoke("variations.run")}
-            ><SingleLineText value={running() ? "Submitting…" : "Queue variations"} /></button>
+            ><SingleLineText value={running() ? "Submitting…" : "Run"} /></button>
           </div>
         </div>
         <button
@@ -465,8 +460,8 @@ function EnumRow(props) {
   };
   return (
     <ParameterRow class="vz-imgrow vz-enumrow" row={r} enabled={() => r().enabled}
-      attributes={{ "data-enum-id": props.p.id }} onEnable={checked => props.onToggle(props.p.id, checked)}>
-      <Show when={r().enabled}>
+      attributes={{ "data-enum-id": props.p.id }} onEnable={checked => props.onToggle(props.p.id, checked)}
+      onInsert={props.onInsert} summary={`${r().picks.length} ${r().picks.length === 1 ? "option" : "options"}`}>
         <div class="vz-imgrow-body vz-enum-body">
           <Show when={r().values.length > 10}>
             <input
@@ -488,14 +483,12 @@ function EnumRow(props) {
                     onChange={checked => props.onPick(props.p.id, v, checked)}
                   />
                   <SingleLineText class="vz-enum-opt-name" value={v} />
-                  <Show when={v === r().current}><span class="vz-field-help">Current</span></Show>
                 </label>
               )}
             </For>
             <Show when={!filtered().length}><p class="vz-field-help">No options match “{filter()}”.</p></Show>
           </div>
         </div>
-      </Show>
     </ParameterRow>
   );
 }
@@ -510,18 +503,17 @@ function TextRow(props) {
   const r = () => props.row();
   return (
     <ParameterRow class="vz-imgrow vz-textrow" row={r} enabled={() => r().enabled}
-      attributes={{ "data-text-id": props.p.id }} onEnable={checked => props.onToggle(props.p.id, checked)}>
-      <Show when={r().enabled}>
+      attributes={{ "data-text-id": props.p.id }} onEnable={checked => props.onToggle(props.p.id, checked)}
+      onInsert={props.onInsert} summary={props.summary}>
         <div class="vz-imgrow-body vz-enum-body">
           <textarea
             {...focus}
             class="vz-text-values" rows="4"
-            aria-label={`${r().label} template`} aria-describedby={`template-help-${props.p.id}`}
+            aria-label={`${r().label} template`}
             placeholder="text template — {{label}} adds a substitution axis"
             value={r().text}
             onInput={(e) => props.onField(props.p.id, "text", e.currentTarget.value)}
           />
-          <p class="vz-field-help" id={`template-help-${props.p.id}`}>Use {"{{subject}}"} for alternatives. Enter its values below, separated by semicolons. Line breaks stay in the prompt.</p>
           <For each={templateLabels(r().text)}>
             {(lab) => (
               <div class="vz-tpl-row">
@@ -529,7 +521,7 @@ function TextRow(props) {
                 <input
                   {...focus}
                    type="text" class="vz-tpl-input"
-                  aria-label={`${r().label}: ${lab} alternatives`} aria-describedby={`template-help-${props.p.id}`}
+                  aria-label={`${r().label}: ${lab} alternatives`}
                   aria-invalid={!String(templateValue(r().tpl, lab) ?? "").trim()}
                   value={templateValue(r().tpl, lab) ?? ""}
                   placeholder="values; separated; by; semicolons"
@@ -539,7 +531,6 @@ function TextRow(props) {
             )}
           </For>
         </div>
-      </Show>
     </ParameterRow>
   );
 }

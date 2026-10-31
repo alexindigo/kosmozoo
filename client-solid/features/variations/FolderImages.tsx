@@ -38,7 +38,7 @@ export function FolderImages(props) {
   return <div class="vz-folder">
     <label for={id}>Folder on the engine computer</label>
     <div class="vz-folder-controls">
-      <input id={id} class="vz-folder-path" type="text" aria-describedby={`${id}-help ${id}-message`} placeholder="/path/to/folder" value={path()} title={path()}
+      <input id={id} class="vz-folder-path" type="text" aria-describedby={message() ? `${id}-message` : undefined} placeholder="/path/to/folder" value={path()} title="Includes subfolders. Maximum 500 images per folder import."
         {...focusMemory(props.rememberFocus)} onInput={e => { revision++; setPath(e.currentTarget.value); }}
         onKeyDown={e => { if (e.key === "Enter") { e.preventDefault(); add(); } }} />
       <span class="vz-folder-chooser" title={props.capability()?.available ? "Choose folder…" : "Folder chooser needs the desktop app"}>
@@ -48,8 +48,6 @@ export function FolderImages(props) {
       </span>
       <button type="button" class="vz-image-action vz-folder-add" disabled={busy() || choosing() || !path()} onClick={add}><SingleLineText value={busy() ? "Reading…" : "Add folder"} /></button>
     </div>
-    <span class="vz-folder-help" id={`${id}-help`}>Includes subfolders. Maximum 500 images per folder import.</span>
-    <Show when={!props.capability()?.available}><span class="vz-folder-help">Folder chooser needs the desktop app</span></Show>
     <Show when={message()}><span class="vz-image-error" id={`${id}-message`} role="status">{message()}</span></Show>
   </div>;
 }

@@ -15,7 +15,8 @@ export function ImageSetPanel(props) {
   const row = () => props.row();
   const selected = name => row().items.some(item => item.kind === "input" && item.name === name);
   return <ParameterRow class="vz-imgrow vz-image-set" row={row} enabled={() => row().enabled}
-    attributes={{ "data-image-id": props.id }} onEnable={props.onEnable}>
+    attributes={{ "data-image-id": props.id }} onEnable={props.onEnable} onInsert={props.onInsert}
+    summary={`${row().items.length} ${row().items.length === 1 ? "image" : "images"}`}>
     <div class="vz-image-content">
       <Show when={row().items.length} fallback={<p class="vz-image-empty">Add images to vary this input.</p>}>
         <div class="vz-image-grid">

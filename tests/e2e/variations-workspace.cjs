@@ -62,11 +62,12 @@ module.exports = async ({ cdp, ENGINE, FAKE, KZ, check }) => {
     await type('[data-param-key="9.steps"] .vz-row-inc-input','1e');await cdp.clickAt('[data-param-key="9.steps"] .checkbox');
     await cdp.clickAt('[data-enum-id="9.scheduler"] .vz-imgrow-head .checkbox');await cdp.clickAt('[data-enum-id="9.scheduler"] .vz-enum-opt:last-child .checkbox');await cdp.clickAt('[data-enum-id="9.scheduler"] .vz-imgrow-head .checkbox');
     await cdp.clickAt('[data-text-id="2.text"] .checkbox');await type('.vz-text-values','{{parked}}');await type('.vz-tpl-input','one; two');await type('.vz-text-values','literal submitted');
+    for(const id of ['470.image','475.image'])await cdp.clickAt(`[data-image-id="${id}"] .checkbox`);
     await cdp.evaluate(`(async()=>{const bytes=await(await fetch('/api/collections/fake/entries/flux-lora.png/bytes')).arrayBuffer();
       window.__recipeFiles=['#%.png','question?.png','spaces Ω [input].png'].map(name=>new File([bytes],name,{type:'image/png'}));
       window.__recipeDormant=new File([bytes],'dormant.png',{type:'image/png'});
       for(const [id,files] of [['470.image',window.__recipeFiles],['475.image',[window.__recipeDormant]]]){const input=document.querySelector('[data-image-id="'+id+'"] .vz-imgfilespick'),dt=new DataTransfer();files.forEach(file=>dt.items.add(file));input.files=dt.files;input.dispatchEvent(new Event('change',{bubbles:true}))}})()`);
-    await cdp.clickAt('[data-image-id="470.image"] .checkbox');await cdp.clickAt('[data-param-key="9.denoise"] .checkbox');
+    await cdp.clickAt('[data-image-id="475.image"] .checkbox');await cdp.clickAt('[data-param-key="9.denoise"] .checkbox');
     await type('.vz-suffix','_{470.image}');await cdp.poll("!document.querySelector('.vz-image-check')");
     await capture('recipe-captured');const before=(await jobs()).length;
     assert.equal((await invoke('variations.run')).adopted,true);
@@ -76,11 +77,15 @@ module.exports = async ({ cdp, ENGINE, FAKE, KZ, check }) => {
     assert.deepEqual(submitted.map(job=>job.prompt['461'].inputs.filename_prefix),submitted.map(job=>'recipe_00001__'+job.prompt['470'].inputs.image));
     await cdp.poll("!document.querySelector('.vz-panel')",6000);
     assert(await cdp.evaluate("window.__recipeURLs.every(item=>window.__recipeRevoked.includes(item.url))"));
-    const urlStart=await cdp.evaluate('window.__recipeURLs.length');await open();await cdp.poll("document.querySelectorAll('.vz-image-tile').length===4&&!document.querySelector('.vz-image-check')");
+    const urlStart=await cdp.evaluate('window.__recipeURLs.length');await open();
+    await cdp.clickAt('[data-image-id="475.image"] .checkbox');await cdp.poll("document.querySelectorAll('.vz-image-tile').length===4&&!document.querySelector('.vz-image-check')");
     assert(await cdp.evaluate(`window.__recipeFiles.concat(window.__recipeDormant).every(file=>window.__recipeURLs.slice(${urlStart}).some(item=>item.file===file))`));
-    assert.equal(await cdp.evaluate("document.querySelector('[data-param-key=\"9.steps\"] .vz-row-inc-input').value"),'1e');
     assert.equal(await cdp.evaluate("document.querySelector('[data-param-key=\"9.steps\"] .checkbox').checked"),false);
+    assert.equal(await cdp.evaluate("!!document.querySelector('[data-param-key=\"9.steps\"] .vz-numeric-editor')"),false);
+    await cdp.clickAt('[data-param-key="9.steps"] .checkbox');
+    assert.equal(await cdp.evaluate("document.querySelector('[data-param-key=\"9.steps\"] .vz-row-inc-input').value"),'1e');
     assert(await cdp.evaluate("document.querySelector('[data-param-key=\"9.steps\"] .noUi-handle[data-handle=\"0\"]').getAttribute('aria-valuenow')===window.__recipeRange"));
+    await cdp.clickAt('[data-param-key="9.steps"] .checkbox');await cdp.clickAt('[data-image-id="475.image"] .checkbox');
     await capture('recipe-recovered');await type('.vz-text-values','{{parked}}');assert.equal(await cdp.evaluate("document.querySelector('.vz-tpl-input').value"),'one; two');
     await type('.vz-text-values','literal submitted');
     await cdp.clickAt('[data-enum-id="9.scheduler"] .vz-imgrow-head .checkbox');assert.equal(await cdp.evaluate("document.querySelector('[data-enum-id=\"9.scheduler\"] .vz-enum-opt:last-child .checkbox').checked"),true);await cdp.clickAt('[data-enum-id="9.scheduler"] .vz-imgrow-head .checkbox');
@@ -104,9 +109,10 @@ module.exports = async ({ cdp, ENGINE, FAKE, KZ, check }) => {
     finally{await cdp.evaluate('window.__recipeLongRestore()')}
     check('recipe layout: normal, preflight and long-error states keep intrinsic content reachable through the sidebar body, bounded messages directly above pinned Run',true);
     await type('.vz-suffix','_{470.image}');
+    await cdp.clickAt('[data-image-id="470.image"] .checkbox');
     for(let remaining=3;remaining>0;remaining--){await cdp.clickAt('[data-image-id="470.image"] .vz-image-tile .chrome-icon');await cdp.poll(`document.querySelectorAll('[data-image-id="470.image"] .vz-image-tile').length===${remaining-1}`)}
     await cdp.evaluate(`(async()=>{const bytes=await(await fetch('/api/collections/fake/entries/flux-lora.png/bytes')).arrayBuffer(),input=document.querySelector('[data-image-id="470.image"] .vz-imgfilespick'),dt=new DataTransfer();dt.items.add(new File([bytes],'x'.repeat(196)+'.png',{type:'image/png'}));input.files=dt.files;input.dispatchEvent(new Event('change',{bubbles:true}))})()`);
-    await cdp.clickAt('[data-image-id="470.image"] .checkbox');await cdp.poll("document.querySelector('[data-image-id=\"470.image\"] .checkbox').checked===true&&!document.querySelector('.vz-image-check')");count=(await jobs()).length;await invoke('variations.run');assert.equal((await jobs()).length,count);
+    await cdp.poll("document.querySelector('[data-image-id=\"470.image\"] .checkbox').checked===true&&!document.querySelector('.vz-image-check')");count=(await jobs()).length;await invoke('variations.run');assert.equal((await jobs()).length,count);
     assert(await cdp.evaluate("document.querySelector('.vz-error').textContent.includes('naming would be folded')"));
     await cdp.clickAt('.vz-close');await cdp.poll("!!document.querySelector('.vz-discard')");await cdp.clickAt('.vz-discard-confirm');await cdp.poll("!document.querySelector('.vz-panel')");
     check('recipe preflight: enabled-empty, unknown naming and a 200-character filename reject clearly with zero jobs',true);
@@ -126,7 +132,9 @@ module.exports = async ({ cdp, ENGINE, FAKE, KZ, check }) => {
     const address=new URL(FAKE).host;await http(ENGINE,'/api/collections','POST',{name:'recipe-owner',address});alias=true;
     await cdp.poll(`(async()=>!!${KZ}.state.hosts['recipe-owner'])()`);await cdp.evaluate("(async()=>{await fetch('/api/collections/recipe-owner/entries/recipe_00001_.png/bytes')})()");
     await open('recipe-owner');await cdp.poll("document.querySelectorAll('.vz-image-set').length===2");
+    await cdp.clickAt('[data-image-id="475.image"] .checkbox');
     await cdp.evaluate("(()=>{const input=document.querySelector('[data-image-id=\"475.image\"] .vz-imgfilespick'),dt=new DataTransfer();dt.items.add(window.__recipeDormant);input.files=dt.files;input.dispatchEvent(new Event('change',{bubbles:true}))})()");
+    await cdp.clickAt('[data-image-id="475.image"] .checkbox');
     assert.equal((await invoke('variations.run')).adopted,true);await cdp.poll("!document.querySelector('.vz-panel')",6000);
     const oldIncarnation=await cdp.evaluate(`(async()=>${KZ}.state.hosts['recipe-owner'].sourceVersion.incarnation)()`);
     await http(ENGINE,'/api/collections/recipe-owner','DELETE');alias=false;await http(ENGINE,'/api/collections','POST',{name:'recipe-owner',address});alias=true;

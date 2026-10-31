@@ -4,6 +4,7 @@ const { discardRecipe } = require('./recipe-helpers.cjs');
 module.exports = async ({ cdp, KZ, check }) => {
   await cdp.evaluate(`(async()=>{await fetch('/api/collections/fake/entries/flux-controlnet.png/bytes');await ${KZ}.handles.invoke('variations.open',{id:'fake:flux-controlnet.png'})})()`);
   await cdp.poll("!!document.querySelector('.vz-image-set')");await discardRecipe(cdp);
+  await cdp.poll("!!document.querySelector('.vz-image-set')");await cdp.clickAt('.vz-image-set .checkbox');
   await cdp.poll("!!document.querySelector('.vz-imgfilespick')");
   await cdp.evaluate(`(()=>{const original=window.fetch;window.__statusRelease=null;window.__statusRestore=()=>window.fetch=original;window.fetch=(url,options)=>{const task=original(url,options);return String(url).includes('/features/variations/inspect-image/')&&options?.body?.get?.('image')?.name==='stable-status.png'?task.then(response=>new Promise(resolve=>window.__statusRelease=()=>resolve(response))):task}})()`);
   try {

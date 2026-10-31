@@ -18,7 +18,7 @@
 //
 // Props convention: enabled/increment/current are GETTERS (the parent's rows
 // state outlives this row — <For> keeps it mounted across toggles); the rest
-// (param, defaults, placeholderKey, relative, callbacks) are stable per row.
+// (param, placeholderKey, relative, callbacks) are stable per row.
 // The row never reaches into its parent; inputs report through injected intents.
 
 import { createSignal, createEffect, onMount, onCleanup } from "solid-js";
@@ -27,10 +27,22 @@ import { snapTo, fmt } from "./graph.mjs";
 import { makeSliderGesture } from "./slider-gesture.js";
 import { focusMemory } from "./draft.js";
 import { ParameterRow, parameterName } from "./ParameterRow.js";
+import { SingleLineText } from "../../components/SingleLineText.js";
 
 const fmtSigned = (v) => (v > 0 ? "+" : "") + fmt(v);
 
 export function SliderRow(props) {
+  return <ParameterRow class="vz-slider-row" row={props.row} enabled={props.enabled}
+    attributes={{ "data-param-key": props.param.key }}
+    current={props.relative ? "varies by image" : fmt(props.current())} summary={props.summary}
+    onInsert={props.onInsert} onEnable={checked => props.onToggle(props.param.key, checked)}>
+    <NumericEditor {...props} />
+  </ParameterRow>;
+}
+
+// Only the native widget lifetime belongs to the expanded body. The recipe owns
+// every editable value, so a fresh widget restores the latest retained bounds.
+function NumericEditor(props) {
   let sliderEl;
   let gesture;
   let setBound;
@@ -57,7 +69,7 @@ export function SliderRow(props) {
     // read props live (Solid's props proxy), so the current increment is
     // always the one that snaps.
     const slider = noUiSlider.create(sliderEl, {
-      start: [props.defaults.min, props.defaults.max],
+      start: [props.row().min, props.row().max],
       connect: true,
       range: { min: lo, max: hi },
       step: fineStep,
@@ -148,11 +160,7 @@ export function SliderRow(props) {
       : null);
 
   return (
-    <ParameterRow class="vz-slider-row" row={props.row} enabled={props.enabled}
-      attributes={{ "data-param-key": props.param.key }}
-      current={props.relative ? "varies by image" : fmt(props.current())}
-      onEnable={checked => props.onToggle(props.param.key, checked)}>
-      <div class="vz-numeric-editor" hidden={!props.enabled()}>
+      <div class="vz-numeric-editor">
         <div class="vz-range-fields">
           <label class="vz-range-field">From<input type="number" step="any" aria-label={`${props.param.label} From`}
             value={Number(minLbl().text)} {...focus} onChange={event => setBound(0, event.currentTarget.value)} /></label>
@@ -164,7 +172,7 @@ export function SliderRow(props) {
                 onClick={() => commitInc(Math.max(fineStep, props.increment() / 2))}>÷2</button>
               <input id={`step-${props.placeholderKey}`} type="text" inputMode="decimal" role="spinbutton" aria-label={`${props.param.label} increment`}
                 aria-valuemin={fineStep} aria-valuenow={props.increment() ?? undefined}
-                aria-invalid={props.increment() === null} aria-describedby={`step-help-${props.placeholderKey}`}
+                aria-invalid={props.increment() === null}
                 class="vz-row-inc-input" value={rawIncrement()} {...focus}
                 onInput={event => props.onIncrement(props.param.key, event.currentTarget.value)}
                 onKeyDown={event => {
@@ -178,11 +186,6 @@ export function SliderRow(props) {
             </div>
           </div>
         </div>
-        <p class="vz-field-help" id={`step-help-${props.placeholderKey}`}>
-          {props.increment() === null ? "Enter a valid positive Step. Your text is kept." : props.relative
-            ? "Offsets from each image's current value. Arrow keys nudge a thumb finely."
-            : "Arrow keys nudge a thumb finely; Step sets the sweep increment."}
-        </p>
         <div class="vz-rangewrap">
           <div class="vz-lane vz-lane-track">
             {/* the full-range track line spans the inset span, so its ends are
@@ -201,7 +204,7 @@ export function SliderRow(props) {
             <div class="vz-slider" ref={sliderEl} />
           </div>
         </div>
+        <SingleLineText class="vz-editor-current" value={props.relative ? "varies by image" : fmt(props.current())} />
       </div>
-    </ParameterRow>
   );
 }

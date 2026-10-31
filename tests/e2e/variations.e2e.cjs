@@ -31,7 +31,8 @@ async function attempt(name, fn) {
 }
 
 async function main() {
-  const cdp = await CDP.launch(9334);
+  const cdp = await CDP.launch(9334, { windowSize: '1800,1200' });
+  await cdp.send('Emulation.setDeviceMetricsOverride', { width: 800, height: 600, deviceScaleFactor: 1, mobile: false });
   const closeAndDiscard = async () => {
     await cdp.evaluate(`document.querySelector('.vz-close')?.click()`);
     if (await cdp.evaluate(`!!document.querySelector('.vz-discard')`)) await cdp.clickAt('.vz-discard-confirm');
@@ -323,8 +324,8 @@ async function main() {
         near(v.h1r, v.railR), `thumbRight=${v.h1r} railRight=${v.railR}`);
     });
 
-    // Inactive rows keep their Current summary and native widget, without rails.
-    await attempt("disabled row is compact with current context and a retained slider", async () => {
+    // Inactive rows expose their current value, without mounting an editor.
+    await attempt("disabled row is compact with current context and no editor", async () => {
       const v = await cdp.evaluate(`(() => {
         const row = [...document.querySelectorAll('.vz-slider-row')].find(r => r.classList.contains('vz-off'));
         if (!row) return { error: 'no off row' };
@@ -335,15 +336,15 @@ async function main() {
           sliderHidden: !vis(row.querySelector('.vz-slider')),
           current: row.querySelector('.vz-parameter-current').textContent,
           compact: row.getBoundingClientRect().height <= 44,
-          widgetRetained: !!row.querySelector('.vz-slider').noUiSlider,
+          editorAbsent: !row.querySelector('.vz-numeric-editor'),
         };
       })()`);
-      check("off row: one-line Current summary, hidden rails and retained native widget",
-        !v.rail && !v.marker && v.sliderHidden && v.current.startsWith('Current ') && v.compact && v.widgetRetained, JSON.stringify(v));
+      check("off row: one-line current value and no editor DOM",
+        !v.rail && !v.marker && v.sliderHidden && !!v.current && !v.current.startsWith('Current ') && v.compact && v.editorAbsent, JSON.stringify(v));
     });
 
-    // The explicit naming action owns insertion; row labels own enablement.
-    await attempt("parameter selector inserts {key} at cursor", async () => {
+    // The row name owns insertion; only its checkbox owns enablement.
+    await attempt("parameter name inserts {key} at cursor", async () => {
       const result = await cdp.evaluate(`(() => {
         const row = document.querySelector('.vz-slider-row');
         const suffix = document.querySelector('.vz-suffix');
@@ -352,12 +353,10 @@ async function main() {
         suffix.setSelectionRange(4, 4);
         suffix.dispatchEvent(new Event('focus'));
         suffix.dispatchEvent(new Event('mouseup'));
-        const selector = document.querySelector('.vz-insert-parameter');
-        selector.value = row.dataset.paramKey;
-        selector.dispatchEvent(new Event('change', { bubbles: true }));
+        row.querySelector('.vz-parameter-name').click();
         return { value: suffix.value };
       })()`);
-      // the selector inserts the row's own placeholder — the auto-enabled
+      // the name inserts the row's own placeholder — the auto-enabled
       // denoise row floats to the top, so the first row's key ends in denoise
       const ok = /^pre_\{[\w.]*denoise\}_post$/.test(result.value);
       check("suffix contains graph-appropriate {denoise} at cursor",
@@ -906,6 +905,7 @@ async function main() {
     await require('./variations-image-set.cjs')({ cdp, check, FAKE, KZ });
     await require('./variations-overflow.cjs')({ cdp, check, ENGINE, FAKE, KZ });
     await require('./variations-workspace.cjs')({ cdp, check, ENGINE, FAKE, KZ });
+    await require('./variations-row-frame.cjs')({ cdp, check, KZ });
   } finally {
     await cdp.close();
   }

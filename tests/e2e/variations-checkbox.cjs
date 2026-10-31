@@ -11,7 +11,7 @@ module.exports = async function checkbox({ cdp, check, selector, size }) {
       fill: fill.content, fillColor: fill.backgroundColor,
       inset: [fill.top, fill.right, fill.bottom, fill.left],
       fillWidth: parseFloat(fill.width), fillHeight: parseFloat(fill.height),
-      labelled: input.labels.length > 0,
+      labelled: input.labels.length > 0 || !!document.getElementById(input.getAttribute('aria-labelledby'))?.textContent.trim(),
       focused: input.matches(':focus-visible'), outline: style.outlineStyle, outlineWidth: style.outlineWidth,
     };
   })()`);

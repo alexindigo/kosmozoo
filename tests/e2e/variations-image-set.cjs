@@ -22,13 +22,14 @@ module.exports = async ({ cdp, FAKE, KZ, check }) => {
     await invoke('variations.open', { id: 'fake:flux-controlnet.png' });
     await cdp.poll("!!document.querySelector('.vz-image-set')");
     await discardRecipe(cdp);await cdp.poll("!!document.querySelector('.vz-image-set')");
+    assert.equal(await cdp.evaluate("!!document.querySelector('.vz-image-content')"), false);
+    await cdp.clickAt('.vz-image-set .checkbox');
     assert.equal(await cdp.evaluate("document.querySelector('.vz-image-empty').textContent"), 'Add images to vary this input.');
     assert(await cdp.evaluate("!!document.querySelector('.vz-input-trigger')&&!!document.querySelector('.vz-imgfilespick')&&!document.querySelector('[webkitdirectory]')"));
     await cdp.poll("document.querySelector('.vz-folder-chooser button')?.disabled===true");
     assert.equal(await cdp.evaluate("document.querySelector('.vz-folder-chooser button').title"), 'Folder chooser needs the desktop app');
     assert.equal(await cdp.evaluate("document.querySelector('.vz-folder-path').disabled"), false);
     await capture('image-set-empty');
-    await cdp.clickAt('.vz-image-set .checkbox');
     await cdp.clickAt('[data-param-key="9.denoise"] .checkbox');
     await cdp.clickAt('.vz-input-trigger');
     await cdp.poll("document.querySelectorAll('.vz-input-option').length>0");
@@ -112,8 +113,8 @@ module.exports = async ({ cdp, FAKE, KZ, check }) => {
     fs.writeFileSync(folder + '/ignore.mp4', 'not an image');
     fs.writeFileSync(folder + '/same-current.png', Buffer.from(await cdp.evaluate("(async()=>Array.from(new Uint8Array(await(await fetch('/api/collections/fake/entries/canny.png/bytes?kind=input')).arrayBuffer())))()")));
     await invoke('variations.open', { id: 'fake:flux-controlnet.png' });
-    await cdp.poll("!!document.querySelector('.vz-folder-path')");
-    await discardRecipe(cdp);await cdp.poll("!!document.querySelector('.vz-folder-path')");
+    await cdp.poll("!!document.querySelector('.vz-image-set')");
+    await discardRecipe(cdp);await cdp.poll("!!document.querySelector('.vz-image-set')");
     await cdp.clickAt('.vz-image-set .checkbox');
     await cdp.clickAt('[data-param-key="9.denoise"] .checkbox');
     await pickInput(cdp, 'picker-0550.png');

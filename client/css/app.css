@@ -673,8 +673,7 @@ body:has(#diff:not([hidden])) #statusCol { bottom: 56px; }
 .vz-sliders { display: flex; flex-direction: column; gap: 10px;
   overflow-y: auto; min-height: 0; flex: 1; padding-right: 4px; }
 
-/* ParameterRow owns the common heading/editor allocation below. Enabled rows
-   retain the existing memo's ordering; native widgets stay mounted when hidden. */
+/* ParameterRow owns every card and the expanded editor's lifetime. */
 .vz-loading { color: var(--foreground-mid); font-size: 12px; padding: 20px 4px;
   text-align: center; font-style: italic; }
 
@@ -684,7 +683,6 @@ body:has(#diff:not([hidden])) #statusCol { bottom: 56px; }
  options as a scrollable checkbox list below the head. The current value is
  orange — the same "current notch" accent the slider rows use. */
 .vz-enum-body { flex-direction: column; }
-.vz-enum-cur { color: var(--attention); }
 .vz-enum-filter { background: var(--background); color: var(--foreground);
   border: 1px solid var(--border-strong); border-radius: 4px; font-size: 12px;
   padding: 3px 6px; }
@@ -694,7 +692,6 @@ body:has(#diff:not([hidden])) #statusCol { bottom: 56px; }
 .vz-enum-opt { display: flex; align-items: center; gap: 8px; cursor: pointer;
   font-size: 12px; color: var(--foreground); padding: 1px 0; }
 .vz-enum-opt-name { flex: 1; }
-.vz-enum-opt > .vz-field-help { flex: 0 0 auto; white-space: nowrap; }
 .vz-enum-current .vz-enum-opt-name { color: var(--attention); }
 
 /* Text is a literal template; line breaks never separate alternatives. */
@@ -1021,9 +1018,7 @@ body:has(#diff:not([hidden])) #statusCol { bottom: 56px; }
 /* The decision is contained by its owner; its editor never unmounts. */
 .vz-panel { position: relative; }
 
-/* Image curation: a contact sheet above a quiet, persistent acquisition row. */
-.vz-image-set { transition: none; }
-.vz-image-set:not(.on) { opacity: 1; }
+/* Image curation inside the checked card: a contact sheet above acquisition. */
 .vz-image-content { display: flex; flex-direction: column; gap: 8px; margin-top: 10px; }
 .vz-image-grid { display: grid; grid-template-columns: repeat(auto-fill, 112px); gap: 10px; }
 .vz-image-tile { margin: 0; display: flex; flex-direction: column; gap: 3px; }
@@ -1064,7 +1059,8 @@ body:has(#diff:not([hidden])) #statusCol { bottom: 56px; }
 .vz-input-option[aria-selected="true"] { border-color: var(--secondary); }
 .vz-input-option:focus-visible { outline-offset: -4px; }
 .vz-input-option .vz-image-same, .vz-input-selected { grid-area: 1 / 1; margin: 4px; padding: 1px 4px; border-radius: 3px; background: var(--backdrop); }
-.vz-input-option .vz-image-same { align-self: end; justify-self: start; }
+.vz-input-option .vz-image-same { align-self: stretch; justify-self: stretch; margin: 0; padding: 0;
+  background: transparent; border: 2px solid var(--attention); border-radius: inherit; pointer-events: none; }
 .vz-input-selected { align-self: start; justify-self: end; color: var(--secondary); font-weight: 600; }
 /* The picture/selection share one cell; Retry is a separate sibling action.
    Fixed allocation is also the virtualizer's tile/row geometry contract. */
@@ -1107,14 +1103,12 @@ body:has(#diff:not([hidden])) #statusCol { bottom: 56px; }
 .vz-folder-controls { display: flex; align-items: center; gap: 4px; }
 .vz-folder-path { flex: 1; width: 100%; padding: 5px 8px; font: inherit; color: var(--foreground); background: var(--background); border: 1px solid var(--border); border-radius: 4px; }
 .vz-folder-path:focus-visible { outline: 2px solid var(--secondary); outline-offset: 2px; }
-.vz-folder-help { color: var(--foreground-mid); font-size: 11px; }
 .vz-image-action:disabled { opacity: .5; cursor: default; }
 .vz-image-add { align-items: start; }
 
 .vz-folder-chooser { display: flex; align-items: center; flex: 0 0 auto; }
 .vz-folder-chooser button:focus-visible { outline: 2px solid var(--secondary); outline-offset: 2px; }
 
-.vz-folder-help { overflow-wrap: anywhere; }
 
 /* Shared display-text primitive; zero specificity leaves allocation, type and
    color to the consumer. Tooltip ownership lives with SingleLineText. */
@@ -1129,20 +1123,22 @@ body:has(#diff:not([hidden])) #statusCol { bottom: 56px; }
 .vz-workspace-actions select { flex: 1; min-width: 0; }
 .vz-workspace-new { align-self: flex-start; }
 
-/* One quiet row vocabulary: only enabled editors earn vertical space. Current
-   values and node identity remain readable without opacity-dimming whole rows. */
-.vz-parameter { display: block; padding: 10px 0; background: transparent;
-  border: 0; border-bottom: 1px solid var(--border); border-radius: 0; opacity: 1; transition: none; }
+/* Production's card vocabulary, shared by every input kind. Only enabled rows
+   mount an editor; the same one-line heading sets all closed-row geometry. */
+.vz-parameter { display: block; flex: 0 0 auto; padding: 10px 12px; background: var(--surface);
+  border: 1px solid var(--lifted); border-radius: 8px; opacity: 1; }
+.vz-parameter.on { border-color: var(--secondary); }
+.vz-parameter:not(.on) { opacity: 0.55;
+  background: color-mix(in srgb, var(--surface) 85%, transparent); }
 .vz-parameter-heading.vz-imgrow-head { display: grid;
-  grid-template-columns: 16px minmax(60px, 1fr) minmax(0, 1fr) minmax(0, 1fr);
+  grid-template-columns: 16px minmax(0, 1fr) minmax(0, .8fr);
   gap: 8px; align-items: center; cursor: default; }
-.vz-parameter-name { min-width: 0; cursor: pointer; }
-.vz-parameter-name .vz-label { font: 500 13px/18px system-ui; }
-.vz-parameter-identity { color: var(--foreground-mid); font: 12px/18px system-ui; }
+.vz-parameter-name { min-width: 0; padding: 0; border: 0; background: transparent; text-align: left; cursor: pointer; }
+.vz-parameter-name .vz-label { font: 400 13px/18px system-ui; }
 .vz-parameter-current.vz-imgrow-cur { margin: 0; max-width: 100%; color: var(--attention);
   text-align: right; font: 12px/18px system-ui; font-variant-numeric: tabular-nums; }
 .vz-numeric-editor { display: grid; gap: 8px; margin: 12px 0 0 24px; }
-.vz-numeric-editor[hidden] { display: none; }
+.vz-editor-current { color: var(--attention); font-variant-numeric: tabular-nums; }
 .vz-range-fields { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) minmax(110px, 1.35fr); gap: 8px; }
 .vz-range-field { display: flex; flex-direction: column; gap: 4px; color: var(--foreground-mid); font: 12px/16px system-ui; }
 .vz-range-field > input, .vz-range-field .vz-row-inc-input { width: 100%; box-sizing: border-box;
@@ -1159,8 +1155,6 @@ body:has(#diff:not([hidden])) #statusCol { bottom: 56px; }
 .vz-root input[aria-invalid="true"] { border-color: var(--error); }
 .vz-left { container: variation-fields / inline-size; }
 @container variation-fields (max-width: 420px) {
-  .vz-parameter-heading.vz-imgrow-head { grid-template-columns: 16px minmax(0, 1fr) minmax(0, 1fr); }
-  .vz-parameter-identity { display: none; }
   .vz-range-fields { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .vz-range-field:last-child { grid-column: 1 / -1; }
 }
@@ -1168,14 +1162,9 @@ body:has(#diff:not([hidden])) #statusCol { bottom: 56px; }
 .vz-count-sub { margin: 0; line-height: 16px; overflow-wrap: anywhere; }
 .vz-count-large { font-size: 23px; }
 .vz-naming-group { grid-template-columns: 38px minmax(0, 1fr); align-items: center; }
-.vz-naming-group :is(.vz-rlabel, .vz-insert-parameter, .vz-name-example, .vz-name-help) { grid-column: 1 / -1; }
+.vz-naming-group .vz-rlabel { grid-column: 1 / -1; }
 .vz-naming-group label { color: var(--foreground-mid); margin: 0; }
 .vz-naming-group .vz-tinput { width: 100%; box-sizing: border-box; padding-inline: 4px; }
-.vz-insert-parameter { width: 100%; padding: 4px; background: var(--background); color: var(--foreground);
-  border: 1px solid var(--border-strong); border-radius: 4px; font: inherit; }
-.vz-name-example { margin: 4px 0 0; overflow-wrap: anywhere; font: 12px/16px system-ui; }
-.vz-name-example span { font-family: ui-monospace, monospace; }
-.vz-name-help { color: var(--foreground-mid); font: 11px/15px system-ui; }
 .vz-queued { margin: 0 0 8px; font: 13px/18px system-ui; }
 .vz-ok { color: var(--positive); }
 .vz-messages .vz-error { text-align: left; margin: 0; font: 12px/16px system-ui; }

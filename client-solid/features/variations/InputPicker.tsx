@@ -189,7 +189,7 @@ function InputOptions(props) {
                 {...memory} onFocus={event => { setActive(index()); memory.onFocus(event); }}
                 onClick={() => { setActive(index()); props.onToggle(name); search.focus(); }}>
                 {picture}
-                <Show when={name === props.current}><SingleLineText class="vz-image-same" aria-hidden="true" value="Current" /></Show>
+                <Show when={name === props.current}><span class="vz-image-same" aria-hidden="true" /></Show>
                 <Show when={props.selected(name)}><SingleLineText class="vz-input-selected" aria-hidden="true" value="✓" /></Show>
               </button>} />;
             }}</For>
