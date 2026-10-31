@@ -25,6 +25,7 @@ function MediaButton(props) {
 }
 
 export function MediaControls(props) {
+  const soundOn = () => !props.muted;
   const bar = () => <MediaControlBoundary class="media-controls">
     <Show when={props.label}><span class="media-side">{props.label}</span></Show>
     <MediaButton docked={props.docked}
@@ -34,8 +35,8 @@ export function MediaControls(props) {
       value={props.current} disabled={!props.duration} onInput={e => props.onSeek(Number(e.currentTarget.value))} />
     <span class="media-time">{mediaTime(props.current)} / {mediaTime(props.duration)}</span>
     <MediaButton docked={props.docked}
-      variant="media-mute" title={props.muted ? "unmute" : "mute"}
-      active={props.muted} onAction={props.onMute} icon={iconSvg(props.muted ? "volume-off" : "volume", 16)} />
+      variant="media-mute" title="Sound"
+      active={soundOn()} onAction={props.onMute} icon={iconSvg(soundOn() ? "volume" : "volume-off", 16)} />
     <MediaButton docked={props.docked}
       variant="media-loop" title="loop" active={props.loop}
       onAction={props.onLoop} icon={iconSvg("repeat", 16)} />

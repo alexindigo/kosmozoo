@@ -16,6 +16,25 @@ module.exports = async ({ page, ENGINE, KZ, check, capture, control }) => {
     await page.mouse('mousePressed', point.x, point.y, { clickCount: 1, buttons: 1 });
     await page.mouse('mouseReleased', point.x, point.y, { clickCount: 1, buttons: 0 });
   };
+  const soundState = (controls, video, on) => page.evaluate(`(async () => {
+    const button=document.querySelector(${JSON.stringify(controls + ' .media-mute')}), video=document.querySelector(${JSON.stringify(video)});
+    const {iconSvg}=await import('/js/icons.mjs'), template=document.createElement('template');
+    template.innerHTML=iconSvg(${JSON.stringify(on ? 'volume' : 'volume-off')},16);
+    return button.title==='Sound' && button.getAttribute('aria-label')==='Sound'
+      && button.getAttribute('aria-pressed')===${JSON.stringify(String(on))}
+      && button.classList.contains('on')===${on} && button.innerHTML===template.innerHTML
+      && video.muted===${!on} && !video.paused && video.currentTime>0;
+  })()`);
+  const checkSound = async (label, controls, video) => {
+    await page.poll(`!document.querySelector(${JSON.stringify(video)}).paused && document.querySelector(${JSON.stringify(video)}).currentTime>0`);
+    check(label + ': playing sound is pressed/on with speaker icon and Sound tooltip', await soundState(controls, video, true));
+    await page.clickAt(controls + ' .media-mute');
+    await page.poll(`document.querySelector(${JSON.stringify(video)}).muted`);
+    check(label + ': muting turns pressed/on off with muted-speaker icon and native muted=true', await soundState(controls, video, false));
+    await page.clickAt(controls + ' .media-mute');
+    await page.poll(`!document.querySelector(${JSON.stringify(video)}).muted`);
+    check(label + ': unmuting restores pressed/on and native muted=false', await soundState(controls, video, true));
+  };
   await page.evaluate(`(() => { window.__videoEvents=[]; window.__videoEventListener=e=>{
     if(e.target.tagName==='VIDEO')window.__videoEvents.push({at:performance.now(),type:e.type,src:e.target.getAttribute('src'),time:e.target.currentTime,ready:e.target.readyState,paused:e.target.paused});
   };for(const type of ['loadstart','loadedmetadata','loadeddata','emptied','play','playing','pause','error'])document.addEventListener(type,window.__videoEventListener,true); })()`);
@@ -49,6 +68,7 @@ module.exports = async ({ page, ENGINE, KZ, check, capture, control }) => {
     await page.clickAt(card(a) + ' .media-play');
     await page.poll(`!${v(a)}.paused && ${v(a)}.currentTime > .1`);
     check('video play button advances native playback time', true);
+    await checkSound('feed card', card(a), card(a) + ' video');
     const stable = await page.evaluate(`({time:${v(a)}.currentTime,loads:window.__videoEvents.filter(e=>e.type==='loadstart'&&e.src===${v(a)}.getAttribute('src')).length})`);
     await page.evaluate(`(async()=>{const w=${KZ}.state.window;for(let i=0;i<6;i++){w.recompute();await new Promise(requestAnimationFrame)}})()`);
     await page.poll(`${v(a)}.currentTime > ${stable.time} + .1`);
@@ -68,6 +88,10 @@ module.exports = async ({ page, ENGINE, KZ, check, capture, control }) => {
     await page.keyTrusted(' ', { code: 'Space', vk: 32 }); await page.poll(`!${v(a)}.paused`);
     check('Space resolves focus anywhere in the containing card, including its action row', true);
     await bodyClick(a); await page.poll(`${v(a)}.paused`);
+    await page.clickAt(card(a) + ' .media-loop'); await page.poll(`${v(a)}.loop`);
+    check('loop toggle is pressed/on exactly when native loop is enabled', await page.evaluate(`(()=>{const button=document.querySelector('${card(a)} .media-loop');return button.getAttribute('aria-pressed')==='true'&&button.classList.contains('on')})()`));
+    await page.clickAt(card(a) + ' .media-loop'); await page.poll(`!${v(a)}.loop`);
+    check('loop toggle is off exactly when native loop is disabled', await page.evaluate(`(()=>{const button=document.querySelector('${card(a)} .media-loop');return button.getAttribute('aria-pressed')==='false'&&!button.classList.contains('on')})()`));
     await page.clickAt(card(a) + ' .media-loop'); await page.poll(`${v(a)}.loop`);
     await page.clickAt(card(a) + ' .media-mute'); await page.poll(`${v(a)}.muted`);
     check('per-player loop and mute controls reach the native player', true);
@@ -99,6 +123,21 @@ module.exports = async ({ page, ENGINE, KZ, check, capture, control }) => {
     await page.poll(`document.querySelector('.dz-a video')?.readyState>=2`);
     await page.poll(`document.getElementById('diffStage').dataset.mode==='full'`);
     check('video opens in full view with only A; Difference absent and exactly the video view set', await page.evaluate(`(()=>{const buttons=[...document.querySelectorAll('#diffModes button')];return !document.getElementById('diff').hidden&&!document.querySelector('.dz-b')&&JSON.stringify(buttons.map(e=>e.dataset.view))===JSON.stringify(['full','split','overlay','slider'])&&buttons[0].classList.contains('on')})()`));
+    // The preceding key rebind reports a transient status chip over this end
+    // of the dock. Wait for real hit-testing before starting the short clip.
+    await page.poll(`(()=>{const b=document.querySelector('#diffMedia .media-mute'),r=b.getBoundingClientRect();return b.contains(document.elementFromPoint(r.x+r.width/2,r.y+r.height/2))})()`);
+    await page.clickAt('#diffMedia .media-toggle');
+    await checkSound('viewer', '#diffMedia', '.dz-a video');
+    if (process.env.E2E_SOUND_SHOT) {
+      await page.send('Emulation.setDeviceMetricsOverride', { width: 1600, height: 1000, deviceScaleFactor: 1, mobile: false });
+      await page.mouse('mouseMoved', 20, 20);
+      await page.evaluate('new Promise(requestAnimationFrame)');
+      const shot=await page.send('Page.captureScreenshot', { format: 'png' });
+      require('node:fs').writeFileSync(process.env.E2E_SOUND_SHOT, Buffer.from(shot.data, 'base64'));
+      await page.send('Emulation.setDeviceMetricsOverride', { width: 1400, height: 1000, deviceScaleFactor: 1, mobile: false });
+    }
+    await page.clickAt('#diffMedia .media-toggle');
+    await page.poll(`document.querySelector('.dz-a video').paused`);
     const dockGeometry = () => page.evaluate(`(()=>{const row=document.getElementById('diffMedia').getBoundingClientRect(),bar=document.getElementById('diffBar').getBoundingClientRect(),stage=document.getElementById('diffStage').getBoundingClientRect(),controls=[...document.querySelectorAll('#diffMedia .media-controls')].map(e=>e.getBoundingClientRect());return{gap:Math.abs(row.bottom-bar.top),left:Math.abs(row.left-bar.left),right:Math.abs(row.right-bar.right),area:Math.abs(stage.bottom-row.top),controlBottom:Math.max(...controls.map(r=>Math.abs(r.bottom-bar.top))),count:controls.length,open:!!document.querySelector('#diff .media-open')}})()`);
     let dock=await dockGeometry();
     check('viewer dock spans toolbar edges and touches it within 1px, with no open control',dock.gap<=1&&dock.left<=1&&dock.right<=1&&dock.area<=1&&dock.controlBottom<=1&&dock.count===1&&!dock.open,JSON.stringify(dock));
