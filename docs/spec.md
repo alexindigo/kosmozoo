@@ -103,8 +103,9 @@ history, observation time or cache maxima. AssetsPlus-only hidden root files
 remain visible, as explicitly approved; Kosmozoo's own hidden/gone overlay and
 AssetsPlus descendant hiding remain honored. Whole responses validate before publication;
 conflicting duplicates, malformed records and truncation are errors. Definitive
-extension absence permits explicit stock-root coverage with a disabled folder
-control. A known recursive host's outage/incompatible response cannot downgrade
+extension absence permits explicit stock-root coverage without a folder
+control. Unknown capability also omits that control until resolved. A known
+recursive host's outage/incompatible response cannot downgrade
 to root-only. Discovery is independent of the delete preference. Existing 10s
 request timeouts apply; complete discovery/metadata waves have a 60s deadline.
 Collection capability probes discover config separately
@@ -515,7 +516,9 @@ card video players show a play affordance centred on the displayed first decoded
 click toggles playback, while pan drags suppress their trailing click. Images
 retain click-to-open and animated-image behavior. A per-store capability owner
 pauses every other registered player on a native play event, and disposal or
-src-window retirement pauses/unloads the consumer.
+src-window retirement pauses/unloads the consumer. The controls row always stays;
+until duration is known, only the seek slider is omitted. Its layout slot and the
+time readout allocation remain reserved, so adjacent controls do not move.
 Native load lifetime follows source value and element identity, not unrelated
 reactive window invalidations; zoom bindings follow element/key identity.
 Audio uses the same controls, focus/Space semantics and arbitration, without a
@@ -534,7 +537,10 @@ Audio's viewer has one view and no switcher or B side.
 The per-kind workbench view catalogue owns opening defaults, command admission
 and the toolbar. Video opens in Full, and offers Split (two-up),
 Overlay (one-up/blink) and Slider (wipe); Difference is absent. Audio has only
-Full. Images offer Full/Two-Up/One-Up/Split/Difference. Every kind opens in Full,
+Full. Images offer Full/Two-Up/One-Up/Split/Difference. Without a comparison image,
+only Full is available and the single-option mode switch is omitted, as are side,
+lock and opacity actions. Empty toolbar slots retain their allocation so controls
+do not shift as the pair changes. Every kind opens in Full,
 on the clicked image, on every open. The open intent names its subject and pair;
 the viewer owns that subject, derives its active column from it, and Full shows
 only that side. Comparison modes retain the pair with the subject active.
@@ -583,8 +589,8 @@ accepted source, kind and filename stay together through a failed swap, retainin
 the last good side. Without a last-good side, a failed guard carries its native
 media error code or image decode cause to the same MediaBox failure formatter;
 unknown guard timeouts stay generic. Closing retires pending guards and native sources. Two-up,
-one-up and split allow video/audio without synchronization. Non-image pairs disable
-Difference with “difference mode compares still images”; the semantic mode
+one-up and split allow video/audio without synchronization. Non-image pairs omit
+Difference; the semantic mode
 command enforces the same restriction. Hidden one-up players pause.
 
 The shared browser JSON transport throws `ApiError` on non-success, retaining
@@ -619,7 +625,7 @@ preferences remain available to existing non-chrome consumers.
 The pinned group has a non-scrolling vertical separator only when pins exist,
 with smaller gaps inside its scrollable button strip. Empty pins retain flexible
 allocation. Folder labels truncate within compact allocations with full path in
-the accessible title; unsupported controls expose a root-only reason. Native
+the accessible title; unsupported folder controls are omitted. Native
 select typing retains precedence in the existing key dispatcher.
 
 The existing feed rail current marker follows live viewport midpoint-crossing
@@ -657,6 +663,10 @@ Static surfaces: `/shared/<name>` serves the allow-listed `src/` modules
 assets (`/css`, `/vendor`, `/js`, logos) from `client/`.
 
 ### Client commands and modal ownership
+
+While deletion runs, the confirmation's two action buttons are replaced by a
+same-row “Deleting N images…” status (singular for one). Success closes the
+confirmation; failure restores the buttons and displays an error message.
 
 Application inputs follow **input → shared handle → private operation**. The plain
 per-store registry returns stable source-independent ports via
@@ -770,8 +780,9 @@ The shared folder icon immediately to the path field's right asks the **engine**
 to open the desktop portal directory chooser; it never uses browser directory
 selection. `GET /api/features/variations/folder-chooser` returns `{available,reason}`.
 Only app mode with a reachable session bus and FileChooser version 3+ enables it;
-serve/container/no-portal cases disable it with “Folder chooser needs the desktop
-app”, without disabling the typed path or Add. `POST /choose-folder` accepts
+serve/container/no-portal cases omit the chooser. The typed path remains available,
+and Add folder appears only with a non-empty path. During choosing or listing,
+“Reading folder…” replaces both actions in their row. `POST /choose-folder` accepts
 `{path:""|absolutePath}` and returns `{path,cancelled:false}` or
 `{path:null,cancelled:true}`. Selection fills the path; Add still explicitly acquires
 the recursive set. Cancel/errors preserve the draft, and later typing wins over
@@ -878,8 +889,11 @@ Row labels exclusively toggle their associated enable checkbox; insertion does
 not share that label's pointer event. A representative output-name example resolves
 through the shared naming-token
 formatter. It does not promise final upload collision names, producer names or
-output counters. “Queue variations” becomes “Submitting…” during preparation and
-submission. The polite result reports “Queued N of N jobs”, with kept-edit reasons
+output counters. Run is replaced by “Queuing…” status in the same final sidebar
+slot during preparation and submission. Retained recipes display Prefix/Suffix as
+text and omit Run; New recipe remains their explicit recovery action. The halve
+step action is omitted at its minimum increment. The polite result reports
+“Queued N of N jobs”, with kept-edit reasons
 in neutral text and actual failures in the error role's color.
 The native input popup uses the shared environment-pure viewport placement owner
 (`client-solid/lib/popover-placement.js`), preferring the side with more room and

@@ -45,8 +45,8 @@ const check = (name, ok, detail = '') => { checks++; console.log(`${ok ? 'ok' : 
           if (mode==='full') await invoke('workbench.column',{column:subject==='a'?'feed':'right'});
           else await page.key(subject==='a'?'ArrowLeft':'ArrowRight');
           await frames();
-          const active = await page.evaluate(`(async()=>({subject:${KZ}.state.diff.subject,label:document.querySelector('#diffCtl .dz-sidebtn').textContent.trim()}))()`);
-          check(`${opener}/${mode}/${subject}: subject and label`,active.subject===subject&&active.label===subject.toUpperCase(),JSON.stringify(active));
+          const active = await page.evaluate(`(async()=>({subject:${KZ}.state.diff.subject,label:document.querySelector('#diffCtl .dz-sidebtn')?.textContent.trim()??null}))()`);
+          check(`${opener}/${mode}/${subject}: subject and available side label`,active.subject===subject&&active.label===(mode==='full'?null:subject.toUpperCase()),JSON.stringify(active));
           if (mode==='two-up'||mode==='split') {
             for (const split of mode==='split'?[.25,.75]:[.5]) {
               await invoke('workbench.parameters',{parameter:'split',value:split}); await frames();

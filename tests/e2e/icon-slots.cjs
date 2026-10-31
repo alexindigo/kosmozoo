@@ -74,6 +74,7 @@ const KZ = '(await import("/store/instance.js")).appStore';
     await page.poll("!!document.querySelector('.card .media-controls') && !!document.querySelector('.card .media-play')");
     await inspect('feed-media', '.card .media-controls button, .card .media-play', 5);
     await page.evaluate(`(async () => ${KZ}.actions.ui.setFilter(''))()`);
+    await invoke('entry.select', { source: 'fake', file: 'icon-slots.webm' });
     await page.poll("document.querySelector('#workspace')?.textContent.includes('SaveVideo')");
     await shot('header');
     await invoke('workbench.openPair', { left: { source: 'fake', file: 'icon-slots.webm' }, right: { source: 'fake', file: 'flux-basic.png' } });
@@ -96,7 +97,11 @@ const KZ = '(await import("/store/instance.js")).appStore';
     await page.evaluate("document.querySelector('.vz-image-tile').focus()");
     await inspect('image-remove', '.vz-image-remove button');
     await openImageFolder(page);
-    await inspect('folder', '.vz-folder-chooser button');
+    // Browser mode has no chooser; measure the available desktop state through
+    // the same public acquisition component, with capability injected.
+    await page.evaluate(`(async()=>{const {render,createComponent}=await import('/vendor/solid/web.mjs'),{FolderImages}=await import('/features/variations/FolderImages.js');const root=document.createElement('div');root.id='folder-geometry';document.querySelector('.vz-folder').append(root);window.__folderGeometry=()=>{dispose();root.remove()};const dispose=render(()=>createComponent(FolderImages,{capability:()=>({available:true}),registerEditor:()=>()=>{},onChoose:async()=>({path:null}),onAdd:async()=>({count:0})}),root)})()`);
+    await inspect('folder', '#folder-geometry .vz-folder-chooser button');
+    await page.evaluate('__folderGeometry()');
     await inspect('input-trigger', '.vz-input-trigger');
     await page.clickAt('.vz-input-trigger');
     await page.poll("!!document.querySelector('.vz-input-search') && getComputedStyle(document.querySelector('.vz-input-popover')).opacity === '1'");

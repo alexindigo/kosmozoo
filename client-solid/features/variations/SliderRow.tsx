@@ -160,8 +160,8 @@ function NumericEditor(props) {
             onInput={event => props.onField(props.param.key, "max", event.currentTarget.value)} /></label>
           <div class="vz-range-field"><label for={`step-${props.placeholderKey}`}>step</label>
             <div class="vz-row-inc">
-              <IconButton chrome size="md" variant="plain vz-step-btn" title="Halve step" aria-label={`${props.param.label}: Halve step`}
-                icon={iconSvg("minus")} onAction={() => commitInc(Math.max(fineStep, props.increment() / 2))} />
+              <Show when={props.increment() > fineStep}><IconButton chrome size="md" variant="plain vz-step-btn" title="Halve step" aria-label={`${props.param.label}: Halve step`}
+                icon={iconSvg("minus")} onAction={() => commitInc(Math.max(fineStep, props.increment() / 2))} /></Show>
               <input id={`step-${props.placeholderKey}`} type="text" inputMode="decimal" role="spinbutton" aria-label={`${props.param.label} increment`}
                 aria-valuemin={fineStep} aria-valuenow={props.increment() ?? undefined}
                 aria-invalid={props.increment() === null}
@@ -173,8 +173,8 @@ function NumericEditor(props) {
                   if (value === null || !Number.isFinite(value)) return;
                   event.preventDefault(); commitInc(value + (event.key === "ArrowUp" ? fineStep : -fineStep));
                 }} />
-              <IconButton chrome size="md" variant="plain vz-step-btn" title="Double step" aria-label={`${props.param.label}: Double step`}
-                icon={iconSvg("plus")} onAction={() => commitInc(props.increment() * 2)} />
+              <Show when={props.increment() !== null}><IconButton chrome size="md" variant="plain vz-step-btn" title="Double step" aria-label={`${props.param.label}: Double step`}
+                icon={iconSvg("plus")} onAction={() => commitInc(props.increment() * 2)} /></Show>
             </div>
           </div>
           </div>}>

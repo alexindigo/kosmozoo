@@ -1,4 +1,4 @@
-import { For } from "solid-js";
+import { For, Show } from "solid-js";
 import { Select } from "./Select.js";
 
 // Controlled native selection only. Inventory, persistence and navigation are
@@ -12,14 +12,14 @@ export function FolderPicker(props) {
   const title = () => (props.value || "Output root (including descendants)") +
     (props.reason ? ` — ${props.reason}` : props.loading ? " — inventory loading" : "");
   return (
-    <div id="folderPicker" class="folder-picker">
+    <Show when={props.supported === true}><div id="folderPicker" class="folder-picker">
       <Select size="sm" id="outputFolder" aria-label="Output folder" title={title()}
-        value={props.value} disabled={props.supported === false || props.supported == null}
+        value={props.value}
         aria-busy={props.loading} onChange={(e) => props.onSelect(e.currentTarget.value)}>
         <For each={props.options}>
           {(folder) => <option value={folder} title={folder || "Output root (including descendants)"}>{caption(folder)}</option>}
         </For>
       </Select>
-    </div>
+    </div></Show>
   );
 }

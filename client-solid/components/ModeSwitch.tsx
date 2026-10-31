@@ -15,7 +15,7 @@ export function ModeSwitch(props) {
         onClick={event => { event.stopPropagation(); props.onChange(value); }}><SingleLineText value={option()?.label} /></button>
     }>
       <IconButton viewer variant={option()?.variant} icon={option()?.icon} title={option()?.title ?? option()?.label}
-        aria-label={option()?.label} data-view={option()?.view} disabled={option()?.disabled}
+        aria-label={option()?.label} data-view={option()?.view}
         active={props.value === value} onAction={() => props.onChange(value)} />
     </Show>;
     }}</For>

@@ -363,13 +363,12 @@ function check(name, ok, detail = "") {
   const single = await cdp.evaluate(`(() => ({
     a: !!document.querySelector('.dz-a .dz-img'),
     b: !!document.querySelector('.dz-b'),
-    inert: [...document.querySelectorAll('.dz-segbtn:not([data-view="full"])')].every((b) => b.disabled),
-    full: document.querySelector('.dz-segbtn[data-view="full"]')?.disabled === false,
-    lock: document.querySelector('.dz-lockbtn')?.disabled ?? null,
+    modesAbsent: !document.querySelector('#diffModes'),
+    lockAbsent: !document.querySelector('.dz-lockbtn'),
   }))()`);
-  check("single-image: one img, the 1–4 control inert",
-    single.a && !single.b && single.inert && single.full, JSON.stringify(single));
-  check("single-image: the lock is inert too", single.lock === true, JSON.stringify(single));
+  check("single-image: one img, comparison choices absent",
+    single.a && !single.b && single.modesAbsent, JSON.stringify(single));
+  check("single-image: the lock is absent too", single.lockAbsent, JSON.stringify(single));
   const lockedBefore = await cdp.evaluate(`(async () => ${KZ}.state.diff.locked)()`);
   await cdp.evaluate("document.dispatchEvent(new KeyboardEvent('keydown', { key: 'l', bubbles: true }))");
   const lockedAfter = await cdp.evaluate(`(async () => ${KZ}.state.diff.locked)()`);

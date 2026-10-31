@@ -915,7 +915,6 @@ body:has(#diff:not([hidden])) #statusCol { bottom: 56px; }
   border-radius: 8px; padding: 10px 0; font-size: 14px; font-weight: 600;
   cursor: pointer; width: 100%; }
 .vz-run:hover { filter: brightness(1.1); box-shadow: 0 0 0 3px var(--primary-dim); }
-.vz-run:disabled { opacity: 0.5; cursor: default; }
 /* The single bounded message region owns overflow, not individual messages. */
 .vz-error { color: var(--negative); font-size: 11px;
   text-align: center; word-break: break-word; }
@@ -1178,6 +1177,24 @@ body:has(#diff:not([hidden])) #statusCol { bottom: 56px; }
   border-radius: 4px; padding: 5px; text-align: left; cursor: pointer; }
 .vz-workspace-discard { color: var(--foreground-mid); background: transparent; }
 .vz-workspace-status { color: var(--warning); font-size: 11px; line-height: 1.4; margin: 4px 0; }
+
+/* Availability belongs to the owner. Empty slots contain no focusable control,
+   but reserve the same allocation as the available presentation. */
+.media-seek-slot { flex: 1; min-width: 24px; display: grid; align-items: center; }
+.media-seek-slot .media-seek { width: 100%; min-width: 0; margin: 0; }
+.media-time { min-width: 13ch; text-align: center; }
+.confirm-actions { min-height: 28px; align-items: center; }
+.confirm-error { color: var(--negative); font-size: 12px; }
+.vz-run-slot { min-height: 38px; display: grid; text-align: center; }
+.vz-run-slot > .vz-field-help { align-self: center; }
+.vz-folder-controls > .vz-field-help { margin: 0; }
+#diffBar { display: grid; grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr); }
+#diffBar #diffModes { position: static; transform: none; }
+#diffCtl { justify-self: start; }
+.viewer-modes-slot, .viewer-control-slot { min-height: calc(var(--control-height-viewer) + 8px); display: grid; align-items: center; }
+.viewer-control-slot { width: calc(var(--control-height-viewer) + 8px); }
+.viewer-side-slot { width: 38px; }
+.viewer-keys { justify-self: end; margin-left: 0; }
 .vz-workspace:focus-visible, .vz-workspace-new:focus-visible, .vz-workspace-discard:focus-visible {
   outline: 2px solid var(--secondary); outline-offset: 2px; }
 .vz-retained-values section { border-bottom: 1px solid var(--border); padding-block: 8px; }

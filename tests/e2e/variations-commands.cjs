@@ -236,6 +236,7 @@ module.exports = async ({ cdp, check, FAKE, KZ }) => {
 
   await test('blocking decision outranks underlying popup; Escape cancels only the decision', async () => {
     await invoke('workbench.openPair',{left:{source:'fake',file:'flux-basic.png'},right:{source:'fake',file:'flux-lora.png'}});
+    await invoke('workbench.mode',{mode:'two-up'});
     await open(); await type('.vz-prefix','popup-guard');
     await invoke('workbench.popup.toggle',{control:'active'});
     await cdp.poll(`!!document.querySelector('.dz-vpop')`);

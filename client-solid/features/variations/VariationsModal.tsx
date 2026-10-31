@@ -388,9 +388,13 @@ function RecipeBody(props) {
             </div>
             <div class="vz-naming-group">
               <span class="vz-rlabel">Output names</span>
+              <Show when={!props.readOnly} fallback={<>
+                <span>Prefix</span><SingleLineText class="vz-retained-prefix" value={prefix() || "None"} />
+                <span>Suffix</span><SingleLineText class="vz-retained-suffix" value={suffix() || "None"} />
+              </>}>
               <label for={`prefix-${props.session}`}>Prefix</label>
               <input
-                id={`prefix-${props.session}`} type="text" class="vz-tinput vz-prefix" ref={prefixEl} disabled={props.readOnly}
+                id={`prefix-${props.session}`} type="text" class="vz-tinput vz-prefix" ref={prefixEl}
                 value={prefix()}
                 title="Click a parameter name to insert its token at the caret"
                 {...focus} onFocus={(e) => { setFocused("prefix"); focus.onFocus(e); }}
@@ -398,12 +402,13 @@ function RecipeBody(props) {
               />
               <label for={`suffix-${props.session}`}>Suffix</label>
               <input
-                id={`suffix-${props.session}`} type="text" class="vz-tinput vz-suffix" ref={suffixEl} disabled={props.readOnly}
+                id={`suffix-${props.session}`} type="text" class="vz-tinput vz-suffix" ref={suffixEl}
                 value={suffix()}
                 title="Click a parameter name to insert its token (enabled sliders auto-append)"
                 {...focus} onFocus={(e) => { setFocused("suffix"); focus.onFocus(e); }}
                 onInput={(e) => editor.edit("naming", "root", "suffix", e.currentTarget.value)}
               />
+              </Show>
             </div>
             </div>
             <div class="vz-messages" role="status">
@@ -420,9 +425,11 @@ function RecipeBody(props) {
                 <p class={"vz-error" + (result()?.ok ? " vz-neutral" : "")}>{result()?.reason ?? result()?.text ?? ""}</p>
               </div>
             </div>
-            <button
-              class="vz-run" disabled={running() || props.readOnly || undefined} onClick={() => store.handles.invoke("variations.run")}
-            ><SingleLineText value={running() ? "Submitting…" : "Run"} /></button>
+            <div class="vz-run-slot"><Show when={!props.readOnly}>
+              <Show when={!running()} fallback={<SingleLineText class="vz-field-help" role="status" value="Queuing…" />}>
+                <button class="vz-run" onClick={() => store.handles.invoke("variations.run")}><SingleLineText value="Run" /></button>
+              </Show>
+            </Show></div>
           </div>
         </div>
         <IconButton chrome variant="plain vz-close" title="close"

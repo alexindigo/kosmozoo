@@ -31,8 +31,10 @@ export function MediaControls(props) {
     <MediaButton docked={props.docked}
       variant="play media-toggle" title={props.paused ? "play" : "pause"}
       onAction={props.onToggle} icon={iconSvg(props.paused ? "player-play" : "player-pause", 20)} />
-    <input class="media-seek" type="range" aria-label="seek" min="0" max={props.duration || 0} step="0.01"
-      value={props.current} disabled={!props.duration} onInput={e => props.onSeek(Number(e.currentTarget.value))} />
+    <span class="media-seek-slot"><Show when={props.duration > 0}>
+      <input class="media-seek" type="range" aria-label="seek" min="0" max={props.duration} step="0.01"
+        value={props.current} onInput={e => props.onSeek(Number(e.currentTarget.value))} />
+    </Show></span>
     <span class="media-time">{mediaTime(props.current)} / {mediaTime(props.duration)}</span>
     <MediaButton docked={props.docked}
       variant="media-mute" title="Sound"
