@@ -12,7 +12,7 @@
 // was last focused. Prefix/suffix WRAP the original filename basename in the
 // submission (they don't replace it).
 
-import { createSignal, createMemo, createEffect, createResource, onCleanup, For, Show } from "solid-js";
+import { createSignal, createMemo, createEffect, createResource, onMount, onCleanup, For, Show } from "solid-js";
 import { iconSvg } from "/js/icons.mjs";
 import { templateLabels, templateValue } from "/shared/features/variations/shared.mjs";
 import { sourceOrigin } from "/shared/source-origin.mjs";
@@ -455,43 +455,101 @@ function EnumRow(props) {
   const focus = focusMemory(props.rememberFocus);
   const [filter, setFilter] = createSignal("");
   const r = () => props.row();
-  const filtered = () => {
-    const f = filter().trim().toLowerCase();
-    return f ? r().values.filter((v) => v.toLowerCase().includes(f)) : r().values;
-  };
   return (
     <ParameterRow class="vz-imgrow vz-enumrow" row={r} enabled={() => r().enabled}
       attributes={{ "data-enum-id": props.p.id }} onEnable={checked => props.onToggle(props.p.id, checked)}
       onInsert={props.onInsert} summary={`${r().picks.length} ${r().picks.length === 1 ? "option" : "options"}`}>
         <div class="vz-imgrow-body vz-enum-body">
           <Show when={r().values.length > 10}>
-            <input
-              {...focus}
-              type="text" class="vz-enum-filter" placeholder="filter…"
-              aria-label={`Filter ${r().label} options`}
-              value={filter()}
-              onInput={(e) => setFilter(e.currentTarget.value)}
-            />
+            <div class="vz-enum-filter-line">
+              <input
+                {...focus}
+                type="text" class="vz-enum-filter" placeholder="filter…"
+                aria-label={`Filter ${r().label} options`}
+                value={filter()}
+                onInput={(e) => setFilter(e.currentTarget.value)}
+              />
+              <SingleLineText class="vz-enum-selected" value={`${r().picks.length} selected`} />
+            </div>
           </Show>
-          <div class="vz-enum-list">
-            <For each={filtered()}>
-              {(v) => (
-                <label class={"vz-enum-opt" + (v === r().current ? " vz-enum-current" : "")}>
-                  <Checkbox
-                    {...focus}
-                    size="option"
-                    checked={r().picks.includes(v)}
-                    onChange={checked => props.onPick(props.p.id, v, checked)}
-                  />
-                  <SingleLineText class="vz-enum-opt-name" value={v} />
-                </label>
-              )}
-            </For>
-            <Show when={!filtered().length}><p class="vz-field-help">No options match “{filter()}”.</p></Show>
-          </div>
+          <EnumOptions row={r} filter={filter()} onPick={props.onPick} focus={focus} />
         </div>
     </ParameterRow>
   );
+}
+
+// Own the list's intrinsic sizing and native resize lifetime with its body.
+// Selection never participates in ordering; the current item stays visible
+// before the filtered catalogue, even when it doesn't match the query.
+function EnumOptions(props) {
+  const r = () => props.row();
+  const compact = () => r().values.length <= 10;
+  const filtered = createMemo(() => {
+    const values = r().values, current = r().current;
+    if (compact()) return values;
+    const query = props.filter.trim().toLowerCase();
+    return [...values.filter(value => value === current),
+      ...values.filter(value => value !== current && value.toLowerCase().includes(query))];
+  });
+  let list, option, check;
+  onMount(() => {
+    if (!compact()) return;
+    const context = document.createElement('canvas').getContext('2d');
+    const measure = () => {
+      if (!option) return;
+      // Measure glyphs with the native label's font and our own checkbox slot.
+      // Shared Checkbox/SingleLineText DOM remains private to those components.
+      const style = getComputedStyle(option);
+      context.font = style.font;
+      const width = Math.max(...r().values.map(value => context.measureText(value).width))
+        + check.getBoundingClientRect().width + parseFloat(style.columnGap);
+      if (Number.isFinite(width)) list.style.setProperty('--vz-option-width', `${Math.ceil(width) + 1}px`);
+    };
+    measure();
+    const observer = new ResizeObserver(measure);
+    observer.observe(list);
+    onCleanup(() => observer.disconnect());
+  });
+  return <div ref={list} class={"vz-enum-list" + (compact() ? " vz-enum-grid" : "")}>
+    <For each={filtered()}>
+      {(v) => (
+        <label ref={option} class={"vz-enum-opt" + (v === r().current ? " vz-enum-current" : "")}>
+          <span ref={check} class="vz-enum-check">
+            <Checkbox
+              {...props.focus}
+              size="option"
+              checked={r().picks.includes(v)}
+              onChange={checked => props.onPick(r().id, v, checked)}
+            />
+          </span>
+          <SingleLineText class="vz-enum-opt-name" value={v} />
+        </label>
+      )}
+    </For>
+    <Show when={!filtered().length}><p class="vz-field-help">No options match “{props.filter}”.</p></Show>
+  </div>;
+}
+
+// Native content/width measurements stay local to the textarea. CSS supplies
+// the one-to-eight-line bounds; recipe changes and wrapping both resize it.
+function AutoSizeTextArea(props) {
+  let input;
+  const resize = () => {
+    input.style.height = 'auto';
+    const style = getComputedStyle(input);
+    input.style.height = `${input.scrollHeight + parseFloat(style.borderTopWidth) + parseFloat(style.borderBottomWidth)}px`;
+  };
+  createEffect(() => { props.value; resize(); });
+  onMount(() => {
+    let width;
+    const observer = new ResizeObserver(() => {
+      const next = input.clientWidth;
+      if (next !== width) { width = next; resize(); }
+    });
+    observer.observe(input);
+    onCleanup(() => observer.disconnect());
+  });
+  return <textarea {...props} ref={input} rows="1" />;
 }
 
 // one text sweep row: master checkbox + label + the orange current value;
@@ -507,9 +565,9 @@ function TextRow(props) {
       attributes={{ "data-text-id": props.p.id }} onEnable={checked => props.onToggle(props.p.id, checked)}
       onInsert={props.onInsert} summary={props.summary}>
         <div class="vz-imgrow-body vz-enum-body">
-          <textarea
+          <AutoSizeTextArea
             {...focus}
-            class="vz-text-values" rows="4"
+            class="vz-text-values"
             aria-label={`${r().label} template`}
             placeholder="text template — {{label}} adds a substitution axis"
             value={r().text}

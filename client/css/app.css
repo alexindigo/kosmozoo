@@ -679,26 +679,33 @@ body:has(#diff:not([hidden])) #statusCol { bottom: 56px; }
 
 .vz-imgrow-body { display: flex; gap: 8px; margin-top: 8px; padding-left: 26px; }
 
-/* enum sweep rows (LoRA names, samplers, …): same card as the imgRows, the
- options as a scrollable checkbox list below the head. The current value is
- orange — the same "current notch" accent the slider rows use. */
+/* Small enums wrap at the longest option's native width. Large enums retain
+   their filter and an eight-row scroller. Orange identifies the current value. */
 .vz-enum-body { flex-direction: column; }
+.vz-enum-filter-line { display: flex; align-items: center; gap: 8px; }
+.vz-enum-filter-line .vz-enum-filter { flex: 1; min-width: 0; }
+.vz-enum-selected { flex: 0 0 auto; color: var(--foreground-mid); font-variant-numeric: tabular-nums; }
 .vz-enum-filter { background: var(--background); color: var(--foreground);
   border: 1px solid var(--border-strong); border-radius: 4px; font-size: 12px;
   padding: 3px 6px; }
 .vz-enum-filter:focus { outline: none; border-color: var(--secondary); }
-.vz-enum-list { display: flex; flex-direction: column; gap: 2px;
-  max-height: 180px; overflow-y: auto; }
+.vz-enum-list { --vz-option-row: 20px; display: grid; grid-template-columns: minmax(0, 1fr);
+  grid-auto-rows: var(--vz-option-row); gap: 2px;
+  max-height: calc(8 * var(--vz-option-row) + 7 * 2px); overflow-y: auto; }
+.vz-enum-grid { grid-template-columns: repeat(auto-fit, minmax(min(100%, var(--vz-option-width, 100%)), 1fr));
+  max-height: none; overflow: visible; column-gap: 16px; }
 .vz-enum-opt { display: flex; align-items: center; gap: 8px; cursor: pointer;
-  font-size: 12px; color: var(--foreground); padding: 1px 0; }
-.vz-enum-opt-name { flex: 1; }
+  font-size: 12px; line-height: 18px; color: var(--foreground); padding: 1px 0; }
+.vz-enum-check { display: flex; flex: 0 0 auto; }
+.vz-enum-opt-name { flex: 0 1 auto; }
 .vz-enum-current .vz-enum-opt-name { color: var(--attention); }
 
 /* Text is a literal template; line breaks never separate alternatives. */
 .vz-text-values { background: var(--background); color: var(--foreground);
   border: 1px solid var(--border-strong); border-radius: 4px; font-size: 12px;
   padding: 4px 6px; font-family: ui-monospace, monospace;
-  resize: vertical; min-height: 3em; }
+  line-height: 18px; width: 100%; box-sizing: border-box;
+  resize: none; min-height: calc(1lh + 10px); max-height: calc(8lh + 10px); overflow-y: auto; }
 .vz-text-values:focus { outline: none; border-color: var(--secondary); }
 
 /* {{label}} substitution inputs: one row per label detected in the text */

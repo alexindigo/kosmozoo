@@ -42,7 +42,7 @@ module.exports=async({cdp,FAKE,KZ,check})=>{
       return new Response(JSON.stringify(data),{status:response.status})})})()`);
     await open('flux-lora.png');await cdp.clickAt('.vz-enumrow[data-enum-id="20.lora_name"] .checkbox');
     await held();await type('.vz-enum-filter','search-only-3');
-    assert.equal(await cdp.evaluate("document.querySelectorAll('.vz-enumrow[data-enum-id=\"20.lora_name\"] .vz-enum-opt').length"),1);
+    assert.deepEqual(await cdp.evaluate("[...document.querySelectorAll('.vz-enumrow[data-enum-id=\"20.lora_name\"] .vz-enum-opt-name')].map(el=>el.textContent)"),['detail.safetensors','search-only-3']);
     assert.equal((await release()).adopted,true);
     await cdp.poll("!document.querySelector('.vz-panel')",6000);
     await cdp.evaluate("window.fetch=window.__presentationFetch;window.__presentationFetch=null");
