@@ -10,10 +10,11 @@
 // to set the value (bottom = min, top = max). The parent owns which popup
 // is open (one at a time); the component never reaches out.
 
-import { Show, For, createSignal, createEffect, onCleanup } from "solid-js";
+import { Show, createSignal, createEffect, onCleanup } from "solid-js";
 import { useAppStore } from "../store/app-store.js";
 import { iconSvg } from "/js/icons.mjs";
 import { IconButton } from "./IconButton.js";
+import { ModeSwitch } from "./ModeSwitch.js";
 
 function VSlider(props) {
   let trackEl;
@@ -135,21 +136,12 @@ export function DiffChrome(props) {
             />
           </Show>
         </div>
-        <Show when={store.state.diffViews().length > 1}><div id="diffModes" class="viewer-group" role="group" aria-label="Comparison view">
-          <For each={store.state.diffViews()}>
-            {({key, mode: m, label, icon}) => (
-              <IconButton viewer
-                data-view={label.toLowerCase()}
-                active={d().mode === m} aria-label={label}
-                variant="dz-segbtn"
-                disabled={(m !== "full" && (!store.state.diffPair().b || (m === "difference" && !!props.differenceReason))) || undefined}
-                title={m === "difference" && props.differenceReason ? props.differenceReason : `${label} (${key})`}
-                onAction={() => store.handles.invoke("workbench.mode", { mode: m })}
-                icon={iconSvg(icon, 16)}
-              />
-            )}
-          </For>
-        </div></Show>
+        <Show when={store.state.diffViews().length > 1}><ModeSwitch id="diffModes" label="Comparison view" value={d().mode}
+          options={store.state.diffViews().map(({ key, mode, label, icon }) => ({
+            value: mode, label, view: label.toLowerCase(), variant: "dz-segbtn", icon: iconSvg(icon),
+            disabled: (mode !== "full" && (!store.state.diffPair().b || (mode === "difference" && !!props.differenceReason))) || undefined,
+            title: mode === "difference" && props.differenceReason ? props.differenceReason : `${label} (${key})`,
+          }))} onChange={mode => store.handles.invoke("workbench.mode", { mode })} /></Show>
         <span class="viewer-group viewer-keys"><IconButton viewer
           id="diffKeysBtn" title="actions & keys (?)"
           onAction={() => store.handles.invoke("keys.panel.toggle")}

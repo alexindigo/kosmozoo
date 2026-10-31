@@ -121,7 +121,7 @@ export function MediaBox(props) {
       <Show when={props.src != null && phase() !== "error"}>
         <Show when={(!props.workbench && paused()) || props.kind === "audio"}><div style={props.workbench || props.kind !== "audio" ? style() : undefined} class={`media-play-overlay ${props.kind === "audio" ? "media-audio-face" : ""}`}>
           <Show when={!props.workbench}><MediaControlBoundary class="media-play-boundary">
-            <IconButton variant="play prominent media-play" title={`${paused() ? "play" : "pause"} ${word()}`}
+            <IconButton size="lg" variant="play prominent media-play" title={`${paused() ? "play" : "pause"} ${word()}`}
               onAction={toggle} icon={iconSvg(paused() ? "player-play" : "player-pause", 28)} />
           </MediaControlBoundary></Show>
           <Show when={props.kind === "audio"}><span class="media-duration">{mediaTime(duration())}</span></Show>

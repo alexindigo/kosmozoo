@@ -5,6 +5,9 @@ import { focusMemory } from "./draft.js";
 import { Thumbnail } from "./Thumbnail.js";
 import { SingleLineText } from "../../components/SingleLineText.js";
 import { popoverPlacement } from "../../lib/popover-placement.js";
+import { Chevron } from "../../components/Select.js";
+import { IconButton } from "../../components/IconButton.js";
+import { iconSvg } from "/js/icons.mjs";
 
 const TILE_SIZE = 96, GAP = 6, ROW_HEIGHT = TILE_SIZE + GAP, OVERSCAN_ROWS = 3;
 
@@ -62,8 +65,8 @@ export function InputPicker(props) {
   createEffect(() => { props.positionRevision; requestPlacement(); });
   createEffect(() => { if (open()) onCleanup(props.registerPopup(close)); });
   return <div class="vz-input-picker" ref={root}>
-    <button type="button" class="vz-image-action vz-input-trigger" ref={trigger}
-      aria-expanded={open()} aria-haspopup="listbox" aria-controls={id} {...focusMemory(props.rememberFocus)} onClick={() => setOpen(!open())}><SingleLineText value="ComfyUI inputs ▾" /></button>
+    <button type="button" class="select-trigger control-size-md vz-input-trigger" ref={trigger}
+      aria-expanded={open()} aria-haspopup="listbox" aria-controls={id} {...focusMemory(props.rememberFocus)} onClick={() => setOpen(!open())}><SingleLineText value="ComfyUI inputs" /><Chevron /></button>
     <Show when={open()}>
       <InputOptions id={id} query={query} onQuery={setQuery} files={props.files} selected={props.selected}
         current={props.current} thumbnail={props.thumbnail} registerThumbnail={props.registerThumbnail}
@@ -163,10 +166,14 @@ function InputOptions(props) {
       "max-height": placement() ? `${placement().maxHeight}px` : undefined,
       "min-height": placement() ? `${placement().minHeight}px` : undefined,
       opacity: placed() ? 1 : 0, "pointer-events": placed() ? "auto" : "none" }} onKeyDown={move}>
+    <div class="search-control control-size-md">
     <input ref={search} type="search" role="combobox" aria-expanded="true" aria-autocomplete="list" aria-controls={`${props.id}-list`}
       aria-activedescendant={placement() && filtered().length ? `${props.id}-option-${active()}` : undefined}
       class="vz-input-search" placeholder="Search inputs…" aria-label="Search ComfyUI inputs"
       {...focusMemory(props.rememberFocus)} value={props.query()} onInput={e => props.onQuery(e.currentTarget.value)} />
+    <Show when={props.query()}><IconButton chrome size="md" variant="plain vz-search-clear" title="Clear search"
+      icon={iconSvg("x")} onAction={() => { props.onQuery(""); search.focus(); }} /></Show>
+    </div>
     <div class="vz-input-list" id={`${props.id}-list`} ref={scrollElement} role="listbox" aria-label="ComfyUI inputs" aria-multiselectable="true"
       onScroll={event => {
         const offset = event.currentTarget.scrollTop;

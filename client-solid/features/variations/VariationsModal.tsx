@@ -25,6 +25,8 @@ import { VariationDiscardConfirmation } from "./VariationDiscardConfirmation.js"
 import { ImageSetPanel } from "./ImageSetPanel.js";
 import { SingleLineText } from "../../components/SingleLineText.js";
 import { Checkbox } from "../../components/Checkbox.js";
+import { Select } from "../../components/Select.js";
+import { IconButton } from "../../components/IconButton.js";
 import { workspaceCurrent } from "./workspaces.js";
 import { ParameterRow } from "./ParameterRow.js";
 
@@ -264,7 +266,7 @@ function RecipeBody(props) {
               <div class="vz-workspace-tools">
                 <label class="vz-workspace-label" for={`recipe-${props.session}`}>Recipe workspace</label>
                 <div class="vz-workspace-actions">
-                  <select id={`recipe-${props.session}`} class="vz-workspace" value={props.workspace.id}
+                  <Select id={`recipe-${props.session}`} class="vz-workspace" value={props.workspace.id}
                     onChange={event => {
                       const next = props.workspaces.options(props.images).find(item => item.id === event.currentTarget.value);
                       event.currentTarget.value = props.workspace.id;
@@ -273,7 +275,7 @@ function RecipeBody(props) {
                     <For each={props.workspaces.options(props.images)}>{item => <option value={item.id}>
                       {workspaceCurrent(item, props.images) ? "Current source recipe" : `Previous source · ${item.targets[0].origin.address} (${item.id})`}
                     </option>}</For>
-                  </select>
+                  </Select>
                   <button class="vz-workspace-discard" onClick={() => switchRecipe(null, true)}>Discard recipe</button>
                 </div>
                 <Show when={props.readOnly}>
@@ -423,10 +425,9 @@ function RecipeBody(props) {
             ><SingleLineText value={running() ? "Submitting…" : "Run"} /></button>
           </div>
         </div>
-        <button
-          class="vz-close" title="close (Esc)" onClick={() => store.handles.invoke("variations.close", { session: props.session })}
-          innerHTML={iconSvg("x", 16)}
-        />
+        <IconButton chrome variant="plain vz-close" title="close"
+          onAction={() => store.handles.invoke("variations.close", { session: props.session })}
+          icon={iconSvg("x")} />
       </div>
       <Show when={decision()}>
         <VariationDiscardConfirmation owner={props.session} running={running()} onCancel={guard.cancel} onDiscard={guard.discard} />

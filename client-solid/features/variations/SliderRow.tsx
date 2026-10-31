@@ -9,6 +9,8 @@ import { focusMemory } from "./draft.js";
 import { ParameterRow, parameterName } from "./ParameterRow.js";
 import { SingleLineText } from "../../components/SingleLineText.js";
 import { IconButton } from "../../components/IconButton.js";
+import { ModeSwitch } from "../../components/ModeSwitch.js";
+import { iconSvg } from "/js/icons.mjs";
 
 export function SliderRow(props) {
   return <ParameterRow class="vz-slider-row" row={props.row} enabled={props.enabled}
@@ -146,10 +148,9 @@ function NumericEditor(props) {
           </div>
         </div>
         <div class="vz-numeric-controls">
-          <div class="viewer-group vz-numeric-mode" role="group" aria-label={`${parameterName(props.row())} mode`}>
-            <IconButton viewer icon="Range" title="Range" active={!single} onAction={() => props.onField(props.param.key, "mode", "range")} />
-            <IconButton viewer icon="Value" title="Value" active={single} onAction={() => props.onField(props.param.key, "mode", "value")} />
-          </div>
+          <ModeSwitch class="vz-numeric-mode" label={`${parameterName(props.row())} mode`} value={props.mode}
+            options={[{ value: "range", label: "Range" }, { value: "value", label: "Value" }]}
+            onChange={mode => props.onField(props.param.key, "mode", mode)} />
           <Show when={single} fallback={<div class="vz-range-fields">
           <label class="vz-range-field">from<input type="text" inputMode="decimal" aria-label={`${props.param.label} From`}
             value={props.row().min} aria-invalid={props.row().numbers.min === null} {...focus}
@@ -159,8 +160,8 @@ function NumericEditor(props) {
             onInput={event => props.onField(props.param.key, "max", event.currentTarget.value)} /></label>
           <div class="vz-range-field"><label for={`step-${props.placeholderKey}`}>step</label>
             <div class="vz-row-inc">
-              <button type="button" class="vz-step-btn" title="Halve step" aria-label={`${props.param.label}: Halve step`}
-                onClick={() => commitInc(Math.max(fineStep, props.increment() / 2))}>−</button>
+              <IconButton chrome size="md" variant="plain vz-step-btn" title="Halve step" aria-label={`${props.param.label}: Halve step`}
+                icon={iconSvg("minus")} onAction={() => commitInc(Math.max(fineStep, props.increment() / 2))} />
               <input id={`step-${props.placeholderKey}`} type="text" inputMode="decimal" role="spinbutton" aria-label={`${props.param.label} increment`}
                 aria-valuemin={fineStep} aria-valuenow={props.increment() ?? undefined}
                 aria-invalid={props.increment() === null}
@@ -172,8 +173,8 @@ function NumericEditor(props) {
                   if (value === null || !Number.isFinite(value)) return;
                   event.preventDefault(); commitInc(value + (event.key === "ArrowUp" ? fineStep : -fineStep));
                 }} />
-              <button type="button" class="vz-step-btn" title="Double step" aria-label={`${props.param.label}: Double step`}
-                onClick={() => commitInc(props.increment() * 2)}>+</button>
+              <IconButton chrome size="md" variant="plain vz-step-btn" title="Double step" aria-label={`${props.param.label}: Double step`}
+                icon={iconSvg("plus")} onAction={() => commitInc(props.increment() * 2)} />
             </div>
           </div>
           </div>}>
