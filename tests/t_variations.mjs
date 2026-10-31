@@ -5,6 +5,7 @@ import {
   generatePermutations,
   templateReplace,
   resolveRelativeRanges,
+  outputName,
 } from "../src/features/variations/shared.mjs";
 import {
   findProducingOutputNode,
@@ -14,8 +15,6 @@ import {
   stringParams,
   mutateGraph,
   lineageTag,
-  clampBasename,
-  clampBudget,
   NAME_MAX_WITHOUT_COUNTER,
 } from "../src/features/variations/server.mjs";
 
@@ -295,9 +294,9 @@ Deno.test("wrapAllOutputPrefixes: fallback wraps every SaveImage's own prefix", 
 
 // --- filename_prefix clamp (ark ENAMETOOLONG incident, 2026-09-27) -----------
 
-Deno.test("clampBasename: folds the MIDDLE of an over-long name, head and tail survive", () => {
+Deno.test("outputName: folds the MIDDLE of an over-long source, head and tail survive", () => {
   const long = "x".repeat(120) + "y".repeat(120);
-  const out = clampBasename(long, NAME_MAX_WITHOUT_COUNTER);
+  const out = outputName({ sourceStem: long, budget: NAME_MAX_WITHOUT_COUNTER });
   assertEquals(out.length, 200);
   assert(out.startsWith("x".repeat(100)), "head keeps the first 100 chars");
   assert(out.endsWith("y".repeat(99)), "tail keeps the last 99 chars");
@@ -337,8 +336,8 @@ Deno.test("wrapAllOutputPrefixes: fallback subtracts pfx/sfx from the middle bud
   assert(out.endsWith(sfx), "sfx survives");
 });
 
-Deno.test("clampBudget: 255 minus headroom minus pfx/sfx", () => {
-  assertEquals(clampBudget("aa", "bbb"), 255 - 15 - 2 - 3);
+Deno.test("outputName: affixes claim their share before the source is folded", () => {
+  assertEquals(outputName({ prefix: "aa", sourceStem: "x".repeat(300), suffix: "bbb", budget: 10 }), "aaxx~xxbbb");
 });
 
 // --- inspectGraph: graph-driven param discovery -------------------------------
@@ -572,8 +571,9 @@ Deno.test("templateReplace: the chosen filename fills {LoadImage.image} and {ima
     { "LoadImage.image": "chosen.png", image: "chosen.png" },
     { "LoadImage.image": "orig.png" },
     {},
+    [{ id: "LoadImage.image", kind: "image" }, { id: "image", kind: "image" }],
   );
-  assertEquals(out, "run_chosen.png_vs_chosen.png");
+  assertEquals(out, "run_chosen_vs_chosen");
 });
 
 Deno.test("stringParams: a LoadImage axis survives ComfyUI's [output] annotation", () => {

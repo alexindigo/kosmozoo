@@ -409,6 +409,12 @@ function RecipeBody(props) {
                 onInput={(e) => editor.edit("naming", "root", "suffix", e.currentTarget.value)}
               />
               </Show>
+              <Show when={tally().naming.example}>
+                <div class="vz-output-preview">
+                  <span>Example</span>
+                  <SingleLineText class="vz-output-example" value={tally().naming.example} hint={tally().naming.help} />
+                </div>
+              </Show>
             </div>
             </div>
             <div class="vz-messages" role="status">

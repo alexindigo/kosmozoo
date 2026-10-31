@@ -107,7 +107,7 @@ module.exports = async ({ cdp, FAKE, KZ, check }) => {
       assert.equal(job.prompt['2'].inputs.text, 'positive-own');
       assert.equal(job.prompt['92:105'].inputs.text, 'negative-own');
       const names = Object.values(job.prompt).filter(node => node.class_type === 'SaveImage').map(node => node.inputs.filename_prefix);
-      assert(names.length); assert(names.every(name => !/[{}]/.test(name) && name.includes('_identity-content.png_ref.png_') && name.endsWith('_positive-own_negative-own')));
+      assert(names.length); assert(names.every(name => !/[{}]/.test(name) && name.includes('_identity-content_ref_') && name.endsWith('_positive-own_negative-own')));
     }
     assert(await cdp.evaluate("window.__identityInput.files[0]===window.__identityFile"));
     await cdp.poll("!document.querySelector('.vz-panel')", 6000);

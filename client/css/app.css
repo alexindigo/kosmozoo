@@ -1162,6 +1162,8 @@ body:has(#diff:not([hidden])) #statusCol { bottom: 56px; }
 .vz-naming-group .vz-rlabel { grid-column: 1 / -1; }
 .vz-naming-group label { color: var(--foreground-mid); margin: 0; }
 .vz-naming-group .vz-tinput { width: 100%; box-sizing: border-box; padding-inline: 4px; }
+.vz-output-preview { grid-column: 1 / -1; display: grid; gap: 4px; }
+.vz-output-example { color: var(--foreground); }
 .vz-queued { margin: 0 0 8px; font: 13px/18px system-ui; }
 .vz-ok { color: var(--positive); }
 .vz-messages .vz-error { text-align: left; margin: 0; font: 12px/16px system-ui; }

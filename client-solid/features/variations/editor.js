@@ -4,7 +4,7 @@ import { snapshotDraft, sameDraft, createRunId } from "./draft.js";
 import { paramDef, defaultRange } from "./graph.mjs";
 import { templateLabels, templateValue, parseSemicolonList, expandTextAxes, permutationPlan,
   resolveRelativeRanges, acknowledgedFields, targetRunPlan, catalogueParams, parameterIndex, parameterLabel, parameterAliases,
-  templateReplaceWithProof, uploadCandidate, uploadFamily } from "/shared/features/variations/shared.mjs";
+  templateReplaceWithProof, outputName, uploadCandidate, uploadFamily } from "/shared/features/variations/shared.mjs";
 import { validOrigin, sameOrigin, validContext, sameContext } from "/shared/source-origin.mjs";
 import { validImageSet, mergeImages, sameImage, imageIdentity } from "./image-set.js";
 import { RECIPE_FIELDS as EDITOR_FIELDS, makeVariationRecipe, recipeField as descriptor,
@@ -356,13 +356,14 @@ export function makeVariationEditor({ targets, services, currentOrigin, changed 
         }
         // Pending upload names are not resolved receipts and are never displayed
         // as real names. No sample or count authorizes an upload/graph assignment.
-        const aliases = parameterAliases(catalogueParams(first));
-        const prefix = templateReplaceWithProof(payload.prefix, sample, values, aliases);
-        const suffix = templateReplaceWithProof(payload.suffix, sample, values, aliases);
+        const parameters = catalogueParams(first), aliases = parameterAliases(parameters);
+        const prefix = templateReplaceWithProof(payload.prefix, sample, values, aliases, parameters);
+        const suffix = templateReplaceWithProof(payload.suffix, sample, values, aliases, parameters);
         const basename = capturedTargets[0].filename.split("/").pop().replace(/\.[^.]+$/, "");
+        const source = first.outputNaming ?? { directory: "", sourceStem: basename };
         const naming = { complete: prefix.complete && suffix.complete,
-          example: (prefix.text + basename + suffix.text).replace(/\0pending-\d+/g, "[upload name pending]"),
-          help: "Representative example; final producer name, upload collision names and output counter may differ." };
+          example: (source.directory + outputName({ prefix: prefix.text, sourceStem: source.sourceStem, suffix: suffix.text })).replace(/\0pending-\d+/g, "[upload name pending]"),
+          help: "Representative first output; upload collision names and ComfyUI's added counter may differ." };
         const factors = [...axes].sort((a, b) => (a.kind !== "images") - (b.kind !== "images")).map(axis =>
           `${axis.count.toLocaleString("en-US")} ${axis.kind === "images" ? `input image${axis.count === 1 ? "" : "s"}` : `${axis.name} value${axis.count === 1 ? "" : "s"}`}`);
         const breakdown = factors.join(" × ") + (excluded ? ` · ${excluded} unchanged combination${excluded === 1 ? "" : "s"} excluded` : "")

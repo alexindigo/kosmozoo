@@ -74,7 +74,7 @@ module.exports = async ({ cdp, ENGINE, FAKE, KZ, check }) => {
     const submitted=(await jobs()).slice(before);assert.equal(submitted.length,3);
     assert.deepEqual(submitted.map(job=>job.prompt['470'].inputs.image),['#%.png','question?.png','spaces Ω [input].png']);
     assert(submitted.every(job=>job.prompt['9'].inputs.steps===20&&job.prompt['475'].inputs.image==='canny.png'&&job.prompt['2'].inputs.text==='literal submitted'));
-    assert.deepEqual(submitted.map(job=>job.prompt['461'].inputs.filename_prefix),submitted.map(job=>'recipe_00001__'+job.prompt['470'].inputs.image));
+    assert.deepEqual(submitted.map(job=>job.prompt['461'].inputs.filename_prefix),submitted.map(job=>'recipe_00001__'+job.prompt['470'].inputs.image.replace(/\.[^.]+$/,'')));
     await cdp.poll("!document.querySelector('.vz-panel')",6000);
     assert(await cdp.evaluate("window.__recipeURLs.every(item=>window.__recipeRevoked.includes(item.url))"));
     const urlStart=await cdp.evaluate('window.__recipeURLs.length');await open();
@@ -112,10 +112,17 @@ module.exports = async ({ cdp, ENGINE, FAKE, KZ, check }) => {
     await cdp.clickAt('[data-image-id="470.image"] .checkbox');
     for(let remaining=3;remaining>0;remaining--){await cdp.clickAt('[data-image-id="470.image"] .vz-image-tile .chrome-icon');await cdp.poll(`document.querySelectorAll('[data-image-id="470.image"] .vz-image-tile').length===${remaining-1}`)}
     await cdp.evaluate(`(async()=>{const bytes=await(await fetch('/api/collections/fake/entries/flux-lora.png/bytes')).arrayBuffer(),input=document.querySelector('[data-image-id="470.image"] .vz-imgfilespick'),dt=new DataTransfer();dt.items.add(new File([bytes],'x'.repeat(196)+'.png',{type:'image/png'}));input.files=dt.files;input.dispatchEvent(new Event('change',{bubbles:true}))})()`);
-    await cdp.poll("document.querySelector('[data-image-id=\"470.image\"] .checkbox').checked===true&&!document.querySelector('.vz-image-check')");count=(await jobs()).length;await invoke('variations.run');assert.equal((await jobs()).length,count);
-    assert(await cdp.evaluate("document.querySelector('.vz-error').textContent.includes('naming would be folded')"));
+    await cdp.poll("document.querySelector('[data-image-id=\"470.image\"] .checkbox').checked===true&&!document.querySelector('.vz-image-check')");count=(await jobs()).length;
+    assert.equal((await invoke('variations.run')).adopted,true);
+    const longJobs=(await jobs()).slice(count);assert(longJobs.length>0);
+    assert(longJobs.every(job=>job.prompt['461'].inputs.filename_prefix==='recipe_00001__'+'x'.repeat(19)+'~'+'x'.repeat(20)));
+    await close();await open();
+    await cdp.clickAt('[data-image-id="470.image"] .checkbox');
+    await type('.vz-prefix','p'.repeat(210));await type('.vz-suffix','');
+    count=(await jobs()).length;await invoke('variations.run');assert.equal((await jobs()).length,count);
+    assert(await cdp.evaluate("document.querySelector('.vz-error').textContent.includes('Prefix and suffix are 210 bytes; the limit is 200 bytes')"));
     await cdp.clickAt('.vz-close');await cdp.poll("!!document.querySelector('.vz-discard')");await cdp.clickAt('.vz-discard-confirm');await cdp.poll("!document.querySelector('.vz-panel')");
-    check('recipe preflight: enabled-empty, unknown naming and a 200-character filename reject clearly with zero jobs',true);
+    check('recipe preflight: enabled-empty, unknown naming and literal affix overflow reject with zero jobs; a 200-character image filename queues with a bounded token',true);
 
     const missing=structuredClone(graph);delete missing['9'].inputs.steps;
     await http(FAKE,'/__test/activity','POST',{publish:[{name:'recipe-batch-full.png',fixture:'flux-basic.png',graph},{name:'recipe-batch-missing.png',fixture:'flux-basic.png',graph:missing}]});

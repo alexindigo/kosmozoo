@@ -12,6 +12,7 @@
 import {
   generatePermutations, permutationAxes, permutationPlan, resolveRelativeRanges, templateReplaceWithProof,
   paramId, parameterIndex, catalogueParams, parameterAliases, validRunAcknowledgement, runOperationFields, targetRunPlan,
+  outputName,
 } from "./shared.mjs";
 import { validEntryName, backingFor } from "../../backings/index.mjs";
 import { sourceOrigin, sameOrigin, validOrigin, validContext, expectedOrigin } from "../../source-origin.mjs";
@@ -191,27 +192,7 @@ export function outputNodeIndex(graph, outputClasses) {
   return out;
 }
 
-// Filesystem NAME_MAX is 255 bytes; ComfyUI appends "_NNNNN_.png" (~12)
-// to the prefix. Fold over-long names in the MIDDLE: keep head AND tail —
-// head carries the pipeline identity, tail carries the newest lineage —
-// and mark the fold with "~". (Ported from kosmozoo.dev's variations
-// plugin after a lineage-chained batch died at SaveImage with
-// ENAMETOOLONG — assembled prefixes hit 252–264 chars.)
-export function clampBasename(basename, max) {
-  if (basename.length <= max) return basename;
-  const keep = max - 1;                 // one char reserved for the "~"
-  const head = Math.ceil(keep / 2);
-  const tail = Math.floor(keep / 2);
-  return basename.slice(0, head) + "~" + basename.slice(basename.length - tail);
-}
-
-export const HEADROOM = 15;  // ComfyUI's "_NNNNN_.png" counter suffix
-export const NAME_MAX_WITHOUT_COUNTER = 200;  // hard cap on the assembled prefix
-// How much of NAME_MAX remains for a node's own middle after pfx/sfx have
-// claimed their share (fallback path wraps every node's prefix).
-export function clampBudget(pfx, sfx) {
-  return 255 - HEADROOM - String(pfx).length - String(sfx).length;
-}
+export { HEADROOM, OUTPUT_NAME_BUDGET as NAME_MAX_WITHOUT_COUNTER } from "./shared.mjs";
 
 // Wrap ONLY the producing node's filename_prefix. Other output nodes stay
 // only when the producer depends on them, including through lazy inputs.
@@ -223,23 +204,21 @@ export function narrowToOneOutputNode(graph, producingId, basename, pfx, sfx, ou
     delete graph[nid];
     dropped++;
   }
-  // Assembled prefix gets the middle-fold treatment: pfx head and sfx tail
-  // both survive, at most NAME_MAX_WITHOUT_COUNTER chars total.
+  // Directory ownership is independent of the shared filename-leaf budget.
   const directory = outputPath(graph[producingId].inputs.filename_prefix).directory;
-  graph[producingId].inputs.filename_prefix = directory + clampBasename(pfx + outputPath(basename).leaf + sfx, NAME_MAX_WITHOUT_COUNTER);
+  graph[producingId].inputs.filename_prefix = directory + outputName({ prefix: pfx, sourceStem: outputPath(basename).leaf, suffix: sfx });
   return { kept, dropped, written: [producingId] };
 }
 
 // Fallback: wrap every output node's own prefix with the user's pfx/sfx.
-// The middle budget subtracts pfx/sfx so a long pfx/sfx can't push the
-// assembled prefix over NAME_MAX either.
+// The same shared writer keeps affixes whole and folds only the source stem.
 export function wrapAllOutputPrefixes(graph, pfx, sfx, outputClasses) {
   const written = [];
   for (const [nid, n] of Object.entries(graph)) {
     if (!outputClasses.has(String(n.class_type ?? ""))) continue;
     const orig = String(n.inputs?.filename_prefix ?? "");
     const { directory, leaf } = outputPath(orig);
-    n.inputs.filename_prefix = directory + pfx + clampBasename(leaf, clampBudget(pfx, sfx)) + sfx;
+    n.inputs.filename_prefix = directory + outputName({ prefix: pfx, sourceStem: leaf, suffix: sfx });
     written.push(nid);
   }
   return written;
@@ -349,9 +328,15 @@ export function register(app) {
     }
     const r = await inspect(collection, name, expected);
     if (r.error) return Response.json({ error: r.error }, { status: r.status });
+    // Project the actual first naming target, including fallback node prefixes.
+    // The client owns formatting, but cannot infer these graph facts from a name.
+    const producing = findProducingOutputNode(r.graph, name, r.outputClasses ?? new Set());
+    const output = producing?.node ?? r.graph[outputNodeIndex(r.graph, r.outputClasses ?? new Set())[0]];
+    const path = outputPath(output?.inputs?.filename_prefix ?? "");
     return Response.json({
       ...parameterCatalogue(r.graph, r),
       context: r.context,
+      outputNaming: output ? { directory: path.directory, sourceStem: producing ? stripExtension(outputPath(name).leaf) : path.leaf } : null,
     });
   });
 
@@ -439,8 +424,8 @@ export function register(app) {
         return rejectPlan("No applicable nodes found; no jobs were submitted");
       }
 
-      const prefixProof = templateReplaceWithProof(pfxTpl, perm, currentValues, labelMap);
-      const suffixProof = templateReplaceWithProof(sfxTpl, perm, currentValues, labelMap);
+      const prefixProof = templateReplaceWithProof(pfxTpl, perm, currentValues, labelMap, fullInspection);
+      const suffixProof = templateReplaceWithProof(sfxTpl, perm, currentValues, labelMap, fullInspection);
       const pfx = prefixProof.text, sfx = suffixProof.text;
       if (!prefixProof.complete || !suffixProof.complete) return rejectPlan("Unresolved naming token: check prefix and suffix; no jobs were submitted");
       if (filename.includes("/") && /[/\\]/.test(pfx + sfx)) {
@@ -448,18 +433,20 @@ export function register(app) {
       }
 
       let namingWrites;
-      if (producing) {
-        const p = findProducingOutputNode(mutated, filename, outputClasses);
-        if (!p) {
-          return rejectPlan("Producing output node lost after clone");
+      try {
+        if (producing) {
+          const p = findProducingOutputNode(mutated, filename, outputClasses);
+          if (!p) {
+            return rejectPlan("Producing output node lost after clone");
+          }
+          namingWrites = narrowToOneOutputNode(mutated, p.id, originalBasename, pfx, sfx, outputClasses).written;
+        } else {
+          namingWrites = wrapAllOutputPrefixes(mutated, pfx, sfx, outputClasses ?? new Set());
+          if (!namingWrites.length) {
+            return rejectPlan("No output node in graph");
+          }
         }
-        namingWrites = narrowToOneOutputNode(mutated, p.id, originalBasename, pfx, sfx, outputClasses).written;
-      } else {
-        namingWrites = wrapAllOutputPrefixes(mutated, pfx, sfx, outputClasses ?? new Set());
-        if (!namingWrites.length) {
-          return rejectPlan("No output node in graph");
-        }
-      }
+      } catch (error) { return rejectPlan(error.message); }
 
       try { validateGraphLinks(mutated); }
       catch (e) {
@@ -467,20 +454,11 @@ export function register(app) {
       }
 
       const surviving = survivingAxes(mutated, writes, fullInspection);
-      // The writer owns naming targets; retained dependency outputs need not
-      // have received a prefix, even when object_info marks them as outputs.
-      const outputs = namingWrites.map(nodeId => ({
-        value: mutated[nodeId].inputs?.filename_prefix,
-        directory: outputPath(graph[nodeId].inputs?.filename_prefix ?? "").directory,
-      }));
-      const naming = [];
-      if (outputs.length && outputs.every(({ value }) => typeof value === "string")) {
-        if (prefixProof.complete && outputs.every(({ value, directory }) => value.slice(directory.length).startsWith(pfx))) naming.push("prefix");
-        if (suffixProof.complete && outputs.every(({ value }) => value.endsWith(sfx))) naming.push("suffix");
-      }
+      // Only writer-owned targets certify naming. outputName guarantees whole
+      // affixes by construction; retained dependency outputs are not targets.
+      const naming = namingWrites.length ? ["prefix", "suffix"] : [];
       const missing = Object.keys(perm).filter(id => !surviving.includes(id));
       if (missing.length) return rejectPlan(`Operation ${missing.join(", ")} was pruned or overwritten in the final graph; no jobs were submitted`);
-      if (naming.length !== 2) return rejectPlan("Output naming would be folded or overwritten; shorten prefix or suffix before Run");
       const appliedPlan = {
         ranges: surviving.filter(id => resolvedRanges[id]?.enabled && !imageParams?.[id]?.enabled),
         imageParams: surviving.filter(id => imageParams?.[id]?.enabled && !resolvedRanges[id]?.enabled),

@@ -188,8 +188,9 @@ survive left stepping/mirroring/close. Clipboard references retain full paths;
 individual downloads suggest `host#leaf` while requesting exact full-path bytes.
 
 Nested variations match the exact producing node directory, retain that directory
-and full-path lineage, and apply existing prefix/suffix/counter/NAME_MAX treatment
-only to the leaf. Ambiguous nested producers and directory-bearing nested
+and full-path lineage, and apply the shared UTF-8 output-name budget only to the
+leaf. Expanded prefix and suffix stay whole; only the source stem folds in the
+middle with `~`. Ambiguous nested producers and directory-bearing nested
 prefix/suffix substitutions reject rather than guessing. Browsing scope is not a
 generation destination.
 
@@ -886,10 +887,13 @@ value available in their tooltip. Existing engine limits and Run admission remai
 Prefix and Suffix have associated labels. A keyboard-native “Insert parameter”
 selector inserts exact canonical IDs at the last naming caret (Suffix by default).
 Row labels exclusively toggle their associated enable checkbox; insertion does
-not share that label's pointer event. A representative output-name example resolves
-through the shared naming-token
-formatter. It does not promise final upload collision names, producer names or
-output counters. Run is replaced by “Queuing…” status in the same final sidebar
+not share that label's pointer event. A representative first-output example uses
+the same shared token expansion and `outputName` writer as Run, including the
+folded source stem. Probe supplies that target's directory and source stem, including
+the wrap-all fallback's first output. The example equals its written `filename_prefix`
+for the sampled tuple and resolved image names; pending uploads are explicitly
+provisional. Upload collision receipts and ComfyUI's appended output counter are
+not predicted. Run is replaced by “Queuing…” status in the same final sidebar
 slot during preparation and submission. Retained recipes display Prefix/Suffix as
 text and omit Run; New recipe remains their explicit recovery action. The halve
 step action is omitted at its minimum increment. The polite result reports
@@ -919,6 +923,27 @@ order; `{image}` selects the first image descriptor even if only a later image
 varies. Explicit IDs are required to address siblings independently. Variation
 drafts and parameter choices are session-private and are not persisted, so
 there are no saved legacy parameter keys to migrate.
+
+Every resolved naming-token value is bounded to **40 UTF-8 bytes**, for every
+parameter kind. Image tokens first remove the filename's last extension:
+`dragon.png` becomes `dragon`. Longer values fold deterministically to a head
+of at most 19 bytes, `~`, and a tail of at most 20 bytes, without splitting a
+Unicode code point. Short values and ordinary numeric formatting stay unchanged.
+The bound applies only to naming substitutions: graph values, image upload names,
+raw recipe text and lineage metadata remain exact. Keeping the tail retains the
+newest counters and distinguishes long names with a shared head and different tails;
+folding is not a collision-proof encoding of arbitrary strings.
+
+`outputName({prefix,sourceStem,suffix,budget})` in the shared pure module owns
+both server paths and the client example. Both paths use a conservative **200-byte**
+assembled prefix budget, below filesystem NAME_MAX (255 bytes) with 15 bytes
+reserved for ComfyUI's counter and extension. The directory is separate. Prefix
+and suffix are preserved in full after token expansion. Only the source stem is
+middle-folded into the remaining bytes, or omitted if the affixes exactly fill the
+budget. Naming-length rejection occurs only when the expanded affixes alone exceed
+the budget, with actual byte lengths, for example “Prefix and suffix are 210 bytes;
+the limit is 200 bytes.” Literal template text is never silently shortened. Recursive
+image-token lineage cannot grow through tokens beyond their shared 40-byte bound.
 
 Run/button/handle input enters `variations.run` and the owner's requestRun. A private
 ticket captures all editable values/targets/revision/close generation before IO.
@@ -976,9 +1001,10 @@ Naming proof uses only the exact node IDs returned by the naming writer; no writ
 
 The engine prepares every final prompt before the first enqueue, using the actual
 mutation, narrowing and naming writers. Enabled-empty axes, missing template values,
-unresolved naming, pruned/overwritten active assignments and affixes lost by folding
-reject with a clear message and zero enqueues for that target plan. Existing
-basename middle folding remains valid when both affixes survive completely.
+unresolved naming, pruned/overwritten active assignments and expanded affixes alone
+over the byte budget reject with a clear message and zero enqueues for that target
+plan. The shared naming writer preserves affixes by construction; no separate
+after-the-fact start/end check can turn legitimate source-stem folding into rejection.
 Actual surviving carrier assignments and recognized naming writes certify positive
 use on confirmed accepted prompts. The same typed axis kernel owns count/generation
 and off-selection exclusion proof. Tuple identity is per field, never delimiter
