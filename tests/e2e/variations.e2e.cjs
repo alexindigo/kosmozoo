@@ -61,6 +61,17 @@ async function main() {
       check("wand click opens variations modal", opened);
     });
 
+    await attempt("close tooltip advertises the modal's working Escape key", async () => {
+      await cdp.poll(`document.querySelectorAll('.vz-slider-row').length > 0`, 5000);
+      const title = await cdp.evaluate(`document.querySelector('.vz-close').title`);
+      check("Variations close tooltip is close (Esc)", title === 'close (Esc)', title);
+      await cdp.keyTrusted('Escape', { vk: 27 });
+      await cdp.poll(`!document.querySelector('.vz-root')`, 5000);
+      check("advertised Escape closes the clean Variations dialog", true);
+      await cdp.clickAt('.card[data-idx="0"] .votebtn.variations');
+      await cdp.poll(`!!document.querySelector('.vz-root .vz-panel')`, 5000);
+    });
+
     // --- modal is a page-level fixed overlay (not clipped by any card) ---
     // behavior, not implementation: the backdrop is fixed, covers the
     // viewport, and contains the panel (the portal parent tag is an

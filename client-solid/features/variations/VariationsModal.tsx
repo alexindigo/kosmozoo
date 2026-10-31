@@ -438,7 +438,7 @@ function RecipeBody(props) {
             </Show></div>
           </div>
         </div>
-        <IconButton chrome variant="plain vz-close" title="close"
+        <IconButton chrome variant="plain vz-close" title="close (Esc)"
           onAction={() => store.handles.invoke("variations.close", { session: props.session })}
           icon={iconSvg("x")} />
       </div>
