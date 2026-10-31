@@ -19,17 +19,25 @@ export function MediaControlBoundary(props) {
   return <div ref={el} class={props.class} onClick={e => e.stopPropagation()}>{props.children}</div>;
 }
 
+function MediaButton(props) {
+  const button = () => <IconButton {...props} viewer={props.docked} />;
+  return props.docked ? <span class="viewer-group">{button()}</span> : button();
+}
+
 export function MediaControls(props) {
   const bar = () => <MediaControlBoundary class="media-controls">
     <Show when={props.label}><span class="media-side">{props.label}</span></Show>
-    <IconButton variant="play media-toggle" title={props.paused ? "play" : "pause"}
+    <MediaButton docked={props.docked}
+      variant="play media-toggle" title={props.paused ? "play" : "pause"}
       onAction={props.onToggle} icon={iconSvg(props.paused ? "player-play" : "player-pause", 20)} />
     <input class="media-seek" type="range" aria-label="seek" min="0" max={props.duration || 0} step="0.01"
       value={props.current} disabled={!props.duration} onInput={e => props.onSeek(Number(e.currentTarget.value))} />
     <span class="media-time">{mediaTime(props.current)} / {mediaTime(props.duration)}</span>
-    <IconButton variant="media-mute" title={props.muted ? "unmute" : "mute"}
+    <MediaButton docked={props.docked}
+      variant="media-mute" title={props.muted ? "unmute" : "mute"}
       active={props.muted} onAction={props.onMute} icon={iconSvg(props.muted ? "volume-off" : "volume", 16)} />
-    <IconButton variant="media-loop" title="loop" active={props.loop}
+    <MediaButton docked={props.docked}
+      variant="media-loop" title="loop" active={props.loop}
       onAction={props.onLoop} icon={iconSvg("repeat", 16)} />
     <Show when={props.onOpen}><IconButton variant="media-open" title="open full screen"
       onAction={props.onOpen} icon={iconSvg("full-screen", 16)} /></Show>

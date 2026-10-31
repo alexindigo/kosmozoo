@@ -677,6 +677,7 @@ async function attempt(name, fn) {
   });
 
   await require('./command-origins.cjs')({ page, ENGINE, KZ, check });
+  await attempt('viewer button visual contract', () => require('./viewer-buttons.cjs')({ page, KZ, check, capture: sourceShot, control: sourceControl }));
   await attempt('video playback contract', () => require('./media-video.cjs')({ page, ENGINE, KZ, check, capture: sourceShot, control: sourceControl }));
   await attempt('audio playback contract', () => require('./media-audio.cjs')({ page, ENGINE, KZ, check, capture: sourceShot, control: sourceControl }));
   await attempt('native failure messages', () => require('./media-failures.cjs')({ page, ENGINE, KZ, check, capture: sourceShot, control: sourceControl }));
