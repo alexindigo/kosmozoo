@@ -199,24 +199,24 @@ function check(name, ok, detail = "") {
   check("unlock: no jump — both crops stay put", stayed.a === stayA && stayed.b === stayB);
 
   // 4b. split hit-testing: the gesture hits the layer VISIBLE at the
-  // pointer — left of the wipe is the bottom layer, right is the top one
+  // pointer — A remains left of the wipe and B remains right of it
   await cdp.evaluate("document.dispatchEvent(new KeyboardEvent('keydown', { key: '3', bubbles: true }))");
   await cdp.poll(`(async () => ${KZ}.state.diff.mode === "split")()`, 5000);
   const readViews = `(async () => ({
     a: JSON.stringify(${KZ}.state.diff.views["fake:flux-basic.png"] ?? null),
     b: JSON.stringify(${KZ}.state.diff.views["another:flux-basic.png"] ?? null),
   }))()`;
-  // col is "feed" → A is the top layer (right of the wipe), B underneath (left)
+  // The active subject does not change either region.
   const hitBefore = await cdp.evaluate(readViews);
   await cdp.mouse("mouseWheel", 350, 450, { deltaY: -40, modifiers: 2 });
   const leftHit = await cdp.evaluate(readViews);
-  check("split: a wheel left of the wipe hits the bottom layer (B)",
-    leftHit.b !== hitBefore.b && leftHit.a === hitBefore.a,
+  check("split: a wheel left of the wipe hits A",
+    leftHit.a !== hitBefore.a && leftHit.b === hitBefore.b,
     JSON.stringify({ hitBefore, leftHit }));
   await cdp.mouse("mouseWheel", 1050, 450, { deltaY: -40, modifiers: 2 });
   const rightHit = await cdp.evaluate(readViews);
-  check("split: a wheel right of the wipe hits the top layer (A)",
-    rightHit.a !== leftHit.a && rightHit.b === leftHit.b,
+  check("split: a wheel right of the wipe hits B",
+    rightHit.b !== leftHit.b && rightHit.a === leftHit.a,
     JSON.stringify({ leftHit, rightHit }));
   // locked: a wheel anywhere moves both
   await cdp.evaluate(`(async () => { ${KZ}.actions.diff.setLocked(true); })()`);
@@ -230,7 +230,7 @@ function check(name, ok, detail = "") {
   await cdp.evaluate("document.dispatchEvent(new KeyboardEvent('keydown', { key: '1', bubbles: true }))");
   await cdp.poll(`(async () => ${KZ}.state.diff.mode === "two-up")()`, 5000);
 
-  // 5. A/B layout: the active column is the left cell in Two-Up
+  // 5. A/B layout: changing the active subject never swaps Two-Up cells
   await cdp.evaluate("document.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowRight', bubbles: true }))");
   await cdp.poll(`(async () => ${KZ}.state.diff.col === "right")()`, 5000);
   const layout = await cdp.evaluate(`(() => {
@@ -238,11 +238,11 @@ function check(name, ok, detail = "") {
     const b = document.querySelector('.dz-b').getBoundingClientRect();
     return { al: a.left, bl: b.left };
   })()`);
-  check("A/B: active column is the left cell in Two-Up", layout.bl < layout.al, JSON.stringify(layout));
+  check("A/B: A stays left in Two-Up with B active", layout.al < layout.bl, JSON.stringify(layout));
 
   // 5b. active opacity: the slider sits in the controls strip in every mode;
   // it fades the ACTIVE layer (Two-Up: col=right → B), moves with A/B, and
-  // dims the Split top layer and the Difference base
+  // dims the Split subject and the Difference base
   const op = await cdp.evaluate(`(async () => {
     ${KZ}.actions.diff.setActiveOpacity(0.4);
     return {
@@ -261,7 +261,7 @@ function check(name, ok, detail = "") {
     b: getComputedStyle(document.querySelector('.dz-b .dz-img')).opacity,
   }))()`);
   check("opacity: the fade follows the A/B switch", opFlip.a === "0.4" && opFlip.b === "1", JSON.stringify(opFlip));
-  // Split: the TOP (active) layer carries it (col=feed → A on top)
+  // Split: the active subject carries opacity without changing its region
   await cdp.evaluate("document.dispatchEvent(new KeyboardEvent('keydown', { key: '3', bubbles: true }))");
   await cdp.poll(`(async () => ${KZ}.state.diff.mode === "split")()`, 5000);
   const opSplit = await cdp.evaluate(`(() => ({
@@ -269,7 +269,7 @@ function check(name, ok, detail = "") {
     b: getComputedStyle(document.querySelector('.dz-b .dz-img')).opacity,
     slider: !!document.querySelector('.dz-active-op'),
   }))()`);
-  check("opacity: works in Split too (top layer fades)",
+  check("opacity: works in Split too (subject fades)",
     opSplit.a === "0.4" && opSplit.b === "1" && opSplit.slider, JSON.stringify(opSplit));
   // One-Up: BOTH layers render (the other one behind), the active on top —
   // faded active lets the bottom show through
@@ -299,8 +299,8 @@ function check(name, ok, detail = "") {
   await cdp.poll(`(async () => ${KZ}.state.diff.col === "feed")()`, 5000);
   check("One-Up: Left/Right flips the visible side", true);
 
-  // 7. Split: key 3 → handle at 50%; the ACTIVE cell is the clipped top
-  // layer; a drag moves the wipe; both layers stay mounted
+  // 7. Split: key 3 → handle at 50%; complementary clips preserve placement;
+  // a drag moves the wipe; both layers stay mounted
   await cdp.evaluate("document.dispatchEvent(new KeyboardEvent('keydown', { key: '3', bubbles: true }))");
   await cdp.poll(`(async () => ${KZ}.state.diff.mode === "split")()`, 5000);
   const split0 = await cdp.evaluate(`(async () => ${KZ}.state.diff.splitT)()`);
@@ -310,9 +310,8 @@ function check(name, ok, detail = "") {
     b: getComputedStyle(document.querySelector('.dz-b')).clipPath,
     col: ${KZ}.state.diff.col,
   }))()`);
-  // col is "feed" from section 6 → A is the clipped top layer
-  check("Split: the active cell is the clipped top layer",
-    topLayer.col === "feed" && topLayer.a !== "none" && topLayer.b === "none",
+  check("Split: both fixed sides have complementary clips",
+    topLayer.col === "feed" && topLayer.a === "inset(0px 50% 0px 0px)" && topLayer.b === "inset(0px 0px 0px 50%)",
     JSON.stringify(topLayer));
   const wipe = await cdp.evaluate(`(() => {
     const r = document.querySelector('.dz-wipe').getBoundingClientRect();

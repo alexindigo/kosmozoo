@@ -149,7 +149,7 @@ module.exports = async ({ page, ENGINE, KZ, check, capture, control }) => {
     await invoke('workbench.pickInput',{source:'fake',file:'canny.png'});
     await invoke('workbench.mode',{mode:'two-up'});
     await page.poll(`document.querySelector('.dz-b img')?.naturalWidth>0`);
-    check('video split uses the existing node-input pair, subject B first with matching boundaries',await page.evaluate(`(async()=>{const p=${KZ}.state.diffPair(),a=document.querySelector('.dz-a').getBoundingClientRect(),b=document.querySelector('.dz-b').getBoundingClientRect();return p.b.source==='input:fake'&&p.b.file==='canny.png'&&Math.abs(b.right-a.left)<1&&Math.abs(a.height-b.height)<1&&Math.abs(a.width-b.width)<1})()`));
+    check('video split uses the existing node-input pair, A left with matching boundaries even when B is active',await page.evaluate(`(async()=>{const p=${KZ}.state.diffPair(),a=document.querySelector('.dz-a').getBoundingClientRect(),b=document.querySelector('.dz-b').getBoundingClientRect();return p.b.source==='input:fake'&&p.b.file==='canny.png'&&Math.abs(a.right-b.left)<1&&Math.abs(a.height-b.height)<1&&Math.abs(a.width-b.width)<1})()`));
     await capture(page,'video-viewer-split-node');
     await page.keyTrusted('f',{code:'KeyF',vk:70});await page.poll(`document.getElementById('diffStage').dataset.mode==='full'&&document.getElementById('diffStage').dataset.col==='right'&&document.querySelector('.dz-b img')?.src.includes('canny.png')`);
     check('f selects Full on subject B through the existing dispatcher',await page.evaluate(`document.querySelector('.dz-a').getBoundingClientRect().width===0&&document.querySelector('.dz-b').getBoundingClientRect().width>0`));

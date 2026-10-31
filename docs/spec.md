@@ -538,6 +538,11 @@ Full. Images offer Full/Two-Up/One-Up/Split/Difference. Every kind opens in Full
 on the clicked image, on every open. The open intent names its subject and pair;
 the viewer owns that subject, derives its active column from it, and Full shows
 only that side. Comparison modes retain the pair with the subject active.
+The diff module's immutable placement map owns A/feed on the left and B/compare
+on the right. Two-Up order, complementary Slider clips, gesture targets,
+control labels/dock order and directional keys derive from that same map.
+Changing the subject never swaps positions: One-Up still overlays the active
+subject and Difference still composites its base; Full shows only the subject.
 Feed opens target A; metadata images and anchors target B. Explicit pairs and
 `/diff` links default to A and can target B with `subject=b` (the URL query).
 A plain image click inside the viewer never reopens or resets its session.

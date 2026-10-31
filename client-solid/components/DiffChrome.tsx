@@ -15,6 +15,7 @@ import { useAppStore } from "../store/app-store.js";
 import { iconSvg } from "/js/icons.mjs";
 import { IconButton } from "./IconButton.js";
 import { ModeSwitch } from "./ModeSwitch.js";
+import { viewerSide } from "../features/diff/views.mjs";
 
 function VSlider(props) {
   let trackEl;
@@ -98,7 +99,7 @@ export function DiffChrome(props) {
             class="viewer-btn dz-sidebtn" title="active side — primary in every view (ArrowLeft/Right)"
             disabled={!hasB() || undefined}
             onClick={() => store.handles.invoke("workbench.column", { toggle: true })}
-          >{d().col === "feed" ? "A" : "B"}</button></span>
+          >{viewerSide[d().subject].label}</button></span>
           <span class="viewer-group"><IconButton viewer
             variant="dz-lockbtn"
             title={d().locked ? "locked — gestures move both (l)" : "unlocked — gestures move the target (l)"}

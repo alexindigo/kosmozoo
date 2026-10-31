@@ -31,7 +31,7 @@ import { makeSourceRegistry, sameSourceIdentity } from "./source-registry.js";
 import { makeRailArrivals } from "./rail-arrivals.js";
 import { fieldList, nodeImages } from "./fields.js";
 import { pairSides } from "../features/diff/pair.mjs";
-import { workbenchViews, defaultWorkbenchView } from "../features/diff/views.mjs";
+import { workbenchViews, defaultWorkbenchView, columnForSide, sideForColumn } from "../features/diff/views.mjs";
 import { makeImageWindow } from "./image-window.js";
 import { makeSizes } from "./sizes.js";
 import { makeMediaPlayers } from "./media-players.js";
@@ -80,7 +80,7 @@ export function makeAppStore({ subscribeSources = typeof window !== "undefined" 
       mode: "full",         // full | two-up | one-up | split | difference
       views: {},             // viewer-session crops; never persisted/shared with cards
       subject: "a",         // viewer-owned side: Full displays it; comparisons make it active
-      get col() { return this.subject === "b" ? "right" : "feed"; },
+      get col() { return columnForSide(this.subject); },
       locked: true,         // entangled zoom: a gesture's delta writes BOTH view keys
       splitT: 0.5,          // wipe position, 0..1 of stage width
       activeOpacity: 1,     // the active column's photo opacity (every mode)
@@ -2019,7 +2019,7 @@ export function makeAppStore({ subscribeSources = typeof window !== "undefined" 
       },
       setCol(col) {
         if (col === "feed" || col === "right") {
-          setSt("diff", "subject", col === "right" ? "b" : "a");
+          setSt("diff", "subject", sideForColumn(col));
           mirrorCurrentHash();
         }
       },

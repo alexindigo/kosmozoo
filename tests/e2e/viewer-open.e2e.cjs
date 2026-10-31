@@ -83,8 +83,8 @@ const check = (name, ok, detail = '') => { checks++; console.log(`${ok ? 'ok' : 
           }
           const before = await page.evaluate(`(async()=>{const d=${KZ}.state.diff;return JSON.stringify({mode:d.mode,col:d.col,subject:d.subject,views:d.views})})()`);
           const clickSelector = mode === 'difference' ? '.dz-canvas' : ready ? selector : '.dz-a img';
-          // In Split the active image begins just to the right of the wipe.
-          const point = await page.evaluate(`(()=>{const r=document.querySelector('${clickSelector}')?.getBoundingClientRect();return r&&{x:r.x+r.width/2+2,y:r.y+r.height/2};})()`);
+          // Click the subject's fixed region in Split, regardless of activity.
+          const point = await page.evaluate(`(()=>{const r=document.querySelector('${clickSelector}')?.getBoundingClientRect();return r&&{x:r.x+r.width*${mode === 'split' ? side === 'a' ? '.25' : '.75' : '.5'},y:r.y+r.height/2};})()`);
           if (point) { await page.mouse('mousePressed', point.x, point.y, { button:'left',clickCount:1 }); await page.mouse('mouseReleased', point.x, point.y, { button:'left',clickCount:1 }); }
           await frames();
           const after = await page.evaluate(`(async()=>{const d=${KZ}.state.diff;return JSON.stringify({mode:d.mode,col:d.col,subject:d.subject,views:d.views})})()`);
