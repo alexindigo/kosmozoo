@@ -13,7 +13,7 @@ import { ModeSwitch } from "../../components/ModeSwitch.js";
 import { iconSvg } from "/js/icons.mjs";
 
 export function SliderRow(props) {
-  return <ParameterRow class="vz-slider-row" row={props.row} enabled={props.enabled}
+  return <ParameterRow class="vz-slider-row" row={props.row} enabled={props.enabled} filteredOut={props.filteredOut}
     attributes={{ "data-param-key": props.param.key }}
     current={props.relative ? "varies by image" : fmt(props.current())} summary={props.summary}
     onInsert={props.onInsert} onEnable={checked => props.onToggle(props.param.key, checked)}>

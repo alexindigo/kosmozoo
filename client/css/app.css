@@ -108,7 +108,8 @@ body.resizing { cursor: col-resize; user-select: none; }
 .haddrow input { min-width: 0; flex: 1; background: var(--background); color: var(--foreground);
   border: 1px solid var(--border); border-radius: 6px; padding: 5px 7px;
   font: 11px ui-monospace, monospace; }
-.haddrow input:focus { outline: none; border-color: var(--secondary); }
+.haddrow input:focus, .vz-tpl-input:focus, .vz-row-inc-input:focus, .vz-tinput:focus,
+.vz-root .vz-field-filter > input:focus { outline: none; border-color: var(--secondary); }
 .haddrow button { font-size: 11px; padding: 4px 8px; }
 
 /* --- bulk bar: fixed under the header while images are selected ---------- */
@@ -721,7 +722,6 @@ body:has(#diff:not([hidden])) #statusCol { bottom: 56px; }
   color: var(--foreground); border: 1px solid var(--border-strong);
   border-radius: 4px; font-size: 12px; padding: 3px 6px;
   font-family: ui-monospace, monospace; }
-.vz-tpl-input:focus { outline: none; border-color: var(--secondary); }
 
 .vz-label { color: var(--foreground); font-size: 13px; font-weight: 400;
   cursor: pointer; align-self: flex-start; }
@@ -792,7 +792,6 @@ body:has(#diff:not([hidden])) #statusCol { bottom: 56px; }
   border: 1px solid var(--foreground-dim); border-radius: 4px; padding: 2px 4px;
   font-size: 11px; text-align: center;
   font-family: ui-monospace, monospace; }
-.vz-row-inc-input:focus { outline: none; border-color: var(--secondary); }
 .vz-row-inc-input:disabled { opacity: 0.5; }
 
 /* node-referenced images (LoadImage-style) rendered inline in the info panel */
@@ -908,7 +907,6 @@ body:has(#diff:not([hidden])) #statusCol { bottom: 56px; }
   border: 1px solid var(--foreground-dim); border-radius: 6px; padding: 4px 8px;
   font-size: 12px; margin-top: 2px;
   font-family: ui-monospace, monospace; }
-.vz-tinput:focus { outline: none; border-color: var(--secondary); }
 /* Run occupies the sidebar's final grid row. Fills the column width for a
    solid primary-action target independent of message length. */
 .vz-run { background: var(--primary); color: var(--black); border: none;
@@ -1117,15 +1115,20 @@ body:has(#diff:not([hidden])) #statusCol { bottom: 56px; }
 
 /* Recipe recovery joins the scrolling editor; the count uses its natural line. */
 .vz-count { line-height: normal; }
-.vz-workspace-tools { display: flex; flex-direction: column; gap: 4px; flex: 0 0 auto; }
-.vz-workspace-label { font-size: 12px; color: var(--foreground-mid); }
+.vz-workspace-tools { display: flex; flex-direction: column; gap: 4px; flex: 0 0 auto;
+  position: sticky; top: 0; z-index: 2; background: var(--focused-background); }
 .vz-workspace-actions { display: flex; align-items: center; gap: 8px; }
 .vz-workspace-actions .select-control { flex: 1; min-width: 0; }
 .vz-workspace-new { align-self: flex-start; }
+.vz-field-filter.search-control { flex: 1; }
+.vz-field-filter > input { width: 100%; height: 100%; padding: 0 8px; padding-inline-end: calc(var(--control-size) + 8px);
+  border: 1px solid var(--border-strong); border-radius: 4px; background: var(--background);
+  color: var(--foreground); font: 12px system-ui; }
+.vz-parameter.vz-filter-hidden { display: none; }
 
 /* Production's card vocabulary, shared by every input kind. Only enabled rows
    mount an editor; the same one-line heading sets all closed-row geometry. */
-.vz-parameter { display: block; flex: 0 0 auto; padding: 10px 12px; background: var(--surface);
+.vz-parameter { display: block; isolation: isolate; flex: 0 0 auto; padding: 10px 12px; background: var(--surface);
   border: 1px solid var(--lifted); border-radius: 8px; opacity: 1; }
 .vz-parameter.on { border-color: var(--secondary); }
 .vz-parameter:not(.on) { opacity: 0.55;

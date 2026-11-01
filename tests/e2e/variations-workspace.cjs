@@ -148,7 +148,7 @@ module.exports = async ({ cdp, ENGINE, FAKE, KZ, check }) => {
     await cdp.poll(`(async()=>${KZ}.state.hosts['recipe-owner']?.sourceVersion.incarnation!==${JSON.stringify(oldIncarnation)}&&!!${KZ}.state.hosts['recipe-owner'])()`);await cdp.evaluate("(async()=>{await fetch('/api/collections/recipe-owner/entries/recipe_00001_.png/bytes')})()");
     await open('recipe-owner');await cdp.poll("!!document.querySelector('.vz-workspace-status')");
     await fixedSummary();
-    assert(await cdp.evaluate("!document.querySelector('button.vz-run')&&!document.querySelector('.vz-naming-group input')&&!document.querySelector('.vz-left input')&&document.querySelector('.vz-retained-values').textContent.includes('dormant.png')"));
+    assert(await cdp.evaluate("!document.querySelector('button.vz-run')&&!document.querySelector('.vz-naming-group input')&&[...document.querySelectorAll('.vz-left input')].every(input=>input.matches('.vz-field-filter input'))&&document.querySelector('.vz-retained-values').textContent.includes('dormant.png')"));
     count=(await jobs()).length;assert.equal((await invoke('variations.run')).status,'stale');assert.equal((await jobs()).length,count);
     await fixedSummary();
     await capture('recipe-old-origin');await cdp.clickAt('.vz-workspace-new');await cdp.poll("!document.querySelector('.vz-workspace-status')&&document.querySelectorAll('.vz-workspace option').length===2");
@@ -159,7 +159,7 @@ module.exports = async ({ cdp, ENGINE, FAKE, KZ, check }) => {
     await cdp.clickAt('.vz-workspace-discard');await cdp.clickAt('.vz-discard-confirm');await cdp.poll("!document.querySelector('.vz-discard')&&document.querySelector('.vz-prefix')?.value===''");
     await cdp.evaluate("(()=>{const select=document.querySelector('.vz-workspace');select.value=[...select.options].find(option=>option.textContent.includes('Previous')).value;select.dispatchEvent(new Event('change',{bubbles:true}))})()");
     await cdp.poll("!!document.querySelector('.vz-workspace-status')");await cdp.clickAt('.vz-workspace-discard');await cdp.poll("!!document.querySelector('.vz-discard')");await cdp.clickAt('.vz-keep');assert.equal(await cdp.evaluate("document.querySelectorAll('.vz-workspace option').length"),2);
-    await cdp.clickAt('.vz-workspace-discard');await cdp.clickAt('.vz-discard-confirm');await cdp.poll("!document.querySelector('.vz-workspace-status')&&document.querySelectorAll('.vz-workspace option').length===1");await close();
+    await cdp.clickAt('.vz-workspace-discard');await cdp.clickAt('.vz-discard-confirm');await cdp.poll("!document.querySelector('.vz-workspace-status')&&!document.querySelector('.vz-workspace')");await close();
     check('recipe origin recovery: previous source is visibly inspectable without retarget or effects; explicit new workspace, Keep editing and committed removal preserve independent identities',true);
   } finally {
     await cdp.evaluate("URL.createObjectURL=window.__recipeCreate;URL.revokeObjectURL=window.__recipeRevoke");

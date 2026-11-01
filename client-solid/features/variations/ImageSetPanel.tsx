@@ -30,7 +30,7 @@ export function ImageSetPanel(props) {
   const selected = name => row().items.some(item => item.kind === "input" && item.name === name);
   useClickOutside(() => content, event => { if (!event.target.closest?.('.vz-input-popover')) setAdding(false); });
   createEffect(() => { if (adding()) onCleanup(props.registerPopup(() => { setAdding(false); addButton.focus(); })); });
-  return <ParameterRow class={`vz-imgrow vz-image-set${dropping() ? " vz-image-dropping" : ""}`} row={row} enabled={() => row().enabled}
+  return <ParameterRow class={`vz-imgrow vz-image-set${dropping() ? " vz-image-dropping" : ""}`} row={row} enabled={() => row().enabled} filteredOut={props.filteredOut}
     attributes={{ "data-image-id": props.id,
       onDragEnter: event => { if (isFileDrag(event.dataTransfer)) { event.preventDefault(); dragDepth++; setDropping(true); } },
       onDragOver: event => { if (isFileDrag(event.dataTransfer)) { event.dataTransfer.dropEffect = "copy"; setDropping(true); } },

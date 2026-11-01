@@ -1,14 +1,16 @@
 import { createUniqueId, Show } from "solid-js";
 import { SingleLineText } from "../../components/SingleLineText.js";
 import { Checkbox } from "../../components/Checkbox.js";
+import { parameterName } from "./field-filter.js";
 
 // Presentation only: identity, current context, enable intent and editor slot.
 // Catalogue IDs remain opaque; a readable name never becomes a token ID.
-export const parameterName = row => `${row.title ?? row.type}.${row.input ?? row.key}`;
+export { parameterName };
 
 export function ParameterRow(props) {
   const id = `vz-param-${createUniqueId()}`;
-  return <div class={`vz-parameter ${props.class ?? ""}${props.enabled() ? " on" : " vz-off"}`} {...props.attributes}>
+  return <div class={`vz-parameter ${props.class ?? ""}${props.enabled() ? " on" : " vz-off"}`}
+    classList={{ "vz-filter-hidden": !!props.filteredOut }} {...props.attributes}>
     <div class="vz-parameter-heading vz-imgrow-head">
       <Checkbox id={id} checked={props.enabled()}
         aria-labelledby={`${id}-name`} aria-describedby={`${id}-identity`} onChange={checked => props.onEnable(checked)} />

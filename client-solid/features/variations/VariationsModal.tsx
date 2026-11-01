@@ -30,6 +30,7 @@ import { IconButton } from "../../components/IconButton.js";
 import { workspaceCurrent } from "./workspaces.js";
 import { ParameterRow } from "./ParameterRow.js";
 import { isFileDrag } from "./image-drop.js";
+import { matchesFieldFilter } from "./field-filter.js";
 
 export function VariationsModal() {
   const store = useAppStore();
@@ -95,6 +96,13 @@ function RecipeBody(props) {
   const prefix = () => read(() => editor.naming("prefix"));
   const suffix = () => read(() => editor.naming("suffix"));
   const [decision, setDecision] = createSignal(null);
+  const [fieldFilter, setFieldFilter] = createSignal("");
+  let filterInput;
+  const fieldMatches = row => matchesFieldFilter(row, fieldFilter());
+  const hasMatchingFields = createMemo(() => [
+    ...Object.values(rows()), ...enumList(), ...textList(),
+    ...Object.values(imgRows()).filter(row => row.filesReady),
+  ].some(fieldMatches));
   const children = new Set();
   const registerEditor = (capability) => { children.add(capability); return () => children.delete(capability); };
   let restoreFocus = () => {};
@@ -276,9 +284,18 @@ function RecipeBody(props) {
           <div class="vz-left">
             <div class="vz-sliders">
               <div class="vz-workspace-tools">
-                <label class="vz-workspace-label" for={`recipe-${props.session}`}>Recipe workspace</label>
                 <div class="vz-workspace-actions">
+                  <div class="search-control control-size-md vz-field-filter">
+                    <input ref={filterInput} type="text" placeholder="Filter fields" aria-label="Filter fields"
+                      {...focus} value={fieldFilter()} onInput={event => setFieldFilter(event.currentTarget.value)} />
+                    <Show when={fieldFilter()}>
+                      <IconButton chrome size="md" variant="plain vz-filter-clear" title="Clear field filter" icon={iconSvg("x")}
+                        onAction={() => { setFieldFilter(""); filterInput.focus(); }} />
+                    </Show>
+                  </div>
+                  <Show when={props.workspaces.options(props.images).length > 1}>
                   <Select id={`recipe-${props.session}`} class="vz-workspace" value={props.workspace.id}
+                    aria-label="Recipe workspace"
                     onChange={event => {
                       const next = props.workspaces.options(props.images).find(item => item.id === event.currentTarget.value);
                       event.currentTarget.value = props.workspace.id;
@@ -288,6 +305,7 @@ function RecipeBody(props) {
                       {workspaceCurrent(item, props.images) ? "Current source recipe" : `Previous source · ${item.targets[0].origin.address} (${item.id})`}
                     </option>}</For>
                   </Select>
+                  </Show>
                   <button class="vz-workspace-discard" onClick={() => switchRecipe(null, true)}>Discard recipe</button>
                 </div>
                 <Show when={props.readOnly}>
@@ -302,7 +320,7 @@ function RecipeBody(props) {
                   const r = () => imgRows()[id];
                   return (
                     <Show when={r()?.filesReady}>
-                      <ImageSetPanel id={id} row={r} onEnable={checked => onImgToggle(id, checked)}
+                      <ImageSetPanel id={id} row={r} filteredOut={!fieldMatches(r())} onEnable={checked => onImgToggle(id, checked)}
                         onInsert={onInsertPlaceholder}
                         onAdd={(items, index) => editor.addImages(id, items, index)} onRemove={item => editor.removeImage(id, item)}
                         onMove={(item, index) => editor.moveImage(id, item, index)}
@@ -324,7 +342,7 @@ function RecipeBody(props) {
               >
                 <Show
                   when={orderedItems().length > 0}
-                  fallback={<SingleLineText class="vz-loading" value="this graph exposes no varyable parameters" />}
+                  fallback={<Show when={!fieldFilter().trim()}><SingleLineText class="vz-loading" value="this graph exposes no varyable parameters" /></Show>}
                 >
                   <For each={orderedItems()}>
                     {(itemId) => {
@@ -336,6 +354,7 @@ function RecipeBody(props) {
                             <EnumRow
                               p={p}
                               row={() => enumRows()[id]}
+                              filteredOut={!fieldMatches(enumRows()[id])}
                               onToggle={onEnumToggle}
                               onPick={onEnumPick}
                               onInsert={onInsertPlaceholder}
@@ -352,6 +371,7 @@ function RecipeBody(props) {
                             <TextRow
                               p={p}
                               row={() => textRows()[id]}
+                              filteredOut={!fieldMatches(textRows()[id])}
                               onToggle={onTextToggle}
                               onField={onTextField}
                               onTpl={onTextTpl}
@@ -367,6 +387,7 @@ function RecipeBody(props) {
                       return (
                         <SliderRow
                           row={() => rows()[key]}
+                          filteredOut={!fieldMatches(rows()[key])}
                           param={{ ...p, key, label: row0.label }}
                           current={() => rows()[key]?.current ?? null}
                           enabled={() => !!rows()[key]?.enabled}
@@ -385,6 +406,9 @@ function RecipeBody(props) {
                     }}
                   </For>
                 </Show>
+              </Show>
+              <Show when={params() !== null && fieldFilter().trim() && !hasMatchingFields()}>
+                <SingleLineText class="vz-loading vz-filter-empty" value={`No fields match "${fieldFilter()}"`} />
               </Show>
               </Show>
             </div>
@@ -484,7 +508,7 @@ function EnumRow(props) {
   const [filter, setFilter] = createSignal("");
   const r = () => props.row();
   return (
-    <ParameterRow class="vz-imgrow vz-enumrow" row={r} enabled={() => r().enabled}
+    <ParameterRow class="vz-imgrow vz-enumrow" row={r} enabled={() => r().enabled} filteredOut={props.filteredOut}
       attributes={{ "data-enum-id": props.p.id }} onEnable={checked => props.onToggle(props.p.id, checked)}
       onInsert={props.onInsert} summary={`${r().picks.length} ${r().picks.length === 1 ? "option" : "options"}`}>
         <div class="vz-imgrow-body vz-enum-body">
@@ -589,7 +613,7 @@ function TextRow(props) {
   const focus = focusMemory(props.rememberFocus);
   const r = () => props.row();
   return (
-    <ParameterRow class="vz-imgrow vz-textrow" row={r} enabled={() => r().enabled}
+    <ParameterRow class="vz-imgrow vz-textrow" row={r} enabled={() => r().enabled} filteredOut={props.filteredOut}
       attributes={{ "data-text-id": props.p.id }} onEnable={checked => props.onToggle(props.p.id, checked)}
       onInsert={props.onInsert} summary={props.summary}>
         <div class="vz-imgrow-body vz-enum-body">
