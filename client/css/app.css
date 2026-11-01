@@ -1022,6 +1022,9 @@ body:has(#diff:not([hidden])) #statusCol { bottom: 56px; }
 @keyframes vz-image-spin { to { transform: rotate(360deg); } }
 @media (prefers-reduced-motion: reduce) { .vz-image-check::after { animation: none; } }
 .vz-image-inspection-error { position: absolute; inset: auto 0 0; padding: 4px; background: var(--backdrop); }
+.vz-image-drop-gap { min-width: 0; aspect-ratio: var(--vz-image-ratio); border-radius: 4px; }
+.vz-parameter.vz-image-dropping { border-color: var(--secondary); box-shadow: inset 0 0 0 1px var(--secondary); }
+.vz-image-drop-status { display: block; margin-top: 8px; font-size: 11px; }
 .vz-image-error { font-size: 11px; }
 .vz-image-same { color: var(--attention); }
 .vz-image-empty { color: var(--foreground-mid); }

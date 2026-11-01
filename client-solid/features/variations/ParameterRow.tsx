@@ -20,5 +20,6 @@ export function ParameterRow(props) {
         hint={props.row().label} />
     </div>
     <Show when={props.enabled()}>{props.children}</Show>
+    {props.status}
   </div>;
 }

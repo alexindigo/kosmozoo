@@ -253,12 +253,12 @@ export function makeVariationEditor({ targets, services, currentOrigin, changed 
       }
       recipe.edited(); invalidateClose(); notify(); return true;
     },
-    addImages(id, items) {
+    addImages(id, items, index) {
       const entry = row("images", id);
       if (!entry) throw new Error("Unknown image row");
       // Unlike immutable Files, a removed disk path may now contain new bytes.
       for (const item of items) if (item.kind === "server-path" && !entry.values.items.some(other => sameImage(item, other))) imageChecks.get(id)?.delete(imageIdentity(item));
-      return this.edit("images", id, "items", mergeImages(entry.values.items, items));
+      return this.edit("images", id, "items", mergeImages(entry.values.items, items, index));
     },
     async addFolder(id, path) {
       if (!alive || deciding || running) throw new Error("Finish the current action before adding a folder");

@@ -29,9 +29,21 @@ import { Select } from "../../components/Select.js";
 import { IconButton } from "../../components/IconButton.js";
 import { workspaceCurrent } from "./workspaces.js";
 import { ParameterRow } from "./ParameterRow.js";
+import { isFileDrag } from "./image-drop.js";
 
 export function VariationsModal() {
   const store = useAppStore();
+  createEffect(() => {
+    if (!store.state.variations.open) return;
+    // One dialog-lifetime guard covers the entire page, including inert areas.
+    const preventFileNavigation = event => { if (isFileDrag(event.dataTransfer)) event.preventDefault(); };
+    window.addEventListener("dragover", preventFileNavigation, true);
+    window.addEventListener("drop", preventFileNavigation, true);
+    onCleanup(() => {
+      window.removeEventListener("dragover", preventFileNavigation, true);
+      window.removeEventListener("drop", preventFileNavigation, true);
+    });
+  });
   // A permitted replacement changes the scalar mount identity, even when the
   // store reconciles the descriptor. Targets are captured for this owner only.
   return (
@@ -292,7 +304,7 @@ function RecipeBody(props) {
                     <Show when={r()?.filesReady}>
                       <ImageSetPanel id={id} row={r} onEnable={checked => onImgToggle(id, checked)}
                         onInsert={onInsertPlaceholder}
-                        onAdd={items => editor.addImages(id, items)} onRemove={item => editor.removeImage(id, item)}
+                        onAdd={(items, index) => editor.addImages(id, items, index)} onRemove={item => editor.removeImage(id, item)}
                         onMove={(item, index) => editor.moveImage(id, item, index)}
                         currentThumbnail={services.inputThumbnail(image.host, r().current, image.origin, r().fromOutput ? "output" : "input")}
                         thumbnail={name => services.inputThumbnail(image.host, name, image.origin)}
