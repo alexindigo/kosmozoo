@@ -36,18 +36,89 @@ export function Grid() {
     setViewportSize((previous) => previous.width === width && previous.height === height ? previous : { width, height });
   };
 
-  // the virtualizer's item list is entriesWithKnownSize (the size-known
-  // view) — count, keys and estimates ALL map through that ONE list, keyed
-  // by entry id: a string, so identity is stable by construction.
+  // The feed-owned above-fold rule: an entry above the viewport whose size
+  // lands INSERTS a card above the fold and would shift the visible content.
+  // The list must not shift — when insertions land above the item at the
+  // viewport's top, the scroll position is compensated by their exact
+  // heights in the same tick (estimates are exact, so the compensation is
+  // exact). Not a virtualizer patch: the feed owns this rule. The store's
+  // compensate port applies the delta, so the settle pipeline never reads
+  // the re-based position as gesture travel.
+  //
+  // The rule fires ONLY for size landings: a landing does not change the
+  // view (view does not subscribe to dims paths), so a known-list change
+  // with a STABLE view is a landing — a vote, a reveal toggle, a filter, or
+  // a host switch recomputes the view, and those shifts belong to the user.
+  //
+  // The anchor is never cached: it is the entry under the ACTUAL scroll
+  // position in the layout the feed showed until this landing. Programmatic
+  // writes (a restore's jump, the tidy, back-to-top, an earlier compensation)
+  // move scrollTop before their scroll events, so a remembered anchor or
+  // scroll signal can describe a position the feed has already left.
+  //
+  // The rule is part of deriving the list the virtualizer windows, not a
+  // reaction to its render: `feed` is that ONE list (count and keys read it),
+  // and deriving it re-bases the virtualizer's offset first. The window of a
+  // changed list is therefore never computed at the uncompensated offset — a
+  // merge that removes or inserts many rows above the viewport cannot push
+  // the mounted cards under it out of the window for a render (the keyed For
+  // would drop and re-create them). The DOM scroll write follows the render
+  // (below), when the spacers already hold the new layout and cannot clamp it.
+  let virtualizer;
+  let prevView = null;
+  let prevList = null;
+  let prevMerge = -1;
+  let previous = null;
+  let pendingCompensation = 0;
+  const layout = createMemo(() => {
+    const entries = store.state.entriesWithKnownSize().map((i) => store.state.images[i]);
+    return {
+      order: entries.map((entry) => entry.id),
+      offsets: feedOffsets(entries,
+        (entry) => cardHeight(store.state.cardSize(store.state.imageIdxById().get(entry.id)), col?.clientWidth ?? 800) + gridGapPx()),
+    };
+  });
+  const feed = createMemo(() => {
+    const v = store.state.view();
+    const list = store.state.entriesWithKnownSize();
+    const merge = store.state.feedMergeNonce();
+    const next = layout();
+    // a landing with a stable view — or a refresh-MERGE (the nonce moved):
+    // new entries arrived from the server and the visible cards must not
+    // shift. A filter/vote/host switch recomputes the view WITHOUT the
+    // nonce — those shifts belong to the user.
+    const landing = (prevView === v && prevList && prevList !== list) || merge !== prevMerge;
+    if (landing && previous && col) {
+      // the actual position includes a compensation not yet written to the DOM
+      const top = col.scrollTop + pendingCompensation;
+      const anchorId = feedEntryAtOffset(previous.order, previous.offsets, top);
+      if (anchorId != null && next.offsets.has(anchorId)) {
+        const delta = next.offsets.get(anchorId) - previous.offsets.get(anchorId);
+        if (delta !== 0) {
+          pendingCompensation += delta;
+          if (virtualizer && virtualizer.scrollOffset != null) virtualizer.scrollOffset = Math.max(0, top + delta);
+        }
+      }
+    }
+    prevView = v;
+    prevList = list;
+    prevMerge = merge;
+    previous = next;
+    return next;
+  });
+
+  // the virtualizer's item list is `feed`, the size-known view (above) —
+  // count, keys and estimates ALL map through that ONE list, keyed by entry
+  // id: a string, so identity is stable by construction.
   // A new ordered identity snapshot invalidates the virtualizer's geometry
   // even when count is unchanged (reorder/replacement is not a count change).
   const itemKey = createMemo(() => {
-    const ids = store.state.entriesWithKnownSize().map((i) => store.state.images[i].id);
+    const ids = feed().order;
     return (i) => ids[i] ?? i;
   });
 
-  const virtualizer = createVirtualizer({
-    get count() { return store.state.entriesWithKnownSize().length; },
+  virtualizer = createVirtualizer({
+    get count() { return feed().order.length; },
     getScrollElement: scrollEl,
     get getItemKey() { return itemKey(); },
     estimateSize: (i) => {
@@ -88,58 +159,14 @@ export function Grid() {
     onCleanup(() => ro.disconnect());
   });
 
-  // The feed-owned above-fold rule: an entry above the viewport whose size
-  // lands INSERTS a card above the fold and would shift the visible content.
-  // The list must not shift — when insertions land above the item at the
-  // viewport's top, the scroll position is compensated by their exact
-  // heights in the same tick (estimates are exact, so the compensation is
-  // exact). Not a virtualizer patch: the feed owns this rule. The store's
-  // compensate port applies the delta, so the settle pipeline never reads
-  // the re-based position as gesture travel.
-  //
-  // The rule fires ONLY for size landings: a landing does not change the
-  // view (view does not subscribe to dims paths), so a known-list change
-  // with a STABLE view is a landing — a vote, a reveal toggle, a filter, or
-  // a host switch recomputes the view, and those shifts belong to the user.
-  //
-  // The anchor is never cached: it is the entry under the ACTUAL scroll
-  // position in the layout the feed showed until this landing. Programmatic
-  // writes (a restore's jump, the tidy, back-to-top, an earlier compensation)
-  // move scrollTop before their scroll events, so a remembered anchor or
-  // scroll signal can describe a position the feed has already left.
-  let prevView = null;
-  let prevList = null;
-  let prevMerge = -1;
-  let previous = null;
-  const layout = createMemo(() => {
-    const entries = store.state.entriesWithKnownSize().map((i) => store.state.images[i]);
-    return {
-      order: entries.map((entry) => entry.id),
-      offsets: feedOffsets(entries,
-        (entry) => cardHeight(store.state.cardSize(store.state.imageIdxById().get(entry.id)), col?.clientWidth ?? 800) + gridGapPx()),
-    };
-  });
+  // The compensation already re-based the virtualizer's window; the scroll
+  // container follows once the render has laid out the new spacers.
   createEffect(() => {
-    const v = store.state.view();
-    const list = store.state.entriesWithKnownSize();
-    const merge = store.state.feedMergeNonce();
-    const next = layout();
-    // a landing with a stable view — or a refresh-MERGE (the nonce moved):
-    // new entries arrived from the server and the visible cards must not
-    // shift. A filter/vote/host switch recomputes the view WITHOUT the
-    // nonce — those shifts belong to the user.
-    const landing = (prevView === v && prevList && prevList !== list) || merge !== prevMerge;
-    if (landing && previous && col) {
-      const anchorId = feedEntryAtOffset(previous.order, previous.offsets, col.scrollTop);
-      if (anchorId != null && next.offsets.has(anchorId)) {
-        const delta = next.offsets.get(anchorId) - previous.offsets.get(anchorId);
-        if (delta !== 0) store.actions.feed.compensate(delta);
-      }
-    }
-    prevView = v;
-    prevList = list;
-    prevMerge = merge;
-    previous = next;
+    feed();
+    if (!pendingCompensation) return;
+    const delta = pendingCompensation;
+    pendingCompensation = 0;
+    store.actions.feed.compensate(delta);
   });
 
   const items = () => virtualizer.getVirtualItems();

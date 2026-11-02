@@ -648,6 +648,9 @@ The feed reads each compensation's anchor from the actual scroll position in the
 it showed, never a remembered one; the Store applies the compensation and moves the
 settle's gesture origin by the same applied displacement, so compensation is never
 gesture travel and cannot invite the settle tidy, however late the settle timer runs.
+A landing/merge compensation re-bases the virtualizer's offset while the changed list is
+derived, before its window is computed, and the scroll container follows after the render;
+a merge that removes or inserts many rows above the viewport keeps the mounted cards under it.
 Ordinary rail ticks use the existing subdued `--foreground-dim` neutral through
 shared card-state presentation; card neutrals, judgment colors/priorities, wave
 length/glow, geometry, tape windowing and scrub handlers retain their contracts.
