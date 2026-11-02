@@ -731,12 +731,13 @@ body:has(#diff:not([hidden])) #statusCol { bottom: 56px; }
 .vz-lane-track .noUi-connects { display: flex; align-items: center; }
 .vz-lane-track .noUi-connect {
   background: var(--secondary); height: 3px; top: auto; border-radius: 1px; }
-/* Keep the full-width origin for the library's horizontal translation math;
-   its flex lane aligns the thumb vertically without another offset formula. */
-.vz-lane-track .noUi-origin { height: 100%; display: flex; align-items: center; justify-content: flex-end; }
+/* Origins are full-width positioning lanes, never hit targets. Otherwise the
+   higher-stacked lane covers its sibling thumb on the same half of the rail.
+   Only each handle accepts pointer input; the connect retains its own drag area. */
+.vz-lane-track .noUi-origin { height: 100%; display: flex; align-items: center; justify-content: flex-end; pointer-events: none; }
 .vz-lane-track .noUi-handle { position: relative; flex: 0 0 auto; width: var(--thumb-w); height: var(--thumb-w);
   border-radius: 50%; background: var(--secondary); border: 2px solid var(--background);
-  cursor: pointer; box-shadow: none;
+  cursor: pointer; box-shadow: none; pointer-events: auto;
   /* right offset is half the handle width so the handle's CENTER sits on the
  value point (the vendored default -17px assumes the library's 34px
  handle and would push our center 10px right of it) */

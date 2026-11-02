@@ -1,7 +1,7 @@
 // Recipe-owned numeric mode and values; only the native widget/gesture lifetime
 // belongs to the expanded body. Batch ranges use offsets; a Value is always fixed.
 
-import { Show, createEffect, onMount, onCleanup } from "solid-js";
+import { For, Show, createEffect, onMount, onCleanup } from "solid-js";
 import noUiSlider from "/vendor/nouislider.mjs";
 import { snapTo, fmt } from "./graph.mjs";
 import { makeSliderGesture } from "./slider-gesture.js";
@@ -34,6 +34,9 @@ function NumericEditor(props) {
   const fineStep = Math.pow(10, -props.param.decimals);
   const single = props.mode === "value";
   const relative = props.relative && !single;
+  // One descriptor owns handle ordering, numeric projection and raw field UI.
+  const fields = single ? [{ key: "value", label: "value", aria: "Value", handle: "value" }]
+    : [{ key: "min", label: "from", aria: "From", handle: "lower bound" }, { key: "max", label: "to", aria: "To", handle: "upper bound" }];
 
   // absolute: the param's clamp; relative: ±(spread×10) around the current
   const lo = relative ? -(props.param.spread ?? 1) * 10 : props.param.clamp[0];
@@ -50,8 +53,7 @@ function NumericEditor(props) {
     const slider = noUiSlider.create(sliderEl, {
       // Invalid text has no numeric position. This fallback only places a newly
       // mounted widget; it never writes a value back into the raw recipe.
-      start: single ? [props.row().numbers.value ?? props.current() ?? lo]
-        : [props.row().numbers.min ?? lo, props.row().numbers.max ?? hi],
+      start: fields.map((field, index) => props.row().numbers[field.key] ?? (single ? props.current() ?? lo : index ? hi : lo)),
       connect: !single,
       range: { min: lo, max: hi },
       step: fineStep,
@@ -61,10 +63,7 @@ function NumericEditor(props) {
       // next real gesture, even after our physical-gesture lease has ended.
       animate: false,
       keyboardSupport: true,
-      handleAttributes: single ? [{ "aria-label": `${parameterName(props.row())} value` }] : [
-        { "aria-label": `${parameterName(props.row())} lower bound` },
-        { "aria-label": `${parameterName(props.row())} upper bound` },
-      ],
+      handleAttributes: fields.map(field => ({ "aria-label": `${parameterName(props.row())} ${field.handle}` })),
     });
     gesture = makeSliderGesture(sliderEl, { gate: (enabled) => enabled ? slider.enable() : slider.disable(),
       onRetire: () => { wasDragging = false; } });
@@ -75,8 +74,7 @@ function NumericEditor(props) {
     sliderEl.addEventListener("focusin", rememberWidget);
     // The widget projects parsed recipe values; null leaves that handle in
     // place. Programmatic projection never replaces the user's raw text.
-    createEffect(() => slider.set(single ? [props.row().numbers.value]
-      : [props.row().numbers.min, props.row().numbers.max]));
+    createEffect(() => slider.set(fields.map(field => props.row().numbers[field.key])));
     // onRange fires ONLY from slide/change (user gestures) — never from
     // `update`, which would re-report every programmatic set 
     const report = () => {
@@ -153,13 +151,13 @@ function NumericEditor(props) {
           <ModeSwitch label={`${parameterName(props.row())} mode`} value={props.mode}
             options={[{ value: "range", label: "Range" }, { value: "value", label: "Value" }]}
             onChange={mode => props.onField(props.param.key, "mode", mode)} />
-          <Show when={single} fallback={<div class="vz-range-fields">
-          <label class="vz-range-field">from<TextField type="text" inputMode="decimal" aria-label={`${props.param.label} From`}
-            value={props.row().min} aria-invalid={props.row().numbers.min === null} {...focus}
-            onInput={event => props.onField(props.param.key, "min", event.currentTarget.value)} /></label>
-          <label class="vz-range-field">to<TextField type="text" inputMode="decimal" aria-label={`${props.param.label} To`}
-            value={props.row().max} aria-invalid={props.row().numbers.max === null} {...focus}
-            onInput={event => props.onField(props.param.key, "max", event.currentTarget.value)} /></label>
+          <div class="vz-range-fields">
+          <For each={fields}>{field => <label class="vz-range-field" classList={{ "vz-value-field": single }}>
+            {field.label}<TextField type="text" inputMode="decimal" aria-label={`${props.param.label} ${field.aria}`}
+              value={props.row()[field.key]} aria-invalid={props.row().numbers[field.key] === null} {...focus}
+              onInput={event => props.onField(props.param.key, field.key, event.currentTarget.value)} />
+          </label>}</For>
+          <Show when={!single}>
           <div class="vz-range-field"><label for={`step-${props.placeholderKey}`}>step</label>
             <div class="vz-row-inc">
               <Show when={props.increment() > fineStep}><IconButton chrome size="md" variant="plain vz-step-btn" title="Halve step" aria-label={`${props.param.label}: Halve step`}
@@ -179,11 +177,8 @@ function NumericEditor(props) {
                 icon={iconSvg("plus")} onAction={() => commitInc(props.increment() * 2)} /></Show>
             </div>
           </div>
-          </div>}>
-            <label class="vz-range-field vz-value-field">value<TextField type="text" inputMode="decimal" aria-label={`${props.param.label} Value`}
-              value={props.row().value} aria-invalid={props.row().numbers.value === null} {...focus}
-              onInput={event => props.onField(props.param.key, "value", event.currentTarget.value)} /></label>
           </Show>
+          </div>
         </div>
       </div>
   );

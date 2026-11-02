@@ -926,6 +926,7 @@ async function main() {
     await require('./variations-numeric-text.cjs')({ cdp, check, FAKE, KZ });
     await require('./variations-field-filter.cjs')({ cdp, check, KZ });
     await require('./variations-output-names.cjs')({ cdp, check, FAKE, KZ });
+    await require('./variations-range-handles.cjs')({ cdp, check, FAKE, KZ });
   } finally {
     await cdp.close();
   }
