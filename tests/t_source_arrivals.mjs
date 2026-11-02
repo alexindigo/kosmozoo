@@ -10,7 +10,10 @@ import { createRoot } from "solid-js";
 import { makeSourceRegistry } from "../client-solid/store/source-registry.js";
 
 Deno.test("arrivals: session sequence is independent of relist order and revalidation; missing/hidden entries don't signal", () => {
-  const rows = [], arrivals = new SourceArrivals({ entriesForCollection: () => rows });
+  const rows = [], arrivals = new SourceArrivals({
+    hiddenNames: () => rows.filter(row => row.hidden === 1).map(row => row.name),
+    goneNames: () => rows.filter(row => row.state === "gone").map(row => row.name),
+  });
   assertEquals(arrivals.projection("a"), null);
   arrivals.observe("a", ["old.png"]);
   assertEquals(arrivals.projection("a"), { sequence: 1, latestVisibleSeq: 1 });
@@ -19,12 +22,56 @@ Deno.test("arrivals: session sequence is independent of relist order and revalid
   arrivals.observe("a", ["old.png", "new.png"]);
   assertEquals(arrivals.projection("a").sequence, 2);
   rows.push({ name: "new.png", hidden: 1 });
+  arrivals.changed("a"); // the Store's post-commit visibility boundary
   assertEquals(arrivals.projection("a"), { sequence: 2, latestVisibleSeq: 1 });
   arrivals.observe("a", ["old.png", "new.png", "hidden.png"]);
   rows.push({ name: "hidden.png", state: "gone" });
+  arrivals.changed("a");
   arrivals.remove("a", "old.png");
   assertEquals(arrivals.projection("a").latestVisibleSeq, 0);
   arrivals.forget("a"); assertEquals(arrivals.projection("a"), null);
+});
+
+Deno.test("arrivals: projections read only exclusion names at mutation boundaries, never metadata on progress snapshots", () => {
+  let broadReads = 0, nameReads = 0;
+  const hidden = new Set(), gone = new Set(), events = [];
+  const arrivals = new SourceArrivals({ entriesForCollection: () => { broadReads++; return []; },
+    hiddenNames: () => { nameReads++; return hidden; }, goneNames: () => { nameReads++; return gone; } });
+  arrivals.subscribe(id => events.push(id));
+  arrivals.observe("a", ["old.png", "latest.png"]);
+  assertEquals(broadReads, 0, "arrival filtering must not load content metadata");
+  assert(nameReads > 0);
+  arrivals.changed("unobserved"); assertEquals(events, ["a"]);
+  const reads = nameReads;
+  for (let i = 0; i < 100; i++) assertEquals(arrivals.projection("a"), { sequence: 2, latestVisibleSeq: 2 });
+  assertEquals(nameReads, reads, "Jobs progress reads the cached small projection");
+  arrivals.changed("a"); arrivals.observe("a", ["latest.png", "old.png"]);
+  hidden.add("old.png"); arrivals.changed("a");
+  assertEquals(events, ["a"], "unchanged sequence/latest-visible does not republish");
+  gone.add("latest.png"); arrivals.changed("a");
+  assertEquals(events, ["a", "a"]); assertEquals(arrivals.projection("a"), { sequence: 2, latestVisibleSeq: 0 });
+  const projected = arrivals.projection("a"); projected.latestVisibleSeq = 99;
+  assertEquals(arrivals.projection("a").latestVisibleSeq, 0, "readers cannot mutate the cached projection");
+  arrivals.forget("a"); assertEquals(arrivals.projection("a"), null);
+  hidden.clear(); gone.clear(); arrivals.observe("a", ["old.png"]);
+  assertEquals(arrivals.projection("a"), { sequence: 1, latestVisibleSeq: 1 }); assertEquals(events.length, 3);
+});
+
+Deno.test("arrivals: real Store hide/gone publishes only changed small projections to SourceActivity", async () => {
+  const r = await mkStateRig("arrival-publication", { hosts: { a: "a:80" } });
+  let sources;
+  try {
+    r.store.collectionAdd("a", "a:80");
+    const jobs = { subscribe: () => () => {}, snapshot: () => ({}) };
+    sources = new SourceActivity({ store: r.store, hosts: r.hosts, inventory: r.inventory, jobs });
+    r.store.entryHide("a", "not-listed.png"); assertEquals(sources.revision, 0);
+    r.store.arrivals.observe("a", ["old.png", "latest.png"]); assertEquals(sources.revision, 1);
+    r.store.entryHide("a", "old.png"); assertEquals(sources.revision, 1);
+    r.store.entryGone("a", "latest.png"); assertEquals(sources.revision, 2);
+    assertEquals(sources.snapshot().sources.a.arrivals, { sequence: 2, latestVisibleSeq: 0 });
+    r.store.entryGone("a", "latest.png"); r.store.entryHide("a", "old.png"); assertEquals(sources.revision, 2);
+    assertEquals(r.store.arrivals.inventory("a").sequences, {});
+  } finally { sources?.stop(); await r.close(); }
 });
 
 Deno.test("arrivals: each browser baselines independently, viewed sources stay current, opening clears; hidden-only attention clears", () => {

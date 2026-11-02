@@ -142,6 +142,10 @@ delivers only `{sequence,latestVisibleSeq}` to all browsers, or null before the
 first complete inventory. Missing/hidden/gone/deleted entries do not contribute
 to `latestVisibleSeq`; deletion retires membership immediately. Inventory entries
 carry their `arrivalSeq`. Source retirement discards this in-memory history.
+Inventory/removal and committed hide/gone changes refresh the small arrival
+projection using output-name-only exclusion queries. Unchanged projections do
+not publish; Jobs progress reads the cached projection without loading entry
+metadata or walking the inventory. Source retirement clears that cache too.
 
 Each browser baselines its own in-memory seen value at the first projection,
 keeps its viewed source current, and clears attention when opening another source.
