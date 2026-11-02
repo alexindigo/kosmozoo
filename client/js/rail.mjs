@@ -14,3 +14,11 @@ export function tapeWindow(viewLength, capacity, waveStart, waveEnd, tapeStart) 
   const center = Math.floor((waveStart + waveEnd) / 2);
   return Math.max(0, Math.min(maxStart, center - Math.floor(capacity / 2)));
 }
+
+// Retain sub-tick trackpad deltas; the presentation rounds to whole rows.
+// Wheel lines are tick steps, pages are the rail's measured capacity.
+export function scrollTapeOffset(viewLength, capacity, offset, delta, mode, tickPx) {
+  if (capacity <= 0 || viewLength <= capacity) return 0;
+  const steps = mode === 2 ? delta * capacity : mode === 1 ? delta : delta / tickPx;
+  return Math.max(0, Math.min(viewLength - capacity, offset + steps));
+}
