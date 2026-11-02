@@ -46,13 +46,18 @@ const audit = `(()=>{
     await page.goto(ENGINE+'/#fake#flux-basic.png');
     await page.poll(`(async()=>${KZ}.state.entriesWithKnownSize().length>350&&!!document.querySelector('.fr-tick.current'))()`,30000);
     await sleep(300);
+    // Other feed specs may publish newer entries ahead of flux-basic. Own the
+    // tape range these absolute boundary checks need instead of assuming that
+    // revealing that fixture also follows the first twenty entries.
+    const point=await page.evaluate(`(()=>{const r=document.querySelector('#feedRail').getBoundingClientRect();return{x:r.left+r.width/2,y:r.top+r.height/2}})()`);
+    await page.mouse('mouseWheel',point.x,point.y,{deltaY:-1000000});
+    await page.poll(`Number(document.querySelector('.fr-top').textContent)===1`);
     await capture('rail-stripes-before');
     const initial=await page.evaluate(audit);verify(initial);
     assert.equal(initial.rows.find(row=>row.index===19).color,'rgb(17, 17, 17)','normal band keeps the existing rail background');
     assert(initial.rows.every(row=>row.tickWidth===10||row.tickWidth===18),'tick and wave widths retained');
     console.log('ok band boundary colors and full-width contiguous geometry',JSON.stringify({normal:initial.rows[19].color,lighter:initial.rows[20].color,bandHeight:initial.rows[40].top-initial.rows[20].top,railWidth:initial.rail.width}));
     await capture('rail-stripes-default');
-    const point=await page.evaluate(`(()=>{const r=document.querySelector('#feedRail').getBoundingClientRect();return{x:r.left+r.width/2,y:r.top+r.height/2}})()`);
     await page.mouse('mouseWheel',point.x,point.y,{deltaY:85});
     await page.poll(`Number(document.querySelector('.fr-top').textContent)===18`);
     const scrolled=await page.evaluate(audit);verify(scrolled);
