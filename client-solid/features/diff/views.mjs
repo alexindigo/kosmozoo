@@ -18,3 +18,25 @@ const videos = Object.freeze([
 const audio = Object.freeze([full]);
 export const workbenchViews = kind => kind === "video" ? videos : kind === "audio" ? audio : images;
 export const defaultWorkbenchView = kind => workbenchViews(kind)[0].mode;
+
+// Resource identity and screen position are independent of the active subject.
+// Rendering, hit-testing, controls and directional keys share this contract.
+export const sides = Object.freeze({ left: "a", right: "b" });
+export const viewerSide = Object.freeze({
+  a: Object.freeze({ label: "A", column: "feed" }),
+  b: Object.freeze({ label: "B", column: "right" }),
+});
+export const sideForColumn = column => Object.keys(viewerSide).find(side => viewerSide[side].column === column);
+export const columnForSide = side => viewerSide[side].column;
+
+export function workbenchLayout({ mode, subject = sides.left, splitT = .5, paired = true }) {
+  const layers = Object.fromEntries(Object.entries(sides).map(([position, side]) => [side, {
+    position,
+    label: viewerSide[side].label,
+    active: side === subject,
+    shown: (paired || side === subject) && mode !== "difference" && (mode !== "full" || side === subject),
+    front: mode === "one-up" && side === subject,
+    clip: paired && mode === "split" ? position : null,
+  }]));
+  return { ...sides, active: subject, divider: mode === "split" ? splitT : .5, layers };
+}

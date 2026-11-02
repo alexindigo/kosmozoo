@@ -103,8 +103,9 @@ history, observation time or cache maxima. AssetsPlus-only hidden root files
 remain visible, as explicitly approved; Kosmozoo's own hidden/gone overlay and
 AssetsPlus descendant hiding remain honored. Whole responses validate before publication;
 conflicting duplicates, malformed records and truncation are errors. Definitive
-extension absence permits explicit stock-root coverage with a disabled folder
-control. A known recursive host's outage/incompatible response cannot downgrade
+extension absence permits explicit stock-root coverage without a folder
+control. Unknown capability also omits that control until resolved. A known
+recursive host's outage/incompatible response cannot downgrade
 to root-only. Discovery is independent of the delete preference. Existing 10s
 request timeouts apply; complete discovery/metadata waves have a 60s deadline.
 Collection capability probes discover config separately
@@ -141,6 +142,10 @@ delivers only `{sequence,latestVisibleSeq}` to all browsers, or null before the
 first complete inventory. Missing/hidden/gone/deleted entries do not contribute
 to `latestVisibleSeq`; deletion retires membership immediately. Inventory entries
 carry their `arrivalSeq`. Source retirement discards this in-memory history.
+Inventory/removal and committed hide/gone changes refresh the small arrival
+projection using output-name-only exclusion queries. Unchanged projections do
+not publish; Jobs progress reads the cached projection without loading entry
+metadata or walking the inventory. Source retirement clears that cache too.
 
 Each browser baselines its own in-memory seen value at the first projection,
 keeps its viewed source current, and clears attention when opening another source.
@@ -187,8 +192,9 @@ survive left stepping/mirroring/close. Clipboard references retain full paths;
 individual downloads suggest `host#leaf` while requesting exact full-path bytes.
 
 Nested variations match the exact producing node directory, retain that directory
-and full-path lineage, and apply existing prefix/suffix/counter/NAME_MAX treatment
-only to the leaf. Ambiguous nested producers and directory-bearing nested
+and full-path lineage, and apply the shared UTF-8 output-name budget only to the
+leaf. Expanded prefix and suffix stay whole; only the source stem folds in the
+middle with `~`. Ambiguous nested producers and directory-bearing nested
 prefix/suffix substitutions reject rather than guessing. Browsing scope is not a
 generation destination.
 
@@ -349,8 +355,14 @@ queue empty (at most one delivered chunk), stricter than the64KiB queue ceiling.
 Large maps are complete, never truncated. Slow readers do not block producers.
 Fifteen-second comment heartbeats are transport liveness, never source changes.
 Cancel, request abort, enqueue failure and stop share idempotent retirement. Stream
-admission/listeners/subscribers retire at shutdown entry, before the existing
-Jobs -> inventory -> prefetch -> HTTP -> Store shutdown sequence.
+admission/listeners/subscribers retire at shutdown entry. One engine lifetime
+aborts all backing transport and wakes worker/metadata waits; Jobs, inventory
+and prefetch begin retirement together before any child is awaited. HTTP admission
+closes immediately; terminal frames have a bounded 100ms delivery turn before
+the serve signal interrupts all remaining responses and slow readers. Tracked
+handlers/ingestion drain before settings flush, Store close and lease release.
+A four-second process deadline logs remaining owners and exits even if an owner
+ignores cancellation. No route chooses its own shutdown policy.
 
 The Store owns one injectable subscription, independent of sources, pins, folders,
 selection and component mounts. Source activity is delivered exclusively through
@@ -515,7 +527,9 @@ card video players show a play affordance centred on the displayed first decoded
 click toggles playback, while pan drags suppress their trailing click. Images
 retain click-to-open and animated-image behavior. A per-store capability owner
 pauses every other registered player on a native play event, and disposal or
-src-window retirement pauses/unloads the consumer.
+src-window retirement pauses/unloads the consumer. The controls row always stays;
+until duration is known, only the seek slider is omitted. Its layout slot and the
+time readout allocation remain reserved, so adjacent controls do not move.
 Native load lifetime follows source value and element identity, not unrelated
 reactive window invalidations; zoom bindings follow element/key identity.
 Audio uses the same controls, focus/Space semantics and arbitration, without a
@@ -534,10 +548,18 @@ Audio's viewer has one view and no switcher or B side.
 The per-kind workbench view catalogue owns opening defaults, command admission
 and the toolbar. Video opens in Full, and offers Split (two-up),
 Overlay (one-up/blink) and Slider (wipe); Difference is absent. Audio has only
-Full. Images offer Full/Two-Up/One-Up/Split/Difference. Every kind opens in Full,
+Full. Images offer Full/Two-Up/One-Up/Split/Difference. Without a comparison image,
+only Full is available and the single-option mode switch is omitted, as are side,
+lock and opacity actions. Empty toolbar slots retain their allocation so controls
+do not shift as the pair changes. Every kind opens in Full,
 on the clicked image, on every open. The open intent names its subject and pair;
 the viewer owns that subject, derives its active column from it, and Full shows
 only that side. Comparison modes retain the pair with the subject active.
+The diff module's immutable placement map owns A/feed on the left and B/compare
+on the right. Two-Up order, complementary Slider clips, gesture targets,
+control labels/dock order and directional keys derive from that same map.
+Changing the subject never swaps positions: One-Up still overlays the active
+subject and Difference still composites its base; Full shows only the subject.
 Feed opens target A; metadata images and anchors target B. Explicit pairs and
 `/diff` links default to A and can target B with `subject=b` (the URL query).
 A plain image click inside the viewer never reopens or resets its session.
@@ -578,8 +600,8 @@ accepted source, kind and filename stay together through a failed swap, retainin
 the last good side. Without a last-good side, a failed guard carries its native
 media error code or image decode cause to the same MediaBox failure formatter;
 unknown guard timeouts stay generic. Closing retires pending guards and native sources. Two-up,
-one-up and split allow video/audio without synchronization. Non-image pairs disable
-Difference with “difference mode compares still images”; the semantic mode
+one-up and split allow video/audio without synchronization. Non-image pairs omit
+Difference; the semantic mode
 command enforces the same restriction. Hidden one-up players pause.
 
 The shared browser JSON transport throws `ApiError` on non-success, retaining
@@ -614,7 +636,7 @@ preferences remain available to existing non-chrome consumers.
 The pinned group has a non-scrolling vertical separator only when pins exist,
 with smaller gaps inside its scrollable button strip. Empty pins retain flexible
 allocation. Folder labels truncate within compact allocations with full path in
-the accessible title; unsupported controls expose a root-only reason. Native
+the accessible title; unsupported folder controls are omitted. Native
 select typing retains precedence in the existing key dispatcher.
 
 The existing feed rail current marker follows live viewport midpoint-crossing
@@ -630,6 +652,9 @@ The feed reads each compensation's anchor from the actual scroll position in the
 it showed, never a remembered one; the Store applies the compensation and moves the
 settle's gesture origin by the same applied displacement, so compensation is never
 gesture travel and cannot invite the settle tidy, however late the settle timer runs.
+A landing/merge compensation re-bases the virtualizer's offset while the changed list is
+derived, before its window is computed, and the scroll container follows after the render;
+a merge that removes or inserts many rows above the viewport keeps the mounted cards under it.
 Ordinary rail ticks use the existing subdued `--foreground-dim` neutral through
 shared card-state presentation; card neutrals, judgment colors/priorities, wave
 length/glow, geometry, tape windowing and scrub handlers retain their contracts.
@@ -652,6 +677,10 @@ Static surfaces: `/shared/<name>` serves the allow-listed `src/` modules
 assets (`/css`, `/vendor`, `/js`, logos) from `client/`.
 
 ### Client commands and modal ownership
+
+While deletion runs, the confirmation's two action buttons are replaced by a
+same-row “Deleting N images…” status (singular for one). Success closes the
+confirmation; failure restores the buttons and displays an error message.
 
 Application inputs follow **input → shared handle → private operation**. The plain
 per-store registry returns stable source-independent ports via
@@ -765,8 +794,9 @@ The shared folder icon immediately to the path field's right asks the **engine**
 to open the desktop portal directory chooser; it never uses browser directory
 selection. `GET /api/features/variations/folder-chooser` returns `{available,reason}`.
 Only app mode with a reachable session bus and FileChooser version 3+ enables it;
-serve/container/no-portal cases disable it with “Folder chooser needs the desktop
-app”, without disabling the typed path or Add. `POST /choose-folder` accepts
+serve/container/no-portal cases omit the chooser. The typed path remains available,
+and Add folder appears only with a non-empty path. During choosing or listing,
+“Reading folder…” replaces both actions in their row. `POST /choose-folder` accepts
 `{path:""|absolutePath}` and returns `{path,cancelled:false}` or
 `{path:null,cancelled:true}`. Selection fills the path; Add still explicitly acquires
 the recursive set. Cancel/errors preserve the draft, and later typing wins over
@@ -794,6 +824,17 @@ decision hides its top-layer surface without replacing search DOM or losing
 query/caret. Both Keep editing and Escape restore it before focus restoration.
 The blocking decision consumes its pointer clicks, which cannot dismiss an
 underlying popup as outside-click side effects.
+The shared outside-click owner considers both the originating pointer press and
+the final click target. A press inside a surface cannot dismiss it merely because
+placement moved it before release. A subsequent genuine outside click still
+closes it; cancelled/foreign pointers and keyboard clicks cannot inherit an old
+inside press. All owned document listeners retire with the component.
+The chosen-image grid's gesture lifetime follows ordered image identities, not
+readonly thumbnail/comparison records. Comparison settlement during a held drag
+preserves the gesture; membership/order changes, cancellation and editor suspension
+still retire it. Popup focus/caret restoration is observed only after the surface's
+placement-ready class is committed and it is no longer inert, not merely after
+the native popover opens.
 Thumbnail GET/HEAD URLs may carry `origin=<JSON>` so native image elements retain
 the captured source boundary too. Header/query origin validation has one owner;
 conflicting origins reject, and stale byte requests reject before cache/backing IO.
@@ -804,7 +845,12 @@ filename's known collision family, with the captured `X-Kosmozoo-Origin`. It ret
 `{hash,currentHash,existing:[{name,hash}],origin}` using Ingest's existing cache/read owner. Comparison
 never uploads to ComfyUI. The editor retains readonly comparison evidence outside
 editable leaves, marks byte-identical Files “Same as current” and compiles them to
-the current name without upload. The shared axis kernel owns exact current-tuple
+the exact current graph value without upload. Image descriptors retain the raw
+`currentValue` (including ComfyUI's folder annotation) separately from the display
+filename `current`; the shared `parameterCurrent` projection supplies compilation
+and current-tuple comparison on both client and engine. Thus a same-name input
+and output remain distinct while a byte-identical File/path reuses the output.
+The shared axis kernel owns exact current-tuple
 exclusion in both displayed count and Run; mixed numeric/text axes still retain
 their existing Cartesian semantics. Pending/failed comparison is visible and
 cannot authorize an unverified upload. Actual uploads still occur only at Run.
@@ -870,11 +916,17 @@ value available in their tooltip. Existing engine limits and Run admission remai
 Prefix and Suffix have associated labels. A keyboard-native “Insert parameter”
 selector inserts exact canonical IDs at the last naming caret (Suffix by default).
 Row labels exclusively toggle their associated enable checkbox; insertion does
-not share that label's pointer event. A representative output-name example resolves
-through the shared naming-token
-formatter. It does not promise final upload collision names, producer names or
-output counters. “Queue variations” becomes “Submitting…” during preparation and
-submission. The polite result reports “Queued N of N jobs”, with kept-edit reasons
+not share that label's pointer event. A representative first-output example uses
+the same shared token expansion and `outputName` writer as Run, including the
+folded source stem. Probe supplies that target's directory and source stem, including
+the wrap-all fallback's first output. The example equals its written `filename_prefix`
+for the sampled tuple and resolved image names; pending uploads are explicitly
+provisional. Upload collision receipts and ComfyUI's appended output counter are
+not predicted. Run is replaced by “Queuing…” status in the same final sidebar
+slot during preparation and submission. Retained recipes display Prefix/Suffix as
+text and omit Run; New recipe remains their explicit recovery action. The halve
+step action is omitted at its minimum increment. The polite result reports
+“Queued N of N jobs”, with kept-edit reasons
 in neutral text and actual failures in the error role's color.
 The native input popup uses the shared environment-pure viewport placement owner
 (`client-solid/lib/popover-placement.js`), preferring the side with more room and
@@ -885,7 +937,12 @@ notifications coalesce into one animation frame and are removed on close or
 suspension. Popup/list resizing cannot schedule placement, and placement never
 writes scroll position. Suspension retains geometry and widget identity while
 interaction waits for the resumed placement frame. The search stays intrinsic
-and the existing list consumes its bounded viewport.
+and the existing list consumes its bounded viewport. The popup is inert until
+its placement-ready class is committed; its own lifetime gates both first focus
+and retained focus/caret restoration until then. Popup readiness, thumbnail decode
+visibility and unavailable current markers use shared class bindings; measured
+geometry stays inline. User template labels and selection summaries use the
+foreground token, as do the available Discard recipe and image-add actions.
 
 Naming tokens use those exact IDs (`_{76.image}_{81.image}`), through the same
 codec/parser. Unknown/unbalanced placeholder syntax remains editable but rejects
@@ -896,20 +953,46 @@ varies. Explicit IDs are required to address siblings independently. Variation
 drafts and parameter choices are session-private and are not persisted, so
 there are no saved legacy parameter keys to migrate.
 
+Every resolved naming-token value is bounded to **40 UTF-8 bytes**, for every
+parameter kind. Image tokens first remove the filename's last extension:
+`dragon.png` becomes `dragon`. Longer values fold deterministically to a head
+of at most 19 bytes, `~`, and a tail of at most 20 bytes, without splitting a
+Unicode code point. Short values and ordinary numeric formatting stay unchanged.
+The bound applies only to naming substitutions: graph values, image upload names,
+raw recipe text and lineage metadata remain exact. Keeping the tail retains the
+newest counters and distinguishes long names with a shared head and different tails;
+folding is not a collision-proof encoding of arbitrary strings.
+
+`outputName({prefix,sourceStem,suffix,budget})` in the shared pure module owns
+both server paths and the client example. Both paths use a conservative **200-byte**
+assembled prefix budget, below filesystem NAME_MAX (255 bytes) with 15 bytes
+reserved for ComfyUI's counter and extension. The directory is separate. Prefix
+and suffix are preserved in full after token expansion. Only the source stem is
+middle-folded into the remaining bytes, or omitted if the affixes exactly fill the
+budget. Naming-length rejection occurs only when the expanded affixes alone exceed
+the budget, with actual byte lengths, for example “Prefix and suffix are 210 bytes;
+the limit is 200 bytes.” Literal template text is never silently shortened. Recursive
+image-token lineage cannot grow through tokens beyond their shared 40-byte bound.
+
 Run/button/handle input enters `variations.run` and the owner's requestRun. A private
 ticket captures all editable values/targets/revision/close generation before IO.
 It also captures the existing image-inspection cohort before awaits and freezes
 that cohort's settled evidence for every compilation of this Run. Later path
 removal/readdition or reinspection cannot change the captured graph values;
 actual upload receipts remain the authority for uploaded names.
-The compiler emits the immutable request, operation identities and exhaustive raw
-dispositions with its consumption bindings in the same read/encode operation.
+The compiler builds the immutable request and validates exhaustive raw dispositions
+with its consumption bindings in the same read/encode operation. Captured target
+plans carry the producer operation identities.
 Each captured leaf/map entry is active or retained; unknown or overlapping
 classification rejects before effects. Source-independent handles/broker retain opening metadata
 and owner capabilities only. Running/pending-decision input is busy. Clean metadata
 settling during a Run cannot strand captured submitted work. Newer/edit-and-revert
-revisions and pending decisions still prevent checkpointing. Disabled and dormant
-values are retained recipe content, not unsubmitted graph operations.
+revisions and pending decisions still prevent accepting that revision as sent.
+Disabled and dormant values remain unchanged in the open draft, not unsubmitted
+graph operations. Each dialog mount owns one draft for its captured targets;
+closing disposes it and every new opening starts with fresh defaults. A fully
+successful Run closes after its result message. Partial, failed or uncertain Runs
+leave the entire draft unchanged with result text and no automatic retry.
 
 Opening/probe/Run retain an `Origin:{source,address,kind,epoch,incarnation}`; pin and
 refresh attribute revisions are not operation identity. Probe optionally accepts
@@ -952,9 +1035,10 @@ Naming proof uses only the exact node IDs returned by the naming writer; no writ
 
 The engine prepares every final prompt before the first enqueue, using the actual
 mutation, narrowing and naming writers. Enabled-empty axes, missing template values,
-unresolved naming, pruned/overwritten active assignments and affixes lost by folding
-reject with a clear message and zero enqueues for that target plan. Existing
-basename middle folding remains valid when both affixes survive completely.
+unresolved naming, pruned/overwritten active assignments and expanded affixes alone
+over the byte budget reject with a clear message and zero enqueues for that target
+plan. The shared naming writer preserves affixes by construction; no separate
+after-the-fact start/end check can turn legitimate source-stem folding into rejection.
 Actual surviving carrier assignments and recognized naming writes certify positive
 use on confirmed accepted prompts. The same typed axis kernel owns count/generation
 and off-selection exclusion proof. Tuple identity is per field, never delimiter
@@ -1124,7 +1208,8 @@ refuses copied/unrelated state, legacy/unrelated listeners and explicit override
 conflicts without killing, port hopping, reconfiguration or reseeding. The lock
 inode is never unlinked. Factories retire resources they acquired on failure;
 borrowed test resources stay caller-owned. Normal/failure drainage fences source
-admission/streams first, then Jobs/inventory/prefetch/HTTP/Store and the lease.
+admission/streams first, then cancels and drains the shared engine lifetime,
+flushes settings, closes Store and releases the lease (bounded shutdown above).
 
 Native browser adapters use stable dedicated provider profiles and safe argv,
 outside engine Context/Store/plugins. Firefox native registration is additionally
@@ -1259,6 +1344,9 @@ bounded record read (`entries/<name>/meta`), retried with backoff while it is
 shown and applied only to the same source session, name and content hash, so
 collection size, churn, publication order, delivery fences and the cursor cannot
 delay or drop it.
+Populated metadata satisfies that consumer immediately; an extracted-but-empty
+collection snapshot still requires its own direct read. A negative reply from
+that record settles once for the shown content identity, without a polling loop.
 
 The prefetch runs TWO passes over each collection's listing: pass 1 the
 dims head reads (10 ms inter-file — size-before-render on a fresh host is

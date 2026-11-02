@@ -1,19 +1,18 @@
 import { assert, assertEquals, assertThrows } from "jsr:@std/assert";
 import { makeVariationRecipe, recipeDispositions } from "../client-solid/features/variations/recipe.js";
 
-Deno.test("recipe owner: raw resources survive snapshots and a captured checkpoint never rewrites live values", () => {
+Deno.test("recipe owner: immutable captures preserve raw resources without sharing mutable containers", () => {
   const recipe = makeVariationRecipe(), file = new File(["native"], "same.png");
   recipe.seed("images", "i.image", {}, { enabled: false, items: [] });
   recipe.write("images", "i.image", "items", [{ kind: "upload", name: file.name, file }]);
   recipe.edited();
   const captured = recipe.capture();
   assert(captured.images["i.image"].values.items[0].file === file);
-  assertEquals(recipe.checkpoint(captured, 1), true);
-  assertEquals(recipe.remaining(), []);
+  assert(recipe.dirty());
   recipe.write("images", "i.image", "enabled", true); recipe.edited();
-  assertEquals(recipe.checkpoint(captured, 1), false);
   assertEquals(recipe.row("images", "i.image").values.enabled, true);
-  assertEquals(recipe.remaining(), [{ domain: "images", id: "i.image", field: "enabled" }]);
+  assertEquals(captured.images["i.image"].values.enabled, false);
+  assert(recipe.dirty());
   assertEquals(recipe.revision(), 2);
 });
 

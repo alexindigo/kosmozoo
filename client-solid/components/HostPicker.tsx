@@ -10,6 +10,7 @@ import { iconSvg } from "/js/icons.mjs";
 import { useAppStore } from "../store/app-store.js";
 import { useClickOutside } from "../lib/click-outside.js";
 import { IconButton } from "./IconButton.js";
+import { TextField } from "./TextField.js";
 import { FeedbackLink } from "./FeedbackLink.js";
 import { sourceNewContent } from "../lib/source-new-content.js";
 
@@ -86,11 +87,11 @@ export function HostPicker() {
           </For>
         </div>
         <div class="haddrow">
-          <input
+          <TextField size="sm"
             type="text" id="hostName" placeholder="name" spellcheck={false}
             value={name()} onInput={(e) => setName(e.target.value)}
           />
-          <input
+          <TextField size="sm"
             type="text" id="hostAddr" placeholder="host[:port] or folder:/path" spellcheck={false}
             value={addr()} onInput={(e) => setAddr(e.target.value)}
             onKeyDown={(e) => { if (e.key === "Enter") submitAdd(); }}

@@ -711,6 +711,7 @@ async function railMotion(page) {
     });
     if (!r.ok) throw new Error('activity fixture control failed');
   };
+  await require('./merge-window.cjs')({ page, FAKE: FAKE_ACTIVITY, KZ, check });
   try {
     await control({ reset: true });
     await page.evaluate(`(async () => {
@@ -1051,6 +1052,8 @@ async function railMotion(page) {
   await require('./auto-refresh.cjs')({ page, ENGINE, FAKE: FAKE_ACTIVITY, KZ, check, traffic: sourceTraffic });
 
   await require('./metadata-position.cjs')({ ENGINE, FAKE: FAKE_ACTIVITY, check });
+
+  await require('./metadata-negative.cjs')({ ENGINE, FAKE: FAKE_ACTIVITY, check });
 
   check("no uncaught page errors", pageErrors.length === 0, pageErrors[0] ?? "");
 

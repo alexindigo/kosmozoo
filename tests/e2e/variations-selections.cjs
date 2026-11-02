@@ -1,7 +1,7 @@
 // Terminal closure after submitted on/off choices, with actual captured prompts.
 const assert=require('node:assert/strict');
 const { pickInput } = require('./image-picker-helpers.cjs');
-const { discardRecipe } = require('./recipe-helpers.cjs');
+const { freshRecipe } = require('./recipe-helpers.cjs');
 const typeText=async(cdp,selector,text)=>{await cdp.clickAt(selector);await cdp.evaluate(`(()=>{const e=document.querySelector(${JSON.stringify(selector)});e.focus();e.select()})()`);await cdp.send('Input.insertText',{text});await cdp.poll(`document.querySelector(${JSON.stringify(selector)}).value===${JSON.stringify(text)}`);};
 const inputControl='.vz-imgrow:not(.vz-enumrow):not(.vz-textrow) .checkbox';
 // This setup operates on ControlNet graphs. Its numeric/text rows can mount
@@ -24,13 +24,12 @@ module.exports=async({cdp,FAKE,KZ,check})=>{
   const open=async()=>{
     await cdp.evaluate(`(async()=>{await fetch('/api/collections/fake/entries/flux-controlnet.png/bytes');await ${KZ}.handles.invoke('variations.open',{id:'fake:flux-controlnet.png'})})()`);
     await cdp.poll("!!document.querySelector('.vz-textrow[data-text-id=\"42.text\"]')");
-    await discardRecipe(cdp);
+    await freshRecipe(cdp);
   };
   const textOnly=(twoTexts=true)=>selectionSetup(cdp,twoTexts);
   await fetch(FAKE+'/__test/activity',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({captureEnqueue:true})});
   try{
-    // Earlier suites now legitimately retain accepted recipes. This suite's
-    // default-state fixture is established through the explicit removal UI.
+    // Establish the default-state fixture through an ordinary fresh opening.
     await open();await invoke('variations.close');await cdp.poll("!document.querySelector('.vz-panel')");
     for(const [name,args,twoTexts] of [
       ['single',{id:'fake:flux-controlnet.png'},true],

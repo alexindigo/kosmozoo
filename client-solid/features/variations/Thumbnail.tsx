@@ -33,7 +33,7 @@ function ThumbnailAttempt(props) {
   const settle = state => { if (display.read().src != null) { display.loaded(); props.onPhase(state); } };
   const picture = <>
     <img ref={image} src={display.read().src ?? undefined} alt="" decoding="async"
-      style={{ visibility: props.phase() === "loaded" ? "visible" : "hidden" }}
+      classList={{ "vz-thumbnail-loaded": props.phase() === "loaded" }}
       fetchpriority={display.read().priority === "background" ? "low" : "auto"}
       draggable={false} onLoad={() => { props.onSize?.(image.naturalWidth, image.naturalHeight); settle("loaded"); }} onError={() => settle("failed")} />
     <Show when={props.phase() === "pending"}><span class="vz-thumbnail-pending" role="status">Loading preview…</span></Show>

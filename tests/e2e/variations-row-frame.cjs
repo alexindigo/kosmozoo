@@ -1,14 +1,14 @@
 // Task 2's contract at the rendered consumer, across all four input kinds.
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
-const { discardRecipe } = require('./recipe-helpers.cjs');
+const { freshRecipe } = require('./recipe-helpers.cjs');
 module.exports = async ({ cdp, check, KZ }) => {
   const kinds = ['.vz-slider-row', '.vz-enumrow', '.vz-textrow', '.vz-image-set'];
   const row = kind => kind === '.vz-slider-row' ? '[data-param-key="9.denoise"]' : kind;
   const toggle = kind => cdp.clickAt(`${row(kind)} .vz-parameter-heading .checkbox`);
   await cdp.evaluate(`(async()=>{await fetch('/api/collections/fake/entries/flux-controlnet.png/bytes');await ${KZ}.handles.invoke('variations.open',{id:'fake:flux-controlnet.png'})})()`);
   await cdp.poll(kinds.map(kind => `!!document.querySelector('${kind}')`).join('&&'));
-  await discardRecipe(cdp);await cdp.poll("!!document.querySelector('.vz-image-set')");
+  await freshRecipe(cdp);await cdp.poll("!!document.querySelector('.vz-image-set')");
   await cdp.send('Emulation.setDeviceMetricsOverride', { width: 1600, height: 1000, deviceScaleFactor: 1, mobile: false });
   try {
     await toggle('.vz-slider-row');
@@ -33,9 +33,10 @@ module.exports = async ({ cdp, check, KZ }) => {
     assert.equal(await cdp.evaluate("document.querySelector('.vz-image-set .vz-parameter-current').textContent"), 'canny.png');
     assert(await cdp.evaluate("!document.querySelector('.vz-insert-parameter,.vz-name-example,.vz-name-help,.vz-parameter-identity')&&document.querySelector('.vz-run').textContent==='Run'"));
     check('row frame: raw ComfyUI names, current image filename and Run replace retired chrome', true);
-    // Use trusted button activation and both naming targets. Insertion must not
-    // enable a row, and opaque graph IDs must survive the display-name change.
+    // Open names insert at both naming targets without toggling. Closed names
+    // now enable the shared row shell; opaque IDs remain the token identities.
     for (const [index, kind] of kinds.entries()) {
+      await toggle(kind);
       const target = index % 2 ? '.vz-suffix' : '.vz-prefix';
       await cdp.evaluate(`(()=>{const input=document.querySelector('${target}');input.focus();input.select()})()`);
       await cdp.send('Input.insertText', { text: 'pre__post' });
@@ -43,8 +44,9 @@ module.exports = async ({ cdp, check, KZ }) => {
       const id = await cdp.evaluate(`(()=>{const r=document.querySelector('${row(kind)}');return r.dataset.paramKey??r.dataset.enumId??r.dataset.textId??r.dataset.imageId})()`);
       await cdp.clickAt(`${row(kind)} .vz-parameter-name`);
       assert.equal(await cdp.evaluate(`document.querySelector('${target}').value`), `pre_{${id}}_post`);
-      assert.equal(await cdp.evaluate(`document.querySelector('${row(kind)} .checkbox').checked`), false);
+      assert.equal(await cdp.evaluate(`document.querySelector('${row(kind)} .checkbox').checked`), true);
       assert(await cdp.evaluate(`document.activeElement===document.querySelector('${target}')`));
+      await toggle(kind);
     }
     check('row frame: every kind inserts its canonical token at the focused prefix/suffix caret without toggling', true);
     // Keep the capture's naming valid and inspect the two state geometries.
@@ -53,7 +55,13 @@ module.exports = async ({ cdp, check, KZ }) => {
     assert(await cdp.evaluate("[...document.querySelectorAll('.vz-parameter.on')].length===4&&[...document.querySelectorAll('.vz-parameter.on')].every(row=>getComputedStyle(row).opacity==='1')"));
     check('row frame: each expanded kind is full strength and mounts its editor', true);
     const numeric = '[data-param-key="9.denoise"]';
-    await cdp.evaluate(`(()=>{const input=document.querySelector('${numeric} .vz-range-field:first-child input');input.value='0.7';input.dispatchEvent(new Event('change',{bubbles:true}));const step=document.querySelector('${numeric} .vz-row-inc-input');step.value='0.1';step.dispatchEvent(new Event('input',{bubbles:true}))})()`);
+    for (const [selector, value] of [[`${numeric} .vz-range-field:first-child input`, '0.7'], [`${numeric} .vz-row-inc-input`, '0.1']]) {
+      await cdp.clickAt(selector);
+      await cdp.evaluate(`document.querySelector(${JSON.stringify(selector)}).select()`);
+      await cdp.send('Input.insertText', { text: value });
+      await cdp.keyTrusted('Tab', { vk: 9 });
+      await cdp.poll(`document.querySelector(${JSON.stringify(selector)}).value===${JSON.stringify(value)}`);
+    }
     const text = '.vz-textrow .vz-text-values';
     await cdp.evaluate(`(()=>{const input=document.querySelector('${text}');input.value='retained template';input.dispatchEvent(new Event('input',{bubbles:true}))})()`);
     await cdp.clickAt('.vz-enumrow.on .vz-enum-opt:last-child .checkbox');

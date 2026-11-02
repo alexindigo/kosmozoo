@@ -25,11 +25,25 @@ import { VariationDiscardConfirmation } from "./VariationDiscardConfirmation.js"
 import { ImageSetPanel } from "./ImageSetPanel.js";
 import { SingleLineText } from "../../components/SingleLineText.js";
 import { Checkbox } from "../../components/Checkbox.js";
-import { workspaceCurrent } from "./workspaces.js";
+import { IconButton } from "../../components/IconButton.js";
+import { TextField } from "../../components/TextField.js";
 import { ParameterRow } from "./ParameterRow.js";
+import { isFileDrag } from "./image-drop.js";
+import { matchesFieldFilter } from "./field-filter.js";
 
 export function VariationsModal() {
   const store = useAppStore();
+  createEffect(() => {
+    if (!store.state.variations.open) return;
+    // One dialog-lifetime guard covers the entire page, including inert areas.
+    const preventFileNavigation = event => { if (isFileDrag(event.dataTransfer)) event.preventDefault(); };
+    window.addEventListener("dragover", preventFileNavigation, true);
+    window.addEventListener("drop", preventFileNavigation, true);
+    onCleanup(() => {
+      window.removeEventListener("dragover", preventFileNavigation, true);
+      window.removeEventListener("drop", preventFileNavigation, true);
+    });
+  });
   // A permitted replacement changes the scalar mount identity, even when the
   // store reconciles the descriptor. Targets are captured for this owner only.
   return (
@@ -48,22 +62,15 @@ export function VariationsModal() {
 }
 
 function ModalBody(props) {
-  const store = useAppStore(), workspaces = store.actions.variations.workspaces;
-  const [workspace, setWorkspace] = createSignal(workspaces.open(props.images));
-  return <Show when={workspace()} keyed>{selected => <RecipeBody {...props} workspace={selected}
-    workspaces={workspaces} selectWorkspace={setWorkspace} readOnly={!workspaceCurrent(selected, props.images)} />}</Show>;
-}
-
-function RecipeBody(props) {
   const store = useAppStore();
   const services = store.actions.variations.services;
-  const image = props.workspace.targets[0];
+  const image = props.images[0];
   // batch = more than one image: ranges become RELATIVE offsets from each
   // image's own current value (resolved by the plugin at run time), and the
   // count shows the total across the whole selection.
   const batch = props.images.length > 1;
   const [version, setVersion] = createSignal(0);
-  const editor = makeVariationEditor({ targets: props.workspace.targets, recipe: props.workspace.recipe, readOnly: props.readOnly, services,
+  const editor = makeVariationEditor({ targets: props.images, services,
     currentOrigin: host => sourceOrigin(host, store.state.hosts[host]),
     changed: () => setVersion(value => value + 1),
     close: () => store.handles.invoke("variations.close", { automatic: true, session: props.session }) });
@@ -81,6 +88,13 @@ function RecipeBody(props) {
   const prefix = () => read(() => editor.naming("prefix"));
   const suffix = () => read(() => editor.naming("suffix"));
   const [decision, setDecision] = createSignal(null);
+  const [fieldFilter, setFieldFilter] = createSignal("");
+  let filterInput;
+  const fieldMatches = row => matchesFieldFilter(row, fieldFilter());
+  const hasMatchingFields = createMemo(() => [
+    ...Object.values(rows()), ...enumList(), ...textList(),
+    ...Object.values(imgRows()).filter(row => row.filesReady),
+  ].some(fieldMatches));
   const children = new Set();
   const registerEditor = (capability) => { children.add(capability); return () => children.delete(capability); };
   let restoreFocus = () => {};
@@ -89,17 +103,9 @@ function RecipeBody(props) {
   const guard = makeLeaveGuard({ dirty: editor.dirty,
     suspend: () => { for (const child of children) child.suspend(); },
     restore: () => { for (const child of children) child.resume(); restoreFocus(); },
-    decision: value => { setDecision(value); editor.decision(value); }, invalidate: editor.invalidateClose,
-    discarded: () => props.workspaces.remove(props.workspace) });
-  const switchRecipe = (next, discard = false) => guard.request({ intent: { type: "recipe", key: next?.id ?? "new", discard },
-    requireDiscard: discard, cancel: () => {}, permit: () => {
-      if (discard) props.workspaces.remove(props.workspace);
-      props.selectWorkspace(next ?? props.workspaces.fresh(props.images));
-      return { status: "applied" };
-    } });
+    decision: value => { setDecision(value); editor.decision(value); }, invalidate: editor.invalidateClose });
   onCleanup(store.actions.variations.registerOwner(props.session, { requestLeave: guard.request, requestRun: editor.run }));
   onCleanup(() => { editor.dispose(); guard.dispose(); });
-  onCleanup(props.workspaces.lease(() => { editor.dispose(); guard.dispose(); }));
   // refs exist solely to read the live selection and restore the caret
   // after an explicit parameter insert.
   let prefixEl, suffixEl;
@@ -132,12 +138,11 @@ function RecipeBody(props) {
   // The graph is the source of truth: only parameters whose target node
   // exists in this image's graph render (writeOnly params — widget-only
   // custom seed nodes etc. — are skipped for now).
-  const [probe] = createResource(() => !props.readOnly, () => services.probe(image));
+  const [probe] = createResource(() => services.probe(image));
   const [folderCapability] = createResource(() => services.folderCapability());
 
   let initializedProbe = false;
   createEffect(() => {
-    if (props.readOnly) return;
     if (probe.loading) return;
     if (initializedProbe) return;
     initializedProbe = true;
@@ -146,7 +151,7 @@ function RecipeBody(props) {
   });
 
   const [inputFiles] = createResource(
-    () => read(() => !props.readOnly && editor.ready() && strParams().length && image.host ? image.host : null),
+    () => read(() => editor.ready() && strParams().length && image.host ? image.host : null),
     (hostName) => services.inputList(hostName, image.origin),
   );
   let initializedImages = false;
@@ -154,8 +159,6 @@ function RecipeBody(props) {
     const sp = strParams();
     if (!sp.length || inputFiles.loading) return;
     if (initializedImages) return;
-    // Retained rows can exist before this mount's probe starts its input read.
-    // Only a resolved resource (or its terminal error) may consume installation.
     if (!inputFiles.error && !inputFiles()) return;
     initializedImages = true;
     if (inputFiles.error) editor.catalogueFailure(inputFiles.error);
@@ -261,36 +264,23 @@ function RecipeBody(props) {
         <div class="vz-body">
           <div class="vz-left">
             <div class="vz-sliders">
-              <div class="vz-workspace-tools">
-                <label class="vz-workspace-label" for={`recipe-${props.session}`}>Recipe workspace</label>
-                <div class="vz-workspace-actions">
-                  <select id={`recipe-${props.session}`} class="vz-workspace" value={props.workspace.id}
-                    onChange={event => {
-                      const next = props.workspaces.options(props.images).find(item => item.id === event.currentTarget.value);
-                      event.currentTarget.value = props.workspace.id;
-                      switchRecipe(next);
-                    }}>
-                    <For each={props.workspaces.options(props.images)}>{item => <option value={item.id}>
-                      {workspaceCurrent(item, props.images) ? "Current source recipe" : `Previous source · ${item.targets[0].origin.address} (${item.id})`}
-                    </option>}</For>
-                  </select>
-                  <button class="vz-workspace-discard" onClick={() => switchRecipe(null, true)}>Discard recipe</button>
-                </div>
-                <Show when={props.readOnly}>
-                  <button class="vz-workspace-new" onClick={() => switchRecipe(null)}>New recipe for current source</button>
-                </Show>
+              <div class="vz-filter-tools">
+                <TextField controlClass="vz-field-filter" ref={filterInput} type="text" placeholder="Filter fields" aria-label="Filter fields"
+                    {...focus} value={fieldFilter()} onInput={event => setFieldFilter(event.currentTarget.value)}
+                    trailing={<Show when={fieldFilter()}>
+                    <IconButton chrome size="md" variant="plain vz-filter-clear" title="Clear field filter" icon={iconSvg("x")}
+                      onAction={() => { setFieldFilter(""); filterInput.focus(); }} />
+                  </Show>} />
               </div>
-              <Show when={props.readOnly}><RetainedRecipe values={editor.retainedValues()} /></Show>
-              <Show when={!props.readOnly}>
               {/* One chosen set, independent of how each image was acquired. */}
               <For each={strParams()}>
                 {(id) => {
                   const r = () => imgRows()[id];
                   return (
                     <Show when={r()?.filesReady}>
-                      <ImageSetPanel id={id} row={r} onEnable={checked => onImgToggle(id, checked)}
+                      <ImageSetPanel id={id} row={r} filteredOut={!fieldMatches(r())} onEnable={checked => onImgToggle(id, checked)}
                         onInsert={onInsertPlaceholder}
-                        onAdd={items => editor.addImages(id, items)} onRemove={item => editor.removeImage(id, item)}
+                        onAdd={(items, index) => editor.addImages(id, items, index)} onRemove={item => editor.removeImage(id, item)}
                         onMove={(item, index) => editor.moveImage(id, item, index)}
                         currentThumbnail={services.inputThumbnail(image.host, r().current, image.origin, r().fromOutput ? "output" : "input")}
                         thumbnail={name => services.inputThumbnail(image.host, name, image.origin)}
@@ -310,7 +300,7 @@ function RecipeBody(props) {
               >
                 <Show
                   when={orderedItems().length > 0}
-                  fallback={<SingleLineText class="vz-loading" value="this graph exposes no varyable parameters" />}
+                  fallback={<Show when={!fieldFilter().trim()}><SingleLineText class="vz-loading" value="this graph exposes no varyable parameters" /></Show>}
                 >
                   <For each={orderedItems()}>
                     {(itemId) => {
@@ -322,6 +312,7 @@ function RecipeBody(props) {
                             <EnumRow
                               p={p}
                               row={() => enumRows()[id]}
+                              filteredOut={!fieldMatches(enumRows()[id])}
                               onToggle={onEnumToggle}
                               onPick={onEnumPick}
                               onInsert={onInsertPlaceholder}
@@ -338,6 +329,7 @@ function RecipeBody(props) {
                             <TextRow
                               p={p}
                               row={() => textRows()[id]}
+                              filteredOut={!fieldMatches(textRows()[id])}
                               onToggle={onTextToggle}
                               onField={onTextField}
                               onTpl={onTextTpl}
@@ -353,6 +345,7 @@ function RecipeBody(props) {
                       return (
                         <SliderRow
                           row={() => rows()[key]}
+                          filteredOut={!fieldMatches(rows()[key])}
                           param={{ ...p, key, label: row0.label }}
                           current={() => rows()[key]?.current ?? null}
                           enabled={() => !!rows()[key]?.enabled}
@@ -372,6 +365,8 @@ function RecipeBody(props) {
                   </For>
                 </Show>
               </Show>
+              <Show when={params() !== null && fieldFilter().trim() && !hasMatchingFields()}>
+                <SingleLineText class="vz-loading vz-filter-empty" value={`No fields match "${fieldFilter()}"`} />
               </Show>
             </div>
           </div>
@@ -387,29 +382,32 @@ function RecipeBody(props) {
             <div class="vz-naming-group">
               <span class="vz-rlabel">Output names</span>
               <label for={`prefix-${props.session}`}>Prefix</label>
-              <input
-                id={`prefix-${props.session}`} type="text" class="vz-tinput vz-prefix" ref={prefixEl} disabled={props.readOnly}
+              <TextField
+                id={`prefix-${props.session}`} type="text" class="vz-tinput vz-prefix" ref={prefixEl}
                 value={prefix()}
                 title="Click a parameter name to insert its token at the caret"
                 {...focus} onFocus={(e) => { setFocused("prefix"); focus.onFocus(e); }}
                 onInput={(e) => editor.edit("naming", "root", "prefix", e.currentTarget.value)}
               />
               <label for={`suffix-${props.session}`}>Suffix</label>
-              <input
-                id={`suffix-${props.session}`} type="text" class="vz-tinput vz-suffix" ref={suffixEl} disabled={props.readOnly}
+              <TextField
+                id={`suffix-${props.session}`} type="text" class="vz-tinput vz-suffix" ref={suffixEl}
                 value={suffix()}
                 title="Click a parameter name to insert its token (enabled sliders auto-append)"
                 {...focus} onFocus={(e) => { setFocused("suffix"); focus.onFocus(e); }}
                 onInput={(e) => editor.edit("naming", "root", "suffix", e.currentTarget.value)}
               />
+              <Show when={tally().naming.example}>
+                <div class="vz-output-preview">
+                  <span>Example</span>
+                  <SingleLineText class="vz-output-example" value={tally().naming.example} hint={tally().naming.help} />
+                </div>
+              </Show>
             </div>
             </div>
             <div class="vz-messages" role="status">
               <div class="vz-message-content">
                 <Show when={tally().message && !result()}><p class={tally().status === "invalid" ? "vz-readiness-error" : "vz-field-help"}>{tally().message}</p></Show>
-                <Show when={props.readOnly && !result()?.text}>
-                  <p class="vz-workspace-status">Recipe from a previous source. Review only; images and values have not been retargeted.</p>
-                </Show>
                 <Show when={result()}>{value => <>
                   <Show when={Number.isSafeInteger(value().submitted) && value().total > 0}>
                     <p class={value().ok ? "vz-queued vz-ok" : "vz-queued"}>Queued {value().submitted} of {value().total} jobs</p>
@@ -418,34 +416,22 @@ function RecipeBody(props) {
                 <p class={"vz-error" + (result()?.ok ? " vz-neutral" : "")}>{result()?.reason ?? result()?.text ?? ""}</p>
               </div>
             </div>
-            <button
-              class="vz-run" disabled={running() || props.readOnly || undefined} onClick={() => store.handles.invoke("variations.run")}
-            ><SingleLineText value={running() ? "Submitting…" : "Run"} /></button>
+            <div class="vz-run-slot">
+              <Show when={!running()} fallback={<SingleLineText class="vz-field-help" role="status" value="Queuing…" />}>
+                <button class="vz-run" onClick={() => store.handles.invoke("variations.run")}><SingleLineText value="Run" /></button>
+              </Show>
+            </div>
           </div>
         </div>
-        <button
-          class="vz-close" title="close (Esc)" onClick={() => store.handles.invoke("variations.close", { session: props.session })}
-          innerHTML={iconSvg("x", 16)}
-        />
+        <IconButton chrome variant="plain vz-close" title="close (Esc)"
+          onAction={() => store.handles.invoke("variations.close", { session: props.session })}
+          icon={iconSvg("x")} />
       </div>
       <Show when={decision()}>
         <VariationDiscardConfirmation owner={props.session} running={running()} onCancel={guard.cancel} onDiscard={guard.discard} />
       </Show>
     </div>
   );
-}
-
-// Every raw value is inspectable on a retired source, including disabled rows
-// and dormant template keys. This consumer has no edit/acquisition callbacks.
-function RetainedRecipe(props) {
-  const display = value => typeof value === "string" ? value : JSON.stringify(value,
-    (_key, item) => item instanceof File ? `${item.name} (${item.size} bytes, native File)` : item, 2);
-  return <div class="vz-retained-values"><For each={props.values}>{entry => <section>
-    <h3>{entry.id} · {entry.domain}</h3>
-    <dl><For each={Object.entries(entry.values)}>{([name, value]) => <>
-      <dt>{name}</dt><dd><pre>{display(value)}</pre></dd>
-    </>}</For></dl>
-  </section>}</For></div>;
 }
 
 // one enum sweep row: master checkbox + label + the orange current value;
@@ -458,13 +444,13 @@ function EnumRow(props) {
   const [filter, setFilter] = createSignal("");
   const r = () => props.row();
   return (
-    <ParameterRow class="vz-imgrow vz-enumrow" row={r} enabled={() => r().enabled}
+    <ParameterRow class="vz-imgrow vz-enumrow" row={r} enabled={() => r().enabled} filteredOut={props.filteredOut}
       attributes={{ "data-enum-id": props.p.id }} onEnable={checked => props.onToggle(props.p.id, checked)}
       onInsert={props.onInsert} summary={`${r().picks.length} ${r().picks.length === 1 ? "option" : "options"}`}>
         <div class="vz-imgrow-body vz-enum-body">
           <Show when={r().values.length > 10}>
             <div class="vz-enum-filter-line">
-              <input
+              <TextField
                 {...focus}
                 type="text" class="vz-enum-filter" placeholder="filter…"
                 aria-label={`Filter ${r().label} options`}
@@ -551,7 +537,7 @@ function AutoSizeTextArea(props) {
     observer.observe(input);
     onCleanup(() => observer.disconnect());
   });
-  return <textarea {...props} ref={input} rows="1" />;
+  return <TextField multiline {...props} ref={input} rows="1" />;
 }
 
 // one text sweep row: master checkbox + label + the orange current value;
@@ -563,7 +549,7 @@ function TextRow(props) {
   const focus = focusMemory(props.rememberFocus);
   const r = () => props.row();
   return (
-    <ParameterRow class="vz-imgrow vz-textrow" row={r} enabled={() => r().enabled}
+    <ParameterRow class="vz-imgrow vz-textrow" row={r} enabled={() => r().enabled} filteredOut={props.filteredOut}
       attributes={{ "data-text-id": props.p.id }} onEnable={checked => props.onToggle(props.p.id, checked)}
       onInsert={props.onInsert} summary={props.summary}>
         <div class="vz-imgrow-body vz-enum-body">
@@ -579,7 +565,7 @@ function TextRow(props) {
             {(lab) => (
               <div class="vz-tpl-row">
                 <SingleLineText class="vz-tpl-label" value={lab} />
-                <input
+                <TextField
                   {...focus}
                    type="text" class="vz-tpl-input"
                   aria-label={`${r().label}: ${lab} alternatives`}

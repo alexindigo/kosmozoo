@@ -122,7 +122,7 @@ module.exports = async ({ page, ENGINE, KZ, check, capture, control }) => {
     await page.clickAt(card(b) + ' .media-open');
     await page.poll(`document.querySelector('.dz-a video')?.readyState>=2`);
     await page.poll(`document.getElementById('diffStage').dataset.mode==='full'`);
-    check('video opens in full view with only A; Difference absent and exactly the video view set', await page.evaluate(`(()=>{const buttons=[...document.querySelectorAll('#diffModes button')];return !document.getElementById('diff').hidden&&!document.querySelector('.dz-b')&&JSON.stringify(buttons.map(e=>e.dataset.view))===JSON.stringify(['full','split','overlay','slider'])&&buttons[0].classList.contains('on')})()`));
+    check('video opens in Full with only A and omits unavailable comparison modes', await page.evaluate(`(async()=>!document.getElementById('diff').hidden&&!document.querySelector('.dz-b')&&${KZ}.state.diff.mode==='full'&&!document.querySelector('#diffModes'))()`));
     // The preceding key rebind reports a transient status chip over this end
     // of the dock. Wait for real hit-testing before starting the short clip.
     await page.poll(`(()=>{const b=document.querySelector('#diffMedia .media-mute'),r=b.getBoundingClientRect();return b.contains(document.elementFromPoint(r.x+r.width/2,r.y+r.height/2))})()`);
@@ -144,12 +144,13 @@ module.exports = async ({ page, ENGINE, KZ, check, capture, control }) => {
     await capture(page,'video-viewer-full');
     await page.evaluate(`(async()=>{const s=${KZ};for(const anchor of [...s.state.anchors])s.actions.anchors.remove(anchor.name);s.actions.ui.setWorkspace('anchors')})()`);
     await page.poll(`(async()=>!${KZ}.state.diffPair().b)()`);
-    check('video comparison choices are disabled without a B; full remains available',await page.evaluate(`(()=>{const b=[...document.querySelectorAll('#diffModes button')];return !b[0].disabled&&b.slice(1).every(e=>e.disabled)})()`));
+    check('video without B stays Full and omits unavailable comparison choices',await page.evaluate(`(async()=>${KZ}.state.diff.mode==='full'&&!document.querySelector('#diffModes')&&!document.querySelector('#diffCtl button'))()`));
     await page.evaluate(`(async()=>${KZ}.actions.ui.setWorkspace('details'))()`);
     await invoke('workbench.pickInput',{source:'fake',file:'canny.png'});
     await invoke('workbench.mode',{mode:'two-up'});
     await page.poll(`document.querySelector('.dz-b img')?.naturalWidth>0`);
-    check('video split uses the existing node-input pair, subject B first with matching boundaries',await page.evaluate(`(async()=>{const p=${KZ}.state.diffPair(),a=document.querySelector('.dz-a').getBoundingClientRect(),b=document.querySelector('.dz-b').getBoundingClientRect();return p.b.source==='input:fake'&&p.b.file==='canny.png'&&Math.abs(b.right-a.left)<1&&Math.abs(a.height-b.height)<1&&Math.abs(a.width-b.width)<1})()`));
+    check('paired video offers exactly Full, Split, Overlay, Slider with no Difference',await page.evaluate(`JSON.stringify([...document.querySelectorAll('#diffModes button')].map(e=>e.dataset.view))===JSON.stringify(['full','split','overlay','slider'])`));
+    check('video split uses the existing node-input pair, A left with matching boundaries even when B is active',await page.evaluate(`(async()=>{const p=${KZ}.state.diffPair(),a=document.querySelector('.dz-a').getBoundingClientRect(),b=document.querySelector('.dz-b').getBoundingClientRect();return p.b.source==='input:fake'&&p.b.file==='canny.png'&&Math.abs(a.right-b.left)<1&&Math.abs(a.height-b.height)<1&&Math.abs(a.width-b.width)<1})()`));
     await capture(page,'video-viewer-split-node');
     await page.keyTrusted('f',{code:'KeyF',vk:70});await page.poll(`document.getElementById('diffStage').dataset.mode==='full'&&document.getElementById('diffStage').dataset.col==='right'&&document.querySelector('.dz-b img')?.src.includes('canny.png')`);
     check('f selects Full on subject B through the existing dispatcher',await page.evaluate(`document.querySelector('.dz-a').getBoundingClientRect().width===0&&document.querySelector('.dz-b').getBoundingClientRect().width>0`));

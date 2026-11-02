@@ -10,9 +10,11 @@ import { useClickOutside } from "../lib/click-outside.js";
 import { HostPicker } from "./HostPicker.js";
 import { IconButton } from "./IconButton.js";
 import { FeedFilter } from "./FeedFilter.js";
+import { TextField } from "./TextField.js";
 import { SourceProgress } from "./SourceProgress.js";
 import { FolderPicker } from "./FolderPicker.js";
 import { FeedbackLink } from "./FeedbackLink.js";
+import { SingleLineText } from "./SingleLineText.js";
 import { sourceProgress } from "../lib/source-progress.js";
 import { sourceNewContent } from "../lib/source-new-content.js";
 
@@ -71,7 +73,7 @@ function Menu() {
   return (
     <Show when={open()}>
       <div id="menu">
-        <input
+        <TextField size="sm"
           id="menuSearch" type="search" placeholder="filter settings…" spellcheck={false}
           value={store.state.menuFilter()}
           onInput={(e) => store.actions.menu.setFilter(e.target.value)}
@@ -104,6 +106,18 @@ function Menu() {
                 />
                 <span class="track" />
                 down-vote hides
+              </label>
+            </div>
+          </Show>
+          <Show when={matches("Filename includes source")}>
+            <div class="menurow">
+              <label class="switchwrap">
+                <input
+                  id="sourcePrefix" type="checkbox" checked={store.state.filePrefs.sourcePrefix}
+                  onChange={(e) => store.handles.invoke("preference.sourcePrefix", { value: e.target.checked })}
+                />
+                <span class="track" />
+                <SingleLineText value="Filename includes source" />
               </label>
             </div>
           </Show>

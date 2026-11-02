@@ -45,7 +45,7 @@ Deno.test("naming proof: dependency output without filename_prefix never blocks 
   for (const [index, { prompt }] of r.jobs.entries()) {
     assertEquals(prompt["475"].inputs.image, files[index]);
     assertEquals(prompt["502"].inputs.value, editedText);
-    assertEquals(prompt["461"].inputs.filename_prefix, `Qwen_image_2.1_00330_${files[index]}`);
+    assertEquals(prompt["461"].inputs.filename_prefix, `Qwen_image_2.1_00330_${files[index].replace(/\.[^.]+$/, "")}`);
     assertEquals(prompt["459:480"], fixture["459:480"]);
     assert(!Object.hasOwn(prompt, "472")); assert(!Object.hasOwn(prompt, "503"));
   }
@@ -74,7 +74,7 @@ Deno.test("naming proof: registered run consumes the local-file editor work thro
     assertEquals(uploads, files);
     assertEquals(r.requests[0].imageParams["475.image"], { enabled: true, values: files });
     assertEquals(r.requests[0].imageParams["502.value"], { enabled: true, values: [editedText] });
-    assertEquals(editor.remaining(), []);
+    assert(!editor.dirty());
     assertEquals(editor.result().state, "adopted");
     assertEquals(timers.length, 1);
     assert(editor.rows("images")["475.image"].items[0].file === localFiles[0]);
@@ -89,7 +89,7 @@ Deno.test("naming proof: fallback certifies every actual naming write and preser
   for (const [index, { prompt }] of r.jobs.entries()) {
     for (const id of ["461", "472", "503", "459:480"]) {
       const middle = fixture[id].inputs.filename_prefix ?? "";
-      assertEquals(prompt[id].inputs.filename_prefix, `pre_${middle}_${files[index]}`);
+      assertEquals(prompt[id].inputs.filename_prefix, `pre_${middle}_${files[index].replace(/\.[^.]+$/, "")}`);
     }
     assert(!Object.hasOwn(prompt["475"].inputs, "filename_prefix"));
   }

@@ -16,6 +16,7 @@ import { zoomViewTransform, readZoomView } from "/js/zoom-view.mjs";
 import { mediaGeometry, AUDIO_SIZE } from "../store/media-geometry.js";
 import { differenceMask, viewRect } from "../features/diff/mask.mjs";
 import { hitLayer } from "../features/diff/hit.mjs";
+import { workbenchLayout } from "../features/diff/views.mjs";
 import { DiffChrome } from "./DiffChrome.js";
 import { MediaBox } from "./MediaBox.js";
 import { mediaKind } from "/shared/backings/mime.mjs";
@@ -82,6 +83,7 @@ export function DiffStage() {
   const differenceReason = () => store.state.differenceReason() ||
     ([srcA(), srcB()].some(side => side && side.kind !== "image") ? "difference mode compares still images" : null);
   const mode = () => d().mode === "difference" && differenceReason() ? "two-up" : d().mode;
+  const layout = createMemo(() => workbenchLayout({ mode: mode(), subject: d().subject, splitT: d().splitT, paired: hasB() }));
   const playableA = () => srcA() && srcA().kind !== "image";
   const playableB = () => showB() && srcB() && srcB().kind !== "image";
   const [dockA, setDockA] = createSignal(null), [dockB, setDockB] = createSignal(null);
@@ -127,7 +129,7 @@ export function DiffStage() {
     const layer = hitLayer({
       mode: mode(), col: d().col, splitT: d().splitT,
       x: e.clientX,
-      cellBRect: showB() ? cellBEl()?.getBoundingClientRect() : null,
+      paired: hasB(),
       stageRect: stageEl.getBoundingClientRect(),
     });
     const box = mode() === "difference" ? stageEl : (layer === "b" ? cellBEl() : cellAEl());
@@ -229,18 +231,22 @@ export function DiffStage() {
         data-mode={mode()} data-col={d().col}
         style={{ "--split": d().splitT, "--active-op": d().activeOpacity }}
       >
-        <div class="dz-cell dz-a" ref={setCellAEl}>
+        <div class="dz-cell dz-a" ref={setCellAEl}
+          data-position={layout().layers.a.position} data-shown={layout().layers.a.shown}
+          data-active={layout().layers.a.active} data-front={layout().layers.a.front} data-clip={layout().layers.a.clip}>
           <MediaBox workbench src={srcA()?.src} kind={srcA()?.kind} alt={srcA()?.name} failed={srcA()?.failed} failureCode={srcA()?.failureCode}
             size={srcA()?.size}
-            controlsMount={dockA()} controlLabel="A"
+            controlsMount={dockA()} controlLabel={layout().layers.a.label}
             transform={tA()} active={d().open && !fullB() && (mode() !== "one-up" || d().col === "feed" || !hasB())} primary={d().col === "feed"}
             registerPlayer={store.actions.media.register} onPlaybackError={store.actions.media.report} />
         </div>
         <Show when={showB()}>
-          <div class="dz-cell dz-b" ref={setCellBEl}>
+          <div class="dz-cell dz-b" ref={setCellBEl}
+            data-position={layout().layers.b.position} data-shown={layout().layers.b.shown}
+            data-active={layout().layers.b.active} data-front={layout().layers.b.front} data-clip={layout().layers.b.clip}>
             <MediaBox workbench src={srcB()?.src} kind={srcB()?.kind} alt={srcB()?.name} failed={srcB()?.failed} failureCode={srcB()?.failureCode}
               size={srcB()?.size}
-              controlsMount={dockB()} controlLabel="B"
+              controlsMount={dockB()} controlLabel={layout().layers.b.label}
               transform={tB()} active={d().open && (mode() !== "one-up" || d().col === "right")} primary={d().col === "right"}
               registerPlayer={store.actions.media.register} onPlaybackError={store.actions.media.report} />
           </div>
@@ -255,8 +261,8 @@ export function DiffStage() {
         </Show>
       </div>
       <div id="diffMedia" hidden={!playableA() && !playableB()}>
-        <div class="media-dock-slot" ref={setDockA} hidden={!playableA()} />
-        <div class="media-dock-slot" ref={setDockB} hidden={!playableB()} />
+        <div class="media-dock-slot" data-position={layout().layers.a.position} ref={setDockA} hidden={!playableA()} />
+        <div class="media-dock-slot" data-position={layout().layers.b.position} ref={setDockB} hidden={!playableB()} />
       </div>
       <DiffChrome differenceReason={differenceReason()} mediaWord={((d().col === "right" ? srcB() : srcA())?.kind ?? "image").replace("audio", "audio file")} />
     </div>

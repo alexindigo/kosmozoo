@@ -1,6 +1,5 @@
 // client-solid/components/DiffChrome.tsx — the workbench chrome: close (X),
-// keys button, the 1–4 mode control (state display + clickable; greyed and
-// inert without a pair), and per-view extras (One-Up: side indicator +
+// keys button, the available mode choices, and per-view extras (One-Up: side indicator +
 // play/pause + interval). The stage never reaches into this component, and
 // this component never reaches into the stage — everything flows through
 // the store's diff tree.
@@ -10,10 +9,13 @@
 // to set the value (bottom = min, top = max). The parent owns which popup
 // is open (one at a time); the component never reaches out.
 
-import { Show, For, createSignal, createEffect, onCleanup } from "solid-js";
+import { Show, createSignal, createEffect, onCleanup } from "solid-js";
 import { useAppStore } from "../store/app-store.js";
 import { iconSvg } from "/js/icons.mjs";
 import { IconButton } from "./IconButton.js";
+import { ModeSwitch } from "./ModeSwitch.js";
+import { viewerSide } from "../features/diff/views.mjs";
+import { keyHint } from "../lib/key-hint.js";
 
 function VSlider(props) {
   let trackEl;
@@ -42,7 +44,6 @@ function VSlider(props) {
         variant={"dz-vbtn " + props.class}
         title={props.title}
         active={props.open()}
-        disabled={props.disabled || undefined}
         onAction={props.onToggle}
         icon={iconSvg(props.icon, 14)}
       />
@@ -62,6 +63,8 @@ export function DiffChrome(props) {
   const store = useAppStore();
   const d = () => store.state.diff;
   const hasB = () => !!store.state.diffPair().b && store.state.diffKind() !== "audio" && d().mode !== "full";
+  const modes = () => store.state.diffViews().filter(({ mode }) => mode === "full" ||
+    (!!store.state.diffPair().b && (mode !== "difference" || !props.differenceReason)));
 
   // one popup open at a time; Esc closes it (never the workbench), and a
   // pointerdown outside any control closes it too
@@ -85,7 +88,7 @@ export function DiffChrome(props) {
   return (
     <>
       <span class="viewer-group viewer-close"><IconButton viewer
-        id="diffClose" title="close (Esc)"
+        id="diffClose" title={keyHint(store.state.bindings(), "close", "workbench.close")}
         onAction={() => store.handles.invoke("workbench.close")}
         icon={iconSvg("x", 16)}
       /></span>
@@ -93,32 +96,33 @@ export function DiffChrome(props) {
  the 1–4 modes centered, the keys button at the right */}
       <div id="diffBar">
         <div id="diffCtl">
-          <span class="viewer-group"><button
-            class="viewer-btn dz-sidebtn" title="active side — primary in every view (ArrowLeft/Right)"
-            disabled={!hasB() || undefined}
+          <span class="viewer-control-slot viewer-side-slot"><Show when={hasB()}><span class="viewer-group"><button
+            class="viewer-btn dz-sidebtn" title={keyHint(store.state.bindings(), "active side — primary in every view", "workbench.column")}
             onClick={() => store.handles.invoke("workbench.column", { toggle: true })}
-          >{d().col === "feed" ? "A" : "B"}</button></span>
-          <span class="viewer-group"><IconButton viewer
+          >{viewerSide[d().subject].label}</button></span></Show></span>
+          <span class="viewer-control-slot"><Show when={hasB()}><span class="viewer-group"><IconButton viewer
             variant="dz-lockbtn"
-            title={d().locked ? "locked — gestures move both (l)" : "unlocked — gestures move the target (l)"}
+            title={keyHint(store.state.bindings(), d().locked ? "locked — gestures move both" : "unlocked — gestures move the target", "workbench.lock")}
             active={d().locked}
-            disabled={!hasB() || undefined}
             onAction={() => store.handles.invoke("workbench.lock", { toggle: true })}
             icon={iconSvg(d().locked ? "lock" : "lock-open", 14)}
-          /></span>
+          /></span></Show></span>
+          <span class="viewer-control-slot"><Show when={hasB()}>
           <VSlider
             icon="opacity" title={`active ${props.mediaWord ?? "image"} opacity`} class="dz-active-op"
             value={() => d().activeOpacity}
-            disabled={!hasB()}
             open={() => openCtl() === "active"}
             onToggle={() => toggle("active")}
             onInput={(value) => store.handles.invoke("workbench.parameters", { parameter: "activeOpacity", value })}
           />
-          <Show when={hasB() && d().mode === "difference"}>
+          </Show></span>
+          <span class="viewer-control-slot viewer-side-slot"><Show when={hasB() && d().mode === "difference"}>
             <span class="viewer-group"><button
               class="viewer-btn dz-sidebtn" title="absolute / proportional highlight"
               onClick={() => store.handles.invoke("workbench.parameters", { parameter: "absolute", toggle: true })}
             >{d().diffAbs ? "abs" : "prop"}</button></span>
+          </Show></span>
+          <span class="viewer-control-slot"><Show when={hasB() && d().mode === "difference"}>
             <VSlider
               icon="filter" title="difference threshold — pixels within this delta count as matching" class="dz-threshold"
               value={() => d().diffThreshold / 64}
@@ -126,6 +130,8 @@ export function DiffChrome(props) {
               onToggle={() => toggle("threshold")}
               onInput={(v) => store.handles.invoke("workbench.parameters", { parameter: "threshold", value: Math.round(v * 64) })}
             />
+          </Show></span>
+          <span class="viewer-control-slot"><Show when={hasB() && d().mode === "difference"}>
             <VSlider
               icon="contrast" title="highlight opacity" class="dz-mask-op"
               value={() => d().diffOpacity}
@@ -133,25 +139,15 @@ export function DiffChrome(props) {
               onToggle={() => toggle("mask")}
               onInput={(value) => store.handles.invoke("workbench.parameters", { parameter: "opacity", value })}
             />
-          </Show>
+          </Show></span>
         </div>
-        <Show when={store.state.diffViews().length > 1}><div id="diffModes" class="viewer-group" role="group" aria-label="Comparison view">
-          <For each={store.state.diffViews()}>
-            {({key, mode: m, label, icon}) => (
-              <IconButton viewer
-                data-view={label.toLowerCase()}
-                active={d().mode === m} aria-label={label}
-                variant="dz-segbtn"
-                disabled={(m !== "full" && (!store.state.diffPair().b || (m === "difference" && !!props.differenceReason))) || undefined}
-                title={m === "difference" && props.differenceReason ? props.differenceReason : `${label} (${key})`}
-                onAction={() => store.handles.invoke("workbench.mode", { mode: m })}
-                icon={iconSvg(icon, 16)}
-              />
-            )}
-          </For>
-        </div></Show>
+        <div class="viewer-modes-slot"><Show when={modes().length > 1}><ModeSwitch id="diffModes" label="Comparison view" value={d().mode}
+          options={modes().map(({ mode, label, icon }) => ({
+            value: mode, label, view: label.toLowerCase(), variant: "dz-segbtn", icon: iconSvg(icon),
+            title: keyHint(store.state.bindings(), label, "workbench.mode", { mode }),
+          }))} onChange={mode => store.handles.invoke("workbench.mode", { mode })} /></Show></div>
         <span class="viewer-group viewer-keys"><IconButton viewer
-          id="diffKeysBtn" title="actions & keys (?)"
+          id="diffKeysBtn" title={keyHint(store.state.bindings(), "actions & keys", "keys.panel.toggle")}
           onAction={() => store.handles.invoke("keys.panel.toggle")}
           icon={iconSvg("keyboard", 18)}
         /></span>

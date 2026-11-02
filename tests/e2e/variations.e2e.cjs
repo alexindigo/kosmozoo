@@ -30,7 +30,17 @@ async function attempt(name, fn) {
   }
 }
 
+// The fake host is shared with the suites that run after this one. Whatever
+// this suite publishes there (fixtures and fake completions) is removed again
+// at the end, so suite order cannot change what a later suite's feed holds.
+async function fakeActivity(body = {}) {
+  const r = await fetch(FAKE + '/__test/activity', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+  if (!r.ok) throw new Error(`fake activity control: ${r.status}`);
+  return r.json();
+}
+
 async function main() {
+  const publishedBefore = new Set((await fakeActivity()).published);
   const cdp = await CDP.launch(9334, { windowSize: '1800,1200' });
   await cdp.send('Emulation.setDeviceMetricsOverride', { width: 800, height: 600, deviceScaleFactor: 1, mobile: false });
   const closeAndDiscard = async () => {
@@ -59,6 +69,17 @@ async function main() {
       const opened = await cdp.poll(`!!document.querySelector('.vz-root .vz-panel')`, 5000)
         .then(() => true).catch(() => false);
       check("wand click opens variations modal", opened);
+    });
+
+    await attempt("close tooltip advertises the modal's working Escape key", async () => {
+      await cdp.poll(`document.querySelectorAll('.vz-slider-row').length > 0`, 5000);
+      const title = await cdp.evaluate(`document.querySelector('.vz-close').title`);
+      check("Variations close tooltip is close (Esc)", title === 'close (Esc)', title);
+      await cdp.keyTrusted('Escape', { vk: 27 });
+      await cdp.poll(`!document.querySelector('.vz-root')`, 5000);
+      check("advertised Escape closes the clean Variations dialog", true);
+      await cdp.clickAt('.card[data-idx="0"] .votebtn.variations');
+      await cdp.poll(`!!document.querySelector('.vz-root .vz-panel')`, 5000);
     });
 
     // --- modal is a page-level fixed overlay (not clipped by any card) ---
@@ -903,14 +924,25 @@ async function main() {
     await require('./variations-status-layout.cjs')({ cdp, check, KZ });
     await require('./variations-image-set.cjs')({ cdp, check, FAKE, KZ });
     await require('./variations-overflow.cjs')({ cdp, check, ENGINE, FAKE, KZ });
-    await require('./variations-workspace.cjs')({ cdp, check, ENGINE, FAKE, KZ });
+    await require('./variations-session.cjs')({ cdp, check, ENGINE, FAKE, KZ });
+    await require('./variations-run-contract.cjs')({ cdp, check, ENGINE, FAKE, KZ });
     await require('./variations-row-frame.cjs')({ cdp, check, KZ });
     await require('./variations-value.cjs')({ cdp, check, KZ, FAKE });
     await require('./variations-enum-text.cjs')({ cdp, check, ENGINE, FAKE, KZ });
     await require('./variations-dynamic.cjs')({ cdp, check, ENGINE, FAKE, KZ });
     await require('./variations-image-order.cjs')({ cdp, check, FAKE, KZ });
+    await require('./variations-image-drop.cjs')({ cdp, check, FAKE, KZ });
+    await require('./variations-gesture-settlement.cjs')({ cdp, check, FAKE, KZ });
+    await require('./variations-picker-settlement.cjs')({ cdp, check, KZ });
+    await require('./variations-numeric-text.cjs')({ cdp, check, FAKE, KZ });
+    await require('./variations-field-filter.cjs')({ cdp, check, KZ });
+    await require('./variations-output-names.cjs')({ cdp, check, FAKE, KZ });
+    await require('./variations-range-handles.cjs')({ cdp, check, FAKE, KZ });
+    await require('./variations-row-click.cjs')({ cdp, check, FAKE, KZ });
   } finally {
     await cdp.close();
+    const leaked = (await fakeActivity()).published.filter((name) => !publishedBefore.has(name));
+    if (leaked.length) await fakeActivity({ remove: leaked });
   }
 
   console.log(`\n${failures === 0 ? "ALL PASS" : failures + " FAILURES"}`);

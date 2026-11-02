@@ -26,6 +26,10 @@ export function parseParamId(id) {
 export const catalogueParams = catalogue => ["params", "stringParams", "enumParams", "textParams"]
   .flatMap(key => catalogue[key] ?? []);
 
+// Image presentation strips ComfyUI's folder annotation; assignment and tuple
+// identity must retain the exact graph value on both sides of the wire.
+export const parameterCurrent = parameter => parameter.currentValue ?? parameter.current;
+
 // Shared admission gate: never build a last-wins catalogue. Graph resolution is
 // asserted at discovery; later consumers still reject ambiguous identity before IO.
 export function parameterIndex(params, graph = null) {
@@ -58,6 +62,49 @@ export function parameterAliases(params) {
 
 export function formatValue(v) {
   return typeof v === "string" ? v : String(parseFloat(Number(v).toFixed(10)));
+}
+
+// One UTF-8 naming contract for preview and both graph writers. Keep the
+// existing conservative 200-byte prefix cap, below NAME_MAX minus the counter.
+export const HEADROOM = 15;
+export const OUTPUT_NAME_BUDGET = Math.min(200, 255 - HEADROOM);
+export const TOKEN_NAME_BUDGET = 40;
+const encoder = new TextEncoder();
+const byteLength = value => encoder.encode(value).length;
+
+function foldName(value, budget, headBudget = Math.ceil((budget - 1) / 2)) {
+  if (byteLength(value) <= budget) return value;
+  if (budget === 0) return "";
+  const points = Array.from(value), tailBudget = budget - 1 - headBudget;
+  let head = "", tail = "", used = 0;
+  for (const point of points) {
+    const size = byteLength(point);
+    if (used + size > headBudget) break;
+    head += point; used += size;
+  }
+  used = 0;
+  for (let index = points.length - 1; index >= 0; index--) {
+    const point = points[index], size = byteLength(point);
+    if (used + size > tailBudget) break;
+    tail = point + tail; used += size;
+  }
+  return head + "~" + tail;
+}
+
+export function outputName({ prefix = "", sourceStem = "", suffix = "", budget = OUTPUT_NAME_BUDGET }) {
+  prefix = String(prefix); suffix = String(suffix);
+  const affixes = byteLength(prefix) + byteLength(suffix);
+  if (affixes > budget) throw new Error(`Prefix and suffix are ${affixes} bytes; the limit is ${budget} bytes. Shorten Prefix or Suffix.`);
+  return prefix + foldName(String(sourceStem), budget - affixes) + suffix;
+}
+
+function namingToken(value, kind) {
+  let text = formatValue(value);
+  if (kind === "image") {
+    const dot = text.lastIndexOf(".");
+    if (dot > text.lastIndexOf("/") + 1) text = text.slice(0, dot);
+  }
+  return foldName(text, TOKEN_NAME_BUDGET, 19);
 }
 
 export function rangeValues(min, max, step) {
@@ -212,8 +259,9 @@ export function expandTextAxes(text, tplValues = {}) {
 // Every placeholder-shaped token is considered, including unknown syntax.
 // Canonical IDs use the same parser as catalogue admission; compatibility
 // aliases select their FIRST carrier, even when only a later carrier varies.
-export function templateReplaceWithProof(template, values, currentValues, labelMap = {}) {
+export function templateReplaceWithProof(template, values, currentValues, labelMap = {}, params = []) {
   const lookup = new Map(Object.entries({ ...currentValues, ...values }));
+  const kinds = new Map(params.map(parameter => [parameter.id, parameter.kind]));
   const aliases = new Map();
   for (const [param, labels] of Object.entries(labelMap)) {
     for (const label of Array.isArray(labels) ? labels : [labels]) {
@@ -224,15 +272,15 @@ export function templateReplaceWithProof(template, values, currentValues, labelM
   const text = template.replace(/\{([^{}]*)\}/g, (_, key) => {
     const canonical = parseParamId(key);
     const resolved = lookup.has(key) ? key : aliases.get(key);
-    if ((canonical || resolved !== undefined) && lookup.has(resolved)) return formatValue(lookup.get(resolved));
+    if ((canonical || resolved !== undefined) && lookup.has(resolved)) return namingToken(lookup.get(resolved), kinds.get(resolved));
     complete = false;
     return `{${key}}`;
   });
   return { text, complete };
 }
 
-export function templateReplace(template, values, currentValues, labelMap = {}) {
-  return templateReplaceWithProof(template, values, currentValues, labelMap).text;
+export function templateReplace(template, values, currentValues, labelMap = {}, params = []) {
+  return templateReplaceWithProof(template, values, currentValues, labelMap, params).text;
 }
 
 // Additive Run evidence, shared by producer and consumer. Counts alone never

@@ -10,22 +10,41 @@ import { Thumbnail } from "./Thumbnail.js";
 import { SingleLineText } from "../../components/SingleLineText.js";
 import { ParameterRow } from "./ParameterRow.js";
 import { useClickOutside } from "../../lib/click-outside.js";
+import { isFileDrag, droppedFiles, classifyImageFiles, nearestImageTile, imageInsertIndex } from "./image-drop.js";
 
 export function ImageSetPanel(props) {
   let fileInput, content, addButton;
   const [adding, setAdding] = createSignal(false), [folder, setFolder] = createSignal(false), [ratio, setRatio] = createSignal(1);
   const row = () => props.row();
+  const [dropping, setDropping] = createSignal(false), [status, setStatus] = createSignal("");
+  let dragDepth = 0;
+  const clearDrop = () => { dragDepth = 0; setDropping(false); };
+  const addFiles = (resources, index, enable = false) => {
+    const result = classifyImageFiles(resources, name => UPLOAD_IMG_EXT.test(name));
+    setStatus(result.status);
+    if (!result.images.length) return;
+    if (enable && !row().enabled) props.onEnable(true);
+    props.onAdd(result.images.map(uploadImage), index);
+  };
+  onCleanup(props.registerEditor({ suspend: clearDrop, resume() {} }));
   const selected = name => row().items.some(item => item.kind === "input" && item.name === name);
   useClickOutside(() => content, event => { if (!event.target.closest?.('.vz-input-popover')) setAdding(false); });
   createEffect(() => { if (adding()) onCleanup(props.registerPopup(() => { setAdding(false); addButton.focus(); })); });
-  return <ParameterRow class="vz-imgrow vz-image-set" row={row} enabled={() => row().enabled}
-    attributes={{ "data-image-id": props.id }} onEnable={props.onEnable} onInsert={props.onInsert}
+  return <ParameterRow class={`vz-imgrow vz-image-set${dropping() ? " vz-image-dropping" : ""}`} row={row} enabled={() => row().enabled} filteredOut={props.filteredOut}
+    attributes={{ "data-image-id": props.id,
+      onDragEnter: event => { if (isFileDrag(event.dataTransfer)) { event.preventDefault(); dragDepth++; setDropping(true); } },
+      onDragOver: event => { if (isFileDrag(event.dataTransfer)) { event.dataTransfer.dropEffect = "copy"; setDropping(true); } },
+      onDragLeave: () => { if (--dragDepth <= 0) clearDrop(); },
+      onDrop: event => { if (!isFileDrag(event.dataTransfer)) return; clearDrop(); addFiles(droppedFiles(event.dataTransfer), undefined, true); }
+    }} onEnable={props.onEnable} onInsert={props.onInsert}
+    status={<Show when={status()}><SingleLineText class="vz-image-drop-status" role="status" value={status()} /></Show>}
     summary={`${row().items.length} ${row().items.length === 1 ? "image" : "images"}`}>
     <div class="vz-image-content" ref={content} style={{ "--vz-image-ratio": ratio() }}>
       <div class="vz-image-ratio-source" aria-hidden="true" inert><Thumbnail src={props.currentThumbnail} register={props.registerThumbnail}
         onSize={(width, height) => { if (width > 0 && height > 0) setRatio(width / height); }} /></div>
       <Show when={!row().items.length}><p class="vz-image-empty">Add images to vary this input.</p></Show>
       <ImageGrid images={row().images} onMove={props.onMove} registerEditor={props.registerEditor}
+        dropping={dropping()} onFiles={(resources, index) => { clearDrop(); addFiles(resources, index, true); }}
         thumbnail={props.thumbnail} pathThumbnail={props.pathThumbnail} registerThumbnail={props.registerThumbnail}
         rememberFocus={props.rememberFocus} onRemove={props.onRemove}>
         <button ref={addButton} type="button" class="vz-image-plus" aria-label="Add images" aria-expanded={adding()}
@@ -35,8 +54,9 @@ export function ImageSetPanel(props) {
         <InputPicker files={row().files} current={row().fromOutput ? null : row().current} selected={selected} positionRevision={row().images} thumbnail={props.thumbnail} registerThumbnail={props.registerThumbnail}
           onToggle={name => selected(name) ? props.onRemove({ kind: "input", name }) : props.onAdd([{ kind: "input", name }])}
           registerPopup={props.registerPopup} registerEditor={props.registerEditor} rememberFocus={props.rememberFocus} />
-        <input type="file" ref={fileInput} class="vz-imgfilespick" hidden multiple accept="image/*" onChange={e =>
-          props.onAdd([...e.currentTarget.files].filter(file => UPLOAD_IMG_EXT.test(file.name)).map(uploadImage))} />
+        <input type="file" ref={fileInput} class="vz-imgfilespick" hidden multiple accept="image/*" onChange={e => {
+          addFiles({ files: [...e.currentTarget.files] }); e.currentTarget.value = "";
+        }} />
         <button type="button" class="vz-image-action" title="Files from this browser" {...focusMemory(props.rememberFocus)} onClick={() => fileInput.click()}><SingleLineText value="Add files…" /></button>
         <button type="button" class="vz-image-action vz-folder-trigger" aria-expanded={folder()} {...focusMemory(props.rememberFocus)} onClick={() => setFolder(!folder())}>Add folder…</button>
         <div class="vz-image-folder" hidden={!folder()}>
@@ -52,9 +72,16 @@ export function ImageSetPanel(props) {
 // keyboard move) writes through the injected recipe intent; cancellation is inert.
 function ImageGrid(props) {
   let grid, drag = null, frame = null;
+  const gap = Symbol("native-file-gap");
+  let fileGeometry = null, fileIndex = null;
   const refs = new Map(), animations = new Map();
   const [preview, setPreview] = createSignal(null), [lifted, setLifted] = createSignal(null);
-  const order = () => preview() ?? props.images.map(imageIdentity);
+  // Readonly thumbnail/comparison updates replace view records, not the user's
+  // ordered set. Only a real membership/order change can retire its held gesture.
+  const identities = createMemo(() => props.images.map(imageIdentity), [], {
+    equals: (before, after) => before.length === after.length && before.every((key, index) => key === after[index]),
+  });
+  const order = () => preview() ?? identities();
   const reduced = () => matchMedia('(prefers-reduced-motion: reduce)').matches;
   const stopAnimations = () => { for (const animation of animations.values()) animation.cancel(); animations.clear(); };
   const reorder = keys => {
@@ -66,6 +93,23 @@ function ImageGrid(props) {
       if (first && (first.x !== last.x || first.y !== last.y)) animations.set(key,
         el.animate([{ transform: `translate(${first.x - last.x}px, ${first.y - last.y}px)` }, { transform: 'none' }], { duration: 150, easing: 'ease-out' }));
     }
+  };
+  const tileGeometry = () => identities().map(key => {
+    const el = refs.get(key);
+    return { x: el.offsetLeft, y: el.offsetTop, width: el.offsetWidth, height: el.offsetHeight };
+  });
+  const clearFiles = () => { fileGeometry = null; fileIndex = null; if (!drag) { setPreview(null); stopAnimations(); } };
+  createEffect(() => { if (!props.dropping) clearFiles(); });
+  const overFiles = event => {
+    if (!isFileDrag(event.dataTransfer)) return;
+    finish(false);
+    // Freeze the un-gapped layout for this drag: opening the slot cannot move
+    // the hit-test boundary and oscillate the insertion point under the cursor.
+    fileGeometry ??= tileGeometry();
+    const origin = grid.getBoundingClientRect();
+    const index = event.target.closest('.vz-image-plus') ? identities().length
+      : imageInsertIndex(fileGeometry, event.clientX - origin.left, event.clientY - origin.top);
+    if (index !== fileIndex) { fileIndex = index; const keys = [...identities()]; keys.splice(index, 0, gap); reorder(keys); }
   };
   const finish = commit => {
     if (!drag) return;
@@ -86,10 +130,7 @@ function ImageGrid(props) {
       // offset geometry excludes FLIP/lift transforms, so animations cannot
       // turn the destination's moving pixels into another reorder decision.
       const origin = grid.getBoundingClientRect();
-      const nearest = [...refs].map(([key, el]) => ({ key, distance: Math.hypot(
-        origin.left + el.offsetLeft + el.offsetWidth / 2 - drag.x,
-        origin.top + el.offsetTop + el.offsetHeight / 2 - drag.y) }))
-        .sort((a, b) => a.distance - b.distance)[0]?.key;
+      const nearest = identities()[nearestImageTile(tileGeometry(), drag.x - origin.left, drag.y - origin.top)];
       const keys = order(), from = keys.indexOf(drag.key), to = keys.indexOf(nearest);
       if (to >= 0 && to !== from) { const next = [...keys]; next.splice(to, 0, ...next.splice(from, 1)); reorder(next); }
       drag.element.style.transform = `translate(${drag.x - origin.left - drag.element.offsetLeft - drag.offsetX}px, ${drag.y - origin.top - drag.element.offsetTop - drag.offsetY}px) scale(1.025)`;
@@ -107,13 +148,21 @@ function ImageGrid(props) {
     element.focus({ preventScroll: true }); grid.setPointerCapture(event.pointerId); frame = requestAnimationFrame(tick);
   };
   onCleanup(() => finish(false));
-  onCleanup(props.registerEditor({ suspend() { finish(false); }, resume() {} }));
-  createEffect(() => { props.images; if (drag) finish(false); });
+  onCleanup(props.registerEditor({ suspend() { finish(false); clearFiles(); }, resume() {} }));
+  createEffect(() => { identities(); if (drag) finish(false); clearFiles(); });
   return <div class="vz-image-grid" ref={grid}
+    onDragOver={overFiles}
+    onDragLeave={event => { if (!event.currentTarget.contains(event.relatedTarget)) clearFiles(); }}
+    onDrop={event => {
+      if (!isFileDrag(event.dataTransfer)) return;
+      event.stopPropagation(); const index = fileIndex ?? identities().length;
+      clearFiles(); props.onFiles(droppedFiles(event.dataTransfer), index);
+    }}
     onPointerMove={event => { if (!drag || drag.pointer !== event.pointerId) return; drag.x = event.clientX; drag.y = event.clientY;
       if (!drag.active && Math.hypot(drag.x - drag.startX, drag.y - drag.startY) > 5) { drag.active = true; setLifted(drag.key); } }}
     onPointerUp={() => finish(true)} onPointerCancel={() => finish(false)} onLostPointerCapture={() => finish(false)}>
     <For each={order()}>{identity => {
+      if (identity === gap) return <div class="vz-image-drop-gap" aria-hidden="true" />;
       const item = () => props.images.find(image => imageIdentity(image) === identity);
       return <div ref={element => { refs.set(identity, element); onCleanup(() => refs.delete(identity)); }}
         class={`vz-image-tile${lifted() === identity ? ' vz-image-dragging' : ''}`} tabindex="0" role="group"
@@ -148,7 +197,7 @@ function ImageTile(props) {
     <div class="vz-image-preview"><Thumbnail src={url()} name={name()} local={!!file()} lazy register={props.registerThumbnail} rememberFocus={props.rememberFocus} /></div>
     <Show when={props.item()?.sameCurrent}><span class="vz-image-same" aria-hidden="true" /></Show>
     <div class="vz-image-remove">
-      <IconButton chrome variant="neutral" icon={iconSvg("x", 12)} title={`Remove ${props.item()?.name}`} onAction={props.onRemove} />
+      <IconButton chrome variant="overlay" icon={iconSvg("x")} title={`Remove ${props.item()?.name}`} onAction={props.onRemove} />
     </div>
     <Show when={props.item()?.pending}><span class="vz-image-check" role="status" aria-label="Checking image…" /></Show>
     <Show when={props.item()?.error}><SingleLineText class="vz-image-error vz-image-inspection-error" role="status" value={props.item()?.error} /></Show>

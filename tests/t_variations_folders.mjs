@@ -40,7 +40,7 @@ Deno.test("folder images: one mixed set shares hash/count projection, actual rec
   assertEquals((await editor.run()).submitted, 3);
   assertEquals(uploaded, [{ path: folder.path, hash: "b".repeat(64) }]);
   assertEquals(rig.requests[0].imageParams["image.image"].values, ["next.png", "browser.png", "folder-result.png", "origin.png"]);
-  assertEquals(editor.remaining(), []); rig.fireTimers(); assertEquals(rig.closeCount(), 1); editor.dispose();
+  assert(!editor.dirty()); rig.fireTimers(); assertEquals(rig.closeCount(), 1); editor.dispose();
 });
 
 Deno.test("folder images: failed path upload never invents provenance or consumes work", async () => {
@@ -63,7 +63,7 @@ Deno.test("folder images: File and distinct path identities share collision/cont
     ...["a", "b"].map(directory => ({ kind: "server-path", name: "same.png", path: `/images/${directory}/same.png` }))]);
   await editor.inspectImages(); assertEquals(editor.rows("images")["image.image"].items.length, 3);
   assertEquals(editor.preview().n, 2); assertEquals((await editor.run()).submitted, 2);
-  assertEquals(rig.requests[0].imageParams["image.image"].values, ["same.png", "same (1).png"]); assertEquals(editor.remaining(), []); editor.dispose();
+  assertEquals(rig.requests[0].imageParams["image.image"].values, ["same.png", "same (1).png"]); assert(!editor.dirty()); editor.dispose();
 });
 
 Deno.test("folder images: readding a mutable path refreshes its evidence; late foreign-source listings retain the existing set", async () => {

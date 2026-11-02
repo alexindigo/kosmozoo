@@ -108,7 +108,7 @@ Deno.test("submission: real variations run sends every batch permutation through
     for (const [index, image] of ["a.jpg", "b.jpg", "c.jpg"].entries()) {
       const expected = structuredClone(before);
       expected["76"].inputs.image = image;
-      expected["94"].inputs.filename_prefix = `v_Flux2-Klein_00057__${image}`;
+      expected["94"].inputs.filename_prefix = `v_Flux2-Klein_00057__${image.replace(/\.[^.]+$/, "")}`;
       delete expected["95"];
       assertEquals(descriptorCount(jobs[index].prompt), 0);
       assertEquals(jobs[index], { prompt: withoutFingerprints(expected),

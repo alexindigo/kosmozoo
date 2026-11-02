@@ -7,7 +7,7 @@
 
 import { join } from "node:path";
 import { loadVersioned } from "./state.mjs";
-import { writeSerialized } from "./writer.mjs";
+import { writeSerialized, flushSerialized } from "./writer.mjs";
 
 const CURRENT = 1;
 
@@ -61,4 +61,6 @@ export class Settings {
   async #save() {
     await writeSerialized(this.#path, new TextEncoder().encode(JSON.stringify(this.#doc, null, 2)));
   }
+
+  flush() { return flushSerialized(this.#path); }
 }

@@ -5,6 +5,10 @@ import { focusMemory } from "./draft.js";
 import { Thumbnail } from "./Thumbnail.js";
 import { SingleLineText } from "../../components/SingleLineText.js";
 import { popoverPlacement } from "../../lib/popover-placement.js";
+import { Chevron } from "../../components/Select.js";
+import { IconButton } from "../../components/IconButton.js";
+import { TextField } from "../../components/TextField.js";
+import { iconSvg } from "/js/icons.mjs";
 
 const TILE_SIZE = 96, GAP = 6, ROW_HEIGHT = TILE_SIZE + GAP, OVERSCAN_ROWS = 3;
 
@@ -62,8 +66,8 @@ export function InputPicker(props) {
   createEffect(() => { props.positionRevision; requestPlacement(); });
   createEffect(() => { if (open()) onCleanup(props.registerPopup(close)); });
   return <div class="vz-input-picker" ref={root}>
-    <button type="button" class="vz-image-action vz-input-trigger" ref={trigger}
-      aria-expanded={open()} aria-haspopup="listbox" aria-controls={id} {...focusMemory(props.rememberFocus)} onClick={() => setOpen(!open())}><SingleLineText value="ComfyUI inputs ▾" /></button>
+    <button type="button" class="select-trigger control-size-md vz-input-trigger" ref={trigger}
+      aria-expanded={open()} aria-haspopup="listbox" aria-controls={id} {...focusMemory(props.rememberFocus)} onClick={() => setOpen(!open())}><SingleLineText value="ComfyUI inputs" /><Chevron /></button>
     <Show when={open()}>
       <InputOptions id={id} query={query} onQuery={setQuery} files={props.files} selected={props.selected}
         current={props.current} thumbnail={props.thumbnail} registerThumbnail={props.registerThumbnail}
@@ -76,6 +80,22 @@ function InputOptions(props) {
   let panel, search, scrollElement, summary;
   const [placement, setPlacement] = createSignal(null);
   const [placed, setPlaced] = createSignal(false);
+  // Both first focus and the modal's retained caret restoration belong to this
+  // surface. No focus callback may run until its visible placement is committed.
+  let restoreFocus = () => search.focus({ preventScroll: true });
+  const rememberFocus = restore => props.rememberFocus?.(() => {
+    if (placed()) restore();
+    else restoreFocus = restore;
+  });
+  createEffect(() => {
+    if (!placed()) return;
+    let alive = true;
+    queueMicrotask(() => {
+      if (!alive || !panel.isConnected || !panel.matches(":popover-open")) return;
+      const restore = restoreFocus; restoreFocus = null; restore?.();
+    });
+    onCleanup(() => { alive = false; });
+  });
   const [scroll, setScroll] = createSignal(null), [active, setActive] = createSignal(0), [columns, setColumns] = createSignal(3);
   const [pendingFocus, setPendingFocus] = createSignal(null);
   const [direction, setDirection] = createSignal(1), [aheadRows, setAheadRows] = createSignal(0);
@@ -101,9 +121,9 @@ function InputOptions(props) {
   createEffect(() => { filtered(); setPendingFocus(null); setActive(0); lastOffset = 0; setDirection(1); virtualizer.scrollToOffset(0); });
   createEffect(() => {
     const index = pendingFocus();
-    if (index == null || !virtualizer.getVirtualItems().some(row => row.index === Math.floor(index / columns()))) return;
+    if (!placed() || index == null || !virtualizer.getVirtualItems().some(row => row.index === Math.floor(index / columns()))) return;
     queueMicrotask(() => {
-      if (pendingFocus() !== index || !panel?.isConnected) return;
+      if (!placed() || pendingFocus() !== index || !panel?.isConnected) return;
       const option = panel.querySelector(`#${props.id}-option-${index}`);
       if (option) { option.focus({ preventScroll: true }); setPendingFocus(null); }
     });
@@ -134,9 +154,8 @@ function InputOptions(props) {
       // Retain intrinsic geometry/rows across the blocking decision. Readiness
       // gates interaction until the next placement frame, not widget identity.
       suspend() { setPlaced(false); if (panel.matches(":popover-open")) panel.hidePopover(); setScroll(null); },
-      resume() { if (!panel.matches(":popover-open")) panel.showPopover(); setScroll(scrollElement); },
+      resume() { if (!panel.matches(":popover-open")) panel.showPopover(); },
     }));
-    search.focus({ preventScroll: true });
   });
   const move = event => {
     if (event.target.closest?.(".vz-thumbnail-retry")) return;
@@ -155,18 +174,20 @@ function InputOptions(props) {
     }
   };
   return <div ref={panel} id={props.id} popover="manual" class="vz-input-popover"
+    classList={{ "is-placed": placed() }} inert={!placed()}
     data-side={placement()?.side}
     style={{ "--vz-input-tile-size": `${TILE_SIZE}px`, "--vz-input-gap": `${GAP}px`,
       left: `${placement()?.left ?? 0}px`, top: `${placement()?.top ?? 0}px`,
       width: placement() ? `${placement().width}px` : undefined,
       height: placement() ? `${placement().height}px` : undefined,
       "max-height": placement() ? `${placement().maxHeight}px` : undefined,
-      "min-height": placement() ? `${placement().minHeight}px` : undefined,
-      opacity: placed() ? 1 : 0, "pointer-events": placed() ? "auto" : "none" }} onKeyDown={move}>
-    <input ref={search} type="search" role="combobox" aria-expanded="true" aria-autocomplete="list" aria-controls={`${props.id}-list`}
+      "min-height": placement() ? `${placement().minHeight}px` : undefined }} onKeyDown={move}>
+    <TextField ref={search} type="search" role="combobox" aria-expanded="true" aria-autocomplete="list" aria-controls={`${props.id}-list`}
       aria-activedescendant={placement() && filtered().length ? `${props.id}-option-${active()}` : undefined}
       class="vz-input-search" placeholder="Search inputs…" aria-label="Search ComfyUI inputs"
-      {...focusMemory(props.rememberFocus)} value={props.query()} onInput={e => props.onQuery(e.currentTarget.value)} />
+      {...focusMemory(rememberFocus)} value={props.query()} onInput={e => props.onQuery(e.currentTarget.value)}
+      trailing={<Show when={props.query()}><IconButton chrome size="md" variant="plain vz-search-clear" title="Clear search"
+        icon={iconSvg("x")} onAction={() => { props.onQuery(""); search.focus(); }} /></Show>} />
     <div class="vz-input-list" id={`${props.id}-list`} ref={scrollElement} role="listbox" aria-label="ComfyUI inputs" aria-multiselectable="true"
       onScroll={event => {
         const offset = event.currentTarget.scrollTop;
@@ -178,12 +199,12 @@ function InputOptions(props) {
           <div class="vz-input-row" role="presentation" style={{ transform: `translateY(${virtual.start}px)` }}>
             <For each={rows()[virtual.index]}>{(name, offset) => {
               const index = () => virtual.index * columns() + offset();
-              const memory = focusMemory(props.rememberFocus);
+              const memory = focusMemory(rememberFocus);
               // Admission class belongs to this keyed native lifetime, even
               // when a preloaded background tile scrolls into view.
               const priority = virtual.index < virtualizer.range.startIndex - OVERSCAN_ROWS || virtual.index > virtualizer.range.endIndex + OVERSCAN_ROWS ? "background" : "foreground";
               return <Thumbnail class="vz-input-tile" name={name} src={props.thumbnail(name)} register={props.registerThumbnail}
-                priority={priority} rememberFocus={props.rememberFocus} surface={picture => <button type="button" role="option" tabindex="-1" id={`${props.id}-option-${index()}`}
+                priority={priority} rememberFocus={rememberFocus} surface={picture => <button type="button" role="option" tabindex="-1" id={`${props.id}-option-${index()}`}
                 aria-label={name} title={name} aria-selected={props.selected(name)} data-input-name={name}
                 class={"vz-input-option" + (active() === index() ? " vz-input-active" : "")}
                 {...memory} onFocus={event => { setActive(index()); memory.onFocus(event); }}

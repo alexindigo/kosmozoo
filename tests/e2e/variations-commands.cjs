@@ -2,7 +2,7 @@
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const { workPath } = require('./paths.cjs');
-const { discardRecipe } = require('./recipe-helpers.cjs');
+const { freshRecipe } = require('./recipe-helpers.cjs');
 const fileControl = '.vz-imgrow:not(.vz-enumrow):not(.vz-textrow) .checkbox';
 const fileSetup = async (cdp) => {
   await cdp.poll(`!!document.querySelector(${JSON.stringify(fileControl)})`);
@@ -63,10 +63,10 @@ async function verifyFileReadiness({ cdp, KZ, check }) {
 
 module.exports = async ({ cdp, check, FAKE, KZ }) => {
   const invoke = (id, args = {}) => cdp.evaluate(`(async()=>${KZ}.handles.invoke(${JSON.stringify(id)},${JSON.stringify(args)}))()`);
-  const open = async (file = 'flux-basic.png') => {
+  const open = async (file = 'flux-basic.png', fresh = true) => {
     await invoke('variations.open', { id: `fake:${file}` });
     await cdp.poll(`document.querySelectorAll('.vz-slider-row').length>0`);
-    await discardRecipe(cdp);
+    if (fresh) await freshRecipe(cdp);
   };
   const requestClose = () => cdp.evaluate(`(async()=>{window.__leave=${KZ}.handles.invoke('variations.close');return true})()`);
   const discard = async () => {
@@ -235,8 +235,11 @@ module.exports = async ({ cdp, check, FAKE, KZ }) => {
   });
 
   await test('blocking decision outranks underlying popup; Escape cancels only the decision', async () => {
+    // A clean close precedes the mount-private underlying popup setup.
+    await open(); await discard();
     await invoke('workbench.openPair',{left:{source:'fake',file:'flux-basic.png'},right:{source:'fake',file:'flux-lora.png'}});
-    await open(); await type('.vz-prefix','popup-guard');
+    await invoke('workbench.mode',{mode:'two-up'});
+    await open('flux-basic.png', false); await type('.vz-prefix','popup-guard');
     await invoke('workbench.popup.toggle',{control:'active'});
     await cdp.poll(`!!document.querySelector('.dz-vpop')`);
     await requestClose(); await cdp.keyTrusted('Escape',{vk:27});

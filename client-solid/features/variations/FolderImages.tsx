@@ -3,6 +3,7 @@ import { focusMemory } from "./draft.js";
 import { IconButton } from "../../components/IconButton.js";
 import { iconSvg } from "/js/icons.mjs";
 import { SingleLineText } from "../../components/SingleLineText.js";
+import { TextField } from "../../components/TextField.js";
 
 // Presentation-only acquisition form; the private editor owns listing acceptance
 // and selection. Unadded path text never becomes a second image-set field.
@@ -38,15 +39,18 @@ export function FolderImages(props) {
   return <div class="vz-folder">
     <label for={id}>Folder on the engine computer</label>
     <div class="vz-folder-controls">
-      <input id={id} class="vz-folder-path" type="text" aria-describedby={message() ? `${id}-message` : undefined} placeholder="/path/to/folder" value={path()} title="Includes subfolders. Maximum 500 images per folder import."
+      <TextField id={id} class="vz-folder-path" type="text" aria-describedby={message() ? `${id}-message` : undefined} placeholder="/path/to/folder" value={path()} title="Includes subfolders. Maximum 500 images per folder import."
         {...focusMemory(props.rememberFocus)} onInput={e => { revision++; setPath(e.currentTarget.value); }}
         onKeyDown={e => { if (e.key === "Enter") { e.preventDefault(); add(); } }} />
-      <span class="vz-folder-chooser" title={props.capability()?.available ? "Choose folder…" : "Folder chooser needs the desktop app"}>
-        <IconButton chrome variant="neutral" icon={iconSvg("folder", 16)}
-          title={!props.capability()?.available ? "Folder chooser needs the desktop app" : choosing() ? "Choosing folder…" : "Choose folder…"}
-          disabled={!props.capability()?.available || busy() || choosing()} onAction={choose} />
+      <Show when={!busy() && !choosing()} fallback={<SingleLineText class="vz-field-help" role="status" value="Reading folder…" />}>
+      <Show when={props.capability()?.available}>
+      <span class="vz-folder-chooser">
+        <IconButton chrome size="md" variant="neutral" icon={iconSvg("folder")}
+          title="Choose folder…" onAction={choose} />
       </span>
-      <button type="button" class="vz-image-action vz-folder-add" disabled={busy() || choosing() || !path()} onClick={add}><SingleLineText value={busy() ? "Reading…" : "Add folder"} /></button>
+      </Show>
+      <Show when={path()}><button type="button" class="vz-image-action vz-folder-add" onClick={add}><SingleLineText value="Add folder" /></button></Show>
+      </Show>
     </div>
     <Show when={message()}><span class="vz-image-error" id={`${id}-message`} role="status">{message()}</span></Show>
   </div>;

@@ -31,6 +31,14 @@ export function validEntryName(addr, name) {
 
 export const createBindingFor = (addr, options) => backingFor(addr).createBinding(addr, options);
 
+// The context injects its lifetime-bound transport once for every Comfy I/O
+// path: routes, ingestion, feature writes and address-owned monitors alike.
+export function withTransport(fetcher) {
+  const driver = comfy.createDriver(fetcher);
+  const select = addr => isFolderHost(addr) ? folder : driver;
+  return { backingFor: select, createBindingFor: (addr, options) => select(addr).createBinding(addr, options) };
+}
+
 export function makeCollectionLifecycle(hosts) {
   const members = new Map(); let stopped = false;
   const reconcile = () => {

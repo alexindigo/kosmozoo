@@ -205,15 +205,27 @@ class CDP {
   // trusted click on an element's center (I7: real input events, not
   // synthetic dispatchEvent — controls see exactly what a user produces)
   async clickAt(selector) {
-    const box = await this.evaluate(`(() => {
+    const box = await this.evaluate(`(async () => {
       const el = document.querySelector(${JSON.stringify(selector)});
       if (!el) return null;
       // a trusted click lands at viewport coordinates — scroll the target
       // into view first (rows below a scroll container's fold have rects
       // outside the clickable area)
       el.scrollIntoView({ block: "center", inline: "nearest" });
-      const r = el.getBoundingClientRect();
-      return { x: r.left + r.width / 2, y: r.top + r.height / 2 };
+      // Scrolling can schedule popup placement on the next rendering frame.
+      // Read the settled box, not coordinates invalidated by that very scroll.
+      // Two consecutive rendering frames must agree before we press.
+      const deadline = performance.now() + 10000;
+      let previous = null;
+      for (;;) {
+        await new Promise(requestAnimationFrame);
+        if (!el.isConnected) throw new Error("clickAt: target retired before placement");
+        const r = el.getBoundingClientRect(), x = r.left + r.width / 2, y = r.top + r.height / 2;
+        if (r.width > 0 && r.height > 0 && previous &&
+            ["left", "top", "width", "height"].every(key => r[key] === previous[key])) return { x, y };
+        if (performance.now() > deadline) throw new Error("clickAt: target geometry did not settle " + JSON.stringify({selector:${JSON.stringify(selector)},box:r.toJSON()}));
+        previous = r;
+      }
     })()`);
     if (!box) throw new Error("clickAt: no element for " + selector);
     await this.mouse("mousePressed", box.x, box.y, { clickCount: 1, buttons: 1 });

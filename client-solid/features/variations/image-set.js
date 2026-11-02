@@ -8,5 +8,10 @@ export const validImageSet = items => Array.isArray(items) && items.every(item =
     item.kind === "server-path" && typeof item.path === "string" && item.path.startsWith("/") && !/[\x00-\x1f\x7f]/.test(item.path) &&
     item.path.split("/").slice(1).every(part => part && part !== "." && part !== "..") && item.path.split("/").at(-1) === item.name)) &&
   items.every((item, index) => !items.slice(0, index).some(other => sameImage(item, other)));
-export const mergeImages = (items, additions) => additions.reduce((set, item) => set.some(other => sameImage(item, other)) ? set : [...set, item], [...items]);
+export function mergeImages(items, additions, index = items.length) {
+  const next = [...items], accepted = [];
+  for (const item of additions) if (![...items, ...accepted].some(other => sameImage(item, other))) accepted.push(item);
+  next.splice(Math.max(0, Math.min(items.length, index)), 0, ...accepted);
+  return next;
+}
 export const uploadImage = file => ({ kind: "upload", name: file.name, file });

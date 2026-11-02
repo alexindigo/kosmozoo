@@ -4,7 +4,7 @@ import { editorRig } from "./helpers/variation-editor.mjs";
 Deno.test("summary: the shared tuple kernel explains every factor and excludes only the unchanged tuple", () => {
   const { editor } = editorRig();
   try {
-    editor.range("n.denoise", { min: .85, max: 1 });
+    editor.range("n.denoise", { min: "0.85", max: "1" });
     editor.edit("images", "image.image", "enabled", true);
     editor.addImages("image.image", ["origin.png", "next.png", "third.png"].map(name => ({ kind: "input", name })));
     const summary = editor.preview();
@@ -25,7 +25,7 @@ Deno.test("summary: invalid raw Step and reversed bounds remain editable without
     assertEquals(summary.status, "invalid"); assertEquals(summary.n, null); assertEquals(summary.exact, false);
     assert(summary.message.includes("Step")); assertEquals(editor.rows("numeric")["n.denoise"].rawIncrement, "1e");
     editor.edit("numeric", "n.denoise", "rawIncrement", ".05");
-    editor.range("n.denoise", { min: 1, max: .5 });
+    editor.range("n.denoise", { min: "1", max: "0.5" });
     summary = editor.preview(); assertEquals(summary.status, "invalid"); assertEquals(summary.n, null);
   } finally { editor.dispose(); }
 });
@@ -53,7 +53,7 @@ Deno.test("summary: pending image evidence is checking; unsafe numeric products 
     release(); await editor.inspectImages(); assertEquals(editor.preview().status, "ready");
     editor.edit("images", "image.image", "enabled", false);
     for (const id of ["n.denoise", "n.steps"]) {
-      editor.edit("numeric", id, "enabled", true); editor.range(id, { min: 0, max: 1e9 });
+      editor.edit("numeric", id, "enabled", true); editor.range(id, { min: "0", max: "1e9" });
       editor.edit("numeric", id, "rawIncrement", "1");
     }
     const summary = editor.preview(); assertEquals(summary.exact, false);

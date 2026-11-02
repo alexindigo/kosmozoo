@@ -31,6 +31,10 @@
   --chrome-h: 37px;              /* header strip height — bulk bar anchors to it */
   --backdrop: rgba(0,0,0,.6);    /* the one modal backdrop tone */
   --dropdown-gap: 8px;           /* dropdown/flash offset from its anchor */
+  --control-height-sm: 24px;
+  --control-height-md: 28px;
+  --control-height-viewer: 26px;
+  --control-height-lg: 48px;
   /* page-level layer scale : chrome < dropdown < overlay < modal <
  confirm < status. Component-local stacking stays plain integers. */
   --z-chrome: 10; --z-dropdown: 20; --z-overlay: 30;
@@ -65,9 +69,9 @@ body.resizing { cursor: col-resize; user-select: none; }
 #chrome h1 { font-size: 15px; margin: 0 4px 0 2px; font-weight: 600; }
 #chrome img.logo { border-radius: 6px; }
 #chrome .flexspacer { flex: 1; }
-#chrome select, #chrome input { background: var(--lifted); color: var(--foreground);
+#chrome select:not(.select-native) { background: var(--lifted); color: var(--foreground);
   border: 1px solid var(--border-strong); border-radius: 4px; padding: 3px 6px; }
-#chrome button { background: var(--lifted); color: var(--foreground); border: 1px solid var(--border-strong);
+#chrome button:not(.icon-button) { background: var(--lifted); color: var(--foreground); border: 1px solid var(--border-strong);
   border-radius: 4px; padding: 2px 9px; cursor: pointer; font-size: 13px; }
 #chrome button:hover { border-color: var(--foreground-dim) }
 #chrome .btn { text-decoration: none; display: inline-block; background: var(--lifted);
@@ -101,10 +105,7 @@ body.resizing { cursor: col-resize; user-select: none; }
 .hostpick .rm:hover { color: var(--negative); }
 .haddrow { display: flex; gap: 6px; margin-top: 4px;
   border-top: 1px solid var(--border); padding-top: 8px; }
-.haddrow input { min-width: 0; flex: 1; background: var(--background); color: var(--foreground);
-  border: 1px solid var(--border); border-radius: 6px; padding: 5px 7px;
-  font: 11px ui-monospace, monospace; }
-.haddrow input:focus { outline: none; border-color: var(--secondary); }
+.haddrow input { min-width: 0; flex: 1; }
 .haddrow button { font-size: 11px; padding: 4px 8px; }
 
 /* --- bulk bar: fixed under the header while images are selected ---------- */
@@ -326,10 +327,10 @@ main { display: flex; flex: 1; min-height: 0; }
   transform: translateY(-50%); color: var(--positive); font-size: 11px;
   opacity: 0; transition: opacity .3s; white-space: nowrap; pointer-events: none; }
 .saved.show { opacity: 1; }
-.votebtn, .savebtn { flex: 0 0 auto; padding: 2px 8px; font-size: 11px;
+.votebtn, .savebtn { flex: 0 0 auto; font-size: 11px;
   background: var(--lifted); color: var(--foreground-dim); border: 1px solid var(--border);
   border-radius: 4px; cursor: pointer; }
-.votebtn svg { vertical-align: -1px; }
+.savebtn { padding: 2px 8px; }
 .votebtn:hover, .savebtn:hover { border-color: var(--foreground-dim); color: var(--foreground-mid); }
 /* one pattern for every action button under the image: the button
  contributes ONLY an accent token. Base color is the muted accent,
@@ -348,9 +349,8 @@ main { display: flex; flex: 1; min-height: 0; }
 /* Shared playback variants: hierarchy belongs to the button library, not to
    any one player surface. Secondary media controls use the default variant. */
 .votebtn.play { --btn-c: var(--primary); color: var(--foreground-bright);
-  background: color-mix(in srgb, var(--primary) 24%, var(--lifted));
-  display: grid; place-items: center; padding: 4px 8px; }
-.votebtn.prominent { width: 48px; height: 48px; padding: 0; border-radius: 50%; }
+  background: color-mix(in srgb, var(--primary) 24%, var(--lifted)); }
+.votebtn.prominent { border-radius: 50%; }
 .votebtn:focus-visible { outline: 2px solid var(--secondary); outline-offset: 2px; }
 
 /* Keep actions reachable on a narrow feed: a separate wrapping row, mirrored
@@ -358,7 +358,6 @@ main { display: flex; flex: 1; min-height: 0; }
 @container (max-width: 420px) {
   .ctitle { flex-direction: column; align-items: stretch; }
   .ctitle .btnwrap { flex-wrap: wrap; justify-content: flex-end; white-space: normal; }
-  .ctitle .votebtn { padding-inline: 4px; }
 }
 
 /* the notes pair row: negatives left, positives right */
@@ -382,14 +381,7 @@ main { display: flex; flex: 1; min-height: 0; }
 
 /* notes row: negatives red-bordered, positives green-bordered */
 .boxcol { display: flex; flex-direction: column; gap: 4px; }
-.boxcol textarea { width: 100%; min-height: 44px; resize: vertical;
-  background: var(--background); border: 1px solid var(--border); border-radius: 6px;
-  color: var(--foreground); font: inherit; padding: 6px 8px; }
-.boxcol textarea.neg { border-color: var(--negative); }
-.boxcol textarea.pos { border-color: var(--positive); }
-.boxcol textarea:focus { outline: none; }
-.boxcol textarea.neg:focus { border-color: var(--negative); }
-.boxcol textarea.pos:focus { border-color: var(--secondary); }
+.boxcol textarea { width: 100%; }
 .btnrow { display: flex; gap: 6px; }
 .btnrow button { flex: 1; padding: 2px 4px; font-size: 11px; color: var(--foreground-dim);
   background: none; border: 1px solid var(--lifted); border-radius: 4px; cursor: pointer; }
@@ -406,9 +398,7 @@ main { display: flex; flex: 1; min-height: 0; }
   background: var(--focused-background); border: 1px solid var(--border); border-radius: 8px;
   padding: 10px; min-width: 300px; display: flex; flex-direction: column;
   gap: 8px; }
-#menuSearch { background: var(--background); color: var(--foreground); border: 1px solid var(--border);
-  border-radius: 6px; padding: 5px 8px; font-size: 12px; width: 100%; }
-#menuSearch:focus { outline: none; border-color: var(--secondary); }
+#menuSearch { width: 100%; }
 #menuRows { display: flex; flex-direction: column; gap: 8px; }
 .menurow { display: flex; align-items: center; gap: 8px; font-size: 13px; }
 .menulabel { color: var(--foreground-dim); font-size: 11px; }
@@ -505,9 +495,7 @@ body:has(#diff:not([hidden])) #statusCol { bottom: 56px; }
 #keysPanelHead { display: flex; gap: 10px; align-items: center;
   padding: 12px 16px; border-bottom: 1px solid var(--lifted); }
 #keysPanelHead h2 { margin: 0; font-size: 14px; flex: 0 0 auto; }
-#keysSearch { flex: 1; background: var(--background); color: var(--foreground); border: 1px solid var(--border);
-  border-radius: 6px; padding: 5px 8px; font-size: 12px; }
-#keysSearch:focus { outline: none; border-color: var(--secondary); }
+#keysSearch { flex: 1; }
 #keysReset { background: var(--lifted); color: var(--foreground); border: 1px solid var(--border-strong);
   border-radius: 4px; padding: 3px 8px; font-size: 11px; cursor: pointer; }
 #keysList { overflow-y: auto; padding: 8px 16px; }
@@ -557,29 +545,31 @@ body:has(#diff:not([hidden])) #statusCol { bottom: 56px; }
  NEVER upscaled (a small photo renders at natural size with margins) */
 .dz-img { object-fit: contain;
   user-select: none; -webkit-user-drag: none; }
-/* the ACTIVE column's photo fades by --active-op (Split: the top layer
- lets the bottom show through; Two-Up/One-Up: against the stage) */
-#diffStage[data-col="feed"] .dz-a .dz-img,
-#diffStage[data-col="right"] .dz-b .dz-img { opacity: var(--active-op, 1); }
+/* The subject's photo fades by --active-op, independently of placement. */
+#diffStage .dz-cell[data-active="true"] .dz-img { opacity: var(--active-op, 1); }
 
-/* Two-Up (1): both cells share the row; the ACTIVE column is the left one */
+/* Placement comes from the viewer model, never the active subject. */
+#diff [data-position="left"] { order: 0; }
+#diff [data-position="right"] { order: 1; }
+#diffStage .dz-cell[data-shown="false"] { display: none; }
+
+/* Two-Up (1): both cells share the row in placement order. */
 #diffStage[data-mode="two-up"] { flex-direction: row; }
-#diffStage[data-mode="two-up"][data-col="right"] { flex-direction: row-reverse; }
 
 /* One-Up (2): both layers stacked full stage — the ACTIVE layer on top.
  At full opacity it covers the other (a single image, as before); faded by
  --active-op the other one shows through behind it */
 #diffStage[data-mode="one-up"] .dz-cell { position: absolute; inset: 0; }
-#diffStage[data-mode="one-up"][data-col="feed"] .dz-a { z-index: 1; }
-#diffStage[data-mode="one-up"][data-col="right"] .dz-b { z-index: 1; }
+#diffStage .dz-cell[data-front="true"] { z-index: 1; }
 
-/* Split (3): layers stacked on the shared registration; the ACTIVE cell is
- the top (clipped) layer — a percentage of the stage, one var */
+/* Split (3): complementary regions of the same registration. Fading either
+ image exposes the stage, never the other image on the wrong side. */
 #diffStage[data-mode="split"] .dz-cell { position: absolute; inset: 0; }
-#diffStage[data-mode="split"][data-col="feed"] .dz-a,
-#diffStage[data-mode="split"][data-col="right"] .dz-b {
+#diffStage .dz-cell[data-clip="left"] {
+  clip-path: inset(0 calc((1 - var(--split, 0.5)) * 100%) 0 0);
+}
+#diffStage .dz-cell[data-clip="right"] {
   clip-path: inset(0 0 0 calc(var(--split, 0.5) * 100%));
-  z-index: 1;
 }
 .dz-wipe { position: absolute; top: 0; bottom: 0;
   left: calc(var(--split, 0.5) * 100%); width: 14px; translate: -50% 0;
@@ -589,10 +579,6 @@ body:has(#diff:not([hidden])) #statusCol { bottom: 56px; }
 
 /* Difference (4): the mask canvas, fitted like an image layer; the photo
  layers stay mounted out of view */
-#diffStage[data-mode="difference"] .dz-a,
-#diffStage[data-mode="difference"] .dz-b { display: none; }
-/* Full displays the viewer's subject, without moving identities between slots. */
-#diffStage[data-mode="full"][data-col="right"] .dz-a { display: none; }
 .dz-canvas-cell { position: absolute; inset: 0; }
 .dz-canvas { max-width: 100%; max-height: 100%; object-fit: contain; }
 /* icon button + its vertical slider popup (Kaleidoscope idiom): the popup
@@ -636,9 +622,10 @@ body:has(#diff:not([hidden])) #statusCol { bottom: 56px; }
 .viewer-group { display: flex; gap: 2px; align-items: center; padding: 3px;
   background: color-mix(in srgb, var(--surface) 75%, transparent);
   border: 1px solid var(--border); border-radius: 999px; }
-.viewer-btn { display: flex; flex: 0 0 auto; align-items: center; justify-content: center;
-  width: 30px; height: 26px; padding: 0; border: none; border-radius: 999px;
+.viewer-btn { border: none; border-radius: 999px;
   background: transparent; color: var(--foreground-dim); cursor: pointer; }
+.viewer-btn:not(.icon-button) { display: grid; place-items: center; flex: 0 0 auto;
+  width: 30px; height: var(--control-height-viewer); padding: 0; }
 .viewer-btn:where(:hover:not(:disabled)) { color: var(--foreground); }
 .viewer-btn.on, .viewer-btn[aria-pressed="true"] { background: var(--secondary); color: var(--black); }
 .viewer-btn:disabled { opacity: 0.35; cursor: default; }
@@ -687,11 +674,7 @@ body:has(#diff:not([hidden])) #statusCol { bottom: 56px; }
 .vz-enum-body { flex-direction: column; }
 .vz-enum-filter-line { display: flex; align-items: center; gap: 8px; }
 .vz-enum-filter-line .vz-enum-filter { flex: 1; min-width: 0; }
-.vz-enum-selected { flex: 0 0 auto; color: var(--foreground-mid); font-variant-numeric: tabular-nums; }
-.vz-enum-filter { background: var(--background); color: var(--foreground);
-  border: 1px solid var(--border-strong); border-radius: 4px; font-size: 12px;
-  padding: 3px 6px; }
-.vz-enum-filter:focus { outline: none; border-color: var(--secondary); }
+.vz-enum-selected { flex: 0 0 auto; color: var(--foreground); font-variant-numeric: tabular-nums; }
 .vz-enum-list { --vz-option-row: 20px; display: grid; grid-template-columns: minmax(0, 1fr);
   grid-auto-rows: var(--vz-option-row); gap: 2px;
   max-height: calc(8 * var(--vz-option-row) + 7 * 2px); overflow-y: auto; }
@@ -704,23 +687,15 @@ body:has(#diff:not([hidden])) #statusCol { bottom: 56px; }
 .vz-enum-current .vz-enum-opt-name { color: var(--attention); }
 
 /* Text is a literal template; line breaks never separate alternatives. */
-.vz-text-values { background: var(--background); color: var(--foreground);
-  border: 1px solid var(--border-strong); border-radius: 4px; font-size: 12px;
-  padding: 4px 6px; font-family: ui-monospace, monospace;
-  line-height: 18px; width: 100%; box-sizing: border-box;
-  resize: none; min-height: calc(1lh + 10px); max-height: calc(8lh + 10px); overflow-y: auto; }
-.vz-text-values:focus { outline: none; border-color: var(--secondary); }
+.vz-text-values { width: 100%;
+   min-height: calc(1lh + 10px); max-height: calc(8lh + 10px); overflow-y: auto; }
 
 /* {{label}} substitution inputs: one row per label detected in the text */
 .vz-tpl-row { display: flex; align-items: center; gap: 8px; }
-.vz-tpl-label { color: var(--foreground-dim); font-size: 11px;
+.vz-tpl-label { color: var(--foreground); font-size: 11px;
   font-family: ui-monospace, monospace; flex: 0 0 auto;
   max-width: 40%; }
-.vz-tpl-input { flex: 1; background: var(--background);
-  color: var(--foreground); border: 1px solid var(--border-strong);
-  border-radius: 4px; font-size: 12px; padding: 3px 6px;
-  font-family: ui-monospace, monospace; }
-.vz-tpl-input:focus { outline: none; border-color: var(--secondary); }
+.vz-tpl-input { flex: 1; }
 
 .vz-label { color: var(--foreground); font-size: 13px; font-weight: 400;
   cursor: pointer; align-self: flex-start; }
@@ -756,12 +731,13 @@ body:has(#diff:not([hidden])) #statusCol { bottom: 56px; }
 .vz-lane-track .noUi-connects { display: flex; align-items: center; }
 .vz-lane-track .noUi-connect {
   background: var(--secondary); height: 3px; top: auto; border-radius: 1px; }
-/* Keep the full-width origin for the library's horizontal translation math;
-   its flex lane aligns the thumb vertically without another offset formula. */
-.vz-lane-track .noUi-origin { height: 100%; display: flex; align-items: center; justify-content: flex-end; }
+/* Origins are full-width positioning lanes, never hit targets. Otherwise the
+   higher-stacked lane covers its sibling thumb on the same half of the rail.
+   Only each handle accepts pointer input; the connect retains its own drag area. */
+.vz-lane-track .noUi-origin { height: 100%; display: flex; align-items: center; justify-content: flex-end; pointer-events: none; }
 .vz-lane-track .noUi-handle { position: relative; flex: 0 0 auto; width: var(--thumb-w); height: var(--thumb-w);
   border-radius: 50%; background: var(--secondary); border: 2px solid var(--background);
-  cursor: pointer; box-shadow: none;
+  cursor: pointer; box-shadow: none; pointer-events: auto;
   /* right offset is half the handle width so the handle's CENTER sits on the
  value point (the vendored default -17px assumes the library's 34px
  handle and would push our center 10px right of it) */
@@ -787,19 +763,7 @@ body:has(#diff:not([hidden])) #statusCol { bottom: 56px; }
 .vz-row-inc { display: flex; align-items: center; gap: 4px;
   flex: 0 0 auto;
   align-self: center; }
-.vz-row-inc .vz-step-btn { background: transparent; color: var(--foreground-mid);
-  border: 1px solid var(--foreground-dim); border-radius: 4px;
-  width: 20px; height: 22px; font-size: 14px; cursor: pointer;
-  padding: 0; line-height: 1;
-  display: flex; align-items: center; justify-content: center; }
-.vz-row-inc .vz-step-btn:hover:not(:disabled) { color: var(--foreground); border-color: var(--foreground); }
-.vz-row-inc .vz-step-btn:disabled { opacity: 0.4; cursor: default; }
-.vz-row-inc-input { width: 56px; background: var(--background); color: var(--foreground);
-  border: 1px solid var(--foreground-dim); border-radius: 4px; padding: 2px 4px;
-  font-size: 11px; text-align: center;
-  font-family: ui-monospace, monospace; }
-.vz-row-inc-input:focus { outline: none; border-color: var(--secondary); }
-.vz-row-inc-input:disabled { opacity: 0.5; }
+.vz-row-inc-input { width: 56px; text-align: center; }
 
 /* node-referenced images (LoadImage-style) rendered inline in the info panel */
 .infoimg { margin-top: 10px; }
@@ -910,26 +874,18 @@ body:has(#diff:not([hidden])) #statusCol { bottom: 56px; }
 .vz-count.vz-count-hot { color: var(--negative); }
 /* batch breakdown under the big total: "<variants> variants × <N> images" */
 .vz-count-sub { font-size: 11px; color: var(--foreground-mid); margin-top: 2px; }
-.vz-tinput { background: var(--background); color: var(--foreground);
-  border: 1px solid var(--foreground-dim); border-radius: 6px; padding: 4px 8px;
-  font-size: 12px; margin-top: 2px;
-  font-family: ui-monospace, monospace; }
-.vz-tinput:focus { outline: none; border-color: var(--secondary); }
+.vz-tinput { margin-top: 2px; }
 /* Run occupies the sidebar's final grid row. Fills the column width for a
    solid primary-action target independent of message length. */
 .vz-run { background: var(--primary); color: var(--black); border: none;
   border-radius: 8px; padding: 10px 0; font-size: 14px; font-weight: 600;
   cursor: pointer; width: 100%; }
 .vz-run:hover { filter: brightness(1.1); box-shadow: 0 0 0 3px var(--primary-dim); }
-.vz-run:disabled { opacity: 0.5; cursor: default; }
 /* The single bounded message region owns overflow, not individual messages. */
 .vz-error { color: var(--negative); font-size: 11px;
   text-align: center; word-break: break-word; }
 .vz-error.vz-ok { color: var(--positive); }
-.vz-close { position: absolute; top: 10px; right: 12px;
-  background: none; border: none; color: var(--foreground-dim); cursor: pointer;
-  padding: 4px; }
-.vz-close:hover { color: var(--foreground); }
+.vz-close { position: absolute; top: 10px; right: 12px; }
 
 /* The topbar's two sections size from their own content: the feed section
    takes the remaining width, the workspace section keeps its content width.
@@ -946,13 +902,7 @@ body:has(#diff:not([hidden])) #statusCol { bottom: 56px; }
 #chrome #hostPicker { flex: 0 1 auto; min-width: 38px; }
 #chrome #hostBtn { max-width: 100%; }
 #chrome #hostBtn > span:nth-child(2) { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
-#chrome .chrome-icon { display: inline-flex; align-items: center; justify-content: center;
-  flex: 0 0 26px; width: 26px; height: 24px; padding: 0;
-  color: var(--foreground-mid); border-color: var(--border-strong); }
-#chrome .chrome-icon.on { color: var(--secondary); border-color: var(--secondary); }
-#chrome .chrome-icon:hover:not(:disabled) { color: var(--foreground); border-color: var(--foreground-mid); }
-#chrome .chrome-icon:disabled { opacity: .4; cursor: default; }
-#chrome button:focus-visible, #chrome input:focus-visible { outline: 2px solid var(--secondary); outline-offset: 2px; }
+#chrome button:focus-visible { outline: 2px solid var(--secondary); outline-offset: 2px; }
 #chrome .pinned-sources { display: flex; align-items: center; gap: 6px; flex: 1 1 auto;
   min-width: 0; overflow-x: auto; scrollbar-width: none; }
 #chrome .pinned-sources::-webkit-scrollbar { display: none; }
@@ -965,7 +915,7 @@ body:has(#diff:not([hidden])) #statusCol { bottom: 56px; }
 .hostpick.has-new .hname { color: var(--attention); }
 #chrome .feed-filter { display: flex; align-items: center; gap: 6px; min-width: 26px;
   flex: 0 1 auto; max-width: 220px; }
-#chrome .feed-filter input { width: 180px; min-width: 0; flex: 1 1 auto; font: inherit; }
+#chrome .feed-filter input { width: 180px; min-width: 0; flex: 1 1 auto; }
 #chrome .source-progress { flex: 0 0 auto; color: var(--foreground-dim); }
 #chrome .source-progress-base { fill: var(--foreground-dim); }
 #chrome .source-progress-outline { fill: none; stroke: currentColor; stroke-width: 1.5; }
@@ -991,12 +941,11 @@ body:has(#diff:not([hidden])) #statusCol { bottom: 56px; }
   #chrome .chrome-feed-inner { gap: 1px; }
   #chrome h1 { margin: 0; }
   #chrome .logo { width: 20px; height: 20px; }
-  #chrome .chrome-icon { flex-basis: 20px; width: 20px; }
   #chrome #hostPicker { min-width: 24px; flex-basis: 45px; }
   #chrome #hostBtn { padding-inline: 1px; gap: 1px; }
   #chrome #hostBtn .chev { font-size: 12px; }
   #chrome .feed-filter { min-width: min-content; gap: 2px; }
-  #chrome .feed-filter input { width: 0; flex-basis: 120px; padding-inline: 2px; }
+  #chrome .feed-filter input { width: 0; flex-basis: 120px; }
 }
 @media (prefers-reduced-motion: reduce) {
   #chrome .source-progress, #chrome .chrome-icon { transition: none; }
@@ -1005,11 +954,6 @@ body:has(#diff:not([hidden])) #statusCol { bottom: 56px; }
 
 /* Folder scope and pin-group allocation remain inside Header's own split. */
 #chrome .folder-picker { flex: 0 1 150px; min-width: 32px; max-width: 210px; }
-#chrome .folder-picker select { display: block; width: 100%; min-width: 0; box-sizing: border-box;
-  height: 24px; padding: 2px 6px; border: 1px solid var(--border-strong); border-radius: 4px;
-  background: var(--background); color: var(--foreground-mid); font: inherit;
-  overflow: hidden; text-overflow: ellipsis; white-space: nowrap; cursor: pointer; }
-#chrome .folder-picker select:disabled { opacity: .5; cursor: default; }
 #chrome select:focus-visible { outline: 2px solid var(--secondary); outline-offset: 2px; }
 #chrome .pinned-source-group { display: flex; align-items: center; min-width: 0; flex: 1 1 auto; }
 #chrome .pinned-source-group.has-pins { gap: 8px; padding-inline-start: 8px; }
@@ -1017,8 +961,7 @@ body:has(#diff:not([hidden])) #statusCol { bottom: 56px; }
 #chrome .pinned-sources { gap: 4px; }
 @container chrome-feed (max-width: 220px) {
   #chrome .chrome-feed-inner { gap: 0; }
-  #chrome .folder-picker { flex-basis: 50px; min-width: 4px; }
-  #chrome .folder-picker select { padding-inline: 0; }
+  #chrome .folder-picker { flex-basis: 50px; min-width: min-content; }
   #chrome .pinned-source-group.has-pins { gap: 1px; padding-inline-start: 1px; }
 }
 
@@ -1036,9 +979,8 @@ body:has(#diff:not([hidden])) #statusCol { bottom: 56px; }
 .vz-image-tile > .vz-image-same { position: absolute; inset: 0; border-radius: inherit; box-shadow: inset 0 0 0 2px var(--attention); pointer-events: none; }
 .vz-image-remove { position: absolute; top: 4px; right: 4px; opacity: 0; }
 .vz-image-tile:hover .vz-image-remove, .vz-image-tile:focus-within .vz-image-remove { opacity: 1; }
-.vz-image-remove .chrome-icon { border-radius: 50%; background: var(--backdrop); color: var(--foreground-bright); }
 .vz-image-dragging { z-index: 2; cursor: grabbing; box-shadow: 0 8px 24px var(--backdrop); }
-.vz-image-plus { border: 1px dashed var(--border-strong); color: var(--foreground-mid); background: transparent; font: inherit; font-size: 28px; cursor: pointer; }
+.vz-image-plus { border: 1px dashed var(--border-strong); color: var(--foreground); background: transparent; font: inherit; font-size: 28px; cursor: pointer; }
 .vz-image-plus:hover { color: var(--foreground); border-color: var(--foreground-dim); }
 .vz-image-ratio-source { position: absolute; width: 1px; height: 1px; opacity: 0; overflow: hidden; pointer-events: none; }
 .vz-image-check { position: absolute; inset: 0; display: grid; place-items: center; background: var(--backdrop); pointer-events: none; }
@@ -1046,6 +988,9 @@ body:has(#diff:not([hidden])) #statusCol { bottom: 56px; }
 @keyframes vz-image-spin { to { transform: rotate(360deg); } }
 @media (prefers-reduced-motion: reduce) { .vz-image-check::after { animation: none; } }
 .vz-image-inspection-error { position: absolute; inset: auto 0 0; padding: 4px; background: var(--backdrop); }
+.vz-image-drop-gap { min-width: 0; aspect-ratio: var(--vz-image-ratio); border-radius: 4px; }
+.vz-parameter.vz-image-dropping { border-color: var(--secondary); box-shadow: inset 0 0 0 1px var(--secondary); }
+.vz-image-drop-status { display: block; margin-top: 8px; font-size: 11px; }
 .vz-image-error { font-size: 11px; }
 .vz-image-same { color: var(--attention); }
 .vz-image-empty { color: var(--foreground-mid); }
@@ -1056,7 +1001,7 @@ body:has(#diff:not([hidden])) #statusCol { bottom: 56px; }
 .vz-image-folder { width: 100%; min-width: 0; }
 .vz-image-action { background: var(--lifted); color: var(--foreground); border: 1px solid var(--border-strong); border-radius: 4px; padding: 5px 8px; font: inherit; cursor: pointer; }
 .vz-image-action:hover { border-color: var(--foreground-dim); }
-.vz-image-action:focus-visible, .vz-input-search:focus-visible, .vz-input-option:focus-visible { outline: 2px solid var(--secondary); outline-offset: 2px; }
+.vz-image-action:focus-visible, .vz-input-option:focus-visible { outline: 2px solid var(--secondary); outline-offset: 2px; }
 .vz-input-picker { position: relative; }
 .vz-input-popover { position: fixed; inset: auto; position-area: none;
   --vz-input-columns: 3;
@@ -1065,7 +1010,7 @@ body:has(#diff:not([hidden])) #statusCol { bottom: 56px; }
   background: var(--focused-background); color: var(--foreground);
   border: 1px solid var(--border-strong); border-radius: 6px; box-shadow: 0 8px 24px var(--backdrop); }
 .vz-input-popover:popover-open { display: flex; flex-direction: column; gap: 6px; }
-.vz-input-search { flex: 0 0 auto; width: 100%; padding: 6px 8px; background: var(--background); color: var(--foreground); border: 1px solid var(--border); border-radius: 4px; font: inherit; }
+.vz-input-search { width: 100%; }
 .vz-input-list { --vz-input-preferred-height: max(var(--vz-input-tile-size), min(300px, 40vh));
   height: var(--vz-input-preferred-height); max-height: var(--vz-input-preferred-height);
   min-height: 0; flex: 1 1 auto; overflow-y: auto; scrollbar-gutter: stable; }
@@ -1121,8 +1066,7 @@ body:has(#diff:not([hidden])) #statusCol { bottom: 56px; }
 
 .vz-folder { flex: 1 1 250px; display: flex; flex-direction: column; gap: 4px; }
 .vz-folder-controls { display: flex; align-items: center; gap: 4px; }
-.vz-folder-path { flex: 1; width: 100%; padding: 5px 8px; font: inherit; color: var(--foreground); background: var(--background); border: 1px solid var(--border); border-radius: 4px; }
-.vz-folder-path:focus-visible { outline: 2px solid var(--secondary); outline-offset: 2px; }
+.vz-folder-path { flex: 1; width: 100%; }
 .vz-image-action:disabled { opacity: .5; cursor: default; }
 .vz-image-add { align-items: start; }
 
@@ -1135,17 +1079,17 @@ body:has(#diff:not([hidden])) #statusCol { bottom: 56px; }
 :where(.single-line-text) { display: block; min-width: 0; max-width: 100%;
   overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
-/* Recipe recovery joins the scrolling editor; the count uses its natural line. */
+/* The field filter stays above the scrolling rows; count uses its natural line. */
 .vz-count { line-height: normal; }
-.vz-workspace-tools { display: flex; flex-direction: column; gap: 4px; flex: 0 0 auto; }
-.vz-workspace-label { font-size: 12px; color: var(--foreground-mid); }
-.vz-workspace-actions { display: flex; align-items: center; gap: 8px; }
-.vz-workspace-actions select { flex: 1; min-width: 0; }
-.vz-workspace-new { align-self: flex-start; }
+.vz-filter-tools { display: flex; flex: 0 0 auto;
+  position: sticky; top: 0; z-index: 2; background: var(--focused-background); }
+.vz-field-filter.search-control { flex: 1; }
+.vz-field-filter > input { width: 100%; }
+.vz-parameter.vz-filter-hidden { display: none; }
 
 /* Production's card vocabulary, shared by every input kind. Only enabled rows
    mount an editor; the same one-line heading sets all closed-row geometry. */
-.vz-parameter { display: block; flex: 0 0 auto; padding: 10px 12px; background: var(--surface);
+.vz-parameter { display: block; isolation: isolate; flex: 0 0 auto; padding: 10px 12px; background: var(--surface);
   border: 1px solid var(--lifted); border-radius: 8px; opacity: 1; }
 .vz-parameter.on { border-color: var(--secondary); }
 .vz-parameter:not(.on) { opacity: 0.55;
@@ -1153,6 +1097,7 @@ body:has(#diff:not([hidden])) #statusCol { bottom: 56px; }
 .vz-parameter-heading.vz-imgrow-head { display: grid;
   grid-template-columns: 16px minmax(0, 1fr) minmax(0, .8fr);
   gap: 8px; align-items: center; cursor: default; }
+.vz-parameter.vz-off, .vz-parameter.vz-off .vz-parameter-heading { cursor: pointer; }
 .vz-parameter-name { min-width: 0; padding: 0; border: 0; background: transparent; text-align: left; cursor: pointer; }
 .vz-parameter-name .vz-label { font: 400 13px/18px system-ui; }
 .vz-parameter-current.vz-imgrow-cur { margin: 0; max-width: 100%; color: var(--attention);
@@ -1160,26 +1105,20 @@ body:has(#diff:not([hidden])) #statusCol { bottom: 56px; }
 .vz-numeric-editor { display: grid; gap: 8px; margin: 12px 0 0 24px; }
 .vz-editor-current { color: var(--attention); font-variant-numeric: tabular-nums; }
 .vz-numeric-controls { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; min-width: 0; }
-.vz-numeric-mode { flex: 0 0 auto; }
-.vz-numeric-mode .viewer-btn { width: auto; padding: 0 8px; font: 12px/18px system-ui; }
 .vz-range-fields { display: flex; align-items: center; flex: 1; flex-wrap: wrap; gap: 8px; min-width: 0; }
 .vz-range-field { display: flex; align-items: center; gap: 4px; color: var(--foreground-mid); font: 12px/16px system-ui; }
-.vz-range-field > input, .vz-range-field .vz-row-inc-input { width: 58px; min-width: 0; box-sizing: border-box;
-  background: var(--background); color: var(--foreground); border: 1px solid var(--border-strong);
-  border-radius: 4px; padding: 4px; font: 12px/18px ui-monospace, monospace;
+.vz-range-field > input, .vz-range-field .vz-row-inc-input { width: 58px; min-width: 0;
   font-variant-numeric: tabular-nums; text-align: left; }
 .vz-range-field > input[type="number"] { appearance: textfield; }
 .vz-range-field > input::-webkit-inner-spin-button { appearance: none; }
 .vz-range-fields > .vz-range-field:last-child { margin-left: auto; }
 .vz-range-field .vz-row-inc { display: flex; gap: 4px; align-self: stretch; }
-.vz-range-field .vz-step-btn { width: 22px; height: 28px; flex: 0 0 auto; font: 14px/16px system-ui; }
 .vz-field-help { margin: 0; color: var(--foreground-mid); font: 12px/16px system-ui; overflow-wrap: anywhere; }
 .vz-parameter .vz-imgrow-body { padding-left: 24px; }
 .vz-parameter .vz-rangewrap { margin-top: 0; }
-.vz-input-summary { margin: 0; color: var(--foreground-mid); font: 12px/16px system-ui; }
+.vz-input-summary { margin: 0; color: var(--foreground); font: 12px/16px system-ui; }
 .vz-folder { flex-basis: 100%; }
-.vz-root :is(input, textarea, select, button):focus-visible { outline: 2px solid var(--secondary); outline-offset: 2px; }
-.vz-root input[aria-invalid="true"] { border-color: var(--error); }
+.vz-root :is(select, button):focus-visible { outline: 2px solid var(--secondary); outline-offset: 2px; }
 .vz-left { container: variation-fields / inline-size; }
 
 .vz-count-sub { margin: 0; line-height: 16px; overflow-wrap: anywhere; }
@@ -1187,28 +1126,34 @@ body:has(#diff:not([hidden])) #statusCol { bottom: 56px; }
 .vz-naming-group { grid-template-columns: 38px minmax(0, 1fr); align-items: center; }
 .vz-naming-group .vz-rlabel { grid-column: 1 / -1; }
 .vz-naming-group label { color: var(--foreground-mid); margin: 0; }
-.vz-naming-group .vz-tinput { width: 100%; box-sizing: border-box; padding-inline: 4px; }
+.vz-naming-group .vz-tinput { width: 100%; }
+.vz-output-preview { grid-column: 1 / -1; display: grid; gap: 4px; }
+.vz-output-example { color: var(--foreground); }
 .vz-queued { margin: 0 0 8px; font: 13px/18px system-ui; }
 .vz-ok { color: var(--positive); }
 .vz-messages .vz-error { text-align: left; margin: 0; font: 12px/16px system-ui; }
 .vz-messages .vz-neutral { color: var(--foreground-mid); }
 .vz-readiness-error { color: var(--error); margin: 0; font: 12px/16px system-ui; overflow-wrap: anywhere; }
-.boxcol textarea:focus-visible { outline: 2px solid var(--secondary); outline-offset: 2px; }
 .metabody .props { font-family: system-ui; }
 .metabody :is(.info-none, .plabel), .infogroup-head { color: var(--foreground-mid); }
-.vz-workspace, .vz-workspace-new, .vz-workspace-discard { font: inherit; font-size: 11px;
-  color: var(--foreground); background: var(--background); border: 1px solid var(--border-strong);
-  border-radius: 4px; padding: 5px; text-align: left; cursor: pointer; }
-.vz-workspace-discard { color: var(--foreground-mid); background: transparent; }
-.vz-workspace-status { color: var(--warning); font-size: 11px; line-height: 1.4; margin: 4px 0; }
-.vz-workspace:focus-visible, .vz-workspace-new:focus-visible, .vz-workspace-discard:focus-visible {
-  outline: 2px solid var(--secondary); outline-offset: 2px; }
-.vz-retained-values section { border-bottom: 1px solid var(--border); padding-block: 8px; }
-.vz-retained-values h3 { color: var(--foreground); font-size: 13px; margin: 0 0 8px; }
-.vz-retained-values dl { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 3fr); gap: 4px 12px; margin: 0; }
-.vz-retained-values dt { color: var(--foreground-mid); font-size: 12px; }
-.vz-retained-values dd { margin: 0; }
-.vz-retained-values pre { white-space: pre-wrap; overflow-wrap: anywhere; margin: 0; font-size: 12px; }
+
+/* Availability belongs to the owner. Empty slots contain no focusable control,
+   but reserve the same allocation as the available presentation. */
+.media-seek-slot { flex: 1; min-width: 24px; display: grid; align-items: center; }
+.media-seek-slot .media-seek { width: 100%; min-width: 0; margin: 0; }
+.media-time { min-width: 13ch; text-align: center; }
+.confirm-actions { min-height: 28px; align-items: center; }
+.confirm-error { color: var(--negative); font-size: 12px; }
+.vz-run-slot { min-height: 38px; display: grid; text-align: center; }
+.vz-run-slot > .vz-field-help { align-self: center; }
+.vz-folder-controls > .vz-field-help { margin: 0; }
+#diffBar { display: grid; grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr); }
+#diffBar #diffModes { position: static; transform: none; }
+#diffCtl { justify-self: start; }
+.viewer-modes-slot, .viewer-control-slot { min-height: calc(var(--control-height-viewer) + 8px); display: grid; align-items: center; }
+.viewer-control-slot { width: calc(var(--control-height-viewer) + 8px); }
+.viewer-side-slot { width: 38px; }
+.viewer-keys { justify-self: end; margin-left: 0; }
 
 /* Shared native checkbox: the border and transparent gap never change state. */
 .checkbox { -webkit-appearance: none; appearance: none; box-sizing: border-box; position: relative;
@@ -1219,3 +1164,72 @@ body:has(#diff:not([hidden])) #statusCol { bottom: 56px; }
 .checkbox:checked::after { content: ""; position: absolute; inset: 2px; background: var(--attention); }
 .checkbox:focus-visible { outline: 2px solid var(--secondary); outline-offset: 2px; }
 .checkbox:disabled { cursor: default; opacity: 0.55; }
+
+/* Controls own their full allocation; consumers never pad or size their icons. */
+.control-size-sm { --control-size: var(--control-height-sm); --control-icon-size: 16px; }
+.control-size-md { --control-size: var(--control-height-md); --control-icon-size: 16px; }
+.control-size-viewer { --control-size: var(--control-height-viewer); --control-icon-size: 16px; }
+.control-size-lg { --control-size: var(--control-height-lg); --control-icon-size: 28px; }
+.icon-button { display: grid; place-items: center; flex: 0 0 auto;
+  width: var(--control-size); height: var(--control-size); min-width: 0;
+  padding: 0; line-height: 1; }
+.icon-button > svg { display: block; width: var(--control-icon-size); height: var(--control-icon-size); }
+/* The exclusive-mode component owns text allocation; IconButton stays square. */
+.mode-switch { flex: 0 0 auto; }
+.mode-switch > .mode-label { width: auto; padding-inline: 8px; font: 12px/18px system-ui; white-space: nowrap; }
+.chrome-icon { background: var(--lifted); color: var(--foreground-mid); border: 1px solid var(--border-strong);
+  border-radius: 4px; cursor: pointer; }
+.chrome-icon.on { color: var(--secondary); border-color: var(--secondary); }
+.chrome-icon:hover:not(:disabled) { color: var(--foreground); border-color: var(--foreground-mid); }
+.chrome-icon:disabled { opacity: .4; cursor: default; }
+.chrome-icon.plain { background: transparent; border-color: transparent; }
+.chrome-icon.overlay { border-radius: 50%; background: var(--backdrop); color: var(--foreground-bright); }
+.icon-button:focus-visible { outline: 2px solid var(--secondary); outline-offset: 2px; }
+
+/* Native selects and popup triggers share a control-height trailing square. */
+.select-control, .select-trigger, .search-control { display: grid; grid-template-columns: minmax(0, 1fr) var(--control-size);
+  align-items: center; height: var(--control-size); min-width: 0; }
+.select-control { width: 100%; }
+.select-native { grid-area: 1 / 1 / 2 / -1; appearance: none; width: 100%; min-width: 0; height: 100%;
+  padding: 0 8px; padding-inline-end: calc(var(--control-size) + 8px);
+  border: 1px solid var(--border-strong); border-radius: 4px; background: var(--background); color: var(--foreground);
+  font: inherit; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; cursor: pointer; }
+.select-native:disabled { opacity: .5; cursor: default; }
+.chevron-slot { grid-area: 1 / 2; display: grid; place-items: center;
+  width: var(--control-size); height: var(--control-size); pointer-events: none; }
+.chevron-slot > svg { display: block; width: var(--control-icon-size); height: var(--control-icon-size); }
+.select-trigger { padding: 0; border: 0; border-radius: 4px; background: var(--lifted); color: var(--foreground);
+  box-shadow: inset 0 0 0 1px var(--border-strong); font: inherit; cursor: pointer; }
+.select-trigger > .single-line-text { padding-inline-start: 8px; }
+.select-trigger:hover { box-shadow: inset 0 0 0 1px var(--foreground-dim); }
+
+/* Readiness and native decode state use Solid's shared class bindings. Geometry
+   remains inline, owned by the surface that measures it. */
+.vz-input-popover { opacity: 0; pointer-events: none; }
+.vz-input-popover.is-placed { opacity: 1; pointer-events: auto; }
+.vz-thumbnail img { visibility: hidden; }
+.vz-thumbnail img.vz-thumbnail-loaded { visibility: visible; }
+.vz-current-point.vz-current-unavailable { display: none; }
+.search-control { flex: 0 0 auto; }
+.search-control > input { grid-area: 1 / 1 / 2 / -1; }
+.search-control > .icon-button { grid-area: 1 / 2; }
+.text-field-control > input::-webkit-search-cancel-button { appearance: none; display: none; }
+
+/* TextField owns the complete native appearance. Locations only allocate width.
+   The focus border is inside the box, including in clipped scrolling editors. */
+.text-field { min-width: 0; height: var(--control-size); box-sizing: border-box;
+  border: 1px solid var(--border-strong); border-radius: 4px;
+  background: var(--background); color: var(--foreground);
+  font: 12px/18px system-ui, sans-serif; padding: 4px 6px; outline: none; }
+.text-field::placeholder { color: var(--foreground-dim); opacity: 1; }
+.text-field:focus { outline: none; border-color: var(--secondary); }
+.text-field[aria-invalid="true"]:not(:focus) { border-color: var(--error); }
+.text-field-multiline { height: auto; resize: none; }
+.text-field-control > .text-field { height: 100%; padding-inline: 8px;
+  padding-inline-end: calc(var(--control-size) + 8px); }
+/* Feedback preserves its original geometry, typography and tone in every state.
+   Both NoteBox and the feed's size probe select these same variants. */
+.text-field-negative, .text-field-positive { min-height: 44px; resize: vertical;
+  border-radius: 6px; font: 13px/1.4 system-ui, sans-serif; padding: 6px 8px; }
+.text-field-negative, .text-field-negative:focus { border-color: var(--negative); }
+.text-field-positive { border-color: var(--positive); }

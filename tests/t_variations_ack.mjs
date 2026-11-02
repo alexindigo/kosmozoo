@@ -37,13 +37,31 @@ function rig({ source = graph, enqueue, inspect } = {}) {
   }, run: (body) => routes.get("POST/run")(new Request("http://x/run", { method: "POST", body: JSON.stringify(body) })) };
 }
 
-Deno.test("plan preflight: an invalid later permutation rejects the entire plan with zero enqueues", async () => {
+Deno.test("plan preflight: long text tokens are bounded, while graph text remains whole", async () => {
   const r = rig(), body = await r.request();
   body.imageParams["text.text"].values = ["short", "x".repeat(450)];
   body.suffix = "_{text.text}";
   const response = await r.run(body), data = await response.json();
+  assertEquals(response.status, 200); assertEquals(data.submitted, 2); assertEquals(r.jobs.length, 2);
+  assertEquals(r.jobs[1].prompt.text.inputs.text, "x".repeat(450));
+  assert(r.jobs[1].prompt.output.inputs.filename_prefix.endsWith("_" + "x".repeat(19) + "~" + "x".repeat(20)));
+});
+
+Deno.test("plan preflight: literal affixes alone over budget reject with lengths and zero enqueues", async () => {
+  const r = rig(), body = await r.request();
+  body.prefix = "x".repeat(210); body.suffix = "";
+  const response = await r.run(body), data = await response.json();
   assertEquals(response.status, 400); assertEquals(r.jobs.length, 0);
-  assert(data.error.includes("naming"));
+  assert(data.error.includes("Prefix and suffix are 210 bytes; the limit is 200 bytes"));
+});
+
+Deno.test("plan preflight: a later expanded affix overflow rejects every tuple before enqueue", async () => {
+  const r = rig(), body = await r.request();
+  body.imageParams["text.text"].values = ["short", "x".repeat(450)];
+  body.prefix = ""; body.suffix = "{text.text}".repeat(6);
+  const response = await r.run(body), data = await response.json();
+  assertEquals(response.status, 400); assertEquals(r.jobs.length, 0);
+  assert(data.error.includes("Prefix and suffix are 240 bytes; the limit is 200 bytes"));
 });
 
 Deno.test("ack: mutation reports actual assignments, not absent descriptors/carriers", () => {
@@ -176,7 +194,7 @@ Deno.test("ack: consumer rejects incomplete, foreign, duplicate and forged proof
   assertEquals(acknowledgedFields(body, multi), null);
 });
 
-Deno.test("ack: whole-recipe checkpoint retains disabled/dormant/inactive fields and native File identity", async () => {
+Deno.test("ack: successful Run leaves disabled/dormant/inactive raw values and native File identity unchanged until close", async () => {
   const a = new File(["a"], "a.png"), b = new File(["b"], "b.png");
   const { editor, requests } = editorRig();
   editor.edit("numeric", "n.denoise", "rawIncrement", "1e-1");
@@ -188,7 +206,7 @@ Deno.test("ack: whole-recipe checkpoint retains disabled/dormant/inactive fields
   editor.template("text.text", "used", "a; b"); editor.template("text.text", "dormant", "kept");
   editor.edit("naming", "root", "prefix", "v_");
   assertEquals((await editor.run()).status, "submitted");
-  assertEquals(editor.remaining(), []);
+  assert(!editor.dirty());
   assertEquals(editor.rows("numeric")["n.steps"].rawIncrement, "1e");
   assertEquals(editor.rows("texts")["text.text"].tpl.dormant, "kept");
   assertEquals(requests[0].ranges["n.denoise"].increment, .1);

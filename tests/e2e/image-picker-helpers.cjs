@@ -1,4 +1,5 @@
 // Drive the real acquisition surface; no synthetic mode/select compatibility.
+exports.waitForInputPicker = cdp => cdp.poll("!!document.querySelector('.vz-input-popover.is-placed:popover-open:not([inert])')");
 exports.openImageAdd = async (cdp, row = '.vz-image-set') => {
   if (!await cdp.evaluate(`document.querySelector(${JSON.stringify(row + ' .vz-image-plus')}).getAttribute('aria-expanded')==='true'`))
     await cdp.clickAt(row + ' .vz-image-plus');
@@ -11,7 +12,8 @@ exports.openImageFolder = async (cdp, row = '.vz-image-set') => {
 exports.pickInput = async (cdp, name, row = '.vz-image-set') => {
   await exports.openImageAdd(cdp, row);
   await cdp.clickAt(row + ' .vz-input-trigger');
-  await cdp.poll("!!document.querySelector('.vz-input-search')");
+  await exports.waitForInputPicker(cdp);
+  await cdp.poll("document.activeElement.matches('.vz-input-search') && getComputedStyle(document.querySelector('.vz-input-popover')).opacity === '1'");
   await cdp.evaluate("document.querySelector('.vz-input-search').select()");
   await cdp.send('Input.insertText', { text: name });
   const option = '.vz-input-option[data-input-name=' + JSON.stringify(name) + ']';

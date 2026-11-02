@@ -2,6 +2,7 @@
 import { createSignal, createEffect, onCleanup } from "solid-js";
 import { iconSvg } from "/js/icons.mjs";
 import { IconButton } from "./IconButton.js";
+import { TextField } from "./TextField.js";
 
 export function FeedFilter(props) {
   const [expanded, setExpanded] = createSignal(false);
@@ -17,7 +18,7 @@ export function FeedFilter(props) {
   });
   return (
     <div class="feed-filter">
-      <input id="filter" ref={input} hidden={!expanded()} type="search"
+      <TextField size="sm" id="filter" ref={input} hidden={!expanded()} type="search"
         aria-label="Filter filenames" placeholder="filter filenames…" spellcheck={false}
         value={props.value} onInput={(e) => props.onInput(e.target.value)} />
       <IconButton id="filterBtn" chrome variant="filter" buttonRef={(el) => button = el}
