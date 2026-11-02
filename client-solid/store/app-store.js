@@ -460,6 +460,7 @@ export function makeAppStore({ subscribeSources = typeof window !== "undefined" 
   // position, and with sub-card estimate error the viewport-middle pick
   // would hop. Restores keep their snap-quiet but DO track current.
   const [suppressSettleCurrent, setSuppressSettleCurrent] = createSignal(false);
+  let pendingCompensatedTop = null; // the one DOM write, not its settle window
   let feedSettleTimer = 0;
   let pendingFeedSettle = null; // ownership of this debounce, never a preview ID
   let gestureStart = null; // scrollTop at the gesture's origin
@@ -470,6 +471,7 @@ export function makeAppStore({ subscribeSources = typeof window !== "undefined" 
     feedSettleTimer = 0;
     pendingFeedSettle = null;
     gestureStart = null;
+    pendingCompensatedTop = null;
     setSuppressSettleCurrent(false);
     setFeedActivity("settled");
   }
@@ -507,7 +509,11 @@ export function makeAppStore({ subscribeSources = typeof window !== "undefined" 
   }
 
   function publishFeedScroll(top) {
-    if (top !== feedScrollTop() && !suppressSettleCurrent()) setFeedMotionRevision(v => v + 1);
+    const compensated = top === pendingCompensatedTop;
+    // Native events may coalesce compensation and user travel. Only the exact
+    // applied position is non-motion, and a later return to it is new travel.
+    pendingCompensatedTop = null;
+    if (top !== feedScrollTop() && !compensated) setFeedMotionRevision(v => v + 1);
     setFeedScrollTop(top);
   }
 
@@ -558,6 +564,7 @@ export function makeAppStore({ subscribeSources = typeof window !== "undefined" 
       }
       feedSettleTimer = 0;
       pendingFeedSettle = null;
+      pendingCompensatedTop = null;
       setSuppressSettleCurrent(false);
       setFeedActivity("settled");
     });
@@ -584,6 +591,7 @@ export function makeAppStore({ subscribeSources = typeof window !== "undefined" 
     setSuppressSettleCurrent(true);
     const before = col.scrollTop;
     col.scrollTop = before + delta;
+    pendingCompensatedTop = col.scrollTop;
     if (gestureStart != null) gestureStart += col.scrollTop - before;
   }
 
