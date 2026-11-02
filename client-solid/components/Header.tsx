@@ -10,6 +10,7 @@ import { useClickOutside } from "../lib/click-outside.js";
 import { HostPicker } from "./HostPicker.js";
 import { IconButton } from "./IconButton.js";
 import { FeedFilter } from "./FeedFilter.js";
+import { TextField } from "./TextField.js";
 import { SourceProgress } from "./SourceProgress.js";
 import { FolderPicker } from "./FolderPicker.js";
 import { FeedbackLink } from "./FeedbackLink.js";
@@ -72,7 +73,7 @@ function Menu() {
   return (
     <Show when={open()}>
       <div id="menu">
-        <input
+        <TextField size="sm"
           id="menuSearch" type="search" placeholder="filter settings…" spellcheck={false}
           value={store.state.menuFilter()}
           onInput={(e) => store.actions.menu.setFilter(e.target.value)}

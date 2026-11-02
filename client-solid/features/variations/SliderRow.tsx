@@ -10,6 +10,7 @@ import { ParameterRow, parameterName } from "./ParameterRow.js";
 import { SingleLineText } from "../../components/SingleLineText.js";
 import { IconButton } from "../../components/IconButton.js";
 import { ModeSwitch } from "../../components/ModeSwitch.js";
+import { TextField } from "../../components/TextField.js";
 import { iconSvg } from "/js/icons.mjs";
 
 export function SliderRow(props) {
@@ -153,17 +154,17 @@ function NumericEditor(props) {
             options={[{ value: "range", label: "Range" }, { value: "value", label: "Value" }]}
             onChange={mode => props.onField(props.param.key, "mode", mode)} />
           <Show when={single} fallback={<div class="vz-range-fields">
-          <label class="vz-range-field">from<input type="text" inputMode="decimal" aria-label={`${props.param.label} From`}
+          <label class="vz-range-field">from<TextField type="text" inputMode="decimal" aria-label={`${props.param.label} From`}
             value={props.row().min} aria-invalid={props.row().numbers.min === null} {...focus}
             onInput={event => props.onField(props.param.key, "min", event.currentTarget.value)} /></label>
-          <label class="vz-range-field">to<input type="text" inputMode="decimal" aria-label={`${props.param.label} To`}
+          <label class="vz-range-field">to<TextField type="text" inputMode="decimal" aria-label={`${props.param.label} To`}
             value={props.row().max} aria-invalid={props.row().numbers.max === null} {...focus}
             onInput={event => props.onField(props.param.key, "max", event.currentTarget.value)} /></label>
           <div class="vz-range-field"><label for={`step-${props.placeholderKey}`}>step</label>
             <div class="vz-row-inc">
               <Show when={props.increment() > fineStep}><IconButton chrome size="md" variant="plain vz-step-btn" title="Halve step" aria-label={`${props.param.label}: Halve step`}
                 icon={iconSvg("minus")} onAction={() => commitInc(Math.max(fineStep, props.increment() / 2))} /></Show>
-              <input id={`step-${props.placeholderKey}`} type="text" inputMode="decimal" role="spinbutton" aria-label={`${props.param.label} increment`}
+              <TextField id={`step-${props.placeholderKey}`} type="text" inputMode="decimal" role="spinbutton" aria-label={`${props.param.label} increment`}
                 aria-valuemin={fineStep} aria-valuenow={props.increment() ?? undefined}
                 aria-invalid={props.increment() === null}
                 class="vz-row-inc-input" value={rawIncrement()} {...focus}
@@ -179,7 +180,7 @@ function NumericEditor(props) {
             </div>
           </div>
           </div>}>
-            <label class="vz-range-field vz-value-field">value<input type="text" inputMode="decimal" aria-label={`${props.param.label} Value`}
+            <label class="vz-range-field vz-value-field">value<TextField type="text" inputMode="decimal" aria-label={`${props.param.label} Value`}
               value={props.row().value} aria-invalid={props.row().numbers.value === null} {...focus}
               onInput={event => props.onField(props.param.key, "value", event.currentTarget.value)} /></label>
           </Show>

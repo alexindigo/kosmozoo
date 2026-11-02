@@ -27,6 +27,7 @@ import { SingleLineText } from "../../components/SingleLineText.js";
 import { Checkbox } from "../../components/Checkbox.js";
 import { Select } from "../../components/Select.js";
 import { IconButton } from "../../components/IconButton.js";
+import { TextField } from "../../components/TextField.js";
 import { workspaceCurrent } from "./workspaces.js";
 import { ParameterRow } from "./ParameterRow.js";
 import { isFileDrag } from "./image-drop.js";
@@ -285,14 +286,12 @@ function RecipeBody(props) {
             <div class="vz-sliders">
               <div class="vz-workspace-tools">
                 <div class="vz-workspace-actions">
-                  <div class="search-control control-size-md vz-field-filter">
-                    <input ref={filterInput} type="text" placeholder="Filter fields" aria-label="Filter fields"
-                      {...focus} value={fieldFilter()} onInput={event => setFieldFilter(event.currentTarget.value)} />
-                    <Show when={fieldFilter()}>
+                  <TextField controlClass="vz-field-filter" ref={filterInput} type="text" placeholder="Filter fields" aria-label="Filter fields"
+                      {...focus} value={fieldFilter()} onInput={event => setFieldFilter(event.currentTarget.value)}
+                      trailing={<Show when={fieldFilter()}>
                       <IconButton chrome size="md" variant="plain vz-filter-clear" title="Clear field filter" icon={iconSvg("x")}
                         onAction={() => { setFieldFilter(""); filterInput.focus(); }} />
-                    </Show>
-                  </div>
+                    </Show>} />
                   <Show when={props.workspaces.options(props.images).length > 1}>
                   <Select id={`recipe-${props.session}`} class="vz-workspace" value={props.workspace.id}
                     aria-label="Recipe workspace"
@@ -429,7 +428,7 @@ function RecipeBody(props) {
                 <span>Suffix</span><SingleLineText class="vz-retained-suffix" value={suffix() || "None"} />
               </>}>
               <label for={`prefix-${props.session}`}>Prefix</label>
-              <input
+              <TextField
                 id={`prefix-${props.session}`} type="text" class="vz-tinput vz-prefix" ref={prefixEl}
                 value={prefix()}
                 title="Click a parameter name to insert its token at the caret"
@@ -437,7 +436,7 @@ function RecipeBody(props) {
                 onInput={(e) => editor.edit("naming", "root", "prefix", e.currentTarget.value)}
               />
               <label for={`suffix-${props.session}`}>Suffix</label>
-              <input
+              <TextField
                 id={`suffix-${props.session}`} type="text" class="vz-tinput vz-suffix" ref={suffixEl}
                 value={suffix()}
                 title="Click a parameter name to insert its token (enabled sliders auto-append)"
@@ -514,7 +513,7 @@ function EnumRow(props) {
         <div class="vz-imgrow-body vz-enum-body">
           <Show when={r().values.length > 10}>
             <div class="vz-enum-filter-line">
-              <input
+              <TextField
                 {...focus}
                 type="text" class="vz-enum-filter" placeholder="filter…"
                 aria-label={`Filter ${r().label} options`}
@@ -601,7 +600,7 @@ function AutoSizeTextArea(props) {
     observer.observe(input);
     onCleanup(() => observer.disconnect());
   });
-  return <textarea {...props} ref={input} rows="1" />;
+  return <TextField multiline {...props} ref={input} rows="1" />;
 }
 
 // one text sweep row: master checkbox + label + the orange current value;
@@ -629,7 +628,7 @@ function TextRow(props) {
             {(lab) => (
               <div class="vz-tpl-row">
                 <SingleLineText class="vz-tpl-label" value={lab} />
-                <input
+                <TextField
                   {...focus}
                    type="text" class="vz-tpl-input"
                   aria-label={`${r().label}: ${lab} alternatives`}

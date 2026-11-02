@@ -7,6 +7,7 @@ import { SingleLineText } from "../../components/SingleLineText.js";
 import { popoverPlacement } from "../../lib/popover-placement.js";
 import { Chevron } from "../../components/Select.js";
 import { IconButton } from "../../components/IconButton.js";
+import { TextField } from "../../components/TextField.js";
 import { iconSvg } from "/js/icons.mjs";
 
 const TILE_SIZE = 96, GAP = 6, ROW_HEIGHT = TILE_SIZE + GAP, OVERSCAN_ROWS = 3;
@@ -181,14 +182,12 @@ function InputOptions(props) {
       height: placement() ? `${placement().height}px` : undefined,
       "max-height": placement() ? `${placement().maxHeight}px` : undefined,
       "min-height": placement() ? `${placement().minHeight}px` : undefined }} onKeyDown={move}>
-    <div class="search-control control-size-md">
-    <input ref={search} type="search" role="combobox" aria-expanded="true" aria-autocomplete="list" aria-controls={`${props.id}-list`}
+    <TextField ref={search} type="search" role="combobox" aria-expanded="true" aria-autocomplete="list" aria-controls={`${props.id}-list`}
       aria-activedescendant={placement() && filtered().length ? `${props.id}-option-${active()}` : undefined}
       class="vz-input-search" placeholder="Search inputs…" aria-label="Search ComfyUI inputs"
-      {...focusMemory(rememberFocus)} value={props.query()} onInput={e => props.onQuery(e.currentTarget.value)} />
-    <Show when={props.query()}><IconButton chrome size="md" variant="plain vz-search-clear" title="Clear search"
-      icon={iconSvg("x")} onAction={() => { props.onQuery(""); search.focus(); }} /></Show>
-    </div>
+      {...focusMemory(rememberFocus)} value={props.query()} onInput={e => props.onQuery(e.currentTarget.value)}
+      trailing={<Show when={props.query()}><IconButton chrome size="md" variant="plain vz-search-clear" title="Clear search"
+        icon={iconSvg("x")} onAction={() => { props.onQuery(""); search.focus(); }} /></Show>} />
     <div class="vz-input-list" id={`${props.id}-list`} ref={scrollElement} role="listbox" aria-label="ComfyUI inputs" aria-multiselectable="true"
       onScroll={event => {
         const offset = event.currentTarget.scrollTop;

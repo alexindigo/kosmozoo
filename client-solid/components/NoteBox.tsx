@@ -7,6 +7,7 @@
 // supplies onSave(text) (returning its promise) and getNeighborText(dir).
 
 import { useAppStore } from "../store/app-store.js";
+import { TextField } from "./TextField.js";
 
 export function NoteBox(props) {
   const store = useAppStore();
@@ -26,7 +27,7 @@ export function NoteBox(props) {
 
   return (
     <div class="boxcol">
-      <textarea
+      <TextField multiline tone={props.sign === "neg" ? "negative" : "positive"}
         class={props.sign}
         aria-label={props.sign === "neg" ? "Negative feedback" : "Positive feedback"}
         placeholder={props.placeholder}

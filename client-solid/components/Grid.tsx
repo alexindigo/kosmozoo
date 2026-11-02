@@ -21,6 +21,7 @@ import { cardHeight, feedOffsets, feedEntryAtOffset, gridGapPx, measureGeometry,
 import { iconSvg } from "/js/icons.mjs";
 import { Card } from "./Card.js";
 import { IconButton } from "./IconButton.js";
+import { TextField } from "./TextField.js";
 
 export function Grid() {
   const store = useAppStore();
@@ -196,11 +197,11 @@ export function Grid() {
           </div>
           <div class="pair">
             <div class="boxcol">
-              <textarea class="neg" tabindex="-1" />
+              <TextField multiline tone="negative" class="neg" tabindex="-1" />
               <div class="btnrow"><button tabindex="-1">copy from below</button><button tabindex="-1">copy from above</button></div>
             </div>
             <div class="boxcol">
-              <textarea class="pos" tabindex="-1" />
+              <TextField multiline tone="positive" class="pos" tabindex="-1" />
               <div class="btnrow"><button tabindex="-1">copy from below</button><button tabindex="-1">copy from above</button></div>
             </div>
           </div>

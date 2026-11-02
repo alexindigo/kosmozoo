@@ -34,7 +34,7 @@ module.exports = async ({ cdp, check, ENGINE, FAKE, KZ }) => {
     const input=document.querySelector('${textarea}'),s=getComputedStyle(input);
     return {height:input.getBoundingClientRect().height,client:input.clientHeight,scroll:input.scrollHeight,
       line:parseFloat(s.lineHeight),chrome:parseFloat(s.paddingTop)+parseFloat(s.paddingBottom)+parseFloat(s.borderTopWidth)+parseFloat(s.borderBottomWidth),
-      resize:s.resize,font:s.fontFamily,x:input.getBoundingClientRect().x,name:document.querySelector('${textRow} .vz-parameter-name').getBoundingClientRect().x};
+      resize:s.resize,font:s.fontFamily,sharedFont:getComputedStyle(document.querySelector('.vz-field-filter input')).fontFamily,x:input.getBoundingClientRect().x,name:document.querySelector('${textRow} .vz-parameter-name').getBoundingClientRect().x};
   })()`);
   await post(FAKE + '/__test/activity', { objectInfoByHost: { '127.0.0.2': objectInfo },
     publish: [{ name: filename, fixture: 'flux-lora.png', graph, mtime: 2100000200 }] });
@@ -87,11 +87,11 @@ module.exports = async ({ cdp, check, ENGINE, FAKE, KZ }) => {
       await type(textarea, Array.from({ length: lines }, (_, i) => `Line ${i + 1}`).join('\n'));
       const g = await geometry(); heights.push({ lines, ...g });
       assert(Math.abs(g.height - (Math.min(lines, 8) * g.line + g.chrome)) <= 1, JSON.stringify(g));
-      assert.equal(g.resize, 'none'); assert(g.font.includes('monospace')); assert(Math.abs(g.x-g.name)<0.5);
+      assert.equal(g.resize, 'none'); assert.equal(g.font, g.sharedFont); assert(Math.abs(g.x-g.name)<0.5);
       if (lines > 8) assert(g.scroll > g.client);
       else assert(g.scroll <= g.client + 1);
     }
-    check('enum/text: textarea grows 1/3/8 lines, caps and scrolls at 12, shrinks back to one; monospace/no handle/name inset', true, JSON.stringify(heights));
+    check('enum/text: textarea grows 1/3/8 lines, caps and scrolls at 12, shrinks back to one; shared TextField font/no handle/name inset', true, JSON.stringify(heights));
     await type(textarea, 'A wrapping paragraph with enough words to occupy several visual lines. '.repeat(5));
     const wide = await geometry(); assert(wide.height > wide.line + wide.chrome);
     await cdp.send('Emulation.setDeviceMetricsOverride', { width: 768, height: 1000, deviceScaleFactor: 1, mobile: false });

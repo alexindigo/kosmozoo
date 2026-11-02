@@ -69,7 +69,7 @@ body.resizing { cursor: col-resize; user-select: none; }
 #chrome h1 { font-size: 15px; margin: 0 4px 0 2px; font-weight: 600; }
 #chrome img.logo { border-radius: 6px; }
 #chrome .flexspacer { flex: 1; }
-#chrome select:not(.select-native), #chrome input { background: var(--lifted); color: var(--foreground);
+#chrome select:not(.select-native) { background: var(--lifted); color: var(--foreground);
   border: 1px solid var(--border-strong); border-radius: 4px; padding: 3px 6px; }
 #chrome button:not(.icon-button) { background: var(--lifted); color: var(--foreground); border: 1px solid var(--border-strong);
   border-radius: 4px; padding: 2px 9px; cursor: pointer; font-size: 13px; }
@@ -105,11 +105,7 @@ body.resizing { cursor: col-resize; user-select: none; }
 .hostpick .rm:hover { color: var(--negative); }
 .haddrow { display: flex; gap: 6px; margin-top: 4px;
   border-top: 1px solid var(--border); padding-top: 8px; }
-.haddrow input { min-width: 0; flex: 1; background: var(--background); color: var(--foreground);
-  border: 1px solid var(--border); border-radius: 6px; padding: 5px 7px;
-  font: 11px ui-monospace, monospace; }
-.haddrow input:focus, .vz-tpl-input:focus, .vz-row-inc-input:focus, .vz-tinput:focus,
-.vz-root .vz-field-filter > input:focus { outline: none; border-color: var(--secondary); }
+.haddrow input { min-width: 0; flex: 1; }
 .haddrow button { font-size: 11px; padding: 4px 8px; }
 
 /* --- bulk bar: fixed under the header while images are selected ---------- */
@@ -385,14 +381,7 @@ main { display: flex; flex: 1; min-height: 0; }
 
 /* notes row: negatives red-bordered, positives green-bordered */
 .boxcol { display: flex; flex-direction: column; gap: 4px; }
-.boxcol textarea { width: 100%; min-height: 44px; resize: vertical;
-  background: var(--background); border: 1px solid var(--border); border-radius: 6px;
-  color: var(--foreground); font: inherit; padding: 6px 8px; }
-.boxcol textarea.neg { border-color: var(--negative); }
-.boxcol textarea.pos { border-color: var(--positive); }
-.boxcol textarea:focus { outline: none; }
-.boxcol textarea.neg:focus { border-color: var(--negative); }
-.boxcol textarea.pos:focus { border-color: var(--secondary); }
+.boxcol textarea { width: 100%; }
 .btnrow { display: flex; gap: 6px; }
 .btnrow button { flex: 1; padding: 2px 4px; font-size: 11px; color: var(--foreground-dim);
   background: none; border: 1px solid var(--lifted); border-radius: 4px; cursor: pointer; }
@@ -409,9 +398,7 @@ main { display: flex; flex: 1; min-height: 0; }
   background: var(--focused-background); border: 1px solid var(--border); border-radius: 8px;
   padding: 10px; min-width: 300px; display: flex; flex-direction: column;
   gap: 8px; }
-#menuSearch { background: var(--background); color: var(--foreground); border: 1px solid var(--border);
-  border-radius: 6px; padding: 5px 8px; font-size: 12px; width: 100%; }
-#menuSearch:focus { outline: none; border-color: var(--secondary); }
+#menuSearch { width: 100%; }
 #menuRows { display: flex; flex-direction: column; gap: 8px; }
 .menurow { display: flex; align-items: center; gap: 8px; font-size: 13px; }
 .menulabel { color: var(--foreground-dim); font-size: 11px; }
@@ -508,9 +495,7 @@ body:has(#diff:not([hidden])) #statusCol { bottom: 56px; }
 #keysPanelHead { display: flex; gap: 10px; align-items: center;
   padding: 12px 16px; border-bottom: 1px solid var(--lifted); }
 #keysPanelHead h2 { margin: 0; font-size: 14px; flex: 0 0 auto; }
-#keysSearch { flex: 1; background: var(--background); color: var(--foreground); border: 1px solid var(--border);
-  border-radius: 6px; padding: 5px 8px; font-size: 12px; }
-#keysSearch:focus { outline: none; border-color: var(--secondary); }
+#keysSearch { flex: 1; }
 #keysReset { background: var(--lifted); color: var(--foreground); border: 1px solid var(--border-strong);
   border-radius: 4px; padding: 3px 8px; font-size: 11px; cursor: pointer; }
 #keysList { overflow-y: auto; padding: 8px 16px; }
@@ -690,10 +675,6 @@ body:has(#diff:not([hidden])) #statusCol { bottom: 56px; }
 .vz-enum-filter-line { display: flex; align-items: center; gap: 8px; }
 .vz-enum-filter-line .vz-enum-filter { flex: 1; min-width: 0; }
 .vz-enum-selected { flex: 0 0 auto; color: var(--foreground); font-variant-numeric: tabular-nums; }
-.vz-enum-filter { background: var(--background); color: var(--foreground);
-  border: 1px solid var(--border-strong); border-radius: 4px; font-size: 12px;
-  padding: 3px 6px; }
-.vz-enum-filter:focus { outline: none; border-color: var(--secondary); }
 .vz-enum-list { --vz-option-row: 20px; display: grid; grid-template-columns: minmax(0, 1fr);
   grid-auto-rows: var(--vz-option-row); gap: 2px;
   max-height: calc(8 * var(--vz-option-row) + 7 * 2px); overflow-y: auto; }
@@ -706,22 +687,15 @@ body:has(#diff:not([hidden])) #statusCol { bottom: 56px; }
 .vz-enum-current .vz-enum-opt-name { color: var(--attention); }
 
 /* Text is a literal template; line breaks never separate alternatives. */
-.vz-text-values { background: var(--background); color: var(--foreground);
-  border: 1px solid var(--border-strong); border-radius: 4px; font-size: 12px;
-  padding: 4px 6px; font-family: ui-monospace, monospace;
-  line-height: 18px; width: 100%; box-sizing: border-box;
-  resize: none; min-height: calc(1lh + 10px); max-height: calc(8lh + 10px); overflow-y: auto; }
-.vz-text-values:focus { outline: none; border-color: var(--secondary); }
+.vz-text-values { width: 100%;
+   min-height: calc(1lh + 10px); max-height: calc(8lh + 10px); overflow-y: auto; }
 
 /* {{label}} substitution inputs: one row per label detected in the text */
 .vz-tpl-row { display: flex; align-items: center; gap: 8px; }
 .vz-tpl-label { color: var(--foreground); font-size: 11px;
   font-family: ui-monospace, monospace; flex: 0 0 auto;
   max-width: 40%; }
-.vz-tpl-input { flex: 1; background: var(--background);
-  color: var(--foreground); border: 1px solid var(--border-strong);
-  border-radius: 4px; font-size: 12px; padding: 3px 6px;
-  font-family: ui-monospace, monospace; }
+.vz-tpl-input { flex: 1; }
 
 .vz-label { color: var(--foreground); font-size: 13px; font-weight: 400;
   cursor: pointer; align-self: flex-start; }
@@ -788,11 +762,7 @@ body:has(#diff:not([hidden])) #statusCol { bottom: 56px; }
 .vz-row-inc { display: flex; align-items: center; gap: 4px;
   flex: 0 0 auto;
   align-self: center; }
-.vz-row-inc-input { width: 56px; background: var(--background); color: var(--foreground);
-  border: 1px solid var(--foreground-dim); border-radius: 4px; padding: 2px 4px;
-  font-size: 11px; text-align: center;
-  font-family: ui-monospace, monospace; }
-.vz-row-inc-input:disabled { opacity: 0.5; }
+.vz-row-inc-input { width: 56px; text-align: center; }
 
 /* node-referenced images (LoadImage-style) rendered inline in the info panel */
 .infoimg { margin-top: 10px; }
@@ -903,10 +873,7 @@ body:has(#diff:not([hidden])) #statusCol { bottom: 56px; }
 .vz-count.vz-count-hot { color: var(--negative); }
 /* batch breakdown under the big total: "<variants> variants × <N> images" */
 .vz-count-sub { font-size: 11px; color: var(--foreground-mid); margin-top: 2px; }
-.vz-tinput { background: var(--background); color: var(--foreground);
-  border: 1px solid var(--foreground-dim); border-radius: 6px; padding: 4px 8px;
-  font-size: 12px; margin-top: 2px;
-  font-family: ui-monospace, monospace; }
+.vz-tinput { margin-top: 2px; }
 /* Run occupies the sidebar's final grid row. Fills the column width for a
    solid primary-action target independent of message length. */
 .vz-run { background: var(--primary); color: var(--black); border: none;
@@ -934,7 +901,7 @@ body:has(#diff:not([hidden])) #statusCol { bottom: 56px; }
 #chrome #hostPicker { flex: 0 1 auto; min-width: 38px; }
 #chrome #hostBtn { max-width: 100%; }
 #chrome #hostBtn > span:nth-child(2) { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
-#chrome button:focus-visible, #chrome input:focus-visible { outline: 2px solid var(--secondary); outline-offset: 2px; }
+#chrome button:focus-visible { outline: 2px solid var(--secondary); outline-offset: 2px; }
 #chrome .pinned-sources { display: flex; align-items: center; gap: 6px; flex: 1 1 auto;
   min-width: 0; overflow-x: auto; scrollbar-width: none; }
 #chrome .pinned-sources::-webkit-scrollbar { display: none; }
@@ -947,7 +914,7 @@ body:has(#diff:not([hidden])) #statusCol { bottom: 56px; }
 .hostpick.has-new .hname { color: var(--attention); }
 #chrome .feed-filter { display: flex; align-items: center; gap: 6px; min-width: 26px;
   flex: 0 1 auto; max-width: 220px; }
-#chrome .feed-filter input { width: 180px; min-width: 0; flex: 1 1 auto; font: inherit; }
+#chrome .feed-filter input { width: 180px; min-width: 0; flex: 1 1 auto; }
 #chrome .source-progress { flex: 0 0 auto; color: var(--foreground-dim); }
 #chrome .source-progress-base { fill: var(--foreground-dim); }
 #chrome .source-progress-outline { fill: none; stroke: currentColor; stroke-width: 1.5; }
@@ -977,7 +944,7 @@ body:has(#diff:not([hidden])) #statusCol { bottom: 56px; }
   #chrome #hostBtn { padding-inline: 1px; gap: 1px; }
   #chrome #hostBtn .chev { font-size: 12px; }
   #chrome .feed-filter { min-width: min-content; gap: 2px; }
-  #chrome .feed-filter input { width: 0; flex-basis: 120px; padding-inline: 2px; }
+  #chrome .feed-filter input { width: 0; flex-basis: 120px; }
 }
 @media (prefers-reduced-motion: reduce) {
   #chrome .source-progress, #chrome .chrome-icon { transition: none; }
@@ -1033,7 +1000,7 @@ body:has(#diff:not([hidden])) #statusCol { bottom: 56px; }
 .vz-image-folder { width: 100%; min-width: 0; }
 .vz-image-action { background: var(--lifted); color: var(--foreground); border: 1px solid var(--border-strong); border-radius: 4px; padding: 5px 8px; font: inherit; cursor: pointer; }
 .vz-image-action:hover { border-color: var(--foreground-dim); }
-.vz-image-action:focus-visible, .vz-input-search:focus-visible, .vz-input-option:focus-visible { outline: 2px solid var(--secondary); outline-offset: 2px; }
+.vz-image-action:focus-visible, .vz-input-option:focus-visible { outline: 2px solid var(--secondary); outline-offset: 2px; }
 .vz-input-picker { position: relative; }
 .vz-input-popover { position: fixed; inset: auto; position-area: none;
   --vz-input-columns: 3;
@@ -1042,8 +1009,7 @@ body:has(#diff:not([hidden])) #statusCol { bottom: 56px; }
   background: var(--focused-background); color: var(--foreground);
   border: 1px solid var(--border-strong); border-radius: 6px; box-shadow: 0 8px 24px var(--backdrop); }
 .vz-input-popover:popover-open { display: flex; flex-direction: column; gap: 6px; }
-.vz-input-search { width: 100%; min-width: 0; height: 100%; padding: 0 8px; padding-inline-end: calc(var(--control-size) + 8px);
-  background: var(--background); color: var(--foreground); border: 1px solid var(--border); border-radius: 4px; font: inherit; }
+.vz-input-search { width: 100%; }
 .vz-input-list { --vz-input-preferred-height: max(var(--vz-input-tile-size), min(300px, 40vh));
   height: var(--vz-input-preferred-height); max-height: var(--vz-input-preferred-height);
   min-height: 0; flex: 1 1 auto; overflow-y: auto; scrollbar-gutter: stable; }
@@ -1099,8 +1065,7 @@ body:has(#diff:not([hidden])) #statusCol { bottom: 56px; }
 
 .vz-folder { flex: 1 1 250px; display: flex; flex-direction: column; gap: 4px; }
 .vz-folder-controls { display: flex; align-items: center; gap: 4px; }
-.vz-folder-path { flex: 1; width: 100%; padding: 5px 8px; font: inherit; color: var(--foreground); background: var(--background); border: 1px solid var(--border); border-radius: 4px; }
-.vz-folder-path:focus-visible { outline: 2px solid var(--secondary); outline-offset: 2px; }
+.vz-folder-path { flex: 1; width: 100%; }
 .vz-image-action:disabled { opacity: .5; cursor: default; }
 .vz-image-add { align-items: start; }
 
@@ -1121,9 +1086,7 @@ body:has(#diff:not([hidden])) #statusCol { bottom: 56px; }
 .vz-workspace-actions .select-control { flex: 1; min-width: 0; }
 .vz-workspace-new { align-self: flex-start; }
 .vz-field-filter.search-control { flex: 1; }
-.vz-field-filter > input { width: 100%; height: 100%; padding: 0 8px; padding-inline-end: calc(var(--control-size) + 8px);
-  border: 1px solid var(--border-strong); border-radius: 4px; background: var(--background);
-  color: var(--foreground); font: 12px system-ui; }
+.vz-field-filter > input { width: 100%; }
 .vz-parameter.vz-filter-hidden { display: none; }
 
 /* Production's card vocabulary, shared by every input kind. Only enabled rows
@@ -1145,9 +1108,7 @@ body:has(#diff:not([hidden])) #statusCol { bottom: 56px; }
 .vz-numeric-controls { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; min-width: 0; }
 .vz-range-fields { display: flex; align-items: center; flex: 1; flex-wrap: wrap; gap: 8px; min-width: 0; }
 .vz-range-field { display: flex; align-items: center; gap: 4px; color: var(--foreground-mid); font: 12px/16px system-ui; }
-.vz-range-field > input, .vz-range-field .vz-row-inc-input { width: 58px; min-width: 0; box-sizing: border-box;
-  background: var(--background); color: var(--foreground); border: 1px solid var(--border-strong);
-  border-radius: 4px; padding: 4px; font: 12px/18px ui-monospace, monospace;
+.vz-range-field > input, .vz-range-field .vz-row-inc-input { width: 58px; min-width: 0;
   font-variant-numeric: tabular-nums; text-align: left; }
 .vz-range-field > input[type="number"] { appearance: textfield; }
 .vz-range-field > input::-webkit-inner-spin-button { appearance: none; }
@@ -1158,8 +1119,7 @@ body:has(#diff:not([hidden])) #statusCol { bottom: 56px; }
 .vz-parameter .vz-rangewrap { margin-top: 0; }
 .vz-input-summary { margin: 0; color: var(--foreground); font: 12px/16px system-ui; }
 .vz-folder { flex-basis: 100%; }
-.vz-root :is(input, textarea, select, button):focus-visible { outline: 2px solid var(--secondary); outline-offset: 2px; }
-.vz-root input[aria-invalid="true"] { border-color: var(--error); }
+.vz-root :is(select, button):focus-visible { outline: 2px solid var(--secondary); outline-offset: 2px; }
 .vz-left { container: variation-fields / inline-size; }
 
 .vz-count-sub { margin: 0; line-height: 16px; overflow-wrap: anywhere; }
@@ -1167,7 +1127,7 @@ body:has(#diff:not([hidden])) #statusCol { bottom: 56px; }
 .vz-naming-group { grid-template-columns: 38px minmax(0, 1fr); align-items: center; }
 .vz-naming-group .vz-rlabel { grid-column: 1 / -1; }
 .vz-naming-group label { color: var(--foreground-mid); margin: 0; }
-.vz-naming-group .vz-tinput { width: 100%; box-sizing: border-box; padding-inline: 4px; }
+.vz-naming-group .vz-tinput { width: 100%; }
 .vz-output-preview { grid-column: 1 / -1; display: grid; gap: 4px; }
 .vz-output-example { color: var(--foreground); }
 .vz-queued { margin: 0 0 8px; font: 13px/18px system-ui; }
@@ -1175,7 +1135,6 @@ body:has(#diff:not([hidden])) #statusCol { bottom: 56px; }
 .vz-messages .vz-error { text-align: left; margin: 0; font: 12px/16px system-ui; }
 .vz-messages .vz-neutral { color: var(--foreground-mid); }
 .vz-readiness-error { color: var(--error); margin: 0; font: 12px/16px system-ui; overflow-wrap: anywhere; }
-.boxcol textarea:focus-visible { outline: 2px solid var(--secondary); outline-offset: 2px; }
 .metabody .props { font-family: system-ui; }
 .metabody :is(.info-none, .plabel), .infogroup-head { color: var(--foreground-mid); }
 .select-native.vz-workspace { font-size: 11px; }
@@ -1268,4 +1227,23 @@ body:has(#diff:not([hidden])) #statusCol { bottom: 56px; }
 .search-control { flex: 0 0 auto; }
 .search-control > input { grid-area: 1 / 1 / 2 / -1; }
 .search-control > .icon-button { grid-area: 1 / 2; }
-.vz-input-search::-webkit-search-cancel-button { appearance: none; display: none; }
+.text-field-control > input::-webkit-search-cancel-button { appearance: none; display: none; }
+
+/* TextField owns the complete native appearance. Locations only allocate width.
+   The focus border is inside the box, including in clipped scrolling editors. */
+.text-field { min-width: 0; height: var(--control-size); box-sizing: border-box;
+  border: 1px solid var(--border-strong); border-radius: 4px;
+  background: var(--background); color: var(--foreground);
+  font: 12px/18px system-ui, sans-serif; padding: 4px 6px; outline: none; }
+.text-field::placeholder { color: var(--foreground-dim); opacity: 1; }
+.text-field:focus { outline: none; border-color: var(--secondary); }
+.text-field[aria-invalid="true"]:not(:focus) { border-color: var(--error); }
+.text-field-multiline { height: auto; resize: none; }
+.text-field-control > .text-field { height: 100%; padding-inline: 8px;
+  padding-inline-end: calc(var(--control-size) + 8px); }
+/* Feedback preserves its original geometry, typography and tone in every state.
+   Both NoteBox and the feed's size probe select these same variants. */
+.text-field-negative, .text-field-positive { min-height: 44px; resize: vertical;
+  border-radius: 6px; font: 13px/1.4 system-ui, sans-serif; padding: 6px 8px; }
+.text-field-negative, .text-field-negative:focus { border-color: var(--negative); }
+.text-field-positive { border-color: var(--positive); }

@@ -6,6 +6,7 @@
 import { For, Show } from "solid-js";
 import { useAppStore } from "../store/app-store.js";
 import { Modal } from "./Modal.js";
+import { TextField } from "./TextField.js";
 const keyLabel = key => key === " " ? "Space" : key;
 
 export function KeysPanel() {
@@ -24,7 +25,7 @@ export function KeysPanel() {
     <Modal overlayId="keysPanel" panelId="keysPanelInner" closeCommand="keys.panel.close" escapeLayer={false}>
       <div id="keysPanelHead">
         <h2>Actions & keys</h2>
-        <input
+        <TextField size="sm"
           id="keysSearch" type="search" placeholder="filter actions…" spellcheck={false}
           value={store.state.keysFilter()}
           onInput={(e) => store.actions.keys.setFilter(e.target.value)}

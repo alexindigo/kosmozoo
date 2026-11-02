@@ -108,6 +108,13 @@ docker run --rm --user "$RUN_USER" --network host -v "$WORK":/work -w /work \
   --entrypoint node "$PW_IMAGE" \
   /work/tests/e2e/workbench.e2e.cjs
 
+# Shared text fields: focus, feedback tones and containment on every surface.
+timeout 600s docker run --rm --user "$RUN_USER" --network host -v "$WORK":/work -w /work \
+  -e HOME=/work/tests/.tmp-runtime/workbench/home -e TMPDIR=/work/tests/.tmp-runtime/workbench/tmp \
+  -e E2E_ENGINE="http://127.0.0.1:$ENGINE_PORT" \
+  -e E2E_FAKE="http://127.0.0.1:$FAKE_PORT" \
+  --entrypoint node "$PW_IMAGE" /work/tests/e2e/text-fields.cjs
+
 # 4. variations panel e2e
 docker run --rm --user "$RUN_USER" --network host -v "$WORK":/work -w /work \
   -e HOME=/work/tests/.tmp-runtime/variations/home -e TMPDIR=/work/tests/.tmp-runtime/variations/tmp \
