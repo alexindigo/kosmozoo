@@ -914,7 +914,8 @@ async function main() {
     await require('./variations-status-layout.cjs')({ cdp, check, KZ });
     await require('./variations-image-set.cjs')({ cdp, check, FAKE, KZ });
     await require('./variations-overflow.cjs')({ cdp, check, ENGINE, FAKE, KZ });
-    await require('./variations-workspace.cjs')({ cdp, check, ENGINE, FAKE, KZ });
+    await require('./variations-session.cjs')({ cdp, check, ENGINE, FAKE, KZ });
+    await require('./variations-run-contract.cjs')({ cdp, check, ENGINE, FAKE, KZ });
     await require('./variations-row-frame.cjs')({ cdp, check, KZ });
     await require('./variations-value.cjs')({ cdp, check, KZ, FAKE });
     await require('./variations-enum-text.cjs')({ cdp, check, ENGINE, FAKE, KZ });

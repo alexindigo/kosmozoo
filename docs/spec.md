@@ -968,14 +968,19 @@ It also captures the existing image-inspection cohort before awaits and freezes
 that cohort's settled evidence for every compilation of this Run. Later path
 removal/readdition or reinspection cannot change the captured graph values;
 actual upload receipts remain the authority for uploaded names.
-The compiler emits the immutable request, operation identities and exhaustive raw
-dispositions with its consumption bindings in the same read/encode operation.
+The compiler builds the immutable request and validates exhaustive raw dispositions
+with its consumption bindings in the same read/encode operation. Captured target
+plans carry the producer operation identities.
 Each captured leaf/map entry is active or retained; unknown or overlapping
 classification rejects before effects. Source-independent handles/broker retain opening metadata
 and owner capabilities only. Running/pending-decision input is busy. Clean metadata
 settling during a Run cannot strand captured submitted work. Newer/edit-and-revert
-revisions and pending decisions still prevent checkpointing. Disabled and dormant
-values are retained recipe content, not unsubmitted graph operations.
+revisions and pending decisions still prevent accepting that revision as sent.
+Disabled and dormant values remain unchanged in the open draft, not unsubmitted
+graph operations. Each dialog mount owns one draft for its captured targets;
+closing disposes it and every new opening starts with fresh defaults. A fully
+successful Run closes after its result message. Partial, failed or uncertain Runs
+leave the entire draft unchanged with result text and no automatic retry.
 
 Opening/probe/Run retain an `Origin:{source,address,kind,epoch,incarnation}`; pin and
 refresh attribute revisions are not operation identity. Probe optionally accepts

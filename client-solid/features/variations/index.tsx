@@ -7,11 +7,9 @@ import { VariationsModal } from "./VariationsModal.js";
 import * as api from "./api.js";
 import { makeVariationSession } from "./session.js";
 import { variationCommands } from "./commands.js";
-import { makeVariationWorkspaces } from "./workspaces.js";
 
 // Assembly injects modal services and registers owner-safe command definitions.
 export function install(store) {
-  const workspaces = makeVariationWorkspaces();
   const broker = makeVariationSession({ read: () => store.state.variations,
     write: (opening) => store.setSt("variations", store.reconcile(opening)) });
   const services = {
@@ -39,12 +37,10 @@ export function install(store) {
     },
   };
   return {
-    dispose: workspaces.dispose,
     ownedCommands: ["variations.discard.cancel", "variations.images.close"].map(id => ({ id, validate: args => Object.keys(args).length === 0 })),
     commands: variationCommands({ state: store.state, broker }),
     ports: {
       services,
-      workspaces,
       registerOwner: broker.register,
       open: (image) => store.handles.invoke("variations.open", { id: image.id }),
     },

@@ -101,8 +101,7 @@ const KZ = '(await import("/store/instance.js")).appStore';
     if (await page.evaluate("!!document.querySelector('.vz-discard')")) await page.clickAt('.vz-discard-confirm');
     await page.poll("!document.querySelector('.vz-panel')");
 
-    // Retire a real source identity; the prior workspace must be inspectable,
-    // with actual retained naming text rather than disabled editor fields.
+    // Retire a real source identity; the next opening is a fresh editable draft.
     await http(ENGINE, '/api/collections', 'POST', { name: 'availability-owner', address: new URL(FAKE).host });
     await page.poll(`(async()=>!!${KZ}.state.hosts['availability-owner'])()`);
     await page.evaluate("fetch('/api/collections/availability-owner/entries/flux-basic.png/bytes').then(r=>r.arrayBuffer()).then(()=>true)");
@@ -110,16 +109,16 @@ const KZ = '(await import("/store/instance.js")).appStore';
     await page.poll("document.querySelectorAll('.vz-slider-row').length>0");
     await page.clickAt('.vz-prefix'); await page.send('Input.insertText', { text: 'retained-prefix' });
     await page.poll("document.querySelector('.vz-prefix').value==='retained-prefix'");
-    // Checkpoint through a real accepted fake run, retaining naming on close.
+    // A real accepted fake run closes and releases this draft.
     await invoke('variations.run'); await page.poll("!document.querySelector('.vz-panel')", 6000);
     const old = await page.evaluate(`(async()=>${KZ}.state.hosts['availability-owner'].sourceVersion.incarnation)()`);
     await http(ENGINE, '/api/collections/availability-owner', 'DELETE');
     await http(ENGINE, '/api/collections', 'POST', { name: 'availability-owner', address: new URL(FAKE).host });
     await page.poll(`(async()=>${KZ}.state.hosts['availability-owner']?.sourceVersion.incarnation!==${JSON.stringify(old)}&&!!${KZ}.state.hosts['availability-owner'])()`);
     await page.evaluate("fetch('/api/collections/availability-owner/entries/flux-basic.png/bytes').then(r=>r.arrayBuffer()).then(()=>true)");
-    await invoke('variations.open', { id: 'availability-owner:flux-basic.png' }); await page.poll("!!document.querySelector('.vz-workspace-status')");
-    await check('retained recipe has naming display content and New recipe, without inputs or Run', `!document.querySelector('.vz-naming-group input')&&!document.querySelector('button.vz-run')&&document.querySelector('.vz-naming-group').textContent.includes('retained-prefix')&&!!document.querySelector('.vz-workspace-new')&&${clean('.vz-panel *')}`);
-    await capture('retained'); await invoke('variations.close'); await page.poll("!document.querySelector('.vz-panel')");
+    await invoke('variations.open', { id: 'availability-owner:flux-basic.png' }); await page.poll("document.querySelectorAll('.vz-slider-row').length>0");
+    await check('source replacement opens fresh naming inputs and Run without recipe recovery controls', `!!document.querySelector('.vz-naming-group input')&&!!document.querySelector('button.vz-run')&&document.querySelector('.vz-prefix').value===''&&!document.querySelector('.vz-workspace-new,.vz-workspace-status')&&${clean('.vz-panel *')}`);
+    await capture('fresh-session'); await invoke('variations.close'); await page.poll("!document.querySelector('.vz-panel')");
 
     // A failed delete must restore both actions after the status-only phase.
     await invoke('image.delete.request', { id: 'fake:flux-lora.png' }); await page.poll("!!document.querySelector('.confirm-ok')");

@@ -74,7 +74,7 @@ Deno.test("naming proof: registered run consumes the local-file editor work thro
     assertEquals(uploads, files);
     assertEquals(r.requests[0].imageParams["475.image"], { enabled: true, values: files });
     assertEquals(r.requests[0].imageParams["502.value"], { enabled: true, values: [editedText] });
-    assertEquals(editor.remaining(), []);
+    assert(!editor.dirty());
     assertEquals(editor.result().state, "adopted");
     assertEquals(timers.length, 1);
     assert(editor.rows("images")["475.image"].items[0].file === localFiles[0]);

@@ -14,8 +14,8 @@ module.exports = async ({ cdp, check, KZ }) => {
   await invoke('variations.open', { id: 'fake:flux-controlnet.png' });
   await cdp.poll("document.querySelectorAll('.vz-parameter').length > 8");
   try {
-    assert(await cdp.evaluate(`!!document.querySelector(${JSON.stringify(input)})`), 'Filter fields input replaces the workspace label');
-    check('field filter exists; single-recipe switcher is absent', await cdp.evaluate("!document.querySelector('.vz-workspace') && !document.querySelector('.vz-workspace-label')"));
+    assert(await cdp.evaluate(`!!document.querySelector(${JSON.stringify(input)})`), 'Filter fields input exists');
+    check('field filter exists; recipe switcher is absent', await cdp.evaluate("!document.querySelector('.vz-workspace') && !document.querySelector('.vz-workspace-label')"));
     await cdp.clickAt(input);
     const focus = await cdp.evaluate(`(()=>{
       const input=document.querySelector('.vz-field-filter input'),style=getComputedStyle(input);
@@ -71,7 +71,7 @@ module.exports = async ({ cdp, check, KZ }) => {
     assert.equal(await cdp.evaluate(`(async()=>${KZ}.state.keysPanelOpen())()`), keysBefore);
     check('typing shortcut keys stays in the filter through the existing input policy', true);
     await cdp.clickAt('.vz-field-filter button');
-    const sticky = await cdp.evaluate(`(async()=>{const scroller=document.querySelector('.vz-sliders'),tools=document.querySelector('.vz-workspace-tools');const before=tools.getBoundingClientRect().top;scroller.scrollTop=scroller.scrollHeight;await new Promise(r=>requestAnimationFrame(()=>requestAnimationFrame(r)));return {before,after:tools.getBoundingClientRect().top,scroll:scroller.scrollTop,hit:tools.contains(document.elementFromPoint(tools.getBoundingClientRect().left+10,tools.getBoundingClientRect().top+10))}})()`);
+    const sticky = await cdp.evaluate(`(async()=>{const scroller=document.querySelector('.vz-sliders'),tools=document.querySelector('.vz-filter-tools');const before=tools.getBoundingClientRect().top;scroller.scrollTop=scroller.scrollHeight;await new Promise(r=>requestAnimationFrame(()=>requestAnimationFrame(r)));return {before,after:tools.getBoundingClientRect().top,scroll:scroller.scrollTop,hit:tools.contains(document.elementFromPoint(tools.getBoundingClientRect().left+10,tools.getBoundingClientRect().top+10))}})()`);
     assert(sticky.scroll > 0 && Math.abs(sticky.before - sticky.after) <= 1 && sticky.hit, JSON.stringify(sticky));
     check('filter stays visible above scrolling parameter rows', true, JSON.stringify(sticky));
     await cdp.evaluate("document.querySelector('.vz-sliders').scrollTop=0");

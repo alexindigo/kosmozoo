@@ -1,4 +1,4 @@
-// Task 3: numeric modes, retained recipe and actual submitted graph values.
+// Numeric modes, session defaults and actual submitted graph values.
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const { freshRecipe } = require('./recipe-helpers.cjs');
@@ -62,8 +62,7 @@ module.exports = async ({ cdp, check, KZ, FAKE }) => {
     assert.equal(await cdp.evaluate(`document.querySelector('${row} .vz-row-inc-input').value`),'0.1');
     await cdp.clickAt(`${row} .mode-switch button[title="Value"]`);
     check('numeric modes: collapse and mode changes preserve independent Value and Range settings', true);
-    // Run establishes an accepted checkpoint, so close/reopen reloads the retained
-    // recipe without a discard. Observe the terminal graph, not just a payload.
+    // Observe the terminal graph, then verify the next session's fresh defaults.
     await fetch(FAKE+'/__test/activity',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({captureEnqueue:true})});
     const before = (await (await fetch(FAKE+'/__test/enqueues')).json()).length;
     await cdp.clickAt('.vz-run');
@@ -72,10 +71,11 @@ module.exports = async ({ cdp, check, KZ, FAKE }) => {
     assert.equal(jobs.length,1); assert.equal(jobs[0].prompt['9'].inputs.denoise,.9);
     check('numeric modes: Value Run enqueues exactly one final graph with denoise 0.9',true);
     await closeKept(); await open();
-    assert.equal(await cdp.evaluate(`document.querySelector('${row} .vz-value-field input').value`),'0.9');
-    assert(await cdp.evaluate(`document.querySelector('${row} button[title="Value"]').getAttribute('aria-pressed')==='true'`));
-    assert.equal(await cdp.evaluate("document.querySelector('.vz-count').textContent"),'1');
-    check('numeric modes: mode/value and count survive clean close/reopen and catalogue-backed recipe reload',true);
+    assert(await cdp.evaluate(`document.querySelector('${row} button[title="Range"]').getAttribute('aria-pressed')==='true'`));
+    assert.equal(await cdp.evaluate(`document.querySelector('${row} .vz-row-inc-input').value`),'0.05');
+    check('numeric modes: successful Run and reopen reset mode and raw Step to fresh defaults',true);
+    await cdp.clickAt(`${row} .mode-switch button[title="Value"]`);
+    await field(`${row} .vz-value-field input`, '0.9');
     // Show both editor modes in one full realistic-size screenshot.
     await cdp.clickAt('[data-param-key="9.steps"] .checkbox');
     await cdp.evaluate("document.querySelector('.vz-sliders').scrollTop=0");

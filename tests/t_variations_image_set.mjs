@@ -21,7 +21,7 @@ Deno.test("image set: moving mixed items preserves File identity and compiled va
   const expected = ["first.png", "third.png", "upload.png", "fourth.png"];
   assertEquals(requests[0].imageParams[id].values, expected);
   assertEquals(generatePermutations({}, { [id]: "origin.png" }, requests[0].imageParams).map(permutation => permutation[id]), expected);
-  assertEquals(editor.remaining(), []); editor.dispose();
+  assert(!editor.dirty()); editor.dispose();
 });
 
 Deno.test("image set: collision families preserve literal punctuation, nested counters and stock dotfile splitting", () => {
@@ -61,7 +61,7 @@ Deno.test("image set: same-current bytes are marked before Run, counted like the
   assertEquals(editor.preview().n, 1); assert(editor.preview().exact);
   assertEquals((await editor.run()).submitted, 1);
   assertEquals(rig.uploads.length, 0); assertEquals(rig.requests[0].imageParams[id].values, ["origin.png", "next.png"]);
-  assertEquals(editor.remaining(), []); rig.fireTimers(); assertEquals(rig.closeCount(), 1); editor.dispose();
+  assert(!editor.dirty()); rig.fireTimers(); assertEquals(rig.closeCount(), 1); editor.dispose();
 });
 
 Deno.test("image set: mixed captured input and File items compile in order and acknowledge one set leaf", async () => {
@@ -70,7 +70,7 @@ Deno.test("image set: mixed captured input and File items compile in order and a
   await editor.inspectImages(); const preview = editor.preview().n;
   assertEquals((await editor.run()).submitted, preview);
   assertEquals(rig.requests[0].imageParams[id].values, ["next.png", "upload.png"]);
-  assertEquals(editor.remaining(), []); assert(editor.rows("images")[id].items[1].file === file); editor.dispose();
+  assert(!editor.dirty()); assert(editor.rows("images")[id].items[1].file === file); editor.dispose();
 });
 
 Deno.test("image set: failed inspection is visible, retains work and prevents unverified upload or enqueue", async () => {
@@ -91,7 +91,7 @@ Deno.test("image set: preview distinguishes same-name different bytes and unifie
   editor.addImages(id, files.map(upload)); await editor.inspectImages();
   assertEquals(editor.rows("images")[id].items.length, 3); assertEquals(editor.preview().n, 2); assert(editor.preview().exact);
   const result = await editor.run(); assertEquals(result.submitted, 2); assertEquals(result.adopted, true);
-  assertEquals(rig.requests[0].imageParams[id].values, ["same.png", "same (1).png"]); assertEquals(editor.remaining(), []); editor.dispose();
+  assertEquals(rig.requests[0].imageParams[id].values, ["same.png", "same (1).png"]); assert(!editor.dirty()); editor.dispose();
 });
 
 Deno.test("image set: preview shares existing collision aliases across inputs, repeated acquisitions and upload order", async () => {
@@ -107,7 +107,7 @@ Deno.test("image set: preview shares existing collision aliases across inputs, r
   await editor.inspectImages(); assertEquals(editor.preview().n, 1); assertEquals((await editor.run()).submitted, 1);
   editor.addImages(id, [upload(new File(["old"], "same.png"))]); await editor.inspectImages();
   assertEquals(editor.preview().n, 2); assertEquals((await editor.run()).submitted, 2);
-  assertEquals(rig.requests[1].imageParams[id].values, ["same (1).png", "same.png"]); assertEquals(editor.remaining(), []); editor.dispose();
+  assertEquals(rig.requests[1].imageParams[id].values, ["same (1).png", "same.png"]); assert(!editor.dirty()); editor.dispose();
 });
 
 Deno.test("image set: confirmed uploaded names survive set removal and inform later acquisitions in the same editor", async () => {
@@ -120,5 +120,5 @@ Deno.test("image set: confirmed uploaded names survive set removal and inform la
   editor.edit("numeric", "n.denoise", "enabled", false); editor.edit("images", id, "enabled", true);
   editor.addImages(id, [old]); assertEquals((await editor.run()).submitted, 1);
   editor.removeImage(id, old); editor.addImages(id, [input("same (1).png"), upload(new File(["new"], "same.png"))]);
-  await editor.inspectImages(); assertEquals(editor.preview().n, 1); assertEquals((await editor.run()).submitted, 1); assertEquals(editor.remaining(), []); editor.dispose();
+  await editor.inspectImages(); assertEquals(editor.preview().n, 1); assertEquals((await editor.run()).submitted, 1); assert(!editor.dirty()); editor.dispose();
 });

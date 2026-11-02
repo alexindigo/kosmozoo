@@ -18,7 +18,7 @@ Deno.test("selection ack: submitted off choices become clean across every row do
   deactivate(editor); assertEquals((await editor.run()).status, "submitted");
   assert(!editor.dirty()); assertEquals(editor.rows("numeric")["n.denoise"].enabled, false); editor.dispose();
 });
-Deno.test("selection ack: a whole off-recipe checkpoint retains unused values and native Files without applying them", async () => {
+Deno.test("selection ack: successful off selections leave unused values and native Files unchanged until close", async () => {
   const { editor } = editorRig(), file = new File(["kept"], "kept.png");
   activate(editor); await editor.run(); deactivate(editor);
   editor.edit("numeric", "n.denoise", "rawIncrement", "1e");

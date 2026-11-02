@@ -77,16 +77,6 @@ module.exports = async ({ cdp, check, FAKE, KZ }) => {
     check('image order: trusted pointer tile 3 before 1 and Alt+Right update recipe; grid reload preserves exact order', true);
     await cdp.evaluate("document.activeElement.blur();document.querySelector('.vz-sliders').scrollTop=0");
     if(process.env.E2E_IMAGE_SHOT){const shot=await cdp.send('Page.captureScreenshot',{format:'png'});fs.writeFileSync(process.env.E2E_IMAGE_SHOT,Buffer.from(shot.data,'base64'));}
-    const count=(await jobs()).length, result=await invoke('variations.run');
-    assert.equal(result.status,'submitted'); assert.equal(result.adopted,true);
-    const submitted=(await jobs()).slice(count).map(job=>job.prompt['43'].inputs.image);
-    assert.deepEqual(submitted,moved.filter(name=>name!=='canny.png'));
-    check('image order: actual captured fake enqueues follow moved recipe order exactly (unchanged current excluded)', true);
-    await invoke('variations.close');
-    await invoke('variations.open', { id: 'fake:flux-controlnet.png' });
-    await cdp.poll("document.querySelectorAll('.vz-image-tile').length===9");
-    assert.deepEqual(await order(), moved);
-    check('image order: full editor close/reopen reloads the same ordered recipe and native Files', true);
     await cdp.send('Emulation.setEmulatedMedia',{features:[{name:'prefers-reduced-motion',value:'reduce'}]});
     const reducedFrom=await box(2),reducedTo=await box(0);
     await cdp.mouse('mousePressed',reducedFrom.x,reducedFrom.y,{buttons:1});await cdp.mouse('mouseMoved',reducedTo.x,reducedTo.y,{buttons:1});
@@ -124,6 +114,17 @@ module.exports = async ({ cdp, check, FAKE, KZ }) => {
       await cdp.keyTrusted(key,{vk:key==='Delete'?46:8});await cdp.poll(`document.querySelectorAll('.vz-image-tile').length===${length-1}`);
     }
     check('image grid: Delete and Backspace each remove the focused tile',true);
+    const finalOrder = await order(), count=(await jobs()).length, result=await invoke('variations.run');
+    assert.equal(result.status,'submitted'); assert.equal(result.adopted,true);
+    const submitted=(await jobs()).slice(count).map(job=>job.prompt['43'].inputs.image);
+    assert.deepEqual(submitted,finalOrder.filter(name=>name!=='canny.png'));
+    check('image order: actual captured fake enqueues follow the final dragged/deleted order exactly (unchanged current excluded)', true);
+    await invoke('variations.close');
+    await invoke('variations.open', { id: 'fake:flux-controlnet.png' });
+    await cdp.poll("!!document.querySelector('.vz-image-set')&&document.querySelectorAll('.vz-slider-row').length>0");
+    assert.deepEqual(await order(), []);
+    assert.equal(await cdp.evaluate("document.querySelector('.vz-image-set .checkbox').checked"),false);
+    check('image order: full editor close/reopen starts with an empty image set, not the prior ordered Files', true);
   } finally {
     await cdp.send('Emulation.clearDeviceMetricsOverride');
     if(await cdp.evaluate("!!document.querySelector('.vz-panel')")){

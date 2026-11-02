@@ -1,6 +1,5 @@
 import { assert, assertEquals, assertThrows } from "jsr:@std/assert";
 import { makeVariationEditor } from "../client-solid/features/variations/editor.js";
-import { makeVariationRecipe } from "../client-solid/features/variations/recipe.js";
 import { generatePermutations, resolveRelativeRanges } from "../src/features/variations/shared.mjs";
 import { editorRig } from "./helpers/variation-editor.mjs";
 
@@ -22,10 +21,10 @@ Deno.test("Value: exactly one axis value, unchanged tuple excluded, other axes s
   } finally { editor.dispose(); }
 });
 
-Deno.test("Value: dormant invalid range is retained through acceptance and recipe remount", async () => {
-  const rig = editorRig(), recipe = makeVariationRecipe();
+Deno.test("Value: dormant invalid range survives mode changes in one session; a new editor starts fresh", async () => {
+  const rig = editorRig();
   const mount = () => {
-    const editor = makeVariationEditor({ recipe, targets: [{ id: "fake:image.png", host: "fake", filename: "image.png", origin: rig.context.origin }],
+    const editor = makeVariationEditor({ targets: [{ id: "fake:image.png", host: "fake", filename: "image.png", origin: rig.context.origin }],
       services: rig.services, currentOrigin: () => rig.context.origin, setTimer: () => 1, clearTimer() {} });
     editor.installCatalogue(rig.catalogue); return editor;
   };
@@ -37,12 +36,15 @@ Deno.test("Value: dormant invalid range is retained through acceptance and recip
     editor.edit("numeric", "n.denoise", "mode", "value");
     assertEquals(editor.preview().n, 1);
     assertEquals((await editor.run()).adopted, true); assert(!editor.dirty());
-    editor.dispose(); editor = mount();
     const row = editor.rows("numeric")["n.denoise"];
     assertEquals([row.mode, row.value, row.min, row.max, row.rawIncrement], ["value", "0.9", "0.7", "0.8", "1e"]);
     assertEquals(editor.preview().n, 1); assert(!editor.dirty());
     editor.edit("numeric", "n.denoise", "mode", "range");
     assertEquals(editor.preview().status, "invalid");
+    editor.dispose(); editor = mount();
+    const fresh = editor.rows("numeric")["n.denoise"];
+    assertEquals([fresh.mode, fresh.value, fresh.min, fresh.max, fresh.rawIncrement], ["range", "1", "0.85", "1", "0.05"]);
+    assert(!editor.dirty());
   } finally { editor.dispose(); rig.editor.dispose(); }
 });
 

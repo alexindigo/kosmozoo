@@ -1,5 +1,5 @@
-// Feature-private raw recipe ownership. Presentation, IO evidence and mount
-// leases never enter this representation. Native Files are opaque resources.
+// Dialog-private raw recipe ownership. Presentation and IO evidence never enter
+// this representation. Native Files are opaque resources.
 import { snapshotDraft, sameDraft } from "./draft.js";
 import { validImageSet, sameImage } from "./image-set.js";
 import { templateLabels } from "/shared/features/variations/shared.mjs";
@@ -43,7 +43,7 @@ export function recipeField(domain, name) {
 
 export function makeVariationRecipe() {
   const groups = new Map(Object.keys(RECIPE_FIELDS).map(domain => [domain, new Map()]));
-  let revision = 0, acceptance = null;
+  let revision = 0;
   const row = (domain, id) => groups.get(domain)?.get(id);
   const capture = () => Object.fromEntries([...groups].map(([domain, entries]) => [domain,
     Object.fromEntries([...entries].map(([id, entry]) => [id, snapshotDraft(entry)]))]));
@@ -64,27 +64,11 @@ export function makeVariationRecipe() {
       entry.values[name] = snapshotDraft(value);
       if (!entry.touched.includes(name)) entry.touched.push(name);
     },
-    remaining() {
-      const output = [];
+    dirty() {
       for (const [domain, entries] of groups) for (const [id, entry] of entries) for (const name of Object.keys(RECIPE_FIELDS[domain])) {
-        if (!sameDraft(entry.values[name], entry.baseline[name])) output.push({ domain, id, field: name });
+        if (!sameDraft(entry.values[name], entry.baseline[name])) return true;
       }
-      return output;
-    },
-    // One revision-atomic recipe checkpoint, never graph-field adoption. Clean
-    // untouched default settlement is not an edit and remains clean, not rewound.
-    acceptance: () => acceptance,
-    checkpoint(snapshot, expectedRevision, receipt = null) {
-      if (revision !== expectedRevision) return false;
-      for (const [domain, entries] of Object.entries(snapshot)) for (const [id, captured] of Object.entries(entries)) {
-        const entry = row(domain, id);
-        for (const [name, value] of Object.entries(captured.values)) {
-          if (!entry.touched.includes(name) && sameDraft(entry.values[name], entry.baseline[name])) continue;
-          entry.baseline[name] = snapshotDraft(value);
-        }
-      }
-      acceptance = receipt ? freezeRecipe(snapshotDraft({ revision, ...receipt })) : null;
-      return true;
+      return false;
     },
   };
 }

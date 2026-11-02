@@ -1,9 +1,8 @@
-// End consumers: exact fake prompts, automatic close, recovered controls and the
-// same native Files delivered to freshly mounted thumbnail object-URL consumers.
+// Run contracts independent of draft lifetime: exact prompts, bounded sidebar,
+// preflight rejection and heterogeneous target applicability.
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const { workPath } = require('./paths.cjs');
-const { freshRecipe } = require('./recipe-helpers.cjs');
 module.exports = async ({ cdp, ENGINE, FAKE, KZ, check }) => {
   const invoke = (id,args={}) => cdp.evaluate(`(async()=>${KZ}.handles.invoke(${JSON.stringify(id)},${JSON.stringify(args)}))()`);
   const http = async (base,path,method='GET',body) => {
@@ -11,7 +10,7 @@ module.exports = async ({ cdp, ENGINE, FAKE, KZ, check }) => {
     assert(response.ok,`${path}: ${response.status}`); return response.json();
   };
   const jobs = () => http(FAKE,'/__test/enqueues');
-  const open = async (host='fake') => { await invoke('variations.open',{id:`${host}:recipe_00001_.png`}); await cdp.poll("document.querySelectorAll('.vz-slider-row').length>0||!!document.querySelector('.vz-retained-values')"); };
+  const open = async () => { await invoke('variations.open',{id:'fake:recipe_00001_.png'}); await cdp.poll("document.querySelectorAll('.vz-slider-row').length>0&&document.querySelectorAll('.vz-image-set').length===2"); };
   const close = async () => { await cdp.clickAt('.vz-close'); await cdp.poll("!document.querySelector('.vz-panel')"); };
   const type = async (selector,text) => {
     await cdp.clickAt(selector); await cdp.evaluate(`(()=>{const e=document.querySelector(${JSON.stringify(selector)});e.focus();e.select()})()`);
@@ -40,7 +39,6 @@ module.exports = async ({ cdp, ENGINE, FAKE, KZ, check }) => {
     '2': {class_type:'CLIPTextEncode',inputs:{text:'original prompt'}},
     '461': {class_type:'SaveImage',inputs:{filename_prefix:'recipe',images:['470',0]}},
   };
-  let alias=false;
   await http(FAKE,'/__test/activity','POST',{captureEnqueue:true,publish:[{name:'recipe_00001_.png',fixture:'flux-basic.png',graph,mtime:2100000100},{name:'recipe-b.png',fixture:'flux-basic.png',graph,mtime:2100000099}]});
   await cdp.evaluate("(async()=>{await fetch('/api/collections/fake/entries/recipe_00001_.png/bytes')})()");
   await cdp.evaluate(`(()=>{window.__recipeCreate=URL.createObjectURL;window.__recipeRevoke=URL.revokeObjectURL;window.__recipeURLs=[];window.__recipeRevoked=[];
@@ -51,11 +49,8 @@ module.exports = async ({ cdp, ENGINE, FAKE, KZ, check }) => {
     const namingJobs=(await jobs()).slice(namingStart);assert.equal(namingJobs.length,3);
     assert(namingJobs.every(job=>job.prompt['461'].inputs.filename_prefix==='recipe_00001__naming-suffix'));
     await cdp.poll("!document.querySelector('.vz-panel')",6000);await open();
-    assert.equal(await cdp.evaluate("document.querySelector('.vz-suffix').value"),'_naming-suffix'); await close();
-    check('recipe scenario 1: naming suffix reaches every actual prompt, automatically closes and recovers on reopen',true);
-
-    await cdp.evaluate("(async()=>{await fetch('/api/collections/fake/entries/recipe-b.png/bytes')})()");await invoke('variations.open',{id:'fake:recipe-b.png'});await cdp.poll("document.querySelectorAll('.vz-slider-row').length>0");await close();
-    await open();assert.equal(await cdp.evaluate("document.querySelector('.vz-suffix').value"),'_naming-suffix');
+    assert.equal(await cdp.evaluate("document.querySelector('.vz-suffix').value"),'_{9.denoise}');
+    check('Run naming suffix reaches every actual prompt and automatically closes',true);
     await cdp.poll("document.querySelectorAll('.vz-image-set').length===2");
     await cdp.clickAt('[data-param-key="9.steps"] .checkbox');
     await cdp.clickAt('[data-param-key="9.steps"] .noUi-handle[data-handle="0"]');await cdp.keyTrusted('ArrowRight',{vk:39});
@@ -78,30 +73,16 @@ module.exports = async ({ cdp, ENGINE, FAKE, KZ, check }) => {
     assert.deepEqual(submitted.map(job=>job.prompt['461'].inputs.filename_prefix),submitted.map(job=>'recipe_00001__'+job.prompt['470'].inputs.image.replace(/\.[^.]+$/,'')));
     await cdp.poll("!document.querySelector('.vz-panel')",6000);
     assert(await cdp.evaluate("window.__recipeURLs.every(item=>window.__recipeRevoked.includes(item.url))"));
-    const urlStart=await cdp.evaluate('window.__recipeURLs.length');await open();
-    await cdp.clickAt('[data-image-id="475.image"] .checkbox');await cdp.poll("document.querySelectorAll('.vz-image-tile').length===4&&!document.querySelector('.vz-image-check')");
-    assert(await cdp.evaluate(`window.__recipeFiles.concat(window.__recipeDormant).every(file=>window.__recipeURLs.slice(${urlStart}).some(item=>item.file===file))`));
-    assert.equal(await cdp.evaluate("document.querySelector('[data-param-key=\"9.steps\"] .checkbox').checked"),false);
-    assert.equal(await cdp.evaluate("!!document.querySelector('[data-param-key=\"9.steps\"] .vz-numeric-editor')"),false);
-    await cdp.clickAt('[data-param-key="9.steps"] .checkbox');
-    assert.equal(await cdp.evaluate("document.querySelector('[data-param-key=\"9.steps\"] .vz-row-inc-input').value"),'1e');
-    assert(await cdp.evaluate("document.querySelector('[data-param-key=\"9.steps\"] .noUi-handle[data-handle=\"0\"]').getAttribute('aria-valuenow')===window.__recipeRange"));
-    await cdp.clickAt('[data-param-key="9.steps"] .checkbox');await cdp.clickAt('[data-image-id="475.image"] .checkbox');
-    await capture('recipe-recovered');await type('.vz-text-values','{{parked}}');assert.equal(await cdp.evaluate("document.querySelector('.vz-tpl-input').value"),'one; two');
-    await type('.vz-text-values','literal submitted');
-    await cdp.clickAt('[data-enum-id="9.scheduler"] .vz-imgrow-head .checkbox');assert.equal(await cdp.evaluate("document.querySelector('[data-enum-id=\"9.scheduler\"] .vz-enum-opt:last-child .checkbox').checked"),true);await cdp.clickAt('[data-enum-id="9.scheduler"] .vz-imgrow-head .checkbox');
-    await cdp.poll("document.querySelector('[data-enum-id=\"9.scheduler\"] .vz-imgrow-head .checkbox').checked===false");
-    check('recipe scenarios 2–3: disabled raw controls, enum picks, dormant templates and identical native Files recover after 3 exact hostile-name graphs and automatic close; object URLs retire',true);
+    check('Run sends three exact hostile-name graphs; disabled rows stay unapplied and object URLs retire on close',true);
+    await open();
 
     // Enabled-empty and unresolved naming reject without a single fake enqueue.
-    await cdp.clickAt('[data-image-id="475.image"] .checkbox');await cdp.poll("document.querySelector('[data-image-id=\"475.image\"] .checkbox').checked===true");await cdp.clickAt('[data-image-id="475.image"] .vz-image-tile .chrome-icon');
+    await cdp.clickAt('[data-image-id="475.image"] .checkbox');await cdp.poll("document.querySelector('[data-image-id=\"475.image\"] .checkbox').checked===true");
     await cdp.poll("document.querySelectorAll('[data-image-id=\"475.image\"] .vz-image-tile').length===0");
     let count=(await jobs()).length;assert.equal((await invoke('variations.run')).adopted,false);assert.equal((await jobs()).length,count);
     assert(await cdp.evaluate("document.querySelector('.vz-error').textContent.includes('at least one image')"));
     await cdp.clickAt('[data-image-id="475.image"] .checkbox');await cdp.poll("document.querySelector('[data-image-id=\"475.image\"] .checkbox').checked===false");
-    // The fake intentionally returns 409 for repeated names (unlike stock byte
-    // dedupe). These independent preflight cases must not retry accepted Files.
-    await cdp.clickAt('[data-image-id="470.image"] .checkbox');await cdp.poll("document.querySelector('[data-image-id=\"470.image\"] .checkbox').checked===false");await type('.vz-suffix','_{unknown}');
+    await type('.vz-suffix','_{unknown}');
     count=(await jobs()).length;await invoke('variations.run');assert.equal((await jobs()).length,count);
     assert(await cdp.evaluate("document.querySelector('.vz-error').textContent.includes('naming token')"),await cdp.evaluate("document.querySelector('.vz-error').textContent"));
     await fixedSummary();await capture('recipe-preflight');
@@ -111,14 +92,12 @@ module.exports = async ({ cdp, ENGINE, FAKE, KZ, check }) => {
     check('recipe layout: normal, preflight and long-error states keep intrinsic content reachable through the sidebar body, bounded messages directly above pinned Run',true);
     await type('.vz-suffix','_{470.image}');
     await cdp.clickAt('[data-image-id="470.image"] .checkbox');
-    for(let remaining=3;remaining>0;remaining--){await cdp.clickAt('[data-image-id="470.image"] .vz-image-tile .chrome-icon');await cdp.poll(`document.querySelectorAll('[data-image-id="470.image"] .vz-image-tile').length===${remaining-1}`)}
     await cdp.evaluate(`(async()=>{const bytes=await(await fetch('/api/collections/fake/entries/flux-lora.png/bytes')).arrayBuffer(),input=document.querySelector('[data-image-id="470.image"] .vz-imgfilespick'),dt=new DataTransfer();dt.items.add(new File([bytes],'x'.repeat(196)+'.png',{type:'image/png'}));input.files=dt.files;input.dispatchEvent(new Event('change',{bubbles:true}))})()`);
     await cdp.poll("document.querySelector('[data-image-id=\"470.image\"] .checkbox').checked===true&&!document.querySelector('.vz-image-check')");count=(await jobs()).length;
     assert.equal((await invoke('variations.run')).adopted,true);
     const longJobs=(await jobs()).slice(count);assert(longJobs.length>0);
     assert(longJobs.every(job=>job.prompt['461'].inputs.filename_prefix==='recipe_00001__'+'x'.repeat(19)+'~'+'x'.repeat(20)));
     await close();await open();
-    await cdp.clickAt('[data-image-id="470.image"] .checkbox');
     await type('.vz-prefix','p'.repeat(210));await type('.vz-suffix','');
     count=(await jobs()).length;await invoke('variations.run');assert.equal((await jobs()).length,count);
     assert(await cdp.evaluate("document.querySelector('.vz-error').textContent.includes('Prefix and suffix are 210 bytes; the limit is 200 bytes')"));
@@ -135,46 +114,10 @@ module.exports = async ({ cdp, ENGINE, FAKE, KZ, check }) => {
     const fullJobs=batchJobs.filter(job=>job.extra_data.extra_pnginfo.kz.source==='fake:recipe-batch-full.png'),missingJobs=batchJobs.filter(job=>job.extra_data.extra_pnginfo.kz.source==='fake:recipe-batch-missing.png');
     assert(fullJobs.length>0&&missingJobs.length>0);assert(fullJobs.every(job=>Object.hasOwn(job.extra_data.extra_pnginfo.kz.params,'9.steps')));assert(missingJobs.every(job=>!Object.hasOwn(job.prompt['9'].inputs,'steps')&&!Object.hasOwn(job.extra_data.extra_pnginfo.kz.params,'9.steps')));
     await cdp.poll("!document.querySelector('.vz-panel')",6000);
-    check('recipe applicability: heterogeneous batch proves each applicable operation, explicitly excludes absent relative numeric work and checkpoints only after both targets accept',true);
-
-    const address=new URL(FAKE).host;await http(ENGINE,'/api/collections','POST',{name:'recipe-owner',address});alias=true;
-    await cdp.poll(`(async()=>!!${KZ}.state.hosts['recipe-owner'])()`);await cdp.evaluate("(async()=>{await fetch('/api/collections/recipe-owner/entries/recipe_00001_.png/bytes')})()");
-    await open('recipe-owner');await cdp.poll("document.querySelectorAll('.vz-image-set').length===2");
-    await cdp.clickAt('[data-image-id="475.image"] .checkbox');
-    await cdp.evaluate("(()=>{const input=document.querySelector('[data-image-id=\"475.image\"] .vz-imgfilespick'),dt=new DataTransfer();dt.items.add(window.__recipeDormant);input.files=dt.files;input.dispatchEvent(new Event('change',{bubbles:true}))})()");
-    await cdp.clickAt('[data-image-id="475.image"] .checkbox');
-    assert.equal((await invoke('variations.run')).adopted,true);await cdp.poll("!document.querySelector('.vz-panel')",6000);
-    const oldIncarnation=await cdp.evaluate(`(async()=>${KZ}.state.hosts['recipe-owner'].sourceVersion.incarnation)()`);
-    await http(ENGINE,'/api/collections/recipe-owner','DELETE');alias=false;await http(ENGINE,'/api/collections','POST',{name:'recipe-owner',address});alias=true;
-    await cdp.poll(`(async()=>${KZ}.state.hosts['recipe-owner']?.sourceVersion.incarnation!==${JSON.stringify(oldIncarnation)}&&!!${KZ}.state.hosts['recipe-owner'])()`);await cdp.evaluate("(async()=>{await fetch('/api/collections/recipe-owner/entries/recipe_00001_.png/bytes')})()");
-    await open('recipe-owner');await cdp.poll("!!document.querySelector('.vz-workspace-status')");
-    await fixedSummary();
-    assert(await cdp.evaluate("!document.querySelector('button.vz-run')&&!document.querySelector('.vz-naming-group input')&&[...document.querySelectorAll('.vz-left input')].every(input=>input.matches('.vz-field-filter input'))&&document.querySelector('.vz-retained-values').textContent.includes('dormant.png')"));
-    count=(await jobs()).length;assert.equal((await invoke('variations.run')).status,'stale');assert.equal((await jobs()).length,count);
-    await fixedSummary();
-    await capture('recipe-old-origin');await cdp.clickAt('.vz-workspace-new');await cdp.poll("!document.querySelector('.vz-workspace-status')&&document.querySelectorAll('.vz-workspace option').length===2");
-    const currentWorkspace=await cdp.evaluate("document.querySelector('.vz-workspace').value");await type('.vz-prefix','kept-current');
-    await cdp.evaluate("(()=>{const select=document.querySelector('.vz-workspace');select.value=[...select.options].find(option=>option.textContent.includes('Previous')).value;select.dispatchEvent(new Event('change',{bubbles:true}))})()");
-    await cdp.poll("!!document.querySelector('.vz-discard')");await cdp.clickAt('.vz-keep');
-    assert.equal(await cdp.evaluate("document.querySelector('.vz-workspace').value"),currentWorkspace);assert.equal(await cdp.evaluate("document.querySelector('.vz-prefix').value"),'kept-current');
-    // Replacing the dirty current recipe still has Keep/Discard; the standalone
-    // reset action is gone. Discarding that replacement leaves the old origin.
-    await cdp.evaluate("(()=>{const select=document.querySelector('.vz-workspace');select.value=[...select.options].find(option=>option.textContent.includes('Previous')).value;select.dispatchEvent(new Event('change',{bubbles:true}))})()");
-    await cdp.poll("!!document.querySelector('.vz-discard')");await cdp.clickAt('.vz-discard-confirm');
-    await cdp.poll("!!document.querySelector('.vz-workspace-status')");
-    assert.equal(await cdp.evaluate("!!document.querySelector('.vz-workspace-discard')"),false);
-    await close();await open('recipe-owner');
-    assert(await cdp.evaluate("!!document.querySelector('.vz-workspace-status')&&!document.querySelector('.vz-workspace')&&document.querySelector('.vz-retained-values').textContent.includes('dormant.png')"));
-    await cdp.clickAt('.vz-workspace-new');await cdp.poll("document.querySelectorAll('.vz-workspace option').length===2");
-    // App disposal is the remaining product path that removes old-source recipes.
-    await cdp.evaluate("URL.createObjectURL=window.__recipeCreate;URL.revokeObjectURL=window.__recipeRevoke");
-    await freshRecipe(cdp);
-    assert(await cdp.evaluate("!document.querySelector('.vz-workspace-status')&&!document.querySelector('.vz-workspace')&&!document.querySelector('.vz-workspace-discard')"));
-    await close();
-    check('recipe origin recovery: old origin stays inspectable across close/new; guarded replacement preserves independent identities; app disposal clears retained recipes',true);
+    check('Run applicability: heterogeneous batch explicitly excludes absent relative numeric work and closes only after both targets accept',true);
   } finally {
     await cdp.evaluate("if(window.__recipeCreate){URL.createObjectURL=window.__recipeCreate;URL.revokeObjectURL=window.__recipeRevoke}");
     if(await cdp.evaluate("!!document.querySelector('.vz-panel')")){await cdp.evaluate(`(async()=>{${KZ}.handles.invoke('variations.close');return true})()`);if(await cdp.evaluate("!!document.querySelector('.vz-discard')"))await cdp.clickAt('.vz-discard-confirm');}
-    if(alias)await http(ENGINE,'/api/collections/recipe-owner','DELETE');await http(FAKE,'/__test/activity','POST',{captureEnqueue:false});
+    await http(FAKE,'/__test/activity','POST',{captureEnqueue:false});
   }
 };

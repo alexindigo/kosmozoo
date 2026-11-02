@@ -194,7 +194,7 @@ Deno.test("ack: consumer rejects incomplete, foreign, duplicate and forged proof
   assertEquals(acknowledgedFields(body, multi), null);
 });
 
-Deno.test("ack: whole-recipe checkpoint retains disabled/dormant/inactive fields and native File identity", async () => {
+Deno.test("ack: successful Run leaves disabled/dormant/inactive raw values and native File identity unchanged until close", async () => {
   const a = new File(["a"], "a.png"), b = new File(["b"], "b.png");
   const { editor, requests } = editorRig();
   editor.edit("numeric", "n.denoise", "rawIncrement", "1e-1");
@@ -206,7 +206,7 @@ Deno.test("ack: whole-recipe checkpoint retains disabled/dormant/inactive fields
   editor.template("text.text", "used", "a; b"); editor.template("text.text", "dormant", "kept");
   editor.edit("naming", "root", "prefix", "v_");
   assertEquals((await editor.run()).status, "submitted");
-  assertEquals(editor.remaining(), []);
+  assert(!editor.dirty());
   assertEquals(editor.rows("numeric")["n.steps"].rawIncrement, "1e");
   assertEquals(editor.rows("texts")["text.text"].tpl.dormant, "kept");
   assertEquals(requests[0].ranges["n.denoise"].increment, .1);

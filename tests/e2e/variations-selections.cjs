@@ -29,8 +29,7 @@ module.exports=async({cdp,FAKE,KZ,check})=>{
   const textOnly=(twoTexts=true)=>selectionSetup(cdp,twoTexts);
   await fetch(FAKE+'/__test/activity',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({captureEnqueue:true})});
   try{
-    // Earlier suites now legitimately retain accepted recipes. This suite's
-    // default-state fixture is established through the explicit removal UI.
+    // Establish the default-state fixture through an ordinary fresh opening.
     await open();await invoke('variations.close');await cdp.poll("!document.querySelector('.vz-panel')");
     for(const [name,args,twoTexts] of [
       ['single',{id:'fake:flux-controlnet.png'},true],

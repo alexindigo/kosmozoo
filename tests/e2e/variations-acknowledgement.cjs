@@ -36,7 +36,7 @@ module.exports=async({cdp,FAKE,KZ,check})=>{
 
     // Widen only the displayed catalogue so the real enum search is available;
     // the selected value and every submitted graph still use the stock fixture.
-    // Reload the fresh app before installing its mount-private fetch fixture.
+    // Close the clean draft before installing its mount-private fetch fixture.
     await open('flux-lora.png');await close();
     await cdp.evaluate(`(()=>{window.__presentationFetch=window.fetch;window.fetch=(url,options)=>window.__presentationFetch(url,options).then(async response=>{
       if(!String(url).includes('/features/variations/probe/'))return response;const data=await response.json();
@@ -48,7 +48,7 @@ module.exports=async({cdp,FAKE,KZ,check})=>{
     assert.equal((await release()).adopted,true);
     await cdp.poll("!document.querySelector('.vz-panel')",6000);
     await cdp.evaluate("window.fetch=window.__presentationFetch;window.__presentationFetch=null");
-    check('enum search during a held Run is presentation only and cannot block checkpoint or automatic close',true);
+    check('enum search during a held Run is presentation only and cannot block acceptance or automatic close',true);
 
     await open();await type('.vz-prefix','before-held_');await held();await type('.vz-prefix','newer-edit_');
     assert.equal((await release()).status,'submitted');await stays();
@@ -81,17 +81,18 @@ module.exports=async({cdp,FAKE,KZ,check})=>{
     await open('flux-basic.png',false);
     assert.equal(await cdp.evaluate("!!document.querySelector('.vz-slider-row[data-param-key=\"9.steps\"] .vz-numeric-editor')"),false);
     await cdp.clickAt('.vz-slider-row[data-param-key="9.steps"] .checkbox');
-    assert.equal(await cdp.evaluate("document.querySelector('.vz-slider-row[data-param-key=\"9.steps\"] .vz-row-inc-input').value"),'1e');
+    assert.notEqual(await cdp.evaluate("document.querySelector('.vz-slider-row[data-param-key=\"9.steps\"] .vz-row-inc-input').value"),'1e');
     await cdp.clickAt('.vz-slider-row[data-param-key="9.steps"] .checkbox');
-    await cdp.clickAt('.vz-close');await cdp.poll("!document.querySelector('.vz-panel')");check('accepted whole recipe closes and recovers disabled incomplete editor text at the reopened control',true);
+    await close();check('successful Run closes; reopened numeric controls have fresh raw defaults',true);
 
     await open();await cdp.clickAt('.vz-textrow[data-text-id="2.text"] .checkbox');
     await type('.vz-text-values','{{dormant}}');await cdp.poll("!!document.querySelector('.vz-tpl-input')");await type('.vz-tpl-input','one; two');
     await type('.vz-text-values','literal submitted text');assert.equal((await invoke('variations.run')).status,'submitted');
     await cdp.poll("!document.querySelector('.vz-panel')",6000);await open('flux-basic.png',false);
+    await cdp.clickAt('.vz-textrow[data-text-id="2.text"] .checkbox');
     await type('.vz-text-values','{{dormant}}');await cdp.poll("!!document.querySelector('.vz-tpl-input')");
-    assert.equal(await cdp.evaluate("document.querySelector('.vz-tpl-input').value"),'one; two');
-    await dirtyClose();check('accepted literal text closes while dormant values recover through their reopened template controls',true);
+    assert.equal(await cdp.evaluate("document.querySelector('.vz-tpl-input').value"),'');
+    await dirtyClose();check('successful literal text Run closes; dormant substitutions do not survive reopen',true);
 
     await open();await type('.vz-prefix','uncorrelated_');
     await cdp.evaluate(`(()=>{window.__ackFetch=window.fetch;window.fetch=(url,options)=>window.__ackFetch(url,options).then(async response=>{
@@ -107,7 +108,7 @@ module.exports=async({cdp,FAKE,KZ,check})=>{
       if(!String(url).includes('/features/variations/run'))return response;const data=await response.json();if(JSON.parse(options.body).filename==='flux-lora.png')data.acknowledgement.accepted=[];
       return new Response(JSON.stringify(data),{status:200})})})()`);
     await invoke('variations.run');await stays();await cdp.evaluate("window.fetch=window.__ackFetch");await dirtyClose();
-    check('one invalid captured target prevents every baseline acknowledgement in a batch',true);
+    check('one invalid captured target keeps the entire batch draft unsent',true);
 
     await open();await type('.vz-slider-row[data-param-key="9.denoise"] .vz-row-inc-input','1e-1');
     await cdp.clickAt('.vz-textrow[data-text-id="2.text"] .checkbox');await type('.vz-text-values','First {{used}}.\n\nSecond {{used}}.\n');

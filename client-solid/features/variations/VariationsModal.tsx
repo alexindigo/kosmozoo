@@ -25,10 +25,8 @@ import { VariationDiscardConfirmation } from "./VariationDiscardConfirmation.js"
 import { ImageSetPanel } from "./ImageSetPanel.js";
 import { SingleLineText } from "../../components/SingleLineText.js";
 import { Checkbox } from "../../components/Checkbox.js";
-import { Select } from "../../components/Select.js";
 import { IconButton } from "../../components/IconButton.js";
 import { TextField } from "../../components/TextField.js";
-import { workspaceCurrent } from "./workspaces.js";
 import { ParameterRow } from "./ParameterRow.js";
 import { isFileDrag } from "./image-drop.js";
 import { matchesFieldFilter } from "./field-filter.js";
@@ -64,22 +62,15 @@ export function VariationsModal() {
 }
 
 function ModalBody(props) {
-  const store = useAppStore(), workspaces = store.actions.variations.workspaces;
-  const [workspace, setWorkspace] = createSignal(workspaces.open(props.images));
-  return <Show when={workspace()} keyed>{selected => <RecipeBody {...props} workspace={selected}
-    workspaces={workspaces} selectWorkspace={setWorkspace} readOnly={!workspaceCurrent(selected, props.images)} />}</Show>;
-}
-
-function RecipeBody(props) {
   const store = useAppStore();
   const services = store.actions.variations.services;
-  const image = props.workspace.targets[0];
+  const image = props.images[0];
   // batch = more than one image: ranges become RELATIVE offsets from each
   // image's own current value (resolved by the plugin at run time), and the
   // count shows the total across the whole selection.
   const batch = props.images.length > 1;
   const [version, setVersion] = createSignal(0);
-  const editor = makeVariationEditor({ targets: props.workspace.targets, recipe: props.workspace.recipe, readOnly: props.readOnly, services,
+  const editor = makeVariationEditor({ targets: props.images, services,
     currentOrigin: host => sourceOrigin(host, store.state.hosts[host]),
     changed: () => setVersion(value => value + 1),
     close: () => store.handles.invoke("variations.close", { automatic: true, session: props.session }) });
@@ -109,19 +100,12 @@ function RecipeBody(props) {
   let restoreFocus = () => {};
   const rememberFocus = (restore) => { restoreFocus = restore; };
   const focus = focusMemory(rememberFocus);
-  const guard = makeLeaveGuard({ dirty: () => !props.readOnly && editor.dirty(),
+  const guard = makeLeaveGuard({ dirty: editor.dirty,
     suspend: () => { for (const child of children) child.suspend(); },
     restore: () => { for (const child of children) child.resume(); restoreFocus(); },
-    decision: value => { setDecision(value); editor.decision(value); }, invalidate: editor.invalidateClose,
-    discarded: () => props.workspaces.remove(props.workspace) });
-  const switchRecipe = next => guard.request({ intent: { type: "recipe", key: next?.id ?? "new" },
-    cancel: () => {}, permit: () => {
-      props.selectWorkspace(next ?? props.workspaces.fresh(props.images));
-      return { status: "applied" };
-    } });
+    decision: value => { setDecision(value); editor.decision(value); }, invalidate: editor.invalidateClose });
   onCleanup(store.actions.variations.registerOwner(props.session, { requestLeave: guard.request, requestRun: editor.run }));
   onCleanup(() => { editor.dispose(); guard.dispose(); });
-  onCleanup(props.workspaces.lease(() => { editor.dispose(); guard.dispose(); }));
   // refs exist solely to read the live selection and restore the caret
   // after an explicit parameter insert.
   let prefixEl, suffixEl;
@@ -154,12 +138,11 @@ function RecipeBody(props) {
   // The graph is the source of truth: only parameters whose target node
   // exists in this image's graph render (writeOnly params — widget-only
   // custom seed nodes etc. — are skipped for now).
-  const [probe] = createResource(() => !props.readOnly, () => services.probe(image));
+  const [probe] = createResource(() => services.probe(image));
   const [folderCapability] = createResource(() => services.folderCapability());
 
   let initializedProbe = false;
   createEffect(() => {
-    if (props.readOnly) return;
     if (probe.loading) return;
     if (initializedProbe) return;
     initializedProbe = true;
@@ -168,7 +151,7 @@ function RecipeBody(props) {
   });
 
   const [inputFiles] = createResource(
-    () => read(() => !props.readOnly && editor.ready() && strParams().length && image.host ? image.host : null),
+    () => read(() => editor.ready() && strParams().length && image.host ? image.host : null),
     (hostName) => services.inputList(hostName, image.origin),
   );
   let initializedImages = false;
@@ -176,8 +159,6 @@ function RecipeBody(props) {
     const sp = strParams();
     if (!sp.length || inputFiles.loading) return;
     if (initializedImages) return;
-    // Retained rows can exist before this mount's probe starts its input read.
-    // Only a resolved resource (or its terminal error) may consume installation.
     if (!inputFiles.error && !inputFiles()) return;
     initializedImages = true;
     if (inputFiles.error) editor.catalogueFailure(inputFiles.error);
@@ -283,34 +264,14 @@ function RecipeBody(props) {
         <div class="vz-body">
           <div class="vz-left">
             <div class="vz-sliders">
-              <div class="vz-workspace-tools">
-                <div class="vz-workspace-actions">
-                  <TextField controlClass="vz-field-filter" ref={filterInput} type="text" placeholder="Filter fields" aria-label="Filter fields"
-                      {...focus} value={fieldFilter()} onInput={event => setFieldFilter(event.currentTarget.value)}
-                      trailing={<Show when={fieldFilter()}>
-                      <IconButton chrome size="md" variant="plain vz-filter-clear" title="Clear field filter" icon={iconSvg("x")}
-                        onAction={() => { setFieldFilter(""); filterInput.focus(); }} />
-                    </Show>} />
-                  <Show when={props.workspaces.options(props.images).length > 1}>
-                  <Select id={`recipe-${props.session}`} class="vz-workspace" value={props.workspace.id}
-                    aria-label="Recipe workspace"
-                    onChange={event => {
-                      const next = props.workspaces.options(props.images).find(item => item.id === event.currentTarget.value);
-                      event.currentTarget.value = props.workspace.id;
-                      switchRecipe(next);
-                    }}>
-                    <For each={props.workspaces.options(props.images)}>{item => <option value={item.id}>
-                      {workspaceCurrent(item, props.images) ? "Current source recipe" : `Previous source · ${item.targets[0].origin.address} (${item.id})`}
-                    </option>}</For>
-                  </Select>
-                  </Show>
-                </div>
-                <Show when={props.readOnly}>
-                  <button class="vz-workspace-new" onClick={() => switchRecipe(null)}>New recipe for current source</button>
-                </Show>
+              <div class="vz-filter-tools">
+                <TextField controlClass="vz-field-filter" ref={filterInput} type="text" placeholder="Filter fields" aria-label="Filter fields"
+                    {...focus} value={fieldFilter()} onInput={event => setFieldFilter(event.currentTarget.value)}
+                    trailing={<Show when={fieldFilter()}>
+                    <IconButton chrome size="md" variant="plain vz-filter-clear" title="Clear field filter" icon={iconSvg("x")}
+                      onAction={() => { setFieldFilter(""); filterInput.focus(); }} />
+                  </Show>} />
               </div>
-              <Show when={props.readOnly}><RetainedRecipe values={editor.retainedValues()} /></Show>
-              <Show when={!props.readOnly}>
               {/* One chosen set, independent of how each image was acquired. */}
               <For each={strParams()}>
                 {(id) => {
@@ -407,7 +368,6 @@ function RecipeBody(props) {
               <Show when={params() !== null && fieldFilter().trim() && !hasMatchingFields()}>
                 <SingleLineText class="vz-loading vz-filter-empty" value={`No fields match "${fieldFilter()}"`} />
               </Show>
-              </Show>
             </div>
           </div>
           <div class="vz-divider" />
@@ -421,10 +381,6 @@ function RecipeBody(props) {
             </div>
             <div class="vz-naming-group">
               <span class="vz-rlabel">Output names</span>
-              <Show when={!props.readOnly} fallback={<>
-                <span>Prefix</span><SingleLineText class="vz-retained-prefix" value={prefix() || "None"} />
-                <span>Suffix</span><SingleLineText class="vz-retained-suffix" value={suffix() || "None"} />
-              </>}>
               <label for={`prefix-${props.session}`}>Prefix</label>
               <TextField
                 id={`prefix-${props.session}`} type="text" class="vz-tinput vz-prefix" ref={prefixEl}
@@ -441,7 +397,6 @@ function RecipeBody(props) {
                 {...focus} onFocus={(e) => { setFocused("suffix"); focus.onFocus(e); }}
                 onInput={(e) => editor.edit("naming", "root", "suffix", e.currentTarget.value)}
               />
-              </Show>
               <Show when={tally().naming.example}>
                 <div class="vz-output-preview">
                   <span>Example</span>
@@ -453,9 +408,6 @@ function RecipeBody(props) {
             <div class="vz-messages" role="status">
               <div class="vz-message-content">
                 <Show when={tally().message && !result()}><p class={tally().status === "invalid" ? "vz-readiness-error" : "vz-field-help"}>{tally().message}</p></Show>
-                <Show when={props.readOnly && !result()?.text}>
-                  <p class="vz-workspace-status">Recipe from a previous source. Review only; images and values have not been retargeted.</p>
-                </Show>
                 <Show when={result()}>{value => <>
                   <Show when={Number.isSafeInteger(value().submitted) && value().total > 0}>
                     <p class={value().ok ? "vz-queued vz-ok" : "vz-queued"}>Queued {value().submitted} of {value().total} jobs</p>
@@ -464,11 +416,11 @@ function RecipeBody(props) {
                 <p class={"vz-error" + (result()?.ok ? " vz-neutral" : "")}>{result()?.reason ?? result()?.text ?? ""}</p>
               </div>
             </div>
-            <div class="vz-run-slot"><Show when={!props.readOnly}>
+            <div class="vz-run-slot">
               <Show when={!running()} fallback={<SingleLineText class="vz-field-help" role="status" value="Queuing…" />}>
                 <button class="vz-run" onClick={() => store.handles.invoke("variations.run")}><SingleLineText value="Run" /></button>
               </Show>
-            </Show></div>
+            </div>
           </div>
         </div>
         <IconButton chrome variant="plain vz-close" title="close (Esc)"
@@ -480,19 +432,6 @@ function RecipeBody(props) {
       </Show>
     </div>
   );
-}
-
-// Every raw value is inspectable on a retired source, including disabled rows
-// and dormant template keys. This consumer has no edit/acquisition callbacks.
-function RetainedRecipe(props) {
-  const display = value => typeof value === "string" ? value : JSON.stringify(value,
-    (_key, item) => item instanceof File ? `${item.name} (${item.size} bytes, native File)` : item, 2);
-  return <div class="vz-retained-values"><For each={props.values}>{entry => <section>
-    <h3>{entry.id} · {entry.domain}</h3>
-    <dl><For each={Object.entries(entry.values)}>{([name, value]) => <>
-      <dt>{name}</dt><dd><pre>{display(value)}</pre></dd>
-    </>}</For></dl>
-  </section>}</For></div>;
 }
 
 // one enum sweep row: master checkbox + label + the orange current value;

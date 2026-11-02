@@ -18,7 +18,7 @@ Deno.test("editor contract: every declared editable field participates in dirty 
       const { editor } = editorRig(); assert(!editor.dirty());
       editor.edit(domain, cases[domain].id, name, cases[domain].values[name]);
       assert(editor.dirty(), `${domain}.${name} must register work`);
-      assert(editor.remaining().some(item => item.domain === domain && item.field === name)); editor.dispose();
+      assertEquals(domain === "naming" ? editor.naming(name) : editor.rows(domain)[cases[domain].id][name], cases[domain].values[name]); editor.dispose();
     }
   }
   const { editor } = editorRig();
@@ -122,7 +122,7 @@ Deno.test("editor templates: explicitly configured prototype-named labels reach 
       rig.editor.edit("texts", "text.text", "text", `{{${label}}}`);rig.editor.template("text.text", label, "one; two");
       assertEquals((await rig.editor.run()).adopted, true);
       assertEquals(rig.requests[0].imageParams["text.text"].values, ["one", "two"]);
-      assertEquals(rig.editor.remaining(), []);
+      assert(!rig.editor.dirty());
     } finally { rig.editor.dispose(); }
   }
 });

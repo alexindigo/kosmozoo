@@ -235,7 +235,7 @@ module.exports = async ({ cdp, check, FAKE, KZ }) => {
   });
 
   await test('blocking decision outranks underlying popup; Escape cancels only the decision', async () => {
-    // App disposal precedes the mount-private underlying popup setup.
+    // A clean close precedes the mount-private underlying popup setup.
     await open(); await discard();
     await invoke('workbench.openPair',{left:{source:'fake',file:'flux-basic.png'},right:{source:'fake',file:'flux-lora.png'}});
     await invoke('workbench.mode',{mode:'two-up'});

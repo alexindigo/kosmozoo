@@ -24,7 +24,7 @@ module.exports = async ({ cdp, FAKE, KZ, check }) => withRecipe({ cdp, FAKE, KZ,
     }
   }
   assert.deepEqual(failures, [], failures.join('; '));
-  // A widget value is not enough: remount projects the retained recipe raw text.
+  // A widget value is not enough: in-session row remount projects its raw text.
   await cdp.clickAt('.vz-close'); await cdp.poll("!!document.querySelector('.vz-discard')");
   await cdp.clickAt('.vz-keep');
   await cdp.clickAt(`${row} .checkbox`); await cdp.clickAt(`${row} .checkbox`);
@@ -34,6 +34,6 @@ module.exports = async ({ cdp, FAKE, KZ, check }) => withRecipe({ cdp, FAKE, KZ,
   const jobs = (await (await fetch(FAKE + '/__test/enqueues')).json()).slice(jobsBefore);
   assert(jobs.some(job => job.prompt['9'].inputs.denoise === Number(expected[0])));
   assert(jobs.some(job => job.prompt['9'].inputs.denoise === Number(expected[1])));
-  check('both range handles change raw fields, retained recipe values and submitted graph endpoints', true);
+  check('both range handles change raw fields, in-session row values and submitted graph endpoints', true);
   await cdp.poll("!document.querySelector('.vz-panel')", 6000);
 });
