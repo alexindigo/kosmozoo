@@ -572,10 +572,13 @@ export function makeAppStore({ subscribeSources = typeof window !== "undefined" 
   function compensateFeed(delta) {
     const col = feedScrollEl();
     if (!col || !delta) return;
-    setSuppressSettleCurrent(true);
     const before = col.scrollTop;
     col.scrollTop = before + delta;
-    if (gestureStart != null) gestureStart += col.scrollTop - before;
+    const applied = col.scrollTop - before;
+    // No movement means no scroll event/settle to consume suppression.
+    if (!applied) return;
+    setSuppressSettleCurrent(true);
+    if (gestureStart != null) gestureStart += applied;
   }
 
   function restoreToIndex(idx) {

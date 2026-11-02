@@ -494,6 +494,28 @@ Deno.test("feed: compensation preserves current but cannot suppress the new coll
   });
 });
 
+Deno.test("feed: clamped compensation cannot suppress the next user scroll or its current marker", async () => {
+  for (const [start, delta, next, before, after] of [[0, -10, 110, "a.png", "b.png"], [110, 10, 0, "b.png", "a.png"], [0, .1, 110, "a.png", "b.png"]]) {
+    await withBookmarkStore(async (store, api) => {
+      api.setSettings = async () => ({});
+      let top = start;
+      const col = { clientHeight: 100, get scrollTop() { return top; },
+        set scrollTop(value) { top = Math.round(Math.max(0, Math.min(110, value))); } };
+      store.actions.feed.register({ scrollEl: col, virtualizer: { scrollToIndex() {},
+        getVirtualItems: () => store.state.images.map((im, index) => ({ key: im.id, index, start: index * 100, end: (index + 1) * 100 })) } });
+      store.actions.current.set("h", before);
+      store.actions.feed.compensate(delta);
+      assertEquals(col.scrollTop, start, "clamping/rounding produces no movement and no scroll event");
+      col.scrollTop = next; store.actions.feed.scrolled(col.scrollTop);
+      assertEquals(store.state.feedMarkerEntryId(), `h:${after}`, "the first real scroll immediately owns its marker");
+      for (let i = 0; i < 100 && store.state.feedActivity() !== "settled"; i++) await new Promise(resolve => setTimeout(resolve, 10));
+      assertEquals(store.state.feedActivity(), "settled");
+      assertEquals(store.state.current(), { remote: "h", image: after });
+      store.state.window.freeze();
+    });
+  }
+});
+
 Deno.test("feed: compensation re-bases the gesture origin, so a landing is never travel however late settle runs", async () => {
   await withBookmarkStore(async (store, api) => {
     api.setSettings = async () => ({});
