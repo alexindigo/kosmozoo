@@ -1,56 +1,47 @@
-// client-solid/components/SliderRow.tsx — one variations parameter row.
-//
-// [☐] label increment
-// min max [-][0.05][+]
-// ●──────────────●
-// current
-//
-// The dual-thumb slider is noUiSlider (vendored ESM — no window global,
-// ), bound in onMount on the lane's .vz-slider element: the library
-// renders the track, thumbs and connect band there. Drag snaps to the row's
-// increment (slide event); keyboard nudge on a focused thumb uses the fine
-// step (options.step).
-// Alignment is structural: rail, connect band, thumbs and the orange
-// current-value marker share one lane centerline by construction.
-//
-// Two modes:
-// absolute — thumbs are min/max values; the marker sits at the image's
-// current value and its label shows it.
-// relative — batch sweeps: thumbs are signed OFFSETS from the current
-// value; the marker is pinned to the center and labeled "X".
-//
-// Props convention: enabled/increment/current are GETTERS (the parent's rows
-// state outlives this row — <For> keeps it mounted across toggles); the rest
-// (param, defaults, placeholderKey, relative, callbacks) are stable per row.
-// The row never reaches into its parent — label clicks report through
-// onInsertPlaceholder and the parent owns the form.
+// Recipe-owned numeric mode and values; only the native widget/gesture lifetime
+// belongs to the expanded body. Batch ranges use offsets; a Value is always fixed.
 
-import { createSignal, createEffect, onMount, onCleanup } from "solid-js";
+import { Show, createSignal, createEffect, onMount, onCleanup } from "solid-js";
 import noUiSlider from "/vendor/nouislider.mjs";
 import { snapTo, fmt } from "./graph.mjs";
 import { makeSliderGesture } from "./slider-gesture.js";
 import { focusMemory } from "./draft.js";
+import { ParameterRow, parameterName } from "./ParameterRow.js";
+import { SingleLineText } from "../../components/SingleLineText.js";
+import { IconButton } from "../../components/IconButton.js";
 
 const fmtSigned = (v) => (v > 0 ? "+" : "") + fmt(v);
 
 export function SliderRow(props) {
+  return <ParameterRow class="vz-slider-row" row={props.row} enabled={props.enabled}
+    attributes={{ "data-param-key": props.param.key }}
+    current={props.relative ? "varies by image" : fmt(props.current())} summary={props.summary}
+    onInsert={props.onInsert} onEnable={checked => props.onToggle(props.param.key, checked)}>
+    <Show when={props.row().mode} keyed>{mode => <NumericEditor {...props} mode={mode} />}</Show>
+  </ParameterRow>;
+}
+
+// Only the native widget lifetime belongs to the expanded body. The recipe owns
+// every editable value, so a fresh widget restores the latest retained bounds.
+function NumericEditor(props) {
   let sliderEl;
   let gesture;
+  let setBound;
   const rawIncrement = () => props.rawIncrement();
   const focus = focusMemory(props.rememberFocus);
   let wasDragging = false;
   createEffect(() => { const enabled = !!props.enabled(); gesture?.setEnabled(enabled); });
   const fineStep = Math.pow(10, -props.param.decimals);
+  const single = props.mode === "value";
+  const relative = props.relative && !single;
 
-  // the bound labels are signals rendered by JSX ( — no imperative
-  // textContent/style writes from the library callback)
-  const [minLbl, setMinLbl] = createSignal({ text: "", left: "0%" });
-  const [maxLbl, setMaxLbl] = createSignal({ text: "", left: "0%" });
+  // Bound values render in allocated input cells, never around moving thumbs.
+  const [minLbl, setMinLbl] = createSignal({ text: "" });
+  const [maxLbl, setMaxLbl] = createSignal({ text: "" });
 
   // absolute: the param's clamp; relative: ±(spread×10) around the current
-  const lo = props.relative ? -(props.param.spread ?? 1) * 10 : props.param.clamp[0];
-  const hi = props.relative ? (props.param.spread ?? 1) * 10 : props.param.clamp[1];
-  const span = hi - lo;
+  const lo = relative ? -(props.param.spread ?? 1) * 10 : props.param.clamp[0];
+  const hi = relative ? (props.param.spread ?? 1) * 10 : props.param.clamp[1];
 
   onMount(() => {
     // step: fineStep — keyboard nudges use the fine step directly. The
@@ -61,12 +52,20 @@ export function SliderRow(props) {
     // read props live (Solid's props proxy), so the current increment is
     // always the one that snaps.
     const slider = noUiSlider.create(sliderEl, {
-      start: [props.defaults.min, props.defaults.max],
-      connect: true,
+      start: single ? [props.row().value] : [props.row().min, props.row().max],
+      connect: !single,
       range: { min: lo, max: hi },
       step: fineStep,
       behaviour: "drag",
+      // Programmatic field edits and release snapping are immediate numeric
+      // writes. noUiSlider's animated set creates a tap state that rejects the
+      // next real gesture, even after our physical-gesture lease has ended.
+      animate: false,
       keyboardSupport: true,
+      handleAttributes: single ? [{ "aria-label": `${parameterName(props.row())} value` }] : [
+        { "aria-label": `${parameterName(props.row())} lower bound` },
+        { "aria-label": `${parameterName(props.row())} upper bound` },
+      ],
     });
     gesture = makeSliderGesture(sliderEl, { gate: (enabled) => enabled ? slider.enable() : slider.disable(),
       onRetire: () => { wasDragging = false; } });
@@ -79,15 +78,21 @@ export function SliderRow(props) {
     // set — the row's state is only ever written by user gestures)
     slider.on("update", (values) => {
       const [a, b] = values.map(Number);
-      setMinLbl({ text: props.relative ? fmtSigned(a) : fmt(a), left: ((a - lo) / span) * 100 + "%" });
-      setMaxLbl({ text: props.relative ? fmtSigned(b) : fmt(b), left: ((b - lo) / span) * 100 + "%" });
+      setMinLbl({ text: relative ? fmtSigned(a) : fmt(a) });
+      setMaxLbl({ text: relative ? fmtSigned(b) : fmt(b) });
     });
     // onRange fires ONLY from slide/change (user gestures) — never from
     // `update`, which would re-report every programmatic set 
     const report = () => {
       if (gesture.suppressed()) return;
-      const vals = slider.get().map(Number);
-      props.onRange(props.param.key, { min: Math.min(vals[0], vals[1]), max: Math.max(vals[0], vals[1]) });
+      const vals = [slider.get()].flat().map(Number);
+      if (single) props.onField(props.param.key, "value", vals[0]);
+      else props.onRange(props.param.key, { min: Math.min(vals[0], vals[1]), max: Math.max(vals[0], vals[1]) });
+    };
+    setBound = (index, raw) => {
+      if (!raw.trim() || !Number.isFinite(Number(raw)) || gesture.suppressed()) return;
+      const values = [slider.get()].flat().map(Number); values[index] = Number(raw);
+      slider.set(values); report();
     };
     // The snap lands on RELEASE, never mid-drag: a set during an active
     // drag puts the widget in its tap-transition state, which rejects the
@@ -108,10 +113,10 @@ export function SliderRow(props) {
         const next = values.map(Number);
         let changed = false;
         const snapOne = (i) => {
-          const sn = snapTo(next[i], props.increment(), props.param.decimals);
+          const sn = snapTo(next[i], single ? fineStep : props.increment(), props.param.decimals);
           if (sn !== next[i]) { next[i] = sn; changed = true; }
         };
-        if (handleNumber === undefined || handleNumber === null) { snapOne(0); snapOne(1); }
+        if (handleNumber === undefined || handleNumber === null) next.forEach((_, i) => snapOne(i));
         else snapOne(handleNumber);
         if (changed) slider.set(next.map(String));
       }
@@ -132,90 +137,60 @@ export function SliderRow(props) {
   };
 
   // absolute: marker at the current value; relative: pinned to the center
-  const markerPct = () => props.relative
+  const markerPct = () => relative
     ? 50
     : (props.current() != null
       ? ((props.current() - props.param.clamp[0]) / (props.param.clamp[1] - props.param.clamp[0])) * 100
       : null);
 
   return (
-    <div
-      class={"vz-slider-row" + (props.enabled() ? "" : " vz-off")}
-      data-param-key={props.param.key}
-    >
-      <input
-        type="checkbox" class="vz-cb"
-        checked={props.enabled()}
-        onChange={(e) => props.onToggle(props.param.key, e.target.checked)}
-      />
-      <div class="vz-slider-inner">
-        <div
-          class="vz-label"
-          title={"click to insert {" + props.placeholderKey + "} into prefix/suffix"}
-          onMouseDown={(e) => {
-            // the label never touches the parent's inputs — it emits and
-            // the parent inserts (it owns prefix/suffix state)
-            if (!props.onInsertPlaceholder) return;
-            e.preventDefault(); // keep the input's focus/selection
-            props.onInsertPlaceholder(props.placeholderKey);
-          }}
-        >{props.param.label}</div>
+      <div class="vz-numeric-editor">
         <div class="vz-rangewrap">
-          <div class="vz-lane vz-lane-labels">
-            <div class="vz-bound vz-min-lbl" style={{ left: minLbl().left }}>{minLbl().text}</div>
-            <div class="vz-bound vz-max-lbl" style={{ left: maxLbl().left }}>{maxLbl().text}</div>
-          </div>
           <div class="vz-lane vz-lane-track">
-            {/* the full-range track line spans the inset span, so its ends are
- exactly where the thumbs land at min/max */}
             <div class="vz-rail" />
-            {/* the marker's reference box shares the slider's inset span, so
- the marker stays centered on the value point */}
             <div class="vz-marker-inset">
-              <div
-                class="vz-marker"
-                style={markerPct() != null ? { left: markerPct() + "%" } : { display: "none" }}
-              />
+              <div class="vz-current-point" style={markerPct() != null ? { left: markerPct() + "%" } : { display: "none" }}>
+                <div class="vz-marker" />
+                <SingleLineText class="vz-editor-current" value={relative ? "varies by image" : fmt(props.current())} />
+              </div>
             </div>
-            {/* the slider insets itself within the lane; the library's base
- fills it, so thumb centers travel exactly the inset span */}
             <div class="vz-slider" ref={sliderEl} />
           </div>
-          <div class="vz-lane vz-lane-current">
-            <div
-              class="vz-current"
-              style={markerPct() != null ? { left: markerPct() + "%" } : { display: "none" }}
-            >{markerPct() != null ? (props.relative ? "X" : fmt(props.current())) : ""}</div>
+        </div>
+        <div class="vz-numeric-controls">
+          <div class="viewer-group vz-numeric-mode" role="group" aria-label={`${parameterName(props.row())} mode`}>
+            <IconButton viewer icon="Range" title="Range" active={!single} onAction={() => props.onField(props.param.key, "mode", "range")} />
+            <IconButton viewer icon="Value" title="Value" active={single} onAction={() => props.onField(props.param.key, "mode", "value")} />
           </div>
+          <Show when={single} fallback={<div class="vz-range-fields">
+          <label class="vz-range-field">from<input type="number" step="any" aria-label={`${props.param.label} From`}
+            value={Number(minLbl().text)} {...focus} onChange={event => setBound(0, event.currentTarget.value)} /></label>
+          <label class="vz-range-field">to<input type="number" step="any" aria-label={`${props.param.label} To`}
+            value={Number(maxLbl().text)} {...focus} onChange={event => setBound(1, event.currentTarget.value)} /></label>
+          <div class="vz-range-field"><label for={`step-${props.placeholderKey}`}>step</label>
+            <div class="vz-row-inc">
+              <button type="button" class="vz-step-btn" title="Halve step" aria-label={`${props.param.label}: Halve step`}
+                onClick={() => commitInc(Math.max(fineStep, props.increment() / 2))}>−</button>
+              <input id={`step-${props.placeholderKey}`} type="text" inputMode="decimal" role="spinbutton" aria-label={`${props.param.label} increment`}
+                aria-valuemin={fineStep} aria-valuenow={props.increment() ?? undefined}
+                aria-invalid={props.increment() === null}
+                class="vz-row-inc-input" value={rawIncrement()} {...focus}
+                onInput={event => props.onIncrement(props.param.key, event.currentTarget.value)}
+                onKeyDown={event => {
+                  if (!["ArrowUp", "ArrowDown"].includes(event.key)) return;
+                  const value = props.increment();
+                  if (value === null || !Number.isFinite(value)) return;
+                  event.preventDefault(); commitInc(value + (event.key === "ArrowUp" ? fineStep : -fineStep));
+                }} />
+              <button type="button" class="vz-step-btn" title="Double step" aria-label={`${props.param.label}: Double step`}
+                onClick={() => commitInc(props.increment() * 2)}>+</button>
+            </div>
+          </div>
+          </div>}>
+            <label class="vz-range-field vz-value-field">value<input type="number" step="any" aria-label={`${props.param.label} Value`}
+              value={Number(minLbl().text)} {...focus} onChange={event => setBound(0, event.currentTarget.value)} /></label>
+          </Show>
         </div>
       </div>
-      <div class="vz-row-inc">
-        <button
-          class="vz-step-btn" title="smaller step" disabled={!props.enabled() || undefined}
-          onClick={() => commitInc(Math.max(fineStep, props.increment() / 2))}
-        >−</button>
-        <input
-          type="text" inputMode="decimal" role="spinbutton" aria-label={`${props.param.label} increment`}
-          aria-valuemin={fineStep} aria-valuenow={props.increment() ?? undefined}
-          class="vz-row-inc-input" value={rawIncrement()} {...focus}
-          disabled={!props.enabled() || undefined}
-          onInput={(e) => {
-            const raw = e.currentTarget.value;
-            props.onIncrement(props.param.key, raw);
-          }}
-          onKeyDown={(e) => {
-            if (!["ArrowUp", "ArrowDown"].includes(e.key)) return;
-            const value = props.increment();
-            if (value === null || !Number.isFinite(value)) return;
-            e.preventDefault();
-            commitInc(value + (e.key === "ArrowUp" ? fineStep : -fineStep));
-          }}
-        />
-        <button
-          class="vz-step-btn" title="larger step" disabled={!props.enabled() || undefined}
-          onClick={() => commitInc(props.increment() * 2)}
-        >+</button>
-      </div>
-    </div>
   );
 }

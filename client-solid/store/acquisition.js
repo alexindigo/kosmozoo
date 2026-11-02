@@ -37,8 +37,20 @@ function scheduleIdle(callback) {
 
 // fallbackPriority ranks jobs outside the projected window. The Store's policy
 // keeps the default; a consumer with no projection may rank everything foreground.
+// Capacity belongs to the resource class, never the caller. A native byte/decode
+// lifetime cannot consume the bounded control capacity needed to discover and
+// publish metadata. Three foreground control flights cover want, poll and schema.
+const RESOURCE_CAPACITY = {
+  image: { foreground: 6, background: 2 },
+  control: { foreground: 3, background: 1 },
+};
+// Chromium's HTTP/1.1 pool has six connections per origin. The app keeps one
+// source-delivery stream and reserves one connection for control/metadata;
+// native image transfers share the remainder across both priority lanes.
+const APP_TRANSPORT = { connections: 6, sourceDelivery: 1, control: 1 };
+const APP_NATIVE_TRANSFERS = APP_TRANSPORT.connections - APP_TRANSPORT.sourceDelivery - APP_TRANSPORT.control;
 export function makeAcquisition({ now = () => performance.now(), scheduleIdle: idle = scheduleIdle,
-  fallbackPriority = "background" } = {}) {
+  fallbackPriority = "background", appOrigin = globalThis.location?.origin } = {}) {
   const queued = new Map(), active = new Set();
   let context = null, foreground = new Set(), gesture = false, disposed = false;
   let cancelIdle = null, pumping = false, windowVersion = 0;
@@ -47,8 +59,16 @@ export function makeAcquisition({ now = () => performance.now(), scheduleIdle: i
   const current = job => !disposed && (!job.scoped || job.context === context) && !job.cancelled && (!job.valid || job.valid());
   const priority = job => (typeof job.priority === "function" ? job.priority() : job.priority) ??
     (foreground.has(job.id) ? "foreground" : fallbackPriority);
-  const foregroundPending = () => [...queued.values(), ...active].some(job => current(job) && priority(job) === "foreground");
-  const slots = lane => [...active].filter(job => job.resource && job.lane === lane).length;
+  const foregroundPending = resourceClass => [...queued.values(), ...active].some(job =>
+    (!resourceClass || job.resourceClass === resourceClass) && current(job) && priority(job) === "foreground");
+  const slots = (resourceClass, lane) => [...active].filter(job => job.resource && job.resourceClass === resourceClass && job.lane === lane).length;
+  const appTransfer = url => {
+    if (!appOrigin || !url) return false;
+    try {
+      const target = new URL(url, appOrigin);
+      return (target.protocol === "http:" || target.protocol === "https:") && target.origin === appOrigin;
+    } catch { return false; }
+  };
 
   function finish(job, result, error) {
     active.delete(job);
@@ -71,8 +91,15 @@ export function makeAcquisition({ now = () => performance.now(), scheduleIdle: i
   }
 
   function eligible(job, lane) {
-    return priority(job) === lane && (!job.resource || slots(lane) < (lane === "background" ? 2 : 6));
+    return priority(job) === lane && (!job.resource ||
+      slots(job.resourceClass, lane) < RESOURCE_CAPACITY[job.resourceClass][lane] &&
+      (!job.appTransfer || [...active].filter(active => active.appTransfer).length < APP_NATIVE_TRANSFERS));
   }
+  // Images retain their foreground-first coverage rule. Background control
+  // follows its own class: an active native image cannot strand a retained
+  // metadata flight (and hence later foreground demand) behind an idle job.
+  const backgroundReady = job => eligible(job, "background") &&
+    !foregroundPending(job.resourceClass === "control" ? "control" : undefined);
 
   function pump(deadline) {
     if (disposed || pumping) return;
@@ -82,26 +109,29 @@ export function makeAcquisition({ now = () => performance.now(), scheduleIdle: i
       for (const job of queued.values()) if (!current(job)) { queued.delete(job.key); job.resolve({ retired: true }); }
       if (gesture) return;
       for (const job of queued.values()) if (eligible(job, "foreground")) start(job);
-      if (foregroundPending()) { cancelIdle?.(); cancelIdle = null; return; }
       if (deadline) {
         for (const job of queued.values()) {
-          if (gesture || foregroundPending() || now() - started >= 8 || !deadline.didTimeout && deadline.timeRemaining() <= 0) break;
-          if (eligible(job, "background")) start(job);
+          if (gesture || now() - started >= 8 || !deadline.didTimeout && deadline.timeRemaining() <= 0) break;
+          if (backgroundReady(job)) start(job);
         }
       }
-      if ([...queued.values()].some(job => eligible(job, "background")) && !cancelIdle) {
+      const hasBackground = [...queued.values()].some(backgroundReady);
+      if (!hasBackground) { cancelIdle?.(); cancelIdle = null; }
+      else if (!cancelIdle) {
         cancelIdle = idle(budget => { cancelIdle = null; pump(budget); });
       }
     } finally { pumping = false; }
   }
 
-  function submit({ key, id = null, valid, priority: lane, resource = true, scoped = true, run }) {
+  function submit({ key, id = null, url, valid, priority: lane, resource = true, resourceClass = "image", scoped = true, run }) {
+    if (!Object.hasOwn(RESOURCE_CAPACITY, resourceClass)) throw new Error(`Unknown acquisition resource class: ${resourceClass}`);
     if (disposed) return Promise.resolve({ retired: true });
     const existing = queued.get(key) ?? [...active].find(job => job.key === key && current(job));
     if (existing && current(existing)) return existing.promise;
     let resolve, reject;
     const promise = new Promise((yes, no) => { resolve = yes; reject = no; });
-    queued.set(key, { key, id, valid, priority: lane, resource, scoped, run, context, promise, resolve, reject });
+    queued.set(key, { key, id, valid, priority: lane, resource, resourceClass,
+      appTransfer: resource && resourceClass === "image" && appTransfer(url), scoped, run, context, promise, resolve, reject });
     pump();
     return promise;
   }

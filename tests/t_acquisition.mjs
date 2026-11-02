@@ -111,3 +111,38 @@ Deno.test("acquisition: context and content retirement fence queued starts and l
     assertEquals(staleStarted, false);
   } finally { old.resolve(); f.policy.dispose(); }
 });
+
+Deno.test("acquisition: bounded control capacity is independent of saturated image lanes", async () => {
+  const f = fixture(), holds = [], started = [];
+  const job = (key, resourceClass, priority) => f.policy.submit({ key, resourceClass, priority,
+    run: () => { started.push(key); const hold = deferred(); holds.push(hold); return hold.promise; } });
+  try {
+    for (let i = 0; i < 7; i++) job(`image-${i}`, "image", "foreground");
+    assertEquals(started.length, 6, "images retain their six-slot foreground budget");
+    for (let i = 0; i < 4; i++) job(`control-${i}`, "control", "foreground");
+    assertEquals(started.filter(key => key.startsWith("control")).length, 3, "control has independent bounded reserved capacity");
+    holds.find((_, i) => i === 6).resolve(); await flush();
+    assert(started.includes("control-3"), "a freed control slot starts the queued control job without image completion");
+    assert(!started.includes("image-6"));
+  } finally { f.policy.dispose(); holds.forEach(hold => hold.resolve()); await flush(); }
+});
+
+Deno.test("acquisition transport: app-origin images share four physical slots, other origins retain the global ceiling", async () => {
+  const policy = makeAcquisition({ appOrigin: "http://engine.test", scheduleIdle: () => () => {} });
+  const held = [], started = [];
+  const submit = (key, url, resourceClass = "image") => policy.submit({ key, url, resourceClass, priority: "foreground",
+    run: () => { const hold = deferred(); held.push(hold); started.push(key); return hold.promise; } });
+  try {
+    for (let i = 0; i < 5; i++) submit(`app-${i}`, `/bytes/${i}`);
+    assertEquals(started, ["app-0", "app-1", "app-2", "app-3"]);
+    submit("foreign", "http://other.test/bytes/a");
+    submit("local", "blob:http://engine.test/local");
+    submit("global-wait", "http://other.test/bytes/b");
+    assertEquals(started.slice(4), ["foreign", "local"], "only the global six-slot ceiling constrains other origins/non-HTTP resources");
+    submit("metadata", "/api/meta", "control");
+    assert(started.includes("metadata"), "native images cannot occupy the reserved control capacity");
+    held[0].resolve(); await flush();
+    assert(started.includes("app-4"), "one native completion releases both transport and lane capacity");
+    assert(!started.includes("global-wait"));
+  } finally { policy.dispose(); held.forEach(hold => hold.resolve()); await flush(); }
+});

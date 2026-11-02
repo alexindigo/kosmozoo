@@ -96,7 +96,8 @@ Deno.test("naming proof: fallback certifies every actual naming write and preser
   assertEquals(acknowledgedFields(request, data).naming, ["prefix", "suffix"]);
   request.suffix = "_{unknown}";
   const unresolved = await r.run(request);
-  assertEquals(acknowledgedFields(request, unresolved.data).naming, ["prefix"]);
+  assertEquals(unresolved.status, 400); assertEquals(r.jobs.length, 5);
+  assertEquals(acknowledgedFields(request, unresolved.data), null);
 });
 
 Deno.test("naming proof: no naming writes cannot acknowledge naming", async () => {

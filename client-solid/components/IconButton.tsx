@@ -1,8 +1,8 @@
 // client-solid/components/IconButton.tsx — ONE icon button, fixed everywhere.
 //
-// Carries the votebtn class contract verbatim: "votebtn <variant>" plus ".on"
-// when active; the variant class owns the accent via CSS (--btn-c), so no
-// inline color. The click stops propagation and executes onAction.
+// Owns the shared active/aria contract across card, chrome and viewer looks.
+// Card variants own their accent via CSS (--btn-c); viewer states have one
+// shared palette. The click stops propagation and executes onAction.
 
 export function IconButton(props) {
   return (
@@ -11,9 +11,10 @@ export function IconButton(props) {
       id={props.id}
       disabled={props.disabled}
       ref={props.buttonRef}
-      class={(props.chrome ? "chrome-icon " : "votebtn ") + props.variant + (props.active ? " on" : "")}
+      class={(props.viewer ? "viewer-btn " : props.chrome ? "chrome-icon " : "votebtn ") + (props.variant ?? "") + (props.active ? " on" : "")}
       title={props.title}
-      aria-label={props.title}
+      data-view={props["data-view"]}
+      aria-label={props["aria-label"] ?? props.title}
       aria-pressed={props.active === undefined ? undefined : !!props.active}
       aria-expanded={props.expanded}
       aria-controls={props.controls}

@@ -58,8 +58,22 @@ export function makeImageMeasurements({ acquisition, srcFor, identityFor = id =>
   const records = new Map();
   const displays = new Set();
   let context = null, disposed = false, cancelRetry = null;
+  // Readers that can change feed-wide derivations — a failure, or a size the
+  // listing does not already fix — share one version. A settled probe of an
+  // entry whose dimensions are already authoritative changes no derivation:
+  // it notifies only that identity's own size readers.
   const [version, setVersion] = createSignal(0);
   const bump = () => setVersion(value => value + 1);
+  const own = new Map();
+  const ownSignal = id => own.get(id) ?? own.set(id, createSignal(undefined, { equals: false })).get(id);
+  const observe = id => { const record = records.get(id); return record && current(record) ? record : null; };
+  const snapshot = id => { const record = observe(id); return { failed: record?.state === "failed", size: record?.size ?? null }; };
+  const notify = (id, before) => {
+    const after = snapshot(id);
+    if (after.failed !== before.failed || after.size !== before.size && !knownSize(id)) bump();
+    else if (after.size !== before.size) own.get(id)?.[1]();
+  };
+  const bumpAll = () => { own.clear(); bump(); };
   // identity null retires an entry; "" means its hash is not known yet.
   // Learning the first hash enriches the same content (matching inventory
   // reconciliation); only a change between known hashes retires a record.
@@ -94,7 +108,7 @@ export function makeImageMeasurements({ acquisition, srcFor, identityFor = id =>
       record.state = "idle";
       request(record.id);
     }
-    bump();
+    bumpAll();
   }
 
   function request(id, interest = {}) {
@@ -122,9 +136,9 @@ export function makeImageMeasurements({ acquisition, srcFor, identityFor = id =>
     }
     if (record.state !== "idle") return; // queued, waiting for its retry deadline, or terminal
     const src = srcFor(id);
-    if (!src) { record.size = FAILURE_SIZE; record.state = "failed"; bump(); return; }
+    if (!src) { const before = snapshot(id); record.size = FAILURE_SIZE; record.state = "failed"; notify(id, before); return; }
     record.state = "queued";
-    acquisition.submit({ key: record.key, id: interest.foregroundId ?? id,
+    acquisition.submit({ key: record.key, id: interest.foregroundId ?? id, url: src,
       priority: interest.priority, valid: () => current(record) && (record.state === "loading" || interested(record)),
       run: ({ priority, release }) => new Promise(resolve => {
         const video = kind === "video";
@@ -136,7 +150,8 @@ export function makeImageMeasurements({ acquisition, srcFor, identityFor = id =>
           // Interest gates admission, not completion: a freeze/re-window
           // cannot strand an already-started resource or its policy slot.
           if (records.get(id) !== record || record.image !== el) return;
-          if (!current(record)) { retire(record); bump(); return; }
+          const before = snapshot(id);
+          if (!current(record)) { retire(record); notify(id, before); return; }
           const w = video ? el?.videoWidth : el?.naturalWidth, h = video ? el?.videoHeight : el?.naturalHeight;
           clearTimeout(record.deadline); record.deadline = null;
           const measured = success && validDims(w, h);
@@ -152,7 +167,7 @@ export function makeImageMeasurements({ acquisition, srcFor, identityFor = id =>
           else if (++record.attempts < 2) { record.state = "waiting"; cancelRetry = scheduleRetry(retryWaiting); }
           else { record.size = FAILURE_SIZE; record.state = "failed"; }
           record.finish();
-          bump();
+          notify(id, before);
         };
         try {
           el = video ? document.createElement("video") : new Image();
@@ -166,7 +181,7 @@ export function makeImageMeasurements({ acquisition, srcFor, identityFor = id =>
           record.deadline = null;
           if (records.get(id) !== record || record.image !== el) return;
           if (current(record)) settle(false);
-          else { retire(record); bump(); }
+          else { const before = snapshot(id); retire(record); notify(id, before); }
         }, MEASURE_TIMEOUT_MS);
         try { el.src = record.request.src; } catch { settle(false); return; }
         for (const item of record.interests) if (!item.valid || item.valid()) item.onStart?.(record.request);
@@ -198,7 +213,7 @@ export function makeImageMeasurements({ acquisition, srcFor, identityFor = id =>
     }, current: live };
     if (!active || identity == null || !src) return lease;
     displays.add(lease);
-    acquisition.submit({ key, id: foregroundId, priority, scoped, valid: live,
+    acquisition.submit({ key, id: foregroundId, url: src, priority, scoped, valid: live,
       run: ({ priority, release }) => new Promise(resolve => {
         finish = () => { release(); resolve(); };
         publish({ src: imageRequestUrl(src, priority), priority });
@@ -212,7 +227,7 @@ export function makeImageMeasurements({ acquisition, srcFor, identityFor = id =>
     cancelRetry?.(); cancelRetry = null;
     for (const lease of [...displays]) if (lease.scoped) lease.dispose();
     for (const record of [...records.values()]) retire(record);
-    bump();
+    bumpAll();
   }
 
   return {
@@ -222,15 +237,15 @@ export function makeImageMeasurements({ acquisition, srcFor, identityFor = id =>
       for (const lease of [...displays]) if (!lease.current()) lease.dispose();
       acquisition.reconcile();
     },
-    sizeOf(id) { version(); const record = records.get(id); return record && current(record) ? record.size ?? null : null; },
-    loadFailed(id) { version(); const record = records.get(id); return !!record && current(record) && record.state === "failed"; },
-    retry(id, interest) { const { record } = reconcile(id); if (record) { retire(record); bump(); } request(id, interest); },
+    sizeOf(id) { version(); if (knownSize(id)) ownSignal(id)[0](); return observe(id)?.size ?? null; },
+    loadFailed(id) { version(); return observe(id)?.state === "failed"; },
+    retry(id, interest) { const { record } = reconcile(id); if (record) { const before = snapshot(id); retire(record); notify(id, before); } request(id, interest); },
     dispose() {
       if (disposed) return;
       cancelRetry?.(); cancelRetry = null;
       for (const lease of [...displays]) lease.dispose();
       for (const record of [...records.values()]) retire(record);
-      disposed = true; bump();
+      disposed = true; bumpAll();
     },
   };
 }

@@ -4,6 +4,7 @@
 import { createSignal, createMemo, createEffect, on, onMount, onCleanup, Show } from "solid-js";
 import { Dynamic } from "solid-js/web";
 import { makeZoomable } from "/js/zoomable.mjs";
+import { zoomViewTransform, readZoomView, readyViewGeometry } from "/js/zoom-view.mjs";
 import { MediaControls, MediaControlBoundary, mediaTime } from "./MediaControls.js";
 import { IconButton } from "./IconButton.js";
 import { mediaFailure } from "../store/media-failure.js";
@@ -14,7 +15,7 @@ export function MediaBox(props) {
   const [loaded, setLoaded] = createSignal(false), [error, setError] = createSignal(false);
   const [paused, setPaused] = createSignal(true), [current, setCurrent] = createSignal(0);
   const [duration, setDuration] = createSignal(0), [muted, setMuted] = createSignal(false), [loop, setLoop] = createSignal(false);
-  const [surface, setSurface] = createSignal(null), [transform, setTransform] = createSignal("");
+  const [surface, setSurface] = createSignal(null);
   const [allocation, setAllocation] = createSignal({ width: 0, height: 0 });
   const [natural, setNatural] = createSignal(null);
   let block, box, registration;
@@ -22,7 +23,7 @@ export function MediaBox(props) {
   const word = () => props.kind === "audio" ? "audio file" : "video";
   // Focus before an ancestor's native pan listener can capture the pointer.
   onMount(() => {
-    const measure = () => setAllocation({ width: box.clientWidth, height: box.clientHeight });
+    const measure = () => { const r = box.getBoundingClientRect(); setAllocation({ width: r.width, height: r.height }); };
     measure();
     const observer = new ResizeObserver(measure);
     observer.observe(box);
@@ -41,9 +42,18 @@ export function MediaBox(props) {
   // The native lifetime follows source VALUE, not every invalidation of a
   // window/size getter that happens to return that same URL.
   const source = createMemo(() => props.failed ? null : props.src);
-  const geometry = createMemo(() => mediaGeometry({ ...allocation(),
-    size: props.size ?? (props.kind === "audio" ? AUDIO_SIZE : natural()), surface: props.workbench ? "viewer" : "card" }));
-  const measureNatural = el => setNatural({ w: el.videoWidth || el.naturalWidth, h: el.videoHeight || el.naturalHeight });
+  const size = () => props.size ?? (props.kind === "audio" ? AUDIO_SIZE : natural()?.src === source() ? natural() : null);
+  const geometry = createMemo(() => mediaGeometry({ ...allocation(), size: size(), surface: props.workbench ? "viewer" : "card" }));
+  const viewGeometry = () => size()?.w > 0 && size()?.h > 0 && readyViewGeometry(geometry()) ? geometry() : null;
+  const measureNatural = el => setNatural({ src: source(), w: el.videoWidth || el.naturalWidth, h: el.videoHeight || el.naturalHeight });
+  const transform = createMemo(() => {
+    const zoom = props.zoom, g = viewGeometry();
+    return zoom && g ? zoomViewTransform(zoom.getView(zoom.key, g), g) : "";
+  });
+  createEffect(() => {
+    const zoom = props.zoom, g = viewGeometry();
+    if (zoom) zoom.onZoomChange?.(g ? readZoomView(zoom.getView(zoom.key, g), g).s > 1 : false);
+  });
   createEffect(on(() => [surface(), source()], ([el, src]) => {
     setLoaded(false); setError(false); setCurrent(0); setDuration(0);
     if (!el) return;
@@ -74,10 +84,9 @@ export function MediaBox(props) {
   });
   createEffect(on(() => [surface(), props.zoom?.key], ([el, key]) => {
     const zoom = props.zoom;
-    setTransform("");
     if (!el || !zoom || props.kind === "audio") return;
     const binding = makeZoomable(el, { key, getView: zoom.getView, setView: zoom.setView,
-      onZoomChange: zoom.onZoomChange, onTransform: setTransform });
+      geometry: viewGeometry });
     onCleanup(() => binding.dispose());
   }));
   createEffect(() => props.onPhase?.(phase()));
@@ -92,6 +101,7 @@ export function MediaBox(props) {
     paused={paused()} current={current()} duration={duration()} muted={muted()} loop={loop()}
     onToggle={toggle} onSeek={n => { surface().currentTime = n; }} onMute={() => setMuted(v => !v)}
     onLoop={() => setLoop(v => !v)} onOpen={props.workbench ? undefined : props.onOpen} />;
+  const feedControls = () => <Show when={props.src != null && phase() !== "error"}>{controls()}</Show>;
   return <div ref={block} class={`media-block ${props.workbench ? "media-block-stage" : ""}`}>
     <div ref={box} tabIndex={playable() ? 0 : undefined}
     class={`media-box ${props.workbench ? "media-stage" : "imgwrap"} ic-${phase()}`}
@@ -125,8 +135,10 @@ export function MediaBox(props) {
       <Show when={!props.failed && props.onErrorClick}><span>click to retry</span></Show>
     </div></Show>
     </div>
-    <Show when={!props.workbench && playable()}><div class="media-controls-slot">
-      <Show when={props.src != null && phase() !== "error"}>{controls()}</Show>
-    </div></Show>
+    <Show when={!props.workbench && playable()}>
+      <Show when={props.controlsMount} fallback={<div class="media-controls-slot">{feedControls()}</div>}>
+        {feedControls()}
+      </Show>
+    </Show>
   </div>;
 }

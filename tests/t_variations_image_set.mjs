@@ -1,10 +1,28 @@
 import { assert, assertEquals, assertThrows } from "jsr:@std/assert";
 import { editorRig } from "./helpers/variation-editor.mjs";
 import { uploadCandidate, uploadFamily } from "../src/features/variations/shared.mjs";
+import { generatePermutations } from "../src/features/variations/shared.mjs";
 
 const id = "image.image";
 const input = name => ({ kind: "input", name });
 const upload = file => ({ kind: "upload", name: file.name, file });
+
+Deno.test("image set: moving mixed items preserves File identity and compiled variation order", async () => {
+  const { editor, requests } = editorRig(), file = new File(["image"], "upload.png");
+  editor.edit("numeric", "n.denoise", "enabled", false); editor.edit("images", id, "enabled", true);
+  editor.addImages(id, [input("first.png"), upload(file), input("third.png"), input("fourth.png")]);
+  assert(editor.moveImage(id, input("third.png"), 0));
+  assertEquals(editor.rows("images")[id].items.map(item => item.name), ["third.png", "first.png", "upload.png", "fourth.png"]);
+  assert(editor.moveImage(id, input("third.png"), 1));
+  assert(!editor.moveImage(id, input("third.png"), -1));
+  assert(!editor.moveImage(id, input("third.png"), 1));
+  assertEquals(editor.rows("images")[id].items[2].file, file);
+  await editor.run();
+  const expected = ["first.png", "third.png", "upload.png", "fourth.png"];
+  assertEquals(requests[0].imageParams[id].values, expected);
+  assertEquals(generatePermutations({}, { [id]: "origin.png" }, requests[0].imageParams).map(permutation => permutation[id]), expected);
+  assertEquals(editor.remaining(), []); editor.dispose();
+});
 
 Deno.test("image set: collision families preserve literal punctuation, nested counters and stock dotfile splitting", () => {
   assertEquals(uploadCandidate("name %.png", 2), "name % (2).png");

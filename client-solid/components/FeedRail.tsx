@@ -15,7 +15,7 @@
 // (Grid's handler is its only writer). No innerHTML rebuilds, no querySelector
 // walks, no paint loop.
 
-import { createSignal, createMemo, onMount, onCleanup, For } from "solid-js";
+import { createSignal, createMemo, createEffect, createRenderEffect, untrack, onMount, onCleanup, For } from "solid-js";
 import { useAppStore } from "../store/app-store.js";
 import { tapeWindow } from "/js/rail.mjs";
 
@@ -41,6 +41,17 @@ export function FeedRail() {
   let tape;
   let geom = { tickPx: 5, labelTop: 14, labelBottom: 28 };
   const [capacity, setCapacity] = createSignal(0);
+  const tickRefs = new Map();
+  let arrivalEpoch;
+  createEffect(() => {
+    const event = store.state.railArrivalEvent();
+    untrack(() => {
+      if (arrivalEpoch !== event.epoch) for (const tick of tickRefs.values()) tick.cancel();
+      arrivalEpoch = event.epoch;
+      // Take the whole ready event now: off-tape/filtered ticks never play later.
+      for (const id of store.actions.feed.takeArrivals(event)) tickRefs.get(id)?.glow();
+    });
+  });
 
   const recompute = () => {
     if (!rail) return;
@@ -141,10 +152,29 @@ export function FeedRail() {
         <For each={ticks()}>
           {(idx) => {
             const entry = () => store.state.feedEntryAt(idx);
+            const entryId = createMemo(() => entry()?.id);
+            let el, animation;
+            const cancel = () => { animation?.cancel(); animation = null; };
+            const glow = () => {
+              cancel();
+              const reduced = matchMedia("(prefers-reduced-motion: reduce)").matches;
+              animation = el.animate({ offset: 0, backgroundColor: "var(--foreground-bright)",
+                ...(reduced ? {} : { boxShadow: "0 0 5px var(--foreground-bright)" }) },
+              { id: "rail-arrival", duration: 1400, easing: "ease-out", iterations: 1 });
+            };
+            // Numeric tape positions can acquire another identity without remounting.
+            // Render effects register the new refs before the event-consumer effect.
+            createRenderEffect(() => {
+              const id = entryId();
+              const binding = { glow, cancel };
+              if (id) tickRefs.set(id, binding);
+              onCleanup(() => { cancel(); if (tickRefs.get(id) === binding) tickRefs.delete(id); });
+            });
             const state = () => store.state.cardState(entry()?.id, {
               current: !!entry() && entry().id === markerId(), surface: "rail",
             });
             return <div class="fr-tick"
+              ref={el}
               classList={{ wave: inWave(idx), current: state().current }}
               style={state().style}
               data-entry-id={entry()?.id}

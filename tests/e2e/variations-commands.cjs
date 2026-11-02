@@ -2,7 +2,8 @@
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const { workPath } = require('./paths.cjs');
-const fileControl = '.vz-imgrow:not(.vz-enumrow):not(.vz-textrow) .vz-cb';
+const { discardRecipe } = require('./recipe-helpers.cjs');
+const fileControl = '.vz-imgrow:not(.vz-enumrow):not(.vz-textrow) .checkbox';
 const fileSetup = async (cdp) => {
   await cdp.poll(`!!document.querySelector(${JSON.stringify(fileControl)})`);
   await cdp.clickAt(fileControl);
@@ -65,6 +66,7 @@ module.exports = async ({ cdp, check, FAKE, KZ }) => {
   const open = async (file = 'flux-basic.png') => {
     await invoke('variations.open', { id: `fake:${file}` });
     await cdp.poll(`document.querySelectorAll('.vz-slider-row').length>0`);
+    await discardRecipe(cdp);
   };
   const requestClose = () => cdp.evaluate(`(async()=>{window.__leave=${KZ}.handles.invoke('variations.close');return true})()`);
   const discard = async () => {
@@ -78,7 +80,7 @@ module.exports = async ({ cdp, check, FAKE, KZ }) => {
     await cdp.poll(`document.querySelector(${JSON.stringify(selector)}).value===${JSON.stringify(text)}`);
   };
   const state = () => cdp.evaluate(`(()=>{const p=document.querySelector('.vz-panel');return {session:p?.dataset.session,url:location.href,
-    values:[...p.querySelectorAll('input:not([type=file]),textarea,select')].map(e=>[e.value,e.checked]),labels:[...p.querySelectorAll('.vz-bound')].map(e=>e.textContent)}})()`);
+    values:[...p.querySelectorAll('input:not([type=file]),textarea,select')].map(e=>[e.value,e.checked]),bounds:[...p.querySelectorAll('.vz-range-field > input')].map(e=>e.value)}})()`);
   const shot = async (name) => {
     fs.mkdirSync(workPath('tests/e2e/.shots'),{recursive:true});
     const image=await cdp.send('Page.captureScreenshot',{format:'png'});
@@ -143,11 +145,11 @@ module.exports = async ({ cdp, check, FAKE, KZ }) => {
   await test('editable domains and exact File objects survive Cancel and SPA navigation', async () => {
     await open('flux-controlnet.png');
     await fileSetup(cdp);
-    await cdp.clickAt('.vz-textrow .vz-imgrow-head .vz-cb');
+    await cdp.clickAt('.vz-textrow .vz-imgrow-head .checkbox');
     await type('.vz-text-values', 'a {{kept}} template');
     await type('.vz-tpl-input', 'first; second');
-    await cdp.clickAt('.vz-enumrow .vz-imgrow-head .vz-cb');
-    await cdp.clickAt('.vz-enumrow.on .vz-enum-opt:last-child .vz-cb');
+    await cdp.clickAt('.vz-enumrow .vz-imgrow-head .checkbox');
+    await cdp.clickAt('.vz-enumrow.on .vz-enum-opt:last-child .checkbox');
     await type('.vz-prefix', 'files-kept');
     const before = await state();
     await requestClose();
@@ -182,7 +184,7 @@ module.exports = async ({ cdp, check, FAKE, KZ }) => {
     await cdp.send('Input.dispatchMouseEvent', { type: 'mouseReleased', x:p.x-100, y:p.y, button:'left', buttons:0 });
     assert.deepEqual(await state(), before);
     p=await point(); await cdp.drag(p.x,p.y,p.x-25,p.y);
-    assert.notDeepEqual((await state()).labels,before.labels);
+    assert.notDeepEqual((await state()).bounds,before.bounds);
     await cdp.send('Emulation.setTouchEmulationEnabled',{enabled:true});
     p=await point();
     await cdp.send('Input.dispatchTouchEvent',{type:'touchStart',touchPoints:[{...p,id:7}]});
@@ -196,7 +198,7 @@ module.exports = async ({ cdp, check, FAKE, KZ }) => {
     await cdp.send('Input.dispatchTouchEvent',{type:'touchStart',touchPoints:[{...p,id:8}]});
     await cdp.send('Input.dispatchTouchEvent',{type:'touchMove',touchPoints:[{x:p.x-23,y:p.y,id:8}]});
     await cdp.send('Input.dispatchTouchEvent',{type:'touchEnd',touchPoints:[]});
-    assert.notDeepEqual((await state()).labels,touchBefore.labels);
+    assert.notDeepEqual((await state()).bounds,touchBefore.bounds);
     await cdp.send('Emulation.setTouchEmulationEnabled',{enabled:false});
     await discard();
   });
@@ -245,7 +247,7 @@ module.exports = async ({ cdp, check, FAKE, KZ }) => {
 
   await test('Run snapshots before upload; stale A completion cannot publish or auto-close B', async () => {
     await open('flux-controlnet.png'); await fileSetup(cdp);
-    await cdp.clickAt('.vz-textrow .vz-imgrow-head .vz-cb');
+    await cdp.clickAt('.vz-textrow .vz-imgrow-head .checkbox');
     await type('.vz-text-values','before upload text');
     await cdp.evaluate(`(()=>{window.__originalFetch=window.fetch;window.__bodies=[];window.fetch=(url,options)=>{
       if(options?.body instanceof FormData)return new Promise(resolve=>window.__upload=()=>resolve(new Response(JSON.stringify({name:options.body.get('image').name,origin:JSON.parse(options.headers['X-Kosmozoo-Origin'])}),{status:200})));

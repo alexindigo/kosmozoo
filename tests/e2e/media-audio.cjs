@@ -87,7 +87,7 @@ module.exports = async ({ page, ENGINE, KZ, check, capture, control }) => {
       check(`${ext}: workbench Space advances audio`,true);
       await invoke('workbench.close');await page.poll(`[...document.querySelectorAll('#diffStage audio')].every(e=>e.paused&&!e.getAttribute('src'))`);
       await invoke('variations.open',{id:`fake:${name}`});await page.poll(`document.querySelectorAll('.vz-slider-row').length>0`,20000);
-      await page.clickAt('.vz-slider-row[data-param-key="2.steps"] .vz-cb');await page.poll(`Number(document.querySelector('.vz-count').textContent)>0`);
+      await page.clickAt('.vz-slider-row[data-param-key="2.steps"] .checkbox');await page.poll(`Number(document.querySelector('.vz-count').textContent)>0`);
       const run = await invoke('variations.run');
       const enqueues = await (await fetch((process.env.E2E_FAKE??'http://127.0.0.1:18261')+'/__test/enqueues')).json();
       check(`${ext}: embedded graph probes and Variations submits SaveAudio jobs`, run?.status==='submitted' && run.submitted===run.total && run.submitted>0 && enqueues.some(r=>r.prompt?.['92']?.class_type==='SaveAudio'),JSON.stringify(run));

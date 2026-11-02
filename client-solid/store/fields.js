@@ -2,6 +2,7 @@
 // over the store's node registry. NOTHING is hardcoded about nodes: the field
 // list derives from the engine's node registry; a field id is
 // `<class_type>.<input>`.
+import { entryBytesUrl } from "/js/api.mjs";
 
 const LONG_TEXT = 120; // chars: full-text fields render in the desc area
 
@@ -137,11 +138,7 @@ export function nodeImages(meta, host) {
       label: `${n.title ?? n.type} — image`,
       file,
       fromOutput, // LoadImage-from-output: served by the output bytes route
-      src: host
-        ? (fromOutput
-          ? `/api/collections/${encodeURIComponent(host)}/entries/${encodeURIComponent(file)}/bytes`
-          : `/api/collections/${encodeURIComponent(host)}/entries/${encodeURIComponent(file)}/bytes?kind=input`)
-        : null,
+      src: host ? entryBytesUrl(host, file, { kind: fromOutput ? "output" : "input" }) : null,
     });
   }
   return out;

@@ -247,15 +247,6 @@ function CardSlot(props) {
   const ready = () => imgIdx() != null && store.state.cardSize(imgIdx()) != null;
   const j = () => image()?.judgment ?? {};
   const state = () => store.state.cardState(props.entryId);
-  // the vote/comment foot sticks to the viewport ONLY when the card is
-  // taller than it — on a fitting card the foot stays at the card's bottom
-  // (sticky would otherwise clamp it to the card's top over the image)
-  const isTall = () => {
-    const el = store.state.feedScrollEl();
-    const s = store.state.cardSize(imgIdx());
-    if (!s || !el) return false;
-    return cardHeight(s, el.clientWidth) + gridGapPx() > el.clientHeight;
-  };
 
   return (
     <Show
@@ -265,7 +256,7 @@ function CardSlot(props) {
       <div
         ref={cardEl} tabIndex={-1}
         onPointerDown={() => cardEl.focus({ preventScroll: true })}
-        class={"card" + (state().current ? " current" : "") + (isTall() ? " card--tall" : "")}
+        class={"card" + (state().current ? " current" : "")}
         style={{ ...state().style, height: `${cardHeight(store.state.cardSize(imgIdx()), store.state.feedScrollEl()?.clientWidth ?? 800)}px` }}
         data-treatment={state().treatment}
         data-idx={imgIdx()}

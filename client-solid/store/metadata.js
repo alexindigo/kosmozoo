@@ -1,18 +1,26 @@
 // Metadata is a retained, acknowledged demand lane. The acquisition owner
 // supplies admission for wants, reads, publication, node refresh and status.
-export function makeMetadata({ acquisition, owns, want, meta, nodes, status,
-  setPending, setNodes, setStatus, apply, batch, capture = () => null,
-  priorityFor = item => item.priority, now = () => performance.now() }) {
+// Shown identities (the entries a consumer displays) additionally own a
+// direct, bounded record read: it never waits on the collection's snapshot,
+// deltas, publication or cursor, and retries while its identity is shown.
+export function makeMetadata({ acquisition, owns, want, meta, nodes, status, entry,
+  setPending, setNodes, setStatus, apply, adopt, batch, capture = () => null,
+  priorityFor = item => item.priority, now = () => performance.now(),
+  retryDelay = attempt => Math.min(500 * 2 ** attempt, 8000) }) {
   let context = null, version = 0, retired = false;
-  let nodesDirty = false;
+  const nodesDirty = new Map();
+  let nodeRevision = 0;
   let wantTask = null, pollTask = null, statusTask = null, flushQueued = false;
   let retryTimer = null, pollTimer = null, statusTimer = null, failures = 0, pending = 0;
   const demand = new Map();
   const byId = new Map();
+  // id → { id, name, identity, attempt, task, timer, settled }: one record flight each.
+  const shown = new Map();
   const lanes = new Map(["full:foreground", "dimensions:foreground", "full:background", "dimensions:background"].map(key => [key, new Set()]));
   let projectionVersion = -1, foreground = new Set();
   const current = owner => !retired && context === owner && owns(owner);
   const signature = item => `${item.interest}:${priorityFor(item)}`;
+  const entryForName = name => demand.get(name) ?? { id: `${context.id}:${name}` };
 
   function index(item) {
     if (item.lane) lanes.get(item.lane).delete(item);
@@ -54,12 +62,21 @@ export function makeMetadata({ acquisition, owns, want, meta, nodes, status,
   }
 
   function setContext(next) {
-    context = next; version = 0; pending = 0; failures = 0; nodesDirty = false;
+    for (const item of shown.values()) clearTimeout(item.timer);
+    shown.clear();
+    context = next; version = 0; pending = 0; failures = 0; nodesDirty.clear();
     clearTimeout(retryTimer); clearTimeout(pollTimer); clearTimeout(statusTimer);
     retryTimer = pollTimer = statusTimer = null;
     wantTask = pollTask = statusTask = null; flushQueued = false; demand.clear(); byId.clear();
     for (const items of lanes.values()) items.clear();
     projectionVersion = -1; foreground.clear();
+  }
+
+  // A session's first accepted listing already carries every record up to its
+  // metadata version: the delta stream continues from there, never from a
+  // full snapshot that would re-send (and re-publish) the whole collection.
+  function resume(listed, owner) {
+    if (current(owner) && version === 0 && Number.isSafeInteger(listed) && listed > 0) version = listed;
   }
 
   function observePending(value, owner) {
@@ -103,7 +120,7 @@ export function makeMetadata({ acquisition, owns, want, meta, nodes, status,
     if (!current(owner) || wantTask || retryTimer) return;
     if (!first()) return;
     let sent = [], snapshot = null;
-    const task = acquisition.submit({ key: Symbol("metadata-want"), priority: () => first()?.lane.split(":")[1] ?? "background",
+    const task = acquisition.submit({ key: Symbol("metadata-want"), resourceClass: "control", priority: () => first()?.lane.split(":")[1] ?? "background",
       valid: () => current(owner) && !!first(), run: () => {
         const head = first(), options = { interest: head.interest, priority: priorityFor(head) };
         const items = [];
@@ -135,12 +152,20 @@ export function makeMetadata({ acquisition, owns, want, meta, nodes, status,
   }
 
   async function refreshNodes(owner) {
-    if (!nodesDirty || !current(owner)) return;
-    await acquisition.submit({ key: "metadata-nodes", valid: () => current(owner),
-      run: async ({ current: live, priority }) => {
-        const registry = await nodes({ priority });
-        if (live()) { setNodes(registry); nodesDirty = false; }
-      } });
+    while (nodesDirty.size && current(owner)) {
+      const result = await acquisition.submit({ key: "metadata-nodes", resourceClass: "control",
+        priority: () => laneOf([...nodesDirty.keys()].map(entryForName)), valid: () => current(owner),
+        run: async ({ current: live, priority }) => {
+          const captured = new Map(nodesDirty);
+          const registry = await nodes({ priority });
+          if (live()) {
+            setNodes(registry);
+            // A graph landing during this read still needs a later registry.
+            for (const [name, revision] of captured) if (nodesDirty.get(name) === revision) nodesDirty.delete(name);
+          }
+        } });
+      if (result?.retired) return;
+    }
   }
 
   async function accept(reply, owner, snapshot = capture()) {
@@ -157,19 +182,19 @@ export function makeMetadata({ acquisition, owns, want, meta, nodes, status,
     if (!unique.length || !current(owner)) return current(owner);
     // Foreground identities publish first, in the foreground lane.
     syncProjection();
-    const isForeground = name => foreground.has(demand.get(name)?.id);
+    const isForeground = name => foreground.has(entryForName(name).id);
     const names = [...unique.filter(isForeground), ...unique.filter(name => !isForeground(name))];
-    let position = 0, graphChanged = false;
+    let position = 0;
     while (position < names.length && current(owner)) {
-      const result = await acquisition.submit({ key: Symbol("metadata-publication"), resource: false,
-        priority: () => laneOf(names.slice(position, position + 200).map(name => demand.get(name))),
+      const result = await acquisition.submit({ key: Symbol("metadata-publication"), resource: false, resourceClass: "control",
+        priority: () => laneOf(names.slice(position, position + 200).map(entryForName)),
         valid: () => current(owner), run: () => {
           const started = now();
           batch(() => {
             let count = 0;
             do {
               const name = names[position++];
-              graphChanged = apply(name, itemsByName?.[name], dimsByName?.[name], owner, snapshot) || graphChanged;
+              if (apply(name, itemsByName?.[name], dimsByName?.[name], owner, snapshot)) nodesDirty.set(name, ++nodeRevision);
               const item = demand.get(name);
               if (item && (item.interest === "full" ? itemsByName?.[name] !== undefined : !!dimsByName?.[name])) item.delivered = true;
               count++;
@@ -180,9 +205,53 @@ export function makeMetadata({ acquisition, owns, want, meta, nodes, status,
     }
     if (!current(owner)) return false;
     // Dimension-only landings cannot change the discovered node schema.
-    nodesDirty ||= graphChanged;
     await refreshNodes(owner);
     return true;
+  }
+
+  // The shown identities' own record path. `entries` are the consumers'
+  // entries ({id, filename, hash, meta, extracted}); one that has its record
+  // needs no flight. A changed content identity or an entry no longer shown
+  // retires its flight: a late reply cannot apply and its retry is cancelled.
+  function show(entries) {
+    const owner = context;
+    if (!current(owner)) return;
+    const wanted = new Map();
+    for (const image of entries) if (image && !(image.meta || image.extracted)) wanted.set(image.id, image);
+    for (const [id, item] of shown) {
+      const image = wanted.get(id);
+      if (!image || (image.hash ?? "") !== item.identity) { clearTimeout(item.timer); shown.delete(id); }
+    }
+    for (const [id, image] of wanted) {
+      if (shown.has(id)) continue;
+      const item = { id, name: image.filename, identity: image.hash ?? "", attempt: 0, task: null, timer: null, settled: false };
+      shown.set(id, item);
+      readShown(item, owner);
+    }
+  }
+
+  function readShown(item, owner) {
+    const live = () => current(owner) && shown.get(item.id) === item;
+    if (!live() || item.task || item.timer || item.settled) return;
+    const task = acquisition.submit({ key: `metadata-shown:${item.id}`, resourceClass: "control", priority: "foreground",
+      valid: live, run: () => entry(owner.id, item.name, { priority: "foreground" }) });
+    item.task = task;
+    task.then(async record => {
+      item.task = null;
+      if (!live() || record?.retired) return;
+      if (!record?.meta && !record?.extracted) { retryShown(item, owner); return; }
+      // One identity-fenced application; a refused record (the listing knows
+      // different content) settles this identity until the listing moves on.
+      let outcome = false;
+      batch(() => { outcome = adopt(item.name, record, owner, item.identity); });
+      item.settled = true;
+      if (outcome === "graph") { nodesDirty.set(item.name, ++nodeRevision); await refreshNodes(owner); }
+    }, () => { item.task = null; retryShown(item, owner); });
+  }
+
+  function retryShown(item, owner) {
+    if (!current(owner) || shown.get(item.id) !== item) return;
+    item.timer = setTimeout(() => { item.timer = null; readShown(item, owner); }, retryDelay(item.attempt++));
   }
 
   function schedulePoll(delay = 1000, owner = context) {
@@ -199,7 +268,7 @@ export function makeMetadata({ acquisition, owns, want, meta, nodes, status,
       try {
         const snapshot = capture();
         // A poll is foreground while a foreground identity awaits its result.
-        const reply = await acquisition.submit({ key: "metadata-poll",
+        const reply = await acquisition.submit({ key: "metadata-poll", resourceClass: "control",
           priority: () => awaiting().length ? "foreground" : priority, valid: () => current(owner),
           run: ({ priority }) => meta(owner.id, version, { priority }) });
         if (!current(owner) || reply?.retired) return;
@@ -221,7 +290,7 @@ export function makeMetadata({ acquisition, owns, want, meta, nodes, status,
     statusTimer = setTimeout(() => {
       statusTimer = null;
       if (!current(owner) || pending <= 0) return;
-      const task = acquisition.submit({ key: "metadata-status", valid: () => current(owner),
+      const task = acquisition.submit({ key: "metadata-status", resourceClass: "control", valid: () => current(owner),
         run: async ({ current: live, priority }) => { const reply = await status({ priority }); if (live()) setStatus(reply); } });
       statusTask = task;
       task.catch(() => {}).finally(() => {
@@ -232,6 +301,6 @@ export function makeMetadata({ acquisition, owns, want, meta, nodes, status,
     }, 2000);
   }
 
-  return { setContext, request, poll, accept,
+  return { setContext, resume, request, poll, accept, show,
     dispose() { setContext(null); retired = true; } };
 }

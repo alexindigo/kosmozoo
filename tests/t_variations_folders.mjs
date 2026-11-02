@@ -49,7 +49,8 @@ Deno.test("folder images: failed path upload never invents provenance or consume
   rig.editor.edit("images", "image.image", "enabled", true);
   rig.editor.addImages("image.image", [{ kind: "server-path", name: "kept.png", path: "/images/kept.png" }]);
   const result = await rig.editor.run(); assertEquals(result.adopted, false); assert(rig.editor.dirty());
-  assertEquals(rig.requests[0].imageParams["image.image"].values, []); rig.editor.dispose();
+  assert(rig.editor.result().text.includes("Image changed since it was added"));
+  assertEquals(rig.requests, []); assertEquals(result.submitted, 0); rig.editor.dispose();
 });
 
 Deno.test("folder images: File and distinct path identities share collision/content projection without filename-only collapse", async () => {
@@ -77,4 +78,26 @@ Deno.test("folder images: readding a mutable path refreshes its evidence; late f
   assert(!editor.rows("images")["image.image"].images[0].sameCurrent); assertEquals(calls, 2);
   const pending = editor.addFolder("image.image", "/images"); rig.replaceSource(); release({ items: [{ ...item, path: "/elsewhere/pick.png" }] });
   await assertRejects(() => pending, Error, "editor changed"); assertEquals(editor.rows("images")["image.image"].items, [item]); editor.dispose();
+});
+
+Deno.test("folder images: later path reinspection cannot change the captured Run's receipt-backed graph value", async () => {
+  let inspections = 0, release;
+  const rig = editorRig({
+    inspectPath: async (_host, _path, _current, _kind, origin) => ({ hash: (++inspections === 1 ? "b" : "a").repeat(64), currentHash: "a".repeat(64), origin }),
+    uploadPath: (_host, _path, hash, origin) => {
+      assertEquals(hash, "b".repeat(64));
+      return new Promise(resolve => { release = () => resolve({ name: "captured-path.png", origin }); });
+    },
+  }), { editor } = rig;
+  const item = { kind: "server-path", name: "mutable.png", path: "/images/mutable.png" };
+  try {
+    editor.edit("numeric", "n.denoise", "enabled", false); editor.edit("images", "image.image", "enabled", true);
+    editor.addImages("image.image", [item]); await editor.inspectImages();
+    const pending = editor.run(); while (!release) await new Promise(resolve => setTimeout(resolve, 0));
+    editor.removeImage("image.image", item); editor.addImages("image.image", [item]); await editor.inspectImages();
+    assert(editor.rows("images")["image.image"].images[0].sameCurrent);
+    release(); const result = await pending;
+    assertEquals(rig.requests[0].imageParams["image.image"].values, ["captured-path.png"]);
+    assertEquals(result.adopted, false); assert(editor.dirty());
+  } finally { editor.dispose(); }
 });

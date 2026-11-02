@@ -244,3 +244,57 @@ Deno.test("meta-want: the acknowledgement carries demanded names' known state, i
     assertEquals(dims.dims, { "a.png": { width: 64, height: 32 } });
   } finally { await rm(dir, { recursive: true }); }
 });
+
+Deno.test("entry meta: a shown entry's record ingests that one entry on demand; an unreadable one replies unextracted", async () => {
+  const dir = await mkdtemp(join(tmpdir(), "kz-entry-meta-"));
+  const folder = join(dir, "images");
+  await mkdir(folder);
+  const { readFile } = await import("node:fs/promises");
+  await writeFile(join(folder, "graph.png"), await readFile(new URL("./fixtures/flux-lora.png", import.meta.url)));
+  const rig = await mkStateRig("entry-meta", { dir: join(dir, "state"), hosts: { local: `folder:${folder}` } });
+  const ensures = [];
+  const ingest = { ensure: (...args) => { ensures.push(args); return rig.ingest.ensure(...args); } };
+  const router = makeRouter({ hosts: rig.hosts, inventory: rig.inventory, store: rig.store, settings: rig.settings, plugins: null, cache: rig.cache, ingest });
+  const read = async name => {
+    const response = await router.handle(new Request(`http://x/api/collections/local/entries/${encodeURIComponent(name)}/meta`));
+    assertEquals(response.status, 200);
+    return response.json();
+  };
+  try {
+    const v = rig.store.metaVersion;
+    const record = await read("graph.png");
+    assertEquals(record.name, "graph.png");
+    assertEquals(record.extracted, true);
+    assert(record.hash, "the entry was ingested for its reader");
+    assert(record.meta.nodes.some(node => node.type === "LoraLoader"), "the record is the extracted graph");
+    assertEquals([ensures[0][0], ensures[0][1], ensures[0][3]], ["local", "graph.png", { priority: "high" }]);
+    assert(rig.store.metaVersion > v, "the ordinary write path versioned it for the collection stream too");
+    assertEquals((await read("graph.png")).hash, record.hash);
+    assertEquals(ensures.length, 1, "a known record is answered without another read");
+    const missing = await read("missing.png");
+    assertEquals([missing.extracted, missing.hash, missing.meta], [false, null, null]);
+  } finally { await rig.close(); await rm(dir, { recursive: true, force: true }); }
+});
+
+Deno.test("listing envelope: its metadata version continues the delta stream with exactly the later writes", async () => {
+  const dir = await mkdtemp(join(tmpdir(), "kz-listing-version-"));
+  const folder = join(dir, "images");
+  await mkdir(folder);
+  for (const name of ["a.png", "b.png"]) await writeFile(join(folder, name), "x");
+  const rig = await mkStateRig("listing-version", { dir: join(dir, "state"), hosts: { local: `folder:${folder}` } });
+  const router = makeRouter({ hosts: rig.hosts, inventory: rig.inventory, store: rig.store, settings: rig.settings, plugins: null, cache: rig.cache, ingest: rig.ingest,
+    prefetch: { pending: () => 0, dimsPending: () => 0 } });
+  const get = async path => (await router.handle(new Request(`http://x${path}`))).json();
+  try {
+    await rig.store.ingestFile("local", "a.png", "aa".repeat(32), 1);
+    await rig.store.metaPut("local", "a.png", { seed: 1 }, { ext: 1 });
+    const listing = await get("/api/collections/local/entries?inventory=1");
+    assertEquals(listing.metaVersion, rig.store.metaVersion);
+    assertEquals(listing.entries.find(entry => entry.name === "a.png").meta, { seed: 1 });
+    assertEquals(await get(`/api/collections/local/meta?since=${listing.metaVersion}`), { v: listing.metaVersion, changed: false, pending: 0 });
+    await rig.store.ingestFile("local", "b.png", "bb".repeat(32), 1);
+    await rig.store.metaPut("local", "b.png", { seed: 2 }, { ext: 1 });
+    const delta = await get(`/api/collections/local/meta?since=${listing.metaVersion}`);
+    assertEquals(delta.items, { "b.png": { seed: 2 } }, "only the write after the listing; never the collection");
+  } finally { await rig.close(); await rm(dir, { recursive: true, force: true }); }
+});

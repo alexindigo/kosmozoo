@@ -130,6 +130,16 @@ async function railMotion(page) {
     if (kz.state.host() !== "fake") await kz.actions.hosts.select("fake");
   })()`);
   await page.poll(`(async () => ${KZ}.state.images.length > 3000)()`, 20000);
+  try {
+    const control = async body => {
+      const response = await fetch((process.env.E2E_FAKE ?? 'http://127.0.0.1:18261') + '/__test/activity', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body),
+      });
+      if (!response.ok) throw new Error('sticky-foot fixture control failed');
+    };
+    await require('./sticky-foot.cjs')({ page, KZ, check, capture, control });
+    await require('./sticky-mixed-feed.cjs')({ page, KZ, check, capture, control });
+  } catch (error) { check('sticky feed foot consumer', false, error.message); }
   await healthyTraffic({ page, traffic: sourceTraffic, ENGINE, KZ, check });
   const dims = await page.evaluate(`(async () => (await (await fetch("/api/prefetch")).json()).dimsPending)()`);
   check("dims pass drained before the feed audit", dims === 0, `dimsPending=${dims}`);
@@ -625,20 +635,26 @@ async function railMotion(page) {
     } catch { /* engine teardown handles it */ }
   }
 
-  // The topbar-only split must follow the actual feed edge without changing
-  // the main composition: two workspace modes, widths, expansion and real drag.
+  // The topbar's sections size from content (not the pane divider); the filter
+  // immediately follows the folder and precedes the pins, and the feed section
+  // never overlaps the workspace section, across expansion and a real drag.
   try {
     await page.evaluate(`(async () => {
       const s = ${KZ}; await s.actions.hosts.select('fake'); s.actions.ui.setFilter('');
     })()`);
     const geometry = `(() => {
-      const region = document.getElementById('candidatesCol').getBoundingClientRect();
+      const region = document.querySelector('#chrome .chrome-workspace').getBoundingClientRect();
       const icon = document.getElementById('filterBtn').getBoundingClientRect();
       const control = document.querySelector('.feed-filter').getBoundingClientRect();
       const input = document.getElementById('filter').getBoundingClientRect();
+      const folder = document.querySelector('.folder-picker').getBoundingClientRect();
+      const pins = document.querySelector('.pinned-source-group').getBoundingClientRect();
+      const row = document.querySelector('.chrome-feed-inner');
+      const gap = parseFloat(getComputedStyle(row).columnGap);
       const inset = parseFloat(getComputedStyle(document.getElementById('chrome')).getPropertyValue('--chrome-inset'));
-      return { delta: Math.max(Math.abs(control.right - (region.right - inset)), Math.abs(icon.right - (region.right - inset))), icon: icon.right,
-        inputLeft: input.left, inputRight: input.right, iconLeft: icon.left, boundary: region.right,
+      return { delta: Math.max(Math.abs(control.left - folder.right - gap), Math.abs(pins.left - control.right - gap),
+          Math.max(0, row.getBoundingClientRect().right + inset - region.left)), icon: icon.right,
+        inputLeft: input.left, inputRight: input.right, iconLeft: icon.left, boundary: region.left,
         barRight: document.getElementById('wsBar').getBoundingClientRect().right, viewport: innerWidth };
     })()`;
     for (const width of [1400, 780, 480]) {
@@ -650,26 +666,26 @@ async function railMotion(page) {
         await page.clickAt('#filterBtn');
         await page.poll(`!document.getElementById('filter').hidden && document.activeElement.id === 'filter'`);
         const after = await page.evaluate(geometry);
-        check(`filter geometry ${width}/${space}: same feed edge, input left, icon stationary`,
-          after.delta <= 1 && Math.abs(before.icon - after.icon) < 1 && after.inputRight <= after.iconLeft && after.barRight <= after.viewport,
+        check(`filter geometry ${width}/${space}: after folder, before pins, input left, clear of the workspace section`,
+          before.delta <= 1 && after.delta <= 1 && after.inputRight <= after.iconLeft && after.barRight <= after.viewport,
           JSON.stringify({ before, after }));
         await page.evaluate(`(async () => {
           const s = ${KZ}; await s.actions.hosts.patch('fake', { pinned: true });
           await s.actions.hosts.patch('another', { pinned: true }); s.actions.folders.select('geometry/long-caption');
         })()`);
         await page.poll(`(${geometry}).delta <= 1`);
-        check(`folder/pin geometry ${width}/${space}: caption and separated scroll strip retain the feed boundary`, await page.evaluate(`(() => {
-          const icon = document.getElementById('filterBtn').getBoundingClientRect();
+        check(`folder/pin geometry ${width}/${space}: filter precedes separated scroll strip clear of the workspace section`, await page.evaluate(`(() => {
+          const filter = document.querySelector('.feed-filter').getBoundingClientRect();
           const folder = document.getElementById('outputFolder').getBoundingClientRect();
           const separator = document.querySelector('.pinned-separator').getBoundingClientRect();
           const strip = document.querySelector('.pinned-sources').getBoundingClientRect();
-          return (${geometry}).delta <= 1 && Math.abs(icon.right - ${after.icon}) <= 1 && folder.width > 0 &&
+          return (${geometry}).delta <= 1 && filter.right <= separator.left && strip.right <= (${geometry}).boundary && folder.width > 0 &&
             separator.right <= strip.left + 1 && document.getElementById('outputFolder').title.includes('geometry/long-caption');
         })()`));
         await page.evaluate(`(async () => { const s = ${KZ}; s.actions.folders.select('');
           await s.actions.hosts.patch('fake', { pinned: false }); await s.actions.hosts.patch('another', { pinned: false }); })()`);
         await page.poll(`(${geometry}).delta <= 1 && !document.querySelector('.pinned-separator')`);
-        check(`empty-pin geometry ${width}/${space}: no separator and unchanged flexible boundary`, (await page.evaluate(geometry)).delta <= 1);
+        check(`empty-pin geometry ${width}/${space}: no separator and retained folder/filter/pin order`, (await page.evaluate(geometry)).delta <= 1);
         await capture(page, `filter-expanded-${width}-${space}`);
         const divider = await page.evaluate(`(() => {
           const r = document.getElementById('divider').getBoundingClientRect();
@@ -677,14 +693,14 @@ async function railMotion(page) {
         })()`);
         await page.drag(divider.x, divider.y, Math.max(40, divider.x - 30), divider.y);
         await page.poll(`(${geometry}).delta <= 1`);
-        check(`filter geometry ${width}/${space}: follows trusted pane drag`, (await page.evaluate(geometry)).delta <= 1);
+        check(`filter geometry ${width}/${space}: unchanged by a trusted pane drag`, (await page.evaluate(geometry)).delta <= 1);
         await page.key('Escape');
         await page.poll(`document.getElementById('filter').hidden`);
       }
     }
     await page.send('Emulation.setDeviceMetricsOverride', { width: 1400, height: 900, deviceScaleFactor: 1, mobile: false });
     await page.evaluate(`(async () => ${KZ}.actions.anchors.setPaneWidth(300))()`);
-  } catch (error) { check('topbar JS-synchronized geometry', false, error.message); }
+  } catch (error) { check('topbar content-sized geometry', false, error.message); }
 
   // End-of-chain proof: real external completion -> listing -> real image
   // acquisition -> decoded card, while the incremental merge retains edits.
@@ -709,8 +725,8 @@ async function railMotion(page) {
       await s.actions.anchors.addFiles([new File([blob], 'source-refresh-anchor.png', { type: 'image/png' })]);
       s.actions.ui.setWorkspace('anchors');
       s.actions.diff.setSplit(.37);
-      s.actions.views.set('fake:flux-basic.png', { s: 2, txf: .1, tyf: .2 }, { persist: false });
-      s.actions.views.set('anchor:source-refresh-anchor.png', { s: 2, txf: .1, tyf: .2 }, { persist: false });
+      s.actions.views.set('fake:flux-basic.png', { version: 2, s: 2, cx: .4, cy: .3 }, { persist: false });
+      s.actions.views.set('anchor:source-refresh-anchor.png', { version: 2, s: 2, cx: .4, cy: .3 }, { persist: false });
       const { api } = await import('/js/api.mjs');
       let release; const gate = new Promise((r) => release = r);
       window.__sourceApi = { setJudgment: api.setJudgment, inventory: api.inventory, want: api.want };
@@ -745,8 +761,8 @@ async function railMotion(page) {
     const before = await page.evaluate(`(async () => {
       const s = ${KZ}; s.handles.invoke('workbench.openEntry', { id: s.state.currentEntry().entry.id });
       s.handles.invoke('workbench.mode', { mode: 'split' });
-      s.actions.diff.views.set('fake:flux-basic.png', { s: 1.5, txf: .05, tyf: -.1 });
-      s.actions.diff.views.set('anchor:source-refresh-anchor.png', { s: 2.5, txf: -.15, tyf: .25 });
+      s.actions.diff.views.set('fake:flux-basic.png', { version: 2, s: 1.5, cx: .45, cy: .6 });
+      s.actions.diff.views.set('anchor:source-refresh-anchor.png', { version: 2, s: 2.5, cx: .65, cy: .25 });
       window.__sourceCard = document.querySelector('${origin}');
       return { current: s.state.current(), trail: s.state.currentStack(), url: location.href,
         top: window.__sourceCard.getBoundingClientRect().top, pair: s.state.diffPair(),
@@ -1033,6 +1049,8 @@ async function railMotion(page) {
   }
 
   await require('./auto-refresh.cjs')({ page, ENGINE, FAKE: FAKE_ACTIVITY, KZ, check, traffic: sourceTraffic });
+
+  await require('./metadata-position.cjs')({ ENGINE, FAKE: FAKE_ACTIVITY, check });
 
   check("no uncaught page errors", pageErrors.length === 0, pageErrors[0] ?? "");
 

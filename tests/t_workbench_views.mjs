@@ -11,7 +11,7 @@ Deno.test("workbench views: image IDs/keys unchanged; video full/split/overlay/s
   assertEquals(["image","video","audio"].map(defaultWorkbenchView), ["full","full","full"]);
 });
 
-Deno.test("workbench admission shares the kind catalogue; full gestures always target A", () => {
+Deno.test("workbench admission shares the kind catalogue; full gestures target the subject", () => {
   const store = makeAppStore({subscribeSources:null});
   try {
     const current = file => store.actions.current.assign({remote:"fake",image:file},{persist:false});
@@ -28,7 +28,7 @@ Deno.test("workbench admission shares the kind catalogue; full gestures always t
     assertEquals(store.state.diff.mode,"full","images admit the same Full view");
     store.handles.invoke("workbench.mode",{mode:"split"});
     assertEquals(store.state.diff.mode,"split","image programmatic setup stays permissive");
-    assertEquals(hitLayer({mode:"full",col:"right",x:900,stageRect:{left:0,width:1400}}),"a");
+    assertEquals(hitLayer({mode:"full",col:"right",x:900,stageRect:{left:0,width:1400}}),"b");
   } finally {store.dispose();}
 });
 

@@ -210,3 +210,149 @@ Deno.test("metadata lanes: work for a foreground identity never queues behind pe
     assertEquals(applied[0], "cur.png", "the current entry's acknowledged demand is polled and published in the foreground lane, first");
   } finally { f.dispose(); }
 });
+
+for (const [count, position] of [[25, 0], [25, 12], [25, 24], [1, 0]]) {
+  Deno.test(`metadata control: want/poll/registry reach fields at position ${position} of ${count} while six native resources remain held`, async () => {
+    const images = Array.from({ length: count }, (_, i) => ({ id: `source:${i}`, filename: `${i}.png` }));
+    const applied = [], calls = [], native = Array.from({ length: 6 }, deferred);
+    let f;
+    f = fixture({
+      priorityFor: item => f.acquisition.priority(item.id),
+      want: async (_id, names, options) => { calls.push(["want", options.priority]); return { pending: 1, items: {}, dims: {} }; },
+      meta: async (_id, _version, options) => { calls.push(["poll", options.priority]); return { pending: 0, changed: true, v: 1,
+        items: { [`${position}.png`]: { nodes: [{ type: "NewType", inputs: { token: "visible-value" } }] } } }; },
+      nodes: async options => { calls.push(["nodes", options.priority]); return { NewType: { inputs: { token: "string" } } }; },
+      apply: (_name, meta) => { if (meta) applied.push(meta); return !!meta; },
+    }, { scheduleIdle: () => () => {} });
+    try {
+      f.acquisition.setWindow({ ids: images.map(image => image.id), currentId: images[position].id, limit: 1 });
+      native.forEach((hold, i) => f.acquisition.submit({ key: `native-${i}`, priority: "foreground", run: () => hold.promise }));
+      f.channel.request([images[position]]); await flush();
+      assertEquals(calls, [["want", "foreground"]]);
+      f.channel.poll(); await flush(); await flush();
+      assertEquals(calls, [["want", "foreground"], ["poll", "foreground"], ["nodes", "foreground"]]);
+      assertEquals(applied[0]?.nodes[0].inputs.token, "visible-value");
+    } finally { f.dispose(); native.forEach(hold => hold.resolve()); await flush(); }
+  });
+}
+
+// A Store-shaped entry table for the shown-record path: the real application
+// fence (snapshot for deltas, content identity for records).
+function shownFixture(overrides = {}) {
+  const store = new Map(), records = [], polls = [];
+  let held = null;
+  const f = fixture({
+    want: async () => ({ pending: 1, items: {}, dims: {} }),
+    meta: (_id, since) => { polls.push(since); if (polls.length === 1) return new Promise(resolve => { held = resolve; });
+      return Promise.resolve({ v: 2, changed: since !== 2, items: {}, dims: {}, pending: 1 }); },
+    entry: async (_id, name) => { records.push(name); return overrides.record?.(name) ?? { name, hash: "hx", extracted: true, meta: { nodes: [{ type: "Shown", inputs: { token: name } }] } }; },
+    capture: names => new Map([...store.values()].filter(i => !names || names.includes(i.filename)).map(i => [i.filename, i.hash])),
+    apply(name, meta, _dims, _owner, snapshot) {
+      const image = store.get(name);
+      if (!image || !snapshot.has(name) || snapshot.get(name) !== image.hash) return false;
+      if (meta && !image.meta) { image.meta = meta; image.extracted = true; return true; }
+      return false;
+    },
+    adopt(name, record, _owner, identity) {
+      const image = store.get(name);
+      if (!image || (image.hash ?? "") !== identity || image.hash && record.hash && record.hash !== image.hash) return false;
+      if (record.meta && !image.meta) { image.meta = record.meta; image.extracted = true; return "graph"; }
+      if (record.extracted) image.extracted = true;
+      return "applied";
+    },
+    retryDelay: () => 0, ...overrides.options,
+  });
+  const list = image => { store.set(image.filename, image); return image; };
+  return { ...f, store, records, polls, list, release: reply => held?.(reply) };
+}
+
+Deno.test("metadata shown record: a delta consumed by a pre-listing snapshot cannot strand the shown entry", async () => {
+  const f = shownFixture();
+  try {
+    f.list({ id: "source:a.png", filename: "a.png", hash: "ha", meta: { a: 1 }, extracted: true });
+    f.acquisition.setWindow({ ids: ["source:a.png"], currentId: "source:a.png" });
+    const poll = f.channel.poll(); await flush();            // snapshot: x.png unlisted
+    const x = f.list({ id: "source:x.png", filename: "x.png", hash: null, meta: null, extracted: false });
+    f.acquisition.setWindow({ ids: ["source:x.png", "source:a.png"], currentId: "source:x.png" });
+    f.channel.request([x], { renew: true });                // acknowledged empty: not ingested yet
+    f.channel.show?.([x]);                                   // the details pane shows it
+    f.release({ v: 2, changed: true, items: { "x.png": { nodes: [] } }, dims: {}, pending: 1 });
+    await poll; await flush();
+    await f.channel.poll(); await flush();
+    assertEquals(f.polls, [0, 2], "the stream's cursor moved past x.png");
+    assert(f.store.get("x.png").meta?.nodes?.[0]?.inputs?.token === "x.png", "the shown entry has its own record");
+    assertEquals(f.registries, ["read"], "its new graph refreshes the field registry");
+  } finally { f.dispose(); }
+});
+
+Deno.test("metadata shown record: unextracted replies retry while shown; hiding or replacing the identity retires the flight", async () => {
+  let ready = false;
+  const f = shownFixture({ record: name => ready ? { name, hash: "h1", extracted: true, meta: null } : { name, hash: null, extracted: false, meta: null } });
+  try {
+    const x = f.list({ id: "source:x.png", filename: "x.png", hash: null, meta: null, extracted: false });
+    f.channel.show([x]); await flush();
+    await new Promise(resolve => setTimeout(resolve, 5)); await flush();
+    assert(f.records.length >= 2, "an unavailable record is read again");
+    ready = true;
+    await new Promise(resolve => setTimeout(resolve, 5)); await flush();
+    assertEquals(f.store.get("x.png").extracted, true, "an entry without parameters leaves loading too");
+    assertEquals(f.store.get("x.png").meta, null);
+    const reads = f.records.length;
+    f.channel.show([{ ...x, extracted: true }]); await flush();
+    await new Promise(resolve => setTimeout(resolve, 5)); await flush();
+    assertEquals(f.records.length, reads, "a satisfied identity issues no further read");
+    // A replaced content identity: the old flight cannot apply to the new one.
+    ready = false;
+    const y = f.list({ id: "source:y.png", filename: "y.png", hash: "old", meta: null, extracted: false });
+    f.channel.show([y]); await flush();
+    y.hash = "new"; f.channel.show([y]); f.channel.show([]);
+    await new Promise(resolve => setTimeout(resolve, 5)); await flush();
+    const settled = f.records.length;
+    await new Promise(resolve => setTimeout(resolve, 5)); await flush();
+    assertEquals(f.records.length, settled, "no identity is shown: no retries remain");
+  } finally { f.dispose(); }
+});
+
+Deno.test("metadata shown record: a refused record (different content) settles until the listing moves on", async () => {
+  const f = shownFixture({ record: name => ({ name, hash: "other", extracted: true, meta: { nodes: [] } }) });
+  try {
+    const x = f.list({ id: "source:x.png", filename: "x.png", hash: "listed", meta: null, extracted: false });
+    f.channel.show([x]); await flush();
+    for (let i = 0; i < 3; i++) { f.channel.show([x]); await flush(); }
+    assertEquals(f.records, ["x.png"]);
+    assertEquals(f.store.get("x.png").meta, null, "a record of other content never applies");
+    x.hash = "other"; f.channel.show([x]); await flush();
+    assertEquals(f.records, ["x.png", "x.png"]);
+    assertEquals(f.store.get("x.png").meta, { nodes: [] });
+  } finally { f.dispose(); }
+});
+
+Deno.test("metadata shown record: independent of a held collection snapshot and its publication", async () => {
+  const f = shownFixture();
+  try {
+    const x = f.list({ id: "source:x.png", filename: "x.png", hash: null, meta: null, extracted: false });
+    f.acquisition.setWindow({ ids: ["source:x.png"], currentId: "source:x.png" });
+    f.channel.poll(); await flush();                          // the full snapshot is still in flight
+    f.channel.show([x]); await flush();
+    assertEquals(f.records, ["x.png"]);
+    assert(f.store.get("x.png").meta, "the shown record applied while the snapshot was held");
+  } finally { f.release({ v: 2, changed: false, pending: 0 }); f.dispose(); }
+});
+
+Deno.test("metadata cursor: a session continues the delta stream from its first listing's version, never a full snapshot", async () => {
+  const f = fixture();
+  try {
+    f.channel.resume(41, f.owner);
+    await f.channel.poll();
+    f.channel.resume(7, f.owner);
+    f.channel.resume(99, { id: "other" });
+    await f.channel.poll();
+    assertEquals(f.reads, [41, 41], "only the session's first listing sets the cursor; other owners cannot");
+    const g = fixture();
+    try {
+      for (const invalid of [undefined, null, 0, -1, 1.5, "41"]) g.channel.resume(invalid, g.owner);
+      await g.channel.poll();
+      assertEquals(g.reads, [0], "a listing without a version keeps the full-snapshot fallback");
+    } finally { g.dispose(); }
+  } finally { f.dispose(); }
+});

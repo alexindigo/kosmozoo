@@ -54,10 +54,20 @@ function check(name, ok, detail) {
   try {
     await page.send('Network.enable', { maxPostDataSize: 1000000 });
     await page.send('Page.addScriptToEvaluateOnNewDocument', { source: `
-      window.__loadWindow = { longtasks: [], acceptance: null };
+      window.__loadWindow = { longtasks: [], acceptance: null, firstVisible: null };
       new PerformanceObserver(list => {
         for (const entry of list.getEntries()) window.__loadWindow.longtasks.push({ start: entry.startTime, duration: entry.duration });
       }).observe({ type: 'longtask', buffered: true });
+      const visible = () => {
+        const col = document.getElementById('candidatesCol');
+        const image = [...document.querySelectorAll('.card img')].find(el => {
+          if (!el.naturalWidth) return false;
+          const r = el.getBoundingClientRect(), c = col.getBoundingClientRect();
+          return r.width > 0 && r.height > 0 && r.bottom > c.top && r.top < c.bottom;
+        });
+        if (image) window.__loadWindow.firstVisible = { at: performance.now(), file: image.alt };
+        else requestAnimationFrame(visible);
+      }; requestAnimationFrame(visible);
     ` });
     await page.goto(ENGINE + '/');
     await page.poll(`!!document.querySelector('.feed-empty')`, 15000);
@@ -131,7 +141,7 @@ function check(name, ok, detail) {
     await sleep(Math.max(0, start + 120000 - performance.now()));
     const observed = await page.evaluate(`(() => {
       window.__loadWindow.dispose();
-      return { longtasks: window.__loadWindow.longtasks, acceptance: window.__loadWindow.acceptance };
+      return { longtasks: window.__loadWindow.longtasks, acceptance: window.__loadWindow.acceptance, firstVisible: window.__loadWindow.firstVisible };
     })()`);
     const acceptance = observed.acceptance;
     // The acceptance task includes synchronous follow-through after the batch.
@@ -140,7 +150,15 @@ function check(name, ok, detail) {
     const later = observed.longtasks.filter(task => task.start >= acceptance?.end);
     const latencies = interactions.map(item => item.elapsedMs).sort((a, b) => a - b);
     const p95 = latencies[Math.ceil(latencies.length * .95) - 1], max = latencies.at(-1);
-    evidence = { durationMs: performance.now() - start, ...observed, initialMs, later, interactions,
+    const windowEnds = (initialWindow ?? []).map(name => requests.find(request => request.name === name && request.end && !request.failed)?.end);
+    // Use the inventory body's completion, not the want's dispatch: the old
+    // scheduler could delay that want until much of the window had already loaded.
+    const inventoryEnd = requests.find(request => new URL(request.url).searchParams.get('inventory') === '1')?.end;
+    const startupWindowMs = inventoryEnd && windowEnds.length && windowEnds.every(Boolean) ? (Math.max(...windowEnds) - inventoryEnd) * 1000 : null;
+    const firstVisibleMs = observed.firstVisible ? observed.firstVisible.at - acceptance.start : null;
+    const wantPosts = requests.filter(request => request.method === 'POST' && new URL(request.url).pathname.endsWith('/want')).length;
+    const longTaskTotalMs = observed.longtasks.reduce((sum, task) => sum + task.duration, 0);
+    evidence = { durationMs: performance.now() - start, ...observed, initialMs, later, interactions, startupWindowMs, firstVisibleMs, wantPosts, longTaskTotalMs,
       p95, max, initialWindow, firstBackground, peakBackground, requests, errors };
     check('load-window starts with 5,000 dimensionless bulk images', acceptance?.count === 5007 && acceptance.unknown >= 5000, acceptance);
     check('load-window initial acceptance <=100ms', acceptance?.end && initialMs <= 100, { initialMs });
@@ -158,6 +176,7 @@ function check(name, ok, detail) {
       bulk.length >= 2 && new Set(bulk.map(request => request.etag)).size >= 2,
       { images: bulk.length, distinctHashes: new Set(bulk.map(request => request.etag)).size });
     check('load-window has no uncaught exceptions', errors.length === 0, errors);
+    console.log('LOAD-WINDOW METRICS', JSON.stringify({ startupWindowMs, firstVisibleMs, wantPosts, longTaskTotalMs }));
   } finally {
     fs.writeFileSync(workPath('tests/e2e/.shots/load-window.json'), JSON.stringify(evidence ?? { requests, interactions, errors }, null, 2));
     await page.close();

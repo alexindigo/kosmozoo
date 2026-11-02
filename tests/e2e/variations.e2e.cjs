@@ -31,7 +31,8 @@ async function attempt(name, fn) {
 }
 
 async function main() {
-  const cdp = await CDP.launch(9334);
+  const cdp = await CDP.launch(9334, { windowSize: '1800,1200' });
+  await cdp.send('Emulation.setDeviceMetricsOverride', { width: 800, height: 600, deviceScaleFactor: 1, mobile: false });
   const closeAndDiscard = async () => {
     await cdp.evaluate(`document.querySelector('.vz-close')?.click()`);
     if (await cdp.evaluate(`!!document.querySelector('.vz-discard')`)) await cdp.clickAt('.vz-discard-confirm');
@@ -90,7 +91,7 @@ async function main() {
       await cdp.poll(`document.querySelectorAll('.vz-slider-row').length > 0`, 5000);
       const info = await cdp.evaluate(`(() => {
         const rows = document.querySelectorAll('.vz-slider-row');
-        const labels = [...rows].map((r) => r.querySelector('.vz-label')?.textContent);
+        const labels = [...rows].map((r) => r.dataset.paramKey);
         return { count: rows.length, labels };
       })()`);
       check("panel renders graph-appropriate params",
@@ -103,11 +104,16 @@ async function main() {
     });
 
     // --- probe fills in seed current value ---
+    await attempt("row checkbox geometry and native interaction", async () => {
+      await require('./variations-checkbox.cjs')({ cdp, check,
+        selector: '.vz-slider-row[data-param-key$="denoise"] .checkbox', size: 16 });
+    });
+
     await attempt("probe fills in seed current value", async () => {
       const cur = await cdp.evaluate(`(() => {
         for (const r of document.querySelectorAll('.vz-slider-row')) {
-          if (/seed$/.test(r.querySelector('.vz-label')?.textContent ?? "")) {
-            return r.querySelector('.vz-current')?.textContent;
+          if (/seed$/.test(r.dataset.paramKey ?? "")) {
+            return r.querySelector('.vz-parameter-current')?.textContent;
           }
         }
         return null;
@@ -147,7 +153,7 @@ async function main() {
         const rows = document.querySelectorAll('.vz-slider-row');
         return rows.length > 1 ? rows[rows.length - 1].dataset.paramKey : null;
       })()`);
-      await cdp.clickAt(`.vz-slider-row[data-param-key="${lastKey}"] .vz-cb`);
+      await cdp.clickAt(`.vz-slider-row[data-param-key="${lastKey}"] .checkbox`);
       await cdp.poll(`document.querySelectorAll('.vz-slider-row:not(.vz-off)').length >= 2`, 5000);
       const order = await cdp.evaluate(`(() => {
         const rows = [...document.querySelectorAll('.vz-slider-row')];
@@ -185,7 +191,7 @@ async function main() {
         check("suffix shrank after disable", false, "no enabled non-denoise row to disable");
         return;
       }
-      await cdp.clickAt(`.vz-slider-row[data-param-key="${key}"] .vz-cb`);
+      await cdp.clickAt(`.vz-slider-row[data-param-key="${key}"] .checkbox`);
       await cdp.poll(`document.querySelector('.vz-suffix').value.length < ${JSON.stringify(before ?? "").length}`, 5000);
       const after = await cdp.evaluate(`document.querySelector('.vz-suffix')?.value`);
       check("suffix shrank after disable", after.length < before.length,
@@ -221,14 +227,14 @@ async function main() {
       await cdp.send("Input.insertText", { text: "0.1" });
       await cdp.evaluate(`document.querySelector('${rowSel} .vz-row-inc-input').blur()`);
       await cdp.poll(`document.querySelector('${rowSel} .vz-row-inc-input').value === "0.1"`, 5000);
-      const before = await cdp.evaluate(`document.querySelector('${rowSel} .vz-max-lbl')?.textContent ?? ""`);
+      const before = await cdp.evaluate(`document.querySelector('${rowSel} .vz-range-field:nth-child(2) input').value`);
       const h1 = await cdp.evaluate(`(() => {
         const r = document.querySelector('${rowSel} .noUi-handle[data-handle="1"]').getBoundingClientRect();
         return { x: r.left + r.width / 2, y: r.top + r.height / 2 };
       })()`);
       await cdp.drag(h1.x, h1.y, h1.x - 37, h1.y); // left: the value decreases
-      await cdp.poll(`(document.querySelector('${rowSel} .vz-max-lbl')?.textContent ?? "") !== ${JSON.stringify(before)}`, 5000);
-      const after = await cdp.evaluate(`document.querySelector('${rowSel} .vz-max-lbl')?.textContent`);
+      await cdp.poll(`document.querySelector('${rowSel} .vz-range-field:nth-child(2) input').value !== ${JSON.stringify(before)}`, 5000);
+      const after = await cdp.evaluate(`document.querySelector('${rowSel} .vz-range-field:nth-child(2) input').value`);
       const v = parseFloat(after);
       const snapped = Math.abs(v / 0.1 - Math.round(v / 0.1)) < 1e-6;
       check("drag lands on an increment multiple", snapped, `${before} -> ${after}`);
@@ -242,12 +248,12 @@ async function main() {
       const h0 = '.vz-slider-row[data-param-key$="denoise"] .noUi-handle[data-handle="0"]';
       // the row's own min label carries the full-precision value (the aria
       // valuenow is one-decimal — a 0.01 nudge would be invisible there)
-      const lbl = '.vz-slider-row[data-param-key$="denoise"] .vz-min-lbl';
+      const lbl = '.vz-slider-row[data-param-key$="denoise"] .vz-range-field:first-child input';
       await cdp.evaluate(`document.querySelector('${h0}').focus()`);
-      const before = parseFloat(await cdp.evaluate(`document.querySelector('${lbl}').textContent`));
+      const before = parseFloat(await cdp.evaluate(`document.querySelector('${lbl}').value`));
       await cdp.keyTrusted("ArrowUp", { vk: 38 });
-      await cdp.poll(`parseFloat(document.querySelector('${lbl}').textContent) !== ${before}`, 5000);
-      const after = parseFloat(await cdp.evaluate(`document.querySelector('${lbl}').textContent`));
+      await cdp.poll(`parseFloat(document.querySelector('${lbl}').value) !== ${before}`, 5000);
+      const after = parseFloat(await cdp.evaluate(`document.querySelector('${lbl}').value`));
       const step = Math.round((after - before) * 1000) / 1000;
       check("arrow key nudges by the fine step (0.01)", step === 0.01, `${before} -> ${after}`);
       const a = await cdp.evaluate(`(() => {
@@ -276,8 +282,7 @@ async function main() {
       })()`);
       const near = (a, b) => Math.abs(a - b) < 0.75;
       // the rail is inset by half the thumb width on each side — that's the
-      // span thumb centers travel, and the thumbs' outer edges attach to the
-      // rail ends at min/max
+      // span thumb centers travel, including both rail endpoints.
       check("rail is inset by half the thumb width on each side",
         near(g.rail.w, g.lane.w - 14), `rail=${g.rail.w} lane=${g.lane.w}`);
       check("rail centered on the lane", near(g.rail.center, g.lane.center), `rail=${g.rail.center} lane=${g.lane.center}`);
@@ -312,14 +317,14 @@ async function main() {
         return { railL: rail.left, railR: rail.right, h0l: h0.left, h0r: h0.right, h1l: h1.left, h1r: h1.right };
       })()`);
       const near = (a, b) => Math.abs(a - b) < 1.2;
-      check("min thumb attaches to the rail's left end",
-        near(v.h0l, v.railL), `thumbLeft=${v.h0l} railLeft=${v.railL}`);
-      check("max thumb attaches to the rail's right end",
-        near(v.h1r, v.railR), `thumbRight=${v.h1r} railRight=${v.railR}`);
+      check("min thumb center attaches to the rail's left end",
+        near((v.h0l + v.h0r) / 2, v.railL), `thumbCenter=${(v.h0l + v.h0r) / 2} railLeft=${v.railL}`);
+      check("max thumb center attaches to the rail's right end",
+        near((v.h1l + v.h1r) / 2, v.railR), `thumbCenter=${(v.h1l + v.h1r) / 2} railRight=${v.railR}`);
     });
 
-    // --- disabled rows keep rail + marker (context for the current value) ---
-    await attempt("disabled row shows rail and marker, hides slider", async () => {
+    // Inactive rows expose their current value, without mounting an editor.
+    await attempt("disabled row is compact with current context and no editor", async () => {
       const v = await cdp.evaluate(`(() => {
         const row = [...document.querySelectorAll('.vz-slider-row')].find(r => r.classList.contains('vz-off'));
         if (!row) return { error: 'no off row' };
@@ -328,14 +333,17 @@ async function main() {
           rail: vis(row.querySelector('.vz-rail')),
           marker: vis(row.querySelector('.vz-marker')),
           sliderHidden: !vis(row.querySelector('.vz-slider')),
+          current: row.querySelector('.vz-parameter-current').textContent,
+          compact: row.getBoundingClientRect().height <= 44,
+          editorAbsent: !row.querySelector('.vz-numeric-editor'),
         };
       })()`);
-      check("off row: rail+marker visible, slider hidden",
-        v.rail === true && v.marker === true && v.sliderHidden === true, JSON.stringify(v));
+      check("off row: one-line current value and no editor DOM",
+        !v.rail && !v.marker && v.sliderHidden && !!v.current && !v.current.startsWith('Current ') && v.compact && v.editorAbsent, JSON.stringify(v));
     });
 
-    // --- label click inserts {key} into focused suffix ---
-    await attempt("slider label click inserts {key} at cursor", async () => {
+    // The row name owns insertion; only its checkbox owns enablement.
+    await attempt("parameter name inserts {key} at cursor", async () => {
       const result = await cdp.evaluate(`(() => {
         const row = document.querySelector('.vz-slider-row');
         const suffix = document.querySelector('.vz-suffix');
@@ -344,11 +352,10 @@ async function main() {
         suffix.setSelectionRange(4, 4);
         suffix.dispatchEvent(new Event('focus'));
         suffix.dispatchEvent(new Event('mouseup'));
-        const label = row.querySelector('.vz-label');
-        label.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, cancelable: true }));
+        row.querySelector('.vz-parameter-name').click();
         return { value: suffix.value };
       })()`);
-      // the label click inserts the row's own placeholder — the auto-enabled
+      // the name inserts the row's own placeholder — the auto-enabled
       // denoise row floats to the top, so the first row's key ends in denoise
       const ok = /^pre_\{[\w.]*denoise\}_post$/.test(result.value);
       check("suffix contains graph-appropriate {denoise} at cursor",
@@ -511,7 +518,7 @@ async function main() {
       const info = await cdp.evaluate(`(() => {
         const out = {};
         for (const r of document.querySelectorAll('.vz-slider-row')) {
-          out[r.dataset.paramKey] = r.querySelector('.vz-current')?.textContent ?? null;
+          out[r.dataset.paramKey] = r.querySelector('.vz-parameter-current')?.textContent.replace(/^Current /, '') ?? null;
         }
         return out;
       })()`);
@@ -576,7 +583,7 @@ async function main() {
         return {
           ids: rows.map((r) => r.dataset.enumId),
           labels: rows.map((r) => r.querySelector('.vz-imgrow-label')?.textContent),
-          curs: rows.map((r) => r.querySelector('.vz-enum-cur')?.textContent),
+          curs: rows.map((r) => r.querySelector('.vz-parameter-current')?.textContent.replace(/^Current /, '')),
         };
       })()`);
       // info-panel order: class_type, then input; per-instance rows in graph
@@ -601,8 +608,14 @@ async function main() {
         JSON.stringify(info.curs));
 
       // enable node 20's row: the host's options render, current pre-checked
-      await cdp.clickAt('.vz-enumrow[data-enum-id="20.lora_name"] .vz-imgrow-head .vz-cb');
+      await cdp.clickAt('.vz-enumrow[data-enum-id="20.lora_name"] .vz-imgrow-head .checkbox');
       await cdp.poll(`document.querySelectorAll('.vz-enumrow[data-enum-id="20.lora_name"] .vz-enum-opt').length === 3`, 5000);
+      await require('./variations-checkbox.cjs')({ cdp, check,
+        selector: '.vz-enumrow[data-enum-id="20.lora_name"] .vz-enum-opt .checkbox', size: 14 });
+      if (process.env.E2E_CHECKBOX_SHOT) {
+        const shot = await cdp.send('Page.captureScreenshot', { format: 'png' });
+        require('node:fs').writeFileSync(process.env.E2E_CHECKBOX_SHOT, Buffer.from(shot.data, 'base64'));
+      }
       // the enabled enum row floats to the top — right after the auto-enabled
       // denoise row; the disabled rows keep info-panel order below
       const order = await cdp.evaluate(`(() => {
@@ -648,7 +661,7 @@ async function main() {
         const opts = [...document.querySelectorAll('.vz-enumrow[data-enum-id="20.lora_name"] .vz-enum-opt')];
         return opts.findIndex((o) => o.querySelector('.vz-enum-opt-name')?.textContent === 'other.safetensors') + 1;
       })()`);
-      await cdp.clickAt(`.vz-enumrow[data-enum-id="20.lora_name"] .vz-enum-list .vz-enum-opt:nth-of-type(${idx}) .vz-cb`);
+      await cdp.clickAt(`.vz-enumrow[data-enum-id="20.lora_name"] .vz-enum-list .vz-enum-opt:nth-of-type(${idx}) .checkbox`);
       const expected = (c0 + 1) * 2 - 1;
       await cdp.poll(`parseInt(document.querySelector('.vz-count')?.textContent, 10) === ${expected}`, 5000);
       const c1 = parseInt(await cdp.evaluate(`document.querySelector('.vz-count')?.textContent`), 10);
@@ -705,7 +718,7 @@ async function main() {
         const last = all.at(-1);
         return {
           ids: rows.map((r) => r.dataset.textId),
-          curs: rows.map((r) => r.querySelector('.vz-enum-cur')?.textContent),
+          curs: rows.map((r) => r.querySelector('.vz-parameter-current')?.textContent.replace(/^Current /, '')),
           last: last?.dataset.textId ?? last?.dataset.enumId ?? last?.dataset.paramKey,
         };
       })()`);
@@ -718,7 +731,7 @@ async function main() {
 
       // Enable -> one current template. Adding paragraphs changes that one
       // prompt; it does not introduce another text axis.
-      await cdp.clickAt('.vz-textrow[data-text-id="2.text"] .vz-imgrow-head .vz-cb');
+      await cdp.clickAt('.vz-textrow[data-text-id="2.text"] .vz-imgrow-head .checkbox');
       await cdp.poll(`!!document.querySelector('.vz-textrow[data-text-id="2.text"] .vz-text-values')`, 5000);
       const pre = await cdp.evaluate(`document.querySelector('.vz-textrow[data-text-id="2.text"] .vz-text-values').value`);
       check("textarea pre-filled with the current text",
@@ -782,7 +795,7 @@ async function main() {
         document.querySelector('.card[data-idx="0"] .votebtn.variations').click()
       `);
       await cdp.poll(`document.querySelectorAll('.vz-slider-row').length > 0`, 5000);
-      await cdp.clickAt('.vz-textrow[data-text-id="2.text"] .vz-imgrow-head .vz-cb');
+      await cdp.clickAt('.vz-textrow[data-text-id="2.text"] .vz-imgrow-head .checkbox');
       await cdp.poll(`!!document.querySelector('.vz-textrow[data-text-id="2.text"] .vz-text-values')`, 5000);
       // spy on the run payload — the expansion is client-side, the POST body
       // is the honest record of what would be enqueued
@@ -813,11 +826,11 @@ async function main() {
           inp.dispatchEvent(new Event('input', { bubbles: true }));
         })()`);
       };
-      // a label without values inerts the row — the count is denoise-only
-      const c0 = parseInt(await cdp.evaluate(`document.querySelector('.vz-count')?.textContent`), 10);
+      // An incomplete enabled template is invalid, never a default-backed count.
+      const c0 = 3; // the fixture's unchanged denoise-only sweep
       await setTpl(0, "cat; dog");
-      const cInert = parseInt(await cdp.evaluate(`document.querySelector('.vz-count')?.textContent`), 10);
-      check("unconfigured label inerts the row", cInert === c0, `c0=${c0} got=${cInert}`);
+      const incomplete = await cdp.evaluate(`document.querySelector('.vz-count').textContent==='—' && document.querySelector('.vz-messages').textContent.includes('every template label')`);
+      check("unconfigured label has an explicit invalid-plan explanation", incomplete);
       // both labels configured: 2×2 cartesian; the current text is NOT among
       // the picks (it has no placeholders), so no current-combo exclusion
       await setTpl(1, "oil; ink");
@@ -853,7 +866,7 @@ async function main() {
         document.querySelector('.card[data-idx="0"] .votebtn.variations').click()
       `);
       await cdp.poll(`document.querySelectorAll('.vz-slider-row').length > 0`, 5000);
-      await cdp.clickAt('.vz-textrow[data-text-id="2.text"] .vz-imgrow-head .vz-cb');
+      await cdp.clickAt('.vz-textrow[data-text-id="2.text"] .vz-imgrow-head .checkbox');
       await cdp.poll(`!!document.querySelector('.vz-textrow[data-text-id="2.text"] .vz-text-values')`, 5000);
       await cdp.evaluate(`(() => {
         const orig = window.fetch;
@@ -887,7 +900,15 @@ async function main() {
     await require('./variations-selections.cjs')({ cdp, check, FAKE, KZ });
     await require('./variations-lifecycle.cjs')({ cdp, check, ENGINE, FAKE, KZ });
     await require('./variations-identity.cjs')({ cdp, check, FAKE, KZ });
+    await require('./variations-status-layout.cjs')({ cdp, check, KZ });
     await require('./variations-image-set.cjs')({ cdp, check, FAKE, KZ });
+    await require('./variations-overflow.cjs')({ cdp, check, ENGINE, FAKE, KZ });
+    await require('./variations-workspace.cjs')({ cdp, check, ENGINE, FAKE, KZ });
+    await require('./variations-row-frame.cjs')({ cdp, check, KZ });
+    await require('./variations-value.cjs')({ cdp, check, KZ, FAKE });
+    await require('./variations-enum-text.cjs')({ cdp, check, ENGINE, FAKE, KZ });
+    await require('./variations-dynamic.cjs')({ cdp, check, ENGINE, FAKE, KZ });
+    await require('./variations-image-order.cjs')({ cdp, check, FAKE, KZ });
   } finally {
     await cdp.close();
   }

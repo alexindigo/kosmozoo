@@ -1,3 +1,5 @@
+import { zoomViewPixels } from "/js/zoom-view.mjs";
+
 // The single media layout model. Allocations are inputs, never inferred from
 // aspect-ratio CSS. Native dimensions remain absolute so small media never grow.
 export const AUDIO_SIZE = Object.freeze({ w: 1024, h: 160, kind: "audio" });
@@ -17,11 +19,11 @@ export function mediaGeometry({ width, height, size, surface = "card" }) {
     x: (w - mediaWidth) / 2, y: (boxHeight - mediaHeight) / 2 };
 }
 
-// Difference renders the same fitted rectangle plus the same view fractions.
+// Difference renders the same fitted rectangle and image-relative crop.
 export function mediaViewRect(size, view, width, height) {
   const g = mediaGeometry({ width, height, size, surface: "viewer" });
-  const v = view ?? { s: 1, txf: 0, tyf: 0 };
-  return { dx: width / 2 + v.txf * width - g.mediaWidth * v.s / 2,
-    dy: height / 2 + v.tyf * height - g.mediaHeight * v.s / 2,
-    dw: g.mediaWidth * v.s, dh: g.mediaHeight * v.s };
+  const p = zoomViewPixels(view, g) ?? { s: 1, tx: 0, ty: 0 };
+  return { dx: width / 2 + p.tx - g.mediaWidth * p.s / 2,
+    dy: height / 2 + p.ty - g.mediaHeight * p.s / 2,
+    dw: g.mediaWidth * p.s, dh: g.mediaHeight * p.s };
 }

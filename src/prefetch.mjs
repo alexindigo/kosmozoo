@@ -139,9 +139,14 @@ export class Prefetch {
   async start() {
     if (this.running) return;
     this.running = true;
+    this.reconcile();
+  }
+
+  reconcile() {
+    if (!this.running) return;
     for (const id of Object.keys(this.hosts)) {
       const w = this.#w(id);
-      w.task = this.#runCollection(id, w);
+      if (!w.task) w.task = this.#runCollection(id, w);
     }
   }
 

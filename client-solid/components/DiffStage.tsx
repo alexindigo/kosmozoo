@@ -12,6 +12,8 @@
 import { createMemo, createSignal, createEffect, on, onMount, onCleanup, Show } from "solid-js";
 import { useAppStore } from "../store/app-store.js";
 import { makeZoomable } from "/js/zoomable.mjs";
+import { zoomViewTransform, readZoomView } from "/js/zoom-view.mjs";
+import { mediaGeometry, AUDIO_SIZE } from "../store/media-geometry.js";
 import { differenceMask, viewRect } from "../features/diff/mask.mjs";
 import { hitLayer } from "../features/diff/hit.mjs";
 import { DiffChrome } from "./DiffChrome.js";
@@ -34,8 +36,9 @@ function useSideSrc(store, sideFn) {
     const playable = next.kind !== "image", el = playable ? document.createElement(next.kind) : new Image();
     const settle = (ok, failureCode) => {
       if (retired) return;
-      if (ok) lastGood = next;
-      setSrc(ok ? next : lastGood ?? { ...next, failed: true, failureCode });
+      if (ok) lastGood = { ...next, size: playable && next.kind === "audio" ? AUDIO_SIZE
+        : { w: el.videoWidth || el.naturalWidth, h: el.videoHeight || el.naturalHeight } };
+      setSrc(lastGood ?? { ...next, failed: true, failureCode });
       release();
     };
     const release = () => {
@@ -71,39 +74,47 @@ export function DiffStage() {
   const store = useAppStore();
   const pair = () => store.state.diffPair();
   const d = () => store.state.diff;
-  const srcA = useSideSrc(store, () => pair().a);
-  const srcB = useSideSrc(store, () => d().mode === "full" || store.state.diffKind() === "audio" ? null : pair().b);
+  const fullB = () => d().mode === "full" && d().subject === "b";
+  const srcA = useSideSrc(store, () => fullB() ? null : pair().a);
+  const srcB = useSideSrc(store, () => (d().mode === "full" ? fullB() : store.state.diffKind() !== "audio") ? pair().b : null);
   const hasB = () => !!pair().b && store.state.diffKind() !== "audio" && mode() !== "full";
+  const showB = () => fullB() || hasB();
   const differenceReason = () => store.state.differenceReason() ||
     ([srcA(), srcB()].some(side => side && side.kind !== "image") ? "difference mode compares still images" : null);
   const mode = () => d().mode === "difference" && differenceReason() ? "two-up" : d().mode;
   const playableA = () => srcA() && srcA().kind !== "image";
-  const playableB = () => hasB() && srcB() && srcB().kind !== "image";
+  const playableB = () => showB() && srcB() && srcB().kind !== "image";
   const [dockA, setDockA] = createSignal(null), [dockB, setDockB] = createSignal(null);
 
   // TWO view states, one per resource. Each layer's transform derives from its
-  // own viewer-session key (view-fraction space; the layer's own box
-  // turns fractions into px). Locked = the gesture's delta also writes the
+  // own viewer-session key (image-space centre; authoritative fit turns it
+  // into px). Locked = the gesture's delta also writes the
   // peer key (entangle, never copy); unlocked = only the target's key.
   const keyA = () => (pair().a ? `${pair().a.source}:${pair().a.file}` : null);
   const keyB = () => (pair().b ? `${pair().b.source}:${pair().b.file}` : null);
-  const layerT = (el, key) => {
+  const layerGeometry = (side) => {
     allocation(); // resize/mode layout is an input, not an untracked DOM read
-    const v = key ? d().views[key] : null;
-    if (!el || !v || !(v.s > 1 || v.txf || v.tyf)) return "";
-    return `translate(${v.txf * el.offsetWidth}px, ${v.tyf * el.offsetHeight}px) scale(${v.s})`;
+    const el = mode() === "difference" ? stageEl : side === "a" ? cellAEl() : cellBEl();
+    const size = (side === "a" ? srcA() : srcB())?.size;
+    if (!el || !size) return null;
+    const { width, height } = el.getBoundingClientRect();
+    return mediaGeometry({ width, height, size, surface: "viewer" });
+  };
+  const layerT = (side, key) => {
+    const g = layerGeometry(side);
+    return key && g ? zoomViewTransform(store.actions.diff.views.get(key, g), g) : "";
   };
   let stageEl;
   const [cellAEl, setCellAEl] = createSignal(null), [cellBEl, setCellBEl] = createSignal(null);
   const [allocation, setAllocation] = createSignal(0);
   createEffect(() => {
-    const a = cellAEl(), b = hasB() ? cellBEl() : null;
+    const a = fullB() ? null : cellAEl(), b = showB() ? cellBEl() : null;
     const observer = new ResizeObserver(() => setAllocation(n => n + 1));
     for (const el of [stageEl, a, b]) if (el) observer.observe(el);
     onCleanup(() => observer.disconnect());
   });
-  const tA = createMemo(() => layerT(cellAEl(), keyA()));
-  const tB = createMemo(() => layerT(cellBEl(), keyB()));
+  const tA = createMemo(() => layerT("a", keyA()));
+  const tB = createMemo(() => layerT("b", keyB()));
 
   // one binding on the stage box; the gesture's target is the layer VISIBLE
   // at the pointer (hitLayer — derived from the same layout state the
@@ -116,16 +127,16 @@ export function DiffStage() {
     const layer = hitLayer({
       mode: mode(), col: d().col, splitT: d().splitT,
       x: e.clientX,
-      cellBRect: hasB() ? cellBEl()?.getBoundingClientRect() : null,
+      cellBRect: showB() ? cellBEl()?.getBoundingClientRect() : null,
       stageRect: stageEl.getBoundingClientRect(),
     });
     const box = mode() === "difference" ? stageEl : (layer === "b" ? cellBEl() : cellAEl());
-    return { key: layer === "b" ? keyB() : keyA(), box };
+    return { key: layer === "b" ? keyB() : keyA(), box, geometry: () => layerGeometry(layer) };
   };
   const alsoFor = (t) => {
     if (!d().locked || !hasB()) return null;
     const peer = t.key === keyA() ? keyB() : keyA();
-    return peer === t.key ? null : peer;
+    return peer === t.key ? null : { key: peer, geometry: () => layerGeometry(t.key === keyA() ? "b" : "a") };
   };
   let binding = null;
   createEffect(on(
@@ -178,8 +189,10 @@ export function DiffStage() {
     const aUrl = srcA()?.src, bUrl = srcB()?.src;
     const absolute = d().diffAbs, opacity = d().diffOpacity, baseIsA = d().col === "feed";
     const baseOpacity = d().activeOpacity, threshold = d().diffThreshold;
-    const vA = keyA() ? d().views[keyA()] : null;
-    const vB = keyB() ? d().views[keyB()] : null;
+    // Snapshot numeric fields while tracked, before the async decode. Holding
+    // a live proxy here would observe only record identity and miss later pans.
+    const vA = keyA() ? readZoomView(store.actions.diff.views.get(keyA(), layerGeometry("a")), layerGeometry("a")) : null;
+    const vB = keyB() ? readZoomView(store.actions.diff.views.get(keyB(), layerGeometry("b")), layerGeometry("b")) : null;
     if (mode() !== "difference" || differenceReason() || !hasB() || !aUrl || !bUrl || !canvasEl) return;
     let cancelled = false;
     (async () => {
@@ -218,18 +231,18 @@ export function DiffStage() {
       >
         <div class="dz-cell dz-a" ref={setCellAEl}>
           <MediaBox workbench src={srcA()?.src} kind={srcA()?.kind} alt={srcA()?.name} failed={srcA()?.failed} failureCode={srcA()?.failureCode}
+            size={srcA()?.size}
             controlsMount={dockA()} controlLabel="A"
-            transform={tA()} active={d().open && (mode() !== "one-up" || d().col === "feed" || !hasB())} primary={d().col === "feed" || !hasB()}
-            registerPlayer={store.actions.media.register} onPlaybackError={store.actions.media.report}
-            onOpen={() => store.handles.invoke("workbench.open")} />
+            transform={tA()} active={d().open && !fullB() && (mode() !== "one-up" || d().col === "feed" || !hasB())} primary={d().col === "feed"}
+            registerPlayer={store.actions.media.register} onPlaybackError={store.actions.media.report} />
         </div>
-        <Show when={hasB()}>
+        <Show when={showB()}>
           <div class="dz-cell dz-b" ref={setCellBEl}>
             <MediaBox workbench src={srcB()?.src} kind={srcB()?.kind} alt={srcB()?.name} failed={srcB()?.failed} failureCode={srcB()?.failureCode}
+              size={srcB()?.size}
               controlsMount={dockB()} controlLabel="B"
               transform={tB()} active={d().open && (mode() !== "one-up" || d().col === "right")} primary={d().col === "right"}
-              registerPlayer={store.actions.media.register} onPlaybackError={store.actions.media.report}
-              onOpen={() => store.handles.invoke("workbench.open")} />
+              registerPlayer={store.actions.media.register} onPlaybackError={store.actions.media.report} />
           </div>
           <Show when={mode() === "split"}>
             <Wipe onDown={onSplitDown} />
@@ -245,7 +258,7 @@ export function DiffStage() {
         <div class="media-dock-slot" ref={setDockA} hidden={!playableA()} />
         <div class="media-dock-slot" ref={setDockB} hidden={!playableB()} />
       </div>
-      <DiffChrome differenceReason={differenceReason()} mediaWord={((hasB() && d().col === "right" ? srcB() : srcA())?.kind ?? "image").replace("audio", "audio file")} />
+      <DiffChrome differenceReason={differenceReason()} mediaWord={((d().col === "right" ? srcB() : srcA())?.kind ?? "image").replace("audio", "audio file")} />
     </div>
   );
 }

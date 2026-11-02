@@ -15,6 +15,7 @@ import { join } from "node:path";
 import { copyFile, readFile, rename } from "node:fs/promises";
 import { CorruptStateError } from "./state.mjs";
 import { splitHostKey } from "./collections.mjs";
+import { SourceArrivals } from "./source-arrivals.mjs";
 
 const SCHEMA_VERSION = 9;
 const CORE_JUDGMENT_FIELDS = new Set(["vote", "favorite", "bookmark", "notes"]);
@@ -297,6 +298,7 @@ export class Store {
         Object.entries(STATEMENTS).map(([k, sql]) => [k, s.#db.prepare(sql)]),
       );
       await s.#foldV7(settings);
+      s.arrivals = new SourceArrivals(s); // in-memory only; schema/settings unchanged
       const stats = await s.#importFeedbackV1(feedbackPath, settings);
       if (stats) {
         console.log(
@@ -786,6 +788,7 @@ export class Store {
     const now = Date.now();
     this.#q.entryInsertSeen.run(collection, name, now, now);
     this.#q.entryHide.run(now, collection, name);
+    this.arrivals.changed(collection);
   }
 
   // The source lost the file: an entry state, never content state (C5).
@@ -794,6 +797,7 @@ export class Store {
     const now = Date.now();
     this.#q.entryInsertSeen.run(host, filename, now, now);
     this.#q.entryGone.run(now, host, filename);
+    this.arrivals.changed(host);
   }
 
   // --- content + entry records ------------------------------------------------

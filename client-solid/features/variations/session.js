@@ -1,5 +1,6 @@
 // Composition metadata and an owner-safe public capability only. Drafts and
-// decisions belong to the mounted modal, never this bridge.
+// recipes belong to the feature workspace and decisions to the mounted modal,
+// never this bridge.
 export function makeVariationSession({ read, write }) {
   let sequence = 0, owner = null;
   const outcome = (status) => Promise.resolve({ status });

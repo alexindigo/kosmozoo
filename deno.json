@@ -16,6 +16,7 @@
     "/js/route-parse.mjs": "./client/js/route-parse.mjs",
     "/js/icons.mjs": "./client/js/icons.mjs",
     "/js/zoomable.mjs": "./client/js/zoomable.mjs",
+    "/js/zoom-view.mjs": "./client/js/zoom-view.mjs",
     "/js/rail.mjs": "./client/js/rail.mjs",
     "/js/keys.mjs": "./client/js/keys.mjs",
     "/js/launch-notice.mjs": "./client/js/launch-notice.mjs",

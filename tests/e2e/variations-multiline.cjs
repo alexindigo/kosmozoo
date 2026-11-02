@@ -2,7 +2,7 @@
 const assert=require('node:assert/strict');
 module.exports=async({cdp,FAKE,KZ,check,closeAndDiscard})=>{
   const textField='.vz-textrow[data-text-id="2.text"] .vz-text-values';
-  const textToggle='.vz-textrow[data-text-id="2.text"] .vz-imgrow-head .vz-cb';
+  const textToggle='.vz-textrow[data-text-id="2.text"] .vz-imgrow-head .checkbox';
   const control=async body=>{const response=await fetch(FAKE+'/__test/activity',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});assert.equal(response.status,200);};
   const enqueues=async()=>await(await fetch(FAKE+'/__test/enqueues')).json();
   const type=async(selector,text)=>{
@@ -14,13 +14,13 @@ module.exports=async({cdp,FAKE,KZ,check,closeAndDiscard})=>{
     await cdp.evaluate(`(async()=>{const s=${KZ};await s.actions.hosts.select('fake');
       await fetch('/api/collections/fake/entries/flux-basic.png/bytes');await s.handles.invoke('variations.open',{id:'fake:flux-basic.png'});})()`);
     await cdp.poll(`!!document.querySelector(${JSON.stringify(textToggle)})`,10000);
-    await cdp.clickAt('.vz-slider-row[data-param-key="9.denoise"] .vz-cb');
+    await cdp.clickAt('.vz-slider-row[data-param-key="9.denoise"] .checkbox');
     await cdp.clickAt(textToggle);await cdp.poll(`!!document.querySelector(${JSON.stringify(textField)})`);
     const literal='  First paragraph.\n\nSecond paragraph.\n  Indented line.\n';
     await type(textField,literal);
     await cdp.poll("document.querySelector('.vz-count')?.textContent==='1'");
     await control({captureEnqueue:true});const before=(await enqueues()).length;
-    await cdp.clickAt('.vz-run');await cdp.poll("document.querySelector('.vz-error')?.textContent==='submitted 1/1'",10000);
+    await cdp.clickAt('.vz-run');await cdp.poll("document.querySelector('.vz-queued')?.textContent==='Queued 1 of 1 jobs'",10000);
     const plain=(await enqueues()).slice(before);assert.equal(plain.length,1);assert.equal(plain[0].prompt['2'].inputs.text,literal);
     assert.equal(await cdp.evaluate(`document.querySelector(${JSON.stringify(textField)}).value`),literal);
     check('multiline text: real typed paragraphs count once and reach one actual enqueue unchanged, editor retained',true,JSON.stringify({jobs:plain.length,text:plain[0].prompt['2'].inputs.text}));
@@ -31,7 +31,7 @@ module.exports=async({cdp,FAKE,KZ,check,closeAndDiscard})=>{
     await type('.vz-textrow .vz-tpl-row:nth-of-type(2) .vz-tpl-input','oil; ; ink');
     await cdp.poll("document.querySelector('.vz-count')?.textContent==='6'");
     const start=(await enqueues()).length;await cdp.clickAt('.vz-run');
-    await cdp.poll("document.querySelector('.vz-error')?.textContent==='submitted 6/6'",10000);
+    await cdp.poll("document.querySelector('.vz-queued')?.textContent==='Queued 6 of 6 jobs'",10000);
     const expected=['cat','dog'].flatMap(animal=>['oil','','ink'].map(style=>`First ${animal}.\n\nSecond ${style}.\nAgain ${animal}.\n`));
     const templates=(await enqueues()).slice(start).map(job=>job.prompt['2'].inputs.text);
     assert.deepEqual(templates,expected);

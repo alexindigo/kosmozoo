@@ -28,6 +28,7 @@ import { formatVersion } from "/shared/version.mjs";
 import { makeSourceBrowse } from "./source-browse.js";
 import { makeSourceFreshness } from "./source-freshness.js";
 import { makeSourceRegistry, sameSourceIdentity } from "./source-registry.js";
+import { makeRailArrivals } from "./rail-arrivals.js";
 import { fieldList, nodeImages } from "./fields.js";
 import { pairSides } from "../features/diff/pair.mjs";
 import { workbenchViews, defaultWorkbenchView } from "../features/diff/views.mjs";
@@ -44,6 +45,7 @@ import { makeCommandHandles } from "./command-handles.js";
 import { registerCoreCommands, commandFacades } from "./core-commands.js";
 import { makeInputPolicy } from "./input-policy.js";
 import { launchNotice } from "/js/launch-notice.mjs";
+import { readZoomView, readyViewGeometry } from "/js/zoom-view.mjs";
 
 // stored host if still present, else first online, else first
 function initialHost(hosts, stored) {
@@ -70,14 +72,15 @@ export function makeAppStore({ subscribeSources = typeof window !== "undefined" 
       subfolders: { supported: null, reason: "Output inventory has not loaded" } },
     selected: {},         // id -> true (bulk actions; session-only)
     anchors: [],          // [{ name, src(dataURL), meta? }] — local drops, persisted
-    views: {},            // per-image zoom views — key -> { s, txf, tyf, … } ( fold)
+    views: {},            // per-resource version2 image-space crops (legacy read below)
     // workbench: the two-sided comparator. The pair is feed current ×
     // right-pane current (session-only); modes and mask prefs are session-only.
     diff: {
       open: false,
       mode: "full",         // full | two-up | one-up | split | difference
       views: {},             // viewer-session crops; never persisted/shared with cards
-      col: "feed",          // active column (One-Up visible side, primary in every view)
+      subject: "a",         // viewer-owned side: Full displays it; comparisons make it active
+      get col() { return this.subject === "b" ? "right" : "feed"; },
       locked: true,         // entangled zoom: a gesture's delta writes BOTH view keys
       splitT: 0.5,          // wipe position, 0..1 of stage width
       activeOpacity: 1,     // the active column's photo opacity (every mode)
@@ -126,10 +129,12 @@ export function makeAppStore({ subscribeSources = typeof window !== "undefined" 
   const [sourceDelivery, setSourceDelivery] = createSignal(subscribeSources ? "connecting" : "explicit");
   const [acquisitionRevision, setAcquisitionRevision] = createSignal(0);
   let sourceSession = null, selectionGeneration = 0, disposed = false;
+  const railArrivals = makeRailArrivals();
   const ownsSession = (s) => !!s && !disposed && sourceSession === s &&
     host() === s.id && hostsView()[s.id]?.address === s.address && sourceRecords.get(s.id) === s.source;
 
   function beginSourceSession(id) {
+    railArrivals.retire();
     retireFeedScroll();
     clearTimeout(sourceSession?.retryTimer);
     setSt("metaPending", 0);
@@ -248,6 +253,7 @@ export function makeAppStore({ subscribeSources = typeof window !== "undefined" 
   }));
   const differenceReason = createMemo(() => [diffPair().a, diffPair().b].some(side =>
     side && (mediaKind(side.file ?? side.image) ?? "image") !== "image") ? "difference mode compares still images" : null);
+  const diffSubject = createMemo(() => diffPair()[st.diff.subject]);
   const diffKind = createMemo(() => mediaKind(diffPair().a?.file) ?? "image");
   const diffViews = createMemo(() => workbenchViews(diffKind()));
   createEffect(() => {
@@ -257,7 +263,6 @@ export function makeAppStore({ subscribeSources = typeof window !== "undefined" 
   });
   const prepareDiffOpen = () => {
     setSt("diff", "mode", defaultWorkbenchView(diffKind()));
-    setSt("diff", "col", "feed");
     setSt("diff", "views", reconcile({}));
   };
 
@@ -369,7 +374,7 @@ export function makeAppStore({ subscribeSources = typeof window !== "undefined" 
     if (location.pathname === "/diff") {
       if (!st.diff.open) return; // route adoption establishes both sides first
       const pair = diffPair();
-      if (pair.a && pair.b) want = diffUrl(pair.a, pair.b, context);
+      if (pair.a && pair.b) want = diffUrl(pair.a, pair.b, { ...context, subject: st.diff.subject });
       else return;
     } else want = feedUrl(host(), c?.remote === host() ? c.image : null, context);
     if ((location.pathname ?? "/") + (location.search ?? "") + (location.hash ?? "") !== want) {
@@ -597,6 +602,7 @@ export function makeAppStore({ subscribeSources = typeof window !== "undefined" 
   });
   const metadata = makeMetadata({ acquisition, owns: ownsSession, batch,
     want: (...args) => api.want(...args), meta: (...args) => api.meta(...args),
+    entry: (...args) => api.entryMeta(...args),
     nodes: options => api.nodes(options), status: options => api.prefetch(options),
     priorityFor: item => item.priority === "background" ? "background" : acquisition.priority(item.id),
     setPending: value => setSt("metaPending", value),
@@ -624,6 +630,27 @@ export function makeAppStore({ subscribeSources = typeof window !== "undefined" 
       }
       return graphChanged;
     },
+    // A shown entry's own record, fenced by the content identity it was read
+    // for: a listing that knows different content refuses it.
+    adopt(name, record, owner, identity) {
+      const idx = imageIdxById().get(`${owner.id}:${name}`);
+      if (idx === undefined) return false;
+      const image = st.images[idx];
+      if ((image.hash ?? "") !== identity || image.hash && record.hash && record.hash !== image.hash) return false;
+      const patch = {};
+      if (record.meta && !image.meta) patch.meta = record.meta;
+      if ((record.meta || record.extracted) && !image.extracted) patch.extracted = true;
+      if (record.width && record.height && !(image.width && image.height)) Object.assign(patch, { width: record.width, height: record.height });
+      if (Object.keys(patch).length) setSt("images", idx, patch);
+      return patch.meta ? "graph" : "applied";
+    },
+  });
+  // The consumers of one entry — Details' current and its comparison — own
+  // that entry's record through the metadata owner's direct path.
+  createEffect(() => {
+    const entries = [currentEntry()?.entry, entryFor(currentStack().at(-1) ?? null)?.entry]
+      .filter(Boolean).map(({ id, filename, hash, meta, extracted }) => ({ id, filename, hash, meta: !!meta, extracted: !!extracted }));
+    untrack(() => metadata.show(entries));
   });
 
   function pollMetadata(s = sourceSession) {
@@ -691,6 +718,7 @@ export function makeAppStore({ subscribeSources = typeof window !== "undefined" 
   // The first accepted read owns initial restoration, including after retry.
   function acceptInventory(s, inventory, read, before = new Map()) {
     const name = s.id, wasReady = s.inventoryReady;
+    const floor = s.acceptedArrivalSeq ?? s.arrivalFloor;
     let idx = -1;
     batch(() => {
       if (s.source) {
@@ -711,6 +739,7 @@ export function makeAppStore({ subscribeSources = typeof window !== "undefined" 
           width: enriched?.width && enriched.width !== start?.width ? enriched.width : e.width ?? enriched?.width ?? null,
           height: enriched?.height && enriched.height !== start?.height ? enriched.height : e.height ?? enriched?.height ?? null,
           modified: e.modified ?? null,
+          arrivalSeq: e.arrivalSeq ?? null,
         };
       })));
       s.inventoryReady = true;
@@ -720,8 +749,14 @@ export function makeAppStore({ subscribeSources = typeof window !== "undefined" 
       const c = current();
       if (!c || c.remote === name) idx = applyBrowseTarget(wasReady ? { ...browseTarget, ...liveBrowseTarget() } : browseTarget);
       if (wasReady) setFeedMergeNonce((n) => n + 1);
+      s.acceptedArrivalSeq = inventory.arrivals?.sequence ?? null;
+      if (floor != null) railArrivals.stage(st.images
+        .filter(image => image.arrivalSeq > floor && !["hidden", "gone"].includes(image.state))
+        .map(image => image.id));
     });
     judgments.endRead(read);
+    s.source?.acceptArrivals(inventory.arrivals, true);
+    if (!wasReady) metadata.resume(inventory.metaVersion, s);
     mirrorCurrentHash();
     if (!wasReady) restoreBrowse(idx);
     else if (browseRestore()) restoreBrowse(findByFile(current()?.image));
@@ -795,8 +830,9 @@ export function makeAppStore({ subscribeSources = typeof window !== "undefined" 
     untrack(() => { setBrowseRestore(null); restoreToIndex(idx); });
   });
 
-  async function loadImages(name) {
+  async function loadImages(name, arrivalFloor) {
     const s = beginSourceSession(name);
+    s.arrivalFloor = arrivalFloor;
     s.pendingBrowse = true;
     s.inventoryReady = false;
     setSt("inventory", { revision: null, coverage: null, folders: [""], loading: true,
@@ -1071,6 +1107,13 @@ export function makeAppStore({ subscribeSources = typeof window !== "undefined" 
   const sizeKnown = (img) => sizes_.sizeFor(img) !== null;
   const sizePending = (img) => !!img && !sizeKnown(img);
   const entriesWithKnownSize = createMemo(() => view().filter((i) => sizeKnown(st.images[i])));
+  createEffect(() => {
+    const waiting = railArrivals.waiting();
+    if (!waiting.length) return;
+    const present = new Map(st.images.map(image => [image.id, image]));
+    const ready = waiting.filter(id => present.has(id) && sizeKnown(present.get(id)));
+    untrack(() => railArrivals.resolve(ready, present));
+  });
   // the pending set as a COUNT — never a
   // 3000-element materialization per landing (RC8)
   const pendingSizeCount = createMemo(() => {
@@ -1213,9 +1256,19 @@ export function makeAppStore({ subscribeSources = typeof window !== "undefined" 
   // --- per-image zoom views (folded from views.mjs — : no second
   // module-level store; the state lives in the tree and the debounced
   // persistence lives here). Keys are image ids ("host:filename") for
-  // candidates, "anchor:<name>" for anchors; box-fraction units;
+  // candidates, "anchor:<name>" for anchors; normalized image-space centres;
   // default-absent (an untouched view is absent, not a default object).
   const viewDirty = new Set();
+  // Compatibility belongs to the owning port, not to individual renderers.
+  // A legacy value is retained untouched until a real fit is available; the
+  // first compatible read replaces it once, so resize never reinterprets it.
+  function viewFor(views, key, geometry, write) {
+    const v = views[key] ?? null;
+    if (!v || v.version === 2 || !readyViewGeometry(geometry)) return v;
+    const converted = readZoomView(v, geometry);
+    write(key, converted);
+    return converted;
+  }
   let viewsTimer = null;
   async function flushViews() {
     clearTimeout(viewsTimer);
@@ -1329,6 +1382,7 @@ export function makeAppStore({ subscribeSources = typeof window !== "undefined" 
           const record = sourceRecords.get(id);
           confirmAttributes(record, value);
           acceptActivity(record, value.activity);
+          record.acceptArrivals(value.arrivals, host() === id);
         }
         streamEpoch = frame.epoch; streamRevision = frame.revision; registryRevision++;
         setSourcesReady(true);
@@ -1442,6 +1496,9 @@ export function makeAppStore({ subscribeSources = typeof window !== "undefined" 
   function dispose() {
     if (disposed) return;
     disposed = true;
+    for (const disposeFeature of featureDisposals) disposeFeature();
+    featureDisposals.clear();
+    railArrivals.retire();
     deliveryGeneration++; deliveryDispose?.(); deliveryDispose = null; pageDispose?.(); pageDispose = null;
     batch(retireFeedScroll);
     window_.clear();
@@ -1464,12 +1521,14 @@ export function makeAppStore({ subscribeSources = typeof window !== "undefined" 
   // store array proxies can't support flatMap/map chains on function-valued
   // items (the Symbol(solid-proxy) defineProperty trap)
   const registeredFeatures = [];
-  // A modal surface's image (e.g. a Load Image input thumbnail) is user-visible
-  // foreground work outside any source entry: it shares the same policy and
-  // capacity, and only its owner's disposal retires it. Features receive this
+  const featureDisposals = new Set();
+  // A modal surface's image (e.g. a Load Image input thumbnail) defaults to
+  // foreground work outside any source entry; ahead-of-viewport demand can
+  // declare background intent. Both share the same policy/capacity, and only
+  // their owner's disposal retires them. Features receive this
   // port at installation; they never reach into the Store's actions.
   function surfaceDisplay(input) {
-    return sizes_.display({ ...input, foregroundId: null, priority: "foreground", scoped: false });
+    return sizes_.display({ ...input, foregroundId: null, priority: input.priority === "background" ? "background" : "foreground", scoped: false });
   }
   const actions = {
     features: {
@@ -1479,6 +1538,7 @@ export function makeAppStore({ subscribeSources = typeof window !== "undefined" 
         if (registeredFeatures.some((x) => x.name === f.name)) return;
         const installed = f.install?.({ state: stateObj, handles, setSt, reconcile, surfaceDisplay });
         if (installed) {
+          if (installed.dispose) featureDisposals.add(installed.dispose);
           for (const command of installed.commands ?? []) handles.register(command);
           for (const command of installed.ownedCommands ?? []) handles.registerOwned(command);
           publicActions[f.name] = installed.ports;
@@ -1533,8 +1593,8 @@ export function makeAppStore({ subscribeSources = typeof window !== "undefined" 
       const h = urlHost && Object.hasOwn(hostsView(), urlHost) ? urlHost : initialHost(hostsView(), st.ui.host);
       const target = urlHost && Object.hasOwn(hostsView(), urlHost) ? routeTarget(route) : { ...rememberedTarget(h), filter: route.filter ?? "" };
       if (h) await actions.hosts.select(h, { target, historyMode: "replace" });
-      // a /diff URL boots into the workbench on the left side
-      if (route.view === "diff") await actions.diff.openDiff(route.left, route.right);
+      // a /diff URL boots its pair with the route's subject
+      if (route.view === "diff") await actions.diff.openDiff(route.left, route.right, { subject: route.subject });
       booted = true;
     },
 
@@ -1549,15 +1609,17 @@ export function makeAppStore({ subscribeSources = typeof window !== "undefined" 
         if (!isFolderPath(target.folder ?? "") || (target.current != null && !isEntryName(hostsView()[name]?.kind, target.current))) {
           actions.status.error("Invalid browsing address"); return;
         }
+        const arrivalFloor = sourceRecords.get(name)?.seenSeq;
         batch(() => {
           setSt("inventory", "loading", true);
+          sourceRecords.get(name)?.markSeen();
           setHost(name);
           beginBrowse(target);
           assignCurrent(target.current ? { remote: name, image: target.current } : null, { persist: false, intent: false });
         });
         if (historyMode !== "none") mirrorCurrentHash(historyMode);
         api.setSettings("core.ui", { host: name }).catch(() => {});
-        const task = loadImages(name);
+        const task = loadImages(name, arrivalFloor);
         if (sourceSession?.id === name) sourceSession.loadTask = task;
         await task;
       },
@@ -1701,7 +1763,7 @@ export function makeAppStore({ subscribeSources = typeof window !== "undefined" 
         if (idx < 0 || st.images[idx].size != null) return;
         const img = st.images[idx];
         const hash = img.hash;
-        const size = await acquisition.submit({ key: `byte-size:${id}`, id,
+        const size = await acquisition.submit({ key: `byte-size:${id}`, id, resourceClass: "control",
           valid: () => ownsSession(s) && st.images[imageIdx(id)]?.hash === hash,
           run: ({ priority }) => api.entrySizeProbe(img.host, img.filename, { priority }) });
         const resolved = imageIdx(id);
@@ -1758,11 +1820,11 @@ export function makeAppStore({ subscribeSources = typeof window !== "undefined" 
         for (const [k, v] of Object.entries(stored)) if (v) clean[k] = v;
         setSt("views", reconcile(clean));
       },
-      get(key) { return st.views[key] ?? null; },
+      get(key, geometry) { return viewFor(st.views, key, geometry, actions.views.set); },
       // persist:false — a restore writing the stored view back is a read,
       // not a write: it must not schedule a settings PATCH
       set(key, v, { persist = true } = {}) {
-        if (v) setSt("views", key, v);
+        if (v) setSt("views", key, reconcile(v));
         else setSt("views", key, undefined);
         if (!persist) return;
         viewDirty.add(key);
@@ -1915,15 +1977,36 @@ export function makeAppStore({ subscribeSources = typeof window !== "undefined" 
       // Mechanical zoom port, local to the viewer session. Card/inline keys
       // retain their own persisted owner; opening never consumes those crops.
       views: {
-        get: key => st.diff.views[key] ?? null,
-        set: (key, view) => setSt("diff", "views", key, view ?? undefined),
+        get: (key, geometry) => viewFor(st.diff.views, key, geometry, actions.diff.views.set),
+        set: (key, view) => setSt("diff", "views", key, view ? reconcile(view) : undefined),
       },
       // read-only model query the workbench surface derives its src from
       resolve: resolveSide,
-      // open the workbench on the current pointer
-      open() {
-        if (!current() || !resolveSide(current())) return false;
-        batch(() => { retireFeedScroll(); prepareDiffOpen(); setSt("diff", "open", true); });
+      // All openers supply a subject and pair to this single session owner.
+      // An omitted B retains the right pane's ordinary current/default.
+      open({ subject = "a", pair = { a: diffPair().a } } = {}) {
+        if (!pair.a || !resolveSide(pair.a) || (subject === "b" && (!pair.b || !resolveSide(pair.b)))) return false;
+        batch(() => {
+          retireFeedScroll();
+          const remote = pair.a.source ?? pair.a.remote, image = pair.a.file ?? pair.a.image;
+          if (pair.b) setSt("diff", "pairedWith", `${remote}:${image}`);
+          if (current()?.remote !== remote || current()?.image !== image) assignCurrent({ remote, image });
+          if (pair.b) {
+            const source = pair.b.source ?? pair.b.remote, file = pair.b.file ?? pair.b.image;
+            if (source === "anchor") {
+              setSt("diff", "anchorName", file);
+              actions.ui.setWorkspace("anchors");
+            } else {
+              setSt("diff", "infoFile", file);
+              setSt("diff", "infoSource", source);
+              actions.ui.setWorkspace("details");
+            }
+          }
+          actions.diff.ensureRightDefault();
+          setSt("diff", "subject", subject);
+          prepareDiffOpen();
+          setSt("diff", "open", true);
+        });
         return true;
       },
       hide() { batch(() => { retireFeedScroll(); setSt("diff", "open", false); }); },
@@ -1932,12 +2015,14 @@ export function makeAppStore({ subscribeSources = typeof window !== "undefined" 
         if (!diffViews().some(view => view.mode === mode)) return false;
         if (diffKind() === "video" && mode !== "full" && !diffPair().b) return false;
         if (mode === "difference" && differenceReason()) return false;
-        batch(() => {
-          setSt("diff", "mode", mode);
-          if (mode === "full") setSt("diff", "col", "feed");
-        });
+        setSt("diff", "mode", mode);
       },
-      setCol(col) { if (col === "feed" || col === "right") setSt("diff", "col", col); },
+      setCol(col) {
+        if (col === "feed" || col === "right") {
+          setSt("diff", "subject", col === "right" ? "b" : "a");
+          mirrorCurrentHash();
+        }
+      },
       setLocked(x) { setSt("diff", "locked", !!x); },
       setSplit(t) { setSt("diff", "splitT", Math.min(1, Math.max(0, t))); },
       setActiveOpacity(x) { setSt("diff", "activeOpacity", Math.min(1, Math.max(0, x))); },
@@ -2004,69 +2089,46 @@ export function makeAppStore({ subscribeSources = typeof window !== "undefined" 
       openFromFeed(imgIdx) {
         const im = st.images[imgIdx];
         if (!im) return;
-        batch(() => { retireFeedScroll(); assignCurrent({ remote: im.host, image: im.filename }); });
+        actions.diff.open({ subject: "a", pair: { a: { source: im.host, file: im.filename } } });
         mirrorCurrentHash();
-        actions.diff.ensureRightDefault();
-        actions.diff.open();
       },
       // discovered image click: that node image becomes the right side (B) —
       // the feed current stays; the pair is the generated image × its source
       openInput(h, file, fromOutput = false) {
         if (!h || !file) return;
-        setSt("diff", "infoFile", file);
-        setSt("diff", "infoSource", null); // pane-picked: derived from nodeImages
-        actions.diff.open();
+        return actions.diff.open({ subject: "b", pair: { a: diffPair().a, b: { source: fromOutput ? h : `input:${h}`, file } } });
       },
       // anchor thumb click: that anchor becomes the right side (B) — the
       // feed current stays; the pair is feed current × that anchor
       openFromAnchor(anchorIdx) {
         const anchor = st.anchors[anchorIdx];
         if (!anchor) return;
-        setSt("diff", "anchorName", anchor.name);
-        actions.diff.open();
+        return actions.diff.open({ subject: "b", pair: { a: diffPair().a, b: { source: "anchor", file: anchor.name } } });
       },
       // /diff deep links: both sides apply — left sets the feed current,
       // right sets the right current by source (anchor → the anchors pane;
       // anything else → the details pane, with its source kept for
       // resolution). A push entry keeps the /diff URL so browser
       // back/forward close/re-open via the route.
-      openDiff(left, right, { push } = {}) {
+      openDiff(left, right, { push, subject = "a" } = {}) {
         if (!left || !resolveSide(left)) return false;
         const remote = left.source ?? left.remote, image = left.file ?? left.image;
         if (Object.hasOwn(hostsView(), remote) && remote !== host()) {
           const context = typeof location === "undefined" ? { folder: "", filter: "" } : parseUrl();
           const loading = actions.hosts.select(remote, { target: { folder: context.folder ?? "", filter: context.filter ?? "", current: image, explicit: true }, historyMode: "none" });
           const intent = browseRevision;
-          return loading.then(() => intent === browseRevision && host() === remote ? actions.diff.openDiff(left, right, { push }) : false);
+          return loading.then(() => intent === browseRevision && host() === remote ? actions.diff.openDiff(left, right, { push, subject }) : false);
         }
-        batch(() => {
-        retireFeedScroll();
-        // the reset must not fire on THIS establishing pointer move
-        setSt("diff", "pairedWith", `${remote}:${image}`);
-        assignCurrent({ remote, image });
-        if (right) {
-          const src = right.source ?? right.remote;
-          const file = right.file ?? right.image;
-          if (src === "anchor") {
-            setSt("diff", "anchorName", file);
-            actions.ui.setWorkspace("anchors");
-          } else {
-            setSt("diff", "infoFile", file);
-            setSt("diff", "infoSource", src);
-            actions.ui.setWorkspace("details");
-          }
-        }
-        prepareDiffOpen();
-        setSt("diff", "open", true);
-        });
+        if (!actions.diff.open({ subject, pair: { a: left, ...(right ? { b: right } : {}) } })) return false;
         if (push && right) history.pushState({ kz: 1 }, "", diffUrl(left, right,
-          { folder: selectedFolder(), filter: filter(), search: location.search ?? "" }));
+          { folder: selectedFolder(), filter: filter(), search: location.search ?? "", subject }));
         else mirrorCurrentHash();
         return true;
       },
     },
 
     feed: {
+      takeArrivals: railArrivals.take,
       register(seamsIn) {
         const registration = seamsIn ? { ...seamsIn } : null;
         batch(() => {
@@ -2150,7 +2212,7 @@ export function makeAppStore({ subscribeSources = typeof window !== "undefined" 
           }
         }
         if (intent !== browseRevision || host() !== name) return;
-        if (r.view === "diff") await actions.diff.openDiff(r.left, r.right);
+        if (r.view === "diff") await actions.diff.openDiff(r.left, r.right, { subject: r.subject });
         else {
           if (st.diff.open) setSt("diff", "open", false);
           mirrorCurrentHash();
@@ -2380,7 +2442,12 @@ export function makeAppStore({ subscribeSources = typeof window !== "undefined" 
     get hosts() { return sourceRecords.hosts(); },
     noSources,
     get sourceActivity() { return sourceRecords.activities(); },
+    sourceHasNew(id) {
+      hostsView(); // membership is reactive; exact IDs stay private Map keys.
+      return host() !== id && !!sourceRecords.get(id)?.hasNew;
+    },
     sourceDelivery,
+    railArrivalEvent: railArrivals.event,
     appVersion,
     get sourceSaving() { return sourceRecords.saving(); },
     get nodesRegistry() { return st.nodesRegistry; },
@@ -2403,6 +2470,7 @@ export function makeAppStore({ subscribeSources = typeof window !== "undefined" 
     get anchors() { return st.anchors; },
     get diff() { return st.diff; },
     diffPair,
+    diffSubject,
     diffKind,
     diffViews,
     get variations() { return st.variations; },

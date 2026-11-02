@@ -41,6 +41,7 @@ the resources; a collection's `capabilities` answer what its backing can do.
 | `/api/events` | GET | one native SSE delivery connection per app tab; complete version1 authoritative cached source maps, no upstream probe/list/monitor creation |
 | `/api/collections/<id>/entries` | GET | the feed listing: size, hash, state, meta, judgment, and dims — `COALESCE(content, entry)`, so an entry the dims pass reached carries width/height before it has a hash. Gone entries are excluded. `?inventory=1` returns the coherent output envelope described below; default remains an array. `?kind=input` lists the input dir instead |
 | `/api/collections/<id>/entries/<name>` | GET | one entry |
+| `/api/collections/<id>/entries/<name>/meta` | GET | one shown entry's record `{name, hash, extracted, meta, width, height}`, independent of the delta stream; an entry without a hash is first ingested through the single-flight high lane for at most 8 s; `extracted:false` means not available yet (unreadable source or the wait elapsed) |
 | `/api/collections/<id>/entries` | POST | multipart upload into the input dir; **409 with the conflicting name, never an overwrite** |
 | `/api/collections/<id>/entries/<name>` | DELETE | per capability: folder → unlink; comfy + assets_plus → trash; otherwise → hide + history cleanup |
 | `/api/collections/<id>/entries/<name>/bytes` | GET | cache-first bytes (`?kind=input` for input-dir files); ETag is the content hash, `Cache-Control: no-cache`; single-byte ranges (§Serve path) |
@@ -77,7 +78,8 @@ backing boundary. Hide-history matching also includes output type and directory.
 
 ### Output inventory and folder scope
 
-`?inventory=1` returns `{revision, generation, coverage, subfolders, folders, entries, unavailable, chronology}`.
+`?inventory=1` returns `{revision, generation, coverage, subfolders, folders, entries, unavailable, chronology, arrivals, metaVersion}`.
+`metaVersion` is the metadata version the entries' rows reflect (read with them, in one turn).
 `revision` is an ephemeral address-owner epoch plus scan revision; `coverage` is
 `recursive` or `root-only`; `subfolders` is `{supported, reason}`. `folders`
 contains root `""` and every discovered image-directory ancestor. It is derived
@@ -131,6 +133,24 @@ Prefetch relist counters acknowledge only the captured successful request; faile
 or concurrently newer requests remain pending with bounded retry.
 Listing schedules no ingestion writes; the existing worker/want paths acquire
 dimensions and bytes.
+
+Complete inventory acceptance observes visible names in memory, independently
+of file timestamps and ingestion. Each name gets a per-source session sequence
+once; relists/revalidation do not manufacture arrivals. The existing source stream
+delivers only `{sequence,latestVisibleSeq}` to all browsers, or null before the
+first complete inventory. Missing/hidden/gone/deleted entries do not contribute
+to `latestVisibleSeq`; deletion retires membership immediately. Inventory entries
+carry their `arrivalSeq`. Source retirement discards this in-memory history.
+
+Each browser baselines its own in-memory seen value at the first projection,
+keeps its viewed source current, and clears attention when opening another source.
+An unselected source is new while its latest visible sequence exceeds that value.
+Reload starts quiet; nothing is persisted or written back to the engine. Selected
+sources never show orange. Pills and picker entries consume the same state and
+“New images.” wording, using `--attention` for text/edge without pulsing or layout
+change. There is no extra transport or browser inventory poll.
+Runtime source membership reconciles the existing headless workers as boot does,
+so a new unselected source does not await browser demand to join observation.
 
 The API overlay and browser folder/filter/judgment/known-size projections preserve
 the finalized sequence as subsequences. The store retains `modified` in both load
@@ -218,6 +238,14 @@ aborts its reads. Re-add has a fresh epoch. `start:false` starts no timers;
 shutdown stops/aborts monitoring. Cadence is 2s active/queued, 5s idle, failure
 backoff capped at 30s. Folder sources invoke no generation telemetry.
 
+The same address monitor owns one receive-only ComfyUI `/ws` connection with
+an independent random clientId, a 10s connection deadline and 1–30s reconnect
+backoff. It never sends messages or submits work. Binary previews and oversized
+or malformed text frames are ignored. Last-alias removal and engine stop close
+the socket and retire callbacks/retries. Queue/history remain authoritative:
+socket loss clears optional live enrichment without changing running/idle or
+delaying completion. No socket starts under `start:false`.
+
 The authoritative lane uses GET `/api/queue` and retained/targeted `/api/history`.
 It installs completion snapshots and notifies relisting without awaiting optional
 progress. A separate prompt-owned flight reads best-effort `/internal/logs/raw`
@@ -234,11 +262,51 @@ Supported snapshots contain `epoch`, `state` (`unknown`, `idle`, `running`,
 `disconnected`), `sampledAt`, `runningCount`, `queuedCount`, `runningPromptId`,
 `progress` (null or `{value,max,fraction}`), `terminalRevision`, `resyncRevision`,
 `historyGap` and `error`. Before successful observation the state is unknown.
+The additive enrichment group is `progressBasis` (`exact`, `log` or null),
+`workflow` and `workflowReason` (`other-client` or `unavailable`). The client
+validates this group atomically; the original version1 shape remains readable.
+One operation field prefers an exact websocket `progress` counter over the
+bracketed log counter; log flight settlement cannot overwrite live exact data.
+`workflow` is null or `{promptId,done,total,fraction,basis:"graph+events"}`.
+Its static denominator is the dependency closure of the running queue item's
+output targets, using the same engine graph traversal as Variations. Finished
+nodes and non-lazy ancestors of observed running/finished nodes count done;
+lazy flags come from the backing's existing cached object_info. A running
+node contributes its bounded operation fraction unless already counted done.
+Runtime-expanded IDs outside the static closure are ignored. The result is
+monotone within the prompt and capped below 1 while still queued/running;
+only the authoritative poll ends activity. The UI calls this **about** N of M
+steps, not an exact prediction of future execution. A missing graph, targets,
+catalogue or observable matching node state leaves workflow unavailable. Other
+tabs' client-addressed events cannot be observed; no identity is impersonated.
+Raw queue graphs, node catalogues and submitting client IDs stay engine-private.
 Counters are best-effort **current-operation** progress, not workflow percentage
 or proof that outputs finished saving. Log snapshots are associated only with
 bracketed stable prompt identity and content continuity; stale/ambiguous counters
 are indeterminate, and disconnect/idle/prompt replacement clears fill. A slow
 unchanged operation count remains valid. Transfer-byte counters are excluded.
+
+Pinned sources render one 24px concentric SVG: the existing current-step sector
+inside a thin workflow arc, clockwise from 12 o'clock. Known workflow progress
+uses the shared secondary token; unavailable workflow data uses a muted half arc
+turning linearly every 2.5s (static with reduced motion). The faint outer track
+and arc exist only while running. Idle, unknown and disconnected states have no
+outer arc; disconnected activity delivery withholds both measures. Tooltip and
+accessible label share plain wording: "workflow about N of M steps" (N is the
+whole completed-step portion of done), "current step V/M (live)" or "(from log)".
+Only the engine's other-client reason adds "queued from another ComfyUI tab";
+other missing data has a generic unavailable explanation.
+
+Immediately left of the ring, the same flex-centred chip displays the source's
+outstanding queue size (`runningCount + queuedCount`). Tabular 12px numerals use
+the shared muted foreground token and reserve at least two digit columns, so
+1→12 does not resize the chip. Values through 999 display literally, larger
+values display `999+`. Zero, unsupported, unknown, upstream-disconnected and
+delivery-disconnected states show no number or retained allocation. Pending-only
+queues still show their positive count even though no prompt is running. The
+chip and instrument share one snapshot-derived label, adding e.g. "3 in queue
+(1 running, 2 waiting)" with the uncapped total. No separate count state or fetch
+is introduced.
 
 Startup establishes full retained-history baseline without replaying old finishes.
 Regular history reads start at 64 and expand until the previous completion
@@ -267,7 +335,7 @@ and inventory versions and not stored in SQLite. Discovery/mutation replies capt
 the actual row/version before probing. Bootstrap and stream share the same source
 identity. SSE `sources` events carry `id: <epoch>:<revision>` and JSON
 `{version:1,epoch,revision,sources:{id:{address,kind,incarnation,pinned,autoRefresh,
-sourceVersion,activity}}}`. The entire source map is authoritative; absence removes
+sourceVersion,activity,arrivals}}}`. The entire source map is authoritative; absence removes
 a source, and revision jumps are legal latest snapshots. Whole-frame validation
 precedes any application. Unknown/incomplete/malformed frames retain accepted state
 and require controlled resynchronization. Exact own source keys are preserved.
@@ -355,10 +423,20 @@ Grid's registered, owner-disposed seam publishes reactive measured readiness,
 positive viewport dimensions and identity-keyed virtual items. One Store
 reconciliation projects actual viewport identities (without overscan) and current into
 one approximately twenty-entry foreground window. The Store-owned acquisition policy
-admits sizes, feed src, inline images, metadata wants/reads/publication, node refresh
-and scraper status; beyond-window work uses idle quanta of at most eight ms and two
-shared background resource slots, and waits while foreground work is pending.
-Foreground resources use at most six slots. Wants are retained, acknowledged and
+admits sizes, feed src, inline images, metadata wants/reads/publication, shown-entry
+record reads, node refresh and scraper status. The policy alone defines bounded resource classes: native images
+retain six foreground/two background slots; control (wants, polls, required node
+registry refresh, byte-size HEAD and scraper status) has three foreground/one
+background slots that native transfers cannot consume. Beyond-window work uses idle
+quanta of at most eight ms. Background images wait while foreground work is pending;
+background control follows its own class so an unfinished native image cannot strand
+the metadata channel. The app-origin HTTP/1 transport budget is six connections:
+one source-delivery stream, one reserved control connection and the derived four
+native transfers, shared across both image lanes. Native measurement/display owners
+declare their actual URL; other origins and non-HTTP resources retain the global
+image ceilings. Native completion/abort releases both budgets together, without
+preempting active images. Required registry refresh follows the graph identities it
+serves and acknowledges only the changes captured by its accepted read. Wants are retained, acknowledged and
 single-flight; outstanding lane heads are identity-indexed, so scheduler queries never
 scan the acknowledged library. Projection changes reindex only affected foreground
 identities. Metadata dimensions publish atomically in batches of at most 200
@@ -400,6 +478,10 @@ ready card into a fallback. The box displays the filename and “Can't display t
 with normal judgment, notes, download and hide/delete controls available. The
 footer counts the same filtered, size-ready entries as the virtualizer (including
 failures), and separately reports pending measurements.
+A settled measurement notifies the shared size readers only when it can change a
+derivation (a failure, or a size the listing does not already fix); a probe of an
+entry with authoritative dimensions notifies only that identity's own size readers,
+so per-image settlement recomputes no feed-wide derivation.
 Store disposal releases measurement resources, deadlines, queued interest, the
 resize listener and retry work.
 
@@ -417,6 +499,12 @@ above the minimum the box hugs it vertically. Terminal failures keep their squar
 box and audio keeps its fixed face aspect. Playable controls occupy a separate
 adjacent row below that box; its stable measured height is included in cardHeight,
 virtualizer estimates and landing compensation, even while src is absent or failed.
+Feed cards mount that row first inside their single feedback foot, above the title
+and notes. The foot is always sticky by layout: playback and feedback stay together
+at the viewport bottom while their natural bottom is below it, including fitting
+cards entering from below. Native containment clamps the foot to its card's content
+edge when less than a foot-height is visible. No tall-card flag gates this behavior;
+the in-flow allocation, cardHeight and virtual stride remain unchanged.
 
 `MediaBox` owns native display/load/zoom and player state; `Zoomable` is its
 store adapter for feed/details/anchors. The comparator also renders MediaBox,
@@ -444,10 +532,15 @@ be decoded.” Unknown causes keep the generic reason. Every failure adds
 “Download it to open elsewhere.”, with ordinary card download still available.
 Audio's viewer has one view and no switcher or B side.
 The per-kind workbench view catalogue owns opening defaults, command admission
-and the toolbar. Video opens in Full (A only), and offers Split (two-up),
+and the toolbar. Video opens in Full, and offers Split (two-up),
 Overlay (one-up/blink) and Slider (wipe); Difference is absent. Audio has only
 Full. Images offer Full/Two-Up/One-Up/Split/Difference. Every kind opens in Full,
-with A only, on every open (including explicit pairs and deep links).
+on the clicked image, on every open. The open intent names its subject and pair;
+the viewer owns that subject, derives its active column from it, and Full shows
+only that side. Comparison modes retain the pair with the subject active.
+Feed opens target A; metadata images and anchors target B. Explicit pairs and
+`/diff` links default to A and can target B with `subject=b` (the URL query).
+A plain image click inside the viewer never reopens or resets its session.
 Video comparison choices require the existing anchor/node-image B pair.
 The persisted, rebindable `wb.full` binding defaults to `f`; keys1–4keep
 their existing mode meanings. Full is available for every asset kind.
@@ -465,6 +558,20 @@ mode switches preserve only the viewer's own crops and locked-delta semantics.
 Allocation changes rederive transforms and the Difference draw. Viewer gestures
 never alter persisted card crops. There is no centred viewer play button for
 any kind; its docked play button is the visible playback affordance.
+
+Every crop uses the shared version2 model `{version:2,s,cx,cy,fh,fv,rot}`:
+`cx`/`cy` are normalized image coordinates under the allocation centre; `s` is
+relative to the existing natural-size-capped fit. Centres remain unbounded for
+pan. Native transforms and Difference destinations derive from that same model
+on every fit/allocation change, independently of element binding time. A missing
+or zero fit is pending and cannot authorize a gesture or compatible-read write.
+Persisted and viewer-session view ports convert legacy `{s,txf,tyf,…}` records
+once, in the first valid fitted frame supplied to the owner. Old records did not
+store their historical reference box; that first frame defines their compatible
+interpretation. The persisted owner saves the version2 conversion through its
+normal debounce; subsequent restore/resize reads never write derived views back.
+Binding lifetime remains element/key-owned, with active drag listeners retired
+on disposal. Wheel/pan deltas, scale limits and the viewer open-centred rule remain.
 
 Workbench guards accept video/audio only after `loadeddata` and images after decode;
 accepted source, kind and filename stay together through a failed swap, retaining
@@ -489,18 +596,18 @@ and restores online presentation. Discovery and navigation cannot reset an outag
 source retirement clears it. Other errors retain their normal reporting.
 
 Feed-side topbar order: logo/wordmark, refresh icon, host dropdown, controlled
-native Output folder selector, separated pinned sources,
-flexible space, filename filter. Pinned buttons forward the dropdown's selection
+native Output folder selector, filename filter, separated pinned sources,
+flexible space. Pinned buttons forward the dropdown's selection
 action; circles are grey idle, filled SVG sectors for available counters, distinct
 active outlines when indeterminate, and warning/unknown treatments without stale
 fill. Source-row pin and auto-refresh toggles save independently without selecting
 or closing the dropdown. Folder refresh controls are disabled with an explicit
 reason; pinned folders have a grey circle labelled with their no-generation reason.
 The filter opens/focuses immediately left of its icon; click/Escape collapses
-without clearing its query. Header owns a separate split synchronized through
-the existing store-owned pane width, with scoped bounds matching the main pane
-and its adjacent divider/bar footprint. Main composition and its layout styles
-are unchanged; the filter follows the actual feed edge. Unhide/Hide up-voted
+without clearing its query. The header's feed and workspace sections size from
+their own content: the feed section takes the remaining width and the workspace
+section its content width; neither follows the main pane divider. Main
+composition and its layout styles are unchanged; expanding the filter pushes the scrollable pins right. Unhide/Hide up-voted
 chrome buttons are removed; their session visibility actions and judgment
 preferences remain available to existing non-chrome consumers.
 
@@ -526,6 +633,18 @@ gesture travel and cannot invite the settle tidy, however late the settle timer 
 Ordinary rail ticks use the existing subdued `--foreground-dim` neutral through
 shared card-state presentation; card neutrals, judgment colors/priorities, wave
 length/glow, geometry, tape windowing and scrub handlers retain their contracts.
+
+New inventory identities in the current source, or entries newer than the seen
+floor captured before opening another source, light their rail ticks once for
+1400ms. Store inventory acceptance owns event publication and its accepted sequence
+independently of source-stream seen advancement. The rail takes the entire event
+once when candidates become size-ready, including identities outside its filter/tape window;
+scrolling, rerendering and remounting cannot replay it. Source navigation/disposal
+retires pending events. The rail owns its native animations and cancels on tick
+identity replacement/unmount. Only brightness/light fades; reduced motion uses
+color alone. No tick dimensions, wave/scrub geometry or browsing state changes.
+Size-pending candidates wait for the existing size owner's feed admission; removed
+entries and retired sessions discard them. A ready off-tape tick never waits.
 
 Static surfaces: `/shared/<name>` serves the allow-listed `src/` modules
 (`extractor.mjs`, `backings/mime.mjs`, `features/variations/shared.mjs`, `entry-path.mjs`, `source-origin.mjs`, `version.mjs`) to the browser;
@@ -573,8 +692,15 @@ originating source and actual v2 JSON download, without duplicate activation or
 synthetic outside-click propagation. Features contribute command definitions,
 data bindings and affordances through the registry, without feature-name dispatch.
 
-Variations owns form/baselines/File references/order, dirty comparison, decision,
-focus/caret and Run state. Its bridge contains opening metadata, a fresh scalar
+Variations retains feature-private recipe workspaces for the app session, keyed
+by the captured target set and origin, including raw values, checkpoints and exact
+File references/order. Reopening restores them; A→B→A never overwrites A. There is
+no silent eviction or disk persistence. An old-origin recipe remains visibly
+recoverable, review-only, without automatic retargeting; “New recipe for current
+source” explicitly opens a separate workspace. “Discard recipe” asks for explicit
+confirmation even when clean; committed Discard removes that workspace. App
+disposal releases all retained workspaces. Mounted components own decision,
+focus/caret, widgets, timers and Run leases. Its bridge contains opening metadata, a fresh scalar
 session and owner-safe request capabilities only. Dirty close/replacement shows
 **“Discard your changes?”**, **“Keep editing”** and **“Discard changes”** inside
 the still-mounted panel, outside its inert editor. Escape cancels only the decision;
@@ -584,10 +710,12 @@ error paths settle safely. Raw incomplete increment text survives blur unchanged
 SliderRow retires active widget listeners with the matching original-target
 terminal adaptation and quarantines that physical gesture through release/cancel.
 
-One modal-private `makeVariationEditor` owns registered editable fields, clean
-baselines, codecs, compilation/consumption bindings, issued immutable Run tickets,
-results and close eligibility. Catalogue metadata is readonly and separate from
-editable work. Unknown edits reject before mutation. Dirty compares only declared
+The feature-private `makeVariationRecipe` owns registered raw editable fields,
+clean baselines, codecs and the global recipe revision. The mounted
+`makeVariationEditor` owns compilation, issued immutable Run tickets, results and
+close eligibility. Enum search belongs to the mounted row, like input search;
+presentation never participates in recipe dirtiness or revisions. Catalogue
+metadata is readonly and separate from editable work. Unknown edits reject before mutation. Dirty compares only declared
 editable leaves; initialization seeds untouched clean defaults without overwriting
 early typed naming or manufacturing a user-edit revision. SliderRow's raw increment
 is controlled by this owner and parsed once; view/child File/caret/gesture identity
@@ -597,20 +725,41 @@ independently maintained acknowledgement path whitelist owns this flow.
 Each Load Image row owns one ordered image set, initially empty. Existing ComfyUI
 input names, native browser Files and engine-host image paths can be added over multiple turns and mixed;
 identity deduplication uses input name, exact File identity or absolute engine path, never filename-only
-deduplication of Files. Removal changes that same set. The chosen thumbnail grid
+deduplication of Files. Removal changes that same set. Each chosen tile reserves
+one comparison-status line, so pending/current/ready/error settlement cannot move
+the acquisition controls. Single-line statuses retain full native tooltips. The chosen thumbnail grid
 is above persistent acquisition controls, even when the axis is off. “ComfyUI
 inputs” opens a searchable, virtualized, multi-select list; arrows/Enter select
-and Escape closes its owned popup before the modal. Only visible input rows load
-engine input-byte thumbnails. Engine thumbnails in the list and the chosen grid
-register near the viewport as foreground displays of the Store's one acquisition
-policy, sharing its capacity; a source change does not retire them, their owner's
-unmount does. “Add files…” uses the browser's multi-file picker;
+and Escape closes its owned popup before the modal. The input grid mounts three
+extra rows on each side to acquire thumbnails before visibility, and declares one
+further viewport in the scroll direction as background image demand. Search, close
+and range changes retire obsolete demand. Visible/three-row-ahead thumbnails and
+the chosen grid register foreground displays of the Store's one acquisition policy;
+further directional rows use its background ceiling and low browser priority,
+retaining their native lifetime as they move into view. Both share its image
+and app-origin capacity, preserving the reserved metadata connection, and decode
+asynchronously. A source change does not retire them, their owner's
+unmount does. Picker names remain tooltip-only with exact accessible names. One
+thumbnail component presents pending, decoded and failed previews for both grids,
+including browser File and engine-path selections. Native broken-image glyphs are
+never shown. A failed preview says “Preview failed” with a separate “Retry preview
+for <name>” action; retry reacquires through the same display policy, without
+toggling selection or changing byte-comparison evidence. It introduces no retry
+timer. All client entry paths (including input listing/upload, thumbnails, Details,
+feed and HEAD requests) use the shared entry URL serializer. Raw names are encoded
+exactly once; Comfy listing annotations are removed only at ingress. The engine's
+Comfy view URL owner separately encodes its filename/subfolder query contract.
+“Add files…” uses the browser's multi-file picker;
 there is no browser-directory input or mutually exclusive image mode.
-The persistent folder path field and Add action recursively acquire engine-host
+The persistent “Folder on the engine computer” path field and “Add folder” action recursively acquire engine-host
 images, including subfolders. The feature filesystem owner skips symlink traversal,
 returns sorted canonical absolute paths and rejects more than 500 images with an
 explicit message instead of silently truncating. Directory paths use the same
 engine-host trust boundary as `folder:` sources, not the browser's filesystem.
+The form explains “Includes subfolders. Maximum 500 images per folder import.”
+Its typed path stays available without the chooser. The picker has a selected
+count and distinguishes an empty input catalogue from no search matches; image
+counts use singular/plural grammar, and the empty chosen set invites adding images.
 
 The shared folder icon immediately to the path field's right asks the **engine**
 to open the desktop portal directory chooser; it never uses browser directory
@@ -677,12 +826,70 @@ creates singleton descriptors and rejects duplicate or unresolved locations;
 probe and Run use that same catalogue. The editor rejects duplicates before
 seeding any rows, and every row controls exactly its own node/input. Numeric
 siblings are independent sliders, with independent currents and proof. Slider
-tuning still uses the class/input schema key. Readable labels include title or
-class, node ID and input, e.g. `Load Image #76 · image`.
+tuning still uses the class/input schema key. Readable labels put the human-readable
+input name first, with title/class and node ID secondary; the complete canonical
+label, e.g. `Load Image #76 · image`, remains in the tooltip and checkbox description.
+One shared parameter-row shell owns checkbox/name/current/context alignment for
+numeric, image, enum and text rows. Disabled numeric rows occupy one compact line
+with their current value; enabling reveals labelled From/To/Step editors and the
+existing rail without remounting its native widget. Step actions explicitly
+halve/double the increment, while thumb arrow keys retain fine nudging. Numeric
+field writes and release snapping are immediate: the slider integration disables
+animated placement, whose native tap-transition state would reject the next
+physical gesture after an otherwise finished edit. Current
+enum options say “Current”, and batch numeric controls describe offsets from each
+image's current value. Enabled rows still float first and retain the existing
+registry/input ordering.
+
+The Variations dialog root constrains every layout descendant to a shrinkable,
+bounded inline allocation, including its modal shell; individual component class
+names do not opt into containment. Flexible grid tracks use zero-minimum tracks.
+The shared `SingleLineText` component owns single-line display truncation and its
+full-value native tooltip, including labels, current values, options, captions and
+numeric readouts. Consumers provide presentation and callbacks, not a second
+truncation/tooltip implementation. Literal native editors retain their full raw
+values; multiline/help text wraps within its allocation.
+The dialog owns a bounded grid row shared by the scrolling parameter pane and
+the fixed sidebar at every width. Sidebar rows are a `minmax(0, 1fr)` body,
+an intrinsic bounded message lane and Run in the final row. The body owns vertical
+scrolling for the big count, wrapping factor breakdown, naming fields and example;
+its children retain intrinsic content height. Results, preflight errors and
+recovery notices sit directly above Run, capped at the lesser of 40% of the sidebar
+or eight text lines, scrolling internally when long. Content cannot resize the
+dialog or push Run outside it. The big count keeps its natural font line box.
+Presentation overflow never changes recipe state or Run admission.
+The big number has a small breakdown of each contributing axis and the unchanged
+tuple exclusion. The fixed sidebar's body makes its complete explanation reachable
+even when a short viewport cannot show all of the count/naming content at once.
+The editor owns this projection using the same typed
+axis kernel as Run, not a second product calculation in the view. Checking images,
+multi-target estimates and unsafe integer precision are explicitly provisional;
+invalid enabled Step/template/empty selections do not display a default-backed
+valid total. Large totals use a bounded readable notation with the full approximate
+value available in their tooltip. Existing engine limits and Run admission remain.
+Prefix and Suffix have associated labels. A keyboard-native “Insert parameter”
+selector inserts exact canonical IDs at the last naming caret (Suffix by default).
+Row labels exclusively toggle their associated enable checkbox; insertion does
+not share that label's pointer event. A representative output-name example resolves
+through the shared naming-token
+formatter. It does not promise final upload collision names, producer names or
+output counters. “Queue variations” becomes “Submitting…” during preparation and
+submission. The polite result reports “Queued N of N jobs”, with kept-edit reasons
+in neutral text and actual failures in the error role's color.
+The native input popup uses the shared environment-pure viewport placement owner
+(`client-solid/lib/popover-placement.js`), preferring the side with more room and
+clamping horizontal position and available height. The picker reads its own
+trigger and receives preferred-size/application capabilities from its child;
+neither component reads the other's DOM. Passive ancestor-scroll and resize
+notifications coalesce into one animation frame and are removed on close or
+suspension. Popup/list resizing cannot schedule placement, and placement never
+writes scroll position. Suspension retains geometry and widget identity while
+interaction waits for the resumed placement frame. The search stays intrinsic
+and the existing list consumes its bounded viewport.
 
 Naming tokens use those exact IDs (`_{76.image}_{81.image}`), through the same
-codec/parser. Unknown placeholder syntax remains literal and cannot certify
-naming consumption. Existing `{Class.input}`, custom-title/class label tokens
+codec/parser. Unknown/unbalanced placeholder syntax remains editable but rejects
+Run before any enqueue with an actionable naming error. Existing `{Class.input}`, custom-title/class label tokens
 and `{image}` are compatibility aliases for the first carrier in catalogue
 order; `{image}` selects the first image descriptor even if only a later image
 varies. Explicit IDs are required to address siblings independently. Variation
@@ -691,11 +898,18 @@ there are no saved legacy parameter keys to migrate.
 
 Run/button/handle input enters `variations.run` and the owner's requestRun. A private
 ticket captures all editable values/targets/revision/close generation before IO.
-The compiler emits the request and its raw-value consumption bindings in the same
-read/encode operation. Source-independent handles/broker retain opening metadata
+It also captures the existing image-inspection cohort before awaits and freezes
+that cohort's settled evidence for every compilation of this Run. Later path
+removal/readdition or reinspection cannot change the captured graph values;
+actual upload receipts remain the authority for uploaded names.
+The compiler emits the immutable request, operation identities and exhaustive raw
+dispositions with its consumption bindings in the same read/encode operation.
+Each captured leaf/map entry is active or retained; unknown or overlapping
+classification rejects before effects. Source-independent handles/broker retain opening metadata
 and owner capabilities only. Running/pending-decision input is busy. Clean metadata
 settling during a Run cannot strand captured submitted work. Newer/edit-and-revert
-revisions, pending decisions and genuinely unused values still prevent adoption.
+revisions and pending decisions still prevent checkpointing. Disabled and dormant
+values are retained recipe content, not unsubmitted graph operations.
 
 Opening/probe/Run retain an `Origin:{source,address,kind,epoch,incarnation}`; pin and
 refresh attribute revisions are not operation identity. Probe optionally accepts
@@ -722,6 +936,13 @@ before enqueue. The response echoes correlation, matched context, `target:{id,ho
 and complete indexed `accepted:[{index,promptId,applied:{ranges:[],imageParams:[]},
 selections:{ranges:[],imageParams:[]},naming:[]}]`. UUIDs use native Web Crypto entropy on the
 existing HTTP LAN origin; they are correlation, not retry/idempotency keys.
+The request-derived immutable target plan records operation IDs and explicit
+apply/off/absent-relative-numeric dispositions. Heterogeneous relative numeric
+absence is the documented exclusion; other positive missing carriers reject.
+The client captures all target plans before dispatch; the engine returns its
+effective `operations` alongside the envelope. The existing v2 correlation and
+context bind each target request; exact final write coverage, never a digest or
+count alone, proves its acceptance.
 
 Every Comfy backing enqueue builds its outgoing prompt through `freshSubmissionGraph`: clone the graph and remove only each node descriptor's execution-only `is_changed`, preserving inputs (including `inputs.is_changed`), all other fields and envelope lineage without cache-busting.
 
@@ -729,16 +950,25 @@ Variation narrowing keeps the producer's complete transitive input-link closure 
 
 Naming proof uses only the exact node IDs returned by the naming writer; no writes means no naming acknowledgement.
 
+The engine prepares every final prompt before the first enqueue, using the actual
+mutation, narrowing and naming writers. Enabled-empty axes, missing template values,
+unresolved naming, pruned/overwritten active assignments and affixes lost by folding
+reject with a clear message and zero enqueues for that target plan. Existing
+basename middle folding remains valid when both affixes survive completely.
 Actual surviving carrier assignments and recognized naming writes certify positive
 use on confirmed accepted prompts. The same typed axis kernel owns count/generation
 and off-selection exclusion proof. Tuple identity is per field, never delimiter
 serialization; count does not allocate the Cartesian product. True/inert/missing
 choices and ambiguous carriers receive no invented proof. The owner validates every
 target/context/correlation, safe positive complete counts, explicit empty errors,
-unique indexes/prompt IDs and requested field sets before any adoption. It intersects
-all-target/all-permutation proof with compiler bindings and advances only captured
-eligible leaves. Off consumes only selection; unused values, filters, dormant
-templates, inactive filenames/Files and newer work remain protected. Editor text
+unique indexes/prompt IDs and **exact** requested operation coverage before any
+checkpoint. Subset naming, selection or applied receipts reject. After every target
+fully accepts the captured plan, the same recipe revision/current origins and no
+pending decision permit one atomic checkpoint of the entire captured recipe.
+Off never claims its dormant values executed: they remain recoverable settings,
+including disabled raw text, enum picks, substitutions and native Files. Dirty
+means recipe changes since that checkpoint. Newer/edit-and-revert work remains
+protected as a whole, with no partial baseline advancement. Editor text
 and File references/order are never normalized/replaced. Enqueue node-error partial
 acceptance or malformed success provides no complete proof or automatic resubmit.
 
@@ -754,9 +984,14 @@ Each Variations text field is one literal template. Line breaks, blank paragraph
 indentation and surrounding whitespace are retained in every submitted value;
 formatting never creates extra variation axes. Only explicit `{{label}}` inputs
 expand a whole-template Cartesian product, with the same expansion used for the
-displayed count and Run payload. Missing referenced values keep that row inert;
+displayed count and Run payload. Missing referenced values visibly invalidate the
+preview and reject Run before effects;
 clearing the field yields one empty string. Unchanged multiline text still matches
 the exact current permutation and is excluded normally.
+Label dictionaries contain explicit own entries only, through the same shared
+lookup in controls, compilation and expansion. Prototype-named labels remain
+valid when configured; inherited object properties never supply alternatives or
+make an unconfigured axis executable.
 
 ## 3. Judgment model
 
@@ -1015,7 +1250,15 @@ but still report pending dimension/ingest work. Dimension-only writes never rese
 unchanged graph metadata. Delivery history does not change the database schema.
 A delta cannot be re-requested by cursor once acknowledged, so a want's reply
 carries its names' current state: a reader that had not yet listed an entry when
-its change arrived recovers it by demanding that identity.
+its change arrived recovers it by demanding that identity. A client session
+continues the stream from its first accepted listing's `metaVersion`; the full
+snapshot remains only for absent, invalid, future or older-than-retained cursors.
+The stream serves the feed; it is never the path of an entry a consumer shows.
+Each shown identity (Details' current and its comparison entry) has one direct,
+bounded record read (`entries/<name>/meta`), retried with backoff while it is
+shown and applied only to the same source session, name and content hash, so
+collection size, churn, publication order, delivery fences and the cursor cannot
+delay or drop it.
 
 The prefetch runs TWO passes over each collection's listing: pass 1 the
 dims head reads (10 ms inter-file — size-before-render on a fresh host is

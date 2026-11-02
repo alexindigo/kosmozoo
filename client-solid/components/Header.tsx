@@ -3,7 +3,7 @@
 // Logo/title, host picker, filter box, options button, the menu with its
 // settings rows, and the layout switcher.
 
-import { For, Show } from "solid-js";
+import { createMemo, For, Show } from "solid-js";
 import { iconSvg } from "/js/icons.mjs";
 import { useAppStore } from "../store/app-store.js";
 import { useClickOutside } from "../lib/click-outside.js";
@@ -13,6 +13,8 @@ import { FeedFilter } from "./FeedFilter.js";
 import { SourceProgress } from "./SourceProgress.js";
 import { FolderPicker } from "./FolderPicker.js";
 import { FeedbackLink } from "./FeedbackLink.js";
+import { sourceProgress } from "../lib/source-progress.js";
+import { sourceNewContent } from "../lib/source-new-content.js";
 
 // layout-switcher icons (icons.mjs): a square with one divider — vertical
 // right of center (wide images / narrow text), horizontal (stacked),
@@ -144,7 +146,7 @@ export function Header() {
   });
 
   return (
-    <header id="chrome" class="chrome-split" style={{ "--chrome-pane-width": `${store.state.anchorPaneWidth()}px` }}>
+    <header id="chrome" class="chrome-split">
       <div class="chrome-feed">
         <div class="chrome-feed-inner">
           <img class="logo" src="/logo-64.png" alt="kosmozoo" width={24} height={24} title={store.state.appVersion() || undefined} />
@@ -156,24 +158,29 @@ export function Header() {
             supported={store.state.inventory.subfolders.supported} reason={store.state.inventory.subfolders.reason}
             loading={store.state.inventory.loading} unavailable={!store.state.inventory.folders.includes(store.state.selectedFolder())}
             onSelect={(folder) => store.handles.invoke("source.folder", { folder })} />
+          <FeedFilter value={store.state.filter()} onInput={(value) => store.handles.invoke("feed.filter", { value })}
+            handles={store.handles} pushLayer={store.actions.keys.pushLayer}
+            canEscape={() => !store.state.keysPanelOpen() && !store.state.diff.open} />
           <div class="pinned-source-group" classList={{ "has-pins": pins().length > 0 }}>
             <Show when={pins().length > 0}><span class="pinned-separator" role="separator" aria-orientation="vertical" /></Show>
             <div class="pinned-sources" aria-label="Pinned sources">
             <For each={pins()}>
-              {(id) => (
-                <button type="button" class={"pinned-source" + (store.state.host() === id ? " on" : "")}
-                  data-source={id} aria-pressed={store.state.host() === id}
-                  title={`Select ${id}`} onClick={() => store.handles.invoke("source.select", { id })}>
-                  <SourceProgress name={id} activity={store.state.sourceActivity[id]} delivery={store.state.sourceDelivery()} />
-                  <span>{id}</span>
-                </button>
-              )}
+              {(id) => {
+                const presentation = createMemo(() => sourceProgress(id, store.state.sourceActivity[id], store.state.sourceDelivery()));
+                const label = () => `Select ${id}. ${sourceNewContent(store.state.sourceHasNew(id))}${presentation().label}`;
+                return (
+                  <button type="button" class={"pinned-source" + (store.state.host() === id ? " on" : "")}
+                    classList={{ "has-new": store.state.sourceHasNew(id) }}
+                    data-source={id} aria-pressed={store.state.host() === id}
+                    title={label()} aria-label={label()} onClick={() => store.handles.invoke("source.select", { id })}>
+                    <SourceProgress presentation={presentation()} />
+                    <span class="source-name">{id}</span>
+                  </button>
+                );
+              }}
             </For>
             </div>
           </div>
-          <FeedFilter value={store.state.filter()} onInput={(value) => store.handles.invoke("feed.filter", { value })}
-            handles={store.handles} pushLayer={store.actions.keys.pushLayer}
-            canEscape={() => !store.state.keysPanelOpen() && !store.state.diff.open} />
         </div>
       </div>
       <div class="chrome-workspace">

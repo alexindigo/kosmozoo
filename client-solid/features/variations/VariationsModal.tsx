@@ -7,14 +7,14 @@
 // right: variations count (big), prefix, suffix, Run.
 //
 // Slider rows are populated once the probe returns — the graph decides which
-// parameters have a target node, and only those render. The label click
+// parameters have a target node, and only those render. Each parameter name
 // inserts the per-graph placeholder key into whichever prefix/suffix input
 // was last focused. Prefix/suffix WRAP the original filename basename in the
 // submission (they don't replace it).
 
-import { createSignal, createMemo, createEffect, createResource, onCleanup, For, Show } from "solid-js";
+import { createSignal, createMemo, createEffect, createResource, onMount, onCleanup, For, Show } from "solid-js";
 import { iconSvg } from "/js/icons.mjs";
-import { templateLabels } from "/shared/features/variations/shared.mjs";
+import { templateLabels, templateValue } from "/shared/features/variations/shared.mjs";
 import { sourceOrigin } from "/shared/source-origin.mjs";
 import { useAppStore } from "../../store/app-store.js";
 import { SliderRow } from "./SliderRow.js";
@@ -23,6 +23,10 @@ import { snapshotDraft, makeLeaveGuard, focusMemory } from "./draft.js";
 import { makeVariationEditor } from "./editor.js";
 import { VariationDiscardConfirmation } from "./VariationDiscardConfirmation.js";
 import { ImageSetPanel } from "./ImageSetPanel.js";
+import { SingleLineText } from "../../components/SingleLineText.js";
+import { Checkbox } from "../../components/Checkbox.js";
+import { workspaceCurrent } from "./workspaces.js";
+import { ParameterRow } from "./ParameterRow.js";
 
 export function VariationsModal() {
   const store = useAppStore();
@@ -44,15 +48,22 @@ export function VariationsModal() {
 }
 
 function ModalBody(props) {
+  const store = useAppStore(), workspaces = store.actions.variations.workspaces;
+  const [workspace, setWorkspace] = createSignal(workspaces.open(props.images));
+  return <Show when={workspace()} keyed>{selected => <RecipeBody {...props} workspace={selected}
+    workspaces={workspaces} selectWorkspace={setWorkspace} readOnly={!workspaceCurrent(selected, props.images)} />}</Show>;
+}
+
+function RecipeBody(props) {
   const store = useAppStore();
   const services = store.actions.variations.services;
-  const image = props.images[0];
+  const image = props.workspace.targets[0];
   // batch = more than one image: ranges become RELATIVE offsets from each
   // image's own current value (resolved by the plugin at run time), and the
   // count shows the total across the whole selection.
   const batch = props.images.length > 1;
   const [version, setVersion] = createSignal(0);
-  const editor = makeVariationEditor({ targets: props.images, services,
+  const editor = makeVariationEditor({ targets: props.workspace.targets, recipe: props.workspace.recipe, readOnly: props.readOnly, services,
     currentOrigin: host => sourceOrigin(host, store.state.hosts[host]),
     changed: () => setVersion(value => value + 1),
     close: () => store.handles.invoke("variations.close", { automatic: true, session: props.session }) });
@@ -78,26 +89,31 @@ function ModalBody(props) {
   const guard = makeLeaveGuard({ dirty: editor.dirty,
     suspend: () => { for (const child of children) child.suspend(); },
     restore: () => { for (const child of children) child.resume(); restoreFocus(); },
-    decision: value => { setDecision(value); editor.decision(value); }, invalidate: editor.invalidateClose });
+    decision: value => { setDecision(value); editor.decision(value); }, invalidate: editor.invalidateClose,
+    discarded: () => props.workspaces.remove(props.workspace) });
+  const switchRecipe = (next, discard = false) => guard.request({ intent: { type: "recipe", key: next?.id ?? "new", discard },
+    requireDiscard: discard, cancel: () => {}, permit: () => {
+      if (discard) props.workspaces.remove(props.workspace);
+      props.selectWorkspace(next ?? props.workspaces.fresh(props.images));
+      return { status: "applied" };
+    } });
   onCleanup(store.actions.variations.registerOwner(props.session, { requestLeave: guard.request, requestRun: editor.run }));
   onCleanup(() => { editor.dispose(); guard.dispose(); });
+  onCleanup(props.workspaces.lease(() => { editor.dispose(); guard.dispose(); }));
   // refs exist solely to read the live selection and restore the caret
-  // after a label-click insert
+  // after an explicit parameter insert.
   let prefixEl, suffixEl;
-  // the input a label click inserts into — ONE focus signal replaces the
-  // four-listener tracking on each input ; the label's mousedown
-  // preventDefault keeps the focus (and the selection) alive through the
-  // click
+  // Remember the naming target while a parameter name is focused; each input
+  // retains its own live caret selection.
   const [focused, setFocused] = createSignal(null); // "prefix" | "suffix"
-  // a slider label click inserts its {placeholder} at the focused input's
+  // The parameter action inserts its {placeholder} at the naming input's
   // selection. The live value+selection are read at click time — direct
   // programmatic sets bypass onInput, so the signal adopts the buffer here,
   // then the write goes through the signal (the only writer). Solid's
   // signal write is synchronous outside a batch, so the caret restores
   // right after it — no microtask hop.
   const onInsertPlaceholder = (key) => {
-    const which = focused();
-    if (!which) return;
+    const which = focused() ?? "suffix";
     const el = which === "prefix" ? prefixEl : suffixEl;
     if (!el) return;
     const cur = el.value;
@@ -116,11 +132,12 @@ function ModalBody(props) {
   // The graph is the source of truth: only parameters whose target node
   // exists in this image's graph render (writeOnly params — widget-only
   // custom seed nodes etc. — are skipped for now).
-  const [probe] = createResource(() => services.probe(image));
+  const [probe] = createResource(() => !props.readOnly, () => services.probe(image));
   const [folderCapability] = createResource(() => services.folderCapability());
 
   let initializedProbe = false;
   createEffect(() => {
+    if (props.readOnly) return;
     if (probe.loading) return;
     if (initializedProbe) return;
     initializedProbe = true;
@@ -129,7 +146,7 @@ function ModalBody(props) {
   });
 
   const [inputFiles] = createResource(
-    () => read(() => editor.ready() && strParams().length && image.host ? image.host : null),
+    () => read(() => !props.readOnly && editor.ready() && strParams().length && image.host ? image.host : null),
     (hostName) => services.inputList(hostName, image.origin),
   );
   let initializedImages = false;
@@ -137,6 +154,9 @@ function ModalBody(props) {
     const sp = strParams();
     if (!sp.length || inputFiles.loading) return;
     if (initializedImages) return;
+    // Retained rows can exist before this mount's probe starts its input read.
+    // Only a resolved resource (or its terminal error) may consume installation.
+    if (!inputFiles.error && !inputFiles()) return;
     initializedImages = true;
     if (inputFiles.error) editor.catalogueFailure(inputFiles.error);
     else editor.installInputs(inputFiles());
@@ -172,9 +192,6 @@ function ModalBody(props) {
   // combo leaves the sweep.
   const onEnumToggle = (id, checked) => {
     editor.edit("enums", id, "enabled", checked);
-  };
-  const onEnumField = (id, field, value) => {
-    editor.edit("enums", id, field, value);
   };
   const onEnumPick = (id, v, checked) => {
     const r = enumRows()[id];
@@ -230,18 +247,41 @@ function ModalBody(props) {
   });
 
   const tally = createMemo(() => read(editor.preview));
+  const valueSummary = id => {
+    const count = tally().axes.find(axis => axis.id === id)?.count ?? "—";
+    return `${count} ${count === 1 ? "value" : "values"}`;
+  };
 
   return (
     <div class="vz-panel" data-session={props.session}>
       <div class="vz-editor" inert={!!decision()}>
-        <div class="vz-title">
-          {batch
+        <SingleLineText class="vz-title" value={batch
             ? `Generate image variations · applying to ${props.images.length} images`
-            : "Generate image variations"}
-        </div>
+            : "Generate image variations"} />
         <div class="vz-body">
           <div class="vz-left">
             <div class="vz-sliders">
+              <div class="vz-workspace-tools">
+                <label class="vz-workspace-label" for={`recipe-${props.session}`}>Recipe workspace</label>
+                <div class="vz-workspace-actions">
+                  <select id={`recipe-${props.session}`} class="vz-workspace" value={props.workspace.id}
+                    onChange={event => {
+                      const next = props.workspaces.options(props.images).find(item => item.id === event.currentTarget.value);
+                      event.currentTarget.value = props.workspace.id;
+                      switchRecipe(next);
+                    }}>
+                    <For each={props.workspaces.options(props.images)}>{item => <option value={item.id}>
+                      {workspaceCurrent(item, props.images) ? "Current source recipe" : `Previous source · ${item.targets[0].origin.address} (${item.id})`}
+                    </option>}</For>
+                  </select>
+                  <button class="vz-workspace-discard" onClick={() => switchRecipe(null, true)}>Discard recipe</button>
+                </div>
+                <Show when={props.readOnly}>
+                  <button class="vz-workspace-new" onClick={() => switchRecipe(null)}>New recipe for current source</button>
+                </Show>
+              </div>
+              <Show when={props.readOnly}><RetainedRecipe values={editor.retainedValues()} /></Show>
+              <Show when={!props.readOnly}>
               {/* One chosen set, independent of how each image was acquired. */}
               <For each={strParams()}>
                 {(id) => {
@@ -249,7 +289,10 @@ function ModalBody(props) {
                   return (
                     <Show when={r()?.filesReady}>
                       <ImageSetPanel id={id} row={r} onEnable={checked => onImgToggle(id, checked)}
+                        onInsert={onInsertPlaceholder}
                         onAdd={items => editor.addImages(id, items)} onRemove={item => editor.removeImage(id, item)}
+                        onMove={(item, index) => editor.moveImage(id, item, index)}
+                        currentThumbnail={services.inputThumbnail(image.host, r().current, image.origin, r().fromOutput ? "output" : "input")}
                         thumbnail={name => services.inputThumbnail(image.host, name, image.origin)}
                         registerThumbnail={services.registerThumbnail}
                         pathThumbnail={services.pathThumbnail} onAddFolder={path => editor.addFolder(id, path)}
@@ -263,11 +306,11 @@ function ModalBody(props) {
  the rest follow the info panel's order (enum + numeric rows interleave) */}
               <Show
                 when={params() !== null}
-                fallback={<div class="vz-loading">inspecting graph…</div>}
+                fallback={<SingleLineText class="vz-loading" value="Reading workflow…" />}
               >
                 <Show
                   when={orderedItems().length > 0}
-                  fallback={<div class="vz-loading">this graph exposes no varyable parameters</div>}
+                  fallback={<SingleLineText class="vz-loading" value="this graph exposes no varyable parameters" />}
                 >
                   <For each={orderedItems()}>
                     {(itemId) => {
@@ -281,7 +324,7 @@ function ModalBody(props) {
                               row={() => enumRows()[id]}
                               onToggle={onEnumToggle}
                               onPick={onEnumPick}
-                              onField={onEnumField}
+                              onInsert={onInsertPlaceholder}
                               rememberFocus={rememberFocus}
                             />
                           </Show>
@@ -298,6 +341,7 @@ function ModalBody(props) {
                               onToggle={onTextToggle}
                               onField={onTextField}
                               onTpl={onTextTpl}
+                              onInsert={onInsertPlaceholder} summary={valueSummary(id)}
                               rememberFocus={rememberFocus}
                             />
                           </Show>
@@ -308,9 +352,9 @@ function ModalBody(props) {
                       const p = row0.tuning;
                       return (
                         <SliderRow
+                          row={() => rows()[key]}
                           param={{ ...p, key, label: row0.label }}
                           current={() => rows()[key]?.current ?? null}
-                          defaults={row0.defaults}
                           enabled={() => !!rows()[key]?.enabled}
                           increment={() => rows()[key]?.increment}
                           rawIncrement={() => rows()[key]?.rawIncrement ?? ""}
@@ -319,7 +363,8 @@ function ModalBody(props) {
                           onToggle={onToggle}
                           onRange={onRange}
                           onIncrement={onIncrement}
-                          onInsertPlaceholder={onInsertPlaceholder}
+                          onField={(key, name, value) => editor.edit("numeric", key, name, value)}
+                          onInsert={onInsertPlaceholder} summary={valueSummary(key)}
                           registerEditor={registerEditor} rememberFocus={rememberFocus}
                         />
                       );
@@ -327,39 +372,55 @@ function ModalBody(props) {
                   </For>
                 </Show>
               </Show>
+              </Show>
             </div>
           </div>
           <div class="vz-divider" />
           <div class="vz-right">
-            <div class="vz-rlabel">variations</div>
-            <div class={"vz-count" + (tally().n > 1000 ? " vz-count-hot" : tally().n > 100 ? " vz-count-warn" : "")}>{() => String(tally().n)}</div>
-            <Show when={batch && tally().anyEnabled}>
-              <div class="vz-count-sub">{`${tally().perImage} variants × ${props.images.length} images`}</div>
-            </Show>
-            <div class="vz-rlabel">prefix</div>
-            <input
-              type="text" class="vz-tinput vz-prefix" ref={prefixEl}
-              value={prefix()}
-              title="click a slider label to insert its {placeholder}"
-              {...focus} onFocus={(e) => { setFocused("prefix"); focus.onFocus(e); }}
-              onInput={(e) => editor.edit("naming", "root", "prefix", e.currentTarget.value)}
-            />
-            <div class="vz-rlabel">suffix</div>
-            <input
-              type="text" class="vz-tinput vz-suffix" ref={suffixEl}
-              value={suffix()}
-              title="click a slider label to insert its {placeholder} (enabled sliders auto-append)"
-              {...focus} onFocus={(e) => { setFocused("suffix"); focus.onFocus(e); }}
-              onInput={(e) => editor.edit("naming", "root", "suffix", e.currentTarget.value)}
-            />
-            {/* spacer pushes the result + Run to the BOTTOM of the right
- column — the result message sits above the button, centered on it,
- and the button is the column's last element */}
-            <div class="vz-rspacer" />
-            <div class={"vz-error" + (result()?.ok ? " vz-ok" : "")}>{result()?.text ?? ""}</div>
+            <div class="vz-sidebar-body">
+            <div class="vz-count-group">
+              <span class="vz-rlabel">{tally().exact ? "Variations" : tally().status === "invalid" ? "Check the recipe" : "Estimated variations"}</span>
+              <SingleLineText class={"vz-count" + (tally().n >= 1e15 ? " vz-count-large" : "") + (tally().n > 1000 ? " vz-count-hot" : tally().n > 100 ? " vz-count-warn" : "")}
+                value={tally().status === "invalid" ? "—" : tally().display} hint={tally().fullCount} />
+              <p class="vz-count-sub">{tally().breakdown}</p>
+            </div>
+            <div class="vz-naming-group">
+              <span class="vz-rlabel">Output names</span>
+              <label for={`prefix-${props.session}`}>Prefix</label>
+              <input
+                id={`prefix-${props.session}`} type="text" class="vz-tinput vz-prefix" ref={prefixEl} disabled={props.readOnly}
+                value={prefix()}
+                title="Click a parameter name to insert its token at the caret"
+                {...focus} onFocus={(e) => { setFocused("prefix"); focus.onFocus(e); }}
+                onInput={(e) => editor.edit("naming", "root", "prefix", e.currentTarget.value)}
+              />
+              <label for={`suffix-${props.session}`}>Suffix</label>
+              <input
+                id={`suffix-${props.session}`} type="text" class="vz-tinput vz-suffix" ref={suffixEl} disabled={props.readOnly}
+                value={suffix()}
+                title="Click a parameter name to insert its token (enabled sliders auto-append)"
+                {...focus} onFocus={(e) => { setFocused("suffix"); focus.onFocus(e); }}
+                onInput={(e) => editor.edit("naming", "root", "suffix", e.currentTarget.value)}
+              />
+            </div>
+            </div>
+            <div class="vz-messages" role="status">
+              <div class="vz-message-content">
+                <Show when={tally().message && !result()}><p class={tally().status === "invalid" ? "vz-readiness-error" : "vz-field-help"}>{tally().message}</p></Show>
+                <Show when={props.readOnly && !result()?.text}>
+                  <p class="vz-workspace-status">Recipe from a previous source. Review only; images and values have not been retargeted.</p>
+                </Show>
+                <Show when={result()}>{value => <>
+                  <Show when={Number.isSafeInteger(value().submitted) && value().total > 0}>
+                    <p class={value().ok ? "vz-queued vz-ok" : "vz-queued"}>Queued {value().submitted} of {value().total} jobs</p>
+                  </Show>
+                </>}</Show>
+                <p class={"vz-error" + (result()?.ok ? " vz-neutral" : "")}>{result()?.reason ?? result()?.text ?? ""}</p>
+              </div>
+            </div>
             <button
-              class="vz-run" disabled={running() || undefined} onClick={() => store.handles.invoke("variations.run")}
-            >{running() ? "Running…" : "Run"}</button>
+              class="vz-run" disabled={running() || props.readOnly || undefined} onClick={() => store.handles.invoke("variations.run")}
+            ><SingleLineText value={running() ? "Submitting…" : "Run"} /></button>
           </div>
         </div>
         <button
@@ -374,6 +435,19 @@ function ModalBody(props) {
   );
 }
 
+// Every raw value is inspectable on a retired source, including disabled rows
+// and dormant template keys. This consumer has no edit/acquisition callbacks.
+function RetainedRecipe(props) {
+  const display = value => typeof value === "string" ? value : JSON.stringify(value,
+    (_key, item) => item instanceof File ? `${item.name} (${item.size} bytes, native File)` : item, 2);
+  return <div class="vz-retained-values"><For each={props.values}>{entry => <section>
+    <h3>{entry.id} · {entry.domain}</h3>
+    <dl><For each={Object.entries(entry.values)}>{([name, value]) => <>
+      <dt>{name}</dt><dd><pre>{display(value)}</pre></dd>
+    </>}</For></dl>
+  </section>}</For></div>;
+}
+
 // one enum sweep row: master checkbox + label + the orange current value;
 // enabled → the host's options as a filterable checkbox list (the current
 // value pre-checked and orange-marked). Props convention mirrors SliderRow:
@@ -381,51 +455,103 @@ function ModalBody(props) {
 // callbacks — the row never reaches into its parent.
 function EnumRow(props) {
   const focus = focusMemory(props.rememberFocus);
+  const [filter, setFilter] = createSignal("");
   const r = () => props.row();
-  const filtered = () => {
-    const f = r().filter.trim().toLowerCase();
-    return f ? r().values.filter((v) => v.toLowerCase().includes(f)) : r().values;
-  };
   return (
-    <div class={"vz-imgrow vz-enumrow" + (r().enabled ? " on" : "")} data-enum-id={props.p.id}>
-      <label class="vz-imgrow-head">
-        <input
-          type="checkbox" class="vz-cb"
-          checked={r().enabled}
-          onChange={(e) => props.onToggle(props.p.id, e.target.checked)}
-        />
-        <span class="vz-imgrow-label">{r().label}</span>
-        <span class="vz-imgrow-cur vz-enum-cur" title={r().current}>{r().current}</span>
-      </label>
-      <Show when={r().enabled}>
+    <ParameterRow class="vz-imgrow vz-enumrow" row={r} enabled={() => r().enabled}
+      attributes={{ "data-enum-id": props.p.id }} onEnable={checked => props.onToggle(props.p.id, checked)}
+      onInsert={props.onInsert} summary={`${r().picks.length} ${r().picks.length === 1 ? "option" : "options"}`}>
         <div class="vz-imgrow-body vz-enum-body">
           <Show when={r().values.length > 10}>
-            <input
-              {...focus}
-              type="text" class="vz-enum-filter" placeholder="filter…"
-              value={r().filter}
-              onInput={(e) => props.onField(props.p.id, "filter", e.currentTarget.value)}
-            />
+            <div class="vz-enum-filter-line">
+              <input
+                {...focus}
+                type="text" class="vz-enum-filter" placeholder="filter…"
+                aria-label={`Filter ${r().label} options`}
+                value={filter()}
+                onInput={(e) => setFilter(e.currentTarget.value)}
+              />
+              <SingleLineText class="vz-enum-selected" value={`${r().picks.length} selected`} />
+            </div>
           </Show>
-          <div class="vz-enum-list">
-            <For each={filtered()}>
-              {(v) => (
-                <label class={"vz-enum-opt" + (v === r().current ? " vz-enum-current" : "")}>
-                  <input
-                    {...focus}
-                    type="checkbox" class="vz-cb"
-                    checked={r().picks.includes(v)}
-                    onChange={(e) => props.onPick(props.p.id, v, e.target.checked)}
-                  />
-                  <span class="vz-enum-opt-name" title={v}>{v}</span>
-                </label>
-              )}
-            </For>
-          </div>
+          <EnumOptions row={r} filter={filter()} onPick={props.onPick} focus={focus} />
         </div>
-      </Show>
-    </div>
+    </ParameterRow>
   );
+}
+
+// Own the list's intrinsic sizing and native resize lifetime with its body.
+// Selection never participates in ordering; the current item stays visible
+// before the filtered catalogue, even when it doesn't match the query.
+function EnumOptions(props) {
+  const r = () => props.row();
+  const compact = () => r().values.length <= 10;
+  const filtered = createMemo(() => {
+    const values = r().values, current = r().current;
+    if (compact()) return values;
+    const query = props.filter.trim().toLowerCase();
+    return [...values.filter(value => value === current),
+      ...values.filter(value => value !== current && value.toLowerCase().includes(query))];
+  });
+  let list, option, check;
+  onMount(() => {
+    if (!compact()) return;
+    const context = document.createElement('canvas').getContext('2d');
+    const measure = () => {
+      if (!option) return;
+      // Measure glyphs with the native label's font and our own checkbox slot.
+      // Shared Checkbox/SingleLineText DOM remains private to those components.
+      const style = getComputedStyle(option);
+      context.font = style.font;
+      const width = Math.max(...r().values.map(value => context.measureText(value).width))
+        + check.getBoundingClientRect().width + parseFloat(style.columnGap);
+      if (Number.isFinite(width)) list.style.setProperty('--vz-option-width', `${Math.ceil(width) + 1}px`);
+    };
+    measure();
+    const observer = new ResizeObserver(measure);
+    observer.observe(list);
+    onCleanup(() => observer.disconnect());
+  });
+  return <div ref={list} class={"vz-enum-list" + (compact() ? " vz-enum-grid" : "")}>
+    <For each={filtered()}>
+      {(v) => (
+        <label ref={option} class={"vz-enum-opt" + (v === r().current ? " vz-enum-current" : "")}>
+          <span ref={check} class="vz-enum-check">
+            <Checkbox
+              {...props.focus}
+              size="option"
+              checked={r().picks.includes(v)}
+              onChange={checked => props.onPick(r().id, v, checked)}
+            />
+          </span>
+          <SingleLineText class="vz-enum-opt-name" value={v} />
+        </label>
+      )}
+    </For>
+    <Show when={!filtered().length}><p class="vz-field-help">No options match “{props.filter}”.</p></Show>
+  </div>;
+}
+
+// Native content/width measurements stay local to the textarea. CSS supplies
+// the one-to-eight-line bounds; recipe changes and wrapping both resize it.
+function AutoSizeTextArea(props) {
+  let input;
+  const resize = () => {
+    input.style.height = 'auto';
+    const style = getComputedStyle(input);
+    input.style.height = `${input.scrollHeight + parseFloat(style.borderTopWidth) + parseFloat(style.borderBottomWidth)}px`;
+  };
+  createEffect(() => { props.value; resize(); });
+  onMount(() => {
+    let width;
+    const observer = new ResizeObserver(() => {
+      const next = input.clientWidth;
+      if (next !== width) { width = next; resize(); }
+    });
+    observer.observe(input);
+    onCleanup(() => observer.disconnect());
+  });
+  return <textarea {...props} ref={input} rows="1" />;
 }
 
 // one text sweep row: master checkbox + label + the orange current value;
@@ -437,21 +563,14 @@ function TextRow(props) {
   const focus = focusMemory(props.rememberFocus);
   const r = () => props.row();
   return (
-    <div class={"vz-imgrow vz-textrow" + (r().enabled ? " on" : "")} data-text-id={props.p.id}>
-      <label class="vz-imgrow-head">
-        <input
-          type="checkbox" class="vz-cb"
-          checked={r().enabled}
-          onChange={(e) => props.onToggle(props.p.id, e.target.checked)}
-        />
-        <span class="vz-imgrow-label">{r().label}</span>
-        <span class="vz-imgrow-cur vz-enum-cur" title={r().current}>{r().current}</span>
-      </label>
-      <Show when={r().enabled}>
+    <ParameterRow class="vz-imgrow vz-textrow" row={r} enabled={() => r().enabled}
+      attributes={{ "data-text-id": props.p.id }} onEnable={checked => props.onToggle(props.p.id, checked)}
+      onInsert={props.onInsert} summary={props.summary}>
         <div class="vz-imgrow-body vz-enum-body">
-          <textarea
+          <AutoSizeTextArea
             {...focus}
-            class="vz-text-values" rows="4"
+            class="vz-text-values"
+            aria-label={`${r().label} template`}
             placeholder="text template — {{label}} adds a substitution axis"
             value={r().text}
             onInput={(e) => props.onField(props.p.id, "text", e.currentTarget.value)}
@@ -459,11 +578,13 @@ function TextRow(props) {
           <For each={templateLabels(r().text)}>
             {(lab) => (
               <div class="vz-tpl-row">
-                <span class="vz-tpl-label" title={lab}>{lab}</span>
+                <SingleLineText class="vz-tpl-label" value={lab} />
                 <input
                   {...focus}
-                  type="text" class="vz-tpl-input"
-                  value={r().tpl?.[lab] ?? ""}
+                   type="text" class="vz-tpl-input"
+                  aria-label={`${r().label}: ${lab} alternatives`}
+                  aria-invalid={!String(templateValue(r().tpl, lab) ?? "").trim()}
+                  value={templateValue(r().tpl, lab) ?? ""}
                   placeholder="values; separated; by; semicolons"
                   onInput={(e) => props.onTpl(props.p.id, lab, e.currentTarget.value)}
                 />
@@ -471,7 +592,6 @@ function TextRow(props) {
             )}
           </For>
         </div>
-      </Show>
-    </div>
+    </ParameterRow>
   );
 }

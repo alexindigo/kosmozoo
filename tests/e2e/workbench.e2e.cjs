@@ -436,6 +436,9 @@ async function attempt(name, fn) {
     check("scroll to end loads tail images", true);
   });
 
+  await attempt('workflow progress instrument', () => require('./workflow-progress.cjs')({ page, FAKE, KZ, check, capture: sourceShot, control: sourceControl }));
+  await attempt('source new content', () => require('./source-new-content.cjs')({ page, ENGINE, FAKE, KZ, check, capture: sourceShot }));
+
   await attempt("source chrome: pointer paths, shared persistence, progress and filter layer", async () => {
     const pin = '#hostList [data-source="fake"] .pin';
     const auto = '#hostList [data-source="fake"] .auto-refresh';
@@ -602,10 +605,11 @@ async function attempt(name, fn) {
         s.actions.folders.select(''); await s.actions.ui.refresh(); await s.actions.hosts.patch('fake', { pinned: true });
       })()`);
       await page.poll(`(async () => ${KZ}.state.inventory.folders.includes('a/deep'))()`, 20000);
-      check('folder picker is between host and separated pinned group', await page.evaluate(`(() => {
+      check('header order is host, folder, filter, separated pinned group', await page.evaluate(`(() => {
         const host = document.getElementById('hostPicker'), folder = document.getElementById('folderPicker');
-        return host.nextElementSibling === folder && folder.nextElementSibling.classList.contains('pinned-source-group') &&
-          !!folder.nextElementSibling.querySelector('.pinned-separator') && document.querySelector('#outputFolder').getAttribute('aria-label') === 'Output folder';
+        const filter = folder.nextElementSibling, pins = filter.nextElementSibling;
+        return host.nextElementSibling === folder && filter.classList.contains('feed-filter') && pins.classList.contains('pinned-source-group') &&
+          !!pins.querySelector('.pinned-separator') && document.querySelector('#outputFolder').getAttribute('aria-label') === 'Output folder';
       })()`));
       await nativeFolder('a');
       await page.poll(`document.querySelector('.card[data-name="a/visible.png"] img')?.naturalWidth === 128`, 20000);
@@ -673,10 +677,12 @@ async function attempt(name, fn) {
   });
 
   await require('./command-origins.cjs')({ page, ENGINE, KZ, check });
+  await attempt('viewer button visual contract', () => require('./viewer-buttons.cjs')({ page, KZ, check, capture: sourceShot, control: sourceControl }));
   await attempt('video playback contract', () => require('./media-video.cjs')({ page, ENGINE, KZ, check, capture: sourceShot, control: sourceControl }));
   await attempt('audio playback contract', () => require('./media-audio.cjs')({ page, ENGINE, KZ, check, capture: sourceShot, control: sourceControl }));
   await attempt('native failure messages', () => require('./media-failures.cjs')({ page, ENGINE, KZ, check, capture: sourceShot, control: sourceControl }));
   await attempt('media geometry contract', () => require('./media-geometry.cjs')({ page, ENGINE, KZ, check, capture: sourceShot, control: sourceControl }));
+  await attempt('image-relative zoom views contract', () => require('./zoom-views.cjs')({ page, KZ, check, capture: sourceShot, control: sourceControl }));
   check("no uncaught page errors", pageErrors.length === 0, pageErrors[0] ?? "");
 
   await page.close();

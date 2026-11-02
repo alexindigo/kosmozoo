@@ -13,6 +13,8 @@ export function validSourceVersion(value) {
 }
 
 export const validSourceCursor = value => shape(value, ["epoch", "revision"]) && text(value.epoch) && integer(value.revision);
+export const validArrivals = value => value === null || shape(value, ["sequence", "latestVisibleSeq"]) &&
+  integer(value.sequence) && integer(value.latestVisibleSeq) && value.latestVisibleSeq <= value.sequence;
 
 export function compareSourceVersions(a, b) {
   if (!validSourceVersion(a) || !validSourceVersion(b) || a.epoch !== b.epoch || a.incarnation !== b.incarnation) return null;
@@ -24,7 +26,8 @@ export function validateSourceSnapshot(frame) {
   if (!shape(frame, ["version", "epoch", "revision", "sources"]) || frame.version !== 1 || !text(frame.epoch) ||
       !integer(frame.revision) || !record(frame.sources)) invalid();
   for (const [id, source] of Object.entries(frame.sources)) {
-    if (!text(id) || !shape(source, ["address", "kind", "incarnation", "pinned", "autoRefresh", "sourceVersion", "activity"]) ||
+    const fields = ["address", "kind", "incarnation", "pinned", "autoRefresh", "sourceVersion", "activity"];
+    if (!text(id) || !(shape(source, fields) || shape(source, [...fields, "arrivals"]) && validArrivals(source.arrivals)) ||
         !text(source.address) || !["folder", "comfy"].includes(source.kind) || !text(source.incarnation) ||
         typeof source.pinned !== "boolean" || typeof source.autoRefresh !== "boolean" || !validSourceVersion(source.sourceVersion) ||
         source.sourceVersion.epoch !== frame.epoch || source.sourceVersion.incarnation !== source.incarnation ||
@@ -34,8 +37,10 @@ export function validateSourceSnapshot(frame) {
       if (!shape(a, ["supported", "reason"]) || a.supported !== false || !text(a.reason)) invalid();
       continue;
     }
-    if (!shape(a, ["epoch", "supported", "state", "sampledAt", "runningCount", "queuedCount", "runningPromptId", "progress",
-      "terminalRevision", "resyncRevision", "historyGap", "error"]) || a.supported !== true || !text(a.epoch) ||
+    const activityFields = ["epoch", "supported", "state", "sampledAt", "runningCount", "queuedCount", "runningPromptId", "progress",
+      "terminalRevision", "resyncRevision", "historyGap", "error"];
+    const enriched = shape(a, [...activityFields, "progressBasis", "workflow", "workflowReason"]);
+    if (!(shape(a, activityFields) || enriched) || a.supported !== true || !text(a.epoch) ||
         !["unknown", "idle", "running", "disconnected"].includes(a.state) ||
         !(a.sampledAt === null || Number.isFinite(a.sampledAt)) || !integer(a.runningCount) || !integer(a.queuedCount) ||
         !(a.runningPromptId === null || text(a.runningPromptId)) || !integer(a.terminalRevision) || !integer(a.resyncRevision) ||
@@ -43,6 +48,18 @@ export function validateSourceSnapshot(frame) {
     if (a.progress !== null && (!shape(a.progress, ["value", "max", "fraction"]) || !Number.isFinite(a.progress.value) ||
         a.progress.value < 0 || !Number.isFinite(a.progress.max) || a.progress.max <= 0 || !Number.isFinite(a.progress.fraction) ||
         a.progress.fraction < 0 || a.progress.fraction > 1)) invalid();
+    if (enriched) {
+      if (![null, "exact", "log"].includes(a.progressBasis) ||
+          (a.progress === null) !== (a.progressBasis === null) ||
+          !["other-client", "unavailable"].includes(a.workflowReason)) invalid();
+      const w = a.workflow;
+      if (w !== null && (!shape(w, ["promptId", "done", "total", "fraction", "basis"]) ||
+          a.state !== "running" || a.runningCount !== 1 || w.promptId !== a.runningPromptId ||
+          w.basis !== "graph+events" || !integer(w.total) || w.total === 0 ||
+          !Number.isFinite(w.done) || w.done < 0 || w.done >= w.total ||
+          !Number.isFinite(w.fraction) || w.fraction < 0 || w.fraction >= 1 ||
+          Math.abs(w.fraction - w.done / w.total) > Number.EPSILON)) invalid();
+    }
   }
   return frame;
 }

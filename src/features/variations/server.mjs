@@ -11,11 +11,11 @@
 
 import {
   generatePermutations, permutationAxes, permutationPlan, resolveRelativeRanges, templateReplaceWithProof,
-  paramId, parameterIndex, catalogueParams, parameterAliases, validRunAcknowledgement,
+  paramId, parameterIndex, catalogueParams, parameterAliases, validRunAcknowledgement, runOperationFields, targetRunPlan,
 } from "./shared.mjs";
 import { validEntryName, backingFor } from "../../backings/index.mjs";
 import { sourceOrigin, sameOrigin, validOrigin, validContext, expectedOrigin } from "../../source-origin.mjs";
-import { dependencyClosure, validateGraphLinks } from "./graph.mjs";
+import { dependencyClosure, validateGraphLinks } from "../../graph.mjs";
 import { sha256 } from "../../cache.mjs";
 import { IMAGE_EXTENSIONS, mediaExtension } from "../../backings/mime.mjs";
 import { listImages, readImage, folderError } from "./folder-images.mjs";
@@ -46,17 +46,29 @@ const PARAMETER_KINDS = [
     describe: p => ({ values: p.options }) },
   { kind: "text", channel: "textParams", accepts: () => true, describe: () => ({}) },
 ];
-export function parameterCatalogue(graph, { types = null, enums = null, outputClasses = null } = {}) {
+export function parameterCatalogue(graph, { types = null, enums = null, outputClasses = null, dynamicCombos = null } = {}) {
   const catalogue = Object.fromEntries(PARAMETER_KINDS.map(strategy => [strategy.channel, []]));
   for (const [nodeId, node] of Object.entries(graph ?? {})) {
     const type = String(node.class_type ?? "");
     if (!type) continue;
     const title = node._meta?.title && node._meta.title !== type ? String(node._meta.title) : null;
+    const nodeTypes = new Map(types), nodeEnums = new Map(enums);
+    const selectBranches = combos => {
+      for (const [name, options] of combos ?? []) {
+        if (!name.startsWith(type + ".")) continue;
+        const branch = options.get(node.inputs?.[name.slice(type.length + 1)]);
+        if (!branch) continue;
+        for (const [key, value] of branch.types) nodeTypes.set(key, value);
+        for (const [key, value] of branch.enums) nodeEnums.set(key, value);
+        selectBranches(branch.dynamicCombos);
+      }
+    };
+    selectBranches(dynamicCombos);
     for (const [key, value] of Object.entries(node.inputs ?? {})) {
       if (typeof value !== "number" && typeof value !== "string") continue;
       if (typeof value === "string" && key === "filename_prefix" && outputClasses?.has(type)) continue;
       const schemaKey = `${type}.${key}`;
-      const context = { value, declared: types?.get(schemaKey), options: enums?.get(schemaKey),
+      const context = { value, declared: nodeTypes.get(schemaKey), options: nodeEnums.get(schemaKey),
         image: typeof value === "string" && /loadimage$/i.test(type) && key === "image" };
       const strategy = PARAMETER_KINDS.find(strategy => strategy.accepts(context));
       const metadata = strategy.describe(context);
@@ -77,9 +89,38 @@ export const textParams = (graph, enums, outputClasses) => parameterCatalogue(gr
 
 // --- graph mutation --------------------------------------------------------------
 
-export function mutateGraph(graph, permutation, params) {
+export function mutateGraph(graph, permutation, params, dynamicCombos = null) {
   const clone = structuredClone(graph);
   const byId = parameterIndex(params ?? inspectGraph(clone));
+  // Prepare branch switches before explicit scalar writes, independent of axis
+  // order. An inactive child cannot be reintroduced by a later assignment.
+  for (const [nodeId, node] of Object.entries(clone)) {
+    const type = String(node.class_type ?? ""), inputs = node.inputs;
+    if (!inputs) continue;
+    const selections = new Map(Object.entries(permutation).flatMap(([id, value]) => {
+      const p = byId.get(id);
+      return p?.nodeIds.includes(nodeId) ? [[p.key, value]] : [];
+    }));
+    const prepare = combos => {
+      for (const [name, options] of combos ?? []) {
+        if (!name.startsWith(type + ".")) continue;
+        const key = name.slice(type.length + 1);
+        if (!Object.hasOwn(inputs, key)) continue;
+        const value = selections.has(key) ? selections.get(key) : inputs[key], branch = options.get(value);
+        if (selections.has(key) && !branch) throw new Error(`Unknown dynamic option for ${nodeId}.${key}: ${value}`);
+        if (!branch) continue;
+        if (!Object.is(inputs[key], value)) {
+          for (const child of Object.keys(inputs)) if (child.startsWith(key + ".")) delete inputs[child];
+          for (const [child, value] of branch.defaults) {
+            if (value === undefined) throw new Error(`No object_info default for ${nodeId}.${child.slice(type.length + 1)}`);
+            inputs[child.slice(type.length + 1)] = structuredClone(value);
+          }
+        }
+        prepare(branch.dynamicCombos);
+      }
+    };
+    prepare(dynamicCombos);
+  }
   const applied = [], writes = [];
   for (const [id, value] of Object.entries(permutation)) {
     const p = byId.get(id);
@@ -291,9 +332,9 @@ export function register(app) {
     const graph = await app.ingest.graph(hash);
     if (!app.backings.isCurrent(token)) return { error: "source changed during inspection", status: 409 };
     if (!graph) return { error: "no embedded ComfyUI graph", status: 422 };
-    const { types, enums, outputClasses } = await backing.objectInfo();
+    const { types, enums, outputClasses, dynamicCombos } = await backing.objectInfo();
     if (!app.backings.isCurrent(token)) return { error: "source changed during inspection", status: 409 };
-    return { graph, addr, types, enums, outputClasses, token, backing, context: { origin, graphHash: hash } };
+    return { graph, addr, types, enums, outputClasses, dynamicCombos, token, backing, context: { origin, graphHash: hash } };
   };
 
   app.route("GET", "/probe/<id>", async (_req, { id }) => {
@@ -338,18 +379,21 @@ export function register(app) {
 
     // Inspect once for current values + labels. Types come from the host's
     // object_info — the current value is not a reliable integer signal.
-    const fullInspection = catalogueParams(parameterCatalogue(graph, r));
+    const catalogue = parameterCatalogue(graph, r), fullInspection = catalogueParams(catalogue);
     const currentValues = Object.fromEntries([...parameterIndex(fullInspection).values()].map(p => [p.id, p.current]));
     const labelMap = parameterAliases(fullInspection);
 
     // Batch sweeps arrive as offsets from each image's own current value;
     // resolve them now that this graph's current values are known.
-    let axes, resolvedRanges, permutations;
+    let axes, resolvedRanges, permutations, effectivePlan;
     try {
-      axes = permutationAxes(ranges, imageParams ?? {});
+      runOperationFields(body);
+      effectivePlan = targetRunPlan({ ...body, imageParams: imageParams ?? {} }, catalogue);
+      axes = permutationAxes(effectivePlan.payload.ranges, imageParams ?? {});
       const selectedRanges = Object.fromEntries(axes.enabled);
       const selectedValues = Object.fromEntries(axes.imgEnabled);
       resolvedRanges = relative ? resolveRelativeRanges(selectedRanges, currentValues) : selectedRanges;
+      if (Object.keys(selectedRanges).some(id => !Object.hasOwn(resolvedRanges, id))) throw new Error("Every applicable relative range needs clamp bounds");
       const count = permutationPlan(resolvedRanges, currentValues, selectedValues).total;
       if (count > MAX_PERMUTATIONS) return Response.json({ error: `too many permutations (${count} > ${MAX_PERMUTATIONS})` }, { status: 413 });
       permutations = generatePermutations(resolvedRanges, currentValues, selectedValues);
@@ -378,47 +422,48 @@ export function register(app) {
 
     const errors = [];
     const accepted = [];
-    let submitted = 0;
+    let submitted = 0, uncertain = false, retired = false;
+    const prepared = [];
+    const rejectPlan = error => Response.json({ error, outcome: "rejected", submitted: 0, total: permutations.length,
+      errors: permutations.map(permutation => ({ permutation, error: `Plan rejected: ${error}` })),
+      acknowledgement: { ...acknowledgement, target: { id, host, filename }, context: r.context, accepted: [] } }, { status: 400 });
     for (const [index, perm] of permutations.entries()) {
       if (!app.backings.isCurrent(token)) {
-        errors.push({ permutation: perm, error: "source changed; remaining jobs were not submitted" });
-        break;
+        return rejectPlan("source changed; no jobs were submitted");
       }
-      const { graph: mutated, applied, writes } = mutateGraph(graph, perm, fullInspection);
+      let mutation;
+      try { mutation = mutateGraph(graph, perm, fullInspection, r.dynamicCombos); }
+      catch (error) { return rejectPlan(error.message); }
+      const { graph: mutated, applied, writes } = mutation;
       if (applied.length === 0) {
-        console.error(`[variations] permutation matched no nodes ${JSON.stringify(perm)}`);
-        errors.push({ permutation: perm, error: "no applicable nodes found" });
-        continue;
+        return rejectPlan("No applicable nodes found; no jobs were submitted");
       }
 
       const prefixProof = templateReplaceWithProof(pfxTpl, perm, currentValues, labelMap);
       const suffixProof = templateReplaceWithProof(sfxTpl, perm, currentValues, labelMap);
       const pfx = prefixProof.text, sfx = suffixProof.text;
+      if (!prefixProof.complete || !suffixProof.complete) return rejectPlan("Unresolved naming token: check prefix and suffix; no jobs were submitted");
       if (filename.includes("/") && /[/\\]/.test(pfx + sfx)) {
-        errors.push({ permutation: perm, error: "Prefix/suffix must stay within the producing directory's filename leaf" });
-        continue;
+        return rejectPlan("Prefix/suffix must stay within the producing directory's filename leaf");
       }
 
       let namingWrites;
       if (producing) {
         const p = findProducingOutputNode(mutated, filename, outputClasses);
         if (!p) {
-          errors.push({ permutation: perm, error: "producing output node lost after clone" });
-          continue;
+          return rejectPlan("Producing output node lost after clone");
         }
         namingWrites = narrowToOneOutputNode(mutated, p.id, originalBasename, pfx, sfx, outputClasses).written;
       } else {
         namingWrites = wrapAllOutputPrefixes(mutated, pfx, sfx, outputClasses ?? new Set());
         if (!namingWrites.length) {
-          errors.push({ permutation: perm, error: "no output node in graph" });
-          continue;
+          return rejectPlan("No output node in graph");
         }
       }
 
       try { validateGraphLinks(mutated); }
       catch (e) {
-        errors.push({ permutation: perm, error: e.message });
-        continue;
+        return rejectPlan(e.message);
       }
 
       const surviving = survivingAxes(mutated, writes, fullInspection);
@@ -433,6 +478,23 @@ export function register(app) {
         if (prefixProof.complete && outputs.every(({ value, directory }) => value.slice(directory.length).startsWith(pfx))) naming.push("prefix");
         if (suffixProof.complete && outputs.every(({ value }) => value.endsWith(sfx))) naming.push("suffix");
       }
+      const missing = Object.keys(perm).filter(id => !surviving.includes(id));
+      if (missing.length) return rejectPlan(`Operation ${missing.join(", ")} was pruned or overwritten in the final graph; no jobs were submitted`);
+      if (naming.length !== 2) return rejectPlan("Output naming would be folded or overwritten; shorten prefix or suffix before Run");
+      const appliedPlan = {
+        ranges: surviving.filter(id => resolvedRanges[id]?.enabled && !imageParams?.[id]?.enabled),
+        imageParams: surviving.filter(id => imageParams?.[id]?.enabled && !resolvedRanges[id]?.enabled),
+      };
+      const selections = Object.fromEntries(["ranges", "imageParams"].map(channel => [channel,
+        [...appliedPlan[channel], ...axes.excluded[channel].filter(id => !Object.hasOwn(perm, id))]]));
+      prepared.push({ index, perm, mutated, applied: appliedPlan, selections, naming });
+    }
+    // All final prompts and their exact write coverage are prepared before the
+    // first irreversible enqueue. A failure in a later tuple cannot leak jobs.
+    for (const { index, perm, mutated, applied, selections, naming } of prepared) {
+      if (!app.backings.isCurrent(token)) {
+        retired = true; errors.push({ permutation: perm, error: "source changed; remaining jobs were not submitted" }); break;
+      }
       const res = await backing.enqueue({
         prompt: mutated,
         extra_data: { extra_pnginfo: lineageTag(`${host}:${filename}`, perm) },
@@ -442,17 +504,9 @@ export function register(app) {
         errors.push({ permutation: perm, error: res.error });
       } else {
         submitted++;
-        if (!app.backings.isCurrent(token)) errors.push({ permutation: perm, error: "source changed after submission; configuration was not acknowledged" });
-        else if (res.acceptance !== "confirmed") errors.push({ permutation: perm, error: res.error ?? "submission acceptance is unconfirmed; do not automatically resubmit" });
+        if (!app.backings.isCurrent(token)) { retired = true; errors.push({ permutation: perm, error: "source changed after submission; configuration was not acknowledged" }); }
+        else if (res.acceptance !== "confirmed") { uncertain ||= res.acceptance !== "partial"; errors.push({ permutation: perm, error: res.error ?? "submission acceptance is unconfirmed; do not automatically resubmit" }); }
         else {
-          const applied = {
-            ranges: surviving.filter(id => resolvedRanges[id]?.enabled && !imageParams?.[id]?.enabled),
-            imageParams: surviving.filter(id => imageParams?.[id]?.enabled && !resolvedRanges[id]?.enabled),
-          };
-          // On uses the surviving write proof; off was consumed by the same
-          // selection filter that constructed this permutation, not a value write.
-          const selections = Object.fromEntries(["ranges", "imageParams"].map(channel => [channel,
-            [...applied[channel], ...axes.excluded[channel].filter(id => !Object.hasOwn(perm, id))]]));
           accepted.push({ index, promptId: res.promptId, applied, selections, naming });
         }
       }
@@ -460,7 +514,8 @@ export function register(app) {
 
     if (errors.length) console.error(`[variations] ${host}:${filename} → submitted ${submitted}/${permutations.length}, ${errors.length} failed`);
     else console.log(`[variations] ${host}:${filename} → submitted ${submitted}/${permutations.length}`);
-    return Response.json({ submitted, total: permutations.length, errors,
+    return Response.json({ submitted, total: permutations.length, errors, operations: effectivePlan.operations,
+      outcome: retired ? "retired" : uncertain ? "uncertain-effects" : errors.length ? submitted ? "partial-effects" : "rejected" : "accepted-plan",
       acknowledgement: { ...acknowledgement, target: { id, host, filename }, context: r.context, accepted },
     });
   });

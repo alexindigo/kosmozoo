@@ -4,14 +4,14 @@ import { makeImageMeasurements, useImageDisplay, ERROR_RETRY_MS, MEASURE_TIMEOUT
 import { createRoot, createSignal } from "solid-js";
 
 const flush = async () => { for (let i = 0; i < 30; i++) await Promise.resolve(); };
-function fixture() {
+function fixture(policyOptions = {}) {
   const original = globalThis.Image, images = [], idle = new Map();
   let sequence = 0;
   globalThis.Image = class {
     constructor() { images.push(this); this.naturalWidth = 640; this.naturalHeight = 360; }
     removeAttribute() { this.src = ""; }
   };
-  const acquisition = makeAcquisition({ scheduleIdle: callback => { const key = ++sequence; idle.set(key, callback); return () => idle.delete(key); } });
+  const acquisition = makeAcquisition({ scheduleIdle: callback => { const key = ++sequence; idle.set(key, callback); return () => idle.delete(key); }, ...policyOptions });
   const context = {}, identities = new Map();
   acquisition.setContext(context);
   acquisition.setWindow({ ids: ["front"], currentId: "front" });
@@ -208,6 +208,10 @@ Deno.test("display seam: re-binding a settled element to the same URL holds no c
 Deno.test("surface displays: features receive the Store's one display port at installation", async () => {
   const { makeAppStore } = await import("../client-solid/store/app-store.js");
   const location = globalThis.location, history = globalThis.history;
+  const requestIdle = globalThis.requestIdleCallback, cancelIdle = globalThis.cancelIdleCallback;
+  const idle = new Map(); let sequence = 0;
+  globalThis.requestIdleCallback = callback => { const id = ++sequence; idle.set(id, callback); return id; };
+  globalThis.cancelIdleCallback = id => idle.delete(id);
   globalThis.location = { pathname: "/", search: "", hash: "" };
   globalThis.history = { state: null, replaceState() {}, pushState() {} };
   const store = makeAppStore({ subscribeSources: null });
@@ -217,10 +221,72 @@ Deno.test("surface displays: features receive the Store's one display port at in
     assertEquals(typeof port, "function");
     const lease = port({ id: "/thumb.png", src: "/thumb.png" });
     assertEquals(lease.read(), { src: "/thumb.png", priority: "foreground" }, "admitted as user-visible foreground work");
-    lease.loaded(); lease.dispose();
+    const preloads = [0, 1, 2].map(i => port({ id: `/ahead-${i}`, src: `/ahead-${i}`, priority: "background" }));
+    assert(preloads.every(item => item.read().src === null), "surface preloads wait behind foreground demand");
+    lease.loaded(); await flush();
+    const [id, callback] = idle.entries().next().value;
+    idle.delete(id); callback({ timeRemaining: () => 8 });
+    assertEquals(preloads.map(item => item.read().src), ["/ahead-0?priority=background", "/ahead-1?priority=background", null],
+      "the feature port preserves background intent and the two-slot ceiling");
+    preloads.forEach(item => item.dispose()); lease.dispose();
+    for (const [id, callback] of idle) { idle.delete(id); callback({ timeRemaining: () => 8 }); }
+    assert(preloads.every(item => item.read().src === null), "retired owners cannot start in a pending idle turn");
   } finally {
     store.dispose();
     if (location === undefined) delete globalThis.location; else globalThis.location = location;
     if (history === undefined) delete globalThis.history; else globalThis.history = history;
+    if (requestIdle === undefined) delete globalThis.requestIdleCallback; else globalThis.requestIdleCallback = requestIdle;
+    if (cancelIdle === undefined) delete globalThis.cancelIdleCallback; else globalThis.cancelIdleCallback = cancelIdle;
   }
+});
+
+Deno.test("image resources: probes and mounted/thumbnail displays share the app-origin transport budget", async () => {
+  const f = fixture({ appOrigin: "http://engine.test" }), displays = [];
+  try {
+    f.acquisition.setWindow({ ids: ["a", "b", "c", "d"], currentId: "a" });
+    for (const id of ["a", "b", "c", "d"]) f.measurements.request(id);
+    assertEquals(f.images.length, 4);
+    displays.push(f.measurements.display({ id: "thumb", src: "/thumb.png", priority: "foreground", scoped: false }));
+    assertEquals(displays[0].read().src, null, "a display cannot bypass four active native probes");
+    f.images[0].onload(); await flush();
+    assertEquals(displays[0].read().src, "/thumb.png");
+    displays.push(f.measurements.display({ id: "foreign", src: "http://other.test/img.png", priority: "foreground", scoped: false }));
+    assertEquals(displays[1].read().src, "http://other.test/img.png");
+  } finally { displays.forEach(display => display.dispose()); f.dispose(); }
+});
+
+Deno.test("image resources: a probe of an already sized entry notifies only its own size readers, never a feed-wide derivation", async () => {
+  const f = fixture();
+  const { createMemo } = await import("solid-js");
+  const ids = Array.from({ length: 2000 }, (_, i) => `entry-${i}`);
+  const known = new Set(ids.slice(1)); // every entry but one has authoritative listing dimensions
+  const m = makeImageMeasurements({ acquisition: f.acquisition, srcFor: id => `/bytes/${id}`,
+    knownSize: id => known.has(id) ? { w: 640, h: 360 } : null });
+  m.setContext({});
+  let wide = 0, own = 0, dispose;
+  try {
+    createRoot(cleanup => {
+      dispose = cleanup;
+      // sizeFor's shape: failure first, then the listing's dimensions, else the measurement.
+      createMemo(() => { wide++; return ids.filter(id => !m.loadFailed(id) && (known.has(id) || m.sizeOf(id))).length; });
+      createMemo(() => { own++; return m.sizeOf("entry-7"); });
+    });
+    f.acquisition.setWindow({ ids, currentId: ids[0], limit: 20 });
+    for (const id of ids.slice(0, 20)) m.request(id);
+    await flush();
+    const [wideBefore, ownBefore] = [wide, own];
+    // listing-sized entries' probes settle as capacity frees; entry-0 stays loading
+    for (let done = 1, guard = 0; done < 20 && guard < 50; guard++) {
+      const started = f.images.length;
+      for (const image of f.images.slice(done, started)) image.onload();
+      done = started; await flush();
+    }
+    assertEquals(f.images.length, 20);
+    assertEquals(wide, wideBefore, "a probe of an already sized entry changes nothing the feed derives");
+    assertEquals(own, ownBefore + 1, "that entry's own size readers are notified");
+    f.images[0].onload();                                    // the one unsized entry becomes ready
+    assertEquals(wide, wideBefore + 1, "a real readiness change recomputes once");
+    m.setContext({});                                        // a new context re-reads everything
+    assertEquals(wide, wideBefore + 2);
+  } finally { dispose?.(); m.dispose(); f.dispose(); }
 });
