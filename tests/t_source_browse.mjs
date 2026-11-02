@@ -345,6 +345,53 @@ Deno.test("rail special motion: sparse known positions, compensation, quiet rest
   });
 });
 
+Deno.test("rail motion notifications: compensation is not travel, quiet restores are, unchanged positions stay quiet", async () => {
+  await withBrowse(async ({ store }) => {
+    const col = { scrollTop: 0, clientHeight: 100 };
+    store.actions.feed.register({ scrollEl: col, virtualizer: { scrollToIndex() {}, getVirtualItems: () => [] } });
+    const start = store.state.feedMotionRevision();
+    col.scrollTop = 50; store.actions.feed.scrolled(50);
+    assertEquals(store.state.feedMotionRevision(), start + 1);
+    store.actions.feed.scrolled(50);
+    assertEquals(store.state.feedMotionRevision(), start + 1);
+    store.actions.feed.compensate(100); store.actions.feed.scrolled(col.scrollTop);
+    assertEquals(store.state.feedScrollTop(), 150, "wave geometry still receives compensation");
+    assertEquals(store.state.feedMotionRevision(), start + 1, "compensation cannot retire rail browsing");
+    await new Promise(r => setTimeout(r, 180));
+    assertEquals(store.state.feedMotionRevision(), start + 1, "settle cannot replay compensation as motion");
+    store.actions.feed.quiet(); col.scrollTop = 200; store.actions.feed.scrolled(200);
+    assertEquals(store.state.feedMotionRevision(), start + 2, "quiet restores move the feed and resume following");
+  });
+});
+
+Deno.test("rail motion notifications: only the compensation's own write is non-motion before settle", async () => {
+  await withBrowse(async ({ store }) => {
+    let position = 0;
+    const col = { clientHeight: 100, get scrollTop() { return position; },
+      set scrollTop(top) { position = Math.min(300, Math.max(0, top)); } };
+    store.actions.feed.register({ scrollEl: col, virtualizer: { scrollToIndex() {}, getVirtualItems: () => [] } });
+    const start = store.state.feedMotionRevision();
+    store.actions.feed.compensate(100);
+    store.actions.feed.scrolled(col.scrollTop);
+    assertEquals(store.state.feedMotionRevision(), start, "the compensation event is not motion");
+    assertEquals(store.state.feedActivity(), "scrolling", "the settle window is still active");
+    col.scrollTop = 125; store.actions.feed.scrolled(col.scrollTop);
+    assertEquals(store.state.feedMotionRevision(), start + 1, "user motion inside the window must retire rail browsing");
+    col.scrollTop = 100; store.actions.feed.scrolled(col.scrollTop);
+    assertEquals(store.state.feedMotionRevision(), start + 2, "returning to the compensated position is a new motion");
+    store.actions.feed.compensate(500); store.actions.feed.scrolled(col.scrollTop);
+    assertEquals(store.state.feedScrollTop(), 300, "classification uses the browser-applied, clamped position");
+    assertEquals(store.state.feedMotionRevision(), start + 2);
+    store.actions.feed.compensate(-50);
+    col.scrollTop = 225; store.actions.feed.scrolled(col.scrollTop);
+    assertEquals(store.state.feedMotionRevision(), start + 3, "a user move coalesced with the compensation event is motion");
+    col.scrollTop = 250; store.actions.feed.scrolled(col.scrollTop);
+    assertEquals(store.state.feedMotionRevision(), start + 4, "an unobserved compensation cannot suppress a later return");
+    store.actions.feed.scrolled(col.scrollTop);
+    assertEquals(store.state.feedMotionRevision(), start + 4, "duplicate positions stay quiet");
+  });
+});
+
 Deno.test("rail reorder/loading: stale virtual keys fall back to committed ID and loading retires the previous scroll", async () => {
   await withBrowse(async ({ store, lists }) => {
     const items=store.state.images.map((im,index)=>({key:im.id,index,start:index*100,end:(index+1)*100}));

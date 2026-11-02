@@ -16,11 +16,13 @@
 // (Grid's handler is its only writer). No innerHTML rebuilds, no querySelector
 // walks, no paint loop.
 
-import { createSignal, createMemo, createEffect, createRenderEffect, untrack, onMount, onCleanup, For } from "solid-js";
+import { createSignal, createMemo, createEffect, createRenderEffect, untrack, onMount, onCleanup, For, Show } from "solid-js";
 import { useAppStore } from "../store/app-store.js";
 import { tapeWindow, scrollTapeOffset } from "/js/rail.mjs";
+import { RailPreview } from "./RailPreview.js";
 
 const BAND_TICKS = 20;
+const HOVER_DELAY_MS = 120;
 
 // rail geometry is owned by the CSS (#feedRail's --fr-* custom properties) —
 // read at mount and on resize so the capacity/scrub math can never silently
@@ -44,6 +46,28 @@ export function FeedRail() {
   let tape;
   let geom = { tickPx: 5, labelTop: 14, labelBottom: 28 };
   const [capacity, setCapacity] = createSignal(0);
+  const [hovered, setHovered] = createSignal(null), [preview, setPreview] = createSignal(null);
+  let hoverTimer = null;
+  const hidePreview = () => { clearTimeout(hoverTimer); hoverTimer = null; setHovered(null); setPreview(null); };
+  const hover = (event, idx, tick) => {
+    if (dragging || event.pointerType === "touch") return;
+    hidePreview();
+    const entry = store.state.feedEntryAt(idx);
+    if (!entry) return;
+    const rect = event.currentTarget.getBoundingClientRect();
+    const tickRect = tick.getBoundingClientRect();
+    const target = { idx, id: entry.id, hash: entry.hash, entry,
+      anchor: { left: rect.left, right: rect.right, top: tickRect.top, bottom: tickRect.bottom },
+      size: store.state.cardSize(store.state.entriesWithKnownSize()[idx]) };
+    setHovered(target);
+    hoverTimer = setTimeout(() => { hoverTimer = null; if (hovered() === target) setPreview(target); }, HOVER_DELAY_MS);
+  };
+  createEffect(() => {
+    const target = hovered();
+    if (!target) return;
+    const entry = store.state.feedEntryAt(target.idx);
+    if (entry?.id !== target.id || target.hash && entry.hash && entry.hash !== target.hash) untrack(hidePreview);
+  });
   const tickRefs = new Map();
   let arrivalEpoch;
   createEffect(() => {
@@ -103,15 +127,16 @@ export function FeedRail() {
   // offsets accumulate smooth trackpad motion; rendered/scrubbed rows are whole.
   const [browsedStart, setBrowsedStart] = createSignal(null);
   createEffect(() => {
-    store.state.feedScrollTop();
+    store.state.feedMotionRevision();
     store.state.feedScrollEl();
-    untrack(() => setBrowsedStart(null));
+    untrack(() => { setBrowsedStart(null); hidePreview(); });
   });
   const tapeStart = createMemo(() => Math.floor(Math.max(0, Math.min(
     Math.max(0, N() - capacity()), browsedStart() ?? followedStart(),
   ))));
   const onWheel = (e) => {
     e.preventDefault();
+    hidePreview();
     setBrowsedStart(scrollTapeOffset(N(), capacity(), browsedStart() ?? tapeStart(),
       e.deltaY, e.deltaMode, geom.tickPx));
   };
@@ -142,6 +167,7 @@ export function FeedRail() {
   };
   let dragging = false;
   const onDown = (e) => {
+    hidePreview();
     dragging = true;
     // synthetic events (probes) carry no active pointer — capture is a
     // nicety for real drags, never a hard requirement
@@ -156,13 +182,18 @@ export function FeedRail() {
     const ro = new ResizeObserver(recompute);
     ro.observe(rail);
     rail.addEventListener("wheel", onWheel, { passive: false });
-    onCleanup(() => { ro.disconnect(); rail.removeEventListener("wheel", onWheel); });
+    window.addEventListener("scroll", hidePreview, { capture: true, passive: true });
+    window.addEventListener("resize", hidePreview, { passive: true });
+    onCleanup(() => {
+      hidePreview(); ro.disconnect(); rail.removeEventListener("wheel", onWheel);
+      window.removeEventListener("scroll", hidePreview, true); window.removeEventListener("resize", hidePreview);
+    });
   });
 
   return (
     <div
       id="feedRail"
-      title="feed position — scroll to browse; click or drag to jump"
+      aria-label="feed position — scroll to browse; click or drag to jump"
       ref={(el) => { rail = el; }}
       style={{ visibility: N() <= 1 ? "hidden" : "" }}
       onPointerDown={onDown}
@@ -194,14 +225,14 @@ export function FeedRail() {
             const state = () => store.state.cardState(entry()?.id, {
               current: !!entry() && entry().id === markerId(), surface: "rail",
             });
-            return <div class="fr-row" classList={{ "fr-band-alt": Math.floor(idx / BAND_TICKS) % 2 === 1 }}>
+            return <div class="fr-row" classList={{ "fr-band-alt": Math.floor(idx / BAND_TICKS) % 2 === 1 }}
+              onPointerEnter={event => hover(event, idx, el)} onPointerLeave={hidePreview}>
               <div class="fr-tick"
               ref={el}
               classList={{ wave: inWave(idx), current: state().current }}
               style={state().style}
               data-entry-id={entry()?.id}
               data-treatment={state().treatment}
-              title={entry()?.filename}
               />
             </div>;
           }}
@@ -210,6 +241,8 @@ export function FeedRail() {
       <div class="fr-num fr-top">{topLabel()}</div>
       <div class="fr-num fr-bottom">{bottomLabel()}</div>
       <div class="fr-num fr-total">{N()}</div>
+      <Show when={preview()} keyed>{target => <RailPreview entry={target.entry} size={target.size}
+        anchor={target.anchor} registerDisplay={store.actions.images.surface} />}</Show>
     </div>
   );
 }

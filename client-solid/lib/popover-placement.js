@@ -6,6 +6,17 @@ export function popoverPlacement(trigger, viewport, size, margin = 4) {
     trigger.bottom < trigger.top || size.width <= 0 || size.height < 0 || margin < 0 ||
     viewport.width <= margin * 2 || viewport.height <= margin * 2) return null;
   const clamp = (value, low, high) => Math.max(low, Math.min(value, high));
+  if (size.side === "right") {
+    if (!Number.isFinite(trigger.right) || trigger.right < trigger.left) return null;
+    const left = Math.max(trigger.right + margin, margin);
+    const width = Math.min(size.width, viewport.width - margin - left);
+    if (width <= 0) return null;
+    const maxHeight = viewport.height - margin * 2;
+    const height = Math.min(size.height, maxHeight);
+    return Object.freeze({ side: "right", width, height, minHeight: 0, maxHeight,
+      left,
+      top: clamp((trigger.top + trigger.bottom - height) / 2, margin, viewport.height - margin - height) });
+  }
   const start = clamp(trigger.top, margin, viewport.height - margin);
   const end = clamp(trigger.bottom, margin, viewport.height - margin);
   const above = Math.max(0, start - margin * 2);
