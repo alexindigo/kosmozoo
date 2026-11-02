@@ -7,6 +7,7 @@ import { VariationsModal } from "./VariationsModal.js";
 import * as api from "./api.js";
 import { makeVariationSession } from "./session.js";
 import { variationCommands } from "./commands.js";
+import { sourceOrigin, validOrigin } from "/shared/source-origin.mjs";
 
 // Assembly injects modal services and registers owner-safe command definitions.
 export function install(store) {
@@ -20,6 +21,9 @@ export function install(store) {
     uploadInput(hostName, form, origin) { return api.uploadInput(hostName, form, origin); },
     inspectImage: api.inspectImage,
     inputThumbnail: api.inputThumbnail,
+    readInput: api.readInput,
+    inputSources: () => Object.keys(store.state.hosts).filter(host => store.state.hosts[host].kind === "comfy" && store.state.hosts[host].capabilities?.list !== false)
+      .map(host => sourceOrigin(host, store.state.hosts[host])).filter(validOrigin),
     // Thumbnail bytes share the feed's engine route and browser connections:
     // they join the Store's one acquisition policy as foreground displays.
     registerThumbnail: input => store.surfaceDisplay(input),
@@ -37,7 +41,10 @@ export function install(store) {
     },
   };
   return {
-    ownedCommands: ["variations.discard.cancel", "variations.images.close"].map(id => ({ id, validate: args => Object.keys(args).length === 0 })),
+    ownedCommands: [
+      ...["variations.discard.cancel", "variations.images.close"].map(id => ({ id, validate: args => Object.keys(args).length === 0 })),
+      { id: "variations.tabs.move", validate: args => Object.keys(args).length === 1 && [-1, 1, "first", "last"].includes(args.step) },
+    ],
     commands: variationCommands({ state: store.state, broker }),
     ports: {
       services,

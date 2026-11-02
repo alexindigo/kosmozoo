@@ -929,6 +929,7 @@ async function main() {
     await require('./variations-output-names.cjs')({ cdp, check, FAKE, KZ });
     await require('./variations-range-handles.cjs')({ cdp, check, FAKE, KZ });
     await require('./variations-row-click.cjs')({ cdp, check, FAKE, KZ });
+    await require('./variations-source-tabs.cjs')({ cdp, check });
   } finally {
     await cdp.close();
   }
