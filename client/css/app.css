@@ -154,6 +154,17 @@ main { display: flex; flex: 1; min-height: 0; }
  : the upper line sits at the band's half — derived, not hand-synced */
 #feedRail .fr-bottom { bottom: calc(var(--fr-label-bottom) / 2); }
 #feedRail .fr-total { bottom: 2px; color: var(--foreground-dim); }
+.fr-preview { --fr-preview-width: 160px;
+  position: fixed; inset: auto; margin: 0; width: var(--fr-preview-width);
+  padding: 6px; border: 1px solid var(--border); border-radius: 6px;
+  display: flex; flex-direction: column; gap: 4px;
+  background: var(--surface); color: var(--foreground); font: 11px/16px system-ui;
+  box-shadow: 0 3px 12px var(--backdrop); pointer-events: none; }
+.fr-preview:not(.is-placed) { visibility: hidden; }
+.fr-preview-picture { position: relative; flex: 1; min-height: 0; overflow: hidden; }
+.fr-preview-picture .media-box:not(.ic-loaded) img { visibility: hidden; }
+.fr-preview-loading { position: absolute; inset: 0; display: grid; place-items: center; white-space: nowrap; }
+.fr-preview-name, .fr-preview-reason { flex: 0 0 auto; display: block; white-space: nowrap; }
 #candidatesCol { flex: 1; min-width: 0; overflow-y: auto; overflow-x: hidden;
   scrollbar-width: none;
   /* the feed owns every scroll adjustment (landings, merges) — the browser's

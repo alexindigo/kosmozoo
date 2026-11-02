@@ -32,3 +32,17 @@ Deno.test("popover placement: remains bounded for offscreen anchors and rejects 
   assertEquals(popoverPlacement({ left: NaN, top: 0, bottom: 10 }, viewport, size), null);
   assertEquals(popoverPlacement({ left: 0, top: -10, bottom: 500 }, viewport, size), null);
 });
+
+Deno.test("popover placement: right-side previews center on their tick and clamp at viewport edges", () => {
+  const preview = { width: 160, height: 120, side: "right" };
+  const middle = popoverPlacement({ left: 8, right: 28, top: 200, bottom: 205 }, viewport, preview);
+  assertEquals(middle.side, "right"); assertEquals(middle.left, 32);
+  assertEquals(middle.top + middle.height / 2, 202.5);
+  const top = popoverPlacement({ left: 8, right: 28, top: 39, bottom: 44 }, viewport, preview);
+  assertEquals(top.top, 4);
+  const bottom = popoverPlacement({ left: 8, right: 28, top: 425, bottom: 430 }, viewport, preview);
+  assertEquals(bottom.top + bottom.height, 437);
+  const short = popoverPlacement({ left: 8, right: 28, top: 39, bottom: 44 }, { width: 100, height: 80 }, preview);
+  assert(short.left >= 4 && short.left + short.width <= 96);
+  assert(short.top >= 4 && short.top + short.height <= 76);
+});
