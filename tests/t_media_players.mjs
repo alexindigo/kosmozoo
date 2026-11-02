@@ -43,6 +43,38 @@ Deno.test("media shortcut: Space consumes without scrolling, rebinds, typing/mod
   } finally { registration.dispose(); store.actions.status.clear("transient"); store.dispose(); api.setSettings = saved; }
 });
 
+Deno.test("media shortcut: absent, unfocused, unavailable and retired targets decline; accepted false results still consume", () => {
+  const store = makeAppStore({ subscribeSources: null });
+  let focused = false, available = true, toggles = 0;
+  const space = () => ({ key: " ", target: { matches: () => false }, prevented: false,
+    preventDefault() { this.prevented = true; }, stopPropagation() {} });
+  const dispatch = expected => { const event = space(); store.actions.keys.dispatch(event); assertEquals(event.prevented, expected); };
+  let registration;
+  try {
+    for (const binding of CORE_BINDINGS) store.actions.keys.register(binding);
+    dispatch(false);
+    registration = store.actions.media.register({ workbench: false, available: () => available,
+      focused: () => focused, primary: () => true, pause() {}, toggle() { toggles++; return false; } });
+    dispatch(false); // primary does not select an unfocused feed player
+    focused = true; available = false; dispatch(false);
+    available = true; dispatch(true); assertEquals(toggles, 1);
+    registration.dispose(); dispatch(false); assertEquals(toggles, 1);
+  } finally { registration?.dispose(); store.dispose(); }
+});
+
+Deno.test("players: shortcut eligibility shares focused/primary workbench selection with toggle", () => {
+  let workbench = false, focused = false, available = true;
+  const owner = makeMediaPlayers({ workbenchOpen: () => workbench });
+  const registration = owner.register({ workbench: true, available: () => available,
+    focused: () => focused, primary: () => true, pause() {}, toggle: () => true });
+  try {
+    assertEquals(owner.canToggle(), false); assertEquals(owner.toggle(), false);
+    workbench = true; assert(owner.canToggle()); assert(owner.toggle());
+    available = false; assertEquals(owner.canToggle(), false); assertEquals(owner.toggle(), false);
+    registration.dispose(); assertEquals(owner.canToggle(), false);
+  } finally { owner.dispose(); }
+});
+
 Deno.test("video measurement uses the retained six-slot owner and retires native video loads", () => {
   const saved = { document: globalThis.document, Image: globalThis.Image };
   const made = [];

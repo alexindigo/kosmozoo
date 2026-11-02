@@ -1,5 +1,5 @@
 // Transport acceptance is independent of an action's result (including false).
-export function makeInputPolicy({ handles, state, layers, captureEvent, onError }) {
+export function makeInputPolicy({ handles, state, layers, captureEvent, onError, canToggleMedia = () => false }) {
   const consumed = new WeakSet();
   const observed = new WeakSet();
   const observe = (result) => {
@@ -16,7 +16,7 @@ export function makeInputPolicy({ handles, state, layers, captureEvent, onError 
     if (binding.route === "keys") return state.keysPanelOpen() && !state.capturing();
     if (binding.route === "workbench") return wb;
     if (binding.route === "workbench-pair") return wb && !!state.diffPair().b;
-    if (binding.route === "media") return !state.keysPanelOpen() && !layers().length;
+    if (binding.route === "media") return !state.keysPanelOpen() && !layers().length && canToggleMedia();
     return true;
   };
   const request = (binding) => {

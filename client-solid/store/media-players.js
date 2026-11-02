@@ -3,6 +3,11 @@
 export function makeMediaPlayers({ workbenchOpen, onError = () => {} }) {
   const players = new Set();
   let disposed = false;
+  const target = () => {
+    const workbench = workbenchOpen();
+    const eligible = [...players].filter(p => p.workbench === workbench && p.available());
+    return eligible.find(p => p.focused()) ?? (workbench ? eligible.find(p => p.primary()) : null);
+  };
   return {
     register(player) {
       if (disposed) return { started() {}, dispose() {} };
@@ -15,10 +20,9 @@ export function makeMediaPlayers({ workbenchOpen, onError = () => {} }) {
         dispose() { players.delete(player); player.pause(); },
       };
     },
+    canToggle: () => !!target(),
     toggle() {
-      const workbench = workbenchOpen();
-      const eligible = [...players].filter(p => p.workbench === workbench && p.available());
-      const player = eligible.find(p => p.focused()) ?? (workbench ? eligible.find(p => p.primary()) : null);
+      const player = target();
       return player ? player.toggle() : false;
     },
     report(error) { onError(error); },

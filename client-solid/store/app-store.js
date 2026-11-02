@@ -2547,6 +2547,7 @@ export function makeAppStore({ subscribeSources = typeof window !== "undefined" 
   registerCoreCommands(handles, { ops: actions, state: stateObj });
   const publicActions = commandFacades(handles, actions, stateObj);
   inputPolicy = makeInputPolicy({ handles, state: stateObj, layers: keyLayers,
+    canToggleMedia: players.canToggle,
     captureEvent: actions.keys.captureEvent, onError: (error) => actions.status.error(`input failed: ${error?.message ?? error}`) });
   return { state: stateObj, actions: publicActions, handles, ui: uiStateObj, dispose };
 }
