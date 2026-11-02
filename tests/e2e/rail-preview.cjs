@@ -121,7 +121,21 @@ const names = {
     assert.equal(await page.evaluate(`document.querySelectorAll('.fr-preview img').length`),0,'failure has no native broken-image glyph');
     await geometry(names.failed);await capture('rail-preview-failed');
     console.log('ok image failure keeps filename and short reason without broken glyph');
-    assert.deepEqual(errors,[]);console.log('PASS rail-preview (9 consumer contracts, no page errors)');
+    // A real narrow viewport must shrink the preview beside the rail, never
+    // slide it over the trigger. Its media height must use that final width.
+    await page.mouse('mouseMoved',300,18,{buttons:0});
+    await page.send('Emulation.setDeviceMetricsOverride',{width:180,height:861,deviceScaleFactor:1,mobile:false});
+    await browse(names.top);await move(names.top);await shown(names.top);
+    await page.poll(`document.querySelector('.fr-preview .media-box')?.classList.contains('ic-loaded')`);
+    const narrow=await page.evaluate(`(()=>{const panel=document.querySelector('.fr-preview'),p=panel.getBoundingClientRect(),rail=document.querySelector('#feedRail').getBoundingClientRect(),picture=panel.querySelector('.fr-preview-picture').getBoundingClientRect(),cs=getComputedStyle(panel);return{left:p.left,right:p.right,width:p.width,height:p.height,railRight:rail.right,vw:innerWidth,pictureHeight:picture.height,imageHeight:panel.querySelector('img').getBoundingClientRect().height,padding:parseFloat(cs.paddingTop)+parseFloat(cs.paddingBottom)+parseFloat(cs.borderTopWidth)+parseFloat(cs.borderBottomWidth),gap:parseFloat(cs.rowGap),label:panel.querySelector('.fr-preview-name').getBoundingClientRect().height}})()`);
+    assert.equal(narrow.left,narrow.railRight+4,'narrow preview stays beside its trigger');
+    assert.equal(narrow.right,narrow.vw-4,'narrow preview respects viewport margin');
+    assert(narrow.width<160,'narrow preview shrinks');
+    assert(Math.abs(narrow.pictureHeight-narrow.imageHeight)<0.5,'tall image allocation hugs the constrained image, without preferred-width surplus');
+    assert(Math.abs(narrow.height-narrow.pictureHeight-narrow.padding-narrow.gap-narrow.label)<0.5,'panel height follows media at its actual constrained width');
+    await capture('rail-preview-narrow');
+    console.log('ok narrow viewport shrinks right-side preview without overlap or stale preferred-width height',narrow);
+    assert.deepEqual(errors,[]);console.log('PASS rail-preview (10 consumer contracts, no page errors)');
   }catch(error){
     console.error('preview diagnostics',await page.evaluate(`({hover:matchMedia('(hover: hover)').matches,anyHover:matchMedia('(any-hover: hover)').matches,pointer:matchMedia('(pointer: fine)').matches,previews:[...document.querySelectorAll('.fr-preview')].map(el=>({text:el.textContent,class:el.className,html:el.outerHTML})),top:document.querySelector('.fr-top')?.textContent,ticks:[...document.querySelectorAll('.fr-tick')].slice(0,5).map(el=>({id:el.dataset.entryId,hover:el.matches(':hover')}))})`),errors);
     throw error;

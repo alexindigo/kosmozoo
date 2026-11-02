@@ -24,13 +24,17 @@ export function RailPreview(props) {
     frame = null;
     if (!mounted) return;
     const cs = getComputedStyle(panel), px = key => parseFloat(cs[key]) || 0;
-    const width = Math.min(parseFloat(cs.getPropertyValue("--fr-preview-width")), innerWidth - 8);
+    const viewport = { width: innerWidth, height: innerHeight };
+    const room = popoverPlacement(props.anchor, viewport,
+      { width: parseFloat(cs.getPropertyValue("--fr-preview-width")), height: 0, side: "right" });
+    if (!room) { setPlacement(null); return; }
+    const width = room.width;
     const inlineChrome = px("paddingLeft") + px("paddingRight") + px("borderLeftWidth") + px("borderRightWidth");
     const blockChrome = px("paddingTop") + px("paddingBottom") + px("borderTopWidth") + px("borderBottomWidth");
     const extra = picture() ? mediaGeometry({ width: width - inlineChrome, size: props.size }).height
       : reason?.getBoundingClientRect().height ?? 0;
     const height = blockChrome + name.getBoundingClientRect().height + extra + (extra ? px("rowGap") : 0);
-    setPlacement(popoverPlacement(props.anchor, { width: innerWidth, height: innerHeight }, { width, height, side: "right" }));
+    setPlacement(popoverPlacement(props.anchor, viewport, { width, height, side: "right" }));
   };
   const schedule = () => { if (mounted && frame === null) frame = requestAnimationFrame(update); };
   createEffect(() => { phase(); props.size; schedule(); });

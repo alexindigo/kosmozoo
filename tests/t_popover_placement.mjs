@@ -43,6 +43,19 @@ Deno.test("popover placement: right-side previews center on their tick and clamp
   const bottom = popoverPlacement({ left: 8, right: 28, top: 425, bottom: 430 }, viewport, preview);
   assertEquals(bottom.top + bottom.height, 437);
   const short = popoverPlacement({ left: 8, right: 28, top: 39, bottom: 44 }, { width: 100, height: 80 }, preview);
+  assertEquals(short.left, 32, "right-side previews cannot slide over their trigger");
+  assertEquals(short.width, 64, "width is bounded by the space beside the trigger");
   assert(short.left >= 4 && short.left + short.width <= 96);
   assert(short.top >= 4 && short.top + short.height <= 76);
+});
+
+Deno.test("popover placement: right-side room rejects missing space and keeps offscreen anchors bounded", () => {
+  const preview = { width: 160, height: 120, side: "right" };
+  for (const width of [36, 35, 20]) {
+    assertEquals(popoverPlacement({ left: 8, right: 28, top: 39, bottom: 44 }, { width, height: 80 }, preview), null);
+  }
+  const left = popoverPlacement({ left: -50, right: -20, top: 39, bottom: 44 }, { width: 100, height: 80 }, preview);
+  assertEquals(left.left, 4); assertEquals(left.width, 92);
+  const sliver = popoverPlacement({ left: 8, right: 28, top: 39, bottom: 44 }, { width: 37, height: 80 }, preview);
+  assertEquals(sliver.left, 32); assertEquals(sliver.width, 1);
 });

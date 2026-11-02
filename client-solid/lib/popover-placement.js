@@ -8,11 +8,13 @@ export function popoverPlacement(trigger, viewport, size, margin = 4) {
   const clamp = (value, low, high) => Math.max(low, Math.min(value, high));
   if (size.side === "right") {
     if (!Number.isFinite(trigger.right) || trigger.right < trigger.left) return null;
-    const width = Math.min(size.width, viewport.width - margin * 2);
+    const left = Math.max(trigger.right + margin, margin);
+    const width = Math.min(size.width, viewport.width - margin - left);
+    if (width <= 0) return null;
     const maxHeight = viewport.height - margin * 2;
     const height = Math.min(size.height, maxHeight);
     return Object.freeze({ side: "right", width, height, minHeight: 0, maxHeight,
-      left: clamp(trigger.right + margin, margin, viewport.width - margin - width),
+      left,
       top: clamp((trigger.top + trigger.bottom - height) / 2, margin, viewport.height - margin - height) });
   }
   const start = clamp(trigger.top, margin, viewport.height - margin);
