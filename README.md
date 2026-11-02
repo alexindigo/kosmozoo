@@ -36,12 +36,22 @@ to loopback2084; service/source/Docker mode to0.0.0.0:2084, with explicit
   package and user installs preserve data.
 - Browse recursive source folders in a newest-first feed, with live source
   activity and updates delivered through an event stream.
+- Review MP4, WebM and MOV videos, and FLAC, MP3, Opus and WAV audio files, in the feed and comparison viewer. Playback is
+  manual, one player at a time, with seek, mute and optional per-player looping.
+  Space toggles focused media (rebindable); embedded workflows supply parameters,
+  lineage and Variations just as they do for images. Codec support follows the browser.
 - Edit Variations and submit runs while keeping control of unsaved work.
 - Keep your place while images arrive: dimensions are resolved before rendering,
   and cards keep fixed, whole-pixel heights as the feed fills.
 - Save votes, favorites, notes and independent return-later bookmarks per image.
 - Keyboard shortcuts respect modal layers; engine settings and browser-local
   browsing/layout preferences preserve your setup between visits.
+
+Add ComfyUI sources as `host[:port]` (HTTP only, no URL scheme), or local sources
+as `folder:/path`. The default HTTP port is 80: `comfy.home` is stored and shown
+as `comfy.home:80`; explicit ports must be whole numbers from 1 through 65535.
+The optional first-boot `KOZMOZOO_HOSTS` seed uses the same grammar, for example
+`studio=comfy.home,worker=worker.home:8188`.
 
 ## Screenshots
 

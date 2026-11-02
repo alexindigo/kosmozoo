@@ -14,13 +14,6 @@ import { Show, For, createSignal, createEffect, onCleanup } from "solid-js";
 import { useAppStore } from "../store/app-store.js";
 import { iconSvg } from "/js/icons.mjs";
 
-const MODES = [
-  ["1", "two-up", "Two-Up", "view-two-up"],
-  ["2", "one-up", "One-Up", "view-one-up"],
-  ["3", "split", "Split", "view-split"],
-  ["4", "difference", "Difference", "view-difference"],
-];
-
 function VSlider(props) {
   let trackEl;
   const setFromEvent = (ev) => {
@@ -62,10 +55,10 @@ function VSlider(props) {
   );
 }
 
-export function DiffChrome() {
+export function DiffChrome(props) {
   const store = useAppStore();
   const d = () => store.state.diff;
-  const hasB = () => !!store.state.diffPair().b;
+  const hasB = () => !!store.state.diffPair().b && store.state.diffKind() !== "audio" && d().mode !== "full";
 
   // one popup open at a time; Esc closes it (never the workbench), and a
   // pointerdown outside any control closes it too
@@ -111,7 +104,7 @@ export function DiffChrome() {
             innerHTML={iconSvg(d().locked ? "lock" : "lock-open", 14)}
           />
           <VSlider
-            icon="opacity" title="active image opacity" class="dz-active-op"
+            icon="opacity" title={`active ${props.mediaWord ?? "image"} opacity`} class="dz-active-op"
             value={() => d().activeOpacity}
             disabled={!hasB()}
             open={() => openCtl() === "active"}
@@ -139,19 +132,20 @@ export function DiffChrome() {
             />
           </Show>
         </div>
-        <div id="diffModes" class="dz-seg">
-          <For each={MODES}>
-            {([key, m, label, icon]) => (
+        <Show when={store.state.diffViews().length > 1}><div id="diffModes" class="dz-seg">
+          <For each={store.state.diffViews()}>
+            {({key, mode: m, label, icon}) => (
               <button
+                data-view={label.toLowerCase()}
                 class={"dz-segbtn" + (d().mode === m ? " on" : "")}
-                disabled={!hasB() || undefined}
-                title={`${label} (${key})`}
+                disabled={(m !== "full" && (!store.state.diffPair().b || (m === "difference" && !!props.differenceReason))) || undefined}
+                title={m === "difference" && props.differenceReason ? props.differenceReason : `${label} (${key})`}
                 onClick={() => store.handles.invoke("workbench.mode", { mode: m })}
                 innerHTML={iconSvg(icon, 16)}
               />
             )}
           </For>
-        </div>
+        </div></Show>
         <button
           id="diffKeysBtn" title="actions & keys (?)"
           onClick={() => store.handles.invoke("keys.panel.toggle")}

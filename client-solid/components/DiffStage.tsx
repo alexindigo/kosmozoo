@@ -4,37 +4,53 @@
 // Both sides stay MOUNTED and decode-guarded (one resource per side; a
 // failed decode resolves to the last good src, never blanks) — the views
 // only change layout, visibility, or clip, so a blink never reloads.
-// Shared zoom: ONE view state, bound to the stage box and copied onto every
-// visible layer; the key is the feed side's "<source>:<file>" (the same key
-// the feed card and info panel use — a crop carries across views). Views:
+// Viewer-session zoom is resource-keyed, isolated from card/inline persistence
+// and reset on open. Per-side crops entangle by delta when locked. Views:
 // two-up (key 1), one-up blink (2), split wipe (3), difference mask (4).
 // No pair (no B) → single image, like a one-file Kaleidoscope.
 
-import { createMemo, createResource, createEffect, on, onMount, onCleanup, Show } from "solid-js";
+import { createMemo, createSignal, createEffect, on, onMount, onCleanup, Show } from "solid-js";
 import { useAppStore } from "../store/app-store.js";
 import { makeZoomable } from "/js/zoomable.mjs";
 import { differenceMask, viewRect } from "../features/diff/mask.mjs";
 import { hitLayer } from "../features/diff/hit.mjs";
 import { DiffChrome } from "./DiffChrome.js";
+import { MediaBox } from "./MediaBox.js";
+import { mediaKind } from "/shared/backings/mime.mjs";
 
 // one decode-guarded src per side: the visible src swaps only once the new
 // image decodes; a failed decode RESOLVES to the last good src
 function useSideSrc(store, sideFn) {
   let lastGood = null;
-  const [src] = createResource(
-    () => (store.state.diff.open && sideFn() ? store.actions.diff.resolve(sideFn())?.src ?? null : null),
-    async (url) => {
-      const img = new Image();
-      img.src = url;
-      try {
-        await img.decode();
-        lastGood = url;
-        return url;
-      } catch {
-        return lastGood;
-      }
-    },
-  );
+  const [src, setSrc] = createSignal(null);
+  const candidate = createMemo(() => {
+    const side = sideFn(), resolved = store.state.diff.open && side ? store.actions.diff.resolve(side) : null;
+    return resolved ? { src: resolved.src, name: resolved.name, kind: mediaKind(resolved.name) ?? "image" } : null;
+  }, undefined, { equals: (a, b) => a?.src === b?.src && a?.name === b?.name });
+  createEffect(() => {
+    const next = candidate();
+    if (!next) { setSrc(null); return; }
+    let retired = false;
+    const playable = next.kind !== "image", el = playable ? document.createElement(next.kind) : new Image();
+    const settle = (ok, failureCode) => {
+      if (retired) return;
+      if (ok) lastGood = next;
+      setSrc(ok ? next : lastGood ?? { ...next, failed: true, failureCode });
+      release();
+    };
+    const release = () => {
+      clearTimeout(deadline); el.onload = el.onerror = el.onloadeddata = null;
+      if (playable) el.pause();
+      el.removeAttribute("src");
+      if (playable) el.load();
+    };
+    const deadline = setTimeout(() => settle(false), 30000);
+    el.onerror = () => settle(false, playable ? el.error?.code : "decode");
+    if (playable) { el.preload = "auto"; el.onloadeddata = () => settle(true); }
+    el.src = next.src;
+    if (!playable) el.decode().then(() => settle(true), () => settle(false, "decode"));
+    onCleanup(() => { retired = true; release(); });
+  });
   return src;
 }
 
@@ -54,25 +70,40 @@ function Wipe(props) {
 export function DiffStage() {
   const store = useAppStore();
   const pair = () => store.state.diffPair();
-  const srcA = useSideSrc(store, () => pair().a);
-  const srcB = useSideSrc(store, () => pair().b);
   const d = () => store.state.diff;
-  const hasB = () => !!pair().b;
+  const srcA = useSideSrc(store, () => pair().a);
+  const srcB = useSideSrc(store, () => d().mode === "full" || store.state.diffKind() === "audio" ? null : pair().b);
+  const hasB = () => !!pair().b && store.state.diffKind() !== "audio" && mode() !== "full";
+  const differenceReason = () => store.state.differenceReason() ||
+    ([srcA(), srcB()].some(side => side && side.kind !== "image") ? "difference mode compares still images" : null);
+  const mode = () => d().mode === "difference" && differenceReason() ? "two-up" : d().mode;
+  const playableA = () => srcA() && srcA().kind !== "image";
+  const playableB = () => hasB() && srcB() && srcB().kind !== "image";
+  const [dockA, setDockA] = createSignal(null), [dockB, setDockB] = createSignal(null);
 
-  // TWO view states, one per side. Each layer's transform derives from its
-  // own key in the store's views (view-fraction space; the layer's own box
+  // TWO view states, one per resource. Each layer's transform derives from its
+  // own viewer-session key (view-fraction space; the layer's own box
   // turns fractions into px). Locked = the gesture's delta also writes the
   // peer key (entangle, never copy); unlocked = only the target's key.
   const keyA = () => (pair().a ? `${pair().a.source}:${pair().a.file}` : null);
   const keyB = () => (pair().b ? `${pair().b.source}:${pair().b.file}` : null);
   const layerT = (el, key) => {
-    const v = key ? store.state.views[key] : null;
+    allocation(); // resize/mode layout is an input, not an untracked DOM read
+    const v = key ? d().views[key] : null;
     if (!el || !v || !(v.s > 1 || v.txf || v.tyf)) return "";
     return `translate(${v.txf * el.offsetWidth}px, ${v.tyf * el.offsetHeight}px) scale(${v.s})`;
   };
-  let stageEl, cellAEl, cellBEl;
-  const tA = createMemo(() => layerT(cellAEl, keyA()));
-  const tB = createMemo(() => layerT(cellBEl, keyB()));
+  let stageEl;
+  const [cellAEl, setCellAEl] = createSignal(null), [cellBEl, setCellBEl] = createSignal(null);
+  const [allocation, setAllocation] = createSignal(0);
+  createEffect(() => {
+    const a = cellAEl(), b = hasB() ? cellBEl() : null;
+    const observer = new ResizeObserver(() => setAllocation(n => n + 1));
+    for (const el of [stageEl, a, b]) if (el) observer.observe(el);
+    onCleanup(() => observer.disconnect());
+  });
+  const tA = createMemo(() => layerT(cellAEl(), keyA()));
+  const tB = createMemo(() => layerT(cellBEl(), keyB()));
 
   // one binding on the stage box; the gesture's target is the layer VISIBLE
   // at the pointer (hitLayer — derived from the same layout state the
@@ -83,17 +114,18 @@ export function DiffStage() {
   // itself is the box the mask draws against.
   const targetFor = (e) => {
     const layer = hitLayer({
-      mode: d().mode, col: d().col, splitT: d().splitT,
+      mode: mode(), col: d().col, splitT: d().splitT,
       x: e.clientX,
-      cellBRect: hasB() ? cellBEl.getBoundingClientRect() : null,
+      cellBRect: hasB() ? cellBEl()?.getBoundingClientRect() : null,
       stageRect: stageEl.getBoundingClientRect(),
     });
-    const box = d().mode === "difference" ? stageEl : (layer === "b" ? cellBEl : cellAEl);
+    const box = mode() === "difference" ? stageEl : (layer === "b" ? cellBEl() : cellAEl());
     return { key: layer === "b" ? keyB() : keyA(), box };
   };
   const alsoFor = (t) => {
     if (!d().locked || !hasB()) return null;
-    return t.key === keyA() ? keyB() : keyA();
+    const peer = t.key === keyA() ? keyB() : keyA();
+    return peer === t.key ? null : peer;
   };
   let binding = null;
   createEffect(on(
@@ -106,8 +138,8 @@ export function DiffStage() {
         target: targetFor,
         also: alsoFor,
         panAlways: true, // the comparator pans at any zoom; cards keep zoomed-only pan
-        getView: store.actions.views.get,
-        setView: store.actions.views.set,
+        getView: store.actions.diff.views.get,
+        setView: store.actions.diff.views.set,
       });
     },
   ));
@@ -142,12 +174,13 @@ export function DiffStage() {
   // diffAbs, or diffOpacity changes; keeps its last paint (never blanks).
   let canvasEl;
   createEffect(() => {
-    const aUrl = srcA(), bUrl = srcB();
+    allocation();
+    const aUrl = srcA()?.src, bUrl = srcB()?.src;
     const absolute = d().diffAbs, opacity = d().diffOpacity, baseIsA = d().col === "feed";
     const baseOpacity = d().activeOpacity, threshold = d().diffThreshold;
-    const vA = keyA() ? store.state.views[keyA()] : null;
-    const vB = keyB() ? store.state.views[keyB()] : null;
-    if (d().mode !== "difference" || !hasB() || !aUrl || !bUrl || !canvasEl) return;
+    const vA = keyA() ? d().views[keyA()] : null;
+    const vB = keyB() ? d().views[keyB()] : null;
+    if (mode() !== "difference" || differenceReason() || !hasB() || !aUrl || !bUrl || !canvasEl) return;
     let cancelled = false;
     (async () => {
       const load = (u) => new Promise((res) => {
@@ -178,29 +211,41 @@ export function DiffStage() {
 
   return (
     <div id="diff" hidden={!d().open}>
-      <DiffChrome />
       <div
         id="diffStage" ref={stageEl}
-        data-mode={d().mode} data-col={d().col}
+        data-mode={mode()} data-col={d().col}
         style={{ "--split": d().splitT, "--active-op": d().activeOpacity }}
       >
-        <div class="dz-cell dz-a" ref={cellAEl}>
-          <img class="dz-img" src={srcA() ?? undefined} alt="" style={{ transform: tA() || undefined }} />
+        <div class="dz-cell dz-a" ref={setCellAEl}>
+          <MediaBox workbench src={srcA()?.src} kind={srcA()?.kind} alt={srcA()?.name} failed={srcA()?.failed} failureCode={srcA()?.failureCode}
+            controlsMount={dockA()} controlLabel="A"
+            transform={tA()} active={d().open && (mode() !== "one-up" || d().col === "feed" || !hasB())} primary={d().col === "feed" || !hasB()}
+            registerPlayer={store.actions.media.register} onPlaybackError={store.actions.media.report}
+            onOpen={() => store.handles.invoke("workbench.open")} />
         </div>
         <Show when={hasB()}>
-          <div class="dz-cell dz-b" ref={cellBEl}>
-            <img class="dz-img" src={srcB() ?? undefined} alt="" style={{ transform: tB() || undefined }} />
+          <div class="dz-cell dz-b" ref={setCellBEl}>
+            <MediaBox workbench src={srcB()?.src} kind={srcB()?.kind} alt={srcB()?.name} failed={srcB()?.failed} failureCode={srcB()?.failureCode}
+              controlsMount={dockB()} controlLabel="B"
+              transform={tB()} active={d().open && (mode() !== "one-up" || d().col === "right")} primary={d().col === "right"}
+              registerPlayer={store.actions.media.register} onPlaybackError={store.actions.media.report}
+              onOpen={() => store.handles.invoke("workbench.open")} />
           </div>
-          <Show when={d().mode === "split"}>
+          <Show when={mode() === "split"}>
             <Wipe onDown={onSplitDown} />
           </Show>
         </Show>
-        <Show when={hasB() && d().mode === "difference"}>
+        <Show when={hasB() && mode() === "difference"}>
           <div class="dz-cell dz-canvas-cell">
             <canvas class="dz-canvas" ref={canvasEl} />
           </div>
         </Show>
       </div>
+      <div id="diffMedia" hidden={!playableA() && !playableB()}>
+        <div class="media-dock-slot" ref={setDockA} hidden={!playableA()} />
+        <div class="media-dock-slot" ref={setDockB} hidden={!playableB()} />
+      </div>
+      <DiffChrome differenceReason={differenceReason()} mediaWord={((hasB() && d().col === "right" ? srcB() : srcA())?.kind ?? "image").replace("audio", "audio file")} />
     </div>
   );
 }

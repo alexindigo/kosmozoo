@@ -18,6 +18,17 @@ export function install(store) {
     probe(image) { return api.probe(image); },
     inputList(hostName, origin) { return api.inputList(hostName, origin); },
     uploadInput(hostName, form, origin) { return api.uploadInput(hostName, form, origin); },
+    inspectImage: api.inspectImage,
+    inputThumbnail: api.inputThumbnail,
+    // Thumbnail bytes share the feed's engine route and browser connections:
+    // they join the Store's one acquisition policy as foreground displays.
+    registerThumbnail: input => store.surfaceDisplay(input),
+    listFolder: api.listFolder,
+    folderCapability: api.folderCapability,
+    chooseFolder: api.chooseFolder,
+    pathThumbnail: api.pathThumbnail,
+    inspectPath: api.inspectPath,
+    uploadPath: api.uploadPath,
     async run(payload) {
       const { ok, status, text } = await api.run(payload);
       let data = null;
@@ -26,7 +37,7 @@ export function install(store) {
     },
   };
   return {
-    ownedCommands: [{ id: "variations.discard.cancel", validate: (args) => Object.keys(args).length === 0 }],
+    ownedCommands: ["variations.discard.cancel", "variations.images.close"].map(id => ({ id, validate: args => Object.keys(args).length === 0 })),
     commands: variationCommands({ state: store.state, broker }),
     ports: {
       services,

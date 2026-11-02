@@ -68,6 +68,11 @@ or supply a seed when creating the container:
 -e KOZMOZOO_HOSTS="studio=comfy.example:8188"
 ```
 
+Comfy addresses use `host[:port]`, without `http://` or `https://`. An omitted
+port defaults to HTTP port 80: `studio=comfy.example` stores `comfy.example:80`.
+Explicit ports must be whole numbers from 1 through 65535. Invalid seed entries
+fail startup with a `KOZMOZOO_HOSTS` error before any collections are seeded.
+
 Existing nonempty SQLite collections take precedence over that environment seed.
 An empty table can be seeded on a later boot too; there is no separate first-boot
 marker. Bare `deno task dev` also starts without sources. Background prefetch
@@ -78,7 +83,7 @@ and source flags retain their existing semantics.
 |---|---|---|
 | 1 | `KOZMOZOO_PORT` | `2084`, container listen port; update port publishing if overridden. |
 | 2 | `KOZMOZOO_BIND` | `0.0.0.0`; explicit bind overrides use the same strict resolver as source and executable modes. |
-| 3 | `KOZMOZOO_HOSTS` | Empty; comma-separated `name=host:port` or `name=folder:/path` seed for an empty collection table. |
+| 3 | `KOZMOZOO_HOSTS` | Empty; comma-separated `name=host[:port]` (HTTP, default 80) or `name=folder:/path` seed for an empty collection table. |
 | 4 | `KOZMOZOO_STATE` | `/data/state`. |
 | 5 | `KOZMOZOO_CACHE` | `/data/cache`. |
 | 6 | `KOZMOZOO_FEEDBACK` | Optional legacy v1 judgment import path, never a canonical output file. Mount the import document with the disposable/migrated state as appropriate. |

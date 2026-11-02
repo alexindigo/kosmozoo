@@ -8,7 +8,7 @@ export function VariationDiscardConfirmation(props) {
   onCleanup(store.handles.own("variations.discard.cancel", props.onCancel));
   onCleanup(store.actions.keys.pushLayer({ id: "variations-discard", command: "variations.discard.cancel", blocking: true, owner: props.owner }));
   onMount(() => keep.focus());
-  return <div class="vz-discard-overlay">
+  return <div class="vz-discard-overlay" onClick={event => event.stopPropagation()}>
     <div class="vz-discard" role="alertdialog" aria-modal="true" aria-labelledby="vz-discard-title"
       onKeyDown={(event) => {
         if (event.key !== "Tab") return;

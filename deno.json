@@ -20,6 +20,7 @@
     "/js/keys.mjs": "./client/js/keys.mjs",
     "/js/launch-notice.mjs": "./client/js/launch-notice.mjs",
     "/shared/extractor.mjs": "./src/extractor.mjs",
+    "/shared/backings/mime.mjs": "./src/backings/mime.mjs",
     "/shared/entry-path.mjs": "./src/entry-path.mjs",
     "/shared/source-origin.mjs": "./src/source-origin.mjs",
     "/shared/version.mjs": "./src/version.mjs",

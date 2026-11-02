@@ -1,5 +1,6 @@
 // Real browser -> private editor -> Run -> accepted fake-Comfy graphs and proof.
 const assert = require('node:assert/strict');
+const { pickInput } = require('./image-picker-helpers.cjs');
 
 module.exports = async ({ cdp, FAKE, KZ, check }) => {
   const http = async (path, body) => {
@@ -20,6 +21,10 @@ module.exports = async ({ cdp, FAKE, KZ, check }) => {
     const source = Object.values(history).find(entry => entry.outputs?.['9']?.images?.some(image => image.filename === 'flux-lora.png'));
     assert(source);
     const graph = structuredClone(source.prompt[2]);
+    for (const id of ['76', '81']) {
+      const form = new FormData(); form.append('image', new Blob(['current-' + id]), `${id}.png`);
+      assert((await fetch(FAKE + '/api/upload/image', { method: 'POST', body: form })).ok);
+    }
     for (const id of ['76', '81']) graph[id] = { class_type: 'LoadImage', inputs: { image: `${id}.png` }, _meta: { title: 'Reference' } };
     graph['92:105'] = structuredClone(graph['2']); graph['92:105'].inputs.text = 'nested original';
     for (const id of ['76', '81', '92:105', '20', '21']) graph[id].is_changed = [`archived-${id}`];
@@ -36,13 +41,11 @@ module.exports = async ({ cdp, FAKE, KZ, check }) => {
     await cdp.clickAt('[data-param-key="20.strength_model"] .vz-cb');
     await type('[data-param-key="20.strength_model"] .vz-row-inc-input', '0.3');
     for (const id of ['76.image', '81.image']) await cdp.clickAt(`[data-image-id="${id}"] .vz-cb`);
-    await cdp.evaluate(`(()=>{const row=document.querySelector('[data-image-id="76.image"]'),mode=row.querySelector('.vz-imgmode');
-      mode.value='files';mode.dispatchEvent(new Event('change',{bubbles:true}))})()`);
     await cdp.poll("!!document.querySelector('[data-image-id=\"76.image\"] .vz-imgfilespick')");
     await cdp.evaluate(`(()=>{const input=document.querySelector('[data-image-id="76.image"] .vz-imgfilespick'),dt=new DataTransfer();
       dt.items.add(new File(['content'],'identity-content.png',{type:'image/png'}));input.files=dt.files;
-      input.dispatchEvent(new Event('change',{bubbles:true}));window.__identityInput=input;window.__identityFile=input.files[0];
-      const select=document.querySelector('[data-image-id="81.image"] .vz-imgfile');select.value='ref.png';select.dispatchEvent(new Event('change',{bubbles:true}))})()`);
+      input.dispatchEvent(new Event('change',{bubbles:true}));window.__identityInput=input;window.__identityFile=input.files[0]})()`);
+    await pickInput(cdp, 'ref.png', '[data-image-id="81.image"]');
     for (const [id, value] of [['2.text', 'positive-own'], ['92:105.text', 'negative-own']]) {
       await cdp.clickAt(`[data-text-id="${id}"] .vz-cb`);
       await type(`[data-text-id="${id}"] .vz-text-values`, value);
@@ -50,7 +53,7 @@ module.exports = async ({ cdp, FAKE, KZ, check }) => {
     await cdp.clickAt('[data-enum-id="20.lora_name"] .vz-imgrow-head .vz-cb');
     await cdp.clickAt('[data-enum-id="20.lora_name"] .vz-enum-opt:last-child .vz-cb');
     // Changing every other kind must preserve the first image's exact native File.
-    assert(await cdp.evaluate("document.querySelector('[data-image-id=\"76.image\"] .vz-imgfilespick')===window.__identityInput&&window.__identityInput.files[0]===window.__identityFile&&document.querySelector('[data-image-id=\"81.image\"] .vz-imgfile').value==='ref.png'"));
+    assert(await cdp.evaluate("document.querySelector('[data-image-id=\"76.image\"] .vz-imgfilespick')===window.__identityInput&&window.__identityInput.files[0]===window.__identityFile&&!!document.querySelector('[data-image-id=\"81.image\"] [data-image-name=\"ref.png\"]')"));
     await type('.vz-prefix', 'identity_');
     await type('.vz-suffix', '_{76.image}_{81.image}_{20.strength_model}_{20.lora_name}_{2.text}_{92:105.text}');
     const start = (await http('/__test/enqueues')).length;

@@ -287,7 +287,8 @@ Deno.test("wrapAllOutputPrefixes: fallback wraps every SaveImage's own prefix", 
     "3": { class_type: "VAEDecode", inputs: {} },
   };
   const touched = wrapAllOutputPrefixes(graph, "pre_", "_suf", OUT);
-  assertEquals(touched, 2);
+  assertEquals(touched, ["1", "2"]);
+  assertEquals(touched.length, 2);
   assertEquals(graph["1"].inputs.filename_prefix, "pre_Alpha_suf");
   assertEquals(graph["2"].inputs.filename_prefix, "pre_Beta_suf");
 });

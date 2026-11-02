@@ -6,6 +6,7 @@
 import { For, Show } from "solid-js";
 import { useAppStore } from "../store/app-store.js";
 import { Modal } from "./Modal.js";
+const keyLabel = key => key === " " ? "Space" : key;
 
 export function KeysPanel() {
   const store = useAppStore();
@@ -42,14 +43,14 @@ export function KeysPanel() {
               <button
                 class={"kbd" + (a.overridden ? " overridden" : "")}
                 title={a.overridden
-                  ? `default: ${a.defaultKey} — click to rebind, right-click resets`
+                  ? `default: ${keyLabel(a.defaultKey)} — click to rebind, right-click resets`
                   : "click to rebind"}
                 onClick={() => store.actions.keys.startCapture(a.id)}
                 onContextMenu={(e) => {
                   e.preventDefault();
                   store.actions.keys.resetOne(a.id);
                 }}
-              >{store.state.capturing() === a.id ? "press keys…" : a.key}</button>
+              >{store.state.capturing() === a.id ? "press keys…" : keyLabel(a.key)}</button>
             </div>
           )}
         </For>

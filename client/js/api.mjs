@@ -17,11 +17,12 @@ export class ApiError extends Error {
 }
 
 // the ONE JSON transport — exported so feature modules (variations) share it
-export async function req(method, path, body) {
+export async function req(method, path, body, { priority } = {}) {
   const r = await fetch(BASE + path, {
     method,
     headers: body ? { "Content-Type": "application/json" } : undefined,
     body: body ? JSON.stringify(body) : undefined,
+    priority: priority === "background" ? "low" : "auto",
   });
   if (!r.ok) {
     let detail = "";
@@ -65,14 +66,16 @@ export const api = {
   deleteEntry: (collection, name) => req("DELETE", entryUrl(collection, name)),
   settings: (ns) => req("GET", `/api/settings/${enc(ns)}`),
   setSettings: (ns, kv) => req("PATCH", `/api/settings/${enc(ns)}`, kv),
-  prefetch: () => req("GET", "/api/prefetch"),
-  nodes: () => req("GET", "/api/nodes"),
+  prefetch: (options) => req("GET", "/api/prefetch", undefined, options),
+  nodes: (options) => req("GET", "/api/nodes", undefined, options),
   setPrefetch: (kv) => req("POST", "/api/prefetch", kv),
-  meta: (collection, since) => req("GET", `/api/collections/${enc(collection)}/meta?since=${since}`),
-  want: (collection, files) => req("POST", `/api/collections/${enc(collection)}/want`, { files }),
+  meta: (collection, since, options) => req("GET", `/api/collections/${enc(collection)}/meta?since=${since}`, undefined, options),
+  want: (collection, files, options = {}) => req("POST", `/api/collections/${enc(collection)}/want`, { files, ...options }, options),
   // byte size isn't in every listing — a HEAD on the bytes route fills it;
   // resolves null when the entry is unknown
-  entrySizeProbe: (collection, name) => fetch(`${BASE}${entryUrl(collection, name)}/bytes`, { method: "HEAD" })
+  entrySizeProbe: (collection, name, { priority } = {}) => fetch(`${BASE}${entryUrl(collection, name)}/bytes`, {
+    method: "HEAD", priority: priority === "background" ? "low" : "auto",
+  })
     .then((r) => (r.ok ? Number(r.headers.get("content-length")) || null : null))
     .catch(() => null),
 };

@@ -10,6 +10,40 @@ export const probe = (image) =>
 // carry per-permutation detail the modal parses
 export const run = (payload) => postRaw("/api/features/variations/run", payload);
 
+const pathRequest = async (route, body, origin) => {
+  const response = await fetch(`/api/features/variations/${route}`, { method: "POST", body: JSON.stringify(body),
+    headers: { "Content-Type": "application/json", ...(origin ? { "X-Kosmozoo-Origin": JSON.stringify(origin) } : {}) } });
+  const data = await response.json();
+  if (!response.ok) throw new Error(data.error || "Folder images unavailable");
+  return data;
+};
+export const listFolder = path => pathRequest("folder-images", { path });
+export const folderCapability = () => req("GET", "/api/features/variations/folder-chooser");
+export const chooseFolder = async (path, signal) => {
+  const response = await fetch("/api/features/variations/choose-folder", { method: "POST", signal,
+    headers: { "Content-Type": "application/json" }, body: JSON.stringify({ path }) });
+  const result = await response.json();
+  if (!response.ok) throw new Error(result.error || "Folder chooser unavailable");
+  return result;
+};
+export const pathThumbnail = path => `/api/features/variations/folder-image?path=${encodeURIComponent(path)}`;
+export const inspectPath = (collection, path, current, kind, origin, names = []) =>
+  pathRequest(`inspect-path/${encodeURIComponent(collection)}`, { path, current, kind, names }, origin);
+export const uploadPath = (collection, path, hash, origin) =>
+  pathRequest(`upload-path/${encodeURIComponent(collection)}`, { path, hash }, origin);
+
+export const inputThumbnail = (collection, name, origin, kind = "input") =>
+  `/api/collections/${encodeURIComponent(collection)}/entries/${encodeURIComponent(name)}/bytes?kind=${kind}&origin=${encodeURIComponent(JSON.stringify(origin))}`;
+
+export const inspectImage = async (collection, file, current, kind, origin, names = []) => {
+  const form = new FormData(); form.append("image", file, file.name); form.append("current", current); form.append("kind", kind);
+  form.append("names", JSON.stringify(names));
+  const response = await fetch(`/api/features/variations/inspect-image/${encodeURIComponent(collection)}`, {
+    method: "POST", headers: { "X-Kosmozoo-Origin": JSON.stringify(origin) }, body: form,
+  });
+  const data = await response.json(); if (!response.ok) throw new Error(data.error || "Image comparison unavailable"); return data;
+};
+
 export const inputList = (collection, origin) =>
   fetch(`/api/collections/${encodeURIComponent(collection)}/entries?kind=input`, { headers: { "X-Kosmozoo-Origin": JSON.stringify(origin) } })
     .then(async response => { if (!response.ok) throw new Error(`Input catalogue: ${response.status}`); return response.json(); });

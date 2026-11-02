@@ -165,8 +165,8 @@ Deno.test("ack: compiler-owned consumption retains disabled/filter/dormant/inact
   const { editor, requests } = editorRig();
   editor.edit("numeric", "n.denoise", "rawIncrement", "1e-1");
   editor.edit("numeric", "n.steps", "rawIncrement", "1e");
-  editor.edit("images", "image.image", "enabled", true); editor.edit("images", "image.image", "mode", "files");
-  editor.edit("images", "image.image", "file", "retained.png"); editor.edit("images", "image.image", "localFiles", [a, b]);
+  editor.edit("images", "image.image", "enabled", true);
+  editor.addImages("image.image", [a, b].map(file => ({ kind: "upload", name: file.name, file })));
   editor.edit("enums", "choice.value", "enabled", true); editor.edit("enums", "choice.value", "picks", ["second", "first"]);
   editor.edit("enums", "choice.value", "filter", "search");
   editor.edit("texts", "text.text", "enabled", true); editor.edit("texts", "text.text", "text", "one {{used}}\n\ntwo");
@@ -174,10 +174,10 @@ Deno.test("ack: compiler-owned consumption retains disabled/filter/dormant/inact
   editor.edit("naming", "root", "prefix", "v_");
   assertEquals((await editor.run()).status, "submitted");
   const remaining = editor.remaining().map(item => `${item.domain}.${item.id}.${item.field}`);
-  assertEquals(remaining.sort(), ["numeric.n.steps.rawIncrement", "images.image.image.file", "enums.choice.value.filter", "texts.text.text.tpl"].sort());
+  assertEquals(remaining.sort(), ["numeric.n.steps.rawIncrement", "enums.choice.value.filter", "texts.text.text.tpl"].sort());
   assertEquals(requests[0].ranges["n.denoise"].increment, .1);
   assertEquals(requests[0].imageParams["text.text"].values, ["one a\n\ntwo", "one b\n\ntwo"]);
-  assert(editor.rows("images")["image.image"].localFiles[0] === a && editor.rows("images")["image.image"].localFiles[1] === b);
+  assert(editor.rows("images")["image.image"].items[0].file === a && editor.rows("images")["image.image"].items[1].file === b);
   assertEquals(editor.rows("numeric")["n.denoise"].rawIncrement, "1e-1");
   editor.dispose();
 });

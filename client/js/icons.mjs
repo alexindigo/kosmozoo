@@ -6,6 +6,12 @@
 // (https://github.com/tabler/tabler-icons/blob/master/LICENSE)
 
 const PATHS = {
+  "folder": `<path d="M5 4h4l3 3h7a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2z" />`,
+  "volume": `<path d="M4 9h4l5-4v14l-5-4H4z" /><path d="M17 8a6 6 0 0 1 0 8M20 5a10 10 0 0 1 0 14" />`,
+  "volume-off": `<path d="M4 9h4l5-4v14l-5-4H4zM17 9l5 6M22 9l-5 6" />`,
+  "repeat": `<path d="M4 10V7h15l-3-3M20 14v3H5l3 3M19 7l-3 3M5 17l3-3" />`,
+  "open-viewer": `<path d="M14 3h7v7M21 3l-11 11M10 3H5a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-5" />`,
+  "full-screen": `<path d="M8 3H3v5M16 3h5v5M21 16v5h-5M8 21H3v-5" />`,
   "refresh": `<path d="M20 7v5h-5" /><path d="M4 17v-5h5" /><path d="M6.1 7a7 7 0 0 1 11.6-2L20 8M4 16l2.3 3A7 7 0 0 0 17.9 17" />`,
   "pin": `<path d="M16 3l5 5-4 1-4 4v4l-3-3-7 7 7-7-3-3h4l4-4z" />`,
   "thumb-up": `<path stroke="none" d="M0 0h24v24H0z" fill="none"/>

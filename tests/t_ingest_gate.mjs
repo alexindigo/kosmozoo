@@ -74,3 +74,38 @@ Deno.test("read gate: a high caller joining a low single-flight upgrades the que
   await server.shutdown();
   await rig.close();
 });
+
+Deno.test("read gate: streamed background bodies retain slots and leave a foreground reserve across aliases and dims", async () => {
+  const rig = await mkStateRig("gate-stream", {});
+  const starts = [], controllers = new Map();
+  const server = Deno.serve({ port: 0, hostname: "127.0.0.1" }, req => {
+    if (req.method === "HEAD") return new Response(null);
+    const name = new URL(req.url).searchParams.get("filename");
+    starts.push(name);
+    return new Response(new ReadableStream({ start(controller) {
+      controller.enqueue(new Uint8Array([1])); controllers.set(name, controller);
+    } }));
+  });
+  const address = `127.0.0.1:${server.addr.port}`;
+  const ingest = new Ingest(rig.store, { a: address, alias: address }, { cache: rig.cache });
+  const tasks = [];
+  const wait = async condition => {
+    for (let i = 0; i < 100 && !condition(); i++) await new Promise(resolve => setTimeout(resolve, 5));
+    assert(condition(), `read starts: ${starts}`);
+  };
+  try {
+    tasks.push(ingest.ensure("a", "low-0.png"), ingest.dims("alias", "low-1.png"),
+      ingest.ensure("alias", "low-2.png"), ingest.ensure("a", "queued.png"));
+    await wait(() => starts.length >= 3);
+    await new Promise(resolve => setTimeout(resolve, 30));
+    assertEquals(starts.length, 3, "headers never release body capacity or consume the reserved slot");
+    tasks.push(ingest.ensure("a", "foreground.png", "output", { priority: "high" }));
+    await wait(() => starts.includes("foreground.png"));
+    assert(!starts.includes("queued.png"), "a low read cannot borrow the foreground reserve");
+    controllers.get("low-0.png").close(); controllers.delete("low-0.png");
+    await wait(() => starts.includes("queued.png"));
+  } finally {
+    for (const controller of controllers.values()) controller.close();
+    await Promise.all(tasks); await server.shutdown(); await rig.close();
+  }
+});

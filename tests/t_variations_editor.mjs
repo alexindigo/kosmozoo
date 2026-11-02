@@ -5,7 +5,7 @@ import { generatePermutations, permutationPlan } from "../src/features/variation
 
 const cases = {
   numeric: { id: "n.denoise", values: { enabled: false, min: .9, max: .95, rawIncrement: "1e-1" } },
-  images: { id: "image.image", values: { enabled: true, mode: "files", file: "next.png", localFiles: [new File(["a"], "a.png")] } },
+  images: { id: "image.image", values: { enabled: true, items: [{ kind: "upload", name: "a.png", file: new File(["a"], "a.png") }] } },
   enums: { id: "choice.value", values: { enabled: true, picks: ["second"], filter: "retained" } },
   texts: { id: "text.text", values: { enabled: true, text: "first\n\nsecond", tpl: { kept: "one; two" } } },
   naming: { id: "root", values: { prefix: "prefix_", suffix: "_suffix" } },
@@ -29,12 +29,12 @@ Deno.test("editor contract: every declared editable field participates in dirty 
 Deno.test("editor contract: one combined configuration consumes all eligible declared fields and reaches owned closure", async () => {
   const rig = editorRig(), { editor } = rig, file = new File(["exact"], "exact.png");
   editor.range("n.denoise", { min: .5, max: .7 }); editor.edit("numeric", "n.denoise", "rawIncrement", "1e-1");
-  editor.edit("images", "image.image", "enabled", true); editor.edit("images", "image.image", "mode", "files"); editor.edit("images", "image.image", "localFiles", [file]);
+  editor.edit("images", "image.image", "enabled", true); editor.addImages("image.image", [{ kind: "upload", name: file.name, file }]);
   editor.edit("enums", "choice.value", "enabled", true); editor.edit("enums", "choice.value", "picks", ["second", "first"]);
   editor.edit("texts", "text.text", "enabled", true); editor.edit("texts", "text.text", "text", "  {{used}}\n\nend\n"); editor.template("text.text", "used", "one; two");
   editor.edit("naming", "root", "prefix", "combined_"); editor.edit("naming", "root", "suffix", "_complete");
   assertEquals((await editor.run()).adopted, true); assert(!editor.dirty()); assertEquals(editor.result().state, "adopted");
-  assertEquals(rig.uploads.length, 1); assert(editor.rows("images")["image.image"].localFiles[0] === file);
+  assertEquals(rig.uploads.length, 1); assert(editor.rows("images")["image.image"].items[0].file === file);
   assertEquals(rig.requests.length, 1); assertEquals(rig.requests[0].imageParams["text.text"].values, ["  one\n\nend\n", "  two\n\nend\n"]);
   assertEquals(editor.rows("numeric")["n.denoise"].rawIncrement, "1e-1");
   rig.fireTimers(); assertEquals(rig.closeCount(), 1); editor.dispose();
@@ -50,7 +50,8 @@ Deno.test("editor contract: clean metadata/default settlement during Run cannot 
   while (!release) await new Promise(resolve => setTimeout(resolve, 0));
   editor.installInputs({ origin: rig.context.origin, files: ["new-clean-default.png", "next.png"] });
   release(); assertEquals((await pending).adopted, true); assert(!editor.dirty());
-  assertEquals(editor.rows("images")["image.image"].file, "new-clean-default.png");
+  assertEquals(editor.rows("images")["image.image"].items, []);
+  assertEquals(editor.rows("images")["image.image"].files, ["new-clean-default.png", "next.png"]);
   rig.fireTimers(); assertEquals(rig.closeCount(), 1); editor.dispose();
 });
 
@@ -75,10 +76,10 @@ Deno.test("editor contract: source replacement after a confirmed upload stops ev
   let release;
   const rig = editorRig({ uploadInput: async (_host, form, origin) => new Promise(resolve => release = () => resolve({ name: form.get("image").name, origin })) });
   const { editor } = rig, file = new File(["old-backend"], "same-name.png");
-  editor.edit("images", "image.image", "enabled", true); editor.edit("images", "image.image", "mode", "files"); editor.edit("images", "image.image", "localFiles", [file]);
+  editor.edit("images", "image.image", "enabled", true); editor.addImages("image.image", [{ kind: "upload", name: file.name, file }]);
   const pending = editor.run(); while (!release) await new Promise(resolve => setTimeout(resolve, 0));
   rig.replaceSource(); release(); assertEquals((await pending).status, "stale");
-  assertEquals(rig.requests.length, 0); assert(editor.dirty()); assert(editor.rows("images")["image.image"].localFiles[0] === file);
+  assertEquals(rig.requests.length, 0); assert(editor.dirty()); assert(editor.rows("images")["image.image"].items[0].file === file);
   assert(editor.result().text.includes("origin changed")); rig.fireTimers(); assertEquals(rig.closeCount(), 0); editor.dispose();
 });
 

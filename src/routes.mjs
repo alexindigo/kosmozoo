@@ -6,7 +6,7 @@
 // reassigns or guards it (E1).
 
 import { backingFor, isFolderHost, EXT_MIME, validEntryName } from "./backings/index.mjs";
-import { capabilities, validateCollection, validateAttributes, sourceAttributes } from "./collections.mjs";
+import { capabilities, normalizeAddress, validateCollection, validateAttributes, sourceAttributes } from "./collections.mjs";
 import { sniffMime } from "./extractor.mjs";
 import { sourceOrigin, sameOrigin, expectedOrigin } from "./source-origin.mjs";
 
@@ -37,6 +37,12 @@ export function makeRouter(ctx) {
   };
 
   const useAssetsPlus = () => ctx.settings.get("core.delete", "useAssetsPlus", true);
+  const byteOriginError = (req, id) => {
+    let expected;
+    try { expected = expectedOrigin(req); } catch (error) { return Response.json({ error: error.message }, { status: 400 }); }
+    if (expected && !sameOrigin(expected, sourceOrigin(id, ctx.sourceActivity.source(id)))) return Response.json({ error: "Source origin changed" }, { status: 412 });
+    return null;
+  };
 
   // One bytes response builder for every bytes route (E4): validators are
   // the content hash + no-cache (the URL never changes on a remap).
@@ -50,6 +56,25 @@ export function makeRouter(ctx) {
     h.set("Content-Length", String(bytes.length));
     h.set("ETag", etag);
     h.set("Cache-Control", "no-cache");
+    h.set("Accept-Ranges", "bytes");
+    const range = req.headers.get("Range");
+    const ifRange = req.headers.get("If-Range");
+    // Unsupported units/multiple ranges/malformed syntax are ignored (200).
+    // A valid but unsatisfiable single bytes range explicitly returns 416.
+    const match = range && (!ifRange || ifRange === etag) && /^bytes=(\d*)-(\d*)$/.exec(range);
+    if (match && (match[1] || match[2])) {
+      const size = bytes.length;
+      const start = match[1] ? Number(match[1]) : Math.max(0, size - Number(match[2]));
+      const end = match[1] && match[2] ? Math.min(size - 1, Number(match[2])) : size - 1;
+      if (!Number.isSafeInteger(start) || !Number.isSafeInteger(end) || start > end || start >= size) {
+        h.set("Content-Range", `bytes */${size}`);
+        h.set("Content-Length", "0");
+        return new Response(null, { status: 416, headers: h });
+      }
+      h.set("Content-Range", `bytes ${start}-${end}/${size}`);
+      h.set("Content-Length", String(end - start + 1));
+      return new Response(bytes.subarray(start, end + 1), { status: 206, headers: h });
+    }
     return new Response(bytes, { headers: h });
   };
 
@@ -122,27 +147,28 @@ export function makeRouter(ctx) {
     if (!body || typeof body !== "object" || Array.isArray(body)) {
       return Response.json({ error: "JSON body: {name, address}" }, { status: 400 });
     }
-    const { name, address, ...attributes } = body;
-    const err = validateAttributes(attributes) ?? await validateCollection(name, address);
+    const { name, address: inputAddress, ...attributes } = body;
+    const { address, error } = normalizeAddress(inputAddress);
+    const err = validateAttributes(attributes) ?? error ?? await validateCollection(name, address);
     if (err) return Response.json({ error: err }, { status: 400 });
     if (!ctx.sourceActivity.acceptingChanges()) return Response.json({ error: "sources are stopping" }, { status: 503 });
     // an existing id with a different address is a conflict, not a silent
     // re-point (every entry/judgment under the id would change host)
-    const existing = ctx.store.collectionGet(body.name);
-    if (existing && existing.address !== body.address) {
+    const existing = ctx.store.collectionGet(name);
+    if (existing && existing.address !== address) {
       return Response.json(
-        { error: `collection "${body.name}" already exists with address ${existing.address}` },
+        { error: `collection "${name}" already exists with address ${existing.address}` },
         { status: 409 },
       );
     }
-    ctx.store.collectionAdd(body.name, body.address, attributes);
-    const { activity: _activity, ...source } = ctx.sourceActivity.source(body.name);
+    ctx.store.collectionAdd(name, address, attributes);
+    const { activity: _activity, ...source } = ctx.sourceActivity.source(name);
     const sourceCursor = ctx.sourceActivity.cursor();
     return Response.json({
-      name: body.name,
+      name,
       ...source,
       sourceCursor,
-      online: await backingFor(body.address).probe(body.address),
+      online: await backingFor(address).probe(address),
     });
   });
 
@@ -294,8 +320,9 @@ export function makeRouter(ctx) {
     return Response.json({ deleted: true, mode: "hide", historyCleared });
   });
 
-  add("HEAD", "/api/collections/<id>/entries/<name>/bytes", async (_req, { id, name }, url) => {
+  add("HEAD", "/api/collections/<id>/entries/<name>/bytes", async (req, { id, name }, url) => {
     if (!ctx.hosts[id]) return new Response(null, { status: 404 });
+    const error = byteOriginError(req, id); if (error) return error;
     const e = ctx.store.entryGet(id, name, url.searchParams.get("kind") === "input" ? "input" : "output");
     if (!e?.hash) return new Response(null, { status: 404 }); // E7: unknown says so
     const c = ctx.store.contentGet(e.hash);
@@ -310,6 +337,9 @@ export function makeRouter(ctx) {
   add("GET", "/api/collections/<id>/entries/<name>/bytes", async (req, { id, name }, url) => {
     const token = ctx.inventory.capture?.(id);
     if (!ctx.hosts[id]) return new Response("unknown collection", { status: 404 });
+    const error = byteOriginError(req, id); if (error) return error;
+    const priority = url.searchParams.get("priority") ?? "foreground";
+    if (!["foreground", "background"].includes(priority)) return Response.json({ error: "bad priority" }, { status: 400 });
     const kind = url.searchParams.get("kind") === "input" ? "input" : "output";
     const mime = EXT_MIME[name.split(".").pop().toLowerCase()];
     const makeResponse = (bytes, hash) => bytesResponse(req, bytes, hash, mime);
@@ -328,11 +358,11 @@ export function makeRouter(ctx) {
       }
     }
 
-    // Read through ingestion — the one ingestion path. A human is waiting
-    // on this exact image: the read gate serves it before background work.
+    // Read through the one ingestion path. Explicit background intent stays
+    // low; legacy/foreground callers retain the reserved high lane.
     // A failing backing is a 502 carrying the reason; no direct backing
     // read in a route, no swallowed errors.
-    const got = await ctx.ingest.ensure(id, name, kind, { priority: "high" });
+    const got = await ctx.ingest.ensure(id, name, kind, { priority: priority === "background" ? "low" : "high" });
     if (token && !ctx.inventory.isCurrent(token)) return Response.json({ error: "Source incarnation changed" }, { status: 409 });
     if (got.status === 200) return makeResponse(got.bytes, got.hash);
     if (got.status === 400) return new Response("bad filename", { status: 400 });
@@ -362,13 +392,7 @@ export function makeRouter(ctx) {
   add("GET", "/api/content/<hash>/bytes", async (req, { hash }) => {
     const bytes = await ctx.cache.get(hash);
     if (!bytes) return new Response("not found", { status: 404 });
-    const etag = `"${hash}"`;
-    if (req.headers.get("If-None-Match") === etag) {
-      return new Response(null, { status: 304, headers: { ETag: etag, "Cache-Control": "no-cache" } });
-    }
-    const h = new Headers({ "Content-Length": String(bytes.length), ETag: etag, "Cache-Control": "no-cache" });
-    h.set("Content-Type", sniffMime(bytes) ?? "application/octet-stream");
-    return new Response(bytes, { headers: h });
+    return bytesResponse(req, bytes, hash, sniffMime(bytes) ?? "application/octet-stream");
   });
 
   // --- settings + nodes + plugins -------------------------------------------------
@@ -441,19 +465,10 @@ export function makeRouter(ctx) {
   // answer says whether anything moved; items ship only when it did.
   add("GET", "/api/collections/<id>/meta", async (_req, { id }, url) => {
     if (!ctx.hosts[id]) return Response.json({ error: "unknown collection" }, { status: 404 });
-    const v = ctx.store.metaVersion;
     const since = url.searchParams.get("since");
-    if (since !== null && Number(since) === v) {
-      return Response.json({ v, changed: false });
-    }
     return Response.json({
-      v,
-      changed: true,
-      items: ctx.store.metaForHost(id),
-      // dims ride the same poll — an entry the dims pass reached gets its
-      // width/height patched into the client before extraction finishes
-      dims: ctx.store.dimsForHost(id),
-      pending: ctx.prefetch.pending(id),
+      ...ctx.store.metadataSince(id, since),
+      pending: ctx.prefetch.pending(id) + ctx.prefetch.dimsPending(id),
     });
   });
 
@@ -466,11 +481,20 @@ export function makeRouter(ctx) {
     catch { return Response.json({ error: "files must be JSON" }, { status: 400 }); }
     const files = body?.files;
     if (!Array.isArray(files)) return Response.json({ error: "files must be an array" }, { status: 400 });
+    const interest = body.interest === undefined ? "full" : body.interest;
+    const priority = body.priority === undefined ? "foreground" : body.priority;
+    if (!["full", "dimensions"].includes(interest) || !["foreground", "background"].includes(priority)) {
+      return Response.json({ error: "bad interest or priority" }, { status: 400 });
+    }
     if (files.some((name) => !validEntryName(ctx.hosts[id], name))) {
       return Response.json({ error: "bad entry path" }, { status: 400 });
     }
-    const pending = ctx.prefetch.feed(id, files, true);
-    return Response.json({ pending });
+    ctx.prefetch.feed(id, files, priority === "foreground", { interest });
+    // Legacy full wants retain their ingest count; dimension interest must
+    // keep polling even when it has no ingestion obligation. The reply also
+    // acknowledges with the demanded names' already-known state.
+    return Response.json({ pending: interest === "dimensions" ? ctx.prefetch.dimsPending(id) : ctx.prefetch.pending(id),
+      ...ctx.store.metadataFor(id, files, { meta: interest === "full" }) });
   });
 
   return {

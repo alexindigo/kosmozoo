@@ -12,7 +12,7 @@ import { useAppStore, clampSplit } from "../store/app-store.js";
 import { fmtBytes } from "../store/fields.js";
 import { useDrag } from "../lib/drag.js";
 import { flash } from "../lib/flash.js";
-import { measuredSrc } from "../lib/img-measure.js";
+import { useMeasuredSrc } from "../lib/img-measure.js";
 import { MetaBody } from "./MetaBody.js";
 import { Zoomable } from "./Zoomable.js";
 
@@ -74,7 +74,7 @@ export function DetailsBody() {
             fallback={
               <>
                 <Head im={im()} />
-                <MetaBody meta={im()?.meta ?? null} host={im()?.host} compareMeta={compareMeta()} />
+                <MetaBody meta={im()?.meta ?? null} host={im()?.host} entryId={im()?.id} identity={im()?.hash ?? im()?.meta} compareMeta={compareMeta()} />
               </>
             }
           >
@@ -82,7 +82,8 @@ export function DetailsBody() {
               <div class="info-source-images" style={{ "flex-basis": `${split() * 100}%` }}>
                 <For each={images()}>
                   {(image) => {
-                    const s = () => measuredSrc(image.src);
+                    const measured = useMeasuredSrc(store.actions.images.inline, () => ({ src: image.src, identity: im()?.hash ?? im()?.meta, foregroundId: im()?.id }));
+                    const s = () => measured().size;
                     return (
                       <div class="infoimg" data-file={image.file}
         classList={{ flash: flashOn() && flashFile() === image.file }}>
@@ -91,9 +92,11 @@ export function DetailsBody() {
                             the broken-bytes path stays reachable) */}
                         <Show when={s() !== "pending"}>
                           <Zoomable
-                            src={image.src}
+                            src={measured().src}
+                            resourceId={measured().id}
+                            foregroundId={measured().foregroundId}
                             alt={image.file}
-                            ar={s() !== "failed" ? `${s().w} / ${s().h}` : null}
+                            size={s() !== "failed" ? s() : { w: 1024, h: 1024, failed: true }}
                             zoomKey={`input:${im()?.host}:${image.file}`}
                             onOpen={() => store.handles.invoke("workbench.pickInput", { source: im()?.host, file: image.file, fromOutput: !!image.fromOutput })}
                           />

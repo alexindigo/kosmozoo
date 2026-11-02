@@ -2,6 +2,7 @@ import { assert, assertEquals } from "jsr:@std/assert";
 import { editorRig } from "./helpers/variation-editor.mjs";
 
 const activate = editor => {
+  editor.addImages("image.image", [{ kind: "input", name: "origin.png" }]);
   editor.edit("images", "image.image", "enabled", true);
   editor.edit("enums", "choice.value", "enabled", true);
   editor.edit("texts", "text.text", "enabled", true);
@@ -21,11 +22,11 @@ Deno.test("selection ack: acknowledging off never acknowledges unused values or 
   const { editor } = editorRig(), file = new File(["kept"], "kept.png");
   activate(editor); await editor.run(); deactivate(editor);
   editor.edit("numeric", "n.denoise", "rawIncrement", "1e");
-  editor.edit("images", "image.image", "mode", "files"); editor.edit("images", "image.image", "file", "unused.png"); editor.edit("images", "image.image", "localFiles", [file]);
+  editor.addImages("image.image", [{ kind: "input", name: "unused.png" }, { kind: "upload", name: file.name, file }]);
   editor.edit("enums", "choice.value", "picks", ["second"]); editor.edit("enums", "choice.value", "filter", "retained filter");
   editor.edit("texts", "text.text", "text", "unused edit"); editor.template("text.text", "dormant", "kept");
   assertEquals((await editor.run()).status, "submitted");
   assertEquals(editor.rows("numeric")["n.denoise"].enabled, false);
-  assert(editor.rows("images")["image.image"].localFiles[0] === file);
+  assert(editor.rows("images")["image.image"].items[2].file === file);
   assert(editor.dirty()); assert(!editor.remaining().some(item => item.field === "enabled")); editor.dispose();
 });

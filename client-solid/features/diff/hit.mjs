@@ -8,6 +8,7 @@
 // concern (the delta then also writes the peer key).
 
 export function hitLayer({ mode, col, splitT, x, cellBRect, stageRect }) {
+  if (mode === "full") return "a";
   // Two-Up: the cell under the pointer
   if (mode === "two-up") {
     return cellBRect && x >= cellBRect.left && x <= cellBRect.right ? "b" : "a";

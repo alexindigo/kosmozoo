@@ -13,9 +13,13 @@ import {
   generatePermutations, permutationAxes, permutationPlan, resolveRelativeRanges, templateReplaceWithProof,
   paramId, parameterIndex, catalogueParams, parameterAliases, validRunAcknowledgement,
 } from "./shared.mjs";
-import { validEntryName } from "../../backings/index.mjs";
-import { sourceOrigin, sameOrigin, validOrigin, validContext } from "../../source-origin.mjs";
+import { validEntryName, backingFor } from "../../backings/index.mjs";
+import { sourceOrigin, sameOrigin, validOrigin, validContext, expectedOrigin } from "../../source-origin.mjs";
 import { dependencyClosure, validateGraphLinks } from "./graph.mjs";
+import { sha256 } from "../../cache.mjs";
+import { IMAGE_EXTENSIONS, mediaExtension } from "../../backings/mime.mjs";
+import { listImages, readImage, folderError } from "./folder-images.mjs";
+import { inspectImage } from "./image-inspection.mjs";
 
 // hard cap on permutations per run — a sweep is a human-scale batch, not a
 // fork bomb (F7). Above the cap the run answers 413.
@@ -182,22 +186,22 @@ export function narrowToOneOutputNode(graph, producingId, basename, pfx, sfx, ou
   // both survive, at most NAME_MAX_WITHOUT_COUNTER chars total.
   const directory = outputPath(graph[producingId].inputs.filename_prefix).directory;
   graph[producingId].inputs.filename_prefix = directory + clampBasename(pfx + outputPath(basename).leaf + sfx, NAME_MAX_WITHOUT_COUNTER);
-  return { kept, dropped };
+  return { kept, dropped, written: [producingId] };
 }
 
 // Fallback: wrap every output node's own prefix with the user's pfx/sfx.
 // The middle budget subtracts pfx/sfx so a long pfx/sfx can't push the
 // assembled prefix over NAME_MAX either.
 export function wrapAllOutputPrefixes(graph, pfx, sfx, outputClasses) {
-  let touched = 0;
-  for (const n of Object.values(graph)) {
+  const written = [];
+  for (const [nid, n] of Object.entries(graph)) {
     if (!outputClasses.has(String(n.class_type ?? ""))) continue;
     const orig = String(n.inputs?.filename_prefix ?? "");
     const { directory, leaf } = outputPath(orig);
     n.inputs.filename_prefix = directory + pfx + clampBasename(leaf, clampBudget(pfx, sfx)) + sfx;
-    touched++;
+    written.push(nid);
   }
-  return touched;
+  return written;
 }
 
 // The lineage tag: ComfyUI writes every extra_pnginfo key as a JSON-encoded
@@ -213,6 +217,65 @@ export function lineageTag(source, params) {
 // app: { store, cache, hosts, ingest, comfy, backings } — the engine surface
 // for features.
 export function register(app) {
+  app.route("GET", "/folder-chooser", async () => Response.json(await app.desktop.capability()));
+  app.route("POST", "/choose-folder", async req => {
+    let body;
+    try { body = await req.json(); } catch { return Response.json({ error: "Folder path required" }, { status: 400 }); }
+    if (!body || typeof body.path !== "string") return Response.json({ error: "Folder path required" }, { status: 400 });
+    try { return Response.json(await app.desktop.choose({ path: body.path, signal: req.signal })); }
+    catch (error) { return Response.json({ error: error.message }, { status: error.status ?? 502 }); }
+  });
+  const source = (req, host) => {
+    const origin = expectedOrigin(req), token = app.backings.capture(host);
+    if (!origin || !token || !sameOrigin(origin, sourceOrigin(host, app.backings.source(host))) || !app.backings.accepting()) throw Object.assign(new Error("Source origin changed"), { status: 412 });
+    return { origin, token };
+  };
+  app.route("POST", "/folder-images", async req => {
+    try { return Response.json(await listImages((await req.json()).path)); }
+    catch (error) { return folderError(error); }
+  });
+  app.route("GET", "/folder-image", async req => {
+    try {
+      const { bytes, mime } = await readImage(new URL(req.url).searchParams.get("path"));
+      return new Response(bytes, { headers: { "Content-Type": mime, "Cache-Control": "no-store" } });
+    } catch (error) { return folderError(error); }
+  });
+  app.route("POST", "/inspect-path/<host>", async (req, { host }) => {
+    try {
+      const { origin, token } = source(req, host), body = await req.json(), file = await readImage(body.path);
+      return await inspectImage(app, token, host, { ...body, ...file }, origin);
+    } catch (error) { return folderError(error); }
+  });
+  app.route("POST", "/upload-path/<host>", async (req, { host }) => {
+    try {
+      const { origin, token } = source(req, host), body = await req.json();
+      if (!/^[a-f0-9]{64}$/.test(body.hash)) return Response.json({ error: "Inspected image hash required" }, { status: 400 });
+      const file = await readImage(body.path);
+      if (await sha256(file.bytes) !== body.hash) return Response.json({ error: "Image changed since it was added. Remove and add it again." }, { status: 409 });
+      if (!app.backings.isCurrent(token)) return Response.json({ error: "Source origin changed before upload" }, { status: 412 });
+      const backing = backingFor(token.address);
+      if (!backing.write) return Response.json({ error: "This source cannot upload images" }, { status: 400 });
+      const receipt = await backing.write(token.address, file.name, file.bytes);
+      if (!receipt.ok) return Response.json({ error: receipt.error }, { status: receipt.status });
+      if (!app.backings.isCurrent(token)) return Response.json({ error: "Source changed after upload; no follow-up was authorized", uploaded: { name: receipt.name, origin } }, { status: 412 });
+      return Response.json({ name: receipt.name, origin });
+    } catch (error) { return folderError(error); }
+  });
+  // Readonly comparison through the existing byte/hash owner. This deliberately
+  // does not upload to ComfyUI or create another input cache.
+  app.route("POST", "/inspect-image/<host>", async (req, { host }) => {
+    let origin;
+    try { origin = expectedOrigin(req); } catch (error) { return Response.json({ error: error.message }, { status: 400 }); }
+    const token = app.backings.capture(host);
+    if (!origin || !token || !sameOrigin(origin, sourceOrigin(host, app.backings.source(host))) || !app.backings.accepting()) return Response.json({ error: "Source origin changed" }, { status: 412 });
+    let form;
+    try { form = await req.formData(); } catch { return Response.json({ error: "Multipart image required" }, { status: 400 }); }
+    const file = form.get("image"), current = form.get("current"), kind = form.get("kind");
+    if (!(file instanceof File) || !IMAGE_EXTENSIONS.has(mediaExtension(file.name)) || !validEntryName(token.address, current) || !["input", "output"].includes(kind)) return Response.json({ error: "Image and current input required" }, { status: 400 });
+    let names;
+    try { names = JSON.parse(form.get("names") ?? "[]"); } catch { return Response.json({ error: "Input names must be an array" }, { status: 400 }); }
+    return inspectImage(app, token, host, { name: file.name, bytes: new Uint8Array(await file.arrayBuffer()), current, kind, names }, origin);
+  });
   const inspect = async (collection, name, expected = null) => {
     if (!app.backings.accepting()) return { error: "Sources are stopping; no new operation was admitted", status: 503 };
     const token = app.backings.capture(collection);
@@ -227,7 +290,7 @@ export function register(app) {
     if (expected?.graphHash && expected.graphHash !== hash) return { error: "Graph catalogue changed; work was kept", status: 412 };
     const graph = await app.ingest.graph(hash);
     if (!app.backings.isCurrent(token)) return { error: "source changed during inspection", status: 409 };
-    if (!graph) return { error: "no embedded ComfyUI graph in this PNG", status: 422 };
+    if (!graph) return { error: "no embedded ComfyUI graph", status: 422 };
     const { types, enums, outputClasses } = await backing.objectInfo();
     if (!app.backings.isCurrent(token)) return { error: "source changed during inspection", status: 409 };
     return { graph, addr, types, enums, outputClasses, token, backing, context: { origin, graphHash: hash } };
@@ -336,15 +399,17 @@ export function register(app) {
         continue;
       }
 
+      let namingWrites;
       if (producing) {
         const p = findProducingOutputNode(mutated, filename, outputClasses);
         if (!p) {
           errors.push({ permutation: perm, error: "producing output node lost after clone" });
           continue;
         }
-        narrowToOneOutputNode(mutated, p.id, originalBasename, pfx, sfx, outputClasses);
+        namingWrites = narrowToOneOutputNode(mutated, p.id, originalBasename, pfx, sfx, outputClasses).written;
       } else {
-        if (!wrapAllOutputPrefixes(mutated, pfx, sfx, outputClasses ?? new Set())) {
+        namingWrites = wrapAllOutputPrefixes(mutated, pfx, sfx, outputClasses ?? new Set());
+        if (!namingWrites.length) {
           errors.push({ permutation: perm, error: "no output node in graph" });
           continue;
         }
@@ -357,7 +422,9 @@ export function register(app) {
       }
 
       const surviving = survivingAxes(mutated, writes, fullInspection);
-      const outputs = outputNodeIndex(mutated, outputClasses ?? new Set()).map(nodeId => ({
+      // The writer owns naming targets; retained dependency outputs need not
+      // have received a prefix, even when object_info marks them as outputs.
+      const outputs = namingWrites.map(nodeId => ({
         value: mutated[nodeId].inputs?.filename_prefix,
         directory: outputPath(graph[nodeId].inputs?.filename_prefix ?? "").directory,
       }));

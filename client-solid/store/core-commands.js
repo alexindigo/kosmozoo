@@ -39,7 +39,7 @@ export function registerCoreCommands(handles, { ops, state, clipboard = (text) =
   const identity = { id: optional(string), ids: optional(ids), target: optional(target) };
   const hasIdentity = (args) => shape(identity)(args) && ["id", "ids", "target"].filter((key) => Object.hasOwn(args, key)).length === 1;
   const entry = (id) => state.images[state.imageIdxById().get(id)];
-  add("workbench.mode", { mode: oneOf("two-up", "one-up", "split", "difference") }, ({ mode }) => ops.diff.setMode(mode), "comparator view");
+  add("workbench.mode", { mode: oneOf("full", "two-up", "one-up", "split", "difference") }, ({ mode }) => ops.diff.setMode(mode), "comparator view");
   add("workbench.column", (a) => shape({ column: optional(oneOf("feed", "right")), toggle: optional(bool) })(a) &&
     (a.toggle === true ? a.column === undefined : a.column !== undefined && a.toggle === undefined), (a) => ops.diff.setCol(a.toggle ? state.diff.col === "feed" ? "right" : "feed" : a.column));
   add("workbench.lock", (a) => shape({ value: optional(bool), toggle: optional(bool) })(a) &&
@@ -65,6 +65,7 @@ export function registerCoreCommands(handles, { ops, state, clipboard = (text) =
   add("keys.panel.toggle", {}, () => ops.keys.togglePanel(), "actions & keys panel");
   add("keys.panel.close", {}, () => ops.keys.closePanel(), "close panel");
   add("keys.capture.cancel", {}, () => ops.keys.cancelCapture());
+  add("media.toggle", {}, () => ops.media.toggle(), "play/pause focused media");
   handles.register({ id: "judgment.apply", validate: (a) => shape({ ...identity, intent: judgmentIntent })(a) &&
     ["id", "ids", "target"].filter((key) => Object.hasOwn(a, key)).length === 1,
     execute(a) {
@@ -119,7 +120,7 @@ export function registerCoreCommands(handles, { ops, state, clipboard = (text) =
   add("feed.filter", { value: text }, ({ value }) => ops.ui.setFilter(value));
   add("feed.revealEntry", { id: string }, ({ id }) => {
     const index = state.imageIdxById().get(id);
-    if (index !== undefined) return ops.feed.restoreToIndex(index);
+    if (index !== undefined) return ops.feed.reveal(index);
   });
   add("feed.top", {}, () => ops.feed.scrollTop());
   add("workspace.select", { space: oneOf("details", "anchors") }, ({ space }) => ops.ui.setWorkspace(space));
@@ -158,6 +159,7 @@ export function commandFacades(handles, ops, state) {
     }
   };
   const facade = Object.fromEntries(Object.entries(ops).map(([key, value]) => [key, typeof value === "object" ? { ...value } : value]));
+  facade.media.toggle = () => invoke("media.toggle");
   facade.collections.downloadFeedback = (source) => invoke("collection.feedback.download", { source });
   Object.assign(facade.diff, {
     setMode: (mode) => invoke("workbench.mode", { mode }),

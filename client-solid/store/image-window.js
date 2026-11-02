@@ -7,7 +7,10 @@
 //   - AT SETTLE / CURRENT CHANGE: the window ripples out from the current
 //     card in priority order — C, C+1, C-1, C+2, C-2, … — one ring per
 //     RIPPLE_MS until the stopped range ± WINDOW_PAD is covered, so the
-//     current image's bytes arrive first.
+//     current image's bytes arrive first. Loaded srcs still inside the new
+//     range ± pad stay members from the start (a settle never unloads and
+//     reloads what it covers); the ripple only adds the rest of the range
+//     and other members are released.
 //   - WHILE IDLE: cards that newly appear (size landings) are covered by a
 //     range union, not a re-ripple.
 //
@@ -16,10 +19,9 @@
 // (The store's TWO INDEX SPACES rule lives in app-store.js — the ripple's
 // ring arithmetic is in feed positions and crosses via entryAt.) Error
 // state is keyed by entry id too (a host switch reindexes the list) and
-// cleared on switch; the retry timer is sizes.js's one scheduler.
+// cleared on switch; all image owners share the measurement retry scheduler.
 
 import { createSignal } from "solid-js";
-import { api } from "/js/api.mjs";
 import { scheduleRetry } from "./sizes.js";
 
 export const WINDOW_PAD = 10;
@@ -27,9 +29,11 @@ const RIPPLE_MS = 40;
 
 // entryAt: (feedPos) => entry — the store's feedEntryAt, the one feed→entry
 // crossing. count: () => known-list length, for ring clamping.
-export function makeImageWindow({ entryAt, count, rippleMs = RIPPLE_MS }) {
+export function makeImageWindow({ entryAt, count, admit, rippleMs = RIPPLE_MS }) {
   const members = new Set();      // entry ids with an assigned src
+  const requests = new Map();     // admitted resource URL and browser priority
   const startedIds = new Set();   // ids assigned but not settled (loaded/errored)
+  const loadedIds = new Set();    // members whose current src has loaded
   const errored = new Set();      // entry ids whose bytes failed
   const retryNonce = new Map();   // id -> cache-bust nonce
 
@@ -40,38 +44,56 @@ export function makeImageWindow({ entryAt, count, rippleMs = RIPPLE_MS }) {
 
   let rippleTimer = 0;
   let cancelRetry = null;
+  let generation = 0;
 
   // stop the ripple (scroll start, new settle); members stay as they are —
   // a started load is never aborted
   function freeze() {
+    generation++;
     clearTimeout(rippleTimer);
     rippleTimer = 0;
   }
 
-  const addPos = (set, pos) => {
+  function addEntry(e, nonce) {
+    if (!e || errored.has(e.id)) return;
+    const owner = generation;
+    admit(e, request => {
+      if (owner !== generation) return;
+      const previous = requests.get(e.id);
+      requests.set(e.id, { ...request, identity: e.hash });
+      if (!members.has(e.id) || previous?.src !== request.src || previous?.identity !== e.hash || nonce) { members.add(e.id); bump(); }
+    }, { valid: () => owner === generation, nonce });
+  }
+
+  const addPos = (pos) => {
     if (pos < 0 || pos >= count()) return;
     const e = entryAt(pos);
-    if (e) set.add(e.id);
+    addEntry(e);
   };
 
   // The settle ripple: C, C+1, C-1, C+2, C-2, … until the stopped range
   // ± pad is covered. In-flight ids stay members throughout.
   function settle(anchor, coverFirst, coverLast) {
     freeze();
-    members.clear();
-    for (const id of startedIds) members.add(id);
     const lo = Math.max(0, coverFirst - WINDOW_PAD);
     const hi = Math.min(count() - 1, coverLast + WINDOW_PAD);
+    // In-flight ids stay; loaded members inside the new range keep their src.
+    const kept = new Set(startedIds);
+    for (let p = lo; p <= hi; p++) {
+      const id = entryAt(p)?.id;
+      if (id != null && loadedIds.has(id) && members.has(id)) kept.add(id);
+    }
+    let released = false;
+    for (const id of members) if (!kept.has(id)) { members.delete(id); released = true; }
+    for (const id of kept) members.add(id);
+    for (const id of loadedIds) if (!members.has(id)) loadedIds.delete(id);
+    if (released) bump();
     let k = 0;
     const step = () => {
       rippleTimer = 0;
-      let grew = false;
-      const before = members.size;
-      if (k === 0) addPos(members, anchor);
-      else if (k % 2 === 1) addPos(members, anchor + (k + 1) / 2);
-      else addPos(members, anchor - k / 2);
-      grew = members.size > before;
-      if (grew) bump();
+      if (k === 0) addPos(anchor);
+      else if (k % 2 === 1) addPos(anchor + (k + 1) / 2);
+      else addPos(anchor - k / 2);
       k++;
       const coveredLow = anchor - Math.floor((k - 1) / 2) <= lo;
       const coveredHigh = anchor + Math.ceil((k - 1) / 2) >= hi;
@@ -86,7 +108,7 @@ export function makeImageWindow({ entryAt, count, rippleMs = RIPPLE_MS }) {
   function coverRange(first, last) {
     const before = members.size;
     for (const id of startedIds) members.add(id);
-    for (let p = Math.max(0, first - WINDOW_PAD); p <= last + WINDOW_PAD; p++) addPos(members, p);
+    for (let p = Math.max(0, first - WINDOW_PAD); p <= last + WINDOW_PAD; p++) addPos(p);
     if (members.size > before) bump();
   }
 
@@ -97,14 +119,18 @@ export function makeImageWindow({ entryAt, count, rippleMs = RIPPLE_MS }) {
   const getSrc = (pos, img) => {
     version();
     if (!members.has(img.id)) return null;
-    const nonce = retryNonce.get(img.id);
-    return api.entryBytesUrl(img.host, img.filename) + (nonce ? `?_r=${nonce}` : "");
+    const request = requests.get(img.id);
+    return request?.identity === img.hash ? request?.src ?? null : null;
   };
 
-  const markStarted = (id) => { startedIds.add(id); };
-  const markLoaded = (id) => { startedIds.delete(id); errored.delete(id); };
+  const markStarted = (id) => { startedIds.add(id); loadedIds.delete(id); };
+  const markLoaded = (id) => {
+    startedIds.delete(id); errored.delete(id);
+    if (members.has(id)) loadedIds.add(id);
+  };
   const markError = (id) => {
     startedIds.delete(id);
+    loadedIds.delete(id);
     errored.add(id);
     cancelRetry = scheduleRetry(requeueErrored);
   };
@@ -115,8 +141,8 @@ export function makeImageWindow({ entryAt, count, rippleMs = RIPPLE_MS }) {
     for (const id of [...errored]) {
       retryNonce.set(id, Date.now());
       errored.delete(id);
-      startedIds.add(id);
-      members.add(id);
+      const entry = findEntry(id);
+      addEntry(entry, retryNonce.get(id));
       any = true;
     }
     if (any) {
@@ -126,12 +152,13 @@ export function makeImageWindow({ entryAt, count, rippleMs = RIPPLE_MS }) {
   }
 
   // manual retry (cache-bust — a partial cached response must not be reused)
+  function findEntry(id) {
+    for (let pos = 0; pos < count(); pos++) { const entry = entryAt(pos); if (entry?.id === id) return entry; }
+  }
   const retry = (id) => {
     retryNonce.set(id, Date.now());
     errored.delete(id);
-    startedIds.add(id);
-    members.add(id);
-    bump();
+    addEntry(findEntry(id), retryNonce.get(id));
   };
 
   // a host switch reindexes everything — the window and the error state die
@@ -141,8 +168,10 @@ export function makeImageWindow({ entryAt, count, rippleMs = RIPPLE_MS }) {
     cancelRetry?.(); cancelRetry = null;
     members.clear();
     startedIds.clear();
+    loadedIds.clear();
     errored.clear();
     retryNonce.clear();
+    requests.clear();
   };
 
   return { getSrc, markStarted, markLoaded, markError, retry, clear, settle, coverRange, freeze, recompute: bump };

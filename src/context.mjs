@@ -19,6 +19,7 @@ import { PluginHost } from "./plugins.mjs";
 import { makeRouter } from "./routes.mjs";
 import { Cache } from "./cache.mjs";
 import { FEATURES } from "./features/index.mjs";
+import { directoryPortal } from "./desktop/portal.mjs";
 
 export async function buildContext({ env = Deno.env.toObject(), fakes = {}, start = true, runtime = null, appVersion = null } = {}) {
   const owned = {};
@@ -29,6 +30,7 @@ export async function buildContext({ env = Deno.env.toObject(), fakes = {}, star
     const failures = [];
     // Fence source/Variations admission and streams synchronously at entry.
     try { owned.sourceActivity?.stop(); } catch (error) { failures.push(error); }
+    try { owned.desktop?.stop(); } catch (error) { failures.push(error); }
     closeTask = (async () => {
       for (const name of ["jobs", "inventory", "prefetch"]) {
         try { await owned[name]?.stop(); } catch (error) { failures.push(error); }
@@ -74,6 +76,7 @@ export async function buildContext({ env = Deno.env.toObject(), fakes = {}, star
     },
   }), fakes.jobs != null);
   const sourceActivity = remember("sourceActivity", fakes.sourceActivity ?? new SourceActivity({ store, hosts, inventory, jobs }), fakes.sourceActivity != null);
+  const desktop = remember("desktop", fakes.desktop ?? directoryPortal({ mode: () => runtime?.()?.mode, env }), fakes.desktop != null);
 
   // plugin routes are collected here and mounted once the router exists —
   // the context (plugin host included) is fully built before the router,
@@ -96,7 +99,7 @@ export async function buildContext({ env = Deno.env.toObject(), fakes = {}, star
 
   // feature modules: isolated core features on the engine surface
   const featureApp = {
-    store, cache, hosts, ingest, comfy,
+    store, cache, hosts, ingest, comfy, desktop,
     // a backing bound to one collection (engine-mediated; the feature never
     // fetches a host directly)
     backings: {

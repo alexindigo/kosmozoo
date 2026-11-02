@@ -9,7 +9,6 @@
 import { createSignal, For } from "solid-js";
 import { iconSvg } from "/js/icons.mjs";
 import { useAppStore } from "../store/app-store.js";
-import { aspectFromMeta } from "../store/fields.js";
 import { Zoomable } from "./Zoomable.js";
 import { IconButton } from "./IconButton.js";
 
@@ -44,7 +43,7 @@ function AnchorCard(props) {
       <Zoomable
         src={props.anchor.src}
         alt={props.anchor.name}
-        ar={aspectFromMeta(props.anchor.meta)}
+        size={props.anchor.meta?.width && props.anchor.meta?.height ? { w: props.anchor.meta.width, h: props.anchor.meta.height } : undefined}
         zoomKey={`anchor:${props.anchor.name}`}
         onZoomChange={setZoomed}
         onOpen={() => store.handles.invoke("workbench.pickAnchor", { name: props.anchor.name })}

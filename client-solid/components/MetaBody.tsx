@@ -13,7 +13,7 @@
 import { createMemo, For, Show } from "solid-js";
 import { useAppStore } from "../store/app-store.js";
 import { fullFieldRows, valueDiffer, nodeImages, NODE_IMG_EXT } from "../store/fields.js";
-import { measuredSrc } from "../lib/img-measure.js";
+import { useMeasuredSrc, useImageDisplay } from "../lib/img-measure.js";
 
 export function MetaBody(props) {
   const store = useAppStore();
@@ -71,13 +71,23 @@ export function MetaBody(props) {
               // the feed's rule here too: the img mounts only at its
               // measured aspect — no grow-on-load morph (a failed measure
               // still renders so the broken-bytes state stays visible)
-              const s = () => measuredSrc(im.src);
+              const measured = useMeasuredSrc(store.actions.images.inline, () => ({ src: im.src, identity: props.identity ?? props.meta, foregroundId: props.entryId }));
+              const s = () => measured().size;
+              let element;
+              const display = useImageDisplay(store.actions.images.display, () => ({
+                id: measured().id, src: measured().src, foregroundId: measured().foregroundId,
+              }), () => element);
               return (
                 <div class="infoimg">
                   <div class="plabel">{im.label}</div>
                   <Show when={s() !== "pending"}>
                     <img
-                      src={im.src}
+                      ref={element}
+                      src={display.read().src ?? undefined}
+                      fetchpriority={display.read().priority === "background" ? "low" : "auto"}
+                      onLoad={display.loaded}
+                      onError={display.loaded}
+                      decoding="async"
                       alt={im.file}
                       style={s() !== "failed" ? { "aspect-ratio": `${s().w} / ${s().h}`, width: "100%" } : undefined}
                     />

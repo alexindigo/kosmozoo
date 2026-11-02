@@ -3,7 +3,7 @@
 
 import { readdir, readFile, open as fsOpen, stat as fsStat, unlink } from "node:fs/promises";
 import { basename, join } from "node:path";
-import { RENDERABLE, EXT_MIME } from "./mime.mjs";
+import { RENDERABLE, IMAGE_EXTENSIONS, EXT_MIME } from "./mime.mjs";
 import { makeInventoryOwner } from "./inventory-owner.mjs";
 import { InventoryError, bounded, cancelled } from "./inventory.mjs";
 
@@ -29,7 +29,7 @@ export async function probe(addr) {
 // kind 'output' → [{ name, size }] newest-first; kind 'input' → [name].
 export async function list(addr, kind = "output") {
   const items = (await inventory(addr)).items;
-  return kind === "input" ? items.map((item) => item.name) : items;
+  return kind === "input" ? items.filter(item => IMAGE_EXTENSIONS.has(item.name.split(".").pop().toLowerCase())).map((item) => item.name) : items;
 }
 
 export function createBinding(addr, { clock, epoch, waveTimeoutMs, readerTimeoutMs, statter = fsStat, enumerator = readdir } = {}) {

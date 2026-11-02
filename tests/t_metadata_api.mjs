@@ -19,7 +19,7 @@ async function ctx(dir) {
   const hosts = { local: "127.0.0.1:1" };
   const ingest = new Ingest(rig.store, hosts, { cache: rig.cache });
   const scraper = new Prefetch({ hosts, store: rig.store, settings: rig.settings, ingest });
-  const router = makeRouter({ hosts, store: rig.store, settings: rig.settings, plugins: null, cache: rig.cache, ingest, prefetch: scraper });
+  const router = makeRouter({ hosts, inventory: makeTestInventory(hosts), store: rig.store, settings: rig.settings, plugins: null, cache: rig.cache, ingest, prefetch: scraper });
   return { settings: rig.settings, store: rig.store, router, scraper };
 }
 
@@ -58,6 +58,77 @@ Deno.test("meta-want: files jump to the priority lane; pending reported", async 
   assertEquals(w.prio.length, 2);
   assertEquals(w.walk.length, 0);
   await rm(dir, { recursive: true });
+});
+
+Deno.test("metadata delta: changed identities include content aliases, not unchanged rows; restart falls back", async () => {
+  const rig = await mkStateRig("meta-delta", {});
+  let store = rig.store;
+  try {
+    await store.ingestFile("a", "one.png", "aa".repeat(32), 10);
+    await store.ingestFile("b", "alias.png", "aa".repeat(32), 10);
+    await store.entryDimsPut("a", "unchanged.png", { width: 2, height: 3 });
+    const since = store.metaVersion;
+    await store.metaPut("a", "one.png", { seed: 7 });
+    await store.entryDimsPut("a", "new.png", { width: 64, height: 32 });
+    const delta = store.metadataSince("a", since);
+    assertEquals(Object.keys(delta.items), ["one.png"]);
+    assertEquals(delta.dims, { "new.png": { width: 64, height: 32 } });
+    assertEquals(store.metadataSince("b", since).items, { "alias.png": { seed: 7 } });
+    assertEquals(store.metadataSince("a", store.metaVersion), { v: store.metaVersion, changed: false });
+    assertEquals(store.metadataSince("a").dims["unchanged.png"], { width: 2, height: 3 });
+    const beforeAlias = store.metaVersion;
+    await store.ingestFile("a", "another.png", "aa".repeat(32), 10);
+    assertEquals(store.metadataSince("b", beforeAlias).items, {}, "unchanged content aliases are not republished on every byte acquisition");
+    assertEquals(store.metadataSince("a", beforeAlias).items, { "another.png": { seed: 7 } });
+    const version = store.metaVersion;
+    store.close();
+    store = await Store.open(rig.dir);
+    const fallback = store.metadataSince("a", since);
+    assertEquals(fallback.v, version);
+    assertEquals(fallback.dims["unchanged.png"], { width: 2, height: 3 });
+    assertEquals(store.metadataSince("a", version + 100).dims, fallback.dims);
+  } finally { if (store !== rig.store) store.close(); await rig.close(); }
+});
+
+Deno.test("meta-want: dimensions-only background intent does not enqueue ingestion; options validate before mutation", async () => {
+  const dir = await mkdtemp(join(tmpdir(), "kz-want-dims-"));
+  const { router, scraper } = await ctx(dir);
+  const post = body => router.handle(new Request("http://x/api/collections/local/want", {
+    method: "POST", body: JSON.stringify(body),
+  }));
+  try {
+    for (const options of [{ interest: "invalid" }, { priority: "invalid" }, { priority: null }]) {
+      assertEquals((await post({ files: ["bad.png"], ...options })).status, 400);
+      assertEquals(scraper.workers.size, 0);
+    }
+    const response = await post({ files: ["a.png", "b.png"], interest: "dimensions", priority: "background" });
+    assertEquals((await response.json()).pending, 2);
+    const worker = scraper.workers.get("local");
+    assertEquals(worker.dimsWalk, ["a.png", "b.png"]);
+    assertEquals(worker.walk, []);
+    assertEquals(worker.prio, []);
+    await post({ files: ["b.png"] });
+    assertEquals(worker.dimsPrio, ["b.png"]);
+    assertEquals(worker.prio, ["b.png"]);
+    const poll = await (await router.handle(new Request(`http://x/api/collections/local/meta?since=${router.ctx.store.metaVersion}`))).json();
+    assertEquals(poll.changed, false);
+    assert(poll.pending >= 2, "unchanged reads still report dimension work");
+  } finally { await rm(dir, { recursive: true }); }
+});
+
+Deno.test("bytes priority: explicit background uses low; legacy requests remain foreground", async () => {
+  const dir = await mkdtemp(join(tmpdir(), "kz-byte-priority-"));
+  const { router } = await ctx(dir), priorities = [];
+  router.ctx.ingest.ensure = async (_id, _name, _kind, options) => {
+    priorities.push(options.priority); return { status: 404 };
+  };
+  try {
+    for (const query of ["?priority=background", "", "?priority=foreground", "?priority=invalid"]) {
+      const response = await router.handle(new Request(`http://x/api/collections/local/entries/a.png/bytes${query}`));
+      assertEquals(response.status, query.endsWith("invalid") ? 400 : 404);
+    }
+    assertEquals(priorities, ["low", "high", "high"]);
+  } finally { await rm(dir, { recursive: true }); }
 });
 
 Deno.test("nodes registry: extraction populates /api/nodes with type→fields", async () => {
@@ -153,4 +224,23 @@ Deno.test("listing: one statement per listing — no per-entry queries at 3000 f
     await server.shutdown();
     await rm(dir, { recursive: true, force: true });
   }
+});
+
+Deno.test("meta-want: the acknowledgement carries demanded names' known state, independent of any cursor", async () => {
+  const dir = await mkdtemp(join(tmpdir(), "kz-want-state-"));
+  const { store, router } = await ctx(dir);
+  const post = body => router.handle(new Request("http://x/api/collections/local/want", {
+    method: "POST", body: JSON.stringify(body),
+  }));
+  try {
+    await store.ingestFile("local", "a.png", "aa".repeat(32), 10);
+    await store.metaPut("local", "a.png", { seed: 3 }, { ext: 1 });
+    await store.entryDimsPut("local", "a.png", { width: 64, height: 32 });
+    const full = await (await post({ files: ["a.png", "missing.png"] })).json();
+    assertEquals(full.items, { "a.png": { seed: 3 } });
+    assertEquals(full.dims, { "a.png": { width: 64, height: 32 } });
+    const dims = await (await post({ files: ["a.png"], interest: "dimensions", priority: "background" })).json();
+    assertEquals(dims.items, {}, "dimension interest never ships graph metadata");
+    assertEquals(dims.dims, { "a.png": { width: 64, height: 32 } });
+  } finally { await rm(dir, { recursive: true }); }
 });

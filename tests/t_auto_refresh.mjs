@@ -7,6 +7,8 @@ import { sourceFrame, injectedSourceStream } from "./helpers/source-stream.mjs";
 import { Jobs } from "../src/jobs.mjs";
 import { makeSourceFreshness } from "../client-solid/store/source-freshness.js";
 import { makeSizes, scheduleRetry, ERROR_RETRY_MS } from "../client-solid/store/sizes.js";
+import { makeAcquisition } from "../client-solid/store/acquisition.js";
+import { installImageResource } from "./helpers/image-resource.mjs";
 
 const deferred = () => {
   let resolve;
@@ -253,6 +255,8 @@ Deno.test("completion monitoring: a pending progress sample cannot prevent obser
 });
 
 Deno.test("viewport acquisition: late coherent range admits images without scrolling or current changes", async () => {
+  const restoreImage = installImageResource();
+  try {
   await withClient(async ({ store, boot }) => {
     await boot;
     const [items, setItems] = createSignal([]);
@@ -265,9 +269,12 @@ Deno.test("viewport acquisition: late coherent range admits images without scrol
     assertEquals(store.state.current(), before);
     assertEquals(store.state.feedActivity(), "settled");
   });
+  } finally { restoreImage(); }
 });
 
 Deno.test("viewport acquisition: zero geometry stays pending and a late viewport size admits the same range", async () => {
+  const restoreImage = installImageResource();
+  try {
   await withClient(async ({ store, boot }) => {
     await boot;
     const [height, setHeight] = createSignal(0);
@@ -280,6 +287,7 @@ Deno.test("viewport acquisition: zero geometry stays pending and a late viewport
     col.clientHeight = 200; setHeight(200);
     await waitFor(() => store.state.window.getSrc(0, first) !== null, 300);
   });
+  } finally { restoreImage(); }
 });
 
 Deno.test("freshness ownership: unknown, forged, foreign and older read tickets cannot acknowledge newer work", () => {
@@ -401,7 +409,9 @@ Deno.test("size acquisition: changed content retires stale slots before the shar
     constructor() { this.naturalWidth = 64; this.naturalHeight = 32; probes.push(this); }
     removeAttribute() { this.src = ""; }
   };
-  const sizes = makeSizes({ srcFor: (id) => `/bytes/${id}`, imageAt: (index) => entries[index],
+  const acquisition = makeAcquisition();
+  acquisition.setWindow({ ids: entries.map(entry => entry.id), currentId: entries[0].id });
+  const sizes = makeSizes({ acquisition, srcFor: (id) => `/bytes/${id}`, imageAt: (index) => entries[index],
     identityFor: (id) => entries.find((entry) => entry.id === id)?.hash ?? null });
   try {
     sizes.setContext({});
@@ -418,6 +428,48 @@ Deno.test("size acquisition: changed content retires stale slots before the shar
     for (const entry of entries) assertEquals(sizes.sizeOf(entry.id), { w: 128, h: 64 });
   } finally {
     sizes.dispose();
+    acquisition.dispose();
     if (oldImage === undefined) delete globalThis.Image; else globalThis.Image = oldImage;
   }
+});
+
+Deno.test("acquisition window: an unknown deep restore stages its requested identity before background candidates", async () => {
+  const original = globalThis.Image, probes = [];
+  globalThis.Image = class {
+    constructor() { this.naturalWidth = 64; this.naturalHeight = 32; probes.push(this); }
+    removeAttribute() { this.src = ""; }
+  };
+  try {
+    await withClient(async ({ store, boot }) => {
+      await waitFor(() => probes.length === 6);
+      assert(probes[0].src.includes("/f40.png/"), "the deep requested identity gets the first Image");
+      assert(probes.every(image => image.fetchPriority === "auto"));
+      let completed = 0;
+      while (completed < 20) {
+        const available = probes.slice(completed);
+        for (const image of available) { image.onload?.(); completed++; }
+        await new Promise(resolve => setTimeout(resolve, 5));
+      }
+      await boot;
+      assertEquals(store.state.current()?.image, "f40.png");
+      assertEquals(probes.length, 20, "only the shared foreground window measures before a viewport exists");
+    }, ({ rows, row }) => {
+      rows.splice(0, rows.length, ...Array.from({ length: 80 }, (_, i) => ({ ...row(`f${i}.png`), width: null, height: null })));
+      globalThis.location.hash = "#h#f40.png";
+    });
+  } finally { if (original === undefined) delete globalThis.Image; else globalThis.Image = original; }
+});
+
+Deno.test("deep jump: the virtualizer's measurements follow the live known list before its one scrollToIndex", async () => {
+  const calls = [];
+  await withClient(async ({ store, boot }) => {
+    await boot;
+    await waitFor(() => calls.some(call => call.startsWith("scroll:")));
+    const first = calls.findIndex(call => call.startsWith("scroll:"));
+    assert(first > 0 && calls[first - 1] === "measure", `measurements refresh first: ${calls.join(",")}`);
+  }, ({ store }) => {
+    globalThis.location.hash = "#h#b.png";
+    store.actions.feed.register({ scrollEl: { clientWidth: 100, clientHeight: 200, scrollTop: 0 },
+      virtualizer: { getMeasurements: () => calls.push("measure"), scrollToIndex: (index) => calls.push(`scroll:${index}`), getVirtualItems: () => [] } });
+  });
 });

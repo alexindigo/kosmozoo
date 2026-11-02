@@ -5,7 +5,7 @@
 // spacers, and scrollToIndex for deep jumps. The DOM only ever holds the
 // window — restore/step costs O(window), not O(scroll position).
 //
-// The feed's invariant: a card mounts only when its size is known and never
+// The feed's invariant: a card mounts at known or terminally failed size and never
 // changes height while mounted. estimateSize IS cardHeight — exact for
 // every mounted row — so the library's measurement pass is not wired and
 // no timer coordinates geometry. A size landing that inserts an entry above
@@ -17,7 +17,7 @@ import { For, Show } from "solid-js";
 import { createVirtualizer } from "@tanstack/solid-virtual";
 import { useAppStore } from "../store/app-store.js";
 import { WINDOW_PAD } from "../store/image-window.js";
-import { cardHeight, feedOffsets, gridGapPx, measureGeometry, invalidateGeometry, geometryMeasured } from "../store/sizes.js";
+import { cardHeight, feedOffsets, feedEntryAtOffset, gridGapPx, measureGeometry, invalidateGeometry, geometryMeasured } from "../store/sizes.js";
 import { iconSvg } from "/js/icons.mjs";
 import { Card } from "./Card.js";
 import { IconButton } from "./IconButton.js";
@@ -37,9 +37,7 @@ export function Grid() {
 
   // the virtualizer's item list is entriesWithKnownSize (the size-known
   // view) — count, keys and estimates ALL map through that ONE list, keyed
-  // by entry id: a string, so identity is stable by construction. knownAt
-  // is the store's feedEntryAt — the one feed→entry conversion
-  const knownAt = (i) => store.state.feedEntryAt(i);
+  // by entry id: a string, so identity is stable by construction.
   // A new ordered identity snapshot invalidates the virtualizer's geometry
   // even when count is unchanged (reorder/replacement is not a count change).
   const itemKey = createMemo(() => {
@@ -94,53 +92,53 @@ export function Grid() {
   // The list must not shift — when insertions land above the item at the
   // viewport's top, the scroll position is compensated by their exact
   // heights in the same tick (estimates are exact, so the compensation is
-  // exact). Not a virtualizer patch: the feed owns this rule.
+  // exact). Not a virtualizer patch: the feed owns this rule. The store's
+  // compensate port applies the delta, so the settle pipeline never reads
+  // the re-based position as gesture travel.
   //
   // The rule fires ONLY for size landings: a landing does not change the
   // view (view does not subscribe to dims paths), so a known-list change
   // with a STABLE view is a landing — a vote, a reveal toggle, a filter, or
   // a host switch recomputes the view, and those shifts belong to the user.
+  //
+  // The anchor is never cached: it is the entry under the ACTUAL scroll
+  // position in the layout the feed showed until this landing. Programmatic
+  // writes (a restore's jump, the tidy, back-to-top, an earlier compensation)
+  // move scrollTop before their scroll events, so a remembered anchor or
+  // scroll signal can describe a position the feed has already left.
   let prevView = null;
   let prevList = null;
   let prevMerge = -1;
-  let previousOffsets = null;
-  let anchorId = null;
-  const offsets = createMemo(() => feedOffsets(
-    store.state.entriesWithKnownSize().map((i) => store.state.images[i]),
-    (entry) => cardHeight(store.state.cardSize(store.state.imageIdxById().get(entry.id)), col?.clientWidth ?? 800) + gridGapPx(),
-  ));
-  const anchorNow = () => {
-    const top = col?.scrollTop ?? 0;
-    const items = virtualizer.getVirtualItems();
-    const first = items.find((it) => it.end > top) ?? items[0];
-    anchorId = first ? knownAt(first.index)?.id ?? null : null;
-  };
+  let previous = null;
+  const layout = createMemo(() => {
+    const entries = store.state.entriesWithKnownSize().map((i) => store.state.images[i]);
+    return {
+      order: entries.map((entry) => entry.id),
+      offsets: feedOffsets(entries,
+        (entry) => cardHeight(store.state.cardSize(store.state.imageIdxById().get(entry.id)), col?.clientWidth ?? 800) + gridGapPx()),
+    };
+  });
   createEffect(() => {
-    // A scroll within an unchanged virtual window still moves the anchor.
-    store.state.feedScrollTop();
     const v = store.state.view();
     const list = store.state.entriesWithKnownSize();
     const merge = store.state.feedMergeNonce();
-    const nextOffsets = offsets();
-    virtualizer.getVirtualItems(); // the virtualizer's own reactivity
+    const next = layout();
     // a landing with a stable view — or a refresh-MERGE (the nonce moved):
     // new entries arrived from the server and the visible cards must not
     // shift. A filter/vote/host switch recomputes the view WITHOUT the
     // nonce — those shifts belong to the user.
     const landing = (prevView === v && prevList && prevList !== list) || merge !== prevMerge;
-    if (landing && previousOffsets?.has(anchorId) && nextOffsets.has(anchorId)) {
-      const delta = nextOffsets.get(anchorId) - previousOffsets.get(anchorId);
-      if (delta !== 0) {
-        store.actions.feed.compensating();
-        col.scrollTop += delta;
+    if (landing && previous && col) {
+      const anchorId = feedEntryAtOffset(previous.order, previous.offsets, col.scrollTop);
+      if (anchorId != null && next.offsets.has(anchorId)) {
+        const delta = next.offsets.get(anchorId) - previous.offsets.get(anchorId);
+        if (delta !== 0) store.actions.feed.compensate(delta);
       }
     }
     prevView = v;
     prevList = list;
     prevMerge = merge;
-    previousOffsets = nextOffsets;
-    // refresh the anchor from the post-compensation state
-    anchorNow();
+    previous = next;
   });
 
   const items = () => virtualizer.getVirtualItems();
@@ -179,7 +177,8 @@ export function Grid() {
  btnwrap's icon button drives the title row's height, and the
  notes rows' real labels wrap exactly like a live card's. */}
         <div class="card--probe" aria-hidden="true" ref={(el) => { probe = el; }}>
-          <div class="imgwrap" />
+          <div class="imgwrap" style={{ height: "1px" }} />
+          <div class="media-controls media-controls-probe" />
           <div class="ctitle">
             <span class="ctitle-left">
               <input type="checkbox" class="selcb" tabindex="-1" />
@@ -218,7 +217,7 @@ export function Grid() {
             <div class="endoflist">
               {store.state.filter()
                 ? `— all ${count()} matching “${store.state.filter()}” —`
-                : `— all ${store.state.folderView().length} images —`}
+                : `— all ${count()} images —`}
             </div>
           </Show>
         </div>
@@ -242,6 +241,7 @@ export function Grid() {
 // appears once, at its final height. No 16:9 floor box, no shrink, no jump.
 function CardSlot(props) {
   const store = useAppStore();
+  let cardEl;
   const imgIdx = () => store.state.imageIdxById().get(props.entryId);
   const image = () => store.state.images[imgIdx()];
   const ready = () => imgIdx() != null && store.state.cardSize(imgIdx()) != null;
@@ -263,6 +263,8 @@ function CardSlot(props) {
       fallback={<div class="card--slot-gap" style={`height:${Math.max(0, (props.slotSize ?? 0) - gridGapPx())}px`} />}
     >
       <div
+        ref={cardEl} tabIndex={-1}
+        onPointerDown={() => cardEl.focus({ preventScroll: true })}
         class={"card" + (state().current ? " current" : "") + (isTall() ? " card--tall" : "")}
         style={{ ...state().style, height: `${cardHeight(store.state.cardSize(imgIdx()), store.state.feedScrollEl()?.clientWidth ?? 800)}px` }}
         data-treatment={state().treatment}
@@ -272,7 +274,7 @@ function CardSlot(props) {
         data-favorite={state().active.favorite ? "1" : undefined}
         data-bookmark={state().active.bookmark ? "1" : undefined}
       >
-        <Card entryId={props.entryId} />
+        <Card entryId={props.entryId} focused={() => cardEl?.contains(document.activeElement)} />
       </div>
     </Show>
   );

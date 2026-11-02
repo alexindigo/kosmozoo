@@ -18,7 +18,7 @@ toggles. Availability and reason derive from each mode's declared `needs`.
 | **Attention (ROI)** | no | guides, region focus | not implemented |
 
 What IS shipped: the feed (virtualized grid), the workbench (the two-sided
-comparator — feed current × right-pane current, Kaleidoscope's four views
+comparator — feed current × right-pane current, per-kind views
 with shared pan/zoom; pair URL live), notes/vote/favorite/bookmark, anchor pane, and
 the variations feature (server route + modal). The three plugin axes
 (alignment / composition-as-plugins / ROI) stay dormant — Difference-the-view
@@ -43,14 +43,14 @@ the resources; a collection's `capabilities` answer what its backing can do.
 | `/api/collections/<id>/entries/<name>` | GET | one entry |
 | `/api/collections/<id>/entries` | POST | multipart upload into the input dir; **409 with the conflicting name, never an overwrite** |
 | `/api/collections/<id>/entries/<name>` | DELETE | per capability: folder → unlink; comfy + assets_plus → trash; otherwise → hide + history cleanup |
-| `/api/collections/<id>/entries/<name>/bytes` | GET | cache-first bytes (`?kind=input` for input-dir files); ETag is the content hash, `Cache-Control: no-cache` |
+| `/api/collections/<id>/entries/<name>/bytes` | GET | cache-first bytes (`?kind=input` for input-dir files); ETag is the content hash, `Cache-Control: no-cache`; single-byte ranges (§Serve path) |
 | `/api/collections/<id>/entries/<name>/bytes` | HEAD | 404 when the entry's bytes are unknown, else `content-length` |
 | `/api/collections/<id>/entries/<name>/judgment` | PATCH | whitelisted fields (`vote`/`favorite`/`bookmark`/`notes`/`plugins.<ns>.*`), defaults deep-pruned, one statement |
 | `/api/collections/<id>/feedback.json` | GET | the collection's judgments as a portable v2 document, generated on demand |
-| `/api/collections/<id>/meta` | GET | versioned poll `?since=<v>` → `{v, changed, items?, dims?, pending}` — extracted metas and entry dims ride the same channel |
-| `/api/collections/<id>/want` | POST | `{files}` — on-screen names jump the extraction queue; the whole name array validates before any queue mutation |
+| `/api/collections/<id>/meta` | GET | versioned identity delta `?since=<v>` → `{v, changed, items?, dims?, pending}`; no cursor gives a full snapshot; pending includes dimension work |
+| `/api/collections/<id>/want` | POST | `{files, interest?:"full"\|"dimensions", priority?:"foreground"\|"background"}`; legacy defaults full/foreground; all names/options validate before queue mutation; reply `{pending, items, dims}` carries the named entries' already-known metadata (full interest only) and dimensions |
 | `/api/content/<hash>` | GET | the content record + `instances: [{collection, name}]` |
-| `/api/content/<hash>/bytes` | GET | cache bytes by hash (plugins, workbench) |
+| `/api/content/<hash>/bytes` | GET | cache bytes by hash (plugins, workbench); same single-byte-range semantics |
 | `/api/prefetch` | GET, POST | the two-pass background ingestion: `enabled`/`paused` toggles, per-collection ingest `pending`, the pass totals `dimsPending`/`ingestPending`, and each collection's `lastError` |
 | `/api/settings/<ns>` | GET, PATCH | namespaced settings (`core.*`, `plugins.<name>.*`) |
 | `/api/plugins` | GET | discovered plugins + their declared capabilities |
@@ -195,10 +195,18 @@ client's delete affordance alike):
 | `virtual` | schema slot only (future) | | | | |
 
 A folder collection's address is `folder:/abs/path`; it lists renderable
-extensions (png, jpg, jpeg, webp, gif, svg, avif, bmp), newest-first by
+extensions (png, jpg, jpeg, webp, gif, svg, avif, bmp, mp4, webm, mov, flac, mp3, opus, wav), newest-first by
 mtime, basename-only (no subdirectories, no traversal); its bytes come
-straight from disk; the PNG extraction pipeline applies unchanged. A
+straight from disk; the shared media extraction pipeline applies unchanged. A
 non-directory `folder:` address is rejected at add time (400 with reason).
+
+Comfy source addresses accept `host[:port]` over HTTP only, without a URL scheme
+or IPv6 literal. Omitting the port means 80; explicit ports must be decimal whole
+numbers from 1 through 65535. One normalization owner in `src/collections.mjs`
+serves API admission and environment seeds. Only `host:port` is stored and shown
+in the picker: `comfy.home` becomes `comfy.home:80`. Repeating either spelling
+under the same name is the same source; a different port remains a 409 conflict.
+Existing stored addresses and source origins are unchanged.
 
 ### Source activity and chrome
 
@@ -345,22 +353,127 @@ does not remount retained cards.
 
 Grid's registered, owner-disposed seam publishes reactive measured readiness,
 positive viewport dimensions and identity-keyed virtual items. One Store
-reconciliation stages sizes/wants and admits a coherent settled range; empty,
-zero or stale-key geometry stays pending. Range/size/readiness changes can acquire
-images without scrolling or another current change. Current-first ripple remains;
-idle coverage extends by union. Acquisition permission is separate from permission
-to commit scroll-derived current/trail/URL: loading-time motion can settle
+reconciliation projects actual viewport identities (without overscan) and current into
+one approximately twenty-entry foreground window. The Store-owned acquisition policy
+admits sizes, feed src, inline images, metadata wants/reads/publication, node refresh
+and scraper status; beyond-window work uses idle quanta of at most eight ms and two
+shared background resource slots, and waits while foreground work is pending.
+Foreground resources use at most six slots. Wants are retained, acknowledged and
+single-flight; outstanding lane heads are identity-indexed, so scheduler queries never
+scan the acknowledged library. Projection changes reindex only affected foreground
+identities. Metadata dimensions publish atomically in batches of at most 200
+entries/eight ms. Empty, zero or stale-key geometry stays pending. Range/size/readiness
+changes can acquire images without scrolling or another current change. Current-first
+ripple remains; idle coverage extends by union. A settle keeps in-flight srcs and
+loaded srcs still inside its new range ± pad; its ripple re-admits the rest of the
+range and other members are released. Acquisition permission is separate from
+permission to commit scroll-derived current/trail/URL: loading-time motion can settle
 acquisition without later gaining browsing permission. Active gestures freeze
 new src admission; the existing 150ms settle, compensation suppression and
 one navigation restore remain.
 
-The private size factory owns measurement images, slots and ephemeral dimensions
-by source context and content identity. Context retirement disposes resources and
-cached dimensions; content replacement retires stale resources before the six-slot
-concurrency gate. Late callbacks require matching context/slot/content. Measurement
-and src-error owners share one eight-second retry timer with retained callbacks and
-owner-specific cancellation, so one owner's work or retirement cannot erase another's.
-Store disposal releases measurement resources, the resize listener and retry work.
+The private size factory composes one retained native resource owner shared by feed
+dimensions/src and owner-disposed inline registrations, admitted by that policy. Views
+only register inputs and render its read-only results. Mounted feed and inline image
+displays register their own load/error lifetimes with that same owner and policy: a
+ready measurement does not exempt later DOM cache validation from capacity.
+Retirement aborts the native consumer before releasing its slot. Resources and
+ephemeral dimensions carry source context/content identity; context retirement
+disposes resources and cached dimensions, and content replacement retires stale
+resources and releases aborted capacity before replacement admission. Late callbacks
+require matching context/resource/content. Completion is context/resource/content
+owned, independent of whether its starting interest survives a re-window. Background
+Images request low browser priority and explicit background engine intent; decoding is
+async. Measurement and src-error owners share one eight-second retry timer with
+retained callbacks and owner-specific cancellation, so one owner's work or retirement
+cannot erase another's. Each measurement attempt has a 30-second deadline and exactly
+one delayed retry; waiting blocks every early staging trigger. Retained measurement
+interest drains through the policy even when no card can mount. A terminal measurement
+failure is a known 1024×1024 box, not an omitted entry. Only pending entries stay
+out of the feed. The size owner supplies the same dimensions to feed membership,
+pending counts and CardSlot geometry; a terminal box cannot change height when
+late metadata arrives. Learning an entry's first hash is same-content enrichment
+and preserves active measurements and terminal boxes; changing a known hash
+retires them. If authoritative dimensions arrive during an attempt, a subsequent
+measurement error settles with those dimensions rather than resizing the already
+ready card into a fallback. The box displays the filename and “Can't display this file.”,
+with normal judgment, notes, download and hide/delete controls available. The
+footer counts the same filtered, size-ready entries as the virtualizer (including
+failures), and separately reports pending measurements.
+Store disposal releases measurement resources, deadlines, queued interest, the
+resize listener and retry work.
+
+Images measure off-DOM with `Image`; videos use a retained
+`<video preload="metadata">` and `videoWidth`/`videoHeight`, inside that same
+owner and policy, with the same context/content guards, deadline and retry.
+Listing/extractor dimensions still take precedence. Retirement pauses video,
+removes its source and resets the native consumer before releasing capacity.
+Audio is immediately size-ready with the fixed 1024×160 face, without measurement
+or a size read; audio and known-size video srcs start without a native probe. Late dimensions and decode errors cannot resize audio cards.
+One pure media-geometry model retains natural dimensions across feed, details
+and anchors. Images/video scale down to available width, never enlarge; the box
+height is max(displayed media height, available width × 9/16). Media is centred;
+above the minimum the box hugs it vertically. Terminal failures keep their square
+box and audio keeps its fixed face aspect. Playable controls occupy a separate
+adjacent row below that box; its stable measured height is included in cardHeight,
+virtualizer estimates and landing compensation, even while src is absent or failed.
+
+`MediaBox` owns native display/load/zoom and player state; `Zoomable` is its
+store adapter for feed/details/anchors. The comparator also renders MediaBox,
+with its existing stage-owned entangled zoom. One shared controls component
+provides play/pause, seek, elapsed/duration, mute, per-player loop (off by
+default, never persisted) and open-in-viewer. Video and audio never autoplay; paused
+card video players show a play affordance centred on the displayed first decoded frame. Surface
+click toggles playback, while pan drags suppress their trailing click. Images
+retain click-to-open and animated-image behavior. A per-store capability owner
+pauses every other registered player on a native play event, and disposal or
+src-window retirement pauses/unloads the consumer.
+Native load lifetime follows source value and element identity, not unrelated
+reactive window invalidations; zoom bindings follow element/key identity.
+Audio uses the same controls, focus/Space semantics and arbitration, without a
+picture: its primary play/pause button and duration share a centered row inside
+the fixed box, without repeating the filename already in the card title.
+No waveform or runtime transcode is involved. Tooltips call it an “audio file”.
+Every playback button uses the shared IconButton contract, with primary play
+and quiet mute/loop toggles using the shared active state. Surfaces and seek
+use semantic palette tokens. Card open uses a four-corner full-screen icon,
+titled “open full screen”; viewer media controls have no open button.
+Native decode/unsupported-format errors say “Your browser can't play this
+video format.” or “…audio format.”; image decode errors say “This image can't
+be decoded.” Unknown causes keep the generic reason. Every failure adds
+“Download it to open elsewhere.”, with ordinary card download still available.
+Audio's viewer has one view and no switcher or B side.
+The per-kind workbench view catalogue owns opening defaults, command admission
+and the toolbar. Video opens in Full (A only), and offers Split (two-up),
+Overlay (one-up/blink) and Slider (wipe); Difference is absent. Audio has only
+Full. Images offer Full/Two-Up/One-Up/Split/Difference. Every kind opens in Full,
+with A only, on every open (including explicit pairs and deep links).
+Video comparison choices require the existing anchor/node-image B pair.
+The persisted, rebindable `wb.full` binding defaults to `f`; keys1–4keep
+their existing mode meanings. Full is available for every asset kind.
+The viewer is a structural column: media area flexes above an ordered A/B
+controls row, followed immediately by the existing bottom toolbar. One
+playable side spans the dock; two playable sides get equal side-by-side bars
+labelled A/B. MediaBox retains player state and receives its controls mount
+as a presentation input; controls never participate in image pan/wipe layout.
+Every native layer and the Difference canvas derive contain-fit geometry from
+the same pure media-geometry model, using the actual media-area allocation;
+constrained grid tracks cannot grow to a native element's intrinsic aspect.
+Viewer crops are resource-keyed session state, separate from the persisted
+feed/details/anchor views. Every open resets viewer crops to centred/fitted;
+mode switches preserve only the viewer's own crops and locked-delta semantics.
+Allocation changes rederive transforms and the Difference draw. Viewer gestures
+never alter persisted card crops. There is no centred viewer play button for
+any kind; its docked play button is the visible playback affordance.
+
+Workbench guards accept video/audio only after `loadeddata` and images after decode;
+accepted source, kind and filename stay together through a failed swap, retaining
+the last good side. Without a last-good side, a failed guard carries its native
+media error code or image decode cause to the same MediaBox failure formatter;
+unknown guard timeouts stay generic. Closing retires pending guards and native sources. Two-up,
+one-up and split allow video/audio without synchronization. Non-image pairs disable
+Difference with “difference mode compares still images”; the semantic mode
+command enforces the same restriction. Hidden one-up players pause.
 
 The shared browser JSON transport throws `ApiError` on non-success, retaining
 method/path/status and at most 1024 characters of recognized engine JSON
@@ -406,12 +519,16 @@ settle policy. Debounce callbacks belong to their source session, browse intent
 and registered seams; explicit context/current/diff navigation retires old work.
 Settle batches current and marker reconnection. Compensation and an open workbench
 retain committed marker/current; snap-quiet restore/scrub/top track actual motion.
+The feed reads each compensation's anchor from the actual scroll position in the layout
+it showed, never a remembered one; the Store applies the compensation and moves the
+settle's gesture origin by the same applied displacement, so compensation is never
+gesture travel and cannot invite the settle tidy, however late the settle timer runs.
 Ordinary rail ticks use the existing subdued `--foreground-dim` neutral through
 shared card-state presentation; card neutrals, judgment colors/priorities, wave
 length/glow, geometry, tape windowing and scrub handlers retain their contracts.
 
 Static surfaces: `/shared/<name>` serves the allow-listed `src/` modules
-(`extractor.mjs`, `features/variations/shared.mjs`, `entry-path.mjs`, `source-origin.mjs`, `version.mjs`) to the browser;
+(`extractor.mjs`, `backings/mime.mjs`, `features/variations/shared.mjs`, `entry-path.mjs`, `source-origin.mjs`, `version.mjs`) to the browser;
 `/` and `/diff` serve the Solid app from `client-solid-dist/`, with shared
 assets (`/css`, `/vendor`, `/js`, logos) from `client/`.
 
@@ -424,8 +541,13 @@ Definitions validate data (not events/DOM/functions), preserving action results/
 Promises. Covered compatibility actions delegate to handles; mechanical/read/
 editor/lifecycle ports are explicitly classified. Ordered bindings reference
 commands with constant arguments/context/routing through one injected adapter.
-All twelve IDs/defaults/descriptions/matching/conflicts/saved-reset behavior remain.
-KeysPanel edits mappings; no new shortcut or command-launch control is introduced.
+The twelve existing IDs/defaults/order retain their behavior. `media.toggle`
+adds a persisted, rebindable Space binding through the same dispatcher. It routes
+to the player containing keyboard focus, or the workbench's active player;
+typing and modal layers retain priority. Accepted playback keys prevent native
+scrolling. KeysPanel displays Space by name and edits mappings.
+`wb.full` adds the persisted/rebindable full-view shortcut `f`, via that same
+dispatcher; typing and modal priority are unchanged.
 
 Payload/binding records use own enumerable data properties and dense arrays;
 accessors, symbol properties, hidden callbacks and cycles reject before execution
@@ -471,6 +593,80 @@ early typed naming or manufacturing a user-edit revision. SliderRow's raw increm
 is controlled by this owner and parsed once; view/child File/caret/gesture identity
 and stable row-ID mounting remain private. No whole row-object comparison or
 independently maintained acknowledgement path whitelist owns this flow.
+
+Each Load Image row owns one ordered image set, initially empty. Existing ComfyUI
+input names, native browser Files and engine-host image paths can be added over multiple turns and mixed;
+identity deduplication uses input name, exact File identity or absolute engine path, never filename-only
+deduplication of Files. Removal changes that same set. The chosen thumbnail grid
+is above persistent acquisition controls, even when the axis is off. “ComfyUI
+inputs” opens a searchable, virtualized, multi-select list; arrows/Enter select
+and Escape closes its owned popup before the modal. Only visible input rows load
+engine input-byte thumbnails. Engine thumbnails in the list and the chosen grid
+register near the viewport as foreground displays of the Store's one acquisition
+policy, sharing its capacity; a source change does not retire them, their owner's
+unmount does. “Add files…” uses the browser's multi-file picker;
+there is no browser-directory input or mutually exclusive image mode.
+The persistent folder path field and Add action recursively acquire engine-host
+images, including subfolders. The feature filesystem owner skips symlink traversal,
+returns sorted canonical absolute paths and rejects more than 500 images with an
+explicit message instead of silently truncating. Directory paths use the same
+engine-host trust boundary as `folder:` sources, not the browser's filesystem.
+
+The shared folder icon immediately to the path field's right asks the **engine**
+to open the desktop portal directory chooser; it never uses browser directory
+selection. `GET /api/features/variations/folder-chooser` returns `{available,reason}`.
+Only app mode with a reachable session bus and FileChooser version 3+ enables it;
+serve/container/no-portal cases disable it with “Folder chooser needs the desktop
+app”, without disabling the typed path or Add. `POST /choose-folder` accepts
+`{path:""|absolutePath}` and returns `{path,cancelled:false}` or
+`{path:null,cancelled:true}`. Selection fills the path; Add still explicitly acquires
+the recursive set. Cancel/errors preserve the draft, and later typing wins over
+late chooser results. Editor suspension/unmount aborts the request.
+The context-owned desktop service uses an in-project Deno Unix-socket D-Bus client
+(SASL EXTERNAL, Hello, Properties.Get, pre-call signal subscription, OpenFile with
+`directory:true`, Response). It adds no runtime dependency. Each operation owns a
+connection; responses match the portal's unique sender and returned handle, including
+early signals/legacy handles. Only one local file URI is accepted and decoded once.
+Abort, five-minute timeout and engine shutdown close the request and connection.
+
+`POST /api/features/variations/folder-images` accepts `{path}` and returns
+`{path,items:[{kind:"server-path",name,path}],limit:500}`. `GET /folder-image?path=...`
+serves an image-only regular file for its thumbnail, with `Cache-Control:no-store`.
+`POST /inspect-path/<host>` accepts `{path,current,kind,names?}` plus captured origin
+and returns the same readonly hash evidence as `inspect-image`. `POST /upload-path/<host>`
+accepts `{path,hash}` plus that origin, rechecks the inspected bytes, and sends them
+through the existing backing upload itself; browser bytes are never required.
+Changed files reject with 409 and retain work; remove/add refreshes their comparison.
+Stale source contexts reject with 412, including completed old-origin upload detail
+when retirement occurred during a write. Real returned names, not preview names,
+still own Run provenance. Path items join the same compiler/adoption leaf as Files.
+The native popup joins the modal's owned suspend/resume seam: a blocking leave
+decision hides its top-layer surface without replacing search DOM or losing
+query/caret. Both Keep editing and Escape restore it before focus restoration.
+The blocking decision consumes its pointer clicks, which cannot dismiss an
+underlying popup as outside-click side effects.
+Thumbnail GET/HEAD URLs may carry `origin=<JSON>` so native image elements retain
+the captured source boundary too. Header/query origin validation has one owner;
+conflicting origins reject, and stale byte requests reject before cache/backing IO.
+
+`POST /api/features/variations/inspect-image/<host>` accepts multipart `image`,
+`current`, `kind` (input/output), and optional JSON `names` for the requested
+filename's known collision family, with the captured `X-Kosmozoo-Origin`. It returns
+`{hash,currentHash,existing:[{name,hash}],origin}` using Ingest's existing cache/read owner. Comparison
+never uploads to ComfyUI. The editor retains readonly comparison evidence outside
+editable leaves, marks byte-identical Files “Same as current” and compiles them to
+the current name without upload. The shared axis kernel owns exact current-tuple
+exclusion in both displayed count and Run; mixed numeric/text axes still retain
+their existing Cartesian semantics. Pending/failed comparison is visible and
+cannot authorize an unverified upload. Actual uploads still occur only at Run.
+The prepared count also projects stock ComfyUI's name/byte dedupe and collision
+sequence (`stem (n).ext`) over the selected set in upload order. Only relevant
+known collision-family bytes are read, not the whole input catalogue. Confirmed
+upload names remain readonly session evidence across later remove/add turns.
+Predictions are used only for counting; graph values and provenance always come
+from actual upload receipts, including returned renamed files.
+One compiler-generated image-set consumption binding replaces the old mode/file/
+localFiles leaves, so a fully acknowledged set has no dormant acquisition work.
 
 All variation kinds (numeric, enum, text and image) use the same node/input
 identity codec in `src/features/variations/shared.mjs`. IDs are `<nodeId>.<input>`
@@ -530,6 +726,8 @@ existing HTTP LAN origin; they are correlation, not retry/idempotency keys.
 Every Comfy backing enqueue builds its outgoing prompt through `freshSubmissionGraph`: clone the graph and remove only each node descriptor's execution-only `is_changed`, preserving inputs (including `inputs.is_changed`), all other fields and envelope lineage without cache-busting.
 
 Variation narrowing keeps the producer's complete transitive input-link closure (including every lazy input), removes only output-class nodes outside it, leaves non-output nodes untouched, and rejects dangling links before enqueue.
+
+Naming proof uses only the exact node IDs returned by the naming writer; no writes means no naming acknowledgement.
 
 Actual surviving carrier assignments and recognized naming writes certify positive
 use on confirmed accepted prompts. The same typed axis kernel owns count/generation
@@ -671,9 +869,11 @@ working tree is never a state dir. Env overrides: `KOZMOZOO_PORT` (default
 `KOZMOZOO_PLUGINS`, `KOZMOZOO_REVALIDATE_MS`.
 
 Fresh state starts with no collections when `KOZMOZOO_HOSTS` is unset or empty.
-An explicit comma-separated `name=host:port` or `name=folder:/path` list seeds an
+An explicit comma-separated `name=host[:port]` or `name=folder:/path` list seeds an
 empty collection table; existing nonempty collections always take precedence.
 There is no separate first-boot marker, so an empty table can be seeded later.
+Seeds use the same address normalization and collection validation as API adds;
+invalid entries fail startup with a `KOZMOZOO_HOSTS` error before any seed is stored.
 
 One pure bind/port resolver owns startup modes. Desktop app defaults to
 `127.0.0.1`; source development, foreground `serve` and Docker to
@@ -769,6 +969,32 @@ output when the row's `ext` is stale) → entry (`hash`, `stamp`,
 revalidation is an `Ingest` method (stale-while-revalidate over every
 backing kind).
 
+`src/backings/mime.mjs` is the shared extension → `{mime, kind}` registry;
+`mediaKind(name)` classifies images, videos (mp4/mov/webm) and audio
+(flac/mp3/opus/wav). `RENDERABLE` admits the existing image extensions plus
+mp4/mov/webm and flac/mp3/opus/wav. The input-folder /
+LoadImage list always uses the image-only set derived from this registry.
+
+`metaFromBytes(bytes, name)` owns metadata dispatch for ingestion and cached
+graph reads. It returns `[meta, hasWorkflow, graph]`, with the executed API prompt
+graph separate from the editor workflow. Hash-only readers select by signature.
+PNG text (including APNG `comf` chunks after IDAT), WebP EXIF prefix strings,
+QuickTime mdta keys/ilst and iTunes comment envelopes, and Matroska SimpleTags
+all produce the same metadata/lineage contract. Version5 re-extracts previously
+ingested content through the existing staleness owner. No ffmpeg/runtime decoder
+dependency is introduced.
+
+Audio readers normalize FLAC Vorbis-comment blocks, Ogg Opus `OpusTags` packets
+(including continuation across pages), MP3 ID3v2.3/v2.4 `TXXX` frames and WAV
+`LIST/INFO/ICMT` JSON comment envelopes through that same dispatcher. ffmpeg/PyAV
+preserve named `prompt`, `workflow` and `kz` dictionary keys in FLAC/Opus/MP3.
+WAV's ffmpeg INFO writer has a fixed vocabulary and drops those arbitrary keys:
+write `comment={"prompt":…, "workflow":…, "kz":…}` to retain them in `ICMT`.
+Without embedded metadata a WAV is still listed/playable, with no invented graph.
+Current stock ComfyUI SaveAudio writes FLAC/MP3/Opus, not WAV. Readers check record
+bounds, skip unsupported ID3 compression/encryption and never search encoded audio
+payloads for JSON. Audio adds no further extractor-version bump (version remains 5).
+
 `Ingest.dims(collection, name)` is the pre-ingest half: dims live in a
 file's first bytes (PNG IHDR, GIF descriptor, WebP VP8*, JPEG SOF), so a
 64 KB ranged head read (`Range: bytes=0-65535`; full-read fallback on a
@@ -778,6 +1004,19 @@ hash, or the entry columns) short-circuit the read; a 404 head read tells
 the prefetch the source lost the file, and the prefetch marks the entry
 `gone`.
 
+Video dimensions use MP4/MOV video-track `tkhd` display dimensions (including
+quarter-turn rotation), or WebM video-track PixelWidth/PixelHeight. A 64KiB head
+may miss a trailing moov; full ingestion and browser measurement cover that case.
+Metadata writes advance one durable cursor per write. A bounded session-local
+change index delivers only changed identities/fields, including content's output
+aliases across collections. Absent, invalid, future or older-than-retained cursors
+receive the full snapshot (including after restart); equal cursors omit payloads
+but still report pending dimension/ingest work. Dimension-only writes never resend
+unchanged graph metadata. Delivery history does not change the database schema.
+A delta cannot be re-requested by cursor once acknowledged, so a want's reply
+carries its names' current state: a reader that had not yet listed an entry when
+its change arrived recovers it by demanding that identity.
+
 The prefetch runs TWO passes over each collection's listing: pass 1 the
 dims head reads (10 ms inter-file — size-before-render on a fresh host is
 fast), pass 2 the full ingestion above at the existing politeness
@@ -785,7 +1024,9 @@ fast), pass 2 the full ingestion above at the existing politeness
 delays and backoff — one host's outage never stalls another; a worker's
 failure is logged, surfaced as its `lastError` on `/api/prefetch`, and the
 worker restarts after the backoff cap. The dims queue drains before
-ingestion starts; `want` (on-screen names) promotes in both queues;
+ingestion starts; full foreground `want` promotes in both queues, while dimension
+interest only queues dimension reads. Whole-library walking is explicitly low
+priority; prio lanes pass high priority to the existing Ingest executor;
 per-collection backoff caps at 30 s; 404 ⇒ `entry.state='gone'`
 (permanent); the pause gate holds both passes.
 
@@ -795,6 +1036,22 @@ per-collection backoff caps at 30 s; 404 ⇒ `entry.state='gone'`
 + debounced revalidation) → read-through ingestion → backing proxy as last
 resort (with background ingest). A busy ComfyUI host is not a read
 outage.
+
+Both entry and hash bytes routes advertise `Accept-Ranges: bytes`. A valid
+single `bytes=start-end`, `bytes=start-` or `bytes=-suffix` request returns206
+with exact inclusive bytes, Content-Length and Content-Range. Unsatisfiable
+ranges return416 with `Content-Range: bytes */<length>`. Malformed, multi-range
+or unsupported units are ignored (200). Matching If-None-Match takes precedence
+(304); If-Range must match the strong content ETag, otherwise full bytes return.
+The complete file still goes through hashing/cache before slicing: no streaming
+rewrite. Comfy byte reads have a ten-second **idle** deadline, reset by headers
+and body progress; a progressing large download has no total ten-second limit.
+Bytes requests default to foreground; `?priority=background` keeps off-window
+read-through in Ingest's low lane. Invalid priority rejects before acquisition.
+All backing read paths (dimensions, bytes and revalidation) share the address gate:
+four total reads, at most three background, with a slot retained through complete
+body buffering. Foreground takes the next available slot; a queued low single-flight
+can be promoted. Cached responses retain the existing validators/revalidation.
 
 ### Judgments
 

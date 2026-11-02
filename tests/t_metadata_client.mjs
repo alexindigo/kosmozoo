@@ -1,0 +1,212 @@
+import { assert, assertEquals } from "jsr:@std/assert";
+import { createRoot, createMemo, createEffect, batch } from "solid-js";
+import { createStore } from "solid-js/store";
+import { makeAcquisition } from "../client-solid/store/acquisition.js";
+import { makeMetadata } from "../client-solid/store/metadata.js";
+
+const flush = async () => { for (let i = 0; i < 60; i++) await Promise.resolve(); };
+const deferred = () => { let resolve; const promise = new Promise(yes => resolve = yes); return { promise, resolve }; };
+function fixture(overrides = {}, policyOptions = {}) {
+  const owner = { id: "source", session: 1 }, requests = [], reads = [], registries = [];
+  const acquisition = makeAcquisition({ scheduleIdle: callback => {
+    let cancelled = false;
+    queueMicrotask(() => { if (!cancelled) callback({ timeRemaining: () => 8 }); });
+    return () => { cancelled = true; };
+  }, ...policyOptions });
+  acquisition.setContext(owner);
+  const channel = makeMetadata({ acquisition, owns: value => value === owner, batch,
+    want: async (_id, names, options) => { requests.push({ names, options }); return { pending: 0 }; },
+    meta: async (_id, since) => { reads.push(since); return { changed: false, pending: 0 }; },
+    nodes: async () => { registries.push("read"); return {}; }, status: async () => ({}),
+    setPending() {}, setNodes() {}, setStatus() {}, apply() {}, ...overrides });
+  channel.setContext(owner);
+  return { owner, channel, acquisition, requests, reads, registries,
+    dispose() { channel.dispose(); acquisition.dispose(); } };
+}
+
+Deno.test("metadata wants: a stable foreground is acknowledged once across repeated landings; background is dimensions-only", async () => {
+  const f = fixture();
+  const images = Array.from({ length: 5000 }, (_, i) => ({ id: `source:${i}`, filename: `${i}.png`, hash: null }));
+  try {
+    f.acquisition.setWindow({ ids: images.map(image => image.id), currentId: images[0].id });
+    for (let landing = 0; landing < 50; landing++) f.channel.request(images.slice(0, 20));
+    await flush();
+    assertEquals(f.requests.length, 1);
+    assertEquals(f.requests[0].names.length, 20, "initial inventory promotes only the window");
+    for (let landing = 0; landing < 50; landing++) f.channel.request(images.slice(0, 20));
+    await flush(); assertEquals(f.requests.length, 1);
+    f.channel.request(images.slice(0, 20), { renew: true }); await flush();
+    assertEquals(f.requests.length, 2, "a new accepted inventory may renew an acknowledged obligation");
+    f.channel.request(images.slice(20, 220), { interest: "dimensions", priority: "background" });
+    await flush();
+    assertEquals(f.requests.length, 3);
+    assertEquals(f.requests[2].options, { interest: "dimensions", priority: "background" });
+  } finally { f.dispose(); }
+});
+
+Deno.test("metadata wants: one flight retains an upgraded demand and never acknowledges a replacement's content", async () => {
+  const held = deferred(), calls = [];
+  const f = fixture({ want: async (_id, names, options) => {
+    calls.push({ names, options }); if (calls.length === 1) return held.promise; return { pending: 0 };
+  } });
+  try {
+    const image = { id: "source:a", filename: "a.png", hash: "old" };
+    f.channel.request([image], { interest: "dimensions", priority: "background" }); await flush();
+    f.channel.request([{ ...image, hash: "replacement" }]); await flush();
+    assertEquals(calls.length, 1, "acknowledgement, not a landing, opens the next POST");
+    held.resolve({ pending: 0 }); await flush();
+    assertEquals(calls.length, 2);
+    assertEquals(calls[1].options, { interest: "full", priority: "foreground" });
+  } finally { held.resolve({ pending: 0 }); f.dispose(); }
+});
+
+Deno.test("metadata wants: failure retains its obligation behind backoff", async () => {
+  let calls = 0;
+  const f = fixture({ want: async () => { if (++calls === 1) throw Error("offline"); return { pending: 0 }; } });
+  try {
+    const images = [{ id: "source:a", filename: "a.png" }];
+    f.channel.request(images); await flush();
+    for (let landing = 0; landing < 10; landing++) f.channel.request(images);
+    await flush(); assertEquals(calls, 1);
+    await new Promise(resolve => setTimeout(resolve, 1100));
+    assertEquals(calls, 2);
+    f.channel.request(images); await flush(); assertEquals(calls, 2);
+  } finally { f.dispose(); }
+});
+
+Deno.test("metadata wants: a queued background POST promotes before idle admission and captures its exact acknowledged intent", async () => {
+  const idle = new Map(); let sequence = 0;
+  const f = fixture({}, { scheduleIdle: callback => { const key = ++sequence; idle.set(key, callback); return () => idle.delete(key); } });
+  const image = { id: "source:a", filename: "a.png" };
+  try {
+    f.channel.request([image], { interest: "dimensions", priority: "background" }); await flush();
+    assertEquals(f.requests, []);
+    f.channel.request([image]); await flush();
+    assertEquals(f.requests, [{ names: ["a.png"], options: { interest: "full", priority: "foreground" } }]);
+    f.channel.request([image]); await flush();
+    assertEquals(f.requests.length, 1);
+  } finally { f.dispose(); }
+});
+
+Deno.test("metadata wants: queued old-window demand consumes the current projection and browser priority", async () => {
+  const idle = new Map(); let sequence = 0, f;
+  f = fixture({ priorityFor: item => f.acquisition.priority(item.id) }, {
+    scheduleIdle: callback => { const key = ++sequence; idle.set(key, callback); return () => idle.delete(key); },
+  });
+  try {
+    f.acquisition.setWindow({ ids: ["source:a", "source:b"], currentId: "source:a", limit: 1 });
+    f.acquisition.setGesture(true);
+    f.channel.request([{ id: "source:a", filename: "a.png" }]); await flush();
+    f.acquisition.setWindow({ ids: ["source:a", "source:b"], currentId: "source:b", limit: 1 });
+    f.acquisition.setGesture(false); await flush();
+    assertEquals(f.requests.length, 0, "the retired foreground grant cannot start immediately");
+    const [key, callback] = idle.entries().next().value;
+    idle.delete(key); callback({ timeRemaining: () => 8 }); await flush();
+    assertEquals(f.requests[0].options.priority, "background");
+  } finally { f.dispose(); }
+});
+
+Deno.test("metadata wants: scheduler head queries do not traverse acknowledged library demand", async () => {
+  let lookups = 0, f;
+  f = fixture({ priorityFor: item => { lookups++; return f.acquisition.priority(item.id); } }, {
+    scheduleIdle: () => () => {},
+  });
+  const images = Array.from({ length: 5000 }, (_, i) => ({ id: `source:${i}`, filename: `${i}.png` }));
+  try {
+    // Acknowledge a large retained library, leaving one queued obligation.
+    f.acquisition.setWindow({ ids: images.map(image => image.id), currentId: images[0].id, limit: 5000 });
+    f.channel.request(images);
+    for (let i = 0; i < 300; i++) await flush();
+    assertEquals(f.requests.flatMap(request => request.names).length, 5000);
+    f.acquisition.setWindow({ ids: images.map(image => image.id), currentId: images[0].id, limit: 1 });
+    f.acquisition.setGesture(true);
+    f.channel.request([{ id: "source:extra", filename: "extra.png" }]); await flush();
+    lookups = 0;
+    for (let i = 0; i < 50; i++) f.acquisition.reconcile();
+    assert(lookups < 200, `head checks must be independent of retained library size; got ${lookups} lookups`);
+    // The queued obligation still promotes without scanning the library.
+    f.acquisition.setWindow({ ids: ["source:extra"], currentId: "source:extra", limit: 1 });
+    f.acquisition.setGesture(false); await flush();
+    assertEquals(f.requests.at(-1).names, ["extra.png"]);
+  } finally { f.dispose(); }
+});
+
+Deno.test("metadata acceptance: bounded batches publish width and height atomically with one readiness reconciliation each", async () => {
+  let rootDispose, publications = 0, reconciliations = 0, active = false;
+  const [state, setState] = createStore({ images: Array.from({ length: 450 }, () => ({ width: null, height: null })) });
+  createRoot(dispose => {
+    rootDispose = dispose;
+    const ready = createMemo(() => state.images.filter(image => image.width && image.height).length);
+    createEffect(() => {
+      const count = ready();
+      if (!active) return;
+      reconciliations++;
+      assert(state.images.every(image => !!image.width === !!image.height), "no half-published dimensions");
+      assert(count > 0);
+    });
+  });
+  const f = fixture({ batch: callback => { publications++; batch(callback); },
+    apply(name, _meta, dims) { setState("images", Number(name), { width: dims.width, height: dims.height }); return false; } });
+  try {
+    active = true;
+    const reply = { changed: true, v: 4, dims: Object.fromEntries(state.images.map((_, i) => [String(i), { width: 640, height: 360 }])) };
+    await f.channel.accept(reply, f.owner);
+    assert(publications >= 3, "450 entries cannot fit a 200-entry maximum batch");
+    assertEquals(reconciliations, publications);
+    assertEquals(state.images.filter(image => image.width === 640 && image.height === 360).length, 450);
+    assertEquals(f.registries.length, 0, "dimension-only changes never refetch the node registry");
+    await f.channel.poll(); assertEquals(f.reads, [4], "the cursor advances after all publications");
+  } finally { f.dispose(); rootDispose(); }
+});
+
+Deno.test("metadata acceptance: source retirement stops a queued delta and graph changes refresh nodes once", async () => {
+  const applied = [], f = fixture({ apply: (name, meta) => { applied.push(name); return !!meta; } });
+  try {
+    await f.channel.accept({ changed: true, v: 1, items: { a: { nodes: [] }, b: { nodes: [] } } }, f.owner);
+    assertEquals(f.registries, ["read"]);
+    const old = f.channel.accept({ changed: true, v: 2, dims: { stale: { width: 1, height: 1 } } }, f.owner);
+    f.channel.setContext({ id: "source", session: 2 });
+    f.acquisition.setContext({ id: "source", session: 2 });
+    await old;
+    assertEquals(applied, ["a", "b"]);
+  } finally { f.dispose(); }
+});
+
+Deno.test("metadata wants: an acknowledgement publishes known state that a delta could not apply before inventory listed the entry", async () => {
+  const applied = [], known = new Map();
+  const f = fixture({
+    meta: async () => ({ changed: true, v: 9, items: {}, dims: { "late.png": { width: 4, height: 2 } }, pending: 0 }),
+    want: async (_id, names) => ({ pending: 0, items: {},
+      dims: Object.fromEntries(names.filter(name => name === "late.png").map(name => [name, { width: 4, height: 2 }])) }),
+    capture: names => new Map((names ?? [...known.keys()]).filter(name => known.has(name)).map(name => [name, known.get(name)])),
+    apply: (name, _meta, dims, _owner, snapshot) => { if (snapshot.has(name)) applied.push([name, dims]); return false; },
+  });
+  try {
+    await f.channel.poll(); await flush();
+    assertEquals(applied, [], "inventory had not listed the entry: the cursor still moved past its change");
+    known.set("late.png", "hash");
+    f.channel.request([{ id: "source:late.png", filename: "late.png", hash: "hash" }], { interest: "dimensions", priority: "background" });
+    await flush(); await flush();
+    assertEquals(applied, [["late.png", { width: 4, height: 2 }]], "wanting the listed identity delivers its current dimensions");
+  } finally { f.dispose(); }
+});
+
+Deno.test("metadata lanes: work for a foreground identity never queues behind pending foreground resources as background", async () => {
+  const applied = [];
+  const f = fixture({
+    want: async () => ({ pending: 1, items: {}, dims: {} }),
+    meta: async () => ({ changed: true, v: 2, items: { "cur.png": { seed: 1 }, "far.png": { seed: 2 } }, dims: {}, pending: 0 }),
+    capture: () => new Map([["cur.png", "h1"], ["far.png", "h2"]]),
+    apply: (name) => { applied.push(name); return false; },
+  });
+  try {
+    f.acquisition.setWindow({ ids: ["source:cur"], currentId: "source:cur" });
+    // A long-running foreground resource keeps background admission paused.
+    f.acquisition.submit({ key: "held-foreground", id: "source:cur", run: () => new Promise(() => {}) });
+    f.channel.request([{ id: "source:cur", filename: "cur.png", hash: "h1" }]);
+    f.channel.request([{ id: "source:far", filename: "far.png", hash: "h2" }], { priority: "background" });
+    await flush();
+    await new Promise(resolve => setTimeout(resolve, 1150)); await flush(); await flush();
+    assertEquals(applied[0], "cur.png", "the current entry's acknowledged demand is polled and published in the foreground lane, first");
+  } finally { f.dispose(); }
+});

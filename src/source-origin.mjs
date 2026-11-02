@@ -22,10 +22,13 @@ export function sameContext(a, b) {
   return validContext(a) && validContext(b) && sameOrigin(a.origin, b.origin) && a.graphHash === b.graphHash;
 }
 export function expectedOrigin(request) {
-  const raw = request.headers.get("X-Kosmozoo-Origin");
-  if (raw === null) return null;
-  let value;
-  try { value = JSON.parse(raw); } catch { throw new Error("Invalid expected source origin"); }
-  if (!validOrigin(value)) throw new Error("Invalid expected source origin");
-  return value;
+  const raws = [request.headers.get("X-Kosmozoo-Origin"), new URL(request.url).searchParams.get("origin")].filter(raw => raw !== null);
+  const values = raws.map(raw => {
+    let value;
+    try { value = JSON.parse(raw); } catch { throw new Error("Invalid expected source origin"); }
+    if (!validOrigin(value)) throw new Error("Invalid expected source origin");
+    return value;
+  });
+  if (values.length === 2 && !sameOrigin(values[0], values[1])) throw new Error("Conflicting expected source origins");
+  return values[0] ?? null;
 }

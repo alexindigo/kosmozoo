@@ -16,6 +16,7 @@ export function makeInputPolicy({ handles, state, layers, captureEvent, onError 
     if (binding.route === "keys") return state.keysPanelOpen() && !state.capturing();
     if (binding.route === "workbench") return wb;
     if (binding.route === "workbench-pair") return wb && !!state.diffPair().b;
+    if (binding.route === "media") return !state.keysPanelOpen() && !layers().length;
     return true;
   };
   const request = (binding) => {
@@ -54,7 +55,7 @@ export function makeInputPolicy({ handles, state, layers, captureEvent, onError 
         captureEvent(event);
         return true;
       }
-      if (event.target?.matches?.("input, textarea, select")) return false;
+      if (event.target?.matches?.("input, textarea, select") || event.target?.isContentEditable) return false;
       if (keymap.dispatch(event)) return consume(event, false);
       return false;
     },

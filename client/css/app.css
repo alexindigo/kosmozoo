@@ -17,6 +17,7 @@
   --foreground-dim: #666;
   --foreground-bright: #fff;
   --card-chrome-h: 148px;         /* card chrome under the image box — read once by sizes.js */
+  --media-controls-h: 42px;       /* separate playable row; measured by the stable feed probe */
   --grid-gap: 16px;               /* inter-card spacing — part of the virtualizer's item size */
   --primary: #38bdf8;            /* primary action, bookmark */
   --secondary: #7ab3ff;          /* interactive accent: hover, links, active */
@@ -237,25 +238,21 @@ main { display: flex; flex: 1; min-height: 0; }
 .card--probe { position: absolute; inset-inline: var(--grid-pad); top: 0; visibility: hidden;
   pointer-events: none; border-color: transparent; }
 
-/* image box: aspect-true, reserved before pixels land.
- Default rule: image width = column width, height = derived from aspect-ratio
- with a 16:9 floor (taller for tall images). The image inside is scale-down
- + centered — never upscaled, never rendered in a corner.
- --ar-num/--ar-den default to 16:9 so a meta-less box renders at the same
- aspect the virtualizer's estimateSize assumes (no first-measure jump). */
-.imgwrap { position: relative;
-  width: 100%; aspect-ratio: var(--ar-num, 16) / var(--ar-den, 9);
-  background: var(--background-stage); border-width: 1px; border-style: solid; border-radius: 4px;
+/* The model supplies box/content dimensions. CSS only centres the layers:
+   constrained grid tracks cannot expand from native replaced-element aspect. */
+.imgwrap { position: relative; display: grid; place-items: center;
+  grid-template: minmax(0, 1fr) / minmax(0, 1fr); width: 100%;
+  background: var(--background-stage); outline-width: 1px; outline-style: solid; outline-offset: -1px; border-radius: 4px;
   overflow: hidden; }
 /* the image box's own layer stack (same model as the card's): base is
  transparent; error is the load-lifecycle state; the link-target flash
  is activity and outranks during its window */
 @layer box-base, box-state, box-activity;
-@layer box-base     { .imgwrap { border-color: transparent; } }
-@layer box-state    { .imgwrap.ic-error { border-color: var(--error); } }
-@layer box-activity { .infoimg.flash .imgwrap { border-color: var(--secondary); }
+@layer box-base     { .imgwrap { outline-color: transparent; } }
+@layer box-state    { .imgwrap.ic-error { outline-color: var(--error); } }
+@layer box-activity { .infoimg.flash .imgwrap { outline-color: var(--secondary); }
                       .infoimg.flash img { border-color: var(--secondary); } }
-.imgwrap img { width: 100%; height: 100%; object-fit: scale-down; display: block;
+.imgwrap img { object-fit: contain; display: block;
   cursor: zoom-in; }
 .imgwrap.ic-empty img { cursor: default; }
 /* the error state's whole box, co-located with its state color :
@@ -263,9 +260,37 @@ main { display: flex; flex: 1; min-height: 0; }
  unlayered beats layered, so the img rule outranks the base .imgwrap img */
 .imgwrap.ic-error { min-height: 120px; display: grid; place-items: center; }
 .imgwrap.ic-error img { display: none; }
-.imgwrap.ic-error::after { content: "load failed — click to retry";
-  position: static; display: block; text-align: center;
-  color: var(--negative); font-size: 12px; }
+.media-failure { min-width: 0; max-width: 100%; padding: 16px;
+  display: flex; flex-direction: column; align-items: center; gap: 6px;
+  text-align: center; color: var(--negative); font-size: 12px; }
+.media-failure-name { max-width: 100%; overflow-wrap: anywhere; font-weight: 600; }
+.media-box { position: relative; }
+.imgwrap video { object-fit: contain; display: block; cursor: pointer; }
+.imgwrap > :is(img, video, .media-play-overlay, .media-failure) { grid-area: 1 / 1; }
+.media-block { min-width: 0; width: 100%; }
+.media-block-stage { height: 100%; min-height: 0; }
+.media-controls-slot { height: var(--media-controls-h); }
+.media-controls-probe { position: absolute; visibility: hidden; }
+.imgwrap .media-play-overlay { position: static; }
+.media-box.ic-error :is(img, video) { display: none; }
+.media-stage { width: 100%; height: 100%; min-width: 0; min-height: 0;
+  display: grid; place-items: center; grid-template: minmax(0, 1fr) / minmax(0, 1fr); }
+.media-stage > :is(img, video, .media-audio-face, .media-failure) { grid-area: 1 / 1; }
+.media-stage > :is(img, video) { min-width: 0; min-height: 0; object-fit: contain; }
+.media-play-overlay { position: absolute; inset: 0; display: grid; place-items: center; pointer-events: none; }
+.media-controls { height: var(--media-controls-h); display: flex; align-items: center; gap: 6px;
+  padding: 6px; background: color-mix(in srgb, var(--background-stage) 92%, transparent);
+  color: var(--foreground); font-size: 11px; }
+.media-seek { min-width: 24px; flex: 1; accent-color: var(--secondary); background: var(--border); }
+.media-time { white-space: nowrap; font-variant-numeric: tabular-nums; }
+.media-box:focus-visible { outline: 2px solid var(--secondary); outline-offset: -2px; }
+.media-box > audio { display: none; }
+.media-play-boundary { pointer-events: auto; }
+.media-duration { color: var(--foreground-mid); font-variant-numeric: tabular-nums; }
+.media-box[data-kind="audio"] { cursor: pointer; min-height: 0; display: grid; }
+.media-box[data-kind="audio"] > .media-audio-face { position: static; grid-area: 1 / 1; min-height: 0; min-width: 0;
+  display: flex; justify-content: center; align-items: center; gap: 12px; padding: 4px 12px; }
+.media-stage[data-kind="audio"] .media-audio-face { background: var(--background-stage); }
 /* the shared title row under the image: title left, actions right */
 .ctitle { display: flex; justify-content: space-between; align-items: flex-start;
   gap: 8px; margin: 8px 0 2px; font-weight: 600; color: var(--foreground-mid); }
@@ -320,6 +345,13 @@ main { display: flex; flex: 1; min-height: 0; }
 .votebtn:hover { color: var(--btn-c); border-color: var(--btn-c); }
 .votebtn.on { color: var(--btn-c); }
 .votebtn.on svg path:not([stroke="none"]) { fill: currentColor; }
+/* Shared playback variants: hierarchy belongs to the button library, not to
+   any one player surface. Secondary media controls use the default variant. */
+.votebtn.play { --btn-c: var(--primary); color: var(--foreground-bright);
+  background: color-mix(in srgb, var(--primary) 24%, var(--lifted));
+  display: grid; place-items: center; padding: 4px 8px; }
+.votebtn.prominent { width: 48px; height: 48px; padding: 0; border-radius: 50%; }
+.votebtn:focus-visible { outline: 2px solid var(--secondary); outline-offset: 2px; }
 
 /* Keep actions reachable on a narrow feed: a separate wrapping row, mirrored
  by the geometry probe, rather than letting fixed controls escape the card. */
@@ -515,13 +547,20 @@ body:has(#diff:not([hidden])) #statusCol { bottom: 56px; }
  Both sides stay mounted (views change layout/visibility/clip only); the
  shared zoom binds to the stage box and the same transform copies onto every
  visible layer. The stage clips the overflow; --split owns the wipe position. */
-#diff { position: fixed; inset: 0; background: var(--black); z-index: var(--z-overlay); }
-#diffStage { position: absolute; inset: 0; display: flex; overflow: hidden; }
+#diff { position: fixed; inset: 0; background: var(--black); z-index: var(--z-overlay);
+  display: flex; flex-direction: column; }
+#diffStage { position: relative; flex: 1; min-height: 0; display: flex; overflow: hidden; }
+#diffMedia { display: flex; flex: 0 0 auto; width: 100%; background: var(--background-stage);
+  border-top: 1px solid var(--border); }
+.media-dock-slot { flex: 1; min-width: 0; }
+.media-dock-slot > div { display: contents; } /* Solid Portal's wrapper */
+.media-dock-slot .media-controls { position: static; width: 100%; }
+.media-side { color: var(--foreground-mid); font-weight: 600; padding-inline: 6px; }
 .dz-cell { flex: 1; min-width: 0; min-height: 0; overflow: hidden;
   display: flex; align-items: center; justify-content: center; }
 /* the fit rule is shared with the mask's viewRect: contain-fit + centered,
  NEVER upscaled (a small photo renders at natural size with margins) */
-.dz-img { max-width: 100%; max-height: 100%; object-fit: contain;
+.dz-img { object-fit: contain;
   user-select: none; -webkit-user-drag: none; }
 /* the ACTIVE column's photo fades by --active-op (Split: the top layer
  lets the bottom show through; Two-Up/One-Up: against the stage) */
@@ -593,7 +632,7 @@ body:has(#diff:not([hidden])) #statusCol { bottom: 56px; }
 /* ONE bottom panel holding all the buttons: the controls strip at the left,
  the 1–4 mode buttons centered, the keys button at the right — one shared
  translucent backdrop over the stage image */
-#diffBar { position: absolute; left: 0; right: 0; bottom: 0;
+#diffBar { position: relative; flex: 0 0 auto; width: 100%;
   display: flex; align-items: center; gap: 10px;
   background: color-mix(in srgb, var(--surface) 60%, transparent);
   backdrop-filter: blur(6px);
@@ -691,15 +730,6 @@ body:has(#diff:not([hidden])) #statusCol { bottom: 56px; }
 .vz-imgrow-cur { color: var(--foreground-dim); font-size: 11px; margin-left: auto;
   overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 45%; }
 .vz-imgrow-body { display: flex; gap: 8px; margin-top: 8px; padding-left: 26px; }
-.vz-imgrow-body select { background: var(--lifted); color: var(--foreground);
-  border: 1px solid var(--border-strong); border-radius: 4px; font-size: 12px;
-  padding: 3px 6px; max-width: 100%; }
-.vz-imgrow-body .vz-imgfile { flex: 1; min-width: 0; }
-.vz-imgrow-body .vz-imglocal { flex: 1; min-width: 0; display: flex; }
-.vz-imgrow-body .vz-imgdirbtn { background: var(--lifted); color: var(--foreground);
-  border: 1px solid var(--border-strong); border-radius: 4px; font-size: 12px;
-  padding: 3px 10px; cursor: pointer; }
-.vz-imgrow-body .vz-imgdirbtn:hover { border-color: var(--foreground-dim); }
 
 /* enum sweep rows (LoRA names, samplers, …): same card as the imgRows, the
  options as a scrollable checkbox list below the head. The current value is
@@ -1051,7 +1081,48 @@ body:has(#diff:not([hidden])) #statusCol { bottom: 56px; }
 
 /* The decision is contained by its owner; its editor never unmounts. */
 .vz-panel { position: relative; }
-.vz-editor { display: flex; flex-direction: column; flex: 1; min-height: 0; }
+
+/* Image curation: a contact sheet above a quiet, persistent acquisition row. */
+.vz-image-set { transition: none; }
+.vz-image-set:not(.on) { opacity: 1; }
+.vz-image-content { display: flex; flex-direction: column; gap: 8px; margin-top: 10px; }
+.vz-image-grid { display: grid; grid-template-columns: repeat(auto-fill, 112px); gap: 10px; }
+.vz-image-tile { margin: 0; min-width: 0; display: flex; flex-direction: column; gap: 3px; }
+.vz-image-preview { height: 84px; display: grid; place-items: center; background: var(--background-stage); border-radius: 4px; overflow: hidden; }
+.vz-image-preview img { width: 100%; height: 100%; object-fit: contain; }
+.vz-image-tile figcaption { display: flex; align-items: center; gap: 4px; }
+.vz-image-name, .vz-input-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.vz-image-tile .chrome-icon { flex: 0 0 auto; }
+.vz-image-name, .vz-image-same, .vz-image-check, .vz-image-error, .vz-image-summary { font-size: 11px; }
+.vz-image-same { color: var(--attention); }
+.vz-image-check, .vz-image-empty, .vz-image-summary { color: var(--foreground-mid); }
+.vz-image-error { color: var(--error); overflow-wrap: anywhere; }
+.vz-image-empty, .vz-image-summary { margin: 0; }
+.vz-image-add { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; padding-top: 8px; border-top: 1px solid var(--border); }
+.vz-image-action { background: var(--lifted); color: var(--foreground); border: 1px solid var(--border-strong); border-radius: 4px; padding: 5px 8px; font: inherit; cursor: pointer; }
+.vz-image-action:hover { border-color: var(--foreground-dim); }
+.vz-image-action:focus-visible, .vz-input-search:focus-visible, .vz-input-option:focus-visible { outline: 2px solid var(--secondary); outline-offset: 2px; }
+.vz-input-picker { position: relative; }
+.vz-input-popover { position: fixed; inset: auto; top: anchor(bottom); left: anchor(left); position-try-fallbacks: flip-block, flip-inline;
+  margin: 4px 0; padding: 8px; width: min(380px, 90vw); background: var(--focused-background); color: var(--foreground);
+  border: 1px solid var(--border-strong); border-radius: 6px; box-shadow: 0 8px 24px var(--backdrop); }
+.vz-input-popover:popover-open { display: flex; flex-direction: column; gap: 6px; }
+.vz-input-search { width: 100%; padding: 6px 8px; background: var(--background); color: var(--foreground); border: 1px solid var(--border); border-radius: 4px; font: inherit; }
+.vz-input-list { height: min(240px, 40vh); overflow-y: auto; }
+.vz-input-window { position: relative; width: 100%; }
+.vz-input-option { position: absolute; inset: 0 0 auto; width: 100%; height: var(--vz-input-row-height); display: flex; align-items: center; gap: 8px;
+  border: 0; border-radius: 4px; padding: 4px; background: transparent; color: var(--foreground); font: inherit; text-align: left; cursor: pointer; }
+.vz-input-option img { width: 40px; height: 40px; object-fit: contain; background: var(--background-stage); flex: 0 0 auto; }
+.vz-input-option:hover, .vz-input-option.vz-input-active { background: var(--lifted); }
+.vz-input-selected { width: 14px; color: var(--secondary); flex: 0 0 auto; }
+@media (max-width: 620px) {
+  .vz-panel { padding: 16px 12px; }
+  .vz-body { flex-direction: column; gap: 12px; overflow-y: auto; }
+  .vz-sliders { overflow-y: visible; flex: 0 0 auto; }
+  .vz-divider { display: none; }
+  .vz-right { width: auto; }
+}
+.vz-editor { display: flex; flex-direction: column; flex: 1; min-height: 0; isolation: isolate; }
 .vz-discard-overlay { position: absolute; inset: 0; display: flex; align-items: center;
   justify-content: center; background: var(--backdrop); border-radius: inherit; z-index: 1; }
 .vz-discard { width: min(360px, 85%); padding: 24px; border: 1px solid var(--border-strong);
@@ -1063,3 +1134,18 @@ body:has(#diff:not([hidden])) #statusCol { bottom: 56px; }
   border-radius: 4px; background: var(--lifted); color: var(--foreground); cursor: pointer; }
 .vz-discard-actions .vz-discard-confirm { color: var(--negative); }
 .vz-discard-actions button:focus-visible { outline: 2px solid var(--secondary); outline-offset: 2px; }
+
+.vz-folder { flex: 1 1 250px; min-width: 0; display: flex; flex-direction: column; gap: 4px; }
+.vz-folder-controls { display: flex; align-items: center; gap: 4px; }
+.vz-folder-path { flex: 1; min-width: 0; width: 100%; padding: 5px 8px; font: inherit; color: var(--foreground); background: var(--background); border: 1px solid var(--border); border-radius: 4px; }
+.vz-folder-path:focus-visible { outline: 2px solid var(--secondary); outline-offset: 2px; }
+.vz-folder-help { color: var(--foreground-mid); font-size: 11px; }
+.vz-image-action:disabled { opacity: .5; cursor: default; }
+.vz-image-add { align-items: start; }
+
+@media (max-width: 620px) {
+  .vz-left { flex: 0 0 auto; }
+}
+
+.vz-folder-chooser { display: flex; align-items: center; flex: 0 0 auto; }
+.vz-folder-chooser button:focus-visible { outline: 2px solid var(--secondary); outline-offset: 2px; }
