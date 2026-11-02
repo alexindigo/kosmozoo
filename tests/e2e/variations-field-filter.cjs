@@ -1,5 +1,6 @@
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
+const { freshRecipe } = require('./recipe-helpers.cjs');
 
 module.exports = async ({ cdp, check, KZ }) => {
   const invoke = (command, args = {}) => cdp.evaluate(`(async()=>${KZ}.handles.invoke(${JSON.stringify(command)},${JSON.stringify(args)}))()`);
@@ -82,8 +83,7 @@ module.exports = async ({ cdp, check, KZ }) => {
     }
     await cdp.clickAt('.vz-field-filter button');
     // Remove only the explicit value edit, then prove filtering itself leaves no work.
-    await cdp.clickAt('.vz-workspace-discard');
-    if (await cdp.evaluate("!!document.querySelector('.vz-discard')")) await cdp.clickAt('.vz-discard-confirm');
+    await freshRecipe(cdp);
     await cdp.poll(`!!document.querySelector(${JSON.stringify(input)}) && document.querySelector(${JSON.stringify(input)}).value === ''`);
     await type('prompt');
     await invoke('variations.close');

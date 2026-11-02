@@ -1,5 +1,5 @@
 // App-session recipe lifetime, private to this feature. Opening metadata never
-// carries recipes or Files. No eviction: only committed Discard or app disposal.
+// carries recipes or Files. No eviction: editable leave decisions or app disposal.
 import { makeVariationRecipe, freezeRecipe } from "./recipe.js";
 import { snapshotDraft } from "./draft.js";
 import { sameOrigin } from "/shared/source-origin.mjs";

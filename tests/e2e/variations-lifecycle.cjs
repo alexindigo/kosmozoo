@@ -1,6 +1,6 @@
 // Contract consumers: metadata is not editable work, and effects retain one origin.
 const assert=require('node:assert/strict');
-const { discardRecipe } = require('./recipe-helpers.cjs');
+const { freshRecipe } = require('./recipe-helpers.cjs');
 module.exports=async({cdp,ENGINE,FAKE,KZ,check})=>{
   const invoke=(id,args={})=>cdp.evaluate(`(async()=>${KZ}.handles.invoke(${JSON.stringify(id)},${JSON.stringify(args)}))()`);
   const http=async(base,path,method='GET',body)=>{const r=await fetch(base+path,{method,headers:body?{'Content-Type':'application/json'}:undefined,body:body?JSON.stringify(body):undefined});assert(r.ok,`${path}: ${r.status}`);return r.json()};
@@ -12,7 +12,7 @@ module.exports=async({cdp,ENGINE,FAKE,KZ,check})=>{
   try{
     await cdp.evaluate("(async()=>{await fetch('/api/collections/fake/entries/flux-controlnet.png/bytes')})()");
     await invoke('variations.open',{id:'fake:flux-controlnet.png'});await cdp.poll("document.querySelectorAll('.vz-slider-row').length>0");
-    await discardRecipe(cdp);await invoke('variations.close');await cdp.poll("!document.querySelector('.vz-panel')");
+    await freshRecipe(cdp);await invoke('variations.close');await cdp.poll("!document.querySelector('.vz-panel')");
     await cdp.evaluate(`(()=>{window.__lifecycleFetch=window.fetch;window.__inputs=null;window.__finish=null;window.fetch=async(url,options)=>{
       if(String(url).includes('/entries?kind=input'))return new Promise(resolve=>window.__inputs=()=>window.__lifecycleFetch(url,options).then(resolve));
       const response=await window.__lifecycleFetch(url,options);if(String(url).includes('/features/variations/run'))return new Promise(resolve=>window.__finish=()=>resolve(response));return response}})()`);

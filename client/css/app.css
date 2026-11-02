@@ -1140,7 +1140,7 @@ body:has(#diff:not([hidden])) #statusCol { bottom: 56px; }
 .metabody .props { font-family: system-ui; }
 .metabody :is(.info-none, .plabel), .infogroup-head { color: var(--foreground-mid); }
 .select-native.vz-workspace { font-size: 11px; }
-.vz-workspace-new, .vz-workspace-discard { font: inherit; font-size: 11px;
+.vz-workspace-new { font: inherit; font-size: 11px;
   color: var(--foreground); background: var(--background); border: 1px solid var(--border-strong);
   border-radius: 4px; padding: 5px; text-align: left; cursor: pointer; }
 .vz-workspace-status { color: var(--warning); font-size: 11px; line-height: 1.4; margin: 4px 0; }
@@ -1162,7 +1162,7 @@ body:has(#diff:not([hidden])) #statusCol { bottom: 56px; }
 .viewer-control-slot { width: calc(var(--control-height-viewer) + 8px); }
 .viewer-side-slot { width: 38px; }
 .viewer-keys { justify-self: end; margin-left: 0; }
-.vz-workspace:focus-visible, .vz-workspace-new:focus-visible, .vz-workspace-discard:focus-visible {
+.vz-workspace:focus-visible, .vz-workspace-new:focus-visible {
   outline: 2px solid var(--secondary); outline-offset: 2px; }
 .vz-retained-values section { border-bottom: 1px solid var(--border); padding-block: 8px; }
 .vz-retained-values h3 { color: var(--foreground); font-size: 13px; margin: 0 0 8px; }

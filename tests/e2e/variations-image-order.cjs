@@ -1,7 +1,7 @@
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const { pickInput, openImageAdd, waitForSelectedPreviews } = require('./image-picker-helpers.cjs');
-const { discardRecipe } = require('./recipe-helpers.cjs');
+const { freshRecipe } = require('./recipe-helpers.cjs');
 
 module.exports = async ({ cdp, check, FAKE, KZ }) => {
   const invoke = (id, args = {}) => cdp.evaluate(`(async()=>${KZ}.handles.invoke(${JSON.stringify(id)},${JSON.stringify(args)}))()`);
@@ -10,7 +10,7 @@ module.exports = async ({ cdp, check, FAKE, KZ }) => {
   await fetch(FAKE + '/__test/activity', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ captureEnqueue: true }) });
   try {
     await invoke('variations.open', { id: 'fake:flux-controlnet.png' });
-    await cdp.poll("!!document.querySelector('.vz-image-set')"); await discardRecipe(cdp);
+    await cdp.poll("!!document.querySelector('.vz-image-set')"); await freshRecipe(cdp);
     await cdp.send('Emulation.setDeviceMetricsOverride', { width: 1600, height: 1000, deviceScaleFactor: 1, mobile: false });
     await cdp.clickAt('.vz-image-set .checkbox');
     await cdp.clickAt('[data-param-key="9.denoise"] .checkbox');

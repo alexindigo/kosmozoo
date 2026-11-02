@@ -109,14 +109,13 @@ function RecipeBody(props) {
   let restoreFocus = () => {};
   const rememberFocus = (restore) => { restoreFocus = restore; };
   const focus = focusMemory(rememberFocus);
-  const guard = makeLeaveGuard({ dirty: editor.dirty,
+  const guard = makeLeaveGuard({ dirty: () => !props.readOnly && editor.dirty(),
     suspend: () => { for (const child of children) child.suspend(); },
     restore: () => { for (const child of children) child.resume(); restoreFocus(); },
     decision: value => { setDecision(value); editor.decision(value); }, invalidate: editor.invalidateClose,
     discarded: () => props.workspaces.remove(props.workspace) });
-  const switchRecipe = (next, discard = false) => guard.request({ intent: { type: "recipe", key: next?.id ?? "new", discard },
-    requireDiscard: discard, cancel: () => {}, permit: () => {
-      if (discard) props.workspaces.remove(props.workspace);
+  const switchRecipe = next => guard.request({ intent: { type: "recipe", key: next?.id ?? "new" },
+    cancel: () => {}, permit: () => {
       props.selectWorkspace(next ?? props.workspaces.fresh(props.images));
       return { status: "applied" };
     } });
@@ -305,7 +304,6 @@ function RecipeBody(props) {
                     </option>}</For>
                   </Select>
                   </Show>
-                  <button class="vz-workspace-discard" onClick={() => switchRecipe(null, true)}>Discard recipe</button>
                 </div>
                 <Show when={props.readOnly}>
                   <button class="vz-workspace-new" onClick={() => switchRecipe(null)}>New recipe for current source</button>

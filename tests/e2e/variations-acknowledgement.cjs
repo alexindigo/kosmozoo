@@ -1,10 +1,10 @@
 // Real edited configuration -> actual fake enqueue -> clean close, never a second Run.
 const assert=require('node:assert/strict');
 const { pickInput } = require('./image-picker-helpers.cjs');
-const { discardRecipe } = require('./recipe-helpers.cjs');
+const { freshRecipe } = require('./recipe-helpers.cjs');
 module.exports=async({cdp,FAKE,KZ,check})=>{
   const invoke=(id,args={})=>cdp.evaluate(`(async()=>${KZ}.handles.invoke(${JSON.stringify(id)},${JSON.stringify(args)}))()`);
-  const open=async(file='flux-basic.png',fresh=true)=>{await invoke('variations.open',{id:'fake:'+file});await cdp.poll("document.querySelectorAll('.vz-slider-row').length>0");if(fresh)await discardRecipe(cdp);};
+  const open=async(file='flux-basic.png',fresh=true)=>{await invoke('variations.open',{id:'fake:'+file});await cdp.poll("document.querySelectorAll('.vz-slider-row').length>0");if(fresh)await freshRecipe(cdp);};
   const type=async(selector,text)=>{await cdp.clickAt(selector);await cdp.evaluate(`(()=>{const e=document.querySelector(${JSON.stringify(selector)});e.focus();e.select()})()`);await cdp.send('Input.insertText',{text});await cdp.poll(`document.querySelector(${JSON.stringify(selector)}).value===${JSON.stringify(text)}`);};
   const enqueues=async()=>await(await fetch(FAKE+'/__test/enqueues')).json();
   const close=async()=>{
@@ -36,11 +36,13 @@ module.exports=async({cdp,FAKE,KZ,check})=>{
 
     // Widen only the displayed catalogue so the real enum search is available;
     // the selected value and every submitted graph still use the stock fixture.
+    // Reload the fresh app before installing its mount-private fetch fixture.
+    await open('flux-lora.png');await close();
     await cdp.evaluate(`(()=>{window.__presentationFetch=window.fetch;window.fetch=(url,options)=>window.__presentationFetch(url,options).then(async response=>{
       if(!String(url).includes('/features/variations/probe/'))return response;const data=await response.json();
       for(const row of data.enumParams??[])row.values=[...row.values,...Array.from({length:11},(_,i)=>'search-only-'+i)];
       return new Response(JSON.stringify(data),{status:response.status})})})()`);
-    await open('flux-lora.png');await cdp.clickAt('.vz-enumrow[data-enum-id="20.lora_name"] .checkbox');
+    await open('flux-lora.png',false);await cdp.clickAt('.vz-enumrow[data-enum-id="20.lora_name"] .checkbox');
     await held();await type('.vz-enum-filter','search-only-3');
     assert.deepEqual(await cdp.evaluate("[...document.querySelectorAll('.vz-enumrow[data-enum-id=\"20.lora_name\"] .vz-enum-opt-name')].map(el=>el.textContent)"),['detail.safetensors','search-only-3']);
     assert.equal((await release()).adopted,true);

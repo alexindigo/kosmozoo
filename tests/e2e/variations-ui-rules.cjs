@@ -73,7 +73,7 @@ const KZ = '(await import("/store/instance.js")).appStore';
       const foreground = getComputedStyle(document.documentElement).getPropertyValue('--foreground').trim();
       const probe = document.createElement('span'); probe.style.color = 'var(--foreground)'; document.body.append(probe);
       const color = getComputedStyle(probe).color; probe.remove();
-      const selectors = ['.vz-tpl-label', '.vz-enum-selected', '.vz-input-summary', '.vz-workspace-discard', '.vz-image-plus'];
+      const selectors = ['.vz-tpl-label', '.vz-enum-selected', '.vz-input-summary', '.vz-image-plus'];
       return { focus: window.__pickerFocus, foreground, color, text: selectors.map(selector => {
         const el = document.querySelector(selector); return { selector, text: el?.textContent, color: el && getComputedStyle(el).color };
       }), inlineState: [...document.querySelectorAll('.vz-input-popover, .vz-thumbnail img, .vz-current-point')].filter(el => ['opacity', 'pointer-events', 'visibility', 'display'].some(key => el.style.getPropertyValue(key))).map(el => el.outerHTML) };

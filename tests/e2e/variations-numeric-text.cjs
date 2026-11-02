@@ -1,7 +1,7 @@
 // Raw numeric text must govern both the visible plan and the terminal prompts.
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
-const { discardRecipe } = require('./recipe-helpers.cjs');
+const { freshRecipe } = require('./recipe-helpers.cjs');
 module.exports = async ({ cdp, check, KZ, FAKE }) => {
   const denoise = '[data-param-key="9.denoise"]', steps = '[data-param-key="9.steps"]';
   const invoke = (id, args = {}) => cdp.evaluate(`(async()=>${KZ}.handles.invoke(${JSON.stringify(id)},${JSON.stringify(args)}))()`);
@@ -41,7 +41,7 @@ module.exports = async ({ cdp, check, KZ, FAKE }) => {
     await cdp.evaluate("fetch('/api/collections/fake/entries/flux-basic.png/bytes').then(r=>r.arrayBuffer()).then(()=>true)");
     await invoke('variations.open', { id: 'fake:flux-basic.png' });
     await cdp.poll(`!!document.querySelector('${denoise} .vz-numeric-editor')`);
-    await discardRecipe(cdp);
+    await freshRecipe(cdp);
     await fetch(FAKE + '/__test/activity', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ captureEnqueue: true }) });
     await field(`${denoise} .vz-range-field:first-child input`, '');
     if (process.env.E2E_BLANK_NUMBER_SHOT) {
@@ -59,7 +59,7 @@ module.exports = async ({ cdp, check, KZ, FAKE }) => {
     check('From: valid re-entry restores counts and prompts exactly match visible bounds/Step', true);
     // A fresh recipe prevents an accepted run's close timer or result from
     // masking the readiness message in the second scenario.
-    await discardRecipe(cdp);
+    await freshRecipe(cdp);
     await cdp.clickAt(`${denoise} .checkbox`);
     await cdp.clickAt(`${steps} .checkbox`);
     await cdp.clickAt(`${steps} .mode-switch button[title="Value"]`);

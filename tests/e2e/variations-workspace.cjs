@@ -3,6 +3,7 @@
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const { workPath } = require('./paths.cjs');
+const { freshRecipe } = require('./recipe-helpers.cjs');
 module.exports = async ({ cdp, ENGINE, FAKE, KZ, check }) => {
   const invoke = (id,args={}) => cdp.evaluate(`(async()=>${KZ}.handles.invoke(${JSON.stringify(id)},${JSON.stringify(args)}))()`);
   const http = async (base,path,method='GET',body) => {
@@ -156,13 +157,23 @@ module.exports = async ({ cdp, ENGINE, FAKE, KZ, check }) => {
     await cdp.evaluate("(()=>{const select=document.querySelector('.vz-workspace');select.value=[...select.options].find(option=>option.textContent.includes('Previous')).value;select.dispatchEvent(new Event('change',{bubbles:true}))})()");
     await cdp.poll("!!document.querySelector('.vz-discard')");await cdp.clickAt('.vz-keep');
     assert.equal(await cdp.evaluate("document.querySelector('.vz-workspace').value"),currentWorkspace);assert.equal(await cdp.evaluate("document.querySelector('.vz-prefix').value"),'kept-current');
-    await cdp.clickAt('.vz-workspace-discard');await cdp.clickAt('.vz-discard-confirm');await cdp.poll("!document.querySelector('.vz-discard')&&document.querySelector('.vz-prefix')?.value===''");
+    // Replacing the dirty current recipe still has Keep/Discard; the standalone
+    // reset action is gone. Discarding that replacement leaves the old origin.
     await cdp.evaluate("(()=>{const select=document.querySelector('.vz-workspace');select.value=[...select.options].find(option=>option.textContent.includes('Previous')).value;select.dispatchEvent(new Event('change',{bubbles:true}))})()");
-    await cdp.poll("!!document.querySelector('.vz-workspace-status')");await cdp.clickAt('.vz-workspace-discard');await cdp.poll("!!document.querySelector('.vz-discard')");await cdp.clickAt('.vz-keep');assert.equal(await cdp.evaluate("document.querySelectorAll('.vz-workspace option').length"),2);
-    await cdp.clickAt('.vz-workspace-discard');await cdp.clickAt('.vz-discard-confirm');await cdp.poll("!document.querySelector('.vz-workspace-status')&&!document.querySelector('.vz-workspace')");await close();
-    check('recipe origin recovery: previous source is visibly inspectable without retarget or effects; explicit new workspace, Keep editing and committed removal preserve independent identities',true);
-  } finally {
+    await cdp.poll("!!document.querySelector('.vz-discard')");await cdp.clickAt('.vz-discard-confirm');
+    await cdp.poll("!!document.querySelector('.vz-workspace-status')");
+    assert.equal(await cdp.evaluate("!!document.querySelector('.vz-workspace-discard')"),false);
+    await close();await open('recipe-owner');
+    assert(await cdp.evaluate("!!document.querySelector('.vz-workspace-status')&&!document.querySelector('.vz-workspace')&&document.querySelector('.vz-retained-values').textContent.includes('dormant.png')"));
+    await cdp.clickAt('.vz-workspace-new');await cdp.poll("document.querySelectorAll('.vz-workspace option').length===2");
+    // App disposal is the remaining product path that removes old-source recipes.
     await cdp.evaluate("URL.createObjectURL=window.__recipeCreate;URL.revokeObjectURL=window.__recipeRevoke");
+    await freshRecipe(cdp);
+    assert(await cdp.evaluate("!document.querySelector('.vz-workspace-status')&&!document.querySelector('.vz-workspace')&&!document.querySelector('.vz-workspace-discard')"));
+    await close();
+    check('recipe origin recovery: old origin stays inspectable across close/new; guarded replacement preserves independent identities; app disposal clears retained recipes',true);
+  } finally {
+    await cdp.evaluate("if(window.__recipeCreate){URL.createObjectURL=window.__recipeCreate;URL.revokeObjectURL=window.__recipeRevoke}");
     if(await cdp.evaluate("!!document.querySelector('.vz-panel')")){await cdp.evaluate(`(async()=>{${KZ}.handles.invoke('variations.close');return true})()`);if(await cdp.evaluate("!!document.querySelector('.vz-discard')"))await cdp.clickAt('.vz-discard-confirm');}
     if(alias)await http(ENGINE,'/api/collections/recipe-owner','DELETE');await http(FAKE,'/__test/activity','POST',{captureEnqueue:false});
   }

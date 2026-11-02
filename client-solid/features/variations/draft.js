@@ -52,7 +52,7 @@ export function makeLeaveGuard({ dirty, suspend, restore, decision, invalidate, 
       const record = { ...request, key, committing: false };
       record.promise = new Promise((resolve, reject) => { record.resolve = resolve; record.reject = reject; });
       pending = record;
-      if (!dirty() && !request.requireDiscard) commit(record);
+      if (!dirty()) commit(record);
       else { record.suspended = true; suspend(); decision(record.intent); }
       return record.promise;
     },

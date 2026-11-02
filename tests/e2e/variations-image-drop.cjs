@@ -1,7 +1,7 @@
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const { workPath } = require('./paths.cjs');
-const { discardRecipe } = require('./recipe-helpers.cjs');
+const { freshRecipe } = require('./recipe-helpers.cjs');
 const { openImageAdd, waitForSelectedPreviews } = require('./image-picker-helpers.cjs');
 
 module.exports = async ({ cdp, check, FAKE, KZ }) => {
@@ -28,7 +28,7 @@ module.exports = async ({ cdp, check, FAKE, KZ }) => {
   try {
     await cdp.send('Emulation.setDeviceMetricsOverride', { width: 1600, height: 1000, deviceScaleFactor: 1, mobile: false });
     await invoke('variations.open', { id: 'fake:flux-controlnet.png' });
-    await cdp.poll("!!document.querySelector('.vz-image-set')"); await discardRecipe(cdp);
+    await cdp.poll("!!document.querySelector('.vz-image-set')"); await freshRecipe(cdp);
     await cdp.clickAt('[data-param-key="9.denoise"] .checkbox');
     const closed = await box('.vz-image-set');
     await drag('dragEnter', closed, [resources[0]]); await drag('dragOver', closed, [resources[0]]);

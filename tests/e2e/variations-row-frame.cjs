@@ -1,14 +1,14 @@
 // Task 2's contract at the rendered consumer, across all four input kinds.
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
-const { discardRecipe } = require('./recipe-helpers.cjs');
+const { freshRecipe } = require('./recipe-helpers.cjs');
 module.exports = async ({ cdp, check, KZ }) => {
   const kinds = ['.vz-slider-row', '.vz-enumrow', '.vz-textrow', '.vz-image-set'];
   const row = kind => kind === '.vz-slider-row' ? '[data-param-key="9.denoise"]' : kind;
   const toggle = kind => cdp.clickAt(`${row(kind)} .vz-parameter-heading .checkbox`);
   await cdp.evaluate(`(async()=>{await fetch('/api/collections/fake/entries/flux-controlnet.png/bytes');await ${KZ}.handles.invoke('variations.open',{id:'fake:flux-controlnet.png'})})()`);
   await cdp.poll(kinds.map(kind => `!!document.querySelector('${kind}')`).join('&&'));
-  await discardRecipe(cdp);await cdp.poll("!!document.querySelector('.vz-image-set')");
+  await freshRecipe(cdp);await cdp.poll("!!document.querySelector('.vz-image-set')");
   await cdp.send('Emulation.setDeviceMetricsOverride', { width: 1600, height: 1000, deviceScaleFactor: 1, mobile: false });
   try {
     await toggle('.vz-slider-row');

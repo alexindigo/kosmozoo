@@ -1,7 +1,7 @@
 // Task 3: numeric modes, retained recipe and actual submitted graph values.
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
-const { discardRecipe } = require('./recipe-helpers.cjs');
+const { freshRecipe } = require('./recipe-helpers.cjs');
 module.exports = async ({ cdp, check, KZ, FAKE }) => {
   const row = '[data-param-key="9.denoise"]';
   const open = async () => {
@@ -20,7 +20,7 @@ module.exports = async ({ cdp, check, KZ, FAKE }) => {
   };
   await cdp.send('Emulation.setDeviceMetricsOverride', { width: 1600, height: 1000, deviceScaleFactor: 1, mobile: false });
   try {
-    await open(); await discardRecipe(cdp);
+    await open(); await freshRecipe(cdp);
     await cdp.poll(`!!document.querySelector('${row} .vz-range-fields')`);
     const layout = await cdp.evaluate(`(()=>{const r=document.querySelector('${row}'),rect=s=>r.querySelector(s).getBoundingClientRect(),cy=s=>{const x=rect(s);return x.y+x.height/2};
       const controls=r.querySelector('.vz-numeric-controls'),parts=[...controls.querySelectorAll('.mode-switch,.vz-range-field')].map(el=>el.getBoundingClientRect());

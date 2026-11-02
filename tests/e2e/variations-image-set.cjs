@@ -2,7 +2,7 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const { workPath } = require('./paths.cjs');
 const { pickInput, waitForSelectedPreviews, openImageAdd, openImageFolder, waitForInputPicker } = require('./image-picker-helpers.cjs');
-const { discardRecipe } = require('./recipe-helpers.cjs');
+const { freshRecipe } = require('./recipe-helpers.cjs');
 
 module.exports = async ({ cdp, FAKE, KZ, check }) => {
   const invoke = (id, args = {}) => cdp.evaluate(`(async()=>${KZ}.handles.invoke(${JSON.stringify(id)},${JSON.stringify(args)}))()`);
@@ -21,7 +21,7 @@ module.exports = async ({ cdp, FAKE, KZ, check }) => {
   try {
     await invoke('variations.open', { id: 'fake:flux-controlnet.png' });
     await cdp.poll("!!document.querySelector('.vz-image-set')");
-    await discardRecipe(cdp);await cdp.poll("!!document.querySelector('.vz-image-set')");
+    await freshRecipe(cdp);await cdp.poll("!!document.querySelector('.vz-image-set')");
     assert.equal(await cdp.evaluate("!!document.querySelector('.vz-image-content')"), false);
     await cdp.clickAt('.vz-image-set .checkbox');
     await openImageFolder(cdp);
@@ -121,7 +121,7 @@ module.exports = async ({ cdp, FAKE, KZ, check }) => {
     fs.writeFileSync(folder + '/same-current.png', Buffer.from(await cdp.evaluate("(async()=>Array.from(new Uint8Array(await(await fetch('/api/collections/fake/entries/canny.png/bytes?kind=input')).arrayBuffer())))()")));
     await invoke('variations.open', { id: 'fake:flux-controlnet.png' });
     await cdp.poll("!!document.querySelector('.vz-image-set')");
-    await discardRecipe(cdp);await cdp.poll("!!document.querySelector('.vz-image-set')");
+    await freshRecipe(cdp);await cdp.poll("!!document.querySelector('.vz-image-set')");
     await cdp.clickAt('.vz-image-set .checkbox');
     await cdp.clickAt('[data-param-key="9.denoise"] .checkbox');
     await pickInput(cdp, 'picker-0550.png');
