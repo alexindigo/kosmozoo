@@ -841,7 +841,12 @@ filename's known collision family, with the captured `X-Kosmozoo-Origin`. It ret
 `{hash,currentHash,existing:[{name,hash}],origin}` using Ingest's existing cache/read owner. Comparison
 never uploads to ComfyUI. The editor retains readonly comparison evidence outside
 editable leaves, marks byte-identical Files “Same as current” and compiles them to
-the current name without upload. The shared axis kernel owns exact current-tuple
+the exact current graph value without upload. Image descriptors retain the raw
+`currentValue` (including ComfyUI's folder annotation) separately from the display
+filename `current`; the shared `parameterCurrent` projection supplies compilation
+and current-tuple comparison on both client and engine. Thus a same-name input
+and output remain distinct while a byte-identical File/path reuses the output.
+The shared axis kernel owns exact current-tuple
 exclusion in both displayed count and Run; mixed numeric/text axes still retain
 their existing Cartesian semantics. Pending/failed comparison is visible and
 cannot authorize an unverified upload. Actual uploads still occur only at Run.

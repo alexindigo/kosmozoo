@@ -11,7 +11,7 @@
 
 import {
   generatePermutations, permutationAxes, permutationPlan, resolveRelativeRanges, templateReplaceWithProof,
-  paramId, parameterIndex, catalogueParams, parameterAliases, validRunAcknowledgement, runOperationFields, targetRunPlan,
+  paramId, parameterIndex, parameterCurrent, catalogueParams, parameterAliases, validRunAcknowledgement, runOperationFields, targetRunPlan,
   outputName,
 } from "./shared.mjs";
 import { validEntryName, backingFor as defaultBackingFor } from "../../backings/index.mjs";
@@ -41,7 +41,7 @@ const PARAMETER_KINDS = [
   { kind: "image", channel: "stringParams", accepts: p => p.image,
     describe: p => {
       const match = ANNOTATION.exec(p.value), file = match ? match[1] : p.value;
-      return IMG_FILE.test(file) ? { current: file, fromOutput: match ? /^output$/i.test(match[2]) : false } : null;
+      return IMG_FILE.test(file) ? { current: file, currentValue: p.value, fromOutput: match ? /^output$/i.test(match[2]) : false } : null;
     } },
   { kind: "enum", channel: "enumParams", accepts: p => p.options?.length,
     describe: p => ({ values: p.options }) },
@@ -366,7 +366,7 @@ export function register(app) {
     // Inspect once for current values + labels. Types come from the host's
     // object_info — the current value is not a reliable integer signal.
     const catalogue = parameterCatalogue(graph, r), fullInspection = catalogueParams(catalogue);
-    const currentValues = Object.fromEntries([...parameterIndex(fullInspection).values()].map(p => [p.id, p.current]));
+    const currentValues = Object.fromEntries([...parameterIndex(fullInspection).values()].map(p => [p.id, parameterCurrent(p)]));
     const labelMap = parameterAliases(fullInspection);
 
     // Batch sweeps arrive as offsets from each image's own current value;

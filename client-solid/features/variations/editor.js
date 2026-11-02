@@ -3,7 +3,7 @@
 import { snapshotDraft, createRunId } from "./draft.js";
 import { paramDef, defaultRange } from "./graph.mjs";
 import { templateLabels, templateValue, parseSemicolonList, expandTextAxes, permutationPlan,
-  resolveRelativeRanges, acknowledgedFields, targetRunPlan, catalogueParams, parameterIndex, parameterLabel, parameterAliases,
+  resolveRelativeRanges, acknowledgedFields, targetRunPlan, catalogueParams, parameterIndex, parameterCurrent, parameterLabel, parameterAliases,
   templateReplaceWithProof, outputName, uploadCandidate, uploadFamily } from "/shared/features/variations/shared.mjs";
 import { validOrigin, sameOrigin, validContext, sameContext } from "/shared/source-origin.mjs";
 import { validImageSet, mergeImages, sameImage, imageIdentity } from "./image-set.js";
@@ -13,7 +13,7 @@ export { RECIPE_FIELDS as EDITOR_FIELDS } from "./recipe.js";
 const filename = value => typeof value === "string" && value.length > 0 && !/[\\/\x00-\x1f\x7f]/.test(value) && ![".", ".."].includes(value);
 const token = id => `_{${id}}`;
 const currentValues = catalogue => Object.fromEntries([...parameterIndex(catalogueParams(catalogue)).values()]
-  .map(parameter => [parameter.id, parameter.current]));
+  .map(parameter => [parameter.id, parameterCurrent(parameter)]));
 // Raw numeric spelling belongs to the recipe; all numeric consumers share this
 // parser. Empty/incomplete text is never coerced to zero or an earlier value.
 const numberText = raw => {
@@ -51,7 +51,7 @@ export function makeVariationEditor({ targets, services, currentOrigin, changed 
   const evidence = (id, item) => imageChecks.get(id)?.get(imageIdentity(item));
   const imageView = (id, item, metadata, lookup = evidence) => {
     const check = item.kind === "input" ? null : lookup(id, item);
-    return { ...item, sameCurrent: item.kind === "input" ? !metadata.fromOutput && item.name === metadata.current
+    return { ...item, sameCurrent: item.kind === "input" ? item.name === parameterCurrent(metadata)
       : !!check?.hash && check.hash === check.currentHash, pending: item.kind !== "input" && (!check || !!check.pending), error: check?.error ?? "" };
   };
   const notify = () => { if (alive) changed(); };
@@ -178,7 +178,7 @@ export function makeVariationEditor({ targets, services, currentOrigin, changed 
         for (const item of items) {
           const state = imageView(id, item, entry.metadata, lookup);
           if (!preview && (state.pending || state.error)) throw new Error(state.error || "Checking image bytes; your work was kept.");
-          if (state.sameCurrent) values.push(entry.metadata.current);
+          if (state.sameCurrent) values.push(parameterCurrent(entry.metadata));
           else if (item.kind === "input") values.push(item.name);
           else {
             const identity = imageIdentity(item);
