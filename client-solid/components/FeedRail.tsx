@@ -127,7 +127,7 @@ export function FeedRail() {
   // offsets accumulate smooth trackpad motion; rendered/scrubbed rows are whole.
   const [browsedStart, setBrowsedStart] = createSignal(null);
   createEffect(() => {
-    store.state.feedScrollTop();
+    store.state.feedMotionRevision();
     store.state.feedScrollEl();
     untrack(() => { setBrowsedStart(null); hidePreview(); });
   });

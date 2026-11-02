@@ -445,6 +445,9 @@ export function makeAppStore({ subscribeSources = typeof window !== "undefined" 
   // the feed's scroll position — Grid's scroll handler is the ONLY writer;
   // the rail's wave bounds are the other consumer (one signal, both consumers)
   const [feedScrollTop, setFeedScrollTop] = createSignal(0);
+  // Presentation consumers follow actual motion, not coordinate rebasing.
+  // Classification stays with this scroll owner, shared with current/settle.
+  const [feedMotionRevision, setFeedMotionRevision] = createSignal(0);
   // a programmatic scroll in flight (the snap's quiet window) — a store
   // signal, set by restoreToIndex/scrollTop/the settle tidy, read by settle;
   // no module global 
@@ -503,12 +506,18 @@ export function makeAppStore({ subscribeSources = typeof window !== "undefined" 
     return col && vz ? feedTargetEntryId(vz.getVirtualItems(), feedScrollTop(), col.clientHeight) ?? committed : committed;
   }
 
+  function publishFeedScroll(top) {
+    if (top !== feedScrollTop() && !suppressSettleCurrent()) setFeedMotionRevision(v => v + 1);
+    setFeedScrollTop(top);
+  }
+
   function feedScrolled(top) {
     if (disposed) return;
+    top = top ?? feedScrollEl()?.scrollTop ?? 0;
     const scheduled = { session: sourceSession, revision: browseRevision,
       virtualizer: feedVirtualizer(), col: feedScrollEl(), commitEligible: !sourceSession?.loading };
     if (!validAcquisitionContext(scheduled)) {
-      batch(() => { retireFeedScroll(); setFeedScrollTop(top ?? feedScrollEl()?.scrollTop ?? 0); });
+      batch(() => { retireFeedScroll(); publishFeedScroll(top); });
       return;
     }
     if (!scrollQuiet() && !suppressSettleCurrent()) setBrowseRestore(null);
@@ -522,7 +531,7 @@ export function makeAppStore({ subscribeSources = typeof window !== "undefined" 
         // the src window freezes mid-gesture: a 200-card sweep fires nothing
         window_.freeze();
       }
-      setFeedScrollTop(top ?? feedScrollEl()?.scrollTop ?? 0);
+      publishFeedScroll(top);
     });
     feedSettleTimer = setTimeout(() => feedSettle(scheduled), FEED_SETTLE_MS);
   }
@@ -2515,6 +2524,7 @@ export function makeAppStore({ subscribeSources = typeof window !== "undefined" 
     infoLayout,
     feedScrollEl,
     feedScrollTop,
+    feedMotionRevision,
     feedMergeNonce,
     feedVirtualizer,
     feedActivity,

@@ -345,6 +345,25 @@ Deno.test("rail special motion: sparse known positions, compensation, quiet rest
   });
 });
 
+Deno.test("rail motion notifications: compensation is not travel, quiet restores are, unchanged positions stay quiet", async () => {
+  await withBrowse(async ({ store }) => {
+    const col = { scrollTop: 0, clientHeight: 100 };
+    store.actions.feed.register({ scrollEl: col, virtualizer: { scrollToIndex() {}, getVirtualItems: () => [] } });
+    const start = store.state.feedMotionRevision();
+    col.scrollTop = 50; store.actions.feed.scrolled(50);
+    assertEquals(store.state.feedMotionRevision(), start + 1);
+    store.actions.feed.scrolled(50);
+    assertEquals(store.state.feedMotionRevision(), start + 1);
+    store.actions.feed.compensate(100); store.actions.feed.scrolled(col.scrollTop);
+    assertEquals(store.state.feedScrollTop(), 150, "wave geometry still receives compensation");
+    assertEquals(store.state.feedMotionRevision(), start + 1, "compensation cannot retire rail browsing");
+    await new Promise(r => setTimeout(r, 180));
+    assertEquals(store.state.feedMotionRevision(), start + 1, "settle cannot replay compensation as motion");
+    store.actions.feed.quiet(); col.scrollTop = 200; store.actions.feed.scrolled(200);
+    assertEquals(store.state.feedMotionRevision(), start + 2, "quiet restores move the feed and resume following");
+  });
+});
+
 Deno.test("rail reorder/loading: stale virtual keys fall back to committed ID and loading retires the previous scroll", async () => {
   await withBrowse(async ({ store, lists }) => {
     const items=store.state.images.map((im,index)=>({key:im.id,index,start:index*100,end:(index+1)*100}));
