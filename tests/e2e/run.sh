@@ -146,6 +146,16 @@ docker run --rm --user "$RUN_USER" --network host -v "$WORK":/work -w /work \
   --entrypoint node "$PW_IMAGE" \
   /work/tests/e2e/feed.e2e.cjs
 
+# Rail presentation contracts share the feed stack and its browser workspace.
+for spec in rail-scroll rail-stripes rail-preview; do
+  timeout 180s docker run --rm --user "$RUN_USER" --network host -v "$WORK":/work -w /work \
+    --memory=1600m --memory-swap=1600m --pids-limit=256 --cpus=2 \
+    -e HOME=/work/tests/.tmp-runtime/feed/home -e TMPDIR=/work/tests/.tmp-runtime/feed/tmp \
+    -e E2E_ENGINE="http://127.0.0.1:$ENGINE_PORT" \
+    -e E2E_FAKE="http://127.0.0.1:$FAKE_PORT" \
+    --entrypoint node "$PW_IMAGE" "/work/tests/e2e/$spec.cjs"
+done
+
 # 8. fresh install: no source seed, then one unreachable source across retries.
 FRESH_ENGINE_PORT="${E2E_FRESH_ENGINE_PORT:-18263}"
 FRESH_USER="$RUN_USER"

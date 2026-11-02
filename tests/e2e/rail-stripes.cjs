@@ -14,6 +14,7 @@ const audit = `(()=>{
 (async()=>{
   const page=await CDP.launch(9343,{windowSize:'1440,1000'}),errors=await collectPageErrors(page);
   const capture=async name=>{
+    fs.mkdirSync(workPath('artifacts'),{recursive:true});
     const shot=await page.send('Page.captureScreenshot',{format:'png'});
     fs.writeFileSync(workPath(`artifacts/${name}.png`),Buffer.from(shot.data,'base64'));
     const clip=await page.evaluate(`(()=>{const r=document.querySelector('#feedRail').getBoundingClientRect();return{x:0,y:r.top,width:60,height:r.height,scale:4}})()`);

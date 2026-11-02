@@ -11,6 +11,7 @@ const names = {
   audio: 'rail-preview-audio.wav', slowA: 'rail-preview-slow-a.png', slowB: 'rail-preview-slow-b.png', failed: 'rail-preview-failed.png',
 };
 (async()=>{
+  fs.mkdirSync(workPath('artifacts'),{recursive:true});
   const published = await fetch(FAKE+'/__test/activity',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({publish:[
     {name:names.top,fixture:'bulk',width:360,height:520,color:[35,118,150,255],mtime:2100003100},
     {name:names.topVideo,fixture:'media/workflow.webm',mtime:2100003099},
