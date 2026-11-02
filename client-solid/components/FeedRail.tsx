@@ -7,6 +7,7 @@
 // re-centers on it at the edges (tapeWindow below). The tape window's edge
 // indices sit at the rail's top and bottom, the total count below.
 // Click/drag scrubs: the tick under the cursor becomes the centered card.
+// Wheel browses the tape independently; actual feed motion resumes following.
 //
 // The tape and ticks are JSX : the wave bounds derive EXACTLY from the
 // virtualizer's visible range — no hysteresis band ( existed only because
@@ -17,7 +18,7 @@
 
 import { createSignal, createMemo, createEffect, createRenderEffect, untrack, onMount, onCleanup, For } from "solid-js";
 import { useAppStore } from "../store/app-store.js";
-import { tapeWindow } from "/js/rail.mjs";
+import { tapeWindow, scrollTapeOffset } from "/js/rail.mjs";
 
 // rail geometry is owned by the CSS (#feedRail's --fr-* custom properties) —
 // read at mount and on resize so the capacity/scrub math can never silently
@@ -89,12 +90,29 @@ export function FeedRail() {
   // the tape window: the pure tapeWindow fold over the wave — ONE memo
   // with prev (no reset-to-0 on count change: a new feed re-centers
   // through the same fold instead of flickering the tape away and back)
-  const tapeStart = createMemo((prev) => {
+  const followedStart = createMemo((prev) => {
     const wb = waveBounds();
     const cap = capacity();
     if (!wb || cap <= 0) return prev;
     return tapeWindow(N(), cap, wb[0], wb[1], prev);
   }, 0);
+
+  // Presentation-only browsing, never another feed/current writer. Fractional
+  // offsets accumulate smooth trackpad motion; rendered/scrubbed rows are whole.
+  const [browsedStart, setBrowsedStart] = createSignal(null);
+  createEffect(() => {
+    store.state.feedScrollTop();
+    store.state.feedScrollEl();
+    untrack(() => setBrowsedStart(null));
+  });
+  const tapeStart = createMemo(() => Math.floor(Math.max(0, Math.min(
+    Math.max(0, N() - capacity()), browsedStart() ?? followedStart(),
+  ))));
+  const onWheel = (e) => {
+    e.preventDefault();
+    setBrowsedStart(scrollTapeOffset(N(), capacity(), browsedStart() ?? tapeStart(),
+      e.deltaY, e.deltaMode, geom.tickPx));
+  };
 
   const ticks = createMemo(() => {
     const count = Math.max(0, Math.min(capacity(), N() - tapeStart()));
@@ -135,13 +153,14 @@ export function FeedRail() {
     recompute();
     const ro = new ResizeObserver(recompute);
     ro.observe(rail);
-    onCleanup(() => ro.disconnect());
+    rail.addEventListener("wheel", onWheel, { passive: false });
+    onCleanup(() => { ro.disconnect(); rail.removeEventListener("wheel", onWheel); });
   });
 
   return (
     <div
       id="feedRail"
-      title="feed position — click or drag to jump"
+      title="feed position — scroll to browse; click or drag to jump"
       ref={(el) => { rail = el; }}
       style={{ visibility: N() <= 1 ? "hidden" : "" }}
       onPointerDown={onDown}
