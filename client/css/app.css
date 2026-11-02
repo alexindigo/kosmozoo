@@ -1221,6 +1221,20 @@ body:has(#diff:not([hidden])) #statusCol { bottom: 56px; }
    remains inline, owned by the surface that measures it. */
 .vz-input-popover { opacity: 0; pointer-events: none; }
 .vz-input-popover.is-placed { opacity: 1; pointer-events: auto; }
+.tabs { display: flex; flex-wrap: nowrap; align-items: center; gap: 4px; min-width: 0; overflow-x: auto; }
+.tabs-tab { flex: 0 0 auto; display: flex; align-items: center; min-width: 0; max-width: 180px;
+  padding: 5px 10px; border: 1px solid transparent; border-radius: 4px;
+  background: transparent; color: var(--foreground); font: inherit; cursor: pointer; white-space: nowrap; }
+.tabs-tab:hover { background: var(--lifted); border-color: var(--border-strong); }
+.tabs-tab.is-active { background: var(--lifted); border-color: var(--secondary); }
+.tabs > .tabs-tab:focus-visible { outline: none; border-color: var(--secondary); box-shadow: inset 0 0 0 1px var(--secondary); }
+.vz-input-tabs { flex: 0 0 auto; min-width: 0; }
+.vz-input-source-panel { display: flex; flex-direction: column; flex: 1 1 auto; min-height: 0; }
+.vz-input-status { margin: 6px 0; }
+.vz-input-failure { display: flex; align-items: center; gap: 6px; color: var(--error); }
+.vz-input-failure[hidden] { display: none; }
+.vz-thumbnail-acquiring { z-index: 1; background: var(--backdrop); pointer-events: none; }
+.vz-thumbnail-failed { min-width: 0; width: 100%; }
 .vz-thumbnail img { visibility: hidden; }
 .vz-thumbnail img.vz-thumbnail-loaded { visibility: visible; }
 .vz-current-point.vz-current-unavailable { display: none; }

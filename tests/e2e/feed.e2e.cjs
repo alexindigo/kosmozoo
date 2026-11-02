@@ -711,6 +711,7 @@ async function railMotion(page) {
     });
     if (!r.ok) throw new Error('activity fixture control failed');
   };
+  await require('./merge-window.cjs')({ page, FAKE: FAKE_ACTIVITY, KZ, check });
   try {
     await control({ reset: true });
     await page.evaluate(`(async () => {

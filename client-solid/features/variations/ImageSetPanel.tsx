@@ -27,7 +27,6 @@ export function ImageSetPanel(props) {
     props.onAdd(result.images.map(uploadImage), index);
   };
   onCleanup(props.registerEditor({ suspend: clearDrop, resume() {} }));
-  const selected = name => row().items.some(item => item.kind === "input" && item.name === name);
   useClickOutside(() => content, event => { if (!event.target.closest?.('.vz-input-popover')) setAdding(false); });
   createEffect(() => { if (adding()) onCleanup(props.registerPopup(() => { setAdding(false); addButton.focus(); })); });
   return <ParameterRow class={`vz-imgrow vz-image-set${dropping() ? " vz-image-dropping" : ""}`} row={row} enabled={() => row().enabled} filteredOut={props.filteredOut}
@@ -51,8 +50,10 @@ export function ImageSetPanel(props) {
           {...focusMemory(props.rememberFocus)} onClick={() => setAdding(!adding())}>+</button>
       </ImageGrid>
       <div class="vz-image-add" hidden={!adding()}>
-        <InputPicker files={row().files} current={row().fromOutput ? null : row().current} selected={selected} positionRevision={row().images} thumbnail={props.thumbnail} registerThumbnail={props.registerThumbnail}
-          onToggle={name => selected(name) ? props.onRemove({ kind: "input", name }) : props.onAdd([{ kind: "input", name }])}
+        <InputPicker sources={props.sources} sourceInputs={props.sourceInputs} inputState={props.inputState}
+          onSource={props.onSource} onRetrySource={props.onRetrySource} registerTabKeys={props.registerTabKeys}
+          current={row().fromOutput ? null : row().current} positionRevision={row().images} thumbnail={props.inputThumbnail} registerThumbnail={props.registerThumbnail}
+          onToggle={props.onToggleInput}
           registerPopup={props.registerPopup} registerEditor={props.registerEditor} rememberFocus={props.rememberFocus} />
         <input type="file" ref={fileInput} class="vz-imgfilespick" hidden multiple accept="image/*" onChange={e => {
           addFiles({ files: [...e.currentTarget.files] }); e.currentTarget.value = "";

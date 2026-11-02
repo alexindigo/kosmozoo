@@ -26,6 +26,10 @@ export function parseParamId(id) {
 export const catalogueParams = catalogue => ["params", "stringParams", "enumParams", "textParams"]
   .flatMap(key => catalogue[key] ?? []);
 
+// Image presentation strips ComfyUI's folder annotation; assignment and tuple
+// identity must retain the exact graph value on both sides of the wire.
+export const parameterCurrent = parameter => parameter.currentValue ?? parameter.current;
+
 // Shared admission gate: never build a last-wins catalogue. Graph resolution is
 // asserted at discovery; later consumers still reject ambiguous identity before IO.
 export function parameterIndex(params, graph = null) {

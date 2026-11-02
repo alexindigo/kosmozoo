@@ -1,6 +1,6 @@
 import { assert, assertEquals } from "jsr:@std/assert";
 import { api } from "../client/js/api.mjs";
-import { inputThumbnail, inputList, uploadInput } from "../client-solid/features/variations/api.js";
+import { inputThumbnail, inputList, uploadInput, readInput } from "../client-solid/features/variations/api.js";
 import { nodeImages } from "../client-solid/store/fields.js";
 import { imageRequestUrl } from "../client-solid/lib/img-measure.js";
 import * as comfy from "../src/backings/comfy.mjs";
@@ -44,6 +44,22 @@ Deno.test("entry URLs: client requests share one serializer, including metadata,
     assertEquals(calls[0].url.searchParams.get("kind"), "input");
     assertEquals(calls[1].options.method, "POST");
     assertEquals(calls[1].options.headers["X-Kosmozoo-Origin"], JSON.stringify(origin));
+  } finally { globalThis.fetch = original; }
+});
+
+Deno.test("entry URLs: foreign input acquisition uses the shared source-bound URL and preserves bytes, filename and MIME in its File", async () => {
+  const original = globalThis.fetch, calls = [], bytes = new Uint8Array([1, 2, 3]);
+  globalThis.fetch = src => { calls.push(new URL(src, "http://x")); return Promise.resolve(new Response(bytes, { headers: { "Content-Type": "image/png" } })); };
+  try {
+    for (const name of names) {
+      const file = await readInput(origin, name), url = calls.at(-1);
+      assertEquals(decodeURIComponent(url.pathname.split("/")[3]), collection);
+      assertEquals(decodeURIComponent(url.pathname.split("/")[5]), name);
+      assertEquals(url.searchParams.get("kind"), "input");
+      assertEquals(JSON.parse(url.searchParams.get("origin")), origin);
+      assertEquals(file.name, name); assertEquals(file.type, "image/png");
+      assertEquals(new Uint8Array(await file.arrayBuffer()), bytes);
+    }
   } finally { globalThis.fetch = original; }
 });
 

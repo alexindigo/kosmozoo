@@ -588,11 +588,14 @@ export function makeAppStore({ subscribeSources = typeof window !== "undefined" 
   function compensateFeed(delta) {
     const col = feedScrollEl();
     if (!col || !delta) return;
-    setSuppressSettleCurrent(true);
     const before = col.scrollTop;
     col.scrollTop = before + delta;
+    const applied = col.scrollTop - before;
+    // No movement means no scroll event/settle to consume suppression.
+    if (!applied) return;
+    setSuppressSettleCurrent(true);
     pendingCompensatedTop = col.scrollTop;
-    if (gestureStart != null) gestureStart += col.scrollTop - before;
+    if (gestureStart != null) gestureStart += applied;
   }
 
   function restoreToIndex(idx) {
@@ -2562,6 +2565,7 @@ export function makeAppStore({ subscribeSources = typeof window !== "undefined" 
   registerCoreCommands(handles, { ops: actions, state: stateObj });
   const publicActions = commandFacades(handles, actions, stateObj);
   inputPolicy = makeInputPolicy({ handles, state: stateObj, layers: keyLayers,
+    canToggleMedia: players.canToggle,
     captureEvent: actions.keys.captureEvent, onError: (error) => actions.status.error(`input failed: ${error?.message ?? error}`) });
   return { state: stateObj, actions: publicActions, handles, ui: uiStateObj, dispose };
 }

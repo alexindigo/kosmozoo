@@ -274,7 +274,9 @@ export function extractMetaFromGraph(graph) {
 }
 
 // --- PNG metadata: tEXt/zTXt/iTXt chunks (ComfyUI writes them pre-IDAT) ----
-// Stop at first IDAT, cap the scan at 256 KB (harvest #11). Pure JS — no
+// By default stop at first IDAT and cap chunk starts at 256 KB (harvest #11).
+// Recognized text payloads are read in full; allChunks also reads late metadata.
+// Pure JS — no
 // node:zlib here so the browser can import this module too; zTXt/iTXt
 // decompression uses DecompressionStream, available in both Deno and
 // browsers.
@@ -305,7 +307,7 @@ export async function parsePngTextChunks(buf, { allChunks = false } = {}) {
     const payload = buf.subarray(off + 8, off + 8 + length);
     off += 12 + length; // advance BEFORE parsing — a bad chunk must not loop
     if (type === "IEND") break;
-    if (length > PNG_READ_CAP) continue;
+    if (!["tEXt", "zTXt", "iTXt", "comf"].includes(type)) continue;
     try {
       if (type === "tEXt" || type === "comf") {
         const nul = payload.indexOf(0);
