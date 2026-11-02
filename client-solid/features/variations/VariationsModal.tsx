@@ -133,8 +133,8 @@ function ModalBody(props) {
     el.setSelectionRange(caret, caret);
   };
 
-  // probe + input list are RESOURCES : recency and cancellation come
-  // from the primitive — no onMount promise chain, no swallowed errors.
+  // Probe is a resource; per-source input catalogues settle in the private
+  // editor, where source identity and failures stay independent of raw work.
   // The graph is the source of truth: only parameters whose target node
   // exists in this image's graph render (writeOnly params — widget-only
   // custom seed nodes etc. — are skipped for now).
@@ -150,19 +150,13 @@ function ModalBody(props) {
     else editor.installCatalogue(probe());
   });
 
-  const [inputFiles] = createResource(
-    () => read(() => editor.ready() && strParams().length && image.host ? image.host : null),
-    (hostName) => services.inputList(hostName, image.origin),
-  );
+  const inputSources = createMemo(() => [image.origin, ...services.inputSources().filter(origin => origin.source !== image.host)]);
   let initializedImages = false;
   createEffect(() => {
-    const sp = strParams();
-    if (!sp.length || inputFiles.loading) return;
+    if (!read(editor.ready) || !strParams().length) return;
     if (initializedImages) return;
-    if (!inputFiles.error && !inputFiles()) return;
     initializedImages = true;
-    if (inputFiles.error) editor.catalogueFailure(inputFiles.error);
-    else editor.installInputs(inputFiles());
+    editor.loadSourceInputs(image.origin);
   });
 
   const onToggle = (key, checked) => {
@@ -186,6 +180,13 @@ function ModalBody(props) {
   const registerImagePopup = close => {
     const disown = store.handles.own("variations.images.close", close);
     const unlayer = store.actions.keys.pushLayer({ id: "variations-images", command: "variations.images.close", phase: "capture" });
+    return () => { unlayer(); disown(); };
+  };
+  const registerTabKeys = capability => {
+    const disown = store.handles.own("variations.tabs.move", capability.move);
+    const unlayer = store.actions.keys.pushLayer({ id: "variations-source-tabs", command: "variations.tabs.move", phase: "capture",
+      keys: { ArrowLeft: { step: -1 }, ArrowRight: { step: 1 }, Home: { step: "first" }, End: { step: "last" } },
+      decline: event => !capability.contains(event.target) });
     return () => { unlayer(); disown(); };
   };
 
@@ -284,6 +285,11 @@ function ModalBody(props) {
                         onMove={(item, index) => editor.moveImage(id, item, index)}
                         currentThumbnail={services.inputThumbnail(image.host, r().current, image.origin, r().fromOutput ? "output" : "input")}
                         thumbnail={name => services.inputThumbnail(image.host, name, image.origin)}
+                        sources={inputSources()} sourceInputs={origin => read(() => editor.sourceInputs(origin))}
+                        onSource={origin => editor.loadSourceInputs(origin)} onRetrySource={origin => editor.loadSourceInputs(origin, true)}
+                        inputState={(origin, name) => read(() => editor.sourceInputState(id, origin, name))}
+                        onToggleInput={(origin, name) => editor.toggleSourceInput(id, origin, name)}
+                        inputThumbnail={(origin, name) => services.inputThumbnail(origin.source, name, origin)} registerTabKeys={registerTabKeys}
                         registerThumbnail={services.registerThumbnail}
                         pathThumbnail={services.pathThumbnail} onAddFolder={path => editor.addFolder(id, path)}
                         folderCapability={() => folderCapability.error ? null : folderCapability()} onChooseFolder={services.chooseFolder}

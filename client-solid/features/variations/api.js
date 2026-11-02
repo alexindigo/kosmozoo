@@ -35,6 +35,13 @@ export const uploadPath = (collection, path, hash, origin) =>
 export const inputThumbnail = (collection, name, origin, kind = "input") =>
   entryBytesUrl(collection, name, { kind, origin });
 
+export const readInput = async (origin, name) => {
+  const response = await fetch(entryBytesUrl(origin.source, name, { kind: "input", origin }));
+  if (!response.ok) throw new Error(`Image unavailable (${response.status})`);
+  const blob = await response.blob();
+  return new File([blob], name, { type: blob.type });
+};
+
 export const inspectImage = async (collection, file, current, kind, origin, names = []) => {
   const form = new FormData(); form.append("image", file, file.name); form.append("current", current); form.append("kind", kind);
   form.append("names", JSON.stringify(names));

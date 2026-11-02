@@ -8,6 +8,7 @@ import { popoverPlacement } from "../../lib/popover-placement.js";
 import { Chevron } from "../../components/Select.js";
 import { IconButton } from "../../components/IconButton.js";
 import { TextField } from "../../components/TextField.js";
+import { Tabs } from "../../components/Tabs.js";
 import { iconSvg } from "/js/icons.mjs";
 
 const TILE_SIZE = 96, GAP = 6, ROW_HEIGHT = TILE_SIZE + GAP, OVERSCAN_ROWS = 3;
@@ -16,6 +17,9 @@ const TILE_SIZE = 96, GAP = 6, ROW_HEIGHT = TILE_SIZE + GAP, OVERSCAN_ROWS = 3;
 // display registration and popup scope registration are injected. The child owns focus, search and virtual geometry.
 export function InputPicker(props) {
   const [open, setOpen] = createSignal(false), [query, setQuery] = createSignal("");
+  const [activeSource, setActiveSource] = createSignal(props.sources[0].source);
+  const source = createMemo(() => props.sources.find(origin => origin.source === activeSource()) ?? props.sources[0]);
+  createEffect(() => { if (open()) props.onSource(source()); });
   const [suspended, setSuspended] = createSignal(false);
   const id = `vz-image-input-${createUniqueId().replace(/[^\w-]/g, "")}`;
   let root, trigger, surface = null, requestPlacement = () => {};
@@ -69,15 +73,20 @@ export function InputPicker(props) {
     <button type="button" class="select-trigger control-size-md vz-input-trigger" ref={trigger}
       aria-expanded={open()} aria-haspopup="listbox" aria-controls={id} {...focusMemory(props.rememberFocus)} onClick={() => setOpen(!open())}><SingleLineText value="ComfyUI inputs" /><Chevron /></button>
     <Show when={open()}>
-      <InputOptions id={id} query={query} onQuery={setQuery} files={props.files} selected={props.selected}
-        current={props.current} thumbnail={props.thumbnail} registerThumbnail={props.registerThumbnail}
-        onToggle={name => { props.onToggle(name); requestPlacement(); }} rememberFocus={props.rememberFocus} registerSurface={registerSurface} />
+      <InputOptions id={id} query={query} onQuery={setQuery} files={props.sourceInputs(source()).files}
+        catalogue={props.sourceInputs(source())} onRetrySource={() => props.onRetrySource(source())}
+        sources={props.sources} source={source()} onSource={setActiveSource} registerTabKeys={props.registerTabKeys}
+        state={name => props.inputState(source(), name)}
+        current={source().source === props.sources[0].source ? props.current : null}
+        thumbnail={name => props.thumbnail(source(), name)} registerThumbnail={props.registerThumbnail}
+        onToggle={name => { props.onToggle(source(), name); requestPlacement(); }} rememberFocus={props.rememberFocus} registerSurface={registerSurface} />
     </Show>
   </div>;
 }
 
 function InputOptions(props) {
-  let panel, search, scrollElement, summary;
+  let panel, search, scrollElement, summary, tabs;
+  const selected = name => props.state(name).selected;
   const [placement, setPlacement] = createSignal(null);
   const [placed, setPlaced] = createSignal(false);
   // Both first focus and the modal's retained caret restoration belong to this
@@ -146,7 +155,7 @@ function InputOptions(props) {
         const style = getComputedStyle(panel), list = getComputedStyle(scrollElement);
         const width = parseFloat(style.maxWidth), listHeight = parseFloat(list.maxHeight);
         if (!Number.isFinite(width) || !Number.isFinite(listHeight)) return null;
-        const chrome = search.getBoundingClientRect().height + summary.getBoundingClientRect().height + (parseFloat(style.rowGap) || 0) + ["paddingTop", "paddingBottom", "borderTopWidth", "borderBottomWidth", "rowGap"]
+        const chrome = search.getBoundingClientRect().height + summary.getBoundingClientRect().height + (tabs?.getBoundingClientRect().height ?? 0) + (parseFloat(style.rowGap) || 0) * (tabs ? 2 : 1) + ["paddingTop", "paddingBottom", "borderTopWidth", "borderBottomWidth", "rowGap"]
           .reduce((sum, key) => sum + (parseFloat(style[key]) || 0), 0);
         return { width, height: chrome + listHeight, minHeight: chrome + TILE_SIZE };
       },
@@ -158,6 +167,7 @@ function InputOptions(props) {
     }));
   });
   const move = event => {
+    if (event.target.closest?.('[role=tablist]')) return;
     if (event.target.closest?.(".vz-thumbnail-retry")) return;
     if (!["ArrowLeft", "ArrowRight", "ArrowDown", "ArrowUp", "Enter"].includes(event.key)) return;
     event.preventDefault();
@@ -182,13 +192,23 @@ function InputOptions(props) {
       height: placement() ? `${placement().height}px` : undefined,
       "max-height": placement() ? `${placement().maxHeight}px` : undefined,
       "min-height": placement() ? `${placement().minHeight}px` : undefined }} onKeyDown={move}>
+    <Show when={props.sources.length > 1}>
+      <div ref={tabs} class="vz-input-tabs">
+        <Tabs label="Input image source" options={props.sources.map(origin => ({ value: origin.source, label: origin.source,
+          id: `${props.id}-tab-${encodeURIComponent(origin.source)}` }))}
+          value={props.source.source} panelId={`${props.id}-source-panel`} onChange={props.onSource}
+          registerKeys={props.registerTabKeys} rememberFocus={rememberFocus} />
+      </div>
+    </Show>
     <TextField ref={search} type="search" role="combobox" aria-expanded="true" aria-autocomplete="list" aria-controls={`${props.id}-list`}
       aria-activedescendant={placement() && filtered().length ? `${props.id}-option-${active()}` : undefined}
       class="vz-input-search" placeholder="Search inputs…" aria-label="Search ComfyUI inputs"
       {...focusMemory(rememberFocus)} value={props.query()} onInput={e => props.onQuery(e.currentTarget.value)}
       trailing={<Show when={props.query()}><IconButton chrome size="md" variant="plain vz-search-clear" title="Clear search"
         icon={iconSvg("x")} onAction={() => { props.onQuery(""); search.focus(); }} /></Show>} />
-    <div class="vz-input-list" id={`${props.id}-list`} ref={scrollElement} role="listbox" aria-label="ComfyUI inputs" aria-multiselectable="true"
+    <div class="vz-input-source-panel" id={`${props.id}-source-panel`} role={props.sources.length > 1 ? "tabpanel" : undefined}
+      aria-labelledby={props.sources.length > 1 ? `${props.id}-tab-${encodeURIComponent(props.source.source)}` : undefined}>
+    <div class="vz-input-list" id={`${props.id}-list`} ref={scrollElement} role="listbox" aria-label={`${props.source.source} inputs`} aria-multiselectable="true"
       onScroll={event => {
         const offset = event.currentTarget.scrollTop;
         if (offset !== lastOffset) setDirection(offset > lastOffset ? 1 : -1);
@@ -204,21 +224,28 @@ function InputOptions(props) {
               // when a preloaded background tile scrolls into view.
               const priority = virtual.index < virtualizer.range.startIndex - OVERSCAN_ROWS || virtual.index > virtualizer.range.endIndex + OVERSCAN_ROWS ? "background" : "foreground";
               return <Thumbnail class="vz-input-tile" name={name} src={props.thumbnail(name)} register={props.registerThumbnail}
+                pending={props.state(name).pending} error={props.state(name).error} onRetry={() => props.onToggle(name)}
                 priority={priority} rememberFocus={rememberFocus} surface={picture => <button type="button" role="option" tabindex="-1" id={`${props.id}-option-${index()}`}
-                aria-label={name} title={name} aria-selected={props.selected(name)} data-input-name={name}
+                aria-label={name} title={name} aria-selected={selected(name)} data-input-name={name}
                 class={"vz-input-option" + (active() === index() ? " vz-input-active" : "")}
                 {...memory} onFocus={event => { setActive(index()); memory.onFocus(event); }}
                 onClick={() => { setActive(index()); props.onToggle(name); search.focus(); }}>
                 {picture}
                 <Show when={name === props.current}><span class="vz-image-same" aria-hidden="true" /></Show>
-                <Show when={props.selected(name)}><SingleLineText class="vz-input-selected" aria-hidden="true" value="✓" /></Show>
+                <Show when={selected(name)}><SingleLineText class="vz-input-selected" aria-hidden="true" value="✓" /></Show>
               </button>} />;
             }}</For>
           </div>
         }</For>
       </div>
-      <Show when={!filtered().length}><p class="vz-image-empty">{files().length ? `No inputs match “${props.query()}”.` : "No ComfyUI inputs available."}</p></Show>
+      <Show when={props.catalogue.pending}><SingleLineText class="vz-input-status" role="status" value={`Reading ${props.source.source} inputs…`} /></Show>
+      <div class="vz-input-status vz-input-failure" hidden={!props.catalogue.error}>
+        <SingleLineText role="status" value={props.catalogue.error ? `Couldn't list ${props.source.source}'s inputs.` : ""} hint={props.catalogue.error} />
+        <button type="button" class="vz-thumbnail-retry" onClick={props.onRetrySource}>Retry</button>
+      </div>
+      <Show when={!filtered().length && !props.catalogue.pending && !props.catalogue.error}><p class="vz-image-empty">{files().length ? `No inputs match “${props.query()}”.` : "No ComfyUI inputs available."}</p></Show>
     </div>
-    <p ref={summary} class="vz-input-summary" role="status">{files().filter(name => props.selected(name)).length} selected</p>
+    </div>
+    <p ref={summary} class="vz-input-summary" role="status">{files().filter(selected).length} selected</p>
   </div>;
 }

@@ -101,6 +101,22 @@ Deno.test("input: capture popup precedence, blocking scope, select/typing and re
   assertEquals(r.errors.length, 1);
 });
 
+Deno.test("input: scoped widget arrows route through the dispatcher without escaping their focus or blocking decision", () => {
+  const r = inputRig(), moves = [];
+  r.handles.register({ id: "tabs", execute: args => moves.push(args.step) });
+  r.layers.push({ id: "tabs", command: "tabs", phase: "capture", keys: { ArrowLeft: { step: -1 }, ArrowRight: { step: 1 } },
+    decline: event => !event.target.matches("tab") });
+  assert(!r.policy.dispatch(r.event("ArrowLeft"), r.km, "capture"));
+  assert(!r.policy.dispatch(r.event("ArrowLeft", "tab", { ctrlKey: true }), r.km, "capture"));
+  const right = r.event("ArrowRight", "tab");
+  assert(r.policy.dispatch(right, r.km, "capture"));
+  assert(r.policy.dispatch(right, r.km));
+  assertEquals(moves, [1]);
+  r.layers.push({ id: "decision", blocking: true });
+  assert(!r.policy.dispatch(r.event("ArrowLeft", "tab"), r.km, "capture"));
+  assertEquals(moves, [1]);
+});
+
 Deno.test("keys: preserved default identities/order plus media playback and permissive programmatic setup", () => {
   assertEquals(CORE_BINDINGS.map(({ id, key, ctx }) => [id, key, ctx]), [
     ["app.keys", "?", "global"], ["keys.close", "Escape", "keys"], ["wb.close", "Escape", "workbench"],
