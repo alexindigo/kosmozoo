@@ -30,7 +30,17 @@ async function attempt(name, fn) {
   }
 }
 
+// The fake host is shared with the suites that run after this one. Whatever
+// this suite publishes there (fixtures and fake completions) is removed again
+// at the end, so suite order cannot change what a later suite's feed holds.
+async function fakeActivity(body = {}) {
+  const r = await fetch(FAKE + '/__test/activity', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+  if (!r.ok) throw new Error(`fake activity control: ${r.status}`);
+  return r.json();
+}
+
 async function main() {
+  const publishedBefore = new Set((await fakeActivity()).published);
   const cdp = await CDP.launch(9334, { windowSize: '1800,1200' });
   await cdp.send('Emulation.setDeviceMetricsOverride', { width: 800, height: 600, deviceScaleFactor: 1, mobile: false });
   const closeAndDiscard = async () => {
@@ -931,6 +941,8 @@ async function main() {
     await require('./variations-row-click.cjs')({ cdp, check, FAKE, KZ });
   } finally {
     await cdp.close();
+    const leaked = (await fakeActivity()).published.filter((name) => !publishedBefore.has(name));
+    if (leaked.length) await fakeActivity({ remove: leaked });
   }
 
   console.log(`\n${failures === 0 ? "ALL PASS" : failures + " FAILURES"}`);
