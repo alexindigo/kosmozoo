@@ -20,6 +20,8 @@ import { createSignal, createMemo, createEffect, createRenderEffect, untrack, on
 import { useAppStore } from "../store/app-store.js";
 import { tapeWindow, scrollTapeOffset } from "/js/rail.mjs";
 
+const BAND_TICKS = 20;
+
 // rail geometry is owned by the CSS (#feedRail's --fr-* custom properties) —
 // read at mount and on resize so the capacity/scrub math can never silently
 // desync
@@ -192,14 +194,16 @@ export function FeedRail() {
             const state = () => store.state.cardState(entry()?.id, {
               current: !!entry() && entry().id === markerId(), surface: "rail",
             });
-            return <div class="fr-tick"
+            return <div class="fr-row" classList={{ "fr-band-alt": Math.floor(idx / BAND_TICKS) % 2 === 1 }}>
+              <div class="fr-tick"
               ref={el}
               classList={{ wave: inWave(idx), current: state().current }}
               style={state().style}
               data-entry-id={entry()?.id}
               data-treatment={state().treatment}
               title={entry()?.filename}
-            />;
+              />
+            </div>;
           }}
         </For>
       </div>
