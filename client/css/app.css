@@ -1100,6 +1100,7 @@ body:has(#diff:not([hidden])) #statusCol { bottom: 56px; }
 .vz-parameter-heading.vz-imgrow-head { display: grid;
   grid-template-columns: 16px minmax(0, 1fr) minmax(0, .8fr);
   gap: 8px; align-items: center; cursor: default; }
+.vz-parameter.vz-off, .vz-parameter.vz-off .vz-parameter-heading { cursor: pointer; }
 .vz-parameter-name { min-width: 0; padding: 0; border: 0; background: transparent; text-align: left; cursor: pointer; }
 .vz-parameter-name .vz-label { font: 400 13px/18px system-ui; }
 .vz-parameter-current.vz-imgrow-cur { margin: 0; max-width: 100%; color: var(--attention);

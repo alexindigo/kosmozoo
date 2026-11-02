@@ -33,9 +33,10 @@ module.exports = async ({ cdp, check, KZ }) => {
     assert.equal(await cdp.evaluate("document.querySelector('.vz-image-set .vz-parameter-current').textContent"), 'canny.png');
     assert(await cdp.evaluate("!document.querySelector('.vz-insert-parameter,.vz-name-example,.vz-name-help,.vz-parameter-identity')&&document.querySelector('.vz-run').textContent==='Run'"));
     check('row frame: raw ComfyUI names, current image filename and Run replace retired chrome', true);
-    // Use trusted button activation and both naming targets. Insertion must not
-    // enable a row, and opaque graph IDs must survive the display-name change.
+    // Open names insert at both naming targets without toggling. Closed names
+    // now enable the shared row shell; opaque IDs remain the token identities.
     for (const [index, kind] of kinds.entries()) {
+      await toggle(kind);
       const target = index % 2 ? '.vz-suffix' : '.vz-prefix';
       await cdp.evaluate(`(()=>{const input=document.querySelector('${target}');input.focus();input.select()})()`);
       await cdp.send('Input.insertText', { text: 'pre__post' });
@@ -43,8 +44,9 @@ module.exports = async ({ cdp, check, KZ }) => {
       const id = await cdp.evaluate(`(()=>{const r=document.querySelector('${row(kind)}');return r.dataset.paramKey??r.dataset.enumId??r.dataset.textId??r.dataset.imageId})()`);
       await cdp.clickAt(`${row(kind)} .vz-parameter-name`);
       assert.equal(await cdp.evaluate(`document.querySelector('${target}').value`), `pre_{${id}}_post`);
-      assert.equal(await cdp.evaluate(`document.querySelector('${row(kind)} .checkbox').checked`), false);
+      assert.equal(await cdp.evaluate(`document.querySelector('${row(kind)} .checkbox').checked`), true);
       assert(await cdp.evaluate(`document.activeElement===document.querySelector('${target}')`));
+      await toggle(kind);
     }
     check('row frame: every kind inserts its canonical token at the focused prefix/suffix caret without toggling', true);
     // Keep the capture's naming valid and inspect the two state geometries.
