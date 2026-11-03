@@ -84,7 +84,7 @@ export function MediaBox(props) {
     setStillAttempt({ state: "idle" });
     if (!el) return;
     const isPlayer = el.tagName === "VIDEO" || el.tagName === "AUDIO";
-    if (isPlayer) { el.pause(); setPaused(true); }
+    if (isPlayer) { el.pause(); el.preload = "metadata"; setPaused(true); }
     if (stillVideo() && src != null)
       cancelStillDeadline = nativeResourceDeadline(() => fail("timeout"));
     // Native consumers are explicitly retired before a src window/side change.
@@ -153,7 +153,7 @@ export function MediaBox(props) {
             let seekable = false;
             for (let i = 0; i < el.seekable.length; i++)
               if (el.seekable.start(i) <= target && target <= el.seekable.end(i)) { seekable = true; break; }
-            if (!seekable) { setStillAttempt({ state: "awaiting-frame" }); return; }
+            if (!seekable) { setStillAttempt({ state: "awaiting-frame" }); el.preload = "auto"; return; }
             setStillAttempt({ state: "seeking", target });
             try { el.currentTime = target; } catch { fail("decode"); }
           }

@@ -77,17 +77,18 @@ const names = {
   // Test-only metadata-only native fixture. Suppress loadeddata and report
   // HAVE_METADATA until an actual seek finishes; stall mode refuses the seek.
   const metadataOnly=async (stall,queued=false,seekable=true)=>page.evaluate(`(()=>{
-    const proto=HTMLMediaElement.prototype,time=Object.getOwnPropertyDescriptor(proto,'currentTime'),ready=Object.getOwnPropertyDescriptor(proto,'readyState'),ranges=Object.getOwnPropertyDescriptor(proto,'seekable');
-    const state=window.__metadataOnly={seeks:[],decoded:new WeakSet(),stall:${stall},queued:${queued},seekable:${seekable},frame:false};
+    const proto=HTMLMediaElement.prototype,time=Object.getOwnPropertyDescriptor(proto,'currentTime'),ready=Object.getOwnPropertyDescriptor(proto,'readyState'),ranges=Object.getOwnPropertyDescriptor(proto,'seekable'),preload=Object.getOwnPropertyDescriptor(proto,'preload');
+    const state=window.__metadataOnly={seeks:[],decoded:new WeakSet(),stall:${stall},queued:${queued},seekable:${seekable},frame:false,requests:0};
     const preview=el=>el.tagName==='VIDEO'&&!!el.closest('.fr-preview');
     Object.defineProperty(proto,'readyState',{...ready,get(){return preview(this)&&!state.decoded.has(this)?state.frame?2:1:ready.get.call(this)}});
     Object.defineProperty(proto,'seekable',{...ranges,get(){return preview(this)?{length:state.seekable?1:0,start:()=>0,end:()=>3}:ranges.get.call(this)}});
+    Object.defineProperty(proto,'preload',{...preload,set(value){preload.set.call(this,value);if(preview(this)&&!state.seekable&&value==='auto'){state.requests++;queueMicrotask(()=>{state.frame=true;this.dispatchEvent(new Event('loadeddata'))})}}});
     Object.defineProperty(proto,'currentTime',{...time,set(value){if(preview(this)){state.seeks.push(value);if(state.queued){state.pending={el:this,time:value};Object.defineProperty(this,'readyState',{configurable:true,get:()=>2});return}if(state.stall||!state.seekable)return}time.set.call(this,value)}});
     state.finish=()=>{const{el,time:target}=state.pending;delete el.readyState;time.set.call(el,target)};
     const data=e=>{if(preview(e.target)&&!((state.queued||!state.seekable)&&!e.isTrusted))e.stopImmediatePropagation()};
     const seeked=e=>{if(preview(e.target)){if(state.stall)e.stopImmediatePropagation();else state.decoded.add(e.target)}};
     document.addEventListener('loadeddata',data,true);document.addEventListener('seeked',seeked,true);
-    window.__restoreMetadataOnly=()=>{Object.defineProperty(proto,'currentTime',time);Object.defineProperty(proto,'readyState',ready);Object.defineProperty(proto,'seekable',ranges);document.removeEventListener('loadeddata',data,true);document.removeEventListener('seeked',seeked,true)};
+    window.__restoreMetadataOnly=()=>{Object.defineProperty(proto,'currentTime',time);Object.defineProperty(proto,'readyState',ready);Object.defineProperty(proto,'seekable',ranges);Object.defineProperty(proto,'preload',preload);document.removeEventListener('loadeddata',data,true);document.removeEventListener('seeked',seeked,true)};
   })()`);
   try{
     await page.send('Network.enable');
@@ -148,12 +149,12 @@ const names = {
     await metadataOnly(false,false,false);
     await move(names.topVideo);await shown(names.topVideo);
     await page.poll(`document.querySelector('.fr-preview video')?.videoWidth>0`);
-    await page.evaluate(`window.__metadataOnly.frame=true;document.querySelector('.fr-preview video').dispatchEvent(new Event('loadeddata'))`);
     await page.poll(`document.querySelector('.fr-preview .media-box')?.classList.contains('ic-loaded')`,1000);
+    assert.equal(await page.evaluate(`window.__metadataOnly.requests`),1,'non-seekable still explicitly requests frame data with preload auto');
     assert.equal(await page.evaluate(`window.__metadataOnly.seeks.length`),0,'no seekable ranges: await a decoded frame without issuing a seek');
     await page.evaluate(`window.__restoreMetadataOnly()`);
     await page.mouse('mouseMoved',300,18,{buttons:0});await page.poll(`!document.querySelector('.fr-preview')`);
-    console.log('ok non-seekable metadata reaches ready on loadeddata');
+    console.log('ok non-seekable metadata requests frame data and reaches ready on loadeddata');
     // The central anchor is clear of both viewport edges: prove actual centering,
     // not only clamping at the top and bottom.
     const middle=await page.evaluate(`document.querySelectorAll('.fr-tick')[60].dataset.entryId.slice(5)`);
