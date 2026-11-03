@@ -114,10 +114,6 @@ body.resizing { cursor: col-resize; user-select: none; }
   background: color-mix(in srgb, var(--focused-background) 95%, transparent); border-bottom: 1px solid var(--border); }
 #bulkCount { font-size: 12px; font-weight: 600; color: var(--secondary);
   margin-right: 6px; white-space: nowrap; }
-#bulkClear { background: transparent; border: 1px solid var(--border);
-  border-radius: 4px; color: var(--foreground-mid); font-size: 13px; line-height: 1;
-  padding: 3px 8px; cursor: pointer; margin-left: auto; }
-#bulkClear:hover { color: var(--foreground); border-color: var(--foreground-dim); }
 
 /* --- main: two feeds share the window; divider splits; each column scrolls
  itself (no page-level scroll) ------------------------------------------- */

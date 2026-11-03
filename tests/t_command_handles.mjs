@@ -158,8 +158,8 @@ Deno.test("feature: dummy private capability/command/binding/affordance joins ge
   store.handles.invoke("dummy.open");
   store.actions.keys.dispatch({ key: "d", preventDefault() {} });
   assertEquals(called, 2);
-  assertEquals(store.state.featureCardActions({ id: "source:file.png" })[0].args, { id: "source:file.png" });
-  assertEquals(store.state.featureBulkActions()[0].args, { target: "selected" });
+  assertEquals(store.state.featureEntryActions({ id: "source:file.png" })[0].args, { id: "source:file.png" });
+  assertEquals(store.state.featureEntryActions({ target: "selected" })[0].args, { target: "selected" });
 });
 
 Deno.test("modal guard: identical Promise/one continuation, conflicting busy, Cancel and disposal settlement", async () => {

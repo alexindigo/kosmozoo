@@ -2500,10 +2500,10 @@ export function makeAppStore({ subscribeSources = typeof window !== "undefined" 
 
   const stateObj = {
     // trees — getters keep reads subscribed to the live store paths
-    featureCardActions: (image) => registeredFeatures.flatMap((f) =>
-      (f.cardAction ? [{ ...f.cardAction, args: { ...f.cardAction.args, id: image.id } }] : [])),
-    featureBulkActions: () => registeredFeatures.flatMap((f) =>
-      (f.bulkAction ? [{ ...f.bulkAction, args: { ...f.bulkAction.args, target: "selected" } }] : [])),
+    featureEntryActions: (target) => registeredFeatures.flatMap((feature) => {
+      const action = feature[target.target === "selected" ? "bulkAction" : "cardAction"];
+      return action ? [{ ...action, args: { ...action.args, ...target } }] : [];
+    }),
     get hosts() { return sourceRecords.hosts(); },
     noSources,
     get sourceActivity() { return sourceRecords.activities(); },

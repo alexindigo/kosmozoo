@@ -18,9 +18,8 @@ import { createVirtualizer } from "@tanstack/solid-virtual";
 import { useAppStore } from "../store/app-store.js";
 import { WINDOW_PAD } from "../store/image-window.js";
 import { cardHeight, feedOffsets, feedEntryAtOffset, gridGapPx, measureGeometry, invalidateGeometry, geometryMeasured } from "../store/sizes.js";
-import { iconSvg } from "/js/icons.mjs";
 import { Card } from "./Card.js";
-import { IconButton } from "./IconButton.js";
+import { EntryActions } from "./EntryActions.js";
 import { TextField } from "./TextField.js";
 
 export function Grid() {
@@ -224,13 +223,8 @@ export function Grid() {
               <span class="copyable">probe</span>
             </span>
             <span class="btnwrap">
-              <IconButton icon={iconSvg("wand", 16)} variant="variations" title="probe" onAction={() => {}} />
-              <IconButton icon={iconSvg("thumb-down")} variant="down" title="probe" onAction={() => {}} />
-              <IconButton icon={iconSvg("thumb-up")} variant="up" title="probe" onAction={() => {}} />
-              <IconButton icon={iconSvg("star")} variant="favorite" title="probe" onAction={() => {}} />
-              <IconButton icon={iconSvg("bookmark")} variant="bookmark" title="probe" onAction={() => {}} />
-              <IconButton icon={iconSvg("download")} variant="download" title="probe" onAction={() => {}} />
-              <IconButton icon={iconSvg("trash", 16)} variant="delete" title="probe" onAction={() => {}} />
+              <EntryActions target={{ id: "probe" }} judgmentType="toggle"
+                deleteCapability={store.state.currentCollection()?.capabilities?.delete} />
             </span>
           </div>
           <div class="pair">

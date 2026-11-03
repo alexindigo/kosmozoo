@@ -7,13 +7,11 @@
 // path-level updates the card's bindings follow by construction.
 
 import { createSignal, onMount } from "solid-js";
-import { For, Show } from "solid-js";
-import { iconSvg } from "/js/icons.mjs";
+import { Show } from "solid-js";
 import { useAppStore } from "../store/app-store.js";
-import { deleteCopy } from "../lib/delete-copy.js";
 import { flash } from "../lib/flash.js";
 import { Zoomable } from "./Zoomable.js";
-import { IconButton } from "./IconButton.js";
+import { EntryActions } from "./EntryActions.js";
 import { NoteBox } from "./NoteBox.js";
 import { mediaKind } from "/shared/backings/mime.mjs";
 
@@ -80,7 +78,6 @@ export function Card(props) {
   };
 
   const del = () => store.state.hosts[image()?.host]?.capabilities?.delete ?? null;
-  const delCopy = () => deleteCopy(del());
 
   return (
     <>
@@ -124,41 +121,8 @@ export function Card(props) {
           </span>
           <span class="btnwrap">
             <span class={"saved" + (savedOn() ? " show" : "")}>Feedback saved</span>
-            <For each={store.state.featureCardActions(image())}>
-              {(a) => <IconButton icon={a.icon} variant={a.variant} title={a.title} onAction={() => store.handles.invoke(a.command, a.args)} />}
-            </For>
-            <IconButton
-              icon={iconSvg("thumb-down")} variant="down" active={state().active.down}
-              title="thumbs down — hides when down-vote hides is enabled"
-              onAction={() => store.handles.invoke("judgment.apply", { id: props.entryId, intent: { type: "toggle", field: "vote", value: "down" } })}
-            />
-            <IconButton
-              icon={iconSvg("thumb-up")} variant="up" active={state().active.up} title="thumbs up"
-              onAction={() => store.handles.invoke("judgment.apply", { id: props.entryId, intent: { type: "toggle", field: "vote", value: "up" } })}
-            />
-            <IconButton
-              icon={iconSvg("star")} variant="favorite" active={state().active.favorite}
-              title="favorite — interesting in itself, not project fitness"
-              onAction={() => store.handles.invoke("judgment.apply", { id: props.entryId, intent: { type: "toggle", field: "favorite" } })}
-            />
-            <IconButton
-              icon={iconSvg("bookmark")} variant="bookmark" active={state().active.bookmark}
-              title={`bookmark - return to this ${word()} later`}
-              onAction={() => store.handles.invoke("judgment.apply", { id: props.entryId, intent: { type: "toggle", field: "bookmark" } })}
-            />
-            <IconButton
-              icon={iconSvg("download")} variant="download"
-              title={`download this ${word()}`}
-              onAction={() => store.handles.invoke("image.download", { id: props.entryId })}
-            />
-            <Show when={del()}>
-              <IconButton
-                icon={iconSvg(delCopy().icon, 16)}
-                variant="delete"
-                title={delCopy().cardTitle}
-                onAction={() => store.handles.invoke("image.delete.request", { id: props.entryId })}
-              />
-            </Show>
+            <EntryActions target={{ id: props.entryId }} judgmentType="toggle"
+              active={state().active} word={word()} deleteCapability={del()} />
           </span>
         </div>
         <div class="pair">
