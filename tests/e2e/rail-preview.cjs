@@ -76,17 +76,18 @@ const names = {
   };
   // Test-only metadata-only native fixture. Suppress loadeddata and report
   // HAVE_METADATA until an actual seek finishes; stall mode refuses the seek.
-  const metadataOnly=async (stall,queued=false)=>page.evaluate(`(()=>{
-    const proto=HTMLMediaElement.prototype,time=Object.getOwnPropertyDescriptor(proto,'currentTime'),ready=Object.getOwnPropertyDescriptor(proto,'readyState');
-    const state=window.__metadataOnly={seeks:[],decoded:new WeakSet(),stall:${stall},queued:${queued}};
+  const metadataOnly=async (stall,queued=false,seekable=true)=>page.evaluate(`(()=>{
+    const proto=HTMLMediaElement.prototype,time=Object.getOwnPropertyDescriptor(proto,'currentTime'),ready=Object.getOwnPropertyDescriptor(proto,'readyState'),ranges=Object.getOwnPropertyDescriptor(proto,'seekable');
+    const state=window.__metadataOnly={seeks:[],decoded:new WeakSet(),stall:${stall},queued:${queued},seekable:${seekable},frame:false};
     const preview=el=>el.tagName==='VIDEO'&&!!el.closest('.fr-preview');
-    Object.defineProperty(proto,'readyState',{...ready,get(){return preview(this)&&!state.decoded.has(this)?1:ready.get.call(this)}});
-    Object.defineProperty(proto,'currentTime',{...time,set(value){if(preview(this)){state.seeks.push(value);if(state.queued){state.pending={el:this,time:value};Object.defineProperty(this,'readyState',{configurable:true,get:()=>2});return}if(state.stall)return}time.set.call(this,value)}});
+    Object.defineProperty(proto,'readyState',{...ready,get(){return preview(this)&&!state.decoded.has(this)?state.frame?2:1:ready.get.call(this)}});
+    Object.defineProperty(proto,'seekable',{...ranges,get(){return preview(this)?{length:state.seekable?1:0,start:()=>0,end:()=>3}:ranges.get.call(this)}});
+    Object.defineProperty(proto,'currentTime',{...time,set(value){if(preview(this)){state.seeks.push(value);if(state.queued){state.pending={el:this,time:value};Object.defineProperty(this,'readyState',{configurable:true,get:()=>2});return}if(state.stall||!state.seekable)return}time.set.call(this,value)}});
     state.finish=()=>{const{el,time:target}=state.pending;delete el.readyState;time.set.call(el,target)};
-    const data=e=>{if(preview(e.target)&&!(state.queued&&!e.isTrusted))e.stopImmediatePropagation()};
+    const data=e=>{if(preview(e.target)&&!((state.queued||!state.seekable)&&!e.isTrusted))e.stopImmediatePropagation()};
     const seeked=e=>{if(preview(e.target)){if(state.stall)e.stopImmediatePropagation();else state.decoded.add(e.target)}};
     document.addEventListener('loadeddata',data,true);document.addEventListener('seeked',seeked,true);
-    window.__restoreMetadataOnly=()=>{Object.defineProperty(proto,'currentTime',time);Object.defineProperty(proto,'readyState',ready);document.removeEventListener('loadeddata',data,true);document.removeEventListener('seeked',seeked,true)};
+    window.__restoreMetadataOnly=()=>{Object.defineProperty(proto,'currentTime',time);Object.defineProperty(proto,'readyState',ready);Object.defineProperty(proto,'seekable',ranges);document.removeEventListener('loadeddata',data,true);document.removeEventListener('seeked',seeked,true)};
   })()`);
   try{
     await page.send('Network.enable');
@@ -144,6 +145,15 @@ const names = {
     assert.equal(await page.evaluate(`document.querySelectorAll('.fr-tick.hovered').length`),0,'leaving clears the tick highlight');
     await page.poll(`!window.__retiredPreview.isConnected&&!window.__retiredPreview.getAttribute('src')&&window.__retiredPreview.readyState===0&&window.__retiredPreview.paused`);
     console.log('ok leaving hides preview');
+    await metadataOnly(false,false,false);
+    await move(names.topVideo);await shown(names.topVideo);
+    await page.poll(`document.querySelector('.fr-preview video')?.videoWidth>0`);
+    await page.evaluate(`window.__metadataOnly.frame=true;document.querySelector('.fr-preview video').dispatchEvent(new Event('loadeddata'))`);
+    await page.poll(`document.querySelector('.fr-preview .media-box')?.classList.contains('ic-loaded')`,1000);
+    assert.equal(await page.evaluate(`window.__metadataOnly.seeks.length`),0,'no seekable ranges: await a decoded frame without issuing a seek');
+    await page.evaluate(`window.__restoreMetadataOnly()`);
+    await page.mouse('mouseMoved',300,18,{buttons:0});await page.poll(`!document.querySelector('.fr-preview')`);
+    console.log('ok non-seekable metadata reaches ready on loadeddata');
     // The central anchor is clear of both viewport edges: prove actual centering,
     // not only clamping at the top and bottom.
     const middle=await page.evaluate(`document.querySelectorAll('.fr-tick')[60].dataset.entryId.slice(5)`);
@@ -218,7 +228,7 @@ const names = {
     assert(Math.abs(narrow.height-narrow.pictureHeight-narrow.padding-narrow.gap-narrow.label)<0.5,'panel height follows media at its actual constrained width');
     await capture('rail-preview-narrow');
     console.log('ok narrow viewport shrinks right-side preview without overlap or stale preferred-width height',narrow);
-    assert.deepEqual(errors,[]);console.log('PASS rail-preview (15 consumer contracts, no page errors)');
+    assert.deepEqual(errors,[]);console.log('PASS rail-preview (16 consumer contracts, no page errors)');
   }catch(error){
     console.error('preview diagnostics',await page.evaluate(`({hover:matchMedia('(hover: hover)').matches,anyHover:matchMedia('(any-hover: hover)').matches,pointer:matchMedia('(pointer: fine)').matches,previews:[...document.querySelectorAll('.fr-preview')].map(el=>({text:el.textContent,class:el.className,html:el.outerHTML})),top:document.querySelector('.fr-top')?.textContent,ticks:[...document.querySelectorAll('.fr-tick')].slice(0,5).map(el=>({id:el.dataset.entryId,hover:el.matches(':hover')}))})`),errors);
     throw error;

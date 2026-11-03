@@ -60,7 +60,8 @@ export function MediaBox(props) {
       // Once requested, only the completed seek owns readiness. A queued
       // loadeddata event may describe the frame at the previous position.
       if (attempt.state === "seeking" && (event !== "seeked" || el.seeking)) return;
-      if (attempt.state === "idle" && event === "seeked") return;
+      if (attempt.state === "idle" && event !== "metadata") return;
+      if (attempt.state === "awaiting-frame" && event !== "loadeddata") return;
       setStillAttempt({ state: "ready" });
     } else setLoaded(true);
     cancelStillDeadline?.(); cancelStillDeadline = null;
@@ -147,8 +148,12 @@ export function MediaBox(props) {
           // Metadata preload may stop before decoding. A tiny seek requests
           // just the first frame without turning this into a playing resource.
           if (stillVideo() && stillAttempt().state === "idle") {
-            if (el.readyState >= 2) return; // loadeddata owns the no-seek path.
+            if (el.readyState >= 2) { complete(el, "metadata"); return; }
             const target = Math.min(0.001, el.duration / 2);
+            let seekable = false;
+            for (let i = 0; i < el.seekable.length; i++)
+              if (el.seekable.start(i) <= target && target <= el.seekable.end(i)) { seekable = true; break; }
+            if (!seekable) { setStillAttempt({ state: "awaiting-frame" }); return; }
             setStillAttempt({ state: "seeking", target });
             try { el.currentTime = target; } catch { fail("decode"); }
           }
