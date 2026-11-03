@@ -73,7 +73,9 @@ const names = {
     await page.evaluate(`(async()=>{const s=${KZ};if(!s.state.judgmentPrefs.revealThumbedDown)s.actions.judgments.toggleReveal()})()`);
     await page.evaluate(`(async()=>${KZ}.actions.ui.refresh())()`);
     await page.poll(`(async()=>{const s=${KZ};return s.state.entriesWithKnownSize().some((_,i)=>s.state.feedEntryAt(i)?.filename===${JSON.stringify(names.bottomVideo)})})()`,30000);
-    const currentColor=await page.evaluate(`(()=>{const t=document.querySelector('.fr-tick.current');return getComputedStyle(t).backgroundColor})()`);
+    // A judged current entry must not contaminate the expected hover color.
+    await page.evaluate(`(async()=>${KZ}.handles.invoke('judgment.apply',{id:'fake:flux-basic.png',intent:{type:'set',patch:{favorite:true,bookmark:null,vote:null}}}))()`);
+    const currentColor=await page.evaluate(`(()=>{const probe=document.createElement('span');probe.style.color='var(--foreground-bright)';document.body.append(probe);const color=getComputedStyle(probe).color;probe.remove();return color})()`);
     await browse(names.top);
     await page.poll(`!!document.querySelector('.card.current .media-box.ic-loaded')`);
     const closed=await page.send('Page.captureScreenshot',{format:'png'});
@@ -87,7 +89,7 @@ const names = {
     assert.equal(await page.evaluate(`!!document.querySelector('.fr-preview')`),false,'short hover does not acquire/show preview');
     await shown(names.top);await page.poll(`document.querySelector('.fr-preview .media-box')?.classList.contains('ic-loaded')`);
     const highlighted=await tickStyle(names.top);
-    assert.equal(highlighted.color,currentColor,'previewed tick uses the current untreated tick colour, overriding treatment');
+    assert.equal(highlighted.color,currentColor,'previewed tick uses foreground-bright, overriding treatment');
     assert.equal(highlighted.hovered,true,'displayed preview owns the hovered class');
     assert.equal(highlighted.width,beforeHover.width,'hover does not widen the tick');
     assert.equal(highlighted.height,beforeHover.height,'hover does not lengthen the tick');
