@@ -76,13 +76,14 @@ const names = {
   };
   // Test-only metadata-only native fixture. Suppress loadeddata and report
   // HAVE_METADATA until an actual seek finishes; stall mode refuses the seek.
-  const metadataOnly=async stall=>page.evaluate(`(()=>{
+  const metadataOnly=async (stall,queued=false)=>page.evaluate(`(()=>{
     const proto=HTMLMediaElement.prototype,time=Object.getOwnPropertyDescriptor(proto,'currentTime'),ready=Object.getOwnPropertyDescriptor(proto,'readyState');
-    const state=window.__metadataOnly={seeks:[],decoded:new WeakSet(),stall:${stall}};
+    const state=window.__metadataOnly={seeks:[],decoded:new WeakSet(),stall:${stall},queued:${queued}};
     const preview=el=>el.tagName==='VIDEO'&&!!el.closest('.fr-preview');
     Object.defineProperty(proto,'readyState',{...ready,get(){return preview(this)&&!state.decoded.has(this)?1:ready.get.call(this)}});
-    Object.defineProperty(proto,'currentTime',{...time,set(value){if(preview(this)){state.seeks.push(value);if(state.stall)return}time.set.call(this,value)}});
-    const data=e=>{if(preview(e.target))e.stopImmediatePropagation()};
+    Object.defineProperty(proto,'currentTime',{...time,set(value){if(preview(this)){state.seeks.push(value);if(state.queued){state.pending={el:this,time:value};Object.defineProperty(this,'readyState',{configurable:true,get:()=>2});return}if(state.stall)return}time.set.call(this,value)}});
+    state.finish=()=>{const{el,time:target}=state.pending;delete el.readyState;time.set.call(el,target)};
+    const data=e=>{if(preview(e.target)&&!(state.queued&&!e.isTrusted))e.stopImmediatePropagation()};
     const seeked=e=>{if(preview(e.target)){if(state.stall)e.stopImmediatePropagation();else state.decoded.add(e.target)}};
     document.addEventListener('loadeddata',data,true);document.addEventListener('seeked',seeked,true);
     window.__restoreMetadataOnly=()=>{Object.defineProperty(proto,'currentTime',time);Object.defineProperty(proto,'readyState',ready);document.removeEventListener('loadeddata',data,true);document.removeEventListener('seeked',seeked,true)};
@@ -123,11 +124,15 @@ const names = {
     assert.equal(await page.evaluate(`document.querySelectorAll('#feedRail[title],.fr-tick[title],.fr-row[title]').length`),0,'no tick or inherited native title tooltip');
     console.log('ok delayed image preview with truncated filename and no native tooltip',await geometry(names.top));
     await capture('rail-preview-image-top');
-    await metadataOnly(false);
+    await metadataOnly(false,true);
     await move(names.topVideo);await shown(names.topVideo);
     assert.equal((await tickStyle(names.top)).hovered,false,'moving clears the former tick');
     assert.notEqual((await tickStyle(names.top)).color,currentColor,'former tick restores its treatment');
     assert.equal((await tickStyle(names.topVideo)).color,currentColor,'highlight moves to the new preview target');
+    await page.poll(`!!window.__metadataOnly.pending`);
+    await page.evaluate(`window.__metadataOnly.pending.el.dispatchEvent(new Event('loadeddata'))`);
+    assert.equal(await page.evaluate(`document.querySelector('.fr-preview .media-box').classList.contains('ic-loaded')`),false,'old-position loadeddata cannot complete a pending still seek');
+    await page.evaluate(`window.__metadataOnly.finish()`);
     await videoStill(names.topVideo);
     assert.equal(await page.evaluate(`window.__metadataOnly.seeks.some(t=>t>0&&t<=0.001)`),true,'metadata-only still explicitly seeks a tiny first-frame time');
     await page.poll(`document.querySelector('.fr-preview .media-box')?.classList.contains('ic-loaded')`);
@@ -213,7 +218,7 @@ const names = {
     assert(Math.abs(narrow.height-narrow.pictureHeight-narrow.padding-narrow.gap-narrow.label)<0.5,'panel height follows media at its actual constrained width');
     await capture('rail-preview-narrow');
     console.log('ok narrow viewport shrinks right-side preview without overlap or stale preferred-width height',narrow);
-    assert.deepEqual(errors,[]);console.log('PASS rail-preview (14 consumer contracts, no page errors)');
+    assert.deepEqual(errors,[]);console.log('PASS rail-preview (15 consumer contracts, no page errors)');
   }catch(error){
     console.error('preview diagnostics',await page.evaluate(`({hover:matchMedia('(hover: hover)').matches,anyHover:matchMedia('(any-hover: hover)').matches,pointer:matchMedia('(pointer: fine)').matches,previews:[...document.querySelectorAll('.fr-preview')].map(el=>({text:el.textContent,class:el.className,html:el.outerHTML})),top:document.querySelector('.fr-top')?.textContent,ticks:[...document.querySelectorAll('.fr-tick')].slice(0,5).map(el=>({id:el.dataset.entryId,hover:el.matches(':hover')}))})`),errors);
     throw error;
