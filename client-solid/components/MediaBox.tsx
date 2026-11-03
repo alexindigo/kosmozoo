@@ -10,6 +10,7 @@ import { IconButton } from "./IconButton.js";
 import { mediaFailure } from "../store/media-failure.js";
 import { mediaGeometry, AUDIO_SIZE } from "../store/media-geometry.js";
 import { iconSvg } from "/js/icons.mjs";
+import { nativeResourceDeadline } from "../lib/img-measure.js";
 
 export function MediaBox(props) {
   const [loaded, setLoaded] = createSignal(false), [error, setError] = createSignal(false);
@@ -18,8 +19,11 @@ export function MediaBox(props) {
   const [surface, setSurface] = createSignal(null);
   const [allocation, setAllocation] = createSignal({ width: 0, height: 0 });
   const [natural, setNatural] = createSignal(null);
-  let block, box, registration;
-  const playable = () => props.kind === "video" || props.kind === "audio";
+  const [stillAttempt, setStillAttempt] = createSignal({ state: "idle" });
+  let block, box, registration, cancelStillDeadline;
+  const nativeMedia = () => props.kind === "video" || props.kind === "audio";
+  const playable = () => nativeMedia() && !props.still;
+  const stillVideo = () => props.still && props.kind === "video";
   const word = () => props.kind === "audio" ? "audio file" : "video";
   // Focus before an ancestor's native pan listener can capture the pointer.
   onMount(() => {
@@ -32,7 +36,9 @@ export function MediaBox(props) {
     box.addEventListener("pointerdown", focus, true);
     onCleanup(() => box.removeEventListener("pointerdown", focus, true));
   });
-  const phase = createMemo(() => props.failed || error() ? "error" : props.src == null ? "empty" : loaded() ? "loaded" : "loading");
+  const displayError = () => stillVideo() ? stillAttempt().code : error();
+  const displayLoaded = () => stillVideo() ? stillAttempt().state === "ready" : loaded();
+  const phase = createMemo(() => props.failed || displayError() ? "error" : props.src == null ? "empty" : displayLoaded() ? "loaded" : "loading");
   const toggle = () => {
     const el = surface();
     if (!playable() || !el || props.src == null || props.active === false || phase() === "error") return false;
@@ -46,6 +52,25 @@ export function MediaBox(props) {
   const geometry = createMemo(() => mediaGeometry({ ...allocation(), size: size(), surface: props.workbench ? "viewer" : "card" }));
   const viewGeometry = () => size()?.w > 0 && size()?.h > 0 && readyViewGeometry(geometry()) ? geometry() : null;
   const measureNatural = el => setNatural({ src: source(), w: el.videoWidth || el.naturalWidth, h: el.videoHeight || el.naturalHeight });
+  const complete = (el, event) => {
+    if (source() == null || displayError()) return;
+    if (stillVideo()) {
+      const attempt = stillAttempt();
+      if (el.readyState < 2 || attempt.state === "ready" || attempt.state === "failed") return;
+      // Once requested, only the completed seek owns readiness. A queued
+      // loadeddata event may describe the frame at the previous position.
+      if (attempt.state === "seeking" && (event !== "seeked" || el.seeking)) return;
+      if (attempt.state === "idle" && event !== "metadata") return;
+      if (attempt.state === "awaiting-frame" && event !== "loadeddata") return;
+      setStillAttempt({ state: "ready" });
+    } else setLoaded(true);
+    cancelStillDeadline?.(); cancelStillDeadline = null;
+  };
+  const fail = code => {
+    if (source() == null) return;
+    cancelStillDeadline?.(); cancelStillDeadline = null;
+    if (stillVideo()) setStillAttempt({ state: "failed", code }); else setError(code);
+  };
   const transform = createMemo(() => {
     const zoom = props.zoom, g = viewGeometry();
     return zoom && g ? zoomViewTransform(zoom.getView(zoom.key, g), g) : "";
@@ -54,15 +79,19 @@ export function MediaBox(props) {
     const zoom = props.zoom, g = viewGeometry();
     if (zoom) zoom.onZoomChange?.(g ? readZoomView(zoom.getView(zoom.key, g), g).s > 1 : false);
   });
-  createEffect(on(() => [surface(), source()], ([el, src]) => {
+  createEffect(on(() => [surface(), source(), props.still], ([el, src]) => {
     setLoaded(false); setError(false); setCurrent(0); setDuration(0);
+    setStillAttempt({ state: "idle" });
     if (!el) return;
     const isPlayer = el.tagName === "VIDEO" || el.tagName === "AUDIO";
-    if (isPlayer) { el.pause(); setPaused(true); }
+    if (isPlayer) { el.pause(); el.preload = "metadata"; setPaused(true); }
+    if (stillVideo() && src != null)
+      cancelStillDeadline = nativeResourceDeadline(() => fail("timeout"));
     // Native consumers are explicitly retired before a src window/side change.
     if (src == null) el.removeAttribute("src"); else el.setAttribute("src", src);
     if (isPlayer) el.load();
     onCleanup(() => {
+      cancelStillDeadline?.(); cancelStillDeadline = null;
       if (isPlayer) el.pause();
       el.removeAttribute("src");
       if (isPlayer) el.load();
@@ -84,7 +113,7 @@ export function MediaBox(props) {
   });
   createEffect(on(() => [surface(), props.zoom?.key], ([el, key]) => {
     const zoom = props.zoom;
-    if (!el || !zoom || props.kind === "audio") return;
+    if (!el || !zoom || props.kind === "audio" || props.still) return;
     const binding = makeZoomable(el, { surface: box, box, key, getView: zoom.getView, setView: zoom.setView,
       geometry: viewGeometry });
     onCleanup(() => binding.dispose());
@@ -105,20 +134,36 @@ export function MediaBox(props) {
   return <div ref={block} class={`media-block ${props.workbench ? "media-block-stage" : ""}`}>
     <div ref={box} tabIndex={playable() ? 0 : undefined}
     class={`media-box ${props.workbench ? "media-stage" : "imgwrap"} ic-${phase()}`}
-    data-kind={props.kind ?? "image"} style={!props.workbench ? { height: `${geometry().height}px` } : undefined} onClick={click}>
-    <Show when={playable()} fallback={<img ref={setSurface} class={props.workbench ? "dz-img" : undefined}
+    data-kind={props.kind ?? "image"} style={!props.workbench ? { height: `${geometry().height}px` } : undefined} onClick={props.still ? undefined : click}>
+    <Show when={nativeMedia()} fallback={<img ref={setSurface} class={props.workbench ? "dz-img" : undefined}
       alt={props.alt} style={style()} decoding={props.workbench ? undefined : "async"}
       fetchpriority={props.fetchPriority === "background" ? "low" : "auto"}
       onLoad={e => { measureNatural(e.currentTarget); setLoaded(true); }}
       onError={() => { if (props.src != null) setError("decode"); }} />}>
       <Dynamic component={props.kind} ref={setSurface} class={props.workbench ? "dz-img" : undefined} preload="metadata" playsinline
         aria-label={props.alt} style={style()} loop={loop()} muted={muted()}
-        onLoadedData={() => setLoaded(true)} onLoadedMetadata={e => { measureNatural(e.currentTarget); setDuration(e.currentTarget.duration); }}
+        onLoadedData={e => complete(e.currentTarget, "loadeddata")} onLoadedMetadata={e => {
+          const el = e.currentTarget;
+          measureNatural(el); setDuration(el.duration);
+          // Metadata preload may stop before decoding. A tiny seek requests
+          // just the first frame without turning this into a playing resource.
+          if (stillVideo() && stillAttempt().state === "idle") {
+            if (el.readyState >= 2) { complete(el, "metadata"); return; }
+            const target = Math.min(0.001, el.duration / 2);
+            let seekable = false;
+            for (let i = 0; i < el.seekable.length; i++)
+              if (el.seekable.start(i) <= target && target <= el.seekable.end(i)) { seekable = true; break; }
+            if (!seekable) { setStillAttempt({ state: "awaiting-frame" }); el.preload = "auto"; return; }
+            setStillAttempt({ state: "seeking", target });
+            try { el.currentTime = target; } catch { fail("decode"); }
+          }
+        }}
+        onSeeked={e => { if (stillVideo()) complete(e.currentTarget, "seeked"); }}
         onDurationChange={e => setDuration(e.currentTarget.duration)} onTimeUpdate={e => setCurrent(e.currentTarget.currentTime)}
-        onPlay={() => { registration?.started(); setPaused(false); }} onPause={() => setPaused(true)}
+        onPlay={e => { if (props.still) { e.currentTarget.pause(); return; } registration?.started(); setPaused(false); }} onPause={() => setPaused(true)}
         onEnded={() => setPaused(true)} onVolumeChange={e => setMuted(e.currentTarget.muted)}
-        onError={e => { if (props.src != null) setError(e.currentTarget.error?.code || "unknown"); }} />
-      <Show when={props.src != null && phase() !== "error"}>
+        onError={e => fail(e.currentTarget.error?.code || "unknown")} />
+      <Show when={playable() && props.src != null && phase() !== "error"}>
         <Show when={(!props.workbench && paused()) || props.kind === "audio"}><div style={props.workbench || props.kind !== "audio" ? style() : undefined} class={`media-play-overlay ${props.kind === "audio" ? "media-audio-face" : ""}`}>
           <Show when={!props.workbench}><MediaControlBoundary class="media-play-boundary">
             <IconButton size="lg" variant="play prominent media-play" title={`${paused() ? "play" : "pause"} ${word()}`}
@@ -130,7 +175,7 @@ export function MediaBox(props) {
       </Show>
     </Show>
     <Show when={phase() === "error"}><div class="media-failure" role="status">
-      <span class="media-failure-name">{props.alt}</span><span>{mediaFailure(props.kind ?? "image", props.failed ? props.failureCode : error())}</span>
+      <span class="media-failure-name">{props.alt}</span><span>{mediaFailure(props.kind ?? "image", props.failed ? props.failureCode : displayError())}</span>
       <span>Download it to open elsewhere.</span>
       <Show when={!props.failed && props.onErrorClick}><span>click to retry</span></Show>
     </div></Show>

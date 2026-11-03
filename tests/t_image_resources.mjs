@@ -1,9 +1,24 @@
 import { assert, assertEquals } from "jsr:@std/assert";
 import { makeAcquisition } from "../client-solid/store/acquisition.js";
-import { makeImageMeasurements, useImageDisplay, ERROR_RETRY_MS, MEASURE_TIMEOUT_MS } from "../client-solid/lib/img-measure.js";
+import { makeImageMeasurements, useImageDisplay, nativeResourceDeadline, ERROR_RETRY_MS, MEASURE_TIMEOUT_MS } from "../client-solid/lib/img-measure.js";
 import { createRoot, createSignal } from "solid-js";
 
 const flush = async () => { for (let i = 0; i < 30; i++) await Promise.resolve(); };
+Deno.test("native resource deadline: bounded once, with settlement and retirement fencing late callbacks", () => {
+  const originalTimeout = globalThis.setTimeout, originalClear = globalThis.clearTimeout;
+  const callbacks = [], cleared = []; let expiries = 0;
+  globalThis.setTimeout = (callback, delay) => { assertEquals(delay, MEASURE_TIMEOUT_MS); callbacks.push(callback); return callbacks.length; };
+  globalThis.clearTimeout = timer => cleared.push(timer);
+  try {
+    const settle = nativeResourceDeadline(() => expiries++);
+    settle(); callbacks[0](); assertEquals(expiries, 0);
+    const retire = nativeResourceDeadline(() => expiries++);
+    retire(); callbacks[1](); assertEquals(expiries, 0);
+    const expire = nativeResourceDeadline(() => expiries++);
+    callbacks[2](); callbacks[2](); assertEquals(expiries, 1);
+    expire(); assertEquals(cleared, [1, 2, 3]);
+  } finally { globalThis.setTimeout = originalTimeout; globalThis.clearTimeout = originalClear; }
+});
 function fixture(policyOptions = {}) {
   const original = globalThis.Image, images = [], idle = new Map();
   let sequence = 0;
