@@ -47,6 +47,7 @@ import { makeInputPolicy } from "./input-policy.js";
 import { launchNotice } from "/js/launch-notice.mjs";
 import { readZoomView, readyViewGeometry } from "/js/zoom-view.mjs";
 import { entryNames } from "./entry-names.js";
+import { makeWheelArbiter } from "../lib/wheel-arbiter.js";
 
 // stored host if still present, else first online, else first
 function initialHost(hosts, stored) {
@@ -465,8 +466,47 @@ export function makeAppStore({ subscribeSources = typeof window !== "undefined" 
   let pendingFeedSettle = null; // ownership of this debounce, never a preview ID
   let gestureStart = null; // scrollTop at the gesture's origin
   const FEED_SETTLE_MS = 150;
+  const wheelArbiter = makeWheelArbiter(performance.now());
+  let wheelHoldTimer = 0;
+
+  function releaseFeedWheel(delta) {
+    const col = feedScrollEl();
+    if (!col || !delta) return;
+    // Accepted wheel motion is user travel, not a restore or compensation.
+    setBrowseRestore(null);
+    setProgrammaticScrollUntil(0);
+    col.scrollTo({ top: col.scrollTop + delta.dy, left: col.scrollLeft + delta.dx, behavior: "instant" });
+  }
+
+  function feedWheel({ media, ctrl, dx, dy, cancelable = true }) {
+    const now = performance.now();
+    const result = wheelArbiter.wheel({ now, media: media && (ctrl || cancelable), ctrl, dx, dy });
+    if (result.prevent || result.pinch) {
+      clearTimeout(wheelHoldTimer);
+      wheelHoldTimer = 0;
+    }
+    if (result.pinch) {
+      // Retire the actual baseline owners: pending restore, settle, native
+      // smooth motion and the virtualizer's retained landing target. No rewind.
+      const col = feedScrollEl();
+      setBrowseRestore(null);
+      batch(retireFeedScroll);
+      quietScrolls();
+      if (col) feedVirtualizer()?.scrollToOffset(col.scrollTop, { behavior: "instant" });
+    } else if (result.release) releaseFeedWheel(result.release);
+    else if (result.deadline != null) {
+      wheelHoldTimer = setTimeout(() => {
+        wheelHoldTimer = 0;
+        releaseFeedWheel(wheelArbiter.tick(performance.now()));
+      }, Math.max(1, Math.ceil(result.deadline - performance.now())));
+    }
+    return result;
+  }
 
   function retireFeedScroll() {
+    clearTimeout(wheelHoldTimer);
+    wheelHoldTimer = 0;
+    wheelArbiter.reset(performance.now());
     clearTimeout(feedSettleTimer);
     feedSettleTimer = 0;
     pendingFeedSettle = null;
@@ -519,6 +559,7 @@ export function makeAppStore({ subscribeSources = typeof window !== "undefined" 
 
   function feedScrolled(top) {
     if (disposed) return;
+    wheelArbiter.scrolled(performance.now());
     top = top ?? feedScrollEl()?.scrollTop ?? 0;
     const scheduled = { session: sourceSession, revision: browseRevision,
       virtualizer: feedVirtualizer(), col: feedScrollEl(), commitEligible: !sourceSession?.loading };
@@ -2178,6 +2219,7 @@ export function makeAppStore({ subscribeSources = typeof window !== "undefined" 
       // the single scroll entry point — the store owns the activity state
       // and the settle pipeline; the model never moves mid-gesture
       scrolled: feedScrolled,
+      wheel: feedWheel,
       wantRangeNow,
       retryImage(id) { window_.retry(id); },
       // floating button: back to the top of the feed

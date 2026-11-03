@@ -90,3 +90,20 @@ Deno.test("zoom gestures: unchanged wheel/pan deltas, distinct-peer entanglement
   binding.dispose();
   assertEquals(handlers.size, 0, "retiring a binding retires its active drag listeners too");
 });
+
+Deno.test("zoom gestures: injected allocation owns wheel; native media retains pan/click lifetime", () => {
+  const wheel = new Map(), native = new Map();
+  const node = handlers => ({ addEventListener: (n, fn) => handlers.set(n, fn), removeEventListener: n => handlers.delete(n), setPointerCapture() {} });
+  const el = node(native), surface = node(wheel);
+  const box = { getBoundingClientRect: () => ({ left: 10, top: 20, width: 1000, height: 600 }) };
+  const geometry = { width: 1000, height: 600, mediaWidth: 400, mediaHeight: 240 };
+  let crop;
+  const binding = makeZoomable(el, { surface, box, geometry, key: 'card', getView: () => crop, setView: (_, v) => { crop = v; } });
+  assertEquals([...wheel.keys()], ['wheel']);
+  assertEquals([...native.keys()], ['pointerdown', 'click']);
+  wheel.get('wheel')({ ctrlKey: true, deltaY: -20, clientX: 14, clientY: 24, preventDefault() {} });
+  assertAlmostEquals(crop.s, Math.exp(.24));
+  assert(crop.cx < .5 && crop.cy < .5, 'letterbox cursor uses the explicitly supplied fitted frame');
+  binding.dispose();
+  assertEquals(wheel.size + native.size, 0);
+});

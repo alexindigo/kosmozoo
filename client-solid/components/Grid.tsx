@@ -146,6 +146,17 @@ export function Grid() {
     const onScroll = () => store.actions.feed.scrolled(col?.scrollTop ?? 0);
     col?.addEventListener("scroll", onScroll, { passive: true });
     onCleanup(() => col?.removeEventListener("scroll", onScroll));
+    // One feed boundary, not per-image timers. MediaBox declares the stable
+    // allocation; its own zoom binding still owns the fitted crop and player.
+    const onWheel = e => {
+      const media = e.target instanceof Element ? e.target.closest('.media-box:not(.media-stage)') : null;
+      const unit = e.deltaMode === 1 ? parseFloat(getComputedStyle(col).lineHeight) || 16 : e.deltaMode === 2 ? col.clientHeight : 1;
+      const result = store.actions.feed.wheel({ media: !!media, ctrl: e.ctrlKey,
+        dx: e.deltaX * unit, dy: e.deltaY * unit, cancelable: e.cancelable });
+      if (result.prevent) e.preventDefault();
+    };
+    col.addEventListener("wheel", onWheel, { capture: true, passive: false });
+    onCleanup(() => col.removeEventListener("wheel", onWheel, true));
     // the probe card makes the rendered geometry measurable on mount (no
     // waiting for a live card); a column-size change re-measures and re-runs
     // the estimates
