@@ -1233,6 +1233,7 @@ body:has(#diff:not([hidden])) #statusCol { bottom: 56px; }
 .select-with-face:has(> .select-native:focus-visible) { outline: 2px solid var(--secondary); outline-offset: 2px; border-radius: 4px; }
 .select-with-face:hover > .select-face { box-shadow: inset 0 0 0 1px var(--foreground-dim); }
 .folder-picker-value { max-width: 16ch; }
+.folder-picker-status { flex-shrink: 0; white-space: pre; }
 
 /* Readiness and native decode state use Solid's shared class bindings. Geometry
    remains inline, owned by the surface that measures it. */

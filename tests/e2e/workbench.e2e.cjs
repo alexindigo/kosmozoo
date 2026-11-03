@@ -631,7 +631,7 @@ async function attempt(name, fn) {
         const host = document.getElementById('hostPicker'), folder = document.getElementById('folderPicker');
         const filter = folder.nextElementSibling, pins = filter.nextElementSibling;
         return host.nextElementSibling === folder && filter.classList.contains('feed-filter') && pins.classList.contains('pinned-source-group') &&
-          !!pins.querySelector('.pinned-separator') && document.querySelector('#outputFolder').getAttribute('aria-label') === 'Output root (all subfolders)';
+          !!pins.querySelector('.pinned-separator') && document.querySelector('#outputFolder').getAttribute('aria-label') === 'Output folder: Output root (all subfolders)';
       })()`));
       await nativeFolder('a');
       await page.poll(`document.querySelector('.card[data-name="a/visible.png"] img')?.naturalWidth === 128`, 20000);
