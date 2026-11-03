@@ -46,6 +46,7 @@ const names = {
     await page.poll(`!!document.querySelector(${JSON.stringify(selector(name))})`);
   };
   const shown=async name=>page.poll(`document.querySelector('.fr-preview')?.dataset.entryId===${JSON.stringify('fake:'+name)}`);
+  const tickStyle=async name=>page.evaluate(`(()=>{const t=document.querySelector(${JSON.stringify(selector(name))}),r=t.getBoundingClientRect();return{color:getComputedStyle(t).backgroundColor,width:r.width,height:r.height,hovered:t.classList.contains('hovered')}})()`);
   const geometry=async name=>{
     const result=await page.evaluate(`(()=>{const p=document.querySelector('.fr-preview'),r=p.getBoundingClientRect(),t=document.querySelector(${JSON.stringify(selector(name))}).getBoundingClientRect(),rail=document.querySelector('#feedRail').getBoundingClientRect(),label=p.querySelector('.fr-preview-name');return{left:r.left,right:r.right,top:r.top,bottom:r.bottom,width:r.width,height:r.height,tickCenter:(t.top+t.bottom)/2,railRight:rail.right,vw:innerWidth,vh:innerHeight,labelHeight:label.getBoundingClientRect().height,labelLine:parseFloat(getComputedStyle(label).lineHeight),labelOverflow:getComputedStyle(label).textOverflow}})()`);
     assert(result.left>=result.railRight,'preview is beside the rail');
@@ -69,8 +70,10 @@ const names = {
     await page.send('Network.setCacheDisabled',{cacheDisabled:true});
     await page.goto(ENGINE+'/#fake#flux-basic.png');
     await page.poll(`!!document.querySelector('.card')`,20000);
+    await page.evaluate(`(async()=>{const s=${KZ};if(!s.state.judgmentPrefs.revealThumbedDown)s.actions.judgments.toggleReveal()})()`);
     await page.evaluate(`(async()=>${KZ}.actions.ui.refresh())()`);
     await page.poll(`(async()=>{const s=${KZ};return s.state.entriesWithKnownSize().some((_,i)=>s.state.feedEntryAt(i)?.filename===${JSON.stringify(names.bottomVideo)})})()`,30000);
+    const currentColor=await page.evaluate(`(()=>{const t=document.querySelector('.fr-tick.current');return getComputedStyle(t).backgroundColor})()`);
     await browse(names.top);
     await page.poll(`!!document.querySelector('.card.current .media-box.ic-loaded')`);
     const closed=await page.send('Page.captureScreenshot',{format:'png'});
@@ -78,18 +81,33 @@ const names = {
     // Touch may enter a row while panning, but must never start hover work.
     await page.evaluate(`document.querySelector(${JSON.stringify(selector(names.top))}).parentElement.dispatchEvent(new PointerEvent('pointerenter',{pointerType:'touch',bubbles:false}))`);
     await sleep(150);assert.equal(await page.evaluate(`!!document.querySelector('.fr-preview')`),false,'touch entry does not show a hover preview');
+    await page.evaluate(`(async()=>${KZ}.actions.judgments.dispatch(${JSON.stringify('fake:'+names.top)},{type:'set',patch:{favorite:true,bookmark:null,vote:null}}))()`);
+    const beforeHover=await tickStyle(names.top);
     await move(names.top);await sleep(60);
     assert.equal(await page.evaluate(`!!document.querySelector('.fr-preview')`),false,'short hover does not acquire/show preview');
     await shown(names.top);await page.poll(`document.querySelector('.fr-preview .media-box')?.classList.contains('ic-loaded')`);
+    const highlighted=await tickStyle(names.top);
+    assert.equal(highlighted.color,currentColor,'previewed tick uses the current untreated tick colour, overriding treatment');
+    assert.equal(highlighted.hovered,true,'displayed preview owns the hovered class');
+    assert.equal(highlighted.width,beforeHover.width,'hover does not widen the tick');
+    assert.equal(highlighted.height,beforeHover.height,'hover does not lengthen the tick');
+    for(const patch of [{favorite:null,bookmark:true,vote:null},{favorite:null,bookmark:null,vote:'up'},{favorite:null,bookmark:null,vote:'down'}]){
+      await page.evaluate(`(async()=>${KZ}.actions.judgments.dispatch(${JSON.stringify('fake:'+names.top)},{type:'set',patch:${JSON.stringify(patch)}}))()`);
+      assert.deepEqual(await tickStyle(names.top),highlighted,'every treatment stays white at unchanged size while previewed');
+    }
     await pixels([35,118,150,255]);
     assert.equal(await page.evaluate(`document.querySelectorAll('#feedRail[title],.fr-tick[title],.fr-row[title]').length`),0,'no tick or inherited native title tooltip');
     console.log('ok delayed image preview with truncated filename and no native tooltip',await geometry(names.top));
     await capture('rail-preview-image-top');
     await move(names.topVideo);await shown(names.topVideo);
+    assert.equal((await tickStyle(names.top)).hovered,false,'moving clears the former tick');
+    assert.notEqual((await tickStyle(names.top)).color,currentColor,'former tick restores its treatment');
+    assert.equal((await tickStyle(names.topVideo)).color,currentColor,'highlight moves to the new preview target');
     assert.equal(await page.evaluate(`document.querySelectorAll('.fr-preview img,.fr-preview video,.fr-preview audio, .fr-preview button').length`),0,'video fallback is filename-only, no player or acquisition');
     await geometry(names.topVideo);await capture('rail-preview-video-top');
     console.log('ok moving ticks replaces image with filename-only video card');
     await page.mouse('mouseMoved',300,18,{buttons:0});await page.poll(`!document.querySelector('.fr-preview')`);
+    assert.equal(await page.evaluate(`document.querySelectorAll('.fr-tick.hovered').length`),0,'leaving clears the tick highlight');
     console.log('ok leaving hides preview');
     // The central anchor is clear of both viewport edges: prove actual centering,
     // not only clamping at the top and bottom.
@@ -98,6 +116,7 @@ const names = {
     await geometry(middle);await capture('rail-preview-image-middle');
     const feed=await page.evaluate(`(()=>{const r=document.querySelector('#candidatesCol').getBoundingClientRect();return{x:r.left+r.width/2,y:r.top+r.height/2}})()`);
     await page.mouse('mouseWheel',feed.x,feed.y,{deltaY:100});await page.poll(`!document.querySelector('.fr-preview')`);
+    assert.equal(await page.evaluate(`document.querySelectorAll('.fr-tick.hovered').length`),0,'feed scroll clears the highlight');
     console.log('ok middle preview centers on its tick; feed scroll hides it');
     for(const [name,shot] of [[names.bottom,'rail-preview-image-bottom'],[names.bottomVideo,'rail-preview-video-bottom'],[names.audio,'rail-preview-audio']]){
       await browse(name);await move(name);await shown(name);
@@ -106,6 +125,7 @@ const names = {
     }
     console.log('ok image/video previews clamp at bottom edge; audio uses filename-only');
     const p=await point(names.audio);await page.mouse('mousePressed',p.x,p.y,{buttons:1,clickCount:1});await page.poll(`!document.querySelector('.fr-preview')`);await page.mouse('mouseReleased',p.x,p.y,{buttons:0,clickCount:1});
+    assert.equal(await page.evaluate(`document.querySelectorAll('.fr-tick.hovered').length`),0,'scrub start clears the highlight');
     console.log('ok scrub start hides preview');
     await browse(names.slowA);
     await page.send('Fetch.enable',{patterns:[{urlPattern:'*rail-preview-slow-*.png/bytes*'},{urlPattern:'*rail-preview-failed.png/bytes*'}]});
@@ -116,6 +136,7 @@ const names = {
     assert.equal(maximum,1,'at most one hover image request in flight');
     console.log('ok replacing a slow hover retires its native request before the next', {maximum});
     const wheel=await point(names.slowB);await page.mouse('mouseWheel',wheel.x,wheel.y,{deltaY:5});await page.poll(`!document.querySelector('.fr-preview')`);
+    assert.equal(await page.evaluate(`document.querySelectorAll('.fr-tick.hovered').length`),0,'rail scroll clears the highlight');
     console.log('ok rail scroll hides preview');
     await browse(names.failed);await move(names.failed);await shown(names.failed);await page.poll(`document.querySelector('.fr-preview')?.textContent.includes('Preview unavailable')`);
     assert.equal(await page.evaluate(`document.querySelectorAll('.fr-preview img').length`),0,'failure has no native broken-image glyph');
@@ -135,7 +156,7 @@ const names = {
     assert(Math.abs(narrow.height-narrow.pictureHeight-narrow.padding-narrow.gap-narrow.label)<0.5,'panel height follows media at its actual constrained width');
     await capture('rail-preview-narrow');
     console.log('ok narrow viewport shrinks right-side preview without overlap or stale preferred-width height',narrow);
-    assert.deepEqual(errors,[]);console.log('PASS rail-preview (10 consumer contracts, no page errors)');
+    assert.deepEqual(errors,[]);console.log('PASS rail-preview (11 consumer contracts, no page errors)');
   }catch(error){
     console.error('preview diagnostics',await page.evaluate(`({hover:matchMedia('(hover: hover)').matches,anyHover:matchMedia('(any-hover: hover)').matches,pointer:matchMedia('(pointer: fine)').matches,previews:[...document.querySelectorAll('.fr-preview')].map(el=>({text:el.textContent,class:el.className,html:el.outerHTML})),top:document.querySelector('.fr-top')?.textContent,ticks:[...document.querySelectorAll('.fr-tick')].slice(0,5).map(el=>({id:el.dataset.entryId,hover:el.matches(':hover')}))})`),errors);
     throw error;

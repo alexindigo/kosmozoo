@@ -229,7 +229,7 @@ export function FeedRail() {
               onPointerEnter={event => hover(event, idx, el)} onPointerLeave={hidePreview}>
               <div class="fr-tick"
               ref={el}
-              classList={{ wave: inWave(idx), current: state().current }}
+              classList={{ wave: inWave(idx), current: state().current, hovered: preview()?.idx === idx }}
               style={state().style}
               data-entry-id={entry()?.id}
               data-treatment={state().treatment}
