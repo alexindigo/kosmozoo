@@ -34,3 +34,21 @@ Deno.test('every condition kind matches and rejects independently', () => {
   assertEquals(compileFilter({ directory: 'Example' })(entry), false, 'directory excludes filename leaf');
   assertEquals(parameterNames([entry, entry]), ['KSampler.flag', 'KSampler.sampler_name', 'KSampler.seed', 'KSampler.zero']);
 });
+Deno.test('incomplete text conditions are not set in AND or OR, including parameter comparisons', () => {
+  const incomplete = [{ filename: '' }, { directory: '' }, { negativeMode: 'contains', negative: '' },
+    { positiveMode: 'contains', positive: '' }, { parameter: '', parameterMode: 'contains', parameterValue: '42' },
+    { parameter: 'KSampler.seed', parameterMode: 'contains', parameterValue: '' },
+    { parameter: 'KSampler.seed', parameterMode: 'equals', parameterValue: '' }];
+  for (const model of incomplete) {
+    assertEquals(filterConditions(model), [], JSON.stringify(model));
+    for (const mode of ['and', 'or']) {
+      assertEquals(compileFilter({ ...model, mode })({ filename: 'other.png' }), true, 'no set conditions');
+      assertEquals(compileFilter({ ...model, mode, bookmark: true })(entry), true);
+      assertEquals(compileFilter({ ...model, mode, bookmark: true })({ filename: 'other.png' }), false, 'incomplete row cannot defeat OR');
+    }
+    assertEquals(parseFilter(serializeFilter(model)), normalizeFilter(model), 'draft survives URL round trip');
+  }
+  assertEquals(filterConditions({ parameter: 'KSampler.seed' }).length, 1, 'Present needs only a name');
+  assertEquals(filterConditions({ negativeMode: 'nonempty', positiveMode: 'nonempty' }).length, 2);
+  assertEquals(compileFilter({ filename: ' ' })({ filename: 'a b.png' }), true, 'literal spaces are entered text');
+});
