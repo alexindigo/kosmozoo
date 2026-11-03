@@ -646,7 +646,7 @@ async function railMotion(page) {
       const region = document.querySelector('#chrome .chrome-workspace').getBoundingClientRect();
       const icon = document.getElementById('filterBtn').getBoundingClientRect();
       const control = document.querySelector('.feed-filter').getBoundingClientRect();
-      const input = document.getElementById('filter').getBoundingClientRect();
+       const input = document.getElementById('filterMenu').getBoundingClientRect();
       const folder = document.querySelector('.folder-picker').getBoundingClientRect();
       const pins = document.querySelector('.pinned-source-group').getBoundingClientRect();
       const row = document.querySelector('.chrome-feed-inner');
@@ -654,7 +654,7 @@ async function railMotion(page) {
       const inset = parseFloat(getComputedStyle(document.getElementById('chrome')).getPropertyValue('--chrome-inset'));
       return { delta: Math.max(Math.abs(control.left - folder.right - gap), Math.abs(pins.left - control.right - gap),
           Math.max(0, row.getBoundingClientRect().right + inset - region.left)), icon: icon.right,
-        inputLeft: input.left, inputRight: input.right, iconLeft: icon.left, boundary: region.left,
+         inputLeft: input.left, inputRight: input.right, inputBottom: input.bottom, iconLeft: icon.left, boundary: region.left,
         barRight: document.getElementById('wsBar').getBoundingClientRect().right, viewport: innerWidth };
     })()`;
     for (const width of [1400, 780, 480]) {
@@ -666,8 +666,8 @@ async function railMotion(page) {
         await page.clickAt('#filterBtn');
         await page.poll(`!document.getElementById('filter').hidden && document.activeElement.id === 'filter'`);
         const after = await page.evaluate(geometry);
-        check(`filter geometry ${width}/${space}: after folder, before pins, input left, clear of the workspace section`,
-          before.delta <= 1 && after.delta <= 1 && after.inputRight <= after.iconLeft && after.barRight <= after.viewport,
+         check(`filter geometry ${width}/${space}: stable header and viewport-bound menu`,
+           before.delta <= 1 && after.delta <= 1 && after.inputLeft >= 0 && after.inputRight <= after.viewport && after.inputBottom <= 900 && after.barRight <= after.viewport,
           JSON.stringify({ before, after }));
         await page.evaluate(`(async () => {
           const s = ${KZ}; await s.actions.hosts.patch('fake', { pinned: true });

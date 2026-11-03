@@ -75,7 +75,8 @@ export function registerCoreCommands(handles, { ops, state, clipboard = (text) =
       return Promise.all(tasks).then((results) => {
         if (a.target === "selected") {
           const count = results.filter((result) => result.ok).length;
-          const label = a.intent.patch?.vote ? a.intent.patch.vote === "up" ? "up-voted" : "down-voted" : "favorited";
+          const patch = a.intent.patch ?? {};
+          const label = patch.vote ? patch.vote === "up" ? "up-voted" : "down-voted" : patch.bookmark ? "bookmarked" : "favorited";
           if (count) ops.status.info(`${count} image${count > 1 ? "s" : ""} ${label}`);
         }
         return results;
@@ -118,6 +119,8 @@ export function registerCoreCommands(handles, { ops, state, clipboard = (text) =
   add("source.menu.open", {}, () => ops.hosts.openMenu());
   add("source.menu.close", {}, () => ops.hosts.closeMenu());
   add("feed.filter", { value: text }, ({ value }) => ops.ui.setFilter(value));
+  add("feed.filter.edit", { field: v => Object.hasOwn(state.feedFilter(), v), value: text }, ({ field, value }) => ops.ui.editFilter(field, value));
+  add("feed.filter.clear", {}, () => ops.ui.clearFilter());
   add("feed.revealEntry", { id: string }, ({ id }) => {
     const index = state.imageIdxById().get(id);
     if (index !== undefined) return ops.feed.reveal(index);
@@ -208,6 +211,8 @@ export function commandFacades(handles, ops, state) {
   facade.folders.select = (folder) => invoke("source.folder", { folder });
   Object.assign(facade.ui, {
     setFilter: (value) => invoke("feed.filter", { value }), refresh: () => invoke("source.refresh"),
+    editFilter: (field, value) => invoke("feed.filter.edit", { field, value }),
+    clearFilter: () => invoke("feed.filter.clear"),
     toggleMenu: () => invoke("menu.toggle"), closeMenu: () => invoke("menu.close"),
     setWorkspace: (space) => invoke("workspace.select", { space }), setInfoLayout: (layout) => invoke("metadata.layout", { layout }),
     infoGroup: { toggle: (group) => invoke("metadata.group.toggle", { group }) }, toggleKeysPanel: () => invoke("keys.panel.toggle"),

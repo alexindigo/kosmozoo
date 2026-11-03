@@ -283,7 +283,6 @@ function ModalBody(props) {
                         onInsert={onInsertPlaceholder}
                         onAdd={(items, index) => editor.addImages(id, items, index)} onRemove={item => editor.removeImage(id, item)}
                         onMove={(item, index) => editor.moveImage(id, item, index)}
-                        currentThumbnail={services.inputThumbnail(image.host, r().current, image.origin, r().fromOutput ? "output" : "input")}
                         thumbnail={name => services.inputThumbnail(image.host, name, image.origin)}
                         sources={inputSources()} sourceInputs={origin => read(() => editor.sourceInputs(origin))}
                         onSource={origin => editor.loadSourceInputs(origin)} onRetrySource={origin => editor.loadSourceInputs(origin, true)}

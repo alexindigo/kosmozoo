@@ -158,8 +158,8 @@ Deno.test("feature: dummy private capability/command/binding/affordance joins ge
   store.handles.invoke("dummy.open");
   store.actions.keys.dispatch({ key: "d", preventDefault() {} });
   assertEquals(called, 2);
-  assertEquals(store.state.featureCardActions({ id: "source:file.png" })[0].args, { id: "source:file.png" });
-  assertEquals(store.state.featureBulkActions()[0].args, { target: "selected" });
+  assertEquals(store.state.featureEntryActions({ id: "source:file.png" })[0].args, { id: "source:file.png" });
+  assertEquals(store.state.featureEntryActions({ target: "selected" })[0].args, { target: "selected" });
 });
 
 Deno.test("modal guard: identical Promise/one continuation, conflicting busy, Cancel and disposal settlement", async () => {
@@ -288,6 +288,16 @@ Deno.test("judgment current target: resolves once and returns the original singu
   assertStrictEquals(handles.invoke("judgment.apply", { target: "current", intent }), promise);
   assertEquals(reads, 1);
   assertEquals(calls, [{ id: "original:a.png", intent }]);
+});
+
+Deno.test("selected judgment status names bookmarks independently of favorites and votes", async () => {
+  const handles = makeCommandHandles(), messages = [];
+  const state = { images: [{ id: "h:a.png" }, { id: "h:b.png" }], selected: { "h:a.png": true, "h:b.png": true } };
+  registerCoreCommands(handles, { state, ops: { diff: {}, judgments: { dispatch: () => Promise.resolve({ ok: true }) }, status: { info: text => messages.push(text) } } });
+  for (const [patch, label] of [[{ bookmark: true }, "bookmarked"], [{ favorite: true }, "favorited"], [{ vote: "up" }, "up-voted"], [{ vote: "down" }, "down-voted"]]) {
+    await handles.invoke("judgment.apply", { target: "selected", intent: { type: "set", patch } });
+    assertEquals(messages.at(-1), `2 images ${label}`);
+  }
 });
 
 Deno.test("command data: accessor, symbol, hidden callback and sparse/cyclic records reject before execution", () => {

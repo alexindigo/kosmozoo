@@ -85,7 +85,7 @@ export function MediaBox(props) {
   createEffect(on(() => [surface(), props.zoom?.key], ([el, key]) => {
     const zoom = props.zoom;
     if (!el || !zoom || props.kind === "audio") return;
-    const binding = makeZoomable(el, { key, getView: zoom.getView, setView: zoom.setView,
+    const binding = makeZoomable(el, { surface: box, box, key, getView: zoom.getView, setView: zoom.setView,
       geometry: viewGeometry });
     onCleanup(() => binding.dispose());
   }));

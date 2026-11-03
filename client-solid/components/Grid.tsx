@@ -18,9 +18,8 @@ import { createVirtualizer } from "@tanstack/solid-virtual";
 import { useAppStore } from "../store/app-store.js";
 import { WINDOW_PAD } from "../store/image-window.js";
 import { cardHeight, feedOffsets, feedEntryAtOffset, gridGapPx, measureGeometry, invalidateGeometry, geometryMeasured } from "../store/sizes.js";
-import { iconSvg } from "/js/icons.mjs";
 import { Card } from "./Card.js";
-import { IconButton } from "./IconButton.js";
+import { EntryActions } from "./EntryActions.js";
 import { TextField } from "./TextField.js";
 
 export function Grid() {
@@ -146,6 +145,17 @@ export function Grid() {
     const onScroll = () => store.actions.feed.scrolled(col?.scrollTop ?? 0);
     col?.addEventListener("scroll", onScroll, { passive: true });
     onCleanup(() => col?.removeEventListener("scroll", onScroll));
+    // One feed boundary, not per-image timers. MediaBox declares the stable
+    // allocation; its own zoom binding still owns the fitted crop and player.
+    const onWheel = e => {
+      const media = e.target instanceof Element ? e.target.closest('.media-box:not(.media-stage)') : null;
+      const unit = e.deltaMode === 1 ? parseFloat(getComputedStyle(col).lineHeight) || 16 : e.deltaMode === 2 ? col.clientHeight : 1;
+      const result = store.actions.feed.wheel({ media: !!media, ctrl: e.ctrlKey,
+        dx: e.deltaX * unit, dy: e.deltaY * unit, cancelable: e.cancelable });
+      if (result.prevent) e.preventDefault();
+    };
+    col.addEventListener("wheel", onWheel, { capture: true, passive: false });
+    onCleanup(() => col.removeEventListener("wheel", onWheel, true));
     // the probe card makes the rendered geometry measurable on mount (no
     // waiting for a live card); a column-size change re-measures and re-runs
     // the estimates
@@ -213,13 +223,8 @@ export function Grid() {
               <span class="copyable">probe</span>
             </span>
             <span class="btnwrap">
-              <IconButton icon={iconSvg("wand", 16)} variant="variations" title="probe" onAction={() => {}} />
-              <IconButton icon={iconSvg("thumb-down")} variant="down" title="probe" onAction={() => {}} />
-              <IconButton icon={iconSvg("thumb-up")} variant="up" title="probe" onAction={() => {}} />
-              <IconButton icon={iconSvg("star")} variant="favorite" title="probe" onAction={() => {}} />
-              <IconButton icon={iconSvg("bookmark")} variant="bookmark" title="probe" onAction={() => {}} />
-              <IconButton icon={iconSvg("download")} variant="download" title="probe" onAction={() => {}} />
-              <IconButton icon={iconSvg("trash", 16)} variant="delete" title="probe" onAction={() => {}} />
+              <EntryActions target={{ id: "probe" }} judgmentType="toggle"
+                deleteCapability={store.state.currentCollection()?.capabilities?.delete} />
             </span>
           </div>
           <div class="pair">

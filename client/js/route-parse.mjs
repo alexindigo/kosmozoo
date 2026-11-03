@@ -4,20 +4,23 @@
 // stateful writers (setCurrent, mirrorCurrentHash, findByFile, resolveSide)
 // live in the app store; this module is the pure grammar only.
 
+import { parseFilter, serializeFilter } from './feed-filter-model.mjs';
+
 export function parseUrl() {
   if (typeof location === "undefined") return { view: "feed", host: null, file: null, folder: "", filter: "" };
   const query = new URLSearchParams(location.search ?? "");
-  const folder = query.get("folder") ?? "", filter = query.get("filter") ?? "";
+  const folder = query.get("folder") ?? "", filter = query.get("filter") ?? "", feedFilter = parseFilter(query);
   if (location.pathname === "/diff") {
-    return { view: "diff", folder, filter, subject: query.get("subject") === "b" ? "b" : "a", ...parseDiffHash(location.hash.replace(/^#/, "")) };
+    return { view: "diff", folder, filter, feedFilter, subject: query.get("subject") === "b" ? "b" : "a", ...parseDiffHash(location.hash.replace(/^#/, "")) };
   }
   const h = location.hash.replace(/^#/, "");
-  if (!h) return { view: "feed", host: null, file: null, folder, filter };
+  if (!h) return { view: "feed", host: null, file: null, folder, filter, feedFilter };
   const [host, file] = h.split("#");
   return {
     view: "feed",
     folder,
     filter,
+    feedFilter,
     host: decode(host),
     file: decode(file),
   };
@@ -31,7 +34,7 @@ const decode = (token) => {
 const browsingQuery = (folder, filter, search) => {
   const query = new URLSearchParams(search ?? "");
   if (folder) query.set("folder", folder); else query.delete("folder");
-  if (filter) query.set("filter", filter); else query.delete("filter");
+  serializeFilter(filter, query);
   return query.size ? "?" + query : "";
 };
 

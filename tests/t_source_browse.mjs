@@ -107,7 +107,10 @@ Deno.test("browse URLs: canonical full paths, filter/folder/unrelated query and 
     const file = "a/%2F#name: café.png";
     const url = feedUrl("h", file, { folder: "a", filter: "#name: café", search: "?other=kept&filter=old" });
     globalThis.location = browser(url).location;
-    assertEquals(parseUrl(), { view: "feed", host: "h", file, folder: "a", filter: "#name: café" });
+    const { feedFilter, ...legacyRoute } = parseUrl();
+    assertEquals(legacyRoute, { view: "feed", host: "h", file, folder: "a", filter: "#name: café" });
+    assertEquals(feedFilter.filename, "#name: café");
+    assertEquals(feedFilter.mode, "and");
     assert(new URL(url, "http://test").searchParams.get("other") === "kept");
     const comparison = diffUrl({ source: "h", file }, { source: "input:other", file: "inputs/ref.png" }, { folder: "a", filter: "café" });
     globalThis.location = browser(comparison).location;

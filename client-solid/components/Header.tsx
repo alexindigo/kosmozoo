@@ -172,7 +172,10 @@ export function Header() {
             supported={store.state.inventory.subfolders.supported} reason={store.state.inventory.subfolders.reason}
             loading={store.state.inventory.loading} unavailable={!store.state.inventory.folders.includes(store.state.selectedFolder())}
             onSelect={(folder) => store.handles.invoke("source.folder", { folder })} />
-          <FeedFilter value={store.state.filter()} onInput={(value) => store.handles.invoke("feed.filter", { value })}
+          <FeedFilter model={store.state.feedFilter()} conditions={store.state.filterSummary()} parameters={store.state.filterParameters()}
+            count={store.state.entriesWithKnownSize().length} total={store.state.filterTotal()} loading={store.state.filterLoading()}
+            onEdit={(field, value) => store.handles.invoke("feed.filter.edit", { field, value })}
+            onClear={() => store.handles.invoke("feed.filter.clear")}
             handles={store.handles} pushLayer={store.actions.keys.pushLayer}
             canEscape={() => !store.state.keysPanelOpen() && !store.state.diff.open} />
           <div class="pinned-source-group" classList={{ "has-pins": pins().length > 0 }}>

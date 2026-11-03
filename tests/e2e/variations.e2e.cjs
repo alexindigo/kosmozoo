@@ -923,6 +923,7 @@ async function main() {
     await require('./variations-identity.cjs')({ cdp, check, FAKE, KZ });
     await require('./variations-status-layout.cjs')({ cdp, check, KZ });
     await require('./variations-image-set.cjs')({ cdp, check, FAKE, KZ });
+    await require('./image-set-square.cjs')({ cdp, check });
     await require('./variations-overflow.cjs')({ cdp, check, ENGINE, FAKE, KZ });
     await require('./variations-session.cjs')({ cdp, check, ENGINE, FAKE, KZ });
     await require('./variations-run-contract.cjs')({ cdp, check, ENGINE, FAKE, KZ });

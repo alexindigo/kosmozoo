@@ -95,7 +95,7 @@ const files = ['plain.png', 'day/nested.png', 'copysave#tagged.png'];
         console.log(`ok source-prefix ${enabled ? 'on' : 'off'}: clipboard ${expectedReference}; card download ${expectedName}`);
       }
       const bulkDir = await directory(`bulk-${enabled}`);
-      await page.clickAt('#bulkBar .savebtn');
+      await page.clickAt('#bulkBar .download');
       for (let i = 0; i < files.length; i++) await waitFile(bulkDir, downloads[i], bytes.get(files[i]));
       assert.deepEqual(fs.readdirSync(bulkDir).sort(), downloads.sort());
       await invoke('selection.clear');

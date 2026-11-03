@@ -11,8 +11,8 @@
 //
 // Views are read FRESH per gesture (never cached between events): a peer
 // write can never go stale. `target(ev)` picks { key, box, geometry }
-// (the comparator's Two-Up aims at the cell under the pointer; the default
-// is the bound element's own key + parent box — the card path). `also(t)`
+// (the comparator's Two-Up aims at the cell under the pointer; cards inject
+// their explicit box and wheel surface independently of the pan element). `also(t)`
 // supplies a peer { key, geometry }: the gesture's box-fraction delta is
 // applied to that key's stored view too — entangle, never copy; one writer
 // per gesture, so no recursion. Render state (the transform CSS, the zoomed
@@ -23,11 +23,11 @@ import { readZoomView, zoomViewPixels, readyViewGeometry, isIdentityView } from 
 
 const IDENTITY = { s: 1, txf: 0, tyf: 0 };
 
-export function makeZoomable(el, { key, geometry, target, also, panAlways = false, getView, setView } = {}) {
+export function makeZoomable(el, { surface = el, box, key, geometry, target, also, panAlways = false, getView, setView } = {}) {
   let dragMoved = 0;
   let endDrag = () => {};
 
-  const targetFor = (ev) => target ? target(ev) : { key, box: el.parentElement, geometry };
+  const targetFor = (ev) => target ? target(ev) : { key, box, geometry };
   const frameFor = t => typeof t.geometry === "function" ? t.geometry() : t.geometry;
   const measuredFrame = t => {
     const g = frameFor(t), r = t.box?.getBoundingClientRect();
@@ -147,7 +147,7 @@ export function makeZoomable(el, { key, geometry, target, also, panAlways = fals
     }
   };
 
-  el.addEventListener("wheel", onWheel, { passive: false });
+  surface.addEventListener("wheel", onWheel, { passive: false });
   el.addEventListener("pointerdown", onDown);
   el.addEventListener("click", onClick, true);
   el.draggable = false;
@@ -155,7 +155,7 @@ export function makeZoomable(el, { key, geometry, target, also, panAlways = fals
   return {
     dispose() {
       endDrag();
-      el.removeEventListener("wheel", onWheel);
+      surface.removeEventListener("wheel", onWheel);
       el.removeEventListener("pointerdown", onDown);
       el.removeEventListener("click", onClick, true);
     },

@@ -54,7 +54,7 @@ const KZ = '(await import("/store/instance.js")).appStore';
     await page.poll(`(async () => !!${KZ}.state.hosts.fake && !!document.querySelector('.card'))()`);
     await page.evaluate(`(async () => { const s = ${KZ}; await s.actions.hosts.select('fake'); s.actions.folders.select(''); s.actions.ui.setFilter(''); await s.actions.ui.refresh(); })()`);
     await inspect('header', '#chrome .chrome-icon', 2);
-    await inspect('output-folder', '#outputFolder');
+    await inspect('output-folder', '#folderPicker .select-icon-slot');
     // Native option construction must precede the controlled value write,
     // including a synthetic unavailable folder first seen during cold boot.
     const unavailable = 'icon-slot/unavailable';

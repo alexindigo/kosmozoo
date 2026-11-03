@@ -14,7 +14,7 @@ import { isFileDrag, droppedFiles, classifyImageFiles, nearestImageTile, imageIn
 
 export function ImageSetPanel(props) {
   let fileInput, content, addButton;
-  const [adding, setAdding] = createSignal(false), [folder, setFolder] = createSignal(false), [ratio, setRatio] = createSignal(1);
+  const [adding, setAdding] = createSignal(false), [folder, setFolder] = createSignal(false);
   const row = () => props.row();
   const [dropping, setDropping] = createSignal(false), [status, setStatus] = createSignal("");
   let dragDepth = 0;
@@ -38,9 +38,7 @@ export function ImageSetPanel(props) {
     }} onEnable={props.onEnable} onInsert={props.onInsert}
     status={<Show when={status()}><SingleLineText class="vz-image-drop-status" role="status" value={status()} /></Show>}
     summary={`${row().items.length} ${row().items.length === 1 ? "image" : "images"}`}>
-    <div class="vz-image-content" ref={content} style={{ "--vz-image-ratio": ratio() }}>
-      <div class="vz-image-ratio-source" aria-hidden="true" inert><Thumbnail src={props.currentThumbnail} register={props.registerThumbnail}
-        onSize={(width, height) => { if (width > 0 && height > 0) setRatio(width / height); }} /></div>
+    <div class="vz-image-content" ref={content}>
       <Show when={!row().items.length}><p class="vz-image-empty">Add images to vary this input.</p></Show>
       <ImageGrid images={row().images} onMove={props.onMove} registerEditor={props.registerEditor}
         dropping={dropping()} onFiles={(resources, index) => { clearDrop(); addFiles(resources, index, true); }}
