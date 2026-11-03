@@ -39,10 +39,16 @@ const card = '.card[data-name="flux-basic.png"]';
     console.log('ok shared ordered actions: ' + rows.card.join(', '));
 
     for (let pass = 0; pass < 2; pass++) {
+      // Each completed bulk write replaces the transient chip. Snapshot DOM
+      // identity so the previous pass's identical message cannot satisfy this one.
+      await page.evaluate(`globalThis.__bulkBookmarkChips = new Set(document.querySelectorAll('#statusStack .statuschip')); true`);
+      const freshStatus = `[...document.querySelectorAll('#statusStack .statuschip')].some(chip => !globalThis.__bulkBookmarkChips.has(chip) && chip.textContent === '2 images bookmarked')`;
+      assert.equal(await page.evaluate(freshStatus), false, `pass ${pass + 1}: existing status is not a new completion`);
       await page.clickAt('#bulkBar .bookmark');
+      await page.poll(freshStatus);
       await page.poll(`(async()=>{const s=${KZ};return ['flux-basic.png','flux-lora.png'].every(f=>s.state.cardState('fixture-dir:'+f).active.bookmark)})()`);
-      await page.poll(`document.querySelector('#statusStack')?.textContent.includes('2 images bookmarked')`);
     }
+    await page.evaluate(`delete globalThis.__bulkBookmarkChips`);
     assert.equal(await page.evaluate(`document.querySelector('#bulkBar .bookmark').hasAttribute('aria-pressed')`), false, 'selected set-all has no active state');
     for (const file of ['flux-basic.png', 'flux-lora.png']) {
       const entry = await (await fetch(ENGINE + '/api/collections/fixture-dir/entries/' + file)).json();
