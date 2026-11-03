@@ -75,7 +75,8 @@ export function registerCoreCommands(handles, { ops, state, clipboard = (text) =
       return Promise.all(tasks).then((results) => {
         if (a.target === "selected") {
           const count = results.filter((result) => result.ok).length;
-          const label = a.intent.patch?.vote ? a.intent.patch.vote === "up" ? "up-voted" : "down-voted" : "favorited";
+          const patch = a.intent.patch ?? {};
+          const label = patch.vote ? patch.vote === "up" ? "up-voted" : "down-voted" : patch.bookmark ? "bookmarked" : "favorited";
           if (count) ops.status.info(`${count} image${count > 1 ? "s" : ""} ${label}`);
         }
         return results;

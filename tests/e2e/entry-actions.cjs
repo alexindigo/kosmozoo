@@ -41,6 +41,7 @@ const card = '.card[data-name="flux-basic.png"]';
     for (let pass = 0; pass < 2; pass++) {
       await page.clickAt('#bulkBar .bookmark');
       await page.poll(`(async()=>{const s=${KZ};return ['flux-basic.png','flux-lora.png'].every(f=>s.state.cardState('fixture-dir:'+f).active.bookmark)})()`);
+      await page.poll(`document.querySelector('#statusStack')?.textContent.includes('2 images bookmarked')`);
     }
     assert.equal(await page.evaluate(`document.querySelector('#bulkBar .bookmark').hasAttribute('aria-pressed')`), false, 'selected set-all has no active state');
     for (const file of ['flux-basic.png', 'flux-lora.png']) {

@@ -290,6 +290,16 @@ Deno.test("judgment current target: resolves once and returns the original singu
   assertEquals(calls, [{ id: "original:a.png", intent }]);
 });
 
+Deno.test("selected judgment status names bookmarks independently of favorites and votes", async () => {
+  const handles = makeCommandHandles(), messages = [];
+  const state = { images: [{ id: "h:a.png" }, { id: "h:b.png" }], selected: { "h:a.png": true, "h:b.png": true } };
+  registerCoreCommands(handles, { state, ops: { diff: {}, judgments: { dispatch: () => Promise.resolve({ ok: true }) }, status: { info: text => messages.push(text) } } });
+  for (const [patch, label] of [[{ bookmark: true }, "bookmarked"], [{ favorite: true }, "favorited"], [{ vote: "up" }, "up-voted"], [{ vote: "down" }, "down-voted"]]) {
+    await handles.invoke("judgment.apply", { target: "selected", intent: { type: "set", patch } });
+    assertEquals(messages.at(-1), `2 images ${label}`);
+  }
+});
+
 Deno.test("command data: accessor, symbol, hidden callback and sparse/cyclic records reject before execution", () => {
   const handles = makeCommandHandles();
   let reads = 0, calls = 0;
