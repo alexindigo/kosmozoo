@@ -47,15 +47,14 @@ module.exports = async ({ cdp, check, FAKE, KZ }) => {
       const tiles=[...document.querySelectorAll('.vz-image-tile,.vz-image-plus')],sizes=tiles.map(el=>{const r=el.getBoundingClientRect();return[r.width,r.height]}),
         current=document.querySelector('[data-image-name="canny.png"] .vz-image-same'),token=document.createElement('span');token.style.color='var(--attention)';document.body.append(token);
       const result={sizes,names:document.querySelector('.vz-image-grid').innerText,ring:getComputedStyle(current).boxShadow,orange:getComputedStyle(token).color,
-        fit:[...document.querySelectorAll('.vz-image-tile img')].every(img=>getComputedStyle(img).objectFit==='cover'),
-        ratios:[...new Set([...document.querySelectorAll('.vz-image-tile img')].map(img=>(img.naturalWidth/img.naturalHeight).toFixed(2)))],
-        currentRatio:document.querySelector('.vz-image-ratio-source img').naturalWidth/document.querySelector('.vz-image-ratio-source img').naturalHeight};token.remove();return result;
+        fit:[...document.querySelectorAll('.vz-image-tile img')].every(img=>getComputedStyle(img).objectFit==='contain'),
+        ratios:[...new Set([...document.querySelectorAll('.vz-image-tile img')].map(img=>(img.naturalWidth/img.naturalHeight).toFixed(2)))]};token.remove();return result;
     })()`);
     assert(geometry.sizes.every(([w,h])=>Math.abs(w-geometry.sizes[0][0])<.5&&Math.abs(h-geometry.sizes[0][1])<.5));
-    assert(Math.abs(geometry.sizes[0][0]/geometry.sizes[0][1]-geometry.currentRatio)<.01);
+    assert(geometry.sizes.every(([w,h])=>Math.abs(w-h)<.5), JSON.stringify(geometry));
     assert.equal(geometry.names.trim(), '+'); assert(geometry.ring.includes(geometry.orange)&&geometry.ring.includes('2px'));
     assert(geometry.fit&&geometry.ratios.length>=3, JSON.stringify(geometry));
-    check('image grid: nine mixed-ratio images and add tile share current aspect/size; cover, orange inset ring and tooltip-only names', true);
+    check('image grid: nine mixed-ratio images and add tile share square size; contain, orange inset ring and tooltip-only names', true);
     await openImageAdd(cdp);
     assert(await cdp.evaluate("document.querySelector('.vz-image-add').getBoundingClientRect().height>0&&document.querySelector('.vz-input-trigger').textContent.includes('ComfyUI inputs')&&document.querySelector('.vz-folder-trigger').textContent==='Add folder…'"));
     await cdp.clickAt('.vz-image-plus');
