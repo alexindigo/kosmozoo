@@ -74,10 +74,10 @@ body.resizing { cursor: col-resize; user-select: none; }
 #chrome button:not(.icon-button) { background: var(--lifted); color: var(--foreground); border: 1px solid var(--border-strong);
   border-radius: 4px; padding: 2px 9px; cursor: pointer; font-size: 13px; }
 #chrome button:hover { border-color: var(--foreground-dim) }
-#chrome .btn { text-decoration: none; display: inline-block; background: var(--lifted);
+:is(#chrome, .feed-filter-menu) .btn { text-decoration: none; display: inline-block; background: var(--lifted);
   color: var(--foreground); border: 1px solid var(--border-strong); border-radius: 4px; padding: 3px 8px;
   font-size: 12px; }
-#chrome .btn:hover { border-color: var(--foreground-dim) }
+:is(#chrome, .feed-filter-menu) .btn:hover { border-color: var(--foreground-dim) }
 #headerButtons { display: flex; gap: 6px; }
 
 /* host picker (dropdown panel) */
@@ -1278,3 +1278,25 @@ body:has(#diff:not([hidden])) #statusCol { bottom: 56px; }
   border-radius: 6px; font: 13px/1.4 system-ui, sans-serif; padding: 6px 8px; }
 .text-field-negative, .text-field-negative:focus { border-color: var(--negative); }
 .text-field-positive { border-color: var(--positive); }
+
+/* Filter conditions live in a viewport-bound popup, independent of header width. */
+#chrome .feed-filter { flex: 0 0 auto; min-width: var(--control-height-sm); }
+.feed-filter-menu { position: fixed; z-index: var(--z-dropdown); box-sizing: border-box;
+  overflow-y: auto; padding: 12px; background: var(--focused-background); color: var(--foreground);
+  border: 1px solid var(--border-strong); border-radius: 8px; box-shadow: 0 8px 24px var(--backdrop);
+  font: 12px/1.4 system-ui; }
+.feed-filter-menu[hidden] { display: none; }
+.filter-row { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.filter-section { display: grid; gap: 6px; margin-top: 12px; min-width: 0; }
+.filter-section > span, .filter-row > span, .filter-feedback > label { white-space: nowrap; }
+.filter-section .text-field, .filter-section .select-control { width: 100%; min-width: 0; }
+.filter-status { display: flex; align-items: center; gap: 6px; }
+.filter-feedback { display: grid; grid-template-columns: 65px minmax(0, 1fr); gap: 6px; align-items: center; }
+.filter-feedback > .text-field { grid-column: 1 / -1; }
+.filter-parameter-value { display: flex; gap: 6px; min-width: 0; min-height: var(--control-height-md); }
+.filter-parameter-value > * { flex: 1 1 0; }
+.filter-footer { display: flex; align-items: center; flex-wrap: wrap; gap: 8px;
+  margin-top: 12px; padding-top: 10px; border-top: 1px solid var(--border); white-space: nowrap; }
+#filterMatchCount { margin-left: auto; font-variant-numeric: tabular-nums; }
+.filter-loading { flex-basis: 100%; }
+.feed-filter-menu button:focus-visible, .feed-filter-menu select:focus-visible { outline: 2px solid var(--secondary); outline-offset: 2px; }

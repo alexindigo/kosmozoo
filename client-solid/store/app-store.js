@@ -48,6 +48,7 @@ import { launchNotice } from "/js/launch-notice.mjs";
 import { readZoomView, readyViewGeometry } from "/js/zoom-view.mjs";
 import { entryNames } from "./entry-names.js";
 import { makeWheelArbiter } from "../lib/wheel-arbiter.js";
+import { emptyFilter, normalizeFilter, compileFilter, filterConditions, parameterNames } from "/js/feed-filter-model.mjs";
 
 // stored host if still present, else first online, else first
 function initialHost(hosts, stored) {
@@ -152,7 +153,12 @@ export function makeAppStore({ subscribeSources = typeof window !== "undefined" 
   }
   const [current, setCurrentSig] = createSignal(null); // { remote, image } | null
   const [currentStack, setCurrentStack] = createSignal([]); // trail, oldest first
-  const [filter, setFilter] = createSignal("");
+  const [filter, setFilter] = createSignal(emptyFilter());
+  const filterSummary = createMemo(() => filterConditions(filter()).map(c => c.label));
+  const filterPredicate = createMemo(() => compileFilter(filter()));
+  // Catalogue reads belong to the open menu's reactive lifetime. A closed
+  // filter must not walk the inventory on every background metadata landing.
+  const filterParameters = () => parameterNames(st.images);
   const [selectedFolder, setSelectedFolder] = createSignal("");
   let sourceBrowse, browseRevision = 0, browseTarget = { folder: "", current: undefined, filter: "" };
   const [browseRestore, setBrowseRestore] = createSignal(null);
@@ -203,7 +209,7 @@ export function makeAppStore({ subscribeSources = typeof window !== "undefined" 
     const down = img.judgment?.vote === "down";
     if (!down) return true;
     if (!jp.downvoteHides) return true;
-    return !!jp.revealThumbedDown;
+    return !!jp.revealThumbedDown || filter().down;
   }
   // view = display order of image indices (filtered + visible)
   const folderView = createMemo(() => {
@@ -212,11 +218,11 @@ export function makeAppStore({ subscribeSources = typeof window !== "undefined" 
     return out;
   });
   const view = createMemo(() => {
-    const q = filter().toLowerCase();
+    const matches = filterPredicate();
     const out = [];
     for (const i of folderView()) {
       const img = st.images[i];
-      if (q && !img.filename.toLowerCase().includes(q)) continue;
+      if (!matches(img)) continue;
       if (!isVisible(img)) continue;
       out.push(i);
     }
@@ -738,14 +744,23 @@ export function makeAppStore({ subscribeSources = typeof window !== "undefined" 
     return foreground;
   }
 
-  async function requestBackgroundDimensions(s, entries) {
+  async function requestBackgroundDimensions(s, entries, interest = "dimensions") {
     for (let position = 0; position < entries.length && ownsSession(s); position += 200) {
       const result = await acquisition.submit({ key: Symbol("dimension-interest"), resource: false,
         valid: () => ownsSession(s), run: () => metadata.request(entries.slice(position, position + 200),
-          { interest: "dimensions", priority: "background" }) });
+          { interest, priority: "background" }) });
       if (result?.retired) return;
     }
   }
+
+  // Parameter filtering needs metadata for candidates outside the filtered feed.
+  // Retain that demand through the same bounded acquisition/metadata owner.
+  createEffect(() => {
+    const parameter = filter().parameter, indices = folderView(), loading = st.inventory.loading;
+    if (parameter && !loading) untrack(() => {
+      if (ownsSession(sourceSession)) requestBackgroundDimensions(sourceSession, indices.map(i => st.images[i]), "full");
+    });
+  });
 
   // --- image list load -----------------------------------------------------------
   const judgments = makeJudgments({
@@ -838,7 +853,7 @@ export function makeAppStore({ subscribeSources = typeof window !== "undefined" 
   }
 
   function routeTarget(route) {
-    return { folder: route.folder ?? "", filter: route.filter ?? "",
+    return { folder: route.folder ?? "", filter: route.feedFilter ?? normalizeFilter(route.filter),
       current: route.view === "diff" ? route.left?.file ?? null : route.file, explicit: true };
   }
 
@@ -853,7 +868,7 @@ export function makeAppStore({ subscribeSources = typeof window !== "undefined" 
       setAcquisitionRevision((v) => v + 1);
       setBrowseRestore(null);
       browseTarget = { ...target, folder: hostsView()[host()]?.kind === "folder" ? "" : target.folder ?? "", filter: target.filter ?? "" };
-      setSelectedFolder(browseTarget.folder); setFilter(browseTarget.filter);
+      setSelectedFolder(browseTarget.folder); setFilter(normalizeFilter(browseTarget.filter));
     });
   }
 
@@ -930,8 +945,8 @@ export function makeAppStore({ subscribeSources = typeof window !== "undefined" 
         actions.status.info(`no output images on ${name}`);
       } else {
         const hidden = st.images.filter((i) => i.judgment?.vote === "down").length;
-        const base = filter()
-          ? `${view().length} of ${st.images.length} matching “${filter()}” from ${name}`
+        const base = filterSummary().length
+          ? `${view().length} of ${st.images.length} matching filters from ${name}`
           : `${st.images.length} images from ${name}`;
         actions.status.info(base + (hidden ? ` (${hidden} hidden)` : ""));
       }
@@ -1588,6 +1603,20 @@ export function makeAppStore({ subscribeSources = typeof window !== "undefined" 
   function surfaceDisplay(input) {
     return sizes_.display({ ...input, foregroundId: null, priority: input.priority === "background" ? "background" : "foreground", scoped: false });
   }
+  function updateFeedFilter(value) {
+    const v = normalizeFilter(value);
+    if (JSON.stringify(v) === JSON.stringify(filter())) return;
+    batch(() => {
+      retireFeedScroll();
+      browseRevision++;
+      setAcquisitionRevision(n => n + 1);
+      setBrowseRestore(null);
+      browseTarget = { ...browseTarget, filter: v };
+      setFilter(v);
+    });
+    mirrorCurrentHash();
+  }
+
   const actions = {
     features: {
       // Feature installation defines private operations/owner ports and semantic
@@ -1651,7 +1680,7 @@ export function makeAppStore({ subscribeSources = typeof window !== "undefined" 
       const route = parseUrl();
       const urlHost = route.view === "diff" ? route.left?.source : route.host;
       const h = urlHost && Object.hasOwn(hostsView(), urlHost) ? urlHost : initialHost(hostsView(), st.ui.host);
-      const target = urlHost && Object.hasOwn(hostsView(), urlHost) ? routeTarget(route) : { ...rememberedTarget(h), filter: route.filter ?? "" };
+      const target = urlHost && Object.hasOwn(hostsView(), urlHost) ? routeTarget(route) : { ...rememberedTarget(h), filter: route.feedFilter ?? normalizeFilter(route.filter) };
       if (h) await actions.hosts.select(h, { target, historyMode: "replace" });
       // a /diff URL boots its pair with the route's subject
       if (route.view === "diff") await actions.diff.openDiff(route.left, route.right, { subject: route.subject });
@@ -1931,18 +1960,9 @@ export function makeAppStore({ subscribeSources = typeof window !== "undefined" 
     },
 
     ui: {
-      setFilter(v) {
-        if (v === filter()) return;
-        batch(() => {
-          retireFeedScroll();
-          browseRevision++;
-          setAcquisitionRevision((v) => v + 1);
-          setBrowseRestore(null);
-          browseTarget = { ...browseTarget, filter: v };
-          setFilter(v);
-        });
-        mirrorCurrentHash();
-      },
+      setFilter(v) { updateFeedFilter({ ...filter(), filename: v }); },
+      editFilter(field, value) { updateFeedFilter({ ...filter(), [field]: value }); },
+      clearFilter() { updateFeedFilter(emptyFilter()); },
       setResizing(v) { setResizing(!!v); },
       toggleMenu() { setMenuOpen(!menuOpen()); },
       closeMenu() { setMenuOpen(false); },
@@ -2175,7 +2195,7 @@ export function makeAppStore({ subscribeSources = typeof window !== "undefined" 
         const remote = left.source ?? left.remote, image = left.file ?? left.image;
         if (Object.hasOwn(hostsView(), remote) && remote !== host()) {
           const context = typeof location === "undefined" ? { folder: "", filter: "" } : parseUrl();
-          const loading = actions.hosts.select(remote, { target: { folder: context.folder ?? "", filter: context.filter ?? "", current: image, explicit: true }, historyMode: "none" });
+          const loading = actions.hosts.select(remote, { target: { folder: context.folder ?? "", filter: context.feedFilter ?? normalizeFilter(context.filter), current: image, explicit: true }, historyMode: "none" });
           const intent = browseRevision;
           return loading.then(() => intent === browseRevision && host() === remote ? actions.diff.openDiff(left, right, { push, subject }) : false);
         }
@@ -2562,7 +2582,12 @@ export function makeAppStore({ subscribeSources = typeof window !== "undefined" 
     currentNodeImages,
     currentCollection,
     entryFor,
-    filter,
+    filter: () => filter().filename,
+    feedFilter: filter,
+    filterSummary,
+    filterParameters,
+    filterLoading: () => filter().parameter ? folderView().filter(i => !st.images[i].meta && !st.images[i].extracted).length : 0,
+    filterTotal: () => folderView().length,
     hostMenuOpen,
     menuOpen,
     menuFilter,
