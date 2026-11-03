@@ -8,15 +8,16 @@ const KZ = `(await import('/store/instance.js')).appStore`;
 const names = {
   top: 'rail-preview-teal-top-image-with-a-long-filename-that-must-truncate.png',
   topVideo: 'rail-preview-top.webm', bottom: 'rail-preview-ochre-bottom.png', bottomVideo: 'rail-preview-bottom.webm',
-  audio: 'rail-preview-audio.wav', slowA: 'rail-preview-slow-a.png', slowB: 'rail-preview-slow-b.png', failed: 'rail-preview-failed.png',
+  audio: 'rail-preview-audio.wav', slowA: 'rail-preview-slow-a.png', slowB: 'rail-preview-slow-b.webm', failed: 'rail-preview-failed.png',
 };
 (async()=>{
   fs.mkdirSync(workPath('artifacts'),{recursive:true});
   const published = await fetch(FAKE+'/__test/activity',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({publish:[
     {name:names.top,fixture:'bulk',width:360,height:520,color:[35,118,150,255],mtime:2100003100},
     {name:names.topVideo,fixture:'media/workflow.webm',mtime:2100003099},
+    {name:'video/fixture_e2e-media-a.webm',fixture:'media/workflow.webm',mtime:2100003098},
     {name:names.slowA,fixture:'bulk',width:320,height:180,mtime:1799999751.8},
-    {name:names.slowB,fixture:'bulk',width:320,height:180,mtime:1799999751.7},
+    {name:names.slowB,fixture:'media/workflow.webm',mtime:1799999751.7},
     {name:names.failed,fixture:'bulk',width:320,height:180,mtime:1600000003},
     {name:names.bottom,fixture:'bulk',width:520,height:360,color:[184,127,68,255],mtime:1600000002},
     {name:names.audio,fixture:'media/workflow.wav',mtime:1600000001},
@@ -28,7 +29,7 @@ const names = {
   const original=page.ws.onmessage;
   page.ws.onmessage=event=>{
     original(event);const msg=JSON.parse(event.data),p=msg.params;
-    if(msg.method==='Network.requestWillBeSent'&&/rail-preview-slow-[ab]\.png\/bytes/.test(p.request.url)){active.add(p.requestId);maximum=Math.max(maximum,active.size)}
+    if(msg.method==='Network.requestWillBeSent'&&/rail-preview-slow-[ab]\.(png|webm)\/bytes/.test(p.request.url)){active.add(p.requestId);maximum=Math.max(maximum,active.size)}
     if(msg.method==='Network.loadingFinished'||msg.method==='Network.loadingFailed')active.delete(p.requestId);
     if(msg.method==='Fetch.requestPaused'){
       if(p.request.url.includes(names.failed))page.send('Fetch.failRequest',{requestId:p.requestId,errorReason:'Failed'}).catch(()=>{});
@@ -62,8 +63,16 @@ const names = {
   };
   const capture=async name=>{
     const shot=await page.send('Page.captureScreenshot',{format:'png'});fs.writeFileSync(workPath(`artifacts/${name}.png`),Buffer.from(shot.data,'base64'));
-    const clip=await page.evaluate(`(()=>{const p=document.querySelector('.fr-preview').getBoundingClientRect(),r=document.querySelector('#feedRail').getBoundingClientRect();return{x:0,y:Math.max(0,p.top-8),width:p.right+12,height:Math.min(innerHeight,p.bottom+8)-Math.max(0,p.top-8),scale:3}})()`);
+    const clip=await page.evaluate(`(()=>{const p=document.querySelector('.fr-preview').getBoundingClientRect(),r=document.querySelector('#feedRail').getBoundingClientRect();return{x:0,y:Math.max(0,p.top-8),width:p.right+12,height:Math.min(innerHeight,p.bottom+8)-Math.max(0,p.top-8),scale:2}})()`);
     const crop=await page.send('Page.captureScreenshot',{format:'png',clip});fs.writeFileSync(workPath(`artifacts/${name}-detail.png`),Buffer.from(crop.data,'base64'));
+  };
+  const videoStill=async name=>{
+    await page.poll(`document.querySelector('.fr-preview video')?.readyState>=2`);
+    const result=await page.evaluate(`(async()=>{const p=document.querySelector('.fr-preview'),v=p.querySelector('video'),r=v.getBoundingClientRect(),s=${KZ},i=s.state.imageIdxById().get(${JSON.stringify('fake:'+name)}),size=s.state.cardSize(i),c=document.createElement('canvas');c.width=c.height=1;const ctx=c.getContext('2d');ctx.drawImage(v,0,0,1,1);return{paused:v.paused,time:v.currentTime,preload:v.preload,controls:v.controls,autoplay:v.autoplay,ratio:r.width/r.height,natural:v.videoWidth/v.videoHeight,expected:size.w/size.h,pixel:[...ctx.getImageData(0,0,1,1).data],chrome:p.querySelectorAll('button,.media-controls,.media-play-overlay,[tabindex="0"]').length}})()`);
+    assert(result.paused&&result.time===0&&!result.controls&&!result.autoplay,'video is a paused first-frame still');
+    assert.equal(result.preload,'metadata');assert.equal(result.chrome,0,'still has no player controls, overlay or focus target');
+    assert(Math.abs(result.ratio-result.expected)<0.001&&Math.abs(result.natural-result.expected)<0.001,'decoded video preserves entry aspect');
+    assert.equal(result.pixel[3],255,'first frame has decoded visible pixels');
   };
   try{
     await page.send('Network.enable');
@@ -105,11 +114,13 @@ const names = {
     assert.equal((await tickStyle(names.top)).hovered,false,'moving clears the former tick');
     assert.notEqual((await tickStyle(names.top)).color,currentColor,'former tick restores its treatment');
     assert.equal((await tickStyle(names.topVideo)).color,currentColor,'highlight moves to the new preview target');
-    assert.equal(await page.evaluate(`document.querySelectorAll('.fr-preview img,.fr-preview video,.fr-preview audio, .fr-preview button').length`),0,'video fallback is filename-only, no player or acquisition');
+    await videoStill(names.topVideo);
+    await page.evaluate(`window.__retiredPreview=document.querySelector('.fr-preview video')`);
     await geometry(names.topVideo);await capture('rail-preview-video-top');
-    console.log('ok moving ticks replaces image with filename-only video card');
+    console.log('ok moving ticks replaces image with a decoded, non-interactive video still');
     await page.mouse('mouseMoved',300,18,{buttons:0});await page.poll(`!document.querySelector('.fr-preview')`);
     assert.equal(await page.evaluate(`document.querySelectorAll('.fr-tick.hovered').length`),0,'leaving clears the tick highlight');
+    await page.poll(`!window.__retiredPreview.isConnected&&!window.__retiredPreview.getAttribute('src')&&window.__retiredPreview.readyState===0&&window.__retiredPreview.paused`);
     console.log('ok leaving hides preview');
     // The central anchor is clear of both viewport edges: prove actual centering,
     // not only clamping at the top and bottom.
@@ -123,6 +134,8 @@ const names = {
     for(const [name,shot] of [[names.bottom,'rail-preview-image-bottom'],[names.bottomVideo,'rail-preview-video-bottom'],[names.audio,'rail-preview-audio']]){
       await browse(name);await move(name);await shown(name);
       if(name===names.bottom){await page.poll(`document.querySelector('.fr-preview .media-box')?.classList.contains('ic-loaded')`);await pixels([184,127,68,255])}
+      if(name===names.bottomVideo)await videoStill(name);
+      if(name===names.audio)assert.equal(await page.evaluate(`document.querySelectorAll('.fr-preview video,.fr-preview audio,.fr-preview img').length`),0,'audio stays filename-only');
       await geometry(name);await capture(shot);
     }
     console.log('ok image/video previews clamp at bottom edge; audio uses filename-only');
@@ -130,12 +143,13 @@ const names = {
     assert.equal(await page.evaluate(`document.querySelectorAll('.fr-tick.hovered').length`),0,'scrub start clears the highlight');
     console.log('ok scrub start hides preview');
     await browse(names.slowA);
-    await page.send('Fetch.enable',{patterns:[{urlPattern:'*rail-preview-slow-*.png/bytes*'},{urlPattern:'*rail-preview-failed.png/bytes*'}]});
+    await page.send('Fetch.enable',{patterns:[{urlPattern:'*rail-preview-slow-*/bytes*'},{urlPattern:'*rail-preview-failed.png/bytes*'}]});
     await move(names.slowA);await shown(names.slowA);
     for(let i=0;i<30&&!active.size;i++)await sleep(30);
     assert.equal(active.size,1,'first hover image request is held in flight');
     await move(names.slowB);await shown(names.slowB);await page.poll(`document.querySelector('.fr-preview .media-box')?.classList.contains('ic-loaded')`);
-    assert.equal(maximum,1,'at most one hover image request in flight');
+    await videoStill(names.slowB);
+    assert.equal(maximum,1,'at most one hover native image/video request in flight');
     console.log('ok replacing a slow hover retires its native request before the next', {maximum});
     const wheel=await point(names.slowB);await page.mouse('mouseWheel',wheel.x,wheel.y,{deltaY:5});await page.poll(`!document.querySelector('.fr-preview')`);
     assert.equal(await page.evaluate(`document.querySelectorAll('.fr-tick.hovered').length`),0,'rail scroll clears the highlight');
@@ -144,6 +158,19 @@ const names = {
     assert.equal(await page.evaluate(`document.querySelectorAll('.fr-preview img').length`),0,'failure has no native broken-image glyph');
     await geometry(names.failed);await capture('rail-preview-failed');
     console.log('ok image failure keeps filename and short reason without broken glyph');
+    await page.send('Fetch.disable');
+    await page.evaluate(`(async()=>${KZ}.handles.invoke('feed.revealEntry',{id:'fake:video/fixture_e2e-media-a.webm'}))()`);
+    await page.poll(`document.querySelector('.card.current video')?.readyState>=2`);
+    await browse(names.topVideo);await move(names.topVideo);await shown(names.topVideo);await videoStill(names.topVideo);
+    await page.evaluate(`document.querySelector('.card.current video').play()`);
+    await page.poll(`document.querySelector('.card.current video').currentTime>0`);
+    assert.equal(await page.evaluate(`document.querySelector('.fr-preview video').paused`),true,'playback elsewhere does not activate the still');
+    await page.evaluate(`document.querySelector('.fr-preview .media-box').click()`);
+    assert.equal(await page.evaluate(`document.querySelector('.fr-preview video').paused&&!document.querySelector('.card.current video').paused`),true,'still click cannot play or interrupt registered playback');
+    await page.mouse('mouseMoved',300,18,{buttons:0});await page.poll(`!document.querySelector('.fr-preview')`);
+    assert.equal(await page.evaluate(`document.querySelector('.card.current video').paused`),false,'retiring preview does not pause playback elsewhere');
+    await page.evaluate(`document.querySelector('.card.current video').pause()`);
+    console.log('ok preview and registered playback have independent lifetimes');
     // A real narrow viewport must shrink the preview beside the rail, never
     // slide it over the trigger. Its media height must use that final width.
     await page.mouse('mouseMoved',300,18,{buttons:0});
@@ -158,7 +185,7 @@ const names = {
     assert(Math.abs(narrow.height-narrow.pictureHeight-narrow.padding-narrow.gap-narrow.label)<0.5,'panel height follows media at its actual constrained width');
     await capture('rail-preview-narrow');
     console.log('ok narrow viewport shrinks right-side preview without overlap or stale preferred-width height',narrow);
-    assert.deepEqual(errors,[]);console.log('PASS rail-preview (11 consumer contracts, no page errors)');
+    assert.deepEqual(errors,[]);console.log('PASS rail-preview (12 consumer contracts, no page errors)');
   }catch(error){
     console.error('preview diagnostics',await page.evaluate(`({hover:matchMedia('(hover: hover)').matches,anyHover:matchMedia('(any-hover: hover)').matches,pointer:matchMedia('(pointer: fine)').matches,previews:[...document.querySelectorAll('.fr-preview')].map(el=>({text:el.textContent,class:el.className,html:el.outerHTML})),top:document.querySelector('.fr-top')?.textContent,ticks:[...document.querySelectorAll('.fr-tick')].slice(0,5).map(el=>({id:el.dataset.entryId,hover:el.matches(':hover')}))})`),errors);
     throw error;

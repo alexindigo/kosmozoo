@@ -1,4 +1,4 @@
-// Rail-private tooltip composition; native image rendering belongs to MediaBox,
+// Rail-private tooltip composition; native still rendering belongs to MediaBox,
 // and request admission/retirement to the injected Store display port.
 import { createEffect, createSignal, onMount, onCleanup, Show } from "solid-js";
 import { mediaKind } from "/shared/backings/mime.mjs";
@@ -13,11 +13,12 @@ export function RailPreview(props) {
   let panel, name, reason, frame = null, mounted = false;
   const [phase, setPhase] = createSignal(props.size?.failed ? "error" : "empty");
   const [placement, setPlacement] = createSignal(null);
-  const image = () => (mediaKind(props.entry.filename) ?? "image") === "image";
-  const picture = () => image() && phase() !== "error";
+  const kind = () => mediaKind(props.entry.filename) ?? "image";
+  const visual = () => kind() === "image" || kind() === "video";
+  const picture = () => visual() && phase() !== "error";
   const display = useImageDisplay(props.registerDisplay, () => ({
-    id: image() && !props.size?.failed ? props.entry.id : null,
-    src: image() && !props.size?.failed ? entryBytesUrl(props.entry.host, props.entry.filename) : null,
+    id: visual() && !props.size?.failed ? props.entry.id : null,
+    src: visual() && !props.size?.failed ? entryBytesUrl(props.entry.host, props.entry.filename) : null,
     identity: props.entry.hash, priority: "foreground",
   }));
   const update = () => {
@@ -55,7 +56,7 @@ export function RailPreview(props) {
       height: placement() ? `${placement().height}px` : undefined }}>
     <Show when={picture()}>
       <div class="fr-preview-picture">
-        <MediaBox workbench kind="image" src={display.read().src} fetchPriority={display.read().priority}
+        <MediaBox workbench still kind={kind()} src={display.read().src} fetchPriority={display.read().priority}
           alt={props.entry.filename} size={props.size} onPhase={onPhase} />
         <Show when={phase() !== "loaded"}><span class="fr-preview-loading">Loading preview…</span></Show>
       </div>

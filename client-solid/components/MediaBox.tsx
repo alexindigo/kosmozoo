@@ -19,7 +19,8 @@ export function MediaBox(props) {
   const [allocation, setAllocation] = createSignal({ width: 0, height: 0 });
   const [natural, setNatural] = createSignal(null);
   let block, box, registration;
-  const playable = () => props.kind === "video" || props.kind === "audio";
+  const nativeMedia = () => props.kind === "video" || props.kind === "audio";
+  const playable = () => nativeMedia() && !props.still;
   const word = () => props.kind === "audio" ? "audio file" : "video";
   // Focus before an ancestor's native pan listener can capture the pointer.
   onMount(() => {
@@ -84,7 +85,7 @@ export function MediaBox(props) {
   });
   createEffect(on(() => [surface(), props.zoom?.key], ([el, key]) => {
     const zoom = props.zoom;
-    if (!el || !zoom || props.kind === "audio") return;
+    if (!el || !zoom || props.kind === "audio" || props.still) return;
     const binding = makeZoomable(el, { surface: box, box, key, getView: zoom.getView, setView: zoom.setView,
       geometry: viewGeometry });
     onCleanup(() => binding.dispose());
@@ -105,8 +106,8 @@ export function MediaBox(props) {
   return <div ref={block} class={`media-block ${props.workbench ? "media-block-stage" : ""}`}>
     <div ref={box} tabIndex={playable() ? 0 : undefined}
     class={`media-box ${props.workbench ? "media-stage" : "imgwrap"} ic-${phase()}`}
-    data-kind={props.kind ?? "image"} style={!props.workbench ? { height: `${geometry().height}px` } : undefined} onClick={click}>
-    <Show when={playable()} fallback={<img ref={setSurface} class={props.workbench ? "dz-img" : undefined}
+    data-kind={props.kind ?? "image"} style={!props.workbench ? { height: `${geometry().height}px` } : undefined} onClick={props.still ? undefined : click}>
+    <Show when={nativeMedia()} fallback={<img ref={setSurface} class={props.workbench ? "dz-img" : undefined}
       alt={props.alt} style={style()} decoding={props.workbench ? undefined : "async"}
       fetchpriority={props.fetchPriority === "background" ? "low" : "auto"}
       onLoad={e => { measureNatural(e.currentTarget); setLoaded(true); }}
@@ -115,10 +116,10 @@ export function MediaBox(props) {
         aria-label={props.alt} style={style()} loop={loop()} muted={muted()}
         onLoadedData={() => setLoaded(true)} onLoadedMetadata={e => { measureNatural(e.currentTarget); setDuration(e.currentTarget.duration); }}
         onDurationChange={e => setDuration(e.currentTarget.duration)} onTimeUpdate={e => setCurrent(e.currentTarget.currentTime)}
-        onPlay={() => { registration?.started(); setPaused(false); }} onPause={() => setPaused(true)}
+        onPlay={e => { if (props.still) { e.currentTarget.pause(); return; } registration?.started(); setPaused(false); }} onPause={() => setPaused(true)}
         onEnded={() => setPaused(true)} onVolumeChange={e => setMuted(e.currentTarget.muted)}
         onError={e => { if (props.src != null) setError(e.currentTarget.error?.code || "unknown"); }} />
-      <Show when={props.src != null && phase() !== "error"}>
+      <Show when={playable() && props.src != null && phase() !== "error"}>
         <Show when={(!props.workbench && paused()) || props.kind === "audio"}><div style={props.workbench || props.kind !== "audio" ? style() : undefined} class={`media-play-overlay ${props.kind === "audio" ? "media-audio-face" : ""}`}>
           <Show when={!props.workbench}><MediaControlBoundary class="media-play-boundary">
             <IconButton size="lg" variant="play prominent media-play" title={`${paused() ? "play" : "pause"} ${word()}`}
