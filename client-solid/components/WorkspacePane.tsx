@@ -34,7 +34,9 @@ export function WorkspacePane() {
   return (
     <>
       <div id="divider" title="drag to resize the split" ref={dividerRef} />
-      <aside id="workspace" ref={asideEl} style={{ width: `${store.state.anchorPaneWidth()}px` }}>
+      <aside id="workspace" ref={asideEl}
+        classList={{ "workspace-details": store.state.workspace() !== "anchors" }}
+        style={{ width: `${store.state.anchorPaneWidth()}px` }}>
         <Switch>
           <Match when={store.state.workspace() === "anchors"}>
             <div class="ws-space">

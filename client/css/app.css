@@ -195,10 +195,13 @@ main { display: flex; flex: 1; min-height: 0; }
 #divider:hover::before, #divider.dragging::before { background: var(--foreground-mid); }
 /* the pane's width is owned by the store signal (rendered as an inline
  style) — no duplicate CSS default (/); min/max bound the drag */
-#workspace { flex: 0 0 auto; background: var(--surface); border: 1px solid var(--lifted);
-  border-radius: 8px; margin: 8px 0; padding: 8px;
+#workspace { flex: 0 0 auto; background: var(--surface);
+  border-radius: 8px; margin: 8px 0;
   display: flex; flex-direction: column; overflow: hidden;
   min-width: 220px; max-width: 70vw; }
+/* The displayed body owns the frame: Details uses the pane border;
+   Anchors supplies ordinary, fully decorated card frames inside it. */
+#workspace.workspace-details { border: 1px solid var(--lifted); }
 .ws-space { flex: 1; min-height: 0; display: flex; flex-direction: column; }
 
 /* workspace bar: one button per space, pinned to the window's right edge */
@@ -237,9 +240,13 @@ main { display: flex; flex: 1; min-height: 0; }
 /* Card state supplies color tokens. Border and inward-glow geometry exist
  in every state; no judgment-specific selectors or decorations are added. */
 
+/* Feed, its measuring probe, Details and anchor cards own the same body
+   frame. Workspace supplies only its border; chrome never adds a media inset. */
+#app { --media-frame-inset: 12px; }
+.card, .card--probe, .info-body { padding: var(--media-frame-inset); }
 .card, .card--probe { scroll-margin-top: 8px;
   --card-color: var(--focused-background); --card-glow-color: var(--focused-background);
-  background: var(--focused-background); border-radius: 8px; padding: 12px;
+  background: var(--focused-background); border-radius: 8px;
   border-width: 1px; border-style: solid;
   /* the inter-card spacing rides ON the card: the virtualizer's item size
  is cardHeight + this margin, so its scroll math matches the DOM
@@ -824,7 +831,9 @@ body:has(#diff:not([hidden])) #statusCol { bottom: 56px; }
 /* images column: the inline flex-basis carries the split ratio; shrink
  allowed so the row yields space to the text column instead of
  overflowing the body when the pane is narrow */
-.info-source-images { flex: 0 1 auto; min-width: 0; }
+.info-source-images { flex: 0 1 auto; min-width: 0;
+  display: flex; flex-direction: column; gap: 10px; }
+.info-source-images > .infoimg { margin-top: 0; flex: 0 0 auto; }
 /* text floor: the metadata column stays readable, the images column
  shrinks below its split first */
 .info-source-nodes { flex: 1; min-width: 120px; }
