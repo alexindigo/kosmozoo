@@ -973,7 +973,7 @@ body:has(#diff:not([hidden])) #statusCol { bottom: 56px; }
 }
 
 /* Folder scope and pin-group allocation remain inside Header's own split. */
-#chrome .folder-picker { flex: 0 1 150px; min-width: 32px; max-width: 210px; }
+#chrome .folder-picker { flex: 0 1 auto; min-width: var(--control-height-sm); }
 #chrome select:focus-visible { outline: 2px solid var(--secondary); outline-offset: 2px; }
 #chrome .pinned-source-group { display: flex; align-items: center; min-width: 0; flex: 1 1 auto; }
 #chrome .pinned-source-group.has-pins { gap: 8px; padding-inline-start: 8px; }
@@ -981,7 +981,7 @@ body:has(#diff:not([hidden])) #statusCol { bottom: 56px; }
 #chrome .pinned-sources { gap: 4px; }
 @container chrome-feed (max-width: 220px) {
   #chrome .chrome-feed-inner { gap: 0; }
-  #chrome .folder-picker { flex-basis: 50px; min-width: min-content; }
+  #chrome .folder-picker { min-width: var(--control-height-sm); }
   #chrome .pinned-source-group.has-pins { gap: 1px; padding-inline-start: 1px; }
 }
 
@@ -1219,6 +1219,20 @@ body:has(#diff:not([hidden])) #statusCol { bottom: 56px; }
   box-shadow: inset 0 0 0 1px var(--border-strong); font: inherit; cursor: pointer; }
 .select-trigger > .single-line-text { padding-inline-start: 8px; }
 .select-trigger:hover { box-shadow: inset 0 0 0 1px var(--foreground-dim); }
+
+/* Optional native-select presentation: content sizes the face, never options.
+   The transparent native control covers it and owns all input/option behavior. */
+.select-with-face { position: relative; width: max-content; max-width: 100%; }
+.select-with-face > .select-native { position: absolute; inset: 0; opacity: 0; padding: 0; z-index: 1; }
+.select-face { grid-area: 1 / 1 / 2 / -1; height: 100%; pointer-events: none; }
+.select-face-content { display: flex; align-items: center; min-width: 0; }
+.select-icon-slot { display: grid; place-items: center; flex: 0 0 var(--control-size);
+  width: var(--control-size); height: var(--control-size); }
+.select-icon-slot > svg { display: block; width: var(--control-icon-size); height: var(--control-icon-size); }
+.select-without-chevron, .select-without-chevron > .select-face { grid-template-columns: auto; }
+.select-with-face:has(> .select-native:focus-visible) { outline: 2px solid var(--secondary); outline-offset: 2px; border-radius: 4px; }
+.select-with-face:hover > .select-face { box-shadow: inset 0 0 0 1px var(--foreground-dim); }
+.folder-picker-value { max-width: 16ch; }
 
 /* Readiness and native decode state use Solid's shared class bindings. Geometry
    remains inline, owned by the surface that measures it. */
