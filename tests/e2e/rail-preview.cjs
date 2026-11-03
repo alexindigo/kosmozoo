@@ -69,11 +69,24 @@ const names = {
   const videoStill=async name=>{
     await page.poll(`document.querySelector('.fr-preview video')?.readyState>=2`);
     const result=await page.evaluate(`(async()=>{const p=document.querySelector('.fr-preview'),v=p.querySelector('video'),r=v.getBoundingClientRect(),s=${KZ},i=s.state.imageIdxById().get(${JSON.stringify('fake:'+name)}),size=s.state.cardSize(i),c=document.createElement('canvas');c.width=c.height=1;const ctx=c.getContext('2d');ctx.drawImage(v,0,0,1,1);return{paused:v.paused,time:v.currentTime,preload:v.preload,controls:v.controls,autoplay:v.autoplay,ratio:r.width/r.height,natural:v.videoWidth/v.videoHeight,expected:size.w/size.h,pixel:[...ctx.getImageData(0,0,1,1).data],chrome:p.querySelectorAll('button,.media-controls,.media-play-overlay,[tabindex="0"]').length}})()`);
-    assert(result.paused&&result.time===0&&!result.controls&&!result.autoplay,'video is a paused first-frame still');
+    assert(result.paused&&result.time>=0&&result.time<=0.001&&!result.controls&&!result.autoplay,'video is a paused first-frame still');
     assert.equal(result.preload,'metadata');assert.equal(result.chrome,0,'still has no player controls, overlay or focus target');
     assert(Math.abs(result.ratio-result.expected)<0.001&&Math.abs(result.natural-result.expected)<0.001,'decoded video preserves entry aspect');
     assert.equal(result.pixel[3],255,'first frame has decoded visible pixels');
   };
+  // Test-only metadata-only native fixture. Suppress loadeddata and report
+  // HAVE_METADATA until an actual seek finishes; stall mode refuses the seek.
+  const metadataOnly=async stall=>page.evaluate(`(()=>{
+    const proto=HTMLMediaElement.prototype,time=Object.getOwnPropertyDescriptor(proto,'currentTime'),ready=Object.getOwnPropertyDescriptor(proto,'readyState');
+    const state=window.__metadataOnly={seeks:[],decoded:new WeakSet(),stall:${stall}};
+    const preview=el=>el.tagName==='VIDEO'&&!!el.closest('.fr-preview');
+    Object.defineProperty(proto,'readyState',{...ready,get(){return preview(this)&&!state.decoded.has(this)?1:ready.get.call(this)}});
+    Object.defineProperty(proto,'currentTime',{...time,set(value){if(preview(this)){state.seeks.push(value);if(state.stall)return}time.set.call(this,value)}});
+    const data=e=>{if(preview(e.target))e.stopImmediatePropagation()};
+    const seeked=e=>{if(preview(e.target)){if(state.stall)e.stopImmediatePropagation();else state.decoded.add(e.target)}};
+    document.addEventListener('loadeddata',data,true);document.addEventListener('seeked',seeked,true);
+    window.__restoreMetadataOnly=()=>{Object.defineProperty(proto,'currentTime',time);Object.defineProperty(proto,'readyState',ready);document.removeEventListener('loadeddata',data,true);document.removeEventListener('seeked',seeked,true)};
+  })()`);
   try{
     await page.send('Network.enable');
     await page.send('Network.setCacheDisabled',{cacheDisabled:true});
@@ -110,11 +123,15 @@ const names = {
     assert.equal(await page.evaluate(`document.querySelectorAll('#feedRail[title],.fr-tick[title],.fr-row[title]').length`),0,'no tick or inherited native title tooltip');
     console.log('ok delayed image preview with truncated filename and no native tooltip',await geometry(names.top));
     await capture('rail-preview-image-top');
+    await metadataOnly(false);
     await move(names.topVideo);await shown(names.topVideo);
     assert.equal((await tickStyle(names.top)).hovered,false,'moving clears the former tick');
     assert.notEqual((await tickStyle(names.top)).color,currentColor,'former tick restores its treatment');
     assert.equal((await tickStyle(names.topVideo)).color,currentColor,'highlight moves to the new preview target');
     await videoStill(names.topVideo);
+    assert.equal(await page.evaluate(`window.__metadataOnly.seeks.some(t=>t>0&&t<=0.001)`),true,'metadata-only still explicitly seeks a tiny first-frame time');
+    await page.poll(`document.querySelector('.fr-preview .media-box')?.classList.contains('ic-loaded')`);
+    await page.evaluate(`window.__restoreMetadataOnly()`);
     await page.evaluate(`window.__retiredPreview=document.querySelector('.fr-preview video')`);
     await geometry(names.topVideo);await capture('rail-preview-video-top');
     console.log('ok moving ticks replaces image with a decoded, non-interactive video still');
@@ -171,6 +188,17 @@ const names = {
     assert.equal(await page.evaluate(`document.querySelector('.card.current video').paused`),false,'retiring preview does not pause playback elsewhere');
     await page.evaluate(`document.querySelector('.card.current video').pause()`);
     console.log('ok preview and registered playback have independent lifetimes');
+    await metadataOnly(true);
+    await browse(names.topVideo);await move(names.topVideo);await shown(names.topVideo);
+    await page.poll(`window.__metadataOnly.seeks.length>0`);
+    const deadline=await page.evaluate(`(async()=>{const s=${KZ};window.__stalledPreview=document.querySelector('.fr-preview video');window.__deadlineProbes=Array.from({length:4},(_,i)=>s.actions.images.surface({id:'deadline-probe-'+i,src:'/deadline-probe-'+i}));return(await import('/lib/img-measure.js')).MEASURE_TIMEOUT_MS})()`);
+    assert.equal(await page.evaluate(`window.__deadlineProbes.some(lease=>lease.read().src===null)`),true,'unfinished still holds its display lease');
+    await page.poll(`document.querySelector('.fr-preview')?.textContent.includes('Preview unavailable')`,deadline+5000);
+    await page.poll(`window.__deadlineProbes.every(lease=>lease.read().src!==null)`);
+    assert.equal(await page.evaluate(`!document.querySelector('.fr-preview video')&&!window.__stalledPreview.getAttribute('src')&&window.__stalledPreview.paused`),true,'deadline failure retires the native source');
+    assert.equal(await page.evaluate(`document.querySelector('.fr-preview-name').textContent`),names.topVideo,'deadline keeps the filename failure card');
+    await page.evaluate(`window.__deadlineProbes.forEach(lease=>lease.dispose());window.__restoreMetadataOnly()`);
+    console.log('ok metadata-only stall reaches shared native deadline, unloads source and releases queued display capacity');
     // A real narrow viewport must shrink the preview beside the rail, never
     // slide it over the trigger. Its media height must use that final width.
     await page.mouse('mouseMoved',300,18,{buttons:0});
@@ -185,7 +213,7 @@ const names = {
     assert(Math.abs(narrow.height-narrow.pictureHeight-narrow.padding-narrow.gap-narrow.label)<0.5,'panel height follows media at its actual constrained width');
     await capture('rail-preview-narrow');
     console.log('ok narrow viewport shrinks right-side preview without overlap or stale preferred-width height',narrow);
-    assert.deepEqual(errors,[]);console.log('PASS rail-preview (12 consumer contracts, no page errors)');
+    assert.deepEqual(errors,[]);console.log('PASS rail-preview (14 consumer contracts, no page errors)');
   }catch(error){
     console.error('preview diagnostics',await page.evaluate(`({hover:matchMedia('(hover: hover)').matches,anyHover:matchMedia('(any-hover: hover)').matches,pointer:matchMedia('(pointer: fine)').matches,previews:[...document.querySelectorAll('.fr-preview')].map(el=>({text:el.textContent,class:el.className,html:el.outerHTML})),top:document.querySelector('.fr-top')?.textContent,ticks:[...document.querySelectorAll('.fr-tick')].slice(0,5).map(el=>({id:el.dataset.entryId,hover:el.matches(':hover')}))})`),errors);
     throw error;

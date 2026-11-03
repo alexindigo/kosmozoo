@@ -10,6 +10,14 @@ export const ERROR_RETRY_MS = 8000;
 export const MEASURE_TIMEOUT_MS = 30000;
 export const validDims = (w, h) => Number.isFinite(w) && w > 0 && Number.isFinite(h) && h > 0;
 
+// Native attempts share this bounded lifetime, whether measuring dimensions or
+// waiting for a displayed first frame. Settlement/retirement cancels late work.
+export function nativeResourceDeadline(expire) {
+  let active = true;
+  const timer = setTimeout(() => { if (active) { active = false; expire(); } }, MEASURE_TIMEOUT_MS);
+  return () => { active = false; clearTimeout(timer); };
+}
+
 // The retry scheduler lives HERE and only here: one timer; when the window
 // opens each callback re-queues whatever its owner retains (measurement
 // waiting records, the image window's errored srcs).
@@ -88,7 +96,7 @@ export function makeImageMeasurements({ acquisition, srcFor, identityFor = id =>
   function retire(record) {
     records.delete(record.id);
     acquisition.cancel(record.key);
-    clearTimeout(record.deadline); record.deadline = null;
+    record.deadline?.(); record.deadline = null;
     detach(record.image); record.image = null;
     record.finish?.();
   }
@@ -153,7 +161,7 @@ export function makeImageMeasurements({ acquisition, srcFor, identityFor = id =>
           const before = snapshot(id);
           if (!current(record)) { retire(record); notify(id, before); return; }
           const w = video ? el?.videoWidth : el?.naturalWidth, h = video ? el?.videoHeight : el?.naturalHeight;
-          clearTimeout(record.deadline); record.deadline = null;
+          record.deadline?.(); record.deadline = null;
           const measured = success && validDims(w, h);
           // A decoded image probe keeps its bytes available to the display;
           // a video probe or a failed attempt retires its native consumer.
@@ -177,12 +185,12 @@ export function makeImageMeasurements({ acquisition, srcFor, identityFor = id =>
         if (!video) { el.decoding = "async"; el.fetchPriority = priority === "background" ? "low" : "auto"; }
         if (video) el.onloadedmetadata = () => settle(true); else el.onload = () => settle(true);
         el.onerror = () => settle(false);
-        record.deadline = setTimeout(() => {
+        record.deadline = nativeResourceDeadline(() => {
           record.deadline = null;
           if (records.get(id) !== record || record.image !== el) return;
           if (current(record)) settle(false);
           else { const before = snapshot(id); retire(record); notify(id, before); }
-        }, MEASURE_TIMEOUT_MS);
+        });
         try { el.src = record.request.src; } catch { settle(false); return; }
         for (const item of record.interests) if (!item.valid || item.valid()) item.onStart?.(record.request);
       }) }).then(result => {

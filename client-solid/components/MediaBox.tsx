@@ -10,6 +10,7 @@ import { IconButton } from "./IconButton.js";
 import { mediaFailure } from "../store/media-failure.js";
 import { mediaGeometry, AUDIO_SIZE } from "../store/media-geometry.js";
 import { iconSvg } from "/js/icons.mjs";
+import { nativeResourceDeadline } from "../lib/img-measure.js";
 
 export function MediaBox(props) {
   const [loaded, setLoaded] = createSignal(false), [error, setError] = createSignal(false);
@@ -18,7 +19,7 @@ export function MediaBox(props) {
   const [surface, setSurface] = createSignal(null);
   const [allocation, setAllocation] = createSignal({ width: 0, height: 0 });
   const [natural, setNatural] = createSignal(null);
-  let block, box, registration;
+  let block, box, registration, cancelStillDeadline;
   const nativeMedia = () => props.kind === "video" || props.kind === "audio";
   const playable = () => nativeMedia() && !props.still;
   const word = () => props.kind === "audio" ? "audio file" : "video";
@@ -47,6 +48,16 @@ export function MediaBox(props) {
   const geometry = createMemo(() => mediaGeometry({ ...allocation(), size: size(), surface: props.workbench ? "viewer" : "card" }));
   const viewGeometry = () => size()?.w > 0 && size()?.h > 0 && readyViewGeometry(geometry()) ? geometry() : null;
   const measureNatural = el => setNatural({ src: source(), w: el.videoWidth || el.naturalWidth, h: el.videoHeight || el.naturalHeight });
+  const complete = el => {
+    if (source() == null || error() || props.still && props.kind === "video" && el.readyState < 2) return;
+    cancelStillDeadline?.(); cancelStillDeadline = null;
+    setLoaded(true);
+  };
+  const fail = code => {
+    if (source() == null) return;
+    cancelStillDeadline?.(); cancelStillDeadline = null;
+    setError(code);
+  };
   const transform = createMemo(() => {
     const zoom = props.zoom, g = viewGeometry();
     return zoom && g ? zoomViewTransform(zoom.getView(zoom.key, g), g) : "";
@@ -55,15 +66,18 @@ export function MediaBox(props) {
     const zoom = props.zoom, g = viewGeometry();
     if (zoom) zoom.onZoomChange?.(g ? readZoomView(zoom.getView(zoom.key, g), g).s > 1 : false);
   });
-  createEffect(on(() => [surface(), source()], ([el, src]) => {
+  createEffect(on(() => [surface(), source(), props.still], ([el, src]) => {
     setLoaded(false); setError(false); setCurrent(0); setDuration(0);
     if (!el) return;
     const isPlayer = el.tagName === "VIDEO" || el.tagName === "AUDIO";
     if (isPlayer) { el.pause(); setPaused(true); }
+    if (props.still && props.kind === "video" && src != null)
+      cancelStillDeadline = nativeResourceDeadline(() => fail("timeout"));
     // Native consumers are explicitly retired before a src window/side change.
     if (src == null) el.removeAttribute("src"); else el.setAttribute("src", src);
     if (isPlayer) el.load();
     onCleanup(() => {
+      cancelStillDeadline?.(); cancelStillDeadline = null;
       if (isPlayer) el.pause();
       el.removeAttribute("src");
       if (isPlayer) el.load();
@@ -114,11 +128,20 @@ export function MediaBox(props) {
       onError={() => { if (props.src != null) setError("decode"); }} />}>
       <Dynamic component={props.kind} ref={setSurface} class={props.workbench ? "dz-img" : undefined} preload="metadata" playsinline
         aria-label={props.alt} style={style()} loop={loop()} muted={muted()}
-        onLoadedData={() => setLoaded(true)} onLoadedMetadata={e => { measureNatural(e.currentTarget); setDuration(e.currentTarget.duration); }}
+        onLoadedData={e => complete(e.currentTarget)} onLoadedMetadata={e => {
+          const el = e.currentTarget;
+          measureNatural(el); setDuration(el.duration);
+          // Metadata preload may stop before decoding. A tiny seek requests
+          // just the first frame without turning this into a playing resource.
+          if (props.still && props.kind === "video") {
+            try { el.currentTime = Math.min(0.001, el.duration / 2); } catch { fail("decode"); }
+          }
+        }}
+        onSeeked={e => { if (props.still) complete(e.currentTarget); }}
         onDurationChange={e => setDuration(e.currentTarget.duration)} onTimeUpdate={e => setCurrent(e.currentTarget.currentTime)}
         onPlay={e => { if (props.still) { e.currentTarget.pause(); return; } registration?.started(); setPaused(false); }} onPause={() => setPaused(true)}
         onEnded={() => setPaused(true)} onVolumeChange={e => setMuted(e.currentTarget.muted)}
-        onError={e => { if (props.src != null) setError(e.currentTarget.error?.code || "unknown"); }} />
+        onError={e => fail(e.currentTarget.error?.code || "unknown")} />
       <Show when={playable() && props.src != null && phase() !== "error"}>
         <Show when={(!props.workbench && paused()) || props.kind === "audio"}><div style={props.workbench || props.kind !== "audio" ? style() : undefined} class={`media-play-overlay ${props.kind === "audio" ? "media-audio-face" : ""}`}>
           <Show when={!props.workbench}><MediaControlBoundary class="media-play-boundary">
