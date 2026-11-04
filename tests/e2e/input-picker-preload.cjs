@@ -14,10 +14,14 @@ async function preload(cdp, check) {
   for (let i = 0; i < 300; i++) {
     const form = new FormData();
     form.append('image', new Blob([image]), `preload-${String(i).padStart(3, '0')}.png`);
-    assert((await fetch(FAKE + '/api/upload/image', { method: 'POST', body: form })).ok);
+    const seeded = await fetch(FAKE + '/api/upload/image', { method: 'POST', body: form });
+    assert(seeded.ok || seeded.status === 409, 'seed input exists on the shared fake');
   }
   assert((await fetch(FAKE + '/__test/activity', { method: 'POST', body: JSON.stringify({ delays: { inputBytes: 150 } }) })).ok);
   await cdp.evaluate(`(async()=>${KZ}.handles.invoke('variations.open',{id:'fake:flux-controlnet.png'}))()`);
+  await cdp.poll("!!document.querySelector('.vz-image-set .checkbox')");
+  await cdp.clickAt('.vz-image-set .checkbox');
+  await require('./image-picker-helpers.cjs').openImageAdd(cdp);
   await cdp.poll("!!document.querySelector('.vz-input-trigger')");
   const active = new Map(), requests = [];
   let maxImages = 0, maxBackground = 0, metadata = null, metadataWhileImages = false;
@@ -86,9 +90,53 @@ async function preload(cdp, check) {
     if (!process.env.E2E_PRELOAD_BASELINE) {
       assert.equal(result.emptyTiles, 0, 'entering tiles are already loaded at a steady one-viewport scroll');
       assert.deepEqual(result.lateStarts, [], 'every entering tile starts before visibility');
-      assert(result.maxRows <= 12 && result.maxTiles <= 36, 'mounted rows plus one preloaded viewport stay small');
-      assert(maxBackground > 0, 'further-ahead demand uses the background lane');
+      assert(result.maxRows <= 16 && result.maxTiles <= 48, 'visible rows plus symmetric lookahead stay bounded');
+      assert(maxBackground > 0, 'lookahead demand uses the background lane');
       assert(await cdp.evaluate("[...document.querySelectorAll('.vz-input-option img')].every(img=>img.decoding==='async')"));
+    }
+    // Start cold in the middle so neither side can borrow decoded first-screen
+    // thumbnails. Assert all 15 immediate neighbours, not just mounted count.
+    await cdp.evaluate("document.querySelector('.vz-input-list').scrollTop=40*102");
+    await sleep(250);
+    await cdp.poll("[...document.querySelectorAll('.vz-input-option img')].every(img=>img.complete&&img.naturalWidth>0)", 15000);
+    const band = await cdp.evaluate(`(()=>{
+      const list=document.querySelector('.vz-input-list'),box=list.getBoundingClientRect();
+      const visible=[...list.querySelectorAll('.vz-input-option')].filter(tile=>{const r=tile.getBoundingClientRect();return r.bottom>box.top&&r.top<box.bottom});
+      const indices=visible.map(tile=>Number(tile.dataset.inputName.match(/preload-(\\d+)/)[1]));
+      const ready=index=>{const img=list.querySelector('[data-input-name="preload-'+String(index).padStart(3,'0')+'.png"] img');return !!img?.complete&&img.naturalWidth>0};
+      return {first:Math.min(...indices),last:Math.max(...indices),above:Array.from({length:15},(_,i)=>ready(Math.min(...indices)-i-1)),below:Array.from({length:15},(_,i)=>ready(Math.max(...indices)+i+1))};
+    })()`);
+    console.log('LOOKAHEAD_BAND '+JSON.stringify(band));
+    assert(band.above.every(Boolean), '15 tiles above the middle viewport are decoded');
+    assert(band.below.every(Boolean), '15 tiles below the middle viewport are decoded');
+    const steps=[];
+    for(const direction of [1,-1]) {
+      const step=await cdp.evaluate(`(async()=>{
+        const list=document.querySelector('.vz-input-list');
+        const visible=()=>{const box=list.getBoundingClientRect();return [...list.querySelectorAll('.vz-input-option')].filter(tile=>{const r=tile.getBoundingClientRect();return r.bottom>box.top&&r.top<box.bottom})};
+        const before=new Set(visible().map(tile=>tile.dataset.inputName));
+        const retained=new Set(list.querySelectorAll('img')),changes=[];
+        const observer=new MutationObserver(records=>changes.push(...records));
+        observer.observe(list,{subtree:true,attributes:true,attributeFilter:['src'],attributeOldValue:true});
+        list.scrollTop+=${direction}*list.clientHeight;
+        await new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve)));
+        const entering=visible().filter(tile=>!before.has(tile.dataset.inputName));
+        observer.disconnect();
+        return {direction:${direction},newlyVisible:entering.length,decoded:entering.filter(tile=>{const img=tile.querySelector('img');return img.complete&&img.naturalWidth>0}).length,
+          retainedSrcChanges:changes.filter(change=>retained.has(change.target)&&change.target.isConnected&&change.oldValue!=null).length};
+      })()`);
+      steps.push(step);
+      assert(step.newlyVisible>0 && step.decoded===step.newlyVisible, JSON.stringify(step));
+      assert.equal(step.retainedSrcChanges,0,'visibility changes never retire retained native sources');
+      await cdp.poll("[...document.querySelectorAll('.vz-input-option img')].every(img=>img.complete&&img.naturalWidth>0)", 15000);
+    }
+    assert(maxImages<=4 && maxBackground<=2, 'both-direction lookahead respects transport and background ceilings');
+    console.log('LOOKAHEAD_STEPS '+JSON.stringify({steps,maxImages,maxBackground}));
+    if(process.env.E2E_PICKER_SCREENSHOT) {
+      await cdp.evaluate("document.querySelector('.vz-input-list').scrollTop+=document.querySelector('.vz-input-list').clientHeight");
+      await sleep(100);
+      const shot=await cdp.send('Page.captureScreenshot',{format:'png',captureBeyondViewport:false});
+      fs.writeFileSync(process.env.E2E_PICKER_SCREENSHOT,Buffer.from(shot.data,'base64'));
     }
     // Retiring the search and closing must not leave old queued demand draining.
     await cdp.evaluate("(()=>{const input=document.querySelector('.vz-input-search');input.value='preload-299';input.dispatchEvent(new Event('input',{bubbles:true}))})()");
@@ -107,7 +155,7 @@ async function preload(cdp, check) {
 }
 
 (async () => {
-  const cdp = await CDP.launch(9336);
+  const cdp = await CDP.launch(9336, { windowSize: '1280,900' });
   const errors = await collectPageErrors(cdp);
   let checks = 0;
   const check = (name, ok) => { assert(ok, name); checks++; console.log('ok ' + name); };
