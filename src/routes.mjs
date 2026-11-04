@@ -25,6 +25,15 @@ export function readJson(req) {
   return req.json();
 }
 
+// Original contributor bytes may be active documents on direct navigation.
+// Keep native image/media display while removing script and origin authority.
+export function mediaHeaders(init) {
+  const headers = new Headers(init);
+  headers.set("Content-Security-Policy", "sandbox");
+  headers.set("X-Content-Type-Options", "nosniff");
+  return headers;
+}
+
 function mutationError(req, url) {
   if (["GET", "HEAD", "OPTIONS"].includes(req.method)) return null;
   const origin = req.headers.get("Origin"), site = req.headers.get("Sec-Fetch-Site");
@@ -82,14 +91,12 @@ export function makeRouter(ctx) {
   // the content hash + no-cache (the URL never changes on a remap).
   const bytesResponse = (req, bytes, hash, mime) => {
     const etag = `"${hash}"`;
+    const h = mediaHeaders({ ETag: etag, "Cache-Control": "no-cache" });
     if (req.headers.get("If-None-Match") === etag) {
-      return new Response(null, { status: 304, headers: { ETag: etag, "Cache-Control": "no-cache" } });
+      return new Response(null, { status: 304, headers: h });
     }
-    const h = new Headers();
     if (mime) h.set("Content-Type", mime);
     h.set("Content-Length", String(bytes.length));
-    h.set("ETag", etag);
-    h.set("Cache-Control", "no-cache");
     h.set("Accept-Ranges", "bytes");
     const range = req.headers.get("Range");
     const ifRange = req.headers.get("If-Range");

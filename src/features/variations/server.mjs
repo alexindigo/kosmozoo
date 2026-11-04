@@ -21,7 +21,7 @@ import { sha256 } from "../../cache.mjs";
 import { IMAGE_EXTENSIONS, mediaExtension } from "../../backings/mime.mjs";
 import { listImages, readImage, folderError } from "./folder-images.mjs";
 import { inspectImage } from "./image-inspection.mjs";
-import { readJson } from "../../routes.mjs";
+import { readJson, mediaHeaders } from "../../routes.mjs";
 
 // hard cap on permutations per run — a sweep is a human-scale batch, not a
 // fork bomb (F7). Above the cap the run answers 413.
@@ -259,7 +259,7 @@ export function register(app) {
   app.route("GET", "/folder-image", async req => {
     try {
       const { bytes, mime } = await readImage(new URL(req.url).searchParams.get("path"));
-      return new Response(bytes, { headers: { "Content-Type": mime, "Cache-Control": "no-store" } });
+      return new Response(bytes, { headers: mediaHeaders({ "Content-Type": mime, "Cache-Control": "no-store" }) });
     } catch (error) { return folderError(error); }
   });
   app.route("POST", "/inspect-path/<host>", async (req, { host }) => {

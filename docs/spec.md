@@ -1393,6 +1393,11 @@ with exact inclusive bytes, Content-Length and Content-Range. Unsatisfiable
 ranges return416 with `Content-Range: bytes */<length>`. Malformed, multi-range
 or unsupported units are ignored (200). Matching If-None-Match takes precedence
 (304); If-Range must match the strong content ETag, otherwise full bytes return.
+All original-media responses, including Variations folder previews, carry
+`Content-Security-Policy: sandbox` and `X-Content-Type-Options: nosniff`.
+SVG still displays as an image, but direct navigation cannot execute contributor
+scripts with application-origin authority. Range and validation responses retain
+that same policy.
 The complete file still goes through hashing/cache before slicing: no streaming
 rewrite. Comfy byte reads have a ten-second **idle** deadline, reset by headers
 and body progress; a progressing large download has no total ten-second limit.
