@@ -220,6 +220,25 @@ Deno.test("display seam: re-binding a settled element to the same URL holds no c
   } finally { f.dispose(); }
 });
 
+Deno.test("display seam: live admission ranks never become native registration dependencies", async () => {
+  const f = fixture();
+  let dispose, setRank, display, registrations = 0;
+  try {
+    f.measurements.display({ id: "second", src: "/bytes/second", priority: "background" });
+    createRoot(cleanup => {
+      dispose = cleanup;
+      const [rank, set] = createSignal(0); setRank = set;
+      display = useImageDisplay(input => { registrations++; return f.measurements.display(input); },
+        () => ({ id: "front", src: "/bytes/front", order: rank }));
+    });
+    await flush();
+    assertEquals(display.read().src, "/bytes/front");
+    setRank(10); await flush();
+    assertEquals(registrations, 1, "changing demand rank cannot re-register or abort an active native consumer");
+    display.loaded();
+  } finally { dispose?.(); f.dispose(); }
+});
+
 Deno.test("surface displays: features receive the Store's one display port at installation", async () => {
   const { makeAppStore } = await import("../client-solid/store/app-store.js");
   const location = globalThis.location, history = globalThis.history;
@@ -254,6 +273,7 @@ Deno.test("surface displays: features receive the Store's one display port at in
     if (cancelIdle === undefined) delete globalThis.cancelIdleCallback; else globalThis.cancelIdleCallback = cancelIdle;
   }
 });
+
 
 Deno.test("image resources: probes and mounted/thumbnail displays share the app-origin transport budget", async () => {
   const f = fixture({ appOrigin: "http://engine.test" }), displays = [];

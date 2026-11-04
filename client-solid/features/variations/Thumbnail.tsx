@@ -14,7 +14,7 @@ export function Thumbnail(props) {
   return <div class={`vz-thumbnail ${props.class ?? ""}`}>
     <Show when={resource()} keyed fallback={<span class="vz-thumbnail-pending">Loading preview…</span>}>
       {resource => <ThumbnailAttempt src={resource.local ? resource.src : imageRequestUrl(resource.src, "foreground", resource.attempt || null)}
-        local={resource.local} priority={props.priority} lazy={props.lazy} register={props.register}
+        local={resource.local} priority={props.priority} order={props.order} lazy={props.lazy} register={props.register}
         surface={props.surface} phase={phase} onPhase={setPhase} />}
     </Show>
     {/* Keep the clicked action connected through document outside-click
@@ -31,7 +31,7 @@ export function Thumbnail(props) {
 
 function ThumbnailAttempt(props) {
   let image;
-  const display = useImageDisplay(props.register, () => ({ id: props.local ? null : props.src, src: props.src, priority: props.priority }),
+  const display = useImageDisplay(props.register, () => ({ id: props.local ? null : props.src, src: props.src, priority: props.priority, order: props.order }),
     () => image, { lazy: !!props.lazy });
   const settle = state => { if (display.read().src != null) { display.loaded(); props.onPhase(state); } };
   const picture = <>

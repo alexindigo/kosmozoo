@@ -1605,7 +1605,7 @@ export function makeAppStore({ subscribeSources = typeof window !== "undefined" 
     // A retained surface can change its queued intent without retiring native
     // work. The existing policy already accepts live priority readers.
     const display = sizes_.display({ ...input, foregroundId: null, priority, scoped: false });
-    createEffect(() => { priority(); acquisition.reconcile(); });
+    createEffect(() => { priority(); input.order?.(); acquisition.reconcile(); });
     return display;
   }
   function updateFeedFilter(value) {

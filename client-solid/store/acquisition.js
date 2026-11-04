@@ -59,6 +59,9 @@ export function makeAcquisition({ now = () => performance.now(), scheduleIdle: i
   const current = job => !disposed && (!job.scoped || job.context === context) && !job.cancelled && (!job.valid || job.valid());
   const priority = job => (typeof job.priority === "function" ? job.priority() : job.priority) ??
     (foreground.has(job.id) ? "foreground" : fallbackPriority);
+  // A retained display may change its presentation order while queued. Reading
+  // the rank at admission preserves its native lifetime across direction changes.
+  const ordered = () => [...queued.values()].sort((a, b) => (a.order?.() ?? 0) - (b.order?.() ?? 0));
   const foregroundPending = resourceClass => [...queued.values(), ...active].some(job =>
     (!resourceClass || job.resourceClass === resourceClass) && current(job) && priority(job) === "foreground");
   const slots = (resourceClass, lane) => [...active].filter(job => job.resource && job.resourceClass === resourceClass && job.lane === lane).length;
@@ -108,9 +111,9 @@ export function makeAcquisition({ now = () => performance.now(), scheduleIdle: i
     try {
       for (const job of queued.values()) if (!current(job)) { queued.delete(job.key); job.resolve({ retired: true }); }
       if (gesture) return;
-      for (const job of queued.values()) if (eligible(job, "foreground")) start(job);
+      for (const job of ordered()) if (eligible(job, "foreground")) start(job);
       if (deadline) {
-        for (const job of queued.values()) {
+        for (const job of ordered()) {
           if (gesture || now() - started >= 8 || !deadline.didTimeout && deadline.timeRemaining() <= 0) break;
           if (backgroundReady(job)) start(job);
         }
@@ -123,14 +126,14 @@ export function makeAcquisition({ now = () => performance.now(), scheduleIdle: i
     } finally { pumping = false; }
   }
 
-  function submit({ key, id = null, url, valid, priority: lane, resource = true, resourceClass = "image", scoped = true, run }) {
+  function submit({ key, id = null, url, valid, priority: lane, order, resource = true, resourceClass = "image", scoped = true, run }) {
     if (!Object.hasOwn(RESOURCE_CAPACITY, resourceClass)) throw new Error(`Unknown acquisition resource class: ${resourceClass}`);
     if (disposed) return Promise.resolve({ retired: true });
     const existing = queued.get(key) ?? [...active].find(job => job.key === key && current(job));
     if (existing && current(existing)) return existing.promise;
     let resolve, reject;
     const promise = new Promise((yes, no) => { resolve = yes; reject = no; });
-    queued.set(key, { key, id, valid, priority: lane, resource, resourceClass,
+    queued.set(key, { key, id, valid, priority: lane, order, resource, resourceClass,
       appTransfer: resource && resourceClass === "image" && appTransfer(url), scoped, run, context, promise, resolve, reject });
     pump();
     return promise;
