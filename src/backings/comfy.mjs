@@ -35,9 +35,22 @@ export async function probe(addr, { fetcher = fetch } = {}) {
 // NEVER part of the identity; the size only when numeric. Greedy prefix so
 // "a [b].png [7]" keeps its inner brackets.
 export function parseListingEntry(n) {
-  const m = /^(.*)\s+\[([^\]]*)\]$/.exec(String(n));
-  if (!m) return { name: String(n), size: null };
-  return { name: m[1], size: /^\d+$/.test(m[2]) ? Number(m[2]) : null };
+  const text = String(n), plain = { name: text, size: null };
+  if (!text.endsWith("]")) return plain;
+  // Locate the rightmost eligible opening bracket without repartitioning a
+  // whitespace run. The old greedy prefix retains all but one separator char.
+  const line = text.search(/[\r\n\u2028\u2029]/);
+  let whitespaceEnd = line;
+  if (line >= 0) while (whitespaceEnd < text.length && /\s/.test(text[whitespaceEnd])) whitespaceEnd++;
+  for (let at = text.length - 2; at > 0; at--) {
+    if (text[at] === "]") break;
+    if (text[at] !== "[" || !/\s/.test(text[at - 1])) continue;
+    if (line >= 0 && at > whitespaceEnd) continue;
+    const end = line >= 0 && line < at ? line : at - 1;
+    const annotation = text.slice(at + 1, -1);
+    return { name: text.slice(0, end), size: /^\d+$/.test(annotation) ? Number(annotation) : null };
+  }
+  return plain;
 }
 
 // kind 'output' → [{ name, size }] (feed listing); kind 'input' → [name]
@@ -304,32 +317,46 @@ export async function inventory(addr, { client, ...options } = {}) {
 
 // Keep dynamic branches, their declared defaults and their input types together.
 // Dotted child names are ComfyUI's prompt keys, not variation parameter IDs.
-function inputSchema(input, prefix) {
+const MAX_SCHEMA_DEPTH = 32;
+const MAX_SCHEMA_ENTRIES = 100_000;
+function schemaBudget() {
+  let remaining = MAX_SCHEMA_ENTRIES;
+  return { take(count = 1) {
+    if (count > remaining) throw new RangeError("ComfyUI object_info expansion budget exceeded");
+    remaining -= count;
+  }, set(map, key, value) { this.take(); map.set(key, value); } };
+}
+
+function inputSchema(input, prefix, budget, depth = 0) {
+  if (depth > MAX_SCHEMA_DEPTH) throw new RangeError("ComfyUI object_info nesting budget exceeded");
   const schema = { types: new Map(), enums: new Map(), dynamicCombos: new Map(), defaults: new Map(), lazy: new Set() };
   for (const section of ["required", "optional"]) {
     for (const [key, spec] of Object.entries(input?.[section] ?? {})) {
+      budget.take();
       const name = `${prefix}.${key}`, t = Array.isArray(spec) ? spec[0] : spec;
       const config = Array.isArray(spec) ? spec[1] : null;
-      if (config?.lazy === true) schema.lazy.add(name);
-      if (config && Object.hasOwn(config, "default")) schema.defaults.set(name, config.default);
-      else if (section === "required") schema.defaults.set(name, undefined);
-      if (t === "INT" || t === "FLOAT") schema.types.set(name, t);
+      if (config?.lazy === true) { budget.take(); schema.lazy.add(name); }
+      if (config && Object.hasOwn(config, "default")) budget.set(schema.defaults, name, config.default);
+      else if (section === "required") budget.set(schema.defaults, name, undefined);
+      if (t === "INT" || t === "FLOAT") budget.set(schema.types, name, t);
       let raw = Array.isArray(t) ? t : t === "COMBO" ? config?.options : null;
       if (t === "COMFY_DYNAMICCOMBO_V3" && Array.isArray(config?.options)) {
         const branches = new Map();
+        budget.take(config.options.length);
         for (const option of config.options) {
           if (typeof option?.key !== "string") continue;
-          const branch = inputSchema(option.inputs, name);
+          const branch = inputSchema(option.inputs, name, budget, depth + 1);
           branches.set(option.key, branch);
           // Flat type/enum lookups also describe existing dotted prompt inputs.
-          for (const channel of ["types", "enums"]) for (const [k, v] of branch[channel]) schema[channel].set(k, v);
+          for (const channel of ["types", "enums"]) for (const [k, v] of branch[channel]) budget.set(schema[channel], k, v);
         }
-        schema.dynamicCombos.set(name, branches);
+        budget.set(schema.dynamicCombos, name, branches);
         raw = [...branches.keys()];
       }
       if (Array.isArray(raw) && raw.length) {
+        budget.take(raw.length);
         const list = [...new Set(raw.filter(v => typeof v === "string"))];
-        if (list.length) schema.enums.set(name, list);
+        if (list.length) budget.set(schema.enums, name, list);
       }
     }
   }
@@ -346,13 +373,15 @@ export async function objectInfo(addr, cache = new Map(), { fetcher = fetch, sig
     if (r.ok) {
       const info = await r.json();
       if (!info || typeof info !== "object" || Array.isArray(info)) throw new Error("Invalid object_info");
-      out = { types: new Map(), outputClasses: new Set(), enums: new Map(), lazyInputs: new Map(), dynamicCombos: new Map() };
+      const candidate = { types: new Map(), outputClasses: new Set(), enums: new Map(), lazyInputs: new Map(), dynamicCombos: new Map() };
+      const budget = schemaBudget();
       for (const [type, def] of Object.entries(info)) {
-        const schema = inputSchema(def?.input, type);
-        out.lazyInputs.set(type, new Set([...schema.lazy].map(key => key.slice(type.length + 1))));
-        if (def?.output_node) out.outputClasses.add(type);
-        for (const channel of ["types", "enums", "dynamicCombos"]) for (const [key, value] of schema[channel]) out[channel].set(key, value);
+        const schema = inputSchema(def?.input, type, budget);
+        budget.set(candidate.lazyInputs, type, new Set([...schema.lazy].map(key => key.slice(type.length + 1))));
+        if (def?.output_node) { budget.take(); candidate.outputClasses.add(type); }
+        for (const channel of ["types", "enums", "dynamicCombos"]) for (const [key, value] of schema[channel]) budget.set(candidate[channel], key, value);
       }
+      out = candidate;
     }
   } catch { /* offline — the null maps stand */ }
   cache.set(addr, { ...out, t: Date.now() });
@@ -588,7 +617,10 @@ export function freshSubmissionGraph(graph) {
 // Queue a prompt graph. Returns { ok, status, error? } — the caller owns
 // permutation-level error reporting. Failures log the host's FULL body to
 // the engine console: the response error is capped for display, but a
-// validation detail truncated at the boundary is undiagnosable.
+// validation detail truncated at the boundary is undiagnosable. Untrusted values
+// are JSON-quoted so control characters cannot become additional log records.
+const logValue = value => JSON.stringify(String(value)).replace(/[\u007f-\u009f\u2028\u2029]/g,
+  char => `\\u${char.charCodeAt(0).toString(16).padStart(4, "0")}`);
 export async function enqueue(addr, prompt, { fetcher = fetch } = {}) {
   try {
     const resp = await fetcher(`http://${addr}/api/prompt`, {
@@ -599,7 +631,7 @@ export async function enqueue(addr, prompt, { fetcher = fetch } = {}) {
     });
     if (!resp.ok) {
       const text = await resp.text();
-      console.error(`[comfy] enqueue ${addr} → ${resp.status}: ${text}`);
+      console.error(`[comfy] enqueue ${logValue(addr)} -> ${resp.status}: ${logValue(text)}`);
       return { ok: false, status: resp.status, error: `ComfyUI ${resp.status}: ${text.slice(0, 200)}` };
     }
     const data = await resp.json().catch(() => null);
@@ -613,7 +645,7 @@ export async function enqueue(addr, prompt, { fetcher = fetch } = {}) {
     return { ok: true, status: resp.status, acceptance: partial ? "partial" : "confirmed",
       promptId: data.prompt_id, nodeErrors, ...(partial ? { error: "ComfyUI accepted only part of the prompt (node errors); configuration was not acknowledged" } : {}) };
   } catch (e) {
-    console.error(`[comfy] enqueue ${addr} → fetch failed: ${e.message}`);
+    console.error(`[comfy] enqueue ${logValue(addr)} -> fetch failed: ${logValue(e.message)}`);
     return { ok: false, status: 502, error: `fetch failed: ${e.message}` };
   }
 }
