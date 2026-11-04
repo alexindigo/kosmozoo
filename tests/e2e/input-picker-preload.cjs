@@ -107,8 +107,8 @@ async function preload(cdp, check) {
       return {above:tiles.filter(t=>t.getBoundingClientRect().bottom<=box.top).length,below:tiles.filter(t=>t.getBoundingClientRect().top>=box.bottom).length};
     })()`);
     console.log('SLOW_LOOKAHEAD '+JSON.stringify(slowBand));
-    assert(slowBand.above<=15 && slowBand.below===15, 'slow scrolling retains only the base band');
     if (!process.env.E2E_PRELOAD_BASELINE) {
+      assert(slowBand.above<=15 && slowBand.below===15, 'slow scrolling retains only the base band');
       assert.equal(result.emptyTiles, 0, 'entering tiles are already loaded at a steady one-viewport scroll');
       assert.deepEqual(result.lateStarts, [], 'every entering tile starts before visibility');
       assert(result.maxRows <= 16 && result.maxTiles <= 48, 'visible rows plus symmetric lookahead stay bounded');
@@ -128,8 +128,10 @@ async function preload(cdp, check) {
       return {first:Math.min(...indices),last:Math.max(...indices),above:Array.from({length:15},(_,i)=>ready(Math.min(...indices)-i-1)),below:Array.from({length:15},(_,i)=>ready(Math.max(...indices)+i+1))};
     })()`);
     console.log('LOOKAHEAD_BAND '+JSON.stringify(band));
-    assert(band.above.every(Boolean), '15 tiles above the middle viewport are decoded');
-    assert(band.below.every(Boolean), '15 tiles below the middle viewport are decoded');
+    if (!process.env.E2E_PRELOAD_BASELINE) {
+      assert(band.above.every(Boolean), '15 tiles above the middle viewport are decoded');
+      assert(band.below.every(Boolean), '15 tiles below the middle viewport are decoded');
+    }
     const steps=[];
     for(const direction of [1,-1]) {
       const step=await cdp.evaluate(`(async()=>{
@@ -147,11 +149,15 @@ async function preload(cdp, check) {
           retainedSrcChanges:changes.filter(change=>retained.has(change.target)&&change.target.isConnected&&change.oldValue!=null).length};
       })()`);
       steps.push(step);
-      assert(step.newlyVisible>0 && step.decoded===step.newlyVisible, JSON.stringify(step));
-      assert.equal(step.retainedSrcChanges,0,'visibility changes never retire retained native sources');
+      if (!process.env.E2E_PRELOAD_BASELINE) {
+        assert(step.newlyVisible>0 && step.decoded===step.newlyVisible, JSON.stringify(step));
+        assert.equal(step.retainedSrcChanges,0,'visibility changes never retire retained native sources');
+      }
       await cdp.poll("[...document.querySelectorAll('.vz-input-option img')].every(img=>img.complete&&img.naturalWidth>0)", 15000);
     }
-    assert(maxImages<=4 && maxBackground<=2, 'both-direction lookahead respects transport and background ceilings');
+    if (!process.env.E2E_PRELOAD_BASELINE) {
+      assert(maxImages<=4 && maxBackground<=2, 'both-direction lookahead respects transport and background ceilings');
+    }
     console.log('LOOKAHEAD_STEPS '+JSON.stringify({steps,maxImages,maxBackground}));
     // Cold territory, then a touchpad-like kinetic fling. Wheel deltas decay
     // exponentially for 700ms from four viewport heights per second.
