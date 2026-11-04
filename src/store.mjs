@@ -917,7 +917,7 @@ export class Store {
       favorite: cur.favorite ? 1 : null,
       bookmark: cur.bookmark ? 1 : null,
       notes: cur.notes ?? null,
-      plugins: cur.plugins ?? null,
+      plugins: cur.plugins ? Object.assign(Object.create(null), cur.plugins) : null,
     };
     for (const [field, value] of Object.entries(patch ?? {})) {
       if (CORE_JUDGMENT_FIELDS.has(field)) {
@@ -929,8 +929,9 @@ export class Store {
         const ns = parts[1];
         const pname = parts.slice(2).join(".");
         if (!ns || !pname) return { ok: false, error: `bad judgment field: ${field}` };
-        next.plugins ??= {};
-        next.plugins[ns] ??= {};
+        next.plugins ??= Object.create(null);
+        const fields = Object.hasOwn(next.plugins, ns) ? next.plugins[ns] : null;
+        next.plugins[ns] = Object.assign(Object.create(null), fields && typeof fields === "object" ? fields : {});
         next.plugins[ns][pname] = value;
         continue;
       }
