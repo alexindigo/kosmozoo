@@ -257,6 +257,22 @@ main { display: flex; flex: 1; min-height: 0; }
 .card--probe { position: absolute; inset-inline: var(--grid-pad); top: 0; visibility: hidden;
   pointer-events: none; border-color: transparent; }
 
+/* Inventory presentation is outside the size-ready virtualized feed. */
+.feed-glimmer { display: flex; flex-direction: column; gap: var(--grid-gap); padding: 8px; }
+.feed-glimmer-card { position: relative; overflow: hidden; flex: none;
+  padding: var(--media-frame-inset); border: 1px solid var(--border);
+  border-radius: 8px; background: var(--surface); }
+.feed-glimmer-media { aspect-ratio: 16 / 9; border-radius: 4px; background: var(--lifted); }
+.feed-glimmer-foot { display: flex; align-items: center; justify-content: space-between; gap: 16px; padding-block: 16px 4px; }
+.feed-glimmer-title { width: 42%; height: 12px; border-radius: 4px; background: var(--lifted); }
+.feed-glimmer-actions { display: flex; gap: 10px; }
+.feed-glimmer-actions span { width: 12px; height: 12px; border-radius: 50%; background: var(--lifted); }
+.feed-glimmer-card::after { content: ""; position: absolute; inset: 0; pointer-events: none;
+  background: linear-gradient(105deg, transparent 20%, color-mix(in srgb, var(--foreground-mid) 24%, transparent) 50%, transparent 80%);
+  animation: feed-glimmer-sweep 1.6s ease-in-out infinite; }
+@keyframes feed-glimmer-sweep { from { transform: translateX(-100%); } to { transform: translateX(100%); } }
+@media (prefers-reduced-motion: reduce) { .feed-glimmer-card::after { animation: none; background: none; } }
+
 /* The model supplies box/content dimensions. CSS only centres the layers:
    constrained grid tracks cannot expand from native replaced-element aspect. */
 .imgwrap { position: relative; display: grid; place-items: center;
