@@ -85,13 +85,15 @@ class HTTPBudget(unittest.TestCase):
     def test_dripping_body_cannot_extend_absolute_deadline(self):
         with self.connect() as client:
             client.sendall(b'POST /detect HTTP/1.0\r\nContent-Length: 100\r\n\r\n')
+            stop = threading.Event()
             def drip():
                 for _ in range(20):
                     try:
                         client.sendall(b'x')
                     except OSError:
                         return
-                    time.sleep(0.04)
+                    if stop.wait(0.04):
+                        return
             sender = threading.Thread(target=drip, daemon=True)
             started = time.monotonic()
             sender.start()
@@ -99,8 +101,9 @@ class HTTPBudget(unittest.TestCase):
                 self.assertIn(b'408', client.recv(4096))
                 self.assertLess(time.monotonic() - started, 0.9)
             finally:
-                client.shutdown(socket.SHUT_RDWR)
+                stop.set()
                 sender.join(timeout=1)
+                self.assertFalse(sender.is_alive(), 'drip sender did not stop')
 
     def test_finished_upload_has_separate_inference_deadline(self):
         class SlowWorker(StubWorker):

@@ -33,7 +33,7 @@ Deno.test("deepscan B variations HTTP: tiny increments reject before any upstrea
     route: (method, path, handler) => handlers.set(method + path, handler) });
   const probe = await handlers.get("GET/probe/<id>")(new Request("http://x/probe"), { id: "fake:image.png" });
   const { context } = await probe.json();
-  const response = await handlers.get("POST/run")(new Request("http://x/run", { method: "POST", body: JSON.stringify({
+  const response = await handlers.get("POST/run")(new Request("http://x/run", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({
     id: "fake:image.png", host: "fake", filename: "image.png", context,
     ranges: { "n.value": { enabled: true, min: 0, max: 5e-11, increment: 1e-16 } }, imageParams: {}, prefix: "v_", suffix: "",
     acknowledgement: { version: 2, runId: crypto.randomUUID(), requestId: crypto.randomUUID() },
