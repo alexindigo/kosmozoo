@@ -68,7 +68,8 @@ class HTTPBudget(unittest.TestCase):
 
     def test_request_threads_are_bounded(self):
         service.REQUEST_READ_TIMEOUT = 2
-        clients = [self.connect(), self.connect()]
+        capacity = service.MAX_REQUESTS + service.CONTROL_REQUEST_RESERVE
+        clients = [self.connect() for _ in range(capacity)]
         try:
             time.sleep(0.05)
             with self.connect() as overflow:
@@ -81,6 +82,65 @@ class HTTPBudget(unittest.TestCase):
         finally:
             for client in clients:
                 client.close()
+
+    def test_detection_saturation_preserves_health_and_rejects_before_body_read(self):
+        entered = threading.Barrier(service.MAX_REQUESTS + 1)
+        release = threading.Event()
+        errors = []
+
+        class HeldWorker(StubWorker):
+            def detect(self, body):
+                entered.wait(timeout=2)
+                if not release.wait(timeout=3):
+                    raise TimeoutError('test failed to release inference')
+                return super().detect(body)
+
+        service.worker = HeldWorker()
+
+        def detect():
+            conn = http.client.HTTPConnection('127.0.0.1', self.port, timeout=3)
+            try:
+                conn.request('POST', '/detect', b'img')
+                response = conn.getresponse()
+                self.assertEqual(response.status, 200)
+                self.assertEqual(json.loads(response.read())['bytes'], 3)
+            except Exception as error:
+                errors.append(error)
+            finally:
+                conn.close()
+
+        threads = [threading.Thread(target=detect) for _ in range(service.MAX_REQUESTS)]
+        for thread in threads:
+            thread.start()
+        try:
+            entered.wait(timeout=2)
+            conn = http.client.HTTPConnection('127.0.0.1', self.port, timeout=0.8)
+            try:
+                conn.request('GET', '/health')
+                response = conn.getresponse()
+                self.assertEqual(response.status, 200)
+                self.assertTrue(json.loads(response.read())['model_ready'])
+            finally:
+                conn.close()
+            # Do not send the promised body: overload must reject without retaining it.
+            with self.connect() as overflow:
+                overflow.sendall(b'POST /detect HTTP/1.0\r\nContent-Length: 100\r\n\r\n')
+                self.assertIn(b'503', overflow.recv(4096))
+        finally:
+            release.set()
+            for thread in threads:
+                thread.join(timeout=3)
+                self.assertFalse(thread.is_alive())
+        self.assertEqual(errors, [])
+        service.worker = StubWorker()
+        conn = http.client.HTTPConnection('127.0.0.1', self.port, timeout=1)
+        try:
+            conn.request('POST', '/detect', b'released')
+            response = conn.getresponse()
+            self.assertEqual(response.status, 200)
+            self.assertEqual(json.loads(response.read())['bytes'], 8)
+        finally:
+            conn.close()
 
     def test_dripping_body_cannot_extend_absolute_deadline(self):
         with self.connect() as client:

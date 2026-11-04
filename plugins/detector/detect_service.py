@@ -44,7 +44,8 @@ READ_TIMEOUT = 60  # seconds — a wedged worker must not hang a request
 DEADLINE_MS = READ_TIMEOUT * 1000  # the ONE deadline; /health exposes it
 MAX_BODY = 32 * 1024 * 1024  # 32 MB — bigger images are a client bug
 REQUEST_READ_TIMEOUT = 10  # absolute header + body budget, separate from inference
-MAX_REQUESTS = 8  # bounds native threads and buffered uploads, including slow clients
+MAX_REQUESTS = 8  # detection uploads + queued/running inference
+CONTROL_REQUEST_RESERVE = 2  # HTTP readers beyond detection capacity, still finite
 
 
 class Worker:
@@ -130,7 +131,8 @@ worker = None  # spawned at startup in main()
 
 class BoundedHTTPServer(ThreadingHTTPServer):
     def __init__(self, *args, **kwargs):
-        self.slots = threading.BoundedSemaphore(MAX_REQUESTS)
+        self.slots = threading.BoundedSemaphore(MAX_REQUESTS + CONTROL_REQUEST_RESERVE)
+        self.detection_slots = threading.BoundedSemaphore(MAX_REQUESTS)
         super().__init__(*args, **kwargs)
 
     def process_request(self, request, client_address):
@@ -207,6 +209,16 @@ class Handler(BaseHTTPRequestHandler):
             return self._json(400, {"error": "empty body", "reason": "no image bytes"})
         if length > MAX_BODY:
             return self._json(413, {"error": "body too large", "reason": f">{MAX_BODY} bytes"})
+        # Admit only parsed detections, before retaining uploads. Queued inference
+        # cannot consume the bounded reserve used by health/control readers.
+        if not self.server.detection_slots.acquire(blocking=False):
+            return self._json(503, {"error": "detector overloaded"})
+        try:
+            self._detect(length)
+        finally:
+            self.server.detection_slots.release()
+
+    def _detect(self, length):
         try:
             body = self.rfile.read(length)
         except TimeoutError:
