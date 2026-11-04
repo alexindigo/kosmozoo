@@ -1,0 +1,38 @@
+const assert = require('node:assert/strict');
+require('./loading-harness.cjs').run(async ({ page, release, waitHeld, shot, ENGINE }) => {
+  await page.send('Fetch.enable', { patterns: [{ urlPattern: '*/main.js' }] });
+  await page.goto(ENGINE + '/#fake');
+  await waitHeld();
+  for (const [width, height] of [[1440, 900], [800, 600]]) {
+    await page.send('Emulation.setDeviceMetricsOverride', { width, height, deviceScaleFactor: 1, mobile: false });
+    const geometry = await page.evaluate(`(()=>{const splash=document.querySelector('#bootSplash');if(!splash)return null;const b=splash.querySelector('.boot-brand').getBoundingClientRect(),s=splash.querySelector('.boot-spinner').getBoundingClientRect(),im=splash.querySelector('img');return{brand:[b.x+b.width/2,b.y+b.height/2],spinner:s.y+s.height/2,logo:im.complete&&im.naturalWidth>0,name:splash.querySelector('.boot-name').textContent,status:splash.querySelector('[role="status"]').textContent,background:getComputedStyle(splash).backgroundColor}})()`);
+    assert(geometry, 'static boot splash visible while main module is held');
+    assert(Math.abs(geometry.brand[0] - width / 2) <= 1 && Math.abs(geometry.brand[1] - height / 2) <= 1, 'brand centered within 1px');
+    assert(geometry.logo && geometry.name === 'Kosmozoo');
+    assert.equal(geometry.status, 'Loading Kosmozoo');
+    assert(geometry.spinner / height >= .75 && geometry.spinner / height <= .8, 'spinner in lower slot');
+    console.log('ok splash geometry', width, height, geometry);
+    await shot(`loading-splash-${width}x${height}`);
+  }
+  await page.send('Emulation.setEmulatedMedia', { features: [{ name: 'prefers-reduced-motion', value: 'reduce' }] });
+  await page.evaluate(`new Promise(requestAnimationFrame)`);
+  assert.equal(await page.evaluate(`document.querySelector('#bootSplash').getAnimations({subtree:true}).length`), 0);
+  await release();
+  await page.poll(`!!document.querySelector('#chrome') && !document.querySelector('#bootSplash')`, 15000);
+  console.log('ok splash removed after mount; reduced motion has no animation');
+  await page.send('Emulation.setEmulatedMedia', { features: [] });
+  await page.send('Fetch.enable', { patterns: [{ urlPattern: '*/css/app.css' }] });
+  await page.send('Page.reload', { ignoreCache: true });
+  await waitHeld();
+  await page.poll(`!!document.querySelector('#chrome')`);
+  assert(await page.evaluate(`!!document.querySelector('#bootSplash') && getComputedStyle(document.querySelector('#bootSplash')).display==='flex'`), 'inline splash paints without app CSS and remains until styles apply');
+  const fallback = await page.evaluate(`(()=>{const s=getComputedStyle(document.querySelector('#bootSplash')),r=getComputedStyle(document.querySelector('.boot-spinner'));return[s.backgroundColor,s.color,r.borderRightColor,r.borderTopColor]})()`);
+  await shot('loading-splash-fallback');
+  await shot('loading-splash-fallback-detail', { x: 300, y: 230, width: 200, height: 280, scale: 2 });
+  await release(); await page.send('Fetch.disable');
+  await page.poll(`!document.querySelector('#bootSplash')`);
+  const palette = await page.evaluate(`(()=>{const p=document.createElement('span');document.body.append(p);const values=['--background','--foreground','--border','--foreground-mid'].map(t=>{p.style.color='var('+t+')';return getComputedStyle(p).color});p.remove();return values})()`);
+  assert.deepEqual(fallback, palette, 'inline fallback equals real background/foreground/border/foreground-mid tokens');
+  console.log('ok fallback equals applied palette', palette);
+  console.log('ok delayed stylesheet retains splash after mount, then normal fade retires it');
+});

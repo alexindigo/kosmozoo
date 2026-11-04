@@ -11,6 +11,10 @@ import { CORE_BINDINGS } from "./store/key-bindings.js";
 
 const store = appStore;
 
+// Boot owns the static shell's lifetime; inventory loading is independent.
+const stylesReady = Promise.all([...document.querySelectorAll("link[data-app-style]")].map((link) =>
+  link.sheet && link.media === "all" ? Promise.resolve() : new Promise((resolve) => link.addEventListener("load", resolve, { once: true }))));
+
 // the page itself never zooms — browser zoom gestures over the app chrome
 // are dead; image zoom lives in the app's own zoomable behavior
 installNoPageZoom();
@@ -27,6 +31,16 @@ render(
   ),
   document.getElementById("app"),
 );
+
+stylesReady.then(() => requestAnimationFrame(() => requestAnimationFrame(() => {
+  const splash = document.getElementById("bootSplash");
+  if (!splash) return;
+  if (matchMedia("(prefers-reduced-motion: reduce)").matches) splash.remove();
+  else {
+    splash.classList.add("boot-leaving");
+    Promise.allSettled(splash.getAnimations().map((animation) => animation.finished)).then(() => splash.remove());
+  }
+})));
 
 // boot failures surface on the status stack
 store.actions.lifecycle.registerPage(window);

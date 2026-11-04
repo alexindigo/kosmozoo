@@ -5,10 +5,39 @@
 <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
 <title>kosmozoo</title>
 <link rel="icon" type="image/png" href="/logo-64.png">
-<link rel="stylesheet" href="/vendor/nouislider.min.css">
-<link rel="stylesheet" href="/css/app.css">
+<style>
+/* Inline fallback colors mirror app.css: --background #111, --foreground #ddd,
+   --border #333 and --foreground-mid #999. Keep them equal for first paint. */
+html, body { margin: 0; height: 100%; background: #111; color: #ddd; }
+#bootSplash { position: fixed; inset: 0; z-index: 100; display: flex;
+  flex-direction: column; align-items: center; background: var(--background, #111);
+  color: var(--foreground, #ddd); font: 600 24px/1.4 system-ui, sans-serif;
+  transition: opacity 150ms ease; }
+#bootSplash.boot-leaving { opacity: 0; pointer-events: none; }
+.boot-spacer, .boot-lower { flex: 1; min-height: 0; }
+.boot-lower { display: flex; align-items: center; }
+.boot-brand { display: flex; flex-direction: column; align-items: center; gap: 12px; }
+.boot-brand img { width: 64px; height: 64px; border-radius: 12px; }
+.boot-name { white-space: nowrap; }
+.boot-spinner { width: 20px; height: 20px; box-sizing: border-box; border: 2px solid var(--border, #333);
+  border-top-color: var(--foreground-mid, #999); border-radius: 50%; animation: boot-spin 1s linear infinite; }
+.boot-status { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); }
+@keyframes boot-spin { to { transform: rotate(360deg); } }
+@media (prefers-reduced-motion: reduce) {
+  #bootSplash { transition: none; }
+  .boot-spinner { animation: none; }
+}
+</style>
+<link data-app-style rel="stylesheet" href="/vendor/nouislider.min.css" media="print" onload="this.media='all'">
+<link data-app-style rel="stylesheet" href="/css/app.css" media="print" onload="this.media='all'">
 </head>
 <body>
+<div id="bootSplash">
+  <div class="boot-spacer" aria-hidden="true"></div>
+  <div class="boot-brand" aria-hidden="true"><img src="/logo-64.png" width="64" height="64" alt=""><span class="boot-name">Kosmozoo</span></div>
+  <div class="boot-lower" aria-hidden="true"><span class="boot-spinner"></span></div>
+  <span class="boot-status" role="status" aria-live="polite">Loading Kosmozoo</span>
+</div>
 <div id="app"></div>
 <script type="module" src="/main.js"></script>
 </body>
