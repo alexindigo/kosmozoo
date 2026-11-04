@@ -1,11 +1,19 @@
 // Output-root-relative POSIX addresses shared by engine and browser. Never
 // normalize an invalid address into another entry's identity or decode it here.
 const CONTROL = /[\u0000-\u001f\u007f-\u009f]/;
+const MAX_ENTRY_PATH_CHARS = 4096;
+const MAX_ENTRY_PATH_COMPONENTS = 128;
+const MAX_INVENTORY_FOLDER_CHARS = 16 * 1024 * 1024;
 
 export function isEntryPath(name) {
-  return typeof name === "string" && name.length > 0 && !CONTROL.test(name) &&
+  return typeof name === "string" && name.length > 0 && name.length <= MAX_ENTRY_PATH_CHARS && !CONTROL.test(name) &&
     !name.includes("\\") && !/^[a-z]:\//i.test(name) &&
-    name.split("/").every((part) => part !== "" && part !== "." && part !== "..");
+    validComponents(name);
+}
+
+function validComponents(name) {
+  const parts = name.split("/");
+  return parts.length <= MAX_ENTRY_PATH_COMPONENTS && parts.every(part => part !== "" && part !== "." && part !== "..");
 }
 
 export const isFolderPath = (folder) => folder === "" || isEntryPath(folder);
@@ -27,13 +35,21 @@ export function splitEntryPath(name) {
 export function folderAncestors(name) {
   const { subfolder } = splitEntryPath(name);
   if (!subfolder) return [];
-  const parts = subfolder.split("/");
-  return parts.map((_, i) => parts.slice(0, i + 1).join("/"));
+  const ancestors = [];
+  for (let at = subfolder.indexOf("/"); at >= 0; at = subfolder.indexOf("/", at + 1)) ancestors.push(subfolder.slice(0, at));
+  ancestors.push(subfolder);
+  return ancestors;
 }
 
 export function inventoryFolders(items) {
   const folders = new Set([""]);
-  for (const { name } of items) for (const folder of folderAncestors(name)) folders.add(folder);
+  let retained = 0;
+  for (const { name } of items) for (const folder of folderAncestors(name)) {
+    if (folders.has(folder)) continue;
+    if (folder.length > MAX_INVENTORY_FOLDER_CHARS - retained) throw new RangeError("Inventory folder string budget exceeded");
+    retained += folder.length;
+    folders.add(folder);
+  }
   return [...folders].sort((a, b) => a < b ? -1 : a > b ? 1 : 0);
 }
 
