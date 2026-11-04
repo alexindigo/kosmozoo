@@ -10,10 +10,15 @@ const directory = process.env.E2E_SECURITY_DIR;
   const path = directory + "/deepscan.svg";
   const attacker = http.createServer((_req, res) => { res.setHeader("Content-Type", "text/html"); res.end("<!doctype html><title>Foreign origin</title>"); });
   let page;
+  let ownsFixture = false;
   try {
-    fs.writeFileSync(path, `<svg xmlns="http://www.w3.org/2000/svg" width="48" height="32">
+    const fixture = fs.openSync(path, "wx");
+    ownsFixture = true;
+    try {
+      fs.writeFileSync(fixture, `<svg xmlns="http://www.w3.org/2000/svg" width="48" height="32">
     <script>globalThis.deepscanExecuted=true;fetch('/api/settings/core.deepscan-svg',{method:'PATCH',headers:{'Content-Type':'application/json'},body:'{"executed":true}'})</script>
     <rect width="48" height="32" fill="red"/></svg>`);
+    } finally { fs.closeSync(fixture); }
     await new Promise((resolve, reject) => { attacker.once("error", reject); attacker.listen(19163, "127.0.0.1", resolve); });
     page = await CDP.launch(19164);
     const entry = ENGINE + "/api/collections/mut/entries/deepscan.svg/bytes";
@@ -56,7 +61,7 @@ const directory = process.env.E2E_SECURITY_DIR;
     finally {
       try {
         if (attacker.listening) await new Promise((resolve, reject) => attacker.close(error => error ? reject(error) : resolve()));
-      } finally { fs.rmSync(path, { force: true }); }
+      } finally { if (ownsFixture) fs.rmSync(path, { force: true }); }
     }
   }
 })().catch(error => { console.error(error); process.exitCode = 1; });
