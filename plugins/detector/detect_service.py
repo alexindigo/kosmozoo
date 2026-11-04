@@ -31,6 +31,7 @@ import base64
 import json
 import os
 import queue
+import socket
 import subprocess
 import sys
 import threading
@@ -42,6 +43,8 @@ WORKER = os.environ.get("DETECT_WORKER", str(Path(__file__).parent / "detect_wor
 READ_TIMEOUT = 60  # seconds — a wedged worker must not hang a request
 DEADLINE_MS = READ_TIMEOUT * 1000  # the ONE deadline; /health exposes it
 MAX_BODY = 32 * 1024 * 1024  # 32 MB — bigger images are a client bug
+REQUEST_READ_TIMEOUT = 10  # absolute header + body budget, separate from inference
+MAX_REQUESTS = 8  # bounds native threads and buffered uploads, including slow clients
 
 
 class Worker:
@@ -125,11 +128,54 @@ class Worker:
 worker = None  # spawned at startup in main()
 
 
+class BoundedHTTPServer(ThreadingHTTPServer):
+    def __init__(self, *args, **kwargs):
+        self.slots = threading.BoundedSemaphore(MAX_REQUESTS)
+        super().__init__(*args, **kwargs)
+
+    def process_request(self, request, client_address):
+        if not self.slots.acquire(blocking=False):
+            self.shutdown_request(request)
+            return
+        try:
+            super().process_request(request, client_address)
+        except Exception:
+            self.slots.release()
+            raise
+
+    def process_request_thread(self, request, client_address):
+        try:
+            super().process_request_thread(request, client_address)
+        finally:
+            self.slots.release()
+
+
 class Handler(BaseHTTPRequestHandler):
+    def handle_one_request(self):
+        self.connection.settimeout(REQUEST_READ_TIMEOUT)
+        self._read_expired = threading.Event()
+        self._read_timer = threading.Timer(REQUEST_READ_TIMEOUT, self._expire_read)
+        self._read_timer.daemon = True
+        self._read_timer.start()
+        try:
+            super().handle_one_request()
+        finally:
+            self._read_timer.cancel()
+
+    def _expire_read(self):
+        # A socket inactivity timeout alone can be extended forever by drips.
+        # Interrupt only reads, so an incomplete body can still receive a 408.
+        self._read_expired.set()
+        try:
+            self.connection.shutdown(socket.SHUT_RD)
+        except OSError:
+            pass  # request already closed
+
     def log_message(self, *a):  # quiet
         pass
 
     def _json(self, code, obj):
+        self._read_timer.cancel()
         body = json.dumps(obj).encode()
         self.send_response(code)
         self.send_header("Content-Type", "application/json")
@@ -149,14 +195,25 @@ class Handler(BaseHTTPRequestHandler):
             self._json(404, {"error": "not found"})
 
     def do_POST(self):
+        if self._read_expired.is_set():
+            return self._json(408, {"error": "request read deadline exceeded"})
         if self.path != "/detect":
             return self._json(404, {"error": "not found"})
-        length = int(self.headers.get("Content-Length") or 0)
+        try:
+            length = int(self.headers.get("Content-Length") or 0)
+        except ValueError:
+            return self._json(400, {"error": "invalid Content-Length"})
         if length <= 0:
             return self._json(400, {"error": "empty body", "reason": "no image bytes"})
         if length > MAX_BODY:
             return self._json(413, {"error": "body too large", "reason": f">{MAX_BODY} bytes"})
-        body = self.rfile.read(length)
+        try:
+            body = self.rfile.read(length)
+        except TimeoutError:
+            return self._json(408, {"error": "request read deadline exceeded"})
+        if len(body) != length or self._read_expired.is_set():
+            return self._json(408, {"error": "incomplete request body"})
+        self._read_timer.cancel()  # inference has its own worker deadline
         try:
             res = worker.detect(body)
             self._json(200, res)
@@ -168,4 +225,4 @@ if __name__ == "__main__":
     port = int(sys.argv[1]) if len(sys.argv) > 1 else 8471
     worker = Worker()  # spawned at startup — /health is honest pre-model
     print(f"kosmozoo detect service on :{port} (worker: {WORKER})", flush=True)
-    ThreadingHTTPServer(("127.0.0.1", port), Handler).serve_forever()
+    BoundedHTTPServer(("127.0.0.1", port), Handler).serve_forever()
