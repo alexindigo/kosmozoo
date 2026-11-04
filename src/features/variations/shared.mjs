@@ -162,9 +162,19 @@ export function uploadFamily(name, names) {
     /^[1-9]\d*$/.test(candidate.slice(prefix.length, -suffix.length)) && Number.isSafeInteger(Number(candidate.slice(prefix.length, -suffix.length))));
 }
 
+const MAX_PERMUTATION_VISITS = 100_000;
+const MAX_PERMUTATION_AXES = 128;
+
 export function generatePermutations(ranges, currentValues, imageParams = {}) {
   const plan = permutationPlan(ranges, currentValues, imageParams);
   if (!plan.axes.length || plan.total === 0) return [];
+  // Output count excludes current tuples; it cannot certify raw traversal cost.
+  // Count every prefix visit before entering the synchronous generator.
+  let width = 1, visits = 0;
+  for (const axis of plan.axes) {
+    width *= axis.length; visits += width;
+    if (visits > MAX_PERMUTATION_VISITS) throw new Error("permutation work budget exceeded; increase the increment or reduce the axes");
+  }
   const output = [];
   const visit = (index, values, current) => {
     if (index === plan.axes.length) { if (!current) output.push(Object.fromEntries(values)); return; }
@@ -182,6 +192,7 @@ export function generatePermutations(ranges, currentValues, imageParams = {}) {
 // not allocate the Cartesian product or serialize arbitrary text through a separator.
 export function permutationPlan(ranges, currentValues, imageParams = {}) {
   const { enabled, imgEnabled } = permutationAxes(ranges, imageParams);
+  if (enabled.length + imgEnabled.length > MAX_PERMUTATION_AXES) throw new Error("permutation axis work budget exceeded");
   const fmt = value => typeof value === "string" ? value : formatValue(value);
   const axes = [];
   for (const [id, range] of enabled) {
