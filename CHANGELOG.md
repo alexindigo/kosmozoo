@@ -44,6 +44,8 @@ Security hardening validates cache digests, rejects cross-site mutation requests
 and serves user media as sandboxed documents. Resource budgets limit metadata
 processing and uploads, while packaging checks validate executable inputs.
 
+Official `kosmozoo-linux-x86_64` SHA-256: `ff2486bfd42f0c50c0e48eb08a52ac9ec8eee826f873629e6e4cad90d0179d34`.
+
 ## 0.2.2 — 2026-10-19
 
 Fresh installs start with no sources instead of assuming a local ComfyUI server.
