@@ -278,7 +278,7 @@ Deno.test("source engine shutdown: SIGTERM retires a deliberately open subscribe
   const directory = await Deno.makeTempDir({ prefix: "kz-source-stop-" });
   const listener = Deno.listen({ hostname: "127.0.0.1", port: 0 }), port = listener.addr.port; listener.close();
   const child = new Deno.Command(Deno.execPath(), { args: ["run", "--frozen", "--allow-all", "src/main.mjs"],
-    env: { KOZMOZOO_PORT: String(port), KOZMOZOO_HOSTS: "", KOZMOZOO_STATE: directory,
+    env: { KOZMOZOO_BIND: "127.0.0.1", KOZMOZOO_PORT: String(port), KOZMOZOO_HOSTS: "", KOZMOZOO_STATE: directory,
       KOZMOZOO_CACHE: `${directory}/cache`, KOZMOZOO_FEEDBACK: "" }, stdout: "piped", stderr: "piped" }).spawn();
   const output = new Response(child.stdout).text(), errors = new Response(child.stderr).text();
   let reader, ended = false, timer;
@@ -288,6 +288,8 @@ Deno.test("source engine shutdown: SIGTERM retires a deliberately open subscribe
       catch { await new Promise(resolve => setTimeout(resolve, 50)); }
     }
     assert(reader, "actual source engine admitted the subscriber");
+    const runtime = await (await fetch(`http://127.0.0.1:${port}/api/runtime`)).json();
+    assertEquals(runtime.binding.hostname, "127.0.0.1", "shutdown fixture must not expose filesystem APIs to peers");
     const frame = await nextFrame(reader); validateSourceSnapshot(frame);
     const started = performance.now(); child.kill("SIGTERM");
     const status = await Promise.race([child.status, new Promise((_resolve, reject) => {

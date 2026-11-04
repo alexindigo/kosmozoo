@@ -69,6 +69,7 @@ docker run -d --name kz-e2e-engine --network host -v "$WORK":/work -w /work \
   "${deno_args[@]}" \
   -e KOZMOZOO_HOSTS="fake=127.0.0.1:$FAKE_PORT,another=127.0.0.1:$FAKE2_PORT,fixture-dir=folder:/work/tests/fixtures,mut=folder:/work/tests/.tmp-mutable" \
   -e KOZMOZOO_PORT="$ENGINE_PORT" \
+  -e KOZMOZOO_BIND=127.0.0.1 \
   -e KOZMOZOO_STATE=/work/tests/.tmp-runtime/state \
   -e KOZMOZOO_CACHE=/work/tests/.tmp-runtime/cache \
   -e HOME=/work/tests/.tmp-runtime/home \
@@ -172,6 +173,7 @@ timeout 30s chmod 1777 "$WORK/tests/.tmp-fresh/tmp"
 timeout 30s docker run -d --name kz-e2e-fresh-engine --user "$FRESH_USER" --network host -v "$WORK":/work -w /work \
   -v "$DENO_CACHE":/deno-dir \
   -e KOZMOZOO_PORT="$FRESH_ENGINE_PORT" \
+  -e KOZMOZOO_BIND=127.0.0.1 \
   -e KOZMOZOO_STATE=/work/tests/.tmp-fresh/state \
   -e KOZMOZOO_CACHE=/work/tests/.tmp-fresh/cache \
   -e KOZMOZOO_PLUGINS=/work/plugins \
@@ -210,6 +212,7 @@ timeout 30s docker run -d --name kz-e2e-perf-fake --network host -v "$WORK":/wor
 timeout 30s docker run -d --name kz-e2e-perf-engine --network host -v "$WORK":/work -w /work \
   --memory=768m --memory-swap=768m --pids-limit=256 --cpus=2 \
   "${deno_args[@]}" -e KOZMOZOO_PORT="$PERF_ENGINE_PORT" \
+  -e KOZMOZOO_BIND=127.0.0.1 \
   -e KOZMOZOO_STATE=/work/tests/.tmp-runtime/perf/state \
   -e KOZMOZOO_CACHE=/work/tests/.tmp-runtime/perf/cache \
   -e KOZMOZOO_PLUGINS=/work/plugins -e HOME=/work/tests/.tmp-runtime/perf/home \
@@ -246,6 +249,7 @@ timeout 30s docker run -d --name kz-e2e-scale-sources --network host -v "$WORK":
 timeout 30s docker run -d --name kz-e2e-scale-engine --network host -v "$WORK":/work -w /work \
   --memory=1200m --memory-swap=1200m --pids-limit=256 --cpus=2 \
   "${deno_args[@]}" -e KOZMOZOO_PORT="$SCALE_ENGINE_PORT" \
+  -e KOZMOZOO_BIND=127.0.0.1 \
   -e KOZMOZOO_STATE=/work/tests/.tmp-runtime/scale/state \
   -e KOZMOZOO_CACHE=/work/tests/.tmp-runtime/scale/cache \
   -e KOZMOZOO_PLUGINS=/work/plugins -e HOME=/work/tests/.tmp-runtime/scale/home \

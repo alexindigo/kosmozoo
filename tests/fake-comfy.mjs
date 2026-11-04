@@ -255,7 +255,7 @@ function queueRows(ids) {
   });
 }
 
-export const server = Deno.serve({ port }, async (req) => {
+const handleRequest = async (req) => {
   const url = new URL(req.url);
   const p = url.pathname;
 
@@ -553,7 +553,13 @@ export const server = Deno.serve({ port }, async (req) => {
   }
 
   return new Response("not found", { status: 404 });
-});
+};
+
+// Separate loopback identities exercise address-scoped catalogues and startup
+// behavior. Bind each explicitly rather than exposing a wildcard listener.
+export const server = Deno.serve({ port, hostname: "127.0.0.1" }, handleRequest);
+export const servers = [server, ...["127.0.0.2", "127.0.0.3"].map(hostname =>
+  Deno.serve({ port: server.addr.port, hostname }, handleRequest))];
 
 console.log(
   `fake-comfy on :${port} — ${fixtures.size} fixtures, ${bulkCount} bulk, ` +

@@ -33,6 +33,13 @@ async function sourceShot(page, name) {
 // evaluate/poll await promises (awaitPromise) — probes wrap in async IIFEs.
 const KZ = `(await import("/store/instance.js")).appStore`;
 
+// One expression builder for card lookups in executable browser probes.
+function cardExpression(name) {
+  // Compare literal dataset values: names enter neither JS nor CSS grammar.
+  return `[...document.querySelectorAll(".card")].find(card => card.dataset.name === ${JSON.stringify(name)})`;
+}
+module.exports = { cardExpression };
+
 let failures = 0;
 function check(name, ok, detail = "") {
   console.log(`${ok ? "ok  " : "FAIL"}  ${name}${detail ? "  (" + detail + ")" : ""}`);
@@ -42,7 +49,7 @@ async function attempt(name, fn) {
   try { await fn(); } catch (e) { check(name, false, e.message.slice(0, 160)); }
 }
 
-(async () => {
+if (require.main === module) (async () => {
   const page = await CDP.launch(9333, { windowSize: "1600,1200" });
   const pageErrors = await collectPageErrors(page);
 
@@ -250,9 +257,9 @@ async function attempt(name, fn) {
   await attempt("down-vote auto-hides the card", async () => {
     const before = await page.evaluate("document.querySelectorAll('.card').length");
     const name = await page.evaluate("document.querySelector('.card').dataset.name");
-    const sel = `.card[data-name="${name}"]`;
-    await page.evaluate(`document.querySelector('${sel} .votebtn.down').click()`);
-    const gone = await page.poll(`!document.querySelector('${sel}')`, 3000)
+    const card = cardExpression(name);
+    await page.evaluate(`${card}.querySelector('.votebtn.down').click()`);
+    const gone = await page.poll(`!${card}`, 3000)
       .then(() => true).catch(() => false);
     check("card left the feed right away", gone);
     await page.evaluate(`(async () => {
@@ -268,9 +275,9 @@ async function attempt(name, fn) {
     await page.evaluate(`(async () => ${KZ}.actions.judgments.toggleHideUp())()`);
     await page.poll("!!document.querySelector('.card .votebtn.up')", 3000);
     const nameUp = await page.evaluate("document.querySelector('.card').dataset.name");
-    const selUp = `.card[data-name="${nameUp}"]`;
-    await page.evaluate(`document.querySelector('${selUp} .votebtn.up').click()`);
-    const goneUp = await page.poll(`!document.querySelector('${selUp}')`, 3000)
+    const cardUp = cardExpression(nameUp);
+    await page.evaluate(`${cardUp}.querySelector('.votebtn.up').click()`);
+    const goneUp = await page.poll(`!${cardUp}`, 3000)
       .then(() => true).catch(() => false);
     check("up-vote hides when coupling on", goneUp);
     await page.evaluate(`(async () => {
