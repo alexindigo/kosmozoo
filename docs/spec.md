@@ -95,11 +95,11 @@ cache/store/backing access. Comfy reads, HEAD/range/stat, input references and
 deletion split path into transport `subfolder` and leaf `filename` only at the
 backing boundary. Hide-history matching also includes output type and directory.
 
-Canonical Comfy names are bounded to 4096 JavaScript string characters and 128
+Canonical Comfy names are bounded to 4096 JavaScript string code units and 128
 slash-separated components, including the leaf filename. Over-limit names are
 invalid records: the complete inventory fails closed and retains its prior
-accepted snapshot. These per-name bounds are separate from the 16 MiB aggregate
-folder-string budget used when deriving the inventory's ancestor folders.
+accepted snapshot. These per-name bounds are separate from the aggregate budget
+of 16,777,216 JavaScript string code units for unique ancestor folder strings.
 
 ### Output inventory and folder scope
 
