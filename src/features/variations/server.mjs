@@ -21,6 +21,7 @@ import { sha256 } from "../../cache.mjs";
 import { IMAGE_EXTENSIONS, mediaExtension } from "../../backings/mime.mjs";
 import { listImages, readImage, folderError } from "./folder-images.mjs";
 import { inspectImage } from "./image-inspection.mjs";
+import { readJson, mediaHeaders } from "../../routes.mjs";
 
 // hard cap on permutations per run — a sweep is a human-scale batch, not a
 // fork bomb (F7). Above the cap the run answers 413.
@@ -241,7 +242,7 @@ export function register(app) {
   app.route("GET", "/folder-chooser", async () => Response.json(await app.desktop.capability()));
   app.route("POST", "/choose-folder", async req => {
     let body;
-    try { body = await req.json(); } catch { return Response.json({ error: "Folder path required" }, { status: 400 }); }
+    try { body = await readJson(req); } catch { return Response.json({ error: "Folder path required" }, { status: 400 }); }
     if (!body || typeof body.path !== "string") return Response.json({ error: "Folder path required" }, { status: 400 });
     try { return Response.json(await app.desktop.choose({ path: body.path, signal: req.signal })); }
     catch (error) { return Response.json({ error: error.message }, { status: error.status ?? 502 }); }
@@ -252,24 +253,24 @@ export function register(app) {
     return { origin, token };
   };
   app.route("POST", "/folder-images", async req => {
-    try { return Response.json(await listImages((await req.json()).path)); }
+    try { return Response.json(await listImages((await readJson(req)).path)); }
     catch (error) { return folderError(error); }
   });
   app.route("GET", "/folder-image", async req => {
     try {
       const { bytes, mime } = await readImage(new URL(req.url).searchParams.get("path"));
-      return new Response(bytes, { headers: { "Content-Type": mime, "Cache-Control": "no-store" } });
+      return new Response(bytes, { headers: mediaHeaders({ "Content-Type": mime, "Cache-Control": "no-store" }) });
     } catch (error) { return folderError(error); }
   });
   app.route("POST", "/inspect-path/<host>", async (req, { host }) => {
     try {
-      const { origin, token } = source(req, host), body = await req.json(), file = await readImage(body.path);
+      const { origin, token } = source(req, host), body = await readJson(req), file = await readImage(body.path);
       return await inspectImage(app, token, host, { ...body, ...file }, origin);
     } catch (error) { return folderError(error); }
   });
   app.route("POST", "/upload-path/<host>", async (req, { host }) => {
     try {
-      const { origin, token } = source(req, host), body = await req.json();
+      const { origin, token } = source(req, host), body = await readJson(req);
       if (!/^[a-f0-9]{64}$/.test(body.hash)) return Response.json({ error: "Inspected image hash required" }, { status: 400 });
       const file = await readImage(body.path);
       if (await sha256(file.bytes) !== body.hash) return Response.json({ error: "Image changed since it was added. Remove and add it again." }, { status: 409 });
@@ -343,7 +344,7 @@ export function register(app) {
 
   app.route("POST", "/run", async (req) => {
     let body;
-    try { body = await req.json(); }
+    try { body = await readJson(req); }
     catch { return Response.json({ error: "JSON body required" }, { status: 400 }); }
 
     if (!body || typeof body !== "object" || Array.isArray(body)) return Response.json({ error: "JSON object required" }, { status: 400 });

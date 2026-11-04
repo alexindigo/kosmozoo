@@ -99,7 +99,7 @@ Deno.test("submission: real variations run sends every batch permutation through
       imageParams: { "76.image": { enabled: true, values: ["a.jpg", "b.jpg", "c.jpg"] } },
       context: (await probe.json()).context,
       acknowledgement: { version: 2, runId: crypto.randomUUID(), requestId: crypto.randomUUID() } };
-    const response = await routes.get("POST/run")(new Request("http://x/run", { method: "POST", body: JSON.stringify(body) }));
+    const response = await routes.get("POST/run")(new Request("http://x/run", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) }));
     assertEquals(response.status, 200);
     const result = await response.json();
     assertEquals(result.submitted, 3); assertEquals(result.errors, []);

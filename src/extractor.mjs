@@ -283,20 +283,44 @@ export function extractMetaFromGraph(graph) {
 
 const PNG_SIG = new Uint8Array([137, 80, 78, 71, 13, 10, 26, 10]);
 const PNG_READ_CAP = 256 * 1024;
+const METADATA_TEXT_BYTES = 8 * 1024 * 1024;
+const PNG_META_KEYS = new Set(["prompt", "workflow", "kz"]);
 
-async function inflateRaw(bytes) {
+// Charge the complete extraction, not each entry/chunk independently. A failed
+// expansion consumes the remainder so later chunks cannot restart the bomb.
+function textBudget() {
+  return { remaining: METADATA_TEXT_BYTES, take(size) {
+    if (size > this.remaining) { this.remaining = 0; throw new RangeError("Metadata text byte budget exceeded"); }
+    this.remaining -= size;
+  } };
+}
+
+async function inflateRaw(bytes, budget) {
   const ds = new DecompressionStream("deflate");
-  const stream = new Blob([bytes]).stream().pipeThrough(ds);
-  return new Uint8Array(await new Response(stream).arrayBuffer());
+  const reader = new Blob([bytes]).stream().pipeThrough(ds).getReader();
+  const parts = []; let size = 0;
+  try {
+    while (true) {
+      const { value, done } = await reader.read();
+      if (done) break;
+      budget.take(value.byteLength);
+      parts.push(value); size += value.byteLength;
+    }
+  } catch (error) { await reader.cancel(error).catch(() => {}); throw error; }
+  finally { reader.releaseLock(); }
+  const out = new Uint8Array(size); let at = 0;
+  for (const part of parts) { out.set(part, at); at += part.byteLength; }
+  return out;
 }
 
 // Read PNG text chunks until the first IDAT; returns {keyword: str}, or null
 // if the bytes aren't a PNG. Stops early — ComfyUI writes prompt/workflow
 // right after IHDR.
-export async function parsePngTextChunks(buf, { allChunks = false } = {}) {
+export async function parsePngTextChunks(buf, { allChunks = false, keys = null } = {}) {
   if (buf.length < 8) return null;
   for (let i = 0; i < 8; i++) if (buf[i] !== PNG_SIG[i]) return null;
   const out = {};
+  const budget = textBudget();
   let off = 8;
   const dv = new DataView(buf.buffer, buf.byteOffset, buf.byteLength);
   while (off + 12 <= (allChunks ? buf.length : Math.min(buf.length, PNG_READ_CAP))) {
@@ -308,25 +332,30 @@ export async function parsePngTextChunks(buf, { allChunks = false } = {}) {
     off += 12 + length; // advance BEFORE parsing — a bad chunk must not loop
     if (type === "IEND") break;
     if (!["tEXt", "zTXt", "iTXt", "comf"].includes(type)) continue;
+    if (!budget.remaining) break;
     try {
       if (type === "tEXt" || type === "comf") {
         const nul = payload.indexOf(0);
         if (nul < 0) continue; // malformed: no keyword terminator
         const key = new TextDecoder("latin1").decode(payload.subarray(0, nul));
+        if (keys && !keys.has(key)) continue;
+        budget.take(payload.length - nul - 1);
         out[key] = new TextDecoder("latin1").decode(payload.subarray(nul + 1));
       } else if (type === "zTXt") {
         const nul = payload.indexOf(0);
         if (nul < 0) continue;
         const key = new TextDecoder("latin1").decode(payload.subarray(0, nul));
+        if (keys && !keys.has(key)) continue;
         const rest = payload.subarray(nul + 1);
         if (rest[0] === 0) { // method 0 = zlib
           out[key] = new TextDecoder("utf-8", { fatal: false })
-            .decode(await inflateRaw(rest.subarray(1)));
+            .decode(await inflateRaw(rest.subarray(1), budget));
         }
       } else if (type === "iTXt") {
         const nul = payload.indexOf(0);
         if (nul < 0) continue; // malformed: no keyword terminator
         const key = new TextDecoder("latin1").decode(payload.subarray(0, nul));
+        if (keys && !keys.has(key)) continue;
         let rest = payload.subarray(nul + 1);
         if (rest.length >= 2) {
           const compressed = rest[0];
@@ -337,7 +366,8 @@ export async function parsePngTextChunks(buf, { allChunks = false } = {}) {
           n2 = rest.indexOf(0);
           if (n2 < 0) continue; // malformed: no translated-keyword terminator
           let text = rest.subarray(n2 + 1); // translated
-          if (compressed) text = await inflateRaw(text);
+          if (compressed) text = await inflateRaw(text, budget);
+          else budget.take(text.length);
           out[key] = new TextDecoder("utf-8", { fatal: false }).decode(text);
         }
       }
@@ -369,7 +399,7 @@ export async function metaFromBytes(buf, name) {
     "audio/flac": "flac", "audio/ogg": "opus", "audio/mpeg": "mp3", "audio/wav": "wav" })[mime] : mediaExtension(name);
   const kind = mediaKind(`media.${ext}`);
   let tags = null;
-  if (kind === "image" && ext === "png") tags = await parsePngTextChunks(buf, { allChunks: true });
+  if (kind === "image" && ext === "png") tags = await parsePngTextChunks(buf, { allChunks: true, keys: PNG_META_KEYS });
   else if (kind === "image" && ext === "webp") tags = webpTags(buf);
   else if (kind === "video" && (ext === "mp4" || ext === "mov")) tags = quickTime(buf).tags;
   else if (kind === "video" && ext === "webm") tags = matroska(buf).tags;
@@ -488,7 +518,12 @@ export function imageDims(buf) {
 // --- container readers -----------------------------------------------------
 // Bounds come from container records, never string-search through compressed
 // media. Truncated/foreign metadata is absent, not an ingestion failure.
-const utf8 = bytes => new TextDecoder().decode(bytes).replace(/\0+$/, "");
+function trimNuls(text) {
+  let end = text.length;
+  while (end > 0 && text.charCodeAt(end - 1) === 0) end--;
+  return text.slice(0, end);
+}
+const utf8 = bytes => trimNuls(new TextDecoder().decode(bytes));
 const view = bytes => new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
 function putTag(tags, key, value) {
   key = key.toLowerCase();
@@ -607,7 +642,7 @@ function id3Tags(buf) {
     if (split < 0) continue;
     const label = encoding === 0 ? "latin1" : encoding === 3 ? "utf-8" :
       encoding === 2 || (text[0] === 254 && text[1] === 255) ? "utf-16be" : "utf-16le";
-    const decode = bytes => new TextDecoder(label).decode(bytes).replace(/\0+$/, "");
+    const decode = bytes => trimNuls(new TextDecoder(label).decode(bytes));
     putTag(tags, decode(text.subarray(0, split)), decode(text.subarray(split + (wide ? 2 : 1))));
   }
   return tags;
@@ -636,11 +671,12 @@ function waveTags(buf) {
 function webpTags(buf) {
   const tags = Object.create(null);
   if (ascii(buf, 0, 4) !== "RIFF" || ascii(buf, 8, 4) !== "WEBP") return tags;
-  const dv = view(buf), end = Math.min(buf.length, dv.getUint32(4, true) + 8);
+  const dv = view(buf), end = Math.min(buf.length, dv.getUint32(4, true) + 8), budget = textBudget();
   for (let off = 12; off + 8 <= end;) {
     const length = dv.getUint32(off + 4, true), start = off + 8;
     if (length > end - start) break;
     if (ascii(buf, off, 4) === "EXIF") {
+      const decoded = new Map();
       let tiff = buf.subarray(start, start + length);
       if (ascii(tiff, 0, 6) === "Exif\0\0") tiff = tiff.subarray(6);
       if (tiff.length >= 8) {
@@ -655,8 +691,14 @@ function webpTags(buf) {
               const size = td.getUint32(entry + 4, le);
               const at = size <= 4 ? entry + 8 : td.getUint32(entry + 8, le);
               if (size > tiff.length - at) continue;
-              const text = utf8(tiff.subarray(at, at + size));
-              const match = /^(prompt|workflow|kz):([\s\S]*)$/i.exec(text);
+              const range = `${at}:${size}`;
+              if (!decoded.has(range)) {
+                if (size > budget.remaining) return tags;
+                budget.take(size);
+                const text = utf8(tiff.subarray(at, at + size));
+                decoded.set(range, /^(prompt|workflow|kz):([\s\S]*)$/i.exec(text));
+              }
+              const match = decoded.get(range);
               if (match) putTag(tags, match[1], match[2]);
             }
           }

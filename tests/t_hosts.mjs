@@ -119,7 +119,7 @@ Deno.test("hosts: real add route canonicalizes before persistence, identity comp
     return Promise.resolve(Response.json({}));
   };
   const post = address => router.handle(new Request("http://engine/api/collections", {
-    method: "POST", body: JSON.stringify({ name: "studio", address, pinned: true }),
+    method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ name: "studio", address, pinned: true }),
   }));
   try {
     const added = await post("comfy.home");
@@ -235,7 +235,7 @@ Deno.test("sources: offline partial patches validate atomically, repeat POST pre
     jobs: { reconcile() { reconciles++; }, subscribe: () => () => {}, snapshot: () => ({ supported: true, state: "unknown", terminalRevision: 0 }) },
   }));
   const patch = (id, body) => router.handle(new Request(`http://x/api/collections/${id}`, {
-    method: "PATCH", body: JSON.stringify(body),
+    method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body),
   }));
   try {
     const flags = async response => { const { sourceVersion, ...result } = await response.json(); assert(sourceVersion); return result; };
@@ -248,9 +248,9 @@ Deno.test("sources: offline partial patches validate atomically, repeat POST pre
       assertEquals((await patch("a", bad)).status, 400);
       assertEquals(rig.store.collectionGet("a").pinned, 0, "the whole patch is validated before any write");
     }
-    assertEquals((await router.handle(new Request("http://x/api/collections/a", { method: "PATCH", body: "{" }))).status, 400);
+    assertEquals((await router.handle(new Request("http://x/api/collections/a", { method: "PATCH", headers: { "Content-Type": "application/json" }, body: "{" }))).status, 400);
     assertEquals((await patch("missing", { pinned: true })).status, 404);
-    const post = (body) => router.handle(new Request("http://x/api/collections", { method: "POST", body: JSON.stringify(body) }));
+    const post = (body) => router.handle(new Request("http://x/api/collections", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) }));
     const again = await post({ name: "a", address: hosts.a, pinned: true, autoRefresh: false });
     assertEquals(again.status, 200);
     assertEquals((await again.json()).autoRefresh, true);

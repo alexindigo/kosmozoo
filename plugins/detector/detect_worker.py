@@ -20,6 +20,15 @@ import os
 import sys
 from pathlib import Path
 
+# OpenCV reads these once at import. Enforce the decoded allocation boundary in
+# the decoder itself, before imdecode can allocate full-resolution pixel data.
+# IMREAD_COLOR is 3 bytes/pixel: at most 48 MiB for the decoded source image.
+MAX_IMAGE_PIXELS = 16 * 1024 * 1024
+MAX_IMAGE_DIMENSION = MAX_IMAGE_PIXELS  # preserve aspect ratios within the pixel budget
+os.environ["OPENCV_IO_MAX_IMAGE_PIXELS"] = str(MAX_IMAGE_PIXELS)
+os.environ["OPENCV_IO_MAX_IMAGE_WIDTH"] = str(MAX_IMAGE_DIMENSION)
+os.environ["OPENCV_IO_MAX_IMAGE_HEIGHT"] = str(MAX_IMAGE_DIMENSION)
+
 # Use the HF cache offline when weights are already downloaded.
 _hf_cache = Path.home() / ".cache" / "huggingface"
 if _hf_cache.exists() and any(_hf_cache.rglob("anime-face-detector*")):

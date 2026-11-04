@@ -13,6 +13,8 @@
 import { join, dirname } from "node:path";
 import { mkdir, rename, writeFile, readFile, stat } from "node:fs/promises";
 
+export const isContentHash = value => typeof value === "string" && /^[a-f0-9]{64}$/.test(value);
+
 export class Cache {
   #root;
 
@@ -21,6 +23,7 @@ export class Cache {
   }
 
   path(hash) {
+    if (!isContentHash(hash)) throw new TypeError("Cache key must be a lowercase SHA-256 digest");
     return join(this.#root, hash.slice(0, 2), hash);
   }
 

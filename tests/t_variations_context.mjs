@@ -27,7 +27,8 @@ async function contextRig() {
   rig.store.collectionAdd("fake", address);
   await rig.ingest.ensure("fake", "file.png");
   const origin = () => sourceOrigin("fake", ctx.sourceActivity.source("fake"));
-  const call = (path, options) => router.handle(new Request("http://x" + path, options));
+  const call = (path, options) => router.handle(new Request("http://x" + path, options && typeof options.body === "string"
+    ? { ...options, headers: { "Content-Type": "application/json", ...options.headers } } : options));
   return { ctx, rig, jobs, uploaded, origin, call,
     replace() { rig.store.collectionRemove("fake"); rig.store.collectionAdd("fake", address); },
     hold() { holdUpload = true; }, release: () => release?.(), pending: () => !!release,

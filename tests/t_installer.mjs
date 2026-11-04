@@ -1,6 +1,13 @@
 import { assertEquals, assertThrows } from "jsr:@std/assert";
 import { desktopArgument, systemdArgument } from "../src/desktop/install.mjs";
-import { renderResources } from "../src/desktop/resources.mjs";
+import { renderResources, systemdPath } from "../src/desktop/resources.mjs";
+
+Deno.test("EnvironmentFile paths cannot expand to another user's configuration", () => {
+  for (const path of ["/home/*/engine.env", "/home/user?/engine.env", "/home/[ab]/engine.env", "/home/user]/engine.env"]) {
+    assertThrows(() => systemdPath(path), Error, "literal");
+  }
+  assertEquals(systemdPath("/home/a space%/engine.env"), "/home/a space%%/engine.env");
+});
 
 Deno.test("installer argument formats: absolute executable paths use distinct systemd and desktop escaping", () => {
   assertEquals(systemdArgument('/home/a space%/"quote"/$literal'), '"/home/a space%%/\\"quote\\"/$literal"');

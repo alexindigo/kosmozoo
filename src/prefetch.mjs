@@ -119,10 +119,11 @@ export class Prefetch {
     const w = this.#w(collection);
     // a collection added at runtime gets its worker on the first feed
     if (this.running && !w.task) w.task = this.#runCollection(collection, w);
+    let promotedDims = false, promotedFull = false;
     for (const name of names) {
       if (!dimmed.has(name) && !tried.has(name) && !w.dimsPrioSet.has(name)) {
         if (priority) {
-          if (w.dimsWalkSet.delete(name)) w.dimsWalk = w.dimsWalk.filter((n) => n !== name);
+          if (w.dimsWalkSet.delete(name)) promotedDims = true;
           w.dimsPrio.push(name); w.dimsPrioSet.add(name);
         } else if (!w.dimsWalkSet.has(name)) {
           w.dimsWalk.push(name); w.dimsWalkSet.add(name);
@@ -130,12 +131,14 @@ export class Prefetch {
       }
       if (interest === "dimensions" || fresh.has(name) || w.prioSet.has(name)) continue;
       if (priority) {
-        if (w.walkSet.delete(name)) w.walk = w.walk.filter((n) => n !== name);
+        if (w.walkSet.delete(name)) promotedFull = true;
         w.prio.push(name); w.prioSet.add(name);
       } else if (!w.walkSet.has(name)) {
         w.walk.push(name); w.walkSet.add(name);
       }
     }
+    if (promotedDims) w.dimsWalk = w.dimsWalk.filter(name => w.dimsWalkSet.has(name));
+    if (promotedFull) w.walk = w.walk.filter(name => w.walkSet.has(name));
     return this.pending(collection);
   }
 

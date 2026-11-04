@@ -27,6 +27,24 @@ export function operationProgress(text, changedFrom = 0) {
 const fingerprint = ({ t, m }) => JSON.stringify([t, m]);
 const template = ({ m }) => clean(m).replace(/\d+(?:\.\d+)?/g, "#");
 
+// KMP prefix table and one scan find the longest old suffix/new prefix in
+// linear work, including repetitive snapshots, without copying candidates.
+function snapshotOverlap(old, now) {
+  if (!now.length) return 0;
+  const failure = new Uint32Array(now.length);
+  for (let i = 1, matched = 0; i < now.length; i++) {
+    while (matched && now[i] !== now[matched]) matched = failure[matched - 1];
+    if (now[i] === now[matched]) matched++;
+    failure[i] = matched;
+  }
+  let matched = 0;
+  for (const entry of old) {
+    while (matched && (matched === now.length || entry !== now[matched])) matched = failure[matched - 1];
+    if (entry === now[matched]) matched++;
+  }
+  return matched;
+}
+
 export class ProgressLog {
   entries = null;
   prompt = null;
@@ -45,10 +63,7 @@ export class ProgressLog {
     while (prefix < Math.min(old.length, now.length) && old[prefix] === now[prefix]) prefix++;
     let from = prefix;
     if (prefix === 0) {
-      let overlap = 0;
-      for (let n = Math.min(old.length, now.length); n > 0; n--) {
-        if (old.slice(-n).every((f, i) => f === now[i])) { overlap = n; break; }
-      }
+      const overlap = snapshotOverlap(old, now);
       if (overlap) from = overlap;
       else if (previous.length === next.length && previous.length &&
           previous.every((e, i) => template(e) === template(next[i]))) {

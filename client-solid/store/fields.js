@@ -26,28 +26,35 @@ export function parseFieldId(id) {
   return [id.slice(0, i), id.slice(i + 1)];
 }
 
-function instancesOf(meta, classType) {
-  const nodes = (meta?.nodes ?? []).filter((n) => n.type === classType);
-  nodes.sort((a, b) => {
+function fieldValues(meta) {
+  const types = new Map(), values = new Map();
+  for (const node of meta?.nodes ?? []) {
+    const type = node.type;
+    if (!types.has(type)) types.set(type, []);
+    types.get(type).push(node);
+  }
+  const order = (a, b) => {
     const na = +a.id, nb = +b.id;
     if (!isNaN(na) && !isNaN(nb)) return na - nb;
     return String(a.id).localeCompare(String(b.id));
-  });
-  return nodes;
+  };
+  for (const [type, nodes] of types) {
+    const inputs = new Map(); values.set(type, inputs);
+    for (const node of nodes.sort(order)) for (const [input, value] of Object.entries(node.inputs ?? {})) {
+      if (value == null || value === "") continue;
+      if (!inputs.has(input)) inputs.set(input, []);
+      inputs.get(input).push(typeof value === "boolean" ? String(value) : value);
+    }
+  }
+  return values;
 }
 
 // One getter per registry field id: reads the value from every instance of
 // the type, skipping empty slots. Returns them as an array (multi-instance)
 // or a scalar (single instance).
 function fieldGetter(classType, input) {
-  return (m) => {
-    const inst = instancesOf(m, classType);
-    const vals = [];
-    for (const n of inst) {
-      const v = n.inputs?.[input];
-      if (v == null || v === "") continue;
-      vals.push(typeof v === "boolean" ? String(v) : v);
-    }
+  return (m, index = fieldValues(m)) => {
+    const vals = index.get(classType)?.get(input) ?? [];
     return vals.length > 1 ? vals : (vals[0] ?? null);
   };
 }
@@ -76,8 +83,11 @@ export function formatScalar(v) {
 // per instance.
 export function materializeRows(meta, { list }) {
   const rows = [];
+  // Per-render index: linear in supplied inputs, without mutable-identity caches
+  // or a node scan for every absent registry field.
+  const index = fieldValues(meta);
   for (const [id, getter] of list) {
-    const v = getter(meta);
+    const v = getter(meta, index);
     if (v == null) continue;
     const [classType, input] = parseFieldId(id);
     const vals = Array.isArray(v) ? v : [v];

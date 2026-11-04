@@ -14,6 +14,7 @@ import { assert, assertEquals } from "jsr:@std/assert";
 import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { fileURLToPath } from "node:url";
 import { register } from "../plugins/detector/plugin.mjs";
 
 // --- variant 1: the plugin's service protocol (Deno-only) --------------------
@@ -114,7 +115,7 @@ for line in sys.stdin:
 
     const port = 28471;
     const svc = new Deno.Command("python3", {
-      args: [new URL("../plugins/detector/detect_service.py", import.meta.url).pathname, String(port)],
+      args: [fileURLToPath(new URL("../plugins/detector/detect_service.py", import.meta.url)), String(port)],
       env: { DETECT_WORKER: stub },
       stdout: "null", stderr: "null",
     }).spawn();

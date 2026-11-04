@@ -24,30 +24,41 @@ export class Settings {
     });
     const s = new Settings();
     s.#path = path;
-    s.#doc = doc;
+    s.#doc = { ...doc, data: Object.assign(Object.create(null), doc.data) };
     return s;
   }
 
   #ns(ns) {
-    if (!this.#doc.data[ns]) this.#doc.data[ns] = {};
+    const current = Object.hasOwn(this.#doc.data, ns) ? this.#doc.data[ns] : null;
+    if (!current || typeof current !== "object" || Array.isArray(current)) this.#doc.data[ns] = Object.create(null);
+    else if (Object.getPrototypeOf(current) !== null) this.#doc.data[ns] = Object.assign(Object.create(null), current);
     return this.#doc.data[ns];
   }
 
   get(ns, key, fallback = null) {
-    const n = this.#doc.data[ns];
-    if (!n || !(key in n)) return fallback;
+    const n = Object.hasOwn(this.#doc.data, ns) ? this.#doc.data[ns] : null;
+    if (!n || !Object.hasOwn(n, key)) return fallback;
     const v = n[key];
     return v !== null && typeof v === "object" ? structuredClone(v) : v;
   }
 
   getNs(ns) {
-    return structuredClone(this.#doc.data[ns] ?? {});
+    return structuredClone(Object.hasOwn(this.#doc.data, ns) ? this.#doc.data[ns] : {});
   }
 
   async set(ns, key, value) {
+    await this.patch(ns, { [key]: value });
+  }
+
+  // A namespace patch is one mutation and one serialized snapshot, regardless
+  // of its field count. Dictionary keys never traverse object prototypes.
+  async patch(ns, fields) {
+    if (!fields || typeof fields !== "object" || Array.isArray(fields)) throw new TypeError("Settings patch must be an object");
     const n = this.#ns(ns);
-    if (value === null || value === undefined) delete n[key];
-    else n[key] = value;
+    for (const [key, value] of Object.entries(fields)) {
+      if (value === null || value === undefined) delete n[key];
+      else n[key] = value;
+    }
     await this.#save();
   }
 

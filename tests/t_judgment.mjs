@@ -202,7 +202,7 @@ Deno.test("judgment: PATCH, entry read and folder listing expose bookmark indepe
     const { makeTestInventory } = await import("./helpers/rig.mjs");
     const router = makeRouter({ store, hosts: { h: address }, inventory: makeTestInventory({ h: address }) });
     const url = "http://test/api/collections/h/entries/a.png";
-    const patched = await router.handle(new Request(`${url}/judgment`, { method: "PATCH", body: JSON.stringify({ bookmark: true }) }));
+    const patched = await router.handle(new Request(`${url}/judgment`, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ bookmark: true }) }));
     assertEquals(patched.status, 200);
     assertEquals(await patched.json(), { bookmark: true });
     const single = await router.handle(new Request(url));
@@ -212,7 +212,7 @@ Deno.test("judgment: PATCH, entry read and folder listing expose bookmark indepe
     const rows = new Map((await listed.json()).map((r) => [r.name, r]));
     assertEquals(rows.get("a.png").judgment, { bookmark: true });
     assertEquals(rows.get("b.png").judgment, { favorite: true });
-    const cleared = await router.handle(new Request(`${url}/judgment`, { method: "PATCH", body: JSON.stringify({ bookmark: false }) }));
+    const cleared = await router.handle(new Request(`${url}/judgment`, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ bookmark: false }) }));
     assertEquals(cleared.status, 200);
     assertEquals(await cleared.json(), {});
     assertEquals((await (await router.handle(new Request(url))).json()).judgment, null);

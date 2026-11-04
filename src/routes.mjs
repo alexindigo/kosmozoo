@@ -10,13 +10,51 @@ import { capabilities, normalizeAddress, validateCollection, validateAttributes,
 import { sniffMime } from "./extractor.mjs";
 import { sourceOrigin, sameOrigin, expectedOrigin } from "./source-origin.mjs";
 import { waitFor } from "./lifetime.mjs";
+import { isContentHash } from "./cache.mjs";
 
 // The bounded wait of one shown entry's record for its own ingestion.
 const ENTRY_META_WAIT_MS = 8000;
 
+const mediaType = req => (req.headers.get("Content-Type") ?? "").split(";", 1)[0].trim().toLowerCase();
+class UnsupportedMediaType extends Error {}
+
+// JSON parsing is an HTTP boundary, not just JSON.parse on arbitrary bytes.
+// Features share it so a multipart/binary exception cannot bypass JSON policy.
+export function readJson(req) {
+  if (mediaType(req) !== "application/json") throw new UnsupportedMediaType("Content-Type must be application/json");
+  return req.json();
+}
+
+// Original contributor bytes may be active documents on direct navigation.
+// Keep native image/media display while removing script and origin authority.
+export function mediaHeaders(init) {
+  const headers = new Headers(init);
+  headers.set("Content-Security-Policy", "sandbox");
+  headers.set("X-Content-Type-Options", "nosniff");
+  return headers;
+}
+
+function mutationError(req, url) {
+  if (["GET", "HEAD", "OPTIONS"].includes(req.method)) return null;
+  const origin = req.headers.get("Origin"), site = req.headers.get("Sec-Fetch-Site");
+  if ((origin !== null && origin !== url.origin) || (site !== null && !["same-origin", "none"].includes(site))) {
+    return Response.json({ error: "Mutations require the engine's own browser origin" }, { status: 403 });
+  }
+  // A server Request may expose an empty stream even for bodyless DELETE.
+  // Reject explicit simple/unknown media types here; readJson enforces the
+  // required JSON type at its parser, without guessing body presence or reading
+  // upload streams. Origin-less API clients and bodyless operations still work.
+  const type = mediaType(req);
+  if (type && !["application/json", "multipart/form-data", "application/octet-stream"].includes(type)) {
+    return Response.json({ error: "Use application/json, multipart/form-data or application/octet-stream" }, { status: 415 });
+  }
+  return null;
+}
+
 export function makeRouter(ctx) {
   const routes = [];
   const backingFor = ctx.backings?.backingFor ?? defaultBackingFor;
+  const addressFor = id => Object.hasOwn(ctx.hosts, id) ? ctx.hosts[id] : null;
 
   const add = (method, pattern, handler) => {
     // pattern: "/api/collections/<id>/entries/<name>" — segments, "<x>" captures one segment
@@ -53,14 +91,12 @@ export function makeRouter(ctx) {
   // the content hash + no-cache (the URL never changes on a remap).
   const bytesResponse = (req, bytes, hash, mime) => {
     const etag = `"${hash}"`;
+    const h = mediaHeaders({ ETag: etag, "Cache-Control": "no-cache" });
     if (req.headers.get("If-None-Match") === etag) {
-      return new Response(null, { status: 304, headers: { ETag: etag, "Cache-Control": "no-cache" } });
+      return new Response(null, { status: 304, headers: h });
     }
-    const h = new Headers();
     if (mime) h.set("Content-Type", mime);
     h.set("Content-Length", String(bytes.length));
-    h.set("ETag", etag);
-    h.set("Cache-Control", "no-cache");
     h.set("Accept-Ranges", "bytes");
     const range = req.headers.get("Range");
     const ifRange = req.headers.get("If-Range");
@@ -145,7 +181,7 @@ export function makeRouter(ctx) {
   add("POST", "/api/collections", async (req) => {
     let body;
     try {
-      body = await req.json();
+      body = await readJson(req);
     } catch {
       return Response.json({ error: "JSON body: {name, address}" }, { status: 400 });
     }
@@ -179,7 +215,7 @@ export function makeRouter(ctx) {
 
   add("PATCH", "/api/collections/<id>", async (req, { id }) => {
     let patch;
-    try { patch = await req.json(); }
+    try { patch = await readJson(req); }
     catch { return Response.json({ error: "source attributes must be JSON" }, { status: 400 }); }
     const error = validateAttributes(patch);
     if (error) return Response.json({ error }, { status: 400 });
@@ -225,9 +261,9 @@ export function makeRouter(ctx) {
   // The feed listing (kind=output, the default) or the input-dir listing
   // (kind=input). Hidden/gone entries stay out of every output listing.
   add("GET", "/api/collections/<id>/entries", async (req, { id }, url) => {
-    const token = ctx.inventory.capture?.(id);
-    const addr = ctx.hosts[id];
+    const addr = addressFor(id);
     if (!addr) return Response.json({ error: "unknown collection" }, { status: 404 });
+    const token = ctx.inventory.capture?.(id);
     const kind = url.searchParams.get("kind") ?? "output";
     if (kind === "input") {
       let expected;
@@ -268,7 +304,7 @@ export function makeRouter(ctx) {
   });
 
   add("GET", "/api/collections/<id>/entries/<name>", async (_req, { id, name }) => {
-    if (!ctx.hosts[id]) return Response.json({ error: "unknown collection" }, { status: 404 });
+    if (!addressFor(id)) return Response.json({ error: "unknown collection" }, { status: 404 });
     return Response.json(entryShape(id, name, null, ctx.store.entryJoined(id, name)));
   });
 
@@ -276,9 +312,9 @@ export function makeRouter(ctx) {
   // "image") — the browser can't post to ComfyUI directly (cross-origin).
   add("POST", "/api/collections/<id>/entries", async (req, { id }) => {
     if (!ctx.sourceActivity.acceptingChanges()) return Response.json({ error: "Sources are stopping; no upload was admitted" }, { status: 503 });
-    const token = ctx.inventory.capture(id);
-    const addr = ctx.hosts[id];
+    const addr = addressFor(id);
     if (!addr) return Response.json({ error: "unknown collection" }, { status: 404 });
+    const token = ctx.inventory.capture(id);
     const origin = sourceOrigin(id, ctx.sourceActivity.source(id));
     let expected;
     try { expected = expectedOrigin(req); } catch (error) { return Response.json({ error: error.message }, { status: 400 }); }
@@ -310,7 +346,7 @@ export function makeRouter(ctx) {
   // Delete an entry from its source, per the collection's delete capability:
   // folder → unlink; comfy + assets_plus → trash; else hide + history cleanup.
   add("DELETE", "/api/collections/<id>/entries/<name>", async (_req, { id, name }) => {
-    const addr = ctx.hosts[id];
+    const addr = addressFor(id);
     if (!addr) return Response.json({ error: "unknown collection" }, { status: 404 });
     const c = ctx.store.collectionGet(id) ?? { id, kind: isFolderHost(addr) ? "folder" : "comfy", address: addr };
     // DELETE probes too (cheap, cached by the assets-plus TTL): an
@@ -333,7 +369,7 @@ export function makeRouter(ctx) {
   });
 
   add("HEAD", "/api/collections/<id>/entries/<name>/bytes", async (req, { id, name }, url) => {
-    if (!ctx.hosts[id]) return new Response(null, { status: 404 });
+    if (!addressFor(id)) return new Response(null, { status: 404 });
     const error = byteOriginError(req, id); if (error) return error;
     const e = ctx.store.entryGet(id, name, url.searchParams.get("kind") === "input" ? "input" : "output");
     if (!e?.hash) return new Response(null, { status: 404 }); // E7: unknown says so
@@ -347,8 +383,8 @@ export function makeRouter(ctx) {
   // Bytes, cache-first, with validators (the URL never changes when content
   // is remapped: no-cache + ETag = the content hash).
   add("GET", "/api/collections/<id>/entries/<name>/bytes", async (req, { id, name }, url) => {
+    if (!addressFor(id)) return new Response("unknown collection", { status: 404 });
     const token = ctx.inventory.capture?.(id);
-    if (!ctx.hosts[id]) return new Response("unknown collection", { status: 404 });
     const error = byteOriginError(req, id); if (error) return error;
     const priority = url.searchParams.get("priority") ?? "foreground";
     if (!["foreground", "background"].includes(priority)) return Response.json({ error: "bad priority" }, { status: 400 });
@@ -388,8 +424,8 @@ export function makeRouter(ctx) {
   // reply is always the entry's current record; `extracted:false` means the
   // record is not available yet (unreachable source, or the wait elapsed).
   add("GET", "/api/collections/<id>/entries/<name>/meta", async (_req, { id, name }) => {
+    if (!addressFor(id)) return Response.json({ error: "unknown collection" }, { status: 404 });
     const token = ctx.inventory.capture?.(id);
-    if (!ctx.hosts[id]) return Response.json({ error: "unknown collection" }, { status: 404 });
     if (!ctx.store.entryJoined(id, name)?.hash) {
       const done = new AbortController();
       const signal = ctx.signal ? AbortSignal.any([ctx.signal, done.signal]) : done.signal;
@@ -405,8 +441,8 @@ export function makeRouter(ctx) {
   // --- judgments (entry columns) ------------------------------------------------
 
   add("PATCH", "/api/collections/<id>/entries/<name>/judgment", async (req, { id, name }) => {
-    if (!ctx.hosts[id]) return Response.json({ error: "unknown collection" }, { status: 404 });
-    const body = await req.json();
+    if (!addressFor(id)) return Response.json({ error: "unknown collection" }, { status: 404 });
+    const body = await readJson(req);
     const r = ctx.store.judgmentPatch(id, name, body);
     if (!r.ok) return Response.json({ error: r.error }, { status: 400 });
     return Response.json(r.judgment ?? {});
@@ -434,10 +470,11 @@ export function makeRouter(ctx) {
   });
 
   add("PATCH", "/api/settings/<ns>", async (req, { ns }) => {
-    const body = await req.json();
-    for (const [key, value] of Object.entries(body)) {
-      await ctx.settings.set(ns, key, value);
-    }
+    let body;
+    try { body = await readJson(req); }
+    catch { return Response.json({ error: "Settings patch must be a JSON object" }, { status: 400 }); }
+    if (!body || typeof body !== "object" || Array.isArray(body)) return Response.json({ error: "Settings patch must be a JSON object" }, { status: 400 });
+    await ctx.settings.patch(ns, body);
     return Response.json(ctx.settings.getNs(ns));
   });
 
@@ -478,7 +515,7 @@ export function makeRouter(ctx) {
   });
 
   add("POST", "/api/prefetch", async (req) => {
-    const body = await req.json();
+    const body = await readJson(req);
     if (typeof body.enabled === "boolean") {
       await ctx.settings.set("core.prefetch", "enabled", body.enabled);
     }
@@ -496,7 +533,7 @@ export function makeRouter(ctx) {
   // Versioned poll: `since` replaces the client's version compare — the
   // answer says whether anything moved; items ship only when it did.
   add("GET", "/api/collections/<id>/meta", async (_req, { id }, url) => {
-    if (!ctx.hosts[id]) return Response.json({ error: "unknown collection" }, { status: 404 });
+    if (!addressFor(id)) return Response.json({ error: "unknown collection" }, { status: 404 });
     const since = url.searchParams.get("since");
     return Response.json({
       ...ctx.store.metadataSince(id, since),
@@ -507,9 +544,9 @@ export function makeRouter(ctx) {
   // Scroll-driven extraction: the client reports rendered-but-meta-less
   // names; they jump the queue (the prio lane drains first).
   add("POST", "/api/collections/<id>/want", async (req, { id }) => {
-    if (!ctx.hosts[id]) return Response.json({ error: "unknown collection" }, { status: 404 });
+    if (!addressFor(id)) return Response.json({ error: "unknown collection" }, { status: 404 });
     let body;
-    try { body = await req.json(); }
+    try { body = await readJson(req); }
     catch { return Response.json({ error: "files must be JSON" }, { status: 400 }); }
     const files = body?.files;
     if (!Array.isArray(files)) return Response.json({ error: "files must be an array" }, { status: 400 });
@@ -518,7 +555,7 @@ export function makeRouter(ctx) {
     if (!["full", "dimensions"].includes(interest) || !["foreground", "background"].includes(priority)) {
       return Response.json({ error: "bad interest or priority" }, { status: 400 });
     }
-    if (files.some((name) => !validEntryName(ctx.hosts[id], name))) {
+    if (files.some((name) => !validEntryName(addressFor(id), name))) {
       return Response.json({ error: "bad entry path" }, { status: 400 });
     }
     ctx.prefetch.feed(id, files, priority === "foreground", { interest });
@@ -540,15 +577,24 @@ export function makeRouter(ctx) {
         throw error;
       }
       if (!m) return new Response("not found", { status: 404 });
+      const denied = mutationError(req, url);
+      if (denied) return denied;
+      if (Object.hasOwn(m.params, "hash") && !isContentHash(m.params.hash)) {
+        return Response.json({ error: "Invalid SHA-256 content hash" }, { status: 400 });
+      }
       // Every named-entry operation crosses this one boundary before touching
       // stored/cached data or a backing, including HEAD and judgment writes.
       if (m.namedEntry) {
-        const addr = ctx.hosts[m.params.id];
+        const addr = addressFor(m.params.id);
         if (addr && !validEntryName(addr, m.params.name)) {
           return Response.json({ error: "bad entry path" }, { status: 400 });
         }
       }
-      return m.handler(req, m.params, url);
+      try { return await m.handler(req, m.params, url); }
+      catch (error) {
+        if (error instanceof UnsupportedMediaType) return Response.json({ error: error.message }, { status: 415 });
+        throw error;
+      }
     },
     add, // plugin host registers its routes here
   };

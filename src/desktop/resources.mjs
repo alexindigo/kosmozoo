@@ -11,6 +11,7 @@ export function systemdArgument(path) {
 }
 export function systemdPath(path) {
   // EnvironmentFile is one path, distinct from ExecStart's argv grammar.
+  if (/[\[\]*?]/.test(pathText(path))) throw new Error("EnvironmentFile must be a literal path without wildcard syntax");
   return pathText(path).replace(/%/g, "%%");
 }
 export function desktopArgument(path) {

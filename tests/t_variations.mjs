@@ -668,7 +668,7 @@ Deno.test("nested variation route: exact source bytes/lineage and producing dire
       const probe = await router.handle(new Request("http://x/api/features/variations/probe/" + encodeURIComponent("h:" + filename)));
       assertEquals(probe.status, 200);
       const { context } = await probe.json();
-      return router.handle(new Request("http://x/api/features/variations/run", { method: "POST", body: JSON.stringify({
+      return router.handle(new Request("http://x/api/features/variations/run", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({
         id: "h:" + filename, host: "h", filename, prefix, suffix: "_{KSampler.denoise}",
         ranges: { "1.denoise": { enabled: true, min: .5, max: .5, increment: .1 } },
         context, acknowledgement: { version: 2, runId: crypto.randomUUID(), requestId: crypto.randomUUID() },

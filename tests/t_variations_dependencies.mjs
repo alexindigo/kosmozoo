@@ -67,7 +67,7 @@ function rig(graph, outputClasses = outputs, filename = "Qwen_image_2.1_00036.pn
       imageParams: { "470.image": { enabled: true, values: ["first.png", "second.png"] },
         "508.value": { enabled: true, values: ["first edit", "second edit"] } },
       acknowledgement: { version: 2, runId: crypto.randomUUID(), requestId: crypto.randomUUID() } };
-    return routes.get("POST/run")(new Request("http://x/run", { method: "POST", body: JSON.stringify(body) }));
+    return routes.get("POST/run")(new Request("http://x/run", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) }));
   } };
 }
 

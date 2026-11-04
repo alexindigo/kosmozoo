@@ -35,7 +35,7 @@ Deno.test("desktop portal: feature routes forward the owned desktop port, path a
     choose: options => { calls.push(options); return { path: "/chosen # é", cancelled: false }; },
   } });
   assertEquals(await (await routes.get("GET /folder-chooser")()).json(), { available: false, reason: CHOOSER_REASON });
-  const req = new Request("http://test/choose-folder", { method: "POST", body: JSON.stringify({ path: "/draft" }) });
+  const req = new Request("http://test/choose-folder", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ path: "/draft" }) });
   assertEquals(await (await routes.get("POST /choose-folder")(req)).json(), { path: "/chosen # é", cancelled: false });
   assertEquals(calls[0].path, "/draft"); assertEquals(calls[0].signal, req.signal);
 });
@@ -48,7 +48,7 @@ Deno.test({ name: "desktop portal: private real bus and independent portal proto
   assertEquals(await portal.capability(), { available: true, reason: "" });
   const routes = new Map();
   register({ desktop: portal, route: (method, path, handler) => routes.set(`${method} ${path}`, handler) });
-  const response = await routes.get("POST /choose-folder")(new Request("http://test/choose-folder", { method: "POST", body: JSON.stringify({ path: "/success" }) }));
+  const response = await routes.get("POST /choose-folder")(new Request("http://test/choose-folder", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ path: "/success" }) }));
   assertEquals(response.status, 200);
   assertEquals(await response.json(), { path: "/home/tester/space # é/%20", cancelled: false });
   assertEquals(await portal.choose({ path: "/alternate" }), { path: "/home/tester/space # é/%20", cancelled: false });

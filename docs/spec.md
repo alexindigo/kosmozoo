@@ -62,6 +62,25 @@ Entry identity on the wire is the plain name under a collection; the
 `collection:name` string survives only inside the client as a derived
 accessor. Underneath it, identity is the content hash (§6).
 
+### Browser mutation admission
+
+Every state-changing request, including feature and plugin routes, passes one
+router check before its handler runs. A present `Origin` must exactly match the
+request URL's origin; `null` and foreign origins reject with 403. A present
+`Sec-Fetch-Site` must be `same-origin` or `none`; `same-site` is insufficient.
+Origin-less non-browser API clients remain supported. This does not authenticate
+network clients or grant cross-origin browser access.
+
+JSON request bodies require `Content-Type: application/json` (optional charset).
+Browser-simple JSON in `text/plain` or form-encoded bodies rejects before effects.
+Multipart uploads retain `multipart/form-data`; binary plugin inputs retain
+`application/octet-stream`. Those exceptions do not let JSON handlers accept
+non-JSON media types. Bodyless operations such as DELETE require no content type.
+The same-origin SPA and desktop app use these formats without a token or extra
+browser-origin configuration. For example, API clients can send
+`curl -X PATCH -H 'Content-Type: application/json' --data '{"paused":true}'
+http://localhost:2084/api/settings/core.prefetch`.
+
 For Comfy, `name` is the complete canonical output-root-relative POSIX path:
 `image.png`, `a/image.png` and `b/image.png` are distinct addresses with independent
 judgments, even when bytes share one content hash. Root names/schema v9 are
@@ -75,6 +94,12 @@ existing flat basename grammar. Named-entry and direct Ingest validation precede
 cache/store/backing access. Comfy reads, HEAD/range/stat, input references and
 deletion split path into transport `subfolder` and leaf `filename` only at the
 backing boundary. Hide-history matching also includes output type and directory.
+
+Canonical Comfy names are bounded to 4096 JavaScript string code units and 128
+slash-separated components, including the leaf filename. Over-limit names are
+invalid records: the complete inventory fails closed and retains its prior
+accepted snapshot. These per-name bounds are separate from the aggregate budget
+of 16,777,216 JavaScript string code units for unique ancestor folder strings.
 
 ### Output inventory and folder scope
 
@@ -1374,6 +1399,11 @@ with exact inclusive bytes, Content-Length and Content-Range. Unsatisfiable
 ranges return416 with `Content-Range: bytes */<length>`. Malformed, multi-range
 or unsupported units are ignored (200). Matching If-None-Match takes precedence
 (304); If-Range must match the strong content ETag, otherwise full bytes return.
+All original-media responses, including Variations folder previews, carry
+`Content-Security-Policy: sandbox` and `X-Content-Type-Options: nosniff`.
+SVG still displays as an image, but direct navigation cannot execute contributor
+scripts with application-origin authority. Range and validation responses retain
+that same policy.
 The complete file still goes through hashing/cache before slicing: no streaming
 rewrite. Comfy byte reads have a ten-second **idle** deadline, reset by headers
 and body progress; a progressing large download has no total ten-second limit.

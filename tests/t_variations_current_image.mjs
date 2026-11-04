@@ -29,7 +29,7 @@ async function rig(current) {
       uploadInput: () => { throw new Error("same-current bytes must not upload"); }, uploadPath: () => { throw new Error("same-current path must not upload"); },
       run: async request => {
         requests.push(request);
-        const response = await routes.get("POST/run")(new Request("http://x/run", { method: "POST", body: JSON.stringify(request) }));
+        const response = await routes.get("POST/run")(new Request("http://x/run", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(request) }));
         return { ok: response.ok, status: response.status, data: await response.json() };
       } } });
   editor.installCatalogue(catalogue);

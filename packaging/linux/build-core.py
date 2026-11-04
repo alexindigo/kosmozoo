@@ -4,7 +4,7 @@ import argparse
 import hashlib
 import json
 import os
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 import shutil
 import subprocess
 import sys
@@ -50,12 +50,29 @@ def run(argv, cwd, env, log):
         raise RuntimeError(f'Command failed ({process.returncode}); preserved log {log}')
 
 
+def regular_source_row(root, name):
+    relative = PurePosixPath(name)
+    if relative.is_absolute() or '..' in relative.parts or str(relative) != name or not relative.parts:
+        raise ValueError(f'Unsafe source path: {name}')
+    path = root
+    for part in relative.parts:
+        path = path / part
+        if path.is_symlink():
+            raise ValueError(f'Build source must be regular, without symlink components: {name}')
+    row = inventory.source_row(root, name)
+    if row['mode'] not in ('100644', '100755'):
+        raise ValueError(f'Build source must be regular: {name}')
+    return row
+
+
 def authenticate(source_manifest, input_root, materials_root):
     manifest = json.loads(source_manifest.read_text())
     rows = manifest['files']
     if [r['path'] for r in rows] != sorted(set(r['path'] for r in rows)):
         raise ValueError('Manifest paths are not unique and sorted')
-    actual = [inventory.source_row(SOURCE, row['path']) for row in rows]
+    # Authenticate consumed bytes, never a link's text or an unselected target.
+    # This includes the policy files before any JSON authority is read.
+    actual = [regular_source_row(SOURCE, row['path']) for row in rows]
     if actual != rows or inventory.fingerprint(rows) != manifest['workingInputSha256']:
         raise ValueError('Current source does not match the complete supplied source selection')
     selected = {row['path'] for row in rows}
@@ -111,7 +128,7 @@ def build(source_manifest, input_root, materials_root, cache, output, evidence, 
         path = stage / row['path']
         path.parent.mkdir(parents=True, exist_ok=True)
         shutil.copy2(SOURCE / row['path'], path, follow_symlinks=False)
-    if [inventory.source_row(stage, row['path']) for row in rows] != rows:
+    if [regular_source_row(stage, row['path']) for row in rows] != rows:
         raise ValueError('Staging does not match source manifest')
     if version is not None and version != (stage / 'VERSION').read_text().strip():
         raise ValueError('Publication --version must equal staged VERSION')

@@ -46,7 +46,7 @@ Deno.test("entry boundary: invalid names reject before entry/cache/backing/judgm
     for (const name of bad.filter((x) => typeof x === "string" && x)) {
       const entry = `http://x/api/collections/h/entries/${encodeURIComponent(name)}`;
       for (const [method, suffix] of [["GET", ""], ["GET", "/bytes"], ["HEAD", "/bytes"], ["DELETE", ""], ["PATCH", "/judgment"]]) {
-        const result = await router.handle(new Request(entry + suffix, { method, ...(method === "PATCH" ? { body: "{}" } : {}) }));
+        const result = await router.handle(new Request(entry + suffix, { method, ...(method === "PATCH" ? { headers: { "Content-Type": "application/json" }, body: "{}" } : {}) }));
         assertEquals(result.status, 400, `${method} ${name}`);
       }
       assertEquals(await rig.ingest.ensure("h", name), { status: 400 });
@@ -55,7 +55,7 @@ Deno.test("entry boundary: invalid names reject before entry/cache/backing/judgm
       rig.ingest.scheduleRevalidate("h", name); await rig.ingest.revalidateNow("h", name);
     }
     for (const files of [["valid.png", "../bad.png"], ["valid.png", null], ["valid.png", 7]]) {
-      assertEquals((await router.handle(new Request("http://x/api/collections/h/want", { method: "POST", body: JSON.stringify({ files }) }))).status, 400);
+      assertEquals((await router.handle(new Request("http://x/api/collections/h/want", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ files }) }))).status, 400);
     }
     for (const method of ["GET", "HEAD", "DELETE", "PATCH"]) {
       assertEquals((await router.handle(new Request(`http://x/api/collections/h/entries/bad%escape${method === "HEAD" ? "/bytes" : method === "PATCH" ? "/judgment" : ""}`, { method, ...(method === "PATCH" ? { body: "{}" } : {}) }))).status, 400);
