@@ -8,13 +8,14 @@ const directory = process.env.E2E_SECURITY_DIR;
 (async () => {
   assert(ENGINE && directory, "Set E2E_ENGINE and E2E_SECURITY_DIR to the stack's mutable folder");
   const path = directory + "/deepscan.svg";
-  fs.writeFileSync(path, `<svg xmlns="http://www.w3.org/2000/svg" width="48" height="32">
+  const attacker = http.createServer((_req, res) => { res.setHeader("Content-Type", "text/html"); res.end("<!doctype html><title>Foreign origin</title>"); });
+  let page;
+  try {
+    fs.writeFileSync(path, `<svg xmlns="http://www.w3.org/2000/svg" width="48" height="32">
     <script>globalThis.deepscanExecuted=true;fetch('/api/settings/core.deepscan-svg',{method:'PATCH',headers:{'Content-Type':'application/json'},body:'{"executed":true}'})</script>
     <rect width="48" height="32" fill="red"/></svg>`);
-  const attacker = http.createServer((_req, res) => { res.setHeader("Content-Type", "text/html"); res.end("<!doctype html><title>Foreign origin</title>"); });
-  await new Promise(resolve => attacker.listen(19163, "127.0.0.1", resolve));
-  const page = await CDP.launch(19164);
-  try {
+    await new Promise((resolve, reject) => { attacker.once("error", reject); attacker.listen(19163, "127.0.0.1", resolve); });
+    page = await CDP.launch(19164);
     const entry = ENGINE + "/api/collections/mut/entries/deepscan.svg/bytes";
     const response = await fetch(entry);
     assert.equal(response.status, 200);
@@ -51,8 +52,11 @@ const directory = process.env.E2E_SECURITY_DIR;
     assert.deepEqual(await (await fetch(ENGINE + "/api/settings/core.deepscan-browser")).json(), { saved: true });
     console.log("ok foreign browser-simple mutation rejected; same-origin saved settings retained");
   } finally {
-    await page.close();
-    await new Promise(resolve => attacker.close(resolve));
-    fs.unlinkSync(path);
+    try { await page?.close(); }
+    finally {
+      try {
+        if (attacker.listening) await new Promise((resolve, reject) => attacker.close(error => error ? reject(error) : resolve()));
+      } finally { fs.rmSync(path, { force: true }); }
+    }
   }
 })().catch(error => { console.error(error); process.exitCode = 1; });
