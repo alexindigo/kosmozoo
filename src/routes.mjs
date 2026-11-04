@@ -10,6 +10,7 @@ import { capabilities, normalizeAddress, validateCollection, validateAttributes,
 import { sniffMime } from "./extractor.mjs";
 import { sourceOrigin, sameOrigin, expectedOrigin } from "./source-origin.mjs";
 import { waitFor } from "./lifetime.mjs";
+import { isContentHash } from "./cache.mjs";
 
 // The bounded wait of one shown entry's record for its own ingestion.
 const ENTRY_META_WAIT_MS = 8000;
@@ -540,6 +541,9 @@ export function makeRouter(ctx) {
         throw error;
       }
       if (!m) return new Response("not found", { status: 404 });
+      if (Object.hasOwn(m.params, "hash") && !isContentHash(m.params.hash)) {
+        return Response.json({ error: "Invalid SHA-256 content hash" }, { status: 400 });
+      }
       // Every named-entry operation crosses this one boundary before touching
       // stored/cached data or a backing, including HEAD and judgment writes.
       if (m.namedEntry) {
