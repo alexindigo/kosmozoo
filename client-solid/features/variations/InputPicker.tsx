@@ -3,6 +3,7 @@ import { createVirtualizer } from "@tanstack/solid-virtual";
 import { useClickOutside } from "../../lib/click-outside.js";
 import { focusMemory } from "./draft.js";
 import { Thumbnail } from "./Thumbnail.js";
+import { ImageAction } from "./ImageAction.js";
 import { SingleLineText } from "../../components/SingleLineText.js";
 import { popoverPlacement } from "../../lib/popover-placement.js";
 import { Chevron } from "../../components/Select.js";
@@ -70,8 +71,8 @@ export function InputPicker(props) {
   createEffect(() => { props.positionRevision; requestPlacement(); });
   createEffect(() => { if (open()) onCleanup(props.registerPopup(close)); });
   return <div class="vz-input-picker" ref={root}>
-    <button type="button" class="select-trigger control-size-md vz-input-trigger" ref={trigger}
-      aria-expanded={open()} aria-haspopup="listbox" aria-controls={id} {...focusMemory(props.rememberFocus)} onClick={() => setOpen(!open())}><SingleLineText value="ComfyUI inputs" /><Chevron /></button>
+    <ImageAction class="select-trigger control-size-md vz-input-trigger" ref={trigger}
+      aria-expanded={open()} aria-haspopup="listbox" aria-controls={id} {...focusMemory(props.rememberFocus)} onClick={() => setOpen(!open())}><SingleLineText value="ComfyUI inputs" /><Chevron /></ImageAction>
     <Show when={open()}>
       <InputOptions id={id} query={query} onQuery={setQuery} files={props.sourceInputs(source()).files}
         catalogue={props.sourceInputs(source())} onRetrySource={() => props.onRetrySource(source())}

@@ -101,6 +101,8 @@ export function outputName({ prefix = "", sourceStem = "", suffix = "", budget =
 function namingToken(value, kind) {
   let text = formatValue(value);
   if (kind === "image") {
+    // A resource path identifies graph input, never an output naming directory.
+    text = text.split("/").at(-1);
     const dot = text.lastIndexOf(".");
     if (dot > text.lastIndexOf("/") + 1) text = text.slice(0, dot);
   }

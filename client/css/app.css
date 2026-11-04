@@ -1034,6 +1034,9 @@ body:has(#diff:not([hidden])) #statusCol { bottom: 56px; }
 .vz-image-folder { width: 100%; min-width: 0; }
 .vz-image-action { background: var(--lifted); color: var(--foreground); border: 1px solid var(--border-strong); border-radius: 4px; padding: 5px 8px; font: inherit; cursor: pointer; }
 .vz-image-action:hover { border-color: var(--foreground-dim); }
+.vz-image-action { white-space: nowrap; }
+.vz-image-action.is-on { color: var(--attention); border-color: var(--attention); }
+.vz-image-each { position: absolute; inset: auto auto 4px 4px; padding: 1px 4px; border-radius: 3px; background: var(--backdrop); color: var(--foreground); pointer-events: none; }
 .vz-image-action:focus-visible, .vz-input-option:focus-visible { outline: 2px solid var(--secondary); outline-offset: 2px; }
 .vz-input-picker { position: relative; }
 .vz-input-popover { position: fixed; inset: auto; position-area: none;
