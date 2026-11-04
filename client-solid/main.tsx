@@ -13,7 +13,19 @@ const store = appStore;
 
 // Boot owns the static shell's lifetime; inventory loading is independent.
 const stylesReady = Promise.all([...document.querySelectorAll("link[data-app-style]")].map((link) =>
-  link.sheet && link.media === "all" ? Promise.resolve() : new Promise((resolve) => link.addEventListener("load", resolve, { once: true }))));
+  link.sheet && link.media === "all" ? Promise.resolve() : new Promise((resolve) => {
+    // A terminal error, a stalled request or an event preceding this module
+    // must never leave the mounted app behind the static shell indefinitely.
+    const settle = () => {
+      clearTimeout(deadline);
+      link.removeEventListener("load", settle);
+      link.removeEventListener("error", settle);
+      resolve();
+    };
+    const deadline = setTimeout(settle, 5000);
+    link.addEventListener("load", settle, { once: true });
+    link.addEventListener("error", settle, { once: true });
+  })));
 
 // the page itself never zooms — browser zoom gestures over the app chrome
 // are dead; image zoom lives in the app's own zoomable behavior
