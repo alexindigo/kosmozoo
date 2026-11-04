@@ -34,7 +34,7 @@ function rig({ source = graph, enqueue, inspect } = {}) {
     const probe = await routes.get("GET/probe/<id>")(new Request("http://x/probe/" + encodeURIComponent(body.id)), { id: body.id });
     assertEquals(probe.status, 200);
     return { ...body, context: (await probe.json()).context };
-  }, run: (body) => routes.get("POST/run")(new Request("http://x/run", { method: "POST", body: JSON.stringify(body) })) };
+  }, run: (body) => routes.get("POST/run")(new Request("http://x/run", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) })) };
 }
 
 Deno.test("plan preflight: long text tokens are bounded, while graph text remains whole", async () => {

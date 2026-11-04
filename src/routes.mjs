@@ -15,6 +15,33 @@ import { isContentHash } from "./cache.mjs";
 // The bounded wait of one shown entry's record for its own ingestion.
 const ENTRY_META_WAIT_MS = 8000;
 
+const mediaType = req => (req.headers.get("Content-Type") ?? "").split(";", 1)[0].trim().toLowerCase();
+class UnsupportedMediaType extends Error {}
+
+// JSON parsing is an HTTP boundary, not just JSON.parse on arbitrary bytes.
+// Features share it so a multipart/binary exception cannot bypass JSON policy.
+export function readJson(req) {
+  if (mediaType(req) !== "application/json") throw new UnsupportedMediaType("Content-Type must be application/json");
+  return req.json();
+}
+
+function mutationError(req, url) {
+  if (["GET", "HEAD", "OPTIONS"].includes(req.method)) return null;
+  const origin = req.headers.get("Origin"), site = req.headers.get("Sec-Fetch-Site");
+  if ((origin !== null && origin !== url.origin) || (site !== null && !["same-origin", "none"].includes(site))) {
+    return Response.json({ error: "Mutations require the engine's own browser origin" }, { status: 403 });
+  }
+  // A server Request may expose an empty stream even for bodyless DELETE.
+  // Reject explicit simple/unknown media types here; readJson enforces the
+  // required JSON type at its parser, without guessing body presence or reading
+  // upload streams. Origin-less API clients and bodyless operations still work.
+  const type = mediaType(req);
+  if (type && !["application/json", "multipart/form-data", "application/octet-stream"].includes(type)) {
+    return Response.json({ error: "Use application/json, multipart/form-data or application/octet-stream" }, { status: 415 });
+  }
+  return null;
+}
+
 export function makeRouter(ctx) {
   const routes = [];
   const backingFor = ctx.backings?.backingFor ?? defaultBackingFor;
@@ -147,7 +174,7 @@ export function makeRouter(ctx) {
   add("POST", "/api/collections", async (req) => {
     let body;
     try {
-      body = await req.json();
+      body = await readJson(req);
     } catch {
       return Response.json({ error: "JSON body: {name, address}" }, { status: 400 });
     }
@@ -181,7 +208,7 @@ export function makeRouter(ctx) {
 
   add("PATCH", "/api/collections/<id>", async (req, { id }) => {
     let patch;
-    try { patch = await req.json(); }
+    try { patch = await readJson(req); }
     catch { return Response.json({ error: "source attributes must be JSON" }, { status: 400 }); }
     const error = validateAttributes(patch);
     if (error) return Response.json({ error }, { status: 400 });
@@ -408,7 +435,7 @@ export function makeRouter(ctx) {
 
   add("PATCH", "/api/collections/<id>/entries/<name>/judgment", async (req, { id, name }) => {
     if (!addressFor(id)) return Response.json({ error: "unknown collection" }, { status: 404 });
-    const body = await req.json();
+    const body = await readJson(req);
     const r = ctx.store.judgmentPatch(id, name, body);
     if (!r.ok) return Response.json({ error: r.error }, { status: 400 });
     return Response.json(r.judgment ?? {});
@@ -437,7 +464,7 @@ export function makeRouter(ctx) {
 
   add("PATCH", "/api/settings/<ns>", async (req, { ns }) => {
     let body;
-    try { body = await req.json(); }
+    try { body = await readJson(req); }
     catch { return Response.json({ error: "Settings patch must be a JSON object" }, { status: 400 }); }
     if (!body || typeof body !== "object" || Array.isArray(body)) return Response.json({ error: "Settings patch must be a JSON object" }, { status: 400 });
     await ctx.settings.patch(ns, body);
@@ -481,7 +508,7 @@ export function makeRouter(ctx) {
   });
 
   add("POST", "/api/prefetch", async (req) => {
-    const body = await req.json();
+    const body = await readJson(req);
     if (typeof body.enabled === "boolean") {
       await ctx.settings.set("core.prefetch", "enabled", body.enabled);
     }
@@ -512,7 +539,7 @@ export function makeRouter(ctx) {
   add("POST", "/api/collections/<id>/want", async (req, { id }) => {
     if (!addressFor(id)) return Response.json({ error: "unknown collection" }, { status: 404 });
     let body;
-    try { body = await req.json(); }
+    try { body = await readJson(req); }
     catch { return Response.json({ error: "files must be JSON" }, { status: 400 }); }
     const files = body?.files;
     if (!Array.isArray(files)) return Response.json({ error: "files must be an array" }, { status: 400 });
@@ -543,6 +570,8 @@ export function makeRouter(ctx) {
         throw error;
       }
       if (!m) return new Response("not found", { status: 404 });
+      const denied = mutationError(req, url);
+      if (denied) return denied;
       if (Object.hasOwn(m.params, "hash") && !isContentHash(m.params.hash)) {
         return Response.json({ error: "Invalid SHA-256 content hash" }, { status: 400 });
       }
@@ -554,7 +583,11 @@ export function makeRouter(ctx) {
           return Response.json({ error: "bad entry path" }, { status: 400 });
         }
       }
-      return m.handler(req, m.params, url);
+      try { return await m.handler(req, m.params, url); }
+      catch (error) {
+        if (error instanceof UnsupportedMediaType) return Response.json({ error: error.message }, { status: 415 });
+        throw error;
+      }
     },
     add, // plugin host registers its routes here
   };

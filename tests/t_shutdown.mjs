@@ -55,8 +55,8 @@ for (const { signal, stubborn = false } of [{ signal: "SIGTERM" }, { signal: "SI
   child.status.then(() => { exited = true; });
   try {
     await until(async () => { try { return (await fetch(`${origin}/api/runtime`)).ok; } catch { return false; } });
-    assertEquals((await fetch(`${origin}/api/settings/core.shutdown-test`, { method: "PATCH", body: JSON.stringify({ intact: "saved" }) })).status, 200);
-    assertEquals((await fetch(`${origin}/api/collections/fake/entries/saved.png/judgment`, { method: "PATCH", body: JSON.stringify({ bookmark: true }) })).status, 200);
+    assertEquals((await fetch(`${origin}/api/settings/core.shutdown-test`, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ intact: "saved" }) })).status, 200);
+    assertEquals((await fetch(`${origin}/api/collections/fake/entries/saved.png/judgment`, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ bookmark: true }) })).status, 200);
     await (await fetch(`${origin}/api/collections/media/entries/large.webm/bytes`)).arrayBuffer();
     slowClient = await Deno.connect({ hostname: "127.0.0.1", port });
     await slowClient.write(new TextEncoder().encode("GET /api/collections/media/entries/large.webm/bytes HTTP/1.1\r\nHost: localhost\r\n\r\n"));

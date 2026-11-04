@@ -29,7 +29,7 @@ async function rig(filename = exact, sourcePrefix = "Qwen_image_2.1", prefix = "
     imageParams: { "image.image": { enabled: true, values: imageNames } },
     acknowledgement: { version: 2, runId: crypto.randomUUID(), requestId: crypto.randomUUID() } };
   const run = async () => {
-    const response = await routes.get("POST/run")(new Request("http://x/run", { method: "POST", body: JSON.stringify(request) }));
+    const response = await routes.get("POST/run")(new Request("http://x/run", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(request) }));
     return { status: response.status, data: await response.json() };
   };
   return { target, catalogue, jobs, request, run };

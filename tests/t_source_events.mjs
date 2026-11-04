@@ -391,7 +391,7 @@ Deno.test("source shutdown admission: cached compatibility projection survives l
     assertEquals(ctx.sourceActivity.snapshot(), before);
     assertEquals(ctx.sourceActivity.source("a"), before.sources.a);
     assertEquals((await router.handle(new Request("http://fixture/api/events"))).status, 503);
-    assertEquals((await router.handle(new Request("http://fixture/api/collections/a", { method: "PATCH", body: '{"pinned":true}' }))).status, 503);
+    assertEquals((await router.handle(new Request("http://fixture/api/collections/a", { method: "PATCH", headers: { "Content-Type": "application/json" }, body: '{"pinned":true}' }))).status, 503);
     assertEquals((await router.handle(new Request("http://fixture/api/collections/a", { method: "DELETE" }))).status, 503);
     assertEquals(rig.store.collectionGet("a").pinned, 0); assert(rig.store.collectionGet("a"));
   } finally { ctx.sourceActivity.stop(); await rig.close(); }

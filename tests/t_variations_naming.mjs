@@ -28,7 +28,7 @@ async function rig(graph = fixture, filename = "Qwen_image_2.1_00330.png", outpu
   const catalogue = await probe.json();
   const run = async request => {
     requests.push(request);
-    const response = await routes.get("POST/run")(new Request("http://x/run", { method: "POST", body: JSON.stringify(request) }));
+    const response = await routes.get("POST/run")(new Request("http://x/run", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(request) }));
     const data = await response.json(); replies.push(data);
     return { ok: response.ok, status: response.status, data };
   };

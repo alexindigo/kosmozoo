@@ -265,7 +265,7 @@ Deno.test("activity context: each finish requests relist only for saved enabled 
     await ctx.jobs.tick();
     assertEquals(relists, ["a", "alias"]);
     const post = await built.router.handle(new Request("http://x/api/collections", {
-      method: "POST", body: JSON.stringify({ name: "late", address, autoRefresh: true }),
+      method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ name: "late", address, autoRefresh: true }),
     }));
     assertEquals(post.status, 200);
     const epoch = ctx.jobs.snapshot("late").epoch;

@@ -94,7 +94,7 @@ Deno.test("meta-want: dimensions-only background intent does not enqueue ingesti
   const dir = await mkdtemp(join(tmpdir(), "kz-want-dims-"));
   const { router, scraper } = await ctx(dir);
   const post = body => router.handle(new Request("http://x/api/collections/local/want", {
-    method: "POST", body: JSON.stringify(body),
+    method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body),
   }));
   try {
     for (const options of [{ interest: "invalid" }, { priority: "invalid" }, { priority: null }]) {
@@ -230,7 +230,7 @@ Deno.test("meta-want: the acknowledgement carries demanded names' known state, i
   const dir = await mkdtemp(join(tmpdir(), "kz-want-state-"));
   const { store, router } = await ctx(dir);
   const post = body => router.handle(new Request("http://x/api/collections/local/want", {
-    method: "POST", body: JSON.stringify(body),
+    method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body),
   }));
   try {
     await store.ingestFile("local", "a.png", "aa".repeat(32), 10);

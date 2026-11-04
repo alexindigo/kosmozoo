@@ -62,6 +62,25 @@ Entry identity on the wire is the plain name under a collection; the
 `collection:name` string survives only inside the client as a derived
 accessor. Underneath it, identity is the content hash (§6).
 
+### Browser mutation admission
+
+Every state-changing request, including feature and plugin routes, passes one
+router check before its handler runs. A present `Origin` must exactly match the
+request URL's origin; `null` and foreign origins reject with 403. A present
+`Sec-Fetch-Site` must be `same-origin` or `none`; `same-site` is insufficient.
+Origin-less non-browser API clients remain supported. This does not authenticate
+network clients or grant cross-origin browser access.
+
+JSON request bodies require `Content-Type: application/json` (optional charset).
+Browser-simple JSON in `text/plain` or form-encoded bodies rejects before effects.
+Multipart uploads retain `multipart/form-data`; binary plugin inputs retain
+`application/octet-stream`. Those exceptions do not let JSON handlers accept
+non-JSON media types. Bodyless operations such as DELETE require no content type.
+The same-origin SPA and desktop app use these formats without a token or extra
+browser-origin configuration. For example, API clients can send
+`curl -X PATCH -H 'Content-Type: application/json' --data '{"paused":true}'
+http://localhost:2084/api/settings/core.prefetch`.
+
 For Comfy, `name` is the complete canonical output-root-relative POSIX path:
 `image.png`, `a/image.png` and `b/image.png` are distinct addresses with independent
 judgments, even when bytes share one content hash. Root names/schema v9 are

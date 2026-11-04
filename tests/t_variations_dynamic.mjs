@@ -20,7 +20,7 @@ function rig(graph, info) {
   return { jobs, probe: async () => (await routes.get("GET/probe/<id>")(new Request("http://x/probe"), { id: "fake:dynamic.png" })).json(),
     run: async (imageParams, ranges = {}) => {
       const probe = await routes.get("GET/probe/<id>")(new Request("http://x/probe"), { id: "fake:dynamic.png" });
-      return routes.get("POST/run")(new Request("http://x/run", { method: "POST", body: JSON.stringify({
+      return routes.get("POST/run")(new Request("http://x/run", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({
         id: "fake:dynamic.png", host: "fake", filename: "dynamic.png", context: (await probe.json()).context,
         imageParams, ranges, prefix: "v_", suffix: "", acknowledgement: { version: 2, runId: crypto.randomUUID(), requestId: crypto.randomUUID() },
       }) }));
