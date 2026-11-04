@@ -1,5 +1,49 @@
 # Changelog
 
+## 0.3.0 - 2026-11-04
+
+Variations has a compact parameter editor with field-name filtering, independent
+node controls, range or single-value inputs, and clearer counts and output-name
+previews. Each opening starts a fresh draft; closing with unsent changes asks
+before discarding them. Successful runs close after confirmation, while partial
+or failed runs keep the draft available. Naming preserves prefixes and suffixes
+while keeping long output names within the filename limit.
+
+Build an ordered image set from ComfyUI inputs, any source's outputs, local files
+or folders on the engine computer. Drop images onto the panel, drag square tiles
+to reorder them, or use each target's current image as its own input. The image
+picker has source tabs, searchable thumbnails and scroll-speed-aware lookahead;
+failed previews offer an explicit retry.
+
+Play MP4, WebM and MOV videos and FLAC, MP3, Opus and WAV audio in the feed and
+viewer, with manual playback, seek, mute and looping. Embedded workflows provide
+metadata and Variations for supported media. The viewer opens on the clicked
+item in Full view, with video comparison modes and consistent A/B placement.
+Zoom stays anchored to the image across navigation and resizing.
+
+The feed filter combines filename, folder, judgments, feedback and parameter
+conditions with AND or OR. Scroll the rail with the wheel, follow its alternating
+20-tick bands, and hover for image or video-frame previews. New arrivals flash
+once, source indicators show unseen images, workflow progress and queue counts,
+and incoming items keep the current cards in place. Pinch zoom takes priority
+over feed scrolling; media and card controls stay aligned and reachable.
+
+A boot splash and source-loading glimmer provide feedback while content loads.
+Shared text fields, buttons, mode switches and action rows bring consistent
+focus, hover and active states, with unavailable actions omitted. Copied and
+downloaded filenames can optionally include the source name.
+
+Foreground media and metadata take priority over background loading, and the
+shown entry gets its metadata independently of collection-wide updates. Byte
+ranges support media seeking, failed measurements no longer hide entries, and
+large PNG metadata is retained. Source addresses accept an omitted HTTP port,
+Variations preserves graph identity and dependencies, and the engine shuts down
+promptly with clients connected.
+
+Security hardening validates cache digests, rejects cross-site mutation requests
+and serves user media as sandboxed documents. Resource budgets limit metadata
+processing and uploads, while packaging checks validate executable inputs.
+
 ## 0.2.2 — 2026-10-19
 
 Fresh installs start with no sources instead of assuming a local ComfyUI server.
