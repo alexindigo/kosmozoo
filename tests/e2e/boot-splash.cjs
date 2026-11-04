@@ -5,12 +5,19 @@ require('./loading-harness.cjs').run(async ({ page, release, waitHeld, shot, ENG
   await waitHeld();
   for (const [width, height] of [[1440, 900], [800, 600]]) {
     await page.send('Emulation.setDeviceMetricsOverride', { width, height, deviceScaleFactor: 1, mobile: false });
-    const geometry = await page.evaluate(`(()=>{const splash=document.querySelector('#bootSplash');if(!splash)return null;const b=splash.querySelector('.boot-brand').getBoundingClientRect(),s=splash.querySelector('.boot-spinner').getBoundingClientRect(),im=splash.querySelector('img');return{brand:[b.x+b.width/2,b.y+b.height/2],spinner:s.y+s.height/2,logo:im.complete&&im.naturalWidth>0,name:splash.querySelector('.boot-name').textContent,status:splash.querySelector('[role="status"]').textContent,background:getComputedStyle(splash).backgroundColor}})()`);
+    await page.poll(`document.querySelector('#bootSplash img')?.complete && document.querySelector('#bootSplash img').naturalWidth>=256`);
+    const geometry = await page.evaluate(`(()=>{const splash=document.querySelector('#bootSplash');if(!splash)return null;const b=splash.querySelector('.boot-brand').getBoundingClientRect(),s=splash.querySelector('.boot-spinner').getBoundingClientRect(),im=splash.querySelector('img'),i=im.getBoundingClientRect(),n=splash.querySelector('.boot-name'),r=n.getBoundingClientRect();return{brand:[b.x+b.width/2,b.y+b.height/2],logoCenter:i.x+i.width/2,nameCenter:r.x+r.width/2,spinnerCenter:s.x+s.width/2,spinner:s.y+s.height/2,naturalWidth:im.naturalWidth,logoWidth:i.width,logoHeight:i.height,name:n.textContent,fontSize:getComputedStyle(n).fontSize,fontWeight:getComputedStyle(n).fontWeight,status:splash.querySelector('[role="status"]').textContent,background:getComputedStyle(splash).backgroundColor}})()`);
     assert(geometry, 'static boot splash visible while main module is held');
     assert(Math.abs(geometry.brand[0] - width / 2) <= 1 && Math.abs(geometry.brand[1] - height / 2) <= 1, 'brand centered within 1px');
-    assert(geometry.logo && geometry.name === 'Kosmozoo');
+    assert(geometry.naturalWidth >= 256 && geometry.logoWidth === 160 && geometry.logoHeight === 160, 'large hi-res logo with declared stable size');
+    assert.equal(geometry.name, 'kosmozoo');
+    assert.equal(geometry.fontSize, '24px');
+    assert.equal(geometry.fontWeight, '700');
+    assert.equal(await page.evaluate(`getComputedStyle(document.querySelector('.boot-brand')).gap`), '24px', 'wordmark size and brand gap share one token');
+    for (const center of [geometry.logoCenter, geometry.nameCenter, geometry.spinnerCenter]) assert(Math.abs(center - width / 2) <= 1, 'logo, wordmark and spinner share viewport center');
+    assert.equal(geometry.background, 'rgb(17, 17, 17)');
     assert.equal(geometry.status, 'Loading Kosmozoo');
-    assert(geometry.spinner / height >= .75 && geometry.spinner / height <= .8, 'spinner in lower slot');
+    assert(geometry.spinner / height >= .75 && geometry.spinner / height <= .85, 'spinner centered in the lower flex slot');
     console.log('ok splash geometry', width, height, geometry);
     await shot(`loading-splash-${width}x${height}`);
   }
