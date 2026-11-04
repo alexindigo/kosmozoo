@@ -3,7 +3,7 @@
 // view. Per-kind strategies: images probe with `Image`, videos with a retained
 // `<video preload="metadata">`; audio (and video whose dimensions are already
 // authoritative) needs no probe, so its src starts without a native resource.
-import { createSignal, createEffect, createMemo, onMount, onCleanup } from "solid-js";
+import { createSignal, createEffect, createMemo, onMount, onCleanup, untrack } from "solid-js";
 import { FAILURE_SIZE } from "../store/media-geometry.js";
 
 export const ERROR_RETRY_MS = 8000;
@@ -206,7 +206,7 @@ export function makeImageMeasurements({ acquisition, srcFor, identityFor = id =>
   // in the same synchronous flush, before any replacement fetch can start.
   // An unscoped display (a modal surface, not a source entry) has no source
   // context or content identity: only its owner's disposal retires it.
-  function display({ id, src, foregroundId = id, priority = undefined, scoped = true, abort = () => {} }) {
+  function display({ id, src, foregroundId = id, priority = undefined, order, scoped = true, abort = () => {} }) {
     const identity = scoped ? identityFor(id) : id, owner = context, key = Symbol("image-display");
     let active = !disposed, finish = null;
     const [read, publish] = createSignal({ src: null, priority: "background" });
@@ -221,7 +221,7 @@ export function makeImageMeasurements({ acquisition, srcFor, identityFor = id =>
     }, current: live };
     if (!active || identity == null || !src) return lease;
     displays.add(lease);
-    acquisition.submit({ key, id: foregroundId, url: src, priority, scoped, valid: live,
+    acquisition.submit({ key, id: foregroundId, url: src, priority, order, scoped, valid: live,
       run: ({ priority, release }) => new Promise(resolve => {
         finish = () => { release(); resolve(); };
         publish({ src: imageRequestUrl(src, priority), priority });
@@ -286,7 +286,7 @@ export function useImageDisplay(register, input, element = () => null, { lazy = 
     onCleanup(() => observer.disconnect());
   });
   const value = createMemo(input, undefined, { equals: (a, b) => !!a &&
-    a.id === b.id && a.src === b.src && a.foregroundId === b.foregroundId && a.identity === b.identity && a.priority === b.priority });
+    a.id === b.id && a.src === b.src && a.foregroundId === b.foregroundId && a.identity === b.identity && a.priority === b.priority && a.order === b.order });
   // The URL whose terminal event this element already delivered. Re-binding the
   // same element to that same URL (e.g. first-hash enrichment) starts no native
   // load and therefore can never deliver another terminal event: it renders
@@ -300,7 +300,9 @@ export function useImageDisplay(register, input, element = () => null, { lazy = 
       setBinding(() => ({ read: () => shown })); return;
     }
     settled = null;
-    const lease = register({ ...next, abort: () => element()?.removeAttribute("src") });
+    // Admission may read live priority/rank data, but only identity/src/near
+    // own this registration. Never turn scheduler reads into native retirement.
+    const lease = untrack(() => register({ ...next, abort: () => element()?.removeAttribute("src") }));
     setBinding(() => lease);
     onCleanup(() => lease.dispose());
   });

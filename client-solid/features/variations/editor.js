@@ -59,6 +59,7 @@ export function makeVariationEditor({ targets, services, currentOrigin, changed 
   const row = recipe.row;
   const evidence = (id, item) => imageChecks.get(id)?.get(imageIdentity(item));
   const imageView = (id, item, metadata, lookup = evidence) => {
+    if (item.kind === "target") return { ...item, name: capturedTargets[0].filename, each: batch, pending: false, error: "", sameCurrent: false };
     const check = item.kind === "input" ? null : lookup(id, item);
     return { ...item, sameCurrent: item.kind === "input" ? item.name === parameterCurrent(metadata)
       : !!check?.hash && check.hash === check.currentHash, pending: item.kind !== "input" && (!check || !!check.pending), error: check?.error ?? "" };
@@ -101,7 +102,7 @@ export function makeVariationEditor({ targets, services, currentOrigin, changed 
     if (!imageChecks.has(id)) imageChecks.set(id, new Map());
     const checks = imageChecks.get(id);
     for (const item of entry.values.items) {
-      if (item.kind === "input" || checks.has(imageIdentity(item))) continue;
+      if (item.kind === "target" || item.kind === "input" || checks.has(imageIdentity(item))) continue;
       const check = { pending: true }, identity = imageIdentity(item); checks.set(identity, check);
       let finish;
       const pending = new Promise(resolve => { finish = resolve; }); pendingInspections.add(pending);
@@ -130,7 +131,7 @@ export function makeVariationEditor({ targets, services, currentOrigin, changed 
       if (!entry.values.enabled) continue;
       for (const item of entry.values.items) {
         const identity = imageIdentity(item);
-        if (item.kind === "input" || imageView(id, item, entry.metadata, lookup).sameCurrent || names.has(identity)) continue;
+        if (item.kind === "target" || item.kind === "input" || imageView(id, item, entry.metadata, lookup).sameCurrent || names.has(identity)) continue;
         const hash = lookup(id, item)?.hash;
         if (!hash) { names.set(identity, `\0pending-${names.size}`); continue; }
         let name = item.name, index = 0;
@@ -143,7 +144,7 @@ export function makeVariationEditor({ targets, services, currentOrigin, changed 
 
   // This compiler is the only reader that attaches producer channels to editor
   // leaves. Dirty tracking uses the same declarations, never whole row objects.
-  const compile = (snapshot, uploadReceipts = null, preview = false, lookup = evidence) => {
+  const compile = (snapshot, uploadReceipts = null, preview = false, lookup = evidence, target = capturedTargets[0]) => {
     const bindings = [], uploads = [], uploadHashes = new Map(), ranges = {}, imageParams = {};
     const uploadPreview = preview ? previewUploads(snapshot, lookup) : null;
     const read = (domain, id, name, label) => {
@@ -187,7 +188,8 @@ export function makeVariationEditor({ targets, services, currentOrigin, changed 
         for (const item of items) {
           const state = imageView(id, item, entry.metadata, lookup);
           if (!preview && (state.pending || state.error)) throw new Error(state.error || "Checking image bytes; your work was kept.");
-          if (state.sameCurrent) values.push(parameterCurrent(entry.metadata));
+          if (item.kind === "target") values.push(`${target.filename} [output]`);
+          else if (state.sameCurrent) values.push(parameterCurrent(entry.metadata));
           else if (item.kind === "input") values.push(item.name);
           else {
             const identity = imageIdentity(item);
@@ -319,6 +321,10 @@ export function makeVariationEditor({ targets, services, currentOrigin, changed 
     },
     removeImage(id, item) {
       return this.edit("images", id, "items", row("images", id).values.items.filter(other => !sameImage(item, other)));
+    },
+    toggleTargetImage(id) {
+      const item = { kind: "target" };
+      return row("images", id).values.items.some(other => sameImage(item, other)) ? this.removeImage(id, item) : this.addImages(id, [item]);
     },
     moveImage(id, item, index) {
       const items = row("images", id).values.items, ordered = moveRecipeImage(items, item, index);
@@ -463,7 +469,7 @@ export function makeVariationEditor({ targets, services, currentOrigin, changed 
           parameterIndex(catalogueParams(data));
           // Predicted names are only placeholders for carrier admission here;
           // final target plans below require the actual upload receipts.
-          targetRunPlan(compile(ticket.snapshot, null, true, runEvidence).payload, data);
+          targetRunPlan(compile(ticket.snapshot, null, true, runEvidence, target).payload, data);
           prepared.set(target.id, data);
         }
         const uploadTarget = ticket.targets[0];
@@ -493,7 +499,7 @@ export function makeVariationEditor({ targets, services, currentOrigin, changed 
         // Capture every immutable target plan before dispatch, including explicit
         // heterogeneous relative-axis exclusions. No later live recipe reads.
         operation.targetPlans = freeze(ticket.targets.map(target => {
-          const catalogue = prepared.get(target.id), plan = targetRunPlan(operation.compiled.payload, catalogue);
+          const catalogue = prepared.get(target.id), plan = targetRunPlan(compile(ticket.snapshot, uploads, false, runEvidence, target).payload, catalogue);
           const request = { id: target.id, host: target.host, filename: target.filename, ...snapshotDraft(plan.payload), context: catalogue.context,
             acknowledgement: { version: 2, runId: ticket.runId, requestId: createRunId() } };
           return { target, operations: plan.operations, request, expectedTotal: count(request, catalogue) };

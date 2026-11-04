@@ -65,6 +65,25 @@ Deno.test("acquisition: background CPU work yields after eight milliseconds even
   } finally { f.policy.dispose(); }
 });
 
+Deno.test("acquisition: retained queued demand follows live directional ranks without restarting active work", async () => {
+  const f = fixture(), starts = [], held = deferred();
+  let direction = 1;
+  try {
+    const running = f.policy.submit({ key: "retained", priority: "background", run: () => { starts.push("retained"); return held.promise; } });
+    f.turn();
+    const tasks = [-1, -2, 2, 1].map(index => f.policy.submit({ key: index, priority: "background",
+      order: () => (Math.sign(index) === direction ? 0 : 100) + Math.abs(index),
+      run: () => { starts.push(index); } }));
+    direction = -1;
+    f.turn(); await flush();
+    assertEquals(starts, ["retained", -1], "the active image retains one of the two background slots");
+    while (f.idle.size) { f.turn(); await flush(); }
+    await Promise.all(tasks);
+    assertEquals(starts, ["retained", -1, -2, 1, 2]);
+    held.resolve(); await running;
+  } finally { held.resolve(); f.policy.dispose(); }
+});
+
 Deno.test("acquisition: an expired idle deadline permits bounded progress when the browser has no idle time", async () => {
   const f = fixture(); let started = false;
   try {

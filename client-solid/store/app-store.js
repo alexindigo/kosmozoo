@@ -1601,7 +1601,12 @@ export function makeAppStore({ subscribeSources = typeof window !== "undefined" 
   // their owner's disposal retires them. Features receive this
   // port at installation; they never reach into the Store's actions.
   function surfaceDisplay(input) {
-    return sizes_.display({ ...input, foregroundId: null, priority: input.priority === "background" ? "background" : "foreground", scoped: false });
+    const priority = () => (typeof input.priority === "function" ? input.priority() : input.priority) === "background" ? "background" : "foreground";
+    // A retained surface can change its queued intent without retiring native
+    // work. The existing policy already accepts live priority readers.
+    const display = sizes_.display({ ...input, foregroundId: null, priority, scoped: false });
+    createEffect(() => { priority(); input.order?.(); untrack(() => acquisition.reconcile()); });
+    return display;
   }
   function updateFeedFilter(value) {
     const v = normalizeFilter(value);

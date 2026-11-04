@@ -21,6 +21,7 @@ import { cardHeight, feedOffsets, feedEntryAtOffset, gridGapPx, measureGeometry,
 import { Card } from "./Card.js";
 import { EntryActions } from "./EntryActions.js";
 import { TextField } from "./TextField.js";
+import { FeedGlimmer } from "./FeedGlimmer.js";
 
 export function Grid() {
   const store = useAppStore();
@@ -195,6 +196,7 @@ export function Grid() {
   const pending = () => store.state.pendingSizeCount();
 
   return (
+    <div class="feed-viewport">
     <section
       id="candidatesCol"
       ref={(el) => { col = el; }}
@@ -256,6 +258,10 @@ export function Grid() {
         </div>
       </div>
     </section>
+    <Show when={store.state.host() && store.state.inventory.loading && store.state.inventory.revision === null}>
+      <FeedGlimmer />
+    </Show>
+    </div>
   );
 }
 

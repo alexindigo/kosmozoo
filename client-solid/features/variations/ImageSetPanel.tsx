@@ -7,6 +7,7 @@ import { imageIdentity, uploadImage } from "./image-set.js";
 import { InputPicker } from "./InputPicker.js";
 import { FolderImages } from "./FolderImages.js";
 import { Thumbnail } from "./Thumbnail.js";
+import { ImageAction } from "./ImageAction.js";
 import { SingleLineText } from "../../components/SingleLineText.js";
 import { ParameterRow } from "./ParameterRow.js";
 import { useClickOutside } from "../../lib/click-outside.js";
@@ -42,7 +43,7 @@ export function ImageSetPanel(props) {
       <Show when={!row().items.length}><p class="vz-image-empty">Add images to vary this input.</p></Show>
       <ImageGrid images={row().images} onMove={props.onMove} registerEditor={props.registerEditor}
         dropping={dropping()} onFiles={(resources, index) => { clearDrop(); addFiles(resources, index, true); }}
-        thumbnail={props.thumbnail} pathThumbnail={props.pathThumbnail} registerThumbnail={props.registerThumbnail}
+        thumbnail={props.thumbnail} targetThumbnail={props.targetThumbnail} pathThumbnail={props.pathThumbnail} registerThumbnail={props.registerThumbnail}
         rememberFocus={props.rememberFocus} onRemove={props.onRemove}>
         <button ref={addButton} type="button" class="vz-image-plus" aria-label="Add images" aria-expanded={adding()}
           {...focusMemory(props.rememberFocus)} onClick={() => setAdding(!adding())}>+</button>
@@ -56,8 +57,12 @@ export function ImageSetPanel(props) {
         <input type="file" ref={fileInput} class="vz-imgfilespick" hidden multiple accept="image/*" onChange={e => {
           addFiles({ files: [...e.currentTarget.files] }); e.currentTarget.value = "";
         }} />
-        <button type="button" class="vz-image-action" title="Files from this browser" {...focusMemory(props.rememberFocus)} onClick={() => fileInput.click()}><SingleLineText value="Add files…" /></button>
-        <button type="button" class="vz-image-action vz-folder-trigger" aria-expanded={folder()} {...focusMemory(props.rememberFocus)} onClick={() => setFolder(!folder())}>Add folder…</button>
+        <ImageAction title="Files from this browser" {...focusMemory(props.rememberFocus)} onClick={() => fileInput.click()}><SingleLineText value="Add files…" /></ImageAction>
+        <ImageAction class="vz-image-action vz-folder-trigger" aria-expanded={folder()} {...focusMemory(props.rememberFocus)} onClick={() => setFolder(!folder())}>Add folder…</ImageAction>
+        <ImageAction class="vz-image-action vz-current-image" classList={{ "is-on": row().items.some(item => item.kind === "target") }}
+          aria-pressed={row().items.some(item => item.kind === "target")} {...focusMemory(props.rememberFocus)} onClick={props.onToggleTarget}>
+          Current image
+        </ImageAction>
         <div class="vz-image-folder" hidden={!folder()}>
         <FolderImages onAdd={props.onAddFolder} capability={props.folderCapability} onChoose={props.onChooseFolder}
           registerEditor={props.registerEditor} rememberFocus={props.rememberFocus} />
@@ -165,7 +170,8 @@ function ImageGrid(props) {
       const item = () => props.images.find(image => imageIdentity(image) === identity);
       return <div ref={element => { refs.set(identity, element); onCleanup(() => refs.delete(identity)); }}
         class={`vz-image-tile${lifted() === identity ? ' vz-image-dragging' : ''}`} tabindex="0" role="group"
-        aria-label={item()?.name} title={item()?.path || item()?.name} data-image-name={item()?.name}
+        aria-label={item()?.kind === "target" ? "Current image - each selected image uses itself" : item()?.name}
+        title={item()?.kind === "target" ? "Current image - each selected image uses itself" : item()?.path || item()?.name} data-image-name={item()?.name} data-image-kind={item()?.kind}
         {...focusMemory(props.rememberFocus)} onPointerDown={event => start(event, item())}
         onKeyDown={event => {
           if (event.target !== event.currentTarget) return;
@@ -174,7 +180,7 @@ function ImageGrid(props) {
             props.onMove(item(), index); event.currentTarget.focus({ preventScroll: true });
           } else if (['Delete', 'Backspace'].includes(event.key)) { event.preventDefault(); props.onRemove(item()); }
         }}>
-        <ImageTile item={item} thumbnail={props.thumbnail} pathThumbnail={props.pathThumbnail} registerThumbnail={props.registerThumbnail}
+        <ImageTile item={item} thumbnail={props.thumbnail} targetThumbnail={props.targetThumbnail} pathThumbnail={props.pathThumbnail} registerThumbnail={props.registerThumbnail}
           rememberFocus={props.rememberFocus} onRemove={() => props.onRemove(item())} />
       </div>;
     }}</For>
@@ -187,7 +193,7 @@ function ImageTile(props) {
   const file = createMemo(() => props.item()?.file), name = createMemo(() => props.item()?.name), path = createMemo(() => props.item()?.path);
   createEffect(() => {
     if (!name()) return;
-    if (!file()) { setUrl(path() ? props.pathThumbnail(path()) : props.thumbnail(name())); return; }
+    if (!file()) { setUrl(props.item()?.kind === "target" ? props.targetThumbnail() : path() ? props.pathThumbnail(path()) : props.thumbnail(name())); return; }
     const src = URL.createObjectURL(file()); setUrl(src); onCleanup(() => URL.revokeObjectURL(src));
   });
   // Local File previews are object URLs; engine thumbnails are admitted
@@ -195,6 +201,7 @@ function ImageTile(props) {
   return <>
     <div class="vz-image-preview"><Thumbnail src={url()} name={name()} local={!!file()} lazy register={props.registerThumbnail} rememberFocus={props.rememberFocus} /></div>
     <Show when={props.item()?.sameCurrent}><span class="vz-image-same" aria-hidden="true" /></Show>
+    <Show when={props.item()?.each}><span class="vz-image-each">each</span></Show>
     <div class="vz-image-remove">
       <IconButton chrome variant="overlay" icon={iconSvg("x")} title={`Remove ${props.item()?.name}`} onAction={props.onRemove} />
     </div>
