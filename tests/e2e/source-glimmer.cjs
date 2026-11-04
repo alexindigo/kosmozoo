@@ -8,6 +8,8 @@ require('./loading-harness.cjs').run(async ({ page, release, waitHeld, shot, ENG
   assert(await page.evaluate(`!!document.querySelector('.feed-glimmer')`), 'initial source glimmer after boot');
   await release(); await page.send('Fetch.disable');
   await page.poll(`document.querySelectorAll('#grid .card').length>0`, 20000);
+  await page.evaluate(`document.querySelector('#candidatesCol').scrollTop=12000`);
+  await page.poll(`document.querySelector('#candidatesCol').scrollTop>1000`);
   const before = await chrome();
   await shot('loading-feed-before');
   await page.send('Fetch.enable', { patterns: [{ urlPattern: '*/api/collections/another/entries?inventory=1' }] });
@@ -15,14 +17,24 @@ require('./loading-harness.cjs').run(async ({ page, release, waitHeld, shot, ENG
   await page.poll(`!!document.querySelector('.feed-glimmer')`);
   assert.equal(await page.evaluate(`document.querySelectorAll('#grid .card').length`), 0, 'no virtualized cards while inventory held');
   assert.deepEqual(await chrome(), before, 'header/rail geometry unchanged');
-  assert.equal(await page.evaluate(`document.querySelectorAll('.feed-glimmer-card').length`), 3);
+  for (const [width, height] of [[1440, 900], [800, 1400]]) {
+    await page.send('Emulation.setDeviceMetricsOverride', { width, height, deviceScaleFactor: 1, mobile: false });
+    await page.evaluate(`new Promise(r=>requestAnimationFrame(()=>requestAnimationFrame(r)))`);
+    const geometry = await page.evaluate(`(()=>{const viewport=document.querySelector('#candidatesCol').getBoundingClientRect(),cards=[...document.querySelectorAll('.feed-glimmer-card')],first=cards[0].getBoundingClientRect(),last=cards.at(-1).getBoundingClientRect();return{top:viewport.top,bottom:viewport.bottom,first:first.top,last:last.bottom,count:cards.length}})()`);
+    console.log('GLIMMER_VIEWPORT '+JSON.stringify({width,height,...geometry}));
+    assert(Math.abs(geometry.first-geometry.top)<=1, 'first skeleton starts at the viewport top after a deep source switch');
+    assert(geometry.last>=geometry.bottom, 'skeletons extend below the viewport');
+    await shot(`loading-glimmer-${width}x${height}`);
+  }
+  await page.send('Emulation.setDeviceMetricsOverride', { width:1440, height:900, deviceScaleFactor:1, mobile:false });
+  await page.evaluate(`new Promise(r=>requestAnimationFrame(()=>requestAnimationFrame(r)))`);
   const ratio = await page.evaluate(`(()=>{const r=document.querySelector('.feed-glimmer-media').getBoundingClientRect();return r.width/r.height})()`);
   assert(Math.abs(ratio - 16/9) < .001);
   const tones = await page.evaluate(`(()=>{const g=document.querySelector('.feed-glimmer-card'),m=g.querySelector('.feed-glimmer-media'),p=document.createElement('span');document.body.append(p);const token=t=>{p.style.color='var('+t+')';return getComputedStyle(p).color};const result={card:getComputedStyle(g).backgroundColor,media:getComputedStyle(m).backgroundColor,title:getComputedStyle(g.querySelector('.feed-glimmer-title')).backgroundColor,dot:getComputedStyle(g.querySelector('.feed-glimmer-actions span')).backgroundColor,surface:token('--surface'),lifted:token('--lifted')};p.remove();return result})()`);
   assert.equal(tones.card, tones.surface);
   for (const part of ['media', 'title', 'dot']) assert.equal(tones[part], tones.lifted);
   const sweep = await page.evaluate(`(()=>{const a=document.querySelector('.feed-glimmer').getAnimations({subtree:true});return a.map(a=>({duration:a.effect.getTiming().duration,state:a.playState}))})()`);
-  assert.equal(sweep.length, 3, 'every skeleton has a sweep');
+  assert.equal(sweep.length, await page.evaluate(`document.querySelectorAll('.feed-glimmer-card').length`), 'every skeleton has a sweep');
   assert(sweep.every(a => a.duration === 1600 && a.state === 'running'), 'slow running 1.6s sweeps');
   await page.send('Animation.enable');
   await page.send('Animation.setPlaybackRate', { playbackRate: 0 });

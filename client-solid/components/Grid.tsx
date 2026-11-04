@@ -196,6 +196,7 @@ export function Grid() {
   const pending = () => store.state.pendingSizeCount();
 
   return (
+    <div class="feed-viewport">
     <section
       id="candidatesCol"
       ref={(el) => { col = el; }}
@@ -207,9 +208,6 @@ export function Grid() {
             store.handles.invoke("source.menu.open");
           }}>add a ComfyUI host or folder</button></p>
         </div>
-      </Show>
-      <Show when={store.state.host() && store.state.inventory.loading && store.state.inventory.revision === null}>
-        <FeedGlimmer />
       </Show>
       <div id="grid">
         {/* the stable measuring card: styled by the card rule (class
@@ -260,6 +258,10 @@ export function Grid() {
         </div>
       </div>
     </section>
+    <Show when={store.state.host() && store.state.inventory.loading && store.state.inventory.revision === null}>
+      <FeedGlimmer />
+    </Show>
+    </div>
   );
 }
 

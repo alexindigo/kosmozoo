@@ -258,7 +258,9 @@ main { display: flex; flex: 1; min-height: 0; }
   pointer-events: none; border-color: transparent; }
 
 /* Inventory presentation is outside the size-ready virtualized feed. */
-.feed-glimmer { display: flex; flex-direction: column; gap: var(--grid-gap); padding: 8px; }
+.feed-viewport { position: relative; flex: 1; min-width: 0; display: flex; overflow: hidden; }
+.feed-glimmer { position: absolute; inset: 0; overflow: hidden; pointer-events: none;
+  display: flex; flex-direction: column; gap: var(--grid-gap); padding-inline: 8px; }
 .feed-glimmer-card { position: relative; overflow: hidden; flex: none;
   padding: var(--media-frame-inset); border: 1px solid var(--border);
   border-radius: 8px; background: var(--surface); }
