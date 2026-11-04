@@ -1,4 +1,4 @@
-import { dependencyClosure, validateGraphLinks } from "./graph.mjs";
+import { dependencyClosure, linkInputs, validateGraphLinks } from "./graph.mjs";
 
 const object = value => value && typeof value === "object" && !Array.isArray(value);
 const counter = data => Number.isFinite(data?.value) && data.value >= 0 && Number.isFinite(data?.max) && data.max > 0
@@ -61,10 +61,23 @@ export class WorkflowProgress {
     const observed = Object.entries(this.frame.nodes).filter(([id, n]) => this.nodes.has(id) && ["running", "finished"].includes(n.state));
     if (!observed.length) return null;
     const done = new Set(observed.filter(([, n]) => n.state === "finished").map(([id]) => id));
-    for (const [id] of observed) {
-      const ancestors = dependencyClosure(this.graph, id, (node, key) => !this.info.lazyInputs.get(node.class_type)?.has(key));
-      ancestors.delete(id);
-      for (const ancestor of ancestors) if (this.nodes.has(ancestor)) done.add(ancestor);
+    // One multi-source walk. Two distinct witnesses per node suffice to prove
+    // "ancestor of an observed node other than itself", even for cyclic data.
+    // Each edge is expanded at most twice, rather than once per observation.
+    const witness = new Map(), shared = new Set(), parents = new Map();
+    const pending = observed.map(([id]) => [id, id]);
+    while (pending.length) {
+      const [id, root] = pending.pop();
+      if (witness.has(id)) {
+        if (witness.get(id) === root || shared.has(id)) continue;
+        shared.add(id);
+      } else witness.set(id, root);
+      if (id !== root && this.nodes.has(id)) done.add(id);
+      if (!parents.has(id)) {
+        const node = this.graph[id], lazy = this.info.lazyInputs.get(node.class_type);
+        parents.set(id, linkInputs(node).filter(([key]) => !lazy?.has(key)).map(([, link]) => String(link[0])));
+      }
+      for (const parent of parents.get(id)) pending.push([parent, root]);
     }
     // ComfyUI can have async nodes running together. Their fractional work is
     // independent; each contributes at most one node and never double-counts done.
