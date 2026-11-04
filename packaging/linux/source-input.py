@@ -33,7 +33,31 @@ def source_row(root, name):
 
 
 def git(root, *args):
-    return subprocess.check_output(['git', '-C', str(root), *args])
+    # Metadata inspection must never execute repository or ambient helpers.
+    # Strip Git's environment overrides as well as disabling executable config
+    # at command-line precedence (which wins over repository includes).
+    env = {key: value for key, value in os.environ.items() if not key.startswith('GIT_')}
+    env.update(GIT_CONFIG_NOSYSTEM='1', GIT_CONFIG_SYSTEM='/dev/null',
+               GIT_CONFIG_GLOBAL='/dev/null', GIT_OPTIONAL_LOCKS='0', GIT_ATTR_NOSYSTEM='1')
+    command = ['git', '-c', 'core.fsmonitor=false', '-c', 'core.hooksPath=/dev/null',
+               '-c', 'core.untrackedCache=false', '-c', 'diff.external=',
+               '-c', 'diff.ignoreSubmodules=all', '-c', 'status.submoduleSummary=false', '-C', str(root)]
+    # Status can run clean/process filters while comparing dirty stat data.
+    # Reading config is inert; disable every driver before content inspection.
+    filters = subprocess.run([*command, 'config', '--null', '--name-only', '--get-regexp',
+                              r'^filter\..*\.(clean|smudge|process|required)$'],
+                             env=env, stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=30)
+    if filters.returncode not in (0, 1):
+        filters.check_returncode()
+    overrides = []
+    for key in filters.stdout.decode('utf-8', errors='surrogateescape').split('\0'):
+        if not key:
+            continue
+        if '=' in key or '\n' in key or '\r' in key:
+            raise ValueError('Unsafe Git filter configuration key')
+        value = 'false' if key.endswith('.required') else ''
+        overrides.extend(['-c', key + '=' + value])
+    return subprocess.check_output([*command, *overrides, *args], env=env, timeout=30)
 
 
 def main():
