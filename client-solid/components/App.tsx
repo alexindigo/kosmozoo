@@ -32,6 +32,10 @@ export function App() {
   const noNav = (e) => e.preventDefault();
   document.addEventListener("dragover", noNav);
   onCleanup(() => document.removeEventListener("dragover", noNav));
+  const statusBounds = () => {
+    const { magnified, rect } = store.state.nativeViewport();
+    return magnified && rect ? { left: `${rect.left}px`, top: `${rect.top}px`, width: `${rect.width}px`, height: `${rect.height}px` } : undefined;
+  };
   return (
     <>
       <Header />
@@ -42,9 +46,11 @@ export function App() {
         <WorkspacePane />
         <WorkspaceBar />
       </main>
-      <div id="statusCol">
-        <ScrollTopButton />
-        <StatusStack />
+      <div id="statusViewport" style={statusBounds()}>
+        <div id="statusCol">
+          <ScrollTopButton />
+          <StatusStack />
+        </div>
       </div>
       <DiffStage />
       <FeatureModals />
