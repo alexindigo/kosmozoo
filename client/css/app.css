@@ -459,9 +459,11 @@ main { display: flex; flex: 1; min-height: 0; }
 /* --- the status corner: ONE fixed flex column holds the scroll-top button
  above the status stack ( — the button's bottom:56px was hand-synced to
  the stack; the column derives the order) --------------------------------- */
-#statusCol { position: fixed; right: 12px; bottom: 10px; z-index: var(--z-status);
+#statusViewport { position: fixed; left: 0; top: 0; width: 100%; height: 100%;
+  z-index: var(--z-status); pointer-events: none; }
+#statusCol { position: absolute; right: 12px; bottom: 10px;
   display: flex; flex-direction: column; justify-content: flex-end; align-items: flex-end;
-  gap: 8px; max-width: calc(100vw - 24px); pointer-events: none; }
+  gap: 8px; max-width: calc(100% - 24px); pointer-events: none; }
 /* the workbench's bottom bar owns the corner when it's open (the column is
  z-status, above the overlay) — the status floats above the bar instead of
  covering the comparator's controls */
@@ -480,11 +482,13 @@ body:has(#diff:not([hidden])) #statusCol { bottom: 56px; }
  the kind only recolors it (no 2px state shift) */
   border-left: 3px solid transparent;
   border-radius: 6px; padding: 4px 10px; font-size: 12px; color: var(--foreground-mid);
-  max-width: calc(100vw - 24px); white-space: normal; overflow-wrap: anywhere;
+  max-width: 100%; white-space: normal; overflow-wrap: anywhere;
   opacity: 1; transition: opacity .6s ease;
   pointer-events: auto; cursor: pointer; }
 .statuschip.active { color: var(--foreground); border-left-color: var(--secondary); }
 .statuschip.error { color: var(--negative); border-left-color: var(--error); }
+.statuschip.warning { color: var(--warning); border-left-color: var(--warning); }
+.statuschip.statuschip-static { cursor: default; }
 
 /* --- the modal contract : ONE backdrop + panel pair. Every modal
  renders .modal-backdrop/.modal-panel (Modal.tsx portals them to body);

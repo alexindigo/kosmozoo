@@ -48,6 +48,7 @@ import { launchNotice } from "/js/launch-notice.mjs";
 import { readZoomView, readyViewGeometry } from "/js/zoom-view.mjs";
 import { entryNames } from "./entry-names.js";
 import { makeWheelArbiter } from "../lib/wheel-arbiter.js";
+import { observeNativeMagnification } from "../lib/native-magnification.js";
 import { emptyFilter, normalizeFilter, compileFilter, filterConditions, parameterNames } from "/js/feed-filter-model.mjs";
 
 // stored host if still present, else first online, else first
@@ -131,6 +132,8 @@ export function makeAppStore({ subscribeSources = typeof window !== "undefined" 
   const [host, setHost] = createSignal(null);
   const [appVersion, setAppVersion] = createSignal("");
   const [sourceDelivery, setSourceDelivery] = createSignal(subscribeSources ? "connecting" : "explicit");
+  const [nativeViewport, setNativeViewport] = createSignal({ magnified: false, rect: null });
+  const nativeMagnification = () => nativeViewport().magnified;
   const [acquisitionRevision, setAcquisitionRevision] = createSignal(0);
   let sourceSession = null, selectionGeneration = 0, disposed = false;
   const railArrivals = makeRailArrivals();
@@ -1791,10 +1794,13 @@ export function makeAppStore({ subscribeSources = typeof window !== "undefined" 
     lifecycle: {
       suspendDelivery, resumeDelivery,
       registerPage(target) {
+        if (disposed) return () => {};
         pageDispose?.();
+        const stopMagnification = observeNativeMagnification(target, setNativeViewport);
         target.addEventListener("pagehide", suspendDelivery);
         target.addEventListener("pageshow", resumeDelivery);
         const retire = () => {
+          stopMagnification();
           target.removeEventListener("pagehide", suspendDelivery);
           target.removeEventListener("pageshow", resumeDelivery);
           if (pageDispose === retire) pageDispose = null;
@@ -2537,6 +2543,8 @@ export function makeAppStore({ subscribeSources = typeof window !== "undefined" 
       return host() !== id && !!sourceRecords.get(id)?.hasNew;
     },
     sourceDelivery,
+    nativeMagnification,
+    nativeViewport,
     railArrivalEvent: railArrivals.event,
     appVersion,
     get sourceSaving() { return sourceRecords.saving(); },
