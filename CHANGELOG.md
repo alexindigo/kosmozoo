@@ -6,6 +6,8 @@ Native browser magnification now shows a recovery hint that clears when normal
 scale returns. The shared status corner follows the visible viewport while
 magnified, keeping its messages reachable during zoom and pan.
 
+Official `kosmozoo-linux-x86_64` SHA-256: `c65a3e5a2676e843a80e182e6215202cda5ef287ca6fb49c2378e6b1b455aae1`.
+
 ## 0.3.0 - 2026-11-04
 
 Variations has a compact parameter editor with field-name filtering, independent
