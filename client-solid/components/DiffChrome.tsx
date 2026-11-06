@@ -62,7 +62,8 @@ function VSlider(props) {
 export function DiffChrome(props) {
   const store = useAppStore();
   const d = () => store.state.diff;
-  const hasB = () => !!store.state.diffPair().b && store.state.diffKind() !== "audio" && d().mode !== "full";
+  const presentation = () => store.state.diffPresentation();
+  const hasB = () => presentation().comparison;
   const modes = () => store.state.diffViews().filter(({ mode }) => mode === "full" ||
     (!!store.state.diffPair().b && (mode !== "difference" || !props.differenceReason)));
 
@@ -107,7 +108,7 @@ export function DiffChrome(props) {
             onAction={() => store.handles.invoke("workbench.lock", { toggle: true })}
             icon={iconSvg(d().locked ? "lock" : "lock-open", 14)}
           /></span></Show></span>
-          <span class="viewer-control-slot"><Show when={hasB()}>
+          <span class="viewer-control-slot"><Show when={presentation().activeOpacity.available}>
           <VSlider
             icon="opacity" title={`active ${props.mediaWord ?? "image"} opacity`} class="dz-active-op"
             value={() => d().activeOpacity}
@@ -131,7 +132,7 @@ export function DiffChrome(props) {
               onInput={(v) => store.handles.invoke("workbench.parameters", { parameter: "threshold", value: Math.round(v * 64) })}
             />
           </Show></span>
-          <span class="viewer-control-slot"><Show when={hasB() && d().mode === "difference"}>
+          <span class="viewer-control-slot"><Show when={presentation().highlightOpacity.available}>
             <VSlider
               icon="contrast" title="highlight opacity" class="dz-mask-op"
               value={() => d().diffOpacity}

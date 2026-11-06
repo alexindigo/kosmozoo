@@ -31,7 +31,7 @@ import { makeSourceRegistry, sameSourceIdentity } from "./source-registry.js";
 import { makeRailArrivals } from "./rail-arrivals.js";
 import { fieldList, nodeImages } from "./fields.js";
 import { pairSides } from "../features/diff/pair.mjs";
-import { workbenchViews, defaultWorkbenchView, columnForSide, sideForColumn } from "../features/diff/views.mjs";
+import { workbenchViews, defaultWorkbenchView, workbenchPresentation, columnForSide, sideForColumn } from "../features/diff/views.mjs";
 import { makeImageWindow } from "./image-window.js";
 import { makeSizes } from "./sizes.js";
 import { makeMediaPlayers } from "./media-players.js";
@@ -88,7 +88,7 @@ export function makeAppStore({ subscribeSources = typeof window !== "undefined" 
       get col() { return columnForSide(this.subject); },
       locked: true,         // entangled zoom: a gesture's delta writes BOTH view keys
       splitT: 0.5,          // wipe position, 0..1 of stage width
-      activeOpacity: 1,     // the active column's photo opacity (every mode)
+      activeOpacity: 1,     // raw comparison opacity, retained on control-less surfaces
       diffAbs: true,        // absolute vs proportional highlight
       diffOpacity: 1,
       diffThreshold: 8,     // the match floor: deltas at or below it show the base
@@ -268,6 +268,11 @@ export function makeAppStore({ subscribeSources = typeof window !== "undefined" 
   const diffSubject = createMemo(() => diffPair()[st.diff.subject]);
   const diffKind = createMemo(() => mediaKind(diffPair().a?.file) ?? "image");
   const diffViews = createMemo(() => workbenchViews(diffKind()));
+  const diffPresentation = createMemo(() => workbenchPresentation({
+    kind: diffKind(), mode: st.diff.mode, paired: !!diffPair().b,
+    activeOpacity: st.diff.activeOpacity, diffOpacity: st.diff.diffOpacity,
+    differenceReason: differenceReason(),
+  }));
   createEffect(() => {
     if (!diffViews().some(view => view.mode === st.diff.mode) || (differenceReason() && st.diff.mode === "difference")) {
       setSt("diff", "mode", defaultWorkbenchView(diffKind()));
@@ -2572,6 +2577,7 @@ export function makeAppStore({ subscribeSources = typeof window !== "undefined" 
     diffSubject,
     diffKind,
     diffViews,
+    diffPresentation,
     get variations() { return st.variations; },
     get infoOverlay() { return st.infoOverlay; },
     get chips() { return st.chips; },

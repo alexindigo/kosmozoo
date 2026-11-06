@@ -75,10 +75,11 @@ export function DiffStage() {
   const store = useAppStore();
   const pair = () => store.state.diffPair();
   const d = () => store.state.diff;
+  const presentation = () => store.state.diffPresentation();
   const fullB = () => d().mode === "full" && d().subject === "b";
   const srcA = useSideSrc(store, () => fullB() ? null : pair().a);
   const srcB = useSideSrc(store, () => (d().mode === "full" ? fullB() : store.state.diffKind() !== "audio") ? pair().b : null);
-  const hasB = () => !!pair().b && store.state.diffKind() !== "audio" && mode() !== "full";
+  const hasB = () => presentation().comparison;
   const showB = () => fullB() || hasB();
   const differenceReason = () => store.state.differenceReason() ||
     ([srcA(), srcB()].some(side => side && side.kind !== "image") ? "difference mode compares still images" : null);
@@ -189,8 +190,8 @@ export function DiffStage() {
   createEffect(() => {
     allocation();
     const aUrl = srcA()?.src, bUrl = srcB()?.src;
-    const absolute = d().diffAbs, opacity = d().diffOpacity, baseIsA = d().col === "feed";
-    const baseOpacity = d().activeOpacity, threshold = d().diffThreshold;
+    const absolute = d().diffAbs, opacity = presentation().highlightOpacity.value, baseIsA = d().col === "feed";
+    const baseOpacity = presentation().activeOpacity.value, threshold = d().diffThreshold;
     // Snapshot numeric fields while tracked, before the async decode. Holding
     // a live proxy here would observe only record identity and miss later pans.
     const vA = keyA() ? readZoomView(store.actions.diff.views.get(keyA(), layerGeometry("a")), layerGeometry("a")) : null;
@@ -229,7 +230,7 @@ export function DiffStage() {
       <div
         id="diffStage" ref={stageEl}
         data-mode={mode()} data-col={d().col}
-        style={{ "--split": d().splitT, "--active-op": d().activeOpacity }}
+        style={{ "--split": d().splitT, "--active-op": presentation().activeOpacity.value }}
       >
         <div class="dz-cell dz-a" ref={setCellAEl}
           data-position={layout().layers.a.position} data-shown={layout().layers.a.shown}

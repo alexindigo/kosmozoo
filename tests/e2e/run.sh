@@ -132,6 +132,14 @@ docker run --rm --user "$RUN_USER" --network host -v "$WORK":/work -w /work \
   --entrypoint node "$PW_IMAGE" \
   /work/tests/e2e/diff.e2e.cjs
 
+# Opacity effects follow their controls, retaining raw choices across Full/unpaired views.
+timeout 600s docker run --rm --user "$RUN_USER" --network host -v "$WORK":/work -w /work \
+  --memory=1600m --memory-swap=1600m --pids-limit=256 --cpus=2 \
+  -e HOME=/work/tests/.tmp-runtime/diff/home -e TMPDIR=/work/tests/.tmp-runtime/diff/tmp \
+  -e E2E_ENGINE="http://127.0.0.1:$ENGINE_PORT" \
+  -e E2E_FAKE="http://127.0.0.1:$FAKE_PORT" \
+  --entrypoint node "$PW_IMAGE" /work/tests/e2e/opacity-scope.cjs
+
 # 6. cache revalidation e2e (pure HTTP — no browser involved)
 docker run --rm --user "$RUN_USER" --network host -v "$WORK":/work -w /work \
   -e HOME=/work/tests/.tmp-runtime/cache/home -e TMPDIR=/work/tests/.tmp-runtime/cache/tmp \

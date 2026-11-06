@@ -576,8 +576,13 @@ Overlay (one-up/blink) and Slider (wipe); Difference is absent. Audio has only
 Full. Images offer Full/Two-Up/One-Up/Split/Difference. Without a comparison image,
 only Full is available and the single-option mode switch is omitted, as are side,
 lock and opacity actions. Empty toolbar slots retain their allocation so controls
-do not shift as the pair changes. Every kind opens in Full,
-on the clicked image, on every open. The open intent names its subject and pair;
+do not shift as the pair changes.
+Opacity controls and rendered effects share one viewer presentation projection.
+Full, unpaired and audio surfaces render opaque without discarding the chosen
+comparison opacity; returning to an eligible comparison restores that choice.
+Difference uses that opacity for its base and its separate highlight control
+for the highlight mix, independently of whether either slider popup is expanded.
+Every kind opens in Full on the clicked image, on every open. The open intent names its subject and pair;
 the viewer owns that subject, derives its active column from it, and Full shows
 only that side. Comparison modes retain the pair with the subject active.
 The diff module's immutable placement map owns A/feed on the left and B/compare

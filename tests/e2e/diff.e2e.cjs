@@ -240,7 +240,7 @@ function check(name, ok, detail = "") {
   })()`);
   check("A/B: A stays left in Two-Up with B active", layout.al < layout.bl, JSON.stringify(layout));
 
-  // 5b. active opacity: the slider sits in the controls strip in every mode;
+  // 5b. active opacity: the slider is offered in eligible comparison views;
   // it fades the ACTIVE layer (Two-Up: col=right → B), moves with A/B, and
   // dims the Split subject and the Difference base
   const op = await cdp.evaluate(`(async () => {
