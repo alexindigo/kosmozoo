@@ -1,5 +1,22 @@
 # Changelog
 
+## 0.4.0 - 2026-11-07
+
+Still-image comparisons can detect faces, select which boxes to show and choose
+an alignment face on each image. Independent, Shared and Face-anchored alignment
+share one selector; `a` cycles alignment and `l` retains shared movement. Face
+anchors align eye midpoints and scale with a shared camera, without rotation or
+identity recognition. Multiple faces require an explicit anchor choice.
+
+Detection is optional, requires an externally configured detector service and
+starts OFF on every page load. Its separate toggle retains choices while off;
+choosing Face-anchored does not enable detection. Detection and displayed pixels
+stay bound to the accepted image content, including delayed or failed swaps.
+
+Viewer opacity controls appear only for eligible comparisons. Full, unpaired
+and audio views stay opaque while retaining the chosen comparison opacity;
+Difference keeps separate base and highlight controls.
+
 ## 0.3.1 - 2026-11-05
 
 Native browser magnification now shows a recovery hint that clears when normal
