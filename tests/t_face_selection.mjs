@@ -2,6 +2,69 @@ import { assert, assertEquals } from "jsr:@std/assert";
 import { makeFaceModel } from "../client-solid/features/face-alignment/model.mjs";
 import { face, resource, result, turn } from "./helpers/face-fixtures.mjs";
 
+Deno.test("faces: cached choice admission is independent of backend work but suspend retires both", async () => {
+  const a = resource(), b = resource("b.png"); let calls = 0;
+  const model = makeFaceModel({ detect: async () => { calls++; return result([face(), face(300, 200), { ...face(400, 200), kps: [] }]); } });
+  try {
+    model.update("session/config", [a]); await turn();
+    const record = model.record(a);
+    assert(model.choose(a, record.id, record.faces[0].id));
+    model.suspend(); assert(!model.choose(a, record.id, record.faces[1].id));
+    model.update("session/config", [a, b], [], false, true);
+    assert(model.choose(a, record.id, record.faces[1].id), "cached choice needs no ready backend");
+    assertEquals(model.record(a).anchor, record.faces[1].id);
+    assertEquals(model.record(a).faces.map(f => f.selected), [true, true, true]);
+    assert(!model.choose(a, "stale-record", record.faces[0].id));
+    assert(!model.choose(a, record.id, "foreign-face"));
+    assert(!model.choose(a, record.id, record.faces[2].id));
+    assertEquals(model.record(a).anchor, record.faces[1].id, "unusable choice retains the prior valid anchor");
+    model.retry(); await turn(); assertEquals(calls, 1, "neither choice nor retry admits backend work");
+    model.suspend(); assert(!model.choose(a, record.id, record.faces[0].id));
+    model.update("session/config", [a], [], false);
+    assert(!model.choose(a, record.id, record.faces[0].id), "existing allowWork=false callers still suspend choices");
+    model.update("session/config", [b], [], false, true);
+    assert(!model.choose(a, record.id, record.faces[0].id), "retained but unrequested content cannot choose");
+    model.update("new-session/config", [a], [], false, true);
+    assert(!model.choose(a, record.id, record.faces[0].id), "real lifetime retirement fences cached choices");
+  } finally { model.dispose(); }
+});
+
+Deno.test("faces: suspension before the queued microtask admits no transport, including rapid OFF/ON", async () => {
+  const calls = [], a = resource();
+  const model = makeFaceModel({ detect: async r => { calls.push(r); return result(); } });
+  try {
+    model.update("session", [a]);
+    model.update("session", [a], [], false);
+    model.retry(); await turn();
+    assertEquals(calls.length, 0, "OFF retires queued transport before invocation");
+    model.update("session", [a]);
+    model.update("session", [a], [], false);
+    model.update("session", [a]); await turn();
+    assertEquals(calls.length, 1, "only the current activation can invoke transport");
+  } finally { model.dispose(); }
+});
+
+Deno.test("faces: OFF preserves valid choices, aborts pending work and fences ignored abort completions", async () => {
+  const jobs = [], a = resource(), b = resource("b.png");
+  const model = makeFaceModel({ detect: (r, signal) => new Promise(resolve => jobs.push({ r, signal, resolve })) });
+  try {
+    model.update("session", [a, b]); await turn();
+    jobs[0].resolve(result([face(), face(300, 200)])); await turn();
+    const first = model.record(a); assert(model.choose(a, first.id, first.faces[1].id));
+    const chosen = model.record(a);
+    model.update("session", [a, b], [], false);
+    assert(jobs[1].signal.aborted);
+    assert(!model.choose(a, chosen.id, chosen.faces[0].id));
+    model.retry(); await turn(); assertEquals(jobs.length, 2);
+    model.update("session", [a, b]); await turn();
+    jobs[1].resolve(result()); await turn();
+    assertEquals(model.record(b), null, "old completion cannot publish into the new interval");
+    assertEquals(model.record(a), chosen, "toggle retains valid immutable face choices");
+    jobs[2].resolve(result()); await turn();
+    assert(model.record(b)); assertEquals(jobs.length, 3, "only missing current identity is acquired");
+  } finally { model.dispose(); }
+});
+
 Deno.test("faces: every face selected; explicit per-record anchor does not remove peers", async () => {
   const a = resource(), b = resource("b.png");
   const model = makeFaceModel({ detect: async () => result([face(100, 100, 40, .01), face(300, 200, 20, 200)]) });

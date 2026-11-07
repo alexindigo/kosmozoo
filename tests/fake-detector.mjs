@@ -35,8 +35,8 @@ for (const [name, faces] of Object.entries(fixtures)) {
   files.set(name, bytes); records.set(hash, { w: 512, h: 512, faces });
   if (values["fixtures-dir"]) await Deno.writeFile(`${values["fixtures-dir"]}/${name}`, bytes);
 }
-let config = { delay: 0, fail: false, ready: true }, serial = 0;
-const requests = [];
+let config = { delay: 0, healthDelay: 0, fail: false, ready: true }, serial = 0;
+const requests = [], operations = [];
 Deno.serve({ hostname: "127.0.0.1", port: Number(values.port) }, async req => {
   const path = new URL(req.url).pathname;
   if (path === "/__test/config" && req.method === "POST") {
@@ -45,14 +45,21 @@ Deno.serve({ hostname: "127.0.0.1", port: Number(values.port) }, async req => {
     return Response.json({ ...config, records: undefined });
   }
   if (path === "/__test/requests") return Response.json(requests);
+  if (path === "/__test/operations") return Response.json(operations);
   if (path.startsWith("/fixtures/")) {
     const bytes = files.get(path.slice(10));
     return bytes ? new Response(bytes, { headers: { "content-type": "image/png" } }) : new Response("missing", { status: 404 });
   }
-  if (path.endsWith("/health")) return Response.json({ model_ready: config.ready, model: "anime28-fixture", deadline_ms: 10000 });
+  if (path.endsWith("/health")) {
+    operations.push({ path, kind: "health" });
+    const captured = { ...config };
+    if (captured.healthDelay) await new Promise(resolve => setTimeout(resolve, captured.healthDelay));
+    return Response.json({ model_ready: captured.ready, model: "anime28-fixture", deadline_ms: 10000 });
+  }
   if (path.endsWith("/detect") && req.method === "POST") {
     const hash = await sha256(new Uint8Array(await req.arrayBuffer())), captured = { ...config }, id = ++serial;
     const request = { id, hash, path, pending: true }; requests.push(request);
+    operations.push({ path, kind: "infer", id, hash });
     if (captured.delay) await new Promise(resolve => setTimeout(resolve, captured.delay));
     request.pending = false;
     if (!captured.ready) return Response.json({ id, error: "model loading" }, { status: 422 });

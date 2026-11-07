@@ -675,16 +675,45 @@ face mode. The feature's rebindable `wb.alignment`/`a` cycles available choices
 through the existing dispatcher. Video offers Independent/Shared only. Full,
 unpaired and audio apply no face effect while retaining the request.
 
-Face-anchored requests detection for the current eligible still pair only.
-Browsing and closed viewers run no inference. The existing settings menu gains
+Face detection has a separate shared viewer on/off button and validated
+`faces.detection.toggle` command, with no default shortcut. It starts OFF once
+per app/store, remembers the choice across navigation and viewer close/reopen
+in the current page, and is not persisted. A fresh reload starts OFF. Selecting
+Face-anchored alone never enables detection; enabling detection never changes
+alignment. Detection is active only when enabled in an eligible paired-still
+comparison. Independent/Shared retain ordinary geometry while showing selected
+faces and detection/choice status; only Face-anchored also applies registration
+and common-camera gestures. Full, unpaired, video, audio and feed do not gain
+detection effects. Browsing and closed viewers run no inference.
+
+OFF hides feedback, face actions and operational status, returns ordinary
+geometry, aborts browser status/inference and retires queued transport admission.
+It retains requested alignment, valid immutable records/choices, raw crops and
+the common camera. ON revalidates readiness before new inference without
+discarding the known model identity during the handshake or an unavailable
+reply without a model observation. Real model/configuration/session changes
+still retire their state. Separate activation tickets fence old status, retry
+and gesture continuations across rapid OFF/ON without changing cache lifetime.
+Current accepted cached-face choices use enabled/eligible/confirmed-configuration
+admission, independently of backend readiness: choosing a valid cached face
+while readiness is pending or unavailable requests Face alignment without new
+inference. OFF/suspend synchronously retires both work and choice admission.
+Retry while OFF, including after an await, cannot probe or infer. A request
+already accepted by the shared external service may finish; retirement prevents
+client publication, not forced model-worker cancellation.
+
+The existing settings menu gains
 a Face detector service URL field for `plugins.detector.serviceUrl`, with save
-confirmation after read-back. Plugin discovery and detector status distinguish
+confirmation after read-back. Configuration reads/saves remain available OFF
+without detector status, outbound health or inference calls. While enabled,
+plugin discovery and detector status distinguish
 configuration, model loading and service failure. No-face, unusable eyes, pending
 detection/decode, waiting for choice, decode failure and ready are distinct states.
 
 All detected faces initially remain selected and visible. Multiple faces require
 an explicit anchor; score and order never choose one. Trusted double-click chooses
-a selected usable face for that accepted image only, retaining every other face.
+a selected usable face for that accepted image only and explicitly requests
+Face-anchored alignment, retaining every other face.
 Native face buttons invoke the same identity-checked `faces.use` command for
 keyboard activation. A single-face result with usable eyes can anchor directly.
 Choosing a current selected face without usable eyes reports the reason without
@@ -709,6 +738,13 @@ successful content identification retires that failure and can reuse an exact re
 Engine-owned results use the correct input/output address without a browser byte
 round-trip. Their exact `/api/content/<hash>/bytes` image must decode with matching
 dimensions before feedback or registration can use it. Local anchors use raw bytes.
+While detection is active, canonical resource hashes select that immutable image
+path before an ML record exists. A pending record never downgrades a known
+version to a mutable named URL. Initial unknown engine content stays honestly
+unverified until content is known; local anchor data keeps its byte-owned path.
+The existing decode guard and accepted old-record pins retain the previous
+version and feedback through slow or failed replacement. OFF uses ordinary
+presentation without claiming named pixels are hash-verified.
 Accepted descriptors retain resource/source, session, generation, dimensions and
 verified hash; mutable named URLs do not claim a verified displayed hash. Failed
 swaps retain the coherent old descriptor and its own feedback. Source/configuration/

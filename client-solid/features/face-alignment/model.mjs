@@ -12,7 +12,7 @@ export function makeFaceModel({ detect, changed = () => {}, limit = 24 }) {
   // Successes and failures share one LRU budget; neither can accumulate in
   // an unbounded parallel map. Active/accepted records are pinned together.
   const cache = new Map();
-  let lifetime = null, wanted = [], retained = [], active = null, disposed = false, serial = 0, enabled = true;
+  let lifetime = null, wanted = [], retained = [], active = null, disposed = false, serial = 0, enabled = true, choicesEnabled = true;
   const publish = () => { if (!disposed) changed(); };
   function entryFor(resource, recordId) {
     if (!resource) return null;
@@ -47,7 +47,10 @@ export function makeFaceModel({ detect, changed = () => {}, limit = 24 }) {
     if (!resource) return;
     const controller = new AbortController(), token = lifetime;
     const job = active = { address: faceAddress(resource), expectedHash: resource.hash ?? null, controller, order: ++serial };
-    Promise.resolve().then(() => detect(resource, controller.signal)).then(result => {
+    Promise.resolve().then(() => {
+      if (disposed || active !== job || lifetime !== token || !enabled || controller.signal.aborted) return;
+      return detect(resource, controller.signal);
+    }).then(result => {
       if (disposed || active !== job || lifetime !== token || !wanted.some(r => compatible(job, r))) return;
       if (job.expectedHash && job.expectedHash !== result.image.hash) {
         // Unknown -> known enrichment can reveal a genuine replacement while
@@ -86,7 +89,10 @@ export function makeFaceModel({ detect, changed = () => {}, limit = 24 }) {
     active?.controller.abort(); active = null; cache.clear();
   }
   return {
-    update(token, resources, displayed = [], allowWork = true) {
+    suspend() { enabled = choicesEnabled = false; active?.controller.abort(); active = null; },
+    // Existing callers keep coupled suspension. The feature can admit current
+    // cached choices independently while backend readiness withholds new work.
+    update(token, resources, displayed = [], allowWork = true, allowChoice = allowWork) {
       if (disposed) return;
       if (lifetime !== token) { retire(); lifetime = token; wanted = []; }
       const previous = wanted;
@@ -96,6 +102,7 @@ export function makeFaceModel({ detect, changed = () => {}, limit = 24 }) {
         return { ...resource, ...(hash ? { hash } : {}) };
       });
       enabled = allowWork;
+      choicesEnabled = allowChoice;
       retained = displayed;
       if (active) {
         const current = enabled && wanted.find(resource => compatible(active, resource));
@@ -117,7 +124,7 @@ export function makeFaceModel({ detect, changed = () => {}, limit = 24 }) {
     },
     choose(resource, recordId, faceId) {
       const entry = read(resource, recordId), record = entry?.record;
-      if (!enabled || !record || !wanted.some(r => entryFor(r)?.key === entry.key)) return false;
+      if (disposed || !choicesEnabled || !record || !wanted.some(r => entryFor(r)?.key === entry.key)) return false;
       const face = record.faces.find(f => f.id === faceId && f.selected);
       if (!face) return false;
       if (!face.eyes) {
@@ -126,6 +133,7 @@ export function makeFaceModel({ detect, changed = () => {}, limit = 24 }) {
       cache.set(entry.key, { ...entry, notice: undefined, record: freeze({ ...record, anchor: faceId }) }); publish(); return true;
     },
     retry() {
+      if (disposed || !enabled) return;
       for (const [k, entry] of cache) if (Object.hasOwn(entry, "error")) cache.delete(k);
       drain(); publish();
     },

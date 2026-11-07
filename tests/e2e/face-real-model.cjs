@@ -36,7 +36,9 @@ const KZ = `(await import('/store/instance.js')).appStore`;
     const confirmed=await(await fetch(ENGINE+'/api/settings/plugins.detector')).json();assert.equal(confirmed.serviceUrl,SERVICE);
     await page.clickAt('#menuBtn');
     await invoke('workbench.openPair',{left:{source:'faces',file:'real-a.png'},right:{source:'faces',file:'real-b.png'}});
-    await invoke('workbench.mode',{mode:'two-up'});
+     await invoke('workbench.mode',{mode:'two-up'});
+     assert.equal(await page.evaluate(`document.querySelector('#faceDetection').getAttribute('aria-pressed')`),'false');
+     await page.clickAt('#faceDetection');
     await page.clickAt('#diffAlignment');await page.keyTrusted('End',{vk:35});await page.keyTrusted('Enter',{vk:13});
     await page.poll(`document.querySelectorAll('.dz-a .face-selected').length>0&&document.querySelectorAll('.dz-b .face-selected').length>0`,90000);
     for(const side of ['a','b']) {
@@ -80,7 +82,7 @@ const KZ = `(await import('/store/instance.js')).appStore`;
     proof.a.midpoint.forEach((n,i)=>assert(Math.abs(n-proof.b.midpoint[i])<.6));
     assert.deepEqual(errors,[]);
     fs.writeFileSync(path.join(E,'actual-model-consumer.json'),JSON.stringify({proof,errors,confirmed},null,2));
-    fs.writeFileSync(path.join(E,'actual-model-registered-overlap.png'),Buffer.from((await page.send('Page.captureScreenshot',{format:'png'})).data,'base64'));
+    if(process.env.FACE_SKIP_SCREENSHOTS !== '1') fs.writeFileSync(path.join(E,'actual-model-registered-overlap.png'),Buffer.from((await page.send('Page.captureScreenshot',{format:'png'})).data,'base64'));
     console.log('ACTUAL MODEL TO BROWSER: selected faces, immutable displayed bytes, native/feedback geometry and registration agree');
     console.log(JSON.stringify({a:{hash:proof.a.record.image.hash,faces:proof.a.record.faces.length,midpoint:proof.a.midpoint,distance:proof.a.distance},b:{hash:proof.b.record.image.hash,faces:proof.b.record.faces.length,midpoint:proof.b.midpoint,distance:proof.b.distance}}));
   } catch(error) {

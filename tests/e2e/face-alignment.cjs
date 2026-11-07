@@ -96,7 +96,7 @@ const fixtures = { a: [[256, 256, 160], [75, 75, 32]], b: [[210, 210, 40], [360,
     assert.equal((await (await fetch(ENGINE + '/api/settings/plugins.detector')).json()).serviceUrl, DETECTOR);
     await capture('settings-saved');
     await page.clickAt('#menuBtn');
-    await open(); await selectFaceMode();
+    await open(); await selectFaceMode(); await page.clickAt('#faceDetection');
     await page.poll(`document.querySelectorAll('.dz-a .face-selected').length === 2 && document.querySelectorAll('.dz-b .face-selected').length === 2`, 20000);
     assert.equal(await anchor('a'), null); assert.equal(await anchor('b'), null);
     assert.equal(await count('a'), 2); assert.equal(await count('b'), 2);
@@ -180,7 +180,8 @@ const fixtures = { a: [[256, 256, 160], [75, 75, 32]], b: [[210, 210, 40], [360,
     await geometry('return retains camera and anchors', 0, 0, true);
     await page.key('l');
     await page.poll(`document.querySelector('#diffAlignment').value==='shared'`);
-    assert.equal(await page.evaluate(`!!document.querySelector('.face-feedback')`), false);
+    assert.equal(await count('a'), 2, 'Shared retains detection feedback independently of registration');
+    assert.equal(await count('b'), 2);
     await page.key('a'); await page.poll(`document.querySelector('#diffAlignment').value==='face'`);
     await invoke('workbench.close'); await open();
     await page.poll(`document.querySelectorAll('.dz-a .face-selected').length===2`);
@@ -198,14 +199,14 @@ const fixtures = { a: [[256, 256, 160], [75, 75, 32]], b: [[210, 210, 40], [360,
     await page.poll(`document.querySelector('.face-status')?.dataset.phase==='loading'`);
     assert(await page.evaluate(`document.querySelector('.face-status').textContent.includes('model is loading')`));
     await capture('state-model-loading');
-    await config({ ready: true }); await page.clickAt('.face-controls-slot button');
+    await config({ ready: true }); await page.clickAt('.face-controls-slot .btn');
     await page.poll(`document.querySelector('.dz-a .face-selected.is-anchor')`);
     await config({ fail: true });
     await open({ source:'faces',file:'single.png' });
     await page.poll(`document.querySelector('.face-status')?.dataset.phase==='error'`);
     assert(await page.evaluate(`document.querySelector('.face-status').textContent.includes('controlled inference failure')`));
     await capture('state-service-error');
-    await config({ fail: false }); await page.clickAt('.face-controls-slot button');
+    await config({ fail: false }); await page.clickAt('.face-controls-slot .btn');
     await page.poll(`document.querySelector('.dz-a .face-selected.is-anchor')`);
     console.log('service failure retry reaches actual selected face');
     // Retire a pending image and configuration through production commands.
@@ -214,6 +215,7 @@ const fixtures = { a: [[256, 256, 160], [75, 75, 32]], b: [[210, 210, 40], [360,
     await page.goto(ENGINE+'/diff#faces#multi-a.png:faces#multi-b.png');
     await page.poll(`(async()=>${KZ}.state.diff.open)()`);
     await invoke('workbench.mode',{mode:'two-up'});await invoke('workbench.alignment',{mode:'face'});
+    await page.clickAt('#faceDetection');
     await page.poll(`document.querySelector('.face-status')?.dataset.phase==='pending'`);
     await requestAfter(beforeNavigation);
     await invoke('entry.select',{source:'faces',file:'single.png'});
@@ -245,6 +247,7 @@ const fixtures = { a: [[256, 256, 160], [75, 75, 32]], b: [[210, 210, 40], [360,
     // An inference result for replacement bytes must never decorate the old
     // decoded frame retained by the native display owner after a failed swap.
     await invoke('workbench.alignment', { mode:'independent' });
+    await page.clickAt('#faceDetection');
     const mutable = process.env.FACE_MUTABLE ?? '/work/tests/.tmp-mutable';
     const mutableFile = path.join(mutable, 'flux-basic.png'), original = fs.readFileSync(mutableFile);
     const originalHash=crypto.createHash('sha256').update(original).digest('hex');
@@ -267,12 +270,17 @@ const fixtures = { a: [[256, 256, 160], [75, 75, 32]], b: [[210, 210, 40], [360,
     }) });
     await config({records:{[originalHash]:makeResult(oldSize)}});
     await invoke('workbench.alignment',{mode:'face'});
+    await page.clickAt('#faceDetection');
     await page.poll(`document.querySelectorAll('.dz-a .face-selected').length===1`);
     const coherent = await page.evaluate(`(()=>({src:document.querySelector('.dz-a img').src,record:document.querySelector('.dz-a .face-feedback').dataset.record}))()`);
     try {
       const invalid = Buffer.from('undecodable replacement face bytes');
       const invalidHash = crypto.createHash('sha256').update(invalid).digest('hex');
       await config({records:{[invalidHash]:makeResult({w:512,h:512},2)}});
+      // Hold the actual inference response after the engine has ingested the
+      // replacement. Known content presentation must not depend on ML timing.
+      await page.evaluate(`(()=>{const original=window.fetch;window.restoreContentFetch=()=>window.fetch=original;
+        window.fetch=async(url,options)=>{const response=await original(url,options);if(String(url).endsWith('/api/plugins/detector/detect')&&typeof options?.body==='string'&&options.body.includes('${invalidHash}'))return new Promise(resolve=>window.releaseContentInference=()=>resolve(response));return response;};})()`);
       fs.writeFileSync(mutableFile, invalid);
       const future = new Date(Date.now()+5000); fs.utimesSync(mutableFile,future,future);
       const until = Date.now()+15000;
@@ -282,6 +290,17 @@ const fixtures = { a: [[256, 256, 160], [75, 75, 32]], b: [[210, 210, 40], [360,
         assert(Date.now()<until,'replacement bytes reached engine');await sleep(200);
       }
       await invoke('source.refresh');
+      await page.poll(`!!window.releaseContentInference`,15000);
+      const pending = await page.evaluate(`(async()=>{const s=${KZ},resource=s.actions.diff.resolve(s.state.diffPair().a);
+        return{resource,request:s.state.comparisonProvider().resource('a',resource),accepted:s.actions['face-alignment'].acceptedRecord('a'),
+          src:document.querySelector('.dz-a img').src,record:document.querySelector('.dz-a .face-feedback')?.dataset.record};})()`);
+      proofs.push({label:'known immutable replacement while ML is pending retains accepted old frame',pending});
+      assert.equal(pending.resource.hash,invalidHash,'Store has the canonical new content identity');
+      assert.equal(pending.request.src,'/api/content/'+invalidHash+'/bytes', 'pending known content cannot downgrade to a mutable address');
+      assert.equal(pending.request.hash,invalidHash);assert.equal(pending.request.recordId,undefined,'held ML response is not a published record');
+      assert.equal(pending.src,coherent.src,'failed known-content decode keeps the actual accepted old pixels');
+      assert.equal(pending.record,coherent.record,'pending ML cannot retire old accepted feedback');
+      await page.evaluate(`window.releaseContentInference();window.restoreContentFetch()`);
       // Content replacement invalidates the old request key and runs detection
       // for the new known hash even though the file name did not change.
       const deadline=Date.now()+15000;
@@ -293,7 +312,8 @@ const fixtures = { a: [[256, 256, 160], [75, 75, 32]], b: [[210, 210, 40], [360,
       assert.equal(await page.evaluate(`document.querySelector('.dz-a .face-feedback')?.dataset.record`),coherent.record);
       assert.equal(await count('a'),1,'two new faces never overlay the retained old pixels');
       proofs.push({label:'failed immutable decode retains coherent old frame and its one-face feedback',coherent,invalidHash});
-    } finally { fs.writeFileSync(mutableFile,original); }
+      await capture('retained-immutable-after-failed-decode');
+    } finally { await page.evaluate(`window.releaseContentInference?.();window.restoreContentFetch?.()`).catch(()=>{});fs.writeFileSync(mutableFile,original); }
     // Source removal retires in-flight work; re-adding the same name creates a
     // different source lifetime and cannot inherit the removed source's face IDs.
     await config({delay:1000}); const beforeRemoval=(await requests()).length; await open();

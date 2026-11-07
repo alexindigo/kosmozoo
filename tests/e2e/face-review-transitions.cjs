@@ -34,7 +34,9 @@ const KZ="(await import('/store/instance.js')).appStore";
   await config({delay:0,fail:false,ready:true});
   await page.goto(ENGINE+'/#faces#multi-a.png');
   await page.poll(`(async()=>{const s=${KZ};return s.state.current()?.image==='multi-a.png'&&!s.state.inventory.loading&&s.state.images.length>0&&!!document.querySelector('.card');})()`,20000);
-  await invoke('faces.settings.edit',{value:DETECTOR});await invoke('faces.settings.save');
+   await invoke('faces.settings.edit',{value:DETECTOR});await invoke('faces.settings.save');
+   await invoke('workbench.openPair',{left:{source:'faces',file:'multi-a.png'},right:{source:'faces',file:'multi-b.png'}});
+   await invoke('workbench.mode',{mode:'two-up'});await page.clickAt('#faceDetection');
   await fetch(ENGINE+'/api/collections/faces/entries/multi-a.png/bytes');await fetch(ENGINE+'/api/collections/faces/entries/multi-b.png/bytes');await invoke('source.refresh');
   await attempt('button-presentation',async()=>{
    await open(['faces','multi-a.png'],['faces','multi-b.png']);

@@ -3,6 +3,37 @@ import { makeAppStore } from "../client-solid/store/app-store.js";
 import { makeZoomable } from "../client/js/zoomable.mjs";
 import { api } from "../client/js/api.mjs";
 import { clientInventory } from "./helpers/client-inventory.mjs";
+import { facePresentation } from "../client-solid/features/face-alignment/presentation.mjs";
+import { resource } from "./helpers/face-fixtures.mjs";
+
+Deno.test("face presentation: known content remains immutable while its detection record is pending", () => {
+  const hash = "a".repeat(64), nextHash = "b".repeat(64);
+  for (const source of ["fake", "input:fake"]) {
+    const current = { ...resource("same.png", source), hash };
+    const accepted = facePresentation(current, { id: "old-record", image: { hash } }, true);
+    const pending = facePresentation({ ...current, hash: nextHash }, null, true);
+    assertEquals(pending.src, `/api/content/${nextHash}/bytes`, "known replacement never requests a cached named URL");
+    assertEquals(pending.hash, nextHash); assertEquals(pending.resource.hash, nextHash);
+    assertEquals(pending.recordId, undefined, "pending detection cannot claim a face result");
+    assertEquals(pending.resource.kind, current.kind);
+    assertEquals(accepted.src, `/api/content/${hash}/bytes`); assertEquals(accepted.recordId, "old-record");
+    const mismatched = facePresentation({ ...current, hash: nextHash }, { id: "old-record", image: { hash } }, true);
+    assertEquals(mismatched.src, pending.src); assertEquals(mismatched.recordId, undefined, "old ML record cannot retarget current known content");
+    const off = facePresentation(current, { id: "old-record", image: { hash } }, false);
+    assertEquals(off.src, current.src); assertEquals(off.hash, undefined, "OFF does not claim named pixels are hash-verified");
+  }
+});
+
+Deno.test("face presentation: unknown engine content and local anchor bytes keep honest initial paths", () => {
+  const initial = resource(), hash = "c".repeat(64);
+  assertEquals(facePresentation(initial, null, true), { ...initial, resource: initial, hash: undefined });
+  const upgraded = facePresentation(initial, { id: "result", image: { hash } }, true);
+  assertEquals(upgraded.src, `/api/content/${hash}/bytes`); assertEquals(upgraded.hash, hash);
+  const anchor = { ...resource("local.png", "anchor"), src: "data:image/png;base64,AA==" };
+  assertEquals(facePresentation(anchor, null, true).src, anchor.src);
+  const knownAnchor = facePresentation({ ...anchor, hash }, null, true);
+  assertEquals(knownAnchor.src, anchor.src); assertEquals(knownAnchor.hash, hash);
+});
 
 Deno.test("comparison resources: accepted inventory content changes retire same-name requests", async () => {
   const saved = { ...api };
