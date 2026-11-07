@@ -23,8 +23,10 @@ import { readZoomView, zoomViewPixels, readyViewGeometry, isIdentityView } from 
 
 const IDENTITY = { s: 1, txf: 0, tyf: 0 };
 
-export function makeZoomable(el, { surface = el, box, key, geometry, target, also, panAlways = false, getView, setView } = {}) {
+export function makeZoomable(el, { surface = el, box, key, geometry, target, also, panAlways = false, getView, setView, onActivate } = {}) {
   let dragMoved = 0;
+  let pressedActivationKey = null, activationSequence = null;
+  const activationKey = t => t.activationKey ?? t.key;
   let endDrag = () => {};
 
   const targetFor = (ev) => target ? target(ev) : { key, box, geometry };
@@ -85,6 +87,11 @@ export function makeZoomable(el, { surface = el, box, key, geometry, target, als
     // would divide by zero and poison the view with NaN)
     const g = measuredFrame(t);
     if (!g) return;
+    if (t.interaction) {
+      const r = t.box.getBoundingClientRect();
+      t.interaction.zoom(e.clientX - r.left, e.clientY - r.top, Math.exp(-e.deltaY * .012));
+      return;
+    }
     const cur = read(t, g);
     const next = Math.min(12, Math.max(1, cur.s * Math.exp(-e.deltaY * 0.012)));
     if (next === cur.s) return;
@@ -100,11 +107,13 @@ export function makeZoomable(el, { surface = el, box, key, geometry, target, als
   };
 
   const onDown = (e) => {
+    if (e.button > 0 || e.target?.closest?.("button,input,select,textarea,a,[data-gesture-boundary]")) return;
     dragMoved = 0;
     const t = targetFor(e);
     const g = measuredFrame(t);
     if (!g) return;
-    const start = read(t, g);
+    const start = t.interaction ? { s: 1 } : read(t, g);
+    pressedActivationKey = activationKey(t);
     // the drag pans at any zoom when panAlways — otherwise zoomed-only
     if (!panAlways && start.s <= 1) return;
     // a zero-sized reference box is never a valid target (see onWheel)
@@ -116,6 +125,11 @@ export function makeZoomable(el, { surface = el, box, key, geometry, target, als
     const move = (ev) => {
       const g = measuredFrame(t);
       if (!g) return;
+      if (t.interaction) {
+        dragMoved += Math.abs(ev.clientX - lx) + Math.abs(ev.clientY - ly);
+        t.interaction.pan(ev.clientX - lx, ev.clientY - ly);
+        lx = ev.clientX; ly = ev.clientY; return;
+      }
       const cur = read(t, g);
       dragMoved += Math.abs(ev.clientX - lx) + Math.abs(ev.clientY - ly);
       const next = {
@@ -126,7 +140,8 @@ export function makeZoomable(el, { surface = el, box, key, geometry, target, als
       write(t, cur, next, g);
       lx = ev.clientX; ly = ev.clientY;
     };
-    const up = () => {
+    const up = (event) => {
+      if (event?.type === "pointercancel") activationSequence = null;
       el.removeEventListener("pointermove", move);
       el.removeEventListener("pointerup", up);
       el.removeEventListener("pointercancel", up);
@@ -140,24 +155,38 @@ export function makeZoomable(el, { surface = el, box, key, geometry, target, als
 
   // swallow the click that ends a pan-drag (it must not open the workbench)
   const onClick = (e) => {
+    if (onActivate) {
+      const key = activationKey(targetFor(e));
+      const eligible = dragMoved <= 5 && key === pressedActivationKey;
+      activationSequence = { key, eligible: e.detail === 1 ? eligible
+        : e.detail === 2 && eligible && activationSequence?.eligible && activationSequence.key === key };
+    }
     if (dragMoved > 5) {
       e.stopImmediatePropagation();
       e.preventDefault();
       dragMoved = 0;
     }
   };
+  const onDoubleClick = e => {
+    if (!e.isTrusted || dragMoved > 5 || !activationSequence?.eligible ||
+      activationSequence.key !== activationKey(targetFor(e)) || e.target?.closest?.("button,input,select,textarea,a")) return;
+    onActivate?.(e);
+  };
 
   surface.addEventListener("wheel", onWheel, { passive: false });
   el.addEventListener("pointerdown", onDown);
   el.addEventListener("click", onClick, true);
+  if (onActivate) el.addEventListener("dblclick", onDoubleClick);
   el.draggable = false;
 
   return {
     dispose() {
+      activationSequence = null;
       endDrag();
       surface.removeEventListener("wheel", onWheel);
       el.removeEventListener("pointerdown", onDown);
       el.removeEventListener("click", onClick, true);
+      if (onActivate) el.removeEventListener("dblclick", onDoubleClick);
     },
   };
 }

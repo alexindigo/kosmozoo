@@ -240,7 +240,7 @@ function check(name, ok, detail = "") {
   })()`);
   check("A/B: A stays left in Two-Up with B active", layout.al < layout.bl, JSON.stringify(layout));
 
-  // 5b. active opacity: the slider sits in the controls strip in every mode;
+  // 5b. active opacity: the slider is offered in eligible comparison views;
   // it fades the ACTIVE layer (Two-Up: col=right → B), moves with A/B, and
   // dims the Split subject and the Difference base
   const op = await cdp.evaluate(`(async () => {
@@ -364,11 +364,11 @@ function check(name, ok, detail = "") {
     a: !!document.querySelector('.dz-a .dz-img'),
     b: !!document.querySelector('.dz-b'),
     modesAbsent: !document.querySelector('#diffModes'),
-    lockAbsent: !document.querySelector('.dz-lockbtn'),
+    alignmentAbsent: !document.querySelector('#diffAlignment'),
   }))()`);
   check("single-image: one img, comparison choices absent",
     single.a && !single.b && single.modesAbsent, JSON.stringify(single));
-  check("single-image: the lock is absent too", single.lockAbsent, JSON.stringify(single));
+  check("single-image: alignment control is absent too", single.alignmentAbsent, JSON.stringify(single));
   const lockedBefore = await cdp.evaluate(`(async () => ${KZ}.state.diff.locked)()`);
   await cdp.evaluate("document.dispatchEvent(new KeyboardEvent('keydown', { key: 'l', bubbles: true }))");
   const lockedAfter = await cdp.evaluate(`(async () => ${KZ}.state.diff.locked)()`);

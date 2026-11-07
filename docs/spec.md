@@ -6,23 +6,24 @@ contract for what exists here. The client architecture (store shape, feed
 invariant, key dispatcher, feature modules, persisted-key registry) lives in
 `~/Documents/kosmozoo/ARCHITECTURE.md`.
 
-## 1. The three axes (design contract; plumbing dormant)
+## 1. The three axes (design contract and shipped viewer)
 
 Comparison behaviour is designed as three independent axes, not a matrix of
 toggles. Availability and reason derive from each mode's declared `needs`.
 
 | Axis | Exclusive | Values | Shipped today |
 |---|---|---|---|
-| **Alignment** | yes | `independent` / `shared` / `face-anchored` | `detector` plugin declares `face-anchored` in the engine; no SPA consumer, so the axis is dormant |
+| **Alignment** | yes | `independent` / `shared` / `face-anchored` | Exclusive viewer selector; the client uses `face` for Face-anchored and consumes detector geometry |
 | **Composition** | yes | `blend` / `split` / `difference` / `flicker` | `difference` plugin declares the mode in the engine; dormant for the same reason |
 | **Attention (ROI)** | no | guides, region focus | not implemented |
 
 What IS shipped: the feed (virtualized grid), the workbench (the two-sided
 comparator — feed current × right-pane current, per-kind views
 with shared pan/zoom; pair URL live), notes/vote/favorite/bookmark, anchor pane, and
-the variations feature (server route + modal). The three plugin axes
-(alignment / composition-as-plugins / ROI) stay dormant — Difference-the-view
-is the canvas mask, not the `difference` plugin.
+the variations feature (server route + modal). Face detection and registered
+comparison are opt-in for the current still-image pair. Composition-as-plugins
+and ROI stay dormant; Difference-the-view is the canvas mask, not the
+`difference` plugin.
 
 Keys are the primary input; the keys panel (`?`) lists the live bindings.
 
@@ -233,6 +234,60 @@ Plugin routes mount under `/api/plugins/<name><path>`:
 | `detector` | `POST /detect`, `GET /status` |
 | `critic` | `GET /status`, `POST /describe`, `POST /diff-describe`, `POST /caption` |
 | `hello` | `GET /hello` |
+
+### Detector foundation
+
+`POST /api/plugins/detector/detect` accepts JSON
+`{collection, name, kind?:"input"|"output", expectedHash?:string}`. Omitted kind
+means output. The typed plugin content port reads cached or read-through bytes
+through the existing high-priority, single-flight Ingest owner; input and output
+with the same name never share an address. Existing bytes-only plugin APIs retain
+their behavior. Names use the backing's canonical grammar. Invalid JSON, address,
+kind or non-lowercase-SHA256 expectedHash returns 400 before inference. Unavailable
+content returns 404 or 502; source retirement during acquisition returns 409.
+An expectedHash mismatch returns 409 before inference, never detects a replacement.
+Raw octet-stream uploads remain supported for local anchor bytes.
+
+Success preserves `{w,h,faces:[{bbox,score,kps}],id?}` and adds:
+
+```json
+{
+  "image": {"collection":"source-id","name":"image.png","kind":"input","hash":"<actual lowercase SHA256>"},
+  "detector": {"serviceUrl":"<captured configured URL>","model":"<health model name or null>"}
+}
+```
+
+Raw uploads return `image:{hash}` instead. The hash identifies the exact submitted
+bytes, not the latest value of a mutable name. The model field is only the available
+health label, not a weights fingerprint or proof of model-version cache validity.
+The installed client feature fences accepted display/source sessions and detector
+configuration. One cancellable single-flight owner uses a session-local 24-entry
+LRU shared by results and failures, pinning current requests and displayed records.
+Failures never become empty detections; explicit retry refreshes readiness and
+clears failure entries. No database or browser-storage detection mirror is added.
+
+`src/detection-result.mjs` owns framework-free validation. Dimensions must be
+positive finite numbers. Every face has four finite bbox coordinates with strictly
+increasing x/y corners, a finite or null score, and an array of finite `[x,y,score]`
+landmark triples (empty is valid for box-only detections). Optional id is a safe
+integer. All faces and landmarks retain their order and coordinates: no selection,
+truncation, clamping or score range restriction. A genuine `faces:[]` is no-face;
+an error document, malformed JSON or invalid geometry is 502, never no-face.
+The plugin receives this decoder as `kz.results.detection(value)`, the shared
+byte hasher as `kz.content.hash(bytes)` (async lowercase SHA256), and the canonical
+hash predicate as `kz.content.isHash(value)`. These are plain injected functions;
+the standalone plugin has no import relative to engine sources. Source checkouts,
+installed plugin directories and drop-ins use the same public boundary.
+
+Each operation captures one service configuration. Health, cached deadline and
+inference belong to that destination only. Health must provide a finite positive
+`deadline_ms` representable with its 5000ms margin by the timeout API; no deadline
+means 503 with the existing unconfigured reason. Status retains unconfigured,
+unreachable, loading and ready states; invalid health is unreachable. URL changes
+fence pending status/detection with 409; stale probes cannot install a deadline for
+the replacement destination. The HTTP service returns 422 for correlated worker
+error documents, retaining error/id and keeping the worker alive. Transport failures
+remain 503 at the engine, and upstream HTTP/protocol failures become 502 with reasons.
 
 Collections answer one capabilities shape (the ONE derivation —
 `src/collections.mjs` — read by the listing, the delete route, and the
@@ -575,9 +630,14 @@ and the toolbar. Video opens in Full, and offers Split (two-up),
 Overlay (one-up/blink) and Slider (wipe); Difference is absent. Audio has only
 Full. Images offer Full/Two-Up/One-Up/Split/Difference. Without a comparison image,
 only Full is available and the single-option mode switch is omitted, as are side,
-lock and opacity actions. Empty toolbar slots retain their allocation so controls
-do not shift as the pair changes. Every kind opens in Full,
-on the clicked image, on every open. The open intent names its subject and pair;
+alignment and opacity actions. Empty toolbar slots retain their allocation so controls
+do not shift as the pair changes.
+Opacity controls and rendered effects share one viewer presentation projection.
+Full, unpaired and audio surfaces render opaque without discarding the chosen
+comparison opacity; returning to an eligible comparison restores that choice.
+Difference uses that opacity for its base and its separate highlight control
+for the highlight mix, independently of whether either slider popup is expanded.
+Every kind opens in Full on the clicked image, on every open. The open intent names its subject and pair;
 the viewer owns that subject, derives its active column from it, and Full shows
 only that side. Comparison modes retain the pair with the subject active.
 The diff module's immutable placement map owns A/feed on the left and B/compare
@@ -601,10 +661,115 @@ the same pure media-geometry model, using the actual media-area allocation;
 constrained grid tracks cannot grow to a native element's intrinsic aspect.
 Viewer crops are resource-keyed session state, separate from the persisted
 feed/details/anchor views. Every open resets viewer crops to centred/fitted;
-mode switches preserve only the viewer's own crops and locked-delta semantics.
+mode switches preserve viewer crops, alignment request and valid face choices.
 Allocation changes rederive transforms and the Difference draw. Viewer gestures
 never alter persisted card crops. There is no centred viewer play button for
 any kind; its docked play button is the visible playback affordance.
+
+### Face detection and registered comparison
+
+One exclusive alignment selector offers Independent, Shared and Face-anchored.
+`diff.alignment` is authoritative; legacy `diff.locked` reads its Shared projection.
+`workbench.lock` and rebindable `l` retain independent/shared semantics and exit
+face mode. The feature's rebindable `wb.alignment`/`a` cycles available choices
+through the existing dispatcher. Video offers Independent/Shared only. Full,
+unpaired and audio apply no face effect while retaining the request.
+
+Face detection has a separate shared viewer on/off button and validated
+`faces.detection.toggle` command, with no default shortcut. It starts OFF once
+per app/store, remembers the choice across navigation and viewer close/reopen
+in the current page, and is not persisted. A fresh reload starts OFF. Selecting
+Face-anchored alone never enables detection; enabling detection never changes
+alignment. Detection is active only when enabled in an eligible paired-still
+comparison. Independent/Shared retain ordinary geometry while showing selected
+faces and detection/choice status; only Face-anchored also applies registration
+and common-camera gestures. Full, unpaired, video, audio and feed do not gain
+detection effects. Browsing and closed viewers run no inference.
+
+OFF hides feedback, face actions and operational status, returns ordinary
+geometry, aborts browser status/inference and retires queued transport admission.
+It retains requested alignment, valid immutable records/choices, raw crops and
+the common camera. ON revalidates readiness before new inference without
+discarding the known model identity during the handshake or an unavailable
+reply without a model observation. Real model/configuration/session changes
+still retire their state. Separate activation tickets fence old status, retry
+and gesture continuations across rapid OFF/ON without changing cache lifetime.
+Current accepted cached-face choices use enabled/eligible/confirmed-configuration
+admission, independently of backend readiness: choosing a valid cached face
+while readiness is pending or unavailable requests Face alignment without new
+inference. OFF/suspend synchronously retires both work and choice admission.
+Retry while OFF, including after an await, cannot probe or infer. A request
+already accepted by the shared external service may finish; retirement prevents
+client publication, not forced model-worker cancellation.
+
+The existing settings menu gains
+a Face detector service URL field for `plugins.detector.serviceUrl`, with save
+confirmation after read-back. Configuration reads/saves remain available OFF
+without detector status, outbound health or inference calls. While enabled,
+plugin discovery and detector status distinguish
+configuration, model loading and service failure. No-face, unusable eyes, pending
+detection/decode, waiting for choice, decode failure and ready are distinct states.
+
+All detected faces initially remain selected and visible. Multiple faces require
+an explicit anchor; score and order never choose one. Trusted double-click chooses
+a selected usable face for that accepted image only and explicitly requests
+Face-anchored alignment, retaining every other face.
+Native face buttons invoke the same identity-checked `faces.use` command for
+keyboard activation. A single-face result with usable eyes can anchor directly.
+Choosing a current selected face without usable eyes reports the reason without
+changing a prior anchor or hiding boxes. Stale/foreign choices publish no reason
+into another image. Face actions share the viewer button base; Save/Retry share
+the existing normal button base, retaining native focus and anchor indication.
+Choices bind immutable result/content, source lifetime, viewer session, configured
+service and observed model label, never a reusable numeric index.
+
+The detection owner separates resource address (including input/output kind and
+source incarnation) from returned content hash. Same-content first-hash metadata
+enrichment preserves the record, anchor and in-flight inference; a changed hash
+acquires a fresh record. Equal bytes at different addresses do not share choices.
+Accepted feedback and cache pins use exact record identity/content, not a mutable
+name's newest lookup. Successes, failures and retained records share one budget.
+Current resource knowledge survives temporary metadata gaps and composition
+suspension separately from inference admission. Unknown lookups never guess a
+newest cached version, and retry cannot reveal an older pinned version as current.
+An unbound acquisition retains its explicit failure rather than silently retrying;
+successful content identification retires that failure and can reuse an exact record.
+
+Engine-owned results use the correct input/output address without a browser byte
+round-trip. Their exact `/api/content/<hash>/bytes` image must decode with matching
+dimensions before feedback or registration can use it. Local anchors use raw bytes.
+While detection is active, canonical resource hashes select that immutable image
+path before an ML record exists. A pending record never downgrades a known
+version to a mutable named URL. Initial unknown engine content stays honestly
+unverified until content is known; local anchor data keeps its byte-owned path.
+The existing decode guard and accepted old-record pins retain the previous
+version and feedback through slow or failed replacement. OFF uses ordinary
+presentation without claiming named pixels are hash-verified.
+Accepted descriptors retain resource/source, session, generation, dimensions and
+verified hash; mutable named URLs do not claim a verified displayed hash. Failed
+swaps retain the coherent old descriptor and its own feedback. Source/configuration/
+result retirement fences requests, commands and gestures. A new opening resets
+the camera lifetime; composition changes and blinking retain valid choices.
+
+Anime28 eye groups 11-16 and 17-22 become centroids. Translation/uniform scale match
+A's eye midpoint and inter-eye distance to B in comparison-frame coordinates.
+There is no rotation or identity recognition. B's ordinary view is a read-only
+seed for one writable common camera.
+The seed lifetime is the actual accepted B resource/content plus viewer session,
+not requested B, candidate replacement or face choice. A different accepted B
+starts from its own current ordinary crop. Captured gesture tickets also bind
+composition and current allocations, so mode/resize retires old mappings while
+fresh gestures use the new frame. Derived scales can be below fit and never
+pass through the ordinary crop's 1-12 clamp or write back to raw/persisted crops.
+One final rectangle and forward/inverse mapping serve native transforms,
+Difference sampling, feedback and hit tests, including equivalent per-cell
+registration in Two-Up. Feedback shares image clipping and opacity.
+
+The shared gesture owner validates native click outcomes and accepted generations:
+a dragged sequence cannot activate, a fresh sequence needs no cooldown, and clicks
+on different accepted frames cannot combine. Feedback is pointer-transparent.
+Core renders generic installed settings/workbench/comparison contributions;
+transport, choices and camera logic stay outside views.
 
 Every crop uses the shared version2 model `{version:2,s,cx,cy,fh,fv,rot}`:
 `cx`/`cy` are normalized image coordinates under the allocation centre; `s` is
@@ -636,7 +801,7 @@ successful payloads keep their existing shape. Failure detail is text, never HTM
 
 With no configured sources, the feed shows an inline centered message and a
 link-style action opening the existing source-picker add form. Initial inventory
-and refresh failures with HTTP502 `collection unreachable` share a source-record
+and refresh failures with HTTP 502 `collection unreachable` share a source-record
 reachability owner: one error per outage, quiet retries at the existing cadence,
 and offline presentation in the picker. Successful inventory clears the error
 and restores online presentation. Discovery and navigation cannot reset an outage;
@@ -697,7 +862,7 @@ Size-pending candidates wait for the existing size owner's feed admission; remov
 entries and retired sessions discard them. A ready off-tape tick never waits.
 
 Static surfaces: `/shared/<name>` serves the allow-listed `src/` modules
-(`extractor.mjs`, `backings/mime.mjs`, `features/variations/shared.mjs`, `entry-path.mjs`, `source-origin.mjs`, `version.mjs`) to the browser;
+(`extractor.mjs`, `backings/mime.mjs`, `features/variations/shared.mjs`, `entry-path.mjs`, `source-origin.mjs`, `version.mjs`, `detection-result.mjs`, `content-hash.mjs`) to the browser;
 `/` and `/diff` serve the Solid app from `client-solid-dist/`, with shared
 assets (`/css`, `/vendor`, `/js`, logos) from `client/`.
 
@@ -721,6 +886,12 @@ typing and modal layers retain priority. Accepted playback keys prevent native
 scrolling. KeysPanel displays Space by name and edits mappings.
 `wb.full` adds the persisted/rebindable full-view shortcut `f`, via that same
 dispatcher; typing and modal priority are unchanged.
+The feature registers `wb.alignment` (`a`) through that catalogue; tooltips and
+the keys panel consume live bindings, including user overrides.
+The public binding catalogue retains its existing fields and adds command names
+and fresh deep-cloned argument data. Hint consumers resolve installed and core
+bindings from that live catalogue, with no static fallback. Snapshot mutation
+cannot change private definitions, dispatch or a later snapshot.
 
 Payload/binding records use own enumerable data properties and dense arrays;
 accessors, symbol properties, hidden callbacks and cycles reject before execution
@@ -1440,6 +1611,9 @@ The `kz` object handed to `register(kz)`:
 | `kz.settings.get/set(k, v)` / `.ns()` | persistence | namespaced `plugins.<name>.*` settings |
 | `kz.store.getField/setField(collection, name, field, v)` | persistence | plugin fields on the entry's `plugin_fields` |
 | `kz.content.bytes(hash)` / `.graph(hash)` / `.bytesForEntry(collection, name)` | data | engine-mediated cache/graph reads |
+| `kz.content.imageForEntry(collection, name, kind="output")` | data | typed high-priority Ingest read-through: `{status:200,bytes,hash}` or failure status (including cancelled source retirement); only input/output kinds |
+| `kz.content.hash(bytes)` / `.isHash(value)` | data | async lowercase SHA256 of submitted bytes / canonical lowercase SHA256 predicate |
+| `kz.results.detection(value)` | codec | validated copy of `{w,h,faces,id?}`; throws TypeError on error/malformed result; preserves geometry/order |
 | `kz.judgments.get/set(...)` | data | the core judgment record, per entry (entry columns) |
 | `kz.reason(status, error, reason)` | response | the shared `{error, reason}` failure shape |
 

@@ -19,6 +19,19 @@ const audio = Object.freeze([full]);
 export const workbenchViews = kind => kind === "video" ? videos : kind === "audio" ? audio : images;
 export const defaultWorkbenchView = kind => workbenchViews(kind)[0].mode;
 
+// Control availability and rendering effects are one projection of the viewer
+// context. Raw session choices survive surfaces where their controls are absent.
+export function workbenchPresentation({ kind, mode, paired, activeOpacity, diffOpacity, differenceReason = null }) {
+  const comparison = !!paired && kind !== "audio" && mode !== "full" &&
+    workbenchViews(kind).some(view => view.mode === mode);
+  const highlight = comparison && mode === "difference" && !differenceReason;
+  return {
+    comparison,
+    activeOpacity: { available: comparison, value: comparison ? activeOpacity : 1 },
+    highlightOpacity: { available: highlight, value: highlight ? diffOpacity : 1 },
+  };
+}
+
 // Resource identity and screen position are independent of the active subject.
 // Rendering, hit-testing, controls and directional keys share this contract.
 export const sides = Object.freeze({ left: "a", right: "b" });

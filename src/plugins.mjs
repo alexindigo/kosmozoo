@@ -13,6 +13,9 @@
 import { readdir, stat } from "node:fs/promises";
 import { join } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
+import { validEntryName } from "./backings/index.mjs";
+import { isContentHash, sha256 } from "./cache.mjs";
+import { decodeDetectionResult } from "./detection-result.mjs";
 
 export function pluginDirs(env = Deno.env.toObject()) {
   const dirs = [];
@@ -113,14 +116,28 @@ export class PluginHost {
       // engine-mediated content access (the public surface — no plugin
       // talks to a host or the cache directly)
       content: {
+        hash: sha256,
+        isHash: isContentHash,
         bytes: (hash) => this.#cache.get(hash),
         graph: (hash) => this.#ingest.graph(hash),
+        // Typed read-through records retain the Ingest owner's hash, status,
+        // per-kind cache and source-incarnation fencing.
+        imageForEntry: (collection, fname, kind = "output") => {
+          if (typeof collection !== "string" || !collection ||
+              !["input", "output"].includes(kind)) return Promise.resolve({ status: 400 });
+          if (!Object.hasOwn(this.#hosts, collection)) return Promise.resolve({ status: 404 });
+          if (!validEntryName(this.#hosts[collection], fname)) return Promise.resolve({ status: 400 });
+          return this.#ingest.ensure(collection, fname, kind, { priority: "high" });
+        },
         // bytes by entry address (hash resolution + cache read in one)
         bytesForEntry: async (collection, fname) => {
           const hash = this.#store.hashFor(collection, fname);
           return hash ? this.#cache.get(hash) : null;
         },
       },
+      // Shared plain result codecs, injected just like content helpers so
+      // installed/drop-in plugins never depend on the engine's file layout.
+      results: { detection: decodeDetectionResult },
       // the core judgment record, per entry (no batch consumer today —
       // kz.judgments.all was deleted with its zero callers)
       judgments: {

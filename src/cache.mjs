@@ -13,7 +13,8 @@
 import { join, dirname } from "node:path";
 import { mkdir, rename, writeFile, readFile, stat } from "node:fs/promises";
 
-export const isContentHash = value => typeof value === "string" && /^[a-f0-9]{64}$/.test(value);
+import { isContentHash } from "./content-hash.mjs";
+export { isContentHash } from "./content-hash.mjs";
 
 export class Cache {
   #root;

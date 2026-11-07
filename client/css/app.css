@@ -74,10 +74,10 @@ body.resizing { cursor: col-resize; user-select: none; }
 #chrome button:not(.icon-button) { background: var(--lifted); color: var(--foreground); border: 1px solid var(--border-strong);
   border-radius: 4px; padding: 2px 9px; cursor: pointer; font-size: 13px; }
 #chrome button:hover { border-color: var(--foreground-dim) }
-:is(#chrome, .feed-filter-menu) .btn { text-decoration: none; display: inline-block; background: var(--lifted);
+:is(#chrome, .feed-filter-menu, .face-controls-slot) .btn { text-decoration: none; display: inline-block; background: var(--lifted);
   color: var(--foreground); border: 1px solid var(--border-strong); border-radius: 4px; padding: 3px 8px;
   font-size: 12px; }
-:is(#chrome, .feed-filter-menu) .btn:hover { border-color: var(--foreground-dim) }
+:is(#chrome, .feed-filter-menu, .face-controls-slot) .btn:hover { border-color: var(--foreground-dim) }
 #headerButtons { display: flex; gap: 6px; }
 
 /* host picker (dropdown panel) */
@@ -1304,6 +1304,22 @@ body:has(#diff:not([hidden])) #statusCol { bottom: 56px; }
   border-radius: 6px; font: 13px/1.4 system-ui, sans-serif; padding: 6px 8px; }
 .text-field-negative, .text-field-negative:focus { border-color: var(--negative); }
 .text-field-positive { border-color: var(--positive); }
+.face-settings { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 6px; }
+.face-settings label, .face-settings [role="status"] { grid-column: 1 / -1; white-space: nowrap; }
+.face-settings .text-field { min-width: 0; width: 100%; }
+.face-controls-slot { flex: 0 0 auto; min-height: calc(var(--control-height-viewer) + 8px);
+  display: flex; align-items: center; justify-content: center; gap: 8px; flex-wrap: wrap; }
+.viewer-alignment-slot { width: 160px; }
+.face-status { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 45vw; }
+.face-choices { display: flex; align-items: center; gap: 4px; }
+#diffStage .dz-cell { position: relative; }
+#diffStage[data-mode="one-up"] .dz-cell, #diffStage[data-mode="split"] .dz-cell,
+#diffStage .dz-canvas-cell { position: absolute; }
+.face-feedback { position: absolute; inset: 0; width: 100%; height: 100%; pointer-events: none; }
+.face-selected { fill: none; stroke: var(--positive); stroke-width: 1.5px; }
+.face-selected.is-anchor { stroke: var(--attention); stroke-width: 2px; }
+.face-eye { fill: var(--attention); stroke: var(--background); }
+#diffStage .dz-cell[data-active="true"] .face-feedback { opacity: var(--active-op, 1); }
 
 /* Filter conditions live in a viewport-bound popup, independent of header width. */
 #chrome .feed-filter { flex: 0 0 auto; min-width: var(--control-height-sm); }

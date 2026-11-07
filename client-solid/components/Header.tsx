@@ -17,6 +17,7 @@ import { FeedbackLink } from "./FeedbackLink.js";
 import { SingleLineText } from "./SingleLineText.js";
 import { sourceProgress } from "../lib/source-progress.js";
 import { sourceNewContent } from "../lib/source-new-content.js";
+import { FeatureContributions } from "../features/index.js";
 
 // layout-switcher icons (icons.mjs): a square with one divider — vertical
 // right of center (wide images / narrow text), horizontal (stacked),
@@ -142,6 +143,7 @@ function Menu() {
               >download feedback.json</FeedbackLink>
             </div>
           </Show>
+          <FeatureContributions store={store} slot="settingsRow" matches={matches} />
         </div>
       </div>
     </Show>

@@ -31,7 +31,7 @@ import { makeSourceRegistry, sameSourceIdentity } from "./source-registry.js";
 import { makeRailArrivals } from "./rail-arrivals.js";
 import { fieldList, nodeImages } from "./fields.js";
 import { pairSides } from "../features/diff/pair.mjs";
-import { workbenchViews, defaultWorkbenchView, columnForSide, sideForColumn } from "../features/diff/views.mjs";
+import { workbenchViews, defaultWorkbenchView, workbenchPresentation, columnForSide, sideForColumn } from "../features/diff/views.mjs";
 import { makeImageWindow } from "./image-window.js";
 import { makeSizes } from "./sizes.js";
 import { makeMediaPlayers } from "./media-players.js";
@@ -50,6 +50,7 @@ import { entryNames } from "./entry-names.js";
 import { makeWheelArbiter } from "../lib/wheel-arbiter.js";
 import { observeNativeMagnification } from "../lib/native-magnification.js";
 import { emptyFilter, normalizeFilter, compileFilter, filterConditions, parameterNames } from "/js/feed-filter-model.mjs";
+import { isContentHash } from "/shared/content-hash.mjs";
 
 // stored host if still present, else first online, else first
 function initialHost(hosts, stored) {
@@ -86,9 +87,11 @@ export function makeAppStore({ subscribeSources = typeof window !== "undefined" 
       views: {},             // viewer-session crops; never persisted/shared with cards
       subject: "a",         // viewer-owned side: Full displays it; comparisons make it active
       get col() { return columnForSide(this.subject); },
-      locked: true,         // entangled zoom: a gesture's delta writes BOTH view keys
+      alignment: "shared", // exclusive alignment owner; lock is a compatibility projection
+      session: 0,
+      get locked() { return this.alignment === "shared"; },
       splitT: 0.5,          // wipe position, 0..1 of stage width
-      activeOpacity: 1,     // the active column's photo opacity (every mode)
+      activeOpacity: 1,     // raw comparison opacity, retained on control-less surfaces
       diffAbs: true,        // absolute vs proportional highlight
       diffOpacity: 1,
       diffThreshold: 8,     // the match floor: deltas at or below it show the base
@@ -268,12 +271,18 @@ export function makeAppStore({ subscribeSources = typeof window !== "undefined" 
   const diffSubject = createMemo(() => diffPair()[st.diff.subject]);
   const diffKind = createMemo(() => mediaKind(diffPair().a?.file) ?? "image");
   const diffViews = createMemo(() => workbenchViews(diffKind()));
+  const diffPresentation = createMemo(() => workbenchPresentation({
+    kind: diffKind(), mode: st.diff.mode, paired: !!diffPair().b,
+    activeOpacity: st.diff.activeOpacity, diffOpacity: st.diff.diffOpacity,
+    differenceReason: differenceReason(),
+  }));
   createEffect(() => {
     if (!diffViews().some(view => view.mode === st.diff.mode) || (differenceReason() && st.diff.mode === "difference")) {
       setSt("diff", "mode", defaultWorkbenchView(diffKind()));
     }
   });
   const prepareDiffOpen = () => {
+    setSt("diff", "session", n => n + 1);
     setSt("diff", "mode", defaultWorkbenchView(diffKind()));
     setSt("diff", "views", reconcile({}));
   };
@@ -416,9 +425,17 @@ export function makeAppStore({ subscribeSources = typeof window !== "undefined" 
     if (!side) return null;
     const source = side.source ?? side.remote;
     const file = side.file ?? side.image;
+    const collection = source.startsWith("input:") ? source.slice(6) : source;
+    const kind = source.startsWith("input:") ? "input" : "output";
+    const record = sourceRecords.get(collection);
+    const index = kind === "output" && source !== "anchor" ? fileIndex(source, file) : -1;
+    const hash = index >= 0 ? st.images[index].hash : null;
+    const identity = { source, collection, kind, name: file, session: st.diff.session,
+      ...(isContentHash(hash) ? { hash } : {}),
+      stamp: record ? JSON.stringify([record.address, record.epoch, record.incarnation]) : null };
     if (source === "anchor") {
       const a = st.anchors.find((x) => x.name === file);
-      return a ? { name: a.name, src: a.src, meta: a.meta ?? null } : null;
+      return a ? { ...identity, name: a.name, src: a.src, meta: a.meta ?? null } : null;
     }
     // input-dir images (node references from the info panel): remote carries
     // the source as "input:<host>"
@@ -426,6 +443,7 @@ export function makeAppStore({ subscribeSources = typeof window !== "undefined" 
       const h = source.slice("input:".length);
       if (!Object.hasOwn(hostsView(), h)) return null;
       return {
+        ...identity,
         name: file,
         host: h,
         src: api.inputBytesUrl(h, file),
@@ -434,6 +452,7 @@ export function makeAppStore({ subscribeSources = typeof window !== "undefined" 
     }
     if (Object.hasOwn(hostsView(), source)) {
       return {
+        ...identity,
         name: file,
         host: source,
         src: api.entryBytesUrl(source, file),
@@ -1598,6 +1617,12 @@ export function makeAppStore({ subscribeSources = typeof window !== "undefined" 
   // items (the Symbol(solid-proxy) defineProperty trap)
   const registeredFeatures = [];
   const featureDisposals = new Set();
+  const [displayReader, setDisplayReader] = createSignal(null);
+  let comparisonProvider = null;
+  const comparisonContext = () => ({ session: st.diff.session, open: st.diff.open,
+    eligible: st.diff.open && diffPresentation().comparison && !differenceReason(),
+    alignment: st.diff.alignment,
+    resources: { a: resolveSide(diffPair().a), b: resolveSide(diffPair().b) } });
   // A modal surface's image (e.g. a Load Image input thumbnail) defaults to
   // foreground work outside any source entry; ahead-of-viewport demand can
   // declare background intent. Both share the same policy/capacity, and only
@@ -1631,15 +1656,20 @@ export function makeAppStore({ subscribeSources = typeof window !== "undefined" 
       // commands before data bindings/affordances join the registry.
       register(f) {
         if (registeredFeatures.some((x) => x.name === f.name)) return;
-        const installed = f.install?.({ state: stateObj, handles, setSt, reconcile, surfaceDisplay });
+        const installed = f.install?.({ state: stateObj, handles, setSt, reconcile, surfaceDisplay,
+          comparison: { context: comparisonContext, accepted: () => displayReader()?.() ?? {} } });
         if (installed) {
           if (installed.dispose) featureDisposals.add(installed.dispose);
           for (const command of installed.commands ?? []) handles.register(command);
           for (const command of installed.ownedCommands ?? []) handles.registerOwned(command);
           publicActions[f.name] = installed.ports;
+          if (installed.comparison) {
+            if (comparisonProvider) throw new Error("Only one comparison presentation provider may be installed");
+            comparisonProvider = installed.comparison;
+          }
         }
         for (const binding of f.bindings ?? []) actions.keys.register(binding);
-        registeredFeatures.push(f);
+        registeredFeatures.push({ ...f, installed });
       },
     },
 
@@ -2065,6 +2095,10 @@ export function makeAppStore({ subscribeSources = typeof window !== "undefined" 
 
     media: { register: player => players.register(player), toggle: () => players.toggle(), report: error => players.report(error) },
     diff: {
+      registerDisplay(read) {
+        setDisplayReader(() => read);
+        return () => { if (displayReader() === read) setDisplayReader(null); };
+      },
       // Mechanical zoom port, local to the viewer session. Card/inline keys
       // retain their own persisted owner; opening never consumes those crops.
       views: {
@@ -2114,7 +2148,11 @@ export function makeAppStore({ subscribeSources = typeof window !== "undefined" 
           mirrorCurrentHash();
         }
       },
-      setLocked(x) { setSt("diff", "locked", !!x); },
+      setLocked(x) { setSt("diff", "alignment", x ? "shared" : "independent"); },
+      setAlignment(mode) {
+        if (!["independent", "shared", ...registeredFeatures.flatMap(f => f.installed?.alignmentModes ?? [])].includes(mode)) return false;
+        setSt("diff", "alignment", mode); return true;
+      },
       setSplit(t) { setSt("diff", "splitT", Math.min(1, Math.max(0, t))); },
       setActiveOpacity(x) { setSt("diff", "activeOpacity", Math.min(1, Math.max(0, x))); },
       setDiffAbs(x) { setSt("diff", "diffAbs", !!x); },
@@ -2530,6 +2568,10 @@ export function makeAppStore({ subscribeSources = typeof window !== "undefined" 
   };
 
   const stateObj = {
+    featureContributions: slot => registeredFeatures.flatMap(f => f.installed?.[slot] ? [{ component: f.installed[slot], ports: f.installed.ports }] : []),
+    comparisonProvider: () => comparisonProvider,
+    comparisonAlignments: () => [{ value: "independent", label: "Independent" }, { value: "shared", label: "Shared" },
+      ...registeredFeatures.flatMap(f => (f.installed?.alignmentOptions ?? []).filter(option => !option.available || option.available()))],
     // trees — getters keep reads subscribed to the live store paths
     featureEntryActions: (target) => registeredFeatures.flatMap((feature) => {
       const action = feature[target.target === "selected" ? "bulkAction" : "cardAction"];
@@ -2572,6 +2614,7 @@ export function makeAppStore({ subscribeSources = typeof window !== "undefined" 
     diffSubject,
     diffKind,
     diffViews,
+    diffPresentation,
     get variations() { return st.variations; },
     get infoOverlay() { return st.infoOverlay; },
     get chips() { return st.chips; },

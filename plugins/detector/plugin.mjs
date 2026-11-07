@@ -15,19 +15,33 @@ export function register(kz) {
   // the plugin honors it with a margin. Refreshed lazily on first detect and
   // on every /status. No hand-synced default: no deadline from /health means
   // unconfigured — /detect refuses rather than guessing a timeout.
-  let deadlineMs = null;
-  const deadline = async () => {
-    if (deadlineMs) return deadlineMs;
+  let configuration = null;
+  const capture = () => {
     const url = serviceUrl();
-    if (!url) return null;
+    if (!configuration || configuration.url !== url) configuration = { url, health: null, probe: null };
+    return configuration;
+  };
+  const current = config => capture() === config;
+  const validDeadline = h => Number.isFinite(h?.deadline_ms) && h.deadline_ms > 0 &&
+    h.deadline_ms + 5000 <= 0xffffffff;
+  const probe = async config => {
     try {
-      const r = await fetch(`${url}/health`, { signal: AbortSignal.timeout(5000) });
+      const r = await fetch(`${config.url}/health`, { signal: AbortSignal.timeout(5000) });
       if (!r.ok) return null;
       const h = await r.json();
-      if (typeof h.deadline_ms === "number") deadlineMs = h.deadline_ms + 5000;
+      return validDeadline(h) ? h : null;
     } catch { return null; }
-    return deadlineMs ?? null;
   };
+  const health = async (config, refresh = false) => {
+    if (!config.url) return null;
+    if (!refresh && config.health) return config.health;
+    if (!config.probe) config.probe = probe(config).then(h => {
+      if (current(config)) config.health = h;
+      return h;
+    }).finally(() => { config.probe = null; });
+    return config.probe;
+  };
+  const changed = () => Response.json({ error: "detector configuration changed", reason: "retry with the current service" }, { status: 409 });
 
   kz.alignment("face-anchored", {
     label: "Face-anchored",
@@ -44,70 +58,85 @@ export function register(kz) {
   });
 
   // per-image detection: the caller names a collection+name — the engine
-  // reads the bytes from the CACHE (no browser round-trip). A raw
+  // reads through the typed Ingest/cache port (no browser round-trip). A raw
   // octet-stream body still works for local anchor blobs.
   kz.route("POST", "/detect", async (req) => {
-    const d = await deadline();
-    if (!d) {
+    const config = capture();
+    let body, image;
+    if ((req.headers.get("Content-Type") ?? "").includes("application/json")) {
+      const value = await req.json().catch(() => null);
+      if (!value || Array.isArray(value) || typeof value.collection !== "string" || !value.collection ||
+          typeof value.name !== "string" || !value.name ||
+          (Object.hasOwn(value, "kind") && !["input", "output"].includes(value.kind)) ||
+          (Object.hasOwn(value, "expectedHash") && !kz.content.isHash(value.expectedHash))) {
+        return Response.json({ error: "invalid image address", reason: "collection, name, kind or expectedHash is invalid" }, { status: 400 });
+      }
+      const { collection, name, kind = "output", expectedHash } = value;
+      const record = await kz.content.imageForEntry(collection, name, kind);
+      if (record.status !== 200 || !record.bytes) {
+        return Response.json({ error: "image unavailable", reason: record.cancelled ? "source retired" : `content status ${record.status}` },
+          { status: record.cancelled ? 409 : record.status === 400 ? 400 : record.status === 404 ? 404 : 502 });
+      }
+      if (expectedHash && expectedHash !== record.hash) {
+        return Response.json({ error: "image changed", reason: "expectedHash does not match accepted content" }, { status: 409 });
+      }
+      body = record.bytes;
+      image = { collection, name, kind, hash: record.hash };
+    } else {
+      body = await req.arrayBuffer();
+      image = { hash: await kz.content.hash(body) };
+    }
+    if (!current(config)) return changed();
+    const h = await health(config);
+    if (!current(config)) return changed();
+    if (!h) {
       return Response.json(
         { error: "service unreachable", reason: "unconfigured (no deadline from /health)" },
         { status: 503 },
       );
     }
-    const url = serviceUrl();
-    let body;
-    if ((req.headers.get("Content-Type") ?? "").includes("application/json")) {
-      const { collection, name } = await req.json().catch(() => ({}));
-      const bytes = collection && name ? await kz.content.bytesForEntry(collection, name) : null;
-      if (!bytes) {
-        return Response.json({ error: "image not cached", reason: "ingest it first" }, { status: 404 });
-      }
-      body = bytes;
-    } else {
-      body = await req.arrayBuffer();
-    }
     let res;
     try {
-      res = await fetch(`${url}/detect`, {
+      res = await fetch(`${config.url}/detect`, {
         method: "POST",
         headers: { "Content-Type": "application/octet-stream" },
         body,
-        signal: AbortSignal.timeout(d),
+        signal: AbortSignal.timeout(Math.ceil(h.deadline_ms + 5000)),
       });
     } catch (e) {
+      if (!current(config)) return changed();
       // absent, not broken: surface the failure state as a reason
       return Response.json({ error: "service unreachable", reason: String(e?.message ?? e) }, { status: 503 });
     }
+    if (!current(config)) { await res.body?.cancel(); return changed(); }
     if (!res.ok) {
       const data = await res.json().catch(() => ({}));
+      if (!current(config)) return changed();
       return Response.json(
-        { error: "service error", reason: data.reason ?? `status ${res.status}` },
+        { error: "service error", reason: String(data?.reason ?? data?.error ?? `status ${res.status}`) },
         { status: 502 },
       );
     }
-    const data = await res.json().catch(() => null);
-    if (!data) {
-      return Response.json({ error: "service error", reason: "no JSON in response" }, { status: 502 });
+    try {
+      const data = kz.results.detection(await res.json());
+      if (!current(config)) return changed();
+      return Response.json({ ...data, image, detector: { serviceUrl: config.url, model: typeof h.model === "string" ? h.model : null } });
+    } catch (e) {
+      if (!current(config)) return changed();
+      return Response.json({ error: "service error", reason: String(e?.message ?? e) }, { status: 502 });
     }
-    return Response.json(data); // { w, h, faces: [{bbox, score, kps}] }
   });
 
   kz.route("GET", "/status", async () => {
-    const url = serviceUrl();
-    if (!url) return Response.json({ state: "unconfigured" });
-    try {
-      const r = await fetch(`${url}/health`, { signal: AbortSignal.timeout(5000) });
-      if (!r.ok) return Response.json({ state: "unreachable" });
-      const h = await r.json();
-      if (typeof h.deadline_ms === "number") deadlineMs = h.deadline_ms + 5000;
-      // model_ready is the honest readiness bit (worker alive AND the
-      // handshake consumed); "loading" was a lie the old service told
-      return Response.json({
-        state: h.model_ready ? "ready" : "loading",
-        model: h.model, stderr: h.stderr_tail, deadlineMs: h.deadline_ms,
-      });
-    } catch {
-      return Response.json({ state: "unreachable" });
-    }
+    const config = capture();
+    if (!config.url) return Response.json({ state: "unconfigured" });
+    const h = await health(config, true);
+    if (!current(config)) return changed();
+    if (!h) return Response.json({ state: "unreachable" });
+    // Readiness reflects the worker handshake, not configuration alone.
+    return Response.json({
+      state: h.model_ready ? "ready" : "loading",
+      model: h.model, stderr: h.stderr_tail, deadlineMs: h.deadline_ms,
+    });
   });
 }

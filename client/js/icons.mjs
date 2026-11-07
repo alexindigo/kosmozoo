@@ -8,6 +8,7 @@
 const PATHS = {
   "chevron-down": `<path d="M6 9l6 6 6-6" />`,
   "minus": `<path d="M5 12h14" />`,
+  "face-scan": `<path d="M8 3H3v5M16 3h5v5M21 16v5h-5M8 21H3v-5M8 10h.01M16 10h.01M9 15a4 4 0 0 0 6 0" />`,
   "plus": `<path d="M5 12h14M12 5v14" />`,
   "folder": `<path d="M5 4h4l3 3h7a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2z" />`,
   "volume": `<path d="M4 9h4l5-4v14l-5-4H4z" /><path d="M17 8a6 6 0 0 1 0 8M20 5a10 10 0 0 1 0 14" />`,
