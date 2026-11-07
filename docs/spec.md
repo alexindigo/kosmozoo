@@ -234,6 +234,57 @@ Plugin routes mount under `/api/plugins/<name><path>`:
 | `critic` | `GET /status`, `POST /describe`, `POST /diff-describe`, `POST /caption` |
 | `hello` | `GET /hello` |
 
+### Detector foundation
+
+`POST /api/plugins/detector/detect` accepts JSON
+`{collection, name, kind?:"input"|"output", expectedHash?:string}`. Omitted kind
+means output. The typed plugin content port reads cached or read-through bytes
+through the existing high-priority, single-flight Ingest owner; input and output
+with the same name never share an address. Existing bytes-only plugin APIs retain
+their behavior. Names use the backing's canonical grammar. Invalid JSON, address,
+kind or non-lowercase-SHA256 expectedHash returns400 before inference. Unavailable
+content returns404 or502; source retirement during acquisition returns409.
+An expectedHash mismatch returns409 before inference, never detects a replacement.
+Raw octet-stream uploads remain supported for local anchor bytes.
+
+Success preserves `{w,h,faces:[{bbox,score,kps}],id?}` and adds:
+
+```json
+{
+  "image": {"collection":"source-id","name":"image.png","kind":"input","hash":"<actual lowercase SHA256>"},
+  "detector": {"serviceUrl":"<captured configured URL>","model":"<health model name or null>"}
+}
+```
+
+Raw uploads return `image:{hash}` instead. The hash identifies the exact submitted
+bytes, not the latest value of a mutable name. The model field is only the available
+health label, not a weights fingerprint or proof of model-version cache validity.
+Consumers must also fence their accepted display/source session and configuration;
+this foundation does not implement client detection caching or face alignment.
+
+`src/detection-result.mjs` owns framework-free validation. Dimensions must be
+positive finite numbers. Every face has four finite bbox coordinates with strictly
+increasing x/y corners, a finite or null score, and an array of finite `[x,y,score]`
+landmark triples (empty is valid for box-only detections). Optional id is a safe
+integer. All faces and landmarks retain their order and coordinates: no selection,
+truncation, clamping or score range restriction. A genuine `faces:[]` is no-face;
+an error document, malformed JSON or invalid geometry is502, never no-face.
+The plugin receives this decoder as `kz.results.detection(value)`, the shared
+byte hasher as `kz.content.hash(bytes)` (async lowercase SHA256), and the canonical
+hash predicate as `kz.content.isHash(value)`. These are plain injected functions;
+the standalone plugin has no import relative to engine sources. Source checkouts,
+installed plugin directories and drop-ins use the same public boundary.
+
+Each operation captures one service configuration. Health, cached deadline and
+inference belong to that destination only. Health must provide a finite positive
+`deadline_ms` representable with its5000ms margin by the timeout API; no deadline
+means503 with the existing unconfigured reason. Status retains unconfigured,
+unreachable, loading and ready states; invalid health is unreachable. URL changes
+fence pending status/detection with409; stale probes cannot install a deadline for
+the replacement destination. The HTTP service returns422 for correlated worker
+error documents, retaining error/id and keeping the worker alive. Transport failures
+remain503 at the engine, and upstream HTTP/protocol failures become502 with reasons.
+
 Collections answer one capabilities shape (the ONE derivation —
 `src/collections.mjs` — read by the listing, the delete route, and the
 client's delete affordance alike):
@@ -1445,6 +1496,9 @@ The `kz` object handed to `register(kz)`:
 | `kz.settings.get/set(k, v)` / `.ns()` | persistence | namespaced `plugins.<name>.*` settings |
 | `kz.store.getField/setField(collection, name, field, v)` | persistence | plugin fields on the entry's `plugin_fields` |
 | `kz.content.bytes(hash)` / `.graph(hash)` / `.bytesForEntry(collection, name)` | data | engine-mediated cache/graph reads |
+| `kz.content.imageForEntry(collection, name, kind="output")` | data | typed high-priority Ingest read-through: `{status:200,bytes,hash}` or failure status (including cancelled source retirement); only input/output kinds |
+| `kz.content.hash(bytes)` / `.isHash(value)` | data | async lowercase SHA256 of submitted bytes / canonical lowercase SHA256 predicate |
+| `kz.results.detection(value)` | codec | validated copy of `{w,h,faces,id?}`; throws TypeError on error/malformed result; preserves geometry/order |
 | `kz.judgments.get/set(...)` | data | the core judgment record, per entry (entry columns) |
 | `kz.reason(status, error, reason)` | response | the shared `{error, reason}` failure shape |
 

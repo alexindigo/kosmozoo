@@ -228,7 +228,9 @@ class Handler(BaseHTTPRequestHandler):
         self._read_timer.cancel()  # inference has its own worker deadline
         try:
             res = worker.detect(body)
-            self._json(200, res)
+            # A correlated worker error is a completed request, not protocol
+            # skew. Keep the healthy worker and preserve its diagnostic/id.
+            self._json(422 if "error" in res else 200, res)
         except Exception as e:  # broad on purpose: 503 with a reason, never a hang
             self._json(503, {"error": "detect failed", "reason": str(e)})
 
