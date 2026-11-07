@@ -17,6 +17,8 @@ Viewer opacity controls appear only for eligible comparisons. Full, unpaired
 and audio views stay opaque while retaining the chosen comparison opacity;
 Difference keeps separate base and highlight controls.
 
+Official `kosmozoo-linux-x86_64` SHA-256: `8d60550a14a4c40a755acfa89abf723621d3cd03cfafdd9bf4e9a2109d4277b9`.
+
 ## 0.3.1 - 2026-11-05
 
 Native browser magnification now shows a recovery hint that clears when normal
