@@ -22,7 +22,7 @@ export function testPng(width, height, color = [36, 40, 48, 255], graph = null, 
   const header = new Uint8Array(13), view = new DataView(header.buffer);
   view.setUint32(0, width); view.setUint32(4, height); header[8] = 8; header[9] = 6;
   const raw = new Uint8Array((1 + width * 4) * height);
-  for (let y = 0; y < height; y++) for (let x = 0; x < width; x++) raw.set(color, y * (1 + width * 4) + 1 + x * 4);
+  for (let y = 0; y < height; y++) for (let x = 0; x < width; x++) raw.set(typeof color === "function" ? color(x, y) : color, y * (1 + width * 4) + 1 + x * 4);
   const parts = [Uint8Array.from([137, 80, 78, 71, 13, 10, 26, 10]), chunk("IHDR", header)];
   if (graph) parts.push(chunk("tEXt", new TextEncoder().encode(`prompt\0${JSON.stringify(graph)}`)));
   if (lineage) parts.push(chunk("tEXt", new TextEncoder().encode(`kz\0${JSON.stringify(lineage)}`)));

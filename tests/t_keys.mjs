@@ -3,6 +3,8 @@
 
 import { assert, assertEquals, assertThrows } from "jsr:@std/assert";
 import { bindingMatches, comboFromEvent, makeKeymap } from "../client/js/keys.mjs";
+import { keyHint } from "../client-solid/lib/key-hint.js";
+import { CORE_BINDINGS } from "../client-solid/store/key-bindings.js";
 
 const ev = (key, mods = {}) => ({
   key,
@@ -100,4 +102,46 @@ Deno.test("binding metadata: labels stay strings and invalid registration cannot
   valid.bind({ id: "valid", key: "x", command: "known", args: { mode: "split" } });
   assertEquals(valid.list()[0].desc, "description");
   assert(valid.dispatch(ev("x")));
+});
+
+Deno.test("live catalogue: installed hints follow rebinds without a static core fallback", () => {
+  const dispatched = [];
+  const km = makeKeymap({ describe: id => id, request: binding => { dispatched.push(binding); return true; } });
+  for (const binding of CORE_BINDINGS) km.bind(binding);
+  km.bind({ id: "installed.cycle", key: "a", command: "installed.alignment.cycle", ctx: "workbench" });
+  assertEquals(keyHint(km.list(), "alignment", "installed.alignment.cycle"), "alignment (a)");
+  assertEquals(km.rebind("installed.cycle", "v"), { ok: true });
+  assertEquals(keyHint(km.list(), "alignment", "installed.alignment.cycle"), "alignment (v)");
+  assertEquals(km.findConflict("wb.lock", "v"), "installed.cycle");
+  assert(km.dispatch(ev("v")));
+  assertEquals(dispatched.at(-1).command, "installed.alignment.cycle");
+  assertEquals(keyHint(km.list(), "side", "workbench.column"), "side (ArrowLeft/Right)");
+  assertEquals(keyHint(km.list(), "view", "workbench.mode", { mode: "split" }), "view (3)");
+  assertEquals(keyHint(km.list(), "play", "media.toggle"), "play (Space)");
+  assertEquals(keyHint([], "close", "workbench.close"), "close", "missing live entries cannot claim a static shortcut");
+  km.setKeymap({ "installed.cycle": "" });
+  assertEquals(keyHint(km.list(), "alignment", "installed.alignment.cycle"), "alignment");
+});
+
+Deno.test("live catalogue: nested command arguments are isolated from definitions and every snapshot", () => {
+  let dispatched;
+  const km = makeKeymap({ describe: () => "installed command", request: binding => { dispatched = binding; return true; } });
+  const args = { nested: { items: [{ value: "original" }] } };
+  km.bind({ id: "installed", key: "x", command: "installed.apply", args });
+  args.nested.items[0].value = "changed original";
+  const first = km.list(), second = km.list();
+  assertEquals(first[0].command, "installed.apply");
+  assertEquals(first[0].args.nested.items[0].value, "original");
+  first[0].args.nested.items[0].value = "changed snapshot";
+  first[0].command = "foreign";
+  second[0].args.nested.items.push({ value: "another mutation" });
+  assertEquals(km.list()[0].args, { nested: { items: [{ value: "original" }] } });
+  assert(km.dispatch(ev("x")));
+  assertEquals(dispatched.command, "installed.apply");
+  assertEquals(dispatched.args, { nested: { items: [{ value: "original" }] } });
+  const dataOnly = value => {
+    assert(typeof value !== "function");
+    if (value && typeof value === "object") for (const item of Object.values(value)) dataOnly(item);
+  };
+  dataOnly(km.list());
 });

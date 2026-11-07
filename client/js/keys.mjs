@@ -96,8 +96,9 @@ export function makeKeymap(adapter) {
       for (const a of actions) a.key = a.defaultKey;
     },
     list() {
-      return actions.map(({ id, key, defaultKey, desc, ctx }) => ({
+      return actions.map(({ id, key, defaultKey, desc, ctx, command, args }) => ({
         id, key, defaultKey, desc: desc ?? id, ctx: ctx ?? "global",
+        command, args: structuredClone(args ?? {}),
         overridden: key !== defaultKey,
       }));
     },

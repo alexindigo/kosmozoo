@@ -16,6 +16,8 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { register } from "../plugins/detector/plugin.mjs";
+import { sha256, isContentHash } from "../src/cache.mjs";
+import { decodeDetectionResult } from "../src/detection-result.mjs";
 
 // --- variant 1: the plugin's service protocol (Deno-only) --------------------
 
@@ -31,7 +33,8 @@ Deno.test("detector plugin: deadline from /health; unconfigured fails 'unconfigu
     },
     route: (method, path, handler) => routes.set(`${method} ${path}`, handler),
     alignment: () => {},
-    content: { bytesForEntry: async () => null },
+    content: { bytesForEntry: async () => null, hash: sha256, isHash: isContentHash },
+    results: { detection: decodeDetectionResult },
     reason: (status, error, reason) => Response.json({ error, reason }, { status }),
   };
   register(kz);
@@ -110,7 +113,8 @@ print(json.dumps({"ready": True}), flush=True)
 for line in sys.stdin:
     req = json.loads(line)
     marker = base64.b64decode(req["b64"]).decode()
-    print(json.dumps({"id": req["id"], "w": 1, "h": 1, "faces": [], "marker": marker}), flush=True)
+    response = {"id": req["id"], "error": "could not decode image"} if marker == "invalid" else {"id": req["id"], "w": 1, "h": 1, "faces": [], "marker": marker}
+    print(json.dumps(response), flush=True)
 `);
 
     const port = 28471;
@@ -144,8 +148,15 @@ for line in sys.stdin:
       assertEquals(r1.id, 1);
       assertEquals(r2.marker, "second-image");
       assertEquals(r2.id, 2);
+      const invalid = await fetch(`http://127.0.0.1:${port}/detect`, { method: "POST", body: "invalid" });
+      assertEquals(invalid.status, 422);
+      assertEquals(await invalid.json(), { id: 3, error: "could not decode image" });
+      const after = await (await fetch(`http://127.0.0.1:${port}/detect`, { method: "POST", body: "after-error" })).json();
+      assertEquals(after.id, 4, "invalid image does not restart/desynchronize the worker");
+      assertEquals(after.marker, "after-error");
     } finally {
       try { svc.kill("SIGTERM"); } catch { /* already gone */ }
+      await svc.status;
       await rm(dir, { recursive: true, force: true });
     }
   },

@@ -19,11 +19,12 @@ export class ApiError extends Error {
 }
 
 // the ONE JSON transport — exported so feature modules (variations) share it
-export async function req(method, path, body, { priority } = {}) {
+export async function req(method, path, body, { priority, signal, raw = false } = {}) {
   const r = await fetch(BASE + path, {
     method,
-    headers: body ? { "Content-Type": "application/json" } : undefined,
-    body: body ? JSON.stringify(body) : undefined,
+    headers: body ? { "Content-Type": raw ? "application/octet-stream" : "application/json" } : undefined,
+    body: body ? raw ? body : JSON.stringify(body) : undefined,
+    signal,
     priority: priority === "background" ? "low" : "auto",
   });
   if (!r.ok) {

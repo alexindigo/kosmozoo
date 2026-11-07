@@ -61,10 +61,9 @@ const KZ = `(await import('/store/instance.js')).appStore`;
       console.log(`ok ${shortcut} changes the rendered active side to ${label}`);
     }
     for (const locked of [false, true]) {
-      const expected = locked ? 'unlocked — gestures move the target (l)' : 'locked — gestures move both (l)';
-      assert.equal(await title('.dz-lockbtn'), expected);
+      assert.equal(await title('#diffAlignment'), 'comparison alignment (a); shared / independent (l)');
       await key('l');
-      await page.poll(`document.querySelector('.dz-lockbtn')?.getAttribute('aria-pressed') === '${locked}'`);
+      await page.poll(`document.querySelector('#diffAlignment')?.value === '${locked ? 'shared' : 'independent'}'`);
       console.log(`ok l toggles rendered lock to ${locked}`);
     }
     assert.equal(await title('#diffKeysBtn'), 'actions & keys (?)');
@@ -88,7 +87,7 @@ const KZ = `(await import('/store/instance.js')).appStore`;
 
     // Use the real capture path; persisted mappings feed the same live registry.
     const remaps = Object.fromEntries(modes.map(([id], i) => [id, ['g', '5', '6', '7', '8'][i]]));
-    Object.assign(remaps, { 'wb.colLeft': 'a', 'wb.colRight': 'd', 'wb.lock': 'k', 'wb.close': 'x', 'app.keys': 'j' });
+    Object.assign(remaps, { 'wb.colLeft': 's', 'wb.colRight': 'd', 'wb.lock': 'k', 'wb.close': 'x', 'app.keys': 'j', 'wb.alignment': 'v' });
     for (const [id, shortcut] of Object.entries(remaps)) {
       await page.evaluate(state(`${KZ}.actions.keys.startCapture(${JSON.stringify(id)})`));
       await key(shortcut);
@@ -96,15 +95,18 @@ const KZ = `(await import('/store/instance.js')).appStore`;
     await openPair('image');
     await modeProof('image', remaps);
     await key('5');
-    assert.equal(await title('.dz-sidebtn'), 'active side — primary in every view (a/d)');
-    for (const [shortcut, label] of [['d', 'B'], ['a', 'A']]) {
+    assert.equal(await title('#diffAlignment'), 'comparison alignment (v); shared / independent (k)');
+    await invoke('workbench.alignment', { mode: 'independent' });
+    await key('v'); await page.poll(`document.querySelector('#diffAlignment')?.value === 'shared'`);
+    assert.equal(await title('.dz-sidebtn'), 'active side — primary in every view (s/d)');
+    for (const [shortcut, label] of [['d', 'B'], ['s', 'A']]) {
       await key(shortcut);
       await page.poll(`document.querySelector('.dz-sidebtn')?.textContent === '${label}'`);
     }
     const locked = await page.evaluate(state(`${KZ}.state.diff.locked`));
-    assert((await title('.dz-lockbtn')).endsWith(' (k)'));
+    assert((await title('#diffAlignment')).endsWith(' (k)'));
     await key('k');
-    await page.poll(`document.querySelector('.dz-lockbtn')?.getAttribute('aria-pressed') === '${!locked}'`);
+    await page.poll(`document.querySelector('#diffAlignment')?.value === '${!locked ? 'shared' : 'independent'}'`);
     assert.equal(await title('#diffKeysBtn'), 'actions & keys (j)');
     await key('j');
     await page.poll(`!!document.querySelector('#keysPanel')`);

@@ -130,7 +130,7 @@ const KZ = '(await import("/store/instance.js")).appStore';
     await page.evaluate('__deleteRestore()'); await invoke('image.delete.cancel');
 
     await invoke('workbench.openPair', { left: { source: 'fake', file: 'flux-basic.png' }, right: { source: 'fake', file: 'flux-lora.png' } });
-    await invoke('workbench.mode', { mode: 'two-up' }); await page.poll("!!document.querySelector('.dz-lockbtn')");
+    await invoke('workbench.mode', { mode: 'two-up' }); await page.poll("!!document.querySelector('#diffAlignment')");
     const geometry = () => page.evaluate("['#diffBar','#diffCtl','.viewer-keys','#diffClose'].map(s=>{const r=document.querySelector(s).getBoundingClientRect();return [r.x,r.y,r.width,r.height]})");
     const paired = await geometry();
     await page.evaluate(`(async()=>{const s=${KZ};s.actions.ui.setWorkspace('anchors');for(const a of [...s.state.anchors])s.actions.anchors.remove(a.name)})()`);
