@@ -243,9 +243,9 @@ means output. The typed plugin content port reads cached or read-through bytes
 through the existing high-priority, single-flight Ingest owner; input and output
 with the same name never share an address. Existing bytes-only plugin APIs retain
 their behavior. Names use the backing's canonical grammar. Invalid JSON, address,
-kind or non-lowercase-SHA256 expectedHash returns400 before inference. Unavailable
-content returns404 or502; source retirement during acquisition returns409.
-An expectedHash mismatch returns409 before inference, never detects a replacement.
+kind or non-lowercase-SHA256 expectedHash returns 400 before inference. Unavailable
+content returns 404 or 502; source retirement during acquisition returns 409.
+An expectedHash mismatch returns 409 before inference, never detects a replacement.
 Raw octet-stream uploads remain supported for local anchor bytes.
 
 Success preserves `{w,h,faces:[{bbox,score,kps}],id?}` and adds:
@@ -272,7 +272,7 @@ increasing x/y corners, a finite or null score, and an array of finite `[x,y,sco
 landmark triples (empty is valid for box-only detections). Optional id is a safe
 integer. All faces and landmarks retain their order and coordinates: no selection,
 truncation, clamping or score range restriction. A genuine `faces:[]` is no-face;
-an error document, malformed JSON or invalid geometry is502, never no-face.
+an error document, malformed JSON or invalid geometry is 502, never no-face.
 The plugin receives this decoder as `kz.results.detection(value)`, the shared
 byte hasher as `kz.content.hash(bytes)` (async lowercase SHA256), and the canonical
 hash predicate as `kz.content.isHash(value)`. These are plain injected functions;
@@ -281,13 +281,13 @@ installed plugin directories and drop-ins use the same public boundary.
 
 Each operation captures one service configuration. Health, cached deadline and
 inference belong to that destination only. Health must provide a finite positive
-`deadline_ms` representable with its5000ms margin by the timeout API; no deadline
-means503 with the existing unconfigured reason. Status retains unconfigured,
+`deadline_ms` representable with its 5000ms margin by the timeout API; no deadline
+means 503 with the existing unconfigured reason. Status retains unconfigured,
 unreachable, loading and ready states; invalid health is unreachable. URL changes
-fence pending status/detection with409; stale probes cannot install a deadline for
-the replacement destination. The HTTP service returns422 for correlated worker
+fence pending status/detection with 409; stale probes cannot install a deadline for
+the replacement destination. The HTTP service returns 422 for correlated worker
 error documents, retaining error/id and keeping the worker alive. Transport failures
-remain503 at the engine, and upstream HTTP/protocol failures become502 with reasons.
+remain 503 at the engine, and upstream HTTP/protocol failures become 502 with reasons.
 
 Collections answer one capabilities shape (the ONE derivation —
 `src/collections.mjs` — read by the listing, the delete route, and the
@@ -801,7 +801,7 @@ successful payloads keep their existing shape. Failure detail is text, never HTM
 
 With no configured sources, the feed shows an inline centered message and a
 link-style action opening the existing source-picker add form. Initial inventory
-and refresh failures with HTTP502 `collection unreachable` share a source-record
+and refresh failures with HTTP 502 `collection unreachable` share a source-record
 reachability owner: one error per outage, quiet retries at the existing cadence,
 and offline presentation in the picker. Successful inventory clears the error
 and restores online presentation. Discovery and navigation cannot reset an outage;

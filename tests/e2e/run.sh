@@ -146,10 +146,16 @@ timeout 30s docker run -d --name kz-e2e-detector --network host -v "$WORK":/work
   --memory=768m --memory-swap=768m --pids-limit=256 --cpus=2 "${deno_args[@]}" \
   denoland/deno:latest run --frozen --cached-only --allow-all tests/fake-detector.mjs \
   --port "$FACE_PORT" --fixtures-dir /work/tests/.tmp-runtime/face-fixtures
+detector_ready=false
 for i in $(seq 1 30); do
-  if curl --fail --max-time 5 -s "http://127.0.0.1:$FACE_PORT/health" >/dev/null; then break; fi
+  if curl --fail --max-time 5 -s "http://127.0.0.1:$FACE_PORT/health" >/dev/null; then detector_ready=true; break; fi
   sleep 1
 done
+if [[ "$detector_ready" != true ]]; then
+  echo "detector kz-e2e-detector not ready after 30 polls of http://127.0.0.1:$FACE_PORT/health" >&2
+  docker logs kz-e2e-detector >&2 || echo "could not retrieve kz-e2e-detector logs" >&2
+  exit 1
+fi
 timeout 600s docker run --rm --user "$RUN_USER" --network host -v "$WORK":/work -w /work \
   --memory=1600m --memory-swap=1600m --pids-limit=256 --cpus=2 \
   -e HOME=/work/tests/.tmp-runtime/diff/home -e TMPDIR=/work/tests/.tmp-runtime/diff/tmp \
