@@ -9,13 +9,15 @@
 // to set the value (bottom = min, top = max). The parent owns which popup
 // is open (one at a time); the component never reaches out.
 
-import { Show, createSignal, createEffect, onCleanup } from "solid-js";
+import { For, Show, createMemo, createSignal, createEffect, onCleanup } from "solid-js";
 import { useAppStore } from "../store/app-store.js";
 import { iconSvg } from "/js/icons.mjs";
 import { IconButton } from "./IconButton.js";
 import { ModeSwitch } from "./ModeSwitch.js";
 import { viewerSide } from "../features/diff/views.mjs";
 import { keyHint } from "../lib/key-hint.js";
+import { FeatureContributions } from "../features/index.js";
+import { Select } from "./Select.js";
 
 function VSlider(props) {
   let trackEl;
@@ -64,6 +66,8 @@ export function DiffChrome(props) {
   const d = () => store.state.diff;
   const presentation = () => store.state.diffPresentation();
   const hasB = () => presentation().comparison;
+  const alignments = createMemo(() => store.state.comparisonAlignments(), undefined,
+    { equals: (a, b) => a?.length === b.length && a.every((option, i) => option.value === b[i].value && option.label === b[i].label) });
   const modes = () => store.state.diffViews().filter(({ mode }) => mode === "full" ||
     (!!store.state.diffPair().b && (mode !== "difference" || !props.differenceReason)));
 
@@ -95,19 +99,21 @@ export function DiffChrome(props) {
       /></span>
       {/* ONE bottom panel holding all the buttons: controls at the left,
  the 1–4 modes centered, the keys button at the right */}
+      <FeatureContributions store={store} slot="workbenchControls" />
       <div id="diffBar">
         <div id="diffCtl">
           <span class="viewer-control-slot viewer-side-slot"><Show when={hasB()}><span class="viewer-group"><button
             class="viewer-btn dz-sidebtn" title={keyHint(store.state.bindings(), "active side — primary in every view", "workbench.column")}
             onClick={() => store.handles.invoke("workbench.column", { toggle: true })}
           >{viewerSide[d().subject].label}</button></span></Show></span>
-          <span class="viewer-control-slot"><Show when={hasB()}><span class="viewer-group"><IconButton viewer
-            variant="dz-lockbtn"
-            title={keyHint(store.state.bindings(), d().locked ? "locked — gestures move both" : "unlocked — gestures move the target", "workbench.lock")}
-            active={d().locked}
-            onAction={() => store.handles.invoke("workbench.lock", { toggle: true })}
-            icon={iconSvg(d().locked ? "lock" : "lock-open", 14)}
-          /></span></Show></span>
+          <span class="viewer-control-slot viewer-alignment-slot"><Show when={hasB()}>
+            <Select id="diffAlignment" size="viewer" aria-label="Comparison alignment"
+              value={alignments().some(option => option.value === d().alignment) ? d().alignment : "independent"}
+              title={keyHint(store.state.bindings(), "comparison alignment", "workbench.alignment.cycle") + "; " + keyHint(store.state.bindings(), "shared / independent", "workbench.lock")}
+              onChange={e => store.handles.invoke("workbench.alignment", { mode: e.currentTarget.value })}>
+              <For each={alignments()}>{option => <option value={option.value}>{option.label}</option>}</For>
+            </Select>
+          </Show></span>
           <span class="viewer-control-slot"><Show when={presentation().activeOpacity.available}>
           <VSlider
             icon="opacity" title={`active ${props.mediaWord ?? "image"} opacity`} class="dz-active-op"

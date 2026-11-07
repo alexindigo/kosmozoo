@@ -12,9 +12,11 @@
 import { createMemo, createSignal, createEffect, on, onMount, onCleanup, Show } from "solid-js";
 import { useAppStore } from "../store/app-store.js";
 import { makeZoomable } from "/js/zoomable.mjs";
-import { zoomViewTransform, readZoomView } from "/js/zoom-view.mjs";
+import { readZoomView } from "/js/zoom-view.mjs";
 import { mediaGeometry, AUDIO_SIZE } from "../store/media-geometry.js";
-import { differenceMask, viewRect } from "../features/diff/mask.mjs";
+import { differenceMask } from "../features/diff/mask.mjs";
+import { comparisonGeometry } from "../features/diff/comparison-geometry.mjs";
+import { FeatureContributions } from "../features/index.js";
 import { hitLayer } from "../features/diff/hit.mjs";
 import { workbenchLayout } from "../features/diff/views.mjs";
 import { DiffChrome } from "./DiffChrome.js";
@@ -23,23 +25,27 @@ import { mediaKind } from "/shared/backings/mime.mjs";
 
 // one decode-guarded src per side: the visible src swaps only once the new
 // image decodes; a failed decode RESOLVES to the last good src
-function useSideSrc(store, sideFn) {
+function useSideSrc(store, sideFn, side) {
   let lastGood = null;
+  let generation = 0;
   const [src, setSrc] = createSignal(null);
   const candidate = createMemo(() => {
     const side = sideFn(), resolved = store.state.diff.open && side ? store.actions.diff.resolve(side) : null;
-    return resolved ? { src: resolved.src, name: resolved.name, kind: mediaKind(resolved.name) ?? "image" } : null;
-  }, undefined, { equals: (a, b) => a?.src === b?.src && a?.name === b?.name });
+    const requested = resolved && (store.state.comparisonProvider()?.resource(side, resolved) ?? { ...resolved, resource: resolved, hash: undefined });
+    return requested ? { ...requested, generation: ++generation, kind: mediaKind(resolved.name) ?? "image" } : null;
+  }, undefined, { equals: (a, b) => a?.src === b?.src && a?.name === b?.name && a?.session === b?.session && a?.stamp === b?.stamp &&
+    a?.recordId === b?.recordId && a?.resource?.hash === b?.resource?.hash });
   createEffect(() => {
     const next = candidate();
     if (!next) { setSrc(null); return; }
+    if (lastGood?.session !== next.session) lastGood = null;
     let retired = false;
     const playable = next.kind !== "image", el = playable ? document.createElement(next.kind) : new Image();
     const settle = (ok, failureCode) => {
       if (retired) return;
       if (ok) lastGood = { ...next, size: playable && next.kind === "audio" ? AUDIO_SIZE
         : { w: el.videoWidth || el.naturalWidth, h: el.videoHeight || el.naturalHeight } };
-      setSrc(lastGood ?? { ...next, failed: true, failureCode });
+      setSrc(ok ? lastGood : lastGood ? { ...lastGood, replacementFailure: { resource: next.resource, failureCode } } : { ...next, failed: true, failureCode });
       release();
     };
     const release = () => {
@@ -77,8 +83,9 @@ export function DiffStage() {
   const d = () => store.state.diff;
   const presentation = () => store.state.diffPresentation();
   const fullB = () => d().mode === "full" && d().subject === "b";
-  const srcA = useSideSrc(store, () => fullB() ? null : pair().a);
-  const srcB = useSideSrc(store, () => (d().mode === "full" ? fullB() : store.state.diffKind() !== "audio") ? pair().b : null);
+  const srcA = useSideSrc(store, () => fullB() ? null : pair().a, "a");
+  const srcB = useSideSrc(store, () => (d().mode === "full" ? fullB() : store.state.diffKind() !== "audio") ? pair().b : null, "b");
+  onMount(() => onCleanup(store.actions.diff.registerDisplay(() => ({ a: srcA(), b: srcB() }))));
   const hasB = () => presentation().comparison;
   const showB = () => fullB() || hasB();
   const differenceReason = () => store.state.differenceReason() ||
@@ -93,8 +100,9 @@ export function DiffStage() {
   // own viewer-session key (image-space centre; authoritative fit turns it
   // into px). Locked = the gesture's delta also writes the
   // peer key (entangle, never copy); unlocked = only the target's key.
-  const keyA = () => (pair().a ? `${pair().a.source}:${pair().a.file}` : null);
-  const keyB = () => (pair().b ? `${pair().b.source}:${pair().b.file}` : null);
+  const keyFor = accepted => accepted?.resource ? `${accepted.resource.source}:${accepted.resource.name}` : null;
+  const keyA = () => keyFor(srcA());
+  const keyB = () => keyFor(srcB());
   const layerGeometry = (side) => {
     allocation(); // resize/mode layout is an input, not an untracked DOM read
     const el = mode() === "difference" ? stageEl : side === "a" ? cellAEl() : cellBEl();
@@ -103,9 +111,12 @@ export function DiffStage() {
     const { width, height } = el.getBoundingClientRect();
     return mediaGeometry({ width, height, size, surface: "viewer" });
   };
-  const layerT = (side, key) => {
+  const ordinaryGeometry = (side, key) => {
     const g = layerGeometry(side);
-    return key && g ? zoomViewTransform(store.actions.diff.views.get(key, g), g) : "";
+    const accepted = side === "a" ? srcA() : srcB();
+    if (!key || !g || !accepted?.size) return null;
+    const view = readZoomView(store.actions.diff.views.get(key, g), g);
+    return { ...comparisonGeometry(accepted.size, g.width, g.height, view), view };
   };
   let stageEl;
   const [cellAEl, setCellAEl] = createSignal(null), [cellBEl, setCellBEl] = createSignal(null);
@@ -116,8 +127,12 @@ export function DiffStage() {
     for (const el of [stageEl, a, b]) if (el) observer.observe(el);
     onCleanup(() => observer.disconnect());
   });
-  const tA = createMemo(() => layerT("a", keyA()));
-  const tB = createMemo(() => layerT("b", keyB()));
+  const resolved = createMemo(() => {
+    const ordinary = { a: ordinaryGeometry("a", keyA()), b: ordinaryGeometry("b", keyB()) };
+    return store.state.comparisonProvider()?.resolve(ordinary) ?? ordinary;
+  });
+  const tA = () => resolved().a?.transform ?? "";
+  const tB = () => resolved().b?.transform ?? "";
 
   // one binding on the stage box; the gesture's target is the layer VISIBLE
   // at the pointer (hitLayer — derived from the same layout state the
@@ -126,6 +141,8 @@ export function DiffStage() {
   // cell in every mode EXCEPT Difference — there the cells are display:none
   // (0×0 — dividing by them would poison the view with NaN), so the stage
   // itself is the box the mask draws against.
+  const frameKey = () => JSON.stringify([mode(), d().subject, d().splitT,
+    ...["a", "b"].map(side => { const g = layerGeometry(side); return [g?.width, g?.height]; })]);
   const targetFor = (e) => {
     const layer = hitLayer({
       mode: mode(), col: d().col, splitT: d().splitT,
@@ -134,7 +151,10 @@ export function DiffStage() {
       stageRect: stageEl.getBoundingClientRect(),
     });
     const box = mode() === "difference" ? stageEl : (layer === "b" ? cellBEl() : cellAEl());
-    return { key: layer === "b" ? keyB() : keyA(), box, geometry: () => layerGeometry(layer) };
+    const accepted = layer === "b" ? srcB() : srcA();
+    return { key: layer === "b" ? keyB() : keyA(), box, geometry: () => layerGeometry(layer), layer,
+      activationKey: `${layer}:${accepted?.session}:${accepted?.generation}`,
+      interaction: store.state.comparisonProvider()?.gesture(layer, resolved()[layer], frameKey) };
   };
   const alsoFor = (t) => {
     if (!d().locked || !hasB()) return null;
@@ -154,6 +174,10 @@ export function DiffStage() {
         panAlways: true, // the comparator pans at any zoom; cards keep zoomed-only pan
         getView: store.actions.diff.views.get,
         setView: store.actions.diff.views.set,
+        onActivate: e => {
+          const target = targetFor(e), rect = target.box?.getBoundingClientRect();
+          if (rect) store.state.comparisonProvider()?.activate(target.layer, resolved()[target.layer], [e.clientX - rect.left, e.clientY - rect.top]);
+        },
       });
     },
   ));
@@ -194,8 +218,7 @@ export function DiffStage() {
     const baseOpacity = presentation().activeOpacity.value, threshold = d().diffThreshold;
     // Snapshot numeric fields while tracked, before the async decode. Holding
     // a live proxy here would observe only record identity and miss later pans.
-    const vA = keyA() ? readZoomView(store.actions.diff.views.get(keyA(), layerGeometry("a")), layerGeometry("a")) : null;
-    const vB = keyB() ? readZoomView(store.actions.diff.views.get(keyB(), layerGeometry("b")), layerGeometry("b")) : null;
+    const rectA = resolved().a?.rect, rectB = resolved().b?.rect;
     if (mode() !== "difference" || differenceReason() || !hasB() || !aUrl || !bUrl || !canvasEl) return;
     let cancelled = false;
     (async () => {
@@ -209,15 +232,15 @@ export function DiffStage() {
       if (cancelled || !ia || !ib) return;
       const stage = stageEl.getBoundingClientRect();
       const W = Math.round(stage.width), H = Math.round(stage.height);
-      const grab = (im, v) => {
+      const grab = (im, r) => {
         const c = document.createElement("canvas");
         c.width = W; c.height = H;
         const x = c.getContext("2d", { willReadFrequently: true });
-        const r = viewRect(im.naturalWidth, im.naturalHeight, v, W, H);
+        if (!r) return x.getImageData(0, 0, W, H);
         x.drawImage(im, r.dx, r.dy, r.dw, r.dh);
         return x.getImageData(0, 0, W, H);
       };
-      const mask = differenceMask(grab(ia, vA), grab(ib, vB), { absolute, opacity, baseIsA, baseOpacity, threshold });
+      const mask = differenceMask(grab(ia, rectA), grab(ib, rectB), { absolute, opacity, baseIsA, baseOpacity, threshold });
       if (cancelled) return;
       canvasEl.width = W; canvasEl.height = H;
       canvasEl.getContext("2d").putImageData(mask, 0, 0);
@@ -239,7 +262,8 @@ export function DiffStage() {
             size={srcA()?.size}
             controlsMount={dockA()} controlLabel={layout().layers.a.label}
             transform={tA()} active={d().open && !fullB() && (mode() !== "one-up" || d().col === "feed" || !hasB())} primary={d().col === "feed"}
-            registerPlayer={store.actions.media.register} onPlaybackError={store.actions.media.report} />
+             registerPlayer={store.actions.media.register} onPlaybackError={store.actions.media.report} />
+          <FeatureContributions store={store} slot="workbenchFeedback" side="a" accepted={srcA()} geometry={resolved().a} />
         </div>
         <Show when={showB()}>
           <div class="dz-cell dz-b" ref={setCellBEl}
@@ -249,15 +273,18 @@ export function DiffStage() {
               size={srcB()?.size}
               controlsMount={dockB()} controlLabel={layout().layers.b.label}
               transform={tB()} active={d().open && (mode() !== "one-up" || d().col === "right")} primary={d().col === "right"}
-              registerPlayer={store.actions.media.register} onPlaybackError={store.actions.media.report} />
+               registerPlayer={store.actions.media.register} onPlaybackError={store.actions.media.report} />
+            <FeatureContributions store={store} slot="workbenchFeedback" side="b" accepted={srcB()} geometry={resolved().b} />
           </div>
           <Show when={mode() === "split"}>
             <Wipe onDown={onSplitDown} />
           </Show>
         </Show>
         <Show when={hasB() && mode() === "difference"}>
-          <div class="dz-cell dz-canvas-cell">
+          <div class="dz-cell dz-canvas-cell" data-active="true">
             <canvas class="dz-canvas" ref={canvasEl} />
+            <FeatureContributions store={store} slot="workbenchFeedback" side={d().subject}
+              accepted={d().subject === "a" ? srcA() : srcB()} geometry={resolved()[d().subject]} />
           </div>
         </Show>
       </div>

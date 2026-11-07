@@ -6,7 +6,7 @@ module.exports = async ({ page, ENGINE, KZ, check }) => {
   const invoke = (id,args={}) => page.evaluate(`(async()=>${KZ}.handles.invoke(${JSON.stringify(id)},${JSON.stringify(args)}))()`);
   const rendered = () => page.evaluate(`(async()=>{const s=${KZ};return{mode:s.state.diff.mode,col:s.state.diff.col,locked:s.state.diff.locked,
     pill:document.querySelector('#diffModes .on')?.title,left:document.querySelector('.dz-sidebtn')?.textContent,
-    lock:document.querySelector('.dz-lockbtn')?.getAttribute('aria-pressed'),url:location.href,current:s.state.current()}})()`);
+    alignment:document.querySelector('#diffAlignment')?.value,url:location.href,current:s.state.current()}})()`);
   await invoke('source.select',{id:'fake'});
   await invoke('feed.filter',{value:''}); await invoke('source.folder',{folder:''});
   await invoke('workbench.openPair',{left:{source:'fake',file:'flux-basic.png'},right:{source:'fake',file:'flux-lora.png'},push:true});
@@ -24,7 +24,11 @@ module.exports = async ({ page, ENGINE, KZ, check }) => {
   await invoke('workbench.column',{column:'right'});
   await invoke('workbench.lock',{value:false});
   const unlocked=await rendered();
-  await page.clickAt('.dz-lockbtn'); await page.keyTrusted('l',{vk:76});
+   await page.clickAt('#diffAlignment');
+    await page.keyTrusted('ArrowDown',{vk:40}); await page.keyTrusted('Enter',{vk:13});
+   await page.poll(`document.querySelector('#diffAlignment')?.value==='shared'`);
+   await page.clickAt('.dz-sidebtn'); await page.clickAt('.dz-sidebtn');
+   await page.keyTrusted('l',{vk:76});
   await page.poll(`(async()=>!${KZ}.state.diff.locked)()`);
   assert.deepEqual(await rendered(),unlocked);
   const before=(await rendered()).current;

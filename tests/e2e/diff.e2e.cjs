@@ -364,11 +364,11 @@ function check(name, ok, detail = "") {
     a: !!document.querySelector('.dz-a .dz-img'),
     b: !!document.querySelector('.dz-b'),
     modesAbsent: !document.querySelector('#diffModes'),
-    lockAbsent: !document.querySelector('.dz-lockbtn'),
+    alignmentAbsent: !document.querySelector('#diffAlignment'),
   }))()`);
   check("single-image: one img, comparison choices absent",
     single.a && !single.b && single.modesAbsent, JSON.stringify(single));
-  check("single-image: the lock is absent too", single.lockAbsent, JSON.stringify(single));
+  check("single-image: alignment control is absent too", single.alignmentAbsent, JSON.stringify(single));
   const lockedBefore = await cdp.evaluate(`(async () => ${KZ}.state.diff.locked)()`);
   await cdp.evaluate("document.dispatchEvent(new KeyboardEvent('keydown', { key: 'l', bubbles: true }))");
   const lockedAfter = await cdp.evaluate(`(async () => ${KZ}.state.diff.locked)()`);
