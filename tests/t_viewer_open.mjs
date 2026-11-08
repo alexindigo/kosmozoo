@@ -2,6 +2,7 @@ import { assertEquals } from "jsr:@std/assert";
 import { makeAppStore } from "../client-solid/store/app-store.js";
 import { api } from "../client/js/api.mjs";
 import { clientInventory } from "./helpers/client-inventory.mjs";
+import { sourceCollections } from "./helpers/source-stream.mjs";
 
 for (const opener of ["feed", "metadata", "anchor", "deep-a", "deep-b"]) {
   Deno.test(`viewer opens on clicked subject: ${opener}`, async () => {
@@ -9,7 +10,7 @@ for (const opener of ["feed", "metadata", "anchor", "deep-a", "deep-b"]) {
     const storage = Object.getOwnPropertyDescriptor(globalThis, "localStorage");
     globalThis.location = { pathname: "/", hash: "", search: "" };
     globalThis.history = { replaceState() {}, pushState() {} };
-    api.collections = async () => ({ fake: { address: "fake:1", kind: "comfy", online: true } });
+    api.collections = async () => sourceCollections({ fake: { address: "fake:1", kind: "comfy", online: true } });
     api.inventory = async () => clientInventory(["a.png", "b.png"].map(name => ({ name, width: 100, height: 80 })));
     api.meta = async () => ({ v: 1, pending: 0 });
     api.want = async () => ({ pending: 0 });

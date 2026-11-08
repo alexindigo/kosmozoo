@@ -3,7 +3,7 @@ import { createRoot, createSignal } from "solid-js";
 import { makeAppStore } from "../client-solid/store/app-store.js";
 import { api, ApiError } from "../client/js/api.mjs";
 import { clientInventory } from "./helpers/client-inventory.mjs";
-import { sourceFrame, injectedSourceStream } from "./helpers/source-stream.mjs";
+import { sourceFrame, injectedSourceStream, sourceCollections } from "./helpers/source-stream.mjs";
 import { Jobs } from "../src/jobs.mjs";
 import { makeSourceFreshness } from "../client-solid/store/source-freshness.js";
 import { makeSizes, scheduleRetry, ERROR_RETRY_MS } from "../client-solid/store/sizes.js";
@@ -48,7 +48,7 @@ async function withClient(run, prepare = () => {}) {
     stream.snapshot(frame());
     for (let i = 0; i < 30; i++) await Promise.resolve();
   };
-  api.collections = async () => structuredClone(sources);
+  api.collections = async () => sourceCollections(sources);
   api.patchCollection = async (_id, patch) => {
     Object.assign(sources.h, patch);
     sources.h.attributesRevision = (sources.h.attributesRevision ?? 0) + 1;

@@ -8,7 +8,7 @@ import { assert, assertEquals } from "jsr:@std/assert";
 import { makeAppStore } from "../client-solid/store/app-store.js";
 import { api } from "../client/js/api.mjs";
 import { clientInventory } from "./helpers/client-inventory.mjs";
-import { sourceFrame, injectedSourceStream } from "./helpers/source-stream.mjs";
+import { sourceFrame, injectedSourceStream, sourceCollections } from "./helpers/source-stream.mjs";
 import { installImageResource } from "./helpers/image-resource.mjs";
 
 api.inventory = async (...args) => clientInventory(await api.entries(...args));
@@ -352,7 +352,7 @@ async function withBookmarkStore(run) {
   api.meta = async () => ({ v: 1, changed: false });
   api.want = async () => ({ pending: 0 });
   api.nodes = async () => ({});
-  api.collections = async () => ({ h: { address: "h:1", kind: "comfy", online: true },
+  api.collections = async () => sourceCollections({ h: { address: "h:1", kind: "comfy", online: true },
     other: { address: "other:1", kind: "comfy", online: true } });
   try {
     await store.actions.hosts.refresh();
@@ -418,7 +418,7 @@ Deno.test("refresh merges new entries into the feed — no wipe, pointer and nod
   api.meta = async () => ({ v: 1, changed: false });
   api.want = async () => ({ pending: 0 });
   api.nodes = async () => ({});
-  api.collections = async () => ({ h: { address: "h:1", kind: "comfy", online: true } });
+  api.collections = async () => sourceCollections({ h: { address: "h:1", kind: "comfy", online: true } });
   try {
     await store.actions.hosts.refresh();
     await store.actions.hosts.select("h");
@@ -797,7 +797,7 @@ async function withSourceStore(run, { initialUnknown = false } = {}) {
     incarnation: source.incarnation, sourceVersion: source.sourceVersion,
   });
   const emit = async () => { stream.snapshot(frame()); for (let i = 0; i < 30; i++) await Promise.resolve(); };
-  api.collections = async () => structuredClone(sources);
+  api.collections = async () => sourceCollections(sources);
   api.patchCollection = async (id, patch) => {
     Object.assign(sources[id], patch);
     sources[id].attributesRevision = (sources[id].attributesRevision ?? 0) + 1;
@@ -846,7 +846,7 @@ Deno.test("source flags: confirmed independent serialized writer and stale colle
     writes[1].resolve({ pinned: true, autoRefresh: false,
       sourceVersion: { ...sources.h.sourceVersion, attributesRevision: 2 } });
     await refreshOff;
-    collection.resolve(sources);
+    collection.resolve(sourceCollections(sources));
     await read;
     assertEquals([store.state.hosts.h.pinned, store.state.hosts.h.autoRefresh], [true, false]);
     assertEquals(store.state.sourceSaving.h, undefined);

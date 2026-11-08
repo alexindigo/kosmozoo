@@ -3,6 +3,7 @@ import { makeAppStore } from "../client-solid/store/app-store.js";
 import { makeZoomable } from "../client/js/zoomable.mjs";
 import { api } from "../client/js/api.mjs";
 import { clientInventory } from "./helpers/client-inventory.mjs";
+import { sourceCollections } from "./helpers/source-stream.mjs";
 import { facePresentation } from "../client-solid/features/face-alignment/presentation.mjs";
 import { resource } from "./helpers/face-fixtures.mjs";
 
@@ -38,7 +39,7 @@ Deno.test("face presentation: unknown engine content and local anchor bytes keep
 Deno.test("comparison resources: accepted inventory content changes retire same-name requests", async () => {
   const saved = { ...api };
   let hash = "a".repeat(64);
-  api.collections = async () => ({ fake: { address: "fake:1", kind: "comfy", online: true } });
+  api.collections = async () => sourceCollections({ fake: { address: "fake:1", kind: "comfy", online: true } });
   api.inventory = async () => clientInventory([{ name: "same.png", width: 512, height: 512, hash }]);
   api.meta = async () => ({ v: 1, pending: 0 }); api.want = async () => ({ pending: 0 });
   api.nodes = api.settings = api.setSettings = async () => ({}); api.prefetch = async () => ({ pending: {} });

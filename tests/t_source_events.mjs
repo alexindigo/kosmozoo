@@ -2,7 +2,7 @@ import { assert, assertEquals, assertThrows } from "jsr:@std/assert";
 import { Jobs } from "../src/jobs.mjs";
 import { mkStateRig, sourceContext, makeTestInventory } from "./helpers/rig.mjs";
 import { validateSourceSnapshot, subscribeSources } from "../client/js/source-events.mjs";
-import { sourceFrame, injectedSourceStream } from "./helpers/source-stream.mjs";
+import { sourceFrame, injectedSourceStream, sourceCollections } from "./helpers/source-stream.mjs";
 import { makeSourceFreshness } from "../client-solid/store/source-freshness.js";
 import { makeAppStore } from "../client-solid/store/app-store.js";
 import { api } from "../client/js/api.mjs";
@@ -183,7 +183,7 @@ async function withStreamClient(run, delayed = false, configured = { h: {} }) {
   globalThis.history = { state: null, replaceState() {}, pushState() {} };
   const initial = sourceFrame(configured), stream = injectedSourceStream(delayed ? null : initial);
   let reads = 0, cleanup;
-  api.collections = async () => structuredClone(initial.sources);
+  api.collections = async () => sourceCollections(initial.sources);
   api.inventory = async () => { reads++; return clientInventory([{ name: "a.png", width: 100, height: 50, hash: "content", judgment: null }], { coverage: "recursive" }); };
   api.meta = async () => ({ changed: false, pending: 0 }); api.want = async () => ({ pending: 0 });
   api.nodes = async () => ({}); api.settings = async () => ({}); api.setSettings = async () => ({}); api.prefetch = async () => ({});
@@ -237,7 +237,7 @@ Deno.test("push Store: full-map replacement fences old reads/flags, late discove
     assertEquals(stream.connections.length, 2);
     const replacement = sourceFrame({ h: { incarnation: "replacement", pinned: true } }, 5);
     stream.snapshot(replacement); await flush();
-    discovery.resolve(initial.sources);
+    discovery.resolve(sourceCollections(initial.sources));
     await pending;
     assertEquals(store.state.hosts.h.incarnation, "replacement"); assertEquals(store.state.hosts.h.pinned, true);
     stream.connections[0].callbacks.onSnapshot(sourceFrame({ h: { pinned: false } }, 99));

@@ -13,6 +13,18 @@ export function sourceFrame(sources, revision = 0, epoch = "stream") {
   })) };
 }
 
+// Discovery has a different wire shape from strict SSE membership. Tests that
+// stub collection GETs must supply settled capabilities unless testing unknowns.
+export function sourceCollections(sources) {
+  return Object.fromEntries(Object.entries(sources).map(([id, source]) => [id, {
+    ...structuredClone(source), capabilities: source.capabilities ?? {
+      list: true, read: true, add: source.kind !== "folder", rename: false,
+      delete: source.kind === "folder" ? "unlink" : "hide",
+      subfolders: { supported: source.kind !== "folder", reason: null },
+    },
+  }]));
+}
+
 export function injectedSourceStream(initial = null) {
   const connections = [];
   return {

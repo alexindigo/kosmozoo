@@ -4,6 +4,7 @@ import { makeAppStore } from "../client-solid/store/app-store.js";
 import { api } from "../client/js/api.mjs";
 import { parseUrl, feedUrl, diffUrl } from "../client/js/route-parse.mjs";
 import { clientInventory } from "./helpers/client-inventory.mjs";
+import { sourceCollections } from "./helpers/source-stream.mjs";
 import { isEntryName } from "../src/entry-path.mjs";
 
 function storage(initial = {}) {
@@ -88,7 +89,7 @@ async function withBrowse(run, { url = "/", saved = storage() } = {}) {
   const row = (name) => ({ name, width: 100, height: 50, meta: null, judgment: null, hash: null, size: 100 });
   const lists = { h: ["root.png", "a/visible.png", "a/deep/image.png", "ab/sibling.png", "b/target.png", "h#real.png"].map(row),
     other: ["other/last.png", "other/first.png"].map(row), flat: [row("flat.png")] };
-  api.collections = async () => hosts;
+  api.collections = async () => sourceCollections(hosts);
   api.inventory = async (id) => clientInventory(lists[id], { coverage: id === "flat" ? "root-only" : "recursive" });
   api.meta = async () => ({ changed: false, pending: 0 }); api.want = async () => ({ pending: 0 });
   api.nodes = async () => ({}); api.settings = async () => ({}); api.setSettings = async () => ({}); api.prefetch = async () => ({});

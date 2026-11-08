@@ -483,6 +483,26 @@ cannot resurrect retired ownership. This cursor orders delivery only, never inve
 acceptance. Source writes refuse after shutdown admission retires, while cached
 compatibility projection remains readable through lifecycle drainage.
 
+One plain Store-owned discovery lifetime retains capability obligations for current
+source records. Boot, accepted stream/membership changes, explicit refresh and
+delete-preference invalidation converge on its single collection read. Each attempt
+has an AbortSignal and 120-second deadline; failure or partial/unknown capabilities
+retain cancellable 1-30 second capped backoff. Duplicate source/progress frames
+cannot reset it. Valid false and known trash/unlink/hide settle without polling.
+Tickets bind captured record/source identity and policy invalidation generation;
+omitted, replaced and late pre-preference observations cannot satisfy new demand.
+Same-source failure retains last-good fields. New identities never inherit them.
+Retirement, pagehide and disposal cancel/fence owned work; pageshow resumes retained
+unresolved obligations. Source transport and capability discovery remain separate.
+
+Accepted stream membership lets boot proceed while enrichment retries. Without it,
+bootstrap waits for successful collection discovery, including an authoritative
+empty map. A committed source add stays successful if only enrichment fails; no
+mutation is automatically repeated. Discovery settlement does not reload/select
+sources or replace browsing, selection, drafts, cards or feature editors/Files.
+Before first accepted inventory, Store derives pending subfolder presentation from
+live matching-source discovery. Accepted inventory remains authoritative thereafter.
+
 HTTP1 has a small per-browser/origin connection pool. The Chromium fixture checks
 six live streams and queued ordinary HTTP until one is released, plus responsive
 API/bytes with two app tabs. One stream per tab is not unlimited-tab support;

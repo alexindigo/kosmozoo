@@ -3,6 +3,7 @@ import { makeAppStore } from "../client-solid/store/app-store.js";
 import { api } from "../client/js/api.mjs";
 import { makeJudgments } from "../client-solid/store/judgments.js";
 import { clientInventory } from "./helpers/client-inventory.mjs";
+import { sourceCollections } from "./helpers/source-stream.mjs";
 
 const initial = { vote: "up", favorite: true, bookmark: true, notes: { pos: "saved", neg: "old" } };
 const changed = { vote: "down", favorite: null, bookmark: null, notes: { pos: "edited" } };
@@ -30,7 +31,7 @@ async function withStore(run, judgment = initial) {
   api.meta = async () => ({ v: 1, changed: false });
   api.want = async () => ({ pending: 0 });
   api.nodes = async () => ({});
-  api.collections = async () => ({ h: { address: "folder:/fixture/h", kind: "folder", online: true },
+  api.collections = async () => sourceCollections({ h: { address: "folder:/fixture/h", kind: "folder", online: true },
     other: { address: "other:1", kind: "comfy", online: true } });
   api.setSettings = async () => ({});
   api.setJudgment = async () => ({});
@@ -160,19 +161,19 @@ for (const field of Object.keys(initial)) {
   for (const timing of ["before", "during"]) {
     Deno.test(`judgment ${field}: listing begun ${timing} write cannot undo completion; fresh read authoritative`, async () => {
       await withStore(async ({ store, requests, holdWrites, listing }) => {
-        const stale = listing(), read = deferred();
+        const stale = listing(), read = deferred(), started = deferred();
         holdWrites();
-        api.entries = () => read.promise;
+        api.entries = () => { started.resolve(); return read.promise; };
         let refresh;
         if (timing === "before") {
           refresh = store.actions.ui.refresh();
-          await tick();
+          await started.promise;
         }
         const write = store.actions.judgments.dispatch("h:a.png", set(field, changed[field]));
         await tick();
         if (timing === "during") {
           refresh = store.actions.ui.refresh();
-          await tick();
+          await started.promise;
         }
         requests[0].resolve({});
         await write;
