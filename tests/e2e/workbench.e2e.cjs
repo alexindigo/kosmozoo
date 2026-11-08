@@ -57,9 +57,12 @@ if (require.main === module) (async () => {
   await page.poll("!!document.querySelector('.card')", 20000);
   // the window is populated (no fixed settle sleep — poll the render)
   await page.poll("document.querySelectorAll('.card').length > 3", 10000);
-  const logoVersion = await page.evaluate("document.querySelector('header img.logo')?.title");
-  check("header brand titles show the app version", /^Kosmozoo v\d+\.\d+(\.\d+)?(-dev| \([0-9a-f]{7}\))$/.test(logoVersion) &&
-    await page.evaluate("document.querySelector('header h1')?.title") === logoVersion, logoVersion);
+  await page.clickAt('#menuBtn');
+  await page.poll(`!!document.querySelector('#menuIdentity')`);
+  const settingsIdentity = await page.evaluate("document.querySelector('#menuIdentity').textContent");
+  check("settings footer shows the app version", /^Kosmozoo v\d+\.\d+(\.\d+)?(-dev| \([0-9a-f]{7}\))$/.test(settingsIdentity) &&
+    await page.evaluate("document.querySelector('#menu').lastElementChild.id === 'menuIdentity' && !document.querySelector('header img.logo').hasAttribute('title') && !document.querySelector('header h1').hasAttribute('title')"), settingsIdentity);
+  await page.clickAt('#menuBtn');
 
   const total = await page.evaluate(`(async () => (await (await fetch("/api/collections/fake/entries")).json()).length)()`);
   check("grid loaded images from engine", total > 3000, `${total} images`);

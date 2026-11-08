@@ -441,6 +441,8 @@ main { display: flex; flex: 1; min-height: 0; isolation: isolate; }
 .menurow { display: flex; align-items: center; gap: 8px; font-size: 13px; }
 .menulabel { color: var(--foreground-dim); font-size: 11px; }
 .menuextra { color: var(--foreground-dim); font-size: 11px; margin-left: auto; }
+#menuIdentity { border-top: 1px solid var(--border); padding-top: 8px;
+  color: var(--foreground-dim); font-size: 12px; white-space: nowrap; }
 
 /* switches — the knob travel derives from the track/knob/inset vars :
  track − knob − 2×inset, never a hand-computed translateX */

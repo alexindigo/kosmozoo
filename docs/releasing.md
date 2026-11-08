@@ -20,9 +20,11 @@ builds images with `KOZMOZOO_REVISION` set to the tagged commit.
 The engine reads `VERSION` once at startup; a missing, unreadable or invalid file
 stops startup with an error naming the file. It logs the version before the
 "listening" line, returns `app: {version, revision}` from `/api/runtime`, and the
-store supplies the formatted version for the header image and wordmark native
-titles, both branded `Kosmozoo`. While unknown they retain `Kosmozoo`. This does not
-change the instance/lease runtime protocol.
+store supplies the formatted version for the read-only footer at the bottom of
+the settings menu, branded `Kosmozoo`. While unknown it shows `Kosmozoo`. The
+footer remains visible even when the settings search hides every row. The header
+image and wordmark have no native title. This does not change the instance/lease
+runtime protocol.
 
 The revision comes from `KOZMOZOO_REVISION` when nonempty (7–40 lowercase hex
 characters), otherwise the executable's `provenance.commit`, otherwise null.
@@ -34,7 +36,7 @@ characters), otherwise the executable's `provenance.commit`, otherwise null.
 | AUR source packages | Launcher exports `KOZMOZOO_REVISION`: `kosmozoo` reads the tarball's embedded commit using `git get-tar-commit-id`; `kosmozoo-git` uses `git rev-parse HEAD` of its build checkout | `v0.2.0 (abc1234)` |
 | Source run / local image | No revision | `v0.2.0-dev` |
 
-An unknown version formats as an empty string; Header supplies the brand fallback.
+An unknown version formats as an empty string; the settings footer supplies the brand fallback.
 One plain Store-owned runtime-identity lifetime reads independently of boot,
 with a ten-second attempt deadline and cancellable 1-30 second capped retry
 backoff. Pagehide suspends it; pageshow refreshes through the same owner. Page

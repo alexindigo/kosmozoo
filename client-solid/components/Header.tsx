@@ -64,6 +64,7 @@ function InfoLayoutSwitcher() {
 function Menu() {
   const store = useAppStore();
   const open = () => store.state.menuOpen();
+  const identity = () => store.state.appVersion() ? `Kosmozoo ${store.state.appVersion()}` : "Kosmozoo";
   const q = () => (store.state.menuFilter() ?? "").toLowerCase();
   const matches = (hay) => !q() || hay.toLowerCase().includes(q());
   const scraperPending = () => {
@@ -145,6 +146,7 @@ function Menu() {
           </Show>
           <FeatureContributions store={store} slot="settingsRow" matches={matches} />
         </div>
+        <div id="menuIdentity">{identity()}</div>
       </div>
     </Show>
   );
@@ -152,7 +154,6 @@ function Menu() {
 
 export function Header() {
   const store = useAppStore();
-  const brandTitle = createMemo(() => store.state.appVersion() ? `Kosmozoo ${store.state.appVersion()}` : "Kosmozoo");
   const pins = () => Object.keys(store.state.hosts).filter((id) => store.state.hosts[id].pinned);
   let menuWrapRef;
 
@@ -166,8 +167,8 @@ export function Header() {
     <header id="chrome" class="chrome-split">
       <div class="chrome-feed">
         <div class="chrome-feed-inner">
-          <img class="logo" src="/logo-64.png" alt="kosmozoo" width={24} height={24} title={brandTitle()} />
-          <h1 title={brandTitle()}>Kosmozoo</h1>
+          <img class="logo" src="/logo-64.png" alt="kosmozoo" width={24} height={24} />
+          <h1>Kosmozoo</h1>
           <IconButton id="refreshBtn" chrome variant="refresh" title="Refresh sources and image list"
             icon={iconSvg("refresh", 16)} onAction={() => store.handles.invoke("source.refresh")} />
           <HostPicker />
