@@ -134,7 +134,7 @@ Highlight image differences in orange with the threshold control visible.
 
 ### Variations editor
 
-![Variations dialog with a style reference, three input images, a denoise range, 12 combinations and output-naming controls](docs/screenshots/06-variations-dialog.png)
+![Variations dialog with a style reference, three input images, a denoise range, 12 combinations and output-naming controls](docs/screenshots/06-variations-dialog.webp)
 
 Combine a style reference with three content images and four denoise values
 for 12 combinations. Review the count and output-naming controls before Run.
