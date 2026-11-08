@@ -2,10 +2,11 @@ import { assertEquals } from "jsr:@std/assert";
 import { makeAppStore } from "../client-solid/store/app-store.js";
 import { api } from "../client/js/api.mjs";
 import { clientInventory } from "./helpers/client-inventory.mjs";
+import { sourceCollections } from "./helpers/source-stream.mjs";
 
 Deno.test("viewer opacity: Store context owns availability/effect without resetting raw preferences", async () => {
   const saved = { ...api };
-  api.collections = async () => ({ fake: { address: "fake:1", kind: "comfy", online: true } });
+  api.collections = async () => sourceCollections({ fake: { address: "fake:1", kind: "comfy", online: true } });
   api.inventory = async () => clientInventory(["still.png", "peer.png", "movie.webm", "sound.wav"].map(name => ({ name, width: 100, height: 80 })));
   api.meta = async () => ({ v: 1, pending: 0 });
   api.want = async () => ({ pending: 0 });
