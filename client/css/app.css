@@ -35,8 +35,8 @@
   --control-height-md: 28px;
   --control-height-viewer: 26px;
   --control-height-lg: 48px;
-  /* page-level layer scale : chrome < dropdown < overlay < modal <
- confirm < status. Component-local stacking stays plain integers. */
+  /* Page-level scale: selection chrome < header/popup scopes < viewer <
+     modal < confirm < status. Main contains its own plain-integer layers. */
   --z-chrome: 10; --z-dropdown: 20; --z-overlay: 30;
   --z-modal: 40; --z-confirm: 50; --z-status: 60;
   /* derived tones — computed from the roles, never raw */
@@ -65,7 +65,8 @@ body.resizing { cursor: col-resize; user-select: none; }
 #app { flex: 1; min-height: 0; display: flex; flex-direction: column; }
 #chrome { height: var(--chrome-h); flex: 0 0 auto;
   display: flex; gap: 8px; align-items: center; padding: 0 8px;
-  background: var(--focused-background); border-bottom: 1px solid var(--border); z-index: var(--z-chrome); }
+  /* Its local popups share this page scope, above the separate selection bar. */
+  background: var(--focused-background); border-bottom: 1px solid var(--border); z-index: var(--z-dropdown); }
 #chrome h1 { font-size: 15px; margin: 0 4px 0 2px; font-weight: 600; }
 #chrome img.logo { border-radius: 6px; }
 #chrome .flexspacer { flex: 1; }
@@ -117,7 +118,8 @@ body.resizing { cursor: col-resize; user-select: none; }
 
 /* --- main: two feeds share the window; divider splits; each column scrolls
  itself (no page-level scroll) ------------------------------------------- */
-main { display: flex; flex: 1; min-height: 0; }
+/* Bound feed/workspace layers without changing layout, scrolling or clipping. */
+main { display: flex; flex: 1; min-height: 0; isolation: isolate; }
 
 /* feed position rail: a tape of small grey ticks spanning the view, the
  viewport-visible images as a wave of wider/brighter ticks over it.
@@ -187,7 +189,7 @@ main { display: flex; flex: 1; min-height: 0; }
   background: transparent; cursor: col-resize; }
 #divider::before, .separator::before { content: ""; position: absolute;
   inset: 0 var(--line-inset); }
-#divider { --grab-w: 7px; border-radius: 4px; margin: 0 -6px; z-index: var(--z-chrome); }
+#divider { --grab-w: 7px; border-radius: 4px; margin: 0 -6px; z-index: 1; }
 #divider::before { background: var(--border); border-radius: 1px; transition: background .15s; }
 #divider:hover::before, #divider.dragging::before { background: var(--foreground-mid); }
 /* the pane's width is owned by the store signal (rendered as an inline
@@ -407,7 +409,7 @@ main { display: flex; flex: 1; min-height: 0; }
    background extended past the title row and the notes, so the pinned
    text/buttons have breathing room against the image and the viewport's
    edge — again with zero layout height. */
-.card-foot { position: sticky; bottom: 0; z-index: var(--z-chrome);
+.card-foot { position: sticky; bottom: 0; z-index: 1;
   box-shadow: 0 -10px 14px -10px var(--backdrop); }
 .card-foot::before { content: ""; position: absolute; z-index: -1;
   inset: -8px -12px -12px; background: var(--focused-background); border-radius: 8px; }
@@ -439,6 +441,8 @@ main { display: flex; flex: 1; min-height: 0; }
 .menurow { display: flex; align-items: center; gap: 8px; font-size: 13px; }
 .menulabel { color: var(--foreground-dim); font-size: 11px; }
 .menuextra { color: var(--foreground-dim); font-size: 11px; margin-left: auto; }
+#menuIdentity { border-top: 1px solid var(--border); padding-top: 8px;
+  color: var(--foreground-dim); font-size: 12px; white-space: nowrap; }
 
 /* switches — the knob travel derives from the track/knob/inset vars :
  track − knob − 2×inset, never a hand-computed translateX */
@@ -875,7 +879,7 @@ body:has(#diff:not([hidden])) #statusCol { bottom: 56px; }
  itself — the zoom binding (ctrl+wheel, drag-pan) lives there */
 .info-source-images .infoimg img { max-height: none; }
 /* the details split's instance of the grab-strip pattern */
-.separator { --grab-w: 13px; z-index: var(--z-chrome); }
+.separator { --grab-w: 13px; z-index: 1; }
 .separator::before { background: var(--lifted); }
 /* stacked layout: the same strip turned — in a column flex the basis IS
  the height, and the line inset flips to the horizontal edges */

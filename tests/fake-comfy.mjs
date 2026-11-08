@@ -220,7 +220,7 @@ const removed = new Set();
 let terminalHistory = history();
 let running = [], pending = [], logs = [], failures = {}, delays = {};
 let publishRevision = 0;
-let captureEnqueue = false, enqueues = [];
+let captureEnqueue = false, enqueues = [], assetsPlusDelete = false;
 let metadataBombs = new Set(), assetsHidden = new Set();
 const telemetryRequests = { queue: 0, history: 0, logs: 0 };
 const activeLogs = new Set();
@@ -272,7 +272,7 @@ const handleRequest = async (req) => {
     if (body.reset) {
       published.clear(); terminalHistory = history();
       removed.clear(); publishedInputs.clear(); publishRevision = 0;
-      captureEnqueue = false; enqueues = [];
+      captureEnqueue = false; enqueues = []; assetsPlusDelete = false;
       metadataBombs = new Set(); assetsHidden = new Set();
       telemetryRequests.queue = 0; telemetryRequests.history = 0; telemetryRequests.logs = 0; activeLogs.clear();
       running = []; pending = []; logs = []; failures = {}; delays = {};
@@ -296,6 +296,7 @@ const handleRequest = async (req) => {
     if (body.failures) failures = { ...body.failures };
     if (body.delays) delays = { ...body.delays };
     if (body.captureEnqueue !== undefined) captureEnqueue = body.captureEnqueue;
+    if (typeof body.assetsPlusDelete === "boolean") assetsPlusDelete = body.assetsPlusDelete;
     if (body.metadataBombs) metadataBombs = new Set(body.metadataBombs);
     if (body.assetsHidden) assetsHidden = new Set(body.assetsHidden);
     for (const name of body.remove ?? []) removed.add(name);
@@ -354,6 +355,15 @@ const handleRequest = async (req) => {
     if (publishedInputs.has(file.name)) return new Response("existing input", { status: 409 });
     publishedInputs.set(file.name, { bytes: new Uint8Array(await file.arrayBuffer()), promptGraph: null });
     return Response.json({ name: file.name, subfolder: "", type: "input" });
+  }
+  if (p === "/api/assets_plus/output/delete" && req.method === "POST" && assetsPlusDelete) {
+    const body = await req.json();
+    if (body.mode !== "trash" || !Array.isArray(body.relpaths) || body.relpaths.some(name => typeof name !== "string")) {
+      return Response.json({ error: "trash relpaths required" }, { status: 400 });
+    }
+    const present = new Set(fileNames()), deleted = body.relpaths.filter(name => present.has(name));
+    for (const name of deleted) removed.add(name);
+    return Response.json({ removed: deleted, failed: body.relpaths.filter(name => !present.has(name)) });
   }
   if (p === "/api/assets_plus/config" && req.method === "GET") {
     return Response.json({ allowed_extensions: [".png", ".jpg", ".jpeg", ".webp"],

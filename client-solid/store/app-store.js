@@ -27,6 +27,7 @@ import { isEntryName, isFolderPath, inFolder } from "/shared/entry-path.mjs";
 import { formatVersion } from "/shared/version.mjs";
 import { makeSourceBrowse } from "./source-browse.js";
 import { makeSourceFreshness } from "./source-freshness.js";
+import { makeRuntimeIdentity } from "./runtime-identity.js";
 import { makeSourceRegistry, sameSourceIdentity } from "./source-registry.js";
 import { makeRailArrivals } from "./rail-arrivals.js";
 import { fieldList, nodeImages } from "./fields.js";
@@ -48,6 +49,7 @@ import { launchNotice } from "/js/launch-notice.mjs";
 import { readZoomView, readyViewGeometry } from "/js/zoom-view.mjs";
 import { entryNames } from "./entry-names.js";
 import { makeWheelArbiter } from "../lib/wheel-arbiter.js";
+import { makeSourceDiscovery, knownCapabilities, enrichCapabilities } from "./source-discovery.js";
 import { observeNativeMagnification } from "../lib/native-magnification.js";
 import { emptyFilter, normalizeFilter, compileFilter, filterConditions, parameterNames } from "/js/feed-filter-model.mjs";
 import { isContentHash } from "/shared/content-hash.mjs";
@@ -119,6 +121,9 @@ export function makeAppStore({ subscribeSources = typeof window !== "undefined" 
   });
   const hostsView = sourceRecords.hosts;
   const [sourcesReady, setSourcesReady] = createSignal(false);
+  let resolveMembership;
+  const membershipReady = new Promise(resolve => { resolveMembership = resolve; });
+  const markSourcesReady = () => { setSourcesReady(true); resolveMembership(); };
   const noSources = createMemo(() => sourcesReady() && Object.keys(hostsView()).length === 0);
 
   // UI state tree — separate reactive graph, moves here as directed
@@ -134,6 +139,10 @@ export function makeAppStore({ subscribeSources = typeof window !== "undefined" 
   // scalar atoms
   const [host, setHost] = createSignal(null);
   const [appVersion, setAppVersion] = createSignal("");
+  const runtimeIdentity = makeRuntimeIdentity({
+    read: async options => formatVersion((await api.runtime(options))?.app ?? {}),
+    publish: setAppVersion,
+  });
   const [sourceDelivery, setSourceDelivery] = createSignal(subscribeSources ? "connecting" : "explicit");
   const [nativeViewport, setNativeViewport] = createSignal({ magnified: false, rect: null });
   const nativeMagnification = () => nativeViewport().magnified;
@@ -1424,7 +1433,7 @@ export function makeAppStore({ subscribeSources = typeof window !== "undefined" 
   }]));
 
   let booted = false;
-  let registryRevision = 0, collectionRead = 0, streamEpoch = null, streamRevision = -1;
+  let registryRevision = 0, streamEpoch = null, streamRevision = -1;
   let membershipFloor = null;
   let deliveryStarted = false, deliverySuspended = false, deliveryGeneration = 0, deliveryDispose = null;
   let everDelivered = false, deliveryGap = false, pageDispose = null;
@@ -1480,7 +1489,7 @@ export function makeAppStore({ subscribeSources = typeof window !== "undefined" 
           record.acceptArrivals(value.arrivals, host() === id);
         }
         streamEpoch = frame.epoch; streamRevision = frame.revision; registryRevision++;
-        setSourcesReady(true);
+        markSourcesReady();
       });
     }
     if (deliveryGap) {
@@ -1488,6 +1497,7 @@ export function makeAppStore({ subscribeSources = typeof window !== "undefined" 
       deliveryGap = false;
     }
     everDelivered = true;
+    sourceDiscovery.reconcile();
     if (sourceSession && !ownsSession(sourceSession) || booted && !host() && Object.keys(hostsView()).length) {
       const id = Object.hasOwn(hostsView(), host()) ? host() : Object.keys(hostsView())[0] ?? null;
       actions.hosts.select(id, { force: true, historyMode: "replace" });
@@ -1520,6 +1530,7 @@ export function makeAppStore({ subscribeSources = typeof window !== "undefined" 
       }
       registryRevision++;
     });
+    sourceDiscovery.reconcile();
     if (sourceSession && !ownsSession(sourceSession)) {
       actions.hosts.select(Object.hasOwn(hostsView(), host()) ? host() : Object.keys(hostsView())[0] ?? null,
         { force: true, historyMode: "replace" });
@@ -1543,6 +1554,8 @@ export function makeAppStore({ subscribeSources = typeof window !== "undefined" 
   }
 
   function suspendDelivery() {
+    runtimeIdentity.suspend();
+    sourceDiscovery.suspend();
     if (disposed || deliverySuspended) return;
     deliverySuspended = true; deliveryGeneration++;
     deliveryDispose?.(); deliveryDispose = null;
@@ -1551,6 +1564,8 @@ export function makeAppStore({ subscribeSources = typeof window !== "undefined" 
   }
 
   function resumeDelivery() {
+    runtimeIdentity.resume();
+    sourceDiscovery.resume();
     if (disposed || !deliverySuspended) return;
     deliverySuspended = false;
     if (deliveryStarted) startDelivery();
@@ -1558,19 +1573,33 @@ export function makeAppStore({ subscribeSources = typeof window !== "undefined" 
 
   function resyncSources() { deliveryDispose?.resync?.(); }
 
-  async function refreshHosts() {
-    const sequence = ++collectionRead, revision = registryRevision;
-    const stamps = new Map([...sourceRecords].map(([id, r]) => [id, { record: r, revision: r.revision }]));
-    const response = await api.collections();
-    if (disposed || sequence !== collectionRead || !streamEpoch && revision !== registryRevision) return;
+  const bootstrapDiscovery = {};
+  const sourceDiscovery = makeSourceDiscovery({
+    capture: () => ({ targets: sourcesReady() ? [...sourceRecords.values()] : [bootstrapDiscovery],
+      revision: registryRevision, stamps: new Map([...sourceRecords].map(([id, r]) => [id, { record: r, revision: r.revision }])) }),
+    read: options => api.collections(options),
+    accept: acceptDiscovery,
+  });
+
+  function acceptDiscovery(response, { revision, stamps }) {
+    if (disposed || !streamEpoch && revision !== registryRevision) return [];
+    if (!response || typeof response !== "object" || Array.isArray(response)) throw new Error("Invalid collection discovery");
     let next = toHosts(response);
+    const accepted = [];
     if (streamEpoch) {
       // Discovery enriches current stream identities; it never owns membership.
       next = Object.fromEntries([...sourceRecords].map(([id, record]) => {
         const discovered = next[id];
-        return [id, sameSource(record, discovered) ? { ...hostsView()[id], online: discovered.online,
-          capabilities: discovered.capabilities } : { ...hostsView()[id] }];
+        if (stamps.get(id)?.record !== record || !sameSource(record, discovered)) return [id, { ...hostsView()[id] }];
+        if (knownCapabilities(discovered.capabilities)) accepted.push(record);
+        return [id, { ...hostsView()[id], online: discovered.online,
+          capabilities: enrichCapabilities(hostsView()[id].capabilities, discovered.capabilities) }];
       }));
+    } else {
+      for (const [id, source] of Object.entries(next)) {
+        const record = sourceRecords.get(id);
+        source.capabilities = enrichCapabilities(record && sameSource(record, source) ? record.host.capabilities : null, source.capabilities);
+      }
     }
     for (const [id, source] of Object.entries(next)) {
       const record = sourceRecords.get(id), stamp = stamps.get(id);
@@ -1580,17 +1609,26 @@ export function makeAppStore({ subscribeSources = typeof window !== "undefined" 
       }
     }
     sourceRecords.reconcile(next);
-    setSourcesReady(true);
+    if (!streamEpoch) for (const [id, source] of Object.entries(response)) {
+      if (knownCapabilities(source.capabilities)) accepted.push(sourceRecords.get(id));
+    }
+    markSourcesReady();
     if (booted && !host()) {
       const first = initialHost(hostsView(), st.ui.host);
-      if (first) await actions.hosts.select(first, { historyMode: "replace" });
+      if (first) actions.hosts.select(first, { historyMode: "replace" });
     }
     drainRefresh(sourceSession);
+    return accepted;
   }
+
+  function refreshHosts(options) { return sourceDiscovery.refresh(options); }
 
   function dispose() {
     if (disposed) return;
     disposed = true;
+    resolveMembership();
+    runtimeIdentity.dispose();
+    sourceDiscovery.dispose();
     for (const disposeFeature of featureDisposals) disposeFeature();
     featureDisposals.clear();
     railArrivals.retire();
@@ -1689,9 +1727,10 @@ export function makeAppStore({ subscribeSources = typeof window !== "undefined" 
         }
       }
       startDelivery();
-      const runtime = await api.runtime().catch(() => null);
-      if (!disposed) setAppVersion(formatVersion(runtime?.app ?? {}));
-      await refreshHosts();
+      runtimeIdentity.start();
+      sourceDiscovery.start();
+      await membershipReady;
+      if (disposed) return;
       const ui = await api.settings("core.ui").catch(() => ({}));
       setSt("ui", ui);
       // persisted info-panel split hydrates the uiSt tree the details pane
@@ -1759,7 +1798,8 @@ export function makeAppStore({ subscribeSources = typeof window !== "undefined" 
           const saved = await api.addCollection(name, addr);
           acceptMembershipReply(saved, name, false, capturedEpoch);
           registryRevision++;
-          await refreshHosts();
+          sourceDiscovery.reconcile();
+          if (!sourcesReady() || !Object.hasOwn(hostsView(), name)) sourceDiscovery.refresh();
           return { ok: true };
         } catch {
           return { ok: false };
@@ -1773,11 +1813,11 @@ export function makeAppStore({ subscribeSources = typeof window !== "undefined" 
           if (disposed || sourceRecords.get(name) !== record) return;
           if (streamEpoch) {
             acceptMembershipReply(saved, name, true, capturedEpoch);
-            await refreshHosts(); return;
+            sourceDiscovery.reconcile(); return;
           }
           registryRevision++;
           sourceRecords.delete(name);
-          await refreshHosts();
+          sourceDiscovery.reconcile();
           if (host() === name) {
             await actions.hosts.select(Object.keys(hostsView())[0] ?? null);
           }
@@ -1827,13 +1867,19 @@ export function makeAppStore({ subscribeSources = typeof window !== "undefined" 
         if (disposed) return () => {};
         pageDispose?.();
         const stopMagnification = observeNativeMagnification(target, setNativeViewport);
-        target.addEventListener("pagehide", suspendDelivery);
-        target.addEventListener("pageshow", resumeDelivery);
+        let active = true;
+        const hide = () => { if (active) suspendDelivery(); };
+        const show = () => { if (active) resumeDelivery(); };
+        target.addEventListener("pagehide", hide);
+        target.addEventListener("pageshow", show);
+        runtimeIdentity.resume();
         const retire = () => {
+          if (!active) return;
+          active = false;
           stopMagnification();
-          target.removeEventListener("pagehide", suspendDelivery);
-          target.removeEventListener("pageshow", resumeDelivery);
-          if (pageDispose === retire) pageDispose = null;
+          target.removeEventListener("pagehide", hide);
+          target.removeEventListener("pageshow", show);
+          if (pageDispose === retire) { pageDispose = null; runtimeIdentity.suspend(); }
         };
         pageDispose = retire;
         return retire;
@@ -2562,7 +2608,7 @@ export function makeAppStore({ subscribeSources = typeof window !== "undefined" 
       async deleteAssetsPlus(on) {
         await api.setSettings("core.delete", { useAssetsPlus: on }).catch(() => {});
         setSt("deletePrefs", { ...st.deletePrefs, useAssetsPlus: on });
-        await refreshHosts(); // capabilities.delete depends on the toggle
+        await refreshHosts({ invalidate: true }); // Fence pre-toggle capability observations.
       },
     },
   };
@@ -2600,7 +2646,8 @@ export function makeAppStore({ subscribeSources = typeof window !== "undefined" 
     downloadName: (image) => namesFor(image).download,
     referenceName: (image) => namesFor(image).reference,
     get images() { return st.images; },
-    get inventory() { return st.inventory; },
+    get inventory() { return st.inventory.coverage !== null ? st.inventory : { ...st.inventory,
+      subfolders: hostsView()[host()]?.capabilities?.subfolders ?? st.inventory.subfolders }; },
     selectedFolder,
     folderView,
     folderOptions() {

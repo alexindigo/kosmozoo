@@ -59,6 +59,17 @@ the resources; a collection's `capabilities` answer what its backing can do.
 | `/api/nodes` | GET | `class_type` registry discovered from extracted graphs |
 | `/api/features` | GET | the registered feature modules (`variations`) |
 
+The plain Store-owned runtime-identity owner acquires `/api/runtime` independently
+of inventory/settings boot. It owns one cancellable read, a ten-second deadline
+and 1-30 second capped failure backoff. Pagehide suspends; pageshow resumes with
+a fresh observation. Page replacement/disposal cancel timers and fence late
+replies, including transports ignoring abort. Accepted `appVersion` uses shared
+`formatVersion`; failures retain its last good value. The settings menu's last
+child is a read-only identity footer, after all settings/feature rows and outside
+their search filter: `Kosmozoo <formatted version>` or `Kosmozoo` while unknown.
+It remains visible when no rows match. The header image and wordmark have no
+native title. No loaded-client identity, asset update or reload protocol is implied.
+
 Entry identity on the wire is the plain name under a collection; the
 `collection:name` string survives only inside the client as a derived
 accessor. Underneath it, identity is the content hash (§6).
@@ -472,6 +483,29 @@ cannot resurrect retired ownership. This cursor orders delivery only, never inve
 acceptance. Source writes refuse after shutdown admission retires, while cached
 compatibility projection remains readable through lifecycle drainage.
 
+One plain Store-owned discovery lifetime retains capability obligations for current
+source records. Boot, accepted stream/membership changes, explicit refresh and
+delete-preference invalidation converge on its single collection read. Each attempt
+has an AbortSignal and 120-second deadline; failure or partial/unknown capabilities
+retain cancellable 1-30 second capped backoff. Duplicate source/progress frames
+cannot reset it. Valid false and known trash/unlink/hide settle without polling.
+Tickets bind captured record/source identity and policy invalidation generation;
+omitted, replaced and late pre-preference observations cannot satisfy new demand.
+Same-source failure retains last-good fields. New identities never inherit them.
+Retirement, pagehide and disposal cancel/fence owned work; pageshow resumes retained
+unresolved obligations. Source transport and capability discovery remain separate.
+
+Accepted stream membership lets boot proceed while enrichment retries. Without it,
+bootstrap waits for successful collection discovery, including an authoritative
+empty map. A committed source add stays successful if only enrichment fails; no
+mutation is automatically repeated. For an already selected source, discovery-only
+capability enrichment does not reload/select sources or replace browsing,
+selection, drafts, cards or feature editors/Files. After boot with no selected
+source, discovery may select the first available source through the normal
+initial-selection lane and load its inventory.
+Before first accepted inventory, Store derives pending subfolder presentation from
+live matching-source discovery. Accepted inventory remains authoritative thereafter.
+
 HTTP1 has a small per-browser/origin connection pool. The Chromium fixture checks
 six live streams and queued ordinary HTTP until one is released, plus responsive
 API/bytes with two app tabs. One stream per tab is not unlimited-tab support;
@@ -828,6 +862,13 @@ with smaller gaps inside its scrollable button strip. Empty pins retain flexible
 allocation. Folder labels truncate within compact allocations with full path in
 the accessible title; unsupported folder controls are omitted. Native
 select typing retains precedence in the existing key dispatcher.
+
+Header popups paint and receive input above ordinary feed, selection and
+workspace chrome. Main content owns an isolated stacking scope; sticky feedback
+and workspace split controls elevate only within it. The header's existing
+popup-containing scope and portaled filter use the page dropdown tier, above the
+separate selection bar and below viewer/modal surfaces. Opening popups changes
+neither feed geometry nor their existing focus, key and outside-dismissal owners.
 
 The existing feed rail current marker follows live viewport midpoint-crossing
 geometry during valid scrolling, then committed current after settle. One shared

@@ -3,6 +3,7 @@ import { makeSizes, ERROR_RETRY_MS } from "../client-solid/store/sizes.js";
 import { makeAppStore } from "../client-solid/store/app-store.js";
 import { api } from "../client/js/api.mjs";
 import { clientInventory } from "./helpers/client-inventory.mjs";
+import { sourceCollections } from "./helpers/source-stream.mjs";
 import { createRoot } from "solid-js";
 
 function measurementEnv() {
@@ -146,7 +147,7 @@ Deno.test("feed failure contract: known + pending partitions the view and termin
     { name: "broken.png", width: null, height: null },
     { name: "good.png", width: 640, height: 360 },
   ].map(e => ({ size: 100, hash: null, meta: null, judgment: null, extracted: false, ...e }));
-  api.collections = async () => ({ h: { address: "mock:1", kind: "comfy", online: true } });
+  api.collections = async () => sourceCollections({ h: { address: "mock:1", kind: "comfy", online: true } });
   api.inventory = async () => clientInventory(structuredClone(rows));
   api.meta = async () => ({ changed: false, pending: 0 });
   api.want = async () => ({ pending: 0 }); api.nodes = async () => ({});
@@ -183,7 +184,7 @@ Deno.test("feed failure contract: all-pending feed with remembered null current 
   const storage = { getItem: key => key === "kosmozoo.sourceBrowse.v1"
     ? JSON.stringify({ version: 1, hosts: { h: { address: "mock:1", folder: "", current: null } } }) : null,
     setItem() {} };
-  api.collections = async () => ({ h: { address: "mock:1", kind: "comfy", online: true } });
+  api.collections = async () => sourceCollections({ h: { address: "mock:1", kind: "comfy", online: true } });
   api.inventory = async () => clientInventory(["a.png", "b.png"].map(name => ({
     name, size: 10, hash: "same", width: null, height: null, meta: null, judgment: null, extracted: false,
   })));

@@ -139,6 +139,7 @@ async function railMotion(page) {
     };
     await require('./sticky-foot.cjs')({ page, KZ, check, capture, control });
     await require('./sticky-mixed-feed.cjs')({ page, KZ, check, capture, control });
+    await require('./popup-layering.cjs')({ page, ENGINE, FAKE: process.env.E2E_FAKE ?? 'http://127.0.0.1:18261', check });
   } catch (error) { check('sticky feed foot consumer', false, error.message); }
   await healthyTraffic({ page, traffic: sourceTraffic, ENGINE, KZ, check });
   const dims = await page.evaluate(`(async () => (await (await fetch("/api/prefetch")).json()).dimsPending)()`);

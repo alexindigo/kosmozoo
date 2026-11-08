@@ -1,5 +1,22 @@
 # Changelog
 
+## 0.4.1 - 2026-11-08
+
+Header popups stay above feed, selection and workspace controls without changing
+feed geometry or scrolling. Runtime identity recovers independently of source
+loading and appears in a read-only settings footer, including when search hides
+every setting.
+
+Source capabilities recover automatically after discovery failures, membership
+changes and engine restarts. Discovery-only updates preserve browsing, selection
+and drafts while Delete actions and supported folder controls recover without a
+page reload.
+
+The README expands feature coverage and illustrates Variations and face-aligned
+comparisons. A new detector guide covers Python installation, model downloads,
+service readiness, Web UI connection and API compatibility. Detection remains
+optional, externally configured and OFF on each page load.
+
 ## 0.4.0 - 2026-11-07
 
 Still-image comparisons can detect faces, select which boxes to show and choose
