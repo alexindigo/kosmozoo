@@ -51,12 +51,17 @@ See the installation guides for launch, storage and upgrade details, and
 | 2 | Face choices | All detected faces start selected. Choose an alignment face explicitly when an image has multiple faces; choosing an anchor keeps the other faces selected. A single usable face can anchor directly. |
 | 3 | Face-anchored comparison | Match the selected faces' eye midpoint and scale, then pan/zoom with a common camera. Detection can also show boxes with Independent or Shared alignment. This is geometric alignment, without rotation or identity recognition. |
 
-Configure **Face detector service** in Settings (`plugins.detector.serviceUrl`).
-The [detector contract](docs/spec.md#detector-foundation) and
-[service implementation](plugins/detector/detect_service.py) describe the external
-service. Selecting Face-anchored does not enable detection. Turning detection
-off hides its feedback and alignment effect while retaining choices for the
-current page session.
+Follow the [detector installation and run guide](docs/face-detection.md) to install
+the Python service and download its models. In the Web UI, open Settings/Options
+-> **Face detector service**, enter the engine-reachable URL and **Save**. For a
+native Linux engine on the detector computer, use `http://127.0.0.1:8471`; the
+engine resolves this URL, not the browser. Open a still-image pair in a comparison
+view, turn **Face detection** on, then select **Face-anchored** and choose face
+anchors as needed. The URL persists; detection starts OFF on each page load.
+Selecting Face-anchored does not enable detection. Turning detection off hides
+its feedback and alignment effect while retaining choices for the current page
+session. The [custom API and 28-landmark compatibility requirements](docs/face-detection.md#api-compatibility)
+explain when another detector library needs an adapter.
 
 ### Record feedback and find results
 
@@ -149,9 +154,10 @@ anchors. It is optional, externally configured and OFF by default.
 |---|---|---|
 | 1 | [Executable](docs/executable.md) | Desktop launch, user-local installation, service mode and state. |
 | 2 | [Container](docs/container.md) | Container image, persistent volumes and runtime configuration. |
-| 3 | [Specification](docs/spec.md) | Shipped behavior, public API, storage and feature contracts. |
-| 4 | [Plugins](PLUGINS.md) | Trusted drop-in engine extensions. |
-| 5 | [Changelog](CHANGELOG.md) | Release-by-release changes. |
+| 3 | [Face detector](docs/face-detection.md) | Python/model installation, foreground launch, Web UI connection and API compatibility. |
+| 4 | [Specification](docs/spec.md) | Shipped behavior, public API, storage and feature contracts. |
+| 5 | [Plugins](PLUGINS.md) | Trusted drop-in engine extensions. |
+| 6 | [Changelog](CHANGELOG.md) | Release-by-release changes. |
 
 ## Contributing
 
