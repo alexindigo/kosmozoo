@@ -59,6 +59,16 @@ the resources; a collection's `capabilities` answer what its backing can do.
 | `/api/nodes` | GET | `class_type` registry discovered from extracted graphs |
 | `/api/features` | GET | the registered feature modules (`variations`) |
 
+The plain Store-owned runtime-identity owner acquires `/api/runtime` independently
+of inventory/settings boot. It owns one cancellable read, a ten-second deadline
+and 1-30 second capped failure backoff. Pagehide suspends; pageshow resumes with
+a fresh observation. Page replacement/disposal cancel timers and fence late
+replies, including transports ignoring abort. Accepted `appVersion` uses shared
+`formatVersion`; failures retain its last good value. Header's image and wordmark
+share the native title `Kosmozoo <formatted version>` or the always-present
+`Kosmozoo` fallback. No loaded-client identity, asset update or reload protocol
+is implied.
+
 Entry identity on the wire is the plain name under a collection; the
 `collection:name` string survives only inside the client as a derived
 accessor. Underneath it, identity is the content hash (§6).

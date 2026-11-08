@@ -20,7 +20,8 @@ builds images with `KOZMOZOO_REVISION` set to the tagged commit.
 The engine reads `VERSION` once at startup; a missing, unreadable or invalid file
 stops startup with an error naming the file. It logs the version before the
 "listening" line, returns `app: {version, revision}` from `/api/runtime`, and the
-store supplies the formatted version for the header logo tooltip. This does not
+store supplies the formatted version for the header image and wordmark native
+titles, both branded `Kosmozoo`. While unknown they retain `Kosmozoo`. This does not
 change the instance/lease runtime protocol.
 
 The revision comes from `KOZMOZOO_REVISION` when nonempty (7–40 lowercase hex
@@ -33,7 +34,13 @@ characters), otherwise the executable's `provenance.commit`, otherwise null.
 | AUR source packages | Launcher exports `KOZMOZOO_REVISION`: `kosmozoo` reads the tarball's embedded commit using `git get-tar-commit-id`; `kosmozoo-git` uses `git rev-parse HEAD` of its build checkout | `v0.2.0 (abc1234)` |
 | Source run / local image | No revision | `v0.2.0-dev` |
 
-No known version formats as an empty string (and no logo title).
+An unknown version formats as an empty string; Header supplies the brand fallback.
+One plain Store-owned runtime-identity lifetime reads independently of boot,
+with a ten-second attempt deadline and cancellable 1-30 second capped retry
+backoff. Pagehide suspends it; pageshow refreshes through the same owner. Page
+replacement and disposal abort/fence old replies and cancel owned timers.
+Transport failure never clears the last accepted appVersion. This observes the
+engine identity only; it adds no loaded-client identity or update/reload protocol.
 `kosmozoo --version` also prints the source-input digest (or `working-source`),
 the running Deno version and target. Publication builds refuse a `--version`
 that differs from the staged `VERSION` file.

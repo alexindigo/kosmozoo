@@ -27,6 +27,7 @@ import { isEntryName, isFolderPath, inFolder } from "/shared/entry-path.mjs";
 import { formatVersion } from "/shared/version.mjs";
 import { makeSourceBrowse } from "./source-browse.js";
 import { makeSourceFreshness } from "./source-freshness.js";
+import { makeRuntimeIdentity } from "./runtime-identity.js";
 import { makeSourceRegistry, sameSourceIdentity } from "./source-registry.js";
 import { makeRailArrivals } from "./rail-arrivals.js";
 import { fieldList, nodeImages } from "./fields.js";
@@ -134,6 +135,10 @@ export function makeAppStore({ subscribeSources = typeof window !== "undefined" 
   // scalar atoms
   const [host, setHost] = createSignal(null);
   const [appVersion, setAppVersion] = createSignal("");
+  const runtimeIdentity = makeRuntimeIdentity({
+    read: async options => formatVersion((await api.runtime(options))?.app ?? {}),
+    publish: setAppVersion,
+  });
   const [sourceDelivery, setSourceDelivery] = createSignal(subscribeSources ? "connecting" : "explicit");
   const [nativeViewport, setNativeViewport] = createSignal({ magnified: false, rect: null });
   const nativeMagnification = () => nativeViewport().magnified;
@@ -1543,6 +1548,7 @@ export function makeAppStore({ subscribeSources = typeof window !== "undefined" 
   }
 
   function suspendDelivery() {
+    runtimeIdentity.suspend();
     if (disposed || deliverySuspended) return;
     deliverySuspended = true; deliveryGeneration++;
     deliveryDispose?.(); deliveryDispose = null;
@@ -1551,6 +1557,7 @@ export function makeAppStore({ subscribeSources = typeof window !== "undefined" 
   }
 
   function resumeDelivery() {
+    runtimeIdentity.resume();
     if (disposed || !deliverySuspended) return;
     deliverySuspended = false;
     if (deliveryStarted) startDelivery();
@@ -1591,6 +1598,7 @@ export function makeAppStore({ subscribeSources = typeof window !== "undefined" 
   function dispose() {
     if (disposed) return;
     disposed = true;
+    runtimeIdentity.dispose();
     for (const disposeFeature of featureDisposals) disposeFeature();
     featureDisposals.clear();
     railArrivals.retire();
@@ -1689,8 +1697,7 @@ export function makeAppStore({ subscribeSources = typeof window !== "undefined" 
         }
       }
       startDelivery();
-      const runtime = await api.runtime().catch(() => null);
-      if (!disposed) setAppVersion(formatVersion(runtime?.app ?? {}));
+      runtimeIdentity.start();
       await refreshHosts();
       const ui = await api.settings("core.ui").catch(() => ({}));
       setSt("ui", ui);
@@ -1827,13 +1834,19 @@ export function makeAppStore({ subscribeSources = typeof window !== "undefined" 
         if (disposed) return () => {};
         pageDispose?.();
         const stopMagnification = observeNativeMagnification(target, setNativeViewport);
-        target.addEventListener("pagehide", suspendDelivery);
-        target.addEventListener("pageshow", resumeDelivery);
+        let active = true;
+        const hide = () => { if (active) suspendDelivery(); };
+        const show = () => { if (active) resumeDelivery(); };
+        target.addEventListener("pagehide", hide);
+        target.addEventListener("pageshow", show);
+        runtimeIdentity.resume();
         const retire = () => {
+          if (!active) return;
+          active = false;
           stopMagnification();
-          target.removeEventListener("pagehide", suspendDelivery);
-          target.removeEventListener("pageshow", resumeDelivery);
-          if (pageDispose === retire) pageDispose = null;
+          target.removeEventListener("pagehide", hide);
+          target.removeEventListener("pageshow", show);
+          if (pageDispose === retire) { pageDispose = null; runtimeIdentity.suspend(); }
         };
         pageDispose = retire;
         return retire;

@@ -55,7 +55,7 @@ const enc = encodeURIComponent;
 
 export const api = {
   subscribeSources,
-  runtime: () => req("GET", "/api/runtime"),
+  runtime: (options) => req("GET", "/api/runtime", undefined, options),
   collections: () => req("GET", "/api/collections"),
   addCollection: (name, address) => req("POST", "/api/collections", { name, address }),
   removeCollection: (name) => req("DELETE", `/api/collections/${enc(name)}`),
