@@ -829,6 +829,13 @@ allocation. Folder labels truncate within compact allocations with full path in
 the accessible title; unsupported folder controls are omitted. Native
 select typing retains precedence in the existing key dispatcher.
 
+Header popups paint and receive input above ordinary feed, selection and
+workspace chrome. Main content owns an isolated stacking scope; sticky feedback
+and workspace split controls elevate only within it. The header's existing
+popup-containing scope and portaled filter use the page dropdown tier, above the
+separate selection bar and below viewer/modal surfaces. Opening popups changes
+neither feed geometry nor their existing focus, key and outside-dismissal owners.
+
 The existing feed rail current marker follows live viewport midpoint-crossing
 geometry during valid scrolling, then committed current after settle. One shared
 pure selector maps known-size virtual positions to IDs and rejects stale item-key
