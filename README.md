@@ -134,11 +134,10 @@ Highlight image differences in orange with the threshold control visible.
 
 ### Variations editor
 
-![Variations dialog with an ordered image set, denoise and steps ranges, a prompt template, 47 combinations and an output-name preview](docs/screenshots/06-variations-dialog.png)
+![Variations dialog with a style reference, three input images, a denoise range, 12 combinations and output-naming controls](docs/screenshots/06-variations-dialog.png)
 
-Build an image set and vary ranges and template values together. The count
-explains the combinations and excludes the unchanged tuple; naming and Run
-remain alongside the fields. This demonstration uses workflow/media fixtures.
+Combine a style reference with three content images and four denoise values
+for 12 combinations. Review the count and output-naming controls before Run.
 
 ### Face detection and registration
 
