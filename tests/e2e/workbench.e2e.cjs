@@ -58,9 +58,10 @@ if (require.main === module) (async () => {
   // the window is populated (no fixed settle sleep — poll the render)
   await page.poll("document.querySelectorAll('.card').length > 3", 10000);
   await page.clickAt('#menuBtn');
-  await page.poll(`!!document.querySelector('#menuIdentity')`);
+  const identityPattern = /^Kosmozoo v\d+\.\d+(\.\d+)?(-dev| \([0-9a-f]{7}\))$/;
+  await page.poll(`${identityPattern}.test(document.querySelector('#menuIdentity')?.textContent ?? '')`, 10000);
   const settingsIdentity = await page.evaluate("document.querySelector('#menuIdentity').textContent");
-  check("settings footer shows the app version", /^Kosmozoo v\d+\.\d+(\.\d+)?(-dev| \([0-9a-f]{7}\))$/.test(settingsIdentity) &&
+  check("settings footer shows the app version", identityPattern.test(settingsIdentity) &&
     await page.evaluate("document.querySelector('#menu').lastElementChild.id === 'menuIdentity' && !document.querySelector('header img.logo').hasAttribute('title') && !document.querySelector('header h1').hasAttribute('title')"), settingsIdentity);
   await page.clickAt('#menuBtn');
 

@@ -40,6 +40,7 @@ const card = '.card[data-name="flux-controlnet.png"]';
     const response = await fetch(ENGINE + path, { method, headers: body ? { 'Content-Type': 'application/json' } : undefined, body: body ? JSON.stringify(body) : undefined });
     assert(response.ok, path + ': ' + response.status); return response.json();
   };
+  let primaryFailure;
   try {
     const enabled = await fetch(FAKE + '/__test/activity', { method: 'POST', headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ assetsPlusDelete: true }) });
@@ -165,9 +166,28 @@ const card = '.card[data-name="flux-controlnet.png"]';
     assert.equal(counters.maxDiscovery, 1); assert.equal(counters.activeStreams, 1); assert.equal(counters.maxStreams, 1); assert(counters.reads <= 12, JSON.stringify(counters));
     await traffic.validate(); assert.equal(traffic.activity().length, 0); record('bounded discovery and one active source stream', counters);
     assert.deepEqual(errors, []);
+  } catch (error) {
+    primaryFailure = error;
+    throw error;
   } finally {
-    console.log('FINAL CONSUMER', JSON.stringify(await page.evaluate(`(async()=>({rows:${allRows},host:${KZ}.state.host(),capabilities:${KZ}.state.currentCollection()?.capabilities,counters:{reads:__capRead.reads,active:__capRead.active,max:__capRead.max}}))()`)));
-    fs.writeFileSync(`${directory}/results.json`, JSON.stringify({ records, errors, requests: traffic.requests, responses: traffic.responses, frames: traffic.frames }, null, 2));
-    await page.close();
+    let cleanupFailure;
+    try {
+      console.log('FINAL CONSUMER', JSON.stringify(await page.evaluate(`(async()=>({rows:${allRows},host:${KZ}.state.host(),capabilities:${KZ}.state.currentCollection()?.capabilities,counters:{reads:__capRead.reads,active:__capRead.active,max:__capRead.max}}))()`)));
+    } catch (probeError) {
+      console.error('final consumer probe failed:', probeError);
+    }
+    try {
+      fs.writeFileSync(`${directory}/results.json`, JSON.stringify({ records, errors, requests: traffic.requests, responses: traffic.responses, frames: traffic.frames }, null, 2));
+    } catch (writeError) {
+      cleanupFailure = writeError;
+      console.error('consumer evidence write failed:', writeError);
+    } finally {
+      try { await page.close(); }
+      catch (closeError) {
+        cleanupFailure ??= closeError;
+        console.error('consumer browser close failed:', closeError);
+      }
+    }
+    if (!primaryFailure && cleanupFailure) throw cleanupFailure;
   }
 })().catch(error => { console.error(error); process.exitCode = 1; });

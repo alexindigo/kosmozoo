@@ -498,8 +498,11 @@ unresolved obligations. Source transport and capability discovery remain separat
 Accepted stream membership lets boot proceed while enrichment retries. Without it,
 bootstrap waits for successful collection discovery, including an authoritative
 empty map. A committed source add stays successful if only enrichment fails; no
-mutation is automatically repeated. Discovery settlement does not reload/select
-sources or replace browsing, selection, drafts, cards or feature editors/Files.
+mutation is automatically repeated. For an already selected source, discovery-only
+capability enrichment does not reload/select sources or replace browsing,
+selection, drafts, cards or feature editors/Files. After boot with no selected
+source, discovery may select the first available source through the normal
+initial-selection lane and load its inventory.
 Before first accepted inventory, Store derives pending subfolder presentation from
 live matching-source discovery. Accepted inventory remains authoritative thereafter.
 
