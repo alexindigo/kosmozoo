@@ -17,6 +17,8 @@ comparisons. A new detector guide covers Python installation, model downloads,
 service readiness, Web UI connection and API compatibility. Detection remains
 optional, externally configured and OFF on each page load.
 
+Official `kosmozoo-linux-x86_64` SHA-256: `b116a32e4b093d4c422277f37cfdfd3eea85d417158ec03dd409cd3f5025f88c`.
+
 ## 0.4.0 - 2026-11-07
 
 Still-image comparisons can detect faces, select which boxes to show and choose
