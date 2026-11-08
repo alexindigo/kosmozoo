@@ -8,8 +8,9 @@ loading and appears in a read-only settings footer, including when search hides
 every setting.
 
 Source capabilities recover automatically after discovery failures, membership
-changes and engine restarts. Delete actions and supported folder controls return
-without reloading the page or replacing retained browsing, selections or drafts.
+changes and engine restarts. Discovery-only updates preserve browsing, selection
+and drafts while Delete actions and supported folder controls recover without a
+page reload.
 
 The README expands feature coverage and illustrates Variations and face-aligned
 comparisons. A new detector guide covers Python installation, model downloads,
