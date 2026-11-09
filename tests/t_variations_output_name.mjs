@@ -3,6 +3,126 @@ import * as naming from "../src/features/variations/shared.mjs";
 import { register, narrowToOneOutputNode, wrapAllOutputPrefixes } from "../src/features/variations/server.mjs";
 import { makeCollectionLifecycle } from "../src/backings/index.mjs";
 import { makeVariationEditor } from "../client-solid/features/variations/editor.js";
+import { typedRunRig } from "./helpers/typed-run.mjs";
+import { parseExactJson, parameterCurrent, parameterAliases } from "../src/parameters.mjs";
+
+Deno.test("selected output name: stable producer composes every candidate, preserves manual text and exact v2 proof", async () => {
+  const graph = { node: { class_type: "Custom", inputs: { value: false } },
+    save: { class_type: "SaveImage", inputs: { filename_prefix: "source", images: ["node", 0] } },
+    other: { class_type: "SaveImage", inputs: { filename_prefix: "chosen", images: ["node", 0] } } };
+  const before = structuredClone(graph), rig = typedRunRig({ graph });
+  const catalogue = await rig.probe();
+  const body = await rig.request({ "save.filename_prefix": { enabled: true, values: ["chosen", "other"] } });
+  body.prefix = "v_"; body.suffix = "_s";
+  const result = await rig.run(body);
+  assertEquals(result.status, 200, JSON.stringify(result.data)); assertEquals(rig.bytes.length, 2);
+  assertEquals(catalogue.outputNaming.nodeId, "save");
+  const current = Object.fromEntries(catalogue.parameters.map(p => [p.id, parameterCurrent(p)]));
+  for (const [index, candidate] of ["chosen", "other"].entries()) {
+    const actual = parseExactJson(rig.bytes[index]);
+    assertEquals(actual.prompt.save.inputs.filename_prefix, `v_${candidate}_s`);
+    assert(!Object.hasOwn(actual.prompt, "other"));
+    const preview = naming.variationOutputName(catalogue.outputNaming, body, { "save.filename_prefix": candidate }, current,
+      parameterAliases(catalogue.parameters), catalogue.parameters);
+    assertEquals(preview.value, actual.prompt.save.inputs.filename_prefix);
+    assertEquals(actual.extra_data.extra_pnginfo.kz.params["save.filename_prefix"], candidate);
+    const directory = Deno.env.get("KZ_TYPED_EVIDENCE");
+    if (directory) { await Deno.mkdir(`${directory}/naming`, { recursive: true }); await Deno.writeTextFile(`${directory}/naming/prompt-${index + 1}.json`, rig.bytes[index]); }
+  }
+  assert(naming.acknowledgedFields(body, result.data));
+  assertEquals(result.data.acknowledgement.accepted.map(a => a.applied.imageParams), [["save.filename_prefix"], ["save.filename_prefix"]]);
+  assertEquals([body.prefix, body.suffix], ["v_", "_s"]); assertEquals(graph, before);
+});
+
+Deno.test("selected output name: retained dependency writes stay exact; selected pruned outputs reject all candidates", async () => {
+  const graph = { node: { class_type: "Custom", inputs: {} },
+    ancestor: { class_type: "SaveImage", inputs: { filename_prefix: "ancestor", images: ["node", 0] } },
+    save: { class_type: "SaveImage", inputs: { filename_prefix: "source", images: ["ancestor", 0] } },
+    other: { class_type: "SaveImage", inputs: { filename_prefix: "other", images: ["node", 0] } } };
+  const rig = typedRunRig({ graph });
+  const body = await rig.request({ "save.filename_prefix": { enabled: true, values: ["chosen"] }, "ancestor.filename_prefix": { enabled: true, values: ["retained"] } });
+  body.prefix = "v_"; body.suffix = "_s";
+  const result = await rig.run(body); assertEquals(result.status, 200);
+  const actual = parseExactJson(rig.bytes[0]).prompt;
+  assertEquals(actual.save.inputs.filename_prefix, "v_chosen_s");
+  assertEquals(actual.ancestor.inputs.filename_prefix, "retained");
+  assert(!Object.hasOwn(actual, "other")); assert(naming.acknowledgedFields(body, result.data));
+  const rejected = typedRunRig({ graph });
+  body.imageParams["other.filename_prefix"] = { enabled: true, values: ["one", "two"] };
+  body.context = (await rejected.probe()).context;
+  const failure = await rejected.run(body);
+  assertEquals(failure.status, 400); assertEquals(rejected.bytes, []); assert(failure.data.error.includes("pruned"));
+});
+
+Deno.test("selected output name: late unsupported types, paths or lossy names enqueue nothing", async () => {
+  const graph = { node: { class_type: "Custom", inputs: {} }, save: { class_type: "SaveImage", inputs: { filename_prefix: "source", images: ["node", 0] } } };
+  for (const invalid of [null, false, .5, {}, [], "other/chosen", "../escape", "/absolute", "a\\b", "a\u0000b", "x".repeat(201)]) {
+    const rig = typedRunRig({ graph });
+    const body = await rig.request({ "save.filename_prefix": { enabled: true, values: ["chosen", invalid] } });
+    body.prefix = "v_"; body.suffix = "_s";
+    const result = await rig.run(body);
+    assertEquals(result.status, 400, String(invalid)); assertEquals(rig.bytes, []); assertEquals(result.data.acknowledgement.accepted, []);
+  }
+  const nested = structuredClone(graph); nested.save.inputs.filename_prefix = "folder/source";
+  const rig = typedRunRig({ graph: nested, filename: "folder/source_00001_.png" });
+  const body = await rig.request({ "save.filename_prefix": { enabled: true, values: ["folder/chosen"] } });
+  body.prefix = "v_"; body.suffix = "_s";
+  assertEquals((await rig.run(body)).status, 200);
+  assertEquals(parseExactJson(rig.bytes[0]).prompt.save.inputs.filename_prefix, "folder/v_chosen_s");
+});
+
+Deno.test("selected output name: fallback composes each original output independently with the same preview owner", async () => {
+  const graph = { node: { class_type: "Custom", inputs: {} },
+    first: { class_type: "SaveImage", inputs: { filename_prefix: "alpha", images: ["node", 0] } },
+    second: { class_type: "SaveImage", inputs: { filename_prefix: "beta", images: ["node", 0] } } };
+  const rig = typedRunRig({ graph }), catalogue = await rig.probe();
+  const body = await rig.request({ "first.filename_prefix": { enabled: true, values: ["chosen", "beta"] } });
+  body.prefix = "v_"; body.suffix = "_s";
+  const result = await rig.run(body);
+  assertEquals(result.status, 200); assert(naming.acknowledgedFields(body, result.data));
+  const current = Object.fromEntries(catalogue.parameters.map(p => [p.id, parameterCurrent(p)]));
+  for (const [index, candidate] of ["chosen", "beta"].entries()) {
+    const actual = parseExactJson(rig.bytes[index]).prompt;
+    assertEquals(Object.keys(actual), ["node", "first", "second"]);
+    assertEquals(actual.first.inputs.filename_prefix, `v_${candidate}_s`);
+    assertEquals(actual.second.inputs.filename_prefix, "v_beta_s");
+    for (const target of catalogue.outputNamingTargets) {
+      const preview = naming.variationOutputName(target, body, { "first.filename_prefix": candidate }, current, {}, catalogue.parameters);
+      assertEquals(preview.value, actual[target.nodeId].inputs.filename_prefix);
+    }
+  }
+});
+
+Deno.test("selected output name: automatic contributions remain separate from fixed base and exact manual text", async () => {
+  const graph = { node: { class_type: "Custom", inputs: { flag: null } },
+    save: { class_type: "SaveImage", inputs: { filename_prefix: "source", images: ["node", 0] } } };
+  const rig = typedRunRig({ graph }), catalogue = await rig.probe();
+  const body = await rig.request({ "save.filename_prefix": { enabled: true, values: ["chosen"] },
+    "node.flag": { enabled: true, values: [false, true, true] } });
+  body.prefix = "v_"; body.suffix = "_manual_{node.flag}"; body.automaticNaming = true;
+  const before = structuredClone(body), current = Object.fromEntries(catalogue.parameters.map(p => [p.id, parameterCurrent(p)]));
+  assertEquals(naming.automaticNaming({}, current, body.imageParams), { ids: ["node.flag"], suffix: "_{node.flag}" });
+  const result = await rig.run(body);
+  assertEquals(result.status, 200); assert(naming.acknowledgedFields(body, result.data));
+  for (const [index, flag] of [false, true].entries()) {
+    const actual = parseExactJson(rig.bytes[index]).prompt;
+    assertEquals(actual.save.inputs.filename_prefix, `v_chosen_manual_${flag}_${flag}`);
+    assertEquals(naming.variationOutputName(catalogue.outputNaming, body, { "save.filename_prefix": "chosen", "node.flag": flag }, current, {}, catalogue.parameters).value,
+      actual.save.inputs.filename_prefix);
+  }
+  assertEquals(body, before);
+});
+
+Deno.test("selected output name: supported empty and whitespace candidates remain exact", async () => {
+  const graph = { node: { class_type: "Custom", inputs: {} },
+    save: { class_type: "SaveImage", inputs: { filename_prefix: "source", images: ["node", 0] } } };
+  const rig = typedRunRig({ graph });
+  const body = await rig.request({ "save.filename_prefix": { enabled: true, values: ["", "  chosen  "] } });
+  body.prefix = "v_"; body.suffix = "_s";
+  const result = await rig.run(body);
+  assertEquals(result.status, 200); assert(naming.acknowledgedFields(body, result.data));
+  assertEquals(rig.bytes.map(text => parseExactJson(text).prompt.save.inputs.filename_prefix), ["v__s", "v_  chosen  _s"]);
+});
 
 const bytes = value => new TextEncoder().encode(value).length;
 const exact = "Qwen_image_2.1_00500_athena_alisa_seed_2.png_00001_alisa_style_donor.png_00001_amaterasu_seed_00_6.png_00001.png";

@@ -1,5 +1,5 @@
 // Complete recorded graph inputs and their names. Environment-pure; no IO or UI.
-import { inputEncoding } from "./graph.mjs";
+import { inputEncoding, inputDeclaration } from "./graph.mjs";
 
 // Identity is graph-local, never a class/title. Dots are delimiters; nested
 // Comfy node IDs retain their readable colon separators.
@@ -51,6 +51,7 @@ export function parameterAliases(params) {
 // JSON data only. No serialization, coercion, File copying or precision repair.
 // Inspect descriptors so accessors cannot execute at this boundary.
 function jsonContainer(value) {
+  if (typeof JSON.isRawJSON === "function" && JSON.isRawJSON(value)) throw new TypeError("Raw JSON is a serialization-only value");
   const array = Array.isArray(value), proto = Object.getPrototypeOf(value);
   if (!array && proto !== Object.prototype && proto !== null) throw new TypeError("Expected JSON data");
   const descriptors = Object.getOwnPropertyDescriptors(value);
@@ -68,7 +69,7 @@ export function cloneJsonValue(value) {
   const ancestors = new Set();
   const clone = value => {
     if (value === null || typeof value === "string" || typeof value === "boolean") return value;
-    if (typeof value === "number" && Number.isFinite(value)) return value;
+    if (typeof value === "bigint" || typeof value === "number" && Number.isFinite(value)) return value;
     if (typeof value !== "object") throw new TypeError("Expected JSON data");
     if (ancestors.has(value)) throw new TypeError("Cyclic JSON data");
     const { array, entries } = jsonContainer(value);
@@ -84,12 +85,42 @@ export function sameJsonValue(left, right) {
   // Validate even equal references: native Files/other non-JSON are not admitted.
   const a = cloneJsonValue(left), b = cloneJsonValue(right);
   const same = (a, b) => {
+    if (typeof a === "bigint" && typeof b === "number") return Number.isSafeInteger(b) && a === BigInt(b);
+    if (typeof b === "bigint" && typeof a === "number") return Number.isSafeInteger(a) && b === BigInt(a);
     if (a === null || b === null || typeof a !== "object" || typeof b !== "object") return Object.is(a, b);
     if (Array.isArray(a) !== Array.isArray(b)) return false;
     const keys = Object.keys(a);
     return keys.length === Object.keys(b).length && keys.every(key => Object.hasOwn(b, key) && same(a[key], b[key]));
   };
   return same(a, b);
+}
+
+// Opt-in exact graph/Variations boundary. Native source text is authoritative;
+// never reconstruct digits from an unsafe Number. No reserved object sentinels.
+export function parseExactJson(text) {
+  return JSON.parse(text, (_key, value, context) => {
+    if (typeof value !== "number") return value;
+    if (typeof context?.source !== "string") throw new TypeError("Exact JSON requires native reviver source support");
+    if (!Number.isSafeInteger(value) && /^-?\d+$/.test(context.source)) return BigInt(context.source);
+    if (!Number.isFinite(value)) throw new TypeError("Non-finite JSON number");
+    return value;
+  });
+}
+
+export function stringifyExactJson(value) {
+  const data = cloneJsonValue(value);
+  return JSON.stringify(data, (_key, value) => {
+    if (typeof value === "bigint") return JSON.rawJSON(String(value));
+    if (typeof value === "number" && Number.isInteger(value) && !Number.isSafeInteger(value)) throw new TypeError("Unsafe Number: exact integer source required");
+    return value;
+  });
+}
+
+// Stable compact data spelling for tokens, not a value conversion for assignment.
+export function formatJsonValue(value) {
+  const sort = value => value !== null && typeof value === "object"
+    ? Array.isArray(value) ? value.map(sort) : Object.fromEntries(Object.keys(value).sort().map(key => [key, sort(value[key])])) : value;
+  return stringifyExactJson(sort(cloneJsonValue(value)));
 }
 
 const IMG_FILE = /\.(png|jpe?g|webp|gif|avif|bmp)$/i;
@@ -107,7 +138,7 @@ function legacyEditor(type, key, value, declared, options, outputClasses) {
   return options?.length ? { kind: "enum", values: [...options] } : { kind: "text" };
 }
 
-export function graphParameters(graph, { types = null, enums = null, outputClasses = null, dynamicCombos = null } = {}) {
+export function graphParameters(graph, { types = null, enums = null, outputClasses = null, dynamicCombos = null, declarations = null } = {}) {
   const parameters = [];
   for (const [nodeId, node] of Object.entries(graph ?? {})) {
     const type = String(node?.class_type ?? "");
@@ -128,15 +159,16 @@ export function graphParameters(graph, { types = null, enums = null, outputClass
     selectBranches(dynamicCombos);
     for (const [key, recorded] of Object.entries(node?.inputs ?? {})) {
       const currentValue = cloneJsonValue(recorded), encoding = inputEncoding(currentValue);
-      const valueKind = encoding === "kosmozoo-link" ? "connection" : currentValue === null ? "null" : Array.isArray(currentValue) ? "array" : typeof currentValue;
+      const valueKind = encoding === "kosmozoo-link" ? "connection" : currentValue === null ? "null" : Array.isArray(currentValue) ? "array" : typeof currentValue === "bigint" ? "number" : typeof currentValue;
       const schemaKey = `${type}.${key}`, declared = nodeTypes.get(schemaKey), options = nodeEnums.get(schemaKey);
       const editor = legacyEditor(type, key, currentValue, declared, options, outputClasses);
+      const declaration = inputDeclaration(node, key, { declarations, dynamicCombos });
       parameters.push({ id: paramId(nodeId, key), nodeId, nodeIds: [nodeId], key, type, title,
         kind: editor?.kind ?? valueKind, current: currentValue, ...editor, currentValue,
         valueKind, encoding,
         // Existing numeric/enum maps are partial knowledge, never proof of a
         // complete input declaration, wrapper validity or output compatibility.
-        schema: { status: declared || options?.length ? "partial" : "unavailable",
+        schema: declaration ? { status: "known", ...cloneJsonValue(declaration) } : { status: declared || options?.length ? "partial" : "unavailable",
           ...(declared ? { numericType: declared } : {}), ...(options?.length ? { options: [...options] } : {}) },
         legacyEditable: editor !== null });
     }

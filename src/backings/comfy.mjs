@@ -7,6 +7,7 @@ import { isEntryPath, splitEntryPath, inventoryFolders } from "../entry-path.mjs
 import { makeInventoryOwner } from "./inventory-owner.mjs";
 import { makeMetadataCollector, interpretHeaders } from "./comfy-metadata.mjs";
 import { InventoryError, bounded, cancelled } from "./inventory.mjs";
+import { cloneJsonValue, parseExactJson, stringifyExactJson } from "../parameters.mjs";
 
 const HOST_TIMEOUT_MS = 10_000;
 
@@ -329,12 +330,27 @@ function schemaBudget() {
 
 function inputSchema(input, prefix, budget, depth = 0) {
   if (depth > MAX_SCHEMA_DEPTH) throw new RangeError("ComfyUI object_info nesting budget exceeded");
-  const schema = { types: new Map(), enums: new Map(), dynamicCombos: new Map(), defaults: new Map(), lazy: new Set() };
+  const schema = { types: new Map(), enums: new Map(), declarations: new Map(), dynamicCombos: new Map(), defaults: new Map(), lazy: new Set() };
   for (const section of ["required", "optional"]) {
     for (const [key, spec] of Object.entries(input?.[section] ?? {})) {
       budget.take();
       const name = `${prefix}.${key}`, t = Array.isArray(spec) ? spec[0] : spec;
       const config = Array.isArray(spec) ? spec[1] : null;
+      const declaration = { type: typeof t === "string" ? t : Array.isArray(t) ? "COMBO" : null, section };
+      for (const key of ["min", "max", "step", "default", "lazy", "rawLink", "forceInput", "multiselect"]) {
+        if (config && Object.hasOwn(config, key)) declaration[key] = config[key];
+      }
+      if (Array.isArray(t)) declaration.options = t;
+      else if (t === "COMBO" && Array.isArray(config?.options)) declaration.options = config.options;
+      budget.set(schema.declarations, name, declaration);
+      if (t === "COMFY_DYNAMICGROUP_V3" && config?.template) {
+        const max = config.max ?? 20;
+        if (!Number.isSafeInteger(max) || max < 1 || max > 20) throw new Error("Invalid dynamic group bounds");
+        for (let index = 0; index < max; index++) {
+          const row = inputSchema(config.template, `${name}.${index}`, budget, depth + 1);
+          for (const channel of ["types", "enums", "declarations"]) for (const [key, value] of row[channel]) budget.set(schema[channel], key, value);
+        }
+      }
       if (config?.lazy === true) { budget.take(); schema.lazy.add(name); }
       if (config && Object.hasOwn(config, "default")) budget.set(schema.defaults, name, config.default);
       else if (section === "required") budget.set(schema.defaults, name, undefined);
@@ -366,20 +382,25 @@ function inputSchema(input, prefix, budget, depth = 0) {
 export async function objectInfo(addr, cache = new Map(), { fetcher = fetch, signal } = {}) {
   const c = cache.get(addr);
   if (c && Date.now() - c.t < OBJECT_INFO_TTL_MS) return c;
-  let out = { types: null, outputClasses: null, enums: null, lazyInputs: null, dynamicCombos: null };
+  let out = { types: null, outputClasses: null, enums: null, lazyInputs: null, dynamicCombos: null, declarations: null, outputs: null };
   try {
     const timeout = AbortSignal.timeout(HOST_TIMEOUT_MS);
     const r = await fetcher(`http://${addr}/api/object_info`, { signal: signal ? AbortSignal.any([signal, timeout]) : timeout });
     if (r.ok) {
-      const info = await r.json();
+       const info = parseExactJson(await r.text());
       if (!info || typeof info !== "object" || Array.isArray(info)) throw new Error("Invalid object_info");
-      const candidate = { types: new Map(), outputClasses: new Set(), enums: new Map(), lazyInputs: new Map(), dynamicCombos: new Map() };
+      const candidate = { types: new Map(), outputClasses: new Set(), enums: new Map(), lazyInputs: new Map(), dynamicCombos: new Map(), declarations: new Map(), outputs: new Map() };
       const budget = schemaBudget();
       for (const [type, def] of Object.entries(info)) {
         const schema = inputSchema(def?.input, type, budget);
         budget.set(candidate.lazyInputs, type, new Set([...schema.lazy].map(key => key.slice(type.length + 1))));
         if (def?.output_node) { budget.take(); candidate.outputClasses.add(type); }
-        for (const channel of ["types", "enums", "dynamicCombos"]) for (const [key, value] of schema[channel]) budget.set(candidate[channel], key, value);
+        if (Array.isArray(def?.output)) {
+          budget.take(def.output.length);
+          budget.set(candidate.outputs, type, def.output.map((type, index) => ({ type,
+            name: def.output_name?.[index] ?? null, isList: def.output_is_list?.[index] === true })));
+        }
+        for (const channel of ["types", "enums", "dynamicCombos", "declarations"]) for (const [key, value] of schema[channel]) budget.set(candidate[channel], key, value);
       }
       out = candidate;
     }
@@ -609,7 +630,7 @@ export function createDriver(fetcher) {
 // recomputing. Every new submission owns a clone; only descriptor metadata is
 // execution-only, never an input (or arbitrary nested field) of the same name.
 export function freshSubmissionGraph(graph) {
-  const clone = structuredClone(graph);
+  const clone = cloneJsonValue(graph);
   for (const node of Object.values(clone)) delete node.is_changed;
   return clone;
 }
@@ -626,7 +647,7 @@ export async function enqueue(addr, prompt, { fetcher = fetch } = {}) {
     const resp = await fetcher(`http://${addr}/api/prompt`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ ...prompt, prompt: freshSubmissionGraph(prompt.prompt) }),
+      body: stringifyExactJson({ ...prompt, prompt: freshSubmissionGraph(prompt.prompt) }),
       signal: AbortSignal.timeout(HOST_TIMEOUT_MS),
     });
     if (!resp.ok) {

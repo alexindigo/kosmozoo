@@ -20,9 +20,9 @@ class UnsupportedMediaType extends Error {}
 
 // JSON parsing is an HTTP boundary, not just JSON.parse on arbitrary bytes.
 // Features share it so a multipart/binary exception cannot bypass JSON policy.
-export function readJson(req) {
+export function readJson(req, { parse = JSON.parse } = {}) {
   if (mediaType(req) !== "application/json") throw new UnsupportedMediaType("Content-Type must be application/json");
-  return req.json();
+  return req.text().then(parse);
 }
 
 // Original contributor bytes may be active documents on direct navigation.

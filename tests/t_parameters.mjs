@@ -136,7 +136,7 @@ Deno.test("parameters: JSON boundary rejects native Files and non-data without i
   let reads = 0;
   const getter = { get x() { reads++; return 1; } };
   for (const value of [new File(["opaque"], "a.png"), new Date(), new Map(), undefined, NaN, Infinity,
-    1n, () => 1, cyclic, getter, Array(1), Object.defineProperty({}, "x", { value: 1 }), { [Symbol()]: 1 }]) {
+    () => 1, cyclic, getter, Array(1), Object.defineProperty({}, "x", { value: 1 }), { [Symbol()]: 1 }]) {
     assertThrows(() => parameters.cloneJsonValue(value), TypeError);
     assertThrows(() => parameters.sameJsonValue(value, value), TypeError);
   }

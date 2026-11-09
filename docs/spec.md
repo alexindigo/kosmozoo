@@ -903,7 +903,7 @@ Size-pending candidates wait for the existing size owner's feed admission; remov
 entries and retired sessions discard them. A ready off-tape tick never waits.
 
 Static surfaces: `/shared/<name>` serves the allow-listed `src/` modules
-(`extractor.mjs`, `backings/mime.mjs`, `features/variations/shared.mjs`, `parameters.mjs`, `graph.mjs`, `entry-path.mjs`, `source-origin.mjs`, `version.mjs`, `detection-result.mjs`, `content-hash.mjs`) to the browser;
+(`extractor.mjs`, `backings/mime.mjs`, `features/variations/shared.mjs`, `features/variations/compile.mjs`, `parameters.mjs`, `graph.mjs`, `entry-path.mjs`, `source-origin.mjs`, `version.mjs`, `detection-result.mjs`, `content-hash.mjs`) to the browser;
 `/` and `/diff` serve the Solid app from `client-solid-dist/`, with shared
 assets (`/css`, `/vendor`, `/js`, logos) from `client/`.
 
@@ -1127,25 +1127,95 @@ literals or valid submissions. Dangling recognized links remain connections, not
 literal fallbacks. Wrapper tags describe recorded shape only; their objects and
 nested arrays stay intact, without unwrapping or traversing them as edges.
 
-`schema.status` is `partial` when existing numeric/enum metadata supplies
-`numericType` and/or `options`, otherwise `unavailable`. Neither means full input,
-output-port, wrapper or custom-validator knowledge. Schema/default potential does
-not create recorded inputs. This phase adds no schema normalization or graph
-validation behavior. `kind` retains the legacy editor kind where eligible and
+`schema.status` is `known` when cached object_info supplies an input declaration
+(type, section, typed options and supplied constraints/configuration), `partial`
+when only numeric/enum metadata supplies `numericType` or `options`, otherwise
+`unavailable`. Known JSON declarations do not describe arbitrary Python validators.
+Schema/default potential does not create recorded inputs.
+`kind` retains the legacy editor kind where eligible and
 otherwise follows `valueKind`; `legacyEditable` identifies that compatibility
 projection, not future all-type support.
 
 The existing `params`, `stringParams`, `enumParams` and `textParams` arrays are
 derived from that sequence, retaining their previous shapes, exclusions and order.
-`catalogueParams` still flattens only those editable arrays so old scalar Run,
-naming and editor behavior cannot silently expand. Complete discovery does not
-yet enable typed Run or all-type editors. Those, the approved three-column/all-off
-interaction and variation-dependent automatic naming remain required later work.
+`catalogueParams` still flattens only those editable arrays for the retained editor.
+Typed Run uses the complete sequence. Compatibility aliases retain legacy array
+order before newly admitted inputs; canonical IDs address every occurrence.
+All-type editors and the approved three-column/all-off interaction remain later work.
 `cloneJsonValue` and `sameJsonValue` supply strict JSON-only snapshot/equality
 primitives: scalar types, array/object kinds and array order differ; record key
 order does not. Non-data/accessor/sparse/cyclic/native values (including Files)
 reject without serialization. Native Files stay in the existing private image
-lane. These helpers do not repair integer precision lost during graph parsing.
+lane. BigInt represents exact unsafe integer tokens; safe integers compare equally
+across Number/BigInt. No helper repairs a previously rounded Number.
+
+The opt-in `parseExactJson`/`stringifyExactJson` boundary uses native reviver
+`context.source` and temporary `JSON.rawJSON` serialization of BigInt to numeric
+tokens. Ordinary safe numbers stay Numbers. Already-unsafe integer Numbers reject
+at serialization rather than inventing lost digits. RawJSON objects cannot enter
+captured data; ordinary objects with a `rawJSON` property are ordinary data.
+The extractor's separate original graph result is exact, including nested comment
+envelopes; display/storage metadata keeps its ordinary-number contract. Variations
+probe, Run request/result consumers and Comfy enqueue share the codec. Generic API
+JSON behavior remains unchanged by default.
+
+The pure `compile.mjs` owner compiles discrete candidates in existing `imageParams`:
+bool/null, exact numeric, whole object/array and connections, alongside old strings.
+Candidate elements never multiply. Non-connection raw array candidates use the
+stock array wrapper; explicit wrapper objects stay intact. Compile before count so
+equivalent raw-array/wrapper candidates share one identity. `compileDiscreteAxes`
+deduplicates normalized whole assignments with typed deep equality, preserving
+the first occurrence and caller data. The generic `permutationPlan` and
+`generatePermutations` preserve their supplied sequence's order and multiplicity;
+they exclude only complete current tuples. Typed Run uses the compiler before
+that same kernel, and the forthcoming all-parameter editor must do so before
+preview and Run. No per-kind duplicate exception or second generator exists. Integer
+ranges use exact arithmetic; floating ranges retain existing quantization and caps.
+Current exclusion follows the generated endpoint, including the existing rounded
+last step, so preview count and actual submitted tuples cannot disagree there.
+
+The backing's address cache retains input declarations, typed options, output
+slots/names/list flags and dynamic-combo/group declarations. Probe adds graph-local
+`nodes` with known outputs or null. Final graphs validate known slot bounds, stock
+type/union overlap and primitive/enum/min/max constraints before enqueue. Unknown
+custom validators/ports remain unknown, with backend partial/uncertain semantics
+authoritative. Lazy closure and producer pruning stay unchanged. Malformed numeric
+slot pairs reject without becoming literal fallbacks; other unmodified custom
+arrays retain unknown encoding/backend validation, preserving legacy Run behavior.
+Stock-source characterization
+is not universal execution proof: validation unwraps array/curve wrappers, but a
+link-shaped array after unwrapping also matches that stock runtime link predicate.
+
+Expected deep writes are independent clones, checked after final naming/pruning.
+Every final graph prepares before the first enqueue. Producer identity is captured
+from the original graph before any parameter mutation and never rediscovered from
+the changed prefix. An explicitly selected output `filename_prefix` supplies that
+output's base name: `chosen` with manual `v_` / `_s` becomes `v_chosen_s`.
+Without a selected prefix, the producer retains the source-image-stem behavior;
+the fallback still wraps each output's own base. Dependency outputs survive only
+through the existing closure, keep their existing affix policy and receive exact
+selected assignments. Unrelated output operations still reject if pruning removes
+their carriers; selecting one never keeps an extra output job alive.
+
+`composeOutputName` owns directory/base/affix composition for both graph writers;
+`variationOutputName` applies shared manual-token and separate automatic projection
+for preview and Run. Probe's `outputNaming` and additive `outputNamingTargets`
+carry stable node/parameter IDs, original directory and fallback source stem.
+Explicit candidates require text and retain the original directory exactly; invalid
+paths or candidates requiring truncation reject the whole plan before enqueue,
+without sanitizing or dropping path text. Root empty and whitespace values remain
+exact. Compositional proof binds the actual candidate, parameter ID, stable node ID
+and final composed write. It does not pretend the raw candidate equals the final
+name, certify a lost candidate or create proof for pruned operations.
+
+`automaticNaming` derives tokens only for distinct surviving values that actually
+vary, after current-tuple exclusion and duplicate equivalence. Repeated direct
+discrete inputs are checked for distinct surviving values even when their endpoints
+match; numeric ranges use monotone endpoints rather than enumeration. It never edits raw
+Prefix/Suffix. Additive request `automaticNaming:true` appends the projection using
+the shared token formatter/writer; omission keeps legacy behavior. Fixed values
+add no automatic token. The next UI phase must use this shared projection rather
+than rewriting manual text. Final native/staging all-type proof remains required.
 
 All variation kinds (numeric, enum, text and image) use those same IDs: `<nodeId>.<input>`
 (for example `76.image`, `81.image`, `20.strength_model`, `92:109.text`); segments
@@ -1200,8 +1270,9 @@ Prefix and Suffix have associated labels. A keyboard-native “Insert parameter�
 selector inserts exact canonical IDs at the last naming caret (Suffix by default).
 Row labels exclusively toggle their associated enable checkbox; insertion does
 not share that label's pointer event. A representative first-output example uses
-the same shared token expansion and `outputName` writer as Run, including the
-folded source stem. Probe supplies that target's directory and source stem, including
+the same shared `variationOutputName` projection and composition writer as Run,
+including the folded unselected source stem. Probe supplies stable target identity,
+directory and source stem, including
 the wrap-all fallback's first output. The example equals its written `filename_prefix`
 for the sampled tuple and resolved image names; pending uploads are explicitly
 provisional. Upload collision receipts and ComfyUI's appended output counter are
@@ -1252,7 +1323,8 @@ assembled prefix budget, below filesystem NAME_MAX (255 bytes) with 15 bytes
 reserved for ComfyUI's counter and extension. The directory is separate. Prefix
 and suffix are preserved in full after token expansion. Only the source stem is
 middle-folded into the remaining bytes, or omitted if the affixes exactly fill the
-budget. Naming-length rejection occurs only when the expanded affixes alone exceed
+budget. For an unselected base, naming-length rejection occurs only when expanded
+affixes alone exceed
 the budget, with actual byte lengths, for example “Prefix and suffix are 210 bytes;
 the limit is 200 bytes.” Literal template text is never silently shortened. Recursive
 image-token lineage cannot grow through tokens beyond their shared 40-byte bound.

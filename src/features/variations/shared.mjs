@@ -4,16 +4,17 @@
 // to the browser via /shared/).
 
 import { sameContext } from "../../source-origin.mjs";
-import { parseParamId, parameterIndex } from "../../parameters.mjs";
+import { isEntryPath } from "../../entry-path.mjs";
+import { parseParamId, parameterIndex, cloneJsonValue, sameJsonValue, formatJsonValue } from "../../parameters.mjs";
 export { paramId, parseParamId, parameterIndex, parameterLabel, parameterAliases, parameterCurrent } from "../../parameters.mjs";
 
-// Legacy editable projection only. New complete consumers use `parameters`;
-// flattening both would duplicate locations and broaden scalar Run/naming.
+// Legacy editor projection only. Typed Run uses `parameters` without flattening
+// both sources; the compatibility arrays retain their original alias ordering.
 export const catalogueParams = catalogue => ["params", "stringParams", "enumParams", "textParams"]
   .flatMap(key => catalogue[key] ?? []);
 
 export function formatValue(v) {
-  return typeof v === "string" ? v : String(parseFloat(Number(v).toFixed(10)));
+  return typeof v === "string" ? v : typeof v === "number" ? String(parseFloat(v.toFixed(10))) : formatJsonValue(v);
 }
 
 // One UTF-8 naming contract for preview and both graph writers. Keep the
@@ -50,6 +51,39 @@ export function outputName({ prefix = "", sourceStem = "", suffix = "", budget =
   return prefix + foldName(String(sourceStem), budget - affixes) + suffix;
 }
 
+// Original graph facts identify the output, never a mutable filename value.
+// An explicit candidate is the complete recorded prefix, including its original
+// directory. It cannot change destinations or be silently folded/sanitized.
+export function composeOutputName(target, values = {}, prefix = "", suffix = "") {
+  const directory = target.directory ?? "", selected = !!target.parameterId && Object.hasOwn(values, target.parameterId);
+  let sourceStem = target.sourceStem ?? "";
+  if (selected) {
+    const candidate = values[target.parameterId];
+    if (typeof candidate !== "string") throw new Error(`${target.parameterId}: filename_prefix requires text`);
+    if (candidate !== "" && !isEntryPath(candidate)) throw new Error(`${target.parameterId}: invalid filename_prefix path`);
+    const slash = candidate.lastIndexOf("/"), candidateDirectory = slash < 0 ? "" : candidate.slice(0, slash + 1);
+    if (candidateDirectory !== directory) throw new Error(`${target.parameterId}: filename_prefix must retain the original output directory`);
+    sourceStem = candidate.slice(slash + 1);
+    if (byteLength(prefix) + byteLength(sourceStem) + byteLength(suffix) > OUTPUT_NAME_BUDGET) {
+      throw new Error(`${target.parameterId}: composed filename_prefix exceeds ${OUTPUT_NAME_BUDGET} bytes; the selected name was not shortened`);
+    }
+  }
+  if ((target.leafOnly ?? !!directory) && /[/\\]/.test(prefix + suffix)) throw new Error("Prefix/suffix must stay within the producing directory's filename leaf");
+  const value = directory + outputName({ prefix, sourceStem, suffix });
+  if (selected && value !== "" && !isEntryPath(value)) throw new Error(`${target.parameterId}: invalid composed filename_prefix path`);
+  return { value, selected, ...(selected ? { parameterId: target.parameterId, candidate: values[target.parameterId] } : {}) };
+}
+
+// Preview and Run use this same projection; automatic contributions are derived,
+// never assigned over manual Prefix/Suffix or over the selected parameter value.
+export function variationOutputName(target, request, permutation, currentValues, aliases = {}, parameters = []) {
+  const automatic = request.automaticNaming === true ? automaticNaming(request.ranges ?? {}, currentValues, request.imageParams ?? {}).suffix : "";
+  const prefix = templateReplaceWithProof(String(request.prefix ?? ""), permutation, currentValues, aliases, parameters);
+  const suffix = templateReplaceWithProof(String(request.suffix ?? "") + automatic, permutation, currentValues, aliases, parameters);
+  return { ...composeOutputName(target, permutation, prefix.text, suffix.text), prefix: prefix.text, suffix: suffix.text,
+    complete: prefix.complete && suffix.complete };
+}
+
 function namingToken(value, kind) {
   let text = formatValue(value);
   if (kind === "image") {
@@ -62,12 +96,9 @@ function namingToken(value, kind) {
 }
 
 export function rangeValues(min, max, step) {
-  const values = [];
-  const count = Math.round((max - min) / step) + 1;
-  for (let i = 0; i < count; i++) {
-    values.push(Math.round((min + i * step) * 1e10) / 1e10);
-  }
-  return values;
+  const { axes: [axis] } = permutationPlan({ value: { enabled: true, min, max, increment: step } }, {});
+  if (axis.length > MAX_PERMUTATION_VISITS) throw new Error("permutation work budget exceeded");
+  return Array.from({ length: axis.length }, (_, index) => axis.at(index));
 }
 
 function cartesianProduct(arrays) {
@@ -140,22 +171,43 @@ export function generatePermutations(ranges, currentValues, imageParams = {}) {
   return output;
 }
 
-// One typed axis representation owns both count and generation. Counting does
-// not allocate the Cartesian product or serialize arbitrary text through a separator.
+// One typed axis representation owns both count and generation. Discrete sequence
+// order/multiplicity is supplied by the caller; typed normalization/deduplication
+// belongs to the compiler. Counting never allocates the Cartesian product.
 export function permutationPlan(ranges, currentValues, imageParams = {}) {
   const { enabled, imgEnabled } = permutationAxes(ranges, imageParams);
   if (enabled.length + imgEnabled.length > MAX_PERMUTATION_AXES) throw new Error("permutation axis work budget exceeded");
-  const fmt = value => typeof value === "string" ? value : formatValue(value);
   const axes = [];
   for (const [id, range] of enabled) {
+    if ([range.min, range.max, range.increment].some(value => typeof value === "bigint") || [range.min, range.max, range.increment].every(Number.isSafeInteger)) {
+      const integer = value => {
+        if (typeof value === "bigint") return value;
+        if (!Number.isSafeInteger(value)) throw new Error("Exact integer ranges require integer bounds/increment");
+        return BigInt(value);
+      };
+      const min = integer(range.min), max = integer(range.max), increment = integer(range.increment);
+      if (increment <= 0n) throw new Error("every enabled range needs a positive increment");
+      const size = max < min ? 0n : ((max - min) * 2n + increment) / (increment * 2n) + 1n;
+      if (size > BigInt(Number.MAX_SAFE_INTEGER)) throw new Error("range is too large");
+      const length = Number(size), at = index => {
+        const value = min + BigInt(index) * increment;
+        return value >= BigInt(Number.MIN_SAFE_INTEGER) && value <= BigInt(Number.MAX_SAFE_INTEGER) ? Number(value) : value;
+      };
+      const isCurrent = value => Object.hasOwn(currentValues, id) && sameJsonValue(value, currentValues[id]);
+      const cur = currentValues[id];
+      const target = typeof cur === "bigint" ? cur : Number.isSafeInteger(cur) ? BigInt(cur) : null;
+      const matches = target !== null && length > 0 && target >= min && target <= min + (size - 1n) * increment && (target - min) % increment === 0n ? 1 : 0;
+      axes.push({ id, length, at, isCurrent, matches });
+      continue;
+    }
     if (!Number.isFinite(range.increment) || range.increment <= 0) throw new Error("every enabled range needs a positive increment");
     if (!Number.isFinite(range.min) || !Number.isFinite(range.max)) throw new Error("range bounds must be finite");
     const length = Math.max(0, Math.round((range.max - range.min) / range.increment) + 1);
     if (!Number.isSafeInteger(length)) throw new Error("range is too large");
     const at = index => Math.round((range.min + index * range.increment) * 1e10) / 1e10;
-    const isCurrent = value => Object.hasOwn(currentValues, id) && fmt(value) === fmt(currentValues[id]);
+    const isCurrent = value => Object.hasOwn(currentValues, id) && typeof currentValues[id] === "number" && formatValue(value) === formatValue(currentValues[id]);
     let matches = 0;
-    const target = Number(fmt(currentValues[id]));
+    const target = typeof currentValues[id] === "number" ? Number(formatValue(currentValues[id])) : NaN;
     if (length && Number.isFinite(target)) {
       const bound = inclusive => {
         let low = 0, high = length;
@@ -168,12 +220,40 @@ export function permutationPlan(ranges, currentValues, imageParams = {}) {
     axes.push({ id, length, at, isCurrent, matches });
   }
   for (const [id, parameter] of imgEnabled) {
-    const values = parameter.values, isCurrent = value => Object.hasOwn(currentValues, id) && fmt(value) === fmt(currentValues[id]);
-    axes.push({ id, length: values.length, at: index => values[index], isCurrent, matches: values.filter(isCurrent).length });
+    const values = cloneJsonValue(parameter.values);
+    const isCurrent = value => Object.hasOwn(currentValues, id) && sameJsonValue(value, currentValues[id]);
+    axes.push({ id, values, length: values.length, at: index => values[index], isCurrent, matches: values.filter(isCurrent).length });
   }
   const product = axes.reduce((n, axis) => n * axis.length, 1);
   const current = axes.reduce((n, axis) => n * axis.matches, 1);
   return { axes, total: axes.length ? product - current : 0 };
+}
+
+// Separate automatic projection: caller text is never rewritten. An axis needs
+// two distinct surviving values, after excluding the complete current tuple.
+export function automaticNaming(ranges, currentValues, imageParams = {}) {
+  const plan = permutationPlan(ranges, currentValues, imageParams);
+  const ids = plan.total < 2 ? [] : plan.axes.filter(axis => {
+    if (axis.length < 2) return false;
+    const otherAllCurrent = plan.axes.filter(other => other !== axis).every(other => other.length === other.matches);
+    if (axis.values) {
+      // Direct callers may supply an unsorted/repeated discrete sequence. Only
+      // distinct values that survive whole-current exclusion contribute a token.
+      let first, found = false;
+      for (const value of axis.values) {
+        if (otherAllCurrent && axis.isCurrent(value)) continue;
+        if (!found) { first = value; found = true; }
+        else if (!sameJsonValue(first, value)) return true;
+      }
+      return false;
+    }
+    // Numeric axes are monotone; current matches are a contiguous interval.
+    // Inspect endpoints without enumerating potentially enormous ranges.
+    const first = otherAllCurrent && axis.isCurrent(axis.at(0)) ? axis.matches : 0;
+    const last = axis.length - 1 - (otherAllCurrent && axis.isCurrent(axis.at(axis.length - 1)) ? axis.matches : 0);
+    return first < last && !sameJsonValue(axis.at(first), axis.at(last));
+  }).map(axis => axis.id);
+  return { ids, suffix: ids.map(id => `_{${id}}`).join("") };
 }
 
 // --- text template axes ({{label}} substitutions) ------------------------------
@@ -280,19 +360,20 @@ export function runOperationFields(request) {
 // documented relative numeric absence is an exclusion; positive other kinds
 // must find a carrier. Raw recipe dispositions remain a separate representation.
 export function targetRunPlan(payload, catalogue) {
-  const index = parameterIndex(catalogueParams(catalogue));
+  const parameters = catalogue.parameters ?? catalogueParams(catalogue), index = parameterIndex(parameters);
+  const numeric = parameter => parameter && (parameter.kind === "numeric" || parameter.valueKind === "number" || catalogue.params?.some(p => p.id === parameter.id));
   const ranges = {}, operations = [];
   for (const [id, axis] of Object.entries(payload.ranges)) {
     const applicable = !(payload.relative && axis.enabled && !index.has(id));
     operations.push({ id: `rangeSelections:${id}`, parameter: id, channel: "rangeSelections", disposition: applicable ? axis.enabled ? "apply" : "off" : "absent-relative-numeric" });
     if (axis.enabled) operations.push({ id: `ranges:${id}`, parameter: id, channel: "ranges", disposition: applicable ? "apply" : "absent-relative-numeric" });
     if (applicable) ranges[id] = axis;
-    if (applicable && axis.enabled && !catalogue.params.some(p => p.id === id)) throw new Error(`${id}: numeric parameter is missing from this target`);
+    if (applicable && axis.enabled && !numeric(index.get(id))) throw new Error(`${id}: numeric parameter is missing from this target`);
   }
   for (const [id, axis] of Object.entries(payload.imageParams)) {
     operations.push({ id: `imageSelections:${id}`, parameter: id, channel: "imageSelections", disposition: axis.enabled ? "apply" : "off" });
     if (axis.enabled) operations.push({ id: `imageParams:${id}`, parameter: id, channel: "imageParams", disposition: "apply" });
-    if (axis.enabled && (!index.has(id) || catalogue.params.some(p => p.id === id))) throw new Error(`${id}: parameter is missing from this target`);
+    if (axis.enabled && !index.has(id)) throw new Error(`${id}: parameter is missing from this target`);
   }
   operations.push(...["prefix", "suffix"].map(parameter => ({ id: `naming:${parameter}`, parameter, channel: "naming", disposition: "apply" })));
   const request = { ...payload, ranges };
@@ -350,6 +431,18 @@ export function resolveRelativeRanges(ranges, currentValues) {
     // A fixed Value axis is absolute even when neighbouring batch axes are
     // offsets. Retain the numeric channel and its target applicability proof.
     if (r.absolute === true) { out[key] = { ...r }; continue; }
+    if ([cur, r.min, r.max, ...r.clamp].some(value => typeof value === "bigint")) {
+      const exact = value => {
+        if (typeof value === "bigint") return value;
+        if (!Number.isSafeInteger(value)) throw new Error("Exact relative integer ranges require integer offsets and bounds");
+        return BigInt(value);
+      };
+      const [clo, chi] = r.clamp.map(exact), base = exact(cur);
+      const clamp = value => value < clo ? clo : value > chi ? chi : value;
+      const lo = clamp(base + exact(r.min)), hi = clamp(base + exact(r.max));
+      out[key] = { ...r, min: lo < hi ? lo : hi, max: lo > hi ? lo : hi };
+      continue;
+    }
     const [clo, chi] = r.clamp;
     const lo = Math.min(Math.max(cur + r.min, clo), chi);
     const hi = Math.min(Math.max(cur + r.max, clo), chi);

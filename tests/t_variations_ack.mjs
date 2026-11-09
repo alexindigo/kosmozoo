@@ -114,7 +114,7 @@ Deno.test("ack: removed carriers cannot be certified; surviving quality and imag
   assertEquals(data.acknowledgement.accepted[0].applied, { ranges: ["sampler.denoise", "output.quality"], imageParams: ["text.text", "first.image", "second.image"] });
 });
 
-Deno.test("ack: actual output-prefix rewriting never certifies the overwritten parameter assignment", async () => {
+Deno.test("ack: unsupported output-prefix types never receive compositional proof", async () => {
   const source = structuredClone(graph);
   // Numeric discovery historically includes every numeric input. The final
   // output naming writer replaces this atypical carrier after the sweep write.
@@ -123,7 +123,8 @@ Deno.test("ack: actual output-prefix rewriting never certifies the overwritten p
   body.ranges['output.filename_prefix'] = { enabled: true, min: .5, max: .5, increment: .1 };
   const response = await r.run(body), data = await response.json();
   assertEquals(response.status, 400); assertEquals(r.jobs.length, 0);
-  assert(data.error.includes("overwritten"));
+  assert(data.error.includes("filename_prefix requires text"));
+  assertEquals(data.acknowledgement.accepted, []);
 });
 
 Deno.test("ack: unknown naming tokens reject before dispatch; recognized directory prefixes survive", async () => {
