@@ -28,6 +28,8 @@
     "/shared/version.mjs": "./src/version.mjs",
     "/shared/detection-result.mjs": "./src/detection-result.mjs",
     "/shared/content-hash.mjs": "./src/content-hash.mjs",
+    "/shared/parameters.mjs": "./src/parameters.mjs",
+    "/shared/graph.mjs": "./src/graph.mjs",
     "/shared/features/variations/shared.mjs": "./src/features/variations/shared.mjs"
   },
   "tasks": {

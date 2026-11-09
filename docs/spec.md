@@ -903,7 +903,7 @@ Size-pending candidates wait for the existing size owner's feed admission; remov
 entries and retired sessions discard them. A ready off-tape tick never waits.
 
 Static surfaces: `/shared/<name>` serves the allow-listed `src/` modules
-(`extractor.mjs`, `backings/mime.mjs`, `features/variations/shared.mjs`, `entry-path.mjs`, `source-origin.mjs`, `version.mjs`, `detection-result.mjs`, `content-hash.mjs`) to the browser;
+(`extractor.mjs`, `backings/mime.mjs`, `features/variations/shared.mjs`, `parameters.mjs`, `graph.mjs`, `entry-path.mjs`, `source-origin.mjs`, `version.mjs`, `detection-result.mjs`, `content-hash.mjs`) to the browser;
 `/` and `/diff` serve the Solid app from `client-solid-dist/`, with shared
 assets (`/css`, `/vendor`, `/js`, logos) from `client/`.
 
@@ -1100,13 +1100,59 @@ from actual upload receipts, including returned renamed files.
 One compiler-generated image-set consumption binding replaces the old mode/file/
 localFiles leaves, so a fully acknowledged set has no dormant acquisition work.
 
-All variation kinds (numeric, enum, text and image) use the same node/input
-identity codec in `src/features/variations/shared.mjs`. IDs are `<nodeId>.<input>`
+The environment-pure `src/parameters.mjs` owns complete recorded-input discovery,
+the node/input identity codec, labels, aliases and exact-current selection.
+`src/features/variations/shared.mjs` re-exports those same functions for existing
+consumers. `graphParameters(graph, schema?)` needs no live object_info and enumerates
+every own recorded input, including custom/unknown classes, missing class metadata,
+booleans, null, arrays, objects, connections, output prefixes and image strings
+without a recognized extension. Missing optional inputs are absent, never null.
+
+`GET /api/features/variations/probe/<id>` adds `parameters`, an ordered complete
+descriptor sequence. Each descriptor contains `id`, `nodeId`, singleton `nodeIds`,
+literal `key`, class `type`, nullable display `title`, exact recorded `currentValue`,
+presentation `current`, `valueKind`, `encoding`, `schema`, `kind` and
+`legacyEditable`. `valueKind` is `number`, `string`, `boolean`, `null`, `array`,
+`object` or `connection`. Image `current` omits its folder annotation while
+`currentValue` retains it. Own-property presence selects `currentValue`, including
+explicit null, false, zero and empty string. Values are detached JSON snapshots;
+duplicate titles/classes/values never merge occurrences.
+
+`encoding` records `kosmozoo-link`, `unresolved-array`, `comfy-array-wrapper`,
+`comfy-curve-wrapper` or `json`. `src/graph.mjs` remains the sole edge interpreter:
+its existing pair predicate accepts string/safe-integer node IDs and nonnegative
+integer slots. This differs from upstream ComfyUI's string-ID/numeric-slot predicate.
+Raw arrays not matching the existing predicate remain unresolved, not proven
+literals or valid submissions. Dangling recognized links remain connections, not
+literal fallbacks. Wrapper tags describe recorded shape only; their objects and
+nested arrays stay intact, without unwrapping or traversing them as edges.
+
+`schema.status` is `partial` when existing numeric/enum metadata supplies
+`numericType` and/or `options`, otherwise `unavailable`. Neither means full input,
+output-port, wrapper or custom-validator knowledge. Schema/default potential does
+not create recorded inputs. This phase adds no schema normalization or graph
+validation behavior. `kind` retains the legacy editor kind where eligible and
+otherwise follows `valueKind`; `legacyEditable` identifies that compatibility
+projection, not future all-type support.
+
+The existing `params`, `stringParams`, `enumParams` and `textParams` arrays are
+derived from that sequence, retaining their previous shapes, exclusions and order.
+`catalogueParams` still flattens only those editable arrays so old scalar Run,
+naming and editor behavior cannot silently expand. Complete discovery does not
+yet enable typed Run or all-type editors. Those, the approved three-column/all-off
+interaction and variation-dependent automatic naming remain required later work.
+`cloneJsonValue` and `sameJsonValue` supply strict JSON-only snapshot/equality
+primitives: scalar types, array/object kinds and array order differ; record key
+order does not. Non-data/accessor/sparse/cyclic/native values (including Files)
+reject without serialization. Native Files stay in the existing private image
+lane. These helpers do not repair integer precision lost during graph parsing.
+
+All variation kinds (numeric, enum, text and image) use those same IDs: `<nodeId>.<input>`
 (for example `76.image`, `81.image`, `20.strength_model`, `92:109.text`); segments
 are percent-encoded when needed, including literal dots. Class names and custom
-titles are display/schema metadata, never identity. One classified graph walk
+titles are display/schema metadata, never identity. One complete graph walk
 creates singleton descriptors and rejects duplicate or unresolved locations;
-probe and Run use that same catalogue. The editor rejects duplicates before
+probe and Run derive their editable projections from that catalogue. The editor rejects duplicates before
 seeding any rows, and every row controls exactly its own node/input. Numeric
 siblings are independent sliders, with independent currents and proof. Slider
 tuning still uses the class/input schema key. Readable labels put the human-readable

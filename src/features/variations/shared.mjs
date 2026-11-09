@@ -4,61 +4,13 @@
 // to the browser via /shared/).
 
 import { sameContext } from "../../source-origin.mjs";
+import { parseParamId, parameterIndex } from "../../parameters.mjs";
+export { paramId, parseParamId, parameterIndex, parameterLabel, parameterAliases, parameterCurrent } from "../../parameters.mjs";
 
-// Wire identity is ONLY the graph location, never its class or display title.
-// Encode delimiters so arbitrary input names remain reversible; nested Comfy
-// node IDs retain their readable colon separators.
-const paramPart = value => encodeURIComponent(String(value)).replace(/\./g, "%2E").replace(/%3A/g, ":");
-export function paramId(nodeId, input) {
-  if (!String(nodeId).length || !String(input).length) throw new Error("Empty parameter location");
-  return `${paramPart(nodeId)}.${paramPart(input)}`;
-}
-export function parseParamId(id) {
-  if (typeof id !== "string") return null;
-  const parts = id.split(".");
-  if (parts.length !== 2) return null;
-  try {
-    const [nodeId, input] = parts.map(decodeURIComponent);
-    return nodeId && input && paramId(nodeId, input) === id ? { nodeId, input } : null;
-  } catch { return null; }
-}
-
+// Legacy editable projection only. New complete consumers use `parameters`;
+// flattening both would duplicate locations and broaden scalar Run/naming.
 export const catalogueParams = catalogue => ["params", "stringParams", "enumParams", "textParams"]
   .flatMap(key => catalogue[key] ?? []);
-
-// Image presentation strips ComfyUI's folder annotation; assignment and tuple
-// identity must retain the exact graph value on both sides of the wire.
-export const parameterCurrent = parameter => parameter.currentValue ?? parameter.current;
-
-// Shared admission gate: never build a last-wins catalogue. Graph resolution is
-// asserted at discovery; later consumers still reject ambiguous identity before IO.
-export function parameterIndex(params, graph = null) {
-  const index = new Map();
-  for (const p of params) {
-    if (index.has(p.id)) throw new Error(`Duplicate variation parameter: ${p.id}`);
-    const location = parseParamId(p.id);
-    if (!location || p.key !== location.input || p.nodeIds?.length !== 1 || p.nodeIds[0] !== location.nodeId ||
-        p.nodeId !== undefined && p.nodeId !== location.nodeId) throw new Error(`Invalid parameter location: ${p.id}`);
-    if (graph && (!Object.hasOwn(graph, location.nodeId) || !Object.hasOwn(graph[location.nodeId]?.inputs ?? {}, location.input))) {
-      throw new Error(`Unresolved parameter location: ${p.id}`);
-    }
-    index.set(p.id, p);
-  }
-  return index;
-}
-
-export const parameterLabel = p => `${p.title ?? p.type} #${p.nodeIds[0]} · ${p.key}`;
-
-// Compatibility aliases are presentation/schema names, not editable IDs.
-export function parameterAliases(params) {
-  const aliases = {};
-  let image = false;
-  for (const p of parameterIndex(params).values()) {
-    aliases[p.id] = [`${p.type}.${p.key}`, p.title ?? p.type];
-    if (p.kind === "image" && !image) { aliases[p.id].push("image"); image = true; }
-  }
-  return aliases;
-}
 
 export function formatValue(v) {
   return typeof v === "string" ? v : String(parseFloat(Number(v).toFixed(10)));

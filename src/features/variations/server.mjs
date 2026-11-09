@@ -11,7 +11,7 @@
 
 import {
   generatePermutations, permutationAxes, permutationPlan, resolveRelativeRanges, templateReplaceWithProof,
-  paramId, parameterIndex, parameterCurrent, catalogueParams, parameterAliases, validRunAcknowledgement, runOperationFields, targetRunPlan,
+  parameterIndex, parameterCurrent, catalogueParams, parameterAliases, validRunAcknowledgement, runOperationFields, targetRunPlan,
   outputName,
 } from "./shared.mjs";
 import { validEntryName, backingFor as defaultBackingFor } from "../../backings/index.mjs";
@@ -22,65 +22,24 @@ import { IMAGE_EXTENSIONS, mediaExtension } from "../../backings/mime.mjs";
 import { listImages, readImage, folderError } from "./folder-images.mjs";
 import { inspectImage } from "./image-inspection.mjs";
 import { readJson, mediaHeaders } from "../../routes.mjs";
+import { graphParameters, editableParameter } from "../../parameters.mjs";
 
 // hard cap on permutations per run — a sweep is a human-scale batch, not a
 // fork bomb (F7). Above the cap the run answers 413.
 const MAX_PERMUTATIONS = 500;
 
-const IMG_FILE = /\.(png|jpe?g|webp|gif|avif|bmp)$/i;
-
-// ComfyUI stores output-sourced LoadImage widget values as "name.png [output]"
-const ANNOTATION = /^(.*)\s+\[([^\]]*)\]$/;
-
 // --- graph inspection (ComfyUI conventions) -----------------------------------
 
-// One walk, explicit classification precedence, one descriptor constructor.
-// Strategies supply only kind-specific metadata; identity/location is shared.
-const PARAMETER_KINDS = [
-  { kind: "numeric", channel: "params", accepts: p => typeof p.value === "number",
-    describe: p => ({ integer: p.declared ? p.declared === "INT" : Number.isInteger(p.value) }) },
-  { kind: "image", channel: "stringParams", accepts: p => p.image,
-    describe: p => {
-      const match = ANNOTATION.exec(p.value), file = match ? match[1] : p.value;
-      return IMG_FILE.test(file) ? { current: file, currentValue: p.value, fromOutput: match ? /^output$/i.test(match[2]) : false } : null;
-    } },
-  { kind: "enum", channel: "enumParams", accepts: p => p.options?.length,
-    describe: p => ({ values: p.options }) },
-  { kind: "text", channel: "textParams", accepts: () => true, describe: () => ({}) },
-];
-export function parameterCatalogue(graph, { types = null, enums = null, outputClasses = null, dynamicCombos = null } = {}) {
-  const catalogue = Object.fromEntries(PARAMETER_KINDS.map(strategy => [strategy.channel, []]));
-  for (const [nodeId, node] of Object.entries(graph ?? {})) {
-    const type = String(node.class_type ?? "");
-    if (!type) continue;
-    const title = node._meta?.title && node._meta.title !== type ? String(node._meta.title) : null;
-    const nodeTypes = new Map(types), nodeEnums = new Map(enums);
-    const selectBranches = combos => {
-      for (const [name, options] of combos ?? []) {
-        if (!name.startsWith(type + ".")) continue;
-        const branch = options.get(node.inputs?.[name.slice(type.length + 1)]);
-        if (!branch) continue;
-        for (const [key, value] of branch.types) nodeTypes.set(key, value);
-        for (const [key, value] of branch.enums) nodeEnums.set(key, value);
-        selectBranches(branch.dynamicCombos);
-      }
-    };
-    selectBranches(dynamicCombos);
-    for (const [key, value] of Object.entries(node.inputs ?? {})) {
-      if (typeof value !== "number" && typeof value !== "string") continue;
-      if (typeof value === "string" && key === "filename_prefix" && outputClasses?.has(type)) continue;
-      const schemaKey = `${type}.${key}`;
-      const context = { value, declared: nodeTypes.get(schemaKey), options: nodeEnums.get(schemaKey),
-        image: typeof value === "string" && /loadimage$/i.test(type) && key === "image" };
-      const strategy = PARAMETER_KINDS.find(strategy => strategy.accepts(context));
-      const metadata = strategy.describe(context);
-      if (!metadata) continue;
-      catalogue[strategy.channel].push({ id: paramId(nodeId, key), nodeId, nodeIds: [nodeId], key,
-        type, title, kind: strategy.kind, current: value, ...metadata });
-    }
+const PARAMETER_CHANNELS = { numeric: "params", image: "stringParams", enum: "enumParams", text: "textParams" };
+export function parameterCatalogue(graph, schema = {}) {
+  const parameters = graphParameters(graph, schema);
+  const catalogue = Object.fromEntries(Object.values(PARAMETER_CHANNELS).map(channel => [channel, []]));
+  for (const parameter of parameters) {
+    const editable = editableParameter(parameter);
+    if (editable) catalogue[PARAMETER_CHANNELS[editable.kind]].push(editable);
   }
   parameterIndex(catalogueParams(catalogue), graph);
-  return catalogue;
+  return { ...catalogue, parameters };
 }
 
 // Compatibility inspection ports all project the same descriptor pipeline.
