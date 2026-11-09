@@ -36,7 +36,7 @@ export function ImageSetPanel(props) {
       onDragOver: event => { if (isFileDrag(event.dataTransfer)) { event.dataTransfer.dropEffect = "copy"; setDropping(true); } },
       onDragLeave: () => { if (--dragDepth <= 0) clearDrop(); },
       onDrop: event => { if (!isFileDrag(event.dataTransfer)) return; clearDrop(); addFiles(droppedFiles(event.dataTransfer), undefined, true); }
-    }} onEnable={props.onEnable} onInsert={props.onInsert}
+    }} onEnable={props.onEnable} onInsert={props.onInsert} registerFocus={props.registerFocus}
     status={<Show when={status()}><SingleLineText class="vz-image-drop-status" role="status" value={status()} /></Show>}
     summary={`${row().items.length} ${row().items.length === 1 ? "image" : "images"}`}>
     <div class="vz-image-content" ref={content}>

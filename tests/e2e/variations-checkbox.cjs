@@ -1,5 +1,19 @@
 // Exercise both native sizes through actual pointer and keyboard input.
-module.exports = async function checkbox({ cdp, check, selector, size }) {
+module.exports = async function checkbox({ cdp, check, selector, size, parameterId }) {
+  if (parameterId) {
+    const { addParameter } = require('./variation-add-helpers.cjs');
+    const before = await cdp.evaluate(`(()=>{const input=document.querySelector(${JSON.stringify(selector)}),r=input.getBoundingClientRect(),s=getComputedStyle(input);return {width:r.width,height:r.height,border:s.borderTopWidth,radius:s.borderRadius,labelled:!!document.getElementById(input.getAttribute('aria-labelledby'))?.textContent}})()`);
+    await cdp.clickAt(selector);
+    check(`${size}px checkbox off transfers its row back to the catalogue`, await cdp.evaluate(`!document.querySelector(${JSON.stringify(selector)})&&!document.querySelector('[data-catalogue-id="${parameterId}"]').classList.contains('vz-catalogue-hidden')`));
+    await addParameter(cdp, parameterId);
+    const after = await cdp.evaluate(`(()=>{const r=document.querySelector(${JSON.stringify(selector)}).getBoundingClientRect();return {width:r.width,height:r.height}})()`);
+    check(`${size}px checkbox keeps its native border box across remove/re-add`, before.width===size&&before.height===size&&after.width===size&&after.height===size&&before.border==='2px'&&before.radius==='3px'&&before.labelled);
+    await cdp.evaluate(`document.querySelector(${JSON.stringify(selector)}).focus()`);
+    await cdp.keyTrusted(' ', { code: 'Space', vk: 32 });
+    check(`${size}px native checkbox turns off with Space`,await cdp.evaluate(`!document.querySelector(${JSON.stringify(selector)})`));
+    await addParameter(cdp, parameterId);
+    return;
+  }
   const read = () => cdp.evaluate(`(() => {
     const input = document.querySelector(${JSON.stringify(selector)});
     const rect = input.getBoundingClientRect();

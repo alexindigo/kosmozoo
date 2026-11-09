@@ -958,15 +958,12 @@ originating source and actual v2 JSON download, without duplicate activation or
 synthetic outside-click propagation. Features contribute command definitions,
 data bindings and affordances through the registry, without feature-name dispatch.
 
-Variations retains feature-private recipe workspaces for the app session, keyed
-by the captured target set and origin, including raw values, checkpoints and exact
-File references/order. Reopening restores them; A→B→A never overwrites A. There is
-no silent eviction or disk persistence. An old-origin recipe remains visibly
-recoverable, review-only, without automatic retargeting; “New recipe for current
-source” explicitly opens a separate workspace. “Discard recipe” asks for explicit
-confirmation even when clean; committed Discard removes that workspace. App
-disposal releases all retained workspaces. Mounted components own decision,
-focus/caret, widgets, timers and Run leases. Its bridge contains opening metadata, a fresh scalar
+Variations owns one private recipe/editor per dialog mount and captured target
+set. Closing or replacing it releases its raw buffers and exact File references;
+every reopening starts fresh. There is no recipe switcher, retained workspace or
+disk persistence. A source change retains the captured-origin fence and cannot
+retarget an open draft. Mounted components own decision, focus/caret, widgets,
+timers and Run leases. Its bridge contains opening metadata, a fresh scalar
 session and owner-safe request capabilities only. Dirty close/replacement shows
 **“Discard your changes?”**, **“Keep editing”** and **“Discard changes”** inside
 the still-mounted panel, outside its inert editor. Escape cancels only the decision;
@@ -994,8 +991,9 @@ identity deduplication uses input name, exact File identity or absolute engine p
 deduplication of Files. Removal changes that same set. Each chosen tile reserves
 one comparison-status line, so pending/current/ready/error settlement cannot move
 the acquisition controls. Single-line statuses retain full native tooltips. The chosen thumbnail grid
-is above persistent acquisition controls, even when the axis is off. “ComfyUI
-inputs” opens a searchable, virtualized, multi-select list; arrows/Enter select
+is above persistent acquisition controls inside the explicitly added card. Turning
+the axis off hides its card without discarding the ordered set. "ComfyUI
+inputs" opens a searchable, virtualized, multi-select list; arrows/Enter select
 and Escape closes its owned popup before the modal. The input grid mounts three
 extra rows on each side to acquire thumbnails before visibility, and declares one
 further viewport in the scroll direction as background image demand. Search, close
@@ -1138,10 +1136,19 @@ projection, not future all-type support.
 
 The existing `params`, `stringParams`, `enumParams` and `textParams` arrays are
 derived from that sequence, retaining their previous shapes, exclusions and order.
-`catalogueParams` still flattens only those editable arrays for the retained editor.
-Typed Run uses the complete sequence. Compatibility aliases retain legacy array
+`catalogueParams` still flattens only those legacy arrays for compatibility.
+The editor and typed Run use the complete sequence. Compatibility aliases retain legacy array
 order before newly admitted inputs; canonical IDs address every occurrence.
-All-type editors and the approved three-column/all-off interaction remain later work.
+All rows start off. One catalogue/strategy projection registers every recorded input
+in the private recipe. Numeric/image/text/string-enum cards retain their existing
+treatment. Typed booleans/options use exact typed choices, retaining JSON string
+quotes so `0` and `"0"` stay distinct. Null, arrays, objects,
+wrappers and unknown values use ordered whole JSON candidate fields. One candidate
+is one assignment, never an implicit element permutation. Connection candidates
+choose existing graph nodes and raw nonnegative output slot text, with known
+port labels/types where available and honest unknown-compatibility help otherwise.
+Zero candidates and incomplete JSON/slots are invalid and cannot enqueue. Raw text,
+ordering, typed picks, Files and manual naming survive off/re-add unchanged.
 `cloneJsonValue` and `sameJsonValue` supply strict JSON-only snapshot/equality
 primitives: scalar types, array/object kinds and array order differ; record key
 order does not. Non-data/accessor/sparse/cyclic/native values (including Files)
@@ -1168,8 +1175,8 @@ deduplicates normalized whole assignments with typed deep equality, preserving
 the first occurrence and caller data. The generic `permutationPlan` and
 `generatePermutations` preserve their supplied sequence's order and multiplicity;
 they exclude only complete current tuples. Typed Run uses the compiler before
-that same kernel, and the forthcoming all-parameter editor must do so before
-preview and Run. No per-kind duplicate exception or second generator exists. Integer
+that same kernel, as does the all-parameter editor before preview and Run.
+No per-kind duplicate exception or second generator exists. Integer
 ranges use exact arithmetic; floating ranges retain existing quantization and caps.
 Current exclusion follows the generated endpoint, including the existing rounded
 last step, so preview count and actual submitted tuples cannot disagree there.
@@ -1214,10 +1221,11 @@ discrete inputs are checked for distinct surviving values even when their endpoi
 match; numeric ranges use monotone endpoints rather than enumeration. It never edits raw
 Prefix/Suffix. Additive request `automaticNaming:true` appends the projection using
 the shared token formatter/writer; omission keeps legacy behavior. Fixed values
-add no automatic token. The next UI phase must use this shared projection rather
-than rewriting manual text. Final native/staging all-type proof remains required.
+add no automatic token. Every UI request enables the shared projection, never
+rewriting manual Prefix/Suffix text or inserted tokens. Final native/staging
+all-type proof remains a separate downstream gate.
 
-All variation kinds (numeric, enum, text and image) use those same IDs: `<nodeId>.<input>`
+All recorded variation kinds use those same IDs: `<nodeId>.<input>`
 (for example `76.image`, `81.image`, `20.strength_model`, `92:109.text`); segments
 are percent-encoded when needed, including literal dots. Class names and custom
 titles are display/schema metadata, never identity. One complete graph walk
@@ -1225,20 +1233,23 @@ creates singleton descriptors and rejects duplicate or unresolved locations;
 probe and Run derive their editable projections from that catalogue. The editor rejects duplicates before
 seeding any rows, and every row controls exactly its own node/input. Numeric
 siblings are independent sliders, with independent currents and proof. Slider
-tuning still uses the class/input schema key. Readable labels put the human-readable
-input name first, with title/class and node ID secondary; the complete canonical
+tuning still uses the class/input schema key. Readable labels combine title/class
+and raw input, adding node identity when repeated; the complete canonical
 label, e.g. `Load Image #76 · image`, remains in the tooltip and checkbox description.
 One shared parameter-row shell owns checkbox/name/current/context alignment for
-numeric, image, enum and text rows. Disabled numeric rows occupy one compact line
-with their current value; enabling reveals labelled From/To/Step editors and the
-existing rail without remounting its native widget. Step actions explicitly
+numeric, image, enum, text and candidate rows. Unadded inputs occupy compact catalogue
+rows with exact current context and an Add action. Added numeric cards reveal
+labelled From/To/Step and Range/Value editors. Exact integer text uses the native
+codec before any Number conversion. Sliders are omitted for unsafe values, bounds
+or increments,
+not replaced with rounded approximations. Step actions explicitly
 halve/double the increment, while thumb arrow keys retain fine nudging. Numeric
 field writes and release snapping are immediate: the slider integration disables
 animated placement, whose native tap-transition state would reject the next
 physical gesture after an otherwise finished edit. Current
 enum options say “Current”, and batch numeric controls describe offsets from each
-image's current value. Enabled rows still float first and retain the existing
-registry/input ordering.
+image's current value. Active cards retain canonical registry/input ordering,
+independent of the order they were added.
 
 The Variations dialog root constrains every layout descendant to a shrinkable,
 bounded inline allocation, including its modal shell; individual component class
@@ -1248,8 +1259,16 @@ full-value native tooltip, including labels, current values, options, captions a
 numeric readouts. Consumers provide presentation and callbacks, not a second
 truncation/tooltip implementation. Literal native editors retain their full raw
 values; multiline/help text wraps within its allocation.
-The dialog owns a bounded grid row shared by the scrolling parameter pane and
-the fixed sidebar at every width. Sidebar rows are a `minmax(0, 1fr)` body,
+The dialog owns three bounded tracks: unadded catalogue on the left, enabled cards
+in the center, fixed summary on the right. The first two scroll vertically and
+independently; the filter only affects unadded catalogue rows. Add/remove transfers
+focus through public child ports without querying child DOM. Below usable control
+minima a bounded inner horizontal scroller retains all three tracks, with focused
+controls revealed rather than hidden or replaced with tabs. Ordinary desktop
+widths need no horizontal scroll.
+Native programmatic focus and Tab reveal controls through their scroll ancestors;
+generic focus handlers capture state only, never scroll on pointer/window refocus.
+Sidebar rows are a `minmax(0, 1fr)` body,
 an intrinsic bounded message lane and Run in the final row. The body owns vertical
 scrolling for the big count, wrapping factor breakdown, naming fields and example;
 its children retain intrinsic content height. Results, preflight errors and

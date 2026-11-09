@@ -247,6 +247,7 @@ Deno.test("output naming: real client example equals the server's written prefix
     editor.edit("naming", "root", "prefix", prefix); editor.edit("naming", "root", "suffix", suffix);
     // Current image value is sufficient here: the same tuple is sent by both consumers.
     r.request.imageParams = {}; r.request.suffix = suffix;
+    r.request.automaticNaming = true;
     const preview = editor.preview();
     const { status, data } = await r.run(); assertEquals(status, 200, JSON.stringify(data));
     assertEquals(preview.naming.example, r.jobs[0].prompt.output.inputs.filename_prefix);

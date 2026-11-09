@@ -3,10 +3,10 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const { workPath } = require('./paths.cjs');
 const { freshRecipe } = require('./recipe-helpers.cjs');
+const { addParameter } = require('./variation-add-helpers.cjs');
 const fileControl = '.vz-imgrow:not(.vz-enumrow):not(.vz-textrow) .checkbox';
 const fileSetup = async (cdp) => {
-  await cdp.poll(`!!document.querySelector(${JSON.stringify(fileControl)})`);
-  await cdp.clickAt(fileControl);
+  await addParameter(cdp, '43.image');
   await cdp.poll(`!!document.querySelector('.vz-imgfilespick')`);
   await cdp.evaluate(`(()=>{const e=document.querySelector('.vz-imgfilespick'),dt=new DataTransfer();dt.items.add(new File(['a'],'a.png',{type:'image/png'}));dt.items.add(new File(['b'],'b.png',{type:'image/png'}));e.files=dt.files;e.dispatchEvent(new Event('change',{bubbles:true}));window.__fileInput=e;window.__files=[...e.files]})()`);
 };
@@ -31,13 +31,14 @@ async function verifyFileReadiness({ cdp, KZ, check }) {
     })()`);
     try {
       await invoke('variations.open', args);
-      await cdp.poll(`document.querySelectorAll('.vz-slider-row').length>0 && typeof window.__fileReadyRelease==='function'`);
+      await cdp.poll(`document.querySelectorAll('.vz-catalogue-row').length>0 && typeof window.__fileReadyRelease==='function'`);
       const response = await cdp.evaluate('window.__fileReadyResponse');
       assert.equal(response.status, 200); assert.deepEqual(response.body.origin, response.origin); assert(response.body.files.length > 0);
       state = 'pending';
       task = fileSetup(cdp).then(() => { state = 'complete'; }, error => { state = 'rejected'; setupError = error; });
-      assert.equal(await cdp.evaluate(`!!document.querySelector(${JSON.stringify(fileControl)})`), false);
-      assert.equal(state, 'pending', 'File setup must remain pending until its image control mounts');
+      await task; if (setupError) throw setupError;
+      assert.equal(await cdp.evaluate(`!!document.querySelector(${JSON.stringify(fileControl)})`), true);
+      assert.equal(state, 'complete', 'Files are editable independently of late listing readiness');
       await cdp.evaluate('window.__fileReadyRelease()');
       await task; if (setupError) throw setupError;
       assert.equal(state, 'complete');
@@ -65,8 +66,9 @@ module.exports = async ({ cdp, check, FAKE, KZ }) => {
   const invoke = (id, args = {}) => cdp.evaluate(`(async()=>${KZ}.handles.invoke(${JSON.stringify(id)},${JSON.stringify(args)}))()`);
   const open = async (file = 'flux-basic.png', fresh = true) => {
     await invoke('variations.open', { id: `fake:${file}` });
-    await cdp.poll(`document.querySelectorAll('.vz-slider-row').length>0`);
+    await cdp.poll(`document.querySelectorAll('.vz-catalogue-row').length>0`);
     if (fresh) await freshRecipe(cdp);
+    await addParameter(cdp, '9.denoise');
   };
   const requestClose = () => cdp.evaluate(`(async()=>{window.__leave=${KZ}.handles.invoke('variations.close');return true})()`);
   const discard = async () => {
@@ -145,10 +147,10 @@ module.exports = async ({ cdp, check, FAKE, KZ }) => {
   await test('editable domains and exact File objects survive Cancel and SPA navigation', async () => {
     await open('flux-controlnet.png');
     await fileSetup(cdp);
-    await cdp.clickAt('.vz-textrow .vz-imgrow-head .checkbox');
+    await addParameter(cdp, '2.text');
     await type('.vz-text-values', 'a {{kept}} template');
     await type('.vz-tpl-input', 'first; second');
-    await cdp.clickAt('.vz-enumrow .vz-imgrow-head .checkbox');
+    await addParameter(cdp, '9.scheduler');
     await cdp.clickAt('.vz-enumrow.on .vz-enum-opt:last-child .checkbox');
     await type('.vz-prefix', 'files-kept');
     const before = await state();
@@ -210,7 +212,7 @@ module.exports = async ({ cdp, check, FAKE, KZ }) => {
     await type('.vz-prefix','typed-before-probe');
     await requestClose(); await cdp.clickAt('.vz-keep');
     await cdp.evaluate(`window.__probe()`);
-    await cdp.poll(`document.querySelectorAll('.vz-slider-row').length>0`);
+    await cdp.poll(`document.querySelectorAll('.vz-catalogue-row').length>0`);
     assert.equal(await cdp.evaluate(`document.querySelector('.vz-prefix').value`),'typed-before-probe');
     await requestClose(); assert(await cdp.evaluate(`!!document.querySelector('.vz-discard')`));
     await cdp.clickAt('.vz-discard-confirm'); await cdp.poll(`!document.querySelector('.vz-panel')`);
@@ -219,14 +221,14 @@ module.exports = async ({ cdp, check, FAKE, KZ }) => {
 
   await test('mixed-backend files reject before uploads; per-target zero cannot hide under aggregate success',async()=>{
     await invoke('variations.open',{ids:['fake:flux-controlnet.png','another:flux-controlnet.png'],bulk:true});
-    await cdp.poll(`document.querySelectorAll('.vz-slider-row').length>0`); await fileSetup(cdp);
+    await cdp.poll(`document.querySelectorAll('.vz-catalogue-row').length>0`); await fileSetup(cdp);
     await cdp.evaluate(`(()=>{window.__originalFetch=window.fetch;window.__sideEffects=0;window.fetch=(url,options)=>{if(options?.body instanceof FormData || String(url).includes('/features/variations/run'))window.__sideEffects++;return window.__originalFetch(url,options)}})()`);
     assert.equal((await invoke('variations.run')).status,'invalid');
     assert.equal(await cdp.evaluate(`window.__sideEffects`),0);
     assert(await cdp.evaluate(`document.querySelector('.vz-error').textContent.includes('different backends') && document.querySelector('.vz-imgfilespick')===window.__fileInput`));
     await cdp.evaluate(`window.fetch=window.__originalFetch`); await discard();
     await invoke('variations.open',{ids:['fake:flux-basic.png','another:flux-basic.png'],bulk:true});
-    await cdp.poll(`document.querySelectorAll('.vz-slider-row').length>0`);
+    await addParameter(cdp, '9.denoise');
     await cdp.evaluate(`(()=>{window.__originalFetch=window.fetch;window.fetch=(url,options)=>String(url).includes('/features/variations/run')?Promise.resolve(new Response(JSON.stringify(JSON.parse(options.body).host==='fake'?{submitted:1,total:1}:{submitted:0,total:0}),{status:200})):window.__originalFetch(url,options)})()`);
     assert.equal((await invoke('variations.run')).status,'failed');
     await new Promise(r=>setTimeout(r,3100));
@@ -250,7 +252,7 @@ module.exports = async ({ cdp, check, FAKE, KZ }) => {
 
   await test('Run snapshots before upload; stale A completion cannot publish or auto-close B', async () => {
     await open('flux-controlnet.png'); await fileSetup(cdp);
-    await cdp.clickAt('.vz-textrow .vz-imgrow-head .checkbox');
+    await addParameter(cdp, '2.text');
     await type('.vz-text-values','before upload text');
     await cdp.evaluate(`(()=>{window.__originalFetch=window.fetch;window.__bodies=[];window.fetch=(url,options)=>{
       if(options?.body instanceof FormData)return new Promise(resolve=>window.__upload=()=>resolve(new Response(JSON.stringify({name:options.body.get('image').name,origin:JSON.parse(options.headers['X-Kosmozoo-Origin'])}),{status:200})));

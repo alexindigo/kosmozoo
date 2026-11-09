@@ -19,6 +19,7 @@ export function sameDraft(a, b) {
   if (a === b) return true;
   if (!a || !b || typeof a !== "object" || typeof b !== "object") return false;
   if (typeof File !== "undefined" && (a instanceof File || b instanceof File)) return false;
+  if (Array.isArray(a) !== Array.isArray(b)) return false;
   const keys = Object.keys(a);
   return keys.length === Object.keys(b).length && keys.every((key) => Object.hasOwn(b, key) && sameDraft(a[key], b[key]));
 }

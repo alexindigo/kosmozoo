@@ -3,6 +3,7 @@ const fs = require('node:fs');
 const { workPath } = require('./paths.cjs');
 const { pickInput, waitForSelectedPreviews, openImageAdd, openImageFolder, waitForInputPicker } = require('./image-picker-helpers.cjs');
 const { freshRecipe } = require('./recipe-helpers.cjs');
+const { addParameter } = require('./variation-add-helpers.cjs');
 
 module.exports = async ({ cdp, FAKE, KZ, check }) => {
   const invoke = (id, args = {}) => cdp.evaluate(`(async()=>${KZ}.handles.invoke(${JSON.stringify(id)},${JSON.stringify(args)}))()`);
@@ -20,10 +21,10 @@ module.exports = async ({ cdp, FAKE, KZ, check }) => {
   await fetch(FAKE + '/__test/activity', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ captureEnqueue: true }) });
   try {
     await invoke('variations.open', { id: 'fake:flux-controlnet.png' });
-    await cdp.poll("!!document.querySelector('.vz-image-set')");
-    await freshRecipe(cdp);await cdp.poll("!!document.querySelector('.vz-image-set')");
+    await cdp.poll("!!document.querySelector('[data-catalogue-id=\"43.image\"]')");
+    await freshRecipe(cdp);
     assert.equal(await cdp.evaluate("!!document.querySelector('.vz-image-content')"), false);
-    await cdp.clickAt('.vz-image-set .checkbox');
+    await addParameter(cdp,'43.image');
     await openImageFolder(cdp);
     assert.equal(await cdp.evaluate("document.querySelector('.vz-image-empty').textContent"), 'Add images to vary this input.');
     assert(await cdp.evaluate("!!document.querySelector('.vz-input-trigger')&&!!document.querySelector('.vz-imgfilespick')&&!document.querySelector('[webkitdirectory]')"));
@@ -31,7 +32,7 @@ module.exports = async ({ cdp, FAKE, KZ, check }) => {
     assert.equal(await cdp.evaluate("!!document.querySelector('.vz-folder-add')"), false);
     assert.equal(await cdp.evaluate("document.querySelector('.vz-folder-path').disabled"), false);
     await capture('image-set-empty');
-    await cdp.clickAt('[data-param-key="9.denoise"] .checkbox');
+    assert.equal(await cdp.evaluate('!!document.querySelector("[data-param-key=\\"9.denoise\\"]")'),false);
     await openImageAdd(cdp);
     await cdp.clickAt('.vz-input-trigger');
     await waitForInputPicker(cdp);
@@ -120,10 +121,8 @@ module.exports = async ({ cdp, FAKE, KZ, check }) => {
     fs.writeFileSync(folder + '/ignore.mp4', 'not an image');
     fs.writeFileSync(folder + '/same-current.png', Buffer.from(await cdp.evaluate("(async()=>Array.from(new Uint8Array(await(await fetch('/api/collections/fake/entries/canny.png/bytes?kind=input')).arrayBuffer())))()")));
     await invoke('variations.open', { id: 'fake:flux-controlnet.png' });
-    await cdp.poll("!!document.querySelector('.vz-image-set')");
-    await freshRecipe(cdp);await cdp.poll("!!document.querySelector('.vz-image-set')");
-    await cdp.clickAt('.vz-image-set .checkbox');
-    await cdp.clickAt('[data-param-key="9.denoise"] .checkbox');
+    await cdp.poll("!!document.querySelector('[data-catalogue-id=\"43.image\"]')");
+    await freshRecipe(cdp);await addParameter(cdp,'43.image');
     await pickInput(cdp, 'picker-0550.png');
     await cdp.evaluate(`(async()=>{const bytes=await(await fetch('/api/collections/fake/entries/flux-lora.png/bytes')).arrayBuffer();const input=document.querySelector('.vz-imgfilespick'),data=new DataTransfer();data.items.add(new File([bytes],'turn-browser.png',{type:'image/png'}));input.files=data.files;input.dispatchEvent(new Event('change',{bubbles:true}))})()`);
     const addFolder = async value => {
@@ -157,7 +156,7 @@ module.exports = async ({ cdp, FAKE, KZ, check }) => {
       await cdp.send('Emulation.setDeviceMetricsOverride', { width: 500, height: 820, deviceScaleFactor: 1, mobile: false });
       // The approved two-column layout keeps a bounded left scroller at this
       // width too. Reveal the field as a user would before probing its hit box.
-      await cdp.evaluate("document.querySelector('.vz-folder-path').scrollIntoView({block:'center',inline:'nearest'})");
+      await cdp.evaluate("document.querySelector('.vz-image-add').scrollIntoView({block:'center',inline:'nearest'})");
       const narrow = await cdp.evaluate(`(()=>{const element=document.querySelector('.vz-folder-path'),input=element.getBoundingClientRect(),add=document.querySelector('.vz-folder-add').getBoundingClientRect(),footer=document.querySelector('.vz-image-add').getBoundingClientRect(),list=document.querySelector('.vz-sliders').getBoundingClientRect(),right=document.querySelector('.vz-right').getBoundingClientRect();return{center:Math.abs((input.top+input.bottom-add.top-add.bottom)/2),contained:input.left>=footer.left&&add.right<=footer.right&&footer.right<=innerWidth,visible:input.top>=0&&add.bottom<=innerHeight,hit:document.elementFromPoint(input.left+input.width/2,input.top+input.height/2)===element,ordered:right.left>=list.right&&Math.abs(right.top-list.top)<1&&Math.abs(right.bottom-list.bottom)<1}})()`);
       assert(narrow.center < 1 && narrow.contained && narrow.visible && narrow.hit && narrow.ordered, JSON.stringify(narrow));
     } finally { await cdp.send('Emulation.clearDeviceMetricsOverride'); }

@@ -4,18 +4,22 @@ import { editorRig } from "./helpers/variation-editor.mjs";
 import { generatePermutations, permutationPlan } from "../src/features/variations/shared.mjs";
 
 const cases = {
-  numeric: { id: "n.denoise", values: { enabled: false, min: "0.9", max: "0.95", rawIncrement: "1e-1", mode: "value", value: "0.9" } },
+  numeric: { id: "n.denoise", values: { enabled: true, min: "0.9", max: "0.95", rawIncrement: "1e-1", mode: "value", value: "0.9" } },
   images: { id: "image.image", values: { enabled: true, items: [{ kind: "upload", name: "a.png", file: new File(["a"], "a.png") }] } },
   enums: { id: "choice.value", values: { enabled: true, picks: ["second"] } },
   texts: { id: "text.text", values: { enabled: true, text: "first\n\nsecond", tpl: { kept: "one; two" } } },
   naming: { id: "root", values: { prefix: "prefix_", suffix: "_suffix" } },
+  candidates: { id: "custom.value", values: { enabled: true, candidates: ["false"] } },
 };
 
 Deno.test("editor contract: every declared editable field participates in dirty work; unknown edits cannot create unclassified work", () => {
   for (const [domain, fields] of Object.entries(EDITOR_FIELDS)) {
     assertEquals(Object.keys(cases[domain].values), Object.keys(fields));
     for (const name of Object.keys(fields)) {
-      const { editor } = editorRig(); assert(!editor.dirty());
+      const { editor, catalogue } = editorRig();
+      editor.installCatalogue({ ...catalogue, parameters: [...catalogue.params, ...catalogue.stringParams.map(p => ({ ...p, kind: "image" })), ...catalogue.enumParams, ...catalogue.textParams,
+        { id: "custom.value", key: "value", type: "Custom", nodeIds: ["custom"], current: null }] });
+      assert(!editor.dirty());
       editor.edit(domain, cases[domain].id, name, cases[domain].values[name]);
       assert(editor.dirty(), `${domain}.${name} must register work`);
       assertEquals(domain === "naming" ? editor.naming(name) : editor.rows(domain)[cases[domain].id][name], cases[domain].values[name]); editor.dispose();
@@ -29,6 +33,7 @@ Deno.test("editor contract: every declared editable field participates in dirty 
 
 Deno.test("editor contract: one combined configuration consumes all eligible declared fields and reaches owned closure", async () => {
   const rig = editorRig(), { editor } = rig, file = new File(["exact"], "exact.png");
+  editor.setEnabled("n.denoise", true);
   editor.range("n.denoise", { min: "0.5", max: "0.7" }); editor.edit("numeric", "n.denoise", "rawIncrement", "1e-1");
   editor.edit("images", "image.image", "enabled", true); editor.addImages("image.image", [{ kind: "upload", name: file.name, file }]);
   editor.edit("enums", "choice.value", "enabled", true); editor.edit("enums", "choice.value", "picks", ["second", "first"]);
@@ -47,6 +52,7 @@ Deno.test("editor contract: clean metadata/default settlement during Run cannot 
     const response = await baseline(request); return new Promise(resolve => release = () => resolve(response));
   } });
   const baseline = editorRig().services.run, { editor } = rig;
+  editor.setEnabled("n.denoise", true);
   editor.edit("naming", "root", "prefix", "captured_"); const pending = editor.run();
   while (!release) await new Promise(resolve => setTimeout(resolve, 0));
   editor.installInputs({ origin: rig.context.origin, files: ["new-clean-default.png", "next.png"] });
@@ -62,7 +68,7 @@ Deno.test("editor contract: edit-and-revert, pending decisions and future-close 
     const baselineRig = editorRig(), rig = editorRig({ run: async request => {
       const response = await baselineRig.services.run(request); return new Promise(resolve => release = () => resolve(response));
     } }), { editor } = rig;
-    editor.edit("naming", "root", "prefix", "captured_"); const pending = editor.run();
+    editor.setEnabled("n.denoise", true); editor.edit("naming", "root", "prefix", "captured_"); const pending = editor.run();
     while (!release) await new Promise(resolve => setTimeout(resolve, 0));
     if (transition === "edit-revert") { editor.edit("naming", "root", "prefix", "newer_"); editor.edit("naming", "root", "prefix", "captured_"); }
     else { editor.invalidateClose(); editor.decision(true); if (transition === "keep-editing") editor.decision(false); }
@@ -159,6 +165,7 @@ Deno.test("editor contract: initialization cannot overwrite early naming edits o
     currentOrigin: () => base.context.origin, setTimer: () => 0, clearTimer() {} });
   editor.edit('naming', 'root', 'prefix', 'early prefix'); editor.edit('naming', 'root', 'suffix', 'early suffix');
   editor.installCatalogue(base.catalogue); editor.installInputs({ origin: base.context.origin, files: ['origin.png'] });
+  editor.setEnabled('n.denoise', true);
   assertEquals(editor.naming('prefix'), 'early prefix'); assertEquals(editor.naming('suffix'), 'early suffix');
   assertThrows(() => editor.edit('numeric', 'n.denoise', 'current', 2));
   assertThrows(() => editor.edit('images', 'image.image', 'files', ['other.png']));

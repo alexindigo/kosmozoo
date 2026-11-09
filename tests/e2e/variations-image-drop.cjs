@@ -7,7 +7,7 @@ const { openImageAdd, waitForSelectedPreviews } = require('./image-picker-helper
 module.exports = async ({ cdp, check, FAKE, KZ }) => {
   const invoke = (id, args = {}) => cdp.evaluate(`(async()=>${KZ}.handles.invoke(${JSON.stringify(id)},${JSON.stringify(args)}))()`);
   const names = () => cdp.evaluate("[...document.querySelectorAll('.vz-image-tile')].map(el=>el.dataset.imageName)");
-  const box = selector => cdp.evaluate(`(()=>{const r=document.querySelector(${JSON.stringify(selector)}).getBoundingClientRect();return{x:r.x+r.width/2,y:r.y+r.height/2}})()`);
+  const box = selector => cdp.evaluate(`(async()=>{const element=document.querySelector(${JSON.stringify(selector)});element.scrollIntoView({block:'center',inline:'nearest'});await new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve)));const r=element.getBoundingClientRect();return{x:r.x+r.width/2,y:r.y+r.height/2}})()`);
   const resources = ['flux-basic.png', 'flux-lora.png', 'flux-ipadapter.png'].map((name, i) => {
     const path = workPath('artifacts', `drop-${i + 1}.png`);
     fs.mkdirSync(workPath('artifacts'), { recursive: true });
@@ -28,11 +28,10 @@ module.exports = async ({ cdp, check, FAKE, KZ }) => {
   try {
     await cdp.send('Emulation.setDeviceMetricsOverride', { width: 1600, height: 1000, deviceScaleFactor: 1, mobile: false });
     await invoke('variations.open', { id: 'fake:flux-controlnet.png' });
-    await cdp.poll("!!document.querySelector('.vz-image-set')"); await freshRecipe(cdp);
-    await cdp.clickAt('[data-param-key="9.denoise"] .checkbox');
-    const closed = await box('.vz-image-set');
+    await cdp.poll("!!document.querySelector('[data-catalogue-id=\"43.image\"]')"); await freshRecipe(cdp);
+    const closed = await box('[data-catalogue-id="43.image"]');
     await drag('dragEnter', closed, [resources[0]]); await drag('dragOver', closed, [resources[0]]);
-    await cdp.poll("!!document.querySelector('.vz-image-set.vz-image-dropping.vz-off')");
+    await cdp.poll("!!document.querySelector('.vz-catalogue-row.vz-image-dropping')");
     await drag('drop', closed, [resources[0]]);
     await cdp.poll("!!document.querySelector('.vz-image-set.on .vz-image-grid')&&document.querySelectorAll('.vz-image-tile').length===1");
     assert.deepEqual(await names(), ['drop-1.png']);

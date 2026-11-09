@@ -2,6 +2,7 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const { pickInput, openImageAdd, waitForSelectedPreviews } = require('./image-picker-helpers.cjs');
 const { freshRecipe } = require('./recipe-helpers.cjs');
+const { addParameter } = require('./variation-add-helpers.cjs');
 
 module.exports = async ({ cdp, check, FAKE, KZ }) => {
   const invoke = (id, args = {}) => cdp.evaluate(`(async()=>${KZ}.handles.invoke(${JSON.stringify(id)},${JSON.stringify(args)}))()`);
@@ -10,10 +11,9 @@ module.exports = async ({ cdp, check, FAKE, KZ }) => {
   await fetch(FAKE + '/__test/activity', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ captureEnqueue: true }) });
   try {
     await invoke('variations.open', { id: 'fake:flux-controlnet.png' });
-    await cdp.poll("!!document.querySelector('.vz-image-set')"); await freshRecipe(cdp);
+    await cdp.poll("!!document.querySelector('[data-catalogue-id=\"43.image\"]')"); await freshRecipe(cdp);
     await cdp.send('Emulation.setDeviceMetricsOverride', { width: 1600, height: 1000, deviceScaleFactor: 1, mobile: false });
-    await cdp.clickAt('.vz-image-set .checkbox');
-    await cdp.clickAt('[data-param-key="9.denoise"] .checkbox');
+    await addParameter(cdp,'43.image');
     await pickInput(cdp, 'canny.png');
     // Real decoded image content in deliberately mixed source aspect ratios.
     await cdp.evaluate(`(async()=>{
@@ -71,7 +71,7 @@ module.exports = async ({ cdp, check, FAKE, KZ }) => {
     const moved = [before[0],before[2],before[1],...before.slice(3)];
     await cdp.poll(`[...document.querySelectorAll('.vz-image-tile')].map(el=>el.dataset.imageName).join('|')===${JSON.stringify(moved.join('|'))}`);
     // Reload the grid from its recipe, without a second presentation-order owner.
-    await cdp.clickAt('.vz-image-set .checkbox'); await cdp.clickAt('.vz-image-set .checkbox');
+    await cdp.clickAt('.vz-image-set .checkbox'); await addParameter(cdp,'43.image');
     await waitForSelectedPreviews(cdp); assert.deepEqual(await order(), moved);
     check('image order: trusted pointer tile 3 before 1 and Alt+Right update recipe; grid reload preserves exact order', true);
     await cdp.evaluate("document.activeElement.blur();document.querySelector('.vz-sliders').scrollTop=0");
@@ -120,9 +120,9 @@ module.exports = async ({ cdp, check, FAKE, KZ }) => {
     check('image order: actual captured fake enqueues follow the final dragged/deleted order exactly (unchanged current excluded)', true);
     await invoke('variations.close');
     await invoke('variations.open', { id: 'fake:flux-controlnet.png' });
-    await cdp.poll("!!document.querySelector('.vz-image-set')&&document.querySelectorAll('.vz-slider-row').length>0");
+    await cdp.poll("!!document.querySelector('[data-catalogue-id=\"43.image\"]')");
     assert.deepEqual(await order(), []);
-    assert.equal(await cdp.evaluate("document.querySelector('.vz-image-set .checkbox').checked"),false);
+    assert.equal(await cdp.evaluate("!!document.querySelector('.vz-image-set')"),false);
     check('image order: full editor close/reopen starts with an empty image set, not the prior ordered Files', true);
   } finally {
     await cdp.send('Emulation.clearDeviceMetricsOverride');

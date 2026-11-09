@@ -2,6 +2,7 @@
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
+const { addParameter } = require('./variation-add-helpers.cjs');
 module.exports = async ({ cdp, check, ENGINE, FAKE, KZ }) => {
   const fixture = JSON.parse(fs.readFileSync(path.join(__dirname, '../fixtures/dynamic-combos.json')));
   const source = 'dynamic-combos', filename = 'dynamic-combos.png';
@@ -16,11 +17,11 @@ module.exports = async ({ cdp, check, ENGINE, FAKE, KZ }) => {
     await cdp.poll(`(async()=>!!${KZ}.state.hosts['${source}'])()`);
     await cdp.evaluate(`fetch('/api/collections/${source}/entries/${filename}/bytes').then(r=>{if(!r.ok)throw Error(r.status);return r.arrayBuffer()}).then(()=>true)`);
     await invoke('variations.open', { id: `${source}:${filename}` });
-    await cdp.poll(`!!document.querySelector('${row}')`);
+    await cdp.poll(`!!document.querySelector('[data-catalogue-id="459:500.sampling_mode"]')`);
     await cdp.send('Emulation.setDeviceMetricsOverride', { width: 1600, height: 1000, deviceScaleFactor: 1, mobile: false });
     // Only the combo axis participates; default-enabled numeric rows are off.
     await cdp.evaluate(`(()=>{for(const cb of document.querySelectorAll('.vz-slider-row .vz-parameter-heading .checkbox'))if(cb.checked)cb.click()})()`);
-    await cdp.clickAt(row + ' .vz-parameter-heading .checkbox');
+    await addParameter(cdp,'459:500.sampling_mode');
     assert.deepEqual(await cdp.evaluate(`[...document.querySelectorAll('${row} .vz-enum-opt-name')].map(el=>el.textContent)`), ['on', 'off']);
     assert.equal(await cdp.evaluate(`document.querySelector('${row} .vz-parameter-name').textContent`), 'Generate Text.sampling_mode');
     assert.equal(await cdp.evaluate(`!!document.querySelector('[data-text-id="459:500.sampling_mode"]')`), false);

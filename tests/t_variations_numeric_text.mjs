@@ -4,6 +4,7 @@ import { editorRig } from "./helpers/variation-editor.mjs";
 for (const [field, label] of [["min", "From"], ["max", "To"], ["value", "Value"]]) {
   for (const raw of ["", "-", "abc", "1e"]) Deno.test(`numeric text: ${label} ${JSON.stringify(raw)} is retained and rejects before effects`, async () => {
     const { editor, requests, uploads } = editorRig();
+    editor.setEnabled("n.denoise", true);
     try {
       if (field === "value") editor.edit("numeric", "n.denoise", "mode", "value");
       editor.edit("numeric", "n.denoise", field, "0.9");

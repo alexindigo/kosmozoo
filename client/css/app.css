@@ -1167,6 +1167,40 @@ body:has(#diff:not([hidden])) #statusCol { bottom: 56px; }
 .vz-root :is(select, button):focus-visible { outline: 2px solid var(--secondary); outline-offset: 2px; }
 .vz-left { container: variation-fields / inline-size; }
 
+/* Three bounded tracks. Below their usable minima only this inner surface
+   scrolls horizontally; all columns and the pinned action remain reachable. */
+.vz-root > .modal-panel { inline-size: min(1200px, 96vw); }
+.vz-body-scroll { min-height: 0; overflow-x: auto; overflow-y: hidden; }
+.vz-body { grid-template-columns: 210px minmax(320px, 1fr) 170px; gap: 16px;
+  min-width: 732px; max-width: none; block-size: 100%; }
+.vz-catalogue { display: grid; grid-template-rows: auto minmax(0, 1fr); gap: 8px; min-height: 0;
+  border-right: 1px solid var(--lifted); padding-right: 12px; }
+.vz-catalogue-list { overflow-y: auto; min-height: 0; }
+.vz-catalogue-row { display: grid; grid-template-columns: minmax(0, 1fr) 28px; align-items: center;
+  gap: 8px; padding-block: 6px; border-bottom: 1px solid var(--lifted); }
+.vz-catalogue-hidden { display: none; }
+.vz-catalogue-row.vz-image-dropping { background: var(--secondary-dim); outline: 1px solid var(--secondary); outline-offset: -1px; }
+.vz-catalogue-context { display: grid; gap: 2px; }
+.vz-catalogue-name { color: var(--foreground); }
+.vz-catalogue-current { color: var(--attention); font-variant-numeric: tabular-nums; }
+.vz-catalogue-add { width: 28px; height: 28px; padding: 0; display: grid; place-items: center;
+  border: 1px solid var(--lifted); border-radius: 4px; background: var(--surface); color: var(--foreground); cursor: pointer; }
+.vz-catalogue-add > span { width: 14px; height: 14px; display: grid; place-items: center; line-height: 14px; }
+.vz-sliders { padding: 2px 6px 2px 2px; }
+.vz-right { border-left: 1px solid var(--lifted); padding-left: 12px; }
+.vz-candidate-body { display: grid; gap: 8px; margin: 8px 0 0 24px; }
+.vz-candidate-entry { display: grid; gap: 4px; }
+.vz-candidate-controls { display: grid; gap: 4px; }
+.vz-candidate-actions { display: flex; align-items: center; justify-content: flex-end; gap: 4px; }
+.vz-candidate-actions button, .vz-candidate-add { border: 1px solid var(--lifted); border-radius: 4px;
+  background: var(--surface); color: var(--foreground); padding: 4px 8px; cursor: pointer; white-space: nowrap; }
+.vz-candidate-add { justify-self: start; }
+.vz-json-candidate { width: 100%; max-height: 8lh; overflow-y: auto; }
+.vz-connection-fields { display: grid; grid-template-columns: minmax(0, 1fr) 64px; gap: 8px; }
+.vz-connection-fields input { width: 100%; }
+.vz-root label { white-space: nowrap; }
+.vz-slider-row:not(:has(.vz-slider)) .vz-range-field > input { width: 23ch; max-width: 100%; }
+
 .vz-count-sub { margin: 0; line-height: 16px; overflow-wrap: anywhere; }
 .vz-count-large { font-size: 23px; }
 .vz-naming-group { grid-template-columns: 38px minmax(0, 1fr); align-items: center; }

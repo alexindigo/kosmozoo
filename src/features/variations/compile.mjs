@@ -10,7 +10,7 @@ export function compileValue(parameter, value) {
   return cloneJsonValue(assignmentValue(parameter, exact));
 }
 
-export function compileDiscreteAxes(imageParams, parameters) {
+export function compileDiscreteAxes(imageParams, parameters, nodes = null) {
   const index = parameterIndex(parameters);
   return Object.fromEntries(Object.entries(imageParams).map(([id, axis]) => {
     if (!axis.enabled) return [id, axis];
@@ -20,11 +20,24 @@ export function compileDiscreteAxes(imageParams, parameters) {
     // Normalize the whole assignment first, then preserve its first occurrence.
     // The generic tuple kernel consumes this sequence without changing multiplicity.
     for (const candidate of cloneJsonValue(axis.values)) {
-      const value = compileValue(parameter, candidate);
+      const value = validateEditorValue(parameter, candidate, nodes);
       if (!values.some(prior => sameJsonValue(prior, value))) values.push(value);
     }
     return [id, { ...axis, values }];
   }));
+}
+
+// The editor checks only facts supplied by the shared catalogue/port schema.
+// Final graph validation remains authoritative; unknown Python rules stay unknown.
+export function validateEditorValue(parameter, candidate, nodes = null) {
+  const value = compileValue(parameter, candidate), nodeId = parameter.nodeIds[0];
+  const schema = { declarations: new Map(parameter.schema?.status === "known" ? [[`${parameter.type}.${parameter.key}`, parameter.schema]] : []),
+    outputs: new Map((nodes ?? []).filter(node => node.outputs !== null).map(node => [node.type, node.outputs])) };
+  const graph = Object.fromEntries((nodes ?? []).map(node => [node.id, { class_type: node.type, inputs: {} }]));
+  graph[nodeId] = { class_type: parameter.type, inputs: { [parameter.key]: value } };
+  validateParameterValue(graph, parameter, schema);
+  if (nodes && parameter.valueKind === "connection") validateGraphLinks(graph, schema);
+  return value;
 }
 
 export function validateParameterValue(graph, parameter, schema = {}) {

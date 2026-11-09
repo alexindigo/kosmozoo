@@ -2,10 +2,12 @@
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const { freshRecipe } = require('./recipe-helpers.cjs');
+const { addParameter } = require('./variation-add-helpers.cjs');
 module.exports = async ({ cdp, check, KZ, FAKE }) => {
   const row = '[data-param-key="9.denoise"]';
   const open = async () => {
     await cdp.evaluate(`(async()=>{await ${KZ}.handles.invoke('variations.open',{id:'fake:flux-controlnet.png'})})()`);
+    await addParameter(cdp,'9.denoise');
     await cdp.poll(`!!document.querySelector('${row} .vz-numeric-editor')`);
   };
   const field = async (selector, value) => {
@@ -20,7 +22,7 @@ module.exports = async ({ cdp, check, KZ, FAKE }) => {
   };
   await cdp.send('Emulation.setDeviceMetricsOverride', { width: 1600, height: 1000, deviceScaleFactor: 1, mobile: false });
   try {
-    await open(); await freshRecipe(cdp);
+    await open(); await freshRecipe(cdp);await addParameter(cdp,'9.denoise');
     await cdp.poll(`!!document.querySelector('${row} .vz-range-fields')`);
     const layout = await cdp.evaluate(`(()=>{const r=document.querySelector('${row}'),rect=s=>r.querySelector(s).getBoundingClientRect(),cy=s=>{const x=rect(s);return x.y+x.height/2};
       const controls=r.querySelector('.vz-numeric-controls'),parts=[...controls.querySelectorAll('.mode-switch,.vz-range-field')].map(el=>el.getBoundingClientRect());
@@ -55,7 +57,7 @@ module.exports = async ({ cdp, check, KZ, FAKE }) => {
     assert(Number(dragged)<.89);
     check('numeric modes: typing, fine keyboard nudge and trusted Value drag stay synchronized', true, dragged);
     await field(`${row} .vz-value-field input`, '0.9');
-    await cdp.clickAt(`${row} .checkbox`); await cdp.clickAt(`${row} .checkbox`);
+    await cdp.clickAt(`${row} .checkbox`); await addParameter(cdp,'9.denoise');
     assert.equal(await cdp.evaluate(`document.querySelector('${row} .vz-value-field input').value`),'0.9');
     await cdp.clickAt(`${row} .mode-switch button[title="Range"]`);
     assert.equal(await cdp.evaluate(`document.querySelector('${row} .vz-range-field:first-child input').value`),'0.7');
@@ -77,7 +79,7 @@ module.exports = async ({ cdp, check, KZ, FAKE }) => {
     await cdp.clickAt(`${row} .mode-switch button[title="Value"]`);
     await field(`${row} .vz-value-field input`, '0.9');
     // Show both editor modes in one full realistic-size screenshot.
-    await cdp.clickAt('[data-param-key="9.steps"] .checkbox');
+    await addParameter(cdp,'9.steps');
     await cdp.evaluate("document.querySelector('.vz-sliders').scrollTop=0");
     if (process.env.E2E_VALUE_SHOT) {
       const shot = await cdp.send('Page.captureScreenshot',{format:'png'});
@@ -98,6 +100,7 @@ module.exports = async ({ cdp, check, KZ, FAKE }) => {
       {name:'value-batch-first.png',fixture:'flux-controlnet.png',graph:first},
       {name:'value-batch-second.png',fixture:'flux-controlnet.png',graph:second}]})});
     await cdp.evaluate(`(async()=>{for(const name of ['value-batch-first.png','value-batch-second.png'])await fetch('/api/collections/fake/entries/'+name+'/bytes');await ${KZ}.handles.invoke('variations.open',{ids:['fake:value-batch-first.png','fake:value-batch-second.png'],bulk:true})})()`);
+    await addParameter(cdp,'9.denoise');
     await cdp.poll(`!!document.querySelector('${row} .vz-numeric-editor')`);
     await cdp.clickAt(`${row} .mode-switch button[title="Value"]`);
     await field(`${row} .vz-value-field input`,'0.9');

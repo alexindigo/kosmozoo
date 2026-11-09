@@ -8,6 +8,7 @@
 // labels — never the slider library's internals (I3/I7).
 
 const { CDP } = require("./cdp.cjs");
+const { addParameter, toggleParameter } = require('./variation-add-helpers.cjs');
 
 const ENGINE = process.env.E2E_ENGINE ?? "http://127.0.0.1:18260";
 const FAKE = process.env.E2E_FAKE ?? "http://127.0.0.1:18261";
@@ -71,10 +72,10 @@ async function main() {
       check("wand click opens variations modal", opened);
     });
 
-    await attempt("close tooltip advertises the modal's working Escape key", async () => {
-      await cdp.poll(`document.querySelectorAll('.vz-slider-row').length > 0`, 5000);
+    await attempt("close tooltip and modal Escape remain available", async () => {
+      await cdp.poll(`document.querySelectorAll('.vz-catalogue-row').length > 0`, 5000);
       const title = await cdp.evaluate(`document.querySelector('.vz-close').title`);
-      check("Variations close tooltip is close (Esc)", title === 'close (Esc)', title);
+      check("Variations close tooltip has no static key hint", title === 'Close', title);
       await cdp.keyTrusted('Escape', { vk: 27 });
       await cdp.poll(`!document.querySelector('.vz-root')`, 5000);
       check("advertised Escape closes the clean Variations dialog", true);
@@ -109,10 +110,10 @@ async function main() {
     // input of every node. Assert the graph-appropriate params are present —
     // exact-set assertions died with the hardcoded probe table.
     await attempt("panel renders only the graph's varyable params", async () => {
-      await cdp.poll(`document.querySelectorAll('.vz-slider-row').length > 0`, 5000);
+      await cdp.poll(`document.querySelectorAll('.vz-catalogue-row').length > 0`, 5000);
       const info = await cdp.evaluate(`(() => {
-        const rows = document.querySelectorAll('.vz-slider-row');
-        const labels = [...rows].map((r) => r.dataset.paramKey);
+        const rows = document.querySelectorAll('.vz-catalogue-row');
+        const labels = [...rows].map((r) => r.dataset.catalogueId);
         return { count: rows.length, labels };
       })()`);
       check("panel renders graph-appropriate params",
@@ -126,15 +127,16 @@ async function main() {
 
     // --- probe fills in seed current value ---
     await attempt("row checkbox geometry and native interaction", async () => {
+      await addParameter(cdp, '9.denoise');
       await require('./variations-checkbox.cjs')({ cdp, check,
-        selector: '.vz-slider-row[data-param-key$="denoise"] .checkbox', size: 16 });
+        selector: '[data-param-key="9.denoise"] .checkbox', size:16, parameterId:'9.denoise' });
     });
 
     await attempt("probe fills in seed current value", async () => {
       const cur = await cdp.evaluate(`(() => {
-        for (const r of document.querySelectorAll('.vz-slider-row')) {
-          if (/seed$/.test(r.dataset.paramKey ?? "")) {
-            return r.querySelector('.vz-parameter-current')?.textContent;
+        for (const r of document.querySelectorAll('.vz-catalogue-row')) {
+          if (/seed$/.test(r.dataset.catalogueId ?? "")) {
+            return r.querySelector('.vz-catalogue-current')?.textContent;
           }
         }
         return null;
@@ -143,14 +145,14 @@ async function main() {
         cur != null && cur !== "",
         "current=" + cur);
     });
-    await attempt("denoise auto-enabled on open (count > 0)", async () => {
+    await attempt("explicitly added denoise has count > 0", async () => {
       const denoiseOn = await cdp.poll(`(() => {
         const r = document.querySelector('.vz-slider-row[data-param-key$="denoise"]');
         return !!r && !r.classList.contains('vz-off');
       })()`, 5000).then(() => true).catch(() => false);
       const count = await cdp.evaluate(`document.querySelector('.vz-count')?.textContent`);
       const n = parseInt(count, 10);
-      check("denoise auto-enabled and count > 0",
+      check("explicitly added denoise and count > 0",
         denoiseOn && n > 0,
         "denoiseOn=" + denoiseOn + " count=" + count);
     });
@@ -159,10 +161,10 @@ async function main() {
     // No trailing underscore in the token — ComfyUI's SaveImage adds its
     // own separator before the counter, so `_{key}` (leading only) is
     // the right shape. The key is the full node/input identity.
-    await attempt("enable auto-inserts _{key} into suffix", async () => {
+    await attempt("automatic naming leaves manual suffix empty", async () => {
       const suffix = await cdp.evaluate(`document.querySelector('.vz-suffix')?.value`);
-      check("suffix auto-populated on enable",
-        /^_\{[\w.]*denoise\}$/.test(suffix ?? ""),
+      check("automatic projection does not write suffix",
+        suffix === "",
         "suffix=" + JSON.stringify(suffix));
     });
 
@@ -171,10 +173,10 @@ async function main() {
       // enable the LAST row too — through a trusted click (I7), then poll
       // the reorder instead of sleeping
       const lastKey = await cdp.evaluate(`(() => {
-        const rows = document.querySelectorAll('.vz-slider-row');
-        return rows.length > 1 ? rows[rows.length - 1].dataset.paramKey : null;
+        const rows = [...document.querySelectorAll('.vz-catalogue-row')].filter(row=>/steps$/.test(row.dataset.catalogueId));
+        return rows.at(-1)?.dataset.catalogueId;
       })()`);
-      await cdp.clickAt(`.vz-slider-row[data-param-key="${lastKey}"] .checkbox`);
+      await addParameter(cdp, lastKey);
       await cdp.poll(`document.querySelectorAll('.vz-slider-row:not(.vz-off)').length >= 2`, 5000);
       const order = await cdp.evaluate(`(() => {
         const rows = [...document.querySelectorAll('.vz-slider-row')];
@@ -213,9 +215,9 @@ async function main() {
         return;
       }
       await cdp.clickAt(`.vz-slider-row[data-param-key="${key}"] .checkbox`);
-      await cdp.poll(`document.querySelector('.vz-suffix').value.length < ${JSON.stringify(before ?? "").length}`, 5000);
+      await cdp.poll(`!document.querySelector('[data-param-key="${key}"]')`, 5000);
       const after = await cdp.evaluate(`document.querySelector('.vz-suffix')?.value`);
-      check("suffix shrank after disable", after.length < before.length,
+      check("manual suffix stays byte-identical after remove", after === before,
         JSON.stringify({ before, after }));
     });
 
@@ -347,15 +349,15 @@ async function main() {
     // Inactive rows expose their current value, without mounting an editor.
     await attempt("disabled row is compact with current context and no editor", async () => {
       const v = await cdp.evaluate(`(() => {
-        const row = [...document.querySelectorAll('.vz-slider-row')].find(r => r.classList.contains('vz-off'));
+        const row = document.querySelector('.vz-catalogue-row:not(.vz-catalogue-hidden)');
         if (!row) return { error: 'no off row' };
         const vis = (el) => el && getComputedStyle(el).visibility !== 'hidden' && el.getBoundingClientRect().width > 0;
         return {
           rail: vis(row.querySelector('.vz-rail')),
           marker: vis(row.querySelector('.vz-marker')),
           sliderHidden: !vis(row.querySelector('.vz-slider')),
-          current: row.querySelector('.vz-parameter-current').textContent,
-          compact: row.getBoundingClientRect().height <= 44,
+          current: row.querySelector('.vz-catalogue-current').textContent,
+          compact: row.getBoundingClientRect().height <= 52,
           editorAbsent: !row.querySelector('.vz-numeric-editor'),
         };
       })()`);
@@ -449,6 +451,7 @@ async function main() {
       await cdp.evaluate(`
         document.querySelector('.card[data-idx="0"] .votebtn.variations').click()
       `);
+      await addParameter(cdp, '9.denoise');
       await cdp.poll(`document.querySelectorAll('.vz-slider-row:not(.vz-off)').length > 0`, 5000);
       await cdp.evaluate(`document.querySelector('.vz-run').click()`);
       const hasResult = await cdp.poll(`(document.querySelector('.vz-error')?.textContent ?? '').length > 0`, 10000)
@@ -535,11 +538,11 @@ async function main() {
       await cdp.evaluate(`
         document.querySelector('.card[data-name="flux-lora.png"] .votebtn.variations').click()
       `);
-      await cdp.poll(`document.querySelectorAll('.vz-slider-row').length > 0`, 5000);
+      await cdp.poll(`document.querySelectorAll('.vz-catalogue-row').length > 0`, 5000);
       const info = await cdp.evaluate(`(() => {
         const out = {};
-        for (const r of document.querySelectorAll('.vz-slider-row')) {
-          out[r.dataset.paramKey] = r.querySelector('.vz-parameter-current')?.textContent.replace(/^Current /, '') ?? null;
+        for (const r of document.querySelectorAll('.vz-catalogue-row')) {
+          out[r.dataset.catalogueId] = r.querySelector('.vz-catalogue-current')?.textContent.replace(/^Current /, '') ?? null;
         }
         return out;
       })()`);
@@ -598,13 +601,14 @@ async function main() {
       await cdp.evaluate(`
         document.querySelector('.card[data-name="flux-lora.png"] .votebtn.variations').click()
       `);
-      await cdp.poll(`document.querySelectorAll('.vz-enumrow').length > 0`, 5000);
+      await cdp.poll(`document.querySelectorAll('.vz-catalogue-row').length > 0`, 5000);
+      const enumIds = ['9.scheduler','3.clip_name','3.type','8.sampler_name','20.lora_name','21.lora_name','1.unet_name','1.weight_dtype','13.vae_name'];
       const info = await cdp.evaluate(`(() => {
-        const rows = [...document.querySelectorAll('.vz-enumrow')];
+        const rows = [...document.querySelectorAll('.vz-catalogue-row')].filter(row=>${JSON.stringify(enumIds)}.includes(row.dataset.catalogueId));
         return {
-          ids: rows.map((r) => r.dataset.enumId),
-          labels: rows.map((r) => r.querySelector('.vz-imgrow-label')?.textContent),
-          curs: rows.map((r) => r.querySelector('.vz-parameter-current')?.textContent.replace(/^Current /, '')),
+          ids: rows.map((r) => r.dataset.catalogueId),
+          labels: rows.map((r) => r.querySelector('.vz-catalogue-name')?.textContent),
+          curs: rows.map((r) => r.querySelector('.vz-catalogue-current')?.textContent.replace(/^Current /, '')),
         };
       })()`);
       // info-panel order: class_type, then input; per-instance rows in graph
@@ -629,7 +633,7 @@ async function main() {
         JSON.stringify(info.curs));
 
       // enable node 20's row: the host's options render, current pre-checked
-      await cdp.clickAt('.vz-enumrow[data-enum-id="20.lora_name"] .vz-imgrow-head .checkbox');
+      await addParameter(cdp,'9.denoise'); await addParameter(cdp,'20.lora_name');
       await cdp.poll(`document.querySelectorAll('.vz-enumrow[data-enum-id="20.lora_name"] .vz-enum-opt').length === 3`, 5000);
       await require('./variations-checkbox.cjs')({ cdp, check,
         selector: '.vz-enumrow[data-enum-id="20.lora_name"] .vz-enum-opt .checkbox', size: 14 });
@@ -646,7 +650,7 @@ async function main() {
       check("enabled enum row floats to the top",
         order[0] === "9.denoise"
           && order[1] === "20.lora_name"
-          && order.indexOf("8.sampler_name") > 1,
+          && !order.includes("8.sampler_name"),
         JSON.stringify(order));
       const opts = await cdp.evaluate(`(() => {
         const row = document.querySelector('.vz-enumrow[data-enum-id="20.lora_name"]');
@@ -732,14 +736,14 @@ async function main() {
       await cdp.evaluate(`
         document.querySelector('.card[data-idx="0"] .votebtn.variations').click()
       `);
-      await cdp.poll(`document.querySelectorAll('.vz-slider-row').length > 0`, 5000);
+      await addParameter(cdp, '9.denoise'); await addParameter(cdp, '2.text');
       const info = await cdp.evaluate(`(() => {
         const rows = [...document.querySelectorAll('.vz-textrow')];
         const all = [...document.querySelectorAll('.vz-slider-row, .vz-enumrow, .vz-textrow')];
         const last = all.at(-1);
         return {
           ids: rows.map((r) => r.dataset.textId),
-          curs: rows.map((r) => r.querySelector('.vz-parameter-current')?.textContent.replace(/^Current /, '')),
+          curs: rows.map((r) => r.querySelector('.vz-text-values')?.value),
           last: last?.dataset.textId ?? last?.dataset.enumId ?? last?.dataset.paramKey,
         };
       })()`);
@@ -752,7 +756,7 @@ async function main() {
 
       // Enable -> one current template. Adding paragraphs changes that one
       // prompt; it does not introduce another text axis.
-      await cdp.clickAt('.vz-textrow[data-text-id="2.text"] .vz-imgrow-head .checkbox');
+      await addParameter(cdp, '2.text');
       await cdp.poll(`!!document.querySelector('.vz-textrow[data-text-id="2.text"] .vz-text-values')`, 5000);
       const pre = await cdp.evaluate(`document.querySelector('.vz-textrow[data-text-id="2.text"] .vz-text-values').value`);
       check("textarea pre-filled with the current text",
@@ -815,8 +819,7 @@ async function main() {
       await cdp.evaluate(`
         document.querySelector('.card[data-idx="0"] .votebtn.variations').click()
       `);
-      await cdp.poll(`document.querySelectorAll('.vz-slider-row').length > 0`, 5000);
-      await cdp.clickAt('.vz-textrow[data-text-id="2.text"] .vz-imgrow-head .checkbox');
+      await addParameter(cdp, '9.denoise'); await addParameter(cdp, '2.text');
       await cdp.poll(`!!document.querySelector('.vz-textrow[data-text-id="2.text"] .vz-text-values')`, 5000);
       // spy on the run payload — the expansion is client-side, the POST body
       // is the honest record of what would be enqueued
@@ -886,8 +889,7 @@ async function main() {
       await cdp.evaluate(`
         document.querySelector('.card[data-idx="0"] .votebtn.variations').click()
       `);
-      await cdp.poll(`document.querySelectorAll('.vz-slider-row').length > 0`, 5000);
-      await cdp.clickAt('.vz-textrow[data-text-id="2.text"] .vz-imgrow-head .checkbox');
+      await addParameter(cdp, '9.denoise'); await addParameter(cdp, '2.text');
       await cdp.poll(`!!document.querySelector('.vz-textrow[data-text-id="2.text"] .vz-text-values')`, 5000);
       await cdp.evaluate(`(() => {
         const orig = window.fetch;

@@ -3,6 +3,7 @@ const fs = require('node:fs');
 const { workPath } = require('./paths.cjs');
 const { CDP } = require('./cdp.cjs');
 const { openImageAdd, waitForInputPicker } = require('./image-picker-helpers.cjs');
+const { addParameter } = require('./variation-add-helpers.cjs');
 const ENGINE = process.env.E2E_ENGINE || 'http://127.0.0.1:18260';
 const FAKE = process.env.E2E_FAKE || 'http://127.0.0.1:18261';
 const OTHER = process.env.E2E_FAKE2 || 'http://127.0.0.1:18262';
@@ -29,9 +30,7 @@ module.exports = async ({ cdp, check }) => {
   };
   const open = async () => {
     await invoke('variations.open', { id: 'fake:flux-controlnet.png' });
-    await cdp.poll("!!document.querySelector('.vz-image-set')");
-    await cdp.clickAt('.vz-image-set .checkbox');
-    await cdp.clickAt('[data-param-key="9.denoise"] .checkbox');
+    await addParameter(cdp,'43.image');
     await openImageAdd(cdp); await cdp.clickAt('.vz-input-trigger'); await waitForInputPicker(cdp);
   };
   await fetch(OTHER + '/__test/activity', { method: 'POST', body: JSON.stringify({ reset: true }) });

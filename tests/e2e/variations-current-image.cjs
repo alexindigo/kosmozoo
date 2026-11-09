@@ -2,6 +2,7 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const { openImageAdd, pickInput, waitForSelectedPreviews } = require('./image-picker-helpers.cjs');
 const { workPath } = require('./paths.cjs');
+const { addParameter } = require('./variation-add-helpers.cjs');
 module.exports = async ({ cdp, KZ, FAKE, check }) => {
   const invoke = (id,args={}) => cdp.evaluate(`(async()=>${KZ}.handles.invoke(${JSON.stringify(id)},${JSON.stringify(args)}))()`);
   const jobs = async () => (await fetch(FAKE+'/__test/enqueues')).json();
@@ -19,9 +20,7 @@ module.exports = async ({ cdp, KZ, FAKE, check }) => {
     for(const bulk of [false,true]) {
       const names = bulk ? ['flux-controlnet.png','portraits/flux-controlnet_00002_.png'] : ['flux-controlnet.png'];
       await invoke('variations.open', bulk ? {ids:names.map(n=>'fake:'+n),bulk:true} : {id:'fake:'+names[0]});
-      await cdp.poll("!!document.querySelector('.vz-image-set .checkbox')");
-      await cdp.clickAt('.vz-image-set .checkbox');
-      await cdp.clickAt('[data-param-key="9.denoise"] .checkbox');
+      await addParameter(cdp,'43.image');
       await openImageAdd(cdp);
       assert(await cdp.evaluate("!!document.querySelector('.vz-current-image')"),'Current image acquisition button exists');
       const labels = await cdp.evaluate("[...document.querySelector('.vz-image-add').children].filter(e=>e.matches('button,.vz-input-picker')).map(e=>e.textContent.trim())");

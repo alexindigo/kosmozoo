@@ -1,4 +1,5 @@
 const assert = require('node:assert/strict');
+const { addParameter } = require('./variation-add-helpers.cjs');
 
 // The range and row-shell regressions share one four-kind public fixture.
 module.exports = async ({ cdp, FAKE, KZ, name }, run) => {
@@ -17,7 +18,8 @@ module.exports = async ({ cdp, FAKE, KZ, name }, run) => {
   await cdp.evaluate(`fetch('/api/collections/fake/entries/${name}/bytes').then(r=>r.arrayBuffer()).then(()=>true)`);
   const open = async () => {
     await invoke('variations.open', { id: 'fake:' + name });
-    await cdp.poll("!!document.querySelector('[data-image-id=\"470.image\"]')&&!!document.querySelector('[data-text-id=\"2.text\"]')");
+    await cdp.poll("!!document.querySelector('[data-catalogue-id=\"470.image\"]')&&!!document.querySelector('[data-catalogue-id=\"2.text\"]')");
+    await addParameter(cdp,'9.denoise');
   };
   const type = async (selector, text) => {
     await cdp.clickAt(selector);

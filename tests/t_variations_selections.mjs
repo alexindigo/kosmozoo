@@ -2,6 +2,7 @@ import { assert, assertEquals } from "jsr:@std/assert";
 import { editorRig } from "./helpers/variation-editor.mjs";
 
 const activate = editor => {
+  editor.setEnabled("n.denoise", true);
   editor.addImages("image.image", [{ kind: "input", name: "origin.png" }]);
   editor.edit("images", "image.image", "enabled", true);
   editor.edit("enums", "choice.value", "enabled", true);

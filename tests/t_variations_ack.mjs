@@ -198,6 +198,7 @@ Deno.test("ack: consumer rejects incomplete, foreign, duplicate and forged proof
 Deno.test("ack: successful Run leaves disabled/dormant/inactive raw values and native File identity unchanged until close", async () => {
   const a = new File(["a"], "a.png"), b = new File(["b"], "b.png");
   const { editor, requests } = editorRig();
+  editor.setEnabled("n.denoise", true);
   editor.edit("numeric", "n.denoise", "rawIncrement", "1e-1");
   editor.edit("numeric", "n.steps", "rawIncrement", "1e");
   editor.edit("images", "image.image", "enabled", true);

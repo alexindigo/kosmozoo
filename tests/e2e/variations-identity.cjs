@@ -1,6 +1,7 @@
 // Real browser -> private editor -> Run -> accepted fake-Comfy graphs and proof.
 const assert = require('node:assert/strict');
 const { pickInput } = require('./image-picker-helpers.cjs');
+const { addParameter } = require('./variation-add-helpers.cjs');
 
 module.exports = async ({ cdp, FAKE, KZ, check }) => {
   const http = async (path, body) => {
@@ -33,14 +34,13 @@ module.exports = async ({ cdp, FAKE, KZ, check }) => {
     await http('/__test/activity', { publish: [{ name: 'identity-multiple.png', fixture: 'flux-lora.png', graph, mtime: 2100000001 }] });
     await cdp.evaluate("(async()=>{await fetch('/api/collections/fake/entries/identity-multiple.png/bytes')})()");
     await invoke('variations.open', { id: 'fake:identity-multiple.png' });
-    await cdp.poll("document.querySelectorAll('[data-image-id]').length===2&&!!document.querySelector('[data-text-id=\"92:105.text\"]')");
+    for(const id of ['76.image','81.image'])await addParameter(cdp,id);
     const labels = await cdp.evaluate("[...document.querySelectorAll('[data-image-id] .vz-imgrow-label')].map(e=>e.title.split('\\n').at(-1))");
     assert.deepEqual(labels, ['Reference #76 · image', 'Reference #81 · image']);
-    for (const id of ['20', '21']) assert(await cdp.evaluate(`!!document.querySelector('[data-param-key="${id}.strength_model"]')`));
-    await cdp.clickAt('[data-param-key="9.denoise"] .checkbox');
-    await cdp.clickAt('[data-param-key="20.strength_model"] .checkbox');
+    for (const id of ['20', '21']) assert(await cdp.evaluate(`!!document.querySelector('[data-catalogue-id="${id}.strength_model"]')`));
+    await addParameter(cdp,'20.strength_model');
     await type('[data-param-key="20.strength_model"] .vz-row-inc-input', '0.3');
-    for (const id of ['76.image', '81.image']) await cdp.clickAt(`[data-image-id="${id}"] .checkbox`);
+    for (const id of ['76.image', '81.image']) await addParameter(cdp,id);
     await cdp.poll("!!document.querySelector('[data-image-id=\"76.image\"] .vz-imgfilespick')");
     await cdp.evaluate(`(()=>{const input=document.querySelector('[data-image-id="76.image"] .vz-imgfilespick'),dt=new DataTransfer();
       dt.items.add(new File(['content'],'identity-content.png',{type:'image/png'}));input.files=dt.files;
@@ -81,10 +81,10 @@ module.exports = async ({ cdp, FAKE, KZ, check }) => {
     check('placement: scrolled 81.image has a visible tile row; resize bursts coalesce, ancestor travel is read-only, no measure/write loop and close removes observers',true);
     await pickInput(cdp, 'ref.png', '[data-image-id="81.image"]');
     for (const [id, value] of [['2.text', 'positive-own'], ['92:105.text', 'negative-own']]) {
-      await cdp.clickAt(`[data-text-id="${id}"] .checkbox`);
+      await addParameter(cdp,id);
       await type(`[data-text-id="${id}"] .vz-text-values`, value);
     }
-    await cdp.clickAt('[data-enum-id="20.lora_name"] .vz-imgrow-head .checkbox');
+    await addParameter(cdp,'20.lora_name');
     await cdp.clickAt('[data-enum-id="20.lora_name"] .vz-enum-opt:last-child .checkbox');
     // Changing every other kind must preserve the first image's exact native File.
     assert(await cdp.evaluate("document.querySelector('[data-image-id=\"76.image\"] .vz-imgfilespick')===window.__identityInput&&window.__identityInput.files[0]===window.__identityFile&&!!document.querySelector('[data-image-id=\"81.image\"] [data-image-name=\"ref.png\"]')"));
@@ -107,7 +107,7 @@ module.exports = async ({ cdp, FAKE, KZ, check }) => {
       assert.equal(job.prompt['2'].inputs.text, 'positive-own');
       assert.equal(job.prompt['92:105'].inputs.text, 'negative-own');
       const names = Object.values(job.prompt).filter(node => node.class_type === 'SaveImage').map(node => node.inputs.filename_prefix);
-      assert(names.length); assert(names.every(name => !/[{}]/.test(name) && name.includes('_identity-content_ref_') && name.endsWith('_positive-own_negative-own')));
+      assert(names.length); assert(names.every(name => !/[{}]/.test(name) && name.includes('_identity-content_ref_') && name.includes('_positive-own_negative-own')));
     }
     assert(await cdp.evaluate("window.__identityInput.files[0]===window.__identityFile"));
     await cdp.poll("!document.querySelector('.vz-panel')", 6000);

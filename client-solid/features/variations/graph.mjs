@@ -10,6 +10,50 @@
 // engine-side endpoints are the variations feature's /probe and /run.
 
 import { formatValue } from "/shared/features/variations/shared.mjs";
+import { parameterCurrent, parseExactJson, stringifyExactJson } from "/shared/parameters.mjs";
+
+// Presentation strategies are projections, never a second parameter catalogue.
+export function editorDomain(parameter) {
+  if (parameter.kind === "image") return "images";
+  const value = parameterCurrent(parameter);
+  if (parameter.valueKind !== "connection" && (parameter.schema?.options?.length || parameter.values?.length)) {
+    const options = parameter.schema?.options ?? parameter.values;
+    return options.every(value => typeof value === "string") && typeof value === "string" ? "enums" : "candidates";
+  }
+  if (typeof value === "number" || typeof value === "bigint") return "numeric";
+  if (typeof value === "string") return "texts";
+  return "candidates";
+}
+
+export function numericText(raw) {
+  try {
+    const text = raw.trim();
+    if (!text) return null;
+    if (!/^[+-]?(?:\d+\.?\d*|\.\d+)(?:e[+-]?\d+)?$/i.test(text)) return null;
+    const value = /^[+-]?\d+$/.test(text) ? parseExactJson(String(BigInt(text))) : Number(text);
+    if (typeof value !== "number" && typeof value !== "bigint") return null;
+    stringifyExactJson(value);
+    return value;
+  } catch { return null; }
+}
+
+export const sliderNumber = value => typeof value === "number" && Number.isFinite(value) && (!Number.isInteger(value) || Number.isSafeInteger(value));
+
+export function numericDefaults(parameter, batch) {
+  const current = parameterCurrent(parameter), integer = parameter.integer ?? (typeof current === "bigint" || Number.isInteger(current));
+  const tuning = paramDef(`${parameter.type}.${parameter.key}`, current, integer);
+  const schema = parameter.schema ?? {};
+  if (schema.min !== undefined) tuning.clamp[0] = schema.min;
+  if (schema.max !== undefined) tuning.clamp[1] = schema.max;
+  // Tuning cannot silently exclude a recorded seed or substitute 32-bit bounds.
+  if (schema.min === undefined && current < tuning.clamp[0]) tuning.clamp[0] = current;
+  if (schema.max === undefined && current > tuning.clamp[1]) tuning.clamp[1] = current;
+  const safe = [current, ...tuning.clamp].every(sliderNumber);
+  const defaults = batch ? { min: -tuning.spread, max: tuning.spread } : safe ? defaultRange(tuning, current) : { min: current, max: current };
+  return { metadata: { input: parameter.key, tuning, defaults, integer, minIncrement: integer ? 1 : 10 ** -tuning.decimals,
+    defaultIncrement: tuning.defaultInc, clamp: tuning.clamp },
+    defaults: { enabled: false, min: String(defaults.min), max: String(defaults.max), rawIncrement: String(tuning.defaultInc), mode: "range", value: String(current) } };
+}
 
 // --- slider tuning overrides ---------------------------------------------------
 //
@@ -38,7 +82,7 @@ export function paramDef(id, current, integer) {
   const decimals = ov.decimals ?? (integer ? 0 : defaultDecimals(current));
   const spread = ov.spread ?? defaultSpread(current, integer, decimals);
   const defaultInc = ov.defaultInc ?? defaultIncrement(decimals);
-  const clamp = ov.clamp ?? defaultClamp(current, decimals);
+  const clamp = [...(ov.clamp ?? defaultClamp(current, decimals))];
   return { key: id, label: id, decimals, spread, defaultInc, clamp };
 }
 
