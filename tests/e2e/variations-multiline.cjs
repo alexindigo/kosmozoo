@@ -3,7 +3,7 @@ const assert=require('node:assert/strict');
 const { addParameter } = require('./variation-add-helpers.cjs');
 module.exports=async({cdp,FAKE,KZ,check,closeAndDiscard})=>{
   const textField='.vz-textrow[data-text-id="2.text"] .vz-text-values';
-  const textToggle='.vz-textrow[data-text-id="2.text"] .vz-imgrow-head .checkbox';
+  const textToggle='.vz-textrow[data-text-id="2.text"] .vz-parameter-remove';
   const control=async body=>{const response=await fetch(FAKE+'/__test/activity',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});assert.equal(response.status,200);};
   const enqueues=async()=>await(await fetch(FAKE+'/__test/enqueues')).json();
   const type=async(selector,text)=>{

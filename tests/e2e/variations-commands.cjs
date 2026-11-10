@@ -4,7 +4,7 @@ const fs = require('node:fs');
 const { workPath } = require('./paths.cjs');
 const { freshRecipe } = require('./recipe-helpers.cjs');
 const { addParameter } = require('./variation-add-helpers.cjs');
-const fileControl = '.vz-imgrow:not(.vz-enumrow):not(.vz-textrow) .checkbox';
+const fileControl = '.vz-imgrow:not(.vz-enumrow):not(.vz-textrow) .vz-parameter-remove';
 const fileSetup = async (cdp) => {
   await addParameter(cdp, '43.image');
   await cdp.poll(`!!document.querySelector('.vz-imgfilespick')`);

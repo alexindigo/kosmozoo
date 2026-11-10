@@ -31,9 +31,10 @@ module.exports = async ({ cdp, check, KZ }) => {
     assert(geometry.scroll <= 1);
     check('row frame: list has no horizontal scroll', true);
     // The complete catalogue distinguishes repeated class/input occurrences by node.
-    assert(geometry.rows.every(item => item.name.includes('.') && (!item.name.includes('#') || item.name.endsWith('#' + item.id.split('.')[0])) && !item.current.startsWith('Current ')));
-    assert.deepEqual(geometry.rows.filter(item => item.id === '2.text' || item.id === '42.text').map(item => item.name), ['CLIPTextEncode.text #2', 'CLIPTextEncode.text #42']);
-    assert.equal(await cdp.evaluate("document.querySelector('[data-catalogue-id=\"43.image\"] .vz-catalogue-current').textContent"), 'canny.png');
+    assert(geometry.rows.every(item => item.name.length && !item.current.startsWith('Current ')));
+    assert.deepEqual(geometry.rows.filter(item => item.id === '2.text' || item.id === '42.text').map(item => item.name), ['text', 'text']);
+    assert.deepEqual(await cdp.evaluate("[...document.querySelectorAll('.vz-catalogue-node')].filter(node=>node.querySelector('[data-catalogue-id=\"2.text\"],[data-catalogue-id=\"42.text\"]')).map(node=>node.querySelector('.vz-catalogue-node-name').textContent)"), ['CLIPTextEncode #2', 'CLIPTextEncode #42']);
+    assert.equal(await cdp.evaluate("document.querySelector('[data-catalogue-id=\"43.image\"] .vz-catalogue-current').textContent"), 'canny.png (input)');
     assert(await cdp.evaluate("!document.querySelector('.vz-insert-parameter,.vz-name-example,.vz-name-help,.vz-parameter-identity')&&document.querySelector('.vz-run').textContent==='Run'"));
     check('row frame: raw ComfyUI names, current image filename and Run replace retired chrome', true);
     // Open names insert at both naming targets without toggling. Closed names
@@ -47,7 +48,7 @@ module.exports = async ({ cdp, check, KZ }) => {
       const id = await cdp.evaluate(`(()=>{const r=document.querySelector('${row(kind)}');return r.dataset.paramKey??r.dataset.enumId??r.dataset.textId??r.dataset.imageId})()`);
       await cdp.clickAt(`${row(kind)} .vz-parameter-name`);
       assert.equal(await cdp.evaluate(`document.querySelector('${target}').value`), `pre_{${id}}_post`);
-      assert.equal(await cdp.evaluate(`document.querySelector('${row(kind)} .checkbox').checked`), true);
+      assert.equal(await cdp.evaluate(`!!document.querySelector('${row(kind)}.on .vz-parameter-remove')`), true);
       assert(await cdp.evaluate(`document.activeElement===document.querySelector('${target}')`));
       await toggle(kind);
     }

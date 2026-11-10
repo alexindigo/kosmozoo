@@ -10,6 +10,7 @@ import { templateLabels, templateValue, parseSemicolonList, expandTextAxes, perm
 import { validOrigin, sameOrigin, validContext, sameContext } from "/shared/source-origin.mjs";
 import { validImageSet, mergeImages, sameImage, imageIdentity, uploadImage } from "./image-set.js";
 import { classifyImageFiles } from "./image-drop.js";
+import { connectionPresentation } from "./field-filter.js";
 import { RECIPE_FIELDS as EDITOR_FIELDS, makeVariationRecipe, recipeField as descriptor,
   validRecipeValue as validValue, freezeRecipe as freeze, recipeDispositions, moveRecipeImage } from "./recipe.js";
 export { RECIPE_FIELDS as EDITOR_FIELDS } from "./recipe.js";
@@ -303,8 +304,7 @@ export function makeVariationEditor({ targets, services, currentOrigin, changed 
       const values = entry.values.candidates.filter(text => { try { return !sameJsonValue(parseExactJson(text), value); } catch { return true; } });
       if (on) values.push(raw); return this.edit("candidates", id, "candidates", values);
     },
-    connectionNodes: () => (catalogues.get(capturedTargets[0].id)?.nodes ?? []).map(node => ({ ...node,
-      label: `${node.title ?? node.type} #${node.id} (${node.outputs ? node.outputs.map((port, slot) => `${slot}: ${port.name ?? port.type} ${port.type}`).join(", ") : "ports unknown"})` })),
+    connectionNodes: id => connectionPresentation(row("candidates", id).metadata, catalogues.get(capturedTargets[0].id)?.nodes ?? []),
     connection(id, index, node, slot) {
       return this.candidate(id, index, stringifyExactJson({ node, slot }));
     },

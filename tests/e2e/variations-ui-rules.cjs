@@ -40,7 +40,7 @@ const KZ = '(await import("/store/instance.js")).appStore';
     await addParameter(page, '2.text');
     await type('[data-text-id="2.text"] .vz-text-values', 'A portrait of {{animal}}.');
     await type('.vz-tpl-input', 'cat; dog');
-    if (!await page.evaluate('document.querySelector(".vz-image-set .checkbox").checked')) await page.clickAt('.vz-image-set .checkbox');
+    if (!await page.evaluate('!!document.querySelector(".vz-image-set.on .vz-parameter-remove")')) await addParameter(page, '43.image');
     await openImageAdd(page);
     await page.evaluate(`(() => {
       window.__pickerFocus = [];

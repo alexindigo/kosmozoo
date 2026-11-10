@@ -1,14 +1,20 @@
 import { For, Show, onMount, onCleanup, createSignal } from "solid-js";
-import { parameterName } from "./field-filter.js";
-import { formatValue } from "/shared/features/variations/shared.mjs";
+import { parameterInputName, parameterContext } from "./field-filter.js";
+import { IconButton } from "../../components/IconButton.js";
+import { iconSvg } from "/js/icons.mjs";
 import { SingleLineText } from "../../components/SingleLineText.js";
-import { parameterCurrent } from "/shared/parameters.mjs";
 import { isFileDrag, droppedFiles } from "./image-drop.js";
 
 export function ParameterCatalogue(props) {
   return <div class="vz-catalogue-list">
-    <For each={props.ids}>{id => <CatalogueRow row={() => props.row(id)} matches={props.matches}
-      onAdd={() => props.onAdd(id)} onFiles={resources => props.onFiles(id, resources)} registerFocus={focus => props.registerFocus(id, focus)} />}</For>
+    <For each={props.sections}>{section => <section class="vz-catalogue-section" classList={{ "vz-catalogue-hidden": !section.nodes.some(node => node.ids.some(id => !props.row(id).enabled && props.matches(props.row(id)))) }}>
+      <SingleLineText class="vz-catalogue-section-name" value={section.name} />
+      <For each={section.nodes}>{node => <div class="vz-catalogue-node" classList={{ "vz-catalogue-hidden": !node.ids.some(id => !props.row(id).enabled && props.matches(props.row(id))) }}>
+        <SingleLineText class="vz-catalogue-node-name" value={node.label} />
+        <For each={node.ids}>{id => <CatalogueRow row={() => props.row(id)} matches={props.matches}
+          onAdd={() => props.onAdd(id)} onFiles={resources => props.onFiles(id, resources)} registerFocus={focus => props.registerFocus(id, focus)} />}</For>
+      </div>}</For>
+    </section>}</For>
     <Show when={props.ready && !props.anyMatch}><SingleLineText class="vz-loading vz-filter-empty" value="No unadded fields match" /></Show>
   </div>;
 }
@@ -23,12 +29,10 @@ function CatalogueRow(props) {
     onDragOver={event => { if (row().domain === "images" && isFileDrag(event.dataTransfer)) { event.preventDefault(); event.dataTransfer.dropEffect = "copy"; setDropping(true); } }}
     onDragLeave={() => setDropping(false)} onDrop={event => { if (row().domain !== "images" || !isFileDrag(event.dataTransfer)) return; event.preventDefault(); setDropping(false); props.onFiles(droppedFiles(event.dataTransfer)); }}>
     <div class="vz-catalogue-context">
-      <SingleLineText class="vz-catalogue-name" value={parameterName(row())} hint={row().label} />
-      <SingleLineText class="vz-catalogue-current" value={formatValue(parameterCurrent(row()))} hint={`${row().label}: ${formatValue(parameterCurrent(row()))}`} />
+      <SingleLineText class="vz-catalogue-name" value={parameterInputName(row())} hint={row().label} />
+      <SingleLineText class="vz-catalogue-current" value={parameterContext(row())} hint={`${row().label}: ${parameterContext(row())}`} />
     </div>
-    <button ref={add} type="button" class="vz-catalogue-add" aria-label={`Add ${row().label}`} title={`Add ${row().label}`}
-      onClick={props.onAdd}>
-      <span aria-hidden="true">-&gt;</span>
-    </button>
+    <IconButton buttonRef={element => add = element} chrome size="sm" variant="plain vz-catalogue-add" title={`Add ${row().label}`}
+      onAction={props.onAdd} icon={iconSvg("plus")} />
   </div>;
 }

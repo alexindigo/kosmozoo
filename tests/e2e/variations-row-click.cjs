@@ -4,8 +4,8 @@ const { addParameter } = require('./variation-add-helpers.cjs');
 
 module.exports = async ({ cdp, FAKE, KZ, check }) => withRecipe({ cdp, FAKE, KZ, name: 'row-click.png' }, async ({ type }) => {
   for (const [kind, row] of [['numeric','[data-param-key="9.steps"]'],['enum','[data-enum-id="9.scheduler"]'],['text','[data-text-id="2.text"]'],['images','[data-image-id="470.image"]']]) {
-    const checked = () => cdp.evaluate(`!!document.querySelector('${row} > .vz-parameter-heading .checkbox')?.checked`);
-    const box = `${row} > .vz-parameter-heading .checkbox`;
+    const checked = () => cdp.evaluate(`!!document.querySelector('${row}.on')`);
+    const box = `${row} > .vz-parameter-heading .vz-parameter-remove`;
     const id = {numeric:'9.steps',enum:'9.scheduler',text:'2.text',images:'470.image'}[kind];
     const catalogue = `[data-catalogue-id="${id}"]`;
     if (await checked()) await cdp.clickAt(box);

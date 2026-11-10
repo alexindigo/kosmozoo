@@ -57,7 +57,7 @@ module.exports = async ({ cdp, check, KZ, FAKE }) => {
     assert(Number(dragged)<.89);
     check('numeric modes: typing, fine keyboard nudge and trusted Value drag stay synchronized', true, dragged);
     await field(`${row} .vz-value-field input`, '0.9');
-    await cdp.clickAt(`${row} .checkbox`); await addParameter(cdp,'9.denoise');
+    await cdp.clickAt(`${row} .vz-parameter-remove`); await addParameter(cdp,'9.denoise');
     assert.equal(await cdp.evaluate(`document.querySelector('${row} .vz-value-field input').value`),'0.9');
     await cdp.clickAt(`${row} .mode-switch button[title="Range"]`);
     assert.equal(await cdp.evaluate(`document.querySelector('${row} .vz-range-field:first-child input').value`),'0.7');

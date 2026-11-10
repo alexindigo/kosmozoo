@@ -126,10 +126,9 @@ async function main() {
     });
 
     // --- probe fills in seed current value ---
-    await attempt("row checkbox geometry and native interaction", async () => {
+    await attempt("row remove icon geometry and native interaction", async () => {
       await addParameter(cdp, '9.denoise');
-      await require('./variations-checkbox.cjs')({ cdp, check,
-        selector: '[data-param-key="9.denoise"] .checkbox', size:16, parameterId:'9.denoise' });
+      await require('./variations-remove.cjs')({ cdp, check, parameterId:'9.denoise' });
     });
 
     await attempt("probe fills in seed current value", async () => {
@@ -214,7 +213,7 @@ async function main() {
         check("suffix shrank after disable", false, "no enabled non-denoise row to disable");
         return;
       }
-      await cdp.clickAt(`.vz-slider-row[data-param-key="${key}"] .checkbox`);
+      await cdp.clickAt(`.vz-slider-row[data-param-key="${key}"] .vz-parameter-remove`);
       await cdp.poll(`!document.querySelector('[data-param-key="${key}"]')`, 5000);
       const after = await cdp.evaluate(`document.querySelector('.vz-suffix')?.value`);
       check("manual suffix stays byte-identical after remove", after === before,
@@ -614,20 +613,20 @@ async function main() {
       // info-panel order: class_type, then input; per-instance rows in graph
       // order (alphabetically: BasicScheduler < CLIPLoader < KSamplerSelect <
       // LoraLoader < UNETLoader < VAELoader)
-      check("one enum row per node instance, info-panel order",
+      check("one enum row per node instance, adjustment priority and node grouping",
         info.ids.join("|") === [
           "9.scheduler",
-          "3.clip_name", "3.type",
-          "8.sampler_name",
           "20.lora_name", "21.lora_name",
+          "8.sampler_name",
+          "3.clip_name", "3.type",
           "1.unet_name", "1.weight_dtype",
           "13.vae_name",
         ].join("|"),
         JSON.stringify(info));
       check("per-node current values in the row heads",
         info.curs.join("|") === [
-          "simple", "t5xxl_fp16.safetensors", "flux", "euler",
-          "detail.safetensors", "style.safetensors",
+          "simple", "detail.safetensors", "style.safetensors", "euler",
+          "t5xxl_fp16.safetensors", "flux",
           "flux1-dev.safetensors", "default", "ae.safetensors",
         ].join("|"),
         JSON.stringify(info.curs));
@@ -658,6 +657,8 @@ async function main() {
         probe.style.color = 'var(--attention)';
         document.body.appendChild(probe);
         const orange = getComputedStyle(probe).color;
+        probe.style.color = 'var(--foreground)';
+        const foreground = getComputedStyle(probe).color;
         probe.remove();
         return [...row.querySelectorAll('.vz-enum-opt')].map((o) => ({
           name: o.querySelector('.vz-enum-opt-name')?.textContent,
@@ -665,14 +666,15 @@ async function main() {
           isCurrent: o.classList.contains('vz-enum-current'),
           color: getComputedStyle(o.querySelector('.vz-enum-opt-name')).color,
           orange,
+          foreground,
         }));
       })()`);
       check("options are the host's own list, in order",
         opts.map((o) => o.name).join("|") === "detail.safetensors|style.safetensors|other.safetensors",
         JSON.stringify(opts.map((o) => o.name)));
       const cur = opts.find((o) => o.name === "detail.safetensors");
-      check("current option pre-checked, orange-marked",
-        cur?.checked === true && cur?.isCurrent === true && cur?.color === cur?.orange,
+      check("current option pre-checked, distinct identity and chosen foreground",
+        cur?.checked === true && cur?.isCurrent === true && cur?.color === cur?.foreground && cur?.color !== cur?.orange,
         JSON.stringify(cur));
       check("other options neither checked nor orange",
         opts.filter((o) => o.name !== "detail.safetensors")

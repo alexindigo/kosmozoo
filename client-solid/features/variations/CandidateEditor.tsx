@@ -5,6 +5,8 @@ import { TextField } from "../../components/TextField.js";
 import { Select } from "../../components/Select.js";
 import { SingleLineText } from "../../components/SingleLineText.js";
 import { focusMemory } from "./draft.js";
+import { IconButton } from "../../components/IconButton.js";
+import { iconSvg } from "/js/icons.mjs";
 
 // Raw candidate text, typed choices, ordering and graph facts are injected by the
 // private editor. This component presents them and forwards semantic intents.
@@ -23,17 +25,29 @@ export function CandidateEditor(props) {
           }}</For>
         </div>
       </Show>
-      <Index each={row().candidateViews}>{(candidate, index) => <div class="vz-candidate-entry">
+      <Index each={row().candidateViews}>{(candidate, index) => {
+        const node = () => props.nodes?.find(node => node.id === candidate().node);
+        return <div class="vz-candidate-entry">
         <div class="vz-candidate-controls">
           <Show when={row().candidateKind === "json"} fallback={
             <Show when={row().candidateKind === "connection"} fallback={<SingleLineText class="vz-candidate-value" value={candidate().label} />}>
               <div class="vz-connection-fields">
-                <Select aria-label={`${row().label} candidate ${index + 1} node`} value={candidate().node} {...focus}
+                <label class="vz-connection-control"><span>Node</span><Select aria-label={`${row().label} candidate ${index + 1} node`} value={candidate().node} {...focus}
                   onChange={event => props.onConnection(index, event.currentTarget.value, candidate().slot)}>
+                  <option value="">Choose node</option>
                   <For each={props.nodes}>{node => <option value={node.id}>{node.label}</option>}</For>
-                </Select>
-                <TextField type="text" inputMode="numeric" aria-label={`${row().label} candidate ${index + 1} slot`}
-                  value={candidate().slot} {...focus} onInput={event => props.onConnection(index, candidate().node, event.currentTarget.value)} />
+                </Select></label>
+                <Show when={node()?.outputs !== null && node() !== undefined} fallback={
+                  <label class="vz-connection-control"><span>Slot</span><TextField type="text" inputMode="numeric" aria-label={`${row().label} candidate ${index + 1} slot`}
+                    title="Output ports are unknown. Enter a nonnegative slot; the backend checks compatibility."
+                    aria-invalid={!!candidate().error} value={candidate().slot} {...focus} onInput={event => props.onConnection(index, candidate().node, event.currentTarget.value)} /></label>
+                }>
+                  <label class="vz-connection-control"><span>Output</span><Select aria-label={`${row().label} candidate ${index + 1} output`} value={candidate().slot} {...focus}
+                    onChange={event => props.onConnection(index, candidate().node, event.currentTarget.value)}>
+                    <option value="">Choose output</option>
+                    <For each={node()?.outputs}>{port => <option value={port.slot}>{port.label}</option>}</For>
+                  </Select></label>
+                </Show>
               </div>
             </Show>
           }>
@@ -41,18 +55,18 @@ export function CandidateEditor(props) {
               aria-invalid={!!candidate().error} value={candidate().raw} {...focus} onInput={event => props.onCandidate(index, event.currentTarget.value)} />
           </Show>
           <div class="vz-candidate-actions">
-            <Show when={index > 0}><button type="button" aria-label={`Move candidate ${index + 1} up`} onClick={() => props.onMove(index, index - 1)}>Up</button></Show>
-            <Show when={index < row().candidateViews.length - 1}><button type="button" aria-label={`Move candidate ${index + 1} down`} onClick={() => props.onMove(index, index + 1)}>Down</button></Show>
-            <button type="button" aria-label={`Remove candidate ${index + 1}`} onClick={() => props.onRemove(index)}>Remove</button>
+            <Show when={index > 0}><IconButton chrome size="sm" variant="plain" title={`Move candidate ${index + 1} up`} onAction={() => props.onMove(index, index - 1)} icon={iconSvg("arrow-up")} /></Show>
+            <Show when={index < row().candidateViews.length - 1}><IconButton chrome size="sm" variant="plain vz-candidate-down" title={`Move candidate ${index + 1} down`} onAction={() => props.onMove(index, index + 1)} icon={iconSvg("chevron-down")} /></Show>
+            <IconButton chrome size="sm" variant="plain" title={`Remove candidate ${index + 1}`} onAction={() => props.onRemove(index)} icon={iconSvg("x")} />
           </div>
         </div>
         <Show when={candidate().error}><p class="vz-readiness-error" role="status">{candidate().error}</p></Show>
-      </div>}</Index>
+      </div>; }}</Index>
       <Show when={row().candidateKind === "json" || row().candidateKind === "connection"}>
-        <button type="button" class="vz-candidate-add" onClick={props.onAdd}>Add value</button>
+        <IconButton chrome size="sm" variant="plain vz-candidate-add" title="Add value" onAction={props.onAdd} icon={iconSvg("plus")} />
       </Show>
-      <Show when={row().candidateKind === "connection"}><p class="vz-field-help">{props.connectionHelp}</p></Show>
-      <Show when={row().schema?.status !== "known"}><p class="vz-field-help">Input schema unavailable. Backend custom validation is unknown.</p></Show>
+      <Show when={row().candidateKind === "connection" && row().candidateViews.some(candidate => props.nodes.find(node => node.id === candidate.node)?.outputs === null)}><p class="vz-field-help">Enter the output slot for nodes with unknown ports.</p></Show>
+      <span class="vz-contract-context" hidden>{row().contract?.knowledge !== "known" ? "Input declaration unavailable; custom validation is backend-owned." : "Custom validation is backend-owned."}</span>
     </div>
   </ParameterRow>;
 }

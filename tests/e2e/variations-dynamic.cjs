@@ -19,11 +19,11 @@ module.exports = async ({ cdp, check, ENGINE, FAKE, KZ }) => {
     await invoke('variations.open', { id: `${source}:${filename}` });
     await cdp.poll(`!!document.querySelector('[data-catalogue-id="459:500.sampling_mode"]')`);
     await cdp.send('Emulation.setDeviceMetricsOverride', { width: 1600, height: 1000, deviceScaleFactor: 1, mobile: false });
-    // Only the combo axis participates; default-enabled numeric rows are off.
-    await cdp.evaluate(`(()=>{for(const cb of document.querySelectorAll('.vz-slider-row .vz-parameter-heading .checkbox'))if(cb.checked)cb.click()})()`);
+    // All rows start off; only the explicitly added combo axis participates.
+    await cdp.evaluate(`(()=>{for(const button of document.querySelectorAll('.vz-slider-row .vz-parameter-remove'))button.click()})()`);
     await addParameter(cdp,'459:500.sampling_mode');
     assert.deepEqual(await cdp.evaluate(`[...document.querySelectorAll('${row} .vz-enum-opt-name')].map(el=>el.textContent)`), ['on', 'off']);
-    assert.equal(await cdp.evaluate(`document.querySelector('${row} .vz-parameter-name').textContent`), 'Generate Text.sampling_mode');
+    assert.equal(await cdp.evaluate(`document.querySelector('${row} .vz-parameter-name').textContent`), 'Generate Text #459:500: sampling_mode');
     assert.equal(await cdp.evaluate(`!!document.querySelector('[data-text-id="459:500.sampling_mode"]')`), false);
     check('dynamic combo: Generate Text.sampling_mode renders native on/off option checkboxes, never a textarea', true);
     await cdp.clickAt(row + ' .vz-enum-opt:last-child .checkbox');

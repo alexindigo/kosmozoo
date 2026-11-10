@@ -4,7 +4,7 @@ const { pickInput } = require('./image-picker-helpers.cjs');
 const { freshRecipe } = require('./recipe-helpers.cjs');
 const { addParameter } = require('./variation-add-helpers.cjs');
 const typeText=async(cdp,selector,text)=>{await cdp.clickAt(selector);await cdp.evaluate(`(()=>{const e=document.querySelector(${JSON.stringify(selector)});e.focus();e.select()})()`);await cdp.send('Input.insertText',{text});await cdp.poll(`document.querySelector(${JSON.stringify(selector)}).value===${JSON.stringify(text)}`);};
-const inputControl='.vz-imgrow:not(.vz-enumrow):not(.vz-textrow) .checkbox';
+const inputControl='.vz-imgrow:not(.vz-enumrow):not(.vz-textrow) .vz-parameter-remove';
 // This setup operates on ControlNet graphs. Its numeric/text rows can mount
 // before the independently fetched input row, which inserts above them. Own
 // complete control readiness before measuring any trusted pointer target.
@@ -79,9 +79,9 @@ module.exports=async({cdp,FAKE,KZ,check})=>{
     await type('.vz-textrow[data-text-id="2.text"] .vz-text-values','acknowledged text');
     assert.equal((await invoke('variations.run')).status,'submitted');
     // Previously acknowledged values are retained; only their on/off choices change.
-    await cdp.clickAt('.vz-imgrow:not(.vz-enumrow):not(.vz-textrow) .checkbox');
-    await cdp.clickAt('.vz-enumrow[data-enum-id="9.scheduler"] .vz-imgrow-head .checkbox');
-    await cdp.clickAt('.vz-textrow[data-text-id="2.text"] .checkbox');
+    await cdp.clickAt('.vz-imgrow:not(.vz-enumrow):not(.vz-textrow) .vz-parameter-remove');
+    await cdp.clickAt('.vz-enumrow[data-enum-id="9.scheduler"] .vz-parameter-remove');
+    await cdp.clickAt('.vz-textrow[data-text-id="2.text"] .vz-parameter-remove');
     const second=(await jobs()).length;assert.equal((await invoke('variations.run')).status,'submitted');
     const numeric=(await jobs()).slice(second);assert(numeric.length>0);
     assert(numeric.every(job=>job.prompt['43'].inputs.image==='canny.png'&&job.prompt['2'].inputs.text==='a portrait, studio light'&&job.prompt['9'].inputs.scheduler==='simple'));

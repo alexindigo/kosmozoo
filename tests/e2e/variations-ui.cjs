@@ -35,11 +35,11 @@ async function main() {
     const compact = await cdp.evaluate("[...document.querySelectorAll('.vz-catalogue-row:not(.vz-catalogue-hidden)')].map(row=>({id:row.dataset.catalogueId,height:row.getBoundingClientRect().height,editorVisible:!!row.querySelector('.vz-numeric-editor')}))");
     assert(compact.length > 2); assert(compact.every(row => row.height <= 52 && !row.editorVisible), JSON.stringify(compact));
     console.log('PASS compact inactive numeric rows ' + JSON.stringify(compact));
-    assert.equal(await cdp.evaluate(`document.querySelector('${denoise} .vz-parameter-name').textContent`), 'BasicScheduler.denoise');
+    assert.equal(await cdp.evaluate(`document.querySelector('${denoise} .vz-parameter-name').textContent`), 'BasicScheduler #9: denoise');
     assert(await cdp.evaluate(`document.querySelector('${denoise} .vz-label').title.includes('#9')`));
-    const identity = await cdp.evaluate(`(()=>{window.__uiWidget=document.querySelector('${denoise} .vz-slider');const cb=document.querySelector('${denoise} .checkbox');return {name:document.getElementById(cb.getAttribute('aria-labelledby')).textContent,description:document.getElementById(cb.getAttribute('aria-describedby')).textContent,thumbs:[...document.querySelectorAll('${denoise} [role="slider"]')].map(e=>e.getAttribute('aria-label'))}})()`);
-    assert.equal(identity.name, 'BasicScheduler.denoise'); assert.equal(identity.description, 'BasicScheduler #9 · denoise'); assert(identity.thumbs[0].includes('lower')); assert(identity.thumbs[1].includes('upper'));
-    await cdp.clickAt(`${denoise} .checkbox`);
+    const identity = await cdp.evaluate(`(()=>{window.__uiWidget=document.querySelector('${denoise} .vz-slider');const name=document.querySelector('${denoise} .vz-parameter-name');return {name:name.textContent,description:document.getElementById(name.getAttribute('aria-describedby')).textContent,thumbs:[...document.querySelectorAll('${denoise} [role="slider"]')].map(e=>e.getAttribute('aria-label'))}})()`);
+    assert.equal(identity.name, 'BasicScheduler #9: denoise'); assert.equal(identity.description, 'BasicScheduler #9 · denoise'); assert(identity.thumbs[0].includes('lower')); assert(identity.thumbs[1].includes('upper'));
+    await cdp.clickAt(`${denoise} .vz-parameter-remove`);
     assert.equal(await cdp.evaluate(`!!document.querySelector('${denoise} .vz-numeric-editor')`), false);
     await addParameter(cdp, '9.denoise');
     assert(await cdp.evaluate(`window.__uiWidget!==document.querySelector('${denoise} .vz-slider')`));
@@ -48,10 +48,10 @@ async function main() {
     await cdp.evaluate("(()=>{const input=document.querySelector('.vz-suffix');input.setSelectionRange(input.value.length,input.value.length)})()");
     await addParameter(cdp, '9.steps');
     await cdp.clickAt('[data-param-key="9.steps"] .vz-parameter-name');
-    assert.equal(await cdp.evaluate("document.querySelector('[data-param-key=\"9.steps\"] .checkbox').checked"),true);
+    assert.equal(await cdp.evaluate("!!document.querySelector('[data-param-key=\"9.steps\"].on .vz-parameter-remove')"),true);
     assert.equal(await cdp.evaluate("document.querySelector('.vz-suffix').value"), suffixBeforeLabel+'{9.steps}', 'name inserts a canonical token without enabling the row');
     await type('.vz-suffix', suffixBeforeLabel);
-    await cdp.clickAt('[data-param-key="9.steps"] .checkbox');
+    await cdp.clickAt('[data-param-key="9.steps"] .vz-parameter-remove');
     await cdp.clickAt(`${denoise} .vz-range-field:first-child input`);
     await type(`${denoise} .vz-range-field:first-child input`, '.85');
     await cdp.keyTrusted('Tab', { vk: 9 });
@@ -105,8 +105,8 @@ async function main() {
     await type('.vz-tpl-input', 'a person; a cat');
     await cdp.poll("document.querySelector('.vz-count').textContent==='24'");
     await shot('text-and-enum');
-    await cdp.clickAt('[data-text-id="2.text"] .vz-imgrow-head .checkbox');
-    await cdp.clickAt('[data-enum-id="9.scheduler"] .vz-imgrow-head .checkbox');
+    await cdp.clickAt('[data-text-id="2.text"] .vz-parameter-remove');
+    await cdp.clickAt('[data-enum-id="9.scheduler"] .vz-parameter-remove');
     await cdp.poll("document.querySelector('.vz-count').textContent==='11'");
     console.log('PASS current enum semantics and persistent template syntax/invalid-value associations');
 

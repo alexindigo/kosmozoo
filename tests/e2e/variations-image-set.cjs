@@ -1,7 +1,7 @@
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const { workPath } = require('./paths.cjs');
-const { pickInput, waitForSelectedPreviews, openImageAdd, openImageFolder, waitForInputPicker } = require('./image-picker-helpers.cjs');
+const { pickInput, waitForSelectedPreviews, openImageAdd, openImageFolder, waitForInputPicker, waitForIdleInputWindow } = require('./image-picker-helpers.cjs');
 const { freshRecipe } = require('./recipe-helpers.cjs');
 const { addParameter } = require('./variation-add-helpers.cjs');
 
@@ -53,6 +53,7 @@ module.exports = async ({ cdp, FAKE, KZ, check }) => {
     for (let row = 0; row < 12; row++) await cdp.keyTrusted('ArrowDown', { vk: 40 });
     await cdp.poll("document.activeElement.dataset.inputName==='picker-0536.png'");
     assert.equal(await activeName(), 'picker-0536.png');
+    await waitForIdleInputWindow(cdp, 'picker-0536.png');
     assert(await cdp.evaluate("document.activeElement.dataset.inputName==='picker-0536.png'&&document.querySelectorAll('.vz-input-option').length<=48"));
     for (let row = 0; row < 12; row++) await cdp.keyTrusted('ArrowUp', { vk: 38 });
     await cdp.poll("document.activeElement.dataset.inputName==='picker-0500.png'");

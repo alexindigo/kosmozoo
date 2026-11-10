@@ -71,7 +71,7 @@ module.exports = async ({ cdp, check, FAKE, KZ }) => {
     const moved = [before[0],before[2],before[1],...before.slice(3)];
     await cdp.poll(`[...document.querySelectorAll('.vz-image-tile')].map(el=>el.dataset.imageName).join('|')===${JSON.stringify(moved.join('|'))}`);
     // Reload the grid from its recipe, without a second presentation-order owner.
-    await cdp.clickAt('.vz-image-set .checkbox'); await addParameter(cdp,'43.image');
+    await cdp.clickAt('.vz-image-set .vz-parameter-remove'); await addParameter(cdp,'43.image');
     await waitForSelectedPreviews(cdp); assert.deepEqual(await order(), moved);
     check('image order: trusted pointer tile 3 before 1 and Alt+Right update recipe; grid reload preserves exact order', true);
     await cdp.evaluate("document.activeElement.blur();document.querySelector('.vz-sliders').scrollTop=0");

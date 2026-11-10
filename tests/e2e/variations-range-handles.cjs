@@ -28,7 +28,7 @@ module.exports = async ({ cdp, FAKE, KZ, check }) => withRecipe({ cdp, FAKE, KZ,
   // A widget value is not enough: in-session row remount projects its raw text.
   await cdp.clickAt('.vz-close'); await cdp.poll("!!document.querySelector('.vz-discard')");
   await cdp.clickAt('.vz-keep');
-  await cdp.clickAt(`${row} .checkbox`); await addParameter(cdp,'9.denoise');
+  await cdp.clickAt(`${row} .vz-parameter-remove`); await addParameter(cdp,'9.denoise');
   assert.deepEqual(await cdp.evaluate(`[document.querySelector(${JSON.stringify(field('From'))}).value,document.querySelector(${JSON.stringify(field('To'))}).value]`), expected);
   const jobsBefore = (await (await fetch(FAKE + '/__test/enqueues')).json()).length;
   assert.equal((await invoke('variations.run')).adopted, true);

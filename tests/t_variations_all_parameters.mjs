@@ -8,8 +8,9 @@ import { numericText } from "../client-solid/features/variations/graph.mjs";
 function allRig(overrides) {
   const rig = editorRig(overrides);
   const parameters = graphParameters({ custom: { class_type: "Custom", inputs: { bool: false, nil: null, object: {}, array: [], wrapper: { __value__: [false] }, text: "", seed: 18446744073709551615n, connection: ["source", 0] } }, source: { class_type: "Source", inputs: {} } });
-  rig.editor.installCatalogue({ ...rig.catalogue, parameters, nodes: [{ id: "custom", type: "Custom", outputs: [{ name: "image", type: "IMAGE" }] }, { id: "source", type: "Source", outputs: [{ name: "image", type: "IMAGE" }] }] });
-  return rig;
+  const nodes = [{ id: "custom", type: "Custom", outputs: [{ name: "image", type: "IMAGE" }] }, { id: "source", type: "Source", outputs: [{ name: "image", type: "IMAGE" }] }];
+  rig.editor.installCatalogue({ ...rig.catalogue, parameters, nodes });
+  return { ...rig, nodes };
 }
 
 Deno.test("all parameters: complete unique projection starts off and retains whole raw candidates without naming rewrites", async () => {
@@ -83,7 +84,7 @@ Deno.test("all parameters: false, null, empty string/container and wrappers are 
 Deno.test("all parameters: known constraints and node/slot facts reject before effects, unknown schema remains editable", async () => {
   const rig = allRig(), { editor } = rig;
   try {
-    const data = { ...rig.catalogue, parameters: editor.catalogue().map(row => ({ ...row, schema: row.id === "custom.bool" ? { status: "known", type: "BOOLEAN" } : row.schema })), nodes: editor.connectionNodes() };
+    const data = { ...rig.catalogue, parameters: editor.catalogue().map(row => ({ ...row, schema: row.id === "custom.bool" ? { status: "known", type: "BOOLEAN" } : row.schema })), nodes: rig.nodes };
     editor.installCatalogue(data);
     editor.setEnabled("custom.bool", true); editor.candidate("custom.bool", 0, "null");
     assertEquals(editor.preview().status, "invalid"); assertEquals((await editor.run()).status, "invalid");

@@ -9,7 +9,7 @@ async function addParameter(cdp, id) {
   await cdp.poll(`document.querySelector(${JSON.stringify(catalogue)}).classList.contains('vz-catalogue-hidden')`);
 }
 async function toggleParameter(cdp, id) {
-  const selector = `[data-param-key="${id}"] .vz-parameter-heading > input, [data-image-id="${id}"] .vz-parameter-heading > input, [data-enum-id="${id}"] .vz-parameter-heading > input, [data-text-id="${id}"] .vz-parameter-heading > input, [data-candidate-id="${id}"] .vz-parameter-heading > input`;
+  const selector = `[data-param-key="${id}"] .vz-parameter-remove, [data-image-id="${id}"] .vz-parameter-remove, [data-enum-id="${id}"] .vz-parameter-remove, [data-text-id="${id}"] .vz-parameter-remove, [data-candidate-id="${id}"] .vz-parameter-remove`;
   if (await cdp.evaluate(`!!document.querySelector(${JSON.stringify(selector)})`)) await cdp.clickAt(selector);
   else await addParameter(cdp, id);
 }
