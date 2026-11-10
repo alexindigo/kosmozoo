@@ -3,9 +3,9 @@ import { enqueue } from "../../src/backings/comfy.mjs";
 import { makeCollectionLifecycle } from "../../src/backings/index.mjs";
 import { parseExactJson, stringifyExactJson } from "../../src/parameters.mjs";
 
-export function typedRunRig({ graph, schema = {}, acceptance = "confirmed", filename = "source_00001_.png" }) {
+export function typedRunRig({ graph, schema = {}, objectInfo: readInfo, acceptance = "confirmed", filename = "source_00001_.png" }) {
   const routes = new Map(), bytes = [], hosts = { fake: "fixture:8188" }, lifecycle = makeCollectionLifecycle(hosts);
-  const backing = { objectInfo: async () => ({ outputClasses: new Set(["SaveImage"]), ...schema }), enqueue: job => enqueue("fixture:8188", job, {
+  const backing = { objectInfo: readInfo ?? (async () => ({ outputClasses: new Set(["SaveImage"]), ...schema })), enqueue: job => enqueue("fixture:8188", job, {
     fetcher: (_url, init) => {
       bytes.push(init.body);
       return Promise.resolve(new Response(JSON.stringify(acceptance === "uncertain" ? {} : {

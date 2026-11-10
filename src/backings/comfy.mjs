@@ -379,19 +379,36 @@ function inputSchema(input, prefix, budget, depth = 0) {
   return schema;
 }
 
-export async function objectInfo(addr, cache = new Map(), { fetcher = fetch, signal } = {}) {
-  const c = cache.get(addr);
-  if (c && Date.now() - c.t < OBJECT_INFO_TTL_MS) return c;
-  let out = { types: null, outputClasses: null, enums: null, lazyInputs: null, dynamicCombos: null, declarations: null, outputs: null };
+export async function objectInfo(addr, cache = new Map(), { fetcher = fetch, signal, graph } = {}) {
+  // Cache the backend catalogue, not the success/failure of one consumer's
+  // expansion. Only that graph's class definitions spend its schema budget.
+  const classes = graph === undefined ? null : [...new Set(Object.values(graph).map(node => String(node?.class_type ?? "")))].sort();
+  const scope = JSON.stringify(classes);
+  let c = cache.get(addr);
+  if (!c || Date.now() - c.t >= OBJECT_INFO_TTL_MS) {
+    c = { raw: null, t: Date.now(), error: null };
+    try {
+      const timeout = AbortSignal.timeout(HOST_TIMEOUT_MS);
+      const r = await fetcher(`http://${addr}/api/object_info`, { signal: signal ? AbortSignal.any([signal, timeout]) : timeout });
+      if (!r.ok) {
+        r.body?.cancel().catch(() => {});
+        throw new Error(`ComfyUI object_info returned HTTP ${r.status}`);
+      }
+      const raw = parseExactJson(await r.text());
+      if (!raw || typeof raw !== "object" || Array.isArray(raw)) throw new Error("Invalid object_info");
+      c.raw = raw;
+    } catch (error) { c.error = error.message; }
+    cache.set(addr, c);
+  }
+  // Retain only the latest view, so graph changes cannot grow a scope cache.
+  if (c.scope === scope) return c.view;
+  let out = { types: null, outputClasses: null, enums: null, lazyInputs: null, dynamicCombos: null, declarations: null, outputs: null, schemaError: c.error };
   try {
-    const timeout = AbortSignal.timeout(HOST_TIMEOUT_MS);
-    const r = await fetcher(`http://${addr}/api/object_info`, { signal: signal ? AbortSignal.any([signal, timeout]) : timeout });
-    if (r.ok) {
-       const info = parseExactJson(await r.text());
-      if (!info || typeof info !== "object" || Array.isArray(info)) throw new Error("Invalid object_info");
-      const candidate = { types: new Map(), outputClasses: new Set(), enums: new Map(), lazyInputs: new Map(), dynamicCombos: new Map(), declarations: new Map(), outputs: new Map() };
+    if (c.raw) {
+      const candidate = { types: new Map(), outputClasses: new Set(), enums: new Map(), lazyInputs: new Map(), dynamicCombos: new Map(), declarations: new Map(), outputs: new Map(), schemaError: null };
       const budget = schemaBudget();
-      for (const [type, def] of Object.entries(info)) {
+      const entries = classes === null ? Object.entries(c.raw) : classes.filter(type => Object.hasOwn(c.raw, type)).map(type => [type, c.raw[type]]);
+      for (const [type, def] of entries) {
         const schema = inputSchema(def?.input, type, budget);
         budget.set(candidate.lazyInputs, type, new Set([...schema.lazy].map(key => key.slice(type.length + 1))));
         if (def?.output_node) { budget.take(); candidate.outputClasses.add(type); }
@@ -404,8 +421,8 @@ export async function objectInfo(addr, cache = new Map(), { fetcher = fetch, sig
       }
       out = candidate;
     }
-  } catch { /* offline — the null maps stand */ }
-  cache.set(addr, { ...out, t: Date.now() });
+  } catch (error) { out.schemaError = error.message; /* No partial view is published. */ }
+  c.scope = scope; c.view = out;
   return out;
 }
 

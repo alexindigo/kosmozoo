@@ -295,9 +295,9 @@ export function register(app) {
     if (!graph) return { error: "no embedded ComfyUI graph", status: 422 };
     try { stringifyExactJson(graph); }
     catch (error) { return { error: `Embedded graph cannot be represented exactly: ${error.message}`, status: 422 }; }
-    const { types, enums, outputClasses, dynamicCombos, declarations, outputs } = await backing.objectInfo();
+    const { types, enums, outputClasses, dynamicCombos, declarations, outputs, schemaError } = await backing.objectInfo({ graph });
     if (!app.backings.isCurrent(token)) return { error: "source changed during inspection", status: 409 };
-    return { graph, addr, types, enums, outputClasses, dynamicCombos, declarations, outputs, token, backing, context: { origin, graphHash: hash } };
+    return { graph, addr, types, enums, outputClasses, dynamicCombos, declarations, outputs, schemaError, token, backing, context: { origin, graphHash: hash } };
   };
 
   app.route("GET", "/probe/<id>", async (_req, { id }) => {
@@ -347,6 +347,7 @@ export function register(app) {
     const r = await inspect(host, filename, context);
     if (r.error) return Response.json({ error: r.error }, { status: r.status });
     const { graph, outputClasses, token, backing } = r;
+    if (!outputClasses) return Response.json({ error: `ComfyUI node information is unavailable: ${r.schemaError ?? "could not identify output nodes"}; no jobs were submitted` }, { status: 502 });
 
     // Inspect once for current values + labels. Types come from the host's
     // object_info — the current value is not a reliable integer signal.

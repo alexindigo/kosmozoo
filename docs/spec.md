@@ -1181,8 +1181,19 @@ ranges use exact arithmetic; floating ranges retain existing quantization and ca
 Current exclusion follows the generated endpoint, including the existing rounded
 last step, so preview count and actual submitted tuples cannot disagree there.
 
-The backing's address cache retains input declarations, typed options, output
-slots/names/list flags and dynamic-combo/group declarations. Probe adds graph-local
+The backing's address cache retains the raw node catalogue for 60 seconds and its
+latest normalized schema view. Variations and workflow telemetry pass their graph
+to `objectInfo({ graph })`: only its distinct class definitions enter the same
+aggregate 100000-entry/depth 32 atomic expansion limits. A failed unrelated or
+full-catalogue view cannot poison a subsequent graph view or force another fetch.
+Changing graph classes replaces the latest view rather than growing a scope cache;
+omitting graph preserves full-catalogue inspection. Requested views retain input
+declarations, typed options, output slots/names/list flags and dynamic-combo/group
+declarations. Failed acquisition/expansion keeps all maps unavailable with its
+reason; Run reports unavailable node information before enqueue instead of
+misdiagnosing a missing output. Probe still discovers recorded parameters without
+schema. Workflow observations bind their captured graph/prompt and cannot publish
+after that prompt retires. Probe adds graph-local
 `nodes` with known outputs or null. Final graphs validate known slot bounds, stock
 type/union overlap and primitive/enum/min/max constraints before enqueue. Unknown
 custom validators/ports remain unknown, with backend partial/uncertain semantics
