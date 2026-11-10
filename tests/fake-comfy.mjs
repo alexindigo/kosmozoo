@@ -28,6 +28,10 @@ import { parseArgs } from "node:util";
 import { readdir, readFile } from "node:fs/promises";
 import { statSync } from "node:fs";
 import { join, basename } from "node:path";
+import { loadImage, loadImageOutput, batchImagesNode } from "./helpers/comfy-object-info.mjs";
+
+// the input dir: the node-referenced images the fixture graphs carry
+const FIXTURE_INPUT_IMAGES = ["canny.png", "ref.png"];
 import { isEntryPath, splitEntryPath } from "../src/entry-path.mjs";
 import { testPng } from "./helpers/png.mjs";
 import { MEDIA, EXT_MIME, mediaExtension } from "../src/backings/mime.mjs";
@@ -216,6 +220,8 @@ function history() {
 // bytes, acquired by the production engine's ordinary GET/HEAD/range path.
 const published = new Map();
 const publishedInputs = new Map();
+// The temp root: served only for type=temp, like ComfyUI's temp directory.
+const publishedTemps = new Map();
 const removed = new Set();
 let terminalHistory = history();
 let running = [], pending = [], logs = [], failures = {}, delays = {};
@@ -271,7 +277,7 @@ const handleRequest = async (req) => {
     const body = await req.json();
     if (body.reset) {
       published.clear(); terminalHistory = history();
-      removed.clear(); publishedInputs.clear(); publishRevision = 0;
+      removed.clear(); publishedInputs.clear(); publishedTemps.clear(); publishRevision = 0;
       captureEnqueue = false; enqueues = []; assetsPlusDelete = false;
       metadataBombs = new Set(); assetsHidden = new Set();
       telemetryRequests.queue = 0; telemetryRequests.history = 0; telemetryRequests.logs = 0; activeLogs.clear();
@@ -300,6 +306,12 @@ const handleRequest = async (req) => {
     if (body.metadataBombs) metadataBombs = new Set(body.metadataBombs);
     if (body.assetsHidden) assetsHidden = new Set(body.assetsHidden);
     for (const name of body.remove ?? []) removed.add(name);
+    // Same-named resources in other roots carry their own fixture bytes.
+    for (const [root, store] of [["publishInputs", publishedInputs], ["publishTemps", publishedTemps]]) for (const item of body[root] ?? []) {
+      const fixture = publication(item);
+      if (!fixture || !isEntryPath(item.name)) return new Response("invalid fixture resource", { status: 400 });
+      store.set(item.name, { bytes: fixture.bytes, promptGraph: null, mtime: item.mtime ?? 2_000_000_000 + ++publishRevision });
+    }
     for (const output of body.publish ?? []) {
       const fixture = publication(output);
       if (!fixture || !isEntryPath(output.name)) return new Response("invalid fixture output", { status: 400 });
@@ -447,6 +459,11 @@ const handleRequest = async (req) => {
       SaveImage: { output_node: true, input: { required: { filename_prefix: ["STRING", {}] } } },
       SaveVideo: { output_node: true, input: { required: { filename_prefix: ["STRING", {}] } } },
       SaveAudio: { output_node: true, input: { required: { filename_prefix: ["STRING", {}] } } },
+      // A real host's resource pickers: the input listing as of this request,
+      // with upload semantics, plus the autogrow socket template.
+      LoadImage: loadImage([...FIXTURE_INPUT_IMAGES, ...publishedInputs.keys()].filter(name => !name.includes("/"))),
+      LoadImageOutput: loadImageOutput(),
+      BatchImagesNode: batchImagesNode(),
     });
   }
 
@@ -457,7 +474,7 @@ const handleRequest = async (req) => {
   // the input dir: the node-referenced images the fixture graphs carry
   // (flux-controlnet's canny.png, flux-ipadapter's ref.png) — the info
   // panel's discovered-images column loads these bytes
-  const INPUT_IMAGES = ["canny.png", "ref.png"];
+  const INPUT_IMAGES = FIXTURE_INPUT_IMAGES;
 
   if (p === "/internal/files/input") {
     return Response.json([...INPUT_IMAGES, ...publishedInputs.keys()].filter((name) => !name.includes("/")).map((n) => n + " [137]"));
@@ -478,11 +495,17 @@ const handleRequest = async (req) => {
     if (!head && !req.headers.get("range")) readOrder.push(name);
     // aiohttp-style ETag: "<mtime_ns_hex>-<size_hex>" (the engine's stamp).
     const etag = (mtimeNs, size) => `"${mtimeNs.toString(16)}-${size.toString(16)}"`;
-    if (url.searchParams.get("type") === "input" && publishedInputs.has(name)) {
-      const bytes = publishedInputs.get(name).bytes;
-      const headers = { "Content-Type": "image/png", "Content-Length": String(bytes.length), ETag: etag(0n, BigInt(bytes.length)) };
+    // ComfyUI's /view resolves exactly one root per type; unknown types are 400
+    // and no root ever falls back to another root's same-named file.
+    const type = url.searchParams.get("type") ?? "output";
+    if (!["input", "output", "temp"].includes(type)) return new Response("bad type", { status: 400 });
+    const rooted = type === "input" ? publishedInputs : type === "temp" ? publishedTemps : null;
+    if (rooted?.has(name)) {
+      const { bytes, mtime = 0 } = rooted.get(name);
+      const headers = { "Content-Type": "image/png", "Content-Length": String(bytes.length), ETag: etag(BigInt(mtime), BigInt(bytes.length)) };
       return head ? new Response(null, { headers }) : ranged(req, bytes, headers);
     }
+    if (type === "temp") return new Response("not found", { status: 404 });
     // input-dir node references: served as real images (the fixture bytes
     // stand in — the info panel needs a loadable image, not specific pixels)
     if (url.searchParams.get("type") === "input" && INPUT_IMAGES.includes(name)) {
@@ -503,6 +526,7 @@ const handleRequest = async (req) => {
         });
       }
     }
+    if (type === "input") return new Response("not found", { status: 404 });
     if (mutableDir) {
       let st = null;
       try {

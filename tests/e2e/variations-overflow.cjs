@@ -18,7 +18,7 @@ function hostileCatalogue() {
     type, key: hostile(type + '_key'), value: hostile(type + '_value', type),
   }));
   const objectInfo = {
-    LoadImage: { input: { required: { image: [[inputName]] } } },
+    LoadImage: { input: { required: { image: [[inputName], { image_upload: true }] } } },
     OverflowParameters: { display_name: hostile('registry_title'), input: { required: Object.fromEntries(fields.map(field =>
       [field.key, field.type === 'ENUM' ? [[field.value, ...Array.from({ length: 11 }, (_, index) => field.value + '_' + index)]] : [field.type, {}]])) } },
     SaveImage: { output_node: true, input: { required: { filename_prefix: ['STRING'] } } },

@@ -35,16 +35,17 @@ export function DetailsBody() {
   });
 
   // filename links in the text column focus the images column on that image —
-  // MetaBody reports the click via onImageRef; the images column is ours.
+  // MetaBody reports the clicked reference's root-qualified key via onImageRef;
+  // the images column is ours, addressed by that key, never the first same name.
   // The flash is a signal through the shared helper 
   let infoEl;
-  const [flashFile, setFlashFile] = createSignal(null);
+  const [flashKey, setFlashKey] = createSignal(null);
   const [flashOn, setFlashOn] = createSignal(false);
   const fireFlash = flash(setFlashOn);
-  const focusImage = (file) => {
-    infoEl?.querySelector(`.infoimg[data-file="${CSS.escape(file)}"]`)
+  const focusImage = (key) => {
+    infoEl?.querySelector(`.infoimg[data-resource="${CSS.escape(key)}"]`)
       ?.scrollIntoView({ behavior: "smooth", block: "nearest" });
-    setFlashFile(file);
+    setFlashKey(key);
     fireFlash();
   };
 
@@ -85,8 +86,8 @@ export function DetailsBody() {
                     const measured = useMeasuredSrc(store.actions.images.inline, () => ({ src: image.src, identity: im()?.hash ?? im()?.meta, foregroundId: im()?.id }));
                     const s = () => measured().size;
                     return (
-                      <div class="infoimg" data-file={image.file}
-        classList={{ flash: flashOn() && flashFile() === image.file }}>
+                      <div class="infoimg" data-file={image.file} data-resource={image.key}
+        classList={{ flash: flashOn() && flashKey() === image.key }}>
                         {/* mount only at the measured aspect — the box never
                             morphs height (a failed measure still renders, so
                             the broken-bytes path stays reachable) */}
@@ -97,8 +98,8 @@ export function DetailsBody() {
                             foregroundId={measured().foregroundId}
                             alt={image.file}
                             size={s() !== "failed" ? s() : { w: 1024, h: 1024, failed: true }}
-                            zoomKey={`input:${im()?.host}:${image.file}`}
-                            onOpen={() => store.handles.invoke("workbench.pickInput", { source: im()?.host, file: image.file, fromOutput: !!image.fromOutput })}
+                            zoomKey={`${image.root}:${im()?.host}:${image.file}`}
+                            onOpen={() => store.handles.invoke("workbench.pickInput", { source: im()?.host, file: image.file, fromOutput: !!image.fromOutput, root: image.root })}
                           />
                         </Show>
                       </div>

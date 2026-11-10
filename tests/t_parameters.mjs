@@ -47,7 +47,9 @@ Deno.test("parameters: exact descriptor, source isolation and own null presence"
   assertEquals(p, {
     id: "a:b%2Ec.value", nodeId: "a:b.c", nodeIds: ["a:b.c"], key: "value", type: "Custom", title: null,
     kind: "object", current: { nested: [null, false, 0, "0"] }, currentValue: { nested: [null, false, 0, "0"] },
-    valueKind: "object", encoding: "json", schema: { status: "unavailable" }, legacyEditable: false,
+    valueKind: "object", encoding: "json", schema: { status: "unavailable" },
+    contract: { knowledge: "unknown", role: "unknown", type: null, literal: null, link: null, choices: null, resource: null,
+      constraints: {}, section: null, lazy: false, display: {} }, legacyEditable: false,
   });
   p.currentValue.nested.push("snapshot only");
   assertEquals(inputs.value.nested, [null, false, 0, "0"]);

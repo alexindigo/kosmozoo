@@ -124,17 +124,91 @@ export function formatJsonValue(value) {
 }
 
 const IMG_FILE = /\.(png|jpe?g|webp|gif|avif|bmp)$/i;
-const ANNOTATION = /^(.*)\s+\[([^\]]*)\]$/;
+
+// The one reading of a resource reference, exactly as upstream
+// folder_paths.annotated_filepath (folder_paths.py:266-279): only the stock
+// root suffixes are annotations, each removed by its fixed upstream length;
+// any other text, including other brackets, stays in the name. Raw values are
+// never rewritten; this is an interpretation for display, roots and checks.
+const STOCK_ANNOTATIONS = [["[output]", "output", 9], ["[input]", "input", 8], ["[temp]", "temp", 7]];
+// Stock ComfyUI resource roots. A resource identity is source + root + raw
+// relative name; an unannotated reference resolves in the input root upstream.
+export const RESOURCE_ROOTS = Object.freeze(["input", "output", "temp"]);
+export const isResourceRoot = value => RESOURCE_ROOTS.includes(value);
+export function resourceReference(value) {
+  if (typeof value !== "string") return null;
+  for (const [suffix, root, length] of STOCK_ANNOTATIONS) if (value.endsWith(suffix)) return { name: value.slice(0, -length), root, annotated: true };
+  return { name: value, root: "input", annotated: false };
+}
+
+// --- semantic input contract ------------------------------------------------
+// One interpretation of a declaration for the catalogue, compiler, final graph
+// and presentation. Raw declarations remain evidence; this is not a validator
+// for arbitrary backend Python rules, file existence or custom compatibility.
+// Dynamic combo selectors are widgets too; their branch keys stay with the
+// backing's branch map rather than becoming a closed literal domain here.
+const WIDGETS = new Set(["INT", "FLOAT", "STRING", "BOOLEAN", "COMBO", "COMFY_DYNAMICCOMBO_V3"]);
+const UPLOADS = { image_upload: "image", audio_upload: "audio", video_upload: "video", file_upload: "file" };
+const CONSTRAINTS = ["min", "max", "step", "multiselect", "multiline", "default"];
+
+export function inputContract(declaration, partial = null) {
+  if (!declaration) {
+    const options = partial?.options?.length ? [...partial.options] : null;
+    return { knowledge: partial?.numericType || options ? "partial" : "unknown", role: "unknown", type: partial?.numericType ?? null,
+      literal: null, link: null, choices: options ? { evidence: "unverified", values: options, multiselect: false } : null,
+      resource: null, constraints: {}, section: null, lazy: false, display: {} };
+  }
+  const type = typeof declaration.type === "string" ? declaration.type : null;
+  const upload = Object.keys(UPLOADS).find(key => declaration[key] === true) ?? null;
+  const remote = declaration.remote && typeof declaration.remote === "object" && !Array.isArray(declaration.remote) && typeof declaration.remote.route === "string" ? declaration.remote.route : null;
+  const folder = isResourceRoot(declaration.image_folder) ? declaration.image_folder : null;
+  const combo = type === "COMBO";
+  // Only upload/folder facts establish a file resource. A remote route is a
+  // generic option provider (_io.py:47-71; Combo options may be integers):
+  // its choices are listing evidence, never inferred filenames.
+  const resource = combo && (upload || folder) ? { media: upload ? UPLOADS[upload] : "image",
+    upload: !!upload, root: folder ?? "input", provider: remote ? "remote" : "listing", ...(remote ? { route: remote } : {}) } : null;
+  const widget = WIDGETS.has(type);
+  return { knowledge: type ? "known" : "unknown", role: !type ? "unknown" : resource ? "resource" : widget ? "value" : "connection", type,
+    // Widgets also accept links; sockets accept links, literal acceptance is backend-owned.
+    literal: widget ? true : null, link: type ? true : null,
+    choices: combo || Array.isArray(declaration.options) ? { evidence: resource || remote ? "listing" : Array.isArray(declaration.options) ? "closed" : "unavailable",
+      values: Array.isArray(declaration.options) ? [...declaration.options] : [], multiselect: declaration.multiselect === true,
+      provider: remote ? "remote" : "declared", ...(remote ? { route: remote } : {}) } : null,
+    resource, constraints: Object.fromEntries(CONSTRAINTS.filter(key => Object.hasOwn(declaration, key)).map(key => [key, declaration[key]])),
+    section: declaration.section ?? null, lazy: declaration.lazy === true,
+    display: Object.fromEntries(["display_name", "tooltip", "advanced"].filter(key => Object.hasOwn(declaration, key)).map(key => [key, declaration[key]])) };
+}
+
+// Descriptors publish this projection; consumers recompute it from the same
+// schema evidence, so a published contract can never diverge from its evidence.
+export const parameterContract = parameter => parameter?.schema ? parameter.schema.status === "known" ? inputContract(parameter.schema)
+  : inputContract(null, parameter.schema) : parameter?.contract ?? inputContract(null);
+
+// Resource-shaped reference: a root-relative name with an optional stock root
+// annotation. Existence and custom validation remain the backend's authority.
+export function resourceReferenceProblem(contract, value) {
+  if (typeof value !== "string" || !value.length) return "resource reference requires a file name";
+  const { name } = resourceReference(value);
+  // Upstream treats paths escaping the root as nonexistent; mirror only that shape.
+  if (!name || /[\x00-\x1f\x7f]/.test(name) || /^([\\/]|[A-Za-z]:)/.test(name) || name.split(/[\\/]/).includes("..")) return "invalid resource path";
+  return null;
+}
 
 // Compatibility editor projection is deliberately narrower than discovery.
-function legacyEditor(type, key, value, declared, options, outputClasses) {
+// A known image resource contract owns the image editor whatever the recorded
+// spelling; the class-name/extension rule serves only catalogues without
+// declarations (offline discovery).
+function legacyEditor(type, key, value, declared, options, outputClasses, contract) {
   if (!type) return null;
   if (typeof value === "number") return { kind: "numeric", integer: declared ? declared === "INT" : Number.isInteger(value) };
   if (typeof value !== "string" || key === "filename_prefix" && outputClasses?.has(type)) return null;
-  if (/loadimage$/i.test(type) && key === "image") {
-    const match = ANNOTATION.exec(value), file = match ? match[1] : value;
-    return IMG_FILE.test(file) ? { kind: "image", current: file, currentValue: value, fromOutput: match ? /^output$/i.test(match[2]) : false } : null;
-  }
+  const reference = resourceReference(value);
+  const image = contract.knowledge === "known" ? contract.resource?.media === "image" : /loadimage$/i.test(type) && key === "image" && IMG_FILE.test(reference.name);
+  // Unannotated references resolve in the input folder upstream, even for an output picker.
+  // `currentRoot` is the explicit root; `fromOutput` remains its compatibility facade.
+  if (image) return { kind: "image", current: reference.name, currentValue: value, currentRoot: reference.root, fromOutput: reference.root === "output" };
+  if (contract.knowledge !== "known" && /loadimage$/i.test(type) && key === "image") return null;
   return options?.length ? { kind: "enum", values: [...options] } : { kind: "text" };
 }
 
@@ -161,15 +235,16 @@ export function graphParameters(graph, { types = null, enums = null, outputClass
       const currentValue = cloneJsonValue(recorded), encoding = inputEncoding(currentValue);
       const valueKind = encoding === "kosmozoo-link" ? "connection" : currentValue === null ? "null" : Array.isArray(currentValue) ? "array" : typeof currentValue === "bigint" ? "number" : typeof currentValue;
       const schemaKey = `${type}.${key}`, declared = nodeTypes.get(schemaKey), options = nodeEnums.get(schemaKey);
-      const editor = legacyEditor(type, key, currentValue, declared, options, outputClasses);
       const declaration = inputDeclaration(node, key, { declarations, dynamicCombos });
+      // Existing numeric/enum maps are partial knowledge, never proof of a
+      // complete input declaration, wrapper validity or output compatibility.
+      const schema = declaration ? { status: "known", ...cloneJsonValue(declaration) } : { status: declared || options?.length ? "partial" : "unavailable",
+        ...(declared ? { numericType: declared } : {}), ...(options?.length ? { options: [...options] } : {}) };
+      const contract = parameterContract({ schema });
+      const editor = legacyEditor(type, key, currentValue, declared, options, outputClasses, contract);
       parameters.push({ id: paramId(nodeId, key), nodeId, nodeIds: [nodeId], key, type, title,
         kind: editor?.kind ?? valueKind, current: currentValue, ...editor, currentValue,
-        valueKind, encoding,
-        // Existing numeric/enum maps are partial knowledge, never proof of a
-        // complete input declaration, wrapper validity or output compatibility.
-        schema: declaration ? { status: "known", ...cloneJsonValue(declaration) } : { status: declared || options?.length ? "partial" : "unavailable",
-          ...(declared ? { numericType: declared } : {}), ...(options?.length ? { options: [...options] } : {}) },
+        valueKind, encoding, schema, contract,
         legacyEditable: editor !== null });
     }
   }
@@ -179,7 +254,7 @@ export function graphParameters(graph, { types = null, enums = null, outputClass
 
 export function editableParameter(parameter) {
   if (!parameter.legacyEditable) return null;
-  const { valueKind, encoding, schema, legacyEditable, currentValue, ...editable } = parameter;
+  const { valueKind, encoding, schema, contract, legacyEditable, currentValue, ...editable } = parameter;
   if (editable.kind === "image") editable.currentValue = currentValue;
   return editable;
 }

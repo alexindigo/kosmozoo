@@ -9,6 +9,7 @@ import { sha256 } from "./cache.mjs";
 import { backingFor as defaultBackingFor, validEntryName, makeCollectionLifecycle } from "./backings/index.mjs";
 import { cancelled } from "./backings/inventory.mjs";
 import { metaFromBytes, imageDims, EXTRACTOR_VERSION } from "./extractor.mjs";
+import { isResourceRoot } from "./parameters.mjs";
 
 const DEFAULT_REVALIDATE_MS = 60_000;
 // Dims live in the first bytes of the file: PNG IHDR at 16–24, GIF at 6–10,
@@ -114,16 +115,18 @@ export class Ingest {
   }
 
   // bytes → hash → cache → content (+extract when stale) → entry. Returns
-  // the hash. `kind` is 'output' (extracted) or 'input' (never extracted).
+  // the hash. `kind` is the resource root: 'output' entries are inventory/
+  // extraction owners; 'input'/'temp' are root-keyed cache rows, never extracted.
   async ingest(collection, name, kind, { bytes, stamp = null, token = this.#capture(collection) }) {
+    if (!isResourceRoot(kind)) throw new TypeError(`unknown resource root: ${kind}`);
     this.#assertCurrent(token);
     if (!validEntryName(token.address, name)) throw new TypeError("bad entry path");
     const hash = await sha256(bytes);
     this.#assertCurrent(token);
     await this.#cache.put(hash, bytes);
     this.#assertCurrent(token);
-    if (kind === "input") {
-      this.#store.inputCachePut(collection, name, hash, stamp);
+    if (kind !== "output") {
+      this.#store.resourceCachePut(collection, name, kind, hash, stamp, bytes.length);
       return hash;
     }
     const before = this.#store.fileInfo(collection, name);
@@ -159,10 +162,11 @@ export class Ingest {
   }
 
   async #dims(collection, name, kind, { priority = "low" } = {}) {
+    if (!isResourceRoot(kind)) return { status: 400, dims: null };
     const token = this.#capture(collection), addr = token?.address;
     if (!token || !this.#isCurrent(token)) return { ...this.#cancelled(), dims: null };
     if (!validEntryName(addr, name)) return { status: 400, dims: null };
-    const known = this.#store.entryDims(collection, name);
+    const known = this.#store.entryDims(collection, name, kind);
     if (known) return { status: 200, dims: known };
     if (!addr) return { status: 404, dims: null };
     const r = await this.#readGated(addr, name, kind, { range: [0, DIMS_HEAD_BYTES - 1] }, priority, null, token);
@@ -171,7 +175,7 @@ export class Ingest {
     const bytes = r.bytes;
     if (!this.#isCurrent(token)) return { ...this.#cancelled(), dims: null };
     const dims = imageDims(bytes);
-    if (dims) this.#store.entryDimsPut(collection, name, dims);
+    if (dims) this.#store.entryDimsPut(collection, name, dims, kind);
     return { status: r.status, dims };
   }
 
@@ -182,6 +186,7 @@ export class Ingest {
   // the read gate serves it before background work.
   // Resolves { hash, bytes, status: 200 } or { status } (backing said no).
   async ensure(collection, name, kind = "output", { priority = "low" } = {}) {
+    if (!isResourceRoot(kind)) return { status: 400 };
     const token = this.#capture(collection);
     if (!token || !this.#isCurrent(token)) return this.#cancelled();
     if (!validEntryName(token?.address, name)) return { status: 400 };
@@ -205,9 +210,7 @@ export class Ingest {
   async #ensureInner(collection, name, kind, flight) {
     const token = flight.token, addr = token.address;
     if (!addr) return { status: 404 };
-    const info = kind === "input"
-      ? this.#store.inputCacheGet(collection, name)
-      : this.#store.fileInfo(collection, name);
+    const info = this.#recorded(collection, name, kind);
     if (info?.hash && await this.#cache.has(info.hash)) {
       if (!this.#isCurrent(token)) return this.#cancelled();
       const bytes = await this.#cache.get(info.hash);
@@ -248,15 +251,22 @@ export class Ingest {
   // judgments follow the hash, so the new content starts clean and the old
   // keeps its history).
 
-  scheduleRevalidate(collection, name, { input = false } = {}) {
+  // `kind` names the root; the `input` boolean remains a compatibility facade.
+  scheduleRevalidate(collection, name, { input = false, kind = input ? "input" : "output" } = {}) {
+    if (!isResourceRoot(kind)) return;
     if (!this.#hosts[collection]) return;
     if (!validEntryName(this.#hosts[collection], name)) return;
     const token = this.#capture(collection);
-    const key = `${token.incarnation}\u0000${input ? "in:" : ""}${collection}:${name}`;
+    const key = `${token.incarnation}\u0000${kind}\u0000${collection}:${name}`;
     const now = Date.now();
     if (now - (this.#lastCheck.get(key) ?? 0) < this.#revalidateMs) return;
     this.#lastCheck.set(key, now);
-    this.revalidateNow(collection, name, { input, token }).catch(() => {});
+    this.revalidateNow(collection, name, { kind, token }).catch(() => {});
+  }
+
+  // The recorded hash/stamp for one resource root (output: the inventory entry).
+  #recorded(collection, name, kind) {
+    return kind === "output" ? this.#store.fileInfo(collection, name) : this.#store.resourceCacheGet(collection, name, kind);
   }
 
   // Exported for tests and the scheduler: compare the source stamp against
@@ -267,31 +277,30 @@ export class Ingest {
     return this.#lifetime ? this.#lifetime.run(`revalidate ${collection}/${name}`, run) : run();
   }
 
-  async #revalidateNow(collection, name, { input = false, token = this.#capture(collection) } = {}) {
+  async #revalidateNow(collection, name, { input = false, kind = input ? "input" : "output", token = this.#capture(collection) } = {}) {
+    if (!isResourceRoot(kind)) throw new TypeError(`unknown resource root: ${kind}`);
     if (!this.#isCurrent(token)) return this.#cancelled();
     const addr = token?.address;
     if (!addr) return;
     if (!validEntryName(addr, name)) return;
-    const stamp = (await this.#backingFor(addr).stat(addr, name, input ? "input" : "output"))?.stamp ?? null;
+    const stamp = (await this.#backingFor(addr).stat(addr, name, kind))?.stamp ?? null;
     if (!this.#isCurrent(token)) return this.#cancelled();
     if (stamp == null) return; // gone/unreachable — keep what we have
 
-    const info = input
-      ? this.#store.inputCacheGet(collection, name)
-      : this.#store.fileInfo(collection, name);
+    const info = this.#recorded(collection, name, kind);
     if (!info) return;
     if (info.stamp != null && stamp === info.stamp) return; // unchanged
 
-    const r = await this.#readGated(addr, name, input ? "input" : "output", undefined, "low", null, token);
+    const r = await this.#readGated(addr, name, kind, undefined, "low", null, token);
     if (!this.#isCurrent(token)) return this.#cancelled();
     if (r.status !== 200) return; // unreadable right now — keep what we have
     const bytes = r.bytes;
     const hash = await sha256(bytes);
     if (!this.#isCurrent(token)) return this.#cancelled();
-    if (!input && info.hash === hash) {
+    if (kind === "output" && info.hash === hash) {
       this.#store.touchFileStamp(collection, name, stamp); // touch only
       return;
     }
-    await this.ingest(collection, name, input ? "input" : "output", { bytes, stamp, token });
+    await this.ingest(collection, name, kind, { bytes, stamp, token });
   }
 }

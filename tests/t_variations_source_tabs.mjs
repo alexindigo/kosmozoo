@@ -25,8 +25,9 @@ Deno.test("source inputs: source/name cache reuses exact File across toggles, in
   await editor.toggleSourceInput(id, other, "next.png");
   assert(editor.rows("images")[id].items[0].file === file); assertEquals(calls, 1);
   const second = "image.second";
+  const image = rig.catalogue.parameters.find(parameter => parameter.id === id);
   editor.installCatalogue({ ...rig.catalogue, stringParams: [...rig.catalogue.stringParams,
-    { ...rig.catalogue.stringParams[0], id: second, key: "second" }] });
+    { ...rig.catalogue.stringParams[0], id: second, key: "second" }], parameters: [...rig.catalogue.parameters, { ...image, id: second, key: "second" }] });
   await editor.toggleSourceInput(second, other, "next.png");
   assert(editor.rows("images")[second].items[0].file === file); assertEquals(calls, 1);
   await editor.toggleSourceInput(id, rig.context.origin, "next.png");

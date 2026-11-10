@@ -10,14 +10,19 @@
 // engine-side endpoints are the variations feature's /probe and /run.
 
 import { formatValue } from "/shared/features/variations/shared.mjs";
-import { parameterCurrent, parseExactJson, stringifyExactJson } from "/shared/parameters.mjs";
+import { parameterContract, parameterCurrent, parseExactJson, stringifyExactJson } from "/shared/parameters.mjs";
 
 // Presentation strategies are projections, never a second parameter catalogue.
+// Choice values come from the shared input contract; legacy carriers without
+// declaration evidence keep their compatibility option list.
+export function choiceValues(parameter) {
+  const values = parameterContract(parameter).choices?.values;
+  return values?.length ? values : parameter.values?.length ? parameter.values : values ?? null;
+}
 export function editorDomain(parameter) {
   if (parameter.kind === "image") return "images";
-  const value = parameterCurrent(parameter);
-  if (parameter.valueKind !== "connection" && (parameter.schema?.options?.length || parameter.values?.length)) {
-    const options = parameter.schema?.options ?? parameter.values;
+  const value = parameterCurrent(parameter), options = choiceValues(parameter);
+  if (parameter.valueKind !== "connection" && options?.length) {
     return options.every(value => typeof value === "string") && typeof value === "string" ? "enums" : "candidates";
   }
   if (typeof value === "number" || typeof value === "bigint") return "numeric";
@@ -42,7 +47,7 @@ export const sliderNumber = value => typeof value === "number" && Number.isFinit
 export function numericDefaults(parameter, batch) {
   const current = parameterCurrent(parameter), integer = parameter.integer ?? (typeof current === "bigint" || Number.isInteger(current));
   const tuning = paramDef(`${parameter.type}.${parameter.key}`, current, integer);
-  const schema = parameter.schema ?? {};
+  const schema = parameterContract(parameter).constraints;
   if (schema.min !== undefined) tuning.clamp[0] = schema.min;
   if (schema.max !== undefined) tuning.clamp[1] = schema.max;
   // Tuning cannot silently exclude a recorded seed or substitute 32-bit bounds.

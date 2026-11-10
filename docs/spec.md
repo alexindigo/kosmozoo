@@ -40,12 +40,12 @@ the resources; a collection's `capabilities` answer what its backing can do.
 | `/api/collections/<id>` | PATCH | partial `{pinned?: boolean, autoRefresh?: boolean}`; validates the complete object before writing; invalid fields/types/null/arrays/malformed JSON are 400, unknown source is 404, empty object is a no-op; returns saved booleans and their committed `sourceVersion` without host/folder probing |
 | `/api/collections/<id>` | DELETE | remove; refuses the last collection |
 | `/api/events` | GET | one native SSE delivery connection per app tab; complete version1 authoritative cached source maps, no upstream probe/list/monitor creation |
-| `/api/collections/<id>/entries` | GET | the feed listing: size, hash, state, meta, judgment, and dims — `COALESCE(content, entry)`, so an entry the dims pass reached carries width/height before it has a hash. Gone entries are excluded. `?inventory=1` returns the coherent output envelope described below; default remains an array. `?kind=input` lists the input dir instead |
+| `/api/collections/<id>/entries` | GET | the feed listing: size, hash, state, meta, judgment, and dims — `COALESCE(content, entry)`, so an entry the dims pass reached carries width/height before it has a hash. Gone entries are excluded. `?inventory=1` returns the coherent output envelope described below; default remains an array. `?kind=input` lists the input dir instead; any other `kind` is 400 (temp has no listing and never falls back to the output inventory) |
 | `/api/collections/<id>/entries/<name>` | GET | one entry |
 | `/api/collections/<id>/entries/<name>/meta` | GET | one shown entry's record `{name, hash, extracted, meta, width, height}`, independent of the delta stream; an entry without a hash is first ingested through the single-flight high lane for at most 8 s; `extracted:false` means not available yet (unreadable source or the wait elapsed) |
 | `/api/collections/<id>/entries` | POST | multipart upload into the input dir; **409 with the conflicting name, never an overwrite** |
 | `/api/collections/<id>/entries/<name>` | DELETE | per capability: folder → unlink; comfy + assets_plus → trash; otherwise → hide + history cleanup |
-| `/api/collections/<id>/entries/<name>/bytes` | GET | cache-first bytes (`?kind=input` for input-dir files); ETag is the content hash, `Cache-Control: no-cache`; single-byte ranges (§Serve path) |
+| `/api/collections/<id>/entries/<name>/bytes` | GET | cache-first bytes of one resource root: absent `kind` or `output` (the feed entry), `?kind=input` or `?kind=temp` (referenced files); an unknown `kind` is 400, never another root. ETag is the content hash, `Cache-Control: no-cache`; single-byte ranges (§Serve path). HEAD uses the same root and reports the content length |
 | `/api/collections/<id>/entries/<name>/bytes` | HEAD | 404 when the entry's bytes are unknown, else `content-length` |
 | `/api/collections/<id>/entries/<name>/judgment` | PATCH | whitelisted fields (`vote`/`favorite`/`bookmark`/`notes`/`plugins.<ns>.*`), defaults deep-pruned, one statement |
 | `/api/collections/<id>/feedback.json` | GET | the collection's judgments as a portable v2 document, generated on demand |
@@ -1095,6 +1095,13 @@ known collision-family bytes are read, not the whole input catalogue. Confirmed
 upload names remain readonly session evidence across later remove/add turns.
 Predictions are used only for counting; graph values and provenance always come
 from actual upload receipts, including returned renamed files.
+Image compilation is staged: existing inputs, byte-identical currents and the
+per-target Current image resolve to literal assignments; Files and engine paths
+remain unresolved transfer intents admitted by each target's resource contract
+(an upload-capable resource, or unknown metadata) before any read or write. The
+literal compiler validates only resolved values. Preview counts and names over a
+separate readonly estimate (resolved values plus predicted names); Run's all-target
+preparation uses the same plan, and final axes contain only receipt names.
 One compiler-generated image-set consumption binding replaces the old mode/file/
 localFiles leaves, so a fully acknowledged set has no dormant acquisition work.
 
@@ -1109,8 +1116,8 @@ without a recognized extension. Missing optional inputs are absent, never null.
 `GET /api/features/variations/probe/<id>` adds `parameters`, an ordered complete
 descriptor sequence. Each descriptor contains `id`, `nodeId`, singleton `nodeIds`,
 literal `key`, class `type`, nullable display `title`, exact recorded `currentValue`,
-presentation `current`, `valueKind`, `encoding`, `schema`, `kind` and
-`legacyEditable`. `valueKind` is `number`, `string`, `boolean`, `null`, `array`,
+presentation `current`, `valueKind`, `encoding`, `schema`, `contract`, `kind` and
+`legacyEditable`. The legacy arrays omit `contract`, as they omit `schema`. `valueKind` is `number`, `string`, `boolean`, `null`, `array`,
 `object` or `connection`. Image `current` omits its folder annotation while
 `currentValue` retains it. Own-property presence selects `currentValue`, including
 explicit null, false, zero and empty string. Values are detached JSON snapshots;
@@ -1130,6 +1137,68 @@ nested arrays stay intact, without unwrapping or traversing them as edges.
 when only numeric/enum metadata supplies `numericType` or `options`, otherwise
 `unavailable`. Known JSON declarations do not describe arbitrary Python validators.
 Schema/default potential does not create recorded inputs.
+Known declarations retain the backend's resource facts (`image_upload`,
+`audio_upload`, `video_upload`, `file_upload`, `image_folder`, `remote`) and
+display facts (`display_name`, `tooltip`, `multiline`, `advanced`, `slotType`).
+The backing normalizer resolves `COMFY_AUTOGROW_V3` children exactly as upstream
+`Autogrow._expand_schema_for_dynamic` does: names take precedence over prefix
+(`<prefix>0..max-1`, at most 100), the first declared template input repeats as
+`<input>.<name>`, required only below `min` when the template is required, and its
+own lazy flag joins the class's lazy inputs. `COMFY_DYNAMICSLOT_V3` children are
+parsed recursively as `<slot>.<input>`, as upstream `parse_class_inputs` does, so
+nested dynamic combos keep their own branch maps, defaults and declarations; the
+same child adoption serves dynamic group rows and Autogrow names. Child defaults
+are never merged into a parent, so no absent value is created. Malformed templates
+stay unknown and the aggregate/depth budgets are unchanged.
+
+Each descriptor also carries `contract`, the shared semantic projection of that
+schema evidence (`inputContract`/`parameterContract` in `src/parameters.mjs`):
+`knowledge` (`known`/`partial`/`unknown`), `role` (`resource`, `value`,
+`connection` or `unknown`), `type`, `literal`/`link` acceptance where declared
+(`null` = backend-owned), `choices` (`{evidence, values, multiselect}` where
+evidence is `closed`, `listing`, `unavailable` or `unverified` for partial maps,
+plus `provider` `declared`/`remote` and its `route`), `resource`
+(`{media, upload, root, provider, route?}`), primitive `constraints`, `section`,
+`lazy` and `display`. Only upload or `image_folder` facts make a COMBO a file
+resource; its options are listing evidence, not an accepted domain. A `remote`
+route alone is a generic option provider (choices may be integers): its choices are
+listing evidence for a value input, with no filename check or transfer. Dynamic
+combo selectors are value widgets. A known image resource owns the image editor
+whatever its recorded spelling; the LoadImage class/extension rule applies only
+without declarations. `resourceReference` is the one reading of a reference, exactly
+as upstream `folder_paths.annotated_filepath`: only `[output]`, `[input]` and `[temp]`
+suffixes are annotations, removed by their fixed upstream lengths; other bracket
+text stays in the name. Descriptor `current` and `fromOutput` and resource checks
+use it, while `currentValue` keeps the raw bytes. An unannotated reference names
+the input root. Image descriptors expose `currentRoot` (`input`, `output` or `temp`);
+`fromOutput` remains its compatibility facade.
+
+Resource identity is source + root + raw relative name; the content hash and source
+incarnation are separate facts. `RESOURCE_ROOTS`/`isResourceRoot` in
+src/parameters.mjs name the stock roots for every layer. Output entries keep the
+inventory, extraction and judgment owner; input and temp references are root-keyed
+byte-cache rows of the same entry table (`resourceCacheGet/Put`, with the input
+facades unchanged), never extracted or listed as outputs. Ingest single-flight,
+cache lookup, dimensions head reads (`entryDims`/`entryDimsPut(..., kind)`; only output dims
+bump the meta version), revalidation debounce and stamp checks are keyed by root
+(`scheduleRevalidate(..., { kind })`; `{ input: true }` still means input). Unknown
+roots are rejected at the byte routes, ingest, inspection and the plugin content
+port. A folder source's files remain its input listing; it has no temp root.
+Variations inspection accepts all three roots, so a temp current compares with temp
+bytes. The client's single side codec (`resourceSource`/`parseResourceSource` in
+client/js/entry-url.mjs) keeps the existing `<host>`/`input:<host>` spellings and
+adds `temp:<host>`; the /diff URL protocol is unchanged. Details discovery
+(`nodeImages`/`imageReference` in client-solid/store/fields.js) reads references
+through `resourceReference`, keeps the LoadImage-class/extension eligibility (metadata
+has no backend declarations), and addresses images, focus links, zoom keys
+(`<root>:<host>:<file>`, input keys unchanged) and viewer selection by root + file.
+`workbench.pickInput` accepts an additive `root`.
+The editor, the shared compiler and final graph validation all derive the contract
+from the same schema evidence; final validation uses the declaration selected by
+the mutated graph's dynamic branches. Closed choices reject undeclared values;
+resource values must be root-relative references with an optional
+` [input]`/` [output]`/` [temp]` annotation. File existence and custom
+`VALIDATE_INPUTS` rules remain the backend's authority.
 `kind` retains the legacy editor kind where eligible and
 otherwise follows `valueKind`; `legacyEditable` identifies that compatibility
 projection, not future all-type support.

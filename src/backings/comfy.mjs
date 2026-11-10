@@ -328,16 +328,57 @@ function schemaBudget() {
   }, set(map, key, value) { this.take(); map.set(key, value); } };
 }
 
+// Declared facts the shared input contract interprets: constraints, resource
+// upload/folder/provider metadata and display text. Raw config stays evidence.
+const DECLARATION_FACTS = ["min", "max", "step", "default", "lazy", "rawLink", "forceInput", "multiselect",
+  "image_upload", "audio_upload", "video_upload", "file_upload", "image_folder", "remote", "slotType",
+  "display_name", "tooltip", "multiline", "advanced"];
+const DYNAMIC_TYPES = new Set(["COMFY_AUTOGROW_V3", "COMFY_DYNAMICCOMBO_V3", "COMFY_DYNAMICGROUP_V3", "COMFY_DYNAMICSLOT_V3"]);
+const MAX_AUTOGROW_NAMES = 100;
+
+// Upstream Autogrow._expand_schema_for_dynamic: names win over prefix; the first
+// declared template input repeats as "<input>.<name>", required only below min
+// when the template itself is required. Malformed templates stay unknown.
+function autogrowChildren(template) {
+  if (!template || typeof template !== "object" || Array.isArray(template) || !Number.isSafeInteger(template.min) || template.min < 0) return null;
+  let names;
+  if (Object.hasOwn(template, "names")) {
+    if (!Array.isArray(template.names) || template.names.some(name => typeof name !== "string" || !name || name.includes("."))) return null;
+    names = template.names.slice(0, MAX_AUTOGROW_NAMES);
+  } else if (Object.hasOwn(template, "prefix")) {
+    const max = template.max;
+    if (typeof template.prefix !== "string" || template.prefix.includes(".") || !Number.isSafeInteger(max) || max < 1 || max > MAX_AUTOGROW_NAMES) return null;
+    names = Array.from({ length: max }, (_, index) => `${template.prefix}${index}`);
+  } else return null;
+  for (const [section, inputs] of Object.entries(template.input ?? {})) {
+    if (!inputs || typeof inputs !== "object" || Array.isArray(inputs)) return null;
+    const first = Object.values(inputs)[0];
+    if (first === undefined) continue;
+    const type = Array.isArray(first) ? first[0] : first;
+    if (DYNAMIC_TYPES.has(type) || section !== "required" && section !== "optional") return null;
+    return names.map((name, index) => [name, index < template.min && section === "required" ? "required" : "optional", first]);
+  }
+  return null;
+}
+
 function inputSchema(input, prefix, budget, depth = 0) {
   if (depth > MAX_SCHEMA_DEPTH) throw new RangeError("ComfyUI object_info nesting budget exceeded");
   const schema = { types: new Map(), enums: new Map(), declarations: new Map(), dynamicCombos: new Map(), defaults: new Map(), lazy: new Set() };
+  // Child prompt keys share this prefix, so their declarations, lazy flags and
+  // nested dynamic combo branches (each owning its own defaults) join the parent
+  // whole. Child defaults stay unmerged: group rows, autogrow names and slot
+  // children exist only when present upstream, so no absent value is created.
+  const adopt = child => {
+    for (const channel of ["types", "enums", "declarations", "dynamicCombos"]) for (const [key, value] of child[channel]) budget.set(schema[channel], key, value);
+    for (const key of child.lazy) { budget.take(); schema.lazy.add(key); }
+  };
   for (const section of ["required", "optional"]) {
     for (const [key, spec] of Object.entries(input?.[section] ?? {})) {
       budget.take();
       const name = `${prefix}.${key}`, t = Array.isArray(spec) ? spec[0] : spec;
       const config = Array.isArray(spec) ? spec[1] : null;
       const declaration = { type: typeof t === "string" ? t : Array.isArray(t) ? "COMBO" : null, section };
-      for (const key of ["min", "max", "step", "default", "lazy", "rawLink", "forceInput", "multiselect"]) {
+      for (const key of DECLARATION_FACTS) {
         if (config && Object.hasOwn(config, key)) declaration[key] = config[key];
       }
       if (Array.isArray(t)) declaration.options = t;
@@ -347,10 +388,19 @@ function inputSchema(input, prefix, budget, depth = 0) {
         const max = config.max ?? 20;
         if (!Number.isSafeInteger(max) || max < 1 || max > 20) throw new Error("Invalid dynamic group bounds");
         for (let index = 0; index < max; index++) {
-          const row = inputSchema(config.template, `${name}.${index}`, budget, depth + 1);
-          for (const channel of ["types", "enums", "declarations"]) for (const [key, value] of row[channel]) budget.set(schema[channel], key, value);
+          adopt(inputSchema(config.template, `${name}.${index}`, budget, depth + 1));
         }
       }
+      if (t === "COMFY_AUTOGROW_V3") {
+        const children = autogrowChildren(config?.template);
+        if (children) {
+          budget.take(children.length);
+          for (const [child, childSection, childSpec] of children) adopt(inputSchema({ [childSection]: { [child]: childSpec } }, name, budget, depth + 1));
+        }
+      }
+      // Upstream DynamicSlot recursively parses its children (_io.py:1320-1328)
+      // as "<slot>.<input>" while connected, including nested dynamic inputs.
+      if (t === "COMFY_DYNAMICSLOT_V3" && config?.inputs && typeof config.inputs === "object") adopt(inputSchema(config.inputs, name, budget, depth + 1));
       if (config?.lazy === true) { budget.take(); schema.lazy.add(name); }
       if (config && Object.hasOwn(config, "default")) budget.set(schema.defaults, name, config.default);
       else if (section === "required") budget.set(schema.defaults, name, undefined);
@@ -402,12 +452,19 @@ export async function objectInfo(addr, cache = new Map(), { fetcher = fetch, sig
   }
   // Retain only the latest view, so graph changes cannot grow a scope cache.
   if (c.scope === scope) return c.view;
-  let out = { types: null, outputClasses: null, enums: null, lazyInputs: null, dynamicCombos: null, declarations: null, outputs: null, schemaError: c.error };
+  const out = objectInfoView(c.raw, classes, c.error);
+  c.scope = scope; c.view = out;
+  return out;
+}
+
+// Pure normalization of one raw catalogue for the given class scope (null: all).
+export function objectInfoView(raw, classes = null, error = null) {
+  let out = { types: null, outputClasses: null, enums: null, lazyInputs: null, dynamicCombos: null, declarations: null, outputs: null, schemaError: error };
   try {
-    if (c.raw) {
+    if (raw) {
       const candidate = { types: new Map(), outputClasses: new Set(), enums: new Map(), lazyInputs: new Map(), dynamicCombos: new Map(), declarations: new Map(), outputs: new Map(), schemaError: null };
       const budget = schemaBudget();
-      const entries = classes === null ? Object.entries(c.raw) : classes.filter(type => Object.hasOwn(c.raw, type)).map(type => [type, c.raw[type]]);
+      const entries = classes === null ? Object.entries(raw) : classes.filter(type => Object.hasOwn(raw, type)).map(type => [type, raw[type]]);
       for (const [type, def] of entries) {
         const schema = inputSchema(def?.input, type, budget);
         budget.set(candidate.lazyInputs, type, new Set([...schema.lazy].map(key => key.slice(type.length + 1))));
@@ -422,7 +479,6 @@ export async function objectInfo(addr, cache = new Map(), { fetcher = fetch, sig
       out = candidate;
     }
   } catch (error) { out.schemaError = error.message; /* No partial view is published. */ }
-  c.scope = scope; c.view = out;
   return out;
 }
 

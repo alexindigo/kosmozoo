@@ -1,9 +1,9 @@
 // Dialog-private Run owner over its raw recipe. Catalogue and image
 // evidence are readonly context; compilation classifies every captured leaf.
 import { snapshotDraft, createRunId } from "./draft.js";
-import { editorDomain, numericDefaults, numericText, sliderNumber } from "./graph.mjs";
+import { editorDomain, choiceValues, numericDefaults, numericText, sliderNumber } from "./graph.mjs";
 import { parseExactJson, stringifyExactJson, sameJsonValue } from "/shared/parameters.mjs";
-import { compileDiscreteAxes, validateEditorValue } from "/shared/features/variations/compile.mjs";
+import { compileDiscreteAxes, validateEditorValue, admitResourceTransfer } from "/shared/features/variations/compile.mjs";
 import { templateLabels, templateValue, parseSemicolonList, expandTextAxes, permutationPlan,
   resolveRelativeRanges, acknowledgedFields, targetRunPlan, catalogueParams, parameterIndex, parameterCurrent, parameterLabel, parameterAliases,
    variationOutputName, uploadCandidate, uploadFamily } from "/shared/features/variations/shared.mjs";
@@ -15,6 +15,8 @@ import { RECIPE_FIELDS as EDITOR_FIELDS, makeVariationRecipe, recipeField as des
 export { RECIPE_FIELDS as EDITOR_FIELDS } from "./recipe.js";
 const filename = value => typeof value === "string" && value.length > 0 && !/[\\/\x00-\x1f\x7f]/.test(value) && ![".", ".."].includes(value);
 const allParameters = catalogue => catalogue.parameters ?? catalogueParams(catalogue);
+// The current image's explicit root; `fromOutput` is the legacy carrier's facade.
+const currentRoot = parameter => parameter.currentRoot ?? (parameter.fromOutput ? "output" : "input");
 // Legacy-first ordering preserves existing manual aliases independently of layout.
 const namingParameters = catalogue => {
   const all = parameterIndex(allParameters(catalogue)), ids = new Set();
@@ -33,10 +35,10 @@ const ROW_STRATEGIES = {
   numeric: { initialize: numericDefaults },
   images: { initialize: () => ({ metadata: { files: [], filesReady: false },
     defaults: { enabled: false, items: [] } }) },
-  enums: { initialize: p => ({ metadata: { values: p.schema?.options ?? p.values }, defaults: { enabled: false, picks: [parameterCurrent(p)] } }) },
+  enums: { initialize: p => ({ metadata: { values: choiceValues(p) }, defaults: { enabled: false, picks: [parameterCurrent(p)] } }) },
   texts: { initialize: p => ({ defaults: { enabled: false, text: parameterCurrent(p), tpl: {} } }) },
-  candidates: { initialize: p => ({ metadata: { candidateKind: p.valueKind === "connection" ? "connection" : p.schema?.options?.length ? "options" : typeof parameterCurrent(p) === "boolean" ? "boolean" : "json",
-    options: p.schema?.options ?? (typeof parameterCurrent(p) === "boolean" ? [true, false] : null) },
+  candidates: { initialize: p => ({ metadata: { candidateKind: p.valueKind === "connection" ? "connection" : choiceValues(p)?.length ? "options" : typeof parameterCurrent(p) === "boolean" ? "boolean" : "json",
+    options: choiceValues(p)?.length ? choiceValues(p) : typeof parameterCurrent(p) === "boolean" ? [true, false] : null },
     defaults: { enabled: false, candidates: [stringifyExactJson(p.valueKind === "connection" ? { node: String(parameterCurrent(p)[0]), slot: String(parameterCurrent(p)[1]) } : parameterCurrent(p))] } }) },
 };
 
@@ -64,7 +66,9 @@ export function makeVariationEditor({ targets, services, currentOrigin, changed 
   const imageView = (id, item, metadata, lookup = evidence) => {
     if (item.kind === "target") return { ...item, name: capturedTargets[0].filename, each: batch, pending: false, error: "", sameCurrent: false };
     const check = item.kind === "input" ? null : lookup(id, item);
-    return { ...item, sameCurrent: item.kind === "input" ? item.name === parameterCurrent(metadata)
+    // An existing input is the current resource when roots and names agree
+    // (`a.png` and `a.png [input]` name the same file); the raw value is kept.
+    return { ...item, sameCurrent: item.kind === "input" ? currentRoot(metadata) === "input" && item.name === metadata.current
       : !!check?.hash && check.hash === check.currentHash, pending: item.kind !== "input" && (!check || !!check.pending), error: check?.error ?? "" };
   };
   const notify = () => { if (alive) changed(); };
@@ -138,7 +142,7 @@ export function makeVariationEditor({ targets, services, currentOrigin, changed 
         try {
           if (!alive || !originCurrent(target)) throw new Error("Source origin changed; your images were kept");
           const inspect = item.kind === "server-path" ? services.inspectPath : services.inspectImage;
-          const result = await inspect(target.host, item.kind === "server-path" ? item.path : item.file, entry.metadata.current, entry.metadata.fromOutput ? "output" : "input", target.origin, uploadFamily(item.name, entry.metadata.files));
+          const result = await inspect(target.host, item.kind === "server-path" ? item.path : item.file, entry.metadata.current, currentRoot(entry.metadata), target.origin, uploadFamily(item.name, entry.metadata.files));
           if (!alive || !originCurrent(target) || !sameOrigin(result?.origin, target.origin)) throw new Error("Source origin changed; your images were kept");
           if (!/^[a-f0-9]{64}$/.test(result.hash) || !/^[a-f0-9]{64}$/.test(result.currentHash)) throw new Error("Image comparison unavailable");
           const existing = result.existing ?? [];
@@ -173,7 +177,7 @@ export function makeVariationEditor({ targets, services, currentOrigin, changed 
   // This compiler is the only reader that attaches producer channels to editor
   // leaves. Dirty tracking uses the same declarations, never whole row objects.
   const compile = (snapshot, uploadReceipts = null, preview = false, lookup = evidence, target = capturedTargets[0]) => {
-    const bindings = [], uploads = [], uploadHashes = new Map(), ranges = {}, imageParams = {};
+    const bindings = [], uploads = [], uploadHashes = new Map(), ranges = {}, imageParams = {}, transfers = {}, estimates = {};
     const catalogue = catalogues.get(capturedTargets[0].id), parameters = allParameters(catalogue);
     const uploadPreview = preview ? previewUploads(snapshot, lookup) : null;
     const read = (domain, id, name, label) => {
@@ -213,24 +217,36 @@ export function makeVariationEditor({ targets, services, currentOrigin, changed 
       const enabled = read(domain, id, "enabled"); imageParams[id] = { enabled, values: [] };
       if (!enabled) continue;
       if (domain === "images") {
-        const values = [];
+        // Resource plan stages: existing references and per-target Current image
+        // resolve now; transfers stay unresolved intents until an actual receipt.
+        const assigned = [], estimate = [], unresolved = [];
         const items = read(domain, id, "items");
         if (!preview && !items.length) throw new Error(`${entry.metadata.label}: add at least one image before Run`);
         for (const item of items) {
           const state = imageView(id, item, entry.metadata, lookup);
           if (!preview && (state.pending || state.error)) throw new Error(state.error || "Checking image bytes; your work was kept.");
-          if (item.kind === "target") values.push(`${target.filename} [output]`);
-          else if (state.sameCurrent) values.push(parameterCurrent(entry.metadata));
-          else if (item.kind === "input") values.push(item.name);
+          let value;
+          if (item.kind === "target") value = `${target.filename} [output]`;
+          else if (state.sameCurrent) value = parameterCurrent(entry.metadata);
+          else if (item.kind === "input") value = item.name;
           else {
             const identity = imageIdentity(item);
+            admitResourceTransfer(entry.metadata);
             uploads.push(item);
             uploadHashes.set(identity, lookup(id, item)?.hash);
-            if (preview) values.push(uploadPreview.get(identity));
-            else if (uploadReceipts?.has(identity)) values.push(uploadReceipts.get(identity).name);
+            if (uploadReceipts?.has(identity)) value = uploadReceipts.get(identity).name;
+            else {
+              if (uploadReceipts) throw new Error(`${item.name}: upload acknowledgement unavailable; your image was kept`);
+              unresolved.push(identity);
+              // Count-only projection; never compiled, assigned or sent.
+              if (preview) estimate.push(uploadPreview.get(identity));
+              continue;
+            }
           }
+          assigned.push(value); estimate.push(value);
         }
-        imageParams[id].values = [...new Set(values)];
+        imageParams[id].values = [...new Set(assigned)];
+        if (unresolved.length) { transfers[id] = unresolved; estimates[id] = [...new Set(estimate)]; }
       } else if (domain === "candidates") {
         imageParams[id].values = read(domain, id, "candidates").map(raw => parseCandidate(entry.metadata, raw));
         if (!imageParams[id].values.length) throw new Error(`${entry.metadata.label}: add at least one value before Run`);
@@ -248,7 +264,11 @@ export function makeVariationEditor({ targets, services, currentOrigin, changed 
     const payload = freeze({ ranges, imageParams: compileDiscreteAxes(imageParams, parameters, catalogue.nodes), automaticNaming: true,
       prefix: read("naming", "root", "prefix"), suffix: read("naming", "root", "suffix"), ...(batch ? { relative: true } : {}) });
     recipeDispositions(snapshot, bindings);
-    return { payload, uploads: [...new Map(uploads.map(item => [imageIdentity(item), item])).values()], uploadHashes };
+    // Readonly count/naming estimate over the same plan: resolved literals plus
+    // predicted names for unresolved transfers. It authorizes no transfer or write.
+    const estimate = freeze({ ...payload, imageParams: { ...payload.imageParams,
+      ...Object.fromEntries(Object.entries(estimates).map(([id, values]) => [id, { ...payload.imageParams[id], values }])) } });
+    return { payload, estimate, transfers, uploads: [...new Map(uploads.map(item => [imageIdentity(item), item])).values()], uploadHashes };
   };
   const count = (payload, catalogue) => {
     const values = currentValues(catalogue);
@@ -446,7 +466,7 @@ export function makeVariationEditor({ targets, services, currentOrigin, changed 
         return unavailable("invalid", `${entry.metadata.label}: enter a valid positive Step. Your text is kept.`);
       }
       try {
-        const compiled = compile(snapshot, null, true), payload = compiled.payload;
+        const compiled = compile(snapshot, null, true), payload = compiled.estimate;
         for (const [id, axis] of Object.entries(payload.imageParams)) if (axis.enabled && !axis.values.length) {
            const entry = snapshot.images[id] ?? snapshot.enums[id] ?? snapshot.texts[id] ?? snapshot.candidates[id];
           return unavailable("invalid", `${entry.metadata.label}: ${snapshot.images[id] ? "add at least one image" : snapshot.enums[id] ? "choose at least one value" : "enter values for every template label"}.`);
@@ -533,9 +553,12 @@ export function makeVariationEditor({ targets, services, currentOrigin, changed 
           check(ticket, target);
           if (!validContext(data?.context) || !sameOrigin(data.context.origin, target.origin)) throw new Error("Source-bound catalogue unavailable; your work has been kept.");
           parameterIndex(catalogueParams(data));
-          // Predicted names are only placeholders for carrier admission here;
-          // final target plans below require the actual upload receipts.
-          targetRunPlan(compile(ticket.snapshot, null, true, runEvidence, target).payload, data);
+          // Every target admits the same plan before any transfer: carriers from
+          // the count estimate, transfers by that target's own resource contract.
+          // Final target plans below require the actual upload receipts.
+          const planned = compile(ticket.snapshot, null, true, runEvidence, target), carriers = parameterIndex(allParameters(data));
+          for (const id of Object.keys(planned.transfers)) if (carriers.has(id)) admitResourceTransfer(carriers.get(id));
+          targetRunPlan(planned.estimate, data);
           prepared.set(target.id, data);
         }
         const uploadTarget = ticket.targets[0];

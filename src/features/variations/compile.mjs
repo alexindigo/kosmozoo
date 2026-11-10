@@ -1,6 +1,6 @@
 // Framework-free typed assignment boundary. Editor adapters and Run share data
 // semantics; graph.mjs alone owns connection/wrapper interpretation.
-import { cloneJsonValue, sameJsonValue, stringifyExactJson, parameterIndex } from "../../parameters.mjs";
+import { cloneJsonValue, sameJsonValue, stringifyExactJson, parameterIndex, inputContract, parameterContract, resourceReferenceProblem } from "../../parameters.mjs";
 import { assignmentValue, inputDeclaration, inputEncoding, isGraphLink, validateGraphLinks } from "../../graph.mjs";
 
 export function compileValue(parameter, value) {
@@ -46,20 +46,35 @@ export function validateParameterValue(graph, parameter, schema = {}) {
   if (!declaration || isGraphLink(raw)) return;
   const encoding = inputEncoding(raw);
   const value = encoding === "comfy-array-wrapper" || encoding === "comfy-curve-wrapper" ? raw.__value__ : raw;
-  const type = declaration.type;
+  // The selected declaration's contract, not a descriptor from another branch.
+  const contract = inputContract(declaration), type = contract.type;
   const invalid = reason => { throw new Error(`${parameter.id}: ${reason}`); };
   if (type === "INT" && !(typeof value === "bigint" || typeof value === "number" && Number.isSafeInteger(value))) invalid("INT requires an exact integer");
   if (type === "FLOAT" && !(typeof value === "number" && Number.isFinite(value))) invalid("FLOAT requires a finite number");
   if (type === "BOOLEAN" && typeof value !== "boolean") invalid("BOOLEAN requires true or false");
   if (type === "STRING" && typeof value !== "string") invalid("STRING requires text");
-  if (Array.isArray(declaration.options)) {
-    const candidates = declaration.multiselect === true && Array.isArray(value) ? value : [value];
-    if (candidates.some(value => !declaration.options.some(option => sameJsonValue(option, value)))) invalid("value is not a declared option");
+  const candidates = contract.choices?.multiselect && Array.isArray(value) ? value : [value];
+  if (contract.role === "resource") {
+    // A picker listing is evidence of what existed, never the accepted domain.
+    for (const candidate of candidates) { const problem = resourceReferenceProblem(contract, candidate); if (problem) invalid(problem); }
+  } else if (contract.choices?.evidence === "closed") {
+    if (candidates.some(value => !contract.choices.values.some(option => sameJsonValue(option, value)))) invalid("value is not a declared option");
   }
   if (typeof value === "number" || typeof value === "bigint") {
     if (declaration.min !== undefined && value < declaration.min) invalid("value is below the declared minimum");
     if (declaration.max !== undefined && value > declaration.max) invalid("value is above the declared maximum");
   }
+}
+
+// A planned transfer is a resource intent, never a literal candidate: its target
+// name exists only after an actual receipt. Known non-resource inputs and
+// listing-only pickers reject before any read or write; unknown stays backend-owned.
+export function admitResourceTransfer(parameter) {
+  const contract = parameterContract(parameter), name = parameter.label ?? parameter.id;
+  if (contract.knowledge !== "known") return contract;
+  if (contract.role !== "resource") throw new Error(`${name}: this input accepts only its declared values, not uploaded files`);
+  if (!contract.resource.upload) throw new Error(`${name}: this input does not accept uploaded files`);
+  return contract;
 }
 
 export function validateFinalGraph(graph, parameters, schema = {}) {

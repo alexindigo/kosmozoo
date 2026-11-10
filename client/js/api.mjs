@@ -2,7 +2,7 @@
 // engine's public API (docs/spec.md ).
 import { subscribeSources } from "./source-events.mjs";
 import { collectionEntriesUrl, entryUrl, entryBytesUrl } from "./entry-url.mjs";
-export { collectionEntriesUrl, entryUrl, entryBytesUrl } from "./entry-url.mjs";
+export { collectionEntriesUrl, entryUrl, entryBytesUrl, resourceSource, parseResourceSource } from "./entry-url.mjs";
 export { compareSourceVersions, validSourceVersion, validSourceCursor, validateSourceSnapshot } from "./source-events.mjs";
 
 const BASE = ""; // same origin

@@ -2,7 +2,8 @@
 // over the store's node registry. NOTHING is hardcoded about nodes: the field
 // list derives from the engine's node registry; a field id is
 // `<class_type>.<input>`.
-import { entryBytesUrl } from "/js/api.mjs";
+import { entryBytesUrl, resourceSource } from "/js/api.mjs";
+import { resourceReference } from "/shared/parameters.mjs";
 
 const LONG_TEXT = 120; // chars: full-text fields render in the desc area
 
@@ -120,35 +121,40 @@ export function valueDiffer(compareMeta, { list }) {
 }
 
 // node inputs that reference an image FILE — only a LoadImage-type node's
-// `image` input qualifies. Sweeping every node input for a ".png" string
-// catches SaveImage's filename_prefix (a generated output name, not an input
-// file). ComfyUI annotates a LoadImage-from-output value as
-// "<filename> [output]": strip the annotation for the real filename, and
-// serve it from the OUTPUT bytes route (it is not in the input dir — the
-// input-bytes route would 404). Input-dir refs use input-bytes.
-// Deduped: two nodes referencing the same file render one image. With a
-// host, each entry carries its src.
+// `image` input qualifies (metadata carries no backend declarations, so this
+// honest offline discovery rule stays). Sweeping every node input for a ".png"
+// string catches SaveImage's filename_prefix (a generated output name, not an
+// input file). The shared resourceReference owner reads ComfyUI's stock root
+// annotations exactly; each image keeps its explicit root and is served from
+// that root's bytes route. Identity is root + file: an input and an output (or
+// temp) file of the same name are distinct images; repeats of one resource
+// render once. With a host, each entry carries its src and viewer side source.
 export const NODE_IMG_EXT = /\.(png|jpe?g|webp|gif|avif|bmp|svg)$/i;
 // uploads to a host's input dir are raster-only (no svg)
 export const UPLOAD_IMG_EXT = /\.(png|jpe?g|webp|gif|avif|bmp)$/i;
-const OUTPUT_TAG = /\s+\[output\]$/i;
+
+// A metadata value that names an image file: its stock root and file name, plus
+// the stable root-qualified key Details uses to address that image.
+export function imageReference(value) {
+  const reference = resourceReference(value);
+  if (!reference || !NODE_IMG_EXT.test(reference.name)) return null;
+  return { root: reference.root, file: reference.name, key: `${reference.root}:${reference.name}` };
+}
 
 export function nodeImages(meta, host) {
   const out = [];
   const seen = new Set();
   for (const n of meta?.nodes ?? []) {
     if (!/loadimage$/i.test(String(n.type ?? ""))) continue;
-    const raw = n.inputs?.image;
-    if (typeof raw !== "string") continue;
-    const fromOutput = OUTPUT_TAG.test(raw);
-    const file = fromOutput ? raw.replace(OUTPUT_TAG, "") : raw;
-    if (!NODE_IMG_EXT.test(file) || seen.has(file)) continue;
-    seen.add(file);
+    const reference = imageReference(n.inputs?.image);
+    if (!reference || seen.has(reference.key)) continue;
+    seen.add(reference.key);
     out.push({
       label: `${n.title ?? n.type} — image`,
-      file,
-      fromOutput, // LoadImage-from-output: served by the output bytes route
-      src: host ? entryBytesUrl(host, file, { kind: fromOutput ? "output" : "input" }) : null,
+      ...reference,
+      fromOutput: reference.root === "output", // compatibility facade of root
+      source: host ? resourceSource(host, reference.root) : null,
+      src: host ? entryBytesUrl(host, reference.file, { kind: reference.root }) : null,
     });
   }
   return out;

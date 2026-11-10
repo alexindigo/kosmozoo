@@ -22,7 +22,7 @@ import { IMAGE_EXTENSIONS, mediaExtension } from "../../backings/mime.mjs";
 import { listImages, readImage, folderError } from "./folder-images.mjs";
 import { inspectImage } from "./image-inspection.mjs";
 import { readJson, mediaHeaders } from "../../routes.mjs";
-import { graphParameters, editableParameter, cloneJsonValue, sameJsonValue, parseExactJson, stringifyExactJson } from "../../parameters.mjs";
+import { isResourceRoot, graphParameters, editableParameter, cloneJsonValue, sameJsonValue, parseExactJson, stringifyExactJson } from "../../parameters.mjs";
 import { compileValue, compileDiscreteAxes, validateFinalGraph } from "./compile.mjs";
 
 const exactResponse = (value, init = {}) => new Response(stringifyExactJson(value), {
@@ -273,7 +273,7 @@ export function register(app) {
     let form;
     try { form = await req.formData(); } catch { return Response.json({ error: "Multipart image required" }, { status: 400 }); }
     const file = form.get("image"), current = form.get("current"), kind = form.get("kind");
-    if (!(file instanceof File) || !IMAGE_EXTENSIONS.has(mediaExtension(file.name)) || !validEntryName(token.address, current) || !["input", "output"].includes(kind)) return Response.json({ error: "Image and current input required" }, { status: 400 });
+    if (!(file instanceof File) || !IMAGE_EXTENSIONS.has(mediaExtension(file.name)) || !validEntryName(token.address, current) || !isResourceRoot(kind)) return Response.json({ error: "Image and current input required" }, { status: 400 });
     let names;
     try { names = JSON.parse(form.get("names") ?? "[]"); } catch { return Response.json({ error: "Input names must be an array" }, { status: 400 }); }
     return inspectImage(app, token, host, { name: file.name, bytes: new Uint8Array(await file.arrayBuffer()), current, kind, names }, origin);

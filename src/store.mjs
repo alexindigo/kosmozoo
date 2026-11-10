@@ -16,6 +16,7 @@ import { copyFile, readFile, rename } from "node:fs/promises";
 import { CorruptStateError } from "./state.mjs";
 import { splitHostKey } from "./collections.mjs";
 import { SourceArrivals } from "./source-arrivals.mjs";
+import { isResourceRoot } from "./parameters.mjs";
 
 const SCHEMA_VERSION = 9;
 const CORE_JUDGMENT_FIELDS = new Set(["vote", "favorite", "bookmark", "notes"]);
@@ -189,10 +190,11 @@ const STATEMENTS = {
   nodeRegGet: "SELECT title, inputs FROM node_registry WHERE class_type = ?",
   nodeRegPut: "INSERT INTO node_registry (class_type, title, inputs, updated_at) VALUES (?, ?, ?, ?) ON CONFLICT(class_type) DO UPDATE SET title = excluded.title, inputs = excluded.inputs, updated_at = excluded.updated_at",
   nodeRegAll: "SELECT class_type, title, inputs FROM node_registry",
-  inputCacheGet: "SELECT hash, stamp FROM entry WHERE collection = ? AND name = ? AND kind = 'input'",
+  resourceCacheGet: "SELECT hash, stamp FROM entry WHERE collection = ? AND name = ? AND kind = ?",
   contentPlaceholder: "INSERT OR IGNORE INTO content (hash, updated_at) VALUES (?, ?)",
-  inputCachePut: `INSERT INTO entry (collection, name, kind, hash, stamp, state, first_seen, last_seen)
-       VALUES (?, ?, 'input', ?, ?, 'ingested', ?, ?)
+  contentSize: "UPDATE content SET bytes = ? WHERE hash = ? AND bytes IS NULL",
+  resourceCachePut: `INSERT INTO entry (collection, name, kind, hash, stamp, state, first_seen, last_seen)
+       VALUES (?, ?, ?, ?, ?, 'ingested', ?, ?)
        ON CONFLICT(collection, name, kind) DO UPDATE SET hash = excluded.hash, stamp = excluded.stamp, state = 'ingested', last_seen = excluded.last_seen`,
   hashFor: "SELECT hash FROM entry WHERE collection = ? AND name = ? AND kind = 'output'",
   fileInfo: "SELECT hash, stamp FROM entry WHERE collection = ? AND name = ? AND kind = 'output'",
@@ -255,9 +257,9 @@ const STATEMENTS = {
   goneNames: "SELECT name FROM entry WHERE collection = ? AND kind = 'output' AND state = 'gone'",
   entryDims: `SELECT COALESCE(c.width, e.width) AS width, COALESCE(c.height, e.height) AS height
        FROM entry e LEFT JOIN content c ON c.hash = e.hash
-       WHERE e.collection = ? AND e.name = ? AND e.kind = 'output'`,
+       WHERE e.collection = ? AND e.name = ? AND e.kind = ?`,
   entryDimsPut: `INSERT INTO entry (collection, name, kind, width, height, state, first_seen, last_seen)
-       VALUES (?, ?, 'output', ?, ?, 'seen', ?, ?)
+       VALUES (?, ?, ?, ?, ?, 'seen', ?, ?)
        ON CONFLICT(collection, name, kind) DO UPDATE SET
          width = COALESCE(excluded.width, entry.width),
          height = COALESCE(excluded.height, entry.height),
@@ -708,21 +710,31 @@ export class Store {
     if (!before) this.#collectionCommitted(id, this.collectionGet(id));
   }
 
-  // --- input-file cache index (entry kind='input' adapter) -------------------
+  // --- referenced-resource cache index (entry kind='input'/'temp') ---------
+  // Non-output roots are byte-cache rows only: no inventory, extraction or
+  // judgments. Output entries keep their own adapters below.
 
-  inputCacheGet(host, filename) {
-    const row = this.#q.inputCacheGet.value(host, filename);
+  resourceCacheGet(host, filename, kind) {
+    if (kind === "output" || !isResourceRoot(kind)) throw new TypeError(`Not a referenced-resource root: ${kind}`);
+    const row = this.#q.resourceCacheGet.value(host, filename, kind);
     return row ? { hash: row[0], stamp: row[1] } : null;
   }
 
-  inputCachePut(host, filename, hash, stamp) {
+  resourceCachePut(host, filename, kind, hash, stamp, size = null) {
+    if (kind === "output" || !isResourceRoot(kind)) throw new TypeError(`Not a referenced-resource root: ${kind}`);
     this.#ensureCollection(host);
     const now = Date.now();
     // the entry's hash must reference a content row (FK) — placeholder
-    // (ext=0, no meta) is fine: input files have no extractor output here
+    // (ext=0, no meta) is fine: referenced files have no extractor output here
     this.#q.contentPlaceholder.run(hash, now);
-    this.#q.inputCachePut.run(host, filename, hash, stamp, now, now);
+    // The byte length is a fact of the content hash; HEAD reports it per root.
+    if (Number.isSafeInteger(size)) this.#q.contentSize.run(size, hash);
+    this.#q.resourceCachePut.run(host, filename, kind, hash, stamp, now, now);
   }
+
+  // Compatibility facades for the input root.
+  inputCacheGet(host, filename) { return this.resourceCacheGet(host, filename, "input"); }
+  inputCachePut(host, filename, hash, stamp) { return this.resourceCachePut(host, filename, "input", hash, stamp); }
 
   // --- hash identity (entry kind='output' adapters) -------------------------
 
@@ -757,7 +769,7 @@ export class Store {
 
     // dims move to content at ingest; the entry's columns stay in sync so
     // the COALESCE reads hold even when the content row is later dropped
-    if (dims) this.#q.entryDimsPut.run(host, filename, dims.width ?? null, dims.height ?? null, now, now);
+    if (dims) this.#q.entryDimsPut.run(host, filename, "output", dims.width ?? null, dims.height ?? null, now, now);
 
     if (changed && old && old !== hash) {
       const refs = this.#q.contentRefs.value(old)[0];
@@ -969,21 +981,25 @@ export class Store {
   // --- entry dims : dims are known before the hash is) ----------------
 
   // { width, height } from the content row (via the entry's hash) or the
-  // entry's own columns — null when neither knows.
-  entryDims(collection, name) {
-    const row = this.#q.entryDims.get(collection, name);
+  // entry's own columns — null when neither knows. Keyed by resource root;
+  // the default remains the output entry.
+  entryDims(collection, name, kind = "output") {
+    if (!isResourceRoot(kind)) throw new TypeError(`unknown resource root: ${kind}`);
+    const row = this.#q.entryDims.get(collection, name, kind);
     if (!row || row.width == null || row.height == null) return null;
     return { width: row.width, height: row.height };
   }
 
-  // Store dims a head read yielded. Creates the 'seen' entry row when the
-  // name has none yet; never wipes known dims with nulls. Bumps the meta
-  // version so /meta polls deliver dims to clients.
-  entryDimsPut(collection, name, dims) {
+  // Store dims a head read yielded. Creates the 'seen' row of that root when
+  // the name has none yet; never wipes known dims with nulls. Output dims bump
+  // the meta version so /meta polls deliver them; input/temp rows are
+  // referenced resources, never output inventory or meta publications.
+  entryDimsPut(collection, name, dims, kind = "output") {
+    if (!isResourceRoot(kind)) throw new TypeError(`unknown resource root: ${kind}`);
     this.#ensureCollection(collection);
     const now = Date.now();
-    this.#q.entryDimsPut.run(collection, name, dims?.width ?? null, dims?.height ?? null, now, now);
-    this.#bumpMeta(collection, name, null, { meta: false, dims: true });
+    this.#q.entryDimsPut.run(collection, name, kind, dims?.width ?? null, dims?.height ?? null, now, now);
+    if (kind === "output") this.#bumpMeta(collection, name, null, { meta: false, dims: true });
   }
 
   // Names whose dims are known (either source) — the dims-pass queue gate.
