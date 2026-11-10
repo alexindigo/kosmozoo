@@ -7,7 +7,7 @@ Deno.test("card state: one treatment supplies border and tick color, including b
     [{}, true, "current", "var(--foreground-bright)"],
     [{ bookmark: true }, false, "bookmark", "var(--primary)"],
     [{ bookmark: true }, true, "bookmark", "var(--primary)"],
-    [{ vote: "up" }, true, "up", "var(--positive-dim)"],
+    [{ vote: "up" }, true, "up", "var(--positive)"],
     [{ vote: "down" }, true, "down", "var(--negative)"],
     [{ favorite: true }, true, "favorite", "var(--attention)"],
     [{ favorite: true, bookmark: true }, true, "favorite", "var(--attention)"],

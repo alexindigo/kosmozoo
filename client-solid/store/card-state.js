@@ -3,7 +3,7 @@ const treatments = [
   { name: "favorite", field: "favorite", value: true, color: "var(--attention)" },
   { name: "bookmark", field: "bookmark", value: true, color: "var(--primary)" },
   { name: "down", field: "vote", value: "down", color: "var(--negative)" },
-  { name: "up", field: "vote", value: "up", color: "var(--positive-dim)" },
+  { name: "up", field: "vote", value: "up", color: "var(--positive)" },
 ];
 
 export function cardState(judgment, current = false, { surface = "card" } = {}) {

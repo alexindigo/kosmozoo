@@ -213,7 +213,7 @@ async function railMotion(page) {
 
   // Each state retains its border treatment when current, and changes
   // decoration only (including the rail's corresponding color).
-  for (const [mode, token] of [["plain", "--foreground-bright"], ["up", "--positive-dim"], ["down", "--negative"], ["bookmark", "--primary"], ["favorite", "--attention"], ["favorite-bookmark", "--attention"]]) {
+  for (const [mode, token] of [["plain", "--foreground-bright"], ["up", "--positive"], ["down", "--negative"], ["bookmark", "--primary"], ["favorite", "--attention"], ["favorite-bookmark", "--attention"]]) {
     const appearance = await page.evaluate(`(async () => {
       const kz = ${KZ};
       const im = kz.state.images.find((i) => i.filename === "flux-basic.png");
