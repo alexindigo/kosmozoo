@@ -147,7 +147,7 @@ for (const path of paths) {
       assertEquals(result.adopted, true, r.editor.result()?.text);
       assertEquals(r.transfers.uploads.length, path.uploads ?? 0); assertEquals(r.transfers.paths.length, path.paths ?? 0);
       assertEquals(r.transfers.reads.length, path.reads ?? 0);
-      assertEquals(r.requests.length, 1); assertEquals(r.requests[0].imageParams[IMAGE].values, [path.final]);
+      assertEquals(r.requests.length, 1); assertEquals(r.requests[0].imageParams[IMAGE].values, ["origin.png", path.final]);
       assertEquals(r.jobs.map(job => job.prompt.image.inputs.image), [path.final]);
       assert(!r.editor.dirty(), "v2 proof adopted exactly the captured revision");
     } finally { r.editor.dispose(); }
@@ -191,12 +191,12 @@ Deno.test("resource path: partial upload failure and uncertain Run keep the whol
     const failed = await r.editor.run();
     assertEquals([failed.adopted, r.requests.length, r.jobs.length, calls], [false, 0, 0, 2]);
     assertEquals(r.editor.result().effects.uploads.map(receipt => receipt.name), ["a.png"]);
-    assert(r.editor.dirty()); assertEquals(r.editor.rows("images")[IMAGE].items.map(item => item.file), files);
+    assert(r.editor.dirty()); assertEquals(r.editor.rows("images")[IMAGE].items.map(item => item.file), [undefined, ...files]);
     r.services.uploadInput = async (_host, form, expected) => ({ name: r.b.store(form.get("image").name, await form.get("image").text()), origin: { ...expected } });
     r.services.run = async () => { throw new Error("connection reset"); };
     const uncertain = await r.editor.run();
     assertEquals([uncertain.adopted, r.editor.result().outcome, r.jobs.length], [false, "uncertain-effects", 0]);
-    assert(r.editor.dirty()); assertEquals(r.editor.rows("images")[IMAGE].items.map(item => item.file), files);
+    assert(r.editor.dirty()); assertEquals(r.editor.rows("images")[IMAGE].items.map(item => item.file), [undefined, ...files]);
   } finally { r.editor.dispose(); }
 });
 

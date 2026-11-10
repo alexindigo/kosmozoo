@@ -30,7 +30,7 @@ module.exports = async ({ cdp, check }) => {
   };
   const open = async () => {
     await invoke('variations.open', { id: 'fake:flux-controlnet.png' });
-    await addParameter(cdp,'43.image');
+    await addParameter(cdp,'43.image');await require('./variation-add-helpers.cjs').removeRecordedImage(cdp,'43.image');
     await openImageAdd(cdp); await cdp.clickAt('.vz-input-trigger'); await waitForInputPicker(cdp);
   };
   await fetch(OTHER + '/__test/activity', { method: 'POST', body: JSON.stringify({ reset: true }) });

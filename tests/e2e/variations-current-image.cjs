@@ -21,6 +21,7 @@ module.exports = async ({ cdp, KZ, FAKE, check }) => {
       const names = bulk ? ['flux-controlnet.png','portraits/flux-controlnet_00002_.png'] : ['flux-controlnet.png'];
       await invoke('variations.open', bulk ? {ids:names.map(n=>'fake:'+n),bulk:true} : {id:'fake:'+names[0]});
       await addParameter(cdp,'43.image');
+      await require('./variation-add-helpers.cjs').removeRecordedImage(cdp,'43.image');
       await openImageAdd(cdp);
       assert(await cdp.evaluate("!!document.querySelector('.vz-current-image')"),'Current image acquisition button exists');
       const labels = await cdp.evaluate("[...document.querySelector('.vz-image-add').children].filter(e=>e.matches('button,.vz-input-picker')).map(e=>e.textContent.trim())");

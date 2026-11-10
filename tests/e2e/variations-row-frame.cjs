@@ -18,12 +18,13 @@ module.exports = async ({ cdp, check, KZ }) => {
       return { rows:rows.map(el=>({id:el.dataset.catalogueId,name:el.querySelector('.vz-catalogue-name').textContent,
         height:el.getBoundingClientRect().height,x:el.querySelector('.vz-catalogue-name').getBoundingClientRect().x,
         opacity:getComputedStyle(el).opacity,body:!!el.querySelector('.vz-numeric-editor,.vz-imgrow-body,.vz-image-content'),
-        current:el.querySelector('.vz-catalogue-current').textContent})),scroll:list.scrollWidth-list.clientWidth};
+        border:getComputedStyle(el).borderTopWidth,image:!!el.querySelector('.vz-catalogue-picture'),current:(el.querySelector('.vz-catalogue-current')??el.querySelector('.vz-catalogue-picture')).textContent})),scroll:list.scrollWidth-list.clientWidth};
     })()`);
     assert(geometry.rows.length > 6);
-    assert(geometry.rows.every(item => !item.body && item.height <= 52));
-    assert(Math.max(...geometry.rows.map(item => item.height))-Math.min(...geometry.rows.map(item => item.height)) <= 1);
-    check('row frame: every closed kind is one equal-height line, with no body in the DOM', true, JSON.stringify(geometry));
+    assert(geometry.rows.every(item => !item.body && item.border === '1px'));
+    const textRows=geometry.rows.filter(item=>!item.image);
+    assert(Math.max(...textRows.map(item => item.height))-Math.min(...textRows.map(item => item.height)) <= 1);
+    check('row frame: every closed kind uses the bordered catalogue card; textual cards share height and image cards retain their thumbnail allocation', true, JSON.stringify(geometry));
     assert(geometry.rows.every(item => item.opacity === '1'));
     check('row frame: unadded catalogue has ordinary foreground values', true);
     assert(geometry.rows.every(item => Math.abs(item.x-geometry.rows[0].x) < 0.5));
@@ -33,8 +34,8 @@ module.exports = async ({ cdp, check, KZ }) => {
     // The complete catalogue distinguishes repeated class/input occurrences by node.
     assert(geometry.rows.every(item => item.name.length && !item.current.startsWith('Current ')));
     assert.deepEqual(geometry.rows.filter(item => item.id === '2.text' || item.id === '42.text').map(item => item.name), ['text', 'text']);
-    assert.deepEqual(await cdp.evaluate("[...document.querySelectorAll('.vz-catalogue-node')].filter(node=>node.querySelector('[data-catalogue-id=\"2.text\"],[data-catalogue-id=\"42.text\"]')).map(node=>node.querySelector('.vz-catalogue-node-name').textContent)"), ['CLIPTextEncode #2', 'CLIPTextEncode #42']);
-    assert.equal(await cdp.evaluate("document.querySelector('[data-catalogue-id=\"43.image\"] .vz-catalogue-current').textContent"), 'canny.png (input)');
+    assert.deepEqual(await cdp.evaluate("['2.text','42.text'].map(id=>document.querySelector('[data-catalogue-id=\"'+id+'\"] .vz-catalogue-node-name').textContent)"), ['CLIPTextEncode', 'CLIPTextEncode']);
+    assert.equal(await cdp.evaluate("document.querySelector('[data-catalogue-id=\"43.image\"] .vz-catalogue-picture').title"), 'canny.png (input)');
     assert(await cdp.evaluate("!document.querySelector('.vz-insert-parameter,.vz-name-example,.vz-name-help,.vz-parameter-identity')&&document.querySelector('.vz-run').textContent==='Run'"));
     check('row frame: raw ComfyUI names, current image filename and Run replace retired chrome', true);
     // Open names insert at both naming targets without toggling. Closed names
@@ -77,7 +78,7 @@ module.exports = async ({ cdp, check, KZ }) => {
     assert.equal(await cdp.evaluate(`document.querySelector('${numeric} .vz-row-inc-input').value`), '0.1');
     assert.equal(await cdp.evaluate(`document.querySelector('${text}').value`), 'retained template');
     assert.deepEqual(await cdp.evaluate("[...document.querySelectorAll('.vz-enumrow.on .vz-enum-opt .checkbox')].map(input=>input.checked)"), picks);
-    assert.equal(await cdp.evaluate("document.querySelector('.vz-image-tile').dataset.imageName"), 'row-retained.png');
+    assert.deepEqual(await cdp.evaluate("[...document.querySelectorAll('.vz-image-tile')].map(el=>el.dataset.imageName)"), ['canny.png','row-retained.png']);
     await cdp.poll("document.querySelector('.vz-image-tile img')?.naturalWidth>0");
     check('row frame: numeric bounds/raw increment, enum picks, text and native File preview survive collapse/reopen', true);
     assert(await cdp.evaluate("[...document.querySelectorAll('.vz-parameter.on .vz-parameter-current')].every(el=>/\\d+ (values?|options?|images?)/.test(el.textContent))"));

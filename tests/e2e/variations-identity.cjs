@@ -17,6 +17,9 @@ module.exports = async ({ cdp, FAKE, KZ, check }) => {
     await cdp.poll(`document.querySelector(${JSON.stringify(selector)}).value===${JSON.stringify(text)}`);
   };
   await http('/__test/activity', { captureEnqueue: true });
+  // This scenario explicitly requires a scrolled second image trigger, not
+  // the viewport inherited from whichever filtered scenario ran previously.
+  await cdp.send('Emulation.setDeviceMetricsOverride',{width:1280,height:700,deviceScaleFactor:1,mobile:false});
   try {
     const history = await http('/api/history');
     const source = Object.values(history).find(entry => entry.outputs?.['9']?.images?.some(image => image.filename === 'flux-lora.png'));
@@ -35,6 +38,7 @@ module.exports = async ({ cdp, FAKE, KZ, check }) => {
     await cdp.evaluate("(async()=>{await fetch('/api/collections/fake/entries/identity-multiple.png/bytes')})()");
     await invoke('variations.open', { id: 'fake:identity-multiple.png' });
     for(const id of ['76.image','81.image'])await addParameter(cdp,id);
+    for(const id of ['76.image','81.image'])await require('./variation-add-helpers.cjs').removeRecordedImage(cdp,id);
     const labels = await cdp.evaluate("[...document.querySelectorAll('[data-image-id] .vz-imgrow-label')].map(e=>e.title.split('\\n').at(-1))");
     assert.deepEqual(labels, ['Reference #76 · image', 'Reference #81 · image']);
     for (const id of ['20', '21']) assert(await cdp.evaluate(`!!document.querySelector('[data-catalogue-id="${id}.strength_model"]')`));
@@ -113,6 +117,7 @@ module.exports = async ({ cdp, FAKE, KZ, check }) => {
     await cdp.poll("!document.querySelector('.vz-panel')", 6000);
     check('identity: two LoadImages, two LoRAs, two text nodes and enum choices reach six own-node graphs, expanded names and clean proof adoption', true);
   } finally {
+    await cdp.send('Emulation.clearDeviceMetricsOverride');
     if (await cdp.evaluate("!!document.querySelector('.vz-panel')")) {
       await cdp.evaluate(`(async()=>{window.__identityLeave=${KZ}.handles.invoke('variations.close');return true})()`);
       if (await cdp.evaluate("!!document.querySelector('.vz-discard')")) await cdp.clickAt('.vz-discard-confirm');

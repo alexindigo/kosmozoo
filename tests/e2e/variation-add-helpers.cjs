@@ -13,4 +13,12 @@ async function toggleParameter(cdp, id) {
   if (await cdp.evaluate(`!!document.querySelector(${JSON.stringify(selector)})`)) await cdp.clickAt(selector);
   else await addParameter(cdp, id);
 }
-module.exports = { addParameter, toggleParameter };
+// Explicit opt-in for acquisition/empty-set scenarios. Exercise the ordinary
+// removable reference through the same native button a user presses.
+async function removeRecordedImage(cdp, id) {
+  const row = `[data-image-id="${id}"]`, tile = `${row} [data-image-kind="reference"]`;
+  await cdp.poll(`!!document.querySelector(${JSON.stringify(tile)})`);
+  await cdp.clickAt(`${tile} .vz-image-remove button`);
+  await cdp.poll(`!document.querySelector(${JSON.stringify(tile)})`);
+}
+module.exports = { addParameter, toggleParameter, removeRecordedImage };

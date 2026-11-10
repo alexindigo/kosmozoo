@@ -22,7 +22,7 @@ module.exports = async ({ cdp, KZ, check }) => {
   await cdp.evaluate(`(async()=>{await fetch('/api/collections/fake/entries/flux-controlnet.png/bytes')})()`);
   await invoke('variations.open', { id: 'fake:flux-controlnet.png' });
   await cdp.poll("!!document.querySelector('[data-catalogue-id=\"43.image\"]')"); await freshRecipe(cdp);
-  await addParameter(cdp,'43.image'); await openImageAdd(cdp);
+   await addParameter(cdp,'43.image');await require('./variation-add-helpers.cjs').removeRecordedImage(cdp,'43.image'); await openImageAdd(cdp);
   await cdp.clickAt('.vz-input-trigger'); await waitForInputPicker(cdp);
   try {
     // Last-selection removal restores the empty-state row and moves the anchor.

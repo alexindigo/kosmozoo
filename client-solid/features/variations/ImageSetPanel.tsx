@@ -193,7 +193,7 @@ function ImageTile(props) {
   const file = createMemo(() => props.item()?.file), name = createMemo(() => props.item()?.name), path = createMemo(() => props.item()?.path);
   createEffect(() => {
     if (!name()) return;
-    if (!file()) { setUrl(props.item()?.kind === "target" ? props.targetThumbnail() : path() ? props.pathThumbnail(path()) : props.thumbnail(name())); return; }
+    if (!file()) { setUrl(props.item()?.kind === "target" ? props.targetThumbnail() : path() ? props.pathThumbnail(path()) : props.thumbnail(name(), props.item()?.root)); return; }
     const src = URL.createObjectURL(file()); setUrl(src); onCleanup(() => URL.revokeObjectURL(src));
   });
   // Local File previews are object URLs; engine thumbnails are admitted

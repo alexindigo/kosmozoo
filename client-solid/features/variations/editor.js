@@ -8,7 +8,7 @@ import { templateLabels, templateValue, parseSemicolonList, expandTextAxes, perm
   resolveRelativeRanges, acknowledgedFields, targetRunPlan, catalogueParams, parameterIndex, parameterCurrent, parameterLabel, parameterAliases,
    variationOutputName, uploadCandidate, uploadFamily } from "/shared/features/variations/shared.mjs";
 import { validOrigin, sameOrigin, validContext, sameContext } from "/shared/source-origin.mjs";
-import { validImageSet, mergeImages, sameImage, imageIdentity, uploadImage } from "./image-set.js";
+import { validImageSet, mergeImages, sameImage, imageIdentity, imageReference, imageReferenceValue, uploadImage } from "./image-set.js";
 import { classifyImageFiles } from "./image-drop.js";
 import { connectionPresentation } from "./field-filter.js";
 import { RECIPE_FIELDS as EDITOR_FIELDS, makeVariationRecipe, recipeField as descriptor,
@@ -34,8 +34,8 @@ const numberText = numericText;
 // identity validation and seeding always pass through the common owner boundary.
 const ROW_STRATEGIES = {
   numeric: { initialize: numericDefaults },
-  images: { initialize: () => ({ metadata: { files: [], filesReady: false },
-    defaults: { enabled: false, items: [] } }) },
+  images: { initialize: p => ({ metadata: { files: [], filesReady: false },
+    defaults: { enabled: false, items: [{ kind: "reference", value: parameterCurrent(p) }] } }) },
   enums: { initialize: p => ({ metadata: { values: choiceValues(p) }, defaults: { enabled: false, picks: [parameterCurrent(p)] } }) },
   texts: { initialize: p => ({ defaults: { enabled: false, text: parameterCurrent(p), tpl: {} } }) },
   candidates: { initialize: p => ({ metadata: { candidateKind: p.valueKind === "connection" ? "connection" : choiceValues(p)?.length ? "options" : typeof parameterCurrent(p) === "boolean" ? "boolean" : "json",
@@ -66,11 +66,11 @@ export function makeVariationEditor({ targets, services, currentOrigin, changed 
   const evidence = (id, item) => imageChecks.get(id)?.get(imageIdentity(item));
   const imageView = (id, item, metadata, lookup = evidence) => {
     if (item.kind === "target") return { ...item, name: capturedTargets[0].filename, each: batch, pending: false, error: "", sameCurrent: false };
-    const check = item.kind === "input" ? null : lookup(id, item);
+    const reference = imageReference(item), check = reference ? null : lookup(id, item);
     // An existing input is the current resource when roots and names agree
     // (`a.png` and `a.png [input]` name the same file); the raw value is kept.
-    return { ...item, sameCurrent: item.kind === "input" ? currentRoot(metadata) === "input" && item.name === metadata.current
-      : !!check?.hash && check.hash === check.currentHash, pending: item.kind !== "input" && (!check || !!check.pending), error: check?.error ?? "" };
+    return { ...item, ...(reference ?? {}), sameCurrent: reference ? currentRoot(metadata) === reference.root && reference.name === metadata.current
+      : !!check?.hash && check.hash === check.currentHash, pending: !reference && (!check || !!check.pending), error: check?.error ?? "" };
   };
   const notify = () => { if (alive) changed(); };
   const invalidateClose = () => { closeGeneration++; if (timer !== null) clearTimer(timer); timer = null; };
@@ -135,7 +135,7 @@ export function makeVariationEditor({ targets, services, currentOrigin, changed 
     if (!imageChecks.has(id)) imageChecks.set(id, new Map());
     const checks = imageChecks.get(id);
     for (const item of entry.values.items) {
-      if (item.kind === "target" || item.kind === "input" || checks.has(imageIdentity(item))) continue;
+      if (item.kind === "target" || imageReference(item) || checks.has(imageIdentity(item))) continue;
       const check = { pending: true }, identity = imageIdentity(item); checks.set(identity, check);
       let finish;
       const pending = new Promise(resolve => { finish = resolve; }); pendingInspections.add(pending);
@@ -164,7 +164,7 @@ export function makeVariationEditor({ targets, services, currentOrigin, changed 
       if (!entry.values.enabled) continue;
       for (const item of entry.values.items) {
         const identity = imageIdentity(item);
-        if (item.kind === "target" || item.kind === "input" || imageView(id, item, entry.metadata, lookup).sameCurrent || names.has(identity)) continue;
+        if (item.kind === "target" || imageReference(item) || imageView(id, item, entry.metadata, lookup).sameCurrent || names.has(identity)) continue;
         const hash = lookup(id, item)?.hash;
         if (!hash) { names.set(identity, `\0pending-${names.size}`); continue; }
         let name = item.name, index = 0;
@@ -229,7 +229,7 @@ export function makeVariationEditor({ targets, services, currentOrigin, changed 
           let value;
           if (item.kind === "target") value = `${target.filename} [output]`;
           else if (state.sameCurrent) value = parameterCurrent(entry.metadata);
-          else if (item.kind === "input") value = item.name;
+          else if (imageReference(item)) value = imageReferenceValue(item);
           else {
             const identity = imageIdentity(item);
             admitResourceTransfer(entry.metadata);

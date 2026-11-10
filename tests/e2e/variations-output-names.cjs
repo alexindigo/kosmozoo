@@ -23,6 +23,7 @@ module.exports = async ({ cdp, check, FAKE, KZ }) => {
     await cdp.evaluate(`(async()=>{await fetch('/api/collections/fake/entries/'+encodeURIComponent(${JSON.stringify(name)})+'/bytes')})()`);
     await invoke('variations.open', { id: 'fake:' + name });
     await addParameter(cdp,'9.denoise');await addParameter(cdp,'470.image');
+    await require('./variation-add-helpers.cjs').removeRecordedImage(cdp,'470.image');
     await cdp.poll("!!document.querySelector('[data-image-id=\"470.image\"] .vz-imgfilespick')");
     await cdp.evaluate(`(async()=>{const bytes=await(await fetch('/api/collections/fake/entries/flux-lora.png/bytes')).arrayBuffer(),input=document.querySelector('[data-image-id="470.image"] .vz-imgfilespick'),dt=new DataTransfer();dt.items.add(new File([bytes],${JSON.stringify(name)},{type:'image/png'}));input.files=dt.files;input.dispatchEvent(new Event('change',{bubbles:true}))})()`);
     await cdp.poll("document.querySelectorAll('.vz-image-tile').length===1&&!document.querySelector('.vz-image-check')");

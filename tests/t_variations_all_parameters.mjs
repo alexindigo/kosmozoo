@@ -141,7 +141,8 @@ Deno.test("all parameters: off and late input settlement retain exact native Fil
     editor.installInputs({ origin: context.origin, files: ["late.png"] });
     assertEquals(editor.rows("images")["image.image"].enabled, false);
     editor.setEnabled("image.image", true);
-    assert(editor.rows("images")["image.image"].items[0].file === file);
+    assertEquals(editor.rows("images")["image.image"].items[0], { kind: "reference", value: "origin.png" });
+    assert(editor.rows("images")["image.image"].items[1].file === file);
     assertEquals(editor.naming("suffix"), "_manual_{image.image}");
   } finally { editor.dispose(); }
 });

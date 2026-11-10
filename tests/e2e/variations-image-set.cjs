@@ -3,7 +3,7 @@ const fs = require('node:fs');
 const { workPath } = require('./paths.cjs');
 const { pickInput, waitForSelectedPreviews, openImageAdd, openImageFolder, waitForInputPicker, waitForIdleInputWindow } = require('./image-picker-helpers.cjs');
 const { freshRecipe } = require('./recipe-helpers.cjs');
-const { addParameter } = require('./variation-add-helpers.cjs');
+const { addParameter, removeRecordedImage } = require('./variation-add-helpers.cjs');
 
 module.exports = async ({ cdp, FAKE, KZ, check }) => {
   const invoke = (id, args = {}) => cdp.evaluate(`(async()=>${KZ}.handles.invoke(${JSON.stringify(id)},${JSON.stringify(args)}))()`);
@@ -25,6 +25,7 @@ module.exports = async ({ cdp, FAKE, KZ, check }) => {
     await freshRecipe(cdp);
     assert.equal(await cdp.evaluate("!!document.querySelector('.vz-image-content')"), false);
     await addParameter(cdp,'43.image');
+    await removeRecordedImage(cdp,'43.image');
     await openImageFolder(cdp);
     assert.equal(await cdp.evaluate("document.querySelector('.vz-image-empty').textContent"), 'Add images to vary this input.');
     assert(await cdp.evaluate("!!document.querySelector('.vz-input-trigger')&&!!document.querySelector('.vz-imgfilespick')&&!document.querySelector('[webkitdirectory]')"));
@@ -124,6 +125,7 @@ module.exports = async ({ cdp, FAKE, KZ, check }) => {
     await invoke('variations.open', { id: 'fake:flux-controlnet.png' });
     await cdp.poll("!!document.querySelector('[data-catalogue-id=\"43.image\"]')");
     await freshRecipe(cdp);await addParameter(cdp,'43.image');
+    await removeRecordedImage(cdp,'43.image');
     await pickInput(cdp, 'picker-0550.png');
     await cdp.evaluate(`(async()=>{const bytes=await(await fetch('/api/collections/fake/entries/flux-lora.png/bytes')).arrayBuffer();const input=document.querySelector('.vz-imgfilespick'),data=new DataTransfer();data.items.add(new File([bytes],'turn-browser.png',{type:'image/png'}));input.files=data.files;input.dispatchEvent(new Event('change',{bubbles:true}))})()`);
     const addFolder = async value => {

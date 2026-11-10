@@ -61,6 +61,7 @@ module.exports = async ({ cdp, ENGINE, FAKE, KZ, check }) => {
     await addParameter(cdp,'9.scheduler');await cdp.clickAt('[data-enum-id="9.scheduler"] .vz-enum-opt:last-child .checkbox');await cdp.clickAt('[data-enum-id="9.scheduler"] .vz-parameter-remove');
     await addParameter(cdp,'2.text');await type('.vz-text-values','{{parked}}');await type('.vz-tpl-input','one; two');await type('.vz-text-values','literal submitted');
     for(const id of ['470.image','475.image'])await addParameter(cdp,id);
+    await require('./variation-add-helpers.cjs').removeRecordedImage(cdp,'470.image');
     await cdp.evaluate(`(async()=>{const bytes=await(await fetch('/api/collections/fake/entries/flux-lora.png/bytes')).arrayBuffer();
       window.__recipeFiles=['#%.png','question?.png','spaces Ω [input].png'].map(name=>new File([bytes],name,{type:'image/png'}));
       window.__recipeDormant=new File([bytes],'dormant.png',{type:'image/png'});
@@ -80,6 +81,7 @@ module.exports = async ({ cdp, ENGINE, FAKE, KZ, check }) => {
 
     // Enabled-empty and unresolved naming reject without a single fake enqueue.
     await addParameter(cdp,'475.image');await cdp.poll("!!document.querySelector('[data-image-id=\"475.image\"].on .vz-parameter-remove')");
+    await require('./variation-add-helpers.cjs').removeRecordedImage(cdp,'475.image');
     await cdp.poll("document.querySelectorAll('[data-image-id=\"475.image\"] .vz-image-tile').length===0");
     let count=(await jobs()).length;assert.equal((await invoke('variations.run')).adopted,false);assert.equal((await jobs()).length,count);
     assert(await cdp.evaluate("document.querySelector('.vz-error').textContent.includes('at least one image')"));
@@ -94,6 +96,7 @@ module.exports = async ({ cdp, ENGINE, FAKE, KZ, check }) => {
     check('recipe layout: normal, preflight and long-error states keep intrinsic content reachable through the sidebar body, bounded messages directly above pinned Run',true);
     await type('.vz-suffix','_{470.image}');
     await addParameter(cdp,'470.image');
+    await require('./variation-add-helpers.cjs').removeRecordedImage(cdp,'470.image');
     await cdp.evaluate(`(async()=>{const bytes=await(await fetch('/api/collections/fake/entries/flux-lora.png/bytes')).arrayBuffer(),input=document.querySelector('[data-image-id="470.image"] .vz-imgfilespick'),dt=new DataTransfer();dt.items.add(new File([bytes],'x'.repeat(196)+'.png',{type:'image/png'}));input.files=dt.files;input.dispatchEvent(new Event('change',{bubbles:true}))})()`);
     await cdp.poll("!!document.querySelector('[data-image-id=\"470.image\"].on .vz-parameter-remove')&&!document.querySelector('.vz-image-check')");count=(await jobs()).length;
     assert.equal((await invoke('variations.run')).adopted,true);

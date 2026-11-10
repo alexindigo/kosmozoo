@@ -2,6 +2,7 @@ import { assert, assertEquals } from "jsr:@std/assert";
 import { register } from "../src/features/variations/server.mjs";
 import { makeCollectionLifecycle } from "../src/backings/index.mjs";
 import { makeVariationEditor } from "../client-solid/features/variations/editor.js";
+import { resourceReference } from "../src/parameters.mjs";
 
 // Real probe -> editor comparison/compile -> Run -> final enqueued prompt.
 async function rig(current) {
@@ -36,7 +37,21 @@ async function rig(current) {
   return { editor, catalogue, jobs, requests, inspections };
 }
 
-for (const current of ["same.png", "same.png [output]", "nested/a [b].png [output]"]) {
+for (const current of ["same.png", "same.png [input]", "nested/a [b].png [input]", "same.png [output]", "nested/a [b].png [output]", "nested/a.png [temp]"]) {
+  Deno.test(`recorded current default: ${current} is clean/off, ordinary, removable and retained`, async () => {
+    const { editor, catalogue, inspections, jobs } = await rig(current);
+    try {
+      const id = "image.image", item = editor.rows("images")[id].items[0];
+      assertEquals(item, { kind: "reference", value: current });
+      assert(!editor.rows("images")[id].enabled); assert(!editor.dirty());
+      editor.setEnabled(id, true); assertEquals(editor.preview().n, 0);
+      await editor.run(); assertEquals(jobs, []);
+      assertEquals(inspections, []); assertEquals(jobs, []);
+      editor.removeImage(id, item); editor.setEnabled(id, false);
+      editor.installCatalogue(catalogue); editor.setEnabled(id, true);
+      assertEquals(editor.rows("images")[id].items, []); assert(editor.dirty());
+    } finally { editor.dispose(); }
+  });
   Deno.test(`current image: ${current} keeps its exact graph value, count and exclusion across File/path acquisitions`, async () => {
     const r = await rig(current), { editor } = r;
     try {
@@ -52,22 +67,53 @@ for (const current of ["same.png", "same.png [output]", "nested/a [b].png [outpu
       assertEquals(result.adopted, true); assertEquals(result.submitted, 1); assert(!editor.dirty());
       assertEquals(r.jobs.length, 1); assertEquals(r.jobs[0].prompt.image.inputs.image, current);
       assertEquals(r.requests[0].imageParams["image.image"].values, [current]);
-      assertEquals(r.inspections, Array(2).fill({ name: r.catalogue.stringParams[0].current, kind: current.endsWith("[output]") ? "output" : "input" }));
-      assert(editor.rows("images")["image.image"].items[0].file === file);
+      assertEquals(r.inspections, Array(2).fill({ name: r.catalogue.stringParams[0].current, kind: r.catalogue.stringParams[0].currentRoot }));
+      assert(editor.rows("images")["image.image"].items[1].file === file);
     } finally { editor.dispose(); }
   });
 }
 
-Deno.test("current image: a same-name input is distinct from the byte-identical output current", async () => {
-  const r = await rig("same.png [output]"), { editor } = r;
+for (const current of ["same.png [input]", "nested/a [b].png [input]"]) for (const kind of ["input", "reference"]) {
+  Deno.test(`equivalent current reference: remove/reselect ${kind} retains exact ${current}`, async () => {
+    const r = await rig(current), { editor } = r, id = "image.image", name = resourceReference(current).name;
+    try {
+      editor.setEnabled(id, true); assertEquals(editor.preview().n, 0);
+      editor.removeImage(id, editor.rows("images")[id].items[0]);
+      editor.addImages(id, [kind === "input" ? {kind,name} : {kind,value:name}]);
+      assert(editor.rows("images")[id].images[0].sameCurrent);
+      assertEquals(editor.preview().n, 0, "equivalent root/name must retain the original raw current tuple");
+      await editor.run();assertEquals(r.jobs,[]);assertEquals(r.requests[0].imageParams[id].values,[current]);
+      editor.setEnabled("n.denoise", true);editor.edit("numeric","n.denoise","mode","value");editor.edit("numeric","n.denoise","value","0.5");
+      assertEquals(editor.preview().n,1);const result=await editor.run();assertEquals(result.adopted,true);assertEquals(result.submitted,1);
+      assertEquals(r.requests.at(-1).imageParams[id].values,[current]);assertEquals(r.requests.at(-1).acknowledgement.version,2);
+      assertEquals(r.jobs.map(job=>job.prompt.image.inputs.image),[current]);assertEquals(r.inspections,[]);assert(!editor.dirty());
+      console.log(JSON.stringify({current,kind,currentOnlyJobs:0,request:r.requests.at(-1).imageParams[id].values,finalPrompt:r.jobs[0].prompt.image.inputs.image,version:2,adopted:result.adopted}));
+    } finally {editor.dispose();}
+  });
+}
+
+Deno.test("recorded reference: a changed numeric axis retains both current and alternative final assignments", async () => {
+  const r = await rig("nested/same.png [temp]"), { editor } = r;
+  try {
+    editor.setEnabled("image.image", true); editor.addImages("image.image", [{kind:"input",name:"alternative.png"}]);
+    editor.setEnabled("n.denoise", true);editor.edit("numeric","n.denoise","mode","value");editor.edit("numeric","n.denoise","value","0.5");
+    assertEquals(editor.preview().n,2);assertEquals((await editor.run()).adopted,true);
+    assertEquals(r.requests[0].imageParams["image.image"].values,["nested/same.png [temp]","alternative.png"]);
+    assertEquals(r.jobs.map(job=>job.prompt.image.inputs.image),["nested/same.png [temp]","alternative.png"]);
+    assertEquals(r.inspections,[]);assert(!editor.dirty());
+  } finally {editor.dispose();}
+});
+
+for (const root of ["output","temp"]) Deno.test(`current image: a same-name input is distinct from the byte-identical ${root} current`, async () => {
+  const current=`same.png [${root}]`, r = await rig(current), { editor } = r;
   try {
     editor.edit("numeric", "n.denoise", "enabled", false); editor.edit("images", "image.image", "enabled", true);
     editor.addImages("image.image", [{ kind: "input", name: "same.png" }, { kind: "upload", name: "copy.png", file: new File(["same"], "copy.png") }]);
     await editor.inspectImages();
-    assertEquals(editor.rows("images")["image.image"].images.map(item => item.sameCurrent), [false, true]);
+    assertEquals(editor.rows("images")["image.image"].images.map(item => item.sameCurrent), [true, false, true]);
     assertEquals(editor.preview().n, 1, "exclude output current, not the distinct same-name input");
     const result = await editor.run(); assertEquals(result.adopted, true); assertEquals(result.submitted, 1);
     assertEquals(r.jobs.length, 1); assertEquals(r.jobs[0].prompt.image.inputs.image, "same.png");
-    assertEquals(r.requests[0].imageParams["image.image"].values, ["same.png", "same.png [output]"]);
+    assertEquals(r.requests[0].imageParams["image.image"].values, [current, "same.png"]);
   } finally { editor.dispose(); }
 });

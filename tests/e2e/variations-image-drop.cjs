@@ -3,6 +3,7 @@ const fs = require('node:fs');
 const { workPath } = require('./paths.cjs');
 const { freshRecipe } = require('./recipe-helpers.cjs');
 const { openImageAdd, waitForSelectedPreviews } = require('./image-picker-helpers.cjs');
+const { addParameter, removeRecordedImage } = require('./variation-add-helpers.cjs');
 
 module.exports = async ({ cdp, check, FAKE, KZ }) => {
   const invoke = (id, args = {}) => cdp.evaluate(`(async()=>${KZ}.handles.invoke(${JSON.stringify(id)},${JSON.stringify(args)}))()`);
@@ -29,6 +30,7 @@ module.exports = async ({ cdp, check, FAKE, KZ }) => {
     await cdp.send('Emulation.setDeviceMetricsOverride', { width: 1600, height: 1000, deviceScaleFactor: 1, mobile: false });
     await invoke('variations.open', { id: 'fake:flux-controlnet.png' });
     await cdp.poll("!!document.querySelector('[data-catalogue-id=\"43.image\"]')"); await freshRecipe(cdp);
+    await addParameter(cdp,'43.image');await removeRecordedImage(cdp,'43.image');await cdp.clickAt('[data-image-id="43.image"] .vz-parameter-remove');
     const closed = await box('[data-catalogue-id="43.image"]');
     await drag('dragEnter', closed, [resources[0]]); await drag('dragOver', closed, [resources[0]]);
     await cdp.poll("!!document.querySelector('.vz-catalogue-row.vz-image-dropping')");

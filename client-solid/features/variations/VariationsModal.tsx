@@ -13,7 +13,7 @@
 import { createSignal, createMemo, createEffect, createResource, onMount, onCleanup, For, Show } from "solid-js";
 import { iconSvg } from "/js/icons.mjs";
 import { templateLabels, templateValue } from "/shared/features/variations/shared.mjs";
-import { sourceOrigin } from "/shared/source-origin.mjs";
+import { sourceOrigin, sameOrigin } from "/shared/source-origin.mjs";
 import { useAppStore } from "../../store/app-store.js";
 import { SliderRow } from "./SliderRow.js";
 import { Modal } from "../../components/Modal.js";
@@ -290,6 +290,8 @@ function ModalBody(props) {
                   onAction={() => { setFieldFilter(""); filterInput.focus(); }} /></Show>} />
             </div>
             <ParameterCatalogue sections={catalogueSections()} row={id => catalogueById().get(id)} matches={fieldMatches}
+              registerPopup={registerImagePopup} registerEditor={registerEditor}
+              previewActive={!decision() && sameOrigin(image.origin, sourceOrigin(image.host, store.state.hosts[image.host]))}
               thumbnail={row => services.inputThumbnail(image.host, row.current, image.origin, row.currentRoot)} registerThumbnail={services.registerThumbnail}
               ready={params() !== null} anyMatch={hasMatchingFields()} onAdd={id => setEnabled(id, true)}
               onFiles={(id, resources) => editor.dropImages(id, resources, name => UPLOAD_IMG_EXT.test(name))}
@@ -310,7 +312,7 @@ function ModalBody(props) {
                         onMove={(item, index) => editor.moveImage(id, item, index)}
                         onToggleTarget={() => editor.toggleTargetImage(id)}
                         targetThumbnail={() => services.inputThumbnail(image.host, image.filename, image.origin, "output")}
-                        thumbnail={name => services.inputThumbnail(image.host, name, image.origin)}
+                        thumbnail={(name, root = "input") => services.inputThumbnail(image.host, name, image.origin, root)}
                         sources={inputSources()} sourceInputs={origin => read(() => editor.sourceInputs(origin))}
                         onSource={origin => editor.loadSourceInputs(origin)} onRetrySource={origin => editor.loadSourceInputs(origin, true)}
                         inputState={(origin, name) => read(() => editor.sourceInputState(id, origin, name))}

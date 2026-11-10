@@ -11,8 +11,14 @@ const KZ = `(await import('/store/instance.js')).appStore`;
   const write = async (selector,text) => {await cdp.clickAt(selector);await cdp.evaluate(`document.querySelector(${JSON.stringify(selector)}).select()`);await cdp.send('Input.insertText',{text});};
   try {
     await cdp.send('Emulation.setDeviceMetricsOverride',{width:1600,height:1000,deviceScaleFactor:1,mobile:false});
+    if (process.env.E2E_VARIATIONS_CASE === 'reference-current') {
+      await require('./variations-current-reference.cjs')({cdp,ENGINE,FAKE,E,KZ,write});assert.deepEqual(errors,[]);return;
+    }
+    if (process.env.E2E_VARIATIONS_CASE === 'value-preview') {
+      await require('./variations-value-preview.cjs')({cdp,shot,ENGINE,FAKE,E,KZ,write});assert.deepEqual(errors,[]);return;
+    }
     if (process.env.E2E_VARIATIONS_CASE === 'catalogue-roots') {
-      const name='catalogue-same.png', roots=['input','output','temp'], colors=[[200,40,40,255],[40,160,60,255],[40,70,200,255]];
+      const name='nested/catalogue-same.png', roots=['input','output','temp'], colors=[[200,40,40,255],[40,160,60,255],[40,70,200,255]];
       const item=i=>({name,fixture:'flux-basic.png',width:96,height:64,color:colors[i]});
       const graph=Object.fromEntries(roots.map((root,i)=>[String(11+i),{class_type:'LoadImage',inputs:{image:name+(root==='input'?'':` [${root}]`)},_meta:{title:'Repeated image'}}]));
       const fullText='  complete current first line\n\nsecond line with trailing spaces  ';
@@ -31,9 +37,24 @@ const KZ = `(await import('/store/instance.js')).appStore`;
         assert.deepEqual(actual.pixels,colors[i]);assert.equal(actual.hint,`${name} (${root})`);assert.equal(actual.aria,actual.hint);assert.equal(actual.title,'Repeated image');
         assert.equal(new URL(actual.src).searchParams.get('kind')??'output',root);pixels.push({root,...actual});
       }
-      assert.equal(await cdp.evaluate('document.querySelector("[data-catalogue-id=\\"14.filename_prefix\\"] .vz-catalogue-current").title'),fullText);
+      assert.equal(await cdp.evaluate('document.querySelector("[data-catalogue-id=\\"14.filename_prefix\\"] .vz-catalogue-current").textContent'),fullText);
       fs.writeFileSync(`${E}/catalogue-root-pixels.json`,JSON.stringify({pixels,fullText},null,2));
       await cdp.evaluate('document.querySelector(".vz-catalogue-list").scrollTop=0');await shot('catalogue-roots');
+      for (const [i,root] of roots.entries()) {
+        await addParameter(cdp,`${11+i}.image`);
+        const row=`[data-image-id="${11+i}.image"]`;
+        await cdp.evaluate(`document.querySelector(${JSON.stringify(row)}).scrollIntoView({block:'center'})`);
+        await cdp.poll(`document.querySelector(${JSON.stringify(row+' .vz-image-tile img')})?.naturalWidth>0`);
+        const current=await cdp.evaluate(`(()=>{const tile=document.querySelector(${JSON.stringify(row+' .vz-image-tile')}),img=tile.querySelector('img'),c=document.createElement('canvas');c.width=c.height=1;const x=c.getContext('2d');x.drawImage(img,0,0,1,1);return {kind:tile.dataset.imageKind,name:tile.dataset.imageName,pixels:[...x.getImageData(0,0,1,1).data],src:img.currentSrc}})()`);
+        assert.equal(current.kind,'reference');assert.equal(current.name,name);assert.deepEqual(current.pixels,colors[i]);
+        assert.equal(new URL(current.src).searchParams.get('kind')??'output',root);pixels[i].candidate=current;
+      }
+      await shot('current-root-candidates');
+      await cdp.clickAt('[data-image-id="11.image"] .vz-image-remove button');
+      await cdp.clickAt('[data-image-id="11.image"] .vz-parameter-remove');await addParameter(cdp,'11.image');
+      assert.equal(await cdp.evaluate('document.querySelectorAll("[data-image-id=\\"11.image\\"] .vz-image-tile").length'),0);
+      await cdp.clickAt('.vz-run');await cdp.poll('document.querySelector(".vz-error").textContent.includes("at least one image")');await shot('current-empty-error');
+      fs.writeFileSync(`${E}/catalogue-root-pixels.json`,JSON.stringify({pixels,fullText},null,2));
       assert.deepEqual(errors,[]);console.log('PASS catalogue same-name input/output/temp decoded RGBA, explicit root, repeated node cards and full image hints');return;
     }
     if (process.env.E2E_VARIATIONS_CASE === 'real') {
@@ -65,9 +86,9 @@ const KZ = `(await import('/store/instance.js')).appStore`;
     assert.equal(await cdp.evaluate('document.querySelectorAll(".vz-catalogue-section-name,.vz-catalogue-node").length'),0);
     const cards=await cdp.evaluate(`(()=>{const p=document.querySelector('.vz-panel'),token=name=>{const s=document.createElement('span');s.style.color='var('+name+')';p.append(s);const c=getComputedStyle(s).color;s.remove();return c};return [...document.querySelectorAll('.vz-catalogue-row')].map(el=>{const node=el.querySelector('.vz-catalogue-node-name'),name=el.querySelector('.vz-catalogue-name'),value=el.querySelector('.vz-catalogue-current'),s=getComputedStyle(el);return {id:el.dataset.catalogueId,node:node.textContent,borders:[s.borderTopWidth,s.borderRightWidth,s.borderBottomWidth,s.borderLeftWidth],roles:getComputedStyle(node).color===token('--foreground-mid')&&getComputedStyle(name).color===token('--foreground')&&(!value||getComputedStyle(value).color===token('--secondary')),value:value?.textContent,hover:value?.title,nowrap:[node,name,value].filter(Boolean).every(x=>getComputedStyle(x).whiteSpace==='nowrap')}})})()`);
     assert(cards.every(c=>c.borders.every(b=>b==='1px')&&c.roles&&c.nowrap&&!/#\d/.test(c.node)));
-    assert.equal(cards.find(c=>c.id==='92:105.seed').hover,'18446744073709551615');
+     assert.equal(cards.find(c=>c.id==='92:105.seed').value,'18446744073709551615');
     assert(cards.filter(c=>c.id.startsWith('92:10')).length>1);
-    assert(cards.every(c=>c.value===undefined||c.hover===c.value));
+     assert(cards.every(c=>c.value===undefined||c.hover===''));
     fs.writeFileSync(`${E}/catalogue-cards.json`,JSON.stringify(cards,null,2));
     assert.equal(await cdp.evaluate('document.querySelectorAll(".vz-parameter").length'),0);
     assert(await cdp.evaluate('[...document.querySelectorAll(".vz-catalogue-add")].every(el=>el.querySelector("svg")&&!el.textContent.includes("->"))'));
@@ -91,7 +112,7 @@ const KZ = `(await import('/store/instance.js')).appStore`;
     await cdp.poll('document.querySelector(".vz-image-tile img")?.naturalWidth>0');
     await cdp.clickAt('[data-image-id="76.image"] .vz-parameter-remove');await addParameter(cdp,'76.image');
     await cdp.poll('document.querySelector(".vz-image-tile img")?.naturalWidth>0');
-    assert.equal(await cdp.evaluate('document.querySelector(".vz-image-tile").dataset.imageName'),'presentation.png');
+    assert.deepEqual(await cdp.evaluate('[...document.querySelectorAll(".vz-image-tile")].map(el=>el.dataset.imageName)'),['canny.png','presentation.png']);
     await cdp.evaluate('document.querySelector("[data-image-id=\\"76.image\\"]").scrollIntoView({block:"center"})');
     await shot('image-file-restored');
     await write('[data-text-id="92:105.text"] textarea','chosen text');

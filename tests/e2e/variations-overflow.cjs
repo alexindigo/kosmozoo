@@ -71,6 +71,7 @@ module.exports = async ({ cdp, ENGINE, FAKE, KZ, check }) => {
     check('hostile generator covers integer, float, image, enum and text catalogue fields', true);
     await invoke('variations.open', { id: `${source}:${filename}` });
     await addParameter(cdp,'76.image');
+    await require('./variation-add-helpers.cjs').removeRecordedImage(cdp,'76.image');
     await require('./image-picker-helpers.cjs').openImageAdd(cdp);
     await cdp.clickAt('.vz-input-trigger');
     await cdp.poll("document.querySelectorAll('.vz-input-option').length>0");
@@ -146,10 +147,10 @@ module.exports = async ({ cdp, ENGINE, FAKE, KZ, check }) => {
     await capture('500-full');
     // The complete values remain in tooltips, never shortened in the model.
     const titles = await cdp.evaluate(`(()=>{
-      return [...document.querySelectorAll('.vz-panel *')].filter(e=>e.getClientRects().length&&e.scrollWidth>e.clientWidth+1&&getComputedStyle(e).textOverflow==='ellipsis').map(e=>({text:e.textContent,title:e.title,primitive:e.classList.contains('single-line-text')}));
+      return [...document.querySelectorAll('.vz-panel *')].filter(e=>e.getClientRects().length&&e.scrollWidth>e.clientWidth+1&&getComputedStyle(e).textOverflow==='ellipsis').map(e=>({text:e.textContent,title:e.title,preview:e.classList.contains('value-preview-trigger')&&!!document.getElementById(e.getAttribute('aria-controls')),primitive:e.classList.contains('single-line-text')}));
     })()`);
     assert(titles.length>0, 'hostile labels must exercise truncation');
-    check('every truncated display string uses the shared full-tooltip text primitive', titles.every(e=>e.primitive&&e.title.includes(e.text)), JSON.stringify(titles));
+    check('every truncated display string retains native full text or its opt-in interactive preview', titles.every(e=>e.primitive&&(e.preview||e.title.includes(e.text))), JSON.stringify(titles));
     assert.equal(failures.length, 0, JSON.stringify(failures));
   } finally {
     await cdp.send('Emulation.clearDeviceMetricsOverride');

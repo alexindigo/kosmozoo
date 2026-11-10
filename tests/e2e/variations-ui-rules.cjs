@@ -41,6 +41,7 @@ const KZ = '(await import("/store/instance.js")).appStore';
     await type('[data-text-id="2.text"] .vz-text-values', 'A portrait of {{animal}}.');
     await type('.vz-tpl-input', 'cat; dog');
     if (!await page.evaluate('!!document.querySelector(".vz-image-set.on .vz-parameter-remove")')) await addParameter(page, '43.image');
+    await require('./variation-add-helpers.cjs').removeRecordedImage(page, '43.image');
     await openImageAdd(page);
     await page.evaluate(`(() => {
       window.__pickerFocus = [];

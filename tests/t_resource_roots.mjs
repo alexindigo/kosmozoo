@@ -203,6 +203,7 @@ Deno.test("roots: a temp current excludes equal temp bytes and keeps its exact a
   try {
     editor.installCatalogue(catalogue); editor.installInputs({ origin, files: [NAME] });
     editor.setEnabled("image.image", true);
+    editor.removeImage("image.image", editor.rows("images")["image.image"].items[0]);
     editor.addImages("image.image", [{ kind: "upload", name: "copy.png", file: new File(["temp bytes"], "copy.png") }, { kind: "input", name: NAME }]);
     await editor.inspectImages();
     assertEquals(kinds, [[NAME, "temp"]], "comparison names the temp root");

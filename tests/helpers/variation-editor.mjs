@@ -50,3 +50,11 @@ export function editorRig(overrides = {}) {
     replaceSource: () => { origin = { ...origin, address: "replacement:8188", incarnation: "replacement" }; },
     closeCount: () => closes, fireTimers: () => { for (const timer of timers) if (timer.active) { timer.active = false; timer.callback(); } } };
 }
+
+// Acquisition scenarios that intentionally start from an empty set model the
+// user's ordinary removal, never change the product's catalogue defaults.
+export function removeRecordedImages(rig) {
+  for (const row of Object.values(rig.editor.rows("images")))
+    for (const item of row.items) rig.editor.removeImage(row.id, item);
+  return rig;
+}

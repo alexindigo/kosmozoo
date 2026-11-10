@@ -1381,3 +1381,31 @@ body:has(#diff:not([hidden])) #statusCol { bottom: 56px; }
 #filterMatchCount { margin-left: auto; font-variant-numeric: tabular-nums; }
 .filter-loading { flex-basis: 100%; }
 .feed-filter-menu button:focus-visible, .feed-filter-menu select:focus-visible { outline: 2px solid var(--secondary); outline-offset: 2px; }
+.value-preview-trigger { cursor: text; }
+.value-preview {
+  position: fixed;
+  inset: auto;
+  margin: 0;
+  padding: var(--value-preview-notch) 0 0;
+  border: 0;
+  background: transparent;
+  color: var(--foreground);
+  box-sizing: border-box;
+  overflow: visible;
+}
+.value-preview-above { padding: 0 0 var(--value-preview-notch); }
+.value-preview-shape { position: absolute; inset: 0; pointer-events: none; overflow: visible; }
+.value-preview-shape path { fill: var(--background); stroke: var(--foreground-mid); stroke-width: 1; }
+.value-preview-text {
+  position: relative;
+  box-sizing: border-box;
+  height: 100%;
+  padding: 12px;
+  overflow: auto;
+  overscroll-behavior: contain;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  user-select: text;
+  font: inherit;
+  line-height: 1.5;
+}

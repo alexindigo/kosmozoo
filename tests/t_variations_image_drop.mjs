@@ -36,6 +36,7 @@ Deno.test("image drop: indexed acquisition retains identities, deduplicates once
   const first = { kind: "input", name: "first.png" }, last = { kind: "input", name: "last.png" };
   const file = new File(["image"], "between.png"), upload = { kind: "upload", name: file.name, file };
   editor.edit("numeric", "n.denoise", "enabled", false); editor.edit("images", id, "enabled", true);
+  editor.removeImage(id, editor.rows("images")[id].items[0]);
   editor.addImages(id, [first, last]); editor.addImages(id, [upload, upload, first], 1);
   const items = editor.rows("images")[id].items;
   assertEquals(items.map(item => item.name), ["first.png", "between.png", "last.png"]);

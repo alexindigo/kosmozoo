@@ -213,7 +213,7 @@ Deno.test("ack: successful Run leaves disabled/dormant/inactive raw values and n
   assertEquals(editor.rows("texts")["text.text"].tpl.dormant, "kept");
   assertEquals(requests[0].ranges["n.denoise"].increment, .1);
   assertEquals(requests[0].imageParams["text.text"].values, ["one a\n\ntwo", "one b\n\ntwo"]);
-  assert(editor.rows("images")["image.image"].items[0].file === a && editor.rows("images")["image.image"].items[1].file === b);
+  assert(editor.rows("images")["image.image"].items[1].file === a && editor.rows("images")["image.image"].items[2].file === b);
   assertEquals(editor.rows("numeric")["n.denoise"].rawIncrement, "1e-1");
   editor.dispose();
 });

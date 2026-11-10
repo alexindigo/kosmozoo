@@ -12,7 +12,8 @@ module.exports = async ({ cdp, FAKE, KZ, check }) => {
     body: JSON.stringify({ publish: [{ name, fixture: 'flux-basic.png', graph }] }) })).ok);
   await cdp.evaluate(`(async()=>{await fetch('/api/collections/fake/entries/'+${JSON.stringify(name)}+'/bytes')})()`);
   await invoke('variations.open', { id: 'fake:' + name });
-  await addParameter(cdp,'470.image');
+   await addParameter(cdp,'470.image');
+   await require('./variation-add-helpers.cjs').removeRecordedImage(cdp,'470.image');
   await cdp.evaluate(`(()=>{const original=window.fetch;window.__gestureRelease=[];window.__gestureRestore=()=>window.fetch=original;
     window.fetch=async(url,options)=>{const response=await original(url,options);return String(url).includes('/features/variations/inspect-image/')&&options?.body?.get?.('image')?.name.startsWith('drag-settlement-')?new Promise(resolve=>window.__gestureRelease.push(()=>resolve(response))):response}})()`);
   try {
