@@ -290,6 +290,7 @@ function ModalBody(props) {
                   onAction={() => { setFieldFilter(""); filterInput.focus(); }} /></Show>} />
             </div>
             <ParameterCatalogue sections={catalogueSections()} row={id => catalogueById().get(id)} matches={fieldMatches}
+              thumbnail={row => services.inputThumbnail(image.host, row.current, image.origin, row.currentRoot)} registerThumbnail={services.registerThumbnail}
               ready={params() !== null} anyMatch={hasMatchingFields()} onAdd={id => setEnabled(id, true)}
               onFiles={(id, resources) => editor.dropImages(id, resources, name => UPLOAD_IMG_EXT.test(name))}
               registerFocus={(id, focus) => registerFocus(catalogueFocus, id, focus)} />

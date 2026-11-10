@@ -4,7 +4,7 @@ async function addParameter(cdp, id) {
   await cdp.poll(`!!document.querySelector(${JSON.stringify(catalogue)})`);
   if (!await cdp.evaluate(`document.querySelector(${JSON.stringify(catalogue)}).classList.contains('vz-catalogue-hidden')`)) {
     await cdp.evaluate(`document.querySelector('.vz-field-filter').value`);
-    await cdp.clickAt(`${catalogue} button`);
+    await cdp.clickAt(`${catalogue} .vz-catalogue-add`);
   }
   await cdp.poll(`document.querySelector(${JSON.stringify(catalogue)}).classList.contains('vz-catalogue-hidden')`);
 }

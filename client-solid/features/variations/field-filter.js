@@ -3,7 +3,8 @@ import { validateEditorValue } from "/shared/features/variations/compile.mjs";
 
 // Presentation over the complete catalogue, never a supported-input registry.
 export const parameterInputName = row => row.contract?.display?.display_name || row.input || row.key;
-export const parameterNodeName = row => `${row.title ?? row.type ?? "Node"} #${row.nodeIds?.[0] ?? row.id}`;
+export const parameterNodeTitle = row => row.title ?? row.type ?? "Node";
+export const parameterNodeName = row => `${parameterNodeTitle(row)} #${row.nodeIds?.[0] ?? row.id}`;
 export const parameterName = row => `${parameterNodeName(row)}: ${parameterInputName(row)}`;
 export const parameterContext = row => row.valueKind === "connection"
   ? `Node ${parameterCurrent(row)[0]}, output ${parameterCurrent(row)[1]}`

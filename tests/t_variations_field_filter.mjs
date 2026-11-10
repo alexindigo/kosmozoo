@@ -1,5 +1,5 @@
 import { assertEquals } from 'jsr:@std/assert';
-import { matchesFieldFilter, cataloguePresentation, parameterInputName, connectionPresentation } from '../client-solid/features/variations/field-filter.js';
+import { matchesFieldFilter, cataloguePresentation, parameterInputName, parameterNodeTitle, parameterContext, connectionPresentation } from '../client-solid/features/variations/field-filter.js';
 
 Deno.test('field filter matches the displayed ComfyUI title', () => {
   assertEquals(matchesFieldFilter({ title: 'Custom sampler', type: 'KSampler', input: 'steps' }, 'sampler'), true);
@@ -45,4 +45,12 @@ Deno.test('connection presentation omits incompatible known ports and preserves 
   assertEquals(connectionPresentation(parameter, nodes).map(node => ({ id: node.id, label: node.label, outputs: node.outputs })), [
     { id: 'source', label: 'Source #source', outputs: [{ slot: '0', label: 'Picture (0)' }] },
     { id: 'unknown', label: 'Custom #unknown', outputs: null }]);
+});
+
+Deno.test('catalogue captions omit instance IDs without shortening current values', () => {
+  assertEquals(parameterNodeTitle({ title: 'Repeated', nodeIds: ['92:105'] }), 'Repeated');
+  assertEquals(parameterNodeTitle({ type: 'Custom', nodeIds: ['2'] }), 'Custom');
+  const current = '  complete first line\n\nsecond line  ';
+  assertEquals(parameterContext({ domain: 'texts', current }), current);
+  assertEquals(parameterContext({ domain: 'numeric', current: 18446744073709551615n }), '18446744073709551615');
 });

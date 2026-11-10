@@ -44,7 +44,7 @@ module.exports = async ({ cdp, errors, FAKE, E, KZ, write, shot }) => {
   const stays = async () => { await new Promise(resolve => setTimeout(resolve, 3200)); assert(await cdp.evaluate('!!document.querySelector(".vz-panel")')); };
   await cdp.evaluate("fetch('/api/collections/fake/entries/allparams_00001_.png/bytes').then(()=>true)");
   await open();
-  const alignment = await cdp.evaluate(`(()=>{const box=el=>el.getBoundingClientRect();return [...document.querySelectorAll('.vz-catalogue-row')].map(row=>{const button=box(row.querySelector('button')),icon=box(row.querySelector('button svg')),context=box(row.querySelector('.vz-catalogue-context'));return {id:row.dataset.catalogueId,gaps:[icon.left-button.left,button.right-icon.right,icon.top-button.top,button.bottom-icon.bottom],center:Math.abs((context.top+context.bottom-button.top-button.bottom)/2)}})})()`);
+  const alignment = await cdp.evaluate(`(()=>{const box=el=>el.getBoundingClientRect();return [...document.querySelectorAll('.vz-catalogue-row')].map(row=>{const button=box(row.querySelector('.vz-catalogue-add')),icon=box(row.querySelector('.vz-catalogue-add svg')),context=box(row.querySelector('.vz-catalogue-context'));return {id:row.dataset.catalogueId,gaps:[icon.left-button.left,button.right-icon.right,icon.top-button.top,button.bottom-icon.bottom],center:Math.abs((context.top+context.bottom-button.top-button.bottom)/2)}})})()`);
   assert(alignment.every(row => Math.max(...row.gaps) - Math.min(...row.gaps) <= 1 && row.center <= 1));
   await cdp.evaluate('document.querySelector(".vz-catalogue-add").focus()');
   await shot('catalogue-focus');
