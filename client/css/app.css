@@ -1388,7 +1388,9 @@ body:has(#diff:not([hidden])) #statusCol { bottom: 56px; }
 #filterMatchCount { margin-left: auto; font-variant-numeric: tabular-nums; }
 .filter-loading { flex-basis: 100%; }
 .feed-filter-menu button:focus-visible, .feed-filter-menu select:focus-visible { outline: 2px solid var(--secondary); outline-offset: 2px; }
+.value-preview-owner { min-width: 0; }
 .value-preview-trigger { cursor: text; }
+.value-preview-owner:not(:hover) > .value-preview { visibility: hidden; pointer-events: none; }
 .value-preview {
   position: fixed;
   inset: auto;
@@ -1400,7 +1402,15 @@ body:has(#diff:not([hidden])) #statusCol { bottom: 56px; }
   box-sizing: border-box;
   overflow: visible;
 }
+.value-preview::before {
+  content: "";
+  position: absolute;
+  inset-inline: 0;
+  bottom: 100%;
+  height: var(--value-preview-gap);
+}
 .value-preview-above { padding: 0 0 var(--value-preview-notch); }
+.value-preview-above::before { bottom: auto; top: 100%; }
 .value-preview-shape { position: absolute; inset: 0; pointer-events: none; overflow: visible; }
 .value-preview-shape path { fill: var(--background); stroke: var(--foreground-mid); stroke-width: 1; }
 .value-preview-text {
