@@ -39,10 +39,7 @@ export function Card(props) {
     // window knows); broken bytes take the in-card error path
     return store.state.window.getSrc(store.state.feedPositionOf(props.entryId), img);
   };
-  // the two flash windows are signals through the shared helper —
-  // no classList pokes, no orphan timers
-  const [savedOn, setSavedOn] = createSignal(false);
-  const flashSaved = flash(setSavedOn);
+  // Filename copy feedback is independent of each NoteBox's save confirmation.
   const [copiedOn, setCopiedOn] = createSignal(false);
   const flashCopied = flash(setCopiedOn, 800);
 
@@ -50,12 +47,8 @@ export function Card(props) {
     if (image()?.size == null) store.actions.images.fillSize(image().id);
   });
 
-  const saveNote = (sign) => (text, id) => {
-    return store.handles.invoke("judgment.apply", { id, intent: { type: "note", sign, text } }).then((result) => {
-      if (result.ok && props.entryId === id) flashSaved();
-      return result;
-    });
-  };
+  const saveNote = (sign) => (text, id) =>
+    store.handles.invoke("judgment.apply", { id, intent: { type: "note", sign, text } });
 
   // First neighbor WITH CONTENT in that direction; an unsaved draft wins
   // over the saved judgment note (it may hold newer edits).
@@ -121,7 +114,6 @@ export function Card(props) {
             </span>
           </span>
           <span class="btnwrap">
-            <span class={"saved" + (savedOn() ? " show" : "")}>Feedback saved</span>
             <EntryActions target={{ id: props.entryId }} judgmentType="toggle"
               active={state().active} word={word()} deleteCapability={del()} />
           </span>

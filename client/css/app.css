@@ -366,12 +366,6 @@ main { display: flex; flex: 1; min-height: 0; isolation: isolate; }
 .copyable { cursor: copy; }
 .copyable:hover { color: var(--secondary); }
 .copyable.copied { color: var(--secondary); }
-/* the save-confirmation flash overlays the row (anchored left of the action
- buttons) instead of occupying width in every card's title row */
-.saved { position: absolute; right: calc(100% + var(--dropdown-gap)); top: 50%;
-  transform: translateY(-50%); color: var(--positive); font-size: 11px;
-  opacity: 0; transition: opacity .3s; white-space: nowrap; pointer-events: none; }
-.saved.show { opacity: 1; }
 .votebtn, .savebtn { flex: 0 0 auto; font-size: 11px;
   background: var(--lifted); color: var(--foreground-dim); border: 1px solid var(--border);
   border-radius: 4px; cursor: pointer; }
@@ -431,6 +425,16 @@ main { display: flex; flex: 1; min-height: 0; isolation: isolate; }
 .btnrow button { flex: 1; padding: 2px 4px; font-size: 11px; color: var(--foreground-dim);
   background: none; border: 1px solid var(--lifted); border-radius: 4px; cursor: pointer; }
 .btnrow button:hover { color: var(--foreground-mid); border-color: var(--foreground-dim) }
+/* Both layers occupy one grid cell. Hidden controls keep their intrinsic
+   allocation but cannot receive pointer or keyboard input. */
+.note-actions { display: grid; grid-template-columns: minmax(0, 1fr); }
+.note-actions > * { grid-area: 1 / 1; min-width: 0; }
+.note-save-status { align-self: center; font-size: 11px; white-space: nowrap;
+  overflow: hidden; visibility: hidden; pointer-events: none; }
+.note-actions.negative { color: var(--negative); }
+.note-actions.positive { color: var(--positive); }
+.note-actions.is-saved > .btnrow { visibility: hidden; }
+.note-actions.is-saved > .note-save-status { visibility: visible; }
 
 /* list progress affordances */
 .sentinel { color: var(--foreground-dim); text-align: center; padding: 18px 0; font-size: 12px; }
