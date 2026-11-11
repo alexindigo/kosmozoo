@@ -176,6 +176,9 @@ Complete inventory acceptance observes names in memory, independently of timesta
 and ingestion. Each name gets one per-source incarnation sequence; ordinary relists,
 attribute updates and same-name content changes do not manufacture arrivals.
 Retirement discards that namespace and rejects late snapshots. Inventory entries
+restored to visibility between observations receive any missing sequence before
+the next publication. Snapshot acceptance commits only after publication succeeds.
+Inventory entries
 carry `arrivalSeq`. Default inventories and source events retain the exact legacy
 `{sequence,latestVisibleSeq}` projection, or null before the first accepted inventory.
 
@@ -1053,7 +1056,10 @@ stay lazy rather than becoming downloaded browser Files.
 
 Dialog recall overlays compatible active contributors onto its current targets.
 Unrelated and dormant buffers remain intact; overlapping unsent changes use the
-existing leave guard. Missing/type/choice/resource/naming mismatches warn and skip;
+existing leave guard. Text overlays merge only labels used by the saved text and
+detect overlap per label. A surviving guard owner resumes its suspended children
+after an applied in-place transition, not just after cancellation.
+Missing/type/choice/resource/naming mismatches warn and skip;
 single-absolute and bulk-relative Ranges never convert implicitly. Values remain
 absolute. Late reads are revision/session/source/decision fenced. Right-panel
 recall restores original ordered targets, archived catalogue and every raw leaf,
@@ -1275,8 +1281,10 @@ byte-cache rows of the same entry table (`resourceCacheGet/Put`, with the input
 facades unchanged), never extracted or listed as outputs. Ingest single-flight,
 cache lookup, dimensions head reads (`entryDims`/`entryDimsPut(..., kind)`; only output dims
 bump the meta version), revalidation debounce and stamp checks are keyed by root
-(`scheduleRevalidate(..., { kind })`; `{ input: true }` still means input). Unknown
-roots are rejected at the byte routes, ingest, inspection and the plugin content
+(`scheduleRevalidate(..., { kind })`; `{ input: true }` still means input). Known
+content replacement clears entry-owned dimensions in both referenced and output
+hash-update paths; first-hash enrichment and same-content writes preserve them.
+Unknown roots are rejected at the byte routes, ingest, inspection and the plugin content
 port. A folder source's files remain its input listing; it has no temp root.
 Variations inspection accepts all three roots, so a temp current compares with temp
 bytes. The client's single side codec (`resourceSource`/`parseResourceSource` in
@@ -1327,7 +1335,8 @@ captured data; ordinary objects with a `rawJSON` property are ordinary data.
 The extractor's separate original graph result is exact, including nested comment
 envelopes; display/storage metadata keeps its ordinary-number contract. Variations
 probe, Run request/result consumers and Comfy enqueue share the codec. Generic API
-JSON behavior remains unchanged by default.
+JSON behavior remains unchanged by default. Browsers missing native reviver source
+support fail closed with an instruction to update, never rounded numeric data.
 
 The pure `compile.mjs` owner compiles discrete candidates in existing `imageParams`:
 bool/null, exact numeric, whole object/array and connections, alongside old strings.
@@ -1344,8 +1353,8 @@ ranges use exact arithmetic; floating ranges retain existing quantization and ca
 Current exclusion follows the generated endpoint, including the existing rounded
 last step, so preview count and actual submitted tuples cannot disagree there.
 
-The backing's address cache retains the raw node catalogue for 60 seconds and its
-latest normalized schema view. Variations and workflow telemetry pass their graph
+The backing's address cache retains one successfully acquired raw node catalogue
+for 60 seconds and its latest normalized schema view. Variations and workflow telemetry pass their graph
 to `objectInfo({ graph })`: only its distinct class definitions enter the same
 aggregate 100000-entry/depth 32 atomic expansion limits. A failed unrelated or
 full-catalogue view cannot poison a subsequent graph view or force another fetch.
@@ -1355,7 +1364,8 @@ declarations, typed options, output slots/names/list flags and dynamic-combo/gro
 declarations. Failed acquisition/expansion keeps all maps unavailable with its
 reason; Run reports unavailable node information before enqueue instead of
 misdiagnosing a missing output. Probe still discovers recorded parameters without
-schema. Workflow observations bind their captured graph/prompt and cannot publish
+schema. Failed or cancelled acquisitions are not cached and cannot evict another
+consumer's concurrent successful acquisition. Workflow observations bind their captured graph/prompt and cannot publish
 after that prompt retires. Probe adds graph-local
 `nodes` with known outputs or null. Final graphs validate known slot bounds, stock
 type/union overlap and primitive/enum/min/max constraints before enqueue. Unknown
@@ -1834,11 +1844,19 @@ The migration is retry-safe after its separate version write. Only Store owns SQ
 Durable bytes live under `<state>/archives/<ab>/<hash>`, distinct from ordinary
 cache. The context injects one hash-locked archive capability. Atomic byte writes
 precede reference publication; reads verify hashes and reject symlink/nonregular
-objects. Logical candidates/order stay distinct even when bytes deduplicate.
+objects. Failed publication rolls back newly created objects under the same hash
+lock only when no reference owns them. Logical candidates/order stay distinct even when bytes deduplicate.
 Deleting a run releases only its unpinned references. Last-reference collection
 can remove only archive-owned objects. Uncertain/orphan pins are retained rather
 than expiring a possibly unsaved draft. Completed tombstones keep replay fencing,
 not full deleted configuration bodies.
+
+Store atomically claims a target effect and acquires a fresh request-owned
+execution pin. Each completed dispatch releases only its pin, independently of
+sibling targets; started/uncertain durable effects continue protecting bytes.
+Upload settlement retries the same tombstone collection path. Client release
+ownership survives failed DELETEs for coalesced retries on activation/disposal;
+transport loss or browser disappearance never authorizes expiry of unsaved drafts.
 
 ### Cache (`~/.local/share/kosmozoo/cache/`, override `KOZMOZOO_CACHE`)
 

@@ -53,7 +53,7 @@ exports.waitForIdleInputWindow = async (cdp, expectedName) => {
     return {ready:JSON.stringify(actual)===JSON.stringify(expected),focus,visible,actual,expected,range,columns,step,scrollTop:list.scrollTop,mounted:document.querySelectorAll('.vz-input-option').length};
   })()`;
   try {
-    const settled=await cdp.poll(`(async()=>{const state=await ${snapshot};if(!state.focus||!state.visible)throw new Error('Picker focus/visibility changed: '+JSON.stringify(state));return state.ready?state:null})()`,3000);
+    const settled=await cdp.poll(`(async()=>{const state=await ${snapshot};if(!state.focus)throw new Error('Picker focus changed: '+JSON.stringify(state));return state.ready&&state.visible?state:null})()`,3000);
     console.log('SETTLED_INPUT_WINDOW',JSON.stringify(settled));
   } catch(error) {
     error.message+=' '+JSON.stringify(await cdp.evaluate(snapshot));throw error;

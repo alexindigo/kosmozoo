@@ -3,7 +3,7 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const { CDP, collectPageErrors } = require('./cdp.cjs');
 const { pickInput } = require('./image-picker-helpers.cjs');
-const { addParameter } = require('./variation-add-helpers.cjs');
+const { addParameter, removeRecordedImage } = require('./variation-add-helpers.cjs');
 const ENGINE = process.env.E2E_ENGINE || 'http://127.0.0.1:18460';
 const FAKE = process.env.E2E_FAKE || 'http://127.0.0.1:18461';
 const KZ = `(await import('/store/instance.js')).appStore`;
@@ -33,7 +33,11 @@ async function main() {
     await cdp.poll(`!!document.querySelector('${denoise} .noUi-handle')`);
     await shot('default');
     const compact = await cdp.evaluate("[...document.querySelectorAll('.vz-catalogue-row:not(.vz-catalogue-hidden)')].map(row=>({id:row.dataset.catalogueId,height:row.getBoundingClientRect().height,editorVisible:!!row.querySelector('.vz-numeric-editor')}))");
-    assert(compact.length > 2); assert(compact.every(row => row.height <= 52 && !row.editorVisible), JSON.stringify(compact));
+    const expandedHeight = await cdp.evaluate(`document.querySelector('${denoise}').getBoundingClientRect().height`);
+    // The approved three-column catalogue uses title/input/value cards, with
+    // taller image previews. Each stays smaller than the expanded editor and
+    // contains no numeric editor of its own, rather than an old 52px list row.
+    assert(compact.length > 2); assert(compact.every(row => row.height < expandedHeight && !row.editorVisible), JSON.stringify({compact,expandedHeight}));
     console.log('PASS compact inactive numeric rows ' + JSON.stringify(compact));
     assert.equal(await cdp.evaluate(`document.querySelector('${denoise} .vz-parameter-name').textContent`), 'BasicScheduler #9: denoise');
     assert(await cdp.evaluate(`document.querySelector('${denoise} .vz-label').title.includes('#9')`));
@@ -81,6 +85,7 @@ async function main() {
     console.log('PASS numeric writes admit the next real touch immediately, without a tap-transition gate');
 
     await addParameter(cdp, '43.image');
+    await removeRecordedImage(cdp, '43.image');
     for (const name of ['canny.png', 'ref.png', 'third.png']) await pickInput(cdp, name);
     await cdp.poll("document.querySelector('.vz-count').textContent==='11'");
     assert(await cdp.evaluate("document.querySelector('.vz-count-sub').textContent.includes('3 input images × 4 denoise values · 1 unchanged combination excluded')"));
@@ -207,7 +212,10 @@ async function main() {
     assert.equal(await cdp.evaluate("document.querySelector('.card .boxcol textarea.pos').getAttribute('aria-label')"), 'Positive feedback');
     await cdp.keyTrusted('Tab', { vk: 9 });
     await cdp.evaluate("document.querySelector('.card .boxcol textarea.neg').focus()");
-    assert.equal(await cdp.evaluate("getComputedStyle(document.querySelector('.card .boxcol textarea.neg')).outlineWidth"), '2px');
+    assert(await cdp.evaluate(`(()=>{const field=document.querySelector('.card .boxcol textarea.neg'),style=getComputedStyle(field);
+      const probe=document.createElement('span');probe.style.color=style.getPropertyValue('--negative');document.body.append(probe);
+      const negative=getComputedStyle(probe).color;probe.remove();
+      return document.activeElement===field&&style.outlineStyle==='none'&&style.borderColor===negative;})()`));
     await shot('feedback-focus');
     assert.equal(await cdp.evaluate("document.querySelector('#hostBtn').getAttribute('aria-controls')"), 'hostDrop');
     await cdp.clickAt('#hostBtn'); await cdp.poll("document.querySelector('#hostBtn').getAttribute('aria-expanded')==='true'");

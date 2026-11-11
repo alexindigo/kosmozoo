@@ -4,7 +4,7 @@ const fs = require('node:fs');
 const { CDP, collectPageErrors } = require('./cdp.cjs');
 const { workPath } = require('./paths.cjs');
 const { openImageAdd, waitForInputPicker, waitForSelectedPreviews } = require('./image-picker-helpers.cjs');
-const { addParameter } = require('./variation-add-helpers.cjs');
+const { addParameter, removeRecordedImage } = require('./variation-add-helpers.cjs');
 const ENGINE = process.env.E2E_ENGINE ?? 'http://127.0.0.1:18260';
 const FAKE = process.env.E2E_FAKE ?? 'http://127.0.0.1:18261';
 const KZ = '(await import("/store/instance.js")).appStore';
@@ -62,6 +62,7 @@ module.exports = async ({ cdp, check = () => {} }) => {
     await cdp.evaluate(`fetch('/api/collections/fake/entries/${name}/bytes').then(r=>r.arrayBuffer()).then(()=>true)`);
     await cdp.evaluate(`(async()=>${KZ}.handles.invoke('variations.open',{id:'fake:${name}'}))()`);
     await addParameter(cdp, '470.image');
+    await removeRecordedImage(cdp, '470.image');
     await openImageAdd(cdp);await cdp.clickAt('.vz-input-trigger');await waitForInputPicker(cdp);
     await cdp.send('Input.insertText',{text:'square-check-'});
     await cdp.poll("document.querySelectorAll('.vz-input-option').length===3");

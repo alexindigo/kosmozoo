@@ -13,7 +13,7 @@ const COLORS = { plain: 'rgb(255, 255, 255)', none: 'rgb(26, 26, 26)',
   up: POSITIVE, down: 'rgb(255, 102, 102)', bookmark: 'rgb(56, 189, 248)', favorite: 'rgb(255, 136, 0)' };
 
 async function run({ page, evidence = process.env.E2E_EVIDENCE ?? workPath('artifacts/judgment-colors'),
-  shots = process.env.E2E_SHOTS ?? path.join(evidence, 'shots'), nativeViewport = false, captureFull }) {
+  shots = process.env.E2E_SHOTS ?? path.join(evidence, 'shots'), nativeViewport = false, captureFull, engine = ENGINE }) {
   fs.mkdirSync(evidence, { recursive: true });
   fs.mkdirSync(shots, { recursive: true });
   const records = [], failures = [];
@@ -33,7 +33,7 @@ async function run({ page, evidence = process.env.E2E_EVIDENCE ?? workPath('arti
     await captureFull?.(name);
   };
   if(!nativeViewport)await page.send('Emulation.setDeviceMetricsOverride', { width: 1400, height: 900, deviceScaleFactor: 1, mobile: false });
-  await page.goto(ENGINE + '/#fixture-dir');
+  await page.goto(engine + '/#fixture-dir');
   await page.poll(`(async () => { const s = ${KZ}; return s.state.host() === 'fixture-dir' && !s.state.inventory.loading && s.state.entriesWithKnownSize().length > 1; })()`, 20000);
   await page.evaluate(`(async () => { const s = ${KZ}; s.actions.diff.hide(); s.actions.ui.setFilter('');
     if (!s.state.judgmentPrefs.revealThumbedDown) s.actions.judgments.toggleReveal();
@@ -42,6 +42,9 @@ async function run({ page, evidence = process.env.E2E_EVIDENCE ?? workPath('arti
     s.actions.current.set('fixture-dir', 'flux-basic.png'); s.actions.feed.restoreToIndex(i); })()`);
   await page.poll(`(() => { const el = document.querySelector('${target} .imgwrap img'); return el?.complete && el.naturalWidth > 0; })()`, 20000);
   await page.poll(`!!document.querySelector('.fr-tick[data-entry-id="${entryId}"]')`, 10000);
+  const original = await page.evaluate(`(async()=>{const j=(await (await fetch('/api/collections/fixture-dir/entries/flux-basic.png')).json()).judgment??{};
+    return {vote:j.vote??null,favorite:j.favorite??null,bookmark:j.bookmark??null};})()`);
+  try {
   await set({ vote: null, favorite: null, bookmark: null });
   await frame();
   const geometry = await page.evaluate(`(() => { const card = document.querySelector('${target}'), tick = document.querySelector('.fr-tick[data-entry-id="${entryId}"]');
@@ -103,9 +106,9 @@ async function run({ page, evidence = process.env.E2E_EVIDENCE ?? workPath('arti
     } catch (error) { failures.push(error.message); console.error(`FAIL ${error.message}`); }
   }
   fs.writeFileSync(path.join(evidence, 'results.json'), JSON.stringify({ geometry, records, failures }, null, 2));
-  await set({ vote: 'up', favorite: null, bookmark: null });
   assert.deepEqual(failures, [], 'rendered judgment color failures');
   return records;
+  } finally { await set(original); }
 }
 
 module.exports = { run };

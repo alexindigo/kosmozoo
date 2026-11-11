@@ -37,6 +37,21 @@ Deno.test("history archive: invalid keys, symlink paths, corrupted bytes and fai
   assert(!published);
 });
 
+Deno.test("history archive: rejected publication rolls back only unreferenced new objects", async () => {
+  const dir = await Deno.makeTempDir({ prefix: "kz-history-rollback-" }), archive = new ContentArchive(dir);
+  const bytes = new Uint8Array([12, 34]), hash = await sha256(bytes); let refs = 0, forgotten = 0;
+  const ownership = { hasReferences: () => refs > 0, forget: () => forgotten++ };
+  await assertRejects(() => archive.retain(bytes, () => { throw new Error("publication failed"); }, ownership), Error, "publication failed");
+  await assertRejects(() => archive.read(hash), Deno.errors.NotFound);
+  assertEquals(forgotten, 1);
+  await archive.retain(bytes, () => refs++, ownership);
+  await assertRejects(() => archive.retain(bytes, () => { throw new Error("conflict"); }, ownership));
+  assertEquals(await archive.read(hash), bytes); assertEquals(forgotten, 1);
+  const partiallyPublished = new Uint8Array([56, 78]), partialHash = await sha256(partiallyPublished);
+  await assertRejects(() => archive.retain(partiallyPublished, () => { refs++; throw new Error("after membership"); }, ownership));
+  assertEquals(await archive.read(partialHash), partiallyPublished, "rollback must consult references even for a newly created object");
+});
+
 Deno.test("history fresh-source proof: cache hits never discharge freshness and all fresh reads share the existing gate", async () => {
   const rig = await mkStateRig("history-fresh", {});
   let value = "old", active = 0, maximum = 0, reads = 0, missing = false;

@@ -39,7 +39,7 @@ module.exports = async ({ cdp, check, KZ }) => {
     const before = await snapshot();
     await cdp.evaluate(`window.__filterKept = document.querySelector('${row} .vz-row-inc-input')`);
     await type('  IMAGE  ');
-    const filtered = await cdp.evaluate(`(()=>{const rows=[...document.querySelectorAll('.vz-catalogue-row')];const shown=rows.filter(r=>r.getClientRects().length);return {total:rows.length,shown:shown.length,allMatch:shown.every(r=>(r.closest('.vz-catalogue-node').querySelector('.vz-catalogue-node-name').textContent+' '+r.querySelector('.vz-catalogue-name').textContent).toLowerCase().includes('image')),images:shown.some(r=>r.dataset.catalogueId==='43.image'),hiddenChecked:!document.querySelector('${row}').getClientRects().length}})()`);
+     const filtered = await cdp.evaluate(`(()=>{const rows=[...document.querySelectorAll('.vz-catalogue-row')];const shown=rows.filter(r=>r.getClientRects().length);return {total:rows.length,shown:shown.length,allMatch:shown.every(r=>(r.querySelector('.vz-catalogue-node-name').textContent+' '+r.querySelector('.vz-catalogue-name').textContent).toLowerCase().includes('image')),images:shown.some(r=>r.dataset.catalogueId==='43.image'),hiddenChecked:!document.querySelector('${row}').getClientRects().length}})()`);
     assert(filtered.total === total && filtered.shown > 0 && filtered.shown < total && filtered.allMatch && filtered.images && !filtered.hiddenChecked, JSON.stringify(filtered));
     assert.equal(await snapshot(), before);
     check('typing filters unadded catalogue fields only; active editor and sidebar stay unchanged', true, JSON.stringify(filtered));

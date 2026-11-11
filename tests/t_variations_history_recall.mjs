@@ -79,3 +79,38 @@ Deno.test("history overlay: a newer revision, source replacement or disposed edi
     rig.editor.dispose();
   }
 });
+
+Deno.test("history overlay: only used template labels replace destination buffers and participate in overlap", async () => {
+  const { record } = await savedRecipe(editor => {
+    editor.setEnabled("text.text", true);
+    editor.edit("texts", "text.text", "text", "{{used}} {{__proto__}}");
+    editor.edit("texts", "text.text", "tpl", JSON.parse('{"used":"saved","__proto__":"literal label","dormant":"old unused"}'));
+  });
+  const rig = editorRig();
+  try {
+    rig.editor.edit("texts", "text.text", "tpl", { dormant: "unsent buffer" });
+    const first = await rig.editor.planRecall(record);
+    assertEquals(first.overlap, false, "unrelated dormant edits do not require discarding work");
+    assert(Object.hasOwn(first.patch.find(field => field.name === "tpl").value, "__proto__"));
+    assertEquals(rig.editor.applyRecall(first).status, "applied");
+    assertEquals(rig.editor.rows("texts")["text.text"].tpl, JSON.parse('{"used":"saved","__proto__":"literal label","dormant":"unsent buffer"}'));
+    rig.editor.edit("texts", "text.text", "tpl", { used: "new work", dormant: "unsent buffer" });
+    assert((await rig.editor.planRecall(record)).overlap, "used-label conflicts still require confirmation");
+  } finally { rig.editor.dispose(); }
+});
+
+Deno.test("leave guard: applied mounted transitions resume capabilities; disposed transitions do not", async () => {
+  for (const unmount of [false, true]) {
+    let suspended = false, resumes = 0;
+    const guard = makeLeaveGuard({ dirty: () => true, invalidate() {}, decision() {},
+      suspend() { suspended = true; }, restore() { suspended = false; resumes++; } });
+    const pending = guard.request({ intent: { type: "apply-history" }, cancel() {}, permit() {
+      if (unmount) guard.dispose();
+      return { status: "applied" };
+    } });
+    assert(suspended); guard.discard(); assertEquals((await pending).status, "applied");
+    assertEquals(resumes, unmount ? 0 : 1);
+    if (!unmount) assertEquals(suspended, false);
+    guard.dispose();
+  }
+});

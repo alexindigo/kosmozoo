@@ -7,7 +7,11 @@ export class SourceArrivals {
   changed(id) {
     const source = this.#sources.get(id);
     if (!source) return;
-    const sequences = this.visible(id).map(name => source.names.get(name)).sort((a,b) => a-b);
+    const visible = this.visible(id);
+    // Ingest/unhide may restore a present name between inventory observations.
+    // Sequence ownership belongs to publication, not only the relist caller.
+    for (const name of visible) if (!source.names.has(name)) source.names.set(name, ++source.sequence);
+    const sequences = visible.map(name => source.names.get(name)).sort((a,b) => a-b);
     const visibleRanges = [];
     for (const sequence of sequences) {
       const last = visibleRanges.at(-1);
@@ -41,7 +45,6 @@ export class SourceArrivals {
     let source = this.#sources.get(id);
     if (!source || source.token !== token) this.#sources.set(id, source = { token, names: new Map(), present: new Set(), sequence: 0, projection: null });
     source.present = new Set(names);
-    for (const name of this.visible(id)) if (!source.names.has(name)) source.names.set(name, ++source.sequence);
     this.changed(id);
   }
   remove(id, name) { if (this.#sources.get(id)?.present.delete(name)) this.changed(id); }

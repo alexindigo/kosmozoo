@@ -4,6 +4,17 @@ import { editorRig } from "./helpers/variation-editor.mjs";
 import { createRunId } from "../client-solid/features/variations/draft.js";
 import { makeVariationSession } from "../client-solid/features/variations/session.js";
 
+Deno.test("history client: failed releases remain owned, coalesce and retry at disposal", async () => {
+  const record = { id: "a", leaseId: "owned" }; let fail = true, calls = 0;
+  const owner = makeHistoryClient({ api: { historyOpen: async () => record,
+    historyRelease: async () => { calls++; if (fail) throw new Error("offline"); } } });
+  await owner.open("a");
+  await assertRejects(() => owner.release(record), Error, "offline");
+  assert(owner.retained("a", "owned"), "failed release cannot forget the lease");
+  fail = false; await owner.dispose();
+  assertEquals(calls, 2); assertEquals(owner.retained("a", "owned"), null);
+});
+
 Deno.test("history opening: Store composition containers never alias the exact-JSON leased read model", async () => {
   const record = { id: createRunId(), leaseId: createRunId(), targets: [{ id: "fake:a.png", host: "fake", filename: "a.png", origin: { source: "fake" }, context: { graphHash: "a".repeat(64) }, historyRef: { runId: "saved" }, unavailable: null }] };
   let opening = { open: false };

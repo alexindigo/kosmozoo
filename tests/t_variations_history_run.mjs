@@ -7,6 +7,7 @@ import { numericDefaults, editorDomain } from "../client-solid/features/variatio
 import { encodeHistoryRecipe } from "../src/features/variations/history-codec.mjs";
 import { parameterCurrent, parseExactJson, stringifyExactJson } from "../src/parameters.mjs";
 import { snapshotDraft } from "../src/features/variations/recipe-model.mjs";
+const deferred = () => { let resolve; const promise = new Promise(r => { resolve = r; }); return { promise, resolve }; };
 
 function recipeFor(catalogue) {
   const r = makeVariationRecipe();
@@ -31,7 +32,7 @@ Deno.test("history HTTP: immutable raw capture/archive barrier, engine plan and 
     save: { class_type: "SaveImage", inputs: { images: ["n", 0], filename_prefix: "source" } } };
   const original = testPng(10, 10, [20, 50, 80, 255]);
   const outputs = new Map([["source_00001_.png", testPng(20, 20, [10, 30, 70, 255], graph)]]), inputs = new Map([["original.png", original]]);
-  const jobs = [], uploads = [];
+  const jobs = [], uploads = [], promptGates = [], uploadGates = [];
   let acceptance = "confirmed";
   const fake = Deno.serve({ hostname: "127.0.0.1", port: 0, onListen() {} }, async req => {
     const url = new URL(req.url);
@@ -41,12 +42,16 @@ Deno.test("history HTTP: immutable raw capture/archive barrier, engine plan and 
       return bytes ? new Response(bytes, { headers: { ETag: '"fixture"' } }) : new Response(null, { status: 404 });
     }
     if (url.pathname === "/api/upload/image") {
+      const gate = uploadGates.shift();
+      if (gate) { gate.entered.resolve(); await gate.release.promise; if (gate.reject) return new Response("rejected", { status: 400 }); }
       const file = (await req.formData()).get("image"), bytes = new Uint8Array(await file.arrayBuffer());
       const name = `archived-${uploads.length}-${file.name}`; inputs.set(name, bytes); uploads.push({ name, bytes });
       return Response.json({ name, type: "input", subfolder: "" });
     }
     if (url.pathname === "/api/prompt") {
       jobs.push(await req.text());
+      const gate = promptGates.shift();
+      if (gate) { gate.entered.resolve(); await gate.release.promise; }
       return Response.json(acceptance === "uncertain" ? {} : { prompt_id: `job-${jobs.length}`, node_errors: acceptance === "partial" ? { save: { errors: ["fixture"] } } : {} });
     }
     return new Response(null, { status: 404 });
@@ -147,6 +152,9 @@ Deno.test("history HTTP: immutable raw capture/archive barrier, engine plan and 
       assertEquals(jobs.length, before + 1);
       await call("POST", "/run", p.data.request);
       assertEquals(jobs.length, before + 1, "repeated partial/uncertain dispatch never re-enters enqueue");
+      await call("DELETE", `/history/${runId}`);
+      assertEquals(engine.ctx.store.variationResources(runId).length > 0, mode !== "partial",
+        "unresolved effects, not finished request pins, protect uncertain bytes");
     }
     const invalidId = crypto.randomUUID(), invalidRecipe = snapshotDraft(opened.data.recipe);
     invalidRecipe.numeric["n.seed"].values.value = "1e";
@@ -189,6 +197,75 @@ Deno.test("history HTTP: immutable raw capture/archive barrier, engine plan and 
     const largeSummary = (await call("GET", "/history")).data.items.find(item => item.id === largeId).summary;
     assertEquals(largeSummary.parameters.find(p => p.id === "load.image").count, 80);
     assertEquals(largeSummary.parameters.find(p => p.id === "load.image").images.length, 4, "list summaries must not carry 80 image payloads");
+    // Concurrent targets and a delayed duplicate own independent dispatch pins.
+    inputs.set("original.png", original);
+    outputs.set("second_00001_.png", outputs.get("source_00001_.png") ?? testPng(20, 20, [10, 30, 70, 255], graph));
+    await engine.ctx.ingest.ensure("fake", "second_00001_.png");
+    const secondProbe = (await call("GET", "/probe/fake%3Asecond_00001_.png")).data;
+    const bulkId = crypto.randomUUID(), bulk = encodeHistoryRecipe(raw.capture(), bulkId);
+    const bulkTargets = [nextTarget, { id: "fake:second_00001_.png", host: "fake", filename: "second_00001_.png", origin: secondProbe.context.origin, context: secondProbe.context }];
+    assertEquals((await call("POST", "/history", { runId: bulkId, format: 1, cohortMode: "bulk", targets: bulkTargets, recipe: bulk.recipe, resources: bulk.resources })).status, 200);
+    const bulkPrepared = await call("POST", `/history/${bulkId}/prepare`);
+    assertEquals(bulkPrepared.status, 200, stringifyExactJson(bulkPrepared));
+    const plans = [];
+    for (const [targetIndex, t] of bulkTargets.entries()) {
+      for (const resourceId of new Set(Object.values(bulkPrepared.data.targets[targetIndex].graphResources)))
+        assertEquals((await call("POST", `/history/${bulkId}/uploads/${targetIndex}-${resourceId}`, { targetIndex, resourceId, origin: t.origin, snapshotHash: bulkPrepared.data.snapshotHash })).status, 200);
+      const p = await call("POST", `/history/${bulkId}/prepare-target`, { targetIndex, origin: t.origin, snapshotHash: bulkPrepared.data.snapshotHash });
+      assertEquals(p.status, 200, stringifyExactJson(p)); plans.push(p.data.request);
+    }
+    const backing = engine.ctx.comfy("fake"), objectInfo = backing.objectInfo;
+    const delayed = deferred(), inspection = deferred(); let delayNext = true;
+    backing.objectInfo = async options => {
+      if (delayNext) { delayNext = false; inspection.resolve(); await delayed.promise; }
+      return objectInfo(options);
+    };
+    const duplicate = call("POST", "/run", plans[0]); await inspection.promise;
+    const gates = [0, 1].map(() => ({ entered: deferred(), release: deferred() })); promptGates.push(...gates);
+    const firstTarget = call("POST", "/run", plans[0]); await gates[0].entered.promise;
+    const secondTarget = call("POST", "/run", plans[1]); await gates[1].entered.promise;
+    gates[0].release.resolve(); assertEquals((await firstTarget).data.submitted, 1);
+    gates[1].release.resolve(); assertEquals((await secondTarget).data.submitted, 1);
+    delayed.resolve(); assertEquals((await duplicate).status, 409); backing.objectInfo = objectInfo;
+    assertEquals((await call("DELETE", `/history/${bulkId}`)).status, 200);
+    assertEquals(engine.ctx.store.variationResources(bulkId), [], "no completed target or losing duplicate can strand archive references");
+    for (const reject of [false, true]) {
+      inputs.set("original.png", original);
+      const uploadId = crypto.randomUUID(), encodedUpload = encodeHistoryRecipe(raw.capture(), uploadId);
+      assertEquals((await call("POST", "/history", { runId: uploadId, format: 1, cohortMode: "single", targets: [nextTarget], recipe: encodedUpload.recipe, resources: encodedUpload.resources })).status, 200);
+      const preparedUpload = await call("POST", `/history/${uploadId}/prepare`);
+      assertEquals(preparedUpload.status, 200);
+      inputs.delete("original.png");
+      const gate = { entered: deferred(), release: deferred(), reject }; uploadGates.push(gate);
+      const resourceId = Object.values(preparedUpload.data.targets[0].graphResources)[0];
+      const upload = call("POST", `/history/${uploadId}/uploads/0-${resourceId}`, { targetIndex: 0, resourceId, origin: nextTarget.origin, snapshotHash: preparedUpload.data.snapshotHash });
+      await gate.entered.promise;
+      await call("DELETE", `/history/${uploadId}`);
+      assert(engine.ctx.store.variationResources(uploadId).length, "active write protects its bytes");
+      gate.release.resolve(); const result = await upload;
+      assertEquals(result.status, reject ? 400 : 200, stringifyExactJson(result));
+      assertEquals(engine.ctx.store.variationResources(uploadId), [], "settled uploads retry tombstone collection");
+    }
+    // Source fencing may reject the caller, but cannot rewrite a known receipt.
+    inputs.set("original.png", original);
+    const fencedId = crypto.randomUUID(), fenced = encodeHistoryRecipe(raw.capture(), fencedId);
+    await call("POST", "/history", { runId: fencedId, format: 1, cohortMode: "single", targets: [nextTarget], recipe: fenced.recipe, resources: fenced.resources });
+    const fencedPrepared = await call("POST", `/history/${fencedId}/prepare`);
+    assertEquals(fencedPrepared.status, 200);
+    inputs.delete("original.png");
+    const fencedGate = { entered: deferred(), release: deferred() }; uploadGates.push(fencedGate);
+    const fencedResource = Object.values(fencedPrepared.data.targets[0].graphResources)[0];
+    const fencedUpload = call("POST", `/history/${fencedId}/uploads/0-${fencedResource}`, { targetIndex: 0, resourceId: fencedResource, origin: nextTarget.origin, snapshotHash: fencedPrepared.data.snapshotHash });
+    await fencedGate.entered.promise;
+    const address = engine.ctx.hosts.fake;
+    engine.ctx.hosts.fake = "127.0.0.1:1"; fencedGate.release.resolve();
+    try {
+      assertEquals((await fencedUpload).status, 412);
+      const effect = engine.ctx.store.variationEffects(fencedId).find(e => e.kind === "upload");
+      assertEquals(effect.state, "confirmed", "a source fence cannot undo an actual old-origin receipt");
+      assertEquals(parseExactJson(effect.result_json).origin, nextTarget.origin);
+    } finally { engine.ctx.hosts.fake = address; }
+    await call("DELETE", `/history/${fencedId}`);
     const beforeFailure = { jobs: jobs.length, uploads: uploads.length };
     await engine.close();
     const FailingArchive = class extends ContentArchive { retain() { throw new Error("fixture disk full"); } };

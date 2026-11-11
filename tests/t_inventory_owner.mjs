@@ -12,6 +12,19 @@ const data = (atMs) => ({ records: [{ name: "nested/image.png", size: 12, modifi
   discovered: ["nested/image.png"], coverage: "recursive", subfolders: { supported: true, reason: null } });
 const tick = async (predicate) => { for (let i = 0; i < 100; i++) { if (predicate()) return; await new Promise((r) => setTimeout(r, 1)); } throw new Error("condition not reached"); };
 
+Deno.test("inventory registry: rejected snapshot publication remains retryable", async () => {
+  const snapshot = { kind: "ready", revision: 1, ...data(1) }; let attempts = 0;
+  const registry = makeCollectionInventory({ a: "fixture:8188" }, {
+    bindingFactory: () => ({ inventory: () => snapshot, disposeInventory: async () => {} }),
+    onSnapshot() { if (++attempts === 1) throw new Error("publication failed"); },
+  });
+  try {
+    await assertRejects(() => registry("a"), Error, "publication failed");
+    assertEquals(registry.accepted(registry.capture("a")), null);
+    assertEquals(await registry("a"), snapshot); assertEquals(attempts, 2);
+  } finally { await registry.stop(); }
+});
+
 Deno.test("inventory owner: immutable accepted cache, no constructor work, fresh/backdated replacement and failed-cache integrity", async () => {
   let clock = 0, calls = 0, date = 2000, fail = false;
   const owner = makeInventoryOwner({ clock: () => clock, collect: async () => { calls++; if (fail) throw new Error("metadata missing"); return data(date); } });

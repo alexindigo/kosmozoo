@@ -10,6 +10,9 @@ Deno.test("workspace catalogue: feature candidate resolves only after registrati
   assertEquals(spaces.resolve(), "history"); assertEquals(spaces.list().length, 3);
   assertThrows(() => spaces.register([{ id: "history", title: "Duplicate", icon: "history", component }]));
   assertEquals(makeWorkspaceSpaces("missing").resolve(), "details");
+  const batch = makeWorkspaceSpaces();
+  assertThrows(() => batch.register([1, 2].map(n => ({ id: "same", title: String(n), icon: "info", component }))));
+  assertEquals(batch.list().length, 2, "rejected batch is atomic");
 });
 Deno.test("workspace commands: membership is live, only selected contribution mounts, third spaces have no implicit comparator", () => {
   const store = makeAppStore({ subscribeSources: null });

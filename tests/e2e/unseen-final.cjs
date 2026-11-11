@@ -8,7 +8,7 @@ async function run(page){
   const other=new URL(process.env.E2E_FAKE??'http://127.0.0.1:20482'),fake=new URL(other);fake.port=String(Number(fake.port)-1);
   await page.goto(ENGINE+'/#fixture-dir');await page.poll(`(async()=>${KZ}.state.sourceDelivery()==='ready'&&!${KZ}.state.inventory.loading)()`,20000);
   await require('./source-new-content.cjs')({page,ENGINE,FAKE:fake.origin,KZ,check,capture});
-  await require('./judgment-colors.cjs').run({page,evidence:path.join(root,'judgment'),shots:path.join(shots,'judgment')});
+  await require('./judgment-colors.cjs').run({page,engine:ENGINE,evidence:path.join(root,'judgment'),shots:path.join(shots,'judgment')});
   check('full positive judgment body/button/border and stable geometry: ten cases',true);
   // Persistent segments preserve treatment while the actual media stays covered.
   const run=require('node:crypto').randomUUID(),name=`treatment/${run}/unseen.png`,id='another:'+name;

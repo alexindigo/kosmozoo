@@ -34,6 +34,7 @@ async function run(page, { nativeViewport = false, captureFull } = {}) {
     await page.evaluate(`(async()=>{const s=${KZ};const i=s.state.images.findIndex(e=>e.filename===${JSON.stringify(name)});if(i<0)throw Error('missing arrival');s.actions.feed.restoreToIndex(i);})()`);
     await page.poll(`(()=>{const el=document.querySelector('.card[data-name="${name}"] .imgwrap img');const v=document.querySelector('#candidatesCol').getBoundingClientRect();const r=el?.getBoundingClientRect();return el?.complete&&el.naturalWidth>0&&r.bottom>v.top&&r.top<v.bottom;})()`,20000);
   };
+  try {
   if(!nativeViewport)await page.send('Emulation.setDeviceMetricsOverride',{width:1400,height:900,deviceScaleFactor:1,mobile:false});
   await page.goto(ENGINE+'/#another');
   await page.poll(`(async()=>{const s=${KZ};return s.state.host()==='another'&&!s.state.inventory.loading&&s.state.entriesWithKnownSize().length>30;})()`,20000);
@@ -63,6 +64,7 @@ async function run(page, { nativeViewport = false, captureFull } = {}) {
   const clear=await record('all-exposed');
   assert.equal(clear.favicon,before.favicon);assert(clear.items.every(e=>!e.unseen));
   console.log('PASS current-source off-screen tick/source/favicon retention and exact exposure clearing');
+  } finally { await control({ remove: OUTPUTS }); }
 }
 module.exports={run};
 if(require.main===module)(async()=>{const page=await CDP.launch(9353,{windowSize:'1600,1200'});const errors=await collectPageErrors(page);

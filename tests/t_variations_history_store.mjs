@@ -7,6 +7,24 @@ const begin = (store, id = crypto.randomUUID(), now = 100) => {
     resources: [{ id: "image-0", descriptorJson: '{"kind":"upload"}' }] });
   return id;
 };
+
+Deno.test("history Store: execution claims atomically acquire a unique owner pin", async () => {
+  const dir = await Deno.makeTempDir({ prefix: "kz-history-claim-" }), store = await Store.open(dir);
+  try {
+    const id = begin(store);
+    store.variationPrepareEffect(id, "target-0", "target", "{}", "hash");
+    const lease = store.variationClaimExecution(id, "target-0");
+    assert(lease); assertEquals(store.variationLease(id, lease).kind, "execution");
+    assertEquals(store.variationClaimExecution(id, "target-0"), null);
+    assert(store.variationLease(id, lease), "losing claims cannot release another request's pin");
+    store.variationEffectResult(id, "target-0", "confirmed", "{}");
+    store.variationLeaseRelease(id, lease);
+    assertEquals(store.variationClaimExecution(id, "target-0"), null);
+    store.variationTombstone(id);
+    store.variationRetire(id);
+    assertEquals(store.variationGet(id).recipe_json, null);
+  } finally { store.close(); }
+});
 Deno.test("history Store: additive retry-safe migration preserves legacy rows and independent metadata cursor", async () => {
   const dir = await Deno.makeTempDir({ prefix: "kz-history-migration-" });
   let store = await Store.open(dir);

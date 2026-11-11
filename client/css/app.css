@@ -430,11 +430,10 @@ main { display: flex; flex: 1; min-height: 0; isolation: isolate; }
 .note-actions { display: grid; grid-template-columns: minmax(0, 1fr); }
 .note-actions > * { grid-area: 1 / 1; min-width: 0; }
 .note-save-status { align-self: center; font-size: 11px; white-space: nowrap;
-  overflow: hidden; visibility: hidden; pointer-events: none; }
+  overflow: hidden; pointer-events: none; }
 .note-actions.negative { color: var(--negative); }
 .note-actions.positive { color: var(--positive); }
 .note-actions.is-saved > .btnrow { visibility: hidden; }
-.note-actions.is-saved > .note-save-status { visibility: visible; }
 
 /* list progress affordances */
 .sentinel { color: var(--foreground-dim); text-align: center; padding: 18px 0; font-size: 12px; }

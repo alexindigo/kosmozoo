@@ -9,11 +9,19 @@ module.exports = async ({ cdp, FAKE, KZ, check }) => withRecipe({ cdp, FAKE, KZ,
     const id = {numeric:'9.steps',enum:'9.scheduler',text:'2.text',images:'470.image'}[kind];
     const catalogue = `[data-catalogue-id="${id}"]`;
     if (await checked()) await cdp.clickAt(box);
-    for (const area of ['.vz-catalogue-name', '.vz-catalogue-current', '.vz-catalogue-context']) {
+    for (const area of ['.vz-catalogue-name', kind === 'images' ? '.vz-catalogue-picture' : '.vz-catalogue-current', '.vz-catalogue-context']) {
       await type('.vz-suffix', 'row-click');
       const naming = await cdp.evaluate("document.querySelector('.vz-suffix').value");
       await cdp.clickAt(`${catalogue} ${area}`);
       assert.equal(await checked(),false,`${kind}: catalogue text must not add implicitly`);
+      // Inspecting current text can open its registered preview. Finish that
+      // interaction before clicking the underlying Add button.
+      await cdp.evaluate('new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve)))');
+      if (await cdp.evaluate("!!document.querySelector('.value-preview:popover-open')")) {
+        await cdp.keyTrusted('Escape', { vk: 27 });
+        await cdp.poll("!document.querySelector('.value-preview:popover-open')");
+        assert(await cdp.evaluate("!!document.querySelector('.vz-panel')"));
+      }
       await addParameter(cdp,id);
       assert(await checked(), `${kind}: explicit Add did not enable row`);
       // Enable may auto-append a token; a closed name must not insert another.
@@ -33,7 +41,7 @@ module.exports = async ({ cdp, FAKE, KZ, check }) => withRecipe({ cdp, FAKE, KZ,
     await cdp.mouse('mousePressed', padding.x, padding.y, { buttons: 1, clickCount: 1 });
     await cdp.mouse('mouseReleased', padding.x, padding.y, { buttons: 0, clickCount: 1 });
     assert.equal(await checked(),false, `${kind}: catalogue padding must not add implicitly`);
-    await cdp.evaluate(`document.querySelector('${catalogue} button').focus()`);
+    await cdp.evaluate(`document.querySelector('${catalogue} .vz-catalogue-add').focus()`);
     await cdp.keyTrusted(' ', { code: 'Space', vk: 32 }); assert(await checked(), `${kind}: keyboard checkbox did not enable`);
     // Enabled-first ordering moves the card; reacquire its native control.
     await cdp.evaluate(`document.querySelector('${box}').focus()`);

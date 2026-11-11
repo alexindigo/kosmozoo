@@ -10,8 +10,10 @@ export function makeWorkspaceSpaces(saved = "details") {
     resolve: () => spaces.has(saved) ? saved : "details",
     components(components) { for (const [id, component] of Object.entries(components)) spaces.set(id, { ...spaces.get(id), component }); },
     register(entries) {
+      const ids = new Set(spaces.keys());
       for (const entry of entries) {
-        if (!entry || typeof entry.id !== "string" || spaces.has(entry.id) || typeof entry.title !== "string" || typeof entry.icon !== "string" || typeof entry.component !== "function") throw new Error("Invalid or duplicate workspace contribution");
+        if (!entry || typeof entry.id !== "string" || ids.has(entry.id) || typeof entry.title !== "string" || typeof entry.icon !== "string" || typeof entry.component !== "function") throw new Error("Invalid or duplicate workspace contribution");
+        ids.add(entry.id);
       }
       for (const entry of entries) spaces.set(entry.id, Object.freeze({ chrome: "plain", ...entry }));
     },

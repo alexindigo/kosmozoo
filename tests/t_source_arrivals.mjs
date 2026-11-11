@@ -9,6 +9,19 @@ import { buildContext } from "../src/context.mjs";
 import { createRoot } from "solid-js";
 import { makeSourceRegistry } from "../client-solid/store/source-registry.js";
 
+Deno.test("arrivals: restored visibility assigns sequences before every publication", () => {
+  let excluded = ["restored.png"];
+  const arrivals = new SourceArrivals({ hiddenNames: () => [], goneNames: () => excluded });
+  arrivals.observe("a", ["first.png", "restored.png"]);
+  excluded = [];
+  arrivals.changed("a");
+  assertEquals(arrivals.projection("a", true).visibleRanges, [[1, 2]]);
+  assertEquals(arrivals.inventory("a").sequences, { "first.png": 1, "restored.png": 2 });
+  assertEquals(JSON.parse(arrivals.wire("a")).latestVisibleSeq, 2);
+  arrivals.changed("a");
+  assertEquals(arrivals.projection("a").sequence, 2, "unchanged visibility does not mint new arrivals");
+});
+
 Deno.test("arrivals: session sequence is independent of relist order and revalidation; missing/hidden entries don't signal", () => {
   const rows = [], arrivals = new SourceArrivals({
     hiddenNames: () => rows.filter(row => row.hidden === 1).map(row => row.name),

@@ -1,6 +1,7 @@
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const { addParameter } = require('./variation-add-helpers.cjs');
+const { openImageAdd, waitForInputPicker } = require('./image-picker-helpers.cjs');
 module.exports = async ({ page, evaluate, invoke, list, write, panel, waitRun, ENGINE, FAKE, E, scenario, original, shot }) => {
   const originalId = original.id;
   const close = async () => {
@@ -38,19 +39,40 @@ module.exports = async ({ page, evaluate, invoke, list, write, panel, waitRun, E
     assert.equal(jobs[1].prompt['9'].inputs.steps, 32); assert.equal(jobs[1].prompt['9'].inputs.denoise, .9);
     fs.writeFileSync(E + '/mismatch-consumer.json', JSON.stringify(jobs));
   } else if (scenario === 'guards') {
+    await require('./history-template-labels.cjs')({page,evaluate});
     await close(); await open('flux-controlnet.png');
+    await addParameter(page, '43.image');
     await addParameter(page, '9.denoise'); await page.clickAt('[data-param-key="9.denoise"] .mode-switch button[title="Value"]');
     await write('[data-param-key="9.denoise"] .vz-value-field input', '0.7');
     await page.evaluate('window.testHistoryInput=document.querySelector("[data-param-key=\\"9.denoise\\"] .vz-value-field input")');
     await choose(); await page.poll('!!document.querySelector(".vz-discard")');
     await shot('recall-overlap-decision');
     assert.equal(await page.evaluate('!!document.querySelector(".vh-menu")?.matches(":popover-open")'), false);
-    await page.clickAt('.vz-keep');
-    await page.poll('!document.querySelector(".vz-discard")');
-    assert.equal(await page.evaluate('window.testHistoryInput===document.querySelector("[data-param-key=\\"9.denoise\\"] .vz-value-field input") && window.testHistoryInput.value==="0.7"'), true);
-    await choose(); await page.poll('!!document.querySelector(".vz-discard")');
+    let heldRelease = null;
+    const holdRelease = event => { const msg=JSON.parse(event.data); if(msg.method==='Fetch.requestPaused') heldRelease=msg.params.requestId; };
+    page.ws.addEventListener('message',holdRelease);
+    await page.send('Fetch.enable',{patterns:[{urlPattern:'*/api/features/variations/history/*/leases/*',requestStage:'Request'}]});
+    try {
+      await page.clickAt('.vz-keep');
+      await page.poll('!document.querySelector(".vz-discard")');
+      assert.equal(await page.evaluate('window.testHistoryInput===document.querySelector("[data-param-key=\\"9.denoise\\"] .vz-value-field input") && window.testHistoryInput.value==="0.7"'), true);
+      for(let i=0;i<100&&!heldRelease;i++)await new Promise(resolve=>setTimeout(resolve,20));
+      assert(heldRelease,'cancelled recall releases its lease through real transport');
+      await choose(); await page.poll('!!document.querySelector(".vz-discard")');
+    } finally {
+      if(heldRelease)await page.send('Fetch.continueRequest',{requestId:heldRelease});
+      await page.send('Fetch.disable');page.ws.removeEventListener('message',holdRelease);
+    }
     await page.clickAt('.vz-discard-confirm');
     await page.poll('document.querySelector("[data-param-key=\\"9.denoise\\"] .vz-value-field input")?.value==="0.9"');
+    await openImageAdd(page, '[data-image-id="43.image"]');
+    await page.clickAt('[data-image-id="43.image"] .vz-input-trigger');
+    await waitForInputPicker(page);
+    await page.keyTrusted('Escape', { vk: 27 });
+    await page.clickAt('.vh-trigger');
+    await page.poll('document.querySelector(".vh-menu")?.matches(":popover-open")&&!document.querySelector(".vh-menu").inert');
+    await page.clickAt('.vh-trigger');
+    console.log('PASS confirmed in-place recall resumes existing input picker and history dropdown');
     assert.equal((await list()).items.length, 1, 'recall/edit alone creates no run');
     await close();
     await panel();

@@ -180,7 +180,12 @@ function ModalBody(props) {
           transferred = true; setHistoryCaption(`${historyCount(saved)} | ${historyDate(saved.createdAt)}`); setRecallWarnings(plan.warnings);
         }
         return result;
-      } finally { if (!transferred) await services.history.release(saved); }
+      } finally {
+        // The transition has settled. Lease cleanup remains owned by the
+        // history client and must not coalesce the next user action into this one.
+        if (recalling?.promise === promise) recalling = null;
+        if (!transferred) await services.history.release(saved);
+      }
     })();
     recalling = { id, promise };
     promise.finally(() => { if (recalling?.promise === promise) recalling = null; }).catch(() => {});

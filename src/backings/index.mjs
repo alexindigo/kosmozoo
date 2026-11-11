@@ -80,8 +80,8 @@ export function makeCollectionInventory(hosts, { bindingFactory = createBindingF
     const snapshot = await binding(token.address).inventory(options);
     if (!lifecycle.isCurrent(token)) throw cancelled();
     if (accepted.get(token) !== snapshot) {
-      accepted.set(token, snapshot);
       onSnapshot(id, token.address, snapshot, token);
+      accepted.set(token, snapshot);
     }
     return snapshot;
   };

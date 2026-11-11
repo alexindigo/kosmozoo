@@ -2,7 +2,7 @@
 import { cloneJsonValue, resourceReference } from "../../parameters.mjs";
 import { RECIPE_FIELDS, validRecipeValue, freezeRecipe, validImageSet, snapshotDraft, sameDraft, numericText } from "./recipe-model.mjs";
 import { sameJsonValue } from "../../parameters.mjs";
-import { acknowledgedFields, catalogueParams, parameterAliases, templateReplaceWithProof } from "./shared.mjs";
+import { acknowledgedFields, catalogueParams, parameterAliases, templateReplaceWithProof, templateLabels } from "./shared.mjs";
 import { validateEditorValue, admitResourceTransfer } from "./compile.mjs";
 import { parseRecipeCandidate } from "./recipe-compile.mjs";
 
@@ -128,7 +128,19 @@ export function planHistoryOverlay(saved, destination, catalogues, cohortMode) {
         }
       }
       const names = domain === "numeric" ? ["enabled", "mode", ...(entry.values.mode === "value" ? ["value"] : ["min", "max", "rawIncrement"])] : Object.keys(RECIPE_FIELDS[domain]);
-      for (const name of names) patch.push({ domain, id, name, value: snapshotDraft(entry.values[name]) });
+      for (const name of names) {
+        let value = snapshotDraft(entry.values[name]);
+        if (domain === "texts" && name === "tpl") {
+          const used = new Set(templateLabels(entry.values.text));
+          // Labels are literal data, including inherited setter names. Build
+          // own entries rather than assigning through Object.prototype.
+          value = Object.fromEntries([
+            ...Object.entries(target.values.tpl).filter(([label]) => !used.has(label)),
+            ...[...used].filter(label => Object.hasOwn(entry.values.tpl, label)).map(label => [label, entry.values.tpl[label]]),
+          ]);
+        }
+        patch.push({ domain, id, name, value });
+      }
     } catch (error) { warnings.push({ id, label: entry.metadata.label ?? id, reason: error.message }); }
   }
   for (const name of ["prefix", "suffix"]) {
@@ -143,6 +155,8 @@ export function planHistoryOverlay(saved, destination, catalogues, cohortMode) {
   }
   const overlap = patch.some(({ domain, id, name, value }) => {
     const entry = destination[domain][id];
+    if (domain === "texts" && name === "tpl") return templateLabels(source.texts[id].values.text).some(label =>
+      !sameDraft(entry.values.tpl[label], entry.baseline.tpl[label]) && !sameDraft(entry.values.tpl[label], value[label]));
     return !sameDraft(entry.values[name], entry.baseline[name]) && !sameDraft(entry.values[name], value);
   });
   return freezeRecipe({ patch, warnings, overlap });

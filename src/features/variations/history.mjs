@@ -81,7 +81,9 @@ export function makeVariationHistory(app) {
     task.then(() => { if (pending.get(key) === record) pending.delete(key); }, () => { if (pending.get(key) === record) pending.delete(key); });
     return task;
   };
-  const attach = async (id, resourceId, bytes) => app.archive.retain(bytes, result => store.variationAttach(id, resourceId, result));
+  const attach = async (id, resourceId, bytes) => app.archive.retain(bytes, result => store.variationAttach(id, resourceId, result), {
+    hasReferences: hash => store.variationAssetRefs(hash) > 0, forget: hash => store.variationForgetAsset(hash),
+  });
   const reserve = (id, descriptor) => store.variationReserve(id, descriptor.id, canonical(descriptor));
   const collect = async id => {
     const hashes = store.variationRetire(id);
@@ -331,7 +333,7 @@ export function makeVariationHistory(app) {
       } catch (error) {
         store.variationEffectResult(id, effectId, !outboundStarted || error.status && error.status < 500 ? "rejected" : "uncertain", canonical({ error: error.message }));
         outcome(id, error.message); throw error;
-      }
+      } finally { await collect(id); }
     }, canonical({ origin, snapshotHash })); },
     prepareTarget(id, targetIndex, origin, snapshotHash) { return single(`plan-${id}-${targetIndex}`, async () => {
       const { row, snapshot } = sealed(id), target = data(row.targets_json)[targetIndex], saved = snapshot.targets[targetIndex];
@@ -385,9 +387,8 @@ export function makeVariationHistory(app) {
       }
       const prepared = data(effect.request_json), saved = snapshot.targets[binding.targetIndex];
       const r = throwInspection(await inspectSource(app, body.host, body.filename, body.context, { graph: prepared.graph, hash: saved.hash }));
-      const leaseId = body.acknowledgement.requestId;
-      store.variationLeaseAcquire(id, "execution", leaseId);
-      if (!store.variationClaimEffect(id, effect.effect_id)) throw fail("Submission was already admitted", 409);
+      const leaseId = store.variationClaimExecution(id, effect.effect_id);
+      if (!leaseId) throw fail("Submission was already admitted", 409);
       try {
         const response = await execute(r, { enqueue: async (job, index) => {
           const effectId = `job-${binding.targetIndex}-${index}`;
@@ -403,7 +404,9 @@ export function makeVariationHistory(app) {
         return result;
       } catch (error) { outcome(id, error.message); throw error; }
       finally {
-        if (!store.variationEffects(id).some(e => ["started", "uncertain"].includes(e.state))) await api.release(id, leaseId);
+        // This request is finished regardless of sibling targets. Durable
+        // unresolved-effect guards, not an abandoned request pin, retain bytes.
+        await api.release(id, leaseId);
       }
     }); },
     finish(id, error = null) { record(id); return outcome(id, typeof error === "string" ? error : null); },

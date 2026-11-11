@@ -2,12 +2,13 @@
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const { CDP, collectPageErrors } = require('./cdp.cjs');
+const { workPath } = require('./paths.cjs');
 const ENGINE = process.env.E2E_ENGINE ?? 'http://127.0.0.1:19450';
 const KZ = '(await import("/store/instance.js")).appStore';
 const target = '.card[data-name="flux-basic.png"]';
 const id = 'fixture-dir:flux-basic.png';
 
-async function run({ page, evidence = process.env.E2E_EVIDENCE, baseline = false }) {
+async function run({ page, evidence = process.env.E2E_EVIDENCE ?? workPath('artifacts/feedback-save-status'), baseline = false }) {
   fs.mkdirSync(evidence, { recursive: true });
   const records = [];
   const shot = async name => fs.writeFileSync(`${evidence}/${name}.png`, Buffer.from(
@@ -18,7 +19,7 @@ async function run({ page, evidence = process.env.E2E_EVIDENCE, baseline = false
     await page.send('Input.insertText', { text: value });
     if (blur) await page.keyTrusted('Tab', { code: 'Tab', vk: 9 });
   };
-  const shown = sign => `(() => { const s = document.querySelector('${target} textarea.${sign}')?.parentElement.querySelector('.note-save-status'); return !!s && getComputedStyle(s).visibility === 'visible'; })()`;
+  const shown = sign => `(() => { const s = document.querySelector('${target} textarea.${sign}')?.parentElement.querySelector('.note-save-status'); return !!s && s.textContent==='Feedback saved' && getComputedStyle(s).visibility === 'visible'; })()`;
   const saved = async (sign, value) => page.poll(`(async () => (await (await fetch('/api/collections/fixture-dir/entries/flux-basic.png')).json()).judgment?.notes?.${sign} === ${JSON.stringify(value)})()`);
   const geometry = () => page.evaluate(`(() => {
     const card = document.querySelector('${target}'), probe = document.querySelector('.card--probe');
@@ -35,6 +36,11 @@ async function run({ page, evidence = process.env.E2E_EVIDENCE, baseline = false
   await page.poll(`(async () => { const s=${KZ}; return s.state.host()==='fixture-dir' && !s.state.inventory.loading && s.state.entriesWithKnownSize().length>1; })()`, 20000);
   await page.evaluate(`(async () => { const s=${KZ}; s.actions.diff.hide(); s.actions.current.set('fixture-dir','flux-basic.png'); s.actions.feed.restoreToIndex(s.state.images.findIndex(x=>x.id===${JSON.stringify(id)})); })()`);
   await page.poll(`!!document.querySelector('${target} textarea.pos')`);
+  // The live region must exist in the accessibility tree before its text changes.
+  const { root } = await page.send('DOM.getDocument');
+  const { nodeId } = await page.send('DOM.querySelector', { nodeId: root.nodeId, selector: target + ' .note-save-status' });
+  const { nodes } = await page.send('Accessibility.getPartialAXTree', { nodeId, fetchRelatives: false });
+  assert(nodes.some(node => !node.ignored && node.role?.value === 'status'), 'empty save status is exposed before confirmation');
   await page.clickAt(target + ' textarea.pos');
   const initial = await geometry();
   await shot('before');
@@ -80,9 +86,11 @@ async function run({ page, evidence = process.env.E2E_EVIDENCE, baseline = false
     // Inject only transport timing/failure, never confirmation state. Successful
     // requests still reach the isolated engine and its real SQLite judgment API.
     await page.evaluate(`(() => { const send=window.fetch.bind(window);
-      window.feedbackTransport={mode:'pass',held:0,failed:0,flashes:0};
+      window.feedbackTransport={mode:'pass',held:0,failed:0,flashes:0,holdFlashes:false,flashCallbacks:[]};
       const schedule=window.setTimeout.bind(window);
-      window.setTimeout=(fn,ms,...args)=>{if(ms===1200)window.feedbackTransport.flashes++;return schedule(fn,ms,...args);};
+      window.setTimeout=(fn,ms,...args)=>{const t=window.feedbackTransport;if(ms===1200){t.flashes++;
+        if(t.holdFlashes){const id=schedule(()=>{},60000);t.flashCallbacks.push({id,fn,args});return id;}}
+        return schedule(fn,ms,...args);};
       window.fetch=async (...args) => { const t=window.feedbackTransport;
         if (String(args[0]).includes('/judgment') && args[1]?.method==='PATCH') {
           if(t.mode==='fail'){t.mode='pass';t.failed++;return new Response('fixture failure',{status:503});}
@@ -116,6 +124,7 @@ async function run({ page, evidence = process.env.E2E_EVIDENCE, baseline = false
     await page.poll(`!(${shown('neg')})`);
     await page.evaluate(`(async()=>{const s=${KZ}; for(const chip of s.state.chips.filter(c=>c.kind==='error'))s.actions.status.dismiss(chip.slot);})()`);
 
+    await page.evaluate('feedbackTransport.holdFlashes=true');
     await input('pos','alternating positive',true);
     await page.poll(shown('pos'));
     await input('neg','alternating negative',true);
@@ -127,6 +136,7 @@ async function run({ page, evidence = process.env.E2E_EVIDENCE, baseline = false
     assert.equal(await page.evaluate(shown('neg')),true);
     await page.keyTrusted('Tab',{code:'Tab',vk:9});
     await saved('pos','new edit clears positive');
+    await page.evaluate('feedbackTransport.holdFlashes=false; for(const {id,fn,args} of feedbackTransport.flashCallbacks.splice(0)){clearTimeout(id);fn(...args)}');
     await page.poll(`!(${shown('pos')}) && !(${shown('neg')})`);
 
     await page.evaluate(`(async()=>{const s=${KZ}, order=s.state.folderView(), i=order.indexOf(s.state.imageIdxById().get('${id}'));

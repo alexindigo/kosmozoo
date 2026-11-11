@@ -29,7 +29,7 @@ export class ContentArchive {
     try { return await task; }
     finally { if (this.#locks.get(hash) === task) this.#locks.delete(hash); }
   }
-  async retain(bytes, publish) {
+  async retain(bytes, publish, { hasReferences = () => true, forget = () => {} } = {}) {
     const hash = await sha256(bytes);
     return this.#locked(hash, async () => {
       await this.#path(hash);
@@ -37,7 +37,14 @@ export class ContentArchive {
       if (previous && (previous.length !== bytes.length || await sha256(previous) !== hash)) throw new Error("Archived bytes are corrupt");
       if (!previous) await this.#cache.put(hash, bytes);
       const record = { hash, bytes: bytes.length, mime: sniffMime(bytes) };
-      await publish(record);
+      try { await publish(record); }
+      catch (error) {
+        if (!previous) {
+          try { await this.#collect(hash, () => hasReferences(hash), () => forget(hash)); }
+          catch (cleanup) { throw new AggregateError([error, cleanup], "Archive publication and rollback failed", { cause: error }); }
+        }
+        throw error;
+      }
       return record;
     });
   }
@@ -55,12 +62,13 @@ export class ContentArchive {
     });
   }
   async collect(hash, hasReferences, forget) {
-    return this.#locked(hash, async () => {
+    return this.#locked(hash, () => this.#collect(hash, hasReferences, forget));
+  }
+  async #collect(hash, hasReferences, forget) {
       if (hasReferences()) return false;
       const path = await this.#path(hash);
       try { await Deno.remove(path); } catch (error) { if (!(error instanceof Deno.errors.NotFound)) throw error; }
       forget();
       return true;
-    });
   }
 }

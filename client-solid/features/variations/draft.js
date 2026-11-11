@@ -24,9 +24,11 @@ export function makeLeaveGuard({ dirty, suspend, restore, decision, invalidate }
     decision(null);
     try {
       const result = record.permit();
-      if (result.status !== "applied" && record.suspended) restore();
+      // A permit may update the mounted editor rather than unmount it. The
+      // surviving owner must resume every capability it suspended either way.
+      if (alive && record.suspended) restore();
       record.resolve(result);
-    } catch (error) { if (record.suspended) restore(); record.reject(error); }
+    } catch (error) { if (alive && record.suspended) restore(); record.reject(error); }
   };
   return {
     request(request) {
