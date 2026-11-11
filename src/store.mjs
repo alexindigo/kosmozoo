@@ -195,7 +195,10 @@ const STATEMENTS = {
   contentSize: "UPDATE content SET bytes = ? WHERE hash = ? AND bytes IS NULL",
   resourceCachePut: `INSERT INTO entry (collection, name, kind, hash, stamp, state, first_seen, last_seen)
        VALUES (?, ?, ?, ?, ?, 'ingested', ?, ?)
-       ON CONFLICT(collection, name, kind) DO UPDATE SET hash = excluded.hash, stamp = excluded.stamp, state = 'ingested', last_seen = excluded.last_seen`,
+       ON CONFLICT(collection, name, kind) DO UPDATE SET
+         width = CASE WHEN entry.hash IS NOT NULL AND entry.hash <> excluded.hash THEN NULL ELSE entry.width END,
+         height = CASE WHEN entry.hash IS NOT NULL AND entry.hash <> excluded.hash THEN NULL ELSE entry.height END,
+         hash = excluded.hash, stamp = excluded.stamp, state = 'ingested', last_seen = excluded.last_seen`,
   hashFor: "SELECT hash FROM entry WHERE collection = ? AND name = ? AND kind = 'output'",
   fileInfo: "SELECT hash, stamp FROM entry WHERE collection = ? AND name = ? AND kind = 'output'",
   entryGet: "SELECT collection, name, kind, hash, stamp, state, vote, favorite, bookmark, notes, hidden, plugin_fields, width, height, first_seen, last_seen FROM entry WHERE collection = ? AND name = ? AND kind = ?",
@@ -225,7 +228,10 @@ const STATEMENTS = {
   entriesByHash: "SELECT collection, name FROM entry WHERE hash = ? AND kind = 'output'",
   entryOutputIngest: `INSERT INTO entry (collection, name, kind, hash, stamp, state, first_seen, last_seen)
        VALUES (?, ?, 'output', ?, ?, 'ingested', ?, ?)
-       ON CONFLICT(collection, name, kind) DO UPDATE SET hash = excluded.hash, stamp = excluded.stamp, state = 'ingested', last_seen = excluded.last_seen`,
+       ON CONFLICT(collection, name, kind) DO UPDATE SET
+         width = CASE WHEN entry.hash IS NOT NULL AND entry.hash <> excluded.hash THEN NULL ELSE entry.width END,
+         height = CASE WHEN entry.hash IS NOT NULL AND entry.hash <> excluded.hash THEN NULL ELSE entry.height END,
+         hash = excluded.hash, stamp = excluded.stamp, state = 'ingested', last_seen = excluded.last_seen`,
   touchFileStamp: "UPDATE entry SET stamp = ? WHERE collection = ? AND name = ? AND kind = 'output'",
   metaStateJoin: `SELECT c.meta FROM entry e JOIN content c ON c.hash = e.hash
        WHERE e.collection = ? AND e.name = ? AND e.kind = 'output'`,

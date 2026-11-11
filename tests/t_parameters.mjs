@@ -5,6 +5,14 @@ import * as variations from "../src/features/variations/shared.mjs";
 import { dependencyClosure, linkInputs, validateGraphLinks } from "../src/graph.mjs";
 import { serveStatic } from "../src/static.mjs";
 
+Deno.test("parameters: unsupported native exact JSON reports actionable compatibility guidance", () => {
+  const parse = JSON.parse;
+  try {
+    JSON.parse = (text, reviver) => parse(text, reviver && ((key, value) => reviver(key, value)));
+    assertThrows(() => parameters.parseExactJson('{"seed":18446744073709551615}'), TypeError, "Update your browser");
+  } finally { JSON.parse = parse; }
+});
+
 Deno.test("parameters: complete recorded inventory survives unavailable custom schema", () => {
   const graph = {
     "group:node.with.dot": { class_type: "Custom", _meta: { title: "Same" }, inputs: {

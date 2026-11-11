@@ -53,6 +53,7 @@ async function main() {
     await cdp.goto(ENGINE);
     await cdp.poll(`(async () => ${KZ}.state.images.length > 0)()`);
     await cdp.poll(`!!document.querySelector('.card[data-idx="0"]')`);
+    await require('./image-picker-idle.cjs')({ cdp, check });
 
     // --- wand button appears on cards ---
     await attempt("wand button exists on first card", async () => {

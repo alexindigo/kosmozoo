@@ -143,6 +143,14 @@ const control = (base, body) => fetch(base + '/__test/activity', { method: 'POST
     if (evidence) fs.writeFileSync(`${evidence}/variations-jobs.json`, JSON.stringify(jobs, null, 1));
     await page.poll(`!document.querySelector('.vz-panel')`, 8000).then(() => check('variations: v2 acknowledgement adopted the Run (auto-close)', true),
       async () => check('variations: v2 acknowledgement adopted the Run (auto-close)', false, await page.evaluate(`document.querySelector('.vz-panel [role=status], .vz-error')?.textContent??''`)));
+    assert((await control(FAKE, { remove: [NAME] })).ok);
+    for (const method of ['GET', 'HEAD']) for (const type of Object.keys(ROOTS)) {
+      const response = await fetch(`${FAKE}/api/view?${new URLSearchParams({ filename: NAME, type })}`, { method });
+      assert.equal(response.status, type === 'output' ? 404 : 200, `${method} ${type}: output tombstone is root-local`);
+      if (method === 'GET' && type !== 'output') assert.equal(sha(Buffer.from(await response.arrayBuffer())), expected[type]);
+      else await response.arrayBuffer();
+    }
+    check('fake output removal preserves same-named input/temp GET and HEAD bytes', true);
     check('no uncaught page errors', errors.length === 0, errors.join(';'));
   } finally { await page.close(); }
   console.log(`resource-roots: ${checks - failures}/${checks} checks; ${failures} failures`);

@@ -1181,8 +1181,10 @@ byte-cache rows of the same entry table (`resourceCacheGet/Put`, with the input
 facades unchanged), never extracted or listed as outputs. Ingest single-flight,
 cache lookup, dimensions head reads (`entryDims`/`entryDimsPut(..., kind)`; only output dims
 bump the meta version), revalidation debounce and stamp checks are keyed by root
-(`scheduleRevalidate(..., { kind })`; `{ input: true }` still means input). Unknown
-roots are rejected at the byte routes, ingest, inspection and the plugin content
+(`scheduleRevalidate(..., { kind })`; `{ input: true }` still means input). Known
+content replacement clears entry-owned dimensions in both referenced and output
+hash-update paths; first-hash enrichment and same-content writes preserve them.
+Unknown roots are rejected at the byte routes, ingest, inspection and the plugin content
 port. A folder source's files remain its input listing; it has no temp root.
 Variations inspection accepts all three roots, so a temp current compares with temp
 bytes. The client's single side codec (`resourceSource`/`parseResourceSource` in
@@ -1233,7 +1235,8 @@ captured data; ordinary objects with a `rawJSON` property are ordinary data.
 The extractor's separate original graph result is exact, including nested comment
 envelopes; display/storage metadata keeps its ordinary-number contract. Variations
 probe, Run request/result consumers and Comfy enqueue share the codec. Generic API
-JSON behavior remains unchanged by default.
+JSON behavior remains unchanged by default. Browsers missing native reviver source
+support fail closed with an instruction to update, never rounded numeric data.
 
 The pure `compile.mjs` owner compiles discrete candidates in existing `imageParams`:
 bool/null, exact numeric, whole object/array and connections, alongside old strings.
@@ -1250,8 +1253,8 @@ ranges use exact arithmetic; floating ranges retain existing quantization and ca
 Current exclusion follows the generated endpoint, including the existing rounded
 last step, so preview count and actual submitted tuples cannot disagree there.
 
-The backing's address cache retains the raw node catalogue for 60 seconds and its
-latest normalized schema view. Variations and workflow telemetry pass their graph
+The backing's address cache retains one successfully acquired raw node catalogue
+for 60 seconds and its latest normalized schema view. Variations and workflow telemetry pass their graph
 to `objectInfo({ graph })`: only its distinct class definitions enter the same
 aggregate 100000-entry/depth 32 atomic expansion limits. A failed unrelated or
 full-catalogue view cannot poison a subsequent graph view or force another fetch.
@@ -1261,7 +1264,8 @@ declarations, typed options, output slots/names/list flags and dynamic-combo/gro
 declarations. Failed acquisition/expansion keeps all maps unavailable with its
 reason; Run reports unavailable node information before enqueue instead of
 misdiagnosing a missing output. Probe still discovers recorded parameters without
-schema. Workflow observations bind their captured graph/prompt and cannot publish
+schema. Failed or cancelled acquisitions are not cached and cannot evict another
+consumer's concurrent successful acquisition. Workflow observations bind their captured graph/prompt and cannot publish
 after that prompt retires. Probe adds graph-local
 `nodes` with known outputs or null. Final graphs validate known slot bounds, stock
 type/union overlap and primitive/enum/min/max constraints before enqueue. Unknown

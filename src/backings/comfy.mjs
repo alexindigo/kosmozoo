@@ -448,7 +448,9 @@ export async function objectInfo(addr, cache = new Map(), { fetcher = fetch, sig
       if (!raw || typeof raw !== "object" || Array.isArray(raw)) throw new Error("Invalid object_info");
       c.raw = raw;
     } catch (error) { c.error = error.message; }
-    cache.set(addr, c);
+    // Retain backend data only. A consumer's cancelled/failed acquisition must
+    // neither poison later consumers nor evict a concurrent successful read.
+    if (c.raw) cache.set(addr, c);
   }
   // Retain only the latest view, so graph changes cannot grow a scope cache.
   if (c.scope === scope) return c.view;

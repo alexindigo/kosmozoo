@@ -64,14 +64,39 @@ Deno.test("schema scope: empty and missing class views never materialize unrelat
 
 Deno.test("schema scope: catalogue TTL refreshes views and failed HTTP reads retain their reason", async () => {
   const cache = new Map(); let calls = 0;
-  const fetcher = () => { calls++; return calls === 1 ? Response.json(normal) : new Response("offline", { status: 503 }); };
+  const fetcher = () => { calls++; return calls === 2 ? new Response("offline", { status: 503 }) : Response.json(normal); };
   const first = await objectInfo("fixture", cache, { graph, fetcher });
   assert(first.outputClasses.has("SaveImageAdvanced"));
   cache.get("fixture").t = Date.now() - 60_001;
   const unavailable = await objectInfo("fixture", cache, { graph, fetcher });
   assertEquals(unavailable.outputClasses, null); assert(unavailable.schemaError.includes("503"));
-  await objectInfo("fixture", cache, { graph: {}, fetcher });
-  assertEquals(calls, 2, "scope changes do not refetch even an unavailable catalogue");
+  const recovered = await objectInfo("fixture", cache, { graph, fetcher });
+  assert(recovered.outputClasses.has("SaveImageAdvanced"));
+  assertEquals(calls, 3, "failed acquisition cannot replace a successful catalogue for the TTL");
+});
+
+Deno.test("schema scope: cancellation, transport and malformed replies never poison other consumers", async () => {
+  for (const fail of [
+    signal => { signal.throwIfAborted(); },
+    () => { throw new TypeError("network unavailable"); },
+    () => new Response("not JSON"),
+    () => Response.json([]),
+  ]) {
+    const cache = new Map(), controller = new AbortController();
+    controller.abort();
+    const unavailable = await objectInfo("fixture", cache, { graph, signal: controller.signal,
+      fetcher: (_url, { signal }) => fail(signal) });
+    assertEquals(unavailable.outputClasses, null); assert(unavailable.schemaError);
+    assertEquals(cache.size, 0);
+    const recovered = await objectInfo("fixture", cache, { graph, fetcher: () => Response.json(normal) });
+    assert(recovered.outputClasses.has("SaveImageAdvanced"));
+  }
+  const cache = new Map(); let release;
+  const pending = objectInfo("fixture", cache, { graph, fetcher: () => new Promise(resolve => { release = resolve; }) });
+  const accepted = await objectInfo("fixture", cache, { graph, fetcher: () => Response.json(normal) });
+  release(new Response("offline", { status: 503 }));
+  assertEquals((await pending).outputClasses, null);
+  assertEquals(await objectInfo("fixture", cache, { graph, fetcher: () => { throw new Error("must reuse success"); } }), accepted);
 });
 
 Deno.test("schema scope: Variations passes its graph and submits all 21 fake final prompts", async () => {

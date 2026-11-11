@@ -42,6 +42,41 @@ async function rootsRig({ gate = null } = {}) {
 
 const get = (r, query = "", method = "GET") => r.router.handle(new Request(`http://x/api/collections/c/entries/${NAME}/bytes${query}`, { method }));
 
+Deno.test("roots: dimension lifetime follows known content replacement in every root", async () => {
+  const r = await mkStateRig("roots-dims-lifetime", { hosts: {} });
+  const first = "a".repeat(64), next = "b".repeat(64), dims = { width: 30, height: 20 };
+  try {
+    for (const kind of ["input", "temp", "output"]) {
+      r.store.entryDimsPut("c", NAME, dims, kind);
+      const put = hash => kind === "output"
+        ? r.store.ingestFile("c", NAME, hash, 100)
+        : r.store.resourceCachePut("c", NAME, kind, hash, hash, 100);
+      await put(first);
+      assertEquals(r.store.entryDims("c", NAME, kind), dims, "first hash enrichment preserves measurements");
+      await put(first);
+      assertEquals(r.store.entryDims("c", NAME, kind), dims, "same content preserves measurements");
+      await put(next);
+      assertEquals(r.store.entryDims("c", NAME, kind), null, `${kind}: changed content retires old dimensions`);
+    }
+  } finally { await r.close(); }
+});
+
+Deno.test("roots: replaced referenced bytes acquire their new dimensions at the consumer", async () => {
+  const { testPng } = await import("./helpers/png.mjs");
+  const old = testPng(30, 20, [200, 40, 40, 255]), next = testPng(70, 50, [40, 70, 200, 255]);
+  const roots = Object.fromEntries(["input", "temp"].map(kind => [kind, { [NAME]: { bytes: old, etag: '"old"' } }]));
+  const comfy = fakeComfyInline({ roots }), r = await mkStateRig("roots-dims-replaced", { hosts: { c: comfy.addr } });
+  try {
+    for (const kind of ["input", "temp"]) {
+      await r.ingest.ensure("c", NAME, kind);
+      assertEquals((await r.ingest.dims("c", NAME, kind)).dims, { width: 30, height: 20 });
+      roots[kind][NAME] = { bytes: next, etag: '"new"' };
+      await r.ingest.revalidateNow("c", NAME, { kind });
+      assertEquals((await r.ingest.dims("c", NAME, kind)).dims, { width: 70, height: 50 });
+    }
+  } finally { await comfy.close(); await r.close(); }
+});
+
 Deno.test("roots: one stock reading gives image descriptors an explicit current root", () => {
   const schema = objectInfoView({ LoadImage: loadImage([NAME]) });
   const roots = Object.fromEntries(["same.png", "same.png [input]", "same.png [output]", "same.png [temp]", "same [draft].png"].map(value => {
@@ -223,7 +258,7 @@ Deno.test("roots: dimensions are looked up and recorded per root; referenced hea
   const rig = await mkStateRig("roots-dims", { hosts });
   try {
     // Temp first, before any output entry exists.
-    assertEquals(await rig.ingest.dims("c", NAME, "temp"), { status: 200, dims: { width: 90, height: 70 } });
+    assertEquals(await rig.ingest.dims("c", NAME, "temp"), { status: 206, dims: { width: 90, height: 70 } });
     assertEquals(rig.store.entryGet("c", NAME, "output"), null, "a referenced-root head read creates no output inventory row");
     assertEquals(rig.store.entryDims("c", NAME, "temp"), { width: 90, height: 70 });
     // A known output short-circuits only the output root.
@@ -232,7 +267,7 @@ Deno.test("roots: dimensions are looked up and recorded per root; referenced hea
     assertEquals(await rig.ingest.dims("c", NAME), { status: 200, dims: { width: 640, height: 480 } });
     assertEquals(await rig.ingest.dims("c", NAME, "output"), { status: 200, dims: { width: 640, height: 480 } });
     assertEquals(comfy.state.reads.length, reads, "cached output dimensions need no read");
-    assertEquals(await rig.ingest.dims("c", NAME, "input"), { status: 200, dims: { width: 30, height: 20 } });
+    assertEquals(await rig.ingest.dims("c", NAME, "input"), { status: 206, dims: { width: 30, height: 20 } });
     assertEquals(await rig.ingest.dims("c", NAME, "temp"), { status: 200, dims: { width: 90, height: 70 } });
     assertEquals(rig.store.entryDims("c", NAME), { width: 640, height: 480 });
     // An unknown root fails before any lookup or read, even with known output dims.

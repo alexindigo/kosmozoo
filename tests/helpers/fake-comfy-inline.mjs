@@ -19,21 +19,20 @@ export function fakeComfyInline({ etag = '"e1"', body = "v1", fixture = null, ro
     const url = new URL(req.url);
     if (url.pathname !== "/api/view") return new Response("nf", { status: 404 });
     if (state.status !== 200) return new Response("boom", { status: state.status });
-    const name = url.searchParams.get("filename") ?? "";
+    const filename = url.searchParams.get("filename") ?? "", subfolder = url.searchParams.get("subfolder") ?? "";
+    const name = subfolder ? `${subfolder}/${filename}` : filename;
+    let file = null, type = null;
     if (state.roots) {
-      const type = url.searchParams.get("type") ?? "output";
+      type = url.searchParams.get("type") ?? "output";
       if (!["input", "output", "temp"].includes(type)) return new Response("bad type", { status: 400 });
-      const file = state.roots[type]?.[name];
+      file = state.roots[type]?.[name];
       if (!file) return new Response("nf", { status: 404 });
-      const headers = { ETag: file.etag, "Content-Type": "image/png", "Content-Length": String(file.bytes.length) };
-      if (req.method === "HEAD") return new Response(null, { headers });
-      if (gate) await gate({ type, name });
-      state.reads.push(`${type}:${name}`);
-      return new Response(file.bytes, { headers });
     }
-    const headers = { ETag: state.etag, "Content-Type": "image/png" };
+    const headers = { ETag: file?.etag ?? state.etag, "Content-Type": "image/png",
+      ...(file ? { "Content-Length": String(file.bytes.length) } : {}) };
     if (req.method === "HEAD") return new Response(null, { headers });
-    const bytes = fixture
+    if (gate && type) await gate({ type, name });
+    const bytes = file ? file.bytes : fixture
       ? await readFile(new URL(`../fixtures/${fixture}`, import.meta.url).pathname)
       : new TextEncoder().encode(state.body);
     const range = req.headers.get("range");
@@ -43,10 +42,10 @@ export function fakeComfyInline({ etag = '"e1"', body = "v1", fixture = null, ro
       const end = Math.min(Number(m[2]) + 1, bytes.length);
       return new Response(bytes.subarray(start, end), {
         status: 206,
-        headers: { ...headers, "Content-Range": `bytes ${start}-${end - 1}/${bytes.length}` },
+        headers: { ...headers, "Content-Length": String(end - start), "Content-Range": `bytes ${start}-${end - 1}/${bytes.length}` },
       });
     }
-    state.reads.push(name);
+    state.reads.push(type ? `${type}:${name}` : name);
     return new Response(bytes, { headers });
   });
   return {

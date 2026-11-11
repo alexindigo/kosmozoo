@@ -5,6 +5,8 @@ import { makeCollectionLifecycle } from "../src/backings/index.mjs";
 import { makeVariationEditor } from "../client-solid/features/variations/editor.js";
 import { typedRunRig } from "./helpers/typed-run.mjs";
 import { parseExactJson, parameterCurrent, parameterAliases } from "../src/parameters.mjs";
+import { objectInfoView } from "../src/backings/comfy.mjs";
+import { saveImage } from "./helpers/comfy-object-info.mjs";
 
 Deno.test("selected output name: stable producer composes every candidate, preserves manual text and exact v2 proof", async () => {
   const graph = { node: { class_type: "Custom", inputs: { value: false } },
@@ -36,10 +38,12 @@ Deno.test("selected output name: stable producer composes every candidate, prese
 
 Deno.test("selected output name: retained dependency writes stay exact; selected pruned outputs reject all candidates", async () => {
   const graph = { node: { class_type: "Custom", inputs: {} },
-    ancestor: { class_type: "SaveImage", inputs: { filename_prefix: "ancestor", images: ["node", 0] } },
+    ancestor: { class_type: "SaveImageAndPass", inputs: { filename_prefix: "ancestor", images: ["node", 0] } },
     save: { class_type: "SaveImage", inputs: { filename_prefix: "source", images: ["ancestor", 0] } },
     other: { class_type: "SaveImage", inputs: { filename_prefix: "other", images: ["node", 0] } } };
-  const rig = typedRunRig({ graph });
+  const schema = objectInfoView({ Custom: { output: ["IMAGE"] }, SaveImage: saveImage(),
+    SaveImageAndPass: { ...saveImage(), output: ["IMAGE"] } });
+  const rig = typedRunRig({ graph, schema });
   const body = await rig.request({ "save.filename_prefix": { enabled: true, values: ["chosen"] }, "ancestor.filename_prefix": { enabled: true, values: ["retained"] } });
   body.prefix = "v_"; body.suffix = "_s";
   const result = await rig.run(body); assertEquals(result.status, 200);
@@ -47,7 +51,7 @@ Deno.test("selected output name: retained dependency writes stay exact; selected
   assertEquals(actual.save.inputs.filename_prefix, "v_chosen_s");
   assertEquals(actual.ancestor.inputs.filename_prefix, "retained");
   assert(!Object.hasOwn(actual, "other")); assert(naming.acknowledgedFields(body, result.data));
-  const rejected = typedRunRig({ graph });
+  const rejected = typedRunRig({ graph, schema });
   body.imageParams["other.filename_prefix"] = { enabled: true, values: ["one", "two"] };
   body.context = (await rejected.probe()).context;
   const failure = await rejected.run(body);

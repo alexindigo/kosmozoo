@@ -489,8 +489,7 @@ const handleRequest = async (req) => {
     const subfolder = url.searchParams.get("subfolder") ?? "";
     if (basename(filename) !== filename) return new Response("bad filename", { status: 400 });
     const name = subfolder ? `${subfolder}/${filename}` : filename;
-    if (!isEntryPath(name) || removed.has(name)) return new Response("not found", { status: 404 });
-    if (name === MISSING) return new Response("not found", { status: 404 });
+    if (!isEntryPath(name)) return new Response("not found", { status: 404 });
     const head = req.method === "HEAD";
     if (!head && !req.headers.get("range")) readOrder.push(name);
     // aiohttp-style ETag: "<mtime_ns_hex>-<size_hex>" (the engine's stamp).
@@ -499,6 +498,7 @@ const handleRequest = async (req) => {
     // and no root ever falls back to another root's same-named file.
     const type = url.searchParams.get("type") ?? "output";
     if (!["input", "output", "temp"].includes(type)) return new Response("bad type", { status: 400 });
+    if (type === "output" && (removed.has(name) || name === MISSING)) return new Response("not found", { status: 404 });
     const rooted = type === "input" ? publishedInputs : type === "temp" ? publishedTemps : null;
     if (rooted?.has(name)) {
       const { bytes, mtime = 0 } = rooted.get(name);
