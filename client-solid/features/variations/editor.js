@@ -3,21 +3,19 @@
 import { snapshotDraft, createRunId } from "./draft.js";
 import { editorDomain, choiceValues, numericDefaults, numericText, sliderNumber } from "./graph.mjs";
 import { parseExactJson, stringifyExactJson, sameJsonValue } from "/shared/parameters.mjs";
-import { compileDiscreteAxes, validateEditorValue, admitResourceTransfer } from "/shared/features/variations/compile.mjs";
-import { templateLabels, templateValue, parseSemicolonList, expandTextAxes, permutationPlan,
+import { admitResourceTransfer } from "/shared/features/variations/compile.mjs";
+import { compileRecipe, parseRecipeCandidate, recipeImageView, currentRoot } from "/shared/features/variations/recipe-compile.mjs";
+import { permutationPlan,
   resolveRelativeRanges, acknowledgedFields, targetRunPlan, catalogueParams, parameterIndex, parameterCurrent, parameterLabel, parameterAliases,
-   variationOutputName, uploadCandidate, uploadFamily } from "/shared/features/variations/shared.mjs";
+   variationOutputName, uploadFamily } from "/shared/features/variations/shared.mjs";
 import { validOrigin, sameOrigin, validContext, sameContext } from "/shared/source-origin.mjs";
 import { validImageSet, mergeImages, sameImage, imageIdentity, imageReference, imageReferenceValue, uploadImage } from "./image-set.js";
 import { classifyImageFiles } from "./image-drop.js";
 import { connectionPresentation } from "./field-filter.js";
-import { RECIPE_FIELDS as EDITOR_FIELDS, makeVariationRecipe, recipeField as descriptor,
-  validRecipeValue as validValue, freezeRecipe as freeze, recipeDispositions, moveRecipeImage } from "./recipe.js";
+import { makeVariationRecipe, validRecipeValue as validValue, freezeRecipe as freeze, moveRecipeImage } from "./recipe.js";
 export { RECIPE_FIELDS as EDITOR_FIELDS } from "./recipe.js";
 const filename = value => typeof value === "string" && value.length > 0 && !/[\\/\x00-\x1f\x7f]/.test(value) && ![".", ".."].includes(value);
 const allParameters = catalogue => catalogue.parameters ?? catalogueParams(catalogue);
-// The current image's explicit root; `fromOutput` is the legacy carrier's facade.
-const currentRoot = parameter => parameter.currentRoot ?? (parameter.fromOutput ? "output" : "input");
 // Legacy-first ordering preserves existing manual aliases independently of layout.
 const namingParameters = catalogue => {
   const all = parameterIndex(allParameters(catalogue)), ids = new Set();
@@ -64,14 +62,7 @@ export function makeVariationEditor({ targets, services, currentOrigin, changed 
   let result = null, running = false, catalogueReady = false, acceptedRevision = null;
   const row = recipe.row;
   const evidence = (id, item) => imageChecks.get(id)?.get(imageIdentity(item));
-  const imageView = (id, item, metadata, lookup = evidence) => {
-    if (item.kind === "target") return { ...item, name: capturedTargets[0].filename, each: batch, pending: false, error: "", sameCurrent: false };
-    const reference = imageReference(item), check = reference ? null : lookup(id, item);
-    // An existing input is the current resource when roots and names agree
-    // (`a.png` and `a.png [input]` name the same file); the raw value is kept.
-    return { ...item, ...(reference ?? {}), sameCurrent: reference ? currentRoot(metadata) === reference.root && reference.name === metadata.current
-      : !!check?.hash && check.hash === check.currentHash, pending: !reference && (!check || !!check.pending), error: check?.error ?? "" };
-  };
+  const imageView = (id, item, metadata, lookup = evidence) => recipeImageView(item, metadata, lookup(id, item), capturedTargets[0], batch);
   const notify = () => { if (alive) changed(); };
   const invalidateClose = () => { closeGeneration++; if (timer !== null) clearTimer(timer); timer = null; };
   const seed = (domain, id, metadata, defaults) => {
@@ -96,17 +87,7 @@ export function makeVariationEditor({ targets, services, currentOrigin, changed 
         }) } : {}),
        ...(domain === "images" ? { images: entry.values.items.map(item => imageView(id, item, entry.metadata)) } : {}) })])));
   const dirty = () => acceptedRevision === null ? recipe.dirty() : recipe.revision() !== acceptedRevision;
-  const parseCandidate = (parameter, raw) => {
-    let value;
-    try { value = parseExactJson(raw); } catch { throw new Error(`${parameter.label}: enter one complete JSON value. Your text is kept.`); }
-    if (parameter.candidateKind === "connection") {
-      const slot = numericText(value?.slot ?? "");
-      if (typeof value?.node !== "string" || !value.node || !Number.isSafeInteger(slot) || slot < 0) throw new Error(`${parameter.label}: choose an existing node and nonnegative output slot. Your text is kept.`);
-      value = [value.node, slot];
-    }
-    validateEditorValue(parameter, value, catalogues.get(capturedTargets[0].id)?.nodes);
-    return value;
-  };
+  const parseCandidate = (parameter, raw) => parseRecipeCandidate(parameter, raw, catalogues.get(capturedTargets[0].id)?.nodes);
   const candidateChoices = entry => (entry.metadata.options ?? []).map(value => ({ text: stringifyExactJson(value),
     label: stringifyExactJson(value),
     on: entry.values.candidates.some(raw => { try { return sameJsonValue(parseExactJson(raw), value); } catch { return false; } }) }));
@@ -155,122 +136,8 @@ export function makeVariationEditor({ targets, services, currentOrigin, changed 
     }
     pumpInspections();
   };
-  const previewUploads = (snapshot, lookup = evidence) => {
-    const names = new Map(), occupied = new Map(confirmedUploads);
-    for (const [id, entry] of Object.entries(snapshot.images)) for (const item of entry.values.items) {
-      for (const record of lookup(id, item)?.existing ?? []) occupied.set(record.name, record.hash);
-    }
-    for (const [id, entry] of Object.entries(snapshot.images)) {
-      if (!entry.values.enabled) continue;
-      for (const item of entry.values.items) {
-        const identity = imageIdentity(item);
-        if (item.kind === "target" || imageReference(item) || imageView(id, item, entry.metadata, lookup).sameCurrent || names.has(identity)) continue;
-        const hash = lookup(id, item)?.hash;
-        if (!hash) { names.set(identity, `\0pending-${names.size}`); continue; }
-        let name = item.name, index = 0;
-        while (occupied.has(name) && occupied.get(name) !== hash) name = uploadCandidate(item.name, ++index);
-        occupied.set(name, hash); names.set(identity, name);
-      }
-    }
-    return names;
-  };
-
-  // This compiler is the only reader that attaches producer channels to editor
-  // leaves. Dirty tracking uses the same declarations, never whole row objects.
-  const compile = (snapshot, uploadReceipts = null, preview = false, lookup = evidence, target = capturedTargets[0]) => {
-    const bindings = [], uploads = [], uploadHashes = new Map(), ranges = {}, imageParams = {}, transfers = {}, estimates = {};
-    const catalogue = catalogues.get(capturedTargets[0].id), parameters = allParameters(catalogue);
-    const uploadPreview = preview ? previewUploads(snapshot, lookup) : null;
-    const read = (domain, id, name, label) => {
-      const definition = descriptor(domain, name), entry = snapshot[domain][id];
-      const path = label === undefined ? [domain, id, name] : [domain, id, name, label];
-      const value = label === undefined ? entry.values[name] : templateValue(entry.values[name], label);
-      if (definition.channel && (label === undefined || Object.hasOwn(entry.values[name], label))) bindings.push({ channel: definition.channel, id: domain === "naming" ? name : id, path, value: snapshotDraft(value) });
-      return value;
-    };
-    for (const [id, entry] of Object.entries(snapshot.numeric)) {
-      const enabled = read("numeric", id, "enabled"); ranges[id] = { enabled };
-      if (!enabled) continue;
-      const mode = read("numeric", id, "mode");
-      if (mode === "value") {
-        const value = numberText(read("numeric", id, "value"));
-        if (value === null) throw new Error(`${entry.metadata.label}: Enter a number for Value. Your text is kept.`);
-        validateEditorValue(entry.metadata, value);
-        Object.assign(ranges[id], { min: value, max: value, increment: entry.metadata.minIncrement,
-          ...(batch ? { absolute: true } : {}) });
-      } else for (const [name, definition] of Object.entries(EDITOR_FIELDS.numeric)) if (definition.wire && definition.channel === "ranges") {
-        const value = read("numeric", id, name);
-        if (name === "rawIncrement") {
-          const parsed = increment(entry);
-          if (parsed === null && !preview) throw new Error("Enter a valid positive increment; incomplete text has been kept.");
-          ranges[id][definition.wire] = parsed ?? entry.metadata.defaultIncrement;
-        } else {
-          const parsed = numberText(value);
-          if (parsed === null) throw new Error(`${entry.metadata.label}: Enter a number for ${name === "min" ? "From" : "To"}. Your text is kept.`);
-          ranges[id][definition.wire] = parsed;
-        }
-      }
-      if (ranges[id].min > ranges[id].max) throw new Error("Minimum exceeds maximum; your values have been kept.");
-      if (!batch) for (const name of ["min", "max"]) validateEditorValue(entry.metadata, ranges[id][name]);
-      if (batch) ranges[id].clamp = [...entry.metadata.clamp];
-    }
-    for (const domain of ["images", "enums", "texts", "candidates"]) for (const [id, entry] of Object.entries(snapshot[domain])) {
-      const enabled = read(domain, id, "enabled"); imageParams[id] = { enabled, values: [] };
-      if (!enabled) continue;
-      if (domain === "images") {
-        // Resource plan stages: existing references and per-target Current image
-        // resolve now; transfers stay unresolved intents until an actual receipt.
-        const assigned = [], estimate = [], unresolved = [];
-        const items = read(domain, id, "items");
-        if (!preview && !items.length) throw new Error(`${entry.metadata.label}: add at least one image before Run`);
-        for (const item of items) {
-          const state = imageView(id, item, entry.metadata, lookup);
-          if (!preview && (state.pending || state.error)) throw new Error(state.error || "Checking image bytes; your work was kept.");
-          let value;
-          if (item.kind === "target") value = `${target.filename} [output]`;
-          else if (state.sameCurrent) value = parameterCurrent(entry.metadata);
-          else if (imageReference(item)) value = imageReferenceValue(item);
-          else {
-            const identity = imageIdentity(item);
-            admitResourceTransfer(entry.metadata);
-            uploads.push(item);
-            uploadHashes.set(identity, lookup(id, item)?.hash);
-            if (uploadReceipts?.has(identity)) value = uploadReceipts.get(identity).name;
-            else {
-              if (uploadReceipts) throw new Error(`${item.name}: upload acknowledgement unavailable; your image was kept`);
-              unresolved.push(identity);
-              // Count-only projection; never compiled, assigned or sent.
-              if (preview) estimate.push(uploadPreview.get(identity));
-              continue;
-            }
-          }
-          assigned.push(value); estimate.push(value);
-        }
-        imageParams[id].values = [...new Set(assigned)];
-        if (unresolved.length) { transfers[id] = unresolved; estimates[id] = [...new Set(estimate)]; }
-      } else if (domain === "candidates") {
-        imageParams[id].values = read(domain, id, "candidates").map(raw => parseCandidate(entry.metadata, raw));
-        if (!imageParams[id].values.length) throw new Error(`${entry.metadata.label}: add at least one value before Run`);
-      } else if (domain === "enums") {
-        imageParams[id].values = [...read(domain, id, "picks")];
-        if (!preview && !imageParams[id].values.length) throw new Error(`${entry.metadata.label}: choose at least one value before Run`);
-      }
-      else {
-        const text = read(domain, id, "text");
-        const substitutions = Object.fromEntries(templateLabels(text).map(label => [label, parseSemicolonList(read(domain, id, "tpl", label))]));
-        imageParams[id].values = expandTextAxes(text, substitutions);
-        if (!preview && !imageParams[id].values.length) throw new Error(`${entry.metadata.label}: enter values for every template label before Run`);
-      }
-    }
-    const payload = freeze({ ranges, imageParams: compileDiscreteAxes(imageParams, parameters, catalogue.nodes), automaticNaming: true,
-      prefix: read("naming", "root", "prefix"), suffix: read("naming", "root", "suffix"), ...(batch ? { relative: true } : {}) });
-    recipeDispositions(snapshot, bindings);
-    // Readonly count/naming estimate over the same plan: resolved literals plus
-    // predicted names for unresolved transfers. It authorizes no transfer or write.
-    const estimate = freeze({ ...payload, imageParams: { ...payload.imageParams,
-      ...Object.fromEntries(Object.entries(estimates).map(([id, values]) => [id, { ...payload.imageParams[id], values }])) } });
-    return { payload, estimate, transfers, uploads: [...new Map(uploads.map(item => [imageIdentity(item), item])).values()], uploadHashes };
-  };
+  const compile = (snapshot, uploadReceipts = null, preview = false, lookup = evidence, target = capturedTargets[0]) =>
+    compileRecipe(snapshot, { catalogue: catalogues.get(capturedTargets[0].id), target, batch, lookup, uploadReceipts, confirmedUploads, preview });
   const count = (payload, catalogue) => {
     const values = currentValues(catalogue);
     return permutationPlan(batch ? resolveRelativeRanges(payload.ranges, values) : payload.ranges, values, payload.imageParams).total;

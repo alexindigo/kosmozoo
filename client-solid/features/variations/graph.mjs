@@ -10,7 +10,7 @@
 // engine-side endpoints are the variations feature's /probe and /run.
 
 import { formatValue } from "/shared/features/variations/shared.mjs";
-import { parameterContract, parameterCurrent, parseExactJson, stringifyExactJson } from "/shared/parameters.mjs";
+import { parameterContract, parameterCurrent } from "/shared/parameters.mjs";
 
 // Presentation strategies are projections, never a second parameter catalogue.
 // Choice values come from the shared input contract; legacy carriers without
@@ -30,17 +30,7 @@ export function editorDomain(parameter) {
   return "candidates";
 }
 
-export function numericText(raw) {
-  try {
-    const text = raw.trim();
-    if (!text) return null;
-    if (!/^[+-]?(?:\d+\.?\d*|\.\d+)(?:e[+-]?\d+)?$/i.test(text)) return null;
-    const value = /^[+-]?\d+$/.test(text) ? parseExactJson(String(BigInt(text))) : Number(text);
-    if (typeof value !== "number" && typeof value !== "bigint") return null;
-    stringifyExactJson(value);
-    return value;
-  } catch { return null; }
-}
+export { numericText } from "/shared/features/variations/recipe-model.mjs";
 
 export const sliderNumber = value => typeof value === "number" && Number.isFinite(value) && (!Number.isInteger(value) || Number.isSafeInteger(value));
 

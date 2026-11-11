@@ -8,21 +8,7 @@ export function createRunId() {
   return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20)}`;
 }
 
-// Owner-private snapshots: containers are copied, File references/order retained.
-export function snapshotDraft(value) {
-  if (value == null || typeof value !== "object") return value;
-  if (typeof File !== "undefined" && value instanceof File) return value;
-  if (Array.isArray(value)) return value.map(snapshotDraft);
-  return Object.fromEntries(Object.entries(value).map(([key, item]) => [key, snapshotDraft(item)]));
-}
-export function sameDraft(a, b) {
-  if (a === b) return true;
-  if (!a || !b || typeof a !== "object" || typeof b !== "object") return false;
-  if (typeof File !== "undefined" && (a instanceof File || b instanceof File)) return false;
-  if (Array.isArray(a) !== Array.isArray(b)) return false;
-  const keys = Object.keys(a);
-  return keys.length === Object.keys(b).length && keys.every((key) => Object.hasOwn(b, key) && sameDraft(a[key], b[key]));
-}
+export { snapshotDraft, sameDraft } from "/shared/features/variations/recipe-model.mjs";
 
 export function makeLeaveGuard({ dirty, suspend, restore, decision, invalidate }) {
   let pending = null, alive = true;
