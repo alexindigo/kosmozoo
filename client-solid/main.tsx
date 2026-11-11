@@ -55,7 +55,7 @@ stylesReady.then(() => requestAnimationFrame(() => requestAnimationFrame(() => {
 })));
 
 // boot failures surface on the status stack
-store.actions.lifecycle.registerPage(window);
+store.actions.lifecycle.registerPage(window, { stylesReady });
 store.actions.boot().catch((e) => store.actions.status.error(`load failed: ${e?.message ?? e}`));
 
 // the URL hash mirrors the current pointer; pasted links / back-forward land

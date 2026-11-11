@@ -22,5 +22,6 @@ export function Zoomable(props) {
     size={props.size} onOpen={props.onOpen} onErrorClick={props.onErrorClick} onPhase={phase}
     registerPlayer={store.actions.media.register} onPlaybackError={store.actions.media.report}
     focused={props.focused} controlsMount={props.controlsMount}
+    registerExposure={props.registerExposure}
     zoom={{ key: props.zoomKey, getView: store.actions.views.get, setView: store.actions.views.set, onZoomChange: props.onZoomChange }} />;
 }

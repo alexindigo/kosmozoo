@@ -146,6 +146,13 @@ main { display: flex; flex: 1; min-height: 0; isolation: isolate; }
 #feedRail .fr-tick.wave { width: 18px;
   box-shadow: 0 0 3px color-mix(in srgb, var(--card-color) 35%, transparent); }
 #feedRail .fr-tick.hovered { background: var(--foreground-bright); }
+#feedRail .fr-tick { display: grid; grid-template-columns: 2fr 1fr; }
+#feedRail .fr-body { grid-column: 1 / -1; background: var(--card-color); }
+#feedRail .fr-unseen { display: none; }
+#feedRail .fr-tick.unseen .fr-body { grid-column: 1; }
+#feedRail .fr-tick.unseen .fr-unseen { display: block; background: var(--warning); }
+#feedRail .fr-tick.unseen-only .fr-body { background: var(--warning); }
+#feedRail .fr-tick.hovered .fr-body { background: var(--foreground-bright); }
 #feedRail .fr-num { position: absolute; left: var(--fr-tick-inset); font-size: 8px;
   color: var(--foreground-dim); font-family: ui-monospace, monospace; }
 #feedRail .fr-top { top: 2px; }

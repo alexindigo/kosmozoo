@@ -81,6 +81,7 @@ export function DiffStage() {
   const store = useAppStore();
   const pair = () => store.state.diffPair();
   const d = () => store.state.diff;
+  createEffect(() => { d().open; store.actions.feed.invalidateExposure(); });
   const presentation = () => store.state.diffPresentation();
   const fullB = () => d().mode === "full" && d().subject === "b";
   const srcA = useSideSrc(store, () => fullB() ? null : pair().a, "a");
@@ -249,7 +250,7 @@ export function DiffStage() {
   });
 
   return (
-    <div id="diff" hidden={!d().open}>
+    <div id="diff" hidden={!d().open} ref={element => onCleanup(store.actions.feed.occluder(element))}>
       <div
         id="diffStage" ref={stageEl}
         data-mode={mode()} data-col={d().col}

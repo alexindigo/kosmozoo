@@ -3,7 +3,7 @@
 // Logo/title, host picker, filter box, options button, the menu with its
 // settings rows, and the layout switcher.
 
-import { createMemo, For, Show } from "solid-js";
+import { createMemo, onCleanup, For, Show } from "solid-js";
 import { iconSvg } from "/js/icons.mjs";
 import { useAppStore } from "../store/app-store.js";
 import { useClickOutside } from "../lib/click-outside.js";
@@ -74,7 +74,7 @@ function Menu() {
   };
   return (
     <Show when={open()}>
-      <div id="menu">
+      <div id="menu" ref={element => onCleanup(store.actions.feed.occluder(element))}>
         <TextField size="sm"
           id="menuSearch" type="search" placeholder="filter settings…" spellcheck={false}
           value={store.state.menuFilter()}
@@ -180,7 +180,8 @@ export function Header() {
             count={store.state.entriesWithKnownSize().length} total={store.state.filterTotal()} loading={store.state.filterLoading()}
             onEdit={(field, value) => store.handles.invoke("feed.filter.edit", { field, value })}
             onClear={() => store.handles.invoke("feed.filter.clear")}
-            handles={store.handles} pushLayer={store.actions.keys.pushLayer}
+             handles={store.handles} pushLayer={store.actions.keys.pushLayer}
+             registerOccluder={store.actions.feed.occluder} onExposureChange={store.actions.feed.invalidateExposure}
             canEscape={() => !store.state.keysPanelOpen() && !store.state.diff.open} />
           <div class="pinned-source-group" classList={{ "has-pins": pins().length > 0 }}>
             <Show when={pins().length > 0}><span class="pinned-separator" role="separator" aria-orientation="vertical" /></Show>
@@ -190,8 +191,8 @@ export function Header() {
                 const presentation = createMemo(() => sourceProgress(id, store.state.sourceActivity[id], store.state.sourceDelivery()));
                 const label = () => `Select ${id}. ${sourceNewContent(store.state.sourceHasNew(id))}${presentation().label}`;
                 return (
-                  <button type="button" class={"pinned-source" + (store.state.host() === id ? " on" : "")}
-                    classList={{ "has-new": store.state.sourceHasNew(id) }}
+                  <button type="button" class="pinned-source"
+                    classList={{ on: store.state.host() === id, "has-new": store.state.sourceHasNew(id) }}
                     data-source={id} aria-pressed={store.state.host() === id}
                     title={label()} aria-label={label()} onClick={() => store.handles.invoke("source.select", { id })}>
                     <SourceProgress presentation={presentation()} />

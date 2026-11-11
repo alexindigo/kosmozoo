@@ -39,11 +39,11 @@ export function withTransport(fetcher) {
   return { backingFor: select, createBindingFor: (addr, options) => select(addr).createBinding(addr, options) };
 }
 
-export function makeCollectionLifecycle(hosts) {
+export function makeCollectionLifecycle(hosts, onRetire = () => {}) {
   const members = new Map(); let stopped = false;
   const reconcile = () => {
     for (const [id, token] of members) {
-      if (hosts[id] !== token.address || token.registered && !(id in hosts)) members.delete(id);
+      if (hosts[id] !== token.address || token.registered && !(id in hosts)) { members.delete(id); onRetire(token); }
     }
     for (const id of Object.keys(hosts)) if (!members.has(id)) members.set(id,
       Object.freeze({ id, address: hosts[id], registered: true, incarnation: crypto.randomUUID() }));
@@ -61,13 +61,13 @@ export function makeCollectionLifecycle(hosts) {
       if (stopped || !token) return false;
       reconcile(); return members.get(token.id) === token && hosts[token.id] === token.address;
     },
-    stop() { stopped = true; members.clear(); },
+    stop() { stopped = true; for (const token of members.values()) onRetire(token); members.clear(); },
   };
 }
 
 // Context/test rigs share this registry-owned address dispatcher and lifetime.
-export function makeCollectionInventory(hosts, { bindingFactory = createBindingFor, onSnapshot = () => {} } = {}) {
-  const bindings = new Map(), lifecycle = makeCollectionLifecycle(hosts); let stopped = false;
+export function makeCollectionInventory(hosts, { bindingFactory = createBindingFor, onSnapshot = () => {}, onRetire = () => {} } = {}) {
+  const bindings = new Map(), lifecycle = makeCollectionLifecycle(hosts, onRetire); let stopped = false;
   const accepted = new WeakMap();
   const binding = (address) => {
     if (stopped) throw cancelled("Address bindings stopped");
@@ -80,14 +80,15 @@ export function makeCollectionInventory(hosts, { bindingFactory = createBindingF
     const snapshot = await binding(token.address).inventory(options);
     if (!lifecycle.isCurrent(token)) throw cancelled();
     if (accepted.get(token) !== snapshot) {
-      onSnapshot(id, token.address, snapshot);
       accepted.set(token, snapshot);
+      onSnapshot(id, token.address, snapshot, token);
     }
     return snapshot;
   };
   inventory.binding = binding;
   inventory.capture = lifecycle.capture;
   inventory.isCurrent = lifecycle.isCurrent;
+  inventory.accepted = token => lifecycle.isCurrent(token) ? accepted.get(token) ?? null : null;
   inventory.peek = (id) => bindings.get(hosts[id])?.peekInventory() ?? null;
   inventory.observeMetadata = async (id, name, { token = lifecycle.capture(id), ...options } = {}) => {
     if (!lifecycle.isCurrent(token) || !token.address) return { kind: "cancelled", status: 499 };

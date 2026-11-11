@@ -66,7 +66,8 @@ export async function buildContext({ env = Deno.env.toObject(), fakes = {}, star
   );
   const inventory = remember("inventory", fakes.inventory ?? backings.makeCollectionInventory(hosts, {
     bindingFactory: scopedBackings.createBindingFor,
-    onSnapshot: (id, _address, snapshot) => store.arrivals.observe(id, snapshot.items.map(item => item.name)),
+    onSnapshot: (id, _address, snapshot, token) => store.arrivals.observe(id, snapshot.items.map(item => item.name), token),
+    onRetire: token => store.arrivals.forget(token.id),
   }), fakes.inventory != null);
   const ingest = fakes.ingest ?? new Ingest(store, hosts, {
     cache,

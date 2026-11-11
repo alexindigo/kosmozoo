@@ -293,6 +293,7 @@ export function makeRouter(ctx) {
     try { inventory = await ctx.inventory(id); }
     catch (error) { return Response.json({ error: `collection unreachable: ${error.message}` }, { status: 502 }); }
     if (token && !ctx.inventory.isCurrent(token)) return Response.json({ error: "Source incarnation changed" }, { status: 409 });
+    inventory = ctx.inventory.accepted?.(token) ?? inventory;
     const list = inventory.items;
     // The rows below reflect every metadata write up to this version: a reader
     // that accepted this listing continues the delta stream from it.
@@ -305,10 +306,13 @@ export function makeRouter(ctx) {
     const entries = visible.map((f) => entryShape(id, f.name, f.size, rows.get(f.name), f.modified));
     const arrivals = ctx.store.arrivals.inventory(id);
     for (const entry of entries) entry.arrivalSeq = arrivals?.sequences[entry.name] ?? null;
+    const items = url.searchParams.get('arrivals') === 'items-v1';
     return Response.json(url.searchParams.get("inventory") === "1"
       ? { revision: inventory.revision, generation: inventory.generation, coverage: inventory.coverage, subfolders: inventory.subfolders,
           folders: inventory.folders, unavailable: inventory.unavailable, chronology: inventory.chronology, metaVersion,
-          arrivals: arrivals ? { sequence: arrivals.sequence, latestVisibleSeq: arrivals.latestVisibleSeq } : null, entries } : entries);
+          ...(items ? { origin: sourceOrigin(id, ctx.sourceActivity.source(id)) } : {}),
+          arrivals: arrivals ? { sequence: arrivals.sequence, latestVisibleSeq: arrivals.latestVisibleSeq,
+            ...(items ? { revision: arrivals.revision, visibleRanges: arrivals.visibleRanges } : {}) } : null, entries } : entries);
   });
 
   add("GET", "/api/collections/<id>/entries/<name>", async (_req, { id, name }) => {

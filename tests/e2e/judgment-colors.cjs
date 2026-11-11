@@ -13,7 +13,7 @@ const COLORS = { plain: 'rgb(255, 255, 255)', none: 'rgb(26, 26, 26)',
   up: POSITIVE, down: 'rgb(255, 102, 102)', bookmark: 'rgb(56, 189, 248)', favorite: 'rgb(255, 136, 0)' };
 
 async function run({ page, evidence = process.env.E2E_EVIDENCE ?? workPath('artifacts/judgment-colors'),
-  shots = process.env.E2E_SHOTS ?? path.join(evidence, 'shots') }) {
+  shots = process.env.E2E_SHOTS ?? path.join(evidence, 'shots'), nativeViewport = false, captureFull }) {
   fs.mkdirSync(evidence, { recursive: true });
   fs.mkdirSync(shots, { recursive: true });
   const records = [], failures = [];
@@ -30,8 +30,9 @@ async function run({ page, evidence = process.env.E2E_EVIDENCE ?? workPath('arti
     await frame();
     const image = await page.send('Page.captureScreenshot', { format: 'png' });
     fs.writeFileSync(path.join(shots, `${name}.png`), Buffer.from(image.data, 'base64'));
+    await captureFull?.(name);
   };
-  await page.send('Emulation.setDeviceMetricsOverride', { width: 1400, height: 900, deviceScaleFactor: 1, mobile: false });
+  if(!nativeViewport)await page.send('Emulation.setDeviceMetricsOverride', { width: 1400, height: 900, deviceScaleFactor: 1, mobile: false });
   await page.goto(ENGINE + '/#fixture-dir');
   await page.poll(`(async () => { const s = ${KZ}; return s.state.host() === 'fixture-dir' && !s.state.inventory.loading && s.state.entriesWithKnownSize().length > 1; })()`, 20000);
   await page.evaluate(`(async () => { const s = ${KZ}; s.actions.diff.hide(); s.actions.ui.setFilter('');
@@ -73,7 +74,7 @@ async function run({ page, evidence = process.env.E2E_EVIDENCE ?? workPath('arti
     await frame();
     const record = await page.evaluate(`(() => { const card = document.querySelector('${target}'), tick = document.querySelector('.fr-tick[data-entry-id="${entryId}"]');
       const c = card.getBoundingClientRect(), t = tick.getBoundingClientRect(), up = card.querySelector('.up'), down = card.querySelector('.down');
-      const cs = getComputedStyle(card), ts = getComputedStyle(tick), us = getComputedStyle(up), ds = getComputedStyle(down);
+      const cs = getComputedStyle(card), ts = getComputedStyle(tick.querySelector('.fr-body')), us = getComputedStyle(up), ds = getComputedStyle(down);
       return { border: cs.borderTopColor, tick: ts.backgroundColor, button: us.color, downButton: ds.color,
         opacity: { card: cs.opacity, tick: ts.opacity, button: us.opacity },
         current: card.classList.contains('current'), tickCurrent: tick.classList.contains('current'), treatment: card.dataset.treatment, tickTreatment: tick.dataset.treatment,

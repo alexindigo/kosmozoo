@@ -15,6 +15,7 @@ export class SourceActivity {
   #unsubscribeArrivals;
   #stopped = false;
   #finalSnapshot = null;
+  #arrivalWires = new WeakMap();
   constructor({ store, hosts, inventory, jobs, arrivals = store.arrivals, onMembership = () => {}, epoch = crypto.randomUUID(),
     setHeartbeat = setInterval, clearHeartbeat = clearInterval, report = error => console.error("Source stream delivery failed:", error) }) {
     Object.assign(this, { store, hosts, inventory, jobs, arrivals, onMembership, epoch, setHeartbeat, clearHeartbeat, report });
@@ -47,20 +48,22 @@ export class SourceActivity {
     this.#publish();
   }
 
-  source(id) {
+  source(id, items = false) {
     if (this.#stopped) return Object.hasOwn(this.#finalSnapshot.sources, id) ? this.#finalSnapshot.sources[id] : null;
     const row = this.#rows.get(id);
     if (!row) return null;
     const incarnation = this.inventory.capture(id).incarnation;
+    const arrivals = this.arrivals.projection(id, items);
+    if (items && arrivals) this.#arrivalWires.set(arrivals, this.arrivals.wire(id));
     return { address: row.address, kind: row.kind, incarnation, ...sourceAttributes(row),
       sourceVersion: { epoch: this.epoch, incarnation, attributesRevision: this.store.collectionRevision(id) },
-      activity: this.jobs.snapshot(id), arrivals: this.arrivals.projection(id) };
+      activity: this.jobs.snapshot(id), arrivals };
   }
 
-  snapshot() {
+  snapshot(items = false) {
     if (this.#stopped) return this.#finalSnapshot;
     return { version: 1, epoch: this.epoch, revision: this.revision,
-      sources: Object.fromEntries([...this.#rows.keys()].map(id => [id, this.source(id)])) };
+      sources: Object.fromEntries([...this.#rows.keys()].map(id => [id, this.source(id, items)])) };
   }
 
   cursor() { return { epoch: this.epoch, revision: this.revision }; }
@@ -70,11 +73,25 @@ export class SourceActivity {
     if (this.#stopped) return;
     this.revision++;
     const snapshot = this.snapshot();
-    for (const subscriber of this.#subscribers) subscriber.offer(snapshot);
+    const itemSnapshot = this.snapshot(true);
+    for (const subscriber of this.#subscribers) subscriber.offer(subscriber.items ? itemSnapshot : snapshot);
   }
 
   open(request) {
     if (this.#stopped) return new Response("Source streams stopped", { status: 503 });
+    const items = new URL(request.url).searchParams.get('arrivals') === 'items-v1';
+    const encodeFrame = frame => {
+      if (!items) return JSON.stringify(frame);
+      const sources = Object.entries(frame.sources).map(([id, source]) => {
+        const { arrivals, ...fields } = source;
+        // Membership fragments were encoded once at the inventory boundary.
+        const fragment = arrivals === null ? 'null' : this.#arrivalWires.get(arrivals);
+        if (fragment === undefined) throw new Error('Uncached arrival projection');
+        const fixed = JSON.stringify(fields);
+        return `${JSON.stringify(id)}:${fixed.slice(0,-1)},"arrivals":${fragment}}`;
+      }).join(',');
+      return `{"version":1,"epoch":${JSON.stringify(frame.epoch)},"revision":${frame.revision},"sources":{${sources}}}`;
+    };
     let controller, active = null, offset = 0, pending = null, heartbeat = false, wake = null, retired = false, timer;
     const resume = () => { const resolve = wake; wake = null; resolve?.(); };
     const retire = close => {
@@ -88,6 +105,7 @@ export class SourceActivity {
     };
     const abort = () => retire(true);
     const subscriber = {
+      items,
       offer(snapshot) { if (!retired) { pending = snapshot; resume(); } },
       retire,
       stats: () => ({ activeFrames: active ? 1 : 0, pendingFrames: pending ? 1 : 0,
@@ -98,7 +116,7 @@ export class SourceActivity {
         controller = c;
         // Registration and capture are synchronous; there is no probing await.
         this.#subscribers.add(subscriber);
-        subscriber.offer(this.snapshot());
+        subscriber.offer(this.snapshot(items));
         request.signal.addEventListener("abort", abort, { once: true });
         timer = this.setHeartbeat(() => { if (!retired) { heartbeat = true; resume(); } }, 15000);
         if (request.signal.aborted) retire(true);
@@ -110,7 +128,7 @@ export class SourceActivity {
           if (!active) {
             if (pending) {
               const snapshot = pending; pending = null;
-              active = encoder.encode(`event: sources\nid: ${snapshot.epoch}:${snapshot.revision}\ndata: ${JSON.stringify(snapshot)}\n\n`);
+              active = encoder.encode(`event: sources\nid: ${snapshot.epoch}:${snapshot.revision}\ndata: ${encodeFrame(snapshot)}\n\n`);
             } else { heartbeat = false; active = encoder.encode(": heartbeat\n\n"); }
             offset = 0;
           }

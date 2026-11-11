@@ -205,12 +205,12 @@ export function FeedRail() {
           {(idx) => {
             const entry = () => store.state.feedEntryAt(idx);
             const entryId = createMemo(() => entry()?.id);
-            let el, animation;
+            let el, body, animation;
             const cancel = () => { animation?.cancel(); animation = null; };
             const glow = () => {
               cancel();
               const reduced = matchMedia("(prefers-reduced-motion: reduce)").matches;
-              animation = el.animate({ offset: 0, backgroundColor: "var(--foreground-bright)",
+              animation = body.animate({ offset: 0, backgroundColor: "var(--foreground-bright)",
                 ...(reduced ? {} : { boxShadow: "0 0 5px var(--foreground-bright)" }) },
               { id: "rail-arrival", duration: 1400, easing: "ease-out", iterations: 1 });
             };
@@ -229,11 +229,13 @@ export function FeedRail() {
               onPointerEnter={event => hover(event, idx, el)} onPointerLeave={hidePreview}>
               <div class="fr-tick"
               ref={el}
-              classList={{ wave: inWave(idx), current: state().current, hovered: preview()?.idx === idx }}
+              classList={{ wave: inWave(idx), current: state().current, hovered: preview()?.idx === idx, unseen: state().unseen,
+                'unseen-only': state().unseen && state().treatment==='none' }}
               style={state().style}
+              aria-label={state().unseen ? 'New image' : undefined}
               data-entry-id={entry()?.id}
               data-treatment={state().treatment}
-              />
+              ><span class="fr-body" data-entry-id={entry()?.id} ref={body}/><span class="fr-unseen"/></div>
             </div>;
           }}
         </For>
@@ -242,7 +244,8 @@ export function FeedRail() {
       <div class="fr-num fr-bottom">{bottomLabel()}</div>
       <div class="fr-num fr-total">{N()}</div>
       <Show when={preview()} keyed>{target => <RailPreview entry={target.entry} size={target.size}
-        anchor={target.anchor} registerDisplay={store.actions.images.surface} />}</Show>
+        anchor={target.anchor} registerDisplay={store.actions.images.surface}
+        registerOccluder={store.actions.feed.occluder} onExposureChange={store.actions.feed.invalidateExposure} />}</Show>
     </div>
   );
 }

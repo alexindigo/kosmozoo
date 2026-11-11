@@ -17,6 +17,7 @@ export function MediaBox(props) {
   const [paused, setPaused] = createSignal(true), [current, setCurrent] = createSignal(0);
   const [duration, setDuration] = createSignal(0), [muted, setMuted] = createSignal(false), [loop, setLoop] = createSignal(false);
   const [surface, setSurface] = createSignal(null);
+  const [audioFace, setAudioFace] = createSignal(null);
   const [allocation, setAllocation] = createSignal({ width: 0, height: 0 });
   const [natural, setNatural] = createSignal(null);
   const [stillAttempt, setStillAttempt] = createSignal({ state: "idle" });
@@ -119,6 +120,17 @@ export function MediaBox(props) {
     onCleanup(() => binding.dispose());
   }));
   createEffect(() => props.onPhase?.(phase()));
+  createEffect(() => {
+    const native=surface(), element=props.kind==='audio'?audioFace():native, resource=source(), state=phase(), register=props.registerExposure;
+    // Display geometry/zoom and presentation changes reissue the mechanical
+    // observation, not a read acknowledgment. Native load lifetime stays intact.
+    geometry(); transform(); props.active;
+    if(!element||!box||!register||resource==null)return;
+    const retire=register({element,clip:box,resource,
+      valid:()=>source()===resource&&surface()===native&&native.getAttribute('src')===resource,
+      ready:()=>props.active!==false&&state==='loaded'&&phase()==='loaded'&&(native.tagName==='IMG'?native.complete&&native.naturalWidth>0:native.readyState>=2)});
+    onCleanup(retire);
+  });
   const click = () => {
     if (phase() === "error") props.onErrorClick?.();
     else if (playable()) toggle();
@@ -164,7 +176,7 @@ export function MediaBox(props) {
         onEnded={() => setPaused(true)} onVolumeChange={e => setMuted(e.currentTarget.muted)}
         onError={e => fail(e.currentTarget.error?.code || "unknown")} />
       <Show when={playable() && props.src != null && phase() !== "error"}>
-        <Show when={(!props.workbench && paused()) || props.kind === "audio"}><div style={props.workbench || props.kind !== "audio" ? style() : undefined} class={`media-play-overlay ${props.kind === "audio" ? "media-audio-face" : ""}`}>
+        <Show when={(!props.workbench && paused()) || props.kind === "audio"}><div ref={element => { if(props.kind==='audio')setAudioFace(element); }} style={props.workbench || props.kind !== "audio" ? style() : undefined} class={`media-play-overlay ${props.kind === "audio" ? "media-audio-face" : ""}`}>
           <Show when={!props.workbench}><MediaControlBoundary class="media-play-boundary">
             <IconButton size="lg" variant="play prominent media-play" title={`${paused() ? "play" : "pause"} ${word()}`}
               onAction={toggle} icon={iconSvg(paused() ? "player-play" : "player-pause", 28)} />

@@ -39,6 +39,7 @@ export function RailPreview(props) {
   };
   const schedule = () => { if (mounted && frame === null) frame = requestAnimationFrame(update); };
   createEffect(() => { phase(); props.size; schedule(); });
+  createEffect(() => { placement(); props.onExposureChange?.(); });
   onMount(() => { mounted = true; panel.showPopover(); update(); });
   onCleanup(() => {
     mounted = false;
@@ -49,7 +50,7 @@ export function RailPreview(props) {
     if (next === "loaded" || next === "error") display.loaded();
     setPhase(next);
   };
-  return <div ref={panel} popover="manual" role="tooltip" class="fr-preview"
+  return <div ref={element => { panel=element; const retire=props.registerOccluder?.(element); if(retire)onCleanup(retire); }} popover="manual" role="tooltip" class="fr-preview"
     classList={{ "is-placed": !!placement() }} data-entry-id={props.entry.id}
     style={{ left: `${placement()?.left ?? 0}px`, top: `${placement()?.top ?? 0}px`,
       width: placement() ? `${placement().width}px` : undefined,

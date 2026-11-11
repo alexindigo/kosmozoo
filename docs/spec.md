@@ -172,25 +172,55 @@ or concurrently newer requests remain pending with bounded retry.
 Listing schedules no ingestion writes; the existing worker/want paths acquire
 dimensions and bytes.
 
-Complete inventory acceptance observes visible names in memory, independently
-of file timestamps and ingestion. Each name gets a per-source session sequence
-once; relists/revalidation do not manufacture arrivals. The existing source stream
-delivers only `{sequence,latestVisibleSeq}` to all browsers, or null before the
-first complete inventory. Missing/hidden/gone/deleted entries do not contribute
-to `latestVisibleSeq`; deletion retires membership immediately. Inventory entries
-carry their `arrivalSeq`. Source retirement discards this in-memory history.
-Inventory/removal and committed hide/gone changes refresh the small arrival
-projection using output-name-only exclusion queries. Unchanged projections do
-not publish; Jobs progress reads the cached projection without loading entry
-metadata or walking the inventory. Source retirement clears that cache too.
+Complete inventory acceptance observes names in memory, independently of timestamps
+and ingestion. Each name gets one per-source incarnation sequence; ordinary relists,
+attribute updates and same-name content changes do not manufacture arrivals.
+Retirement discards that namespace and rejects late snapshots. Inventory entries
+carry `arrivalSeq`. Default inventories and source events retain the exact legacy
+`{sequence,latestVisibleSeq}` projection, or null before the first accepted inventory.
 
-Each browser baselines its own in-memory seen value at the first projection,
-keeps its viewed source current, and clears attention when opening another source.
-An unselected source is new while its latest visible sequence exceeds that value.
-Reload starts quiet; nothing is persisted or written back to the engine. Selected
-sources never show orange. Pills and picker entries consume the same state and
-“New images.” wording, using `--attention` for text/edge without pulsing or layout
-change. There is no extra transport or browser inventory poll.
+`arrivals=items-v1` opts the existing inventory request and single EventSource into
+`{sequence,latestVisibleSeq,revision,visibleRanges}`. Ranges are canonical inclusive
+positive integer pairs: dense, ascending, disjoint, nonadjacent and within sequence.
+`latestVisibleSeq` is their maximum, or zero when empty. Missing/hidden/gone outputs
+are excluded. Lower-member removal changes revision even when the maximum stays
+unchanged. Contradictory equal revisions, older revisions and malformed ranges reject
+atomically. Opted-in inventory includes shared `origin` (source/address/kind/epoch/
+incarnation). Its entries, visibility overlay and arrival projection synchronously
+use the token's latest accepted snapshot after the awaited inventory read.
+
+Inventory/removal and committed hide/gone boundaries refresh immutable membership
+and its cached JSON fragment using name-only exclusions. Jobs progress never walks
+names, metadata or interval arrays. Demand-only event encoding keeps chunks at most
+16384 bytes and one active plus latest pending immutable frame. Fragmented membership
+has O(intervals) payload, not constant size. Legacy and opted-in delivery share the
+same connection, retry and backpressure owner. Production clients require negotiated
+telemetry; absent-telemetry injected test fixtures never create acknowledgment state.
+
+Each browser baselines quietly at its first non-null projection. One session-only
+ledger retains exact exposed intervals above that baseline; unseen is live membership
+above the baseline minus those intervals. Opening/selecting a source, assigning current,
+accepting a listing, mounting, decoding or prefetching alone never acknowledges it.
+Actual matching loaded feed media must intersect positive uncovered feed/visual-viewport
+area in a genuinely visible tab, without dwell. Paused video and painted audio faces use
+that same display contract; placeholders, failed decode and Details/workbench previews
+do not qualify. App-owned modal/workbench, popup, status, preview and sticky-foot bounds
+subtract only their painted coverage. Native surface/clip/root/occluder observers and
+coalesced frames sample geometry and visibility changes without requiring feed scroll;
+pagehide disconnects native observation, pageshow rebinds, and replacement/disposal fence
+retired callbacks. Store tickets also fence source/session/name/sequence/known-content
+and native resource retirement. First-hash enrichment preserves the same content.
+
+Source pills, picker rows, persistent rail segments and favicon consume that one ledger,
+including selected and unpinned sources. Reload starts quiet; no read state is persisted
+or written to the engine. Source text/edge uses `--attention` and shared "New images."
+wording, without pulsing/layout change. Rail ticks preserve judgment/current bodies and
+one-third `--warning` unseen segments, independently of the one-shot arrival animation.
+The favicon caches the original 64px swan with a stationary 20px `--negative` upper-right
+dot and 4px `--foreground-bright` separator. Last unseen removal/exposure and adapter
+retirement restore original href/type/sizes exactly; late decode cannot revive it.
+Title, installed icon, splash and header logo stay unchanged. No additional transport,
+background fetch or inventory poll is introduced.
 Runtime source membership reconciles the existing headless workers as boot does,
 so a new unselected source does not await browser demand to join observation.
 
@@ -890,10 +920,10 @@ Ordinary rail ticks use the existing subdued `--foreground-dim` neutral through
 shared card-state presentation; card neutrals, judgment colors/priorities, wave
 length/glow, geometry, tape windowing and scrub handlers retain their contracts.
 
-New inventory identities in the current source, or entries newer than the seen
-floor captured before opening another source, light their rail ticks once for
+New inventory identities in the current source, or entries above its separate
+last-observed inventory ceiling when opening another source, light their tick bodies once for
 1400ms. Store inventory acceptance owns event publication and its accepted sequence
-independently of source-stream seen advancement. The rail takes the entire event
+independently of source-stream exposure membership. The rail takes the entire event
 once when candidates become size-ready, including identities outside its filter/tape window;
 scrolling, rerendering and remounting cannot replay it. Source navigation/disposal
 retires pending events. The rail owns its native animations and cancels on tick

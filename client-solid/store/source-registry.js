@@ -1,6 +1,7 @@
 // Exact source IDs belong to a Map, never a reactive object's mutation path.
 import { createMemo, createSignal, batch } from "solid-js";
 import { createStore, reconcile } from "solid-js/store";
+import { makeUnseenItems } from './unseen-items.js';
 
 export const sameSourceIdentity = (record, source) => !!source && source.address === record.address &&
   source.incarnation === record.incarnation && source.sourceVersion?.epoch === record.epoch;
@@ -11,7 +12,10 @@ export function makeSourceRegistry({ createRecord, onRetire }) {
   const changed = () => setMembership(value => value + 1);
   function makeRecord(id, source) {
     const [state, setState] = createStore({ host: source, activity: undefined, saving: undefined, reachability: undefined,
-      arrivals: null, seenSeq: null });
+      arrivals: null });
+    const [unseenRevision, setUnseenRevision] = createSignal(0);
+    const unseen = makeUnseenItems({ changed: () => setUnseenRevision(n => n+1) });
+    let inventorySequence = null;
     // Inventory owns reachability once observed; discovery cannot undo it.
     const host = createMemo(() => state.reachability === undefined ? state.host : { ...state.host, online: state.reachability });
     return { ...createRecord(id, source),
@@ -20,15 +24,16 @@ export function makeSourceRegistry({ createRecord, onRetire }) {
       setReachability(value) { setState("reachability", value); },
       get activity() { return state.activity; },
       get arrivals() { return state.arrivals; },
-      get seenSeq() { return state.seenSeq; },
-      get hasNew() { return state.arrivals !== null && state.arrivals.latestVisibleSeq > state.seenSeq; },
-      markSeen() { if (state.arrivals) setState("seenSeq", state.arrivals.sequence); },
-      acceptArrivals(value, viewed = false) {
-        if (!value) return;
-        const previous = state.arrivals;
-        if (previous && value.sequence < previous.sequence) return;
+      unseen,
+      get inventorySequence() { return inventorySequence; },
+      observeInventory(sequence) { if (Number.isSafeInteger(sequence)) inventorySequence = sequence; },
+      get hasNew() { unseenRevision(); return unseen.hasUnseen(); },
+      isUnseen(sequence) { unseenRevision(); return unseen.isUnseen(sequence); },
+      acceptArrivals(value) {
+        if (!unseen.accept(value)) return false;
+        if (inventorySequence === null) inventorySequence = value.sequence;
         setState("arrivals", reconcile(value));
-        if (state.seenSeq === null || viewed) setState("seenSeq", value.sequence);
+        return true;
       },
       get saving() { return state.saving; },
       updateHost(value) { setState("host", reconcile(value)); },

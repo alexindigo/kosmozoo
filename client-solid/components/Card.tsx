@@ -6,7 +6,7 @@
 // the store's images tree (the source of truth); vote/favorite are
 // path-level updates the card's bindings follow by construction.
 
-import { createSignal, onMount } from "solid-js";
+import { createSignal, onMount, onCleanup } from "solid-js";
 import { Show } from "solid-js";
 import { useAppStore } from "../store/app-store.js";
 import { flash } from "../lib/flash.js";
@@ -91,6 +91,7 @@ export function Card(props) {
         zoomKey={image()?.id}
         focused={props.focused}
         controlsMount={controlsMount()}
+        registerExposure={input => store.actions.feed.expose(props.entryId, input)}
         onOpen={() => store.handles.invoke("workbench.openEntry", { id: props.entryId })}
         onErrorClick={() => store.state.window.retry(props.entryId)}
         onPhase={(p) => {
@@ -102,7 +103,7 @@ export function Card(props) {
       {/* One in-flow foot keeps playback and feedback together while a tall
           card scrolls. The playable row reserves the same measured height
           even when its native source is absent or failed. */}
-      <div class="card-foot">
+      <div class="card-foot" ref={element => onCleanup(store.actions.feed.occluder(element))}>
         <Show when={playable()}><div class="media-controls-slot" ref={setControlsMount} /></Show>
         <div class="ctitle">
           <span class="ctitle-left">

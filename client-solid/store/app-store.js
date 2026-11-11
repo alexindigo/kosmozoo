@@ -53,6 +53,9 @@ import { makeSourceDiscovery, knownCapabilities, enrichCapabilities } from "./so
 import { observeNativeMagnification } from "../lib/native-magnification.js";
 import { emptyFilter, normalizeFilter, compileFilter, filterConditions, parameterNames } from "/js/feed-filter-model.mjs";
 import { isContentHash } from "/shared/content-hash.mjs";
+import { validItemArrivals } from '/js/api.mjs';
+import { makeFeedExposure } from '../lib/feed-exposure.js';
+import { makeFaviconAttention } from '../lib/favicon-attention.js';
 
 // stored host if still present, else first online, else first
 function initialHost(hosts, stored) {
@@ -149,6 +152,8 @@ export function makeAppStore({ subscribeSources = typeof window !== "undefined" 
   const [acquisitionRevision, setAcquisitionRevision] = createSignal(0);
   let sourceSession = null, selectionGeneration = 0, disposed = false;
   const railArrivals = makeRailArrivals();
+  const exposure = makeFeedExposure();
+  let faviconOwner = null, faviconGeneration = 0;
   const ownsSession = (s) => !!s && !disposed && sourceSession === s &&
     host() === s.id && hostsView()[s.id]?.address === s.address && sourceRecords.get(s.id) === s.source;
 
@@ -826,9 +831,20 @@ export function makeAppStore({ subscribeSources = typeof window !== "undefined" 
     return reply;
   }
 
+  function matchingInventory(s, inventory) {
+    // An injected inventory without arrival telemetry cannot acknowledge any
+    // item. The real API adapter requires the negotiated modern envelope.
+    if (inventory.origin === undefined && inventory.arrivals === undefined) return true;
+    const origin=inventory.origin, record=s.source;
+    return origin?.source===s.id && origin.address===record?.address && origin.kind===record.host.kind &&
+      origin.epoch===record.epoch && origin.incarnation===record.incarnation &&
+      validItemArrivals(inventory.arrivals) && record.unseen.compatible(inventory.arrivals);
+  }
+
   // All successful inventory reads share their acceptance responsibilities.
   // The first accepted read owns initial restoration, including after retry.
   function acceptInventory(s, inventory, read, before = new Map()) {
+    if (!matchingInventory(s, inventory)) { judgments.endRead(read); throw new Error('Stale or foreign arrival inventory'); }
     const name = s.id, wasReady = s.inventoryReady;
     const floor = s.acceptedArrivalSeq ?? s.arrivalFloor;
     let idx = -1;
@@ -867,7 +883,9 @@ export function makeAppStore({ subscribeSources = typeof window !== "undefined" 
         .map(image => image.id));
     });
     judgments.endRead(read);
-    s.source?.acceptArrivals(inventory.arrivals, true);
+    s.source?.acceptArrivals(inventory.arrivals);
+    s.source?.observeInventory(inventory.arrivals?.sequence);
+    exposure.invalidate();
     if (!wasReady) metadata.resume(inventory.metaVersion, s);
     mirrorCurrentHash();
     if (!wasReady) restoreBrowse(idx);
@@ -1462,7 +1480,7 @@ export function makeAppStore({ subscribeSources = typeof window !== "undefined" 
   }
 
   function acceptSourceSnapshot(input) {
-    const frame = validateSourceSnapshot(input);
+    const frame = validateSourceSnapshot(input, { items: 'optional' });
     if (disposed || deliverySuspended) return false;
     if (membershipFloor && (frame.epoch === membershipFloor.epoch && frame.revision < membershipFloor.revision ||
         frame.epoch === streamEpoch && membershipFloor.epoch !== streamEpoch)) return everDelivered;
@@ -1473,6 +1491,7 @@ export function makeAppStore({ subscribeSources = typeof window !== "undefined" 
       for (const [id, value] of Object.entries(frame.sources)) {
         const record = sourceRecords.get(id);
         if (!record || !sameSource(record, value)) continue;
+        if (value.arrivals !== undefined && !record.unseen.compatible(value.arrivals)) return false;
         const confirmed = record.confirmed;
         if (compareSourceVersions(value.sourceVersion, confirmed.sourceVersion) === 0 &&
             (confirmed.pinned !== value.pinned || confirmed.autoRefresh !== value.autoRefresh)) return false;
@@ -1490,11 +1509,12 @@ export function makeAppStore({ subscribeSources = typeof window !== "undefined" 
           const record = sourceRecords.get(id);
           confirmAttributes(record, value);
           acceptActivity(record, value.activity);
-          record.acceptArrivals(value.arrivals, host() === id);
+          record.acceptArrivals(value.arrivals);
         }
         streamEpoch = frame.epoch; streamRevision = frame.revision; registryRevision++;
         markSourcesReady();
       });
+      exposure.invalidate();
     }
     if (deliveryGap) {
       for (const record of sourceRecords.values()) if (previous.has(record)) record.freshness.deliveryGap();
@@ -1630,6 +1650,7 @@ export function makeAppStore({ subscribeSources = typeof window !== "undefined" 
   function dispose() {
     if (disposed) return;
     disposed = true;
+    exposure.dispose(); faviconGeneration++; faviconOwner?.dispose(); faviconOwner=null;
     resolveMembership();
     runtimeIdentity.dispose();
     sourceDiscovery.dispose();
@@ -1779,10 +1800,9 @@ export function makeAppStore({ subscribeSources = typeof window !== "undefined" 
         if (!isFolderPath(target.folder ?? "") || (target.current != null && !isEntryName(hostsView()[name]?.kind, target.current))) {
           actions.status.error("Invalid browsing address"); return;
         }
-        const arrivalFloor = sourceRecords.get(name)?.seenSeq;
+        const arrivalFloor = sourceRecords.get(name)?.inventorySequence;
         batch(() => {
           setSt("inventory", "loading", true);
-          sourceRecords.get(name)?.markSeen();
           setHost(name);
           beginBrowse(target);
           assignCurrent(target.current ? { remote: name, image: target.current } : null, { persist: false, intent: false });
@@ -1867,10 +1887,20 @@ export function makeAppStore({ subscribeSources = typeof window !== "undefined" 
 
     lifecycle: {
       suspendDelivery, resumeDelivery,
-      registerPage(target) {
+      registerPage(target, { stylesReady = Promise.resolve() } = {}) {
         if (disposed) return () => {};
         pageDispose?.();
         const stopMagnification = observeNativeMagnification(target, setNativeViewport);
+        const stopExposure=exposure.page(target), own=++faviconGeneration;
+        faviconOwner?.dispose(); faviconOwner=null;
+        Promise.resolve(stylesReady).then(()=>{
+          if(disposed||own!==faviconGeneration)return;
+          const link=target.document?.querySelector('link[rel="icon"]');if(!link)return;
+          const style=target.getComputedStyle(target.document.documentElement);
+          faviconOwner=makeFaviconAttention({link,palette:{dot:style.getPropertyValue('--negative').trim(),separator:style.getPropertyValue('--foreground-bright').trim()},
+            createImage:()=>new target.Image(),createCanvas:()=>target.document.createElement('canvas')});
+          faviconOwner.update(anySourceHasNew());
+        });
         let active = true;
         const hide = () => { if (active) suspendDelivery(); };
         const show = () => { if (active) resumeDelivery(); };
@@ -1881,6 +1911,8 @@ export function makeAppStore({ subscribeSources = typeof window !== "undefined" 
           if (!active) return;
           active = false;
           stopMagnification();
+          stopExposure();
+          if(own===faviconGeneration){faviconGeneration++;faviconOwner?.dispose();faviconOwner=null;}
           target.removeEventListener("pagehide", hide);
           target.removeEventListener("pageshow", show);
           if (pageDispose === retire) { pageDispose = null; runtimeIdentity.suspend(); }
@@ -2310,8 +2342,21 @@ export function makeAppStore({ subscribeSources = typeof window !== "undefined" 
 
     feed: {
       takeArrivals: railArrivals.take,
+      occluder: element => exposure.occluder(element),
+      invalidateExposure: () => exposure.invalidate(),
+      expose(id, input) {
+        const session=sourceSession, record=session?.source, entry=st.images[imageIdx(id)];
+        if(!record||!entry||!ownsSession(session))return ()=>{};
+        const ticket={session,record,id,name:entry.filename,sequence:entry.arrivalSeq,hash:entry.hash,resource:input.resource};
+        let live=true;
+        const valid=()=>{const current=st.images[imageIdx(id)];return live&&ownsSession(ticket.session)&&sourceRecords.get(session.id)===ticket.record&&
+          current?.filename===ticket.name&&current.arrivalSeq===ticket.sequence&&!(ticket.hash&&current.hash&&ticket.hash!==current.hash)&&input.valid();};
+        const retire=exposure.surface({...input,valid,expose:()=>{if(valid())record.unseen.acknowledge(ticket.sequence);}});
+        return ()=>{live=false;retire();};
+      },
       register(seamsIn) {
         const registration = seamsIn ? { ...seamsIn } : null;
+        const retireExposure=exposure.root(seamsIn?.scrollEl ?? null);
         batch(() => {
           if (seams.virtualizer !== (seamsIn?.virtualizer ?? null) || feedScrollEl() !== (seamsIn?.scrollEl ?? null)) retireFeedScroll();
           seams.virtualizer = seamsIn?.virtualizer ?? null;
@@ -2321,6 +2366,7 @@ export function makeAppStore({ subscribeSources = typeof window !== "undefined" 
         });
         return () => {
           if (feedRegistration() !== registration) return;
+          retireExposure();
           batch(() => {
             retireFeedScroll(); seams.virtualizer = null;
             setFeedRegistration(null); setFeedScrollEl(null); setFeedVirtualizer(null);
@@ -2619,6 +2665,9 @@ export function makeAppStore({ subscribeSources = typeof window !== "undefined" 
     },
   };
 
+  function anySourceHasNew() { hostsView(); return [...sourceRecords.values()].some(record=>record.hasNew); }
+  createEffect(()=>{const value=anySourceHasNew();untrack(()=>faviconOwner?.update(value));});
+  function entryHasNew(id) { const image=st.images[imageIdx(id)];return !!image && !!sourceRecords.get(image.host)?.isUnseen(image.arrivalSeq); }
   const stateObj = {
     featureContributions: slot => registeredFeatures.flatMap(f => f.installed?.[slot] ? [{ component: f.installed[slot], ports: f.installed.ports }] : []),
     comparisonProvider: () => comparisonProvider,
@@ -2634,8 +2683,10 @@ export function makeAppStore({ subscribeSources = typeof window !== "undefined" 
     get sourceActivity() { return sourceRecords.activities(); },
     sourceHasNew(id) {
       hostsView(); // membership is reactive; exact IDs stay private Map keys.
-      return host() !== id && !!sourceRecords.get(id)?.hasNew;
+      return !!sourceRecords.get(id)?.hasNew;
     },
+    anySourceHasNew,
+    entryHasNew,
     sourceDelivery,
     nativeMagnification,
     nativeViewport,
@@ -2675,7 +2726,7 @@ export function makeAppStore({ subscribeSources = typeof window !== "undefined" 
     get drafts() { return st.drafts; },
     cardState(id, { current: override, surface = "card" } = {}) {
       const img = st.images[imageIdxById().get(id)];
-      return cardState(img?.judgment, !!img && (override ?? currentEntry()?.entry.id === id), { surface });
+      return cardState(img?.judgment, !!img && (override ?? currentEntry()?.entry.id === id), { surface, unseen: surface==='rail' && entryHasNew(id) });
     },
     get views() { return st.views; },
     // derived
