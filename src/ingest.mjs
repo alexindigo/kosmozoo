@@ -185,19 +185,21 @@ export class Ingest {
   // priority: "high" = a human is waiting on this image (the bytes route) —
   // the read gate serves it before background work.
   // Resolves { hash, bytes, status: 200 } or { status } (backing said no).
-  async ensure(collection, name, kind = "output", { priority = "low" } = {}) {
+  async ensure(collection, name, kind = "output", { priority = "low", fresh = false } = {}) {
     if (!isResourceRoot(kind)) return { status: 400 };
     const token = this.#capture(collection);
     if (!token || !this.#isCurrent(token)) return this.#cancelled();
     if (!validEntryName(token?.address, name)) return { status: 400 };
     // \0-separated: plain concatenation collides ("ab","c" vs "a","bc")
-    const key = `${token.incarnation}\u0000${collection}\u0000${name}\u0000${kind}`;
+    // A cache-hit flight cannot discharge a fresh-source obligation. Fresh reads
+    // still share this owner's address gate, source fences and ingestion pipeline.
+    const key = `${token.incarnation}\u0000${collection}\u0000${name}\u0000${kind}${fresh ? "\u0000fresh" : ""}`;
     const existing = this.#inflight.get(key);
     if (existing) {
       if (priority === "high") existing.upgrade?.();
       return existing.promise;
     }
-    const flight = { priority, promise: null, upgrade: null, token };
+    const flight = { priority, promise: null, upgrade: null, token, fresh };
     const run = () => this.#ensureInner(collection, name, kind, flight);
     const p = (this.#lifetime ? this.#lifetime.run(`ingest ${collection}/${name}`, run) : run())
       .catch((error) => { if (error.code === "cancelled") return this.#cancelled(); throw error; })
@@ -211,7 +213,7 @@ export class Ingest {
     const token = flight.token, addr = token.address;
     if (!addr) return { status: 404 };
     const info = this.#recorded(collection, name, kind);
-    if (info?.hash && await this.#cache.has(info.hash)) {
+    if (!flight.fresh && info?.hash && await this.#cache.has(info.hash)) {
       if (!this.#isCurrent(token)) return this.#cancelled();
       const bytes = await this.#cache.get(info.hash);
       if (!this.#isCurrent(token)) return this.#cancelled();

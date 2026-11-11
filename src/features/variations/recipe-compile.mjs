@@ -44,7 +44,7 @@ export function previewRecipeUploads(snapshot, lookup, confirmedUploads, target,
   return names;
 }
 export function compileRecipe(snapshot, { catalogue, target, batch = false, lookup = () => undefined,
-  uploadReceipts = null, confirmedUploads = new Map(), preview = false }) {
+  uploadReceipts = null, confirmedUploads = new Map(), resourceValues = new Map(), preview = false }) {
   const bindings = [], uploads = [], uploadHashes = new Map(), ranges = {}, imageParams = {}, transfers = {}, estimates = {};
   const parameters = catalogue.parameters ?? catalogueParams(catalogue);
   const uploadPreview = preview ? previewRecipeUploads(snapshot, lookup, confirmedUploads, target, batch) : null;
@@ -88,9 +88,11 @@ export function compileRecipe(snapshot, { catalogue, target, batch = false, look
       if (!preview && !items.length) throw new Error(`${entry.metadata.label}: add at least one image before Run`);
       for (const item of items) {
         const state = recipeImageView(item, entry.metadata, lookup(id, item), target, batch);
-        if (!preview && (state.pending || state.error)) throw new Error(state.error || "Checking image bytes; your work was kept.");
+        const resolved = resourceValues.get(imageIdentity(item));
+        if (!resolved && !preview && (state.pending || state.error)) throw new Error(state.error || "Checking image bytes; your work was kept.");
         let value;
-        if (item.kind === "target") value = `${target.filename} [output]`;
+        if (resolved) value = resolved.value;
+        else if (item.kind === "target") value = `${target.filename} [output]`;
         else if (state.sameCurrent) value = parameterCurrent(entry.metadata);
         else if (imageReference(item)) value = imageReferenceValue(item);
         else {

@@ -268,6 +268,43 @@ generation destination.
 Feature routes mount under `/api/features/<name><path>`: `variations`
 serves `GET /probe/<id>` + `POST /run` (a core feature module, not a plugin).
 
+#### Durable Variations snapshots
+
+The engine owns version1 raw recipe snapshots, original target graphs/pixels and
+declared image inputs independently of ordinary cache and mutable source names.
+The original v2 Run context and acknowledgement shape remain unchanged. Optional
+`history:{id,snapshotHash,targetIndex,planHash}` binds a Run to a sealed engine
+snapshot and the engine-prepared request. A correlated response echoes `history`
+outside the acknowledgement. Legacy Run requests remain compatible.
+
+| # | Variations route | Method | Contract |
+|---|---|---|---|
+| 1 | `/history` | GET | Newest-first summary pages, `limit`1-100 (default50), opaque `before` cursor; format, independent revision, items and nextCursor. Lists never load full graphs/image sets. |
+| 2 | `/history` | POST | Begin `{runId,format:1,cohortMode,targets,recipe,resources}` before resource acquisition/effects. Same validated capture is idempotent; conflicting reuse is409. Raw incomplete editor strings remain data. |
+| 3 | `/history/<id>/resources/<resourceId>` | PUT | Octet-stream bytes for a reserved browser image occurrence. The engine hashes them; repeated changed bytes conflict. |
+| 4 | `/history/<id>/prepare` | POST | Archive ordered targets/declared graph inputs/raw selected and dormant image items, seal the immutable snapshot and preflight all target contracts. Missing bytes or invalid edits retain an inspectable failed attempt and authorize no upstream effects. |
+| 5 | `/history/<id>` | GET | Detail/raw recipe, target facts and resource manifest; incomplete attempts explicitly report their archive state. |
+| 6 | `/history/<id>/open` | POST | Acquire an editor lease, return original data and fresh matched-source contexts; missing/offline sources preserve inspection without retargeting. |
+| 7 | `/history/<id>/leases/<leaseId>` | DELETE | Release a draft pin without deleting another run's resources. |
+| 8 | `/history/<id>/resources/<resourceId>/bytes?lease=<id>` | GET | Hash-verified member bytes; the shared ETag/range/sandbox/nosniff response owner. A valid retained lease can read a deleted row's resources. |
+| 9 | `/history/<id>/uploads/<targetIndex>-<resourceId>` | POST | Materialize an active target requirement from archived bytes with `{targetIndex,resourceId,origin,snapshotHash}`. Reuse a named resource only after a fresh matching hash; otherwise use the existing backing upload/collision receipt. |
+| 10 | `/history/<id>/prepare-target` | POST | Same target/origin/snapshot binding; compile actual resource receipts to one stable requestId/planHash/expectedTotal and final v2 request. The graph remains engine-private. |
+| 11 | `/history/<id>/finish` | POST | Record a client error/end observation; outcome/counts derive from durable engine effects, never caller-invented success. |
+| 12 | `/history/<id>` | DELETE | Idempotent tombstone from history, retaining open-draft/admitted-work pins. Never deletes source images, jobs or judgments. |
+
+Every upload/permutation has a durable admission claim before its external call.
+Duplicate requests return stored evidence or pending/uncertain, never redispatch.
+An interrupted started effect becomes uncertain at restart; unfinished captures
+become interrupted. Neither automatically resumes. Submitted means queue acceptance,
+not generation completion. Completed snapshot data is immutable; only outcome
+evidence changes. New Runs have new IDs. Archive failure prohibits effects.
+
+Named-resource proof uses opt-in `Ingest.ensure(...,{fresh:true})`: fresh flights
+cannot join cache-hit flights but share the same source fences, four-read address
+gate and ingestion pipeline. Ordinary callers stay cache-first. Saved target graphs
+come only from engine snapshot membership, never arbitrary client graphs or today's
+replacement filename. Fresh authority cannot silently retarget an old opening.
+
 Plugin routes mount under `/api/plugins/<name><path>`:
 
 | Plugin | Routes |
@@ -1702,7 +1739,7 @@ port. Unavailable/unknown/conflicting native app capability uses the selected-po
 ordinary-browser URL with a whitelisted transient Store-owned status notice;
 no prefs/registry/profile/lock reset or notice persistence is performed.
 
-### Schema (`metadata.db`, `PRAGMA user_version = 9`, ordered migrations)
+### Schema (`metadata.db`, `PRAGMA user_version = 10`, ordered migrations)
 
 Content is what the bytes are; a collection is a namespace of names backed
 by a host or folder; an entry is one instance's state in one collection.
@@ -1758,6 +1795,23 @@ so a partial/version-write interrupted migration can be retried. Source flags
 are canonical SQLite attributes, shared by browsers and retained across restarts;
 they are not engine settings or browser convenience storage. Runtime activity
 and revision epochs are ephemeral and never persisted.
+
+v9-to-v10 transactionally adds five isolated tables without altering legacy rows:
+`variation_run` (immutable raw/sealed snapshots, summary, state and tombstone),
+`variation_asset` (verified hash/size/MIME, no byte BLOB), `variation_asset_ref`
+(ordered logical resource membership), `variation_effect` (immutable request/digest,
+claim and actual receipt) and `variation_lease` (editor/execution pins). The separate
+`variations.history.revision` KV key never advances the inventory/metadata cursor.
+The migration is retry-safe after its separate version write. Only Store owns SQL.
+
+Durable bytes live under `<state>/archives/<ab>/<hash>`, distinct from ordinary
+cache. The context injects one hash-locked archive capability. Atomic byte writes
+precede reference publication; reads verify hashes and reject symlink/nonregular
+objects. Logical candidates/order stay distinct even when bytes deduplicate.
+Deleting a run releases only its unpinned references. Last-reference collection
+can remove only archive-owned objects. Uncertain/orphan pins are retained rather
+than expiring a possibly unsaved draft. Completed tombstones keep replay fencing,
+not full deleted configuration bodies.
 
 ### Cache (`~/.local/share/kosmozoo/cache/`, override `KOZMOZOO_CACHE`)
 

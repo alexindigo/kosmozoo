@@ -18,6 +18,7 @@ import { SourceActivity } from "./source-activity.mjs";
 import { PluginHost } from "./plugins.mjs";
 import { makeRouter } from "./routes.mjs";
 import { Cache } from "./cache.mjs";
+import { ContentArchive } from "./content-archive.mjs";
 import { FEATURES } from "./features/index.mjs";
 import { directoryPortal } from "./desktop/portal.mjs";
 import { EngineLifetime } from "./lifetime.mjs";
@@ -116,7 +117,8 @@ export async function buildContext({ env = Deno.env.toObject(), fakes = {}, star
 
   // feature modules: isolated core features on the engine surface
   const featureApp = {
-    store, cache, hosts, ingest, comfy, desktop,
+    store, cache, hosts, ingest, comfy, desktop, lifetime,
+    archive: fakes.archive ?? new ContentArchive(`${stateDir}/archives`),
     // a backing bound to one collection (engine-mediated; the feature never
     // fetches a host directly)
     backings: {

@@ -1,4 +1,4 @@
-// src/store.mjs — the engine store: content / collection / entry (schema v9)
+// src/store.mjs - the engine store: content / collection / entry (schema v10)
 // + the discovered-node registry.
 //
 // content — what the bytes ARE: hash → meta, dims, workflow flag
@@ -18,7 +18,7 @@ import { splitHostKey } from "./collections.mjs";
 import { SourceArrivals } from "./source-arrivals.mjs";
 import { isResourceRoot } from "./parameters.mjs";
 
-const SCHEMA_VERSION = 9;
+const SCHEMA_VERSION = 10;
 const CORE_JUDGMENT_FIELDS = new Set(["vote", "favorite", "bookmark", "notes"]);
 
 const MIGRATIONS = [
@@ -172,10 +172,85 @@ const MIGRATIONS = [
 ];
 
 
+// v9 -> v10: isolated feature records; retry after the separate version write
+// changes no old table or row. Bytes remain in the context-owned archive.
+MIGRATIONS.push(db => db.transaction(() => db.exec(`
+  CREATE TABLE IF NOT EXISTS variation_run (
+    id TEXT PRIMARY KEY, created_at INTEGER NOT NULL, format INTEGER NOT NULL,
+    recipe_json TEXT, targets_json TEXT, snapshot_json TEXT, snapshot_hash TEXT,
+    summary_json TEXT NOT NULL, capture_state TEXT NOT NULL,
+    outcome TEXT NOT NULL DEFAULT 'preparing', planned_count TEXT,
+    submitted_count INTEGER NOT NULL DEFAULT 0, total_count INTEGER,
+    updated_at INTEGER NOT NULL, deleted_at INTEGER
+  );
+  CREATE TABLE IF NOT EXISTS variation_asset (
+    hash TEXT PRIMARY KEY, bytes INTEGER NOT NULL, mime TEXT, complete INTEGER NOT NULL CHECK(complete = 1)
+  );
+  CREATE TABLE IF NOT EXISTS variation_asset_ref (
+    run_id TEXT NOT NULL REFERENCES variation_run(id), resource_id TEXT NOT NULL,
+    hash TEXT REFERENCES variation_asset(hash), descriptor_json TEXT NOT NULL,
+    PRIMARY KEY(run_id,resource_id)
+  );
+  CREATE TABLE IF NOT EXISTS variation_effect (
+    run_id TEXT NOT NULL REFERENCES variation_run(id), effect_id TEXT NOT NULL,
+    kind TEXT NOT NULL, request_json TEXT NOT NULL, request_hash TEXT NOT NULL,
+    state TEXT NOT NULL, result_json TEXT, created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL,
+    PRIMARY KEY(run_id,effect_id)
+  );
+  CREATE TABLE IF NOT EXISTS variation_lease (
+    lease_id TEXT PRIMARY KEY, run_id TEXT NOT NULL REFERENCES variation_run(id),
+    kind TEXT NOT NULL CHECK(kind IN ('editor','execution')), created_at INTEGER NOT NULL
+  );
+  CREATE INDEX IF NOT EXISTS variation_run_page ON variation_run(created_at DESC,id DESC) WHERE deleted_at IS NULL;
+  CREATE INDEX IF NOT EXISTS variation_refs_hash ON variation_asset_ref(hash);
+  CREATE INDEX IF NOT EXISTS variation_effect_run ON variation_effect(run_id,state);
+  CREATE INDEX IF NOT EXISTS variation_lease_run ON variation_lease(run_id);
+  INSERT OR IGNORE INTO kv(k,v) VALUES('variations.history.revision','0');
+`))());
+
 // Every recurring statement is prepared ONCE (audit D9: a prepare per call
 // is a compile per call — a 3000-file listing compiled ~10k statements).
 // The registry is prepared eagerly in open right after the migrations.
 const STATEMENTS = {
+  variationGet: "SELECT * FROM variation_run WHERE id = ?",
+  variationList: `SELECT id,created_at,format,summary_json,capture_state,outcome,planned_count,submitted_count,total_count,updated_at FROM variation_run
+    WHERE deleted_at IS NULL AND (created_at < ? OR (created_at = ? AND id < ?)) ORDER BY created_at DESC,id DESC LIMIT ?`,
+  variationBegin: `INSERT INTO variation_run(id,created_at,format,recipe_json,targets_json,summary_json,capture_state,updated_at)
+    VALUES(?,?,?,?,?,?,'preparing',?)`,
+  variationReserve: "INSERT INTO variation_asset_ref(run_id,resource_id,descriptor_json) VALUES(?,?,?)",
+  variationResource: "SELECT * FROM variation_asset_ref WHERE run_id = ? AND resource_id = ?",
+  variationResources: "SELECT * FROM variation_asset_ref WHERE run_id = ? ORDER BY rowid",
+  variationAsset: "INSERT OR IGNORE INTO variation_asset(hash,bytes,mime,complete) VALUES(?,?,?,1)",
+  variationAttach: "UPDATE variation_asset_ref SET hash = ? WHERE run_id = ? AND resource_id = ? AND hash IS NULL",
+  variationSeal: "UPDATE variation_run SET snapshot_json = ?, snapshot_hash = ?, summary_json = ?, capture_state = 'complete', updated_at = ? WHERE id = ?",
+  variationOutcome: "UPDATE variation_run SET outcome = ?, summary_json = ?, submitted_count = ?, total_count = ?, planned_count = ?, updated_at = ? WHERE id = ?",
+  variationTombstone: "UPDATE variation_run SET deleted_at = ?,updated_at = ? WHERE id = ? AND deleted_at IS NULL",
+  variationLease: "SELECT * FROM variation_lease WHERE run_id = ? AND lease_id = ?",
+  variationLeaseAdd: "INSERT INTO variation_lease(lease_id,run_id,kind,created_at) VALUES(?,?,?,?)",
+  variationLeaseRelease: "DELETE FROM variation_lease WHERE run_id = ? AND lease_id = ?",
+  variationPins: "SELECT COUNT(*) AS n FROM variation_lease WHERE run_id = ?",
+  variationExecutionPins: "SELECT COUNT(*) AS n FROM variation_lease WHERE run_id = ? AND kind = 'execution'",
+  variationBusy: "SELECT COUNT(*) AS n FROM variation_effect WHERE run_id = ? AND state IN ('started','uncertain')",
+  variationRefsDrop: "DELETE FROM variation_asset_ref WHERE run_id = ?",
+  variationCompact: "UPDATE variation_run SET recipe_json = NULL,targets_json = NULL,snapshot_json = NULL WHERE id = ?",
+  variationEffectsCompact: "UPDATE variation_effect SET request_json = 'null',result_json = NULL WHERE run_id = ?",
+  variationAssetRefs: "SELECT COUNT(*) AS n FROM variation_asset_ref WHERE hash = ?",
+  variationAssetForget: "DELETE FROM variation_asset WHERE hash = ? AND NOT EXISTS(SELECT 1 FROM variation_asset_ref WHERE hash = ?)",
+  variationEffectGet: "SELECT * FROM variation_effect WHERE run_id = ? AND effect_id = ?",
+  variationEffects: "SELECT * FROM variation_effect WHERE run_id = ? ORDER BY rowid",
+  variationEffectPrepare: `INSERT INTO variation_effect(run_id,effect_id,kind,request_json,request_hash,state,created_at,updated_at)
+    VALUES(?,?,?,?,?,'prepared',?,?)`,
+  variationEffectClaim: "UPDATE variation_effect SET state = 'started',updated_at = ? WHERE run_id = ? AND effect_id = ? AND state = 'prepared'",
+  variationEffectResult: "UPDATE variation_effect SET state = ?,result_json = ?,updated_at = ? WHERE run_id = ? AND effect_id = ? AND state = 'started'",
+  variationRecoveryEffects: "UPDATE variation_effect SET state = 'uncertain',updated_at = ? WHERE state = 'started'",
+  variationRecoveryCaptures: "UPDATE variation_run SET capture_state = 'interrupted',outcome = 'interrupted',updated_at = ? WHERE capture_state = 'preparing'",
+  variationRecoveryRuns: `UPDATE variation_run SET outcome = CASE WHEN EXISTS
+    (SELECT 1 FROM variation_effect e WHERE e.run_id = variation_run.id AND e.state = 'uncertain')
+    THEN 'uncertain' ELSE 'interrupted' END,
+    submitted_count = (SELECT COUNT(*) FROM variation_effect e WHERE e.run_id = variation_run.id AND e.kind = 'permutation' AND e.state IN ('confirmed','partial')),
+    updated_at = ? WHERE outcome = 'preparing' OR (outcome <> 'uncertain' AND EXISTS
+    (SELECT 1 FROM variation_effect e WHERE e.run_id = variation_run.id AND e.state = 'uncertain'))`,
+  variationBump: "UPDATE kv SET v = CAST(CAST(v AS INTEGER) + 1 AS TEXT) WHERE k = 'variations.history.revision'",
   kvGet: "SELECT v FROM kv WHERE k = ?",
   kvSet: "INSERT INTO kv (k, v) VALUES (?, ?) ON CONFLICT(k) DO UPDATE SET v = excluded.v",
   bumpMeta: "UPDATE kv SET v = CAST(CAST(v AS INTEGER) + 1 AS TEXT) WHERE k = 'meta_version'",
@@ -310,6 +385,13 @@ export class Store {
         );
       }
       s.#metaFloor = s.metaVersion;
+      s.#db.transaction(() => {
+        const now = Date.now();
+        const effects = s.#q.variationRecoveryEffects.run(now);
+        const captures = s.#q.variationRecoveryCaptures.run(now);
+        const runs = s.#q.variationRecoveryRuns.run(now);
+        if (effects || captures || runs) s.#q.variationBump.run();
+      })();
       s.#ready = true;
       return s;
     } catch (error) {
@@ -322,6 +404,140 @@ export class Store {
       throw error;
     }
   }
+
+  // History owns only its feature tables and revision, never inventory cursors.
+  variationRevision() { return Number(this.#kvGet("variations.history.revision") ?? 0); }
+  variationGet(id) { return this.#q.variationGet.get(id); }
+  variationList(limit, before = { at: Number.MAX_SAFE_INTEGER, id: "\uffff" }) {
+    return this.#q.variationList.all(before.at, before.at, before.id, limit);
+  }
+  #variationLive(id) {
+    const row = this.variationGet(id);
+    if (!row || row.deleted_at !== null || row.recipe_json === null) throw Object.assign(new Error("History entry unavailable"), { status: 410 });
+    return row;
+  }
+  variationBegin({ id, format, recipeJson, targetsJson, summaryJson, resources, now = Date.now() }) {
+    return this.#db.transaction(() => {
+      const previous = this.variationGet(id);
+      if (previous) {
+        if (previous.deleted_at !== null) throw Object.assign(new Error("History entry unavailable"), { status: 410 });
+        if (previous.format !== format || previous.recipe_json !== recipeJson || previous.targets_json !== targetsJson ||
+          resources.some(r => this.variationResource(id, r.id)?.descriptor_json !== r.descriptorJson)) {
+          throw Object.assign(new Error("History capture conflict"), { status: 409 });
+        }
+        return previous;
+      }
+      this.#q.variationBegin.run(id, now, format, recipeJson, targetsJson, summaryJson, now);
+      for (const r of resources) this.#q.variationReserve.run(id, r.id, r.descriptorJson);
+      this.#q.variationBump.run();
+      return this.variationGet(id);
+    })();
+  }
+  variationResources(id) { return this.#q.variationResources.all(id); }
+  variationResource(id, resourceId) { return this.#q.variationResource.get(id, resourceId); }
+  variationReserve(id, resourceId, descriptorJson) {
+    this.#db.transaction(() => {
+      const run = this.#variationLive(id), previous = this.variationResource(id, resourceId);
+      if (previous) {
+        if (previous.descriptor_json !== descriptorJson) throw Object.assign(new Error("History resource conflict"), { status: 409 });
+        return;
+      }
+      if (run.capture_state !== "preparing") throw Object.assign(new Error("History snapshot is sealed"), { status: 409 });
+      this.#q.variationReserve.run(id, resourceId, descriptorJson);
+    })();
+  }
+  variationAttach(id, resourceId, { hash, bytes, mime }) {
+    this.#db.transaction(() => {
+      const run = this.#variationLive(id), ref = this.variationResource(id, resourceId);
+      if (!ref) throw Object.assign(new Error("History resource unavailable"), { status: 410 });
+      if (ref.hash) {
+        if (ref.hash !== hash) throw Object.assign(new Error("History bytes conflict"), { status: 409 });
+        return;
+      }
+      if (run.capture_state !== "preparing") throw Object.assign(new Error("History snapshot is sealed"), { status: 409 });
+      this.#q.variationAsset.run(hash, bytes, mime);
+      this.#q.variationAttach.run(hash, id, resourceId);
+    })();
+  }
+  variationSeal(id, snapshotJson, snapshotHash, summaryJson) {
+    this.#db.transaction(() => {
+      const previous = this.#variationLive(id);
+      if (previous.snapshot_hash) {
+        if (previous.snapshot_hash !== snapshotHash || previous.snapshot_json !== snapshotJson) throw Object.assign(new Error("History snapshot conflict"), { status: 409 });
+        return;
+      }
+      if (previous.capture_state !== "preparing" || this.variationResources(id).some(r => !r.hash)) throw Object.assign(new Error("History archive incomplete"), { status: 409 });
+      this.#q.variationSeal.run(snapshotJson, snapshotHash, summaryJson, Date.now(), id);
+      this.#q.variationBump.run();
+    })();
+  }
+  variationOutcome(id, outcome, summaryJson, { submitted = 0, total = null, planned = null } = {}) {
+    // A late result may enrich an existing tombstone but cannot recreate it.
+    if (!this.variationGet(id)) return;
+    this.#db.transaction(() => {
+      this.#q.variationOutcome.run(outcome, summaryJson, submitted, total, planned === null ? null : String(planned), Date.now(), id);
+      this.#q.variationBump.run();
+    })();
+  }
+  variationLeaseAcquire(id, kind, leaseId) {
+    return this.#db.transaction(() => {
+      this.#variationLive(id);
+      const existing = this.#q.variationLease.get(id, leaseId);
+      if (existing) {
+        if (existing.kind !== kind) throw Object.assign(new Error("History lease conflict"), { status: 409 });
+        return existing;
+      }
+      this.#q.variationLeaseAdd.run(leaseId, id, kind, Date.now());
+      return this.#q.variationLease.get(id, leaseId);
+    })();
+  }
+  variationLease(id, leaseId) { return this.#q.variationLease.get(id, leaseId); }
+  variationLeaseRelease(id, leaseId) { this.#q.variationLeaseRelease.run(id, leaseId); }
+  variationTombstone(id) {
+    this.#db.transaction(() => {
+      if (this.#q.variationTombstone.run(Date.now(), Date.now(), id)) this.#q.variationBump.run();
+    })();
+  }
+  variationRetire(id) {
+    return this.#db.transaction(() => {
+      const run = this.variationGet(id);
+      if (!run || run.deleted_at === null || this.#q.variationPins.get(id).n || this.#q.variationBusy.get(id).n) return [];
+      const hashes = [...new Set(this.variationResources(id).map(r => r.hash).filter(Boolean))];
+      this.#q.variationRefsDrop.run(id);
+      this.#q.variationCompact.run(id);
+      this.#q.variationEffectsCompact.run(id);
+      return hashes;
+    })();
+  }
+  variationAssetRefs(hash) { return this.#q.variationAssetRefs.get(hash).n; }
+  variationForgetAsset(hash) { return this.#q.variationAssetForget.run(hash, hash); }
+  variationPrepareEffect(id, effectId, kind, requestJson, requestHash) {
+    return this.#db.transaction(() => {
+      const run = this.variationGet(id);
+      if (!run || run.deleted_at !== null && !this.#q.variationExecutionPins.get(id).n) throw Object.assign(new Error("History entry unavailable"), { status: 410 });
+      const previous = this.#q.variationEffectGet.get(id, effectId);
+      if (previous) {
+        if (previous.kind !== kind || previous.request_hash !== requestHash || previous.request_json !== requestJson) throw Object.assign(new Error("History effect conflict"), { status: 409 });
+        return previous;
+      }
+      this.#q.variationEffectPrepare.run(id, effectId, kind, requestJson, requestHash, Date.now(), Date.now());
+      return this.#q.variationEffectGet.get(id, effectId);
+    })();
+  }
+  variationClaimEffect(id, effectId) {
+    return this.#db.transaction(() => {
+      const run = this.variationGet(id);
+      if (!run || run.deleted_at !== null && !this.#q.variationPins.get(id).n) return false;
+      return this.#q.variationEffectClaim.run(Date.now(), id, effectId) === 1;
+    })();
+  }
+  variationEffectResult(id, effectId, state, resultJson) {
+    if (!["confirmed", "rejected", "partial", "uncertain"].includes(state)) throw new Error("Invalid effect result state");
+    this.#db.transaction(() => {
+      if (this.#q.variationEffectResult.run(state, resultJson, Date.now(), id, effectId)) this.#q.variationBump.run();
+    })();
+  }
+  variationEffects(id) { return this.#q.variationEffects.all(id); }
 
   // --- feedback.json v1 → entry columns (one-time) -------------------------
   // The old hash-keyed judgment document is read ONCE: each entry fans out

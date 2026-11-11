@@ -39,6 +39,30 @@ export function mediaHeaders(init) {
   return headers;
 }
 
+// One media/validator/range owner for live resources and durable archive members.
+export function bytesResponse(req, bytes, hash, mime) {
+  const etag = `"${hash}"`;
+  const h = mediaHeaders({ ETag: etag, "Cache-Control": "no-cache" });
+  if (req.headers.get("If-None-Match") === etag) return new Response(null, { status: 304, headers: h });
+  if (mime) h.set("Content-Type", mime);
+  h.set("Content-Length", String(bytes.length));
+  h.set("Accept-Ranges", "bytes");
+  const range = req.headers.get("Range"), ifRange = req.headers.get("If-Range");
+  const match = range && (!ifRange || ifRange === etag) && /^bytes=(\d*)-(\d*)$/.exec(range);
+  if (match && (match[1] || match[2])) {
+    const size = bytes.length;
+    const start = match[1] ? Number(match[1]) : Math.max(0, size - Number(match[2]));
+    const end = match[1] && match[2] ? Math.min(size - 1, Number(match[2])) : size - 1;
+    if (!Number.isSafeInteger(start) || !Number.isSafeInteger(end) || start > end || start >= size) {
+      h.set("Content-Range", `bytes */${size}`); h.set("Content-Length", "0");
+      return new Response(null, { status: 416, headers: h });
+    }
+    h.set("Content-Range", `bytes ${start}-${end}/${size}`); h.set("Content-Length", String(end - start + 1));
+    return new Response(bytes.subarray(start, end + 1), { status: 206, headers: h });
+  }
+  return new Response(bytes, { headers: h });
+}
+
 function mutationError(req, url) {
   if (["GET", "HEAD", "OPTIONS"].includes(req.method)) return null;
   const origin = req.headers.get("Origin"), site = req.headers.get("Sec-Fetch-Site");
@@ -90,38 +114,6 @@ export function makeRouter(ctx) {
     try { expected = expectedOrigin(req); } catch (error) { return Response.json({ error: error.message }, { status: 400 }); }
     if (expected && !sameOrigin(expected, sourceOrigin(id, ctx.sourceActivity.source(id)))) return Response.json({ error: "Source origin changed" }, { status: 412 });
     return null;
-  };
-
-  // One bytes response builder for every bytes route (E4): validators are
-  // the content hash + no-cache (the URL never changes on a remap).
-  const bytesResponse = (req, bytes, hash, mime) => {
-    const etag = `"${hash}"`;
-    const h = mediaHeaders({ ETag: etag, "Cache-Control": "no-cache" });
-    if (req.headers.get("If-None-Match") === etag) {
-      return new Response(null, { status: 304, headers: h });
-    }
-    if (mime) h.set("Content-Type", mime);
-    h.set("Content-Length", String(bytes.length));
-    h.set("Accept-Ranges", "bytes");
-    const range = req.headers.get("Range");
-    const ifRange = req.headers.get("If-Range");
-    // Unsupported units/multiple ranges/malformed syntax are ignored (200).
-    // A valid but unsatisfiable single bytes range explicitly returns 416.
-    const match = range && (!ifRange || ifRange === etag) && /^bytes=(\d*)-(\d*)$/.exec(range);
-    if (match && (match[1] || match[2])) {
-      const size = bytes.length;
-      const start = match[1] ? Number(match[1]) : Math.max(0, size - Number(match[2]));
-      const end = match[1] && match[2] ? Math.min(size - 1, Number(match[2])) : size - 1;
-      if (!Number.isSafeInteger(start) || !Number.isSafeInteger(end) || start > end || start >= size) {
-        h.set("Content-Range", `bytes */${size}`);
-        h.set("Content-Length", "0");
-        return new Response(null, { status: 416, headers: h });
-      }
-      h.set("Content-Range", `bytes ${start}-${end}/${size}`);
-      h.set("Content-Length", String(end - start + 1));
-      return new Response(bytes.subarray(start, end + 1), { status: 206, headers: h });
-    }
-    return new Response(bytes, { headers: h });
   };
 
   // One joined row (entry ⟕ content, judgment columns included) → the wire
