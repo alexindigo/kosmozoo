@@ -1,6 +1,16 @@
 // Versioned persistence boundary over the declared raw leaves, never widget state.
 import { cloneJsonValue, resourceReference } from "../../parameters.mjs";
-import { RECIPE_FIELDS, validRecipeValue, freezeRecipe, validImageSet } from "./recipe-model.mjs";
+import { RECIPE_FIELDS, validRecipeValue, freezeRecipe, validImageSet, snapshotDraft, sameDraft, numericText } from "./recipe-model.mjs";
+import { sameJsonValue } from "../../parameters.mjs";
+import { acknowledgedFields, catalogueParams, parameterAliases, templateReplaceWithProof } from "./shared.mjs";
+import { validateEditorValue, admitResourceTransfer } from "./compile.mjs";
+import { parseRecipeCandidate } from "./recipe-compile.mjs";
+
+// Saved-plan correlation is deliberately outside the unchanged strict v2 proof.
+export function acknowledgedHistoryFields(request, response) {
+  if (!request.history || !response?.history || !sameJsonValue(request.history, response.history)) return null;
+  return acknowledgedFields(request, response);
+}
 
 export const HISTORY_FORMAT = 1;
 export const historyId = value => typeof value === "string" && /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(value);
@@ -81,4 +91,59 @@ export function decodeHistoryRecipe(document) {
     }
   }
   return freezeRecipe(data.recipe);
+}
+
+// A data patch, not a second editor. Every destination contract is checked; only
+// active contributors enter the patch, leaving dormant destination buffers alone.
+export function planHistoryOverlay(saved, destination, catalogues, cohortMode) {
+  const source = decodeHistoryRecipe(saved), patch = [], warnings = [];
+  const parameters = catalogues.map(c => new Map((c.parameters ?? catalogueParams(c)).map(p => [p.id, p])));
+  for (const [domain, rows] of Object.entries(source)) for (const [id, entry] of Object.entries(rows)) {
+    if (domain === "naming" || !entry.values.enabled) continue;
+    try {
+      const target = destination[domain]?.[id];
+      if (!target) throw new Error("location or editor type is missing");
+      if (domain === "numeric" && entry.values.mode === "range" && saved.cohortMode !== cohortMode) throw new Error("Range uses a different absolute/relative basis");
+      for (let index = 0; index < parameters.length; index++) {
+        const p = parameters[index].get(id);
+        if (!p) throw new Error("location is missing from a target");
+        if (p.type !== entry.metadata.type || p.key !== entry.metadata.key || !sameDraft(p.nodeIds, entry.metadata.nodeIds) ||
+          p.valueKind !== entry.metadata.valueKind || p.kind !== entry.metadata.kind) throw new Error("parameter type or resource semantics changed");
+        const v = entry.values;
+        if (domain === "numeric") {
+          const names = v.mode === "value" ? ["value"] : ["min", "max", "rawIncrement"];
+          for (const name of names) {
+            const number = numericText(v[name]);
+            if (number === null) throw new Error(`saved ${name} is incomplete`);
+            if (name !== "rawIncrement" && (v.mode === "value" || cohortMode === "single")) validateEditorValue(p, number);
+          }
+        } else if (domain === "candidates") for (const raw of v.candidates) parseRecipeCandidate({ ...target.metadata, ...p }, raw, catalogues[index].nodes);
+        else if (domain === "enums") for (const value of v.picks) validateEditorValue(p, value, catalogues[index].nodes);
+        else if (domain === "texts") validateEditorValue(p, v.text, catalogues[index].nodes);
+        else for (const item of v.items) {
+          if (item.kind !== "target") {
+            if (item.kind !== "archive" || !saved.resources?.some(r => r.id === item.resourceId && r.hash)) throw new Error("saved image bytes are unavailable");
+            admitResourceTransfer(p);
+          }
+        }
+      }
+      const names = domain === "numeric" ? ["enabled", "mode", ...(entry.values.mode === "value" ? ["value"] : ["min", "max", "rawIncrement"])] : Object.keys(RECIPE_FIELDS[domain]);
+      for (const name of names) patch.push({ domain, id, name, value: snapshotDraft(entry.values[name]) });
+    } catch (error) { warnings.push({ id, label: entry.metadata.label ?? id, reason: error.message }); }
+  }
+  for (const name of ["prefix", "suffix"]) {
+    const naming = source.naming.root;
+    if (sameDraft(naming.values[name], naming.baseline[name])) continue;
+    const complete = catalogues.every(c => {
+      const params = c.parameters ?? catalogueParams(c), current = Object.fromEntries(params.map(p => [p.id, p.currentValue ?? p.current]));
+      return templateReplaceWithProof(naming.values[name], {}, current, parameterAliases(params), params).complete;
+    });
+    if (complete) patch.push({ domain: "naming", id: "root", name, value: naming.values[name] });
+    else warnings.push({ id: name, label: name === "prefix" ? "Prefix" : "Suffix", reason: "unresolved naming token" });
+  }
+  const overlap = patch.some(({ domain, id, name, value }) => {
+    const entry = destination[domain][id];
+    return !sameDraft(entry.values[name], entry.baseline[name]) && !sameDraft(entry.values[name], value);
+  });
+  return freezeRecipe({ patch, warnings, overlap });
 }

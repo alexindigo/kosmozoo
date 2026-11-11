@@ -11,6 +11,18 @@ export function makeVariationRecipe() {
     Object.fromEntries([...entries].map(([id, entry]) => [id, snapshotDraft(entry)]))]));
   return {
     row, entries: domain => groups.get(domain), revision: () => revision, edited: () => revision++, capture,
+    restore(snapshot) {
+      for (const [domain, entries] of Object.entries(snapshot)) for (const [id, entry] of Object.entries(entries)) {
+        for (const values of [entry.values, entry.baseline]) for (const [name, definition] of Object.entries(RECIPE_FIELDS[domain])) {
+          if (!validRecipeValue(definition.type, values[name])) throw new Error(`Invalid restored field: ${domain}.${name}`);
+        }
+        const target = row(domain, id);
+        if (!target) throw new Error(`Restored location unavailable: ${id}`);
+        target.values = snapshotDraft(entry.values); target.baseline = snapshotDraft(entry.baseline);
+        target.touched = Object.keys(RECIPE_FIELDS[domain]);
+      }
+      revision++;
+    },
     seed(domain, id, metadata, defaults) {
       let entry = row(domain, id);
       if (!entry) { entry = { metadata: {}, values: {}, baseline: {}, touched: [] }; groups.get(domain).set(id, entry); }

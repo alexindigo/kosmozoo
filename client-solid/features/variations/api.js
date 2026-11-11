@@ -5,6 +5,24 @@ import { req, postRaw, collectionEntriesUrl, entryBytesUrl } from "/js/api.mjs";
 import { parseExactJson, stringifyExactJson } from "/shared/parameters.mjs";
 const json = { parse: parseExactJson, stringify: stringifyExactJson };
 export const readRunResult = parseExactJson;
+const historyPath = id => `/api/features/variations/history${id ? `/${encodeURIComponent(id)}` : ""}`;
+export const historyList = before => req("GET", historyPath() + (before ? `?before=${encodeURIComponent(before)}` : ""), undefined, { json });
+export const historyDetail = id => req("GET", historyPath(id), undefined, { json });
+export const historyBegin = capture => req("POST", historyPath(), capture, { json });
+export const historyPrepare = id => req("POST", historyPath(id) + "/prepare", {}, { json });
+export const historyOpen = id => req("POST", historyPath(id) + "/open", {}, { json });
+export const historyRelease = (id, leaseId) => req("DELETE", historyPath(id) + `/leases/${encodeURIComponent(leaseId)}`, undefined, { json });
+export const historyRemove = id => req("DELETE", historyPath(id), undefined, { json });
+export const historyFinish = (id, error) => req("POST", historyPath(id) + "/finish", { error }, { json });
+export const historyMaterialize = (id, binding) => req("POST", historyPath(id) + `/uploads/${binding.targetIndex}-${encodeURIComponent(binding.resourceId)}`, binding, { json });
+export const historyTarget = (id, binding) => req("POST", historyPath(id) + "/prepare-target", binding, { json });
+export const historyThumbnail = item => historyPath(item.runId) + `/resources/${encodeURIComponent(item.resourceId)}/bytes${item.leaseId ? `?lease=${encodeURIComponent(item.leaseId)}` : ""}`;
+export async function historyBytes(id, resourceId, file) {
+  const response = await fetch(historyPath(id) + `/resources/${encodeURIComponent(resourceId)}`, { method: "PUT", headers: { "Content-Type": "application/octet-stream" }, body: file });
+  const data = parseExactJson(await response.text());
+  if (!response.ok) throw new Error(data.error ?? `Archive failed (${response.status})`);
+  return data;
+}
 
 export const probe = (image) =>
   req("GET", `/api/features/variations/probe/${encodeURIComponent(image.id)}${image.origin ? `?origin=${encodeURIComponent(JSON.stringify(image.origin))}` : ""}`, undefined, { json });

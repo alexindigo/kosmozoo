@@ -1026,9 +1026,12 @@ synthetic outside-click propagation. Features contribute command definitions,
 data bindings and affordances through the registry, without feature-name dispatch.
 
 Variations owns one private recipe/editor per dialog mount and captured target
-set. Closing or replacing it releases its raw buffers and exact File references;
-every reopening starts fresh. There is no recipe switcher, retained workspace or
-disk persistence. A source change retains the captured-origin fence and cannot
+set. Closing or replacing it releases its raw buffers and exact File references.
+Ordinary openings start from fresh defaults; explicit history recall creates a new
+editable owner from a saved immutable Run, never an old draft or accepted timer.
+Every application Run begins durable history before resource preparation and uses
+engine-journaled uploads/plans/effects. Opening, recalling and editing create no
+entry; each explicit rerun creates a distinct entry. A source change retains the captured-origin fence and cannot
 retarget an open draft. Mounted components own decision, focus/caret, widgets,
 timers and Run leases. Its bridge contains opening metadata, a fresh scalar
 session and owner-safe request capabilities only. Dirty close/replacement shows
@@ -1039,6 +1042,30 @@ one terminal Promise/continuation/permit; conflicts return busy, and stale/dispo
 error paths settle safely. Raw incomplete increment text survives blur unchanged.
 SliderRow retires active widget listeners with the matching original-target
 terminal adaptation and quarantines that physical gesture through release/cancel.
+
+The installed history client owns coalesced summary/detail reads, pagination,
+errors, deletion fencing and readonly leased records. Interest, focus/pageshow and
+owned mutations refresh it without polling. The compact dialog dropdown and the
+right-panel history share entry/value/image presentation. Only the latter deletes;
+image-set inspection has its own action and virtualized ordered contact sheet.
+Both reuse native Thumbnail admission and exact-value previews. Archive handles
+stay lazy rather than becoming downloaded browser Files.
+
+Dialog recall overlays compatible active contributors onto its current targets.
+Unrelated and dormant buffers remain intact; overlapping unsent changes use the
+existing leave guard. Missing/type/choice/resource/naming mismatches warn and skip;
+single-absolute and bulk-relative Ranges never convert implicitly. Values remain
+absolute. Late reads are revision/session/source/decision fenced. Right-panel
+recall restores original ordered targets, archived catalogue and every raw leaf,
+without probing today's same-named graph. Offline or replaced sources permit
+inspection/editing but offer no Run; they cannot retarget that editor.
+
+Workspace descriptors are registered generically before rendering. Assembly
+supplies Details/Anchors components; installed features supply their own component
+and ports. Membership validates workspace commands, and the saved choice resolves
+once after registration. Unknown choices fall back to Details. Only the selected
+component mounts; other spaces inherit no Details/Anchors navigation, metadata
+interest or comparator side. Width/divider ownership remains unchanged.
 
 The feature-private `makeVariationRecipe` owns registered raw editable fields,
 clean baselines, codecs and the global recipe revision. The mounted

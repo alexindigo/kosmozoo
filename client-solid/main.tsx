@@ -8,6 +8,8 @@ import { App } from "./components/App.js";
 import { FEATURES } from "./features/index.js";
 import { installNoPageZoom } from "/js/no-page-zoom.mjs";
 import { CORE_BINDINGS } from "./store/key-bindings.js";
+import { DetailsBody } from "./components/DetailsBody.js";
+import { AnchorSpace } from "./components/AnchorSpace.js";
 
 const store = appStore;
 
@@ -33,7 +35,9 @@ installNoPageZoom();
 
 // features register into the store before anything renders (the store never
 // imports a feature by name — the registry is the only place that knows them)
+store.actions.features.workspaceComponents({ details: DetailsBody, anchors: AnchorSpace });
 for (const f of FEATURES) store.actions.features.register(f);
+store.actions.features.ready();
 
 render(
   () => (

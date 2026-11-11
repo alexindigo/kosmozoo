@@ -7,6 +7,7 @@
 
 const PATHS = {
   "chevron-down": `<path d="M6 9l6 6 6-6" />`,
+  "history": `<path d="M4.5 7.5a9 9 0 1 1-1.5 7.5M1.5 3v6h6M12 6v6l4.5 3" />`,
   "minus": `<path d="M5 12h14" />`,
   "face-scan": `<path d="M8 3H3v5M16 3h5v5M21 16v5h-5M8 21H3v-5M8 10h.01M16 10h.01M9 15a4 4 0 0 0 6 0" />`,
   "plus": `<path d="M5 12h14M12 5v14" />`,

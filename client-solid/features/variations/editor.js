@@ -5,6 +5,7 @@ import { editorDomain, choiceValues, numericDefaults, numericText, sliderNumber 
 import { parseExactJson, stringifyExactJson, sameJsonValue } from "/shared/parameters.mjs";
 import { admitResourceTransfer } from "/shared/features/variations/compile.mjs";
 import { compileRecipe, parseRecipeCandidate, recipeImageView, currentRoot } from "/shared/features/variations/recipe-compile.mjs";
+import { acknowledgedHistoryFields, planHistoryOverlay, decodeHistoryRecipe } from "/shared/features/variations/history-codec.mjs";
 import { permutationPlan,
   resolveRelativeRanges, acknowledgedFields, targetRunPlan, catalogueParams, parameterIndex, parameterCurrent, parameterLabel, parameterAliases,
    variationOutputName, uploadFamily } from "/shared/features/variations/shared.mjs";
@@ -59,7 +60,8 @@ export function makeVariationEditor({ targets, services, currentOrigin, changed 
   const cachedInput = (origin, name) => sourceRecord(sourceFiles, origin)?.files.get(name);
   const batch = capturedTargets.length > 1;
   let alive = true, closeGeneration = 0, deciding = false, active = null, timer = null;
-  let result = null, running = false, catalogueReady = false, acceptedRevision = null;
+  let result = null, running = false, catalogueReady = false, acceptedRevision = null, restoredWork = false;
+  const heldRecords = new Map();
   const row = recipe.row;
   const evidence = (id, item) => imageChecks.get(id)?.get(imageIdentity(item));
   const imageView = (id, item, metadata, lookup = evidence) => recipeImageView(item, metadata, lookup(id, item), capturedTargets[0], batch);
@@ -86,7 +88,7 @@ export function makeVariationEditor({ targets, services, currentOrigin, changed 
             node: value?.node ?? "", slot: value?.slot ?? "" };
         }) } : {}),
        ...(domain === "images" ? { images: entry.values.items.map(item => imageView(id, item, entry.metadata)) } : {}) })])));
-  const dirty = () => acceptedRevision === null ? recipe.dirty() : recipe.revision() !== acceptedRevision;
+  const dirty = () => acceptedRevision === null ? restoredWork || recipe.dirty() : recipe.revision() !== acceptedRevision;
   const parseCandidate = (parameter, raw) => parseRecipeCandidate(parameter, raw, catalogues.get(capturedTargets[0].id)?.nodes);
   const candidateChoices = entry => (entry.metadata.options ?? []).map(value => ({ text: stringifyExactJson(value),
     label: stringifyExactJson(value),
@@ -116,7 +118,7 @@ export function makeVariationEditor({ targets, services, currentOrigin, changed 
     if (!imageChecks.has(id)) imageChecks.set(id, new Map());
     const checks = imageChecks.get(id);
     for (const item of entry.values.items) {
-      if (item.kind === "target" || imageReference(item) || checks.has(imageIdentity(item))) continue;
+      if (item.kind === "target" || item.kind === "archive" || imageReference(item) || checks.has(imageIdentity(item))) continue;
       const check = { pending: true }, identity = imageIdentity(item); checks.set(identity, check);
       let finish;
       const pending = new Promise(resolve => { finish = resolve; }); pendingInspections.add(pending);
@@ -149,6 +151,36 @@ export function makeVariationEditor({ targets, services, currentOrigin, changed 
   seed("naming", "root", {}, { prefix: "", suffix: "" });
   return {
     rows: view,
+    revision: recipe.revision,
+    async planRecall(saved) {
+      const revision = recipe.revision();
+      if (!alive || deciding || running) throw new Error("Finish the current action before recalling history");
+      const cohort = [];
+      for (const target of capturedTargets) {
+        if (!originCurrent(target)) throw new Error("Source origin changed; reopen Variations before recalling");
+        const data = catalogues.get(target.id) ?? await services.probe(target);
+        if (!alive || deciding || running || recipe.revision() !== revision || !originCurrent(target)) throw new Error("Editor changed while reading history; choose it again");
+        cohort.push(data);
+      }
+      const plan = planHistoryOverlay(saved, captureRows(), cohort, batch ? "bulk" : "single");
+      return { ...plan, revision, id: saved.id, leaseId: saved.leaseId, record: saved };
+    },
+    applyRecall(plan) {
+      if (!alive || running || plan.revision !== recipe.revision() || !capturedTargets.every(originCurrent)) return { status: "stale" };
+      for (const field of plan.patch) write(field.domain, field.id, field.name, field.value);
+      heldRecords.set(plan.leaseId, plan.record);
+      recipe.edited(); invalidateClose(); notify();
+      return { status: "applied" };
+    },
+    restoreHistory(record) {
+      if (!alive || catalogueReady || recipe.revision()) throw new Error("History requires a fresh editor");
+      for (const target of record.targets) catalogues.set(target.id, freeze(snapshotDraft({ ...target.catalogue, context: target.context })));
+      // Archived catalogues are readonly facts, not fresh authority. The explicit
+      // opening's matched contexts fence Run independently, including offline use.
+      this.installCatalogue({ ...record.targets[0].catalogue, context: record.targets[0].context }, true);
+      recipe.restore(decodeHistoryRecipe(record));
+      restoredWork = true; heldRecords.set(record.leaseId, record); notify();
+    },
     catalogue: catalogueRows,
     setEnabled(id, enabled) { const location = locations.find(row => row.id === id); if (!location) throw new Error(`Unknown parameter: ${id}`); return this.edit(location.domain, id, "enabled", enabled); },
     candidate(id, index, raw) {
@@ -294,10 +326,10 @@ export function makeVariationEditor({ targets, services, currentOrigin, changed 
       write("texts", id, "tpl", { ...entry.values.tpl, [label]: value });
       recipe.edited(); invalidateClose(); notify(); return true;
     },
-    installCatalogue(data) {
+    installCatalogue(data, archived = false) {
       if (!alive) return;
       const target = capturedTargets[0];
-      if (!validContext(data?.context) || !sameOrigin(data.context.origin, target.origin)) {
+      if (!archived && (!validContext(data?.context) || !sameOrigin(data.context.origin, target.origin))) {
         publish({ text: "Source-bound catalogue unavailable; your edits have been kept.", ok: false, state: "unavailable" }); return;
       }
       parameterIndex(allParameters(data)); parameterIndex(catalogueParams(data));
@@ -405,11 +437,19 @@ export function makeVariationEditor({ targets, services, currentOrigin, changed 
       const effects = { uploads: [], targets: [] };
       running = true; result = null; notify();
       try {
+        const saved = services.history ? await services.history.capture(ticket,
+          new Map([...catalogues].map(([id, catalogue]) => [id, catalogue.context])), target => check(ticket, target)) : null;
         await Promise.all(inspections);
         const runChecks = new Map([...capturedChecks].map(([id, checks]) => [id,
           new Map([...checks].map(([identity, value]) => [identity, freeze(snapshotDraft(value))]))]));
         const runEvidence = (id, item) => runChecks.get(id)?.get(imageIdentity(item));
         for (const target of ticket.targets) check(ticket, target);
+        let uploadFailure = false;
+        if (saved) operation.targetPlans = freeze(await services.history.plans(ticket, saved, target => check(ticket, target)));
+        else {
+        // Explicit narrow legacy service rigs retain their old wire contract.
+        // Application installation always supplies history and rejects unbound
+        // Run requests; capture failures never enter this compatibility branch.
         operation.compiled = compile(ticket.snapshot, null, false, runEvidence);
         if (operation.compiled.uploads.length && new Set(ticket.targets.map(target => target.origin?.address)).size > 1) throw new Error("Local-file variations across different backends are unsupported. Your files and edits have been kept.");
         for (const target of ticket.targets) check(ticket, target);
@@ -449,7 +489,7 @@ export function makeVariationEditor({ targets, services, currentOrigin, changed 
             check(ticket, uploadTarget); failures.push(error.message);
           }
         }
-        const uploadFailure = failures.length > 0;
+        uploadFailure = failures.length > 0;
         if (uploadFailure) throw new Error(failures[0]);
         operation.compiled = compile(ticket.snapshot, uploads, false, runEvidence);
         // Capture every immutable target plan before dispatch, including explicit
@@ -460,6 +500,7 @@ export function makeVariationEditor({ targets, services, currentOrigin, changed 
             acknowledgement: { version: 2, runId: ticket.runId, requestId: createRunId() } };
           return { target, operations: plan.operations, request, expectedTotal: count(request, catalogue) };
         }));
+        }
         const proofs = [];
         await Promise.all(operation.targetPlans.map(async ({ target, request, expectedTotal }) => {
           try {
@@ -481,7 +522,7 @@ export function makeVariationEditor({ targets, services, currentOrigin, changed 
               !Array.isArray(data.errors ?? []) || data.errors?.length) countsComplete = false;
             check(ticket, target);
             if (!response.ok) { failures.push(`${target.filename}: ${data?.error ?? response.text ?? `error ${response.status}`}`); return; }
-            const proof = acknowledgedFields(request, data);
+             const proof = request.history ? acknowledgedHistoryFields(request, data) : acknowledgedFields(request, data);
             for (const error of Array.isArray(data?.errors) ? data.errors : []) failures.push(error?.error ?? String(error));
             if (!proof || data.total !== expectedTotal || !sameContext(context, data.acknowledgement?.context)) {
               uncertain ||= data.outcome === "uncertain-effects" || data.submitted === data.total && !data.errors?.length;
@@ -505,8 +546,18 @@ export function makeVariationEditor({ targets, services, currentOrigin, changed 
       } catch (error) {
         if (owns(ticket)) publish({ text: error.message, ok: false, state: error.stale ? "stale" : "invalid", outcome: error.stale ? "retired" : "rejected", submitted, total, adopted: false, effects: freeze(snapshotDraft(effects)) });
         return { status: owns(ticket) ? error.stale ? "stale" : "invalid" : "stale", submitted, total, adopted: false };
-      } finally { if (owns(ticket)) { running = false; notify(); } }
+       } finally {
+         if (services.history) {
+           try { await services.history.finish(ticket.runId, result?.ok ? null : result?.reason ?? result?.text ?? null); }
+           catch (error) { if (owns(ticket)) publish({ ...result, historyError: error.message, text: `${result?.text ?? "Run ended"}; history refresh failed: ${error.message}` }); }
+         }
+         if (owns(ticket)) { running = false; notify(); }
+       }
     },
-    dispose() { alive = false; invalidateClose(); active = null; sourceFiles.clear(); inputCatalogues.clear(); },
+    dispose() {
+      alive = false; invalidateClose(); active = null; sourceFiles.clear(); inputCatalogues.clear();
+      for (const record of heldRecords.values()) services.history?.release(record).catch(() => {});
+      heldRecords.clear();
+    },
   };
 }

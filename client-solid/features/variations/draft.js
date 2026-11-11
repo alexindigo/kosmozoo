@@ -33,12 +33,12 @@ export function makeLeaveGuard({ dirty, suspend, restore, decision, invalidate }
       if (!alive) return Promise.resolve({ status: "stale" });
       const key = JSON.stringify(request.intent);
       if (pending) return key === pending.key ? pending.promise : Promise.resolve({ status: "busy" });
-      if (request.intent.type === "automatic" && dirty()) return Promise.resolve({ status: "stale" });
+       if (request.intent.type === "automatic" && dirty(request.intent)) return Promise.resolve({ status: "stale" });
       invalidate();
       const record = { ...request, key, committing: false };
       record.promise = new Promise((resolve, reject) => { record.resolve = resolve; record.reject = reject; });
       pending = record;
-      if (!dirty()) commit(record);
+       if (!dirty(request.intent)) commit(record);
       else { record.suspended = true; suspend(); decision(record.intent); }
       return record.promise;
     },

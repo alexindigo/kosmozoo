@@ -9,6 +9,7 @@ import { RECIPE_FIELDS, recipeField, recipeDispositions, snapshotDraft, freezeRe
 export const currentRoot = parameter => parameter.currentRoot ?? (parameter.fromOutput ? "output" : "input");
 export function recipeImageView(item, metadata, check, target, batch) {
   if (item.kind === "target") return { ...item, name: target.filename, each: batch, pending: false, error: "", sameCurrent: false };
+  if (item.kind === "archive") return { ...item, pending: false, error: "", sameCurrent: false };
   const reference = imageReference(item);
   return { ...item, ...(reference ?? {}), sameCurrent: reference ? currentRoot(metadata) === reference.root && reference.name === metadata.current
     : !!check?.hash && check.hash === check.currentHash, pending: !reference && (!check || !!check.pending), error: check?.error ?? "" };

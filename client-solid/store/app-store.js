@@ -44,6 +44,7 @@ import { makeJudgments } from "./judgments.js";
 import { cardState } from "./card-state.js";
 import { makeCommandHandles } from "./command-handles.js";
 import { registerCoreCommands, commandFacades } from "./core-commands.js";
+import { makeWorkspaceSpaces } from "./workspace-spaces.js";
 import { makeInputPolicy } from "./input-policy.js";
 import { launchNotice } from "/js/launch-notice.mjs";
 import { readZoomView, readyViewGeometry } from "/js/zoom-view.mjs";
@@ -207,11 +208,9 @@ export function makeAppStore({ subscribeSources = typeof window !== "undefined" 
   // right-column space + details layout — persisted (workspaceState contract).
   // Read once at construction: the persisted space must be set before the
   // first paint of the pane.
-  const [workspace, setWorkspaceSig] = createSignal((() => {
-    try {
-      return localStorage.getItem("kosmozoo.workspace.v1") === "anchors" ? "anchors" : "details";
-    } catch { return "details"; }
-  })());
+  const spaces = makeWorkspaceSpaces((() => { try { return localStorage.getItem("kosmozoo.workspace.v1") ?? "details"; } catch { return "details"; } })());
+  const [workspace, setWorkspaceSig] = createSignal("details");
+  const [spacesRevision, setSpacesRevision] = createSignal(0);
   const [infoLayout, setInfoLayoutSig] = createSignal((() => {
     try {
       const l = localStorage.getItem("kosmozoo.infoLayout.v1");
@@ -275,7 +274,7 @@ export function makeAppStore({ subscribeSources = typeof window !== "undefined" 
     workspace: workspace(),
     anchors: st.anchors,
     anchorName: st.diff.anchorName,
-    nodeImages: currentNodeImages(),
+    nodeImages: workspace() === "details" ? currentNodeImages() : [],
     infoFile: st.diff.infoFile,
     infoSource: st.diff.infoSource,
     host: host(),
@@ -756,7 +755,7 @@ export function makeAppStore({ subscribeSources = typeof window !== "undefined" 
   // The consumers of one entry — Details' current and its comparison — own
   // that entry's record through the metadata owner's direct path.
   createEffect(() => {
-    const entries = [currentEntry()?.entry, entryFor(currentStack().at(-1) ?? null)?.entry]
+    const entries = (workspace() === "details" ? [currentEntry()?.entry, entryFor(currentStack().at(-1) ?? null)?.entry] : [])
       .filter(Boolean).map(({ id, filename, hash, meta, extracted }) => ({ id, filename, hash, meta: !!meta, extracted: !!extracted }));
     untrack(() => metadata.show(entries));
   });
@@ -1715,6 +1714,8 @@ export function makeAppStore({ subscribeSources = typeof window !== "undefined" 
 
   const actions = {
     features: {
+      workspaceComponents(components) { spaces.components(components); setSpacesRevision(n => n + 1); },
+      ready() { actions.ui.setWorkspace(spaces.resolve()); },
       // Feature installation defines private operations/owner ports and semantic
       // commands before data bindings/affordances join the registry.
       register(f) {
@@ -1722,6 +1723,7 @@ export function makeAppStore({ subscribeSources = typeof window !== "undefined" 
         const installed = f.install?.({ state: stateObj, handles, setSt, reconcile, surfaceDisplay,
           comparison: { context: comparisonContext, accepted: () => displayReader()?.() ?? {} } });
         if (installed) {
+          spaces.register(installed.workspaceSpaces ?? []); setSpacesRevision(n => n + 1);
           if (installed.dispose) featureDisposals.add(installed.dispose);
           for (const command of installed.commands ?? []) handles.register(command);
           for (const command of installed.ownedCommands ?? []) handles.registerOwned(command);
@@ -2097,6 +2099,7 @@ export function makeAppStore({ subscribeSources = typeof window !== "undefined" 
         } catch (error) { if (ownsSession(s)) actions.status.error(`couldn't refresh sources: ${error.message}`); }
       },
       setWorkspace(space) {
+        if (!spaces.has(space)) return false;
         if (workspace() === space) return;
         setWorkspaceSig(space);
         try { localStorage.setItem("kosmozoo.workspace.v1", space); } catch { /* private mode */ }
@@ -2260,6 +2263,7 @@ export function makeAppStore({ subscribeSources = typeof window !== "undefined" 
           if (names[i + dir] != null) setSt("diff", "anchorName", names[i + dir]);
           return;
         }
+        if (workspace() !== "details") return;
         const imgs = currentNodeImages();
         const f = st.diff.infoFile, s = st.diff.infoSource;
         const i = f == null ? 0 : imgs.findIndex((im) => im.file === f && (s == null || im.source === s));
@@ -2291,7 +2295,7 @@ export function makeAppStore({ subscribeSources = typeof window !== "undefined" 
       ensureRightDefault() {
         if (workspace() === "anchors") {
           if (!st.diff.anchorName && st.anchors.length) setSt("diff", "anchorName", st.anchors[0].name);
-        } else {
+        } else if (workspace() === "details") {
           const imgs = currentNodeImages();
           if (!st.diff.infoFile && imgs.length) { setSt("diff", "infoFile", imgs[0].file); setSt("diff", "infoSource", imgs[0].source); }
         }
@@ -2669,6 +2673,7 @@ export function makeAppStore({ subscribeSources = typeof window !== "undefined" 
   createEffect(()=>{const value=anySourceHasNew();untrack(()=>faviconOwner?.update(value));});
   function entryHasNew(id) { const image=st.images[imageIdx(id)];return !!image && !!sourceRecords.get(image.host)?.isUnseen(image.arrivalSeq); }
   const stateObj = {
+    workspaceSpaces: () => { spacesRevision(); return spaces.list(); },
     featureContributions: slot => registeredFeatures.flatMap(f => f.installed?.[slot] ? [{ component: f.installed[slot], ports: f.installed.ports }] : []),
     comparisonProvider: () => comparisonProvider,
     comparisonAlignments: () => [{ value: "independent", label: "Independent" }, { value: "shared", label: "Shared" },
