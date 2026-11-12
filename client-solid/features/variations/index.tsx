@@ -36,7 +36,7 @@ export function install(store) {
     async run(payload) {
       const { ok, status, text } = await api.run(payload);
       let data = null;
-      try { data = JSON.parse(text); } catch { /* non-JSON error body */ }
+      try { data = api.readRunResult(text); } catch { /* non-JSON error body */ }
       return { ok, status, data, text };
     },
   };

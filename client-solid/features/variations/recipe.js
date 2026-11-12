@@ -18,6 +18,7 @@ export const RECIPE_FIELDS = Object.freeze({
     mode: field("numeric-mode", "ranges"), value: field("string", "ranges") }),
   images: Object.freeze({ enabled: field("boolean", "imageSelections", "enabled"), items: field("image-set", "imageParams") }),
   enums: Object.freeze({ enabled: field("boolean", "imageSelections", "enabled"), picks: field("strings", "imageParams") }),
+  candidates: Object.freeze({ enabled: field("boolean", "imageSelections", "enabled"), candidates: field("strings", "imageParams") }),
   texts: Object.freeze({ enabled: field("boolean", "imageSelections", "enabled"), text: field("string", "imageParams"), tpl: field("templates", "imageParams") }),
   naming: Object.freeze({ prefix: field("string", "naming"), suffix: field("string", "naming") }),
 });

@@ -101,11 +101,11 @@ Deno.test("identity: equal image values/titles never merge rows or their native 
   editor.addImages('81.image', [{ kind: 'upload', name: second.name, file: second }]);
   editor.installInputs({ origin, files: ['same.png'] });
   assertEquals(Object.keys(editor.rows('images')), ['76.image', '81.image']);
-  assert(editor.rows('images')['76.image'].items[0].file === first);
-  assert(editor.rows('images')['81.image'].items[0].file === second);
+  assert(editor.rows('images')['76.image'].items[1].file === first);
+  assert(editor.rows('images')['81.image'].items[1].file === second);
   assertEquals(editor.rows('images')['76.image'].label, 'Reference #76 · image');
   assertEquals(editor.rows('images')['81.image'].label, 'Reference #81 · image');
   assertThrows(() => editor.installCatalogue({ ...data, textParams: [...data.textParams, data.params[0]] }), Error, 'Duplicate');
-  assert(editor.rows('images')['76.image'].items[0].file === first);
+  assert(editor.rows('images')['76.image'].items[1].file === first);
   editor.dispose();
 });

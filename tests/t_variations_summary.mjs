@@ -3,6 +3,7 @@ import { editorRig } from "./helpers/variation-editor.mjs";
 
 Deno.test("summary: the shared tuple kernel explains every factor and excludes only the unchanged tuple", () => {
   const { editor } = editorRig();
+  editor.setEnabled("n.denoise", true);
   try {
     editor.range("n.denoise", { min: "0.85", max: "1" });
     editor.edit("images", "image.image", "enabled", true);
@@ -19,6 +20,7 @@ Deno.test("summary: the shared tuple kernel explains every factor and excludes o
 
 Deno.test("summary: invalid raw Step and reversed bounds remain editable without a default-backed valid total", () => {
   const { editor } = editorRig();
+  editor.setEnabled("n.denoise", true);
   try {
     editor.edit("numeric", "n.denoise", "rawIncrement", "1e");
     let summary = editor.preview();

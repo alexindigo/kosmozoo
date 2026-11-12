@@ -1,0 +1,25 @@
+const assert=require('node:assert/strict'),fs=require('node:fs');
+const {addParameter,removeRecordedImage}=require('./variation-add-helpers.cjs');
+const {pickInput}=require('./image-picker-helpers.cjs');
+module.exports=async({cdp,ENGINE,FAKE,E,KZ,write})=>{
+  const name='reference-current.png',current=name+' [input]',filename='reference-proof.png';
+  const graph={'11':{class_type:'LoadImage',inputs:{image:current}},'9':{class_type:'BasicScheduler',inputs:{denoise:1,image:['11',0]}},'14':{class_type:'SaveImage',inputs:{images:['9',0],filename_prefix:'reference'}}};
+  assert((await fetch(FAKE+'/__test/activity',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({reset:true,captureEnqueue:true,publishInputs:[{name,fixture:'flux-lora.png',width:96,height:64}],publish:[{name:filename,fixture:'flux-lora.png',graph,width:640,height:480}]})})).ok);
+  await cdp.goto(ENGINE+'/#fake#'+filename);await cdp.poll('!!document.querySelector(".card .variations")',20000);
+  await cdp.evaluate(`(async()=>{await fetch('/api/collections/fake/entries/${filename}/bytes');return ${KZ}.handles.invoke('variations.open',{id:'fake:${filename}'})})()`);
+  await addParameter(cdp,'11.image');await removeRecordedImage(cdp,'11.image');await pickInput(cdp,name);
+  await cdp.poll('document.querySelector(".vz-count").textContent==="0"');
+  await cdp.poll('document.querySelector(".vz-image-tile img")?.naturalWidth>0');
+  await cdp.evaluate(`(()=>{const original=window.fetch;window.__referenceRequests=[];window.__referenceResponses=[];window.fetch=async(url,options)=>{if(String(url).includes('/features/variations/run'))window.__referenceRequests.push(options.body);const response=await original(url,options);if(String(url).includes('/features/variations/run'))window.__referenceResponses.push(await response.clone().text());return response}})()`);
+  await cdp.evaluate(`(async()=>${KZ}.handles.invoke('variations.run'))()`);
+  assert.equal((await(await fetch(FAKE+'/__test/enqueues')).json()).length,0);
+  assert.deepEqual(await cdp.evaluate('JSON.parse(window.__referenceRequests[0]).imageParams["11.image"].values'),[current]);
+  await addParameter(cdp,'9.denoise');await cdp.clickAt('[data-param-key="9.denoise"] .mode-switch button:last-child');
+  await write('[data-param-key="9.denoise"] .vz-value-field input','0.5');
+  const result=await cdp.evaluate(`(async()=>${KZ}.handles.invoke('variations.run'))()`);assert.equal(result.adopted,true);assert.equal(result.submitted,1);
+  const jobs=await(await fetch(FAKE+'/__test/enqueues')).json();assert.equal(jobs.length,1);assert.equal(jobs[0].prompt['11'].inputs.image,current);
+  const record=await cdp.evaluate('({requests:window.__referenceRequests,responses:window.__referenceResponses})');
+  assert.equal(JSON.parse(record.requests.at(-1)).acknowledgement.version,2);
+  fs.writeFileSync(E+'/reference-current-consumer.json',JSON.stringify({current,result,record,finalAssignment:jobs[0].prompt['11'].inputs.image},null,2));
+  console.log('PASS explicit input remove/reselect: current-only zero jobs; changed numeric axis sends exact original raw annotation and adopts v2');
+};

@@ -1,6 +1,7 @@
 const assert = require('node:assert/strict');
 const { openImageAdd, waitForInputPicker } = require('./image-picker-helpers.cjs');
 const { freshRecipe } = require('./recipe-helpers.cjs');
+const { addParameter } = require('./variation-add-helpers.cjs');
 
 module.exports = async ({ cdp, KZ, check }) => {
   const invoke = (id, args = {}) => cdp.evaluate(`(async()=>${KZ}.handles.invoke(${JSON.stringify(id)},${JSON.stringify(args)}))()`);
@@ -20,8 +21,8 @@ module.exports = async ({ cdp, KZ, check }) => {
   check('outside click: source and options menus retain inside-origin releases and close on a subsequent genuine outside click', true);
   await cdp.evaluate(`(async()=>{await fetch('/api/collections/fake/entries/flux-controlnet.png/bytes')})()`);
   await invoke('variations.open', { id: 'fake:flux-controlnet.png' });
-  await cdp.poll("!!document.querySelector('.vz-image-set')"); await freshRecipe(cdp);
-  await cdp.clickAt('.vz-image-set .checkbox'); await openImageAdd(cdp);
+  await cdp.poll("!!document.querySelector('[data-catalogue-id=\"43.image\"]')"); await freshRecipe(cdp);
+   await addParameter(cdp,'43.image');await require('./variation-add-helpers.cjs').removeRecordedImage(cdp,'43.image'); await openImageAdd(cdp);
   await cdp.clickAt('.vz-input-trigger'); await waitForInputPicker(cdp);
   try {
     // Last-selection removal restores the empty-state row and moves the anchor.

@@ -6,12 +6,130 @@
 
 import { assert, assertEquals } from "jsr:@std/assert";
 import { Ingest } from "../src/ingest.mjs";
-import { Cache } from "../src/cache.mjs";
+import { Cache, sha256 } from "../src/cache.mjs";
 import { Store } from "../src/store.mjs";
 import { imageDims } from "../src/extractor.mjs";
 import { mkdtemp, rm, readFile, writeFile, mkdir } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { mkStateRig } from "./helpers/rig.mjs";
+import { testPng } from "./helpers/png.mjs";
+import { Database } from "@db/sqlite";
+
+const deferred = () => { let resolve; const promise = new Promise(r => resolve = r); return { promise, resolve }; };
+const roots = ["input", "temp", "output"];
+const putHash = (store, kind, hash) => kind === "output" ? store.ingestFile("c", "same.png", hash, 100)
+  : store.resourceCachePut("c", "same.png", kind, hash, null, 100);
+
+function assertProjections(store, dims) {
+  assertEquals(store.entryDims("c", "same.png"), dims);
+  for (const row of [store.entryJoined("c", "same.png"), store.entriesForCollection("c")[0]]) {
+    assertEquals([row.width, row.height], [dims?.width ?? null, dims?.height ?? null]);
+  }
+  assertEquals(store.dimsKnown("c").has("same.png"), !!dims);
+  assertEquals(store.dimsForHost("c"), dims ? { "same.png": dims } : {});
+  assertEquals(store.metadataFor("c", ["same.png"]).dims, dims ? { "same.png": dims } : {});
+  assertEquals(store.metadataSince("c").dims, dims ? { "same.png": dims } : {});
+}
+
+for (const kind of roots) for (const readable of [true, false]) Deno.test(`dims: late ${kind} head follows full ingestion (${readable})`, async () => {
+  const r = await mkStateRig("late-head", { hosts: { c: "example:1" } });
+  const entered = deferred(), release = deferred(), old = testPng(30, 20);
+  const ingest = new Ingest(r.store, r.hosts, { cache: r.cache, backingFor: () => ({ read: () => {
+    entered.resolve(); return { status: 206, body: new ReadableStream({ async start(controller) {
+      await release.promise; controller.enqueue(old); controller.close();
+    } }) };
+  } }) });
+  try {
+    const pending = ingest.dims("c", "same.png", kind);
+    await entered.promise;
+    const next = readable ? testPng(70, 50) : new Uint8Array([1, 2, 3]);
+    await ingest.ensureBytes("c", "same.png", next, { kind });
+    release.resolve();
+    const dims = readable ? { width: 70, height: 50 } : null;
+    assertEquals((await pending).dims, dims, "retired head result cannot escape to its caller");
+    assertEquals(r.store.entryDims("c", "same.png", kind), dims);
+    if (kind === "output") assertProjections(r.store, dims);
+  } finally { release.resolve(); await r.close(); }
+});
+
+for (const kind of roots) for (const readable of [true, false, null]) Deno.test(`dims: ${kind} hashed gap reads only its exact cache (${readable})`, async () => {
+  const r = await mkStateRig("hash-gap", { hosts: { c: "example:1" } });
+  const bytes = readable ? testPng(30, 20) : new Uint8Array([1, 2, 3]), hash = await sha256(bytes);
+  let reads = 0;
+  const ingest = new Ingest(r.store, r.hosts, { cache: r.cache, backingFor: () => ({ read: () => {
+    reads++; return { status: 206, body: testPng(70, 50) };
+  } }) });
+  try {
+    if (readable !== null) await r.cache.put(hash, bytes);
+    await putHash(r.store, kind, hash);
+    const dims = readable ? { width: 30, height: 20 } : null;
+    assertEquals((await ingest.dims("c", "same.png", kind)).dims, dims);
+    assertEquals(reads, 0, "today's name cannot fill an older hash's facts");
+    assertEquals(r.store.entryGet("c", "same.png", kind).hash, hash);
+    assertEquals(r.store.entryDims("c", "same.png", kind), dims);
+    if (kind === "output") assertProjections(r.store, dims);
+  } finally { await r.close(); }
+});
+
+for (const kind of roots) for (const phase of ["head", "full", "cache-put"]) Deno.test(`dims: ${kind} ${phase} completion cannot publish after same-source retirement`, async () => {
+  const hosts = { c: "example:1", alias: "example:1" }, r = await mkStateRig("dims-retirement", { hosts });
+  const bytes = testPng(30, 20), entered = deferred(), release = deferred();
+  const ingest = new Ingest(r.store, hosts, {
+    capture: r.inventory.capture, isCurrent: r.inventory.isCurrent,
+    cache: { async put(hash, value) { entered.resolve(); await release.promise; await r.cache.put(hash, value); } },
+    backingFor: () => ({ async read() { entered.resolve(); await release.promise; return { status: phase === "head" ? 206 : 200, body: bytes }; },
+      stat: () => ({ stamp: "same" }) }),
+  });
+  try {
+    const pending = phase === "head" ? ingest.dims("c", "same.png", kind)
+      : phase === "full" ? ingest.ensure("c", "same.png", kind)
+      : ingest.ensureBytes("c", "same.png", bytes, { kind }).catch(error => ({ cancelled: error.code === "cancelled" }));
+    await entered.promise;
+    delete hosts.c; r.inventory.reconcile(); hosts.c = "example:1"; r.inventory.reconcile();
+    r.store.collectionAdd("c", hosts.c);
+    const version = r.store.metaVersion;
+    release.resolve();
+    const result = await pending;
+    assertEquals(result.cancelled, true);
+    assertEquals(r.store.entryGet("c", "same.png", kind), null);
+    assertEquals(r.store.contentGet(await sha256(bytes)), null);
+    assertEquals(r.store.metaVersion, version);
+  } finally { release.resolve(); await r.close(); }
+});
+
+Deno.test("dims: all Store projections ignore legacy hash-bound entry geometry", async () => {
+  const r = await mkStateRig("legacy-dims", { hosts: {} });
+  try {
+    await putHash(r.store, "output", "a".repeat(64));
+    const db = new Database(join(r.dir, "metadata.db"));
+    try { db.exec("UPDATE entry SET width=30, height=20 WHERE name='same.png'"); } finally { db.close(); }
+    assertProjections(r.store, null);
+  } finally { await r.close(); }
+});
+
+for (const kind of roots) for (const effect of ["retire", "remap"]) Deno.test(`dims: delayed ${kind} cache recovery fences ${effect}`, async () => {
+  const hosts = { c: "example:1", alias: "example:1" }, r = await mkStateRig("gap-fence", { hosts });
+  const bytes = testPng(30, 20), hash = await sha256(bytes), entered = deferred(), release = deferred();
+  const ingest = new Ingest(r.store, hosts, { cache: { async get() { entered.resolve(); await release.promise; return bytes; } },
+    capture: r.inventory.capture, isCurrent: r.inventory.isCurrent,
+    backingFor: () => ({ async read() { entered.resolve(); await release.promise; return { status: 206, body: bytes }; } }) });
+  try {
+    await putHash(r.store, kind, hash);
+    const pending = ingest.dims("c", "same.png", kind); await entered.promise;
+    if (effect === "retire") {
+      delete hosts.c; r.inventory.reconcile(); hosts.c = "example:1"; r.inventory.reconcile();
+      r.store.collectionRemove("c"); r.store.collectionAdd("c", hosts.c);
+    } else await putHash(r.store, kind, "b".repeat(64));
+    const version = r.store.metaVersion;
+    release.resolve(); const result = await pending;
+    assertEquals(result.dims, null);
+    if (effect === "retire") assertEquals(result.status, 499);
+    assertEquals(r.store.contentGet(hash)?.width ?? null, null, "retired evidence is not published");
+    assertEquals(r.store.metaVersion, version);
+    assertEquals(r.store.entryDims("c", "same.png", kind), null);
+  } finally { release.resolve(); await r.close(); }
+});
 
 // --- synthetic images: just enough header for imageDims ---------------------
 

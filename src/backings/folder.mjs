@@ -93,7 +93,10 @@ export async function inventory(addr, { binding, ...options } = {}) {
 }
 
 // { stamp: mtime stringified, size } — the folder's whole revalidation seam.
-export async function stat(addr, name) {
+// A folder source's files serve both its output and input roots (list(kind)
+// above); it has no temp root, so a temp reference never aliases a folder file.
+export async function stat(addr, name, kind = "output") {
+  if (kind === "temp") return null;
   if (!assertSafeName(name)) return null;
   try {
     const s = await fsStat(join(folderPath(addr), name));
@@ -105,7 +108,8 @@ export async function stat(addr, name) {
 
 // Read bytes. `range: [start, end]` (inclusive) reads just that head slice —
 // the dims pass never touches the rest of the file .
-export async function read(addr, name, _kind = "output", { range } = {}) {
+export async function read(addr, name, kind = "output", { range } = {}) {
+  if (kind === "temp") return { status: 404 };
   if (!assertSafeName(name)) return { status: 400 };
   const full = join(folderPath(addr), name);
   const mime = EXT_MIME[name.split(".").pop().toLowerCase()];

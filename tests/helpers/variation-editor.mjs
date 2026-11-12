@@ -1,17 +1,23 @@
 import { makeVariationEditor } from "../../client-solid/features/variations/editor.js";
+import { parameterCatalogue } from "../../src/features/variations/server.mjs";
+import { objectInfoView } from "../../src/backings/comfy.mjs";
+import { loadImage } from "./comfy-object-info.mjs";
 import { generatePermutations, permutationAxes, resolveRelativeRanges } from "../../src/features/variations/shared.mjs";
 
 export function editorRig(overrides = {}) {
   let origin = { source: "fake", address: "fake:8188", kind: "comfy", epoch: "test-epoch", incarnation: "test-incarnation" };
   const context = { origin: { ...origin }, graphHash: "a".repeat(64) };
-  const catalogue = { context,
-    params: [{ id: "n.denoise", key: "denoise", current: 1, integer: false, type: "BasicScheduler", nodeIds: ["n"] },
-      { id: "n.steps", key: "steps", current: 20, integer: true, type: "BasicScheduler", nodeIds: ["n"] }],
-    stringParams: [{ id: "image.image", key: "image", type: "LoadImage", current: "origin.png", nodeIds: ["image"] }],
-    enumParams: [{ id: "choice.value", key: "value", type: "Choice", current: "first", values: ["first", "second"], nodeIds: ["choice"] }],
-    textParams: [{ id: "text.text", key: "text", type: "Text", current: "original", nodeIds: ["text"] },
-      { id: "submit.text", key: "text", type: "Text", current: "other", nodeIds: ["submit"] }],
-  };
+  // Production-shaped probe: the same catalogue owner and normalized backend
+  // declarations as the engine, including LoadImage's listing/upload contract.
+  const graph = { n: { class_type: "BasicScheduler", inputs: { denoise: 1, steps: 20 } },
+    image: { class_type: "LoadImage", inputs: { image: "origin.png" } },
+    choice: { class_type: "Choice", inputs: { value: "first" } },
+    text: { class_type: "Text", inputs: { text: "original" } }, submit: { class_type: "Text", inputs: { text: "other" } } };
+  const info = { BasicScheduler: { input: { required: { steps: ["INT", {}], denoise: ["FLOAT", {}] } } }, LoadImage: loadImage(["origin.png", "next.png"]),
+    Choice: { input: { required: { value: [["first", "second"], {}] } } }, Text: { input: { required: { text: ["STRING", {}] } } } };
+  const schema = objectInfoView(info, null);
+  const catalogue = { context, ...parameterCatalogue(graph, schema),
+    nodes: Object.entries(graph).map(([id, node]) => ({ id, type: node.class_type, title: null, outputs: schema.outputs.get(node.class_type) ?? null })) };
   const requests = [], uploads = [], timers = []; let closes = 0;
   const values = Object.fromEntries([...catalogue.params, ...catalogue.stringParams, ...catalogue.enumParams, ...catalogue.textParams].map(parameter => [parameter.id, parameter.current]));
   const services = {
@@ -43,4 +49,12 @@ export function editorRig(overrides = {}) {
   return { editor, catalogue, context, requests, uploads, timers, services,
     replaceSource: () => { origin = { ...origin, address: "replacement:8188", incarnation: "replacement" }; },
     closeCount: () => closes, fireTimers: () => { for (const timer of timers) if (timer.active) { timer.active = false; timer.callback(); } } };
+}
+
+// Acquisition scenarios that intentionally start from an empty set model the
+// user's ordinary removal, never change the product's catalogue defaults.
+export function removeRecordedImages(rig) {
+  for (const row of Object.values(rig.editor.rows("images")))
+    for (const item of row.items) rig.editor.removeImage(row.id, item);
+  return rig;
 }

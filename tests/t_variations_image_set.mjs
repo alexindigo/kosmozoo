@@ -1,5 +1,6 @@
 import { assert, assertEquals, assertThrows } from "jsr:@std/assert";
-import { editorRig } from "./helpers/variation-editor.mjs";
+import { editorRig as defaultRig, removeRecordedImages } from "./helpers/variation-editor.mjs";
+const editorRig = overrides => removeRecordedImages(defaultRig(overrides));
 import { uploadCandidate, uploadFamily } from "../src/features/variations/shared.mjs";
 import { generatePermutations } from "../src/features/variations/shared.mjs";
 
@@ -44,11 +45,11 @@ Deno.test("image set: acquisition is additive, identity-deduplicated and removab
 });
 
 Deno.test("image set: catalogue settlement never selects the first input or replaces chosen work", () => {
-  const { editor, context } = editorRig();
-  assertEquals(editor.rows("images")[id].items, []); assert(!editor.dirty());
+  const { editor, context } = defaultRig();
+  assertEquals(editor.rows("images")[id].items, [{ kind: "reference", value: "origin.png" }]); assert(!editor.dirty());
   editor.addImages(id, [input("next.png")]);
   editor.installInputs({ origin: context.origin, files: ["new-first.png"] });
-  assertEquals(editor.rows("images")[id].items, [input("next.png")]); editor.dispose();
+  assertEquals(editor.rows("images")[id].items, [{ kind: "reference", value: "origin.png" }, input("next.png")]); editor.dispose();
 });
 
 Deno.test("image set: same-current bytes are marked before Run, counted like the current name and never uploaded", async () => {

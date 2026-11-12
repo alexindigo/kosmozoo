@@ -10,77 +10,41 @@
 // nodes) — the backing owns object_info/enqueue; the store owns the bytes.
 
 import {
-  generatePermutations, permutationAxes, permutationPlan, resolveRelativeRanges, templateReplaceWithProof,
-  paramId, parameterIndex, parameterCurrent, catalogueParams, parameterAliases, validRunAcknowledgement, runOperationFields, targetRunPlan,
-  outputName,
+  generatePermutations, permutationAxes, permutationPlan, resolveRelativeRanges,
+  parameterIndex, parameterCurrent, catalogueParams, parameterAliases, validRunAcknowledgement, runOperationFields, targetRunPlan,
+  composeOutputName, variationOutputName, paramId,
 } from "./shared.mjs";
 import { validEntryName, backingFor as defaultBackingFor } from "../../backings/index.mjs";
 import { sourceOrigin, sameOrigin, validOrigin, validContext, expectedOrigin } from "../../source-origin.mjs";
-import { dependencyClosure, validateGraphLinks } from "../../graph.mjs";
+import { dependencyClosure } from "../../graph.mjs";
 import { sha256 } from "../../cache.mjs";
 import { IMAGE_EXTENSIONS, mediaExtension } from "../../backings/mime.mjs";
 import { listImages, readImage, folderError } from "./folder-images.mjs";
 import { inspectImage } from "./image-inspection.mjs";
 import { readJson, mediaHeaders } from "../../routes.mjs";
+import { isResourceRoot, graphParameters, editableParameter, cloneJsonValue, sameJsonValue, parseExactJson, stringifyExactJson } from "../../parameters.mjs";
+import { compileValue, compileDiscreteAxes, validateFinalGraph } from "./compile.mjs";
+
+const exactResponse = (value, init = {}) => new Response(stringifyExactJson(value), {
+  ...init, headers: { "Content-Type": "application/json", ...init.headers },
+});
 
 // hard cap on permutations per run — a sweep is a human-scale batch, not a
 // fork bomb (F7). Above the cap the run answers 413.
 const MAX_PERMUTATIONS = 500;
 
-const IMG_FILE = /\.(png|jpe?g|webp|gif|avif|bmp)$/i;
-
-// ComfyUI stores output-sourced LoadImage widget values as "name.png [output]"
-const ANNOTATION = /^(.*)\s+\[([^\]]*)\]$/;
-
 // --- graph inspection (ComfyUI conventions) -----------------------------------
 
-// One walk, explicit classification precedence, one descriptor constructor.
-// Strategies supply only kind-specific metadata; identity/location is shared.
-const PARAMETER_KINDS = [
-  { kind: "numeric", channel: "params", accepts: p => typeof p.value === "number",
-    describe: p => ({ integer: p.declared ? p.declared === "INT" : Number.isInteger(p.value) }) },
-  { kind: "image", channel: "stringParams", accepts: p => p.image,
-    describe: p => {
-      const match = ANNOTATION.exec(p.value), file = match ? match[1] : p.value;
-      return IMG_FILE.test(file) ? { current: file, currentValue: p.value, fromOutput: match ? /^output$/i.test(match[2]) : false } : null;
-    } },
-  { kind: "enum", channel: "enumParams", accepts: p => p.options?.length,
-    describe: p => ({ values: p.options }) },
-  { kind: "text", channel: "textParams", accepts: () => true, describe: () => ({}) },
-];
-export function parameterCatalogue(graph, { types = null, enums = null, outputClasses = null, dynamicCombos = null } = {}) {
-  const catalogue = Object.fromEntries(PARAMETER_KINDS.map(strategy => [strategy.channel, []]));
-  for (const [nodeId, node] of Object.entries(graph ?? {})) {
-    const type = String(node.class_type ?? "");
-    if (!type) continue;
-    const title = node._meta?.title && node._meta.title !== type ? String(node._meta.title) : null;
-    const nodeTypes = new Map(types), nodeEnums = new Map(enums);
-    const selectBranches = combos => {
-      for (const [name, options] of combos ?? []) {
-        if (!name.startsWith(type + ".")) continue;
-        const branch = options.get(node.inputs?.[name.slice(type.length + 1)]);
-        if (!branch) continue;
-        for (const [key, value] of branch.types) nodeTypes.set(key, value);
-        for (const [key, value] of branch.enums) nodeEnums.set(key, value);
-        selectBranches(branch.dynamicCombos);
-      }
-    };
-    selectBranches(dynamicCombos);
-    for (const [key, value] of Object.entries(node.inputs ?? {})) {
-      if (typeof value !== "number" && typeof value !== "string") continue;
-      if (typeof value === "string" && key === "filename_prefix" && outputClasses?.has(type)) continue;
-      const schemaKey = `${type}.${key}`;
-      const context = { value, declared: nodeTypes.get(schemaKey), options: nodeEnums.get(schemaKey),
-        image: typeof value === "string" && /loadimage$/i.test(type) && key === "image" };
-      const strategy = PARAMETER_KINDS.find(strategy => strategy.accepts(context));
-      const metadata = strategy.describe(context);
-      if (!metadata) continue;
-      catalogue[strategy.channel].push({ id: paramId(nodeId, key), nodeId, nodeIds: [nodeId], key,
-        type, title, kind: strategy.kind, current: value, ...metadata });
-    }
+const PARAMETER_CHANNELS = { numeric: "params", image: "stringParams", enum: "enumParams", text: "textParams" };
+export function parameterCatalogue(graph, schema = {}) {
+  const parameters = graphParameters(graph, schema);
+  const catalogue = Object.fromEntries(Object.values(PARAMETER_CHANNELS).map(channel => [channel, []]));
+  for (const parameter of parameters) {
+    const editable = editableParameter(parameter);
+    if (editable) catalogue[PARAMETER_CHANNELS[editable.kind]].push(editable);
   }
   parameterIndex(catalogueParams(catalogue), graph);
-  return catalogue;
+  return { ...catalogue, parameters };
 }
 
 // Compatibility inspection ports all project the same descriptor pipeline.
@@ -91,8 +55,8 @@ export const textParams = (graph, enums, outputClasses) => parameterCatalogue(gr
 
 // --- graph mutation --------------------------------------------------------------
 
-export function mutateGraph(graph, permutation, params, dynamicCombos = null) {
-  const clone = structuredClone(graph);
+export function mutateGraph(graph, permutation, params, dynamicCombos = null, { rangeIds = null } = {}) {
+  const clone = cloneJsonValue(graph);
   const byId = parameterIndex(params ?? inspectGraph(clone));
   // Prepare branch switches before explicit scalar writes, independent of axis
   // order. An inactive child cannot be reintroduced by a later assignment.
@@ -115,7 +79,7 @@ export function mutateGraph(graph, permutation, params, dynamicCombos = null) {
           for (const child of Object.keys(inputs)) if (child.startsWith(key + ".")) delete inputs[child];
           for (const [child, value] of branch.defaults) {
             if (value === undefined) throw new Error(`No object_info default for ${nodeId}.${child.slice(type.length + 1)}`);
-            inputs[child.slice(type.length + 1)] = structuredClone(value);
+            inputs[child.slice(type.length + 1)] = cloneJsonValue(value);
           }
         }
         prepare(branch.dynamicCombos);
@@ -127,12 +91,12 @@ export function mutateGraph(graph, permutation, params, dynamicCombos = null) {
   for (const [id, value] of Object.entries(permutation)) {
     const p = byId.get(id);
     if (!p) continue;
-    const v = typeof value === "string" ? value : (p.integer ? Math.round(value) : value);
+    const v = compileValue(p, p.integer && typeof value === "number" && (rangeIds === null || rangeIds.has(id)) ? Math.round(value) : value);
     for (const nodeId of p.nodeIds) {
       const node = clone[nodeId];
       if (!node?.inputs || !Object.hasOwn(node.inputs, p.key)) continue;
-      node.inputs[p.key] = v;
-      writes.push({ id, nodeId, key: p.key, value: v });
+      node.inputs[p.key] = cloneJsonValue(v);
+      writes.push({ id, nodeId, key: p.key, value: cloneJsonValue(v) });
     }
     if (writes.some(write => write.id === id)) applied.push(id);
   }
@@ -141,13 +105,15 @@ export function mutateGraph(graph, permutation, params, dynamicCombos = null) {
 
 // Descriptor IDs are not proof. Every carrier must have received the assignment
 // and survived output narrowing/rewriting. Colliding descriptors stay uncertified.
-function survivingAxes(graph, writes, inspection) {
+function survivingAxes(graph, writes, inspection, namingProofs = []) {
   return [...new Set(writes.map(write => write.id))].filter(id => {
     const descriptors = inspection.filter(param => param.id === id);
     if (descriptors.length !== 1) return false;
     const carriers = descriptors[0].nodeIds;
     return carriers.length > 0 && carriers.every(nodeId => writes.some(write => write.id === id && write.nodeId === nodeId &&
-      Object.hasOwn(graph[nodeId]?.inputs ?? {}, write.key) && Object.is(graph[nodeId].inputs[write.key], write.value)));
+      Object.hasOwn(graph[nodeId]?.inputs ?? {}, write.key) && (sameJsonValue(graph[nodeId].inputs[write.key], write.value) ||
+        namingProofs.some(proof => proof.nodeId === nodeId && proof.parameterId === id && write.key === "filename_prefix" &&
+          sameJsonValue(proof.candidate, write.value) && sameJsonValue(graph[nodeId].inputs[write.key], proof.value)))));
   });
 }
 
@@ -193,11 +159,33 @@ export function outputNodeIndex(graph, outputClasses) {
   return out;
 }
 
+export function outputNamingTargets(graph, filename, producingId, outputClasses) {
+  return outputNodeIndex(graph, outputClasses).map(nodeId => {
+    const path = outputPath(graph[nodeId].inputs?.filename_prefix ?? "");
+    return { nodeId, parameterId: paramId(nodeId, "filename_prefix"), directory: path.directory,
+      sourceStem: nodeId === producingId ? stripExtension(outputPath(filename).leaf) : path.leaf,
+      leafOnly: filename.includes("/") };
+  });
+}
+
+function writeOutputNames(graph, targets, pfx, sfx, { values = {}, proofs = [] } = {}) {
+  const written = [];
+  for (const target of targets) {
+    const node = graph[target.nodeId];
+    if (!node?.inputs) throw new Error(`Producing output node ${target.nodeId} is missing`);
+    const result = composeOutputName(target, values, pfx, sfx);
+    node.inputs.filename_prefix = result.value;
+    if (result.selected) proofs.push({ ...result, nodeId: target.nodeId });
+    written.push(target.nodeId);
+  }
+  return written;
+}
+
 export { HEADROOM, OUTPUT_NAME_BUDGET as NAME_MAX_WITHOUT_COUNTER } from "./shared.mjs";
 
 // Wrap ONLY the producing node's filename_prefix. Other output nodes stay
 // only when the producer depends on them, including through lazy inputs.
-export function narrowToOneOutputNode(graph, producingId, basename, pfx, sfx, outputClasses) {
+export function narrowToOneOutputNode(graph, producingId, basename, pfx, sfx, outputClasses, options = {}) {
   const dependencies = dependencyClosure(graph, producingId);
   let kept = 0, dropped = 0;
   for (const nid of outputNodeIndex(graph, outputClasses)) {
@@ -205,24 +193,16 @@ export function narrowToOneOutputNode(graph, producingId, basename, pfx, sfx, ou
     delete graph[nid];
     dropped++;
   }
-  // Directory ownership is independent of the shared filename-leaf budget.
-  const directory = outputPath(graph[producingId].inputs.filename_prefix).directory;
-  graph[producingId].inputs.filename_prefix = directory + outputName({ prefix: pfx, sourceStem: outputPath(basename).leaf, suffix: sfx });
-  return { kept, dropped, written: [producingId] };
+  const target = options.targets?.find(target => target.nodeId === producingId) ?? {
+    nodeId: producingId, directory: outputPath(graph[producingId].inputs.filename_prefix).directory, sourceStem: outputPath(basename).leaf };
+  return { kept, dropped, written: writeOutputNames(graph, [target], pfx, sfx, options) };
 }
 
 // Fallback: wrap every output node's own prefix with the user's pfx/sfx.
 // The same shared writer keeps affixes whole and folds only the source stem.
-export function wrapAllOutputPrefixes(graph, pfx, sfx, outputClasses) {
-  const written = [];
-  for (const [nid, n] of Object.entries(graph)) {
-    if (!outputClasses.has(String(n.class_type ?? ""))) continue;
-    const orig = String(n.inputs?.filename_prefix ?? "");
-    const { directory, leaf } = outputPath(orig);
-    n.inputs.filename_prefix = directory + outputName({ prefix: pfx, sourceStem: leaf, suffix: sfx });
-    written.push(nid);
-  }
-  return written;
+export function wrapAllOutputPrefixes(graph, pfx, sfx, outputClasses, options = {}) {
+  const targets = options.targets ?? outputNamingTargets(graph, "", null, outputClasses);
+  return writeOutputNames(graph, targets, pfx, sfx, options);
 }
 
 // The lineage tag: ComfyUI writes every extra_pnginfo key as a JSON-encoded
@@ -230,7 +210,7 @@ export function wrapAllOutputPrefixes(graph, pfx, sfx, outputClasses) {
 // rename-proof, host-move-proof. A re-varied variation tags its immediate
 // parent; the chain walks via repeated jumps.
 export function lineageTag(source, params) {
-  return { kz: JSON.parse(JSON.stringify({ v: 1, source, params })) };
+  return { kz: cloneJsonValue({ v: 1, source, params }) };
 }
 
 // --- registration ----------------------------------------------------------------
@@ -293,7 +273,7 @@ export function register(app) {
     let form;
     try { form = await req.formData(); } catch { return Response.json({ error: "Multipart image required" }, { status: 400 }); }
     const file = form.get("image"), current = form.get("current"), kind = form.get("kind");
-    if (!(file instanceof File) || !IMAGE_EXTENSIONS.has(mediaExtension(file.name)) || !validEntryName(token.address, current) || !["input", "output"].includes(kind)) return Response.json({ error: "Image and current input required" }, { status: 400 });
+    if (!(file instanceof File) || !IMAGE_EXTENSIONS.has(mediaExtension(file.name)) || !validEntryName(token.address, current) || !isResourceRoot(kind)) return Response.json({ error: "Image and current input required" }, { status: 400 });
     let names;
     try { names = JSON.parse(form.get("names") ?? "[]"); } catch { return Response.json({ error: "Input names must be an array" }, { status: 400 }); }
     return inspectImage(app, token, host, { name: file.name, bytes: new Uint8Array(await file.arrayBuffer()), current, kind, names }, origin);
@@ -313,9 +293,11 @@ export function register(app) {
     const graph = await app.ingest.graph(hash);
     if (!app.backings.isCurrent(token)) return { error: "source changed during inspection", status: 409 };
     if (!graph) return { error: "no embedded ComfyUI graph", status: 422 };
-    const { types, enums, outputClasses, dynamicCombos } = await backing.objectInfo();
+    try { stringifyExactJson(graph); }
+    catch (error) { return { error: `Embedded graph cannot be represented exactly: ${error.message}`, status: 422 }; }
+    const { types, enums, outputClasses, dynamicCombos, declarations, outputs, schemaError } = await backing.objectInfo({ graph });
     if (!app.backings.isCurrent(token)) return { error: "source changed during inspection", status: 409 };
-    return { graph, addr, types, enums, outputClasses, dynamicCombos, token, backing, context: { origin, graphHash: hash } };
+    return { graph, addr, types, enums, outputClasses, dynamicCombos, declarations, outputs, schemaError, token, backing, context: { origin, graphHash: hash } };
   };
 
   app.route("GET", "/probe/<id>", async (_req, { id }) => {
@@ -333,22 +315,24 @@ export function register(app) {
     // Project the actual first naming target, including fallback node prefixes.
     // The client owns formatting, but cannot infer these graph facts from a name.
     const producing = findProducingOutputNode(r.graph, name, r.outputClasses ?? new Set());
-    const output = producing?.node ?? r.graph[outputNodeIndex(r.graph, r.outputClasses ?? new Set())[0]];
-    const path = outputPath(output?.inputs?.filename_prefix ?? "");
-    return Response.json({
+    const targets = outputNamingTargets(r.graph, name, producing?.id, r.outputClasses ?? new Set());
+    return exactResponse({
       ...parameterCatalogue(r.graph, r),
       context: r.context,
-      outputNaming: output ? { directory: path.directory, sourceStem: producing ? stripExtension(outputPath(name).leaf) : path.leaf } : null,
+      nodes: Object.entries(r.graph).map(([id, node]) => ({ id, type: String(node.class_type ?? ""), title: node._meta?.title ?? null,
+        outputs: r.outputs?.get(String(node.class_type ?? "")) ?? null })),
+      outputNaming: targets.find(target => target.nodeId === producing?.id) ?? targets[0] ?? null,
+      outputNamingTargets: targets,
     });
   });
 
   app.route("POST", "/run", async (req) => {
     let body;
-    try { body = await readJson(req); }
+    try { body = await readJson(req, { parse: parseExactJson }); }
     catch { return Response.json({ error: "JSON body required" }, { status: 400 }); }
 
     if (!body || typeof body !== "object" || Array.isArray(body)) return Response.json({ error: "JSON object required" }, { status: 400 });
-    const { id, host, filename, ranges, prefix, suffix, relative, imageParams, acknowledgement, context } = body;
+    const { id, host, filename, ranges, relative, imageParams, acknowledgement, context } = body;
     if (!id || !host || !filename || !ranges) {
       return Response.json({ error: "missing required fields" }, { status: 400 });
     }
@@ -363,22 +347,24 @@ export function register(app) {
     const r = await inspect(host, filename, context);
     if (r.error) return Response.json({ error: r.error }, { status: r.status });
     const { graph, outputClasses, token, backing } = r;
+    if (!outputClasses) return Response.json({ error: `ComfyUI node information is unavailable: ${r.schemaError ?? "could not identify output nodes"}; no jobs were submitted` }, { status: 502 });
 
     // Inspect once for current values + labels. Types come from the host's
     // object_info — the current value is not a reliable integer signal.
-    const catalogue = parameterCatalogue(graph, r), fullInspection = catalogueParams(catalogue);
+    const catalogue = parameterCatalogue(graph, r), fullInspection = catalogue.parameters;
     const currentValues = Object.fromEntries([...parameterIndex(fullInspection).values()].map(p => [p.id, parameterCurrent(p)]));
-    const labelMap = parameterAliases(fullInspection);
+    const legacy = catalogueParams(catalogue), legacyIds = new Set(legacy.map(p => p.id));
+    const labelMap = parameterAliases([...legacy, ...fullInspection.filter(p => !legacyIds.has(p.id))]);
 
     // Batch sweeps arrive as offsets from each image's own current value;
     // resolve them now that this graph's current values are known.
-    let axes, resolvedRanges, permutations, effectivePlan;
+    let axes, resolvedRanges, permutations, effectivePlan, selectedValues;
     try {
       runOperationFields(body);
       effectivePlan = targetRunPlan({ ...body, imageParams: imageParams ?? {} }, catalogue);
       axes = permutationAxes(effectivePlan.payload.ranges, imageParams ?? {});
       const selectedRanges = Object.fromEntries(axes.enabled);
-      const selectedValues = Object.fromEntries(axes.imgEnabled);
+      selectedValues = compileDiscreteAxes(Object.fromEntries(axes.imgEnabled), fullInspection);
       resolvedRanges = relative ? resolveRelativeRanges(selectedRanges, currentValues) : selectedRanges;
       if (Object.keys(selectedRanges).some(id => !Object.hasOwn(resolvedRanges, id))) throw new Error("Every applicable relative range needs clamp bounds");
       const count = permutationPlan(resolvedRanges, currentValues, selectedValues).total;
@@ -403,15 +389,16 @@ export function register(app) {
       return Response.json({ error: "Cannot identify an unambiguous producing output directory for this image" }, { status: 400 });
     }
 
-    const pfxTpl = String(prefix ?? "");
-    const sfxTpl = String(suffix ?? "");
+    const namingTargets = outputNamingTargets(graph, filename, producing?.id, outputClasses ?? new Set());
+    const firstNamingTarget = namingTargets.find(target => target.nodeId === producing?.id) ?? namingTargets[0];
+    const namingRequest = { ...body, ranges: resolvedRanges, imageParams: selectedValues };
     const originalBasename = stripExtension(outputPath(filename).leaf);
 
     const errors = [];
     const accepted = [];
     let submitted = 0, uncertain = false, retired = false;
     const prepared = [];
-    const rejectPlan = error => Response.json({ error, outcome: "rejected", submitted: 0, total: permutations.length,
+    const rejectPlan = error => exactResponse({ error, outcome: "rejected", submitted: 0, total: permutations.length,
       errors: permutations.map(permutation => ({ permutation, error: `Plan rejected: ${error}` })),
       acknowledgement: { ...acknowledgement, target: { id, host, filename }, context: r.context, accepted: [] } }, { status: 400 });
     for (const [index, perm] of permutations.entries()) {
@@ -419,43 +406,40 @@ export function register(app) {
         return rejectPlan("source changed; no jobs were submitted");
       }
       let mutation;
-      try { mutation = mutateGraph(graph, perm, fullInspection, r.dynamicCombos); }
+      try { mutation = mutateGraph(graph, perm, fullInspection, r.dynamicCombos, { rangeIds: new Set(Object.keys(resolvedRanges)) }); }
       catch (error) { return rejectPlan(error.message); }
       const { graph: mutated, applied, writes } = mutation;
       if (applied.length === 0) {
         return rejectPlan("No applicable nodes found; no jobs were submitted");
       }
 
-      const prefixProof = templateReplaceWithProof(pfxTpl, perm, currentValues, labelMap, fullInspection);
-      const suffixProof = templateReplaceWithProof(sfxTpl, perm, currentValues, labelMap, fullInspection);
-      const pfx = prefixProof.text, sfx = suffixProof.text;
-      if (!prefixProof.complete || !suffixProof.complete) return rejectPlan("Unresolved naming token: check prefix and suffix; no jobs were submitted");
-      if (filename.includes("/") && /[/\\]/.test(pfx + sfx)) {
-        return rejectPlan("Prefix/suffix must stay within the producing directory's filename leaf");
-      }
-
       let namingWrites;
+      const namingProofs = [];
       try {
+        if (!firstNamingTarget) return rejectPlan("No output node in graph");
+        // Validate every explicit output prefix, including retained dependencies,
+        // without giving those dependencies new sidebar-affix writes.
+        for (const target of namingTargets) if (Object.hasOwn(perm, target.parameterId)) composeOutputName(target, perm);
+        const naming = variationOutputName(firstNamingTarget, namingRequest, perm, currentValues, labelMap, fullInspection);
+        if (!naming.complete) return rejectPlan("Unresolved naming token: check prefix and suffix; no jobs were submitted");
+        const { prefix: pfx, suffix: sfx } = naming;
+        const options = { targets: namingTargets, values: perm, proofs: namingProofs };
         if (producing) {
-          const p = findProducingOutputNode(mutated, filename, outputClasses);
-          if (!p) {
-            return rejectPlan("Producing output node lost after clone");
-          }
-          namingWrites = narrowToOneOutputNode(mutated, p.id, originalBasename, pfx, sfx, outputClasses).written;
+          namingWrites = narrowToOneOutputNode(mutated, producing.id, originalBasename, pfx, sfx, outputClasses, options).written;
         } else {
-          namingWrites = wrapAllOutputPrefixes(mutated, pfx, sfx, outputClasses ?? new Set());
+          namingWrites = wrapAllOutputPrefixes(mutated, pfx, sfx, outputClasses ?? new Set(), options);
           if (!namingWrites.length) {
             return rejectPlan("No output node in graph");
           }
         }
       } catch (error) { return rejectPlan(error.message); }
 
-      try { validateGraphLinks(mutated); }
+      try { validateFinalGraph(mutated, fullInspection, r); }
       catch (e) {
         return rejectPlan(e.message);
       }
 
-      const surviving = survivingAxes(mutated, writes, fullInspection);
+      const surviving = survivingAxes(mutated, writes, fullInspection, namingProofs);
       // Only writer-owned targets certify naming. outputName guarantees whole
       // affixes by construction; retained dependency outputs are not targets.
       const naming = namingWrites.length ? ["prefix", "suffix"] : [];
@@ -480,7 +464,7 @@ export function register(app) {
         extra_data: { extra_pnginfo: lineageTag(`${host}:${filename}`, perm) },
       });
       if (!res.ok) {
-        console.error(`[variations] permutation failed ${JSON.stringify(perm)} → ${res.error}`);
+        console.error(`[variations] permutation failed ${stringifyExactJson(perm)} -> ${res.error}`);
         errors.push({ permutation: perm, error: res.error });
       } else {
         submitted++;
@@ -494,7 +478,7 @@ export function register(app) {
 
     if (errors.length) console.error(`[variations] ${host}:${filename} → submitted ${submitted}/${permutations.length}, ${errors.length} failed`);
     else console.log(`[variations] ${host}:${filename} → submitted ${submitted}/${permutations.length}`);
-    return Response.json({ submitted, total: permutations.length, errors, operations: effectivePlan.operations,
+    return exactResponse({ submitted, total: permutations.length, errors, operations: effectivePlan.operations,
       outcome: retired ? "retired" : uncertain ? "uncertain-effects" : errors.length ? submitted ? "partial-effects" : "rejected" : "accepted-plan",
       acknowledgement: { ...acknowledgement, target: { id, host, filename }, context: r.context, accepted },
     });

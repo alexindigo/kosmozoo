@@ -36,7 +36,7 @@ export function ImageSetPanel(props) {
       onDragOver: event => { if (isFileDrag(event.dataTransfer)) { event.dataTransfer.dropEffect = "copy"; setDropping(true); } },
       onDragLeave: () => { if (--dragDepth <= 0) clearDrop(); },
       onDrop: event => { if (!isFileDrag(event.dataTransfer)) return; clearDrop(); addFiles(droppedFiles(event.dataTransfer), undefined, true); }
-    }} onEnable={props.onEnable} onInsert={props.onInsert}
+    }} onEnable={props.onEnable} onInsert={props.onInsert} registerFocus={props.registerFocus}
     status={<Show when={status()}><SingleLineText class="vz-image-drop-status" role="status" value={status()} /></Show>}
     summary={`${row().items.length} ${row().items.length === 1 ? "image" : "images"}`}>
     <div class="vz-image-content" ref={content}>
@@ -51,7 +51,7 @@ export function ImageSetPanel(props) {
       <div class="vz-image-add" hidden={!adding()}>
         <InputPicker sources={props.sources} sourceInputs={props.sourceInputs} inputState={props.inputState}
           onSource={props.onSource} onRetrySource={props.onRetrySource} registerTabKeys={props.registerTabKeys}
-          current={row().fromOutput ? null : row().current} positionRevision={row().images} thumbnail={props.inputThumbnail} registerThumbnail={props.registerThumbnail}
+          current={(row().currentRoot ?? (row().fromOutput ? "output" : "input")) === "input" ? row().current : null} positionRevision={row().images} thumbnail={props.inputThumbnail} registerThumbnail={props.registerThumbnail}
           onToggle={props.onToggleInput}
           registerPopup={props.registerPopup} registerEditor={props.registerEditor} rememberFocus={props.rememberFocus} />
         <input type="file" ref={fileInput} class="vz-imgfilespick" hidden multiple accept="image/*" onChange={e => {
@@ -193,7 +193,7 @@ function ImageTile(props) {
   const file = createMemo(() => props.item()?.file), name = createMemo(() => props.item()?.name), path = createMemo(() => props.item()?.path);
   createEffect(() => {
     if (!name()) return;
-    if (!file()) { setUrl(props.item()?.kind === "target" ? props.targetThumbnail() : path() ? props.pathThumbnail(path()) : props.thumbnail(name())); return; }
+    if (!file()) { setUrl(props.item()?.kind === "target" ? props.targetThumbnail() : path() ? props.pathThumbnail(path()) : props.thumbnail(name(), props.item()?.root)); return; }
     const src = URL.createObjectURL(file()); setUrl(src); onCleanup(() => URL.revokeObjectURL(src));
   });
   // Local File previews are object URLs; engine thumbnails are admitted

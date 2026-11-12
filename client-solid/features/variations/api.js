@@ -2,13 +2,16 @@
 // The transport itself is the shared one from /js/api.mjs.
 
 import { req, postRaw, collectionEntriesUrl, entryBytesUrl } from "/js/api.mjs";
+import { parseExactJson, stringifyExactJson } from "/shared/parameters.mjs";
+const json = { parse: parseExactJson, stringify: stringifyExactJson };
+export const readRunResult = parseExactJson;
 
 export const probe = (image) =>
-  req("GET", `/api/features/variations/probe/${encodeURIComponent(image.id)}${image.origin ? `?origin=${encodeURIComponent(JSON.stringify(image.origin))}` : ""}`);
+  req("GET", `/api/features/variations/probe/${encodeURIComponent(image.id)}${image.origin ? `?origin=${encodeURIComponent(JSON.stringify(image.origin))}` : ""}`, undefined, { json });
 
 // raw POST: { ok, status, text }, no throw — the run report's error bodies
 // carry per-permutation detail the modal parses
-export const run = (payload) => postRaw("/api/features/variations/run", payload);
+export const run = (payload) => postRaw("/api/features/variations/run", payload, { json });
 
 const pathRequest = async (route, body, origin) => {
   const response = await fetch(`/api/features/variations/${route}`, { method: "POST", body: JSON.stringify(body),

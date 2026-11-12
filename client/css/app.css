@@ -728,7 +728,8 @@ body:has(#diff:not([hidden])) #statusCol { bottom: 56px; }
   font-size: 12px; line-height: 18px; color: var(--foreground); padding: 1px 0; }
 .vz-enum-check { display: flex; flex: 0 0 auto; }
 .vz-enum-opt-name { flex: 0 1 auto; }
-.vz-enum-current .vz-enum-opt-name { color: var(--attention); }
+.vz-enum-current .vz-enum-opt-name { color: var(--foreground-mid); }
+.vz-enum-picked .vz-enum-opt-name { color: var(--foreground); }
 
 /* Text is a literal template; line breaks never separate alternatives. */
 .vz-text-values { width: 100%;
@@ -1141,15 +1142,15 @@ body:has(#diff:not([hidden])) #statusCol { bottom: 56px; }
 .vz-parameter:not(.on) { opacity: 0.55;
   background: color-mix(in srgb, var(--surface) 85%, transparent); }
 .vz-parameter-heading.vz-imgrow-head { display: grid;
-  grid-template-columns: 16px minmax(0, 1fr) minmax(0, .8fr);
+  grid-template-columns: minmax(0, 1fr) auto auto;
   gap: 8px; align-items: center; cursor: default; }
 .vz-parameter.vz-off, .vz-parameter.vz-off .vz-parameter-heading { cursor: pointer; }
 .vz-parameter-name { min-width: 0; padding: 0; border: 0; background: transparent; text-align: left; cursor: pointer; }
 .vz-parameter-name .vz-label { font: 400 13px/18px system-ui; }
-.vz-parameter-current.vz-imgrow-cur { margin: 0; max-width: 100%; color: var(--attention);
+.vz-parameter-current.vz-imgrow-cur { margin: 0; max-width: 100%; color: var(--foreground);
   text-align: right; font: 12px/18px system-ui; font-variant-numeric: tabular-nums; }
-.vz-numeric-editor { display: grid; gap: 8px; margin: 12px 0 0 24px; }
-.vz-editor-current { color: var(--attention); font-variant-numeric: tabular-nums; }
+.vz-numeric-editor { display: grid; gap: 8px; margin: 12px 0 0; }
+.vz-editor-current { color: var(--foreground-mid); font-variant-numeric: tabular-nums; }
 .vz-numeric-controls { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; min-width: 0; }
 .vz-range-fields { display: flex; align-items: center; flex: 1; flex-wrap: wrap; gap: 8px; min-width: 0; }
 .vz-range-field { display: flex; align-items: center; gap: 4px; color: var(--foreground-mid); font: 12px/16px system-ui; }
@@ -1160,12 +1161,46 @@ body:has(#diff:not([hidden])) #statusCol { bottom: 56px; }
 .vz-range-fields > .vz-range-field:last-child { margin-left: auto; }
 .vz-range-field .vz-row-inc { display: flex; gap: 4px; align-self: stretch; }
 .vz-field-help { margin: 0; color: var(--foreground-mid); font: 12px/16px system-ui; overflow-wrap: anywhere; }
-.vz-parameter .vz-imgrow-body { padding-left: 24px; }
+.vz-parameter .vz-imgrow-body { padding-left: 0; }
 .vz-parameter .vz-rangewrap { margin-top: 0; }
 .vz-input-summary { margin: 0; color: var(--foreground); font: 12px/16px system-ui; }
 .vz-folder { flex-basis: 100%; }
 .vz-root :is(select, button):focus-visible { outline: 2px solid var(--secondary); outline-offset: 2px; }
 .vz-left { container: variation-fields / inline-size; }
+
+/* Three bounded tracks. Below their usable minima only this inner surface
+   scrolls horizontally; all columns and the pinned action remain reachable. */
+.vz-root > .modal-panel { inline-size: min(1200px, 96vw); }
+.vz-body-scroll { min-height: 0; overflow-x: auto; overflow-y: hidden; }
+.vz-body { grid-template-columns: 210px minmax(320px, 1fr) 170px; gap: 16px;
+  min-width: 732px; max-width: none; block-size: 100%; }
+.vz-catalogue { display: grid; grid-template-rows: auto minmax(0, 1fr); gap: 8px; min-height: 0;
+  border-right: 1px solid var(--lifted); padding-right: 12px; }
+.vz-catalogue-list { display: flex; flex-direction: column; gap: 8px; overflow-y: auto; min-height: 0; }
+.vz-catalogue-row { display: grid; grid-template-columns: minmax(0, 1fr) 28px; align-items: center;
+  flex-shrink: 0; gap: 8px; padding: 8px; border: 1px solid var(--border-strong); border-radius: 4px; }
+.vz-catalogue-hidden { display: none; }
+.vz-catalogue-row.vz-image-dropping { background: var(--secondary-dim); outline: 1px solid var(--secondary); outline-offset: -1px; }
+.vz-catalogue-context { display: grid; gap: 2px; }
+.vz-catalogue-name { color: var(--foreground); }
+.vz-catalogue-current { color: var(--secondary); font-variant-numeric: tabular-nums; }
+.vz-catalogue-node-name { color: var(--foreground-mid); font-size: 12px; }
+.vz-catalogue-picture { height: 72px; min-width: 0; }
+.vz-catalogue-context { min-width: 0; }
+.vz-sliders { padding: 2px 6px 2px 2px; }
+.vz-right { border-left: 1px solid var(--lifted); padding-left: 12px; }
+.vz-candidate-body { display: grid; gap: 8px; margin: 8px 0 0; }
+.vz-candidate-entry { display: grid; gap: 4px; }
+.vz-candidate-controls { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: end; gap: 8px; }
+.vz-candidate-actions { display: flex; align-items: center; justify-content: flex-end; gap: 4px; }
+.vz-candidate-add { justify-self: start; }
+.vz-json-candidate { width: 100%; max-height: 8lh; overflow-y: auto; }
+.vz-connection-fields { display: grid; grid-template-columns: minmax(0, 1.5fr) minmax(80px, 1fr); gap: 8px; }
+.vz-connection-control { display: grid; gap: 4px; min-width: 0; font: 12px/16px system-ui; }
+.vz-connection-control > span:first-child { color: var(--foreground-mid); }
+.vz-connection-fields input { width: 100%; }
+.vz-root label { white-space: nowrap; }
+.vz-slider-row:not(:has(.vz-slider)) .vz-range-field > input { width: 23ch; max-width: 100%; }
 
 .vz-count-sub { margin: 0; line-height: 16px; overflow-wrap: anywhere; }
 .vz-count-large { font-size: 23px; }
@@ -1346,3 +1381,31 @@ body:has(#diff:not([hidden])) #statusCol { bottom: 56px; }
 #filterMatchCount { margin-left: auto; font-variant-numeric: tabular-nums; }
 .filter-loading { flex-basis: 100%; }
 .feed-filter-menu button:focus-visible, .feed-filter-menu select:focus-visible { outline: 2px solid var(--secondary); outline-offset: 2px; }
+.value-preview-trigger { cursor: text; }
+.value-preview {
+  position: fixed;
+  inset: auto;
+  margin: 0;
+  padding: var(--value-preview-notch) 0 0;
+  border: 0;
+  background: transparent;
+  color: var(--foreground);
+  box-sizing: border-box;
+  overflow: visible;
+}
+.value-preview-above { padding: 0 0 var(--value-preview-notch); }
+.value-preview-shape { position: absolute; inset: 0; pointer-events: none; overflow: visible; }
+.value-preview-shape path { fill: var(--background); stroke: var(--foreground-mid); stroke-width: 1; }
+.value-preview-text {
+  position: relative;
+  box-sizing: border-box;
+  height: 100%;
+  padding: 12px;
+  overflow: auto;
+  overscroll-behavior: contain;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  user-select: text;
+  font: inherit;
+  line-height: 1.5;
+}

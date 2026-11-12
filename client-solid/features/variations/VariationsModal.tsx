@@ -1,10 +1,8 @@
 // client-solid/features/variations/VariationsModal.tsx — the variations
 // panel, declarative: the shared Modal portals it to the page level.
 //
-// Layout: title centered at top; left: parameter rows, LoadImage sweep rows
-// first; enabled cards float to the top, the rest follow the info panel's
-// own order (registry title, then input); vertical divider;
-// right: variations count (big), prefix, suffix, Run.
+// Three tracks: unadded catalogue, explicitly enabled editor cards, summary/Run.
+// All rows start off; removing a card retains its private recipe buffers.
 //
 // Slider rows are populated once the probe returns — the graph decides which
 // parameters have a target node, and only those render. Each parameter name
@@ -15,7 +13,7 @@
 import { createSignal, createMemo, createEffect, createResource, onMount, onCleanup, For, Show } from "solid-js";
 import { iconSvg } from "/js/icons.mjs";
 import { templateLabels, templateValue } from "/shared/features/variations/shared.mjs";
-import { sourceOrigin } from "/shared/source-origin.mjs";
+import { sourceOrigin, sameOrigin } from "/shared/source-origin.mjs";
 import { useAppStore } from "../../store/app-store.js";
 import { SliderRow } from "./SliderRow.js";
 import { Modal } from "../../components/Modal.js";
@@ -29,7 +27,11 @@ import { IconButton } from "../../components/IconButton.js";
 import { TextField } from "../../components/TextField.js";
 import { ParameterRow } from "./ParameterRow.js";
 import { isFileDrag } from "./image-drop.js";
-import { matchesFieldFilter } from "./field-filter.js";
+import { matchesFieldFilter, cataloguePresentation } from "./field-filter.js";
+import { ParameterCatalogue } from "./ParameterCatalogue.js";
+import { CandidateEditor } from "./CandidateEditor.js";
+import { makeKeyboardReveal } from "./keyboard-reveal.js";
+import { UPLOAD_IMG_EXT } from "../../store/fields.js";
 
 export function VariationsModal() {
   const store = useAppStore();
@@ -79,6 +81,27 @@ function ModalBody(props) {
   const imgRows = () => read(() => editor.rows("images"));
   const enumRows = () => read(() => editor.rows("enums"));
   const textRows = () => read(() => editor.rows("texts"));
+  const candidateRows = () => read(() => editor.rows("candidates"));
+  const catalogue = createMemo(() => read(editor.catalogue));
+   const catalogueSections = createMemo(() => cataloguePresentation(catalogue()));
+  const catalogueById = createMemo(() => new Map(catalogue().map(row => [row.id, row])));
+  const catalogueFocus = new Map(), panelFocus = new Map();
+  let pendingPanelFocus = null;
+  const registerFocus = (ports, id, focus) => {
+    ports.set(id, focus);
+    if (ports === panelFocus && pendingPanelFocus === id) queueMicrotask(() => { if (pendingPanelFocus === id) { pendingPanelFocus = null; focus(); } });
+    return () => { if (ports.get(id) === focus) ports.delete(id); };
+  };
+  const panelFocusPort = id => focus => registerFocus(panelFocus, id, focus);
+  const setEnabled = (id, enabled) => {
+    pendingPanelFocus = enabled ? id : null;
+    editor.setEnabled(id, enabled);
+    queueMicrotask(() => {
+      if (enabled) panelFocus.get(id)?.();
+      else if (fieldMatches(catalogueById().get(id))) catalogueFocus.get(id)?.();
+      else filterInput?.focus();
+    });
+  };
   const params = () => read(() => editor.ready() ? Object.values(rows()) : null);
   const strParams = () => Object.keys(imgRows());
   const enumList = () => Object.values(enumRows());
@@ -88,13 +111,41 @@ function ModalBody(props) {
   const prefix = () => read(() => editor.naming("prefix"));
   const suffix = () => read(() => editor.naming("suffix"));
   const [decision, setDecision] = createSignal(null);
+  let bodyScroll, editorSurface;
+  const keyboardReveal = makeKeyboardReveal({ schedule: requestAnimationFrame, cancel: cancelAnimationFrame,
+    read: target => {
+      if (decision() || !target?.isConnected || !bodyScroll.contains(target) || !target.matches(":focus") || !target.getClientRects().length) return null;
+      const targetBox = target.getBoundingClientRect(), surface = bodyScroll.getBoundingClientRect();
+      if (!targetBox.width || !targetBox.height || getComputedStyle(target).visibility !== "visible") return null;
+      return { target: targetBox, viewport: { left: surface.left + bodyScroll.clientLeft, right: surface.left + bodyScroll.clientLeft + bodyScroll.clientWidth },
+        left: bodyScroll.scrollLeft, maximum: bodyScroll.scrollWidth - bodyScroll.clientWidth };
+    }, write: left => { bodyScroll.scrollLeft = left; } });
+  createEffect(() => { if (decision()) keyboardReveal.retire(); });
+  onMount(() => {
+    const key = event => {
+      if (event.isTrusted && event.key === "Tab" && !event.altKey && !event.ctrlKey && !event.metaKey && !decision() && editorSurface.contains(event.target)) keyboardReveal.tab(event.target);
+      else keyboardReveal.retire();
+    };
+    const focus = event => { if (bodyScroll.contains(event.target)) keyboardReveal.focus(event.target); else keyboardReveal.retire(); };
+    const retire = () => keyboardReveal.retire();
+    document.addEventListener("keydown", key, true);
+    document.addEventListener("focusin", focus, true);
+    document.addEventListener("pointerdown", retire, true);
+    document.addEventListener("pointermove", retire, true);
+    window.addEventListener("blur", retire);
+    onCleanup(() => {
+      keyboardReveal.dispose();
+      document.removeEventListener("keydown", key, true);
+      document.removeEventListener("focusin", focus, true);
+      document.removeEventListener("pointerdown", retire, true);
+      document.removeEventListener("pointermove", retire, true);
+      window.removeEventListener("blur", retire);
+    });
+  });
   const [fieldFilter, setFieldFilter] = createSignal("");
   let filterInput;
   const fieldMatches = row => matchesFieldFilter(row, fieldFilter());
-  const hasMatchingFields = createMemo(() => [
-    ...Object.values(rows()), ...enumList(), ...textList(),
-    ...Object.values(imgRows()).filter(row => row.filesReady),
-  ].some(fieldMatches));
+  const hasMatchingFields = createMemo(() => catalogue().some(row => !row.enabled && fieldMatches(row)));
   const children = new Set();
   const registerEditor = (capability) => { children.add(capability); return () => children.delete(capability); };
   let restoreFocus = () => {};
@@ -133,11 +184,8 @@ function ModalBody(props) {
     el.setSelectionRange(caret, caret);
   };
 
-  // Probe is a resource; per-source input catalogues settle in the private
-  // editor, where source identity and failures stay independent of raw work.
-  // The graph is the source of truth: only parameters whose target node
-  // exists in this image's graph render (writeOnly params — widget-only
-  // custom seed nodes etc. — are skipped for now).
+  // The complete recorded graph is the catalogue, independent of live schema.
+  // Per-source input readiness settles separately from editable recipe work.
   const [probe] = createResource(() => services.probe(image));
   const [folderCapability] = createResource(() => services.folderCapability());
 
@@ -160,7 +208,7 @@ function ModalBody(props) {
   });
 
   const onToggle = (key, checked) => {
-    editor.edit("numeric", key, "enabled", checked);
+    setEnabled(key, checked);
   };
 
   const onRange = (key, { min, max }) => {
@@ -171,11 +219,9 @@ function ModalBody(props) {
     editor.edit("numeric", key, "rawIncrement", rawIncrement);
   };
 
-  // LoadImage sweep: enabling auto-inserts its canonical per-node token into
-  // the suffix (the output name must encode WHICH input image produced it);
-  // disabling removes it. Same grammar as the numeric placeholder tokens.
+  // Enablement changes membership only; automatic names are a compile projection.
   const onImgToggle = (id, checked) => {
-    editor.edit("images", id, "enabled", checked);
+    setEnabled(id, checked);
   };
   const registerImagePopup = close => {
     const disown = store.handles.own("variations.images.close", close);
@@ -190,22 +236,22 @@ function ModalBody(props) {
     return () => { unlayer(); disown(); };
   };
 
-  // enum sweep rows: the master checkbox arms the axis (its picks ride the
-  // imageParams channel at run time); the option checkboxes pick the values.
+  // Catalogue Add and the shared remove action own axis membership; option
+  // checkboxes pick values through the existing imageParams channel.
   // The current value starts pre-checked — unchecking it is how the current
   // combo leaves the sweep.
   const onEnumToggle = (id, checked) => {
-    editor.edit("enums", id, "enabled", checked);
+    setEnabled(id, checked);
   };
   const onEnumPick = (id, v, checked) => {
     const r = enumRows()[id];
     editor.edit("enums", id, "picks", checked ? [...r.picks, v] : r.picks.filter(value => value !== v));
   };
 
-  // text sweep rows: the master checkbox arms the axis; the textarea holds
+  // Text sweep rows: explicit membership; the textarea holds
   // one literal template to expand (pre-filled with the current text)
   const onTextToggle = (id, checked) => {
-    editor.edit("texts", id, "enabled", checked);
+    setEnabled(id, checked);
   };
   const onTextField = (id, field, value) => {
     editor.edit("texts", id, field, value);
@@ -217,38 +263,11 @@ function ModalBody(props) {
   // Row order mirrors the info panel: registry title (fallback class_type),
   // then input name; per-instance rows of one type+input keep graph (probe)
   // order, and prompt (CLIPTextEncode) rows sink to the bottom — exactly the
-  // info panel's group order. Enabled rows float to the top. Items are plain
-  // strings ("num:"/"enum:"/"txt:" + id) so <For> keeps rows mounted.
+  // info panel's group order. Stable scalar keys retain active editor identity.
   const enumById = createMemo(() => new Map(enumList().map((p) => [p.id, p])));
   const textById = createMemo(() => new Map(textList().map((p) => [p.id, p])));
-  const orderedItems = createMemo(() => {
-    const reg = store.state.nodesRegistry ?? {};
-    const titleOf = (type) => reg[type]?.title || type;
-    const sinkOf = (type) => +/clip\s*text\s*encode/i.test(type);
-    const items = [];
-    for (const [key, r] of Object.entries(rows())) {
-      items.push({ id: "num:" + key, enabled: !!r.enabled, sort: [sinkOf(r.type), titleOf(r.type), r.input, 0] });
-    }
-    const erank = new Map(enumList().map((p, i) => [p.id, i]));
-    for (const p of enumList()) {
-      const r = enumRows()[p.id];
-      if (!r) continue;
-      items.push({ id: "enum:" + p.id, enabled: !!r.enabled, sort: [sinkOf(p.type), titleOf(p.type), p.key, erank.get(p.id) ?? 0] });
-    }
-    const trank = new Map(textList().map((p, i) => [p.id, i]));
-    for (const p of textList()) {
-      const r = textRows()[p.id];
-      if (!r) continue;
-      items.push({ id: "txt:" + p.id, enabled: !!r.enabled, sort: [sinkOf(p.type), titleOf(p.type), p.key, trank.get(p.id) ?? 0] });
-    }
-    return items
-      .sort((a, b) => {
-        if (a.enabled !== b.enabled) return a.enabled ? -1 : 1;
-        const [sa, ta, ia, ra] = a.sort, [sb, tb, ib, rb] = b.sort;
-        return sa - sb || ta.localeCompare(tb) || ia.localeCompare(ib) || ra - rb;
-      })
-      .map((it) => it.id);
-  });
+  const orderedItems = createMemo(() => catalogue().filter(row => row.domain !== "images").map(row =>
+    ({ numeric: "num:", enums: "enum:", texts: "txt:", candidates: "candidate:" })[row.domain] + row.id));
 
   const tally = createMemo(() => read(editor.preview));
   const valueSummary = id => {
@@ -258,34 +277,42 @@ function ModalBody(props) {
 
   return (
     <div class="vz-panel" data-session={props.session}>
-      <div class="vz-editor" inert={!!decision()}>
+      <div ref={editorSurface} class="vz-editor" inert={!!decision()}>
         <SingleLineText class="vz-title" value={batch
             ? `Generate image variations · applying to ${props.images.length} images`
             : "Generate image variations"} />
-        <div class="vz-body">
+        <div ref={bodyScroll} class="vz-body-scroll"><div class="vz-body">
+          <div class="vz-catalogue">
+            <div class="vz-filter-tools">
+              <TextField controlClass="vz-field-filter" ref={filterInput} type="text" placeholder="Filter fields" aria-label="Filter fields"
+                {...focus} value={fieldFilter()} onInput={event => setFieldFilter(event.currentTarget.value)}
+                trailing={<Show when={fieldFilter()}><IconButton chrome size="md" variant="plain vz-filter-clear" title="Clear field filter" icon={iconSvg("x")}
+                  onAction={() => { setFieldFilter(""); filterInput.focus(); }} /></Show>} />
+            </div>
+            <ParameterCatalogue sections={catalogueSections()} row={id => catalogueById().get(id)} matches={fieldMatches}
+              registerPopup={registerImagePopup} registerEditor={registerEditor}
+              previewActive={!decision() && sameOrigin(image.origin, sourceOrigin(image.host, store.state.hosts[image.host]))}
+              thumbnail={row => services.inputThumbnail(image.host, row.current, image.origin, row.currentRoot)} registerThumbnail={services.registerThumbnail}
+              ready={params() !== null} anyMatch={hasMatchingFields()} onAdd={id => setEnabled(id, true)}
+              onFiles={(id, resources) => editor.dropImages(id, resources, name => UPLOAD_IMG_EXT.test(name))}
+              registerFocus={(id, focus) => registerFocus(catalogueFocus, id, focus)} />
+          </div>
           <div class="vz-left">
             <div class="vz-sliders">
-              <div class="vz-filter-tools">
-                <TextField controlClass="vz-field-filter" ref={filterInput} type="text" placeholder="Filter fields" aria-label="Filter fields"
-                    {...focus} value={fieldFilter()} onInput={event => setFieldFilter(event.currentTarget.value)}
-                    trailing={<Show when={fieldFilter()}>
-                    <IconButton chrome size="md" variant="plain vz-filter-clear" title="Clear field filter" icon={iconSvg("x")}
-                      onAction={() => { setFieldFilter(""); filterInput.focus(); }} />
-                  </Show>} />
-              </div>
+              <Show when={params() !== null && !catalogue().some(row => row.enabled)}><SingleLineText class="vz-loading vz-editing-empty" value="Add a parameter from the left to edit it." /></Show>
               {/* One chosen set, independent of how each image was acquired. */}
               <For each={strParams()}>
                 {(id) => {
                   const r = () => imgRows()[id];
                   return (
-                    <Show when={r()?.filesReady}>
-                      <ImageSetPanel id={id} row={r} filteredOut={!fieldMatches(r())} onEnable={checked => onImgToggle(id, checked)}
+                    <Show when={r()?.enabled}>
+                      <ImageSetPanel id={id} row={r} onEnable={checked => onImgToggle(id, checked)} registerFocus={panelFocusPort(id)}
                         onInsert={onInsertPlaceholder}
                         onAdd={(items, index) => editor.addImages(id, items, index)} onRemove={item => editor.removeImage(id, item)}
                         onMove={(item, index) => editor.moveImage(id, item, index)}
                         onToggleTarget={() => editor.toggleTargetImage(id)}
                         targetThumbnail={() => services.inputThumbnail(image.host, image.filename, image.origin, "output")}
-                        thumbnail={name => services.inputThumbnail(image.host, name, image.origin)}
+                        thumbnail={(name, root = "input") => services.inputThumbnail(image.host, name, image.origin, root)}
                         sources={inputSources()} sourceInputs={origin => read(() => editor.sourceInputs(origin))}
                         onSource={origin => editor.loadSourceInputs(origin)} onRetrySource={origin => editor.loadSourceInputs(origin, true)}
                         inputState={(origin, name) => read(() => editor.sourceInputState(id, origin, name))}
@@ -299,8 +326,7 @@ function ModalBody(props) {
                   );
                 }}
               </For>
-              {/* one merged parameter list: enabled cards float to the top,
- the rest follow the info panel's order (enum + numeric rows interleave) */}
+              {/* One ordered list; only explicitly enabled cards render here. */}
               <Show
                 when={params() !== null}
                 fallback={<SingleLineText class="vz-loading" value="Reading workflow…" />}
@@ -311,15 +337,24 @@ function ModalBody(props) {
                 >
                   <For each={orderedItems()}>
                     {(itemId) => {
+                      if (itemId.startsWith("candidate:")) {
+                        const id = itemId.slice(10), row = () => candidateRows()[id];
+                        return <Show when={row()?.enabled}><CandidateEditor row={row} summary={valueSummary(id)}
+                          onEnable={enabled => setEnabled(id, enabled)} registerFocus={panelFocusPort(id)} rememberFocus={rememberFocus}
+                          onInsert={onInsertPlaceholder} nodes={read(() => editor.connectionNodes(id))}
+                          onCandidate={(index, raw) => editor.candidate(id, index, raw)} onAdd={() => editor.addCandidate(id)}
+                          onRemove={index => editor.removeCandidate(id, index)} onMove={(from, to) => editor.moveCandidate(id, from, to)}
+                          onPick={(raw, on) => editor.pickCandidate(id, raw, on)} onConnection={(index, node, slot) => editor.connection(id, index, node, slot)} /></Show>;
+                      }
                       if (itemId.startsWith("enum:")) {
                         const id = itemId.slice(5);
                         const p = enumById().get(id);
                         return (
-                          <Show when={p && enumRows()[id]}>
+                           <Show when={p && enumRows()[id]?.enabled}>
                             <EnumRow
                               p={p}
                               row={() => enumRows()[id]}
-                              filteredOut={!fieldMatches(enumRows()[id])}
+                               registerFocus={panelFocusPort(id)}
                               onToggle={onEnumToggle}
                               onPick={onEnumPick}
                               onInsert={onInsertPlaceholder}
@@ -332,11 +367,11 @@ function ModalBody(props) {
                         const id = itemId.slice(4);
                         const p = textById().get(id);
                         return (
-                          <Show when={p && textRows()[id]}>
+                           <Show when={p && textRows()[id]?.enabled}>
                             <TextRow
                               p={p}
                               row={() => textRows()[id]}
-                              filteredOut={!fieldMatches(textRows()[id])}
+                               registerFocus={panelFocusPort(id)}
                               onToggle={onTextToggle}
                               onField={onTextField}
                               onTpl={onTextTpl}
@@ -350,9 +385,9 @@ function ModalBody(props) {
                       const row0 = rows()[key];
                       const p = row0.tuning;
                       return (
-                        <SliderRow
+                        <Show when={rows()[key]?.enabled}><SliderRow
                           row={() => rows()[key]}
-                          filteredOut={!fieldMatches(rows()[key])}
+                           registerFocus={panelFocusPort(key)}
                           param={{ ...p, key, label: row0.label }}
                           current={() => rows()[key]?.current ?? null}
                           enabled={() => !!rows()[key]?.enabled}
@@ -366,18 +401,14 @@ function ModalBody(props) {
                           onField={(key, name, value) => editor.edit("numeric", key, name, value)}
                           onInsert={onInsertPlaceholder} summary={valueSummary(key)}
                           registerEditor={registerEditor} rememberFocus={rememberFocus}
-                        />
+                         /></Show>
                       );
                     }}
                   </For>
                 </Show>
               </Show>
-              <Show when={params() !== null && fieldFilter().trim() && !hasMatchingFields()}>
-                <SingleLineText class="vz-loading vz-filter-empty" value={`No fields match "${fieldFilter()}"`} />
-              </Show>
             </div>
           </div>
-          <div class="vz-divider" />
           <div class="vz-right">
             <div class="vz-sidebar-body">
             <div class="vz-count-group">
@@ -400,7 +431,7 @@ function ModalBody(props) {
               <TextField
                 id={`suffix-${props.session}`} type="text" class="vz-tinput vz-suffix" ref={suffixEl}
                 value={suffix()}
-                title="Click a parameter name to insert its token (enabled sliders auto-append)"
+                title="Click a parameter name to insert its token at the caret"
                 {...focus} onFocus={(e) => { setFocused("suffix"); focus.onFocus(e); }}
                 onInput={(e) => editor.edit("naming", "root", "suffix", e.currentTarget.value)}
               />
@@ -429,8 +460,8 @@ function ModalBody(props) {
               </Show>
             </div>
           </div>
-        </div>
-        <IconButton chrome variant="plain vz-close" title="close (Esc)"
+        </div></div>
+        <IconButton chrome variant="plain vz-close" title="Close"
           onAction={() => store.handles.invoke("variations.close", { session: props.session })}
           icon={iconSvg("x")} />
       </div>
@@ -441,9 +472,9 @@ function ModalBody(props) {
   );
 }
 
-// one enum sweep row: master checkbox + label + the orange current value;
-// enabled → the host's options as a filterable checkbox list (the current
-// value pre-checked and orange-marked). Props convention mirrors SliderRow:
+// One enum sweep row: shared heading and the host's filterable option list.
+// The current option starts checked and retains its existing marker.
+// Props convention mirrors SliderRow:
 // p is stable per row, row is a GETTER, interactions report through the
 // callbacks — the row never reaches into its parent.
 function EnumRow(props) {
@@ -453,7 +484,7 @@ function EnumRow(props) {
   return (
     <ParameterRow class="vz-imgrow vz-enumrow" row={r} enabled={() => r().enabled} filteredOut={props.filteredOut}
       attributes={{ "data-enum-id": props.p.id }} onEnable={checked => props.onToggle(props.p.id, checked)}
-      onInsert={props.onInsert} summary={`${r().picks.length} ${r().picks.length === 1 ? "option" : "options"}`}>
+      registerFocus={props.registerFocus} onInsert={props.onInsert} summary={`${r().picks.length} ${r().picks.length === 1 ? "option" : "options"}`}>
         <div class="vz-imgrow-body vz-enum-body">
           <Show when={r().values.length > 10}>
             <div class="vz-enum-filter-line">
@@ -508,7 +539,7 @@ function EnumOptions(props) {
   return <div ref={list} class={"vz-enum-list" + (compact() ? " vz-enum-grid" : "")}>
     <For each={filtered()}>
       {(v) => (
-        <label ref={option} class={"vz-enum-opt" + (v === r().current ? " vz-enum-current" : "")}>
+        <label ref={option} class={"vz-enum-opt" + (v === r().current ? " vz-enum-current" : "")} classList={{ "vz-enum-picked": r().picks.includes(v) }}>
           <span ref={check} class="vz-enum-check">
             <Checkbox
               {...props.focus}
@@ -547,8 +578,7 @@ function AutoSizeTextArea(props) {
   return <TextField multiline {...props} ref={input} rows="1" />;
 }
 
-// one text sweep row: master checkbox + label + the orange current value;
-// enabled → a textarea holding one literal template (the
+// One text sweep row: shared heading and a textarea holding one literal template (the
 // current text pre-filled). Each {{label}} in the text spawns a substitution
 // input below the textarea (semicolon-separated values, cartesian-expanded
 // at tally/run time). Same props convention as EnumRow/SliderRow.
@@ -558,7 +588,7 @@ function TextRow(props) {
   return (
     <ParameterRow class="vz-imgrow vz-textrow" row={r} enabled={() => r().enabled} filteredOut={props.filteredOut}
       attributes={{ "data-text-id": props.p.id }} onEnable={checked => props.onToggle(props.p.id, checked)}
-      onInsert={props.onInsert} summary={props.summary}>
+      registerFocus={props.registerFocus} onInsert={props.onInsert} summary={props.summary}>
         <div class="vz-imgrow-body vz-enum-body">
           <AutoSizeTextArea
             {...focus}

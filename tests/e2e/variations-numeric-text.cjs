@@ -2,6 +2,7 @@
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const { freshRecipe } = require('./recipe-helpers.cjs');
+const { addParameter } = require('./variation-add-helpers.cjs');
 module.exports = async ({ cdp, check, KZ, FAKE }) => {
   const denoise = '[data-param-key="9.denoise"]', steps = '[data-param-key="9.steps"]';
   const invoke = (id, args = {}) => cdp.evaluate(`(async()=>${KZ}.handles.invoke(${JSON.stringify(id)},${JSON.stringify(args)}))()`);
@@ -40,8 +41,8 @@ module.exports = async ({ cdp, check, KZ, FAKE }) => {
   try {
     await cdp.evaluate("fetch('/api/collections/fake/entries/flux-basic.png/bytes').then(r=>r.arrayBuffer()).then(()=>true)");
     await invoke('variations.open', { id: 'fake:flux-basic.png' });
-    await cdp.poll(`!!document.querySelector('${denoise} .vz-numeric-editor')`);
     await freshRecipe(cdp);
+    await addParameter(cdp,'9.denoise');
     await fetch(FAKE + '/__test/activity', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ captureEnqueue: true }) });
     await field(`${denoise} .vz-range-field:first-child input`, '');
     if (process.env.E2E_BLANK_NUMBER_SHOT) {
@@ -60,8 +61,7 @@ module.exports = async ({ cdp, check, KZ, FAKE }) => {
     // A fresh recipe prevents an accepted run's close timer or result from
     // masking the readiness message in the second scenario.
     await freshRecipe(cdp);
-    await cdp.clickAt(`${denoise} .checkbox`);
-    await cdp.clickAt(`${steps} .checkbox`);
+    await addParameter(cdp,'9.steps');
     await cdp.clickAt(`${steps} .mode-switch button[title="Value"]`);
     await field(`${steps} .vz-value-field input`, '21');
     await field(`${steps} .vz-value-field input`, '');

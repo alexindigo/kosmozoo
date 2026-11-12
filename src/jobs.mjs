@@ -172,11 +172,13 @@ export class Jobs {
   }
 
   #readInfo(monitor) {
-    if (monitor.infoTask || !this.client(monitor.address).objectInfo) return;
+    const graph = monitor.live.graph, prompt = monitor.live.prompt;
+    if (!graph || monitor.infoTask || !this.client(monitor.address).objectInfo) return;
     const controller = new AbortController(); monitor.infoController = controller;
-    monitor.infoTask = bounded(() => this.client(monitor.address).objectInfo({ signal: controller.signal }),
+    monitor.infoTask = bounded(() => this.client(monitor.address).objectInfo({ signal: controller.signal, graph }),
       { signal: controller.signal }).then(info => {
-        if (controller.signal.aborted || this.monitors.get(monitor.address) !== monitor) return;
+        if (controller.signal.aborted || this.monitors.get(monitor.address) !== monitor ||
+            monitor.live.prompt !== prompt || monitor.live.graph !== graph) return;
         monitor.live.info = info;
         this.#install(monitor, this.#enrich(monitor, monitor.snapshot));
       }).catch(() => {}).finally(() => { monitor.infoTask = null; monitor.infoController = null; });
@@ -290,6 +292,8 @@ export class Jobs {
       const progress = samePrompt ? monitor.snapshot.progress : null;
       if (!samePrompt) {
         monitor.progressController?.abort();
+        monitor.infoController?.abort();
+        monitor.live.info = null;
         monitor.logs.clear();
       }
       monitor.live.configure(prompt, queue.prompts?.get(prompt));

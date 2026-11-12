@@ -1,4 +1,5 @@
 const assert = require('node:assert/strict');
+const { addParameter } = require('./variation-add-helpers.cjs');
 
 module.exports = async ({ cdp, check, FAKE, KZ }) => {
   const name = 'Qwen_image_2.1_00500_athena_alisa_seed_2.png_00001_alisa_style_donor.png_00001_amaterasu_seed_00_6.png_00001.png';
@@ -21,8 +22,8 @@ module.exports = async ({ cdp, check, FAKE, KZ }) => {
   try {
     await cdp.evaluate(`(async()=>{await fetch('/api/collections/fake/entries/'+encodeURIComponent(${JSON.stringify(name)})+'/bytes')})()`);
     await invoke('variations.open', { id: 'fake:' + name });
-    await cdp.poll("!!document.querySelector('[data-image-id=\"470.image\"]')");
-    await cdp.clickAt('[data-image-id="470.image"] .checkbox');
+    await addParameter(cdp,'9.denoise');await addParameter(cdp,'470.image');
+    await require('./variation-add-helpers.cjs').removeRecordedImage(cdp,'470.image');
     await cdp.poll("!!document.querySelector('[data-image-id=\"470.image\"] .vz-imgfilespick')");
     await cdp.evaluate(`(async()=>{const bytes=await(await fetch('/api/collections/fake/entries/flux-lora.png/bytes')).arrayBuffer(),input=document.querySelector('[data-image-id="470.image"] .vz-imgfilespick'),dt=new DataTransfer();dt.items.add(new File([bytes],${JSON.stringify(name)},{type:'image/png'}));input.files=dt.files;input.dispatchEvent(new Event('change',{bubbles:true}))})()`);
     await cdp.poll("document.querySelectorAll('.vz-image-tile').length===1&&!document.querySelector('.vz-image-check')");
@@ -44,7 +45,7 @@ module.exports = async ({ cdp, check, FAKE, KZ }) => {
     for (const job of submitted) {
       const written = job.prompt['461'].inputs.filename_prefix;
       assert(written.startsWith(prefix));
-      assert(written.endsWith('_' + token + '_' + job.prompt['9'].inputs.denoise + '_done'));
+      assert(written.endsWith('_' + token + '_' + job.prompt['9'].inputs.denoise + '_done_'+job.prompt['9'].inputs.denoise));
       assert(Buffer.byteLength(written + '_00001_.png') <= 255);
       assert.equal(job.prompt['470'].inputs.image, name);
     }

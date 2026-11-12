@@ -7,12 +7,12 @@
 // `compareMeta` (the previous image's meta) marks field VALUES that differ
 // from it with .pdiff. `host` enables inline node-referenced images;
 // `skipImages` leaves those to a caller-drawn column instead. Image-filename
-// spans (.imgref) report clicks through the optional onImageRef(file)
+// spans (.imgref) report clicks through the optional onImageRef(key)
 // callback — the component never leaks its internals to a parent.
 
 import { createMemo, createUniqueId, For, Show } from "solid-js";
 import { useAppStore } from "../store/app-store.js";
-import { fullFieldRows, valueDiffer, nodeImages, NODE_IMG_EXT } from "../store/fields.js";
+import { fullFieldRows, valueDiffer, nodeImages, imageReference } from "../store/fields.js";
 import { useMeasuredSrc, useImageDisplay } from "../lib/img-measure.js";
 
 export function MetaBody(props) {
@@ -128,7 +128,7 @@ function InfoGroup(props) {
                 <div>
                   <span class="plabel">{input}: </span>
                   <Show
-                    when={props.host && NODE_IMG_EXT.test(String(v))}
+                    when={props.host && imageReference(String(v))}
                     fallback={
                       <Show when={changed()} fallback={v}>
                         <span class="pdiff">{v}</span>
@@ -137,7 +137,7 @@ function InfoGroup(props) {
                   >
                     <span
                       class={"imgref" + (changed() ? " pdiff" : "")}
-                      onClick={() => props.onImageRef?.(v)}
+                      onClick={() => props.onImageRef?.(imageReference(String(v)).key)}
                     >{v}</span>
                   </Show>
                 </div>

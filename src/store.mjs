@@ -16,6 +16,7 @@ import { copyFile, readFile, rename } from "node:fs/promises";
 import { CorruptStateError } from "./state.mjs";
 import { splitHostKey } from "./collections.mjs";
 import { SourceArrivals } from "./source-arrivals.mjs";
+import { isResourceRoot } from "./parameters.mjs";
 
 const SCHEMA_VERSION = 9;
 const CORE_JUDGMENT_FIELDS = new Set(["vote", "favorite", "bookmark", "notes"]);
@@ -189,23 +190,27 @@ const STATEMENTS = {
   nodeRegGet: "SELECT title, inputs FROM node_registry WHERE class_type = ?",
   nodeRegPut: "INSERT INTO node_registry (class_type, title, inputs, updated_at) VALUES (?, ?, ?, ?) ON CONFLICT(class_type) DO UPDATE SET title = excluded.title, inputs = excluded.inputs, updated_at = excluded.updated_at",
   nodeRegAll: "SELECT class_type, title, inputs FROM node_registry",
-  inputCacheGet: "SELECT hash, stamp FROM entry WHERE collection = ? AND name = ? AND kind = 'input'",
+  resourceCacheGet: "SELECT hash, stamp FROM entry WHERE collection = ? AND name = ? AND kind = ?",
   contentPlaceholder: "INSERT OR IGNORE INTO content (hash, updated_at) VALUES (?, ?)",
-  inputCachePut: `INSERT INTO entry (collection, name, kind, hash, stamp, state, first_seen, last_seen)
-       VALUES (?, ?, 'input', ?, ?, 'ingested', ?, ?)
-       ON CONFLICT(collection, name, kind) DO UPDATE SET hash = excluded.hash, stamp = excluded.stamp, state = 'ingested', last_seen = excluded.last_seen`,
+  resourceCachePut: `INSERT INTO entry (collection, name, kind, hash, stamp, state, first_seen, last_seen)
+       VALUES (?, ?, ?, ?, ?, 'ingested', ?, ?)
+       ON CONFLICT(collection, name, kind) DO UPDATE SET
+         width = NULL, height = NULL,
+         hash = excluded.hash, stamp = excluded.stamp, state = 'ingested', last_seen = excluded.last_seen`,
   hashFor: "SELECT hash FROM entry WHERE collection = ? AND name = ? AND kind = 'output'",
   fileInfo: "SELECT hash, stamp FROM entry WHERE collection = ? AND name = ? AND kind = 'output'",
   entryGet: "SELECT collection, name, kind, hash, stamp, state, vote, favorite, bookmark, notes, hidden, plugin_fields, width, height, first_seen, last_seen FROM entry WHERE collection = ? AND name = ? AND kind = ?",
   // one joined row per entry (entry ⟕ content) — judgment, dims and byte
   // size arrive in the SAME row, so a listing never queries per entry
   entryJoined: `SELECT e.name, e.hash, e.state, e.hidden, e.vote, e.favorite, e.bookmark, e.notes, e.plugin_fields,
-       COALESCE(c.width, e.width) AS width, COALESCE(c.height, e.height) AS height,
+       CASE WHEN e.hash IS NULL THEN e.width ELSE c.width END AS width,
+       CASE WHEN e.hash IS NULL THEN e.height ELSE c.height END AS height,
        c.bytes, c.meta
      FROM entry e LEFT JOIN content c ON c.hash = e.hash
      WHERE e.collection = ? AND e.name = ? AND e.kind = 'output'`,
   entriesForCollection: `SELECT e.name, e.hash, e.state, e.hidden, e.vote, e.favorite, e.bookmark, e.notes, e.plugin_fields,
-       COALESCE(c.width, e.width) AS width, COALESCE(c.height, e.height) AS height,
+       CASE WHEN e.hash IS NULL THEN e.width ELSE c.width END AS width,
+       CASE WHEN e.hash IS NULL THEN e.height ELSE c.height END AS height,
        c.bytes, c.meta
      FROM entry e LEFT JOIN content c ON c.hash = e.hash
      WHERE e.collection = ? AND e.kind = ?`,
@@ -215,7 +220,7 @@ const STATEMENTS = {
   hiddenNames: "SELECT name FROM entry WHERE collection = ? AND kind = 'output' AND hidden = 1",
   contentGet: "SELECT hash, width, height, meta, has_workflow, ext, bytes, updated_at FROM content WHERE hash = ?",
   contentIngest: `INSERT INTO content (hash, bytes, width, height, updated_at) VALUES (?, ?, ?, ?, ?)
-       ON CONFLICT(hash) DO UPDATE SET bytes = excluded.bytes,
+       ON CONFLICT(hash) DO UPDATE SET bytes = COALESCE(excluded.bytes, content.bytes),
          width = COALESCE(excluded.width, content.width),
          height = COALESCE(excluded.height, content.height)`,
   contentRefs: "SELECT COUNT(*) FROM entry WHERE hash = ?",
@@ -223,7 +228,9 @@ const STATEMENTS = {
   entriesByHash: "SELECT collection, name FROM entry WHERE hash = ? AND kind = 'output'",
   entryOutputIngest: `INSERT INTO entry (collection, name, kind, hash, stamp, state, first_seen, last_seen)
        VALUES (?, ?, 'output', ?, ?, 'ingested', ?, ?)
-       ON CONFLICT(collection, name, kind) DO UPDATE SET hash = excluded.hash, stamp = excluded.stamp, state = 'ingested', last_seen = excluded.last_seen`,
+       ON CONFLICT(collection, name, kind) DO UPDATE SET
+         width = NULL, height = NULL,
+         hash = excluded.hash, stamp = excluded.stamp, state = 'ingested', last_seen = excluded.last_seen`,
   touchFileStamp: "UPDATE entry SET stamp = ? WHERE collection = ? AND name = ? AND kind = 'output'",
   metaStateJoin: `SELECT c.meta FROM entry e JOIN content c ON c.hash = e.hash
        WHERE e.collection = ? AND e.name = ? AND e.kind = 'output'`,
@@ -253,22 +260,26 @@ const STATEMENTS = {
        ORDER BY name`,
   instancesOf: "SELECT collection, name FROM entry WHERE hash = ? AND kind = 'output' ORDER BY collection, name",
   goneNames: "SELECT name FROM entry WHERE collection = ? AND kind = 'output' AND state = 'gone'",
-  entryDims: `SELECT COALESCE(c.width, e.width) AS width, COALESCE(c.height, e.height) AS height
+  entryDims: `SELECT CASE WHEN e.hash IS NULL THEN e.width ELSE c.width END AS width,
+        CASE WHEN e.hash IS NULL THEN e.height ELSE c.height END AS height
        FROM entry e LEFT JOIN content c ON c.hash = e.hash
-       WHERE e.collection = ? AND e.name = ? AND e.kind = 'output'`,
+       WHERE e.collection = ? AND e.name = ? AND e.kind = ?`,
   entryDimsPut: `INSERT INTO entry (collection, name, kind, width, height, state, first_seen, last_seen)
-       VALUES (?, ?, 'output', ?, ?, 'seen', ?, ?)
+       VALUES (?, ?, ?, ?, ?, 'seen', ?, ?)
        ON CONFLICT(collection, name, kind) DO UPDATE SET
          width = COALESCE(excluded.width, entry.width),
          height = COALESCE(excluded.height, entry.height),
-         last_seen = excluded.last_seen`,
+         last_seen = excluded.last_seen WHERE entry.hash IS NULL`,
   dimsKnown: `SELECT e.name FROM entry e LEFT JOIN content c ON c.hash = e.hash
        WHERE e.collection = ? AND e.kind = 'output'
-         AND COALESCE(c.width, e.width) IS NOT NULL AND COALESCE(c.height, e.height) IS NOT NULL`,
-  dimsForHost: `SELECT e.name, COALESCE(c.width, e.width) AS width, COALESCE(c.height, e.height) AS height
+         AND (CASE WHEN e.hash IS NULL THEN e.width ELSE c.width END) IS NOT NULL
+         AND (CASE WHEN e.hash IS NULL THEN e.height ELSE c.height END) IS NOT NULL`,
+  dimsForHost: `SELECT e.name, CASE WHEN e.hash IS NULL THEN e.width ELSE c.width END AS width,
+        CASE WHEN e.hash IS NULL THEN e.height ELSE c.height END AS height
        FROM entry e LEFT JOIN content c ON c.hash = e.hash
        WHERE e.collection = ? AND e.kind = 'output'
-         AND COALESCE(c.width, e.width) IS NOT NULL AND COALESCE(c.height, e.height) IS NOT NULL`,
+         AND (CASE WHEN e.hash IS NULL THEN e.width ELSE c.width END) IS NOT NULL
+         AND (CASE WHEN e.hash IS NULL THEN e.height ELSE c.height END) IS NOT NULL`,
 };
 
 const kindFor = (address) => address?.startsWith("folder:") ? "folder" : "comfy";
@@ -558,12 +569,12 @@ export class Store {
   }
 
   // bumped in the same transaction style as the meta write it versions
-  #bumpMeta(host, name, hash = null, { meta = true, dims = true, aliasMeta = meta, aliasDims = dims } = {}) {
+  #bumpMeta(host, name, hash = null, { meta = true, dims = true, aliasMeta = meta, aliasDims = dims, kind = "output" } = {}) {
     this.#q.bumpMeta.run();
     const v = this.metaVersion;
     const entries = hash && (aliasMeta || aliasDims) ? this.#q.entriesByHash.all(hash) : [{ collection: host, name }];
     for (const entry of entries) {
-      const target = entry.collection === host && entry.name === name;
+      const target = kind === "output" && entry.collection === host && entry.name === name;
       const changedMeta = target ? meta : aliasMeta, changedDims = target ? dims : aliasDims;
       if (!changedMeta && !changedDims) continue;
       const key = `${entry.collection}\0${entry.name}`;
@@ -708,21 +719,28 @@ export class Store {
     if (!before) this.#collectionCommitted(id, this.collectionGet(id));
   }
 
-  // --- input-file cache index (entry kind='input' adapter) -------------------
+  // --- referenced-resource cache index (entry kind='input'/'temp') ---------
+  // Non-output roots are byte-cache rows only: no inventory, extraction or
+  // judgments. Output entries keep their own adapters below.
 
-  inputCacheGet(host, filename) {
-    const row = this.#q.inputCacheGet.value(host, filename);
+  resourceCacheGet(host, filename, kind) {
+    if (kind === "output" || !isResourceRoot(kind)) throw new TypeError(`Not a referenced-resource root: ${kind}`);
+    const row = this.#q.resourceCacheGet.value(host, filename, kind);
     return row ? { hash: row[0], stamp: row[1] } : null;
   }
 
-  inputCachePut(host, filename, hash, stamp) {
+  resourceCachePut(host, filename, kind, hash, stamp, size = null, dims = null) {
+    if (kind === "output" || !isResourceRoot(kind)) throw new TypeError(`Not a referenced-resource root: ${kind}`);
     this.#ensureCollection(host);
     const now = Date.now();
-    // the entry's hash must reference a content row (FK) — placeholder
-    // (ext=0, no meta) is fine: input files have no extractor output here
-    this.#q.contentPlaceholder.run(hash, now);
-    this.#q.inputCachePut.run(host, filename, hash, stamp, now, now);
+    const changedDims = this.#ingestContent(hash, Number.isSafeInteger(size) ? size : null, dims, now);
+    this.#q.resourceCachePut.run(host, filename, kind, hash, stamp, now, now);
+    if (changedDims) this.#bumpMeta(host, filename, hash, { kind, meta: false, dims: false, aliasDims: true });
   }
+
+  // Compatibility facades for the input root.
+  inputCacheGet(host, filename) { return this.resourceCacheGet(host, filename, "input"); }
+  inputCachePut(host, filename, hash, stamp) { return this.resourceCachePut(host, filename, "input", hash, stamp); }
 
   // --- hash identity (entry kind='output' adapters) -------------------------
 
@@ -737,6 +755,24 @@ export class Store {
     return row ? { hash: row[0], stamp: row[1] } : null;
   }
 
+  // Only byte-derived evidence enters content. All roots share the upsert;
+  // absent evidence never erases facts already established for this hash.
+  #ingestContent(hash, size, dims, now = Date.now()) {
+    const before = this.contentGet(hash);
+    this.#q.contentIngest.run(hash, size, dims?.width ?? null, dims?.height ?? null, now);
+    return !!dims && (before?.width !== dims.width || before?.height !== dims.height);
+  }
+
+  // Ingest's exact-cache recovery fills an existing content record, notifying
+  // output aliases only, even if the requesting resource is input/temp.
+  contentDimsPut(hash, dims) {
+    const content = this.contentGet(hash);
+    if (!content || !dims) return;
+    if (this.#ingestContent(hash, content.bytes, dims)) {
+      this.#bumpMeta(null, null, hash, { meta: false, dims: false, aliasDims: true });
+    }
+  }
+
   // Called when bytes are ingested: the entry points at the (new) hash.
   // opts.stamp — the source-content stamp at ingestion (null when unknown).
   // opts.changed — this is a RE-ingest of a file whose content changed:
@@ -746,25 +782,20 @@ export class Store {
     this.#ensureCollection(host);
     const now = Date.now();
     const old = this.#q.hashFor.value(host, filename)?.[0] ?? null;
-    const content = this.contentGet(hash);
 
     // the content row exists as soon as the bytes do (meta filled by metaPut;
     // inserted BEFORE the entry — entry.hash references content.hash). Dims
     // land when the bytes yield them; never wiped by a dimless re-ingest.
-    this.#q.contentIngest.run(hash, size, dims?.width ?? null, dims?.height ?? null, now);
+    const changedDims = this.#ingestContent(hash, size, dims, now);
 
     this.#q.entryOutputIngest.run(host, filename, hash, stamp, now, now);
-
-    // dims move to content at ingest; the entry's columns stay in sync so
-    // the COALESCE reads hold even when the content row is later dropped
-    if (dims) this.#q.entryDimsPut.run(host, filename, dims.width ?? null, dims.height ?? null, now, now);
 
     if (changed && old && old !== hash) {
       const refs = this.#q.contentRefs.value(old)[0];
       if (refs === 0) this.#q.contentDelete.run(old);
     }
     this.#bumpMeta(host, filename, hash, { aliasMeta: false,
-      aliasDims: !!dims && (content?.width !== dims.width || content?.height !== dims.height) });
+      aliasDims: changedDims });
   }
 
   // Same content, newer source stamp (a touch, or a new ETag over identical
@@ -968,22 +999,27 @@ export class Store {
 
   // --- entry dims : dims are known before the hash is) ----------------
 
-  // { width, height } from the content row (via the entry's hash) or the
-  // entry's own columns — null when neither knows.
-  entryDims(collection, name) {
-    const row = this.#q.entryDims.get(collection, name);
+  // { width, height } from content once hashed, otherwise provisional entry
+  // columns. A hashed-but-dimless entry is unknown. Keyed by resource root;
+  // the default remains the output entry.
+  entryDims(collection, name, kind = "output") {
+    if (!isResourceRoot(kind)) throw new TypeError(`unknown resource root: ${kind}`);
+    const row = this.#q.entryDims.get(collection, name, kind);
     if (!row || row.width == null || row.height == null) return null;
     return { width: row.width, height: row.height };
   }
 
-  // Store dims a head read yielded. Creates the 'seen' entry row when the
-  // name has none yet; never wipes known dims with nulls. Bumps the meta
-  // version so /meta polls deliver dims to clients.
-  entryDimsPut(collection, name, dims) {
+  // Store dims a head read yielded. Creates the 'seen' row of that root when
+  // the name has none yet; never wipes known dims with nulls. Output dims bump
+  // the meta version so /meta polls deliver them; input/temp rows are
+  // referenced resources, never output inventory or meta publications.
+  entryDimsPut(collection, name, dims, kind = "output") {
+    if (!isResourceRoot(kind)) throw new TypeError(`unknown resource root: ${kind}`);
+    if (this.entryGet(collection, name, kind)?.hash) return;
     this.#ensureCollection(collection);
     const now = Date.now();
-    this.#q.entryDimsPut.run(collection, name, dims?.width ?? null, dims?.height ?? null, now, now);
-    this.#bumpMeta(collection, name, null, { meta: false, dims: true });
+    this.#q.entryDimsPut.run(collection, name, kind, dims?.width ?? null, dims?.height ?? null, now, now);
+    if (kind === "output") this.#bumpMeta(collection, name, null, { meta: false, dims: true });
   }
 
   // Names whose dims are known (either source) — the dims-pass queue gate.

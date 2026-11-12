@@ -1,4 +1,5 @@
 // Semantic catalog over private model operations. No input/UI dependencies.
+import { RESOURCE_ROOTS } from "/shared/parameters.mjs";
 const string = (v) => typeof v === "string" && v.length > 0;
 const text = (v) => typeof v === "string";
 const bool = (v) => typeof v === "boolean";
@@ -53,7 +54,8 @@ export function registerCoreCommands(handles, { ops, state, clipboard = (text) =
     const index = state.imageIdxById().get(id);
     return index === undefined ? false : ops.diff.openFromFeed(index);
   });
-  add("workbench.pickInput", { source: string, file: string, fromOutput: optional(bool) }, (a) => ops.diff.openInput(a.source, a.file, a.fromOutput));
+  add("workbench.pickInput", { source: string, file: string, fromOutput: optional(bool), root: optional(oneOf(...RESOURCE_ROOTS)) },
+    (a) => ops.diff.openInput(a.source, a.file, a.fromOutput, a.root ?? (a.fromOutput ? "output" : "input")));
   add("workbench.pickAnchor", { name: string }, ({ name }) => ops.diff.openFromAnchor(state.anchors.findIndex((anchor) => anchor.name === name)));
   add("workbench.openPair", { left: side, right: optional(side), push: optional(bool), subject: optional(oneOf("a", "b")) }, (a) => ops.diff.openDiff(a.left, a.right, { push: a.push, subject: a.subject }));
   const parameters = {
@@ -173,7 +175,7 @@ export function commandFacades(handles, ops, state) {
     step: (direction) => invoke("workbench.step", { direction }),
     open: (intent = {}) => invoke("workbench.open", intent), hide: () => invoke("workbench.hide"), close: () => invoke("workbench.close"),
     openFromFeed: (index) => state.images[index] ? invoke("workbench.openEntry", { id: state.images[index].id }) : undefined,
-    openInput: (source, file, fromOutput = false) => invoke("workbench.pickInput", { source, file, fromOutput }),
+    openInput: (source, file, fromOutput = false, root) => invoke("workbench.pickInput", { source, file, fromOutput, ...(root ? { root } : {}) }),
     openFromAnchor: (index) => state.anchors[index] ? invoke("workbench.pickAnchor", { name: state.anchors[index].name }) : undefined,
     openDiff: (left, right, { push = false, subject = "a" } = {}) => invoke("workbench.openPair", { left, ...(right ? { right } : {}), push, subject }),
   });

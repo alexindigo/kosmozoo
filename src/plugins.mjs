@@ -16,6 +16,7 @@ import { fileURLToPath, pathToFileURL } from "node:url";
 import { validEntryName } from "./backings/index.mjs";
 import { isContentHash, sha256 } from "./cache.mjs";
 import { decodeDetectionResult } from "./detection-result.mjs";
+import { isResourceRoot } from "./parameters.mjs";
 
 export function pluginDirs(env = Deno.env.toObject()) {
   const dirs = [];
@@ -124,7 +125,7 @@ export class PluginHost {
         // per-kind cache and source-incarnation fencing.
         imageForEntry: (collection, fname, kind = "output") => {
           if (typeof collection !== "string" || !collection ||
-              !["input", "output"].includes(kind)) return Promise.resolve({ status: 400 });
+              !isResourceRoot(kind)) return Promise.resolve({ status: 400 });
           if (!Object.hasOwn(this.#hosts, collection)) return Promise.resolve({ status: 404 });
           if (!validEntryName(this.#hosts[collection], fname)) return Promise.resolve({ status: 400 });
           return this.#ingest.ensure(collection, fname, kind, { priority: "high" });

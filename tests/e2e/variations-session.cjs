@@ -1,6 +1,7 @@
 // Dialog lifetime observed through rendered controls and actual fake-backend jobs.
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
+const { addParameter } = require('./variation-add-helpers.cjs');
 module.exports = async ({ cdp, ENGINE, FAKE, KZ, check }) => {
   const invoke = (id, args = {}) => cdp.evaluate(`(async()=>${KZ}.handles.invoke(${JSON.stringify(id)},${JSON.stringify(args)}))()`);
   const dismiss = async () => {
@@ -11,8 +12,7 @@ module.exports = async ({ cdp, ENGINE, FAKE, KZ, check }) => {
   };
   const open = async (args = { id: 'fake:flux-controlnet.png' }) => {
     await invoke('variations.open', args);
-    await cdp.poll("document.querySelectorAll('.vz-slider-row').length>0");
-    await cdp.poll("document.querySelectorAll('.vz-image-set').length>0");
+    await cdp.poll("document.querySelectorAll('.vz-catalogue-row').length>0");
   };
   const type = async (selector, text) => {
     await cdp.evaluate(`(()=>{const e=document.querySelector(${JSON.stringify(selector)});e.focus();e.select()})()`);
@@ -50,7 +50,7 @@ module.exports = async ({ cdp, ENGINE, FAKE, KZ, check }) => {
       await cdp.evaluate(`(async()=>{window.__vsReplace=${KZ}.handles.invoke('variations.open',{id:'fake:flux-basic.png'});return true})()`);
       await cdp.poll("!!document.querySelector('.vz-discard')"); await cdp.clickAt('.vz-discard-confirm');
       assert.equal((await cdp.evaluate('window.__vsReplace')).status, 'applied');
-      await cdp.poll("document.querySelectorAll('.vz-slider-row').length>0");
+      await cdp.poll("document.querySelectorAll('.vz-catalogue-row').length>0");
       assert.equal(await cdp.evaluate("document.querySelector('.vz-prefix').value"), '');
       check('session b: Keep editing preserves edits; replacement confirms once and starts fresh', true); await dismiss();
     }
@@ -62,7 +62,7 @@ module.exports = async ({ cdp, ENGINE, FAKE, KZ, check }) => {
     }
     if (selected('d')) {
       await fetch(FAKE + '/__test/activity', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ captureEnqueue: true }) });
-      await open(); await type('.vz-prefix', 'session-success_'); const before = (await jobs()).length;
+      await open(); await addParameter(cdp,'9.denoise'); await type('.vz-prefix', 'session-success_'); const before = (await jobs()).length;
       const result = await invoke('variations.run'); assert.equal(result.adopted, true);
       const submitted = (await jobs()).slice(before); assert(submitted.length > 0);
       assert(submitted.every(job => Object.values(job.prompt).some(node => node.class_type === 'SaveImage' && node.inputs.filename_prefix.startsWith('session-success_'))));
@@ -72,7 +72,7 @@ module.exports = async ({ cdp, ENGINE, FAKE, KZ, check }) => {
     }
     if (selected('e')) {
       for (const mode of ['failed', 'partial', 'uncertain']) {
-        await open(); await type('.vz-prefix', 'keep-after-' + mode);
+        await open(); await addParameter(cdp,'9.denoise'); await type('.vz-prefix', 'keep-after-' + mode);
         await type('.vz-slider-row[data-param-key="9.denoise"] .vz-row-inc-input', '1e-1');
         const before = await cdp.evaluate("[document.querySelector('.vz-prefix').value,document.querySelector('.vz-suffix').value,document.querySelector('.vz-row-inc-input').value]");
         await cdp.evaluate(`(()=>{window.__vsFetch=window.fetch;window.__vsCalls=0;window.fetch=(url,options)=>{if(!String(url).includes('/features/variations/run'))return window.__vsFetch(url,options);window.__vsCalls++;${mode === 'uncertain' ? "return Promise.reject(new Error('lost response'))" : `return Promise.resolve(new Response(JSON.stringify(${JSON.stringify(mode === 'partial' ? { submitted: 1, total: 3, errors: [{ error: 'partial result' }] } : { error: 'forced failure' })}),{status:${mode === 'partial' ? 200 : 500}}))`}}})()`);
@@ -89,6 +89,7 @@ module.exports = async ({ cdp, ENGINE, FAKE, KZ, check }) => {
     if (selected('f')) {
       await fetch(FAKE + '/__test/activity', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ captureEnqueue: true }) });
       await open({ ids: ['fake:flux-controlnet.png', 'fake:flux-basic.png'], bulk: true });
+      await addParameter(cdp,'9.denoise');
       assert(await cdp.evaluate("document.querySelector('.vz-title').textContent.includes('applying to 2 images')"));
       await type('.vz-prefix', 'session-bulk_'); await capture('bulk'); const before = (await jobs()).length;
       const result = await invoke('variations.run'); assert.equal(result.adopted, true);
@@ -111,7 +112,7 @@ module.exports = async ({ cdp, ENGINE, FAKE, KZ, check }) => {
         await cdp.poll(`(async()=>!!${KZ}.state.hosts['session-owner']&&${KZ}.state.hosts['session-owner'].sourceVersion.incarnation!==${JSON.stringify(incarnation)})()`);
         await cdp.evaluate("(async()=>{await fetch('/api/collections/session-owner/entries/flux-controlnet.png/bytes')})()");
         await invoke('variations.open', { id: name + ':flux-controlnet.png' });
-        await cdp.poll("document.querySelectorAll('.vz-slider-row').length>0||!!document.querySelector('.vz-workspace-new')");
+        await cdp.poll("document.querySelectorAll('.vz-catalogue-row').length>0||!!document.querySelector('.vz-workspace-new')");
         assert(await cdp.evaluate("!document.querySelector('.vz-workspace,.vz-workspace-new,.vz-retained-values,.vz-workspace-status')&&!document.querySelector('[aria-label=\"Recipe workspace\"]')&&!document.querySelector('.vz-panel').textContent.includes('New recipe')"));
         check('session g: no recipe switcher, new-recipe action or old-origin mode after source replacement', true);
       } finally { await dismiss(); await fetch(ENGINE + '/api/collections/' + name, { method: 'DELETE' }); }

@@ -17,26 +17,75 @@ export function SliderRow(props) {
   return <ParameterRow class="vz-slider-row" row={props.row} enabled={props.enabled} filteredOut={props.filteredOut}
     attributes={{ "data-param-key": props.param.key }}
     current={props.relative ? "varies by image" : fmt(props.current())} summary={props.summary}
-    onInsert={props.onInsert} onEnable={checked => props.onToggle(props.param.key, checked)}>
+    registerFocus={props.registerFocus} onInsert={props.onInsert} onEnable={checked => props.onToggle(props.param.key, checked)}>
     <Show when={props.row().mode} keyed>{mode => <NumericEditor {...props} mode={mode} />}</Show>
   </ParameterRow>;
 }
 
-// Only the native widget lifetime belongs to the expanded body. The recipe owns
-// every editable value, so a fresh widget restores the latest retained bounds.
+// Raw fields live for the explicit mode, independently of representability.
+// Only the slider child is retired when exact text cannot be drawn safely.
 function NumericEditor(props) {
+  const rawIncrement = () => props.rawIncrement();
+  const focus = focusMemory(props.rememberFocus);
+  const fineStep = Math.pow(10, -props.param.decimals);
+  const single = props.mode === "value";
+  const fields = single ? [{ key: "value", label: "value", aria: "Value", handle: "value" }]
+    : [{ key: "min", label: "from", aria: "From", handle: "lower bound" }, { key: "max", label: "to", aria: "To", handle: "upper bound" }];
+  const commitInc = (v) => {
+    const next = Math.max(fineStep, +Number(v).toFixed(props.param.decimals + 3));
+    props.onIncrement(props.param.key, String(next));
+  };
+  return <div class="vz-numeric-editor">
+    <Show when={props.row().sliderSafe}><NumericSlider {...props} fields={fields} /></Show>
+    <div class="vz-numeric-controls">
+      <ModeSwitch label={`${parameterName(props.row())} mode`} value={props.mode}
+        options={[{ value: "range", label: "Range" }, { value: "value", label: "Value" }]}
+        onChange={mode => props.onField(props.param.key, "mode", mode)} />
+      <div class="vz-range-fields">
+        <For each={fields}>{field => <label class="vz-range-field" classList={{ "vz-value-field": single }}>
+          {field.label}<TextField type="text" inputMode="decimal" aria-label={`${props.param.label} ${field.aria}`}
+            value={props.row()[field.key]} aria-invalid={props.row().numbers[field.key] === null} {...focus}
+            onInput={event => props.onField(props.param.key, field.key, event.currentTarget.value)} />
+        </label>}</For>
+        <Show when={!single}>
+          <div class="vz-range-field"><label for={`step-${props.placeholderKey}`}>step</label>
+            <div class="vz-row-inc">
+              <Show when={props.row().sliderSafe && props.increment() > fineStep}><IconButton chrome size="md" variant="plain vz-step-btn" title="Halve step" aria-label={`${props.param.label}: Halve step`}
+                icon={iconSvg("minus")} onAction={() => commitInc(Math.max(fineStep, props.increment() / 2))} /></Show>
+              <TextField id={`step-${props.placeholderKey}`} type="text" inputMode="decimal" role="spinbutton" aria-label={`${props.param.label} increment`}
+                aria-valuemin={fineStep} aria-valuenow={props.increment() ?? undefined}
+                aria-invalid={props.increment() === null}
+                class="vz-row-inc-input" value={rawIncrement()} {...focus}
+                onInput={event => props.onIncrement(props.param.key, event.currentTarget.value)}
+                onKeyDown={event => {
+                  if (!["ArrowUp", "ArrowDown"].includes(event.key)) return;
+                  const value = props.increment();
+                  if (value === null || !Number.isFinite(value) || !props.row().sliderSafe) return;
+                  event.preventDefault(); commitInc(value + (event.key === "ArrowUp" ? fineStep : -fineStep));
+                }} />
+              <Show when={props.row().sliderSafe && props.increment() !== null}><IconButton chrome size="md" variant="plain vz-step-btn" title="Double step" aria-label={`${props.param.label}: Double step`}
+                icon={iconSvg("plus")} onAction={() => commitInc(props.increment() * 2)} /></Show>
+            </div>
+          </div>
+        </Show>
+      </div>
+    </div>
+  </div>;
+}
+
+// The widget owns initialization, projection, gestures and public suspension;
+// its cleanup cannot replace or focus the sibling native raw fields.
+function NumericSlider(props) {
   let sliderEl;
   let gesture;
-  const rawIncrement = () => props.rawIncrement();
   const focus = focusMemory(props.rememberFocus);
   let wasDragging = false;
   createEffect(() => { const enabled = !!props.enabled(); gesture?.setEnabled(enabled); });
   const fineStep = Math.pow(10, -props.param.decimals);
   const single = props.mode === "value";
   const relative = props.relative && !single;
-  // One descriptor owns handle ordering, numeric projection and raw field UI.
-  const fields = single ? [{ key: "value", label: "value", aria: "Value", handle: "value" }]
-    : [{ key: "min", label: "from", aria: "From", handle: "lower bound" }, { key: "max", label: "to", aria: "To", handle: "upper bound" }];
+  // The stable editor's descriptor also defines widget handle ordering.
+  const fields = props.fields;
 
   // absolute: the param's clamp; relative: ±(spread×10) around the current
   const lo = relative ? -(props.param.spread ?? 1) * 10 : props.param.clamp[0];
@@ -119,21 +168,14 @@ function NumericEditor(props) {
     });
   });
 
-  const commitInc = (v) => {
-    const next = Math.max(fineStep, +Number(v).toFixed(props.param.decimals + 3));
-    const raw = String(next);
-    props.onIncrement(props.param.key, raw);
-  };
-
   // absolute: marker at the current value; relative: pinned to the center
-  const markerPct = () => relative
+  const markerPct = () => !props.row().sliderSafe ? null : relative
     ? 50
     : (props.current() != null
       ? ((props.current() - props.param.clamp[0]) / (props.param.clamp[1] - props.param.clamp[0])) * 100
       : null);
 
   return (
-      <div class="vz-numeric-editor">
         <div class="vz-rangewrap">
           <div class="vz-lane vz-lane-track">
             <div class="vz-rail" />
@@ -147,39 +189,5 @@ function NumericEditor(props) {
             <div class="vz-slider" ref={sliderEl} />
           </div>
         </div>
-        <div class="vz-numeric-controls">
-          <ModeSwitch label={`${parameterName(props.row())} mode`} value={props.mode}
-            options={[{ value: "range", label: "Range" }, { value: "value", label: "Value" }]}
-            onChange={mode => props.onField(props.param.key, "mode", mode)} />
-          <div class="vz-range-fields">
-          <For each={fields}>{field => <label class="vz-range-field" classList={{ "vz-value-field": single }}>
-            {field.label}<TextField type="text" inputMode="decimal" aria-label={`${props.param.label} ${field.aria}`}
-              value={props.row()[field.key]} aria-invalid={props.row().numbers[field.key] === null} {...focus}
-              onInput={event => props.onField(props.param.key, field.key, event.currentTarget.value)} />
-          </label>}</For>
-          <Show when={!single}>
-          <div class="vz-range-field"><label for={`step-${props.placeholderKey}`}>step</label>
-            <div class="vz-row-inc">
-              <Show when={props.increment() > fineStep}><IconButton chrome size="md" variant="plain vz-step-btn" title="Halve step" aria-label={`${props.param.label}: Halve step`}
-                icon={iconSvg("minus")} onAction={() => commitInc(Math.max(fineStep, props.increment() / 2))} /></Show>
-              <TextField id={`step-${props.placeholderKey}`} type="text" inputMode="decimal" role="spinbutton" aria-label={`${props.param.label} increment`}
-                aria-valuemin={fineStep} aria-valuenow={props.increment() ?? undefined}
-                aria-invalid={props.increment() === null}
-                class="vz-row-inc-input" value={rawIncrement()} {...focus}
-                onInput={event => props.onIncrement(props.param.key, event.currentTarget.value)}
-                onKeyDown={event => {
-                  if (!["ArrowUp", "ArrowDown"].includes(event.key)) return;
-                  const value = props.increment();
-                  if (value === null || !Number.isFinite(value)) return;
-                  event.preventDefault(); commitInc(value + (event.key === "ArrowUp" ? fineStep : -fineStep));
-                }} />
-              <Show when={props.increment() !== null}><IconButton chrome size="md" variant="plain vz-step-btn" title="Double step" aria-label={`${props.param.label}: Double step`}
-                icon={iconSvg("plus")} onAction={() => commitInc(props.increment() * 2)} /></Show>
-            </div>
-          </div>
-          </Show>
-          </div>
-        </div>
-      </div>
   );
 }

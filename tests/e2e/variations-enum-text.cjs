@@ -1,6 +1,7 @@
 // Task 4: real catalogue -> retained editor -> native layout/typing.
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
+const { addParameter } = require('./variation-add-helpers.cjs');
 module.exports = async ({ cdp, check, ENGINE, FAKE, KZ }) => {
   const source = 'enum-text-editors', filename = 'enum-text-editors.png';
   const small = ['euler', 'euler_a', 'heun', 'dpm_2', 'ddim', 'uni_pc'];
@@ -43,9 +44,8 @@ module.exports = async ({ cdp, check, ENGINE, FAKE, KZ }) => {
     await cdp.poll(`(async()=>!!${KZ}.state.hosts['${source}'])()`);
     await cdp.evaluate(`fetch('/api/collections/${source}/entries/${filename}/bytes').then(r=>{if(!r.ok)throw Error(r.status);return r.arrayBuffer()}).then(()=>true)`);
     await invoke('variations.open', { id: `${source}:${filename}` });
-    await cdp.poll(`!!document.querySelector('${shortRow}')&&!!document.querySelector('${longRow}')&&!!document.querySelector('${textRow}')`);
     await cdp.send('Emulation.setDeviceMetricsOverride', { width: 1600, height: 1000, deviceScaleFactor: 1, mobile: false });
-    for (const row of [shortRow, longRow, textRow]) await cdp.clickAt(row + ' .vz-parameter-heading .checkbox');
+    for (const id of ['81.sampler','81.model','81.text']) await addParameter(cdp,id);
     await cdp.poll(`document.querySelectorAll('${shortRow} .vz-enum-opt').length===6`);
     await cdp.evaluate('new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve)))');
     const grid = await cdp.evaluate(`(()=>{
@@ -60,7 +60,7 @@ module.exports = async ({ cdp, check, ENGINE, FAKE, KZ }) => {
     assert(grid.every(option => option.checkbox === 14 && option.label >= option.natural));
     check('enum/text: six short options wrap into at most two equal-width rows, longest label fits, option checkboxes are 14px', true, JSON.stringify(grid));
     assert(await cdp.evaluate(`(()=>{const r=document.querySelector('${shortRow}'),v=r.querySelector('.vz-enum-current .vz-enum-opt-name');return v.textContent==='ddim'&&getComputedStyle(v).color===getComputedStyle(r.querySelector('.vz-parameter-current')).color})()`));
-    check('enum/text: current small option label uses the orange current-value token', true);
+    check('enum/text: chosen current option and contribution summary use foreground', true);
 
     const order = () => cdp.evaluate(`[...document.querySelectorAll('${longRow} .vz-enum-opt-name')].map(el=>el.textContent)`);
     const expected = [current, ...large.filter(value => value !== current)];
@@ -104,8 +104,8 @@ module.exports = async ({ cdp, check, ENGINE, FAKE, KZ }) => {
     check('enum/text: wrapping reacts to viewport width; both enum layouts and text fit narrow lists without horizontal scrolling', true);
     await cdp.send('Emulation.setDeviceMetricsOverride', { width: 1600, height: 1000, deviceScaleFactor: 1, mobile: false });
     await type(textarea, 'First paragraph.\n\nSecond paragraph.\nAn indented line stays literal.');
-    await cdp.clickAt(textRow + ' .vz-parameter-heading .checkbox');
-    await cdp.clickAt(textRow + ' .vz-parameter-heading .checkbox');
+    await cdp.clickAt(textRow + ' .vz-parameter-remove');
+    await addParameter(cdp,'81.text');
     const restored = await geometry(); assert(Math.abs(restored.height - (4 * restored.line + restored.chrome)) <= 1);
     assert.equal(await cdp.evaluate(`document.querySelector('${textarea}').value`), 'First paragraph.\n\nSecond paragraph.\nAn indented line stays literal.');
     check('enum/text: collapse/reopen sizes the retained literal template on its new native textarea', true);

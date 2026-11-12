@@ -4,6 +4,7 @@
 // ~20 empirical class_type probes are field data, not architecture — port
 // them verbatim, do not re-derive them.
 import { mediaKind, mediaExtension } from "./backings/mime.mjs";
+import { parseExactJson } from "./parameters.mjs";
 
 // Bump when the extraction shape changes; content rows with an older ext
 // are stale and re-extract on their next ingest (decided in src/ingest.mjs,
@@ -385,9 +386,13 @@ export async function metaFromPngBytes(buf) {
   return (await metaFromBytes(buf, "image.png")).slice(0, 2);
 }
 
-const jsonValue = value => {
-  try { return typeof value === "string" ? JSON.parse(value) : value; } catch { return null; }
+const jsonValue = (value, parse = parseExactJson) => {
+  try { return typeof value === "string" ? parse(value) : value; } catch { return null; }
 };
+// Deliberately retain the old, ordinary-number metadata projection. It is not
+// a source for generation and must not narrow ingestion to the exact codec.
+const metadataValue = value => typeof value === "string" ? jsonValue(value, JSON.parse)
+  : value == null ? value : JSON.parse(JSON.stringify(value, (_key, value) => typeof value === "bigint" ? Number(value) : value));
 
 // One dispatcher for ingestion, raw graph reads and plugins. The third result
 // is the executed graph, not the editor workflow. Hash-only cache readers have
@@ -409,9 +414,12 @@ export async function metaFromBytes(buf, name) {
   else if (kind === "audio" && ext === "wav") tags = waveTags(buf);
   const hasWorkflow = tags != null && Object.hasOwn(tags, "workflow");
   const graph = jsonValue(tags?.prompt);
-  if (!graph || typeof graph !== "object" || Array.isArray(graph)) return [null, hasWorkflow, null];
-  const meta = extractMetaFromGraph(graph);
-  const lineage = jsonValue(tags?.kz);
+  const displayGraph = metadataValue(tags?.prompt);
+  if (!displayGraph || typeof displayGraph !== "object" || Array.isArray(displayGraph)) return [null, hasWorkflow, null];
+  // Display/storage metadata retains its ordinary JSON-number contract. Only
+  // the separate original graph result carries exact integers into generation.
+  const meta = extractMetaFromGraph(displayGraph);
+  const lineage = metadataValue(tags?.kz);
   if (meta && lineage && typeof lineage.source === "string") meta.lineage = lineage;
   return [meta, hasWorkflow, graph];
 }
@@ -529,7 +537,7 @@ function putTag(tags, key, value) {
   key = key.toLowerCase();
   if (["prompt", "workflow", "kz"].includes(key)) tags[key] = value;
   else if (key === "comment") {
-    const comment = jsonValue(value);
+    const comment = jsonValue(value) ?? jsonValue(value, JSON.parse);
     if (comment && typeof comment === "object" && !Array.isArray(comment)) {
       for (const field of ["prompt", "workflow", "kz"]) {
         if (Object.hasOwn(comment, field) && !Object.hasOwn(tags, field)) tags[field] = comment[field];

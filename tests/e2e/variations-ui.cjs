@@ -3,6 +3,7 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const { CDP, collectPageErrors } = require('./cdp.cjs');
 const { pickInput } = require('./image-picker-helpers.cjs');
+const { addParameter, removeRecordedImage } = require('./variation-add-helpers.cjs');
 const ENGINE = process.env.E2E_ENGINE || 'http://127.0.0.1:18460';
 const FAKE = process.env.E2E_FAKE || 'http://127.0.0.1:18461';
 const KZ = `(await import('/store/instance.js')).appStore`;
@@ -28,26 +29,33 @@ async function main() {
     await cdp.goto(ENGINE + '/#fake#flux-controlnet.png');
     await cdp.poll("!!document.querySelector('.card')", 20000);
     await cdp.evaluate(`(async()=>{await fetch('/api/collections/fake/entries/flux-controlnet.png/bytes');return ${KZ}.handles.invoke('variations.open',{id:'fake:flux-controlnet.png'})})()`);
-    await cdp.poll(`!!document.querySelector('${denoise} .noUi-handle')&&!!document.querySelector('.vz-image-set')`);
+    await addParameter(cdp, '9.denoise');
+    await cdp.poll(`!!document.querySelector('${denoise} .noUi-handle')`);
     await shot('default');
-    const compact = await cdp.evaluate("[...document.querySelectorAll('.vz-slider-row.vz-off')].map(row=>({id:row.dataset.paramKey,height:row.getBoundingClientRect().height,editorVisible:!!row.querySelector('.vz-numeric-editor')?.getClientRects().length}))");
-    assert(compact.length > 2); assert(compact.every(row => row.height <= 44 && !row.editorVisible), JSON.stringify(compact));
+    const compact = await cdp.evaluate("[...document.querySelectorAll('.vz-catalogue-row:not(.vz-catalogue-hidden)')].map(row=>({id:row.dataset.catalogueId,height:row.getBoundingClientRect().height,editorVisible:!!row.querySelector('.vz-numeric-editor')}))");
+    const expandedHeight = await cdp.evaluate(`document.querySelector('${denoise}').getBoundingClientRect().height`);
+    // The approved three-column catalogue uses title/input/value cards, with
+    // taller image previews. Each stays smaller than the expanded editor and
+    // contains no numeric editor of its own, rather than an old 52px list row.
+    assert(compact.length > 2); assert(compact.every(row => row.height < expandedHeight && !row.editorVisible), JSON.stringify({compact,expandedHeight}));
     console.log('PASS compact inactive numeric rows ' + JSON.stringify(compact));
-    assert.equal(await cdp.evaluate(`document.querySelector('${denoise} .vz-parameter-name').textContent`), 'BasicScheduler.denoise');
+    assert.equal(await cdp.evaluate(`document.querySelector('${denoise} .vz-parameter-name').textContent`), 'BasicScheduler #9: denoise');
     assert(await cdp.evaluate(`document.querySelector('${denoise} .vz-label').title.includes('#9')`));
-    const identity = await cdp.evaluate(`(()=>{window.__uiWidget=document.querySelector('${denoise} .vz-slider');const cb=document.querySelector('${denoise} .checkbox');return {name:document.getElementById(cb.getAttribute('aria-labelledby')).textContent,description:document.getElementById(cb.getAttribute('aria-describedby')).textContent,thumbs:[...document.querySelectorAll('${denoise} [role="slider"]')].map(e=>e.getAttribute('aria-label'))}})()`);
-    assert.equal(identity.name, 'BasicScheduler.denoise'); assert.equal(identity.description, 'BasicScheduler #9 · denoise'); assert(identity.thumbs[0].includes('lower')); assert(identity.thumbs[1].includes('upper'));
-    await cdp.clickAt(`${denoise} .checkbox`);
+    const identity = await cdp.evaluate(`(()=>{window.__uiWidget=document.querySelector('${denoise} .vz-slider');const name=document.querySelector('${denoise} .vz-parameter-name');return {name:name.textContent,description:document.getElementById(name.getAttribute('aria-describedby')).textContent,thumbs:[...document.querySelectorAll('${denoise} [role="slider"]')].map(e=>e.getAttribute('aria-label'))}})()`);
+    assert.equal(identity.name, 'BasicScheduler #9: denoise'); assert.equal(identity.description, 'BasicScheduler #9 · denoise'); assert(identity.thumbs[0].includes('lower')); assert(identity.thumbs[1].includes('upper'));
+    await cdp.clickAt(`${denoise} .vz-parameter-remove`);
     assert.equal(await cdp.evaluate(`!!document.querySelector('${denoise} .vz-numeric-editor')`), false);
-    await cdp.clickAt(`${denoise} .checkbox`);
+    await addParameter(cdp, '9.denoise');
     assert(await cdp.evaluate(`window.__uiWidget!==document.querySelector('${denoise} .vz-slider')`));
     const suffixBeforeLabel = await cdp.evaluate("document.querySelector('.vz-suffix').value");
     await cdp.clickAt('.vz-suffix');
     await cdp.evaluate("(()=>{const input=document.querySelector('.vz-suffix');input.setSelectionRange(input.value.length,input.value.length)})()");
+    await addParameter(cdp, '9.steps');
     await cdp.clickAt('[data-param-key="9.steps"] .vz-parameter-name');
-    assert.equal(await cdp.evaluate("document.querySelector('[data-param-key=\"9.steps\"] .checkbox').checked"),false);
+    assert.equal(await cdp.evaluate("!!document.querySelector('[data-param-key=\"9.steps\"].on .vz-parameter-remove')"),true);
     assert.equal(await cdp.evaluate("document.querySelector('.vz-suffix').value"), suffixBeforeLabel+'{9.steps}', 'name inserts a canonical token without enabling the row');
     await type('.vz-suffix', suffixBeforeLabel);
+    await cdp.clickAt('[data-param-key="9.steps"] .vz-parameter-remove');
     await cdp.clickAt(`${denoise} .vz-range-field:first-child input`);
     await type(`${denoise} .vz-range-field:first-child input`, '.85');
     await cdp.keyTrusted('Tab', { vk: 9 });
@@ -76,7 +84,8 @@ async function main() {
     await type(upper, '1'); await cdp.keyTrusted('Tab', { vk:9 });
     console.log('PASS numeric writes admit the next real touch immediately, without a tap-transition gate');
 
-    await cdp.clickAt('.vz-image-set .checkbox');
+    await addParameter(cdp, '43.image');
+    await removeRecordedImage(cdp, '43.image');
     for (const name of ['canny.png', 'ref.png', 'third.png']) await pickInput(cdp, name);
     await cdp.poll("document.querySelector('.vz-count').textContent==='11'");
     assert(await cdp.evaluate("document.querySelector('.vz-count-sub').textContent.includes('3 input images × 4 denoise values · 1 unchanged combination excluded')"));
@@ -92,17 +101,17 @@ async function main() {
     console.log('PASS exact tuple explanation, labelled acquisition and row-name insertion');
     await shot('populated');
 
-    await cdp.clickAt('[data-enum-id="9.scheduler"] .checkbox');
+    await addParameter(cdp, '9.scheduler');
     assert(await cdp.evaluate("!!document.querySelector('[data-enum-id=\"9.scheduler\"] .vz-enum-current')&&!document.querySelector('[data-enum-id=\"9.scheduler\"]').textContent.includes('Current')"));
-    await cdp.clickAt('[data-text-id="2.text"] .checkbox');
+    await addParameter(cdp, '2.text');
     await type('[data-text-id="2.text"] .vz-text-values', 'A portrait of {{subject}}.\nLine breaks stay.');
     await cdp.poll("document.querySelector('.vz-count').textContent==='—'");
     assert(await cdp.evaluate("document.querySelector('.vz-tpl-input').getAttribute('aria-invalid')==='true'"));
     await type('.vz-tpl-input', 'a person; a cat');
     await cdp.poll("document.querySelector('.vz-count').textContent==='24'");
     await shot('text-and-enum');
-    await cdp.clickAt('[data-text-id="2.text"] .vz-imgrow-head .checkbox');
-    await cdp.clickAt('[data-enum-id="9.scheduler"] .vz-imgrow-head .checkbox');
+    await cdp.clickAt('[data-text-id="2.text"] .vz-parameter-remove');
+    await cdp.clickAt('[data-enum-id="9.scheduler"] .vz-parameter-remove');
     await cdp.poll("document.querySelector('.vz-count').textContent==='11'");
     console.log('PASS current enum semantics and persistent template syntax/invalid-value associations');
 
@@ -132,6 +141,7 @@ async function main() {
           await cdp.poll("document.querySelector('.vz-error').textContent.length>2000");
         } finally { await cdp.evaluate('window.fetch=window.__sidebarFetch'); }
       }
+      await cdp.evaluate('document.querySelector(".vz-run").blur();document.querySelector(".vz-run").focus()');
       const geometry = await cdp.evaluate(`new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(()=>{
         const r=s=>document.querySelector(s).getBoundingClientRect(),side=r('.vz-right'),left=r('.vz-left'),run=r('.vz-run'),panel=r('.vz-panel');
         const field=document.querySelector('${denoise} .vz-range-fields'),inputs=[...field.querySelectorAll('input')].map(e=>e.getBoundingClientRect());
@@ -185,8 +195,8 @@ async function main() {
         '94': { class_type: 'SaveImage', inputs: { images: ['91',0], filename_prefix: 'summary-large' } },
       } }] }) }); assert(published.ok);
     await cdp.evaluate(`(async()=>{await fetch('/api/collections/fake/entries/summary-large.png/bytes');return ${KZ}.handles.invoke('variations.open',{id:'fake:summary-large.png'})})()`);
+    for (const key of ['a','b','c']) await addParameter(cdp, `91.${key}`);
     await cdp.poll("document.querySelectorAll('.vz-slider-row').length===3");
-    for (const key of ['a','b','c']) await cdp.clickAt(`[data-param-key="91.${key}"] .checkbox`);
     await cdp.poll("document.querySelector('.vz-count').title.includes('(estimate)')");
     assert(await cdp.evaluate("document.querySelector('.vz-count').textContent.includes('10^')&&document.querySelector('.vz-messages').textContent.includes('precision')"));
     assert.equal(await cdp.evaluate("document.querySelector('.vz-run').disabled"), false);
@@ -202,7 +212,10 @@ async function main() {
     assert.equal(await cdp.evaluate("document.querySelector('.card .boxcol textarea.pos').getAttribute('aria-label')"), 'Positive feedback');
     await cdp.keyTrusted('Tab', { vk: 9 });
     await cdp.evaluate("document.querySelector('.card .boxcol textarea.neg').focus()");
-    assert.equal(await cdp.evaluate("getComputedStyle(document.querySelector('.card .boxcol textarea.neg')).outlineWidth"), '2px');
+    assert(await cdp.evaluate(`(()=>{const field=document.querySelector('.card .boxcol textarea.neg'),style=getComputedStyle(field);
+      const probe=document.createElement('span');probe.style.color=style.getPropertyValue('--negative');document.body.append(probe);
+      const negative=getComputedStyle(probe).color;probe.remove();
+      return document.activeElement===field&&style.outlineStyle==='none'&&style.borderColor===negative;})()`));
     await shot('feedback-focus');
     assert.equal(await cdp.evaluate("document.querySelector('#hostBtn').getAttribute('aria-controls')"), 'hostDrop');
     await cdp.clickAt('#hostBtn'); await cdp.poll("document.querySelector('#hostBtn').getAttribute('aria-expanded')==='true'");

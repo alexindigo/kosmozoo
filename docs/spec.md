@@ -40,12 +40,12 @@ the resources; a collection's `capabilities` answer what its backing can do.
 | `/api/collections/<id>` | PATCH | partial `{pinned?: boolean, autoRefresh?: boolean}`; validates the complete object before writing; invalid fields/types/null/arrays/malformed JSON are 400, unknown source is 404, empty object is a no-op; returns saved booleans and their committed `sourceVersion` without host/folder probing |
 | `/api/collections/<id>` | DELETE | remove; refuses the last collection |
 | `/api/events` | GET | one native SSE delivery connection per app tab; complete version1 authoritative cached source maps, no upstream probe/list/monitor creation |
-| `/api/collections/<id>/entries` | GET | the feed listing: size, hash, state, meta, judgment, and dims — `COALESCE(content, entry)`, so an entry the dims pass reached carries width/height before it has a hash. Gone entries are excluded. `?inventory=1` returns the coherent output envelope described below; default remains an array. `?kind=input` lists the input dir instead |
+| `/api/collections/<id>/entries` | GET | the feed listing: size, hash, state, meta, judgment, and dims - content dimensions once hashed, provisional entry dimensions only before hashing. Gone entries are excluded. `?inventory=1` returns the coherent output envelope described below; default remains an array. `?kind=input` lists the input dir instead; any other `kind` is 400 (temp has no listing and never falls back to the output inventory) |
 | `/api/collections/<id>/entries/<name>` | GET | one entry |
 | `/api/collections/<id>/entries/<name>/meta` | GET | one shown entry's record `{name, hash, extracted, meta, width, height}`, independent of the delta stream; an entry without a hash is first ingested through the single-flight high lane for at most 8 s; `extracted:false` means not available yet (unreadable source or the wait elapsed) |
 | `/api/collections/<id>/entries` | POST | multipart upload into the input dir; **409 with the conflicting name, never an overwrite** |
 | `/api/collections/<id>/entries/<name>` | DELETE | per capability: folder → unlink; comfy + assets_plus → trash; otherwise → hide + history cleanup |
-| `/api/collections/<id>/entries/<name>/bytes` | GET | cache-first bytes (`?kind=input` for input-dir files); ETag is the content hash, `Cache-Control: no-cache`; single-byte ranges (§Serve path) |
+| `/api/collections/<id>/entries/<name>/bytes` | GET | cache-first bytes of one resource root: absent `kind` or `output` (the feed entry), `?kind=input` or `?kind=temp` (referenced files); an unknown `kind` is 400, never another root. ETag is the content hash, `Cache-Control: no-cache`; single-byte ranges (§Serve path). HEAD uses the same root and reports the content length |
 | `/api/collections/<id>/entries/<name>/bytes` | HEAD | 404 when the entry's bytes are unknown, else `content-length` |
 | `/api/collections/<id>/entries/<name>/judgment` | PATCH | whitelisted fields (`vote`/`favorite`/`bookmark`/`notes`/`plugins.<ns>.*`), defaults deep-pruned, one statement |
 | `/api/collections/<id>/feedback.json` | GET | the collection's judgments as a portable v2 document, generated on demand |
@@ -903,7 +903,7 @@ Size-pending candidates wait for the existing size owner's feed admission; remov
 entries and retired sessions discard them. A ready off-tape tick never waits.
 
 Static surfaces: `/shared/<name>` serves the allow-listed `src/` modules
-(`extractor.mjs`, `backings/mime.mjs`, `features/variations/shared.mjs`, `entry-path.mjs`, `source-origin.mjs`, `version.mjs`, `detection-result.mjs`, `content-hash.mjs`) to the browser;
+(`extractor.mjs`, `backings/mime.mjs`, `features/variations/shared.mjs`, `features/variations/compile.mjs`, `parameters.mjs`, `graph.mjs`, `entry-path.mjs`, `source-origin.mjs`, `version.mjs`, `detection-result.mjs`, `content-hash.mjs`) to the browser;
 `/` and `/diff` serve the Solid app from `client-solid-dist/`, with shared
 assets (`/css`, `/vendor`, `/js`, logos) from `client/`.
 
@@ -958,15 +958,12 @@ originating source and actual v2 JSON download, without duplicate activation or
 synthetic outside-click propagation. Features contribute command definitions,
 data bindings and affordances through the registry, without feature-name dispatch.
 
-Variations retains feature-private recipe workspaces for the app session, keyed
-by the captured target set and origin, including raw values, checkpoints and exact
-File references/order. Reopening restores them; A→B→A never overwrites A. There is
-no silent eviction or disk persistence. An old-origin recipe remains visibly
-recoverable, review-only, without automatic retargeting; “New recipe for current
-source” explicitly opens a separate workspace. “Discard recipe” asks for explicit
-confirmation even when clean; committed Discard removes that workspace. App
-disposal releases all retained workspaces. Mounted components own decision,
-focus/caret, widgets, timers and Run leases. Its bridge contains opening metadata, a fresh scalar
+Variations owns one private recipe/editor per dialog mount and captured target
+set. Closing or replacing it releases its raw buffers and exact File references;
+every reopening starts fresh. There is no recipe switcher, retained workspace or
+disk persistence. A source change retains the captured-origin fence and cannot
+retarget an open draft. Mounted components own decision, focus/caret, widgets,
+timers and Run leases. Its bridge contains opening metadata, a fresh scalar
 session and owner-safe request capabilities only. Dirty close/replacement shows
 **“Discard your changes?”**, **“Keep editing”** and **“Discard changes”** inside
 the still-mounted panel, outside its inert editor. Escape cancels only the decision;
@@ -994,8 +991,9 @@ identity deduplication uses input name, exact File identity or absolute engine p
 deduplication of Files. Removal changes that same set. Each chosen tile reserves
 one comparison-status line, so pending/current/ready/error settlement cannot move
 the acquisition controls. Single-line statuses retain full native tooltips. The chosen thumbnail grid
-is above persistent acquisition controls, even when the axis is off. “ComfyUI
-inputs” opens a searchable, virtualized, multi-select list; arrows/Enter select
+is above persistent acquisition controls inside the explicitly added card. Turning
+the axis off hides its card without discarding the ordered set. "ComfyUI
+inputs" opens a searchable, virtualized, multi-select list; arrows/Enter select
 and Escape closes its owned popup before the modal. The input grid mounts three
 extra rows on each side to acquire thumbnails before visibility, and declares one
 further viewport in the scroll direction as background image demand. Search, close
@@ -1097,32 +1095,252 @@ known collision-family bytes are read, not the whole input catalogue. Confirmed
 upload names remain readonly session evidence across later remove/add turns.
 Predictions are used only for counting; graph values and provenance always come
 from actual upload receipts, including returned renamed files.
+Image compilation is staged: existing inputs, byte-identical currents and the
+per-target Current image resolve to literal assignments; Files and engine paths
+remain unresolved transfer intents admitted by each target's resource contract
+(an upload-capable resource, or unknown metadata) before any read or write. The
+literal compiler validates only resolved values. Preview counts and names over a
+separate readonly estimate (resolved values plus predicted names); Run's all-target
+preparation uses the same plan, and final axes contain only receipt names.
 One compiler-generated image-set consumption binding replaces the old mode/file/
 localFiles leaves, so a fully acknowledged set has no dormant acquisition work.
 
-All variation kinds (numeric, enum, text and image) use the same node/input
-identity codec in `src/features/variations/shared.mjs`. IDs are `<nodeId>.<input>`
+The environment-pure `src/parameters.mjs` owns complete recorded-input discovery,
+the node/input identity codec, labels, aliases and exact-current selection.
+`src/features/variations/shared.mjs` re-exports those same functions for existing
+consumers. `graphParameters(graph, schema?)` needs no live object_info and enumerates
+every own recorded input, including custom/unknown classes, missing class metadata,
+booleans, null, arrays, objects, connections, output prefixes and image strings
+without a recognized extension. Missing optional inputs are absent, never null.
+
+`GET /api/features/variations/probe/<id>` adds `parameters`, an ordered complete
+descriptor sequence. Each descriptor contains `id`, `nodeId`, singleton `nodeIds`,
+literal `key`, class `type`, nullable display `title`, exact recorded `currentValue`,
+presentation `current`, `valueKind`, `encoding`, `schema`, `contract`, `kind` and
+`legacyEditable`. The legacy arrays omit `contract`, as they omit `schema`. `valueKind` is `number`, `string`, `boolean`, `null`, `array`,
+`object` or `connection`. Image `current` omits its folder annotation while
+`currentValue` retains it. Own-property presence selects `currentValue`, including
+explicit null, false, zero and empty string. Values are detached JSON snapshots;
+duplicate titles/classes/values never merge occurrences.
+
+`encoding` records `kosmozoo-link`, `unresolved-array`, `comfy-array-wrapper`,
+`comfy-curve-wrapper` or `json`. `src/graph.mjs` remains the sole edge interpreter:
+its existing pair predicate accepts string/safe-integer node IDs and nonnegative
+integer slots. This differs from upstream ComfyUI's string-ID/numeric-slot predicate.
+Raw arrays not matching the existing predicate remain unresolved, not proven
+literals or valid submissions. Dangling recognized links remain connections, not
+literal fallbacks. Wrapper tags describe recorded shape only; their objects and
+nested arrays stay intact, without unwrapping or traversing them as edges.
+
+`schema.status` is `known` when cached object_info supplies an input declaration
+(type, section, typed options and supplied constraints/configuration), `partial`
+when only numeric/enum metadata supplies `numericType` or `options`, otherwise
+`unavailable`. Known JSON declarations do not describe arbitrary Python validators.
+Schema/default potential does not create recorded inputs.
+Known declarations retain the backend's resource facts (`image_upload`,
+`audio_upload`, `video_upload`, `file_upload`, `image_folder`, `remote`) and
+display facts (`display_name`, `tooltip`, `multiline`, `advanced`, `slotType`).
+The backing normalizer resolves `COMFY_AUTOGROW_V3` children exactly as upstream
+`Autogrow._expand_schema_for_dynamic` does: names take precedence over prefix
+(`<prefix>0..max-1`, at most 100), the first declared template input repeats as
+`<input>.<name>`, required only below `min` when the template is required, and its
+own lazy flag joins the class's lazy inputs. `COMFY_DYNAMICSLOT_V3` children are
+parsed recursively as `<slot>.<input>`, as upstream `parse_class_inputs` does, so
+nested dynamic combos keep their own branch maps, defaults and declarations; the
+same child adoption serves dynamic group rows and Autogrow names. Child defaults
+are never merged into a parent, so no absent value is created. Malformed templates
+stay unknown and the aggregate/depth budgets are unchanged.
+
+Each descriptor also carries `contract`, the shared semantic projection of that
+schema evidence (`inputContract`/`parameterContract` in `src/parameters.mjs`):
+`knowledge` (`known`/`partial`/`unknown`), `role` (`resource`, `value`,
+`connection` or `unknown`), `type`, `literal`/`link` acceptance where declared
+(`null` = backend-owned), `choices` (`{evidence, values, multiselect}` where
+evidence is `closed`, `listing`, `unavailable` or `unverified` for partial maps,
+plus `provider` `declared`/`remote` and its `route`), `resource`
+(`{media, upload, root, provider, route?}`), primitive `constraints`, `section`,
+`lazy` and `display`. Only upload or `image_folder` facts make a COMBO a file
+resource; its options are listing evidence, not an accepted domain. A `remote`
+route alone is a generic option provider (choices may be integers): its choices are
+listing evidence for a value input, with no filename check or transfer. Dynamic
+combo selectors are value widgets. A known image resource owns the image editor
+whatever its recorded spelling; the LoadImage class/extension rule applies only
+without declarations. `resourceReference` is the one reading of a reference, exactly
+as upstream `folder_paths.annotated_filepath`: only `[output]`, `[input]` and `[temp]`
+suffixes are annotations, removed by their fixed upstream lengths; other bracket
+text stays in the name. Descriptor `current` and `fromOutput` and resource checks
+use it, while `currentValue` keeps the raw bytes. An unannotated reference names
+the input root. Image descriptors expose `currentRoot` (`input`, `output` or `temp`);
+`fromOutput` remains its compatibility facade.
+
+Resource identity is source + root + raw relative name; the content hash and source
+incarnation are separate facts. `RESOURCE_ROOTS`/`isResourceRoot` in
+src/parameters.mjs name the stock roots for every layer. Output entries keep the
+inventory, extraction and judgment owner; input and temp references are root-keyed
+byte-cache rows of the same entry table (`resourceCacheGet/Put`, with the input
+facades unchanged), never extracted or listed as outputs. Ingest single-flight,
+cache lookup, provisional dimensions head reads (`entryDims`/`entryDimsPut(..., kind)`),
+revalidation debounce and stamp checks are keyed by root
+(`scheduleRevalidate(..., { kind })`; `{ input: true }` still means input). Every
+root derives content dimensions from the exact hashed bytes. Hash binding retires
+provisional entry columns; hashed entries never fall back to them or accept head
+writes. Genuine same-byte first-hash geometry is preserved by exact-byte derivation,
+not inferred from a previously null hash. Same-hash writes without new dimension
+evidence retain established content facts. Referenced roots can enrich dimensions
+for output aliases (including the same collection/name), publishing through the
+ordinary metadata channel without extracting referenced content or listing it as output.
+`resourceCachePut(host,name,kind,hash,stamp,size,dims)` adds evidence after the existing
+positional arguments; hash-only callers remain legal but cannot certify provisional geometry.
+Unknown roots are rejected at the byte routes, ingest, inspection and the plugin content
+port. A folder source's files remain its input listing; it has no temp root.
+Variations inspection accepts all three roots, so a temp current compares with temp
+bytes. The client's single side codec (`resourceSource`/`parseResourceSource` in
+client/js/entry-url.mjs) keeps the existing `<host>`/`input:<host>` spellings and
+adds `temp:<host>`; the /diff URL protocol is unchanged. Details discovery
+(`nodeImages`/`imageReference` in client-solid/store/fields.js) reads references
+through `resourceReference`, keeps the LoadImage-class/extension eligibility (metadata
+has no backend declarations), and addresses images, focus links, zoom keys
+(`<root>:<host>:<file>`, input keys unchanged) and viewer selection by root + file.
+`workbench.pickInput` accepts an additive `root`.
+The editor, the shared compiler and final graph validation all derive the contract
+from the same schema evidence; final validation uses the declaration selected by
+the mutated graph's dynamic branches. Closed choices reject undeclared values;
+resource values must be root-relative references with an optional
+` [input]`/` [output]`/` [temp]` annotation. File existence and custom
+`VALIDATE_INPUTS` rules remain the backend's authority.
+`kind` retains the legacy editor kind where eligible and
+otherwise follows `valueKind`; `legacyEditable` identifies that compatibility
+projection, not future all-type support.
+
+The existing `params`, `stringParams`, `enumParams` and `textParams` arrays are
+derived from that sequence, retaining their previous shapes, exclusions and order.
+`catalogueParams` still flattens only those legacy arrays for compatibility.
+The editor and typed Run use the complete sequence. Compatibility aliases retain legacy array
+order before newly admitted inputs; canonical IDs address every occurrence.
+All rows start off. One catalogue/strategy projection registers every recorded input
+in the private recipe. Numeric/image/text/string-enum cards retain their existing
+treatment. Typed booleans/options use exact typed choices, retaining JSON string
+quotes so `0` and `"0"` stay distinct. Null, arrays, objects,
+wrappers and unknown values use ordered whole JSON candidate fields. One candidate
+is one assignment, never an implicit element permutation. Connection candidates
+choose existing graph nodes and raw nonnegative output slot text, with known
+port labels/types where available and honest unknown-compatibility help otherwise.
+Zero candidates and incomplete JSON/slots are invalid and cannot enqueue. Raw text,
+ordering, typed picks, Files and manual naming survive off/re-add unchanged.
+`cloneJsonValue` and `sameJsonValue` supply strict JSON-only snapshot/equality
+primitives: scalar types, array/object kinds and array order differ; record key
+order does not. Non-data/accessor/sparse/cyclic/native values (including Files)
+reject without serialization. Native Files stay in the existing private image
+lane. BigInt represents exact unsafe integer tokens; safe integers compare equally
+across Number/BigInt. No helper repairs a previously rounded Number.
+
+The opt-in `parseExactJson`/`stringifyExactJson` boundary uses native reviver
+`context.source` and temporary `JSON.rawJSON` serialization of BigInt to numeric
+tokens. Ordinary safe numbers stay Numbers. Already-unsafe integer Numbers reject
+at serialization rather than inventing lost digits. RawJSON objects cannot enter
+captured data; ordinary objects with a `rawJSON` property are ordinary data.
+The extractor's separate original graph result is exact, including nested comment
+envelopes; display/storage metadata keeps its ordinary-number contract. Variations
+probe, Run request/result consumers and Comfy enqueue share the codec. Generic API
+JSON behavior remains unchanged by default. Browsers missing native reviver source
+support fail closed with an instruction to update, never rounded numeric data.
+
+The pure `compile.mjs` owner compiles discrete candidates in existing `imageParams`:
+bool/null, exact numeric, whole object/array and connections, alongside old strings.
+Candidate elements never multiply. Non-connection raw array candidates use the
+stock array wrapper; explicit wrapper objects stay intact. Compile before count so
+equivalent raw-array/wrapper candidates share one identity. `compileDiscreteAxes`
+deduplicates normalized whole assignments with typed deep equality, preserving
+the first occurrence and caller data. The generic `permutationPlan` and
+`generatePermutations` preserve their supplied sequence's order and multiplicity;
+they exclude only complete current tuples. Typed Run uses the compiler before
+that same kernel, as does the all-parameter editor before preview and Run.
+No per-kind duplicate exception or second generator exists. Integer
+ranges use exact arithmetic; floating ranges retain existing quantization and caps.
+Current exclusion follows the generated endpoint, including the existing rounded
+last step, so preview count and actual submitted tuples cannot disagree there.
+
+The backing's address cache retains one successfully acquired raw node catalogue
+for 60 seconds and its latest normalized schema view. Variations and workflow telemetry pass their graph
+to `objectInfo({ graph })`: only its distinct class definitions enter the same
+aggregate 100000-entry/depth 32 atomic expansion limits. A failed unrelated or
+full-catalogue view cannot poison a subsequent graph view or force another fetch.
+Changing graph classes replaces the latest view rather than growing a scope cache;
+omitting graph preserves full-catalogue inspection. Requested views retain input
+declarations, typed options, output slots/names/list flags and dynamic-combo/group
+declarations. Failed acquisition/expansion keeps all maps unavailable with its
+reason; Run reports unavailable node information before enqueue instead of
+misdiagnosing a missing output. Probe still discovers recorded parameters without
+schema. Failed or cancelled acquisitions are not cached and cannot evict another
+consumer's concurrent successful acquisition. Workflow observations bind their captured graph/prompt and cannot publish
+after that prompt retires. Probe adds graph-local
+`nodes` with known outputs or null. Final graphs validate known slot bounds, stock
+type/union overlap and primitive/enum/min/max constraints before enqueue. Unknown
+custom validators/ports remain unknown, with backend partial/uncertain semantics
+authoritative. Lazy closure and producer pruning stay unchanged. Malformed numeric
+slot pairs reject without becoming literal fallbacks; other unmodified custom
+arrays retain unknown encoding/backend validation, preserving legacy Run behavior.
+Stock-source characterization
+is not universal execution proof: validation unwraps array/curve wrappers, but a
+link-shaped array after unwrapping also matches that stock runtime link predicate.
+
+Expected deep writes are independent clones, checked after final naming/pruning.
+Every final graph prepares before the first enqueue. Producer identity is captured
+from the original graph before any parameter mutation and never rediscovered from
+the changed prefix. An explicitly selected output `filename_prefix` supplies that
+output's base name: `chosen` with manual `v_` / `_s` becomes `v_chosen_s`.
+Without a selected prefix, the producer retains the source-image-stem behavior;
+the fallback still wraps each output's own base. Dependency outputs survive only
+through the existing closure, keep their existing affix policy and receive exact
+selected assignments. Unrelated output operations still reject if pruning removes
+their carriers; selecting one never keeps an extra output job alive.
+
+`composeOutputName` owns directory/base/affix composition for both graph writers;
+`variationOutputName` applies shared manual-token and separate automatic projection
+for preview and Run. Probe's `outputNaming` and additive `outputNamingTargets`
+carry stable node/parameter IDs, original directory and fallback source stem.
+Explicit candidates require text and retain the original directory exactly; invalid
+paths or candidates requiring truncation reject the whole plan before enqueue,
+without sanitizing or dropping path text. Root empty and whitespace values remain
+exact. Compositional proof binds the actual candidate, parameter ID, stable node ID
+and final composed write. It does not pretend the raw candidate equals the final
+name, certify a lost candidate or create proof for pruned operations.
+
+`automaticNaming` derives tokens only for distinct surviving values that actually
+vary, after current-tuple exclusion and duplicate equivalence. Repeated direct
+discrete inputs are checked for distinct surviving values even when their endpoints
+match; numeric ranges use monotone endpoints rather than enumeration. It never edits raw
+Prefix/Suffix. Additive request `automaticNaming:true` appends the projection using
+the shared token formatter/writer; omission keeps legacy behavior. Fixed values
+add no automatic token. Every UI request enables the shared projection, never
+rewriting manual Prefix/Suffix text or inserted tokens. Final native/staging
+all-type proof remains a separate downstream gate.
+
+All recorded variation kinds use those same IDs: `<nodeId>.<input>`
 (for example `76.image`, `81.image`, `20.strength_model`, `92:109.text`); segments
 are percent-encoded when needed, including literal dots. Class names and custom
-titles are display/schema metadata, never identity. One classified graph walk
+titles are display/schema metadata, never identity. One complete graph walk
 creates singleton descriptors and rejects duplicate or unresolved locations;
-probe and Run use that same catalogue. The editor rejects duplicates before
+probe and Run derive their editable projections from that catalogue. The editor rejects duplicates before
 seeding any rows, and every row controls exactly its own node/input. Numeric
 siblings are independent sliders, with independent currents and proof. Slider
-tuning still uses the class/input schema key. Readable labels put the human-readable
-input name first, with title/class and node ID secondary; the complete canonical
+tuning still uses the class/input schema key. Readable labels combine title/class
+and raw input, adding node identity when repeated; the complete canonical
 label, e.g. `Load Image #76 · image`, remains in the tooltip and checkbox description.
 One shared parameter-row shell owns checkbox/name/current/context alignment for
-numeric, image, enum and text rows. Disabled numeric rows occupy one compact line
-with their current value; enabling reveals labelled From/To/Step editors and the
-existing rail without remounting its native widget. Step actions explicitly
+numeric, image, enum, text and candidate rows. Unadded inputs occupy compact catalogue
+rows with exact current context and an Add action. Added numeric cards reveal
+labelled From/To/Step and Range/Value editors. Exact integer text uses the native
+codec before any Number conversion. Sliders are omitted for unsafe values, bounds
+or increments,
+not replaced with rounded approximations. Step actions explicitly
 halve/double the increment, while thumb arrow keys retain fine nudging. Numeric
 field writes and release snapping are immediate: the slider integration disables
 animated placement, whose native tap-transition state would reject the next
 physical gesture after an otherwise finished edit. Current
 enum options say “Current”, and batch numeric controls describe offsets from each
-image's current value. Enabled rows still float first and retain the existing
-registry/input ordering.
+image's current value. Active cards retain canonical registry/input ordering,
+independent of the order they were added.
 
 The Variations dialog root constrains every layout descendant to a shrinkable,
 bounded inline allocation, including its modal shell; individual component class
@@ -1132,8 +1350,16 @@ full-value native tooltip, including labels, current values, options, captions a
 numeric readouts. Consumers provide presentation and callbacks, not a second
 truncation/tooltip implementation. Literal native editors retain their full raw
 values; multiline/help text wraps within its allocation.
-The dialog owns a bounded grid row shared by the scrolling parameter pane and
-the fixed sidebar at every width. Sidebar rows are a `minmax(0, 1fr)` body,
+The dialog owns three bounded tracks: unadded catalogue on the left, enabled cards
+in the center, fixed summary on the right. The first two scroll vertically and
+independently; the filter only affects unadded catalogue rows. Add/remove transfers
+focus through public child ports without querying child DOM. Below usable control
+minima a bounded inner horizontal scroller retains all three tracks, with focused
+controls revealed rather than hidden or replaced with tabs. Ordinary desktop
+widths need no horizontal scroll.
+Native programmatic focus and Tab reveal controls through their scroll ancestors;
+generic focus handlers capture state only, never scroll on pointer/window refocus.
+Sidebar rows are a `minmax(0, 1fr)` body,
 an intrinsic bounded message lane and Run in the final row. The body owns vertical
 scrolling for the big count, wrapping factor breakdown, naming fields and example;
 its children retain intrinsic content height. Results, preflight errors and
@@ -1154,8 +1380,9 @@ Prefix and Suffix have associated labels. A keyboard-native “Insert parameter�
 selector inserts exact canonical IDs at the last naming caret (Suffix by default).
 Row labels exclusively toggle their associated enable checkbox; insertion does
 not share that label's pointer event. A representative first-output example uses
-the same shared token expansion and `outputName` writer as Run, including the
-folded source stem. Probe supplies that target's directory and source stem, including
+the same shared `variationOutputName` projection and composition writer as Run,
+including the folded unselected source stem. Probe supplies stable target identity,
+directory and source stem, including
 the wrap-all fallback's first output. The example equals its written `filename_prefix`
 for the sampled tuple and resolved image names; pending uploads are explicitly
 provisional. Upload collision receipts and ComfyUI's appended output counter are
@@ -1206,7 +1433,8 @@ assembled prefix budget, below filesystem NAME_MAX (255 bytes) with 15 bytes
 reserved for ComfyUI's counter and extension. The directory is separate. Prefix
 and suffix are preserved in full after token expansion. Only the source stem is
 middle-folded into the remaining bytes, or omitted if the affixes exactly fill the
-budget. Naming-length rejection occurs only when the expanded affixes alone exceed
+budget. For an unselected base, naming-length rejection occurs only when expanded
+affixes alone exceed
 the budget, with actual byte lengths, for example “Prefix and suffix are 210 bytes;
 the limit is 200 bytes.” Literal template text is never silently shortened. Recursive
 image-token lineage cannot grow through tokens beyond their shared 40-byte bound.
@@ -1552,12 +1780,18 @@ Current stock ComfyUI SaveAudio writes FLAC/MP3/Opus, not WAV. Readers check rec
 bounds, skip unsupported ID3 compression/encryption and never search encoded audio
 payloads for JSON. Audio adds no further extractor-version bump (version remains 5).
 
-`Ingest.dims(collection, name)` is the pre-ingest half: dims live in a
+`Ingest.dims(collection, name, kind="output")` is the pre-ingest half: dims live in a
 file's first bytes (PNG IHDR, GIF descriptor, WebP VP8*, JPEG SOF), so a
 64 KB ranged head read (`Range: bytes=0-65535`; full-read fallback on a
-200-without-206) + `imageDims` stores them on `entry.width/height` — no
-hash, no cache write, no extract. Known dims (content via the entry's
-hash, or the entry columns) short-circuit the read; a 404 head read tells
+200-without-206) + `imageDims` stores provisional dimensions on hashless
+`entry.width/height` - no hash, cache write or extraction. Known authoritative
+dimensions short-circuit. A hash-bound gap reads only that exact hash's cached
+bytes; missing or unparseable cached bytes leave dimensions unknown, never read
+today's mutable named source to fill an earlier hash. Source lifetime and current
+entry hash fence cache completion before publication. If full ingestion wins a
+head race, the late head returns current content dimensions or unknown, not its
+obsolete measurement. All Store projections enforce the same authority, including
+legacy hashed rows with provisional columns. A 404 head read tells
 the prefetch the source lost the file, and the prefetch marks the entry
 `gone`.
 

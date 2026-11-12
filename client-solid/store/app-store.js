@@ -14,7 +14,7 @@
 
 import { createSignal, createMemo, createEffect, on, onCleanup, getOwner, createContext, useContext, untrack, batch } from "solid-js";
 import { createStore, reconcile } from "solid-js/store";
-import { api, compareSourceVersions, validSourceVersion, validSourceCursor, validateSourceSnapshot } from "/js/api.mjs";
+import { api, resourceSource, parseResourceSource, compareSourceVersions, validSourceVersion, validSourceCursor, validateSourceSnapshot } from "/js/api.mjs";
 import { metaFromPngBytes } from "/shared/extractor.mjs";
 import { makeKeymap, comboFromEvent } from "/js/keys.mjs";
 import {
@@ -310,9 +310,10 @@ export function makeAppStore({ subscribeSources = typeof window !== "undefined" 
       if (st.diff.pairedWith === key) return; // the establishing move
       setSt("diff", "pairedWith", null);
       const imgs = currentNodeImages();
-      if (!imgs.some((im) => im.file === f)) {
+      const s = st.diff.infoSource;
+      if (!imgs.some((im) => im.file === f && (s == null || im.source === s))) {
         setSt("diff", "infoFile", imgs[0]?.file ?? null);
-        setSt("diff", "infoSource", null);
+        setSt("diff", "infoSource", imgs[0]?.source ?? null);
       }
     },
   ));
@@ -434,8 +435,10 @@ export function makeAppStore({ subscribeSources = typeof window !== "undefined" 
     if (!side) return null;
     const source = side.source ?? side.remote;
     const file = side.file ?? side.image;
-    const collection = source.startsWith("input:") ? source.slice(6) : source;
-    const kind = source.startsWith("input:") ? "input" : "output";
+    const parsed = parseResourceSource(source);
+    if (!parsed) return null;
+    const collection = parsed.anchor ? source : parsed.collection;
+    const kind = parsed.anchor ? "output" : parsed.root;
     const record = sourceRecords.get(collection);
     const index = kind === "output" && source !== "anchor" ? fileIndex(source, file) : -1;
     const hash = index >= 0 ? st.images[index].hash : null;
@@ -446,16 +449,16 @@ export function makeAppStore({ subscribeSources = typeof window !== "undefined" 
       const a = st.anchors.find((x) => x.name === file);
       return a ? { ...identity, name: a.name, src: a.src, meta: a.meta ?? null } : null;
     }
-    // input-dir images (node references from the info panel): remote carries
-    // the source as "input:<host>"
-    if (source.startsWith("input:")) {
-      const h = source.slice("input:".length);
+    // referenced input/temp images (node references from the info panel):
+    // the side source names that root ("input:<host>", "temp:<host>")
+    if (kind !== "output") {
+      const h = collection;
       if (!Object.hasOwn(hostsView(), h)) return null;
       return {
         ...identity,
         name: file,
         host: h,
-        src: api.inputBytesUrl(h, file),
+        src: api.entryBytesUrl(h, file, { kind }),
         meta: null,
       };
     }
@@ -1094,10 +1097,11 @@ export function makeAppStore({ subscribeSources = typeof window !== "undefined" 
     // the pair (input:<host> sides name input-dir files of that host)
     if (st.diff.open) {
       const { a, b } = diffPair();
+      // Deleting an output entry affects only output-root sides of that name.
       const sideMatches = (side, img) => {
-        if (!side) return false;
-        const src = side.source.startsWith("input:") ? side.source.slice("input:".length) : side.source;
-        return src === img.host &&
+        const parsed = side ? parseResourceSource(side.source) : null;
+        if (!parsed || parsed.anchor || parsed.root !== "output") return false;
+        return parsed.collection === img.host &&
           (side.file === img.filename || side.file === img.host + "#" + img.filename);
       };
       if (images.some((i) => sideMatches(a, i) || sideMatches(b, i))) {
@@ -2225,9 +2229,10 @@ export function makeAppStore({ subscribeSources = typeof window !== "undefined" 
           return;
         }
         const imgs = currentNodeImages();
-        const i = imgs.findIndex((im) => im.file === (st.diff.infoFile ?? imgs[0]?.file));
+        const f = st.diff.infoFile, s = st.diff.infoSource;
+        const i = f == null ? 0 : imgs.findIndex((im) => im.file === f && (s == null || im.source === s));
         const n = imgs[i + dir];
-        if (n) { setSt("diff", "infoFile", n.file); setSt("diff", "infoSource", null); }
+        if (n) { setSt("diff", "infoFile", n.file); setSt("diff", "infoSource", n.source); }
       },
       close() {
         if (!st.diff.open) return;
@@ -2256,7 +2261,7 @@ export function makeAppStore({ subscribeSources = typeof window !== "undefined" 
           if (!st.diff.anchorName && st.anchors.length) setSt("diff", "anchorName", st.anchors[0].name);
         } else {
           const imgs = currentNodeImages();
-          if (!st.diff.infoFile && imgs.length) setSt("diff", "infoFile", imgs[0].file);
+          if (!st.diff.infoFile && imgs.length) { setSt("diff", "infoFile", imgs[0].file); setSt("diff", "infoSource", imgs[0].source); }
         }
       },
       // feed card click: the current image is that candidate; the pair is
@@ -2269,9 +2274,10 @@ export function makeAppStore({ subscribeSources = typeof window !== "undefined" 
       },
       // discovered image click: that node image becomes the right side (B) —
       // the feed current stays; the pair is the generated image × its source
-      openInput(h, file, fromOutput = false) {
+      // `root` names the resource root explicitly; `fromOutput` is its facade.
+      openInput(h, file, fromOutput = false, root = fromOutput ? "output" : "input") {
         if (!h || !file) return;
-        return actions.diff.open({ subject: "b", pair: { a: diffPair().a, b: { source: fromOutput ? h : `input:${h}`, file } } });
+        return actions.diff.open({ subject: "b", pair: { a: diffPair().a, b: { source: resourceSource(h, root), file } } });
       },
       // anchor thumb click: that anchor becomes the right side (B) — the
       // feed current stays; the pair is feed current × that anchor
@@ -2352,7 +2358,7 @@ export function makeAppStore({ subscribeSources = typeof window !== "undefined" 
       async changed() {
         const r = parseUrl();
         const remote = r.view === "diff" ? r.left?.source : r.host;
-        if (remote && !Object.hasOwn(hostsView(), remote) && !remote.startsWith("input:") && remote !== "anchor") return;
+        if (remote && !Object.hasOwn(hostsView(), remote) && parseResourceSource(remote)?.root === "output" && remote !== "anchor") return;
         const name = Object.hasOwn(hostsView(), remote) ? remote : host();
         if (!name || !isFolderPath(r.folder ?? "")) return;
         const target = routeTarget(r);

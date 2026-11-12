@@ -2,7 +2,7 @@
 // engine's public API (docs/spec.md ).
 import { subscribeSources } from "./source-events.mjs";
 import { collectionEntriesUrl, entryUrl, entryBytesUrl } from "./entry-url.mjs";
-export { collectionEntriesUrl, entryUrl, entryBytesUrl } from "./entry-url.mjs";
+export { collectionEntriesUrl, entryUrl, entryBytesUrl, resourceSource, parseResourceSource } from "./entry-url.mjs";
 export { compareSourceVersions, validSourceVersion, validSourceCursor, validateSourceSnapshot } from "./source-events.mjs";
 
 const BASE = ""; // same origin
@@ -19,11 +19,11 @@ export class ApiError extends Error {
 }
 
 // the ONE JSON transport — exported so feature modules (variations) share it
-export async function req(method, path, body, { priority, signal, raw = false } = {}) {
+export async function req(method, path, body, { priority, signal, raw = false, json = JSON } = {}) {
   const r = await fetch(BASE + path, {
     method,
     headers: body ? { "Content-Type": raw ? "application/octet-stream" : "application/json" } : undefined,
-    body: body ? raw ? body : JSON.stringify(body) : undefined,
+    body: body ? raw ? body : json.stringify(body) : undefined,
     signal,
     priority: priority === "background" ? "low" : "auto",
   });
@@ -37,16 +37,16 @@ export async function req(method, path, body, { priority, signal, raw = false } 
     } catch { /* malformed/non-JSON bodies still retain their HTTP failure */ }
     throw new ApiError(method, path, r.status, detail);
   }
-  return r.json();
+  return json.parse(await r.text());
 }
 
 // raw POST: { ok, status, text }, no throw — for endpoints whose error
 // bodies carry detail the caller parses (the variations run report)
-export async function postRaw(path, body) {
+export async function postRaw(path, body, { json = JSON } = {}) {
   const r = await fetch(BASE + path, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(body),
+    body: json.stringify(body),
   });
   return { ok: r.ok, status: r.status, text: await r.text() };
 }

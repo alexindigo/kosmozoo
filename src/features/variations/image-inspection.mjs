@@ -1,11 +1,12 @@
 import { validEntryName } from "../../backings/index.mjs";
 import { uploadFamily } from "./shared.mjs";
 import { sha256 } from "../../cache.mjs";
+import { isResourceRoot } from "../../parameters.mjs";
 
 // Both native browser Files and engine-host files use the same input-cache/hash
 // owner and collision-family contract. No comparison uploads to the source.
 export async function inspectImage(app, token, host, { name, bytes, current, kind, names = [] }, origin) {
-  if (!validEntryName(token.address, current) || !["input", "output"].includes(kind) || !Array.isArray(names) ||
+  if (!validEntryName(token.address, current) || !isResourceRoot(kind) || !Array.isArray(names) ||
       names.some(name => typeof name !== "string" || !validEntryName(token.address, name))) return Response.json({ error: "Invalid current image or input names" }, { status: 400 });
   const stale = () => !app.backings.isCurrent(token);
   const retired = () => Response.json({ error: "Source origin changed" }, { status: 412 });

@@ -1,6 +1,7 @@
 import { assert, assertEquals, assertRejects } from "jsr:@std/assert";
 import { listImages, readImage } from "../src/features/variations/folder-images.mjs";
-import { editorRig } from "./helpers/variation-editor.mjs";
+import { editorRig as defaultRig, removeRecordedImages } from "./helpers/variation-editor.mjs";
+const editorRig = overrides => removeRecordedImages(defaultRig(overrides));
 
 Deno.test("folder images: recursive image-only canonical identities, deterministic order, no symlink traversal, explicit cap", async () => {
   const dir = await Deno.makeTempDir({ prefix: "variation-folder-" });

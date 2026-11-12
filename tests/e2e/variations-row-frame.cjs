@@ -2,35 +2,40 @@
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const { freshRecipe } = require('./recipe-helpers.cjs');
+const { toggleParameter } = require('./variation-add-helpers.cjs');
 module.exports = async ({ cdp, check, KZ }) => {
   const kinds = ['.vz-slider-row', '.vz-enumrow', '.vz-textrow', '.vz-image-set'];
   const row = kind => kind === '.vz-slider-row' ? '[data-param-key="9.denoise"]' : kind;
-  const toggle = kind => cdp.clickAt(`${row(kind)} .vz-parameter-heading .checkbox`);
+  const ids = {'.vz-slider-row':'9.denoise','.vz-enumrow':'9.scheduler','.vz-textrow':'2.text','.vz-image-set':'43.image'};
+  const toggle = kind => toggleParameter(cdp,ids[kind]);
   await cdp.evaluate(`(async()=>{await fetch('/api/collections/fake/entries/flux-controlnet.png/bytes');await ${KZ}.handles.invoke('variations.open',{id:'fake:flux-controlnet.png'})})()`);
-  await cdp.poll(kinds.map(kind => `!!document.querySelector('${kind}')`).join('&&'));
-  await freshRecipe(cdp);await cdp.poll("!!document.querySelector('.vz-image-set')");
+  await cdp.poll("document.querySelectorAll('.vz-catalogue-row').length>0");
+  await freshRecipe(cdp);
   await cdp.send('Emulation.setDeviceMetricsOverride', { width: 1600, height: 1000, deviceScaleFactor: 1, mobile: false });
   try {
-    await toggle('.vz-slider-row');
     const geometry = await cdp.evaluate(`(()=>{
-      const rows=[...document.querySelectorAll('.vz-parameter')],list=document.querySelector('.vz-sliders');
-      return { rows:rows.map(el=>({name:el.querySelector('.vz-parameter-name').textContent,
-        height:el.getBoundingClientRect().height,x:el.querySelector('.vz-parameter-name').getBoundingClientRect().x,
+      const rows=[...document.querySelectorAll('.vz-catalogue-row')],list=document.querySelector('.vz-catalogue-list');
+      return { rows:rows.map(el=>({id:el.dataset.catalogueId,name:el.querySelector('.vz-catalogue-name').textContent,
+        height:el.getBoundingClientRect().height,x:el.querySelector('.vz-catalogue-name').getBoundingClientRect().x,
         opacity:getComputedStyle(el).opacity,body:!!el.querySelector('.vz-numeric-editor,.vz-imgrow-body,.vz-image-content'),
-        current:el.querySelector('.vz-parameter-current').textContent})),scroll:list.scrollWidth-list.clientWidth};
+        border:getComputedStyle(el).borderTopWidth,image:!!el.querySelector('.vz-catalogue-picture'),current:(el.querySelector('.vz-catalogue-current')??el.querySelector('.vz-catalogue-picture')).textContent})),scroll:list.scrollWidth-list.clientWidth};
     })()`);
     assert(geometry.rows.length > 6);
-    assert(geometry.rows.every(item => !item.body && item.height <= 41));
-    assert(Math.max(...geometry.rows.map(item => item.height))-Math.min(...geometry.rows.map(item => item.height)) <= 1);
-    check('row frame: every closed kind is one equal-height line, with no body in the DOM', true, JSON.stringify(geometry));
-    assert(geometry.rows.every(item => item.opacity === '0.55'));
-    check('row frame: all closed cards, including images, have opacity 0.55', true);
+    assert(geometry.rows.every(item => !item.body && item.border === '1px'));
+    const textRows=geometry.rows.filter(item=>!item.image);
+    assert(Math.max(...textRows.map(item => item.height))-Math.min(...textRows.map(item => item.height)) <= 1);
+    check('row frame: every closed kind uses the bordered catalogue card; textual cards share height and image cards retain their thumbnail allocation', true, JSON.stringify(geometry));
+    assert(geometry.rows.every(item => item.opacity === '1'));
+    check('row frame: unadded catalogue has ordinary foreground values', true);
     assert(geometry.rows.every(item => Math.abs(item.x-geometry.rows[0].x) < 0.5));
     check('row frame: names share one left inset across all kinds', true);
     assert(geometry.scroll <= 1);
     check('row frame: list has no horizontal scroll', true);
-    assert(geometry.rows.every(item => item.name.includes('.') && !item.name.includes('#') && !item.current.startsWith('Current ')));
-    assert.equal(await cdp.evaluate("document.querySelector('.vz-image-set .vz-parameter-current').textContent"), 'canny.png');
+    // The complete catalogue distinguishes repeated class/input occurrences by node.
+    assert(geometry.rows.every(item => item.name.length && !item.current.startsWith('Current ')));
+    assert.deepEqual(geometry.rows.filter(item => item.id === '2.text' || item.id === '42.text').map(item => item.name), ['text', 'text']);
+    assert.deepEqual(await cdp.evaluate("['2.text','42.text'].map(id=>document.querySelector('[data-catalogue-id=\"'+id+'\"] .vz-catalogue-node-name').textContent)"), ['CLIPTextEncode', 'CLIPTextEncode']);
+    assert.equal(await cdp.evaluate("document.querySelector('[data-catalogue-id=\"43.image\"] .vz-catalogue-picture').title"), 'canny.png (input)');
     assert(await cdp.evaluate("!document.querySelector('.vz-insert-parameter,.vz-name-example,.vz-name-help,.vz-parameter-identity')&&document.querySelector('.vz-run').textContent==='Run'"));
     check('row frame: raw ComfyUI names, current image filename and Run replace retired chrome', true);
     // Open names insert at both naming targets without toggling. Closed names
@@ -44,7 +49,7 @@ module.exports = async ({ cdp, check, KZ }) => {
       const id = await cdp.evaluate(`(()=>{const r=document.querySelector('${row(kind)}');return r.dataset.paramKey??r.dataset.enumId??r.dataset.textId??r.dataset.imageId})()`);
       await cdp.clickAt(`${row(kind)} .vz-parameter-name`);
       assert.equal(await cdp.evaluate(`document.querySelector('${target}').value`), `pre_{${id}}_post`);
-      assert.equal(await cdp.evaluate(`document.querySelector('${row(kind)} .checkbox').checked`), true);
+      assert.equal(await cdp.evaluate(`!!document.querySelector('${row(kind)}.on .vz-parameter-remove')`), true);
       assert(await cdp.evaluate(`document.activeElement===document.querySelector('${target}')`));
       await toggle(kind);
     }
@@ -73,7 +78,7 @@ module.exports = async ({ cdp, check, KZ }) => {
     assert.equal(await cdp.evaluate(`document.querySelector('${numeric} .vz-row-inc-input').value`), '0.1');
     assert.equal(await cdp.evaluate(`document.querySelector('${text}').value`), 'retained template');
     assert.deepEqual(await cdp.evaluate("[...document.querySelectorAll('.vz-enumrow.on .vz-enum-opt .checkbox')].map(input=>input.checked)"), picks);
-    assert.equal(await cdp.evaluate("document.querySelector('.vz-image-tile').dataset.imageName"), 'row-retained.png');
+    assert.deepEqual(await cdp.evaluate("[...document.querySelectorAll('.vz-image-tile')].map(el=>el.dataset.imageName)"), ['canny.png','row-retained.png']);
     await cdp.poll("document.querySelector('.vz-image-tile img')?.naturalWidth>0");
     check('row frame: numeric bounds/raw increment, enum picks, text and native File preview survive collapse/reopen', true);
     assert(await cdp.evaluate("[...document.querySelectorAll('.vz-parameter.on .vz-parameter-current')].every(el=>/\\d+ (values?|options?|images?)/.test(el.textContent))"));

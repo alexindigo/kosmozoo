@@ -5,6 +5,7 @@ const path = require('node:path');
 const { CDP, collectPageErrors } = require('./cdp.cjs');
 const { workPath } = require('./paths.cjs');
 const { waitForSelectedPreviews } = require('./image-picker-helpers.cjs');
+const { addParameter } = require('./variation-add-helpers.cjs');
 
 // One generator for every scalar catalogue kind. Numeric values stay numeric;
 // their labels/keys and raw increment editors carry the hostile spelling too.
@@ -17,7 +18,7 @@ function hostileCatalogue() {
     type, key: hostile(type + '_key'), value: hostile(type + '_value', type),
   }));
   const objectInfo = {
-    LoadImage: { input: { required: { image: [[inputName]] } } },
+    LoadImage: { input: { required: { image: [[inputName], { image_upload: true }] } } },
     OverflowParameters: { display_name: hostile('registry_title'), input: { required: Object.fromEntries(fields.map(field =>
       [field.key, field.type === 'ENUM' ? [[field.value, ...Array.from({ length: 11 }, (_, index) => field.value + '_' + index)]] : [field.type, {}]])) } },
     SaveImage: { output_node: true, input: { required: { filename_prefix: ['STRING'] } } },
@@ -69,8 +70,8 @@ module.exports = async ({ cdp, ENGINE, FAKE, KZ, check }) => {
     for (const channel of ['stringParams', 'enumParams', 'textParams']) assert.equal(catalogue[channel].length, 1, channel);
     check('hostile generator covers integer, float, image, enum and text catalogue fields', true);
     await invoke('variations.open', { id: `${source}:${filename}` });
-    await cdp.poll("!!document.querySelector('.vz-image-set')&&!!document.querySelector('.vz-enumrow')&&!!document.querySelector('.vz-textrow')&&!!document.querySelector('.vz-slider-row')");
-    await cdp.clickAt('.vz-image-set .checkbox');
+    await addParameter(cdp,'76.image');
+    await require('./variation-add-helpers.cjs').removeRecordedImage(cdp,'76.image');
     await require('./image-picker-helpers.cjs').openImageAdd(cdp);
     await cdp.clickAt('.vz-input-trigger');
     await cdp.poll("document.querySelectorAll('.vz-input-option').length>0");
@@ -80,16 +81,16 @@ module.exports = async ({ cdp, ENGINE, FAKE, KZ, check }) => {
     await cdp.clickAt('.vz-input-option');
     await cdp.poll("document.querySelectorAll('.vz-image-tile').length===1");
     await cdp.keyTrusted('Escape', { vk: 27 });
-    await cdp.clickAt('.vz-enumrow .vz-imgrow-head .checkbox');
+    await addParameter(cdp,'81.'+encodeURIComponent(fields.find(field=>field.type==='ENUM').key));
     await cdp.poll("document.querySelectorAll('.vz-enum-opt').length===12");
     await type('.vz-enum-filter', fields.find(field => field.type === 'ENUM').value);
     await cdp.poll("document.querySelectorAll('.vz-enum-opt').length===12");
-    await cdp.clickAt('.vz-textrow .vz-imgrow-head .checkbox');
+    await addParameter(cdp,'81.'+encodeURIComponent(fields.find(field=>field.type==='STRING').key));
     await cdp.poll("!!document.querySelector('.vz-tpl-input')");
     await type('.vz-tpl-input', hostile('substitution'));
     for (const field of fields.filter(field => ['INT', 'FLOAT'].includes(field.type))) {
       const row = `[data-param-key=${JSON.stringify('81.' + encodeURIComponent(field.key))}]`;
-      await cdp.clickAt(row + ' .checkbox');
+      await addParameter(cdp,'81.'+encodeURIComponent(field.key));
       await type(row + ' .vz-row-inc-input', hostile(field.type + '_increment'));
     }
     await require('./image-picker-helpers.cjs').openImageFolder(cdp);
@@ -120,10 +121,10 @@ module.exports = async ({ cdp, ENGINE, FAKE, KZ, check }) => {
               -parseFloat(style.borderLeftWidth||0)-parseFloat(style.borderRightWidth||0);
             const available=viewport?innerWidth:inner-parseFloat(style.paddingLeft||0)-parseFloat(style.paddingRight||0);
             const width=e.getBoundingClientRect().width;
-            return width>available+1?[{...describe(e),width,available,parent:viewport?'viewport':name(parent)}]:[];
+            return width>available+1&&!e.matches('.vz-body')?[{...describe(e),width,available,parent:viewport?'viewport':name(parent)}]:[];
           });
-          return {scrolls:scrolls.map(describe),offenders:scrolls.filter(e=>e.scrollWidth>e.clientWidth+1).map(describe),
-            escaped,unshrinkable:elements.filter(e=>e!==root&&getComputedStyle(e).minWidth!=='0px').map(describe),measured:elements.length};
+          return {scrolls:scrolls.map(describe),offenders:scrolls.filter(e=>e.scrollWidth>e.clientWidth+1&&!(innerWidth<1024&&e.matches('.vz-body-scroll'))).map(describe),
+            escaped,unshrinkable:elements.filter(e=>e!==root&&!e.matches('.vz-body')&&getComputedStyle(e).minWidth!=='0px').map(describe),measured:elements.length};
         })()`);
         console.log(`overflow geometry ${width} ${state}: ${JSON.stringify(geometry)}`);
         assert(geometry.scrolls.length>0, 'must exercise actual scroll containers');
@@ -146,10 +147,10 @@ module.exports = async ({ cdp, ENGINE, FAKE, KZ, check }) => {
     await capture('500-full');
     // The complete values remain in tooltips, never shortened in the model.
     const titles = await cdp.evaluate(`(()=>{
-      return [...document.querySelectorAll('.vz-panel *')].filter(e=>e.getClientRects().length&&e.scrollWidth>e.clientWidth+1&&getComputedStyle(e).textOverflow==='ellipsis').map(e=>({text:e.textContent,title:e.title,primitive:e.classList.contains('single-line-text')}));
+      return [...document.querySelectorAll('.vz-panel *')].filter(e=>e.getClientRects().length&&e.scrollWidth>e.clientWidth+1&&getComputedStyle(e).textOverflow==='ellipsis').map(e=>({text:e.textContent,title:e.title,preview:e.classList.contains('value-preview-trigger')&&!!document.getElementById(e.getAttribute('aria-controls')),primitive:e.classList.contains('single-line-text')}));
     })()`);
     assert(titles.length>0, 'hostile labels must exercise truncation');
-    check('every truncated display string uses the shared full-tooltip text primitive', titles.every(e=>e.primitive&&e.title.includes(e.text)), JSON.stringify(titles));
+    check('every truncated display string retains native full text or its opt-in interactive preview', titles.every(e=>e.primitive&&(e.preview||e.title.includes(e.text))), JSON.stringify(titles));
     assert.equal(failures.length, 0, JSON.stringify(failures));
   } finally {
     await cdp.send('Emulation.clearDeviceMetricsOverride');

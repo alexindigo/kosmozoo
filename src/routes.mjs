@@ -11,6 +11,11 @@ import { sniffMime } from "./extractor.mjs";
 import { sourceOrigin, sameOrigin, expectedOrigin } from "./source-origin.mjs";
 import { waitFor } from "./lifetime.mjs";
 import { isContentHash } from "./cache.mjs";
+import { isResourceRoot } from "./parameters.mjs";
+
+// Byte routes name the resource root explicitly; absent keeps the historical
+// output meaning, an unknown root fails instead of falling back to another root.
+const byteRoot = url => { const kind = url.searchParams.get("kind") ?? "output"; return isResourceRoot(kind) ? kind : null; };
 
 // The bounded wait of one shown entry's record for its own ingestion.
 const ENTRY_META_WAIT_MS = 8000;
@@ -20,9 +25,9 @@ class UnsupportedMediaType extends Error {}
 
 // JSON parsing is an HTTP boundary, not just JSON.parse on arbitrary bytes.
 // Features share it so a multipart/binary exception cannot bypass JSON policy.
-export function readJson(req) {
+export function readJson(req, { parse = JSON.parse } = {}) {
   if (mediaType(req) !== "application/json") throw new UnsupportedMediaType("Content-Type must be application/json");
-  return req.json();
+  return req.text().then(parse);
 }
 
 // Original contributor bytes may be active documents on direct navigation.
@@ -265,6 +270,9 @@ export function makeRouter(ctx) {
     if (!addr) return Response.json({ error: "unknown collection" }, { status: 404 });
     const token = ctx.inventory.capture?.(id);
     const kind = url.searchParams.get("kind") ?? "output";
+    // Only the output inventory and the input listing exist; other roots never
+    // fall back to the output listing.
+    if (kind !== "input" && kind !== "output") return Response.json({ error: "no listing for this resource root" }, { status: 400 });
     if (kind === "input") {
       let expected;
       try { expected = expectedOrigin(req); } catch (error) { return Response.json({ error: error.message }, { status: 400 }); }
@@ -371,7 +379,9 @@ export function makeRouter(ctx) {
   add("HEAD", "/api/collections/<id>/entries/<name>/bytes", async (req, { id, name }, url) => {
     if (!addressFor(id)) return new Response(null, { status: 404 });
     const error = byteOriginError(req, id); if (error) return error;
-    const e = ctx.store.entryGet(id, name, url.searchParams.get("kind") === "input" ? "input" : "output");
+    const kind = byteRoot(url);
+    if (!kind) return new Response(null, { status: 400 });
+    const e = ctx.store.entryGet(id, name, kind);
     if (!e?.hash) return new Response(null, { status: 404 }); // E7: unknown says so
     const c = ctx.store.contentGet(e.hash);
     return new Response(null, {
@@ -388,20 +398,21 @@ export function makeRouter(ctx) {
     const error = byteOriginError(req, id); if (error) return error;
     const priority = url.searchParams.get("priority") ?? "foreground";
     if (!["foreground", "background"].includes(priority)) return Response.json({ error: "bad priority" }, { status: 400 });
-    const kind = url.searchParams.get("kind") === "input" ? "input" : "output";
+    const kind = byteRoot(url);
+    if (!kind) return Response.json({ error: "unknown resource root" }, { status: 400 });
     const mime = EXT_MIME[name.split(".").pop().toLowerCase()];
     const makeResponse = (bytes, hash) => bytesResponse(req, bytes, hash, mime);
 
     // Cache hit: serve + debounced revalidation (the NEXT request gets fresh
     // bytes if the source was rewritten under the same name).
-    const info = kind === "input"
-      ? ctx.store.inputCacheGet(id, name)
-      : ctx.store.fileInfo(id, name);
+    const info = kind === "output"
+      ? ctx.store.fileInfo(id, name)
+      : ctx.store.resourceCacheGet(id, name, kind);
     if (info?.hash) {
       const cached = await ctx.cache.get(info.hash);
       if (token && !ctx.inventory.isCurrent(token)) return Response.json({ error: "Source incarnation changed" }, { status: 409 });
       if (cached) {
-        ctx.ingest.scheduleRevalidate(id, name, { input: kind === "input" });
+        ctx.ingest.scheduleRevalidate(id, name, { kind });
         return makeResponse(cached, info.hash);
       }
     }

@@ -7,5 +7,5 @@ exports.freshRecipe = async cdp => {
   await cdp.poll("!document.querySelector('.vz-panel')");
   await cdp.evaluate(`(async()=>{const s=(await import('/store/instance.js')).appStore;
     return s.handles.invoke('variations.open',${JSON.stringify(opening.ids.length > 1 ? { ids: opening.ids, bulk: true } : { id: opening.ids[0] })})})()`);
-  await cdp.poll(`document.querySelectorAll('.vz-slider-row').length>0&&document.querySelectorAll('.vz-image-set').length>=${opening.images}`);
+  await cdp.poll(`document.querySelectorAll('.vz-catalogue-row').length>0`);
 };

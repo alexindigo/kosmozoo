@@ -5,6 +5,7 @@ import { editorRig } from "./helpers/variation-editor.mjs";
 
 Deno.test("Value: exactly one axis value, unchanged tuple excluded, other axes still multiply", async () => {
   const { editor, requests } = editorRig();
+  editor.setEnabled("n.denoise", true);
   try {
     editor.edit("numeric", "n.denoise", "mode", "value");
     assertEquals(editor.preview().axes[0].count, 1);
@@ -29,6 +30,7 @@ Deno.test("Value: dormant invalid range survives mode changes in one session; a 
     editor.installCatalogue(rig.catalogue); return editor;
   };
   let editor = mount();
+  editor.setEnabled("n.denoise", true);
   try {
     editor.range("n.denoise", { min: "0.7", max: "0.8" });
     editor.edit("numeric", "n.denoise", "rawIncrement", "1e");
@@ -60,6 +62,7 @@ Deno.test("Value: batch compilation fixes the same absolute value for different 
     } }, currentOrigin: () => rig.context.origin, setTimer: () => 1, clearTimer() {} });
   try {
     editor.installCatalogue(rig.catalogue);
+    editor.setEnabled("n.denoise", true);
     editor.edit("numeric", "n.denoise", "mode", "value"); editor.edit("numeric", "n.denoise", "value", "0.9");
     assertEquals(editor.preview().n, 2);
     assertEquals((await editor.run()).adopted, true);
