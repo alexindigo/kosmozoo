@@ -56,8 +56,8 @@ export const uploadPath = (collection, path, hash, origin) =>
 export const inputThumbnail = (collection, name, origin, kind = "input") =>
   entryBytesUrl(collection, name, { kind, origin });
 
-export const readInput = async (origin, name) => {
-  const response = await fetch(entryBytesUrl(origin.source, name, { kind: "input", origin }));
+export const readInput = async (origin, name, root = "input") => {
+  const response = await fetch(entryBytesUrl(origin.source, name, { kind: root, origin }));
   if (!response.ok) throw new Error(`Image unavailable (${response.status})`);
   const blob = await response.blob();
   return new File([blob], name, { type: blob.type });
@@ -72,8 +72,8 @@ export const inspectImage = async (collection, file, current, kind, origin, name
   const data = await response.json(); if (!response.ok) throw new Error(data.error || "Image comparison unavailable"); return data;
 };
 
-export const inputList = (collection, origin) =>
-  fetch(`${collectionEntriesUrl(collection)}?kind=input`, { headers: { "X-Kosmozoo-Origin": JSON.stringify(origin) } })
+export const inputList = (collection, origin, root = "input") =>
+  fetch(`${collectionEntriesUrl(collection)}?kind=${encodeURIComponent(root)}&catalogue=images-v1`, { headers: { "X-Kosmozoo-Origin": JSON.stringify(origin) } })
     .then(async response => { if (!response.ok) throw new Error(`Input catalogue: ${response.status}`); return response.json(); });
 
 // multipart upload — a 409 carries the conflicting name (never an overwrite)

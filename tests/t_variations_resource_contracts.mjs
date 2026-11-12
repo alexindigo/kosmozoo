@@ -66,7 +66,7 @@ async function rig({ graph, current = "origin.png", inputs, listing, foreign = n
       return { name: b.store(file.name, await file.text()), origin: { ...expected } }; },
     uploadPath: async (_host, path, _hash, expected) => { transfers.paths.push(path);
       return { name: b.store(path.split("/").at(-1), b.disk.get(path)), origin: { ...expected } }; },
-    inputList: async source => ({ origin: origins[source], files: source === "other" ? Object.keys(foreign?.files ?? {}) : [...b.files.keys()] }),
+    inputList: async (source, _origin, root) => ({ origin: origins[source], root, files: source === "other" ? Object.keys(foreign?.files ?? {}) : [...b.files.keys()] }),
     readInput: async (source, name) => { transfers.reads.push([source.source, name]); return new File([foreign.files[name]], name); },
     run: async request => {
       requests.push(structuredClone(request));

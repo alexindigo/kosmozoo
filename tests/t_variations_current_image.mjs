@@ -2,7 +2,7 @@ import { assert, assertEquals } from "jsr:@std/assert";
 import { register } from "../src/features/variations/server.mjs";
 import { makeCollectionLifecycle } from "../src/backings/index.mjs";
 import { makeVariationEditor } from "../client-solid/features/variations/editor.js";
-import { resourceReference } from "../src/parameters.mjs";
+import { resourceReference, resourceReferenceValue } from "../src/parameters.mjs";
 
 // Real probe -> editor comparison/compile -> Run -> final enqueued prompt.
 async function rig(current) {
@@ -73,13 +73,14 @@ for (const current of ["same.png", "same.png [input]", "nested/a [b].png [input]
   });
 }
 
-for (const current of ["same.png [input]", "nested/a [b].png [input]"]) for (const kind of ["input", "reference"]) {
+for (const current of ["same.png [input]", "nested/a [b].png [input]", "same.png [output]", "nested/a [b].png [output]"]) for (const kind of resourceReference(current).root === "input" ? ["input", "reference", "feed"] : ["reference", "feed"]) {
   Deno.test(`equivalent current reference: remove/reselect ${kind} retains exact ${current}`, async () => {
     const r = await rig(current), { editor } = r, id = "image.image", name = resourceReference(current).name;
     try {
       editor.setEnabled(id, true); assertEquals(editor.preview().n, 0);
       editor.removeImage(id, editor.rows("images")[id].items[0]);
-      editor.addImages(id, [kind === "input" ? {kind,name} : {kind,value:name}]);
+      if (kind === "feed") await editor.toggleSourceInput(id, r.catalogue.context.origin, name, resourceReference(current).root);
+      else editor.addImages(id, [kind === "input" ? {kind,name} : {kind,value:resourceReferenceValue(name, resourceReference(current).root)}]);
       assert(editor.rows("images")[id].images[0].sameCurrent);
       assertEquals(editor.preview().n, 0, "equivalent root/name must retain the original raw current tuple");
       await editor.run();assertEquals(r.jobs,[]);assertEquals(r.requests[0].imageParams[id].values,[current]);

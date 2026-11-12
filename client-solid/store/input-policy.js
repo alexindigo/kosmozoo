@@ -39,8 +39,9 @@ export function makeInputPolicy({ handles, state, layers, captureEvent, onError,
         if (active.some((layer) => layer.blocking)) return false;
         const plain = !event.ctrlKey && !event.altKey && !event.metaKey && !event.shiftKey;
         const popup = active.findLast((layer) => layer.phase === "capture" &&
-          (layer.keys ? plain && Object.hasOwn(layer.keys, event.key) : event.key === "Escape"));
-        if (!popup || popup.decline?.(event) === true) return false;
+          (layer.keys ? plain && Object.hasOwn(layer.keys, event.key) : event.key === "Escape") &&
+          layer.decline?.(event) !== true);
+        if (!popup) return false;
         invoke(popup.command, popup.keys ? popup.keys[event.key] : popup.args);
         return consume(event);
       }

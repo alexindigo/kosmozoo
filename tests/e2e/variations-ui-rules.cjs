@@ -58,7 +58,7 @@ const KZ = '(await import("/store/instance.js")).appStore';
     await page.poll('document.activeElement.matches(".vz-input-search")');
     await type('.vz-input-search', 'canny');
     await page.clickAt('.vz-input-option[data-input-name="canny.png"]');
-    await page.poll('document.querySelector(".vz-input-summary").textContent === "1 selected"');
+    await page.poll('document.querySelector(".vz-input-summary [role=status]").textContent === "1 selected"');
     await page.evaluate(`(() => { const search = document.querySelector('.vz-input-search'); window.__search = search; search.focus(); search.setSelectionRange(1, 3); search.dispatchEvent(new Event('select')); })()`);
     await page.evaluate(`(async () => { ${KZ}.handles.invoke('variations.close'); return true; })()`);
     await page.poll('!!document.querySelector(".vz-keep")');

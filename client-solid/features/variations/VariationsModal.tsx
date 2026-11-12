@@ -266,9 +266,10 @@ function ModalBody(props) {
     const unlayer = store.actions.keys.pushLayer({ id: "variations-images", command: "variations.images.close", phase: "capture" });
     return () => { unlayer(); disown(); };
   };
-  const registerTabKeys = capability => {
-    const disown = store.handles.own("variations.tabs.move", capability.move);
-    const unlayer = store.actions.keys.pushLayer({ id: "variations-source-tabs", command: "variations.tabs.move", phase: "capture",
+  const registerTabKeys = (capability, group = "source") => {
+    const command = group === "feed" ? "variations.feed-tabs.move" : "variations.tabs.move";
+    const disown = store.handles.own(command, capability.move);
+    const unlayer = store.actions.keys.pushLayer({ id: `variations-${group}-tabs`, command, phase: "capture",
       keys: { ArrowLeft: { step: -1 }, ArrowRight: { step: 1 }, Home: { step: "first" }, End: { step: "last" } },
       decline: event => !capability.contains(event.target) });
     return () => { unlayer(); disown(); };
@@ -354,11 +355,11 @@ function ModalBody(props) {
                         onToggleTarget={() => editor.toggleTargetImage(id)}
                         targetThumbnail={targetThumbnail} archiveThumbnail={services.historyThumbnail}
                         thumbnail={(name, root = "input") => services.inputThumbnail(image.host, name, image.origin, root)}
-                        sources={inputSources()} sourceInputs={origin => read(() => editor.sourceInputs(origin))}
-                        onSource={origin => editor.loadSourceInputs(origin)} onRetrySource={origin => editor.loadSourceInputs(origin, true)}
-                        inputState={(origin, name) => read(() => editor.sourceInputState(id, origin, name))}
-                        onToggleInput={(origin, name) => editor.toggleSourceInput(id, origin, name)}
-                        inputThumbnail={(origin, name) => services.inputThumbnail(origin.source, name, origin)} registerTabKeys={registerTabKeys}
+                        sources={inputSources()} sourceInputs={(origin, root) => read(() => editor.sourceInputs(origin, root))}
+                        onSource={(origin, root) => editor.loadSourceInputs(origin, false, root)} onRetrySource={(origin, root) => editor.loadSourceInputs(origin, true, root)}
+                        inputState={(origin, name, root) => read(() => editor.sourceInputState(id, origin, name, root))}
+                        onToggleInput={(origin, name, root) => editor.toggleSourceInput(id, origin, name, root)}
+                        inputThumbnail={(origin, name, root) => services.inputThumbnail(origin.source, name, origin, root)} registerTabKeys={registerTabKeys}
                         registerThumbnail={services.registerThumbnail}
                         pathThumbnail={services.pathThumbnail} onAddFolder={path => editor.addFolder(id, path)}
                         folderCapability={() => folderCapability.error ? null : folderCapability()} onChooseFolder={services.chooseFolder}

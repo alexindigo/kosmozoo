@@ -27,7 +27,7 @@ export function install(store) {
     // session-scoped results (probe params, file lists) in local signals
     probe(image) { return api.probe(image); },
     history, historyState, historyThumbnail: api.historyThumbnail,
-    inputList(hostName, origin) { return api.inputList(hostName, origin); },
+    inputList(hostName, origin, root = "input") { return api.inputList(hostName, origin, root); },
     uploadInput(hostName, form, origin) { return api.uploadInput(hostName, form, origin); },
     inspectImage: api.inspectImage,
     inputThumbnail: api.inputThumbnail,
@@ -59,6 +59,7 @@ export function install(store) {
     ownedCommands: [
       ...["variations.discard.cancel", "variations.images.close"].map(id => ({ id, validate: args => Object.keys(args).length === 0 })),
       { id: "variations.tabs.move", validate: args => Object.keys(args).length === 1 && [-1, 1, "first", "last"].includes(args.step) },
+      { id: "variations.feed-tabs.move", validate: args => Object.keys(args).length === 1 && [-1, 1, "first", "last"].includes(args.step) },
     ],
     commands: [...variationCommands({ state: store.state, broker }),
       { id: "variations.history.open", description: "recall original variation run", validate: args => Object.keys(args).length === 1 && typeof args.id === "string",

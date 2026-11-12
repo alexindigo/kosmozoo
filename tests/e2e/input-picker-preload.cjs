@@ -19,8 +19,7 @@ async function preload(cdp, check) {
   }
   assert((await fetch(FAKE + '/__test/activity', { method: 'POST', body: JSON.stringify({ delays: { inputBytes: 150 } }) })).ok);
   await cdp.evaluate(`(async()=>${KZ}.handles.invoke('variations.open',{id:'fake:flux-controlnet.png'}))()`);
-  await cdp.poll("!!document.querySelector('.vz-image-set .checkbox')");
-  await cdp.clickAt('.vz-image-set .checkbox');
+  await require('./variation-add-helpers.cjs').addParameter(cdp, '43.image');
   await require('./image-picker-helpers.cjs').openImageAdd(cdp);
   await cdp.poll("!!document.querySelector('.vz-input-trigger')");
   const active = new Map(), requests = [], nativeRequests = new Map(), wire = new Map();

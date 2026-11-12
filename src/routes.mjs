@@ -12,6 +12,7 @@ import { sourceOrigin, sameOrigin, expectedOrigin } from "./source-origin.mjs";
 import { waitFor } from "./lifetime.mjs";
 import { isContentHash } from "./cache.mjs";
 import { isResourceRoot } from "./parameters.mjs";
+import { mediaKind } from "./backings/mime.mjs";
 
 // Byte routes name the resource root explicitly; absent keeps the historical
 // output meaning, an unknown root fails instead of falling back to another root.
@@ -265,6 +266,17 @@ export function makeRouter(ctx) {
     // Only the output inventory and the input listing exist; other roots never
     // fall back to the output listing.
     if (kind !== "input" && kind !== "output") return Response.json({ error: "no listing for this resource root" }, { status: 400 });
+    const catalogue = url.searchParams.get("catalogue") === "images-v1";
+    let catalogueOrigin = null;
+    if (catalogue) {
+      let expected;
+      try { expected = expectedOrigin(req); } catch (error) { return Response.json({ error: error.message }, { status: 400 }); }
+      if (!expected) return Response.json({ error: "Image catalogue requires an expected origin" }, { status: 400 });
+      catalogueOrigin = sourceOrigin(id, ctx.sourceActivity.source(id));
+      if (!sameOrigin(expected, catalogueOrigin)) return Response.json({ error: "Source origin changed" }, { status: 412 });
+    }
+    const catalogueCurrent = () => (!token || ctx.inventory.isCurrent(token)) && sameOrigin(catalogueOrigin, sourceOrigin(id, ctx.sourceActivity.source(id)));
+    const images = files => files.filter(file => mediaKind(typeof file === "string" ? file : file.name) === "image");
     if (kind === "input") {
       let expected;
       try { expected = expectedOrigin(req); } catch (error) { return Response.json({ error: error.message }, { status: 400 }); }
@@ -272,6 +284,7 @@ export function makeRouter(ctx) {
       if (expected && !sameOrigin(expected, origin)) return Response.json({ error: "Source origin changed" }, { status: 412 });
       try {
         const files = await backingFor(addr).list(addr, "input");
+        if (catalogue) return catalogueCurrent() ? Response.json({ files: images(files), origin: catalogueOrigin, root: kind }) : Response.json({ error: "Source origin changed" }, { status: 412 });
         if (!ctx.inventory.isCurrent(token)) return Response.json({ error: "Source origin changed" }, { status: 412 });
         return Response.json(expected ? { files, origin } : files);
       } catch (e) {
@@ -284,6 +297,7 @@ export function makeRouter(ctx) {
     let inventory;
     try { inventory = await ctx.inventory(id); }
     catch (error) { return Response.json({ error: `collection unreachable: ${error.message}` }, { status: 502 }); }
+    if (catalogue && !catalogueCurrent()) return Response.json({ error: "Source origin changed" }, { status: 412 });
     if (token && !ctx.inventory.isCurrent(token)) return Response.json({ error: "Source incarnation changed" }, { status: 409 });
     inventory = ctx.inventory.accepted?.(token) ?? inventory;
     const list = inventory.items;
@@ -296,6 +310,7 @@ export function makeRouter(ctx) {
       return !r || (r.state !== "gone" && r.hidden !== 1);
     });
     const entries = visible.map((f) => entryShape(id, f.name, f.size, rows.get(f.name), f.modified));
+    if (catalogue) return Response.json({ files: images(entries), origin: catalogueOrigin, root: kind });
     const arrivals = ctx.store.arrivals.inventory(id);
     for (const entry of entries) entry.arrivalSeq = arrivals?.sequences[entry.name] ?? null;
     const items = url.searchParams.get('arrivals') === 'items-v1';

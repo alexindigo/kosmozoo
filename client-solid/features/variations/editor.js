@@ -2,7 +2,7 @@
 // evidence are readonly context; compilation classifies every captured leaf.
 import { snapshotDraft, createRunId } from "./draft.js";
 import { editorDomain, choiceValues, numericDefaults, numericText, sliderNumber } from "./graph.mjs";
-import { parseExactJson, stringifyExactJson, sameJsonValue } from "/shared/parameters.mjs";
+import { parseExactJson, stringifyExactJson, sameJsonValue, resourceReferenceValue, resourceReferenceProblem } from "/shared/parameters.mjs";
 import { admitResourceTransfer } from "/shared/features/variations/compile.mjs";
 import { compileRecipe, parseRecipeCandidate, recipeImageView, currentRoot } from "/shared/features/variations/recipe-compile.mjs";
 import { acknowledgedHistoryFields, planHistoryOverlay, decodeHistoryRecipe } from "/shared/features/variations/history-codec.mjs";
@@ -50,16 +50,24 @@ export function makeVariationEditor({ targets, services, currentOrigin, changed 
   let locations = [];
   const imageChecks = new Map(), confirmedUploads = new Map();
   const inputCatalogues = new Map(), sourceFiles = new Map();
-  const sourceRecord = (map, origin, create) => {
-    const previous = map.get(origin.source);
+  const sourceLifetimes = new Map();
+  const sourceRecord = (map, origin, create, root = "input") => {
+    if (sameOrigin(origin, currentOrigin(origin.source)) && !sameOrigin(sourceLifetimes.get(origin.source), origin)) {
+      for (const records of [inputCatalogues, sourceFiles]) for (const [key, record] of records)
+        if (record.origin.source === origin.source) records.delete(key);
+      sourceLifetimes.set(origin.source, freeze(snapshotDraft(origin)));
+    }
+    const key = JSON.stringify([origin.source, root]), previous = map.get(key);
     if (previous && sameOrigin(previous.origin, origin)) return previous;
     if (!create) return null;
     const record = { origin: freeze(snapshotDraft(origin)), ...create() };
-    map.set(origin.source, record); return record;
+    map.set(key, record); return record;
   };
-  const cachedInput = (origin, name) => sourceRecord(sourceFiles, origin)?.files.get(name);
+  const cachedInput = (origin, name, root) => sourceRecord(sourceFiles, origin, null, root)?.files.get(name);
+  const reference = (name, root) => ({ kind: "reference", value: resourceReferenceValue(name, root) });
+  const resourceName = name => typeof name === "string" && !resourceReferenceProblem(null, name);
   const batch = capturedTargets.length > 1;
-  let alive = true, closeGeneration = 0, deciding = false, active = null, timer = null;
+  let alive = true, closeGeneration = 0, decisionGeneration = 0, deciding = false, active = null, timer = null;
   let result = null, running = false, catalogueReady = false, acceptedRevision = null, restoredWork = false;
   const heldRecords = new Map();
   const row = recipe.row;
@@ -215,64 +223,71 @@ export function makeVariationEditor({ targets, services, currentOrigin, changed 
       return { ...result, state: "kept", reason: "Newer edits have been kept.", text: `submitted ${result.submitted}/${result.total} — newer edits have been kept` };
     },
     ready: () => catalogueReady,
-    sourceInputs: origin => sourceRecord(inputCatalogues, origin) ?? { files: [], pending: false, error: "" },
-    async loadSourceInputs(origin, retry = false) {
-      if (!alive || !validOrigin(origin) || !sameOrigin(origin, currentOrigin(origin.source))) return;
-      const record = sourceRecord(inputCatalogues, origin, () => ({ files: [], pending: false, error: "", loaded: false }));
+    sourceInputs: (origin, root = "input") => sourceRecord(inputCatalogues, origin, null, root) ?? { files: [], pending: false, error: "" },
+    async loadSourceInputs(origin, retry = false, root = "input") {
+      if (!alive || !["input", "output"].includes(root) || !validOrigin(origin) || !sameOrigin(origin, currentOrigin(origin.source))) return;
+      const record = sourceRecord(inputCatalogues, origin, () => ({ files: [], pending: false, error: "", loaded: false }), root);
+      const ownsRecord = () => alive && sameOrigin(origin, currentOrigin(origin.source)) && sourceRecord(inputCatalogues, origin, null, root) === record;
       if (record.pending || record.loaded && !retry) return;
       record.pending = true; record.error = ""; notify();
       try {
-        const data = await services.inputList(origin.source, origin);
-        if (!alive || !sameOrigin(origin, currentOrigin(origin.source)) || sourceRecord(inputCatalogues, origin) !== record) return;
-        if (!sameOrigin(data?.origin, origin) || !Array.isArray(data.files)) throw new Error("Source-bound input catalogue unavailable");
-        record.files = data.files.map(file => typeof file === "string" ? file : file.name).filter(filename);
+        const data = await services.inputList(origin.source, origin, root);
+        if (!ownsRecord()) return;
+        if (!sameOrigin(data?.origin, origin) || data.root !== root || !Array.isArray(data.files)) throw new Error("Source-bound image catalogue unavailable");
+        record.files = data.files.map(file => typeof file === "string" ? file : file.name).filter(resourceName);
         record.loaded = true;
-        if (sameOrigin(origin, capturedTargets[0].origin)) this.installInputs(data);
-      } catch (error) { record.error = `${origin.source}: ${error.message}`; }
+        if (root === "input" && sameOrigin(origin, capturedTargets[0].origin)) this.installInputs(data);
+      } catch (error) { if (ownsRecord()) record.error = `${origin.source}: ${error.message}`; }
       finally {
+        if (!ownsRecord()) return;
         record.pending = false;
-        if (alive && sameOrigin(origin, capturedTargets[0].origin))
+        if (root === "input" && sameOrigin(origin, capturedTargets[0].origin))
           for (const [id] of recipe.entries("images")) seed("images", id, { filesReady: true }, {});
         notify();
       }
     },
-    sourceInputState(id, origin, name) {
-      const cached = cachedInput(origin, name), item = sameOrigin(origin, capturedTargets[0].origin)
-        ? { kind: "input", name } : cached?.file ? uploadImage(cached.file) : null;
+    sourceInputState(id, origin, name, root = "input") {
+      const cached = cachedInput(origin, name, root), item = sameOrigin(origin, capturedTargets[0].origin)
+        ? reference(name, root) : cached?.file ? uploadImage(cached.file) : null;
       return { selected: !!item && row("images", id).values.items.some(other => sameImage(item, other)),
         pending: !!cached?.pending && cached.wanted.has(id), error: cached?.error ?? "" };
     },
-    async toggleSourceInput(id, origin, name) {
-      if (!alive || deciding || !filename(name) || !validOrigin(origin) || !originCurrent(capturedTargets[0]) ||
+    async toggleSourceInput(id, origin, name, root = "input") {
+      if (!alive || deciding || !["input", "output"].includes(root) || !resourceName(name) || !validOrigin(origin) || !originCurrent(capturedTargets[0]) ||
         !sameOrigin(origin, currentOrigin(origin.source))) return false;
       if (sameOrigin(origin, capturedTargets[0].origin)) {
-        const item = { kind: "input", name };
-        return this.sourceInputState(id, origin, name).selected ? this.removeImage(id, item) : this.addImages(id, [item]);
+        const item = reference(name, root);
+        return this.sourceInputState(id, origin, name, root).selected ? this.removeImage(id, item) : this.addImages(id, [item]);
       }
-      const source = sourceRecord(sourceFiles, origin, () => ({ files: new Map() }));
+      const source = sourceRecord(sourceFiles, origin, () => ({ files: new Map() }), root);
+      const ownsRead = () => alive && sourceRecord(sourceFiles, origin, null, root) === source && sameOrigin(origin, currentOrigin(origin.source));
       if (!source.files.has(name)) source.files.set(name, { file: null, pending: false, error: "", wanted: new Set() });
       const cached = source.files.get(name);
       if (cached.file) {
         cached.error = "";
         const item = uploadImage(cached.file);
-        return this.sourceInputState(id, origin, name).selected ? this.removeImage(id, item) : this.addImages(id, [item]);
+        return this.sourceInputState(id, origin, name, root).selected ? this.removeImage(id, item) : this.addImages(id, [item]);
       }
       if (cached.wanted.has(id)) cached.wanted.delete(id); else cached.wanted.add(id);
       if (cached.pending) { notify(); return; }
+      const generation = decisionGeneration;
       cached.pending = true; cached.error = ""; notify();
       try {
-        const file = await services.readInput(origin, name);
-        if (!alive || sourceRecord(sourceFiles, origin) !== source || !sameOrigin(origin, currentOrigin(origin.source))) return;
-        if (!(file instanceof File) || file.name !== name) throw new Error("Invalid input image");
+        const resource = await services.readInput(origin, name, root);
+        if (!ownsRead()) return;
+        if (!(resource instanceof File) || resource.name !== name) throw new Error("Invalid input image");
+        // The resource port retains its full raw name. Uploads have their own
+        // flat namespace; the editor owns that leaf-named File, not the API.
+        const file = name.includes("/") ? new File([resource], name.split("/").at(-1), { type: resource.type, lastModified: resource.lastModified }) : resource;
         cached.file = file;
-        if (deciding || !originCurrent(capturedTargets[0])) throw new Error("Editor context changed; choose the image again when ready");
+        if (deciding || generation !== decisionGeneration || !originCurrent(capturedTargets[0])) throw new Error("Editor context changed; choose the image again when ready");
         for (const rowId of cached.wanted) this.addImages(rowId, [uploadImage(file)]);
-      } catch (error) { cached.error = `${name}: ${error.message}`; }
-      finally { cached.pending = false; cached.wanted.clear(); notify(); }
+      } catch (error) { if (ownsRead()) cached.error = `${name}: ${error.message}`; }
+      finally { if (ownsRead()) { cached.pending = false; cached.wanted.clear(); notify(); } }
     },
     catalogueFailure(error) { publish({ text: `Catalogue unavailable: ${error.message ?? error}. Your edits have been kept.`, ok: false, state: "unavailable" }); },
     invalidateClose,
-    decision(value) { deciding = !!value; notify(); },
+    decision(value) { deciding = !!value; if (deciding) decisionGeneration++; notify(); },
     edit(domain, id, name, value) {
       if (!alive || deciding) return false;
       write(domain, id, name, value);
@@ -350,8 +365,8 @@ export function makeVariationEditor({ targets, services, currentOrigin, changed 
       catalogueReady = true; notify();
     },
     installInputs(data) {
-      if (!alive || !sameOrigin(data?.origin, capturedTargets[0].origin) || !Array.isArray(data.files)) return;
-      const files = data.files.map(file => typeof file === "string" ? file : file.name).filter(filename);
+      if (!alive || data?.root && data.root !== "input" || !sameOrigin(data?.origin, capturedTargets[0].origin) || !Array.isArray(data.files)) return;
+      const files = data.files.map(file => typeof file === "string" ? file : file.name).filter(resourceName);
       const record = sourceRecord(inputCatalogues, data.origin, () => ({}));
       Object.assign(record, { files, loaded: true, pending: false, error: "" });
       for (const [id] of recipe.entries("images")) { seed("images", id, { files, filesReady: true }, {}); inspectItems(id); }
@@ -555,7 +570,7 @@ export function makeVariationEditor({ targets, services, currentOrigin, changed 
        }
     },
     dispose() {
-      alive = false; invalidateClose(); active = null; sourceFiles.clear(); inputCatalogues.clear();
+      alive = false; invalidateClose(); active = null; sourceFiles.clear(); inputCatalogues.clear(); sourceLifetimes.clear();
       for (const record of heldRecords.values()) services.history?.release(record).catch(() => {});
       heldRecords.clear();
     },

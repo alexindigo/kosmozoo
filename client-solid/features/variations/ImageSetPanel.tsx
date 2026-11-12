@@ -51,7 +51,7 @@ export function ImageSetPanel(props) {
       <div class="vz-image-add" hidden={!adding()}>
         <Show when={props.sources.length}><InputPicker sources={props.sources} sourceInputs={props.sourceInputs} inputState={props.inputState}
           onSource={props.onSource} onRetrySource={props.onRetrySource} registerTabKeys={props.registerTabKeys}
-          current={(row().currentRoot ?? (row().fromOutput ? "output" : "input")) === "input" ? row().current : null} positionRevision={row().images} thumbnail={props.inputThumbnail} registerThumbnail={props.registerThumbnail}
+          current={row().current} currentRoot={row().currentRoot ?? (row().fromOutput ? "output" : "input")} positionRevision={row().images} thumbnail={props.inputThumbnail} registerThumbnail={props.registerThumbnail}
           onToggle={props.onToggleInput}
           registerPopup={props.registerPopup} registerEditor={props.registerEditor} rememberFocus={props.rememberFocus} /></Show>
         <input type="file" ref={fileInput} class="vz-imgfilespick" hidden multiple accept="image/*" onChange={e => {
