@@ -125,12 +125,12 @@ export class Ingest {
     this.#assertCurrent(token);
     await this.#cache.put(hash, bytes);
     this.#assertCurrent(token);
+    const dims = imageDims(bytes);
     if (kind !== "output") {
-      this.#store.resourceCachePut(collection, name, kind, hash, stamp, bytes.length);
+      this.#store.resourceCachePut(collection, name, kind, hash, stamp, bytes.length, dims);
       return hash;
     }
     const before = this.#store.fileInfo(collection, name);
-    const dims = imageDims(bytes);
     await this.#store.ingestFile(collection, name, hash, bytes.length, {
       stamp,
       changed: !!before?.hash && before.hash !== hash,
@@ -151,10 +151,10 @@ export class Ingest {
     await this.#store.metaPut(collection, name, meta, { hasWorkflow, ext: EXTRACTOR_VERSION });
   }
 
-  // Dims WITHOUT ingestion ( pass 1): known dims (content via the
-  // entry's hash, or the entry's own columns) short-circuit the read; else a
-  // ranged head read → imageDims → stored on the entry. No hash, no cache
-  // write, no extract. status 404 means the source lost the file (the
+  // Dims without full ingestion (pass 1): hash-bound facts short-circuit or
+  // recover from that hash's cache. Only hashless entries use provisional
+  // ranged heads. No upstream full ingest, cache write or extraction.
+  // status 404 means the source lost the file (the
   // prefetch acts on it exactly like pass 2 would).
   dims(collection, name, kind = "output", options = {}) {
     const run = () => this.#dims(collection, name, kind, options);
@@ -168,9 +168,24 @@ export class Ingest {
     if (!validEntryName(addr, name)) return { status: 400, dims: null };
     const known = this.#store.entryDims(collection, name, kind);
     if (known) return { status: 200, dims: known };
+    const hash = this.#recorded(collection, name, kind)?.hash;
+    if (hash) {
+      // A mutable named head cannot say anything about already-hashed bytes.
+      // Dimension-only interest recovers only from that exact cache object.
+      const bytes = await this.#cache.get(hash);
+      if (!this.#isCurrent(token)) return { ...this.#cancelled(), dims: null };
+      if (this.#recorded(collection, name, kind)?.hash === hash && bytes) {
+        this.#store.contentDimsPut(hash, imageDims(bytes));
+      }
+      return { status: 200, dims: this.#store.entryDims(collection, name, kind) };
+    }
     if (!addr) return { status: 404, dims: null };
     const r = await this.#readGated(addr, name, kind, { range: [0, DIMS_HEAD_BYTES - 1] }, priority, null, token);
     if (!this.#isCurrent(token)) return { ...this.#cancelled(), dims: null };
+    // Full ingestion may have won while this provisional read held its body.
+    if (this.#recorded(collection, name, kind)?.hash) {
+      return { status: 200, dims: this.#store.entryDims(collection, name, kind) };
+    }
     if (r.status !== 200 && r.status !== 206) return { status: r.status, dims: null };
     const bytes = r.bytes;
     if (!this.#isCurrent(token)) return { ...this.#cancelled(), dims: null };

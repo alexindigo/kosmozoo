@@ -44,21 +44,45 @@ const get = (r, query = "", method = "GET") => r.router.handle(new Request(`http
 
 Deno.test("roots: dimension lifetime follows known content replacement in every root", async () => {
   const r = await mkStateRig("roots-dims-lifetime", { hosts: {} });
-  const first = "a".repeat(64), next = "b".repeat(64), dims = { width: 30, height: 20 };
+  const { testPng } = await import("./helpers/png.mjs");
+  const bytes = testPng(30, 20), first = await sha256(bytes), next = "b".repeat(64), dims = { width: 30, height: 20 };
   try {
     for (const kind of ["input", "temp", "output"]) {
       r.store.entryDimsPut("c", NAME, dims, kind);
       const put = hash => kind === "output"
         ? r.store.ingestFile("c", NAME, hash, 100)
         : r.store.resourceCachePut("c", NAME, kind, hash, hash, 100);
-      await put(first);
+      await r.ingest.ensureBytes("c", NAME, bytes, { kind });
       assertEquals(r.store.entryDims("c", NAME, kind), dims, "first hash enrichment preserves measurements");
       await put(first);
       assertEquals(r.store.entryDims("c", NAME, kind), dims, "same content preserves measurements");
       await put(next);
       assertEquals(r.store.entryDims("c", NAME, kind), null, `${kind}: changed content retires old dimensions`);
+      r.store.entryDimsPut("c", "hash-only.png", dims, kind);
+      if (kind === "output") await r.store.ingestFile("c", "hash-only.png", next, 100);
+      else r.store.resourceCachePut("c", "hash-only.png", kind, next, null, 100);
+      assertEquals(r.store.entryDims("c", "hash-only.png", kind), null, "first hash alone is not byte evidence");
+      r.store.entryDimsPut("c", "hash-only.png", dims, kind);
+      assertEquals(r.store.entryDims("c", "hash-only.png", kind), null, "head writes cannot certify hashed content");
     }
   } finally { await r.close(); }
+});
+
+for (const kind of ["input", "temp", "output"]) for (const readable of [true, false]) Deno.test(`roots: first ingestion replaces provisional ${kind} geometry with exact bytes (${readable})`, async () => {
+  const { testPng } = await import("./helpers/png.mjs");
+  const old = testPng(30, 20), next = readable ? testPng(70, 50) : new Uint8Array([1, 2, 3]);
+  const roots = { [kind]: { [NAME]: { bytes: old } } };
+  const comfy = fakeComfyInline({ roots }), r = await mkStateRig("first-dims", { hosts: { c: comfy.addr } });
+  try {
+    assertEquals((await r.ingest.dims("c", NAME, kind)).dims, { width: 30, height: 20 });
+    roots[kind][NAME] = { bytes: next };
+    const result = await r.ingest.ensure("c", NAME, kind);
+    assertEquals(result.bytes, next);
+    assertEquals(result.hash, await sha256(next));
+    assertEquals(r.store.contentGet(result.hash).width, readable ? 70 : null);
+    assertEquals((await r.ingest.dims("c", NAME, kind)).dims, readable ? { width: 70, height: 50 } : null);
+    assertEquals(r.store.entryGet("c", NAME, kind).width, null, "provisional geometry retires at binding");
+  } finally { await comfy.close(); await r.close(); }
 });
 
 Deno.test("roots: replaced referenced bytes acquire their new dimensions at the consumer", async () => {
