@@ -108,6 +108,13 @@ export function makeVariationEditor({ targets, services, currentOrigin, changed 
   const captureRows = recipe.capture;
   const owns = ticket => alive && active === ticket;
   const originCurrent = target => validOrigin(target.origin) && sameOrigin(target.origin, currentOrigin(target.host));
+  // Byte/catalogue facts can outlive a choice. Only the row's current membership
+  // ticket admits an async edit; ordinary recipe revisions and browsing do not.
+  const membershipGenerations = new Map();
+  const membershipTicket = id => ({ id, decision: decisionGeneration, row: membershipGenerations.get(id) });
+  const admitsMembership = ticket => alive && !deciding && originCurrent(capturedTargets[0]) &&
+    ticket.decision === decisionGeneration && ticket.row === membershipGenerations.get(ticket.id);
+  const retireMembership = id => { membershipGenerations.set(id, (membershipGenerations.get(id) ?? 0) + 1); };
   const check = (ticket, target) => {
     if (!owns(ticket)) throw Object.assign(new Error("Operation retired; work was kept"), { stale: true });
     if (!originCurrent(target)) throw Object.assign(new Error("Source origin changed; no follow-up was authorized. Your work has been kept."), { stale: true });
@@ -174,7 +181,9 @@ export function makeVariationEditor({ targets, services, currentOrigin, changed 
       return { ...plan, revision, id: saved.id, leaseId: saved.leaseId, record: saved };
     },
     applyRecall(plan) {
-      if (!alive || running || plan.revision !== recipe.revision() || !capturedTargets.every(originCurrent)) return { status: "stale" };
+      if (!alive || deciding || running || plan.revision !== recipe.revision() || !capturedTargets.every(originCurrent)) return { status: "stale" };
+      if (!plan.patch.length) return { status: "unchanged" };
+      for (const id of new Set(plan.patch.filter(field => field.domain === "images" && field.name === "items").map(field => field.id))) retireMembership(id);
       for (const field of plan.patch) write(field.domain, field.id, field.name, field.value);
       heldRecords.set(plan.leaseId, plan.record);
       recipe.edited(); invalidateClose(); notify();
@@ -250,7 +259,7 @@ export function makeVariationEditor({ targets, services, currentOrigin, changed 
       const cached = cachedInput(origin, name, root), item = sameOrigin(origin, capturedTargets[0].origin)
         ? reference(name, root) : cached?.file ? uploadImage(cached.file) : null;
       return { selected: !!item && row("images", id).values.items.some(other => sameImage(item, other)),
-        pending: !!cached?.pending && cached.wanted.has(id), error: cached?.error ?? "" };
+        pending: !!cached?.pending && cached.wanted.has(id) && admitsMembership(cached.wanted.get(id)), error: cached?.error ?? "" };
     },
     async toggleSourceInput(id, origin, name, root = "input") {
       if (!alive || deciding || !["input", "output"].includes(root) || !resourceName(name) || !validOrigin(origin) || !originCurrent(capturedTargets[0]) ||
@@ -261,16 +270,16 @@ export function makeVariationEditor({ targets, services, currentOrigin, changed 
       }
       const source = sourceRecord(sourceFiles, origin, () => ({ files: new Map() }), root);
       const ownsRead = () => alive && sourceRecord(sourceFiles, origin, null, root) === source && sameOrigin(origin, currentOrigin(origin.source));
-      if (!source.files.has(name)) source.files.set(name, { file: null, pending: false, error: "", wanted: new Set() });
+      if (!source.files.has(name)) source.files.set(name, { file: null, pending: false, error: "", wanted: new Map() });
       const cached = source.files.get(name);
       if (cached.file) {
         cached.error = "";
         const item = uploadImage(cached.file);
         return this.sourceInputState(id, origin, name, root).selected ? this.removeImage(id, item) : this.addImages(id, [item]);
       }
-      if (cached.wanted.has(id)) cached.wanted.delete(id); else cached.wanted.add(id);
+      if (cached.wanted.has(id) && admitsMembership(cached.wanted.get(id))) cached.wanted.delete(id);
+      else cached.wanted.set(id, membershipTicket(id));
       if (cached.pending) { notify(); return; }
-      const generation = decisionGeneration;
       cached.pending = true; cached.error = ""; notify();
       try {
         const resource = await services.readInput(origin, name, root);
@@ -280,10 +289,13 @@ export function makeVariationEditor({ targets, services, currentOrigin, changed 
         // flat namespace; the editor owns that leaf-named File, not the API.
         const file = name.includes("/") ? new File([resource], name.split("/").at(-1), { type: resource.type, lastModified: resource.lastModified }) : resource;
         cached.file = file;
-        if (deciding || generation !== decisionGeneration || !originCurrent(capturedTargets[0])) throw new Error("Editor context changed; choose the image again when ready");
-        for (const rowId of cached.wanted) this.addImages(rowId, [uploadImage(file)]);
-      } catch (error) { if (ownsRead()) cached.error = `${name}: ${error.message}`; }
-      finally { if (ownsRead()) { cached.pending = false; cached.wanted.clear(); notify(); } }
+        for (const [rowId, ticket] of [...cached.wanted]) {
+          if (cached.wanted.get(rowId) !== ticket) continue;
+          cached.wanted.delete(rowId);
+          if (admitsMembership(ticket)) this.addImages(rowId, [uploadImage(file)]);
+        }
+      } catch (error) { if (ownsRead()) { cached.wanted.clear(); cached.error = `${name}: ${error.message}`; } }
+      finally { if (ownsRead()) { cached.pending = false; notify(); } }
     },
     catalogueFailure(error) { publish({ text: `Catalogue unavailable: ${error.message ?? error}. Your edits have been kept.`, ok: false, state: "unavailable" }); },
     invalidateClose,
@@ -310,8 +322,9 @@ export function makeVariationEditor({ targets, services, currentOrigin, changed 
       if (!alive || deciding || running) throw new Error("Finish the current action before adding a folder");
       const target = capturedTargets[0];
       if (!originCurrent(target)) throw new Error("Source origin changed; your images were kept");
+      const ticket = membershipTicket(id);
       const result = await services.listFolder(path);
-      if (!alive || deciding || running || !originCurrent(target)) throw new Error("The editor changed while reading the folder. Add it again when ready.");
+      if (running || !admitsMembership(ticket)) throw new Error("The editor changed while reading the folder. Add it again when ready.");
       if (!validImageSet(result?.items) || result.items.some(item => item.kind !== "server-path")) throw new Error("Invalid folder image listing");
       this.addImages(id, result.items);
       return { count: result.items.length };

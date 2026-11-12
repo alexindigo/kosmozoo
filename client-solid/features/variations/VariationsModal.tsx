@@ -82,6 +82,7 @@ function ModalBody(props) {
   if (original) editor.restoreHistory(original);
   const [historyCaption, setHistoryCaption] = createSignal(original ? `${historyCount(original)} | ${historyDate(original.createdAt)} | ${image.filename}` : "");
   const [recallWarnings, setRecallWarnings] = createSignal([]);
+  const [recallStatus, setRecallStatus] = createSignal(null);
   let alive = true, recalling = null;
   onCleanup(() => { alive = false; });
   const read = getter => { version(); return getter(); };
@@ -174,10 +175,15 @@ function ModalBody(props) {
       try {
         if (!alive || guard.pending() || editor.revision() !== revision) return { status: "stale" };
         const plan = await editor.planRecall(saved);
-        const result = await guard.request({ intent: { type: "apply-history", id, leaseId: saved.leaseId, revision, overlap: plan.overlap },
+        // Even a clean guard invalidates accepted close eligibility. An empty
+        // overlay is a terminal selection, not an editor transition.
+        const result = !plan.patch.length ? editor.applyRecall(plan) : await guard.request({ intent: { type: "apply-history", id, leaseId: saved.leaseId, revision, overlap: plan.overlap },
           cancel() {}, permit: () => editor.applyRecall(plan) });
         if (result.status === "applied") {
-          transferred = true; setHistoryCaption(`${historyCount(saved)} | ${historyDate(saved.createdAt)}`); setRecallWarnings(plan.warnings);
+          transferred = true; setHistoryCaption(`${historyCount(saved)} | ${historyDate(saved.createdAt)}`);
+        }
+        if (result.status === "applied" || result.status === "unchanged") {
+          setRecallWarnings(plan.warnings); setRecallStatus(result.status);
         }
         return result;
       } finally {
@@ -322,7 +328,7 @@ function ModalBody(props) {
             : "Generate image variations"} />
         <HistoryDropdown history={services.history} state={services.historyState} thumbnail={services.historyThumbnail} registerThumbnail={services.registerThumbnail}
           registerPopup={registerImagePopup} registerEditor={registerEditor} rememberFocus={rememberFocus} bulk={batch}
-          caption={historyCaption()} warnings={recallWarnings()} onRecall={recall} />
+          caption={historyCaption()} warnings={recallWarnings()} recallStatus={recallStatus()} onRecall={recall} />
         <div ref={bodyScroll} class="vz-body-scroll"><div class="vz-body">
           <div class="vz-catalogue">
             <div class="vz-filter-tools">

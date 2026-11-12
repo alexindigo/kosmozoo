@@ -131,6 +131,12 @@ export async function buildContext({ env = Deno.env.toObject(), fakes = {}, star
     },
     route: (method, path, handler) => router.add(method, path, handler),
   };
+  // Store recovery retires dead execution ownership transactionally. Durable
+  // unreferenced asset rows survive failed collection and are retried on startup.
+  // Compose the existing SQL/byte owners here, never during feature registration.
+  for (const { hash } of store.variationUnreferencedAssets()) {
+    await featureApp.archive.collect(hash, () => store.variationAssetRefs(hash) > 0, () => store.variationForgetAsset(hash));
+  }
   const features = fakes.features ?? FEATURES;
   for (const f of features) {
     f.register({

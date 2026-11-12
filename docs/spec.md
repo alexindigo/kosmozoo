@@ -1072,7 +1072,17 @@ single-absolute and bulk-relative Ranges never convert implicitly. Values remain
 absolute. Recall and compilation share complete active numeric validation, including
 exact ordered endpoints and the destination increment floor, before any row patch.
 Invalid saved attempts and dormant Value-mode range text remain archived unchanged.
-Late reads are revision/session/source/decision fenced. Right-panel
+Pending foreign-image reads and folder listings share editor-owned membership
+tickets. Successful recall retires only choices for image rows whose membership
+it replaces; numeric-only recall, typing, browsing and unrelated pending rows keep
+their intent. Blocking decision entry retires all old membership tickets. Readonly
+byte/catalogue facts retain their own lifetimes, and a new explicit choice can use
+an older pending read's validated File without inheriting its retired intent.
+An empty compatible overlay reports `No compatible changes were applied.` and
+closes the dropdown without entering the leave guard. It preserves raw state,
+revision, accepted close eligibility, prior caption and prior leases; only the
+newly opened lease is released. Non-empty compatible overlays keep their existing
+edit semantics even when their values equal the current values. Right-panel
 recall restores original ordered targets, archived catalogue and every raw leaf,
 without probing today's same-named graph. Offline or replaced sources permit
 inspection/editing but offer no Run; they cannot retarget that editor.
@@ -1865,7 +1875,7 @@ precede reference publication; reads verify hashes and reject symlink/nonregular
 objects. Failed publication rolls back newly created objects under the same hash
 lock only when no reference owns them. Logical candidates/order stay distinct even when bytes deduplicate.
 Deleting a run releases only its unpinned references. Last-reference collection
-can remove only archive-owned objects. Uncertain/orphan pins are retained rather
+can remove only archive-owned objects. Orphan editor pins are retained rather
 than expiring a possibly unsaved draft. Completed tombstones keep replay fencing,
 not full deleted configuration bodies.
 
@@ -1875,6 +1885,13 @@ sibling targets; started/uncertain durable effects continue protecting bytes.
 Upload settlement retries the same tombstone collection path. Client release
 ownership survives failed DELETEs for coalesced retries on activation/disposal;
 transport loss or browser disappearance never authorizes expiry of unsaved drafts.
+Startup first marks unfinished effects uncertain, then retires only dead server
+execution pins and reuses the same deleted-run retirement predicate. Editor pins,
+visible records and started/uncertain effects retain their resources. Context
+awaits hash-locked archive collection of durable unreferenced asset rows before
+exposing the engine. Collection failure rejects initialization through owned cleanup
+and leaves the uncollected rows retryable on later startup; feature registration
+remains synchronous and IO-free. Recovery never uploads, enqueues or replays effects.
 
 ### Cache (`~/.local/share/kosmozoo/cache/`, override `KOZMOZOO_CACHE`)
 

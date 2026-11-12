@@ -37,9 +37,9 @@ export function HistoryDropdown(props) {
       <div class="vh-menu-label">Apply saved changes to {props.bulk ? "these images" : "this image"}</div>
       <HistoryList compact history={props.history} state={props.state} thumbnail={props.thumbnail} registerThumbnail={props.registerThumbnail}
         registerPopup={props.registerPopup} registerEditor={props.registerEditor}
-        onRecall={async id => { const result = await props.onRecall(id); if (result?.status === "applied") close(); }} />
+        onRecall={async id => { const result = await props.onRecall(id); if (result?.status === "applied" || result?.status === "unchanged") close(); }} />
     </div></Show>
-    <Show when={props.warnings?.length}><div class="vh-warning" role="status"><strong>Applied compatible changes. Other settings were kept.</strong>
+    <Show when={props.warnings?.length || props.recallStatus === "unchanged"}><div class="vh-warning" role="status"><strong>{props.recallStatus === "unchanged" ? "No compatible changes were applied." : "Applied compatible changes. Other settings were kept."}</strong>
       <For each={props.warnings}>{warning => <span>{warning.label}: {warning.reason}</span>}</For>
     </div></Show>
   </div>;

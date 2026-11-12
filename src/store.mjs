@@ -236,6 +236,7 @@ const STATEMENTS = {
   variationEffectsCompact: "UPDATE variation_effect SET request_json = 'null',result_json = NULL WHERE run_id = ?",
   variationAssetRefs: "SELECT COUNT(*) AS n FROM variation_asset_ref WHERE hash = ?",
   variationAssetForget: "DELETE FROM variation_asset WHERE hash = ? AND NOT EXISTS(SELECT 1 FROM variation_asset_ref WHERE hash = ?)",
+  variationUnreferencedAssets: "SELECT hash FROM variation_asset WHERE NOT EXISTS(SELECT 1 FROM variation_asset_ref r WHERE r.hash = variation_asset.hash)",
   variationEffectGet: "SELECT * FROM variation_effect WHERE run_id = ? AND effect_id = ?",
   variationEffects: "SELECT * FROM variation_effect WHERE run_id = ? ORDER BY rowid",
   variationEffectPrepare: `INSERT INTO variation_effect(run_id,effect_id,kind,request_json,request_hash,state,created_at,updated_at)
@@ -243,6 +244,8 @@ const STATEMENTS = {
   variationEffectClaim: "UPDATE variation_effect SET state = 'started',updated_at = ? WHERE run_id = ? AND effect_id = ? AND state = 'prepared'",
   variationEffectResult: "UPDATE variation_effect SET state = ?,result_json = ?,updated_at = ? WHERE run_id = ? AND effect_id = ? AND state = 'started'",
   variationRecoveryEffects: "UPDATE variation_effect SET state = 'uncertain',updated_at = ? WHERE state = 'started'",
+  variationRecoveryExecutionRuns: "SELECT DISTINCT run_id FROM variation_lease WHERE kind = 'execution'",
+  variationRecoveryExecutionPins: "DELETE FROM variation_lease WHERE kind = 'execution'",
   variationRecoveryCaptures: "UPDATE variation_run SET capture_state = 'interrupted',outcome = 'interrupted',updated_at = ? WHERE capture_state = 'preparing'",
   variationRecoveryRuns: `UPDATE variation_run SET outcome = CASE WHEN EXISTS
     (SELECT 1 FROM variation_effect e WHERE e.run_id = variation_run.id AND e.state = 'uncertain')
@@ -399,6 +402,11 @@ export class Store {
         const effects = s.#q.variationRecoveryEffects.run(now);
         const captures = s.#q.variationRecoveryCaptures.run(now);
         const runs = s.#q.variationRecoveryRuns.run(now);
+        // Request executions died with the server. Editor drafts did not; their
+        // pins and durable uncertain effects independently retain resources.
+        const executions = s.#q.variationRecoveryExecutionRuns.all();
+        s.#q.variationRecoveryExecutionPins.run();
+        for (const { run_id } of executions) s.#variationRetire(run_id);
         if (effects || captures || runs) s.#q.variationBump.run();
       })();
       s.#ready = true;
@@ -508,18 +516,20 @@ export class Store {
     })();
   }
   variationRetire(id) {
-    return this.#db.transaction(() => {
-      const run = this.variationGet(id);
-      if (!run || run.deleted_at === null || this.#q.variationPins.get(id).n || this.#q.variationBusy.get(id).n) return [];
-      const hashes = [...new Set(this.variationResources(id).map(r => r.hash).filter(Boolean))];
-      this.#q.variationRefsDrop.run(id);
-      this.#q.variationCompact.run(id);
-      this.#q.variationEffectsCompact.run(id);
-      return hashes;
-    })();
+    return this.#db.transaction(() => this.#variationRetire(id))();
+  }
+  #variationRetire(id) {
+    const run = this.variationGet(id);
+    if (!run || run.deleted_at === null || this.#q.variationPins.get(id).n || this.#q.variationBusy.get(id).n) return [];
+    const hashes = [...new Set(this.variationResources(id).map(r => r.hash).filter(Boolean))];
+    this.#q.variationRefsDrop.run(id);
+    this.#q.variationCompact.run(id);
+    this.#q.variationEffectsCompact.run(id);
+    return hashes;
   }
   variationAssetRefs(hash) { return this.#q.variationAssetRefs.get(hash).n; }
   variationForgetAsset(hash) { return this.#q.variationAssetForget.run(hash, hash); }
+  variationUnreferencedAssets() { return this.#q.variationUnreferencedAssets.all(); }
   variationPrepareEffect(id, effectId, kind, requestJson, requestHash) {
     return this.#db.transaction(() => {
       const run = this.variationGet(id);

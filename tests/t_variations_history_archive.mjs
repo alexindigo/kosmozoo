@@ -4,6 +4,8 @@ import { sha256 } from "../src/cache.mjs";
 import { join } from "node:path";
 import { Ingest } from "../src/ingest.mjs";
 import { mkStateRig } from "./helpers/rig.mjs";
+import { Store } from "../src/store.mjs";
+import { buildContext } from "../src/context.mjs";
 
 Deno.test("history archive: bytes precede reference publication, shared retention serializes collection", async () => {
   const dir = await Deno.makeTempDir({ prefix: "kz-history-archive-" });
@@ -78,4 +80,74 @@ Deno.test("history fresh-source proof: cache hits never discharge freshness and 
     assertEquals((await ingest.ensure("fake", "saved.png", "input", { fresh: true })).status, 404);
     assertEquals((await ingest.ensure("fake", "saved.png", "input")).hash, fresh.hash);
   } finally { await rig.close(); }
+});
+
+Deno.test("history archive recovery: dead request bytes collect at context startup, shared/editor/uncertain bytes and receipts survive", async () => {
+  const dir = await Deno.makeTempDir({ prefix: "kz-history-recovery-" }), archive = new ContentArchive(join(dir, "archives"));
+  const env = { HOME: dir, KOZMOZOO_STATE: dir, KOZMOZOO_CACHE: join(dir, "cache"), KOZMOZOO_HOSTS: "" };
+  let store = await Store.open(dir), engine;
+  const rows = [];
+  try {
+    for (const [index, mode] of ["terminal", "shared-dead", "visible", "editor", "uncertain"].entries()) {
+      const id = crypto.randomUUID(), bytes = new Uint8Array(mode.startsWith("shared") || mode === "visible" ? [2] : [index + 10]);
+      store.variationBegin({ id, format: 1, recipeJson: "{}", targetsJson: "[]", summaryJson: "{}", resources: [{ id: "image", descriptorJson: "{}" }] });
+      const { hash } = await archive.retain(bytes, record => store.variationAttach(id, "image", record));
+      store.variationSeal(id, "{}", "a".repeat(64), "{}");
+      store.variationPrepareEffect(id, "target", "target", "{}", "request-hash");
+      const lease = store.variationClaimExecution(id, "target");
+      if (mode !== "uncertain") store.variationEffectResult(id, "target", "confirmed", '{"promptId":"kept"}');
+      const editor = crypto.randomUUID(); if (mode === "editor") store.variationLeaseAcquire(id, "editor", editor);
+      if (mode !== "visible") store.variationTombstone(id);
+      rows.push({ id, mode, bytes, hash, lease, editor });
+    }
+    store.close(); store = null;
+    // Real context construction, no feature-specific recovery/IO or fake upstream.
+    engine = await buildContext({ env, start: false, fakes: { plugins: { list: () => [] } } });
+    for (const { id, mode, bytes, hash, lease, editor } of rows) {
+      assertEquals(engine.ctx.store.variationLease(id, lease), undefined);
+      if (mode === "terminal") {
+        await assertRejects(() => archive.read(hash), Deno.errors.NotFound);
+        assertEquals(engine.ctx.store.variationGet(id).targets_json, null);
+        assertEquals(engine.ctx.store.variationEffects(id)[0].request_hash, "request-hash");
+      } else assertEquals(await archive.read(hash), bytes);
+      if (mode === "shared-dead") assertEquals(engine.ctx.store.variationResources(id), []);
+      if (mode === "editor") assertEquals(engine.ctx.store.variationLease(id, editor).kind, "editor");
+      if (mode === "uncertain") assertEquals(engine.ctx.store.variationEffects(id)[0].state, "uncertain");
+      if (mode === "visible") {
+        assertEquals(engine.ctx.store.variationEffects(id)[0].result_json, '{"promptId":"kept"}');
+        assertEquals(engine.ctx.store.variationClaimExecution(id, "target"), null, "restart cannot replay a settled effect");
+      }
+    }
+    await engine.close(); engine = await buildContext({ env, start: false, fakes: { plugins: { list: () => [] } } });
+    assertEquals(await archive.read(rows[2].hash), rows[2].bytes, "repeated startup retains shared bytes");
+  } finally { if (engine) await engine.close(); store?.close(); }
+});
+
+Deno.test("history archive recovery: collection failure rejects initialization and leaves durable orphan rows for later retry", async () => {
+  const dir = await Deno.makeTempDir({ prefix: "kz-history-collect-retry-" }), archive = new ContentArchive(join(dir, "archives"));
+  const env = { HOME: dir, KOZMOZOO_STATE: dir, KOZMOZOO_CACHE: join(dir, "cache"), KOZMOZOO_HOSTS: "" };
+  let store = await Store.open(dir);
+  const id = crypto.randomUUID(), bytes = new Uint8Array([9, 8, 7]);
+  store.variationBegin({ id, format: 1, recipeJson: "{}", targetsJson: "[]", summaryJson: "{}", resources: [{ id: "image", descriptorJson: "{}" }] });
+  const { hash } = await archive.retain(bytes, record => store.variationAttach(id, "image", record));
+  store.variationPrepareEffect(id, "target", "target", "{}", "hash");
+  store.variationClaimExecution(id, "target"); store.variationEffectResult(id, "target", "confirmed", "{}");
+  store.variationTombstone(id); store.close();
+  let calls = 0;
+  class FailingArchive extends ContentArchive { collect() { calls++; throw new Error("fixture collection failure"); } }
+  let unexpected;
+  try {
+    await assertRejects(async () => { unexpected = await buildContext({ env, start: false, fakes: { archive: new FailingArchive(join(dir, "archives")), plugins: { list: () => [] } } }); }, Error, "fixture collection failure");
+  } finally { if (unexpected) await unexpected.close(); }
+  assertEquals(calls, 1);
+  assertEquals(await archive.read(hash), bytes);
+  store = await Store.open(dir);
+  assertEquals(store.variationResources(id), []);
+  assertEquals(store.variationUnreferencedAssets().map(row => row.hash), [hash], "failed collection cannot forget durable retry evidence");
+  store.close();
+  const engine = await buildContext({ env, start: false, fakes: { plugins: { list: () => [] } } });
+  try {
+    await assertRejects(() => archive.read(hash), Deno.errors.NotFound);
+    assertEquals(engine.ctx.store.variationUnreferencedAssets(), []);
+  } finally { await engine.close(); }
 });

@@ -14,13 +14,13 @@ module.exports = async ({ page, evaluate, invoke, list, write, panel, waitRun, E
     await invoke('variations.open', { id: 'fake:' + name });
     await page.poll('document.querySelectorAll(".vz-catalogue-row").length>0');
   };
-  const choose = async () => {
+  const choose = async (id = originalId) => {
     // A resumed logical popup waits one placement frame before becoming native
     // top-layer chrome. Do not toggle it closed during that retained lifetime.
     if (!await page.evaluate('document.querySelector(".vh-trigger")?.getAttribute("aria-expanded")==="true"')) await page.clickAt('.vh-trigger');
     await page.poll('document.querySelector(".vh-menu")?.matches(":popover-open")&&!document.querySelector(".vh-menu").inert');
-    await page.poll(`!!document.querySelector('.vh-menu [data-history-id="${originalId}"] .vh-recall')`);
-    await page.clickAt(`.vh-menu [data-history-id="${originalId}"] .vh-recall`);
+    await page.poll(`!!document.querySelector('.vh-menu [data-history-id="${id}"] .vh-recall')`);
+    await page.clickAt(`.vh-menu [data-history-id="${id}"] .vh-recall`);
   };
   if (scenario === 'mismatch') {
     await close(); await open('flux-basic.png');
@@ -38,6 +38,7 @@ module.exports = async ({ page, evaluate, invoke, list, write, panel, waitRun, E
     const jobs = await (await fetch(FAKE + '/__test/enqueues')).json();
     assert.equal(jobs[1].prompt['9'].inputs.steps, 32); assert.equal(jobs[1].prompt['9'].inputs.denoise, .9);
     fs.writeFileSync(E + '/mismatch-consumer.json', JSON.stringify(jobs));
+    await require('./history-empty-recall.cjs')({page,evaluate,invoke,list,write,close,open,waitRun,choose,originalId,shot,E});
   } else if (scenario === 'guards') {
     await require('./history-template-labels.cjs')({page,evaluate});
     await close(); await open('flux-controlnet.png');
