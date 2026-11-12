@@ -13,14 +13,15 @@ async function run(page){
   // Persistent segments preserve treatment while the actual media stays covered.
   const run=require('node:crypto').randomUUID(),name=`treatment/${run}/unseen.png`,id='another:'+name;
   const control=async body=>{const r=await fetch(other.origin+'/__test/activity',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});assert.equal(r.status,200);await r.json();};
+  const owned=require('./owned-fixtures.cjs').fakeFixtures(other.origin,control);
+  await owned.run(async()=>{
   await page.evaluate(`(async()=>{const s=${KZ};await s.actions.hosts.select('another');s.actions.ui.setFilter('');s.actions.folders.select('');const i=s.state.images.findIndex(e=>e.filename==='bulk-00035.png');s.actions.current.set('another','bulk-00035.png');s.actions.feed.restoreToIndex(i);})()`);
-  await control({publish:[{name,fixture:'flux-basic.png',width:150,height:90,mtime:1}]});await page.evaluate(`(async()=>${KZ}.actions.ui.refresh())()`);
+  await owned.publish([{name,fixture:'flux-basic.png',width:150,height:90,mtime:1}]);await page.evaluate(`(async()=>${KZ}.actions.ui.refresh())()`);
   await page.poll(`(async()=>${KZ}.state.entryHasNew(${JSON.stringify(id)}))()`);await page.evaluate(`(async()=>${KZ}.handles.invoke('keys.panel.toggle'))()`);
   assert.equal(await page.evaluate(`(async()=>${KZ}.handles.invoke('entry.navigate',{source:'another',file:${JSON.stringify(name)}}))()`),true);
   await page.poll(`document.querySelector('.card[data-name="${name}"] .media-box')?.classList.contains('ic-loaded')`,20000);
   await page.poll(`(()=>{const body=document.querySelector('.fr-tick[data-entry-id="${id}"] .fr-body');return body&&body.getAnimations().every(a=>a.playState==='finished');})()`);
   const records=[];let geometry;
-  try{
     for(const [kind,patch,color] of [['up',{vote:'up'},'rgb(158, 206, 106)'],['down',{vote:'down'},'rgb(255, 102, 102)'],['bookmark',{vote:'up',bookmark:true},'rgb(56, 189, 248)'],['favorite',{vote:'up',bookmark:true,favorite:true},'rgb(255, 136, 0)']]){
       await page.evaluate(`(async()=>${KZ}.handles.invoke('judgment.apply',{id:${JSON.stringify(id)},intent:{type:'set',patch:{vote:null,favorite:null,bookmark:null,...${JSON.stringify(patch)}}}}))()`);
       const actual=await page.poll(`(()=>{const tick=document.querySelector('.fr-tick[data-entry-id="${id}"]'),card=document.querySelector('.card[data-name="${name}"]');if(!tick||!card)return false;const body=tick.querySelector('.fr-body'),segment=tick.querySelector('.fr-unseen'),b=body.getBoundingClientRect(),u=segment.getBoundingClientRect(),t=tick.getBoundingClientRect();return {unseen:tick.classList.contains('unseen'),treatment:tick.dataset.treatment,body:getComputedStyle(body).backgroundColor,segment:getComputedStyle(segment).backgroundColor,border:getComputedStyle(card).borderTopColor,width:t.width,height:t.height,bodyWidth:b.width,segmentWidth:u.width,adjacency:u.left-b.right,bodyTop:b.top,segmentTop:u.top,bodyHeight:b.height,segmentHeight:u.height};})()`);
@@ -29,7 +30,7 @@ async function run(page){
     }
     await capture(page,'treated-unseen');await page.evaluate(`(async()=>${KZ}.handles.invoke('keys.panel.close'))()`);await page.poll(`(async()=>!${KZ}.state.entryHasNew(${JSON.stringify(id)}))()`);
     fs.writeFileSync(path.join(root,'treated-unseen.json'),JSON.stringify(records,null,2));check('treated/current unseen segment preserves all body priorities and structural geometry',true);
-  }finally{await control({remove:[name]});await page.evaluate(`(async()=>${KZ}.actions.ui.refresh())()`);}
+  });
   console.log('PASS qualified pulse/reduced-motion/full-green/treated-unseen consumers');
 }
 module.exports={run};

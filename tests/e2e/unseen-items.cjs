@@ -29,12 +29,13 @@ async function run(page, { nativeViewport = false, captureFull } = {}) {
   };
   const other = new URL(FAKE); other.port=String(Number(other.port)+1);
   const control=async body=>{const r=await fetch(other.origin+'/__test/activity',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});assert.equal(r.status,200);await r.json();};
+  const owned = require('./owned-fixtures.cjs').fakeFixtures(other.origin, control);
   const reveal=async name=>{
     await page.poll(`(async()=>{const s=${KZ};return s.state.entriesWithKnownSize().some(i=>s.state.images[i].filename===${JSON.stringify(name)});})()`,20000);
     await page.evaluate(`(async()=>{const s=${KZ};const i=s.state.images.findIndex(e=>e.filename===${JSON.stringify(name)});if(i<0)throw Error('missing arrival');s.actions.feed.restoreToIndex(i);})()`);
     await page.poll(`(()=>{const el=document.querySelector('.card[data-name="${name}"] .imgwrap img');const v=document.querySelector('#candidatesCol').getBoundingClientRect();const r=el?.getBoundingClientRect();return el?.complete&&el.naturalWidth>0&&r.bottom>v.top&&r.top<v.bottom;})()`,20000);
   };
-  try {
+   await owned.run(async () => {
   if(!nativeViewport)await page.send('Emulation.setDeviceMetricsOverride',{width:1400,height:900,deviceScaleFactor:1,mobile:false});
   await page.goto(ENGINE+'/#another');
   await page.poll(`(async()=>{const s=${KZ};return s.state.host()==='another'&&!s.state.inventory.loading&&s.state.entriesWithKnownSize().length>30;})()`,20000);
@@ -43,9 +44,9 @@ async function run(page, { nativeViewport = false, captureFull } = {}) {
   await page.poll(`(()=>{const e=document.querySelector('.card[data-name="'+window.unseenAnchor+'"] .imgwrap img');return e?.complete&&e.naturalWidth>0;})()`,20000);
   await new Promise(resolve=>setTimeout(resolve,400));
   const before=await record('baseline');
-  await control({running:[JOB]});
+  await owned.start(JOB);
   await page.poll(`(async()=>${KZ}.state.sourceActivity.another?.runningPromptId===${JSON.stringify(JOB)})()`,20000);
-  await control({running:[],finish:OUTPUTS.map(output=>({id:JOB,output,width:150,height:90,mtime:1}))});
+  await owned.finish(JOB, OUTPUTS.map(output=>({output,width:150,height:90,mtime:1})));
   await page.poll(`(async()=>${KZ}.state.images.some(e=>e.filename===${JSON.stringify(OUTPUTS[1])}))()`,25000);
   await page.poll(`!!document.querySelector('.fr-tick[data-entry-id="another:${OUTPUTS[1]}"]')`,20000);
   await new Promise(resolve=>setTimeout(resolve,1700));
@@ -64,7 +65,7 @@ async function run(page, { nativeViewport = false, captureFull } = {}) {
   const clear=await record('all-exposed');
   assert.equal(clear.favicon,before.favicon);assert(clear.items.every(e=>!e.unseen));
   console.log('PASS current-source off-screen tick/source/favicon retention and exact exposure clearing');
-  } finally { await control({ remove: OUTPUTS }); }
+  });
 }
 module.exports={run};
 if(require.main===module)(async()=>{const page=await CDP.launch(9353,{windowSize:'1600,1200'});const errors=await collectPageErrors(page);

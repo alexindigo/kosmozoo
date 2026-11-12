@@ -40,7 +40,7 @@ the resources; a collection's `capabilities` answer what its backing can do.
 | `/api/collections/<id>` | PATCH | partial `{pinned?: boolean, autoRefresh?: boolean}`; validates the complete object before writing; invalid fields/types/null/arrays/malformed JSON are 400, unknown source is 404, empty object is a no-op; returns saved booleans and their committed `sourceVersion` without host/folder probing |
 | `/api/collections/<id>` | DELETE | remove; refuses the last collection |
 | `/api/events` | GET | one native SSE delivery connection per app tab; complete version1 authoritative cached source maps, no upstream probe/list/monitor creation |
-| `/api/collections/<id>/entries` | GET | the feed listing: size, hash, state, meta, judgment, and dims — `COALESCE(content, entry)`, so an entry the dims pass reached carries width/height before it has a hash. Gone entries are excluded. `?inventory=1` returns the coherent output envelope described below; default remains an array. `?kind=input` lists the input dir instead; any other `kind` is 400 (temp has no listing and never falls back to the output inventory) |
+| `/api/collections/<id>/entries` | GET | the feed listing: size, hash, state, meta, judgment, and dims - content dimensions once hashed, provisional entry dimensions only before hashing. Gone entries are excluded. `?inventory=1` returns the coherent output envelope described below; default remains an array. `?kind=input` lists the input dir instead; any other `kind` is 400 (temp has no listing and never falls back to the output inventory) |
 | `/api/collections/<id>/entries/<name>` | GET | one entry |
 | `/api/collections/<id>/entries/<name>/meta` | GET | one shown entry's record `{name, hash, extracted, meta, width, height}`, independent of the delta stream; an entry without a hash is first ingested through the single-flight high lane for at most 8 s; `extracted:false` means not available yet (unreadable source or the wait elapsed) |
 | `/api/collections/<id>/entries` | POST | multipart upload into the input dir; **409 with the conflicting name, never an overwrite** |
@@ -1054,6 +1054,14 @@ image-set inspection has its own action and virtualized ordered contact sheet.
 Both reuse native Thumbnail admission and exact-value previews. Archive handles
 stay lazy rather than becoming downloaded browser Files.
 
+Disposal synchronously fences open admission and retires listeners/UI roots, then
+returns a plain cleanup promise draining known leases and every already-admitted
+open. Each lease joins one serial DELETE transaction, with at most one retry in
+that retirement pass. Concurrent disposal shares the drain; acknowledged leases
+cannot be re-enrolled. Terminal failures remain retained with rejected cleanup
+outcomes and an error; a later explicit pass may retry them. Open POSTs, uploads
+and Runs never retry through cleanup. Store teardown is not an awaited contract.
+
 Dialog recall overlays compatible active contributors onto its current targets.
 Unrelated and dormant buffers remain intact; overlapping unsent changes use the
 existing leave guard. Text overlays merge only labels used by the saved text and
@@ -1061,7 +1069,10 @@ detect overlap per label. A surviving guard owner resumes its suspended children
 after an applied in-place transition, not just after cancellation.
 Missing/type/choice/resource/naming mismatches warn and skip;
 single-absolute and bulk-relative Ranges never convert implicitly. Values remain
-absolute. Late reads are revision/session/source/decision fenced. Right-panel
+absolute. Recall and compilation share complete active numeric validation, including
+exact ordered endpoints and the destination increment floor, before any row patch.
+Invalid saved attempts and dormant Value-mode range text remain archived unchanged.
+Late reads are revision/session/source/decision fenced. Right-panel
 recall restores original ordered targets, archived catalogue and every raw leaf,
 without probing today's same-named graph. Offline or replaced sources permit
 inspection/editing but offer no Run; they cannot retarget that editor.
@@ -1279,11 +1290,18 @@ src/parameters.mjs name the stock roots for every layer. Output entries keep the
 inventory, extraction and judgment owner; input and temp references are root-keyed
 byte-cache rows of the same entry table (`resourceCacheGet/Put`, with the input
 facades unchanged), never extracted or listed as outputs. Ingest single-flight,
-cache lookup, dimensions head reads (`entryDims`/`entryDimsPut(..., kind)`; only output dims
-bump the meta version), revalidation debounce and stamp checks are keyed by root
-(`scheduleRevalidate(..., { kind })`; `{ input: true }` still means input). Known
-content replacement clears entry-owned dimensions in both referenced and output
-hash-update paths; first-hash enrichment and same-content writes preserve them.
+cache lookup, provisional dimensions head reads (`entryDims`/`entryDimsPut(..., kind)`),
+revalidation debounce and stamp checks are keyed by root
+(`scheduleRevalidate(..., { kind })`; `{ input: true }` still means input). Every
+root derives content dimensions from the exact hashed bytes. Hash binding retires
+provisional entry columns; hashed entries never fall back to them or accept head
+writes. Genuine same-byte first-hash geometry is preserved by exact-byte derivation,
+not inferred from a previously null hash. Same-hash writes without new dimension
+evidence retain established content facts. Referenced roots can enrich dimensions
+for output aliases (including the same collection/name), publishing through the
+ordinary metadata channel without extracting referenced content or listing it as output.
+`resourceCachePut(host,name,kind,hash,stamp,size,dims)` adds evidence after the existing
+positional arguments; hash-only callers remain legal but cannot certify provisional geometry.
 Unknown roots are rejected at the byte routes, ingest, inspection and the plugin content
 port. A folder source's files remain its input listing; it has no temp root.
 Variations inspection accepts all three roots, so a temp current compares with temp
@@ -1898,12 +1916,18 @@ Current stock ComfyUI SaveAudio writes FLAC/MP3/Opus, not WAV. Readers check rec
 bounds, skip unsupported ID3 compression/encryption and never search encoded audio
 payloads for JSON. Audio adds no further extractor-version bump (version remains 5).
 
-`Ingest.dims(collection, name)` is the pre-ingest half: dims live in a
+`Ingest.dims(collection, name, kind="output")` is the pre-ingest half: dims live in a
 file's first bytes (PNG IHDR, GIF descriptor, WebP VP8*, JPEG SOF), so a
 64 KB ranged head read (`Range: bytes=0-65535`; full-read fallback on a
-200-without-206) + `imageDims` stores them on `entry.width/height` — no
-hash, no cache write, no extract. Known dims (content via the entry's
-hash, or the entry columns) short-circuit the read; a 404 head read tells
+200-without-206) + `imageDims` stores provisional dimensions on hashless
+`entry.width/height` - no hash, cache write or extraction. Known authoritative
+dimensions short-circuit. A hash-bound gap reads only that exact hash's cached
+bytes; missing or unparseable cached bytes leave dimensions unknown, never read
+today's mutable named source to fill an earlier hash. Source lifetime and current
+entry hash fence cache completion before publication. If full ingestion wins a
+head race, the late head returns current content dimensions or unknown, not its
+obsolete measurement. All Store projections enforce the same authority, including
+legacy hashed rows with provisional columns. A 404 head read tells
 the prefetch the source lost the file, and the prefetch marks the entry
 `gone`.
 

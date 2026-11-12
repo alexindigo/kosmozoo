@@ -91,7 +91,7 @@ export function makeVariationHistory(app) {
   };
   const outcome = (id, error = null) => {
     const row = store.variationGet(id);
-    if (!row) return;
+    if (!row || row.targets_json === null) return;
     const summary = data(row.summary_json), effects = store.variationEffects(id), jobs = effects.filter(e => e.kind === "permutation");
     summary.submitted = jobs.filter(e => e.state === "confirmed" || e.state === "partial").length;
     const targets = effects.filter(e => e.kind === "target");

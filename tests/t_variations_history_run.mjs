@@ -79,6 +79,31 @@ Deno.test("history HTTP: immutable raw capture/archive barrier, engine plan and 
     const raw = recipeFor(probe), id = crypto.randomUUID(), encoded = encodeHistoryRecipe(raw.capture(), id);
     const target = { id: "fake:source_00001_.png", host: "fake", filename: "source_00001_.png", origin: probe.context.origin, context: probe.context };
     const capture = { runId: id, format: 1, cohortMode: "single", targets: [target], recipe: encoded.recipe, resources: encoded.resources };
+    for (const phase of ["target-read", "attached-resource"]) {
+      const deletedId = crypto.randomUUID(), entered = deferred(), resume = deferred();
+      const owner = phase === "target-read" ? engine.ctx.ingest : ContentArchive.prototype;
+      const method = phase === "target-read" ? "ensure" : "retain", originalMethod = owner[method];
+      let first = true;
+      owner[method] = async function (...args) {
+        const result = await originalMethod.apply(this, args);
+        if (first) { first = false; entered.resolve(); await resume.promise; }
+        return result;
+      };
+      const before = { jobs: jobs.length, uploads: uploads.length };
+      try {
+        const deleted = encodeHistoryRecipe(raw.capture(), deletedId);
+        assertEquals((await call("POST", "/history", { ...capture, runId: deletedId, recipe: deleted.recipe, resources: deleted.resources })).status, 200);
+        const preparing = call("POST", `/history/${deletedId}/prepare`);
+        await entered.promise;
+        assertEquals((await call("DELETE", `/history/${deletedId}`)).status, 200);
+        assertEquals(engine.ctx.store.variationGet(deletedId).targets_json, null);
+        resume.resolve();
+        const result = await preparing;
+        assertEquals(result.status, 410, stringifyExactJson(result));
+        assert(result.data.error.includes("unavailable"));
+        assertEquals({ jobs: jobs.length, uploads: uploads.length }, before);
+      } finally { resume.resolve(); owner[method] = originalMethod; }
+    }
     assertEquals((await call("POST", "/history", capture)).status, 200);
     assertEquals((await call("POST", "/history", capture)).status, 200);
     assertEquals(jobs.length + uploads.length, 0);

@@ -80,6 +80,10 @@ async function run({ page, errors, ENGINE, FAKE, E, scenario, phase }) {
   }
   const saved = await list();
   const original = JSON.parse(fs.readFileSync(E + '/record.json', 'utf8'));
+  if (['disposal','disposal-permanent'].includes(scenario)) {
+    await require('./history-disposal.cjs')({ page, evaluate, E, original, permanent: scenario === 'disposal-permanent' });
+    assert.deepEqual(errors, []); return;
+  }
   if (['mismatch','guards','recovery','deletion','layout'].includes(scenario)) {
     await require('./variation-history-cases.cjs')({page,evaluate,invoke,list,write,panel,waitRun,ENGINE,FAKE,E,scenario,original,shot});
     assert.deepEqual(errors, []); return;

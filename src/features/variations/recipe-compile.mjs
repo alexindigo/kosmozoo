@@ -3,10 +3,27 @@
 import { parseExactJson, parameterCurrent } from "../../parameters.mjs";
 import { compileDiscreteAxes, validateEditorValue, admitResourceTransfer } from "./compile.mjs";
 import { catalogueParams, templateValue, templateLabels, parseSemicolonList, expandTextAxes, uploadCandidate } from "./shared.mjs";
-import { RECIPE_FIELDS, recipeField, recipeDispositions, snapshotDraft, freezeRecipe,
+import { recipeField, recipeDispositions, snapshotDraft, freezeRecipe,
   numericText, imageIdentity, imageReference, imageReferenceValue } from "./recipe-model.mjs";
 
 export const currentRoot = parameter => parameter.currentRoot ?? (parameter.fromOutput ? "output" : "input");
+// Shared active numeric operation admission. Raw text remains in the recipe;
+// preview alone may estimate an incomplete increment, never recall or Run.
+export function compileNumericOperation(values, metadata, { batch = false, preview = false } = {}) {
+  if (values.mode === "value") {
+    const value = numericText(values.value);
+    if (value === null) throw new Error(`${metadata.label}: Enter a number for Value. Your text is kept.`);
+    validateEditorValue(metadata, value);
+    return { min: value, max: value, increment: metadata.minIncrement, ...(batch ? { absolute: true } : {}) };
+  }
+  const min = numericText(values.min), max = numericText(values.max), number = numericText(values.rawIncrement);
+  if (min === null || max === null) throw new Error(`${metadata.label}: Enter a number for ${min === null ? "From" : "To"}. Your text is kept.`);
+  const increment = number !== null && number > 0 && number >= metadata.minIncrement ? number : null;
+  if (increment === null && !preview) throw new Error("Enter a valid positive increment; incomplete text has been kept.");
+  if (min > max) throw new Error("Minimum exceeds maximum; your values have been kept.");
+  if (!batch) for (const value of [min, max]) validateEditorValue(metadata, value);
+  return { min, max, increment: increment ?? metadata.defaultIncrement };
+}
 export function recipeImageView(item, metadata, check, target, batch) {
   if (item.kind === "target") return { ...item, name: target.filename, each: batch, pending: false, error: "", sameCurrent: false };
   if (item.kind === "archive") return { ...item, pending: false, error: "", sameCurrent: false };
@@ -60,25 +77,9 @@ export function compileRecipe(snapshot, { catalogue, target, batch = false, look
     const enabled = read("numeric", id, "enabled"); ranges[id] = { enabled };
     if (!enabled) continue;
     const mode = read("numeric", id, "mode");
-    if (mode === "value") {
-      const value = numericText(read("numeric", id, "value"));
-      if (value === null) throw new Error(`${entry.metadata.label}: Enter a number for Value. Your text is kept.`);
-      validateEditorValue(entry.metadata, value);
-      Object.assign(ranges[id], { min: value, max: value, increment: entry.metadata.minIncrement, ...(batch ? { absolute: true } : {}) });
-    } else for (const [name, definition] of Object.entries(RECIPE_FIELDS.numeric)) if (definition.wire && definition.channel === "ranges") {
-      const value = read("numeric", id, name);
-      if (name === "rawIncrement") {
-        const number = numericText(value), parsed = number !== null && number >= entry.metadata.minIncrement ? number : null;
-        if (parsed === null && !preview) throw new Error("Enter a valid positive increment; incomplete text has been kept.");
-        ranges[id][definition.wire] = parsed ?? entry.metadata.defaultIncrement;
-      } else {
-        const parsed = numericText(value);
-        if (parsed === null) throw new Error(`${entry.metadata.label}: Enter a number for ${name === "min" ? "From" : "To"}. Your text is kept.`);
-        ranges[id][definition.wire] = parsed;
-      }
-    }
-    if (ranges[id].min > ranges[id].max) throw new Error("Minimum exceeds maximum; your values have been kept.");
-    if (!batch) for (const name of ["min", "max"]) validateEditorValue(entry.metadata, ranges[id][name]);
+    const values = { mode };
+    for (const name of mode === "value" ? ["value"] : ["min", "max", "rawIncrement"]) values[name] = read("numeric", id, name);
+    Object.assign(ranges[id], compileNumericOperation(values, entry.metadata, { batch, preview }));
     if (batch) ranges[id].clamp = [...entry.metadata.clamp];
   }
   for (const domain of ["images", "enums", "texts", "candidates"]) for (const [id, entry] of Object.entries(snapshot[domain])) {

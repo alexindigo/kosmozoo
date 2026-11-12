@@ -233,9 +233,8 @@ Deno.test("meta-want: the acknowledgement carries demanded names' known state, i
     method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body),
   }));
   try {
-    await store.ingestFile("local", "a.png", "aa".repeat(32), 10);
+    await store.ingestFile("local", "a.png", "aa".repeat(32), 10, { dims: { width: 64, height: 32 } });
     await store.metaPut("local", "a.png", { seed: 3 }, { ext: 1 });
-    await store.entryDimsPut("local", "a.png", { width: 64, height: 32 });
     const full = await (await post({ files: ["a.png", "missing.png"] })).json();
     assertEquals(full.items, { "a.png": { seed: 3 } });
     assertEquals(full.dims, { "a.png": { width: 64, height: 32 } });
@@ -243,6 +242,49 @@ Deno.test("meta-want: the acknowledgement carries demanded names' known state, i
     assertEquals(dims.items, {}, "dimension interest never ships graph metadata");
     assertEquals(dims.dims, { "a.png": { width: 64, height: 32 } });
   } finally { await rm(dir, { recursive: true }); }
+});
+
+for (const kind of ["input", "temp"]) for (const recovery of [false, true]) Deno.test(`metadata: ${kind} content facts reach output aliases including same name (cache ${recovery})`, async () => {
+  const { testPng } = await import("./helpers/png.mjs");
+  const { sha256 } = await import("../src/cache.mjs");
+  const bytes = testPng(70, 50), hash = await sha256(bytes), dims = { width: 70, height: 50 };
+  const server = Deno.serve({ port: 0, hostname: "127.0.0.1" }, req => {
+    if (req.method === "HEAD") return new Response(null, { headers: { "Last-Modified": "Thu, 01 Jan 1970 00:00:00 GMT" } });
+    if (new URL(req.url).pathname === "/internal/files/output") return Response.json(["same.png", "alias.png"]);
+    return new Response("nf", { status: 404 });
+  });
+  const addr = `127.0.0.1:${server.addr.port}`;
+  const r = await mkStateRig("dims-alias", { hosts: { c: addr, other: addr } });
+  const router = makeRouter({ hosts: r.hosts, inventory: r.inventory, store: r.store, settings: r.settings, plugins: null,
+    ingest: r.ingest, cache: r.cache, prefetch: { feed() {}, pending: () => 0, dimsPending: () => 0 } });
+  try {
+    await r.store.ingestFile("c", "same.png", hash, bytes.length);
+    await r.store.ingestFile("other", "alias.png", hash, bytes.length);
+    const since = r.store.metaVersion;
+    if (recovery) {
+      r.store.resourceCachePut("c", "same.png", kind, hash, null, bytes.length);
+      await r.cache.put(hash, bytes);
+      await r.ingest.dims("c", "same.png", kind);
+    } else await r.ingest.ensureBytes("c", "same.png", bytes, { kind });
+    for (const [host, name] of [["c", "same.png"], ["other", "alias.png"]]) {
+      assertEquals(r.store.metadataSince(host, since).dims, { [name]: dims });
+      assertEquals(r.store.metadataFor(host, [name]).dims, { [name]: dims });
+      assertEquals(r.store.entriesForCollection(host)[0].width, 70);
+      assertEquals(r.store.metadataSince(host, since).items, {}, "geometry publication does not fabricate extraction");
+      const get = async path => (await router.handle(new Request(`http://x/api/collections/${host}/${path}`))).json();
+      assertEquals((await get(`meta?since=${since}`)).dims, { [name]: dims });
+      const want = await router.handle(new Request(`http://x/api/collections/${host}/want`, {
+        method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ files: [name], interest: "dimensions" }),
+      }));
+      assertEquals((await want.json()).dims, { [name]: dims });
+      const entry = (await get("entries")).find(row => row.name === name);
+      assertEquals([entry.width, entry.height], [70, 50]);
+    }
+    await r.ingest.ensureBytes("c", "referenced-only.png", testPng(40, 10), { kind });
+    assertEquals(r.store.entriesForCollection("c").map(row => row.name), ["same.png"]);
+    assertEquals(r.store.contentGet(hash).ext, 0);
+    assertEquals(r.store.contentGet(hash).meta, null);
+  } finally { await server.shutdown(); await r.close(); }
 });
 
 Deno.test("entry meta: a shown entry's record ingests that one entry on demand; an unreadable one replies unextracted", async () => {

@@ -8,6 +8,8 @@ export function makeHistoryClient({ api, changed = () => {} }) {
   let items = [], error = "", loaded = false;
   const removed = new Set(), details = new Map(), leases = new Map(), deleting = new Set();
   const releasing = new Map(), pendingRelease = new Set();
+  const acquisitions = new Set(), acknowledged = new Set(), releaseErrors = new Map();
+  let draining = null, retirement = null;
   const notify = () => { if (alive) changed(); };
   const refresh = (more = false) => {
     if (!alive || more && !nextCursor) return Promise.resolve();
@@ -31,19 +33,39 @@ export function makeHistoryClient({ api, changed = () => {} }) {
   const release = record => {
     if (!record?.leaseId) return Promise.resolve();
     const key = record.leaseId;
+    if (acknowledged.has(key)) return Promise.resolve();
     if (releasing.has(key)) return releasing.get(key);
     leases.set(key, record); pendingRelease.add(key);
     const task = Promise.resolve().then(() => api.historyRelease(record.id, key)).then(() => {
-      leases.delete(key); pendingRelease.delete(key);
-    }).catch(problem => { error = `History lease release failed: ${problem.message}`; notify(); throw problem; })
+      acknowledged.add(key); leases.delete(key); pendingRelease.delete(key); releaseErrors.delete(key);
+    }).catch(problem => { releaseErrors.set(key, problem); error = `History lease release failed: ${problem.message}`; notify(); throw problem; })
       .finally(() => { if (releasing.get(key) === task) releasing.delete(key); });
     releasing.set(key, task); return task;
+  };
+  const retire = (record, pass) => {
+    if (!record?.leaseId || acknowledged.has(record.leaseId)) return;
+    if (!pass.has(record.leaseId)) {
+      const task = release(record).catch(() => release(record));
+      // Late acquisitions may fail before the drain reaches allSettled.
+      task.catch(() => {}); pass.set(record.leaseId, task);
+    }
+  };
+  const dispose = () => {
+    alive = false; generation++; reading = null; details.clear();
+    if (draining) return draining;
+    const pass = new Map(); retirement = pass;
+    for (const record of leases.values()) retire(record, pass);
+    const task = Promise.allSettled([...acquisitions]).then(() => Promise.allSettled([...pass.values()]));
+    draining = task;
+    task.then(() => { if (draining === task) { draining = null; retirement = null; } });
+    return task;
   };
   return {
     state: () => ({ items, error, pending: !!reading, loaded, more: !!nextCursor, deleting: new Set(deleting) }),
     refresh, more: () => refresh(true),
     interest() { interests++; refresh(); let owned = true; return () => { if (owned) interests--; owned = false; }; },
     activate() {
+      if (!alive) return dispose();
       const cleanup = [...pendingRelease].map(key => release(leases.get(key)));
       if (interests) cleanup.push(refresh());
       return Promise.allSettled(cleanup);
@@ -57,9 +79,27 @@ export function makeHistoryClient({ api, changed = () => {} }) {
     },
     async open(id) {
       if (!alive || removed.has(id)) throw new Error("History entry unavailable");
-      const record = await api.historyOpen(id);
-      if (!alive || removed.has(id)) { await release(record); throw new Error("History entry unavailable"); }
-      leases.set(record.leaseId, record); return record;
+      // Track only acquisition/enrollment, never the public continuation that
+      // may await retirement. Otherwise disposal and open would await each other.
+      let accept, reject;
+      const transport = new Promise((yes, no) => { accept = yes; reject = no; });
+      const acquisition = transport.then(record => {
+        if (!acknowledged.has(record.leaseId)) leases.set(record.leaseId, record);
+        if (retirement) retire(record, retirement);
+        return record;
+      });
+      acquisitions.add(acquisition);
+      acquisition.then(() => acquisitions.delete(acquisition), () => acquisitions.delete(acquisition));
+      try { accept(api.historyOpen(id)); } catch (problem) { reject(problem); }
+      const record = await acquisition;
+      if (!alive || removed.has(id)) {
+        let cause;
+        if (!alive) {
+          await dispose(); cause = releaseErrors.get(record.leaseId);
+        } else { try { await release(record); } catch (problem) { cause = problem; } }
+        throw new Error("History entry unavailable", cause ? { cause } : undefined);
+      }
+      return record;
     },
     retained: (id, leaseId) => { const record = leases.get(leaseId); return record?.id === id ? record : null; },
     release,
@@ -117,11 +157,6 @@ export function makeHistoryClient({ api, changed = () => {} }) {
       try { await api.historyFinish(id, message); }
       finally { details.delete(id); if (alive) { generation++; reading = null; await refresh(); } }
     },
-    dispose() {
-      alive = false; generation++; reading = null; details.clear();
-      // DELETE is idempotent; retry a failed close once, not uploads or Runs.
-      // Still-failed pins remain owned and observable, never expire a draft.
-      return Promise.allSettled([...leases.values()].map(record => release(record).catch(() => release(record))));
-    },
+    dispose,
   };
 }

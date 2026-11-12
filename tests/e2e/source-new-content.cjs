@@ -10,13 +10,14 @@ module.exports = async ({ page, ENGINE, FAKE, KZ, check, capture }) => {
     assert.equal(response.status, 200); await response.json();
   };
   const chip = '.pinned-source[data-source="another"]';
+  const owned = require('./owned-fixtures.cjs').fakeFixtures(other.origin, control);
   const active = `window.railGlows.filter(x=>x.animation.playState==='running')`;
   const arrive = async (id, outputs) => {
-    await control({ running: [id] });
+    await owned.start(id);
     await page.poll(`(async()=>${KZ}.state.sourceActivity.another?.runningPromptId===${JSON.stringify(id)})()`,15000);
-    await control({ running: [], finish: outputs.map(output => ({ id, width: 150, height: 90, ...output })) });
+    await owned.finish(id, outputs.map(output => ({ width: 150, height: 90, ...output })));
   };
-  try {
+  await owned.run(async () => {
     await page.send('Emulation.setDeviceMetricsOverride', { width: 1400, height: 900, deviceScaleFactor: 1, mobile: false });
     await page.evaluate(`(async()=>{const s=${KZ};s.actions.diff.hide();s.actions.ui.setFilter('');
       await s.actions.hosts.patch('another',{pinned:true,autoRefresh:true});await s.actions.hosts.select('another');})()`);
@@ -121,12 +122,11 @@ module.exports = async ({ page, ENGINE, FAKE, KZ, check, capture }) => {
     await page.poll(`(async()=>document.readyState==='complete'&&window.__unseenReloadProbe===undefined&&${KZ}.state.sourceDelivery()==='ready'&&!${KZ}.state.inventory.loading)()`,20000);
     assert.equal(await page.evaluate(`document.querySelector('${chip}').classList.contains('has-new')`),false);
     check('new content: reload starts quiet with a fresh session baseline',true);
-  } finally {
+  }, async () => {
     await page.evaluate(`(()=>{if(window.originalAnimate)Element.prototype.animate=window.originalAnimate;
       delete window.originalAnimate;delete window.railGlows;})()`);
     await page.send('Emulation.setEmulatedMedia', { features:[] });
-    await control({ remove: Object.values(names) });
     await page.evaluate(`(async()=>{const s=${KZ};await s.actions.hosts.patch('another',{pinned:false,autoRefresh:false});await s.actions.hosts.select('fake');})()`);
     await page.send('Emulation.clearDeviceMetricsOverride');
-  }
+  });
 };

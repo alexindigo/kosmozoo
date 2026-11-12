@@ -5,8 +5,9 @@ const ENGINE=process.env.E2E_ENGINE??'http://127.0.0.1:20480',FAKE=process.env.E
 const KZ='(await import("/store/instance.js")).appStore';
 async function run(page){
   const run=require('node:crypto').randomUUID(),root=process.env.E2E_EVIDENCE,shots=process.env.E2E_SHOTS??path.join(root,'shots');
-  fs.mkdirSync(shots,{recursive:true});const records=[],created=[];
+  fs.mkdirSync(shots,{recursive:true});const records=[];
   const control=async body=>{const r=await fetch(FAKE+'/__test/activity',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});assert.equal(r.status,200);await r.json();};
+  const owned=require('./owned-fixtures.cjs').fakeFixtures(FAKE,control);
   const invoke=(id,args={})=>page.evaluate(`(async()=>${KZ}.handles.invoke(${JSON.stringify(id)},${JSON.stringify(args)}))()`);
   const fresh=label=>`matrix/${run}/${label}`;
   const has=name=>`(async()=>${KZ}.state.entryHasNew(${JSON.stringify('another:'+name)}))()`;
@@ -24,8 +25,8 @@ async function run(page){
     await page.poll(`document.querySelector('.card[data-name="bulk-00035.png"] img')?.naturalWidth>0`,20000);await frame();
   };
   const publish=async(label,options={})=>{
-    const name=fresh(label);created.push(name);
-    await control({publish:[{name,fixture:'flux-basic.png',width:150,height:90,mtime:1,...options}]});await refresh();
+    const name=fresh(label);
+    await owned.publish([{name,fixture:'flux-basic.png',width:150,height:90,mtime:1,...options}]);await refresh();
     await page.poll(`(async()=>${KZ}.state.images.some(e=>e.filename===${JSON.stringify(name)}))()`,20000);
     return name;
   };
@@ -58,7 +59,7 @@ async function run(page){
   await page.goto(ENGINE+'/#another');await page.poll(`(async()=>${KZ}.state.sourceDelivery()==='ready'&&!${KZ}.state.inventory.loading)()`,20000);
   await page.evaluate(`(async()=>${KZ}.actions.hosts.patch('another',{pinned:true,autoRefresh:true}))()`);await select();await anchor();
   const original=await page.evaluate(`(()=>{const l=document.querySelector('link[rel="icon"]');return {href:l.getAttribute('href'),type:l.getAttribute('type'),sizes:l.getAttribute('sizes')};})()`);
-  try{
+  return owned.run(async()=>{try{
     if(!['sticky','failed','single'].includes(process.env.E2E_MATRIX_FROM)){
     // Navigation, current assignment, filter remount and unpinned membership.
     const browsing=()=>page.evaluate(`(async()=>{const s=${KZ};return {current:s.state.current(),trail:s.state.currentStack(),url:location.href,top:document.querySelector('.card[data-name="bulk-00035.png"]').getBoundingClientRect().top};})()`);
@@ -165,7 +166,7 @@ async function run(page){
     await page.goto(ENGINE+'/#another');await page.evaluate('window.__unseenReloadProbe=true');await page.send('Page.reload');
     await page.poll(`(async()=>document.readyState==='complete'&&window.__unseenReloadProbe===undefined&&${KZ}.state.sourceDelivery()==='ready'&&!${KZ}.state.inventory.loading)()`,20000);assert.equal(await page.evaluate(attention),false);await record('reload-quiet-baseline');
     console.log('PASS '+records.length+' real unseen matrix consumer outcomes');return records;
-  }catch(error){await shot('failure');await record('FAIL',{error:error.message});throw error;}
+  }catch(error){await shot('failure').catch(()=>{});await record('FAIL',{error:error.message}).catch(()=>{});throw error;} });
 }
 module.exports={run};
 if(require.main===module)(async()=>{const page=await CDP.launch(9355,{windowSize:'1600,1200'}),errors=await collectPageErrors(page);try{await run(page);assert.deepEqual(errors,[],'zero uncaught page errors');}finally{fs.writeFileSync(path.join(process.env.E2E_EVIDENCE,'page-errors.json'),JSON.stringify(errors,null,2));await page.close();}})().catch(error=>{console.error(error);process.exitCode=1;});

@@ -1,10 +1,10 @@
 // Versioned persistence boundary over the declared raw leaves, never widget state.
 import { cloneJsonValue, resourceReference } from "../../parameters.mjs";
-import { RECIPE_FIELDS, validRecipeValue, freezeRecipe, validImageSet, snapshotDraft, sameDraft, numericText } from "./recipe-model.mjs";
+import { RECIPE_FIELDS, validRecipeValue, freezeRecipe, validImageSet, snapshotDraft, sameDraft } from "./recipe-model.mjs";
 import { sameJsonValue } from "../../parameters.mjs";
 import { acknowledgedFields, catalogueParams, parameterAliases, templateReplaceWithProof, templateLabels } from "./shared.mjs";
 import { validateEditorValue, admitResourceTransfer } from "./compile.mjs";
-import { parseRecipeCandidate } from "./recipe-compile.mjs";
+import { parseRecipeCandidate, compileNumericOperation } from "./recipe-compile.mjs";
 
 // Saved-plan correlation is deliberately outside the unchanged strict v2 proof.
 export function acknowledgedHistoryFields(request, response) {
@@ -111,12 +111,7 @@ export function planHistoryOverlay(saved, destination, catalogues, cohortMode) {
           p.valueKind !== entry.metadata.valueKind || p.kind !== entry.metadata.kind) throw new Error("parameter type or resource semantics changed");
         const v = entry.values;
         if (domain === "numeric") {
-          const names = v.mode === "value" ? ["value"] : ["min", "max", "rawIncrement"];
-          for (const name of names) {
-            const number = numericText(v[name]);
-            if (number === null) throw new Error(`saved ${name} is incomplete`);
-            if (name !== "rawIncrement" && (v.mode === "value" || cohortMode === "single")) validateEditorValue(p, number);
-          }
+          compileNumericOperation(v, { ...target.metadata, ...p }, { batch: cohortMode === "bulk" });
         } else if (domain === "candidates") for (const raw of v.candidates) parseRecipeCandidate({ ...target.metadata, ...p }, raw, catalogues[index].nodes);
         else if (domain === "enums") for (const value of v.picks) validateEditorValue(p, value, catalogues[index].nodes);
         else if (domain === "texts") validateEditorValue(p, v.text, catalogues[index].nodes);

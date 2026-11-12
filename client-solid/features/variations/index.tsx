@@ -55,7 +55,7 @@ export function install(store) {
     workspaceSpaces: [{ id: "variation-history", title: "Variations history", icon: "history", component: HistoryPanel,
       ports: { history, state: historyState, thumbnail: api.historyThumbnail, registerThumbnail: input => store.surfaceDisplay(input),
         recall: id => store.handles.invoke("variations.history.open", { id }) } }],
-    dispose() { window.removeEventListener("focus", activate); window.removeEventListener("pageshow", activate); history.dispose(); disposeRoot(); },
+    dispose() { window.removeEventListener("focus", activate); window.removeEventListener("pageshow", activate); const cleanup = history.dispose(); disposeRoot(); return cleanup; },
     ownedCommands: [
       ...["variations.discard.cancel", "variations.images.close"].map(id => ({ id, validate: args => Object.keys(args).length === 0 })),
       { id: "variations.tabs.move", validate: args => Object.keys(args).length === 1 && [-1, 1, "first", "last"].includes(args.step) },
@@ -65,11 +65,11 @@ export function install(store) {
         async execute({ id }) {
           const opening = broker.captureOpening();
           const record = await history.open(id);
-          try {
-            const result = await broker.openHistory(record, opening);
-            if (result.status !== "applied") await history.release(record);
-            return result;
-          } catch (error) { await history.release(record); throw error; }
+          let result;
+          try { result = await broker.openHistory(record, opening); }
+          catch (error) { try { await history.release(record); } catch { /* retained by history owner */ } throw error; }
+          if (result.status !== "applied") await history.release(record);
+          return result;
         } }],
     ports: {
       services,

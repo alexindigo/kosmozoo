@@ -14,6 +14,31 @@ async function savedRecipe(configure = () => {}) {
   rig.editor.dispose();
   return { record, raw: captured.snapshot, catalogue: rig.catalogue, context: rig.context };
 }
+Deno.test("history overlay: complete active ranges validate before any row patch, preserving raw Value buffers", async () => {
+  const { record, raw, catalogue } = await savedRecipe(editor => {
+    editor.setEnabled("n.denoise", true); editor.setEnabled("n.steps", true);
+  });
+  for (const cohortMode of ["single", "bulk"]) for (const values of [
+    { min: "0", max: "1", rawIncrement: "0" }, { min: "0", max: "1", rawIncrement: "-1" },
+    { min: "0", max: "1", rawIncrement: "0.00000001" }, { min: "1", max: "0", rawIncrement: "1" },
+  ]) {
+    const saved = snapshotDraft(record); saved.cohortMode = cohortMode;
+    Object.assign(saved.recipe.numeric["n.denoise"].values, { mode: "range", ...values });
+    const before = snapshotDraft(raw), result = planHistoryOverlay(saved, raw, [catalogue], cohortMode);
+    assertEquals(result.patch.filter(p => p.id === "n.denoise"), []);
+    assert(result.warnings.some(w => w.id === "n.denoise")); assertEquals(raw, before);
+    assert(result.patch.some(p => p.id === "n.steps"), "compatible sibling row still applies");
+  }
+  const saved = snapshotDraft(record);
+  Object.assign(saved.recipe.numeric["n.denoise"].values, { mode: "value", value: "0.8", min: "bad", max: "bad", rawIncrement: "0" });
+  assert(planHistoryOverlay(saved, raw, [catalogue], "single").patch.some(p => p.id === "n.denoise" && p.name === "value"));
+  for (const bounds of [["2", "2"], ["9007199254740993", "9007199254740994"]]) {
+    const exact = snapshotDraft(record); exact.cohortMode = "bulk";
+    Object.assign(exact.recipe.numeric["n.steps"].values, { mode: "range", min: bounds[0], max: bounds[1], rawIncrement: "1" });
+    const result = planHistoryOverlay(exact, raw, [catalogue], "bulk");
+    assertEquals(result.patch.find(p => p.id === "n.steps" && p.name === "max")?.value, bounds[1]);
+  }
+});
 Deno.test("history overlay: active contributors only, dormant destination text/native File identity and overlap cancellation", async () => {
   const { record } = await savedRecipe(editor => {
     editor.setEnabled("n.denoise", true); editor.edit("numeric", "n.denoise", "mode", "value"); editor.edit("numeric", "n.denoise", "value", "0.8");
