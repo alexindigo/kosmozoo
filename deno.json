@@ -42,7 +42,7 @@
     "vendor": "deno run --frozen --cached-only --allow-read --allow-write=client/vendor dev/vendor-browser.mjs",
     "setup": "deno eval --frozen --cached-only 'import { Database } from \"@db/sqlite\"; new Database(\":memory:\").close();'",
     "dev": "deno run --allow-all src/main.mjs",
-    "test": "deno task deps && deno test --frozen --cached-only --allow-all"
+    "test": "deno task deps && deno test --frozen --cached-only --allow-all tests/t_*.mjs"
   },
   "env": {
     "DENO_SQLITE_PATH": "/usr/lib/libsqlite3.so"
