@@ -457,7 +457,10 @@ export function makeRouter(ctx) {
       if (token && !ctx.inventory.isCurrent(token)) return Response.json({ error: "Source incarnation changed" }, { status: 409 });
     }
     const { name: entry, hash, extracted, meta, width, height } = entryShape(id, name, null, ctx.store.entryJoined(id, name), null);
-    return Response.json({ name: entry, hash, extracted, meta, width, height });
+    const generationTimeMs = await ctx.comfy?.(id)?.generationTime?.(name) ?? null;
+    if (token && !ctx.inventory.isCurrent(token)) return Response.json({ error: "Source incarnation changed" }, { status: 409 });
+    if (hash !== (ctx.store.entryJoined(id, name)?.hash ?? null)) return Response.json({ error: "Entry content changed" }, { status: 409 });
+    return Response.json({ name: entry, hash, extracted, meta, width, height, generationTimeMs });
   });
 
   // --- judgments (entry columns) ------------------------------------------------

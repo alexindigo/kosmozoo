@@ -739,7 +739,7 @@ export function makeAppStore({ subscribeSources = typeof window !== "undefined" 
     },
     // A shown entry's own record, fenced by the content identity it was read
     // for: a listing that knows different content refuses it.
-    adopt(name, record, owner, identity) {
+    adopt(name, record, owner, identity, recordRevision) {
       const idx = imageIdxById().get(`${owner.id}:${name}`);
       if (idx === undefined) return false;
       const image = st.images[idx];
@@ -747,16 +747,20 @@ export function makeAppStore({ subscribeSources = typeof window !== "undefined" 
       const patch = {};
       if (record.meta && !image.meta) patch.meta = record.meta;
       if ((record.meta || record.extracted) && !image.extracted) patch.extracted = true;
+      if (Object.hasOwn(record, "generationTimeMs")) Object.assign(patch, { generationTimeMs: record.generationTimeMs, generationTimeRevision: recordRevision });
       if (record.width && record.height && !(image.width && image.height)) Object.assign(patch, { width: record.width, height: record.height });
       if (Object.keys(patch).length) setSt("images", idx, patch);
       return patch.meta ? "graph" : "applied";
     },
+    needsEntry: image => !image.meta || image.generationTimeMs === undefined || image.generationTimeRevision !== image.recordRevision,
   });
   // The consumers of one entry — Details' current and its comparison — own
   // that entry's record through the metadata owner's direct path.
   createEffect(() => {
+    const activity = sourceSession?.source?.activity;
+    const recordRevision = `${activity?.epoch ?? ""}:${activity?.terminalRevision ?? 0}:${activity?.resyncRevision ?? 0}`;
     const entries = (workspace() === "details" ? [currentEntry()?.entry, entryFor(currentStack().at(-1) ?? null)?.entry] : [])
-      .filter(Boolean).map(({ id, filename, hash, meta, extracted }) => ({ id, filename, hash, meta: !!meta, extracted: !!extracted }));
+      .filter(Boolean).map(({ id, filename, hash, meta, extracted, generationTimeMs, generationTimeRevision }) => ({ id, filename, hash, meta: !!meta, extracted: !!extracted, generationTimeMs, generationTimeRevision, recordRevision }));
     untrack(() => metadata.show(entries));
   });
 
@@ -862,6 +866,8 @@ export function makeAppStore({ subscribeSources = typeof window !== "undefined" 
           size: e.size ?? enriched?.size ?? null, hash: e.hash ?? enriched?.hash ?? null, state: e.state,
           meta: enriched?.meta && enriched.meta !== start?.meta ? enriched.meta : e.meta ?? enriched?.meta ?? null,
           extracted: e.extracted || !!enriched?.extracted,
+          generationTimeMs: enriched?.generationTimeMs,
+          generationTimeRevision: enriched?.generationTimeRevision,
           judgment: judgments.overlay(id, e.judgment, read),
           width: enriched?.width && enriched.width !== start?.width ? enriched.width : e.width ?? enriched?.width ?? null,
           height: enriched?.height && enriched.height !== start?.height ? enriched.height : e.height ?? enriched?.height ?? null,

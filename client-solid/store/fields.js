@@ -20,6 +20,14 @@ export function fmtBytes(n) {
   return `${(n / 1024 / 1024).toFixed(1)} MB`;
 }
 
+export function fmtGenerationTime(ms) {
+  if (typeof ms !== "number" || !Number.isFinite(ms) || ms < 0) return "--";
+  if (ms < 1000) return `${Number((ms / 1000).toFixed(2))}s`;
+  const total = Math.round(ms / 1000), seconds = total % 60;
+  const minutes = Math.floor(total / 60) % 60, hours = Math.floor(total / 3600);
+  return hours ? `${hours}h ${minutes}m ${seconds}s` : total >= 60 ? `${minutes}m ${seconds}s` : `${seconds}s`;
+}
+
 export function fieldId(classType, input) { return `${classType}.${input}`; }
 
 export function parseFieldId(id) {

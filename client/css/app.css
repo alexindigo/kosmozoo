@@ -542,6 +542,11 @@ body:has(#diff:not([hidden])) #statusCol { bottom: 56px; }
   overflow-wrap: anywhere; }
 .metabody a.ws-lineage-src { cursor: pointer; text-decoration: none; }
 .metabody a.ws-lineage-src:hover { text-decoration: underline; }
+.metabody .ws-generation { border: 1px solid var(--lifted); border-radius: 6px;
+  background: var(--surface); padding: 8px 10px; margin-bottom: 10px;
+  display: flex; flex-wrap: wrap; align-items: baseline; column-gap: .4em; row-gap: 2px;
+  font-size: 12px; color: var(--foreground-mid); }
+.metabody .ws-generation > span { white-space: nowrap; }
 
 /* --- keys panel (a modal-tier layer; its Esc-close is a keymap binding) ----- */
 #keysPanelInner { min-width: 520px; max-width: 86vw;

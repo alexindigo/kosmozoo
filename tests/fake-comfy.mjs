@@ -332,7 +332,7 @@ const handleRequest = async (req) => {
         prompt: [0, job.id, {}, { client_id: "external-fixture-client" }],
         outputs: job.output ? { "9": { images: [{ ...splitEntryPath(job.output), type: "output" }] } } : {},
         status: { completed: outcome === "success", status_str: outcome === "success" ? "success" : "error",
-          messages: [[outcome === "interrupted" ? "execution_interrupted" : outcome === "error" ? "execution_error" : "execution_success", {}]] },
+          messages: job.messages ?? [[outcome === "interrupted" ? "execution_interrupted" : outcome === "error" ? "execution_error" : "execution_success", {}]] },
       };
     }
     return Response.json({ running, pending, published: [...published.keys()] });

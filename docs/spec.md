@@ -42,7 +42,7 @@ the resources; a collection's `capabilities` answer what its backing can do.
 | `/api/events` | GET | one native SSE delivery connection per app tab; complete version1 authoritative cached source maps, no upstream probe/list/monitor creation |
 | `/api/collections/<id>/entries` | GET | the feed listing: size, hash, state, meta, judgment, and dims - content dimensions once hashed, provisional entry dimensions only before hashing. Gone entries are excluded. `?inventory=1` returns the coherent output envelope described below; default remains an array. `?kind=input` lists the input dir instead; any other `kind` is 400 (temp has no listing and never falls back to the output inventory). Add `catalogue=images-v1` with an expected origin for `{files, origin, root}`: image-only input or visible output inventory, fenced before/after IO; legacy shapes are unchanged. |
 | `/api/collections/<id>/entries/<name>` | GET | one entry |
-| `/api/collections/<id>/entries/<name>/meta` | GET | one shown entry's record `{name, hash, extracted, meta, width, height}`, independent of the delta stream; an entry without a hash is first ingested through the single-flight high lane for at most 8 s; `extracted:false` means not available yet (unreadable source or the wait elapsed) |
+| `/api/collections/<id>/entries/<name>/meta` | GET | one shown entry's record `{name, hash, extracted, meta, width, height, generationTimeMs}`, independent of the delta stream; an entry without a hash is first ingested through the single-flight high lane for at most 8 s; `extracted:false` means not available yet (unreadable source or the wait elapsed); nullable generation timing is described below |
 | `/api/collections/<id>/entries` | POST | multipart upload into the input dir; **409 with the conflicting name, never an overwrite** |
 | `/api/collections/<id>/entries/<name>` | DELETE | per capability: folder → unlink; comfy + assets_plus → trash; otherwise → hide + history cleanup |
 | `/api/collections/<id>/entries/<name>/bytes` | GET | cache-first bytes of one resource root: absent `kind` or `output` (the feed entry), `?kind=input` or `?kind=temp` (referenced files); an unknown `kind` is 400, never another root. ETag is the content hash, `Cache-Control: no-cache`; single-byte ranges (§Serve path). HEAD uses the same root and reports the content length |
@@ -270,6 +270,35 @@ generation destination.
 
 Feature routes mount under `/api/features/<name><path>`: `variations`
 serves `GET /probe/<id>` + `POST /run` (a core feature module, not a plugin).
+
+### Image generation time
+
+Details renders a separate bordered `Generation time: <duration>` box directly
+below the filename/dimensions/size header. Unknown timing renders exactly
+`Generation time: --`, including local/folder images. Duration uses compact
+hours/minutes/seconds, preserving subsecond and genuine zero values. In narrow
+columns the value can flow below the intact single-line label.
+
+The existing address-owned Comfy binding learns optional timing from ordinary
+history reads. Matching `execution_start` and `execution_success` timestamps for
+one successfully completed prompt supply execution wall time, excluding queue
+wait. Its output descriptors bind full subfolder/filename plus output root;
+input/temp entries, missing or invalid/foreign/reversed timestamps and ambiguous
+multiple producers never supply a duration. Ordinary telemetry's public shape,
+completion semantics and polling cadence are unchanged. The shown-entry record
+can coalesce a first retained-history read when that binding has no full baseline.
+Optional timing failure does not remove graph metadata.
+
+The metadata record adds `generationTimeMs: number | null`. Store's existing
+shown-record owner acquires it even for populated graphs and refreshes it when
+the existing source stream advances completion/recovery evidence, not on progress
+ticks or a new poller. Source incarnation and content hash fence asynchronous
+application. Other images never inherit the selected image's timing.
+
+Learned observations stay with the engine's address binding until retirement.
+No image bytes, settings, content-extractor facts or SQLite schema change. If
+timing is lost from both that engine lifetime and upstream history, the box is --;
+there is no guessed backfill or second durable job-history database.
 
 #### Durable Variations snapshots
 
