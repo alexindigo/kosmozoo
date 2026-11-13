@@ -35,6 +35,7 @@ export function HistoryDropdown(props) {
     <Show when={open()}><div ref={panel} popover="manual" class="vh-menu" inert={suspended() || !placed()}
       style={{ left: `${placed()?.left ?? 0}px`, top: `${placed()?.top ?? 0}px`, width: `${placed()?.width ?? 320}px`, "max-height": `${placed()?.maxHeight ?? 320}px` }}>
       <div class="vh-menu-label">Apply saved changes to {props.bulk ? "these images" : "this image"}</div>
+      <Show when={props.notice}><p class="vh-status" role="status">{props.notice}</p></Show>
       <HistoryList compact history={props.history} state={props.state} thumbnail={props.thumbnail} registerThumbnail={props.registerThumbnail}
         registerPopup={props.registerPopup} registerEditor={props.registerEditor}
         onRecall={async id => { const result = await props.onRecall(id); if (result?.status === "applied" || result?.status === "unchanged") close(); }} />

@@ -83,6 +83,7 @@ function ModalBody(props) {
   const [historyCaption, setHistoryCaption] = createSignal(original ? `${historyCount(original)} | ${historyDate(original.createdAt)} | ${image.filename}` : "");
   const [recallWarnings, setRecallWarnings] = createSignal([]);
   const [recallStatus, setRecallStatus] = createSignal(null);
+  const [recallNotice, setRecallNotice] = createSignal("");
   let alive = true, recalling = null;
   onCleanup(() => { alive = false; });
   const read = getter => { version(); return getter(); };
@@ -166,8 +167,19 @@ function ModalBody(props) {
     decision: value => { setDecision(value); editor.decision(value); }, invalidate: editor.invalidateClose });
   onCleanup(store.actions.variations.registerOwner(props.session, { requestLeave: guard.request, requestRun: editor.run }));
   onCleanup(() => { editor.dispose(); guard.dispose(); });
+  const settleRecall = promise => {
+    if (recalling?.promise !== promise) return;
+    recalling = null;
+    if (alive) setRecallNotice("");
+  };
   const recall = id => {
-    if (recalling) return recalling.id === id ? recalling.promise : Promise.resolve({ status: "busy" });
+    if (!alive) return Promise.resolve({ status: "stale" });
+    if (recalling) {
+      if (recalling.id === id) return recalling.promise;
+      setRecallNotice("Another recall is in progress. This selection was not applied.");
+      return Promise.resolve({ status: "busy" });
+    }
+    setRecallNotice("");
     const revision = editor.revision();
     const promise = (async () => {
       const saved = await services.history.open(id);
@@ -189,12 +201,12 @@ function ModalBody(props) {
       } finally {
         // The transition has settled. Lease cleanup remains owned by the
         // history client and must not coalesce the next user action into this one.
-        if (recalling?.promise === promise) recalling = null;
+        settleRecall(promise);
         if (!transferred) await services.history.release(saved);
       }
     })();
     recalling = { id, promise };
-    promise.finally(() => { if (recalling?.promise === promise) recalling = null; }).catch(() => {});
+    promise.finally(() => settleRecall(promise)).catch(() => {});
     return promise;
   };
   // refs exist solely to read the live selection and restore the caret
@@ -328,7 +340,7 @@ function ModalBody(props) {
             : "Generate image variations"} />
         <HistoryDropdown history={services.history} state={services.historyState} thumbnail={services.historyThumbnail} registerThumbnail={services.registerThumbnail}
           registerPopup={registerImagePopup} registerEditor={registerEditor} rememberFocus={rememberFocus} bulk={batch}
-          caption={historyCaption()} warnings={recallWarnings()} recallStatus={recallStatus()} onRecall={recall} />
+          caption={historyCaption()} warnings={recallWarnings()} recallStatus={recallStatus()} notice={recallNotice()} onRecall={recall} />
         <div ref={bodyScroll} class="vz-body-scroll"><div class="vz-body">
           <div class="vz-catalogue">
             <div class="vz-filter-tools">
