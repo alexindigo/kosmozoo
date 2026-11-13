@@ -13,6 +13,7 @@ import { validOrigin, sameOrigin, validContext, sameContext } from "/shared/sour
 import { validImageSet, mergeImages, sameImage, imageIdentity, imageReference, imageReferenceValue, uploadImage } from "./image-set.js";
 import { classifyImageFiles } from "./image-drop.js";
 import { connectionPresentation } from "./field-filter.js";
+import { estimateGenerationTime, knownGenerationTime } from "./time-estimate.js";
 import { makeVariationRecipe, validRecipeValue as validValue, freezeRecipe as freeze, moveRecipeImage } from "./recipe.js";
 export { RECIPE_FIELDS as EDITOR_FIELDS } from "./recipe.js";
 const filename = value => typeof value === "string" && value.length > 0 && !/[\\/\x00-\x1f\x7f]/.test(value) && ![".", ".."].includes(value);
@@ -47,6 +48,9 @@ export function makeVariationEditor({ targets, services, currentOrigin, changed 
   const recipe = makeVariationRecipe();
   const capturedTargets = freeze(snapshotDraft(targets));
   const catalogues = new Map();
+  const generationTimes = new Map(capturedTargets.map(target => [target.id, knownGenerationTime(target.generationTimeMs) ? target.generationTimeMs : null]));
+  const timingController = new AbortController();
+  let timingTask = null;
   let locations = [];
   const imageChecks = new Map(), confirmedUploads = new Map();
   const inputCatalogues = new Map(), sourceFiles = new Map();
@@ -167,6 +171,18 @@ export function makeVariationEditor({ targets, services, currentOrigin, changed 
   return {
     rows: view,
     revision: recipe.revision,
+    loadGenerationTimes() {
+      if (!alive) return Promise.resolve();
+      if (timingTask) return timingTask;
+      timingTask = Promise.allSettled(capturedTargets.map(async target => {
+        if (knownGenerationTime(generationTimes.get(target.id)) || !services.generationTime || !originCurrent(target) || target.historyRef && !target.hash) return;
+        const record = await services.generationTime(target, { signal: timingController.signal });
+        if (!alive || !originCurrent(target) || record?.name !== target.filename || !/^[a-f0-9]{64}$/.test(record.hash ?? "") ||
+            target.hash && record.hash !== target.hash || !knownGenerationTime(record.generationTimeMs)) return;
+        generationTimes.set(target.id, record.generationTimeMs); notify();
+      })).then(() => {});
+      return timingTask;
+    },
     async planRecall(saved) {
       const revision = recipe.revision();
       if (!alive || deciding || running) throw new Error("Finish the current action before recalling history");
@@ -386,7 +402,7 @@ export function makeVariationEditor({ targets, services, currentOrigin, changed 
     },
     preview() {
       const unavailable = (status, message) => ({ n: null, display: "—", fullCount: message, perImage: 0,
-        anyEnabled: false, exact: false, status, message, breakdown: "", axes: [], excluded: 0, naming: { example: "", complete: false } });
+        anyEnabled: false, exact: false, status, message, breakdown: "", axes: [], excluded: 0, naming: { example: "", complete: false }, timeEstimate: estimateGenerationTime(null, []) });
       if (!catalogueReady) return unavailable("reading", "Reading workflow…");
       const snapshot = captureRows(), first = catalogues.get(capturedTargets[0].id);
       for (const [id, entry] of Object.entries(snapshot.numeric)) if (entry.values.enabled && entry.values.mode === "range" && increment(entry) === null) {
@@ -442,7 +458,9 @@ export function makeVariationEditor({ targets, services, currentOrigin, changed 
           : !safe ? "Estimate exceeds safe integer precision; the full value is approximate."
           : batch ? "Estimated from the first image; each target is checked before submission."
           : n > 100 ? "Large sweep: this many jobs will be queued. The engine validates its existing per-run limit." : "";
-        return { n, perImage, anyEnabled: axes.length > 0, exact: exact && naming.complete, status, message, axes, excluded, breakdown, naming,
+        const timeEstimate = estimateGenerationTime(status === "invalid" ? null : perImage,
+          capturedTargets.map(target => originCurrent(target) ? generationTimes.get(target.id) : null));
+        return { n, perImage, anyEnabled: axes.length > 0, exact: exact && naming.complete, status, message, axes, excluded, breakdown, naming, timeEstimate,
           display: n >= 1e6 ? n < 1e15 ? new Intl.NumberFormat("en-US", { notation: "compact", maximumSignificantDigits: 4 }).format(n)
             : n.toExponential(2).replace("e+", " × 10^") : n.toLocaleString("en-US"),
           fullCount: `${n.toLocaleString("en-US", { maximumFractionDigits: 0 })}${exact ? " variations" : " variations (estimate)"}` };
@@ -584,6 +602,7 @@ export function makeVariationEditor({ targets, services, currentOrigin, changed 
     },
     dispose() {
       alive = false; invalidateClose(); active = null; sourceFiles.clear(); inputCatalogues.clear(); sourceLifetimes.clear();
+      timingController.abort(); generationTimes.clear();
       for (const record of heldRecords.values()) services.history?.release(record).catch(() => {});
       heldRecords.clear();
     },

@@ -78,6 +78,7 @@ function ModalBody(props) {
     currentOrigin: host => sourceOrigin(host, store.state.hosts[host]),
     changed: () => setVersion(value => value + 1),
     close: () => store.handles.invoke("variations.close", { automatic: true, session: props.session }) });
+  onMount(() => { editor.loadGenerationTimes(); });
   const original = props.historyRef ? services.history.retained(props.historyRef.id, props.historyRef.leaseId) : null;
   if (original) editor.restoreHistory(original);
   const [historyCaption, setHistoryCaption] = createSignal(original ? `${historyCount(original)} | ${historyDate(original.createdAt)} | ${image.filename}` : "");
@@ -472,9 +473,12 @@ function ModalBody(props) {
           <div class="vz-right">
             <div class="vz-sidebar-body">
             <div class="vz-count-group">
-              <span class="vz-rlabel">{tally().exact ? "Variations" : tally().status === "invalid" ? "Check the recipe" : "Estimated variations"}</span>
+              <SingleLineText class="vz-rlabel" value={tally().exact ? "Variations" : tally().status === "invalid" ? "Check the recipe" : "Estimated variations"} />
+              <span class="vz-rlabel vz-time-label">Estimated time:</span>
               <SingleLineText class={"vz-count" + (tally().n >= 1e15 ? " vz-count-large" : "") + (tally().n > 1000 ? " vz-count-hot" : tally().n > 100 ? " vz-count-warn" : "")}
                 value={tally().status === "invalid" ? "—" : tally().display} hint={tally().fullCount} />
+              <SingleLineText class="vz-time-value" value={tally().timeEstimate.display}
+                hint="Based on original image generation times and the displayed job-count estimate. Edited settings can change speed; existing queues are not included. Independent backends may run concurrently." />
               <p class="vz-count-sub">{tally().breakdown}</p>
             </div>
             <div class="vz-naming-group">

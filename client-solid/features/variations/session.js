@@ -29,7 +29,9 @@ export function makeVariationSession({ read, write }) {
   return {
     captureOpening: () => Object.freeze({ generation: sequence, session: read().session ?? null }),
     open(images, bulk) {
-      const captured = images.map(({ id, host, filename, meta, origin }) => ({ id, host, filename, meta, ...(origin === undefined ? {} : { origin }) }));
+      const captured = images.map(({ id, host, filename, meta, origin, hash, generationTimeMs }) => ({ id, host, filename, meta,
+        ...(origin === undefined ? {} : { origin }), ...(hash === undefined ? {} : { hash }),
+        ...(generationTimeMs === undefined ? {} : { generationTimeMs }) }));
       if (!captured.length) return outcome("stale");
       const key = bulk ? "batch:" + captured.map((image) => image.id).join("|") : captured[0].id;
       return request(read().open && read().key === key ? null : { images: captured, key });
@@ -38,7 +40,8 @@ export function makeVariationSession({ read, write }) {
       if (ticket && (ticket.generation !== sequence || ticket.session !== (read().session ?? null))) return outcome("stale");
       // Store reconciliation brands its own data containers. Do not let those
       // proxies/symbols enter the separately leased exact-JSON archive read model.
-      const images = snapshotDraft(record.targets.map(({ id, host, filename, origin, context, historyRef, unavailable }) => ({ id, host, filename, origin, context, historyRef, unavailable })));
+      const images = snapshotDraft(record.targets.map(({ id, host, filename, origin, context, historyRef, unavailable }, index) => ({ id, host, filename, origin, context, historyRef, unavailable,
+        ...(record.resources?.find(resource => resource.id === `target-${index}`)?.hash ? { hash: record.resources.find(resource => resource.id === `target-${index}`).hash } : {}) })));
       return request({ images, key: `history:${record.id}:${record.leaseId}`, historyRef: { id: record.id, leaseId: record.leaseId } });
     },
     close: ({ automatic = false, session } = {}) => request(null, automatic, session),

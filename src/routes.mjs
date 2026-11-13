@@ -445,8 +445,10 @@ export function makeRouter(ctx) {
   // path (the high lane a human-visible image uses), for a bounded wait. The
   // reply is always the entry's current record; `extracted:false` means the
   // record is not available yet (unreachable source, or the wait elapsed).
-  add("GET", "/api/collections/<id>/entries/<name>/meta", async (_req, { id, name }) => {
+  add("GET", "/api/collections/<id>/entries/<name>/meta", async (req, { id, name }) => {
     if (!addressFor(id)) return Response.json({ error: "unknown collection" }, { status: 404 });
+    const originError = byteOriginError(req, id);
+    if (originError) return originError;
     const token = ctx.inventory.capture?.(id);
     if (!ctx.store.entryJoined(id, name)?.hash) {
       const done = new AbortController();
@@ -458,6 +460,8 @@ export function makeRouter(ctx) {
     }
     const { name: entry, hash, extracted, meta, width, height } = entryShape(id, name, null, ctx.store.entryJoined(id, name), null);
     const generationTimeMs = await ctx.comfy?.(id)?.generationTime?.(name) ?? null;
+    const finalOriginError = byteOriginError(req, id);
+    if (finalOriginError) return finalOriginError;
     if (token && !ctx.inventory.isCurrent(token)) return Response.json({ error: "Source incarnation changed" }, { status: 409 });
     if (hash !== (ctx.store.entryJoined(id, name)?.hash ?? null)) return Response.json({ error: "Entry content changed" }, { status: 409 });
     return Response.json({ name: entry, hash, extracted, meta, width, height, generationTimeMs });

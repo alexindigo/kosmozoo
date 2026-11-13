@@ -289,7 +289,9 @@ completion semantics and polling cadence are unchanged. The shown-entry record
 can coalesce a first retained-history read when that binding has no full baseline.
 Optional timing failure does not remove graph metadata.
 
-The metadata record adds `generationTimeMs: number | null`. Store's existing
+The metadata record adds `generationTimeMs: number | null` and accepts the same
+optional expected-origin header/query as resource-byte reads, fencing source
+replacement before and after acquisition. Store's existing
 shown-record owner acquires it even for populated graphs and refreshes it when
 the existing source stream advances completion/recovery evidence, not on progress
 ticks or a new poller. Source incarnation and content hash fence asynchronous
@@ -299,6 +301,23 @@ Learned observations stay with the engine's address binding until retirement.
 No image bytes, settings, content-extractor facts or SQLite schema change. If
 timing is lost from both that engine lifetime and upstream history, the box is --;
 there is no guessed backfill or second durable job-history database.
+
+The Variations summary places a smaller two-line `Estimated time:` block next to
+its dominant count. Multiply each known captured original-image duration by the
+preview's per-image job count and sum. Complete timing coverage displays e.g.
+`12m`; partial coverage displays `above 12m`; no usable time/count displays `--`.
+Bulk retains its existing first-image count estimate, so time is a workload
+estimate based on that same displayed count, not a queue ETA or backend scheduler.
+Edited parameters can change speed; independent backends may execute concurrently.
+
+The private editor owns captured timing facts and one abortable acquisition of
+missing facts through injected metadata services. Byte hashes when known, expected
+origin and editor lifetime fence publication. A history opening uses archived
+target-resource hashes, never its graph hashes or an unverified replacement name.
+Timing settlement is readonly: it cannot edit the recipe, dirty a draft, adopt a
+Run, reset its close timer or change selection. Count changes derive the estimate
+again without new timing fetches. Labels remain single-line, with value below;
+the count/time share grid rows and the breakdown spans both columns.
 
 #### Durable Variations snapshots
 

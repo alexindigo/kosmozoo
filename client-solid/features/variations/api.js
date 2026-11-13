@@ -1,7 +1,7 @@
 // client-solid/features/variations/api.js — the feature's endpoint paths.
 // The transport itself is the shared one from /js/api.mjs.
 
-import { req, postRaw, collectionEntriesUrl, entryBytesUrl } from "/js/api.mjs";
+import { req, postRaw, collectionEntriesUrl, entryUrl, entryBytesUrl } from "/js/api.mjs";
 import { parseExactJson, stringifyExactJson } from "/shared/parameters.mjs";
 const json = { parse: parseExactJson, stringify: stringifyExactJson };
 export const readRunResult = parseExactJson;
@@ -26,6 +26,9 @@ export async function historyBytes(id, resourceId, file) {
 
 export const probe = (image) =>
   req("GET", `/api/features/variations/probe/${encodeURIComponent(image.id)}${image.origin ? `?origin=${encodeURIComponent(JSON.stringify(image.origin))}` : ""}`, undefined, { json });
+
+export const generationTime = (image, { signal } = {}) =>
+  req("GET", `${entryUrl(image.host, image.filename)}/meta?origin=${encodeURIComponent(JSON.stringify(image.origin))}`, undefined, { signal });
 
 // raw POST: { ok, status, text }, no throw — the run report's error bodies
 // carry per-permutation detail the modal parses

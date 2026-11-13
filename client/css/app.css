@@ -1219,6 +1219,13 @@ body:has(#diff:not([hidden])) #statusCol { bottom: 56px; }
 
 .vz-count-sub { margin: 0; line-height: 16px; overflow-wrap: anywhere; }
 .vz-count-large { font-size: 23px; }
+.vz-count-group { grid-template-columns: minmax(0, 1fr) max-content; column-gap: 12px; align-items: baseline; }
+.vz-count-group .vz-rlabel { margin: 0; white-space: nowrap; }
+.vz-time-label, .vz-time-value { grid-column: 2; }
+.vz-count-group .vz-count, .vz-time-value { grid-row: 2; }
+.vz-time-value { font-size: 14px; font-variant-numeric: tabular-nums; color: var(--foreground); }
+.vz-count-group .vz-count-sub { grid-column: 1 / -1; }
+.vz-body { grid-template-columns: 210px minmax(320px, 1fr) 220px; min-width: 782px; }
 .vz-naming-group { grid-template-columns: 38px minmax(0, 1fr); align-items: center; }
 .vz-naming-group .vz-rlabel { grid-column: 1 / -1; }
 .vz-naming-group label { color: var(--foreground-mid); margin: 0; }

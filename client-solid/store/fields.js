@@ -20,12 +20,13 @@ export function fmtBytes(n) {
   return `${(n / 1024 / 1024).toFixed(1)} MB`;
 }
 
-export function fmtGenerationTime(ms) {
+export function fmtGenerationTime(ms, { compact = false } = {}) {
   if (typeof ms !== "number" || !Number.isFinite(ms) || ms < 0) return "--";
   if (ms < 1000) return `${Number((ms / 1000).toFixed(2))}s`;
   const total = Math.round(ms / 1000), seconds = total % 60;
   const minutes = Math.floor(total / 60) % 60, hours = Math.floor(total / 3600);
-  return hours ? `${hours}h ${minutes}m ${seconds}s` : total >= 60 ? `${minutes}m ${seconds}s` : `${seconds}s`;
+  if (!compact) return hours ? `${hours}h ${minutes}m ${seconds}s` : total >= 60 ? `${minutes}m ${seconds}s` : `${seconds}s`;
+  return [hours ? `${hours}h` : "", minutes ? `${minutes}m` : "", seconds || !total ? `${seconds}s` : ""].filter(Boolean).join(" ");
 }
 
 export function fieldId(classType, input) { return `${classType}.${input}`; }

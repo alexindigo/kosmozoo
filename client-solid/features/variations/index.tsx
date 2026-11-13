@@ -26,6 +26,7 @@ export function install(store) {
     // modal I/O — the feature's api.js owns the transport; the modal keeps
     // session-scoped results (probe params, file lists) in local signals
     probe(image) { return api.probe(image); },
+    generationTime: api.generationTime,
     history, historyState, historyThumbnail: api.historyThumbnail,
     inputList(hostName, origin, root = "input") { return api.inputList(hostName, origin, root); },
     uploadInput(hostName, form, origin) { return api.uploadInput(hostName, form, origin); },
