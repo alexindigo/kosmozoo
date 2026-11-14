@@ -1372,6 +1372,36 @@ body:has(#diff:not([hidden])) #statusCol { bottom: 56px; }
 .face-settings { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 6px; }
 .face-settings label, .face-settings [role="status"] { grid-column: 1 / -1; white-space: nowrap; }
 .face-settings .text-field { min-width: 0; width: 100%; }
+/* Pexels services: one list owner in the settings menu. Rows are a grid of
+   identity button, key marker and remove action on one centreline. */
+.pexels-settings { display: flex; flex-direction: column; gap: 6px; font-size: 13px; }
+.pexels-settings-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; min-height: var(--control-height-sm); }
+.pexels-settings-title { color: var(--foreground); }
+/* One grid for the whole list; each row is a subgrid, so the key marker and
+   remove columns are shared by every row whether or not a row fills them. */
+.pexels-services { list-style: none; margin: 0; padding: 0; display: grid;
+  grid-template-columns: minmax(0, 1fr) auto auto; column-gap: 6px; row-gap: 2px; }
+.pexels-service { display: grid; grid-column: 1 / -1; grid-template-columns: subgrid; align-items: center;
+  border-radius: 4px; }
+.pexels-service.is-editing { background: var(--lifted); }
+.pexels-service-key { grid-column: 2; }
+.pexels-service > .icon-button { grid-column: 3; }
+#chrome button.pexels-service-open { grid-column: 1; display: flex; flex-direction: column; align-items: stretch; min-width: 0; gap: 1px;
+  padding: 3px 6px; background: none; border: 1px solid transparent; text-align: start; color: var(--foreground); }
+#chrome button.pexels-service-open:hover { border-color: var(--border-strong); }
+.pexels-service-url { font-size: 11px; color: var(--foreground); }
+.pexels-service-key { display: flex; color: var(--foreground-mid); }
+.pexels-service-confirm { grid-column: 1 / -1; display: flex; align-items: center; gap: 6px;
+  min-height: var(--control-height-md); padding-inline-start: 6px; }
+.pexels-service-confirm > .single-line-text { flex: 1; }
+#chrome button.pexels-remove { color: var(--negative); border-color: var(--negative-dim); }
+.pexels-settings-empty { margin: 0; color: var(--foreground-mid); font-size: 12px; }
+.pexels-settings-error { display: flex; align-items: center; gap: 8px; color: var(--error); }
+.pexels-form { display: grid; grid-template-columns: auto minmax(0, 1fr); align-items: center; gap: 6px 8px; }
+.pexels-form label { white-space: nowrap; color: var(--foreground-mid); font-size: 12px; }
+.pexels-form .text-field { min-width: 0; width: 100%; }
+.pexels-form-actions { grid-column: 1 / -1; display: flex; justify-content: flex-end; align-items: center; gap: 6px; }
+.pexels-settings-message { font-size: 12px; color: var(--foreground-mid); }
 .face-controls-slot { flex: 0 0 auto; min-height: calc(var(--control-height-viewer) + 8px);
   display: flex; align-items: center; justify-content: center; gap: 8px; flex-wrap: wrap; }
 .viewer-alignment-slot { width: 160px; }

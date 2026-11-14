@@ -11,6 +11,8 @@ import { sourceOrigin, validOrigin } from "/shared/source-origin.mjs";
 import { createRoot, createSignal } from "solid-js";
 import { makeHistoryClient } from "./history-client.js";
 import { HistoryPanel } from "./HistoryPanel.js";
+import { makePexelsServices } from "./pexels-services.js";
+import { PexelsSettings } from "./PexelsSettings.js";
 
 // Assembly injects modal services and registers owner-safe command definitions.
 export function install(store) {
@@ -20,6 +22,9 @@ export function install(store) {
   const historyState = () => { historyRevision(); return history.state(); };
   const activate = () => history.activate();
   window.addEventListener("focus", activate); window.addEventListener("pageshow", activate);
+  const [pexelsRevision, setPexelsRevision] = createSignal(0);
+  const pexels = makePexelsServices({ api, changed: () => setPexelsRevision(n => n + 1) });
+  const pexelsState = () => { pexelsRevision(); return pexels.state(); };
   const broker = makeVariationSession({ read: () => store.state.variations,
     write: (opening) => store.setSt("variations", store.reconcile(opening)) });
   const services = {
@@ -44,6 +49,10 @@ export function install(store) {
     pathThumbnail: api.pathThumbnail,
     inspectPath: api.inspectPath,
     uploadPath: api.uploadPath,
+    pexelsServices: pexelsState,
+    loadPexelsServices: force => pexels.load(force),
+    pexelsApi: { pexelsPhotos: api.pexelsPhotos, pexelsThumbnail: api.pexelsThumbnail },
+    readPexelsPhoto: api.readPexelsPhoto,
     async run(payload) {
       if (!payload.history) throw new Error("A durable history capture is required before Run");
       const { ok, status, text } = await api.run(payload);
@@ -56,7 +65,8 @@ export function install(store) {
     workspaceSpaces: [{ id: "variation-history", title: "Variations history", icon: "history", component: HistoryPanel,
       ports: { history, state: historyState, thumbnail: api.historyThumbnail, registerThumbnail: input => store.surfaceDisplay(input),
         recall: id => store.handles.invoke("variations.history.open", { id }) } }],
-    dispose() { window.removeEventListener("focus", activate); window.removeEventListener("pageshow", activate); const cleanup = history.dispose(); disposeRoot(); return cleanup; },
+    settingsRow: PexelsSettings,
+    dispose() { window.removeEventListener("focus", activate); window.removeEventListener("pageshow", activate); pexels.dispose(); const cleanup = history.dispose(); disposeRoot(); return cleanup; },
     ownedCommands: [
       ...["variations.discard.cancel", "variations.images.close"].map(id => ({ id, validate: args => Object.keys(args).length === 0 })),
       { id: "variations.tabs.move", validate: args => Object.keys(args).length === 1 && [-1, 1, "first", "last"].includes(args.step) },
@@ -76,6 +86,7 @@ export function install(store) {
     ports: {
       services,
       registerOwner: broker.register,
+      pexels: { state: pexelsState, load: pexels.load, create: pexels.create, update: pexels.update, remove: pexels.remove },
       open: (image) => store.handles.invoke("variations.open", { id: image.id }),
     },
   };

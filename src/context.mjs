@@ -117,7 +117,7 @@ export async function buildContext({ env = Deno.env.toObject(), fakes = {}, star
 
   // feature modules: isolated core features on the engine surface
   const featureApp = {
-    store, cache, hosts, ingest, comfy, desktop, lifetime,
+    store, cache, hosts, ingest, comfy, desktop, lifetime, paths: { state: stateDir },
     archive: fakes.archive ?? new ContentArchive(`${stateDir}/archives`),
     // a backing bound to one collection (engine-mediated; the feature never
     // fetches a host directly)

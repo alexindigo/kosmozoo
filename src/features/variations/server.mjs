@@ -27,6 +27,7 @@ import { compileValue, compileDiscreteAxes, validateFinalGraph } from "./compile
 import { parameterCatalogue, findProducingOutputNode, outputNodeIndex, outputNamingTargets,
   outputPath, stripExtension, inspectSource, projectInspection } from "./inspection.mjs";
 import { registerHistory, historyResponse } from "./history-routes.mjs";
+import { registerPexels } from "./pexels.mjs";
 export { parameterCatalogue, findProducingOutputNode, outputNodeIndex, outputNamingTargets } from "./inspection.mjs";
 
 const exactResponse = (value, init = {}) => new Response(stringifyExactJson(value), {
@@ -158,11 +159,12 @@ export function lineageTag(source, params) {
 
 // --- registration ----------------------------------------------------------------
 
-// app: { store, cache, hosts, ingest, comfy, backings } — the engine surface
+// app: { store, cache, hosts, ingest, comfy, backings, paths } — the engine surface
 // for features.
 export function register(app) {
   const backingFor = app.backings?.backingFor ?? defaultBackingFor;
   const history = registerHistory(app);
+  registerPexels(app);
   app.route("GET", "/folder-chooser", async () => Response.json(await app.desktop.capability()));
   app.route("POST", "/choose-folder", async req => {
     let body;

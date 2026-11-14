@@ -94,3 +94,25 @@ export const uploadInput = (collection, form, origin) =>
       }
       throw new Error(`POST entries/${collection}: ${r.status}`);
     });
+
+// Pexels-compatible services: the engine owns keys and upstream requests.
+const pexelsPath = (id = null) => `/api/features/variations/pexels/services${id === null ? "" : `/${encodeURIComponent(id)}`}`;
+export const pexelsServices = signal => req("GET", pexelsPath(), undefined, { signal });
+export const createPexelsService = details => req("POST", pexelsPath(), details);
+export const updatePexelsService = (id, details) => req("PATCH", pexelsPath(id), details);
+export const removePexelsService = id => req("DELETE", pexelsPath(id));
+export const pexelsPhotos = (id, query, page, signal) =>
+  req("GET", `${pexelsPath(id)}/photos?${new URLSearchParams({ query, page: String(page) })}`, undefined, { signal });
+export const pexelsThumbnail = (id, photo) => `${pexelsPath(id)}/photos/${encodeURIComponent(photo)}/thumbnail`;
+const PEXELS_EXTENSIONS = { "image/jpeg": "jpg", "image/png": "png", "image/webp": "webp", "image/gif": "gif", "image/avif": "avif" };
+export async function readPexelsPhoto(id, photo) {
+  const response = await fetch(`${pexelsPath(id)}/photos/${encodeURIComponent(photo)}/image`);
+  if (!response.ok) {
+    let message = `Photo unavailable (${response.status})`;
+    try { message = (await response.json()).error ?? message; } catch { /* non-JSON body */ }
+    throw new Error(message);
+  }
+  const blob = await response.blob(), extension = PEXELS_EXTENSIONS[blob.type];
+  if (!extension) throw new Error("The service sent a file that isn't a supported image");
+  return new File([blob], `pexels-${photo}.${extension}`, { type: blob.type });
+}
