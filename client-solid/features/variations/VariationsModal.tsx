@@ -19,6 +19,7 @@ import { SliderRow } from "./SliderRow.js";
 import { Modal } from "../../components/Modal.js";
 import { snapshotDraft, makeLeaveGuard, focusMemory } from "./draft.js";
 import { makeVariationEditor } from "./editor.js";
+import { makePexelsBrowse } from "./pexels-browse.js";
 import { VariationDiscardConfirmation } from "./VariationDiscardConfirmation.js";
 import { ImageSetPanel } from "./ImageSetPanel.js";
 import { SingleLineText } from "../../components/SingleLineText.js";
@@ -89,6 +90,32 @@ function ModalBody(props) {
   let alive = true, recalling = null;
   onCleanup(() => { alive = false; });
   const read = getter => { version(); return getter(); };
+  // Pexels browsing is readonly presentation data for this mount; chosen
+  // photos enter the image set through the editor's own File lane.
+  const [browseVersion, setBrowseVersion] = createSignal(0);
+  const pexelsBrowse = makePexelsBrowse({ api: services.pexelsApi, changed: () => setBrowseVersion(value => value + 1) });
+  onCleanup(() => pexelsBrowse.dispose());
+  services.loadPexelsServices(true);
+  const pexelsSources = createMemo(() => services.pexelsServices().services.map(service => ({ source: service.id, label: service.name, url: service.url })));
+  const pexelsUrls = new Map();
+  createEffect(() => {
+    for (const { source, url } of pexelsSources()) {
+      if (pexelsUrls.has(source) && pexelsUrls.get(source) !== url) pexelsBrowse.forget(source);
+      pexelsUrls.set(source, url);
+    }
+  });
+  const browse = getter => { browseVersion(); return getter(); };
+  const pexelsPort = id => ({
+    sources: pexelsSources,
+    results: (service, query) => browse(() => pexelsBrowse.results(service.source, query)),
+    request: (service, query) => pexelsBrowse.request(service.source, query),
+    more: (service, query) => pexelsBrowse.more(service.source, query),
+    retry: (service, query) => pexelsBrowse.retry(service.source, query),
+    state: (service, photo) => read(() => editor.pexelsState(id, service.source, photo)),
+    label: (service, photo) => browse(() => pexelsLabel(pexelsBrowse.photo(service.source, photo), photo)),
+    thumbnail: (service, photo) => services.pexelsApi.pexelsThumbnail(service.source, photo),
+    toggle: (service, photo) => editor.togglePexels(id, service.source, photo),
+  });
   const targets = () => read(editor.targets);
   const rows = () => read(() => editor.rows("numeric"));
   const imgRows = () => read(() => editor.rows("images"));
@@ -388,6 +415,7 @@ function ModalBody(props) {
                         registerThumbnail={services.registerThumbnail}
                         pathThumbnail={services.pathThumbnail} onAddFolder={path => editor.addFolder(id, path)}
                         folderCapability={() => folderCapability.error ? null : folderCapability()} onChooseFolder={services.chooseFolder}
+                        pexels={pexelsPort(id)}
                         registerPopup={registerImagePopup} registerEditor={registerEditor} rememberFocus={rememberFocus} />
                     </Show>
                   );
@@ -690,4 +718,12 @@ function TextRow(props) {
         </div>
     </ParameterRow>
   );
+}
+
+// Picker names stay tooltip/accessibility text: the photo's description and
+// its photographer, as Pexels asks.
+function pexelsLabel(photo, id) {
+  if (!photo) return `Photo ${id}`;
+  const title = photo.alt || `Photo ${id}`;
+  return photo.photographer ? `${title} - photo by ${photo.photographer}` : title;
 }

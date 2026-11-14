@@ -55,7 +55,7 @@ export function makeVariationEditor({ targets, cohortMode, services, currentOrig
   let timingTask = null;
   let locations = [];
   const imageChecks = new Map(), confirmedUploads = new Map();
-  const inputCatalogues = new Map(), sourceFiles = new Map();
+  const inputCatalogues = new Map(), sourceFiles = new Map(), pexelsFiles = new Map();
   const sourceLifetimes = new Map();
   const sourceRecord = (map, origin, create, root = "input") => {
     if (sameOrigin(origin, currentOrigin(origin.source)) && !sameOrigin(sourceLifetimes.get(origin.source), origin)) {
@@ -336,6 +336,18 @@ export function makeVariationEditor({ targets, cohortMode, services, currentOrig
         // flat namespace; the editor owns that leaf-named File, not the API.
         return name.includes("/") ? new File([resource], name.split("/").at(-1), { type: resource.type, lastModified: resource.lastModified }) : resource;
       }, ownsRead);
+    },
+    pexelsState(id, service, photo) { return cachedFileState(id, pexelsFiles.get(service)?.get(photo)); },
+    // A chosen Pexels photo is an ordinary uploaded image once its bytes arrive.
+    togglePexels(id, service, photo) {
+      if (!alive || deciding || typeof service !== "string" || typeof photo !== "string" || !row("images", id) || !originCurrent(capturedTargets[0])) return false;
+      if (!pexelsFiles.has(service)) pexelsFiles.set(service, new Map());
+      const files = pexelsFiles.get(service);
+      return toggleCachedFile(this, id, fileRecord(files, photo), `Photo ${photo}`, async () => {
+        const file = await services.readPexelsPhoto(service, photo);
+        if (!(file instanceof File) || !file.size) throw new Error("Invalid photo");
+        return file;
+      }, () => alive && pexelsFiles.get(service) === files);
     },
     catalogueFailure(error) { publish({ text: `Catalogue unavailable: ${error.message ?? error}. Your edits have been kept.`, ok: false, state: "unavailable" }); },
     invalidateClose,
@@ -625,7 +637,7 @@ export function makeVariationEditor({ targets, cohortMode, services, currentOrig
        }
     },
     dispose() {
-      alive = false; invalidateClose(); active = null; sourceFiles.clear(); inputCatalogues.clear(); sourceLifetimes.clear();
+      alive = false; invalidateClose(); active = null; sourceFiles.clear(); pexelsFiles.clear(); inputCatalogues.clear(); sourceLifetimes.clear();
       timingController.abort(); generationTimes.clear();
       for (const record of heldRecords.values()) services.history?.release(record).catch(() => {});
       heldRecords.clear();
