@@ -1,6 +1,7 @@
 // Composition metadata and an owner-safe public capability only. Drafts and
 // recipes and decisions belong to the mounted modal,
 // never this bridge.
+import { snapshotDraft } from "./draft.js";
 export function makeVariationSession({ read, write }) {
   let sequence = 0, owner = null;
   const outcome = (status) => Promise.resolve({ status });
@@ -26,11 +27,22 @@ export function makeVariationSession({ read, write }) {
     return registration.capability.requestLeave({ intent, permit, cancel: () => {} });
   }
   return {
+    captureOpening: () => Object.freeze({ generation: sequence, session: read().session ?? null }),
     open(images, bulk) {
-      const captured = images.map(({ id, host, filename, meta, origin }) => ({ id, host, filename, meta, ...(origin === undefined ? {} : { origin }) }));
+      const captured = images.map(({ id, host, filename, meta, origin, hash, generationTimeMs }) => ({ id, host, filename, meta,
+        ...(origin === undefined ? {} : { origin }), ...(hash === undefined ? {} : { hash }),
+        ...(generationTimeMs === undefined ? {} : { generationTimeMs }) }));
       if (!captured.length) return outcome("stale");
       const key = bulk ? "batch:" + captured.map((image) => image.id).join("|") : captured[0].id;
       return request(read().open && read().key === key ? null : { images: captured, key });
+    },
+    openHistory(record, ticket) {
+      if (ticket && (ticket.generation !== sequence || ticket.session !== (read().session ?? null))) return outcome("stale");
+      // Store reconciliation brands its own data containers. Do not let those
+      // proxies/symbols enter the separately leased exact-JSON archive read model.
+      const images = snapshotDraft(record.targets.map(({ id, host, filename, origin, context, historyRef, unavailable }, index) => ({ id, host, filename, origin, context, historyRef, unavailable,
+        ...(record.resources?.find(resource => resource.id === `target-${index}`)?.hash ? { hash: record.resources.find(resource => resource.id === `target-${index}`).hash } : {}) })));
+      return request({ images, cohortMode: record.cohortMode, key: `history:${record.id}:${record.leaseId}`, historyRef: { id: record.id, leaseId: record.leaseId } });
     },
     close: ({ automatic = false, session } = {}) => request(null, automatic, session),
     run() {

@@ -57,7 +57,7 @@ module.exports = async ({ cdp, check, FAKE, KZ }) => {
     assert(geometry.fit&&geometry.ratios.length>=3, JSON.stringify(geometry));
     check('image grid: nine mixed-ratio images and add tile share square size; contain, orange inset ring and tooltip-only names', true);
     await openImageAdd(cdp);
-    assert(await cdp.evaluate("document.querySelector('.vz-image-add').getBoundingClientRect().height>0&&document.querySelector('.vz-input-trigger').textContent.includes('ComfyUI inputs')&&document.querySelector('.vz-folder-trigger').textContent==='Add folder…'"));
+    assert(await cdp.evaluate("document.querySelector('.vz-image-add').getBoundingClientRect().height>0&&document.querySelector('.vz-input-trigger').textContent.includes('ComfyUI images')&&document.querySelector('.vz-folder-trigger').textContent==='Add folder…'"));
     await cdp.clickAt('.vz-image-plus');
     const before = await order(), box = index => cdp.evaluate(`(()=>{const r=document.querySelectorAll('.vz-image-tile')[${index}].getBoundingClientRect();return{x:r.x+r.width/2,y:r.y+r.height/2}})()`);
     const a = await box(2), b = await box(0);

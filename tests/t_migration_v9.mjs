@@ -53,7 +53,7 @@ for (const partial of [null, "pinned", "auto_refresh", "both"]) {
       }
       const check = new Database(`${rig.dir}/metadata.db`);
       try {
-        assertEquals(check.prepare("PRAGMA user_version").value()[0], 9);
+        assertEquals(check.prepare("PRAGMA user_version").value()[0], 10);
         assertThrows(() => check.exec("UPDATE collection SET pinned = 2"));
         assertThrows(() => check.exec("UPDATE collection SET auto_refresh = NULL"));
         assert(check.prepare("PRAGMA foreign_key_check").all().length === 0);

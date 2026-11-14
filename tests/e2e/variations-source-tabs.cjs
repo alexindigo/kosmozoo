@@ -41,7 +41,7 @@ module.exports = async ({ cdp, check }) => {
   await fetch(FAKE + '/__test/activity', { method: 'POST', body: JSON.stringify({ reset: true, captureEnqueue: true }) });
   try {
     await open();
-    assert.deepEqual(await cdp.evaluate("[...document.querySelectorAll('.vz-input-popover [role=tab]')].map(el=>el.textContent)"), ['fake', 'another']);
+    assert.deepEqual(await cdp.evaluate("[...document.querySelectorAll('.vz-input-tabs [role=tab]')].map(el=>el.textContent)"), ['fake', 'another']);
     const placement = await cdp.evaluate("(()=>{window.__sourcePopup=document.querySelector('.vz-input-popover');const r=window.__sourcePopup.getBoundingClientRect();return [r.x,r.y,r.width,r.height]})()");
     await capture('source-tabs-target');
     await cdp.evaluate(`window.__tabsFetch=window.fetch;window.__listMode='fail';window.fetch=(...args)=>{
@@ -54,12 +54,12 @@ module.exports = async ({ cdp, check }) => {
     }`);
     await cdp.clickAt('[role=tab][data-value="another"]');
     await cdp.poll("document.querySelector('.vz-input-failure')?.hidden===false");
-    assert.equal(await cdp.evaluate("document.querySelector('.vz-input-failure [role=status]').textContent"), "Couldn't list another's inputs.");
+    assert.equal(await cdp.evaluate("document.querySelector('.vz-input-failure [role=status]').textContent"), "Couldn't list another's imported images.");
     assert(await cdp.evaluate("document.querySelector('.vz-input-failure [role=status]').title.includes('503')"));
     await capture('source-tabs-list-failed');
     await cdp.evaluate("window.__listMode='pending'");
     await cdp.clickAt('.vz-input-failure .vz-thumbnail-retry');
-    await cdp.poll("document.querySelector('.vz-input-status')?.textContent==='Reading another inputs…'");
+    await cdp.poll("document.querySelector('.vz-input-status')?.textContent==='Reading another imported images...'");
     await capture('source-tabs-list-pending');
     await cdp.evaluate("window.__listMode='ready';window.__releaseList()");
     await cdp.poll("!!document.querySelector('[data-input-name=" + JSON.stringify('remote-only.png') + "]')");
@@ -110,7 +110,7 @@ module.exports = async ({ cdp, check }) => {
     await cdp.poll("document.activeElement.dataset.value==='fake'&&document.activeElement.getAttribute('aria-selected')==='true'");
     await cdp.keyTrusted('ArrowRight', { vk: 39 });
     await cdp.poll("document.activeElement.dataset.value==='another'&&document.activeElement.getAttribute('aria-selected')==='true'");
-    const geometry = await cdp.evaluate("(()=>{const tabs=[...document.querySelectorAll('[role=tab]')].map(el=>el.getBoundingClientRect());return tabs.every(r=>Math.abs(r.top-tabs[0].top)<1)})()");
+    const geometry = await cdp.evaluate("(()=>{const tabs=[...document.querySelectorAll('.vz-input-tabs [role=tab]')].map(el=>el.getBoundingClientRect());return tabs.every(r=>Math.abs(r.top-tabs[0].top)<1)})()");
     assert(geometry);
     const focusGeometry = await cdp.evaluate(`(()=>{
       const tab=document.activeElement,strip=tab.closest('[role=tablist]'),style=getComputedStyle(tab),t=tab.getBoundingClientRect(),s=strip.getBoundingClientRect();
@@ -143,7 +143,7 @@ module.exports = async ({ cdp, check }) => {
     await capture('source-tabs-overflow');
     await cdp.send('Emulation.setDeviceMetricsOverride', { width: 500, height: 820, deviceScaleFactor: 1, mobile: false });
     await cdp.poll("(()=>{const r=document.querySelector('.vz-input-popover').getBoundingClientRect();return r.left>=0&&r.right<=innerWidth&&r.top>=0&&r.bottom<=innerHeight})()");
-    assert(await cdp.evaluate("(()=>{const tabs=[...document.querySelectorAll('[role=tab]')].map(el=>el.getBoundingClientRect());return tabs.every(r=>Math.abs(r.top-tabs[0].top)<1)})()"));
+    assert(await cdp.evaluate("(()=>{const tabs=[...document.querySelectorAll('.vz-input-tabs [role=tab]')].map(el=>el.getBoundingClientRect());return tabs.every(r=>Math.abs(r.top-tabs[0].top)<1)})()"));
     await capture('source-tabs-narrow');
     await cdp.send('Emulation.clearDeviceMetricsOverride');
     await close();
@@ -151,7 +151,7 @@ module.exports = async ({ cdp, check }) => {
     await invoke('source.remove', { id: 'another' });
     await cdp.poll(`(async()=>!${KZ}.state.hosts.another)()`);
     await open();
-    assert.equal(await cdp.evaluate("!!document.querySelector('.vz-input-popover [role=tablist]')"), false);
+    assert.equal(await cdp.evaluate("!!document.querySelector('.vz-input-tabs [role=tablist]')"), false);
     await capture('source-tabs-single-source');
     check('source tabs: strip absent with a single ComfyUI source', true);
   } finally {

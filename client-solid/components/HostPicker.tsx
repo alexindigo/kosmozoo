@@ -4,7 +4,7 @@
 // an add row. Data/actions come from the global store; this declares the DOM
 // and forwards intents.
 
-import { createSignal } from "solid-js";
+import { createSignal, createEffect, onCleanup } from "solid-js";
 import { For } from "solid-js";
 import { iconSvg } from "/js/icons.mjs";
 import { useAppStore } from "../store/app-store.js";
@@ -19,6 +19,7 @@ export function HostPicker() {
   let rootRef;
   const [name, setName] = createSignal("");
   const [addr, setAddr] = createSignal("");
+  createEffect(() => { store.state.hostMenuOpen(); store.actions.feed.invalidateExposure(); });
 
   // click outside closes the dropdown — the shared primitive; the root
   // contains the button, so it needs no stopPropagation shield
@@ -46,7 +47,7 @@ export function HostPicker() {
         <span>{store.state.host() ?? "no hosts"}</span>
         <span class="chev">▾</span>
       </button>
-      <div id="hostDrop" hidden={!store.state.hostMenuOpen()}>
+      <div id="hostDrop" hidden={!store.state.hostMenuOpen()} ref={element => onCleanup(store.actions.feed.occluder(element))}>
         <div id="hostList">
           <For each={Object.keys(store.state.hosts)}>
             {(n) => {
@@ -54,8 +55,8 @@ export function HostPicker() {
               const label = () => `Select ${n}. ${sourceNewContent(store.state.sourceHasNew(n))}${h().address}${h().online ? "" : " (offline)"}`;
               return (
                 <div
-                  class={"hostpick" + (n === store.state.host() ? " current" : "") + (h().online ? "" : " off")}
-                  classList={{ "has-new": store.state.sourceHasNew(n) }}
+                  class="hostpick"
+                  classList={{ current: n === store.state.host(), off: !h().online, "has-new": store.state.sourceHasNew(n) }}
                   data-source={n}
                   title={label()} aria-label={label()}
                   onClick={() => store.handles.invoke("source.select", { id: n })}

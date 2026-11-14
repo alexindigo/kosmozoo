@@ -23,6 +23,35 @@ async function ctx(dir) {
   return { settings: rig.settings, store: rig.store, router, scraper };
 }
 
+Deno.test("entry meta: generation timing is additive, path-specific and source/content fenced", async () => {
+  const rig = await mkStateRig("generation-record");
+  let release;
+  const held = new Promise(resolve => { release = resolve; });
+  const hosts = { local: "fake:8188" };
+  const inventory = makeTestInventory(hosts);
+  const requests = [];
+  let timing = () => held;
+  const router = makeRouter({ hosts, inventory, store: rig.store, settings: rig.settings, plugins: null,
+    cache: rig.cache, ingest: rig.ingest, prefetch: {}, comfy: () => ({ generationTime: name => { requests.push(name); return timing(); } }) });
+  try {
+    await rig.store.ingestFile("local", "nested/a.png", "aa".repeat(32), 10);
+    await rig.store.metaPut("local", "nested/a.png", { seed: 1 }, { ext: 1 });
+    const pending = router.handle(new Request("http://x/api/collections/local/entries/nested%2Fa.png/meta"));
+    await Promise.resolve(); await Promise.resolve();
+    release(140138);
+    const response = await pending; assertEquals(response.status, 200);
+    const record = await response.json();
+    assertEquals(record.generationTimeMs, 140138); assertEquals(record.meta.seed, 1);
+    assertEquals(requests, ["nested/a.png"]);
+    timing = async () => {
+      await rig.store.ingestFile("local", "nested/a.png", "bb".repeat(32), 10);
+      return 140138;
+    };
+    const changed = await router.handle(new Request("http://x/api/collections/local/entries/nested%2Fa.png/meta"));
+    assertEquals(changed.status, 409);
+  } finally { release(null); await rig.close(); }
+});
+
 Deno.test("metadata: version bumps on write; items are per-host, nulls skipped", async () => {
   const dir = await mkdtemp(join(tmpdir(), "kz-meta-"));
   const { store, router } = await ctx(dir);

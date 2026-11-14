@@ -36,6 +36,18 @@ async function contextRig() {
   };
 }
 
+Deno.test("source-bound metadata: optional timing reads reject a replaced source before entry acquisition", async () => {
+  const r = await contextRig();
+  try {
+    const path = '/api/collections/fake/entries/file.png/meta?origin=' + encodeURIComponent(JSON.stringify(r.origin()));
+    const response = await r.call(path);
+    assertEquals(response.status, 200);
+    assertEquals((await response.json()).generationTimeMs, null);
+    r.replace();
+    assertEquals((await r.call(path)).status, 412);
+  } finally { await r.close(); }
+});
+
 Deno.test("source-bound v2: probe/context/accepted writes reach matching proof; graph and source preconditions reject unsent effects", async () => {
   const r = await contextRig();
   try {

@@ -21,6 +21,7 @@ import { cardHeight, feedOffsets, feedEntryAtOffset, gridGapPx, measureGeometry,
 import { Card } from "./Card.js";
 import { EntryActions } from "./EntryActions.js";
 import { TextField } from "./TextField.js";
+import { NoteActions } from "./NoteActions.js";
 import { FeedGlimmer } from "./FeedGlimmer.js";
 
 export function Grid() {
@@ -232,11 +233,11 @@ export function Grid() {
           <div class="pair">
             <div class="boxcol">
               <TextField multiline tone="negative" class="neg" tabindex="-1" />
-              <div class="btnrow"><button tabindex="-1">copy from below</button><button tabindex="-1">copy from above</button></div>
+              <NoteActions sign="neg" tabindex="-1" />
             </div>
             <div class="boxcol">
               <TextField multiline tone="positive" class="pos" tabindex="-1" />
-              <div class="btnrow"><button tabindex="-1">copy from below</button><button tabindex="-1">copy from above</button></div>
+              <NoteActions sign="pos" tabindex="-1" />
             </div>
           </div>
         </div>

@@ -2,22 +2,22 @@
 // evidence are readonly context; compilation classifies every captured leaf.
 import { snapshotDraft, createRunId } from "./draft.js";
 import { editorDomain, choiceValues, numericDefaults, numericText, sliderNumber } from "./graph.mjs";
-import { parseExactJson, stringifyExactJson, sameJsonValue } from "/shared/parameters.mjs";
-import { compileDiscreteAxes, validateEditorValue, admitResourceTransfer } from "/shared/features/variations/compile.mjs";
-import { templateLabels, templateValue, parseSemicolonList, expandTextAxes, permutationPlan,
+import { parseExactJson, stringifyExactJson, sameJsonValue, resourceReferenceValue, resourceReferenceProblem } from "/shared/parameters.mjs";
+import { admitResourceTransfer } from "/shared/features/variations/compile.mjs";
+import { compileRecipe, parseRecipeCandidate, recipeImageView, currentRoot } from "/shared/features/variations/recipe-compile.mjs";
+import { acknowledgedHistoryFields, planHistoryOverlay, decodeHistoryRecipe } from "/shared/features/variations/history-codec.mjs";
+import { permutationPlan,
   resolveRelativeRanges, acknowledgedFields, targetRunPlan, catalogueParams, parameterIndex, parameterCurrent, parameterLabel, parameterAliases,
-   variationOutputName, uploadCandidate, uploadFamily } from "/shared/features/variations/shared.mjs";
+   variationOutputName, uploadFamily } from "/shared/features/variations/shared.mjs";
 import { validOrigin, sameOrigin, validContext, sameContext } from "/shared/source-origin.mjs";
 import { validImageSet, mergeImages, sameImage, imageIdentity, imageReference, imageReferenceValue, uploadImage } from "./image-set.js";
 import { classifyImageFiles } from "./image-drop.js";
 import { connectionPresentation } from "./field-filter.js";
-import { RECIPE_FIELDS as EDITOR_FIELDS, makeVariationRecipe, recipeField as descriptor,
-  validRecipeValue as validValue, freezeRecipe as freeze, recipeDispositions, moveRecipeImage } from "./recipe.js";
+import { estimateGenerationTime, knownGenerationTime } from "./time-estimate.js";
+import { makeVariationRecipe, validRecipeValue as validValue, freezeRecipe as freeze, moveRecipeImage } from "./recipe.js";
 export { RECIPE_FIELDS as EDITOR_FIELDS } from "./recipe.js";
 const filename = value => typeof value === "string" && value.length > 0 && !/[\\/\x00-\x1f\x7f]/.test(value) && ![".", ".."].includes(value);
 const allParameters = catalogue => catalogue.parameters ?? catalogueParams(catalogue);
-// The current image's explicit root; `fromOutput` is the legacy carrier's facade.
-const currentRoot = parameter => parameter.currentRoot ?? (parameter.fromOutput ? "output" : "input");
 // Legacy-first ordering preserves existing manual aliases independently of layout.
 const namingParameters = catalogue => {
   const all = parameterIndex(allParameters(catalogue)), ids = new Set();
@@ -43,35 +43,42 @@ const ROW_STRATEGIES = {
     defaults: { enabled: false, candidates: [stringifyExactJson(p.valueKind === "connection" ? { node: String(parameterCurrent(p)[0]), slot: String(parameterCurrent(p)[1]) } : parameterCurrent(p))] } }) },
 };
 
-export function makeVariationEditor({ targets, services, currentOrigin, changed = () => {}, close = () => {},
+export function makeVariationEditor({ targets, cohortMode, services, currentOrigin, changed = () => {}, close = () => {},
   setTimer = setTimeout, clearTimer = clearTimeout }) {
   const recipe = makeVariationRecipe();
   const capturedTargets = freeze(snapshotDraft(targets));
+  // Opening facts and recipe basis stay stable; only the private Run cohort shrinks.
+  let selectedTargets = capturedTargets;
   const catalogues = new Map();
+  const generationTimes = new Map(capturedTargets.map(target => [target.id, knownGenerationTime(target.generationTimeMs) ? target.generationTimeMs : null]));
+  const timingController = new AbortController();
+  let timingTask = null;
   let locations = [];
   const imageChecks = new Map(), confirmedUploads = new Map();
   const inputCatalogues = new Map(), sourceFiles = new Map();
-  const sourceRecord = (map, origin, create) => {
-    const previous = map.get(origin.source);
+  const sourceLifetimes = new Map();
+  const sourceRecord = (map, origin, create, root = "input") => {
+    if (sameOrigin(origin, currentOrigin(origin.source)) && !sameOrigin(sourceLifetimes.get(origin.source), origin)) {
+      for (const records of [inputCatalogues, sourceFiles]) for (const [key, record] of records)
+        if (record.origin.source === origin.source) records.delete(key);
+      sourceLifetimes.set(origin.source, freeze(snapshotDraft(origin)));
+    }
+    const key = JSON.stringify([origin.source, root]), previous = map.get(key);
     if (previous && sameOrigin(previous.origin, origin)) return previous;
     if (!create) return null;
     const record = { origin: freeze(snapshotDraft(origin)), ...create() };
-    map.set(origin.source, record); return record;
+    map.set(key, record); return record;
   };
-  const cachedInput = (origin, name) => sourceRecord(sourceFiles, origin)?.files.get(name);
-  const batch = capturedTargets.length > 1;
-  let alive = true, closeGeneration = 0, deciding = false, active = null, timer = null;
-  let result = null, running = false, catalogueReady = false, acceptedRevision = null;
+  const cachedInput = (origin, name, root) => sourceRecord(sourceFiles, origin, null, root)?.files.get(name);
+  const reference = (name, root) => ({ kind: "reference", value: resourceReferenceValue(name, root) });
+  const resourceName = name => typeof name === "string" && !resourceReferenceProblem(null, name);
+  const batch = cohortMode === "bulk" || capturedTargets.length > 1;
+  let alive = true, closeGeneration = 0, decisionGeneration = 0, deciding = false, active = null, timer = null;
+  let result = null, running = false, catalogueReady = false, acceptedRevision = null, restoredWork = false;
+  const heldRecords = new Map();
   const row = recipe.row;
   const evidence = (id, item) => imageChecks.get(id)?.get(imageIdentity(item));
-  const imageView = (id, item, metadata, lookup = evidence) => {
-    if (item.kind === "target") return { ...item, name: capturedTargets[0].filename, each: batch, pending: false, error: "", sameCurrent: false };
-    const reference = imageReference(item), check = reference ? null : lookup(id, item);
-    // An existing input is the current resource when roots and names agree
-    // (`a.png` and `a.png [input]` name the same file); the raw value is kept.
-    return { ...item, ...(reference ?? {}), sameCurrent: reference ? currentRoot(metadata) === reference.root && reference.name === metadata.current
-      : !!check?.hash && check.hash === check.currentHash, pending: !reference && (!check || !!check.pending), error: check?.error ?? "" };
-  };
+  const imageView = (id, item, metadata, lookup = evidence) => recipeImageView(item, metadata, lookup(id, item), capturedTargets[0], batch);
   const notify = () => { if (alive) changed(); };
   const invalidateClose = () => { closeGeneration++; if (timer !== null) clearTimer(timer); timer = null; };
   const seed = (domain, id, metadata, defaults) => {
@@ -95,18 +102,8 @@ export function makeVariationEditor({ targets, services, currentOrigin, changed 
             node: value?.node ?? "", slot: value?.slot ?? "" };
         }) } : {}),
        ...(domain === "images" ? { images: entry.values.items.map(item => imageView(id, item, entry.metadata)) } : {}) })])));
-  const dirty = () => acceptedRevision === null ? recipe.dirty() : recipe.revision() !== acceptedRevision;
-  const parseCandidate = (parameter, raw) => {
-    let value;
-    try { value = parseExactJson(raw); } catch { throw new Error(`${parameter.label}: enter one complete JSON value. Your text is kept.`); }
-    if (parameter.candidateKind === "connection") {
-      const slot = numericText(value?.slot ?? "");
-      if (typeof value?.node !== "string" || !value.node || !Number.isSafeInteger(slot) || slot < 0) throw new Error(`${parameter.label}: choose an existing node and nonnegative output slot. Your text is kept.`);
-      value = [value.node, slot];
-    }
-    validateEditorValue(parameter, value, catalogues.get(capturedTargets[0].id)?.nodes);
-    return value;
-  };
+  const dirty = () => acceptedRevision === null ? restoredWork || selectedTargets.length !== capturedTargets.length || recipe.dirty() : recipe.revision() !== acceptedRevision;
+  const parseCandidate = (parameter, raw) => parseRecipeCandidate(parameter, raw, catalogues.get(capturedTargets[0].id)?.nodes);
   const candidateChoices = entry => (entry.metadata.options ?? []).map(value => ({ text: stringifyExactJson(value),
     label: stringifyExactJson(value),
     on: entry.values.candidates.some(raw => { try { return sameJsonValue(parseExactJson(raw), value); } catch { return false; } }) }));
@@ -117,6 +114,13 @@ export function makeVariationEditor({ targets, services, currentOrigin, changed 
   const captureRows = recipe.capture;
   const owns = ticket => alive && active === ticket;
   const originCurrent = target => validOrigin(target.origin) && sameOrigin(target.origin, currentOrigin(target.host));
+  // Byte/catalogue facts can outlive a choice. Only the row's current membership
+  // ticket admits an async edit; ordinary recipe revisions and browsing do not.
+  const membershipGenerations = new Map();
+  const membershipTicket = id => ({ id, decision: decisionGeneration, row: membershipGenerations.get(id) });
+  const admitsMembership = ticket => alive && !deciding && originCurrent(capturedTargets[0]) &&
+    ticket.decision === decisionGeneration && ticket.row === membershipGenerations.get(ticket.id);
+  const retireMembership = id => { membershipGenerations.set(id, (membershipGenerations.get(id) ?? 0) + 1); };
   const check = (ticket, target) => {
     if (!owns(ticket)) throw Object.assign(new Error("Operation retired; work was kept"), { stale: true });
     if (!originCurrent(target)) throw Object.assign(new Error("Source origin changed; no follow-up was authorized. Your work has been kept."), { stale: true });
@@ -135,7 +139,7 @@ export function makeVariationEditor({ targets, services, currentOrigin, changed 
     if (!imageChecks.has(id)) imageChecks.set(id, new Map());
     const checks = imageChecks.get(id);
     for (const item of entry.values.items) {
-      if (item.kind === "target" || imageReference(item) || checks.has(imageIdentity(item))) continue;
+      if (item.kind === "target" || item.kind === "archive" || imageReference(item) || checks.has(imageIdentity(item))) continue;
       const check = { pending: true }, identity = imageIdentity(item); checks.set(identity, check);
       let finish;
       const pending = new Promise(resolve => { finish = resolve; }); pendingInspections.add(pending);
@@ -155,122 +159,8 @@ export function makeVariationEditor({ targets, services, currentOrigin, changed 
     }
     pumpInspections();
   };
-  const previewUploads = (snapshot, lookup = evidence) => {
-    const names = new Map(), occupied = new Map(confirmedUploads);
-    for (const [id, entry] of Object.entries(snapshot.images)) for (const item of entry.values.items) {
-      for (const record of lookup(id, item)?.existing ?? []) occupied.set(record.name, record.hash);
-    }
-    for (const [id, entry] of Object.entries(snapshot.images)) {
-      if (!entry.values.enabled) continue;
-      for (const item of entry.values.items) {
-        const identity = imageIdentity(item);
-        if (item.kind === "target" || imageReference(item) || imageView(id, item, entry.metadata, lookup).sameCurrent || names.has(identity)) continue;
-        const hash = lookup(id, item)?.hash;
-        if (!hash) { names.set(identity, `\0pending-${names.size}`); continue; }
-        let name = item.name, index = 0;
-        while (occupied.has(name) && occupied.get(name) !== hash) name = uploadCandidate(item.name, ++index);
-        occupied.set(name, hash); names.set(identity, name);
-      }
-    }
-    return names;
-  };
-
-  // This compiler is the only reader that attaches producer channels to editor
-  // leaves. Dirty tracking uses the same declarations, never whole row objects.
-  const compile = (snapshot, uploadReceipts = null, preview = false, lookup = evidence, target = capturedTargets[0]) => {
-    const bindings = [], uploads = [], uploadHashes = new Map(), ranges = {}, imageParams = {}, transfers = {}, estimates = {};
-    const catalogue = catalogues.get(capturedTargets[0].id), parameters = allParameters(catalogue);
-    const uploadPreview = preview ? previewUploads(snapshot, lookup) : null;
-    const read = (domain, id, name, label) => {
-      const definition = descriptor(domain, name), entry = snapshot[domain][id];
-      const path = label === undefined ? [domain, id, name] : [domain, id, name, label];
-      const value = label === undefined ? entry.values[name] : templateValue(entry.values[name], label);
-      if (definition.channel && (label === undefined || Object.hasOwn(entry.values[name], label))) bindings.push({ channel: definition.channel, id: domain === "naming" ? name : id, path, value: snapshotDraft(value) });
-      return value;
-    };
-    for (const [id, entry] of Object.entries(snapshot.numeric)) {
-      const enabled = read("numeric", id, "enabled"); ranges[id] = { enabled };
-      if (!enabled) continue;
-      const mode = read("numeric", id, "mode");
-      if (mode === "value") {
-        const value = numberText(read("numeric", id, "value"));
-        if (value === null) throw new Error(`${entry.metadata.label}: Enter a number for Value. Your text is kept.`);
-        validateEditorValue(entry.metadata, value);
-        Object.assign(ranges[id], { min: value, max: value, increment: entry.metadata.minIncrement,
-          ...(batch ? { absolute: true } : {}) });
-      } else for (const [name, definition] of Object.entries(EDITOR_FIELDS.numeric)) if (definition.wire && definition.channel === "ranges") {
-        const value = read("numeric", id, name);
-        if (name === "rawIncrement") {
-          const parsed = increment(entry);
-          if (parsed === null && !preview) throw new Error("Enter a valid positive increment; incomplete text has been kept.");
-          ranges[id][definition.wire] = parsed ?? entry.metadata.defaultIncrement;
-        } else {
-          const parsed = numberText(value);
-          if (parsed === null) throw new Error(`${entry.metadata.label}: Enter a number for ${name === "min" ? "From" : "To"}. Your text is kept.`);
-          ranges[id][definition.wire] = parsed;
-        }
-      }
-      if (ranges[id].min > ranges[id].max) throw new Error("Minimum exceeds maximum; your values have been kept.");
-      if (!batch) for (const name of ["min", "max"]) validateEditorValue(entry.metadata, ranges[id][name]);
-      if (batch) ranges[id].clamp = [...entry.metadata.clamp];
-    }
-    for (const domain of ["images", "enums", "texts", "candidates"]) for (const [id, entry] of Object.entries(snapshot[domain])) {
-      const enabled = read(domain, id, "enabled"); imageParams[id] = { enabled, values: [] };
-      if (!enabled) continue;
-      if (domain === "images") {
-        // Resource plan stages: existing references and per-target Current image
-        // resolve now; transfers stay unresolved intents until an actual receipt.
-        const assigned = [], estimate = [], unresolved = [];
-        const items = read(domain, id, "items");
-        if (!preview && !items.length) throw new Error(`${entry.metadata.label}: add at least one image before Run`);
-        for (const item of items) {
-          const state = imageView(id, item, entry.metadata, lookup);
-          if (!preview && (state.pending || state.error)) throw new Error(state.error || "Checking image bytes; your work was kept.");
-          let value;
-          if (item.kind === "target") value = `${target.filename} [output]`;
-          else if (state.sameCurrent) value = parameterCurrent(entry.metadata);
-          else if (imageReference(item)) value = imageReferenceValue(item);
-          else {
-            const identity = imageIdentity(item);
-            admitResourceTransfer(entry.metadata);
-            uploads.push(item);
-            uploadHashes.set(identity, lookup(id, item)?.hash);
-            if (uploadReceipts?.has(identity)) value = uploadReceipts.get(identity).name;
-            else {
-              if (uploadReceipts) throw new Error(`${item.name}: upload acknowledgement unavailable; your image was kept`);
-              unresolved.push(identity);
-              // Count-only projection; never compiled, assigned or sent.
-              if (preview) estimate.push(uploadPreview.get(identity));
-              continue;
-            }
-          }
-          assigned.push(value); estimate.push(value);
-        }
-        imageParams[id].values = [...new Set(assigned)];
-        if (unresolved.length) { transfers[id] = unresolved; estimates[id] = [...new Set(estimate)]; }
-      } else if (domain === "candidates") {
-        imageParams[id].values = read(domain, id, "candidates").map(raw => parseCandidate(entry.metadata, raw));
-        if (!imageParams[id].values.length) throw new Error(`${entry.metadata.label}: add at least one value before Run`);
-      } else if (domain === "enums") {
-        imageParams[id].values = [...read(domain, id, "picks")];
-        if (!preview && !imageParams[id].values.length) throw new Error(`${entry.metadata.label}: choose at least one value before Run`);
-      }
-      else {
-        const text = read(domain, id, "text");
-        const substitutions = Object.fromEntries(templateLabels(text).map(label => [label, parseSemicolonList(read(domain, id, "tpl", label))]));
-        imageParams[id].values = expandTextAxes(text, substitutions);
-        if (!preview && !imageParams[id].values.length) throw new Error(`${entry.metadata.label}: enter values for every template label before Run`);
-      }
-    }
-    const payload = freeze({ ranges, imageParams: compileDiscreteAxes(imageParams, parameters, catalogue.nodes), automaticNaming: true,
-      prefix: read("naming", "root", "prefix"), suffix: read("naming", "root", "suffix"), ...(batch ? { relative: true } : {}) });
-    recipeDispositions(snapshot, bindings);
-    // Readonly count/naming estimate over the same plan: resolved literals plus
-    // predicted names for unresolved transfers. It authorizes no transfer or write.
-    const estimate = freeze({ ...payload, imageParams: { ...payload.imageParams,
-      ...Object.fromEntries(Object.entries(estimates).map(([id, values]) => [id, { ...payload.imageParams[id], values }])) } });
-    return { payload, estimate, transfers, uploads: [...new Map(uploads.map(item => [imageIdentity(item), item])).values()], uploadHashes };
-  };
+  const compile = (snapshot, uploadReceipts = null, preview = false, lookup = evidence, target = capturedTargets[0]) =>
+    compileRecipe(snapshot, { catalogue: catalogues.get(capturedTargets[0].id), target, batch, lookup, uploadReceipts, confirmedUploads, preview });
   const count = (payload, catalogue) => {
     const values = currentValues(catalogue);
     return permutationPlan(batch ? resolveRelativeRanges(payload.ranges, values) : payload.ranges, values, payload.imageParams).total;
@@ -282,6 +172,57 @@ export function makeVariationEditor({ targets, services, currentOrigin, changed 
   seed("naming", "root", {}, { prefix: "", suffix: "" });
   return {
     rows: view,
+    revision: recipe.revision,
+    targets: () => selectedTargets,
+    generationTime: id => selectedTargets.some(target => target.id === id && originCurrent(target)) ? generationTimes.get(id) ?? null : null,
+    removeTarget(id) {
+      if (!alive || deciding || running || selectedTargets.length <= 1 || !selectedTargets.some(target => target.id === id)) return false;
+      selectedTargets = freeze(selectedTargets.filter(target => target.id !== id));
+      recipe.edited(); invalidateClose(); notify(); return true;
+    },
+    loadGenerationTimes() {
+      if (!alive) return Promise.resolve();
+      if (timingTask) return timingTask;
+      timingTask = Promise.allSettled(capturedTargets.map(async target => {
+        if (knownGenerationTime(generationTimes.get(target.id)) || !services.generationTime || !originCurrent(target) || target.historyRef && !target.hash) return;
+        const record = await services.generationTime(target, { signal: timingController.signal });
+        if (!alive || !selectedTargets.includes(target) || !originCurrent(target) || record?.name !== target.filename || !/^[a-f0-9]{64}$/.test(record.hash ?? "") ||
+            target.hash && record.hash !== target.hash || !knownGenerationTime(record.generationTimeMs)) return;
+        generationTimes.set(target.id, record.generationTimeMs); notify();
+      })).then(() => {});
+      return timingTask;
+    },
+    async planRecall(saved) {
+      const revision = recipe.revision();
+      if (!alive || deciding || running) throw new Error("Finish the current action before recalling history");
+      const cohort = [];
+      for (const target of selectedTargets) {
+        if (!originCurrent(target)) throw new Error("Source origin changed; reopen Variations before recalling");
+        const data = catalogues.get(target.id) ?? await services.probe(target);
+        if (!alive || deciding || running || recipe.revision() !== revision || !originCurrent(target)) throw new Error("Editor changed while reading history; choose it again");
+        cohort.push(data);
+      }
+      const plan = planHistoryOverlay(saved, captureRows(), cohort, batch ? "bulk" : "single");
+      return { ...plan, revision, id: saved.id, leaseId: saved.leaseId, record: saved };
+    },
+    applyRecall(plan) {
+      if (!alive || deciding || running || plan.revision !== recipe.revision() || !selectedTargets.every(originCurrent)) return { status: "stale" };
+      if (!plan.patch.length) return { status: "unchanged" };
+      for (const id of new Set(plan.patch.filter(field => field.domain === "images" && field.name === "items").map(field => field.id))) retireMembership(id);
+      for (const field of plan.patch) write(field.domain, field.id, field.name, field.value);
+      heldRecords.set(plan.leaseId, plan.record);
+      recipe.edited(); invalidateClose(); notify();
+      return { status: "applied" };
+    },
+    restoreHistory(record) {
+      if (!alive || catalogueReady || recipe.revision()) throw new Error("History requires a fresh editor");
+      for (const target of record.targets) catalogues.set(target.id, freeze(snapshotDraft({ ...target.catalogue, context: target.context })));
+      // Archived catalogues are readonly facts, not fresh authority. The explicit
+      // opening's matched contexts fence Run independently, including offline use.
+      this.installCatalogue({ ...record.targets[0].catalogue, context: record.targets[0].context }, true);
+      recipe.restore(decodeHistoryRecipe(record));
+      restoredWork = true; heldRecords.set(record.leaseId, record); notify();
+    },
     catalogue: catalogueRows,
     setEnabled(id, enabled) { const location = locations.find(row => row.id === id); if (!location) throw new Error(`Unknown parameter: ${id}`); return this.edit(location.domain, id, "enabled", enabled); },
     candidate(id, index, raw) {
@@ -316,64 +257,74 @@ export function makeVariationEditor({ targets, services, currentOrigin, changed 
       return { ...result, state: "kept", reason: "Newer edits have been kept.", text: `submitted ${result.submitted}/${result.total} — newer edits have been kept` };
     },
     ready: () => catalogueReady,
-    sourceInputs: origin => sourceRecord(inputCatalogues, origin) ?? { files: [], pending: false, error: "" },
-    async loadSourceInputs(origin, retry = false) {
-      if (!alive || !validOrigin(origin) || !sameOrigin(origin, currentOrigin(origin.source))) return;
-      const record = sourceRecord(inputCatalogues, origin, () => ({ files: [], pending: false, error: "", loaded: false }));
+    sourceInputs: (origin, root = "input") => sourceRecord(inputCatalogues, origin, null, root) ?? { files: [], pending: false, error: "" },
+    async loadSourceInputs(origin, retry = false, root = "input") {
+      if (!alive || !["input", "output"].includes(root) || !validOrigin(origin) || !sameOrigin(origin, currentOrigin(origin.source))) return;
+      const record = sourceRecord(inputCatalogues, origin, () => ({ files: [], pending: false, error: "", loaded: false }), root);
+      const ownsRecord = () => alive && sameOrigin(origin, currentOrigin(origin.source)) && sourceRecord(inputCatalogues, origin, null, root) === record;
       if (record.pending || record.loaded && !retry) return;
       record.pending = true; record.error = ""; notify();
       try {
-        const data = await services.inputList(origin.source, origin);
-        if (!alive || !sameOrigin(origin, currentOrigin(origin.source)) || sourceRecord(inputCatalogues, origin) !== record) return;
-        if (!sameOrigin(data?.origin, origin) || !Array.isArray(data.files)) throw new Error("Source-bound input catalogue unavailable");
-        record.files = data.files.map(file => typeof file === "string" ? file : file.name).filter(filename);
+        const data = await services.inputList(origin.source, origin, root);
+        if (!ownsRecord()) return;
+        if (!sameOrigin(data?.origin, origin) || data.root !== root || !Array.isArray(data.files)) throw new Error("Source-bound image catalogue unavailable");
+        record.files = data.files.map(file => typeof file === "string" ? file : file.name).filter(resourceName);
         record.loaded = true;
-        if (sameOrigin(origin, capturedTargets[0].origin)) this.installInputs(data);
-      } catch (error) { record.error = `${origin.source}: ${error.message}`; }
+        if (root === "input" && sameOrigin(origin, capturedTargets[0].origin)) this.installInputs(data);
+      } catch (error) { if (ownsRecord()) record.error = `${origin.source}: ${error.message}`; }
       finally {
+        if (!ownsRecord()) return;
         record.pending = false;
-        if (alive && sameOrigin(origin, capturedTargets[0].origin))
+        if (root === "input" && sameOrigin(origin, capturedTargets[0].origin))
           for (const [id] of recipe.entries("images")) seed("images", id, { filesReady: true }, {});
         notify();
       }
     },
-    sourceInputState(id, origin, name) {
-      const cached = cachedInput(origin, name), item = sameOrigin(origin, capturedTargets[0].origin)
-        ? { kind: "input", name } : cached?.file ? uploadImage(cached.file) : null;
+    sourceInputState(id, origin, name, root = "input") {
+      const cached = cachedInput(origin, name, root), item = sameOrigin(origin, capturedTargets[0].origin)
+        ? reference(name, root) : cached?.file ? uploadImage(cached.file) : null;
       return { selected: !!item && row("images", id).values.items.some(other => sameImage(item, other)),
-        pending: !!cached?.pending && cached.wanted.has(id), error: cached?.error ?? "" };
+        pending: !!cached?.pending && cached.wanted.has(id) && admitsMembership(cached.wanted.get(id)), error: cached?.error ?? "" };
     },
-    async toggleSourceInput(id, origin, name) {
-      if (!alive || deciding || !filename(name) || !validOrigin(origin) || !originCurrent(capturedTargets[0]) ||
+    async toggleSourceInput(id, origin, name, root = "input") {
+      if (!alive || deciding || !["input", "output"].includes(root) || !resourceName(name) || !validOrigin(origin) || !originCurrent(capturedTargets[0]) ||
         !sameOrigin(origin, currentOrigin(origin.source))) return false;
       if (sameOrigin(origin, capturedTargets[0].origin)) {
-        const item = { kind: "input", name };
-        return this.sourceInputState(id, origin, name).selected ? this.removeImage(id, item) : this.addImages(id, [item]);
+        const item = reference(name, root);
+        return this.sourceInputState(id, origin, name, root).selected ? this.removeImage(id, item) : this.addImages(id, [item]);
       }
-      const source = sourceRecord(sourceFiles, origin, () => ({ files: new Map() }));
-      if (!source.files.has(name)) source.files.set(name, { file: null, pending: false, error: "", wanted: new Set() });
+      const source = sourceRecord(sourceFiles, origin, () => ({ files: new Map() }), root);
+      const ownsRead = () => alive && sourceRecord(sourceFiles, origin, null, root) === source && sameOrigin(origin, currentOrigin(origin.source));
+      if (!source.files.has(name)) source.files.set(name, { file: null, pending: false, error: "", wanted: new Map() });
       const cached = source.files.get(name);
       if (cached.file) {
         cached.error = "";
         const item = uploadImage(cached.file);
-        return this.sourceInputState(id, origin, name).selected ? this.removeImage(id, item) : this.addImages(id, [item]);
+        return this.sourceInputState(id, origin, name, root).selected ? this.removeImage(id, item) : this.addImages(id, [item]);
       }
-      if (cached.wanted.has(id)) cached.wanted.delete(id); else cached.wanted.add(id);
+      if (cached.wanted.has(id) && admitsMembership(cached.wanted.get(id))) cached.wanted.delete(id);
+      else cached.wanted.set(id, membershipTicket(id));
       if (cached.pending) { notify(); return; }
       cached.pending = true; cached.error = ""; notify();
       try {
-        const file = await services.readInput(origin, name);
-        if (!alive || sourceRecord(sourceFiles, origin) !== source || !sameOrigin(origin, currentOrigin(origin.source))) return;
-        if (!(file instanceof File) || file.name !== name) throw new Error("Invalid input image");
+        const resource = await services.readInput(origin, name, root);
+        if (!ownsRead()) return;
+        if (!(resource instanceof File) || resource.name !== name) throw new Error("Invalid input image");
+        // The resource port retains its full raw name. Uploads have their own
+        // flat namespace; the editor owns that leaf-named File, not the API.
+        const file = name.includes("/") ? new File([resource], name.split("/").at(-1), { type: resource.type, lastModified: resource.lastModified }) : resource;
         cached.file = file;
-        if (deciding || !originCurrent(capturedTargets[0])) throw new Error("Editor context changed; choose the image again when ready");
-        for (const rowId of cached.wanted) this.addImages(rowId, [uploadImage(file)]);
-      } catch (error) { cached.error = `${name}: ${error.message}`; }
-      finally { cached.pending = false; cached.wanted.clear(); notify(); }
+        for (const [rowId, ticket] of [...cached.wanted]) {
+          if (cached.wanted.get(rowId) !== ticket) continue;
+          cached.wanted.delete(rowId);
+          if (admitsMembership(ticket)) this.addImages(rowId, [uploadImage(file)]);
+        }
+      } catch (error) { if (ownsRead()) { cached.wanted.clear(); cached.error = `${name}: ${error.message}`; } }
+      finally { if (ownsRead()) { cached.pending = false; notify(); } }
     },
     catalogueFailure(error) { publish({ text: `Catalogue unavailable: ${error.message ?? error}. Your edits have been kept.`, ok: false, state: "unavailable" }); },
     invalidateClose,
-    decision(value) { deciding = !!value; notify(); },
+    decision(value) { deciding = !!value; if (deciding) decisionGeneration++; notify(); },
     edit(domain, id, name, value) {
       if (!alive || deciding) return false;
       write(domain, id, name, value);
@@ -396,8 +347,9 @@ export function makeVariationEditor({ targets, services, currentOrigin, changed 
       if (!alive || deciding || running) throw new Error("Finish the current action before adding a folder");
       const target = capturedTargets[0];
       if (!originCurrent(target)) throw new Error("Source origin changed; your images were kept");
+      const ticket = membershipTicket(id);
       const result = await services.listFolder(path);
-      if (!alive || deciding || running || !originCurrent(target)) throw new Error("The editor changed while reading the folder. Add it again when ready.");
+      if (running || !admitsMembership(ticket)) throw new Error("The editor changed while reading the folder. Add it again when ready.");
       if (!validImageSet(result?.items) || result.items.some(item => item.kind !== "server-path")) throw new Error("Invalid folder image listing");
       this.addImages(id, result.items);
       return { count: result.items.length };
@@ -427,10 +379,10 @@ export function makeVariationEditor({ targets, services, currentOrigin, changed 
       write("texts", id, "tpl", { ...entry.values.tpl, [label]: value });
       recipe.edited(); invalidateClose(); notify(); return true;
     },
-    installCatalogue(data) {
+    installCatalogue(data, archived = false) {
       if (!alive) return;
       const target = capturedTargets[0];
-      if (!validContext(data?.context) || !sameOrigin(data.context.origin, target.origin)) {
+      if (!archived && (!validContext(data?.context) || !sameOrigin(data.context.origin, target.origin))) {
         publish({ text: "Source-bound catalogue unavailable; your edits have been kept.", ok: false, state: "unavailable" }); return;
       }
       parameterIndex(allParameters(data)); parameterIndex(catalogueParams(data));
@@ -451,15 +403,15 @@ export function makeVariationEditor({ targets, services, currentOrigin, changed 
       catalogueReady = true; notify();
     },
     installInputs(data) {
-      if (!alive || !sameOrigin(data?.origin, capturedTargets[0].origin) || !Array.isArray(data.files)) return;
-      const files = data.files.map(file => typeof file === "string" ? file : file.name).filter(filename);
+      if (!alive || data?.root && data.root !== "input" || !sameOrigin(data?.origin, capturedTargets[0].origin) || !Array.isArray(data.files)) return;
+      const files = data.files.map(file => typeof file === "string" ? file : file.name).filter(resourceName);
       const record = sourceRecord(inputCatalogues, data.origin, () => ({}));
       Object.assign(record, { files, loaded: true, pending: false, error: "" });
       for (const [id] of recipe.entries("images")) { seed("images", id, { files, filesReady: true }, {}); inspectItems(id); }
     },
     preview() {
       const unavailable = (status, message) => ({ n: null, display: "—", fullCount: message, perImage: 0,
-        anyEnabled: false, exact: false, status, message, breakdown: "", axes: [], excluded: 0, naming: { example: "", complete: false } });
+        anyEnabled: false, exact: false, status, message, breakdown: "", axes: [], excluded: 0, naming: { example: "", complete: false }, timeEstimate: estimateGenerationTime(null, []) });
       if (!catalogueReady) return unavailable("reading", "Reading workflow…");
       const snapshot = captureRows(), first = catalogues.get(capturedTargets[0].id);
       for (const [id, entry] of Object.entries(snapshot.numeric)) if (entry.values.enabled && entry.values.mode === "range" && increment(entry) === null) {
@@ -481,7 +433,7 @@ export function makeVariationEditor({ targets, services, currentOrigin, changed 
         const selected = [...recipe.entries("images")].filter(([, entry]) => entry.values.enabled)
           .flatMap(([id, entry]) => entry.values.items.map(item => imageView(id, item, entry.metadata)));
         const pending = selected.some(item => item.pending), error = selected.find(item => item.error)?.error;
-        const perImage = plan.total, n = perImage * capturedTargets.length, safe = Number.isSafeInteger(n);
+        const perImage = plan.total, n = perImage * selectedTargets.length, safe = Number.isSafeInteger(n);
         const exact = !batch && !pending && !error && safe;
         const excluded = plan.axes.length ? plan.axes.reduce((number, axis) => number * axis.matches, 1) : 0;
         // One representative non-current tuple from the kernel, without allocating
@@ -508,14 +460,16 @@ export function makeVariationEditor({ targets, services, currentOrigin, changed 
         const factors = [...axes].sort((a, b) => (a.kind !== "images") - (b.kind !== "images")).map(axis =>
           `${axis.count.toLocaleString("en-US")} ${axis.kind === "images" ? `input image${axis.count === 1 ? "" : "s"}` : `${axis.name} value${axis.count === 1 ? "" : "s"}`}`);
         const breakdown = factors.join(" × ") + (excluded ? ` · ${excluded} unchanged combination${excluded === 1 ? "" : "s"} excluded` : "")
-          + (batch && axes.length ? ` · first-image estimate × ${capturedTargets.length} target images` : "");
+          + (batch && axes.length ? ` · workflow estimate × ${selectedTargets.length} target image${selectedTargets.length === 1 ? "" : "s"}` : "");
         const status = !naming.complete || error ? "invalid" : pending ? "checking" : "ready";
         const message = !naming.complete ? "Unresolved naming token: check Prefix and Suffix." : error ? `Image comparison failed: ${error}`
           : pending ? "Checking images…" : !n ? "Choose a different value or image to create variations."
           : !safe ? "Estimate exceeds safe integer precision; the full value is approximate."
-          : batch ? "Estimated from the first image; each target is checked before submission."
+          : batch ? "Estimated from the opening workflow; each remaining target is checked before submission."
           : n > 100 ? "Large sweep: this many jobs will be queued. The engine validates its existing per-run limit." : "";
-        return { n, perImage, anyEnabled: axes.length > 0, exact: exact && naming.complete, status, message, axes, excluded, breakdown, naming,
+        const timeEstimate = estimateGenerationTime(status === "invalid" ? null : perImage,
+          selectedTargets.map(target => originCurrent(target) ? generationTimes.get(target.id) : null));
+        return { n, perImage, anyEnabled: axes.length > 0, exact: exact && naming.complete, status, message, axes, excluded, breakdown, naming, timeEstimate,
           display: n >= 1e6 ? n < 1e15 ? new Intl.NumberFormat("en-US", { notation: "compact", maximumSignificantDigits: 4 }).format(n)
             : n.toExponential(2).replace("e+", " × 10^") : n.toLocaleString("en-US"),
           fullCount: `${n.toLocaleString("en-US", { maximumFractionDigits: 0 })}${exact ? " variations" : " variations (estimate)"}` };
@@ -526,7 +480,7 @@ export function makeVariationEditor({ targets, services, currentOrigin, changed 
       if (running || deciding) return { status: "busy" };
       if (!catalogueReady) { publish({ text: "Inspecting source context; your edits have been kept.", ok: false, state: "unavailable" }); return { status: "invalid" }; }
       invalidateClose();
-      const ticket = Object.freeze({ runId: createRunId(), editRevision: recipe.revision(), closeGeneration, snapshot: freeze(captureRows()), targets: capturedTargets });
+      const ticket = Object.freeze({ runId: createRunId(), editRevision: recipe.revision(), closeGeneration, snapshot: freeze(captureRows()), targets: selectedTargets, cohortMode: batch ? "bulk" : "single" });
       // Retain the captured inspection handles while they settle. Removing and
       // readding a path may replace live evidence, never this Run's evidence.
       const inspections = [...pendingInspections];
@@ -538,11 +492,19 @@ export function makeVariationEditor({ targets, services, currentOrigin, changed 
       const effects = { uploads: [], targets: [] };
       running = true; result = null; notify();
       try {
+        const saved = services.history ? await services.history.capture(ticket,
+          new Map([...catalogues].map(([id, catalogue]) => [id, catalogue.context])), target => check(ticket, target)) : null;
         await Promise.all(inspections);
         const runChecks = new Map([...capturedChecks].map(([id, checks]) => [id,
           new Map([...checks].map(([identity, value]) => [identity, freeze(snapshotDraft(value))]))]));
         const runEvidence = (id, item) => runChecks.get(id)?.get(imageIdentity(item));
         for (const target of ticket.targets) check(ticket, target);
+        let uploadFailure = false;
+        if (saved) operation.targetPlans = freeze(await services.history.plans(ticket, saved, target => check(ticket, target)));
+        else {
+        // Explicit narrow legacy service rigs retain their old wire contract.
+        // Application installation always supplies history and rejects unbound
+        // Run requests; capture failures never enter this compatibility branch.
         operation.compiled = compile(ticket.snapshot, null, false, runEvidence);
         if (operation.compiled.uploads.length && new Set(ticket.targets.map(target => target.origin?.address)).size > 1) throw new Error("Local-file variations across different backends are unsupported. Your files and edits have been kept.");
         for (const target of ticket.targets) check(ticket, target);
@@ -582,7 +544,7 @@ export function makeVariationEditor({ targets, services, currentOrigin, changed 
             check(ticket, uploadTarget); failures.push(error.message);
           }
         }
-        const uploadFailure = failures.length > 0;
+        uploadFailure = failures.length > 0;
         if (uploadFailure) throw new Error(failures[0]);
         operation.compiled = compile(ticket.snapshot, uploads, false, runEvidence);
         // Capture every immutable target plan before dispatch, including explicit
@@ -593,6 +555,7 @@ export function makeVariationEditor({ targets, services, currentOrigin, changed 
             acknowledgement: { version: 2, runId: ticket.runId, requestId: createRunId() } };
           return { target, operations: plan.operations, request, expectedTotal: count(request, catalogue) };
         }));
+        }
         const proofs = [];
         await Promise.all(operation.targetPlans.map(async ({ target, request, expectedTotal }) => {
           try {
@@ -614,7 +577,7 @@ export function makeVariationEditor({ targets, services, currentOrigin, changed 
               !Array.isArray(data.errors ?? []) || data.errors?.length) countsComplete = false;
             check(ticket, target);
             if (!response.ok) { failures.push(`${target.filename}: ${data?.error ?? response.text ?? `error ${response.status}`}`); return; }
-            const proof = acknowledgedFields(request, data);
+             const proof = request.history ? acknowledgedHistoryFields(request, data) : acknowledgedFields(request, data);
             for (const error of Array.isArray(data?.errors) ? data.errors : []) failures.push(error?.error ?? String(error));
             if (!proof || data.total !== expectedTotal || !sameContext(context, data.acknowledgement?.context)) {
               uncertain ||= data.outcome === "uncertain-effects" || data.submitted === data.total && !data.errors?.length;
@@ -638,8 +601,19 @@ export function makeVariationEditor({ targets, services, currentOrigin, changed 
       } catch (error) {
         if (owns(ticket)) publish({ text: error.message, ok: false, state: error.stale ? "stale" : "invalid", outcome: error.stale ? "retired" : "rejected", submitted, total, adopted: false, effects: freeze(snapshotDraft(effects)) });
         return { status: owns(ticket) ? error.stale ? "stale" : "invalid" : "stale", submitted, total, adopted: false };
-      } finally { if (owns(ticket)) { running = false; notify(); } }
+       } finally {
+         if (services.history) {
+           try { await services.history.finish(ticket.runId, result?.ok ? null : result?.reason ?? result?.text ?? null); }
+           catch (error) { if (owns(ticket)) publish({ ...result, historyError: error.message, text: `${result?.text ?? "Run ended"}; history refresh failed: ${error.message}` }); }
+         }
+         if (owns(ticket)) { running = false; notify(); }
+       }
     },
-    dispose() { alive = false; invalidateClose(); active = null; sourceFiles.clear(); inputCatalogues.clear(); },
+    dispose() {
+      alive = false; invalidateClose(); active = null; sourceFiles.clear(); inputCatalogues.clear(); sourceLifetimes.clear();
+      timingController.abort(); generationTimes.clear();
+      for (const record of heldRecords.values()) services.history?.release(record).catch(() => {});
+      heldRecords.clear();
+    },
   };
 }

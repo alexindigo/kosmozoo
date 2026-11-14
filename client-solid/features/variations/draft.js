@@ -8,21 +8,7 @@ export function createRunId() {
   return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20)}`;
 }
 
-// Owner-private snapshots: containers are copied, File references/order retained.
-export function snapshotDraft(value) {
-  if (value == null || typeof value !== "object") return value;
-  if (typeof File !== "undefined" && value instanceof File) return value;
-  if (Array.isArray(value)) return value.map(snapshotDraft);
-  return Object.fromEntries(Object.entries(value).map(([key, item]) => [key, snapshotDraft(item)]));
-}
-export function sameDraft(a, b) {
-  if (a === b) return true;
-  if (!a || !b || typeof a !== "object" || typeof b !== "object") return false;
-  if (typeof File !== "undefined" && (a instanceof File || b instanceof File)) return false;
-  if (Array.isArray(a) !== Array.isArray(b)) return false;
-  const keys = Object.keys(a);
-  return keys.length === Object.keys(b).length && keys.every((key) => Object.hasOwn(b, key) && sameDraft(a[key], b[key]));
-}
+export { snapshotDraft, sameDraft } from "/shared/features/variations/recipe-model.mjs";
 
 export function makeLeaveGuard({ dirty, suspend, restore, decision, invalidate }) {
   let pending = null, alive = true;
@@ -38,21 +24,23 @@ export function makeLeaveGuard({ dirty, suspend, restore, decision, invalidate }
     decision(null);
     try {
       const result = record.permit();
-      if (result.status !== "applied" && record.suspended) restore();
+      // A permit may update the mounted editor rather than unmount it. The
+      // surviving owner must resume every capability it suspended either way.
+      if (alive && record.suspended) restore();
       record.resolve(result);
-    } catch (error) { if (record.suspended) restore(); record.reject(error); }
+    } catch (error) { if (alive && record.suspended) restore(); record.reject(error); }
   };
   return {
     request(request) {
       if (!alive) return Promise.resolve({ status: "stale" });
       const key = JSON.stringify(request.intent);
       if (pending) return key === pending.key ? pending.promise : Promise.resolve({ status: "busy" });
-      if (request.intent.type === "automatic" && dirty()) return Promise.resolve({ status: "stale" });
+       if (request.intent.type === "automatic" && dirty(request.intent)) return Promise.resolve({ status: "stale" });
       invalidate();
       const record = { ...request, key, committing: false };
       record.promise = new Promise((resolve, reject) => { record.resolve = resolve; record.reject = reject; });
       pending = record;
-      if (!dirty()) commit(record);
+       if (!dirty(request.intent)) commit(record);
       else { record.suspended = true; suspend(); decision(record.intent); }
       return record.promise;
     },

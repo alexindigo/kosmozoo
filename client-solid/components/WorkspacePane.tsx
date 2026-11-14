@@ -7,14 +7,14 @@
 // via core.ui.anchorWidth); the pane width is owned by the store signal
 // alone — the CSS carries no duplicate default .
 
-import { createEffect, Switch, Match } from "solid-js";
+import { createEffect, createMemo } from "solid-js";
+import { Dynamic } from "solid-js/web";
 import { useAppStore } from "../store/app-store.js";
 import { useDrag } from "../lib/drag.js";
-import { DetailsBody } from "./DetailsBody.js";
-import { AnchorSpace } from "./AnchorSpace.js";
 
 export function WorkspacePane() {
   const store = useAppStore();
+  const space = createMemo(() => store.state.workspaceSpaces().find(space => space.id === store.state.workspace()));
   let asideEl;
 
   // the pane is anchored RIGHT of its own box (the wsBar sits after it, so
@@ -35,20 +35,9 @@ export function WorkspacePane() {
     <>
       <div id="divider" title="drag to resize the split" ref={dividerRef} />
       <aside id="workspace" ref={asideEl}
-        classList={{ "workspace-details": store.state.workspace() !== "anchors" }}
+        classList={{ "workspace-details": space()?.chrome === "details" }}
         style={{ width: `${store.state.anchorPaneWidth()}px` }}>
-        <Switch>
-          <Match when={store.state.workspace() === "anchors"}>
-            <div class="ws-space">
-              <AnchorSpace />
-            </div>
-          </Match>
-          <Match when={true}>
-            <div class="ws-space">
-              <DetailsBody />
-            </div>
-          </Match>
-        </Switch>
+        <div class="ws-space"><Dynamic component={space()?.component} ports={space()?.ports} /></div>
       </aside>
     </>
   );

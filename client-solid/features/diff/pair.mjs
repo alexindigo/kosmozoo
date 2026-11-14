@@ -18,7 +18,7 @@ export function pairSides({ current, workspace, anchors, anchorName, nodeImages,
   if (workspace === "anchors") {
     const pick = anchorName ?? anchors?.[0]?.name ?? null;
     if (pick) b = { source: "anchor", file: pick };
-  } else {
+  } else if (workspace === "details") {
     const imgs = nodeImages ?? [];
     if (infoFile) {
       // A node image of the current graph is addressed by root + file: a

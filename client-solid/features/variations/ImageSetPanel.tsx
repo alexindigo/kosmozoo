@@ -43,17 +43,17 @@ export function ImageSetPanel(props) {
       <Show when={!row().items.length}><p class="vz-image-empty">Add images to vary this input.</p></Show>
       <ImageGrid images={row().images} onMove={props.onMove} registerEditor={props.registerEditor}
         dropping={dropping()} onFiles={(resources, index) => { clearDrop(); addFiles(resources, index, true); }}
-        thumbnail={props.thumbnail} targetThumbnail={props.targetThumbnail} pathThumbnail={props.pathThumbnail} registerThumbnail={props.registerThumbnail}
+        thumbnail={props.thumbnail} archiveThumbnail={props.archiveThumbnail} targetThumbnail={props.targetThumbnail} pathThumbnail={props.pathThumbnail} registerThumbnail={props.registerThumbnail}
         rememberFocus={props.rememberFocus} onRemove={props.onRemove}>
         <button ref={addButton} type="button" class="vz-image-plus" aria-label="Add images" aria-expanded={adding()}
           {...focusMemory(props.rememberFocus)} onClick={() => setAdding(!adding())}>+</button>
       </ImageGrid>
       <div class="vz-image-add" hidden={!adding()}>
-        <InputPicker sources={props.sources} sourceInputs={props.sourceInputs} inputState={props.inputState}
+        <Show when={props.sources.length}><InputPicker sources={props.sources} sourceInputs={props.sourceInputs} inputState={props.inputState}
           onSource={props.onSource} onRetrySource={props.onRetrySource} registerTabKeys={props.registerTabKeys}
-          current={(row().currentRoot ?? (row().fromOutput ? "output" : "input")) === "input" ? row().current : null} positionRevision={row().images} thumbnail={props.inputThumbnail} registerThumbnail={props.registerThumbnail}
+          current={row().current} currentRoot={row().currentRoot ?? (row().fromOutput ? "output" : "input")} positionRevision={row().images} thumbnail={props.inputThumbnail} registerThumbnail={props.registerThumbnail}
           onToggle={props.onToggleInput}
-          registerPopup={props.registerPopup} registerEditor={props.registerEditor} rememberFocus={props.rememberFocus} />
+          registerPopup={props.registerPopup} registerEditor={props.registerEditor} rememberFocus={props.rememberFocus} /></Show>
         <input type="file" ref={fileInput} class="vz-imgfilespick" hidden multiple accept="image/*" onChange={e => {
           addFiles({ files: [...e.currentTarget.files] }); e.currentTarget.value = "";
         }} />
@@ -180,7 +180,7 @@ function ImageGrid(props) {
             props.onMove(item(), index); event.currentTarget.focus({ preventScroll: true });
           } else if (['Delete', 'Backspace'].includes(event.key)) { event.preventDefault(); props.onRemove(item()); }
         }}>
-        <ImageTile item={item} thumbnail={props.thumbnail} targetThumbnail={props.targetThumbnail} pathThumbnail={props.pathThumbnail} registerThumbnail={props.registerThumbnail}
+        <ImageTile item={item} thumbnail={props.thumbnail} archiveThumbnail={props.archiveThumbnail} targetThumbnail={props.targetThumbnail} pathThumbnail={props.pathThumbnail} registerThumbnail={props.registerThumbnail}
           rememberFocus={props.rememberFocus} onRemove={() => props.onRemove(item())} />
       </div>;
     }}</For>
@@ -193,7 +193,7 @@ function ImageTile(props) {
   const file = createMemo(() => props.item()?.file), name = createMemo(() => props.item()?.name), path = createMemo(() => props.item()?.path);
   createEffect(() => {
     if (!name()) return;
-    if (!file()) { setUrl(props.item()?.kind === "target" ? props.targetThumbnail() : path() ? props.pathThumbnail(path()) : props.thumbnail(name(), props.item()?.root)); return; }
+    if (!file()) { setUrl(props.item()?.kind === "target" ? props.targetThumbnail() : props.item()?.kind === "archive" ? props.archiveThumbnail(props.item()) : path() ? props.pathThumbnail(path()) : props.thumbnail(name(), props.item()?.root)); return; }
     const src = URL.createObjectURL(file()); setUrl(src); onCleanup(() => URL.revokeObjectURL(src));
   });
   // Local File previews are object URLs; engine thumbnails are admitted

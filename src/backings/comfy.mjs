@@ -6,6 +6,7 @@ import { assertSafeName } from "./folder.mjs";
 import { isEntryPath, splitEntryPath, inventoryFolders } from "../entry-path.mjs";
 import { makeInventoryOwner } from "./inventory-owner.mjs";
 import { makeMetadataCollector, interpretHeaders } from "./comfy-metadata.mjs";
+import { makeGenerationTimes } from "./comfy-generation.mjs";
 import { InventoryError, bounded, cancelled } from "./inventory.mjs";
 import { cloneJsonValue, parseExactJson, stringifyExactJson } from "../parameters.mjs";
 
@@ -613,6 +614,40 @@ export function comfyClient(addr, { fetcher = fetch, clock = () => performance.n
     return r.json();
   };
   const object = (v) => v && typeof v === "object" && !Array.isArray(v);
+  const generationTimes = makeGenerationTimes();
+  let historyReady = false, fullHistoryTask = null;
+  const readHistory = async ({ maxItems, promptId, signal } = {}) => {
+    const path = promptId ? `/api/history/${encodeURIComponent(promptId)}`
+      : `/api/history${maxItems === undefined ? "" : `?max_items=${maxItems}`}`;
+    const d = await telemetry(path, signal);
+    if (!object(d)) throw new Error("ComfyUI history: invalid object");
+    const records = Object.entries(d).map(([id, entry]) => {
+      if (!object(entry) || (entry.status !== undefined && !object(entry.status))) {
+        throw new Error("ComfyUI history: invalid entry");
+      }
+      const status = entry.status;
+      if (status && (typeof status.completed !== "boolean" || typeof status.status_str !== "string" || !Array.isArray(status.messages))) {
+        throw new Error("ComfyUI history: invalid status");
+      }
+      const messages = status?.messages ?? [];
+      const interrupted = messages.some((m) => Array.isArray(m) && m[0] === "execution_interrupted");
+      const failed = messages.some((m) => Array.isArray(m) && m[0] === "execution_error");
+      const terminal = !!status && (status.completed || status.status_str === "error" || interrupted || failed);
+      return { id, terminal, outcome: interrupted ? "interrupted" : failed || status?.status_str === "error" ? "error" : terminal ? "success" : null };
+    });
+    if (!disposed) {
+      generationTimes.observe(d);
+      if (maxItems === undefined && !promptId) historyReady = true;
+    }
+    return records;
+  };
+  const history = (options = {}) => {
+    if (options.maxItems !== undefined || options.promptId) return readHistory(options);
+    if (!fullHistoryTask) {
+      fullHistoryTask = readHistory(options).finally(() => { fullHistoryTask = null; });
+    }
+    return fullHistoryTask;
+  };
   return {
     addr,
     inventory(options) { assertAlive(); return owner.inventory(options); },
@@ -626,6 +661,7 @@ export function comfyClient(addr, { fetcher = fetch, clock = () => performance.n
     },
     async disposeInventory() {
       disposed = true;
+      generationTimes.clear();
       await owner.disposeInventory();
       metadata.dispose();
       await Promise.allSettled([configTask].filter(Boolean));
@@ -649,25 +685,13 @@ export function comfyClient(addr, { fetcher = fetch, clock = () => performance.n
           otherClient: !!row[3]?.client_id,
         }])) };
     },
-    async history({ maxItems, promptId, signal } = {}) {
-      const path = promptId ? `/api/history/${encodeURIComponent(promptId)}`
-        : `/api/history${maxItems === undefined ? "" : `?max_items=${maxItems}`}`;
-      const d = await telemetry(path, signal);
-      if (!object(d)) throw new Error("ComfyUI history: invalid object");
-      return Object.entries(d).map(([id, entry]) => {
-        if (!object(entry) || (entry.status !== undefined && !object(entry.status))) {
-          throw new Error("ComfyUI history: invalid entry");
-        }
-        const status = entry.status;
-        if (status && (typeof status.completed !== "boolean" || typeof status.status_str !== "string" || !Array.isArray(status.messages))) {
-          throw new Error("ComfyUI history: invalid status");
-        }
-        const messages = status?.messages ?? [];
-        const interrupted = messages.some((m) => Array.isArray(m) && m[0] === "execution_interrupted");
-        const failed = messages.some((m) => Array.isArray(m) && m[0] === "execution_error");
-        const terminal = !!status && (status.completed || status.status_str === "error" || interrupted || failed);
-        return { id, terminal, outcome: interrupted ? "interrupted" : failed || status?.status_str === "error" ? "error" : terminal ? "success" : null };
-      });
+    history,
+    async generationTime(name) {
+      if (disposed || !isEntryPath(name)) return null;
+      if (!historyReady) {
+        try { await history(); } catch { return null; }
+      }
+      return disposed ? null : generationTimes.read(name);
     },
     async logs({ signal } = {}) {
       const d = await telemetry("/internal/logs/raw", signal);

@@ -1,9 +1,13 @@
 // client/js/api.mjs — engine API client. The SPA is one client of the
 // engine's public API (docs/spec.md ).
 import { subscribeSources } from "./source-events.mjs";
+import { validItemArrivals } from './source-events.mjs';
+import { validOrigin } from '/shared/source-origin.mjs';
 import { collectionEntriesUrl, entryUrl, entryBytesUrl } from "./entry-url.mjs";
 export { collectionEntriesUrl, entryUrl, entryBytesUrl, resourceSource, parseResourceSource } from "./entry-url.mjs";
 export { compareSourceVersions, validSourceVersion, validSourceCursor, validateSourceSnapshot } from "./source-events.mjs";
+export { validItemArrivals } from './source-events.mjs';
+export { containsSequence, insertRange, subtractRanges, equalRanges } from './sequence-ranges.mjs';
 
 const BASE = ""; // same origin
 
@@ -54,14 +58,18 @@ export async function postRaw(path, body, { json = JSON } = {}) {
 const enc = encodeURIComponent;
 
 export const api = {
-  subscribeSources,
+  subscribeSources: callbacks => subscribeSources(callbacks, { items: true }),
   runtime: (options) => req("GET", "/api/runtime", undefined, options),
   collections: (options) => req("GET", "/api/collections", undefined, options),
   addCollection: (name, address) => req("POST", "/api/collections", { name, address }),
   removeCollection: (name) => req("DELETE", `/api/collections/${enc(name)}`),
   patchCollection: (name, attributes) => req("PATCH", `/api/collections/${enc(name)}`, attributes),
   entries: (collection) => req("GET", collectionEntriesUrl(collection)),
-  inventory: (collection) => req("GET", `${collectionEntriesUrl(collection)}?inventory=1`),
+  inventory: async (collection) => {
+    const reply = await req('GET', `${collectionEntriesUrl(collection)}?inventory=1&arrivals=items-v1`);
+    if (!validOrigin(reply?.origin) || !validItemArrivals(reply?.arrivals)) throw new Error('Missing or invalid item arrival inventory');
+    return reply;
+  },
   entryBytesUrl,
   inputBytesUrl: (collection, name) => entryBytesUrl(collection, name, { kind: "input" }),
   setJudgment: (collection, name, fields) => req("PATCH", `${entryUrl(collection, name)}/judgment`, fields),

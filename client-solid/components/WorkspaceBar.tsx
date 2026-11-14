@@ -4,23 +4,15 @@
 
 import { iconSvg } from "/js/icons.mjs";
 import { useAppStore } from "../store/app-store.js";
+import { For } from "solid-js";
 
 export function WorkspaceBar() {
   const store = useAppStore();
   return (
     <nav id="wsBar">
-      <button
-        title="image details"
-        class={store.state.workspace() === "details" ? "on" : ""}
-        onClick={() => store.handles.invoke("workspace.select", { space: "details" })}
-        innerHTML={iconSvg("info-circle", 16)}
-      />
-      <button
-        title="anchors"
-        class={store.state.workspace() === "anchors" ? "on" : ""}
-        onClick={() => store.handles.invoke("workspace.select", { space: "anchors" })}
-        innerHTML={iconSvg("anchor", 16)}
-      />
+      <For each={store.state.workspaceSpaces()}>{space => <button title={space.title} aria-label={space.title}
+        data-workspace={space.id} classList={{ on: store.state.workspace() === space.id }}
+        onClick={() => store.handles.invoke("workspace.select", { space: space.id })} innerHTML={iconSvg(space.icon, 16)} />}</For>
     </nav>
   );
 }

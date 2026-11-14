@@ -32,6 +32,7 @@ export function Modal(props) {
     <Portal mount={document.body}>
       <div
         id={props.overlayId}
+        ref={element => onCleanup(store.actions.feed.occluder(element))}
         class={"modal-backdrop" + (props.class ? " " + props.class : "")}
         onClick={(e) => { if (e.target === e.currentTarget) close(); }}
       >

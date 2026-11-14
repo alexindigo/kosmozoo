@@ -23,6 +23,16 @@ module.exports = async ({cdp,shot,ENGINE,FAKE,E,KZ,write}) => {
   await cdp.poll(`document.querySelector('${text}').scrollTop>0`);await shot('preview-scroll');
   const scroll=await cdp.evaluate(`({top:document.querySelector('${text}').scrollTop,page:scrollY,catalogue:document.querySelector('.vz-catalogue-list').scrollTop})`);
   assert.equal(scroll.page,before.page);assert.equal(scroll.catalogue,before.catalogue);
+  // Mouse focus is not hover. Clicking/scrolling must not latch an empty selection.
+  await cdp.clickAt(text);await cdp.mouse('mouseMoved',1,1,{buttons:0});
+  await cdp.poll(`!document.querySelector('${popup}')`,1500);
+  await move(trigger);await cdp.poll(`!!document.querySelector('${popup}')`);
+  await cdp.clickAt(trigger);await cdp.mouse('mouseMoved',1,1,{buttons:0});
+  await cdp.poll(`!document.querySelector('${popup}')`,1500);
+  await cdp.evaluate(`document.querySelector('${trigger}').focus({preventScroll:true})`);
+  await cdp.evaluate('new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve)))');
+  assert.equal(await cdp.evaluate(`!!document.querySelector('${popup}')`),false,'focus alone cannot open a hover preview');
+  await move(trigger);await cdp.poll(`!!document.querySelector('${popup}')`);await move(text);
   await cdp.evaluate(`window.__previewText=document.querySelector('${text}');window.__previewText.focus({preventScroll:true})`);
   await move(trigger);await move(text);
   assert(await cdp.evaluate(`document.querySelector('${text}')===window.__previewText&&window.__previewText.scrollTop===${scroll.top}`));
@@ -31,7 +41,8 @@ module.exports = async ({cdp,shot,ENGINE,FAKE,E,KZ,write}) => {
   await cdp.mouse('mousePressed',points.x,points.y,{clickCount:1});
   await cdp.mouse('mouseMoved',points.right,points.y,{buttons:1});await cdp.mouse('mouseReleased',points.right,points.y,{clickCount:1});
   await cdp.poll(`String(window.getSelection())===${JSON.stringify(first)}`);await shot('preview-selected');
-  await cdp.mouse('mouseMoved',1,1);await new Promise(r=>setTimeout(r,350));
+  // Retain native selection across unrelated changes while actually hovered.
+  await new Promise(r=>setTimeout(r,350));
   assert.equal(await cdp.evaluate('String(window.getSelection())'),first);
   assert(await cdp.evaluate(`!!document.querySelector('${popup}')`));
   await cdp.evaluate('window.__previewText.scrollTop=500');
@@ -44,6 +55,18 @@ module.exports = async ({cdp,shot,ENGINE,FAKE,E,KZ,write}) => {
   assert.equal(await cdp.evaluate('String(window.getSelection())'),first);
   assert(await cdp.evaluate(`document.querySelector('${text}')===window.__previewText&&window.__previewText.scrollTop===500`));
   fs.writeFileSync(`${E}/native-retention.json`,JSON.stringify({selection:await cdp.evaluate('String(window.getSelection())'),sameDOM:await cdp.evaluate(`document.querySelector('${text}')===window.__previewText`),scroll,afterSettlement:await cdp.evaluate(`window.__previewText.scrollTop`),recipeUpdate:true,inputCatalogueSettlement:true},null,2));
+  await cdp.mouse('mouseMoved',1,1,{buttons:0});await cdp.poll(`!document.querySelector('${popup}')`,1500);
+  await cdp.evaluate('getSelection().removeAllRanges()');
+  await cdp.evaluate('new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve)))');
+  assert.equal(await cdp.evaluate(`!!document.querySelector('${popup}')`),false,'selection settlement cannot reopen');
+  await move(trigger);await cdp.poll(`!!document.querySelector('${popup}')`);
+  await move(text);await cdp.evaluate('window.__previewText.scrollTop=0');
+  const outside=await cdp.evaluate(`(()=>{const r=document.querySelector('.vz-title').getBoundingClientRect();return {x:r.x+r.width/2,y:r.y+r.height/2}})()`);
+  await cdp.mouse('mousePressed',points.x,points.y,{clickCount:1});
+  await cdp.mouse('mouseMoved',outside.x,outside.y,{buttons:1});await cdp.poll(`!document.querySelector('${popup}')`,1500);
+  await cdp.mouse('mouseReleased',outside.x,outside.y,{clickCount:1});
+  assert(await cdp.evaluate('!!document.querySelector(".vz-panel")&&!document.querySelector(".vz-discard")'),'dragging into editor chrome dismisses only the preview');
+  await move(trigger);await cdp.poll(`!!document.querySelector('${popup}')`);
   await cdp.keyTrusted('Escape',{vk:27});await cdp.poll(`!document.querySelector('${popup}')`);
   assert(await cdp.evaluate('!!document.querySelector(".vz-panel")'));
   const geometry=[];
@@ -55,7 +78,13 @@ module.exports = async ({cdp,shot,ENGINE,FAKE,E,KZ,write}) => {
     assert(g.p.left>=7&&g.p.top>=7&&g.p.right<=width-7&&g.p.bottom<=height-7);
     const points=[...g.path.matchAll(/L([\d.]+),([\d.]+)/g)].map(m=>[Number(m[1]),Number(m[2])]);
     const tip=points.find(point=>Math.abs(point[1]-(g.above?g.p.height:0))<0.01);
-    assert(tip&&Math.abs(g.p.left+tip[0]-(g.t.left+g.t.right)/2)<1);geometry.push(g);await shot(`preview-${width}x${height}`);
+    assert(tip&&Math.abs(g.p.left+tip[0]-(g.t.left+g.t.right)/2)<1);
+    const bridge={x:(g.t.left+g.t.right)/2,y:g.above?(g.p.bottom+g.t.top)/2:(g.t.bottom+g.p.top)/2};
+    await cdp.mouse('mouseMoved',bridge.x,bridge.y,{buttons:0});
+    assert(await cdp.evaluate(`!!document.elementFromPoint(${bridge.x},${bridge.y})?.closest('.value-preview')`),'gap belongs to the popup hover surface');
+    await move(text);await new Promise(r=>setTimeout(r,350));
+    assert(await cdp.evaluate(`!!document.querySelector('${popup}')&&document.querySelector('${trigger}').parentElement.matches(':hover')`));
+    geometry.push({...g,bridge});await shot(`preview-${width}x${height}`);
     await cdp.keyTrusted('Escape',{vk:27});
   }
   await cdp.send('Emulation.setDeviceMetricsOverride',{width:1600,height:1000,deviceScaleFactor:1,mobile:false});
@@ -73,6 +102,15 @@ module.exports = async ({cdp,shot,ENGINE,FAKE,E,KZ,write}) => {
   await cdp.poll('!!document.querySelector(".vz-discard")');assert.equal(await cdp.evaluate(`!!document.querySelector('${popup}')`),false);
   await cdp.clickAt('.vz-discard-confirm');await cdp.poll('!!document.querySelector("[data-catalogue-id=\\"92:105.seed\\"]")');
   const unsafe='[data-catalogue-id="92:105.seed"] .value-preview-trigger';
+  await cdp.send('Emulation.setDeviceMetricsOverride',{width:1024,height:360,deviceScaleFactor:1,mobile:false});
+  await cdp.evaluate(`document.querySelector(${JSON.stringify(unsafe)}).scrollIntoView({block:'end'})`);await move(unsafe);await cdp.poll(`!!document.querySelector('${popup}')`);
+  const above=await cdp.evaluate(`(()=>{const p=document.querySelector('${popup}'),t=document.querySelector(${JSON.stringify(unsafe)}).getBoundingClientRect(),r=p.getBoundingClientRect();return {above:p.classList.contains('value-preview-above'),x:(t.left+t.right)/2,y:(r.bottom+t.top)/2}})()`);
+  assert(above.above,'short viewport exercises actual above placement');
+  await cdp.mouse('mouseMoved',above.x,above.y,{buttons:0});
+  assert(await cdp.evaluate(`!!document.elementFromPoint(${above.x},${above.y})?.closest('.value-preview')`),'above gap is hit-testable');
+  await move(text);await new Promise(r=>setTimeout(r,350));assert(await cdp.evaluate(`!!document.querySelector('${popup}')`));
+  await cdp.mouse('mouseMoved',1,1,{buttons:0});await cdp.poll(`!document.querySelector('${popup}')`);
+  await cdp.send('Emulation.setDeviceMetricsOverride',{width:1600,height:1000,deviceScaleFactor:1,mobile:false});
   await cdp.evaluate(`document.querySelector(${JSON.stringify(unsafe)}).scrollIntoView({block:'center'})`);await move(unsafe);await cdp.poll(`!!document.querySelector('${popup}')`);
   assert.equal(await cdp.evaluate(`document.querySelector('${text}').textContent`),'18446744073709551615');await shot('preview-unsafe-integer');
   const address=await cdp.evaluate(`(async()=>${KZ}.state.hosts.fake.address)()`);
@@ -85,5 +123,5 @@ module.exports = async ({cdp,shot,ENGINE,FAKE,E,KZ,write}) => {
   assert((await fetch(ENGINE+'/api/collections/preview-owner',{method:'DELETE'})).ok);
   await cdp.poll(`(async()=>!${KZ}.state.hosts['preview-owner'])()`);await cdp.poll(`!document.querySelector('${popup}')`);
   fs.writeFileSync(`${E}/value-preview.json`,JSON.stringify({full,selection:first,scroll,before,geometry},null,2));
-  console.log('PASS value preview real gap travel, wheel containment, native drag selection, Escape, filter retirement and six viewports');
+  console.log('PASS hover-only preview: click/focus/selection/drag exit dismiss; CSS above/below gap; native selection/scroll retention while hovered; Escape, retirement and six viewports');
 };

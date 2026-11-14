@@ -40,9 +40,9 @@ the resources; a collection's `capabilities` answer what its backing can do.
 | `/api/collections/<id>` | PATCH | partial `{pinned?: boolean, autoRefresh?: boolean}`; validates the complete object before writing; invalid fields/types/null/arrays/malformed JSON are 400, unknown source is 404, empty object is a no-op; returns saved booleans and their committed `sourceVersion` without host/folder probing |
 | `/api/collections/<id>` | DELETE | remove; refuses the last collection |
 | `/api/events` | GET | one native SSE delivery connection per app tab; complete version1 authoritative cached source maps, no upstream probe/list/monitor creation |
-| `/api/collections/<id>/entries` | GET | the feed listing: size, hash, state, meta, judgment, and dims - content dimensions once hashed, provisional entry dimensions only before hashing. Gone entries are excluded. `?inventory=1` returns the coherent output envelope described below; default remains an array. `?kind=input` lists the input dir instead; any other `kind` is 400 (temp has no listing and never falls back to the output inventory) |
+| `/api/collections/<id>/entries` | GET | the feed listing: size, hash, state, meta, judgment, and dims - content dimensions once hashed, provisional entry dimensions only before hashing. Gone entries are excluded. `?inventory=1` returns the coherent output envelope described below; default remains an array. `?kind=input` lists the input dir instead; any other `kind` is 400 (temp has no listing and never falls back to the output inventory). Add `catalogue=images-v1` with an expected origin for `{files, origin, root}`: image-only input or visible output inventory, fenced before/after IO; legacy shapes are unchanged. |
 | `/api/collections/<id>/entries/<name>` | GET | one entry |
-| `/api/collections/<id>/entries/<name>/meta` | GET | one shown entry's record `{name, hash, extracted, meta, width, height}`, independent of the delta stream; an entry without a hash is first ingested through the single-flight high lane for at most 8 s; `extracted:false` means not available yet (unreadable source or the wait elapsed) |
+| `/api/collections/<id>/entries/<name>/meta` | GET | one shown entry's record `{name, hash, extracted, meta, width, height, generationTimeMs}`, independent of the delta stream; an entry without a hash is first ingested through the single-flight high lane for at most 8 s; `extracted:false` means not available yet (unreadable source or the wait elapsed); nullable generation timing is described below |
 | `/api/collections/<id>/entries` | POST | multipart upload into the input dir; **409 with the conflicting name, never an overwrite** |
 | `/api/collections/<id>/entries/<name>` | DELETE | per capability: folder → unlink; comfy + assets_plus → trash; otherwise → hide + history cleanup |
 | `/api/collections/<id>/entries/<name>/bytes` | GET | cache-first bytes of one resource root: absent `kind` or `output` (the feed entry), `?kind=input` or `?kind=temp` (referenced files); an unknown `kind` is 400, never another root. ETag is the content hash, `Cache-Control: no-cache`; single-byte ranges (§Serve path). HEAD uses the same root and reports the content length |
@@ -172,25 +172,58 @@ or concurrently newer requests remain pending with bounded retry.
 Listing schedules no ingestion writes; the existing worker/want paths acquire
 dimensions and bytes.
 
-Complete inventory acceptance observes visible names in memory, independently
-of file timestamps and ingestion. Each name gets a per-source session sequence
-once; relists/revalidation do not manufacture arrivals. The existing source stream
-delivers only `{sequence,latestVisibleSeq}` to all browsers, or null before the
-first complete inventory. Missing/hidden/gone/deleted entries do not contribute
-to `latestVisibleSeq`; deletion retires membership immediately. Inventory entries
-carry their `arrivalSeq`. Source retirement discards this in-memory history.
-Inventory/removal and committed hide/gone changes refresh the small arrival
-projection using output-name-only exclusion queries. Unchanged projections do
-not publish; Jobs progress reads the cached projection without loading entry
-metadata or walking the inventory. Source retirement clears that cache too.
+Complete inventory acceptance observes names in memory, independently of timestamps
+and ingestion. Each name gets one per-source incarnation sequence; ordinary relists,
+attribute updates and same-name content changes do not manufacture arrivals.
+Retirement discards that namespace and rejects late snapshots. Inventory entries
+restored to visibility between observations receive any missing sequence before
+the next publication. Snapshot acceptance commits only after publication succeeds.
+Inventory entries
+carry `arrivalSeq`. Default inventories and source events retain the exact legacy
+`{sequence,latestVisibleSeq}` projection, or null before the first accepted inventory.
 
-Each browser baselines its own in-memory seen value at the first projection,
-keeps its viewed source current, and clears attention when opening another source.
-An unselected source is new while its latest visible sequence exceeds that value.
-Reload starts quiet; nothing is persisted or written back to the engine. Selected
-sources never show orange. Pills and picker entries consume the same state and
-“New images.” wording, using `--attention` for text/edge without pulsing or layout
-change. There is no extra transport or browser inventory poll.
+`arrivals=items-v1` opts the existing inventory request and single EventSource into
+`{sequence,latestVisibleSeq,revision,visibleRanges}`. Ranges are canonical inclusive
+positive integer pairs: dense, ascending, disjoint, nonadjacent and within sequence.
+`latestVisibleSeq` is their maximum, or zero when empty. Missing/hidden/gone outputs
+are excluded. Lower-member removal changes revision even when the maximum stays
+unchanged. Contradictory equal revisions, older revisions and malformed ranges reject
+atomically. Opted-in inventory includes shared `origin` (source/address/kind/epoch/
+incarnation). Its entries, visibility overlay and arrival projection synchronously
+use the token's latest accepted snapshot after the awaited inventory read.
+
+Inventory/removal and committed hide/gone boundaries refresh immutable membership
+and its cached JSON fragment using name-only exclusions. Jobs progress never walks
+names, metadata or interval arrays. Demand-only event encoding keeps chunks at most
+16384 bytes and one active plus latest pending immutable frame. Fragmented membership
+has O(intervals) payload, not constant size. Legacy and opted-in delivery share the
+same connection, retry and backpressure owner. Production clients require negotiated
+telemetry; absent-telemetry injected test fixtures never create acknowledgment state.
+
+Each browser baselines quietly at its first non-null projection. One session-only
+ledger retains exact exposed intervals above that baseline; unseen is live membership
+above the baseline minus those intervals. Opening/selecting a source, assigning current,
+accepting a listing, mounting, decoding or prefetching alone never acknowledges it.
+Actual matching loaded feed media must intersect positive uncovered feed/visual-viewport
+area in a genuinely visible tab, without dwell. Paused video and painted audio faces use
+that same display contract; placeholders, failed decode and Details/workbench previews
+do not qualify. App-owned modal/workbench, popup, status, preview and sticky-foot bounds
+subtract only their painted coverage. Native surface/clip/root/occluder observers and
+coalesced frames sample geometry and visibility changes without requiring feed scroll;
+pagehide disconnects native observation, pageshow rebinds, and replacement/disposal fence
+retired callbacks. Store tickets also fence source/session/name/sequence/known-content
+and native resource retirement. First-hash enrichment preserves the same content.
+
+Source pills, picker rows, persistent rail segments and favicon consume that one ledger,
+including selected and unpinned sources. Reload starts quiet; no read state is persisted
+or written to the engine. Source text/edge uses `--attention` and shared "New images."
+wording, without pulsing/layout change. Rail ticks preserve judgment/current bodies and
+one-third `--warning` unseen segments, independently of the one-shot arrival animation.
+The favicon caches the original 64px swan with a stationary 20px `--negative` upper-right
+dot and 4px `--foreground-bright` separator. Last unseen removal/exposure and adapter
+retirement restore original href/type/sizes exactly; late decode cannot revive it.
+Title, installed icon, splash and header logo stay unchanged. No additional transport,
+background fetch or inventory poll is introduced.
 Runtime source membership reconciles the existing headless workers as boot does,
 so a new unselected source does not await browser demand to join observation.
 
@@ -237,6 +270,109 @@ generation destination.
 
 Feature routes mount under `/api/features/<name><path>`: `variations`
 serves `GET /probe/<id>` + `POST /run` (a core feature module, not a plugin).
+
+### Image generation time
+
+Details renders a separate bordered `Generation time: <duration>` box directly
+below the filename/dimensions/size header. Unknown timing renders exactly
+`Generation time: --`, including local/folder images. Duration uses compact
+hours/minutes/seconds, preserving subsecond and genuine zero values. In narrow
+columns the value can flow below the intact single-line label.
+
+The existing address-owned Comfy binding learns optional timing from ordinary
+history reads. Matching `execution_start` and `execution_success` timestamps for
+one successfully completed prompt supply execution wall time, excluding queue
+wait. Its output descriptors bind full subfolder/filename plus output root;
+input/temp entries, missing or invalid/foreign/reversed timestamps and ambiguous
+multiple producers never supply a duration. Ordinary telemetry's public shape,
+completion semantics and polling cadence are unchanged. The shown-entry record
+can coalesce a first retained-history read when that binding has no full baseline.
+Optional timing failure does not remove graph metadata.
+
+The metadata record adds `generationTimeMs: number | null` and accepts the same
+optional expected-origin header/query as resource-byte reads, fencing source
+replacement before and after acquisition. Store's existing
+shown-record owner acquires it even for populated graphs and refreshes it when
+the existing source stream advances completion/recovery evidence, not on progress
+ticks or a new poller. Source incarnation and content hash fence asynchronous
+application. Other images never inherit the selected image's timing.
+
+Learned observations stay with the engine's address binding until retirement.
+No image bytes, settings, content-extractor facts or SQLite schema change. If
+timing is lost from both that engine lifetime and upstream history, the box is --;
+there is no guessed backfill or second durable job-history database.
+
+The Variations summary places a smaller two-line `Estimated time:` block next to
+its dominant count. Multiply each known captured original-image duration by the
+preview's per-image job count and sum. Complete timing coverage displays e.g.
+`12m`; partial coverage displays `above 12m`; no usable time/count displays `--`.
+Bulk retains its existing first-image count estimate, so time is a workload
+estimate based on that same displayed count, not a queue ETA or backend scheduler.
+Edited parameters can change speed; independent backends may execute concurrently.
+
+The private editor owns captured timing facts and one abortable acquisition of
+missing facts through injected metadata services. Byte hashes when known, expected
+origin and editor lifetime fence publication. A history opening uses archived
+target-resource hashes, never its graph hashes or an unverified replacement name.
+Timing settlement is readonly: it cannot edit the recipe, dirty a draft, adopt a
+Run, reset its close timer or change selection. Count changes derive the estimate
+again without new timing fetches. Labels remain single-line, with value below;
+the count/time share grid rows and the breakdown spans both columns.
+
+Multi-target Variations also shows a bottom batch-target strip: each target's
+thumbnail, filename, original generation duration (or `--`) and remove action.
+This is the target cohort, not a Load Image candidate set. Removing affects only
+this editor; the main gallery selection, image files and saved runs are untouched.
+Count/time and the next Run capture use exactly the remaining targets, in order.
+The strip disappears at one remaining image. Removal keeps raw edits and the
+opening workflow/range basis, participates in dirty/revision/close protection,
+and is unavailable while Run or a blocking decision owns the editor. Issued Run
+tickets stay immutable. Lazy thumbnails use the existing display owner; timing
+uses the existing readonly source/hash-fenced facts. Archived targets retain
+their original archive resource indexes for display after removal.
+
+History's `cohortMode` denotes absolute (`single`) or relative (`bulk`) recipe
+basis, independently of cardinality: `single` requires exactly one target;
+`bulk` allows one or more. Shrinking a batch never reinterprets existing ranges.
+Original saved-run openings restore that explicit basis. No schema migration or
+modification of existing saved runs is required.
+
+#### Durable Variations snapshots
+
+The engine owns version1 raw recipe snapshots, original target graphs/pixels and
+declared image inputs independently of ordinary cache and mutable source names.
+The original v2 Run context and acknowledgement shape remain unchanged. Optional
+`history:{id,snapshotHash,targetIndex,planHash}` binds a Run to a sealed engine
+snapshot and the engine-prepared request. A correlated response echoes `history`
+outside the acknowledgement. Legacy Run requests remain compatible.
+
+| # | Variations route | Method | Contract |
+|---|---|---|---|
+| 1 | `/history` | GET | Newest-first summary pages, `limit`1-100 (default50), opaque `before` cursor; format, independent revision, items and nextCursor. Lists never load full graphs/image sets. |
+| 2 | `/history` | POST | Begin `{runId,format:1,cohortMode,targets,recipe,resources}` before resource acquisition/effects. Same validated capture is idempotent; conflicting reuse is409. Raw incomplete editor strings remain data. |
+| 3 | `/history/<id>/resources/<resourceId>` | PUT | Octet-stream bytes for a reserved browser image occurrence. The engine hashes them; repeated changed bytes conflict. |
+| 4 | `/history/<id>/prepare` | POST | Archive ordered targets/declared graph inputs/raw selected and dormant image items, seal the immutable snapshot and preflight all target contracts. Missing bytes or invalid edits retain an inspectable failed attempt and authorize no upstream effects. |
+| 5 | `/history/<id>` | GET | Detail/raw recipe, target facts and resource manifest; incomplete attempts explicitly report their archive state. |
+| 6 | `/history/<id>/open` | POST | Acquire an editor lease, return original data and fresh matched-source contexts; missing/offline sources preserve inspection without retargeting. |
+| 7 | `/history/<id>/leases/<leaseId>` | DELETE | Release a draft pin without deleting another run's resources. |
+| 8 | `/history/<id>/resources/<resourceId>/bytes?lease=<id>` | GET | Hash-verified member bytes; the shared ETag/range/sandbox/nosniff response owner. A valid retained lease can read a deleted row's resources. |
+| 9 | `/history/<id>/uploads/<targetIndex>-<resourceId>` | POST | Materialize an active target requirement from archived bytes with `{targetIndex,resourceId,origin,snapshotHash}`. Reuse a named resource only after a fresh matching hash; otherwise use the existing backing upload/collision receipt. |
+| 10 | `/history/<id>/prepare-target` | POST | Same target/origin/snapshot binding; compile actual resource receipts to one stable requestId/planHash/expectedTotal and final v2 request. The graph remains engine-private. |
+| 11 | `/history/<id>/finish` | POST | Record a client error/end observation; outcome/counts derive from durable engine effects, never caller-invented success. |
+| 12 | `/history/<id>` | DELETE | Idempotent tombstone from history, retaining open-draft/admitted-work pins. Never deletes source images, jobs or judgments. |
+
+Every upload/permutation has a durable admission claim before its external call.
+Duplicate requests return stored evidence or pending/uncertain, never redispatch.
+An interrupted started effect becomes uncertain at restart; unfinished captures
+become interrupted. Neither automatically resumes. Submitted means queue acceptance,
+not generation completion. Completed snapshot data is immutable; only outcome
+evidence changes. New Runs have new IDs. Archive failure prohibits effects.
+
+Named-resource proof uses opt-in `Ingest.ensure(...,{fresh:true})`: fresh flights
+cannot join cache-hit flights but share the same source fences, four-read address
+gate and ingestion pipeline. Ordinary callers stay cache-first. Saved target graphs
+come only from engine snapshot membership, never arbitrary client graphs or today's
+replacement filename. Fresh authority cannot silently retarget an old opening.
 
 Plugin routes mount under `/api/plugins/<name><path>`:
 
@@ -890,10 +1026,10 @@ Ordinary rail ticks use the existing subdued `--foreground-dim` neutral through
 shared card-state presentation; card neutrals, judgment colors/priorities, wave
 length/glow, geometry, tape windowing and scrub handlers retain their contracts.
 
-New inventory identities in the current source, or entries newer than the seen
-floor captured before opening another source, light their rail ticks once for
+New inventory identities in the current source, or entries above its separate
+last-observed inventory ceiling when opening another source, light their tick bodies once for
 1400ms. Store inventory acceptance owns event publication and its accepted sequence
-independently of source-stream seen advancement. The rail takes the entire event
+independently of source-stream exposure membership. The rail takes the entire event
 once when candidates become size-ready, including identities outside its filter/tape window;
 scrolling, rerendering and remounting cannot replay it. Source navigation/disposal
 retires pending events. The rail owns its native animations and cancels on tick
@@ -959,9 +1095,12 @@ synthetic outside-click propagation. Features contribute command definitions,
 data bindings and affordances through the registry, without feature-name dispatch.
 
 Variations owns one private recipe/editor per dialog mount and captured target
-set. Closing or replacing it releases its raw buffers and exact File references;
-every reopening starts fresh. There is no recipe switcher, retained workspace or
-disk persistence. A source change retains the captured-origin fence and cannot
+set. Closing or replacing it releases its raw buffers and exact File references.
+Ordinary openings start from fresh defaults; explicit history recall creates a new
+editable owner from a saved immutable Run, never an old draft or accepted timer.
+Every application Run begins durable history before resource preparation and uses
+engine-journaled uploads/plans/effects. Opening, recalling and editing create no
+entry; each explicit rerun creates a distinct entry. A source change retains the captured-origin fence and cannot
 retarget an open draft. Mounted components own decision, focus/caret, widgets,
 timers and Run leases. Its bridge contains opening metadata, a fresh scalar
 session and owner-safe request capabilities only. Dirty close/replacement shows
@@ -972,6 +1111,54 @@ one terminal Promise/continuation/permit; conflicts return busy, and stale/dispo
 error paths settle safely. Raw incomplete increment text survives blur unchanged.
 SliderRow retires active widget listeners with the matching original-target
 terminal adaptation and quarantines that physical gesture through release/cancel.
+
+The installed history client owns coalesced summary/detail reads, pagination,
+errors, deletion fencing and readonly leased records. Interest, focus/pageshow and
+owned mutations refresh it without polling. The compact dialog dropdown and the
+right-panel history share entry/value/image presentation. Only the latter deletes;
+image-set inspection has its own action and virtualized ordered contact sheet.
+Both reuse native Thumbnail admission and exact-value previews. Archive handles
+stay lazy rather than becoming downloaded browser Files.
+
+Disposal synchronously fences open admission and retires listeners/UI roots, then
+returns a plain cleanup promise draining known leases and every already-admitted
+open. Each lease joins one serial DELETE transaction, with at most one retry in
+that retirement pass. Concurrent disposal shares the drain; acknowledged leases
+cannot be re-enrolled. Terminal failures remain retained with rejected cleanup
+outcomes and an error; a later explicit pass may retry them. Open POSTs, uploads
+and Runs never retry through cleanup. Store teardown is not an awaited contract.
+
+Dialog recall overlays compatible active contributors onto its current targets.
+Unrelated and dormant buffers remain intact; overlapping unsent changes use the
+existing leave guard. Text overlays merge only labels used by the saved text and
+detect overlap per label. A surviving guard owner resumes its suspended children
+after an applied in-place transition, not just after cancellation.
+Missing/type/choice/resource/naming mismatches warn and skip;
+single-absolute and bulk-relative Ranges never convert implicitly. Values remain
+absolute. Recall and compilation share complete active numeric validation, including
+exact ordered endpoints and the destination increment floor, before any row patch.
+Invalid saved attempts and dormant Value-mode range text remain archived unchanged.
+Pending foreign-image reads and folder listings share editor-owned membership
+tickets. Successful recall retires only choices for image rows whose membership
+it replaces; numeric-only recall, typing, browsing and unrelated pending rows keep
+their intent. Blocking decision entry retires all old membership tickets. Readonly
+byte/catalogue facts retain their own lifetimes, and a new explicit choice can use
+an older pending read's validated File without inheriting its retired intent.
+An empty compatible overlay reports `No compatible changes were applied.` and
+closes the dropdown without entering the leave guard. It preserves raw state,
+revision, accepted close eligibility, prior caption and prior leases; only the
+newly opened lease is released. Non-empty compatible overlays keep their existing
+edit semantics even when their values equal the current values. Right-panel
+recall restores original ordered targets, archived catalogue and every raw leaf,
+without probing today's same-named graph. Offline or replaced sources permit
+inspection/editing but offer no Run; they cannot retarget that editor.
+
+Workspace descriptors are registered generically before rendering. Assembly
+supplies Details/Anchors components; installed features supply their own component
+and ports. Membership validates workspace commands, and the saved choice resolves
+once after registration. Unknown choices fall back to Details. Only the selected
+component mounts; other spaces inherit no Details/Anchors navigation, metadata
+interest or comparator side. Width/divider ownership remains unchanged.
 
 The feature-private `makeVariationRecipe` owns registered raw editable fields,
 clean baselines, codecs and the global recipe revision. The mounted
@@ -1683,7 +1870,7 @@ port. Unavailable/unknown/conflicting native app capability uses the selected-po
 ordinary-browser URL with a whitelisted transient Store-owned status notice;
 no prefs/registry/profile/lock reset or notice persistence is performed.
 
-### Schema (`metadata.db`, `PRAGMA user_version = 9`, ordered migrations)
+### Schema (`metadata.db`, `PRAGMA user_version = 10`, ordered migrations)
 
 Content is what the bytes are; a collection is a namespace of names backed
 by a host or folder; an entry is one instance's state in one collection.
@@ -1739,6 +1926,38 @@ so a partial/version-write interrupted migration can be retried. Source flags
 are canonical SQLite attributes, shared by browsers and retained across restarts;
 they are not engine settings or browser convenience storage. Runtime activity
 and revision epochs are ephemeral and never persisted.
+
+v9-to-v10 transactionally adds five isolated tables without altering legacy rows:
+`variation_run` (immutable raw/sealed snapshots, summary, state and tombstone),
+`variation_asset` (verified hash/size/MIME, no byte BLOB), `variation_asset_ref`
+(ordered logical resource membership), `variation_effect` (immutable request/digest,
+claim and actual receipt) and `variation_lease` (editor/execution pins). The separate
+`variations.history.revision` KV key never advances the inventory/metadata cursor.
+The migration is retry-safe after its separate version write. Only Store owns SQL.
+
+Durable bytes live under `<state>/archives/<ab>/<hash>`, distinct from ordinary
+cache. The context injects one hash-locked archive capability. Atomic byte writes
+precede reference publication; reads verify hashes and reject symlink/nonregular
+objects. Failed publication rolls back newly created objects under the same hash
+lock only when no reference owns them. Logical candidates/order stay distinct even when bytes deduplicate.
+Deleting a run releases only its unpinned references. Last-reference collection
+can remove only archive-owned objects. Orphan editor pins are retained rather
+than expiring a possibly unsaved draft. Completed tombstones keep replay fencing,
+not full deleted configuration bodies.
+
+Store atomically claims a target effect and acquires a fresh request-owned
+execution pin. Each completed dispatch releases only its pin, independently of
+sibling targets; started/uncertain durable effects continue protecting bytes.
+Upload settlement retries the same tombstone collection path. Client release
+ownership survives failed DELETEs for coalesced retries on activation/disposal;
+transport loss or browser disappearance never authorizes expiry of unsaved drafts.
+Startup first marks unfinished effects uncertain, then retires only dead server
+execution pins and reuses the same deleted-run retirement predicate. Editor pins,
+visible records and started/uncertain effects retain their resources. Context
+awaits hash-locked archive collection of durable unreferenced asset rows before
+exposing the engine. Collection failure rejects initialization through owned cleanup
+and leaves the uncollected rows retryable on later startup; feature registration
+remains synchronous and IO-free. Recovery never uploads, enqueues or replays effects.
 
 ### Cache (`~/.local/share/kosmozoo/cache/`, override `KOZMOZOO_CACHE`)
 

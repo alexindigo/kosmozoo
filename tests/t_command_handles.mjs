@@ -117,6 +117,54 @@ Deno.test("input: scoped widget arrows route through the dispatcher without esca
   assertEquals(moves, [1]);
 });
 
+Deno.test("input: scoped capture decline falls through across independent groups without weakening consumption or blockers", async () => {
+  const r = inputRig(), moves = [];
+  let rejected;
+  for (const group of ["source", "feed"]) {
+    r.handles.register({ id: group, execute: args => {
+      moves.push([group, args.step]);
+      return group === "source" ? false : rejected ?? Promise.resolve(false);
+    } });
+    r.layers.push({ id: group, command: group, phase: "capture",
+      keys: { ArrowLeft: { step: -1 }, ArrowRight: { step: 1 }, Home: { step: "first" }, End: { step: "last" } },
+      decline: event => !event.target.matches(group) });
+  }
+  for (const group of ["source", "feed"]) for (const [key, step] of [["ArrowLeft", -1], ["ArrowRight", 1], ["Home", "first"], ["End", "last"]]) {
+    const event = r.event(key, group), before = moves.length;
+    assert(r.policy.dispatch(event, r.km, "capture"));
+    assert(r.policy.dispatch(event, r.km));
+    assertEquals(moves.slice(before), [[group, step]]);
+    assertEquals([event.prevented, event.stopped], [1, 1]);
+  }
+  for (const group of ["div", "source", "feed"]) for (const mods of group === "div" ? [{}] : [{ ctrlKey: true }, { altKey: true }, { metaKey: true }, { shiftKey: true }]) {
+    const event = r.event("ArrowRight", group, mods), before = moves.length;
+    assert(!r.policy.dispatch(event, r.km, "capture"));
+    assertEquals([event.prevented, event.stopped, moves.length], [0, 0, before]);
+  }
+  r.layers.push({ id: "decision", blocking: true });
+  for (const group of ["source", "feed"]) {
+    const event = r.event("Home", group), before = moves.length;
+    assert(!r.policy.dispatch(event, r.km, "capture"));
+    assertEquals([event.prevented, event.stopped, moves.length], [0, 0, before]);
+  }
+  r.layers.pop();
+  rejected = Promise.reject(new Error("scoped capture rejection"));
+  const event = r.event("End", "feed");
+  assert(r.policy.dispatch(event, r.km, "capture"));
+  assert(r.policy.dispatch(event, r.km));
+  await assertRejects(() => rejected);
+  await Promise.resolve();
+  assertEquals(r.errors.map(error => error.message), ["scoped capture rejection"]);
+  // Non-keyed capture Escape keeps its modifier policy; bubble routing is unchanged.
+  r.handles.register({ id: "popup", execute: () => { moves.push(["popup"]); return false; } });
+  r.layers.push({ id: "popup", command: "popup", phase: "capture" });
+  const escape = r.event("Escape", "select", { ctrlKey: true });
+  assert(r.policy.dispatch(escape, r.km, "capture"));
+  assert(r.policy.dispatch(escape, r.km));
+  assertEquals(moves.at(-1), ["popup"]);
+  assertEquals([escape.prevented, escape.stopped], [1, 1]);
+});
+
 Deno.test("keys: preserved default identities/order plus media playback and permissive programmatic setup", () => {
   assertEquals(CORE_BINDINGS.map(({ id, key, ctx }) => [id, key, ctx]), [
     ["app.keys", "?", "global"], ["keys.close", "Escape", "keys"], ["wb.close", "Escape", "workbench"],

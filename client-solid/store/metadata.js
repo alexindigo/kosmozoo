@@ -6,7 +6,7 @@
 export function makeMetadata({ acquisition, owns, want, meta, nodes, status, entry,
   setPending, setNodes, setStatus, apply, adopt, batch, capture = () => null,
   priorityFor = item => item.priority, now = () => performance.now(),
-  retryDelay = attempt => Math.min(500 * 2 ** attempt, 8000) }) {
+  retryDelay = attempt => Math.min(500 * 2 ** attempt, 8000), needsEntry = image => !image.meta }) {
   let context = null, version = 0, retired = false;
   const nodesDirty = new Map();
   let nodeRevision = 0;
@@ -220,14 +220,14 @@ export function makeMetadata({ acquisition, owns, want, meta, nodes, status, ent
     const owner = context;
     if (!current(owner)) return;
     const wanted = new Map();
-    for (const image of entries) if (image && !image.meta) wanted.set(image.id, image);
+    for (const image of entries) if (image && needsEntry(image)) wanted.set(image.id, image);
     for (const [id, item] of shown) {
       const image = wanted.get(id);
-      if (!image || (image.hash ?? "") !== item.identity) { clearTimeout(item.timer); shown.delete(id); }
+      if (!image || (image.hash ?? "") !== item.identity || image.recordRevision !== item.recordRevision) { clearTimeout(item.timer); shown.delete(id); }
     }
     for (const [id, image] of wanted) {
       if (shown.has(id)) continue;
-      const item = { id, name: image.filename, identity: image.hash ?? "", attempt: 0, task: null, timer: null, settled: false };
+      const item = { id, name: image.filename, identity: image.hash ?? "", recordRevision: image.recordRevision, attempt: 0, task: null, timer: null, settled: false };
       shown.set(id, item);
       readShown(item, owner);
     }
@@ -246,7 +246,7 @@ export function makeMetadata({ acquisition, owns, want, meta, nodes, status, ent
       // One identity-fenced application; a refused record (the listing knows
       // different content) settles this identity until the listing moves on.
       let outcome = false;
-      batch(() => { outcome = adopt(item.name, record, owner, item.identity); });
+      batch(() => { outcome = adopt(item.name, record, owner, item.identity, item.recordRevision); });
       item.settled = true;
       if (outcome === "graph") { nodesDirty.set(item.name, ++nodeRevision); await refreshNodes(owner); }
     }, () => { item.task = null; retryShown(item, owner); });

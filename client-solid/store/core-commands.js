@@ -129,7 +129,7 @@ export function registerCoreCommands(handles, { ops, state, clipboard = (text) =
     if (index !== undefined) return ops.feed.reveal(index);
   });
   add("feed.top", {}, () => ops.feed.scrollTop());
-  add("workspace.select", { space: oneOf("details", "anchors") }, ({ space }) => ops.ui.setWorkspace(space));
+  add("workspace.select", { space: value => typeof value === "string" && (state.workspaceSpaces?.().some(space => space.id === value) ?? ["details", "anchors"].includes(value)) }, ({ space }) => ops.ui.setWorkspace(space));
   add("metadata.layout", { layout: oneOf("split", "rev", "stacked", "stacked-rev") }, ({ layout }) => ops.ui.setInfoLayout(layout));
   add("metadata.group.toggle", { group: string }, ({ group }) => ops.ui.infoGroup.toggle(group));
   add("menu.toggle", {}, () => ops.ui.toggleMenu());

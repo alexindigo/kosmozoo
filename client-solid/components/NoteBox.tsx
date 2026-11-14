@@ -6,8 +6,11 @@
 // typed edit — no DOM value writes, no hand-called onInput. The parent
 // supplies onSave(text) (returning its promise) and getNeighborText(dir).
 
+import { createEffect, createSignal, onCleanup } from "solid-js";
 import { useAppStore } from "../store/app-store.js";
+import { flash } from "../lib/flash.js";
 import { TextField } from "./TextField.js";
+import { NoteActions } from "./NoteActions.js";
 
 export function NoteBox(props) {
   const store = useAppStore();
@@ -16,13 +19,32 @@ export function NoteBox(props) {
   // unsaved draft first, then the judgment note
   const text = () => store.state.drafts[key()] ?? props.initialValue ?? "";
 
-  const onInput = (e) =>
-    store.actions.notes.setDraft(props.noteId, props.sign, e.target.value, props.onSave);
+  const [saved, setSaved] = createSignal(false);
+  let alive = true, revision = 0;
+  const flashSaved = flash(value => { if (alive) setSaved(value); });
+  onCleanup(() => { alive = false; });
+  const clearSaved = () => { revision++; setSaved(false); };
+  createEffect(() => { key(); clearSaved(); });
+  // This observes the injected save result only. Store still owns drafts,
+  // autosave, blur flushing and persistence, including after this field retires.
+  const save = () => {
+    const id = props.noteId, sign = props.sign, version = revision, onSave = props.onSave;
+    return (value, originId) => Promise.resolve(onSave(value, originId)).then(result => {
+      if (result?.ok && alive && originId === id && props.noteId === id && props.sign === sign &&
+          version === revision && text() === value) flashSaved();
+      return result;
+    });
+  };
+  const onInput = (e) => {
+    clearSaved();
+    store.actions.notes.setDraft(props.noteId, props.sign, e.target.value, save());
+  };
   const onBlur = () =>
-    store.actions.notes.flushDraft(props.noteId, props.sign, props.onSave);
+    store.actions.notes.flushDraft(props.noteId, props.sign, save());
   const copyFrom = (dir) => {
+    clearSaved();
     const t = props.getNeighborText(dir);
-    if (t) store.actions.notes.setDraft(props.noteId, props.sign, t, props.onSave);
+    if (t) store.actions.notes.setDraft(props.noteId, props.sign, t, save());
   };
 
   return (
@@ -35,10 +57,7 @@ export function NoteBox(props) {
         onInput={onInput}
         onBlur={onBlur}
       />
-      <div class="btnrow">
-        <button onClick={() => copyFrom(1)}>copy from below</button>
-        <button onClick={() => copyFrom(-1)}>copy from above</button>
-      </div>
+      <NoteActions sign={props.sign} saved={saved()} onCopy={copyFrom} />
     </div>
   );
 }

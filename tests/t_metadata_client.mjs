@@ -266,6 +266,45 @@ function shownFixture(overrides = {}) {
   return { ...f, store, records, polls, list, release: reply => held?.(reply) };
 }
 
+Deno.test("metadata shown record: optional timing is read with an already populated graph and fenced on navigation", async () => {
+  const held = deferred(), adopted = [];
+  const f = fixture({
+    needsEntry: image => !image.meta || image.generationTimeMs === undefined,
+    entry: async (_source, name) => name === "old.png" ? held.promise : { name, meta: { nodes: [] }, extracted: true, generationTimeMs: null },
+    adopt: (name, record) => { adopted.push([name, record.generationTimeMs]); return "applied"; },
+  });
+  try {
+    f.channel.show([{ id: "source:old.png", filename: "old.png", hash: "old", meta: { nodes: [] } }]);
+    await flush();
+    f.channel.show([{ id: "source:new.png", filename: "new.png", hash: "new", meta: { nodes: [] } }]);
+    await flush();
+    held.resolve({ name: "old.png", meta: { nodes: [] }, extracted: true, generationTimeMs: 140138 });
+    await flush();
+    assertEquals(adopted, [["new.png", null]], "late timing cannot decorate the newly selected image");
+    f.channel.show([{ id: "source:new.png", filename: "new.png", hash: "new", meta: { nodes: [] }, generationTimeMs: null }]);
+    await flush(); assertEquals(adopted.length, 1, "an authoritative unavailable result is not a polling loop");
+  } finally { f.dispose(); held.resolve({}); }
+});
+
+Deno.test("metadata shown record: completion evidence refreshes timing without a new polling loop", async () => {
+  let reads = 0;
+  const image = { id: "source:image.png", filename: "image.png", hash: "hash", meta: true, recordRevision: "first" };
+  const f = fixture({
+    needsEntry: value => value.recordRevision !== value.generationTimeRevision,
+    entry: async () => ({ meta: { nodes: [] }, extracted: true, generationTimeMs: ++reads === 1 ? null : 140138 }),
+    adopt: (_name, record, _owner, _hash, revision) => {
+      image.generationTimeMs = record.generationTimeMs; image.generationTimeRevision = revision; return "applied";
+    },
+  });
+  try {
+    f.channel.show([image]); await flush(); assertEquals(image.generationTimeMs, null);
+    f.channel.show([image]); await flush(); assertEquals(reads, 1);
+    image.recordRevision = "completion";
+    f.channel.show([image]); await flush(); assertEquals(image.generationTimeMs, 140138);
+    f.channel.show([image]); await flush(); assertEquals(reads, 2);
+  } finally { f.dispose(); }
+});
+
 Deno.test("metadata shown record: a delta consumed by a pre-listing snapshot cannot strand the shown entry", async () => {
   const f = shownFixture();
   try {

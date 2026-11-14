@@ -9,7 +9,7 @@
 
 import { createSignal, createEffect, createMemo, For, Show } from "solid-js";
 import { useAppStore, clampSplit } from "../store/app-store.js";
-import { fmtBytes } from "../store/fields.js";
+import { fmtBytes, fmtGenerationTime } from "../store/fields.js";
 import { useDrag } from "../lib/drag.js";
 import { flash } from "../lib/flash.js";
 import { useMeasuredSrc } from "../lib/img-measure.js";
@@ -154,6 +154,7 @@ function Head(props) {
   };
 
   return (
+    <>
     <div class="ws-head">
       <div class="ws-name" title={name()}>{name()}</div>
       <div class="ws-sub">{subText()}</div>
@@ -178,5 +179,10 @@ function Head(props) {
         )}
       </Show>
     </div>
+    <div class="ws-generation">
+      <span class="ws-generation-label">Generation time:</span>{" "}
+      <span class="ws-generation-value">{fmtGenerationTime(props.im.generationTimeMs)}</span>
+    </div>
+    </>
   );
 }

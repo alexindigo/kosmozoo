@@ -32,6 +32,9 @@ import { ParameterCatalogue } from "./ParameterCatalogue.js";
 import { CandidateEditor } from "./CandidateEditor.js";
 import { makeKeyboardReveal } from "./keyboard-reveal.js";
 import { UPLOAD_IMG_EXT } from "../../store/fields.js";
+import { HistoryDropdown } from "./HistoryDropdown.js";
+import { historyCount, historyDate } from "./HistoryEntry.js";
+import { BatchTargets } from "./BatchTargets.js";
 
 export function VariationsModal() {
   const store = useAppStore();
@@ -56,7 +59,7 @@ export function VariationsModal() {
       {(session) => {
         const images = [...store.state.variations.images].map(snapshotDraft);
         return <Modal class="vz-root" closeCommand="variations.close" closeArgs={{ session }}>
-          <ModalBody session={session} images={images} />
+          <ModalBody session={session} images={images} cohortMode={store.state.variations.cohortMode} historyRef={snapshotDraft(store.state.variations.historyRef)} />
         </Modal>;
       }}
     </Show>
@@ -70,13 +73,23 @@ function ModalBody(props) {
   // batch = more than one image: ranges become RELATIVE offsets from each
   // image's own current value (resolved by the plugin at run time), and the
   // count shows the total across the whole selection.
-  const batch = props.images.length > 1;
+  const batch = props.cohortMode === "bulk" || props.images.length > 1;
   const [version, setVersion] = createSignal(0);
-  const editor = makeVariationEditor({ targets: props.images, services,
+  const editor = makeVariationEditor({ targets: props.images, cohortMode: props.cohortMode, services,
     currentOrigin: host => sourceOrigin(host, store.state.hosts[host]),
     changed: () => setVersion(value => value + 1),
     close: () => store.handles.invoke("variations.close", { automatic: true, session: props.session }) });
+  onMount(() => { editor.loadGenerationTimes(); });
+  const original = props.historyRef ? services.history.retained(props.historyRef.id, props.historyRef.leaseId) : null;
+  if (original) editor.restoreHistory(original);
+  const [historyCaption, setHistoryCaption] = createSignal(original ? `${historyCount(original)} | ${historyDate(original.createdAt)} | ${image.filename}` : "");
+  const [recallWarnings, setRecallWarnings] = createSignal([]);
+  const [recallStatus, setRecallStatus] = createSignal(null);
+  const [recallNotice, setRecallNotice] = createSignal("");
+  let alive = true, recalling = null;
+  onCleanup(() => { alive = false; });
   const read = getter => { version(); return getter(); };
+  const targets = () => read(editor.targets);
   const rows = () => read(() => editor.rows("numeric"));
   const imgRows = () => read(() => editor.rows("images"));
   const enumRows = () => read(() => editor.rows("enums"));
@@ -151,12 +164,55 @@ function ModalBody(props) {
   let restoreFocus = () => {};
   const rememberFocus = (restore) => { restoreFocus = restore; };
   const focus = focusMemory(rememberFocus);
-  const guard = makeLeaveGuard({ dirty: editor.dirty,
+  const guard = makeLeaveGuard({ dirty: intent => intent?.type === "apply-history" ? intent.overlap : editor.dirty(),
     suspend: () => { for (const child of children) child.suspend(); },
     restore: () => { for (const child of children) child.resume(); restoreFocus(); },
     decision: value => { setDecision(value); editor.decision(value); }, invalidate: editor.invalidateClose });
   onCleanup(store.actions.variations.registerOwner(props.session, { requestLeave: guard.request, requestRun: editor.run }));
   onCleanup(() => { editor.dispose(); guard.dispose(); });
+  const settleRecall = promise => {
+    if (recalling?.promise !== promise) return;
+    recalling = null;
+    if (alive) setRecallNotice("");
+  };
+  const recall = id => {
+    if (!alive) return Promise.resolve({ status: "stale" });
+    if (recalling) {
+      if (recalling.id === id) return recalling.promise;
+      setRecallNotice("Another recall is in progress. This selection was not applied.");
+      return Promise.resolve({ status: "busy" });
+    }
+    setRecallNotice("");
+    const revision = editor.revision();
+    const promise = (async () => {
+      const saved = await services.history.open(id);
+      let transferred = false;
+      try {
+        if (!alive || guard.pending() || editor.revision() !== revision) return { status: "stale" };
+        const plan = await editor.planRecall(saved);
+        // Even a clean guard invalidates accepted close eligibility. An empty
+        // overlay is a terminal selection, not an editor transition.
+        const result = !plan.patch.length ? editor.applyRecall(plan) : await guard.request({ intent: { type: "apply-history", id, leaseId: saved.leaseId, revision, overlap: plan.overlap },
+          cancel() {}, permit: () => editor.applyRecall(plan) });
+        if (result.status === "applied") {
+          transferred = true; setHistoryCaption(`${historyCount(saved)} | ${historyDate(saved.createdAt)}`);
+        }
+        if (result.status === "applied" || result.status === "unchanged") {
+          setRecallWarnings(plan.warnings); setRecallStatus(result.status);
+        }
+        return result;
+      } finally {
+        // The transition has settled. Lease cleanup remains owned by the
+        // history client (failures stay retained for retry); it must neither
+        // delay this terminal result nor coalesce the next user action into it.
+        settleRecall(promise);
+        if (!transferred) services.history.release(saved).catch(() => {});
+      }
+    })();
+    recalling = { id, promise };
+    promise.finally(() => settleRecall(promise)).catch(() => {});
+    return promise;
+  };
   // refs exist solely to read the live selection and restore the caret
   // after an explicit parameter insert.
   let prefixEl, suffixEl;
@@ -186,11 +242,12 @@ function ModalBody(props) {
 
   // The complete recorded graph is the catalogue, independent of live schema.
   // Per-source input readiness settles separately from editable recipe work.
-  const [probe] = createResource(() => services.probe(image));
+  const [probe] = createResource(() => original ? Promise.resolve(null) : services.probe(image));
   const [folderCapability] = createResource(() => services.folderCapability());
 
   let initializedProbe = false;
   createEffect(() => {
+    if (original) return;
     if (probe.loading) return;
     if (initializedProbe) return;
     initializedProbe = true;
@@ -198,7 +255,13 @@ function ModalBody(props) {
     else editor.installCatalogue(probe());
   });
 
-  const inputSources = createMemo(() => [image.origin, ...services.inputSources().filter(origin => origin.source !== image.host)]);
+  const inputSources = createMemo(() => [image.origin, ...services.inputSources().filter(origin => origin.source !== image.host)].filter(Boolean));
+  const targetThumbnail = () => original ? services.historyThumbnail({ runId: original.id, resourceId: "target-0", leaseId: original.leaseId }) : services.inputThumbnail(image.host, image.filename, image.origin, "output");
+  const batchThumbnail = target => original ? services.historyThumbnail({ runId: original.id,
+    resourceId: `target-${props.images.findIndex(image => image.id === target.id)}`, leaseId: original.leaseId })
+    : services.inputThumbnail(target.host, target.filename, target.origin, "output");
+  const currentThumbnail = row => original ? services.historyThumbnail({ runId: original.id, resourceId: original.targets[0].graphResources[row.id], leaseId: original.leaseId }) : services.inputThumbnail(image.host, row.current, image.origin, row.currentRoot);
+  const unavailable = () => targets().find(target => target.unavailable)?.unavailable ?? (original && !targets().every(target => sameOrigin(target.origin, sourceOrigin(target.host, store.state.hosts[target.host]))) ? "Original source unavailable or changed. Reopen this saved run after reconnecting." : null);
   let initializedImages = false;
   createEffect(() => {
     if (!read(editor.ready) || !strParams().length) return;
@@ -228,9 +291,10 @@ function ModalBody(props) {
     const unlayer = store.actions.keys.pushLayer({ id: "variations-images", command: "variations.images.close", phase: "capture" });
     return () => { unlayer(); disown(); };
   };
-  const registerTabKeys = capability => {
-    const disown = store.handles.own("variations.tabs.move", capability.move);
-    const unlayer = store.actions.keys.pushLayer({ id: "variations-source-tabs", command: "variations.tabs.move", phase: "capture",
+  const registerTabKeys = (capability, group = "source") => {
+    const command = group === "feed" ? "variations.feed-tabs.move" : "variations.tabs.move";
+    const disown = store.handles.own(command, capability.move);
+    const unlayer = store.actions.keys.pushLayer({ id: `variations-${group}-tabs`, command, phase: "capture",
       keys: { ArrowLeft: { step: -1 }, ArrowRight: { step: 1 }, Home: { step: "first" }, End: { step: "last" } },
       decline: event => !capability.contains(event.target) });
     return () => { unlayer(); disown(); };
@@ -279,8 +343,11 @@ function ModalBody(props) {
     <div class="vz-panel" data-session={props.session}>
       <div ref={editorSurface} class="vz-editor" inert={!!decision()}>
         <SingleLineText class="vz-title" value={batch
-            ? `Generate image variations · applying to ${props.images.length} images`
+            ? `Generate image variations · applying to ${targets().length} image${targets().length === 1 ? "" : "s"}`
             : "Generate image variations"} />
+        <HistoryDropdown history={services.history} state={services.historyState} thumbnail={services.historyThumbnail} registerThumbnail={services.registerThumbnail}
+          registerPopup={registerImagePopup} registerEditor={registerEditor} rememberFocus={rememberFocus} bulk={batch}
+          caption={historyCaption()} warnings={recallWarnings()} recallStatus={recallStatus()} notice={recallNotice()} onRecall={recall} />
         <div ref={bodyScroll} class="vz-body-scroll"><div class="vz-body">
           <div class="vz-catalogue">
             <div class="vz-filter-tools">
@@ -292,7 +359,7 @@ function ModalBody(props) {
             <ParameterCatalogue sections={catalogueSections()} row={id => catalogueById().get(id)} matches={fieldMatches}
               registerPopup={registerImagePopup} registerEditor={registerEditor}
               previewActive={!decision() && sameOrigin(image.origin, sourceOrigin(image.host, store.state.hosts[image.host]))}
-              thumbnail={row => services.inputThumbnail(image.host, row.current, image.origin, row.currentRoot)} registerThumbnail={services.registerThumbnail}
+              thumbnail={currentThumbnail} registerThumbnail={services.registerThumbnail}
               ready={params() !== null} anyMatch={hasMatchingFields()} onAdd={id => setEnabled(id, true)}
               onFiles={(id, resources) => editor.dropImages(id, resources, name => UPLOAD_IMG_EXT.test(name))}
               registerFocus={(id, focus) => registerFocus(catalogueFocus, id, focus)} />
@@ -311,13 +378,13 @@ function ModalBody(props) {
                         onAdd={(items, index) => editor.addImages(id, items, index)} onRemove={item => editor.removeImage(id, item)}
                         onMove={(item, index) => editor.moveImage(id, item, index)}
                         onToggleTarget={() => editor.toggleTargetImage(id)}
-                        targetThumbnail={() => services.inputThumbnail(image.host, image.filename, image.origin, "output")}
+                        targetThumbnail={targetThumbnail} archiveThumbnail={services.historyThumbnail}
                         thumbnail={(name, root = "input") => services.inputThumbnail(image.host, name, image.origin, root)}
-                        sources={inputSources()} sourceInputs={origin => read(() => editor.sourceInputs(origin))}
-                        onSource={origin => editor.loadSourceInputs(origin)} onRetrySource={origin => editor.loadSourceInputs(origin, true)}
-                        inputState={(origin, name) => read(() => editor.sourceInputState(id, origin, name))}
-                        onToggleInput={(origin, name) => editor.toggleSourceInput(id, origin, name)}
-                        inputThumbnail={(origin, name) => services.inputThumbnail(origin.source, name, origin)} registerTabKeys={registerTabKeys}
+                        sources={inputSources()} sourceInputs={(origin, root) => read(() => editor.sourceInputs(origin, root))}
+                        onSource={(origin, root) => editor.loadSourceInputs(origin, false, root)} onRetrySource={(origin, root) => editor.loadSourceInputs(origin, true, root)}
+                        inputState={(origin, name, root) => read(() => editor.sourceInputState(id, origin, name, root))}
+                        onToggleInput={(origin, name, root) => editor.toggleSourceInput(id, origin, name, root)}
+                        inputThumbnail={(origin, name, root) => services.inputThumbnail(origin.source, name, origin, root)} registerTabKeys={registerTabKeys}
                         registerThumbnail={services.registerThumbnail}
                         pathThumbnail={services.pathThumbnail} onAddFolder={path => editor.addFolder(id, path)}
                         folderCapability={() => folderCapability.error ? null : folderCapability()} onChooseFolder={services.chooseFolder}
@@ -412,9 +479,12 @@ function ModalBody(props) {
           <div class="vz-right">
             <div class="vz-sidebar-body">
             <div class="vz-count-group">
-              <span class="vz-rlabel">{tally().exact ? "Variations" : tally().status === "invalid" ? "Check the recipe" : "Estimated variations"}</span>
+              <SingleLineText class="vz-rlabel" value={tally().exact ? "Variations" : tally().status === "invalid" ? "Check the recipe" : "Estimated variations"} />
+              <span class="vz-rlabel vz-time-label">Estimated time:</span>
               <SingleLineText class={"vz-count" + (tally().n >= 1e15 ? " vz-count-large" : "") + (tally().n > 1000 ? " vz-count-hot" : tally().n > 100 ? " vz-count-warn" : "")}
                 value={tally().status === "invalid" ? "—" : tally().display} hint={tally().fullCount} />
+              <SingleLineText class="vz-time-value" value={tally().timeEstimate.display}
+                hint="Based on original image generation times and the displayed job-count estimate. Edited settings can change speed; existing queues are not included. Independent backends may run concurrently." />
               <p class="vz-count-sub">{tally().breakdown}</p>
             </div>
             <div class="vz-naming-group">
@@ -455,18 +525,21 @@ function ModalBody(props) {
               </div>
             </div>
             <div class="vz-run-slot">
-              <Show when={!running()} fallback={<SingleLineText class="vz-field-help" role="status" value="Queuing…" />}>
+              <Show when={!unavailable()} fallback={<p class="vz-readiness-error" role="status">{unavailable()}</p>}><Show when={!running()} fallback={<SingleLineText class="vz-field-help" role="status" value="Queuing…" />}>
                 <button class="vz-run" onClick={() => store.handles.invoke("variations.run")}><SingleLineText value="Run" /></button>
-              </Show>
+              </Show></Show>
             </div>
           </div>
         </div></div>
+        <BatchTargets targets={targets()} thumbnail={batchThumbnail} registerThumbnail={services.registerThumbnail}
+          generationTime={id => read(() => editor.generationTime(id))} removable={!running()}
+          rememberFocus={rememberFocus} onRemove={id => editor.removeTarget(id)} />
         <IconButton chrome variant="plain vz-close" title="Close"
           onAction={() => store.handles.invoke("variations.close", { session: props.session })}
           icon={iconSvg("x")} />
       </div>
       <Show when={decision()}>
-        <VariationDiscardConfirmation owner={props.session} running={running()} onCancel={guard.cancel} onDiscard={guard.discard} />
+        <VariationDiscardConfirmation owner={props.session} running={running()} applying={decision().type === "apply-history"} onCancel={guard.cancel} onDiscard={guard.discard} />
       </Show>
     </div>
   );

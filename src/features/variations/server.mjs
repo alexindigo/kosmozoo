@@ -12,7 +12,7 @@
 import {
   generatePermutations, permutationAxes, permutationPlan, resolveRelativeRanges,
   parameterIndex, parameterCurrent, catalogueParams, parameterAliases, validRunAcknowledgement, runOperationFields, targetRunPlan,
-  composeOutputName, variationOutputName, paramId,
+  composeOutputName, variationOutputName,
 } from "./shared.mjs";
 import { validEntryName, backingFor as defaultBackingFor } from "../../backings/index.mjs";
 import { sourceOrigin, sameOrigin, validOrigin, validContext, expectedOrigin } from "../../source-origin.mjs";
@@ -22,8 +22,12 @@ import { IMAGE_EXTENSIONS, mediaExtension } from "../../backings/mime.mjs";
 import { listImages, readImage, folderError } from "./folder-images.mjs";
 import { inspectImage } from "./image-inspection.mjs";
 import { readJson, mediaHeaders } from "../../routes.mjs";
-import { isResourceRoot, graphParameters, editableParameter, cloneJsonValue, sameJsonValue, parseExactJson, stringifyExactJson } from "../../parameters.mjs";
+import { isResourceRoot, cloneJsonValue, sameJsonValue, parseExactJson, stringifyExactJson } from "../../parameters.mjs";
 import { compileValue, compileDiscreteAxes, validateFinalGraph } from "./compile.mjs";
+import { parameterCatalogue, findProducingOutputNode, outputNodeIndex, outputNamingTargets,
+  outputPath, stripExtension, inspectSource, projectInspection } from "./inspection.mjs";
+import { registerHistory, historyResponse } from "./history-routes.mjs";
+export { parameterCatalogue, findProducingOutputNode, outputNodeIndex, outputNamingTargets } from "./inspection.mjs";
 
 const exactResponse = (value, init = {}) => new Response(stringifyExactJson(value), {
   ...init, headers: { "Content-Type": "application/json", ...init.headers },
@@ -34,18 +38,6 @@ const exactResponse = (value, init = {}) => new Response(stringifyExactJson(valu
 const MAX_PERMUTATIONS = 500;
 
 // --- graph inspection (ComfyUI conventions) -----------------------------------
-
-const PARAMETER_CHANNELS = { numeric: "params", image: "stringParams", enum: "enumParams", text: "textParams" };
-export function parameterCatalogue(graph, schema = {}) {
-  const parameters = graphParameters(graph, schema);
-  const catalogue = Object.fromEntries(Object.values(PARAMETER_CHANNELS).map(channel => [channel, []]));
-  for (const parameter of parameters) {
-    const editable = editableParameter(parameter);
-    if (editable) catalogue[PARAMETER_CHANNELS[editable.kind]].push(editable);
-  }
-  parameterIndex(catalogueParams(catalogue), graph);
-  return { ...catalogue, parameters };
-}
 
 // Compatibility inspection ports all project the same descriptor pipeline.
 export const inspectGraph = (graph, types = null) => parameterCatalogue(graph, { types }).params;
@@ -119,55 +111,6 @@ function survivingAxes(graph, writes, inspection, namingProofs = []) {
 
 // --- output nodes ----------------------------------------------------------------
 
-function stripExtension(name) {
-  const dot = name.lastIndexOf(".");
-  return dot > 0 ? name.slice(0, dot) : name;
-}
-
-const outputPath = (value) => {
-  const name = String(value), slash = name.lastIndexOf("/");
-  return { directory: slash < 0 ? "" : name.slice(0, slash + 1), leaf: name.slice(slash + 1) };
-};
-
-// Output nodes are identified by object_info's `output_node: true` (F4 —
-// not a hardcoded class-name pattern). Among those, the node that PRODUCED
-// the source image is identified by prefix-matching the original filename
-// (ComfyUI names outputs `<prefix>_<counter>_.<ext>`).
-export function findProducingOutputNode(graph, originalFilename, outputClasses) {
-  const base = stripExtension(originalFilename);
-  const directory = outputPath(originalFilename).directory;
-  let best = null, ambiguous = false;
-  for (const [nid, n] of Object.entries(graph)) {
-    if (!outputClasses.has(String(n.class_type ?? ""))) continue;
-    const pfx = n.inputs?.filename_prefix;
-    if (typeof pfx !== "string" || !pfx) continue;
-    if (outputPath(pfx).directory !== directory) continue;
-    if (base === pfx || base.startsWith(pfx + "_")) {
-      if (!best || pfx.length > best.prefix.length) { best = { id: nid, node: n, prefix: pfx }; ambiguous = false; }
-      else if (directory && pfx.length === best.prefix.length) ambiguous = true;
-    }
-  }
-  return ambiguous ? null : best;
-}
-
-// Index the graph's output nodes once per run (not per permutation).
-export function outputNodeIndex(graph, outputClasses) {
-  const out = [];
-  for (const [nid, n] of Object.entries(graph)) {
-    if (outputClasses.has(String(n.class_type ?? ""))) out.push(nid);
-  }
-  return out;
-}
-
-export function outputNamingTargets(graph, filename, producingId, outputClasses) {
-  return outputNodeIndex(graph, outputClasses).map(nodeId => {
-    const path = outputPath(graph[nodeId].inputs?.filename_prefix ?? "");
-    return { nodeId, parameterId: paramId(nodeId, "filename_prefix"), directory: path.directory,
-      sourceStem: nodeId === producingId ? stripExtension(outputPath(filename).leaf) : path.leaf,
-      leafOnly: filename.includes("/") };
-  });
-}
-
 function writeOutputNames(graph, targets, pfx, sfx, { values = {}, proofs = [] } = {}) {
   const written = [];
   for (const target of targets) {
@@ -219,6 +162,7 @@ export function lineageTag(source, params) {
 // for features.
 export function register(app) {
   const backingFor = app.backings?.backingFor ?? defaultBackingFor;
+  const history = registerHistory(app);
   app.route("GET", "/folder-chooser", async () => Response.json(await app.desktop.capability()));
   app.route("POST", "/choose-folder", async req => {
     let body;
@@ -278,27 +222,7 @@ export function register(app) {
     try { names = JSON.parse(form.get("names") ?? "[]"); } catch { return Response.json({ error: "Input names must be an array" }, { status: 400 }); }
     return inspectImage(app, token, host, { name: file.name, bytes: new Uint8Array(await file.arrayBuffer()), current, kind, names }, origin);
   });
-  const inspect = async (collection, name, expected = null) => {
-    if (!app.backings.accepting()) return { error: "Sources are stopping; no new operation was admitted", status: 503 };
-    const token = app.backings.capture(collection);
-    const addr = token?.address;
-    if (!addr) return { error: "unknown collection", status: 404 };
-    const origin = sourceOrigin(collection, app.backings.source(collection));
-    if (expected && !sameOrigin(expected.origin, origin)) return { error: "Source origin changed; work was kept", status: 412 };
-    const backing = app.backings.comfy(collection);
-    if (!validEntryName(addr, name)) return { error: "bad entry path", status: 400 };
-    const hash = app.store.hashFor(collection, name);
-    if (!hash) return { error: "image not ingested (no hash)", status: 404 };
-    if (expected?.graphHash && expected.graphHash !== hash) return { error: "Graph catalogue changed; work was kept", status: 412 };
-    const graph = await app.ingest.graph(hash);
-    if (!app.backings.isCurrent(token)) return { error: "source changed during inspection", status: 409 };
-    if (!graph) return { error: "no embedded ComfyUI graph", status: 422 };
-    try { stringifyExactJson(graph); }
-    catch (error) { return { error: `Embedded graph cannot be represented exactly: ${error.message}`, status: 422 }; }
-    const { types, enums, outputClasses, dynamicCombos, declarations, outputs, schemaError } = await backing.objectInfo({ graph });
-    if (!app.backings.isCurrent(token)) return { error: "source changed during inspection", status: 409 };
-    return { graph, addr, types, enums, outputClasses, dynamicCombos, declarations, outputs, schemaError, token, backing, context: { origin, graphHash: hash } };
-  };
+  const inspect = (collection, name, expected = null) => inspectSource(app, collection, name, expected);
 
   app.route("GET", "/probe/<id>", async (_req, { id }) => {
     const i = id.indexOf(":");
@@ -312,18 +236,7 @@ export function register(app) {
     }
     const r = await inspect(collection, name, expected);
     if (r.error) return Response.json({ error: r.error }, { status: r.status });
-    // Project the actual first naming target, including fallback node prefixes.
-    // The client owns formatting, but cannot infer these graph facts from a name.
-    const producing = findProducingOutputNode(r.graph, name, r.outputClasses ?? new Set());
-    const targets = outputNamingTargets(r.graph, name, producing?.id, r.outputClasses ?? new Set());
-    return exactResponse({
-      ...parameterCatalogue(r.graph, r),
-      context: r.context,
-      nodes: Object.entries(r.graph).map(([id, node]) => ({ id, type: String(node.class_type ?? ""), title: node._meta?.title ?? null,
-        outputs: r.outputs?.get(String(node.class_type ?? "")) ?? null })),
-      outputNaming: targets.find(target => target.nodeId === producing?.id) ?? targets[0] ?? null,
-      outputNamingTargets: targets,
-    });
+    return exactResponse(projectInspection(r, name));
   });
 
   app.route("POST", "/run", async (req) => {
@@ -344,7 +257,7 @@ export function register(app) {
       return Response.json({ error: "invalid or ambiguous submission acknowledgement request" }, { status: 400 });
     }
 
-    const r = await inspect(host, filename, context);
+    const execute = async (r, journal = null) => {
     if (r.error) return Response.json({ error: r.error }, { status: r.status });
     const { graph, outputClasses, token, backing } = r;
     if (!outputClasses) return Response.json({ error: `ComfyUI node information is unavailable: ${r.schemaError ?? "could not identify output nodes"}; no jobs were submitted` }, { status: 502 });
@@ -459,10 +372,11 @@ export function register(app) {
       if (!app.backings.isCurrent(token)) {
         retired = true; errors.push({ permutation: perm, error: "source changed; remaining jobs were not submitted" }); break;
       }
-      const res = await backing.enqueue({
+      const job = {
         prompt: mutated,
         extra_data: { extra_pnginfo: lineageTag(`${host}:${filename}`, perm) },
-      });
+      };
+      const res = journal ? await journal.enqueue(job, index) : await backing.enqueue(job);
       if (!res.ok) {
         console.error(`[variations] permutation failed ${stringifyExactJson(perm)} -> ${res.error}`);
         errors.push({ permutation: perm, error: res.error });
@@ -482,5 +396,13 @@ export function register(app) {
       outcome: retired ? "retired" : uncertain ? "uncertain-effects" : errors.length ? submitted ? "partial-effects" : "rejected" : "accepted-plan",
       acknowledgement: { ...acknowledgement, target: { id, host, filename }, context: r.context, accepted },
     });
+    };
+    if (body.history) {
+      try {
+        const result = await history.dispatch(body, execute);
+        return historyResponse(result.data, result.status);
+      } catch (error) { return historyResponse({ error: error.message }, error.status ?? 500); }
+    }
+    return execute(await inspect(host, filename, context));
   });
 }

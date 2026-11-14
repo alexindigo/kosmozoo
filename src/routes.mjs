@@ -12,6 +12,7 @@ import { sourceOrigin, sameOrigin, expectedOrigin } from "./source-origin.mjs";
 import { waitFor } from "./lifetime.mjs";
 import { isContentHash } from "./cache.mjs";
 import { isResourceRoot } from "./parameters.mjs";
+import { mediaKind } from "./backings/mime.mjs";
 
 // Byte routes name the resource root explicitly; absent keeps the historical
 // output meaning, an unknown root fails instead of falling back to another root.
@@ -37,6 +38,30 @@ export function mediaHeaders(init) {
   headers.set("Content-Security-Policy", "sandbox");
   headers.set("X-Content-Type-Options", "nosniff");
   return headers;
+}
+
+// One media/validator/range owner for live resources and durable archive members.
+export function bytesResponse(req, bytes, hash, mime) {
+  const etag = `"${hash}"`;
+  const h = mediaHeaders({ ETag: etag, "Cache-Control": "no-cache" });
+  if (req.headers.get("If-None-Match") === etag) return new Response(null, { status: 304, headers: h });
+  if (mime) h.set("Content-Type", mime);
+  h.set("Content-Length", String(bytes.length));
+  h.set("Accept-Ranges", "bytes");
+  const range = req.headers.get("Range"), ifRange = req.headers.get("If-Range");
+  const match = range && (!ifRange || ifRange === etag) && /^bytes=(\d*)-(\d*)$/.exec(range);
+  if (match && (match[1] || match[2])) {
+    const size = bytes.length;
+    const start = match[1] ? Number(match[1]) : Math.max(0, size - Number(match[2]));
+    const end = match[1] && match[2] ? Math.min(size - 1, Number(match[2])) : size - 1;
+    if (!Number.isSafeInteger(start) || !Number.isSafeInteger(end) || start > end || start >= size) {
+      h.set("Content-Range", `bytes */${size}`); h.set("Content-Length", "0");
+      return new Response(null, { status: 416, headers: h });
+    }
+    h.set("Content-Range", `bytes ${start}-${end}/${size}`); h.set("Content-Length", String(end - start + 1));
+    return new Response(bytes.subarray(start, end + 1), { status: 206, headers: h });
+  }
+  return new Response(bytes, { headers: h });
 }
 
 function mutationError(req, url) {
@@ -90,38 +115,6 @@ export function makeRouter(ctx) {
     try { expected = expectedOrigin(req); } catch (error) { return Response.json({ error: error.message }, { status: 400 }); }
     if (expected && !sameOrigin(expected, sourceOrigin(id, ctx.sourceActivity.source(id)))) return Response.json({ error: "Source origin changed" }, { status: 412 });
     return null;
-  };
-
-  // One bytes response builder for every bytes route (E4): validators are
-  // the content hash + no-cache (the URL never changes on a remap).
-  const bytesResponse = (req, bytes, hash, mime) => {
-    const etag = `"${hash}"`;
-    const h = mediaHeaders({ ETag: etag, "Cache-Control": "no-cache" });
-    if (req.headers.get("If-None-Match") === etag) {
-      return new Response(null, { status: 304, headers: h });
-    }
-    if (mime) h.set("Content-Type", mime);
-    h.set("Content-Length", String(bytes.length));
-    h.set("Accept-Ranges", "bytes");
-    const range = req.headers.get("Range");
-    const ifRange = req.headers.get("If-Range");
-    // Unsupported units/multiple ranges/malformed syntax are ignored (200).
-    // A valid but unsatisfiable single bytes range explicitly returns 416.
-    const match = range && (!ifRange || ifRange === etag) && /^bytes=(\d*)-(\d*)$/.exec(range);
-    if (match && (match[1] || match[2])) {
-      const size = bytes.length;
-      const start = match[1] ? Number(match[1]) : Math.max(0, size - Number(match[2]));
-      const end = match[1] && match[2] ? Math.min(size - 1, Number(match[2])) : size - 1;
-      if (!Number.isSafeInteger(start) || !Number.isSafeInteger(end) || start > end || start >= size) {
-        h.set("Content-Range", `bytes */${size}`);
-        h.set("Content-Length", "0");
-        return new Response(null, { status: 416, headers: h });
-      }
-      h.set("Content-Range", `bytes ${start}-${end}/${size}`);
-      h.set("Content-Length", String(end - start + 1));
-      return new Response(bytes.subarray(start, end + 1), { status: 206, headers: h });
-    }
-    return new Response(bytes, { headers: h });
   };
 
   // One joined row (entry ⟕ content, judgment columns included) → the wire
@@ -273,6 +266,17 @@ export function makeRouter(ctx) {
     // Only the output inventory and the input listing exist; other roots never
     // fall back to the output listing.
     if (kind !== "input" && kind !== "output") return Response.json({ error: "no listing for this resource root" }, { status: 400 });
+    const catalogue = url.searchParams.get("catalogue") === "images-v1";
+    let catalogueOrigin = null;
+    if (catalogue) {
+      let expected;
+      try { expected = expectedOrigin(req); } catch (error) { return Response.json({ error: error.message }, { status: 400 }); }
+      if (!expected) return Response.json({ error: "Image catalogue requires an expected origin" }, { status: 400 });
+      catalogueOrigin = sourceOrigin(id, ctx.sourceActivity.source(id));
+      if (!sameOrigin(expected, catalogueOrigin)) return Response.json({ error: "Source origin changed" }, { status: 412 });
+    }
+    const catalogueCurrent = () => (!token || ctx.inventory.isCurrent(token)) && sameOrigin(catalogueOrigin, sourceOrigin(id, ctx.sourceActivity.source(id)));
+    const images = files => files.filter(file => mediaKind(typeof file === "string" ? file : file.name) === "image");
     if (kind === "input") {
       let expected;
       try { expected = expectedOrigin(req); } catch (error) { return Response.json({ error: error.message }, { status: 400 }); }
@@ -280,6 +284,7 @@ export function makeRouter(ctx) {
       if (expected && !sameOrigin(expected, origin)) return Response.json({ error: "Source origin changed" }, { status: 412 });
       try {
         const files = await backingFor(addr).list(addr, "input");
+        if (catalogue) return catalogueCurrent() ? Response.json({ files: images(files), origin: catalogueOrigin, root: kind }) : Response.json({ error: "Source origin changed" }, { status: 412 });
         if (!ctx.inventory.isCurrent(token)) return Response.json({ error: "Source origin changed" }, { status: 412 });
         return Response.json(expected ? { files, origin } : files);
       } catch (e) {
@@ -292,7 +297,9 @@ export function makeRouter(ctx) {
     let inventory;
     try { inventory = await ctx.inventory(id); }
     catch (error) { return Response.json({ error: `collection unreachable: ${error.message}` }, { status: 502 }); }
+    if (catalogue && !catalogueCurrent()) return Response.json({ error: "Source origin changed" }, { status: 412 });
     if (token && !ctx.inventory.isCurrent(token)) return Response.json({ error: "Source incarnation changed" }, { status: 409 });
+    inventory = ctx.inventory.accepted?.(token) ?? inventory;
     const list = inventory.items;
     // The rows below reflect every metadata write up to this version: a reader
     // that accepted this listing continues the delta stream from it.
@@ -303,12 +310,16 @@ export function makeRouter(ctx) {
       return !r || (r.state !== "gone" && r.hidden !== 1);
     });
     const entries = visible.map((f) => entryShape(id, f.name, f.size, rows.get(f.name), f.modified));
+    if (catalogue) return Response.json({ files: images(entries), origin: catalogueOrigin, root: kind });
     const arrivals = ctx.store.arrivals.inventory(id);
     for (const entry of entries) entry.arrivalSeq = arrivals?.sequences[entry.name] ?? null;
+    const items = url.searchParams.get('arrivals') === 'items-v1';
     return Response.json(url.searchParams.get("inventory") === "1"
       ? { revision: inventory.revision, generation: inventory.generation, coverage: inventory.coverage, subfolders: inventory.subfolders,
           folders: inventory.folders, unavailable: inventory.unavailable, chronology: inventory.chronology, metaVersion,
-          arrivals: arrivals ? { sequence: arrivals.sequence, latestVisibleSeq: arrivals.latestVisibleSeq } : null, entries } : entries);
+          ...(items ? { origin: sourceOrigin(id, ctx.sourceActivity.source(id)) } : {}),
+          arrivals: arrivals ? { sequence: arrivals.sequence, latestVisibleSeq: arrivals.latestVisibleSeq,
+            ...(items ? { revision: arrivals.revision, visibleRanges: arrivals.visibleRanges } : {}) } : null, entries } : entries);
   });
 
   add("GET", "/api/collections/<id>/entries/<name>", async (_req, { id, name }) => {
@@ -434,8 +445,10 @@ export function makeRouter(ctx) {
   // path (the high lane a human-visible image uses), for a bounded wait. The
   // reply is always the entry's current record; `extracted:false` means the
   // record is not available yet (unreachable source, or the wait elapsed).
-  add("GET", "/api/collections/<id>/entries/<name>/meta", async (_req, { id, name }) => {
+  add("GET", "/api/collections/<id>/entries/<name>/meta", async (req, { id, name }) => {
     if (!addressFor(id)) return Response.json({ error: "unknown collection" }, { status: 404 });
+    const originError = byteOriginError(req, id);
+    if (originError) return originError;
     const token = ctx.inventory.capture?.(id);
     if (!ctx.store.entryJoined(id, name)?.hash) {
       const done = new AbortController();
@@ -446,7 +459,12 @@ export function makeRouter(ctx) {
       if (token && !ctx.inventory.isCurrent(token)) return Response.json({ error: "Source incarnation changed" }, { status: 409 });
     }
     const { name: entry, hash, extracted, meta, width, height } = entryShape(id, name, null, ctx.store.entryJoined(id, name), null);
-    return Response.json({ name: entry, hash, extracted, meta, width, height });
+    const generationTimeMs = await ctx.comfy?.(id)?.generationTime?.(name) ?? null;
+    const finalOriginError = byteOriginError(req, id);
+    if (finalOriginError) return finalOriginError;
+    if (token && !ctx.inventory.isCurrent(token)) return Response.json({ error: "Source incarnation changed" }, { status: 409 });
+    if (hash !== (ctx.store.entryJoined(id, name)?.hash ?? null)) return Response.json({ error: "Entry content changed" }, { status: 409 });
+    return Response.json({ name: entry, hash, extracted, meta, width, height, generationTimeMs });
   });
 
   // --- judgments (entry columns) ------------------------------------------------

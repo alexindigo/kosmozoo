@@ -9,6 +9,19 @@ import { buildContext } from "../src/context.mjs";
 import { createRoot } from "solid-js";
 import { makeSourceRegistry } from "../client-solid/store/source-registry.js";
 
+Deno.test("arrivals: restored visibility assigns sequences before every publication", () => {
+  let excluded = ["restored.png"];
+  const arrivals = new SourceArrivals({ hiddenNames: () => [], goneNames: () => excluded });
+  arrivals.observe("a", ["first.png", "restored.png"]);
+  excluded = [];
+  arrivals.changed("a");
+  assertEquals(arrivals.projection("a", true).visibleRanges, [[1, 2]]);
+  assertEquals(arrivals.inventory("a").sequences, { "first.png": 1, "restored.png": 2 });
+  assertEquals(JSON.parse(arrivals.wire("a")).latestVisibleSeq, 2);
+  arrivals.changed("a");
+  assertEquals(arrivals.projection("a").sequence, 2, "unchanged visibility does not mint new arrivals");
+});
+
 Deno.test("arrivals: session sequence is independent of relist order and revalidation; missing/hidden entries don't signal", () => {
   const rows = [], arrivals = new SourceArrivals({
     hiddenNames: () => rows.filter(row => row.hidden === 1).map(row => row.name),
@@ -47,14 +60,14 @@ Deno.test("arrivals: projections read only exclusion names at mutation boundarie
   assertEquals(nameReads, reads, "Jobs progress reads the cached small projection");
   arrivals.changed("a"); arrivals.observe("a", ["latest.png", "old.png"]);
   hidden.add("old.png"); arrivals.changed("a");
-  assertEquals(events, ["a"], "unchanged sequence/latest-visible does not republish");
+  assertEquals(events, ["a", "a"], "lower membership removal publishes even when the maximum is unchanged");
   gone.add("latest.png"); arrivals.changed("a");
-  assertEquals(events, ["a", "a"]); assertEquals(arrivals.projection("a"), { sequence: 2, latestVisibleSeq: 0 });
+  assertEquals(events, ["a", "a", "a"]); assertEquals(arrivals.projection("a"), { sequence: 2, latestVisibleSeq: 0 });
   const projected = arrivals.projection("a"); projected.latestVisibleSeq = 99;
   assertEquals(arrivals.projection("a").latestVisibleSeq, 0, "readers cannot mutate the cached projection");
   arrivals.forget("a"); assertEquals(arrivals.projection("a"), null);
   hidden.clear(); gone.clear(); arrivals.observe("a", ["old.png"]);
-  assertEquals(arrivals.projection("a"), { sequence: 1, latestVisibleSeq: 1 }); assertEquals(events.length, 3);
+  assertEquals(arrivals.projection("a"), { sequence: 1, latestVisibleSeq: 1 }); assertEquals(events.length, 4);
 });
 
 Deno.test("arrivals: real Store hide/gone publishes only changed small projections to SourceActivity", async () => {
@@ -66,29 +79,30 @@ Deno.test("arrivals: real Store hide/gone publishes only changed small projectio
     sources = new SourceActivity({ store: r.store, hosts: r.hosts, inventory: r.inventory, jobs });
     r.store.entryHide("a", "not-listed.png"); assertEquals(sources.revision, 0);
     r.store.arrivals.observe("a", ["old.png", "latest.png"]); assertEquals(sources.revision, 1);
-    r.store.entryHide("a", "old.png"); assertEquals(sources.revision, 1);
-    r.store.entryGone("a", "latest.png"); assertEquals(sources.revision, 2);
+    r.store.entryHide("a", "old.png"); assertEquals(sources.revision, 2);
+    r.store.entryGone("a", "latest.png"); assertEquals(sources.revision, 3);
     assertEquals(sources.snapshot().sources.a.arrivals, { sequence: 2, latestVisibleSeq: 0 });
-    r.store.entryGone("a", "latest.png"); r.store.entryHide("a", "old.png"); assertEquals(sources.revision, 2);
+    r.store.entryGone("a", "latest.png"); r.store.entryHide("a", "old.png"); assertEquals(sources.revision, 3);
     assertEquals(r.store.arrivals.inventory("a").sequences, {});
   } finally { sources?.stop(); await r.close(); }
 });
 
-Deno.test("arrivals: each browser baselines independently, viewed sources stay current, opening clears; hidden-only attention clears", () => {
+Deno.test("arrivals: independent browser baselines, exposure-only clearing and exact hidden membership", () => {
   createRoot(dispose => {
     try {
       const make = () => makeSourceRegistry({ createRecord: () => ({}), onRetire: () => {} });
       const one = make(), two = make();
       for (const registry of [one, two]) registry.reconcile({ a: { address: "a:80" } });
       const a = one.get("a"), b = two.get("a");
-      a.acceptArrivals({ sequence: 3, latestVisibleSeq: 3 }); assertEquals(a.hasNew, false);
-      a.acceptArrivals({ sequence: 4, latestVisibleSeq: 4 }); assertEquals(a.hasNew, true);
-      b.acceptArrivals({ sequence: 4, latestVisibleSeq: 4 }); assertEquals(b.hasNew, false, "new browser starts quiet");
-      a.markSeen(); assertEquals(a.hasNew, false);
-      a.acceptArrivals({ sequence: 5, latestVisibleSeq: 5 }, true); assertEquals(a.hasNew, false);
-      a.acceptArrivals({ sequence: 6, latestVisibleSeq: 6 }); assertEquals(a.hasNew, true);
-      a.acceptArrivals({ sequence: 6, latestVisibleSeq: 5 }); assertEquals(a.hasNew, false);
-      assertEquals(b.seenSeq, 4, "no cross-browser cursor writes");
+      const p=(sequence,revision=sequence,visibleRanges=[[1,sequence]])=>({sequence,revision,visibleRanges,latestVisibleSeq:visibleRanges.at(-1)?.[1]??0});
+      a.acceptArrivals(p(3)); assertEquals(a.hasNew, false);
+      a.acceptArrivals(p(4)); assertEquals(a.hasNew, true);
+      b.acceptArrivals(p(4)); assertEquals(b.hasNew, false, "new browser starts quiet");
+      a.unseen.acknowledge(4); assertEquals(a.hasNew, false);
+      a.acceptArrivals(p(5), true); assertEquals(a.hasNew, true, "navigation cannot acknowledge");
+      a.acceptArrivals(p(6)); a.unseen.acknowledge(6); assertEquals(a.hasNew, true, "lower unseen hole survives");
+      a.acceptArrivals(p(6,7,[[1,4],[6,6]])); assertEquals(a.hasNew, false);
+      assertEquals(b.unseen.projection.sequence, 4, "no cross-browser cursor writes");
     } finally { dispose(); }
   });
 });

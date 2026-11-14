@@ -43,12 +43,15 @@ export function FeedFilter(props) {
     type="search" aria-label={label} placeholder={placeholder} spellcheck={false}
     value={props.model[key]} onInput={e => edit(key, e.currentTarget.value)} />;
   const options = () => props.parameters.filter(name => name.toLowerCase().includes(search().toLowerCase()));
+  createEffect(() => { expanded(); placement(); props.onExposureChange?.(); });
   const summary = () => props.conditions.length ? `${props.model.mode.toUpperCase()}: ${props.conditions.join("; ")}` : "Filter images";
   return <div class="feed-filter" ref={wrap}>
     <IconButton id="filterBtn" chrome variant="filter" buttonRef={el => button = el}
       title={summary()} active={props.conditions.length > 0} expanded={expanded()} controls="filterMenu"
       icon={iconSvg("filter", 16)} onAction={() => props.handles.invoke("feed.filter.toggle")} />
-    <Portal><div id="filterMenu" class="feed-filter-menu" role="dialog" aria-label="Filter images" ref={menu}
+    <Portal><div id="filterMenu" class="feed-filter-menu" role="dialog" aria-label="Filter images" ref={element => {
+      menu=element; const retire=props.registerOccluder?.(element); if(retire)onCleanup(retire);
+    }}
       hidden={!expanded()} style={placement() ? { left: `${placement().left}px`, top: `${placement().top}px`,
         width: `${placement().width}px`, "max-height": `${placement().maxHeight}px` } : {}}>
       <Show when={expanded()}><div class="filter-row filter-combine"><span>Combine</span><ModeSwitch id="filterCombine" label="Combine conditions" value={props.model.mode}

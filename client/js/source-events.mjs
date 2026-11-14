@@ -1,4 +1,5 @@
 // Version1 authoritative source snapshots. Validation precedes every consumer write.
+import { validRanges } from './sequence-ranges.mjs';
 const integer = value => Number.isSafeInteger(value) && value >= 0;
 const text = value => typeof value === "string" && value.length > 0;
 const record = value => value && typeof value === "object" && !Array.isArray(value) &&
@@ -15,19 +16,24 @@ export function validSourceVersion(value) {
 export const validSourceCursor = value => shape(value, ["epoch", "revision"]) && text(value.epoch) && integer(value.revision);
 export const validArrivals = value => value === null || shape(value, ["sequence", "latestVisibleSeq"]) &&
   integer(value.sequence) && integer(value.latestVisibleSeq) && value.latestVisibleSeq <= value.sequence;
+export const validItemArrivals = value => value === null || shape(value, ['sequence','latestVisibleSeq','revision','visibleRanges']) &&
+  integer(value.sequence) && integer(value.revision) && value.revision > 0 && integer(value.latestVisibleSeq) &&
+  validRanges(value.visibleRanges, value.sequence) && value.latestVisibleSeq === (value.visibleRanges.at(-1)?.[1] ?? 0);
 
 export function compareSourceVersions(a, b) {
   if (!validSourceVersion(a) || !validSourceVersion(b) || a.epoch !== b.epoch || a.incarnation !== b.incarnation) return null;
   return Math.sign(a.attributesRevision - b.attributesRevision);
 }
 
-export function validateSourceSnapshot(frame) {
+export function validateSourceSnapshot(frame, { items = false } = {}) {
   const invalid = () => { throw new Error("Invalid source snapshot; full resynchronization required"); };
   if (!shape(frame, ["version", "epoch", "revision", "sources"]) || frame.version !== 1 || !text(frame.epoch) ||
       !integer(frame.revision) || !record(frame.sources)) invalid();
   for (const [id, source] of Object.entries(frame.sources)) {
     const fields = ["address", "kind", "incarnation", "pinned", "autoRefresh", "sourceVersion", "activity"];
-    if (!text(id) || !(shape(source, fields) || shape(source, [...fields, "arrivals"]) && validArrivals(source.arrivals)) ||
+    const arrivalsValid = shape(source, [...fields, 'arrivals']) && (items === true ? validItemArrivals(source.arrivals)
+      : validArrivals(source.arrivals) || items === 'optional' && validItemArrivals(source.arrivals));
+    if (!text(id) || !((items !== true && shape(source, fields)) || arrivalsValid) ||
         !text(source.address) || !["folder", "comfy"].includes(source.kind) || !text(source.incarnation) ||
         typeof source.pinned !== "boolean" || typeof source.autoRefresh !== "boolean" || !validSourceVersion(source.sourceVersion) ||
         source.sourceVersion.epoch !== frame.epoch || source.sourceVersion.incarnation !== source.incarnation ||
@@ -66,7 +72,8 @@ export function validateSourceSnapshot(frame) {
 
 // The adapter closes native retry before owning a single capped/jittered retry.
 export function subscribeSources({ onSnapshot, onConnection }, { createEventSource = url => new EventSource(url),
-  setTimer = setTimeout, clearTimer = clearTimeout, random = Math.random, url = "/api/events" } = {}) {
+  setTimer = setTimeout, clearTimer = clearTimeout, random = Math.random, items = false,
+  url = items ? '/api/events?arrivals=items-v1' : "/api/events" } = {}) {
   let retired = false, generation = 0, source = null, timer = null, errors = 0;
   const close = () => { generation++; const previous = source; source = null; previous?.close(); };
   const failed = error => {
@@ -85,7 +92,7 @@ export function subscribeSources({ onSnapshot, onConnection }, { createEventSour
       instance.addEventListener("sources", event => {
         if (!current()) return;
         try {
-          const snapshot = validateSourceSnapshot(JSON.parse(event.data));
+          const snapshot = validateSourceSnapshot(JSON.parse(event.data), { items });
           if (event.lastEventId !== `${snapshot.epoch}:${snapshot.revision}` || onSnapshot(snapshot) === false) {
             throw new Error("Source snapshot ordering requires resynchronization");
           }

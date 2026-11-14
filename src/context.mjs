@@ -18,6 +18,7 @@ import { SourceActivity } from "./source-activity.mjs";
 import { PluginHost } from "./plugins.mjs";
 import { makeRouter } from "./routes.mjs";
 import { Cache } from "./cache.mjs";
+import { ContentArchive } from "./content-archive.mjs";
 import { FEATURES } from "./features/index.mjs";
 import { directoryPortal } from "./desktop/portal.mjs";
 import { EngineLifetime } from "./lifetime.mjs";
@@ -66,7 +67,8 @@ export async function buildContext({ env = Deno.env.toObject(), fakes = {}, star
   );
   const inventory = remember("inventory", fakes.inventory ?? backings.makeCollectionInventory(hosts, {
     bindingFactory: scopedBackings.createBindingFor,
-    onSnapshot: (id, _address, snapshot) => store.arrivals.observe(id, snapshot.items.map(item => item.name)),
+    onSnapshot: (id, _address, snapshot, token) => store.arrivals.observe(id, snapshot.items.map(item => item.name), token),
+    onRetire: token => store.arrivals.forget(token.id),
   }), fakes.inventory != null);
   const ingest = fakes.ingest ?? new Ingest(store, hosts, {
     cache,
@@ -115,7 +117,8 @@ export async function buildContext({ env = Deno.env.toObject(), fakes = {}, star
 
   // feature modules: isolated core features on the engine surface
   const featureApp = {
-    store, cache, hosts, ingest, comfy, desktop,
+    store, cache, hosts, ingest, comfy, desktop, lifetime,
+    archive: fakes.archive ?? new ContentArchive(`${stateDir}/archives`),
     // a backing bound to one collection (engine-mediated; the feature never
     // fetches a host directly)
     backings: {
@@ -128,6 +131,12 @@ export async function buildContext({ env = Deno.env.toObject(), fakes = {}, star
     },
     route: (method, path, handler) => router.add(method, path, handler),
   };
+  // Store recovery retires dead execution ownership transactionally. Durable
+  // unreferenced asset rows survive failed collection and are retried on startup.
+  // Compose the existing SQL/byte owners here, never during feature registration.
+  for (const { hash } of store.variationUnreferencedAssets()) {
+    await featureApp.archive.collect(hash, () => store.variationAssetRefs(hash) > 0, () => store.variationForgetAsset(hash));
+  }
   const features = fakes.features ?? FEATURES;
   for (const f of features) {
     f.register({

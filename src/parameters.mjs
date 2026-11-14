@@ -140,6 +140,11 @@ export function resourceReference(value) {
   for (const [suffix, root, length] of STOCK_ANNOTATIONS) if (value.endsWith(suffix)) return { name: value.slice(0, -length), root, annotated: true };
   return { name: value, root: "input", annotated: false };
 }
+export const resourceReferenceValue = (name, root = "input") => {
+  if (!isResourceRoot(root)) throw new Error("Unknown resource root");
+  const interpreted = resourceReference(name);
+  return root === "input" && interpreted?.root === root && interpreted.name === name ? name : `${name} [${root}]`;
+};
 
 // --- semantic input contract ------------------------------------------------
 // One interpretation of a declaration for the catalogue, compiler, final graph
