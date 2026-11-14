@@ -42,7 +42,7 @@ export function makeVariationSession({ read, write }) {
       // proxies/symbols enter the separately leased exact-JSON archive read model.
       const images = snapshotDraft(record.targets.map(({ id, host, filename, origin, context, historyRef, unavailable }, index) => ({ id, host, filename, origin, context, historyRef, unavailable,
         ...(record.resources?.find(resource => resource.id === `target-${index}`)?.hash ? { hash: record.resources.find(resource => resource.id === `target-${index}`).hash } : {}) })));
-      return request({ images, key: `history:${record.id}:${record.leaseId}`, historyRef: { id: record.id, leaseId: record.leaseId } });
+      return request({ images, cohortMode: record.cohortMode, key: `history:${record.id}:${record.leaseId}`, historyRef: { id: record.id, leaseId: record.leaseId } });
     },
     close: ({ automatic = false, session } = {}) => request(null, automatic, session),
     run() {

@@ -119,7 +119,7 @@ export function makeHistoryClient({ api, changed = () => {} }) {
       const targets = ticket.targets.map(target => ({ id: target.id, host: target.host, filename: target.filename, origin: target.origin,
         ...(contexts.get(target.id) ?? target.context ? { context: contexts.get(target.id) ?? target.context } : {}),
         ...(target.historyRef ? { historyRef: target.historyRef } : {}) }));
-      await api.historyBegin({ runId: ticket.runId, format: encoded.format, cohortMode: targets.length > 1 ? "bulk" : "single",
+      await api.historyBegin({ runId: ticket.runId, format: encoded.format, cohortMode: ticket.cohortMode ?? (targets.length > 1 ? "bulk" : "single"),
         targets, recipe: encoded.recipe, resources: encoded.resources });
       for (const target of targets) check(target);
       // Bounded, disk-backed archive uploads; never upstream materialization.

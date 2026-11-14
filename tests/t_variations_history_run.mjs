@@ -254,6 +254,17 @@ Deno.test("history HTTP: immutable raw capture/archive barrier, engine plan and 
     delayed.resolve(); assertEquals((await duplicate).status, 409); backing.objectInfo = objectInfo;
     assertEquals((await call("DELETE", `/history/${bulkId}`)).status, 200);
     assertEquals(engine.ctx.store.variationResources(bulkId), [], "no completed target or losing duplicate can strand archive references");
+    // Shrinking a bulk editor to one target retains its relative recipe basis.
+    const oneId = crypto.randomUUID(), one = encodeHistoryRecipe(raw.capture(), oneId);
+    assertEquals((await call("POST", "/history", { runId: oneId, format: 1, cohortMode: "bulk", targets: [nextTarget], recipe: one.recipe, resources: one.resources })).status, 200);
+    const onePrepared = await call("POST", `/history/${oneId}/prepare`);
+    assertEquals(onePrepared.status, 200, stringifyExactJson(onePrepared));
+    assertEquals(onePrepared.data.cohortMode, "bulk");
+    await materialize(onePrepared.data);
+    const onePlan = await call("POST", `/history/${oneId}/prepare-target`, { targetIndex: 0, origin: nextTarget.origin, snapshotHash: onePrepared.data.snapshotHash });
+    assertEquals(onePlan.status, 200, stringifyExactJson(onePlan)); assertEquals(onePlan.data.request.relative, true);
+    assertEquals((await call("POST", `/history/${oneId}/open`)).data.cohortMode, "bulk");
+    await call("DELETE", `/history/${oneId}`);
     for (const reject of [false, true]) {
       inputs.set("original.png", original);
       const uploadId = crypto.randomUUID(), encodedUpload = encodeHistoryRecipe(raw.capture(), uploadId);

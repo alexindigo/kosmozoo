@@ -43,10 +43,12 @@ const ROW_STRATEGIES = {
     defaults: { enabled: false, candidates: [stringifyExactJson(p.valueKind === "connection" ? { node: String(parameterCurrent(p)[0]), slot: String(parameterCurrent(p)[1]) } : parameterCurrent(p))] } }) },
 };
 
-export function makeVariationEditor({ targets, services, currentOrigin, changed = () => {}, close = () => {},
+export function makeVariationEditor({ targets, cohortMode, services, currentOrigin, changed = () => {}, close = () => {},
   setTimer = setTimeout, clearTimer = clearTimeout }) {
   const recipe = makeVariationRecipe();
   const capturedTargets = freeze(snapshotDraft(targets));
+  // Opening facts and recipe basis stay stable; only the private Run cohort shrinks.
+  let selectedTargets = capturedTargets;
   const catalogues = new Map();
   const generationTimes = new Map(capturedTargets.map(target => [target.id, knownGenerationTime(target.generationTimeMs) ? target.generationTimeMs : null]));
   const timingController = new AbortController();
@@ -70,7 +72,7 @@ export function makeVariationEditor({ targets, services, currentOrigin, changed 
   const cachedInput = (origin, name, root) => sourceRecord(sourceFiles, origin, null, root)?.files.get(name);
   const reference = (name, root) => ({ kind: "reference", value: resourceReferenceValue(name, root) });
   const resourceName = name => typeof name === "string" && !resourceReferenceProblem(null, name);
-  const batch = capturedTargets.length > 1;
+  const batch = cohortMode === "bulk" || capturedTargets.length > 1;
   let alive = true, closeGeneration = 0, decisionGeneration = 0, deciding = false, active = null, timer = null;
   let result = null, running = false, catalogueReady = false, acceptedRevision = null, restoredWork = false;
   const heldRecords = new Map();
@@ -100,7 +102,7 @@ export function makeVariationEditor({ targets, services, currentOrigin, changed 
             node: value?.node ?? "", slot: value?.slot ?? "" };
         }) } : {}),
        ...(domain === "images" ? { images: entry.values.items.map(item => imageView(id, item, entry.metadata)) } : {}) })])));
-  const dirty = () => acceptedRevision === null ? restoredWork || recipe.dirty() : recipe.revision() !== acceptedRevision;
+  const dirty = () => acceptedRevision === null ? restoredWork || selectedTargets.length !== capturedTargets.length || recipe.dirty() : recipe.revision() !== acceptedRevision;
   const parseCandidate = (parameter, raw) => parseRecipeCandidate(parameter, raw, catalogues.get(capturedTargets[0].id)?.nodes);
   const candidateChoices = entry => (entry.metadata.options ?? []).map(value => ({ text: stringifyExactJson(value),
     label: stringifyExactJson(value),
@@ -171,13 +173,20 @@ export function makeVariationEditor({ targets, services, currentOrigin, changed 
   return {
     rows: view,
     revision: recipe.revision,
+    targets: () => selectedTargets,
+    generationTime: id => selectedTargets.some(target => target.id === id && originCurrent(target)) ? generationTimes.get(id) ?? null : null,
+    removeTarget(id) {
+      if (!alive || deciding || running || selectedTargets.length <= 1 || !selectedTargets.some(target => target.id === id)) return false;
+      selectedTargets = freeze(selectedTargets.filter(target => target.id !== id));
+      recipe.edited(); invalidateClose(); notify(); return true;
+    },
     loadGenerationTimes() {
       if (!alive) return Promise.resolve();
       if (timingTask) return timingTask;
       timingTask = Promise.allSettled(capturedTargets.map(async target => {
         if (knownGenerationTime(generationTimes.get(target.id)) || !services.generationTime || !originCurrent(target) || target.historyRef && !target.hash) return;
         const record = await services.generationTime(target, { signal: timingController.signal });
-        if (!alive || !originCurrent(target) || record?.name !== target.filename || !/^[a-f0-9]{64}$/.test(record.hash ?? "") ||
+        if (!alive || !selectedTargets.includes(target) || !originCurrent(target) || record?.name !== target.filename || !/^[a-f0-9]{64}$/.test(record.hash ?? "") ||
             target.hash && record.hash !== target.hash || !knownGenerationTime(record.generationTimeMs)) return;
         generationTimes.set(target.id, record.generationTimeMs); notify();
       })).then(() => {});
@@ -187,7 +196,7 @@ export function makeVariationEditor({ targets, services, currentOrigin, changed 
       const revision = recipe.revision();
       if (!alive || deciding || running) throw new Error("Finish the current action before recalling history");
       const cohort = [];
-      for (const target of capturedTargets) {
+      for (const target of selectedTargets) {
         if (!originCurrent(target)) throw new Error("Source origin changed; reopen Variations before recalling");
         const data = catalogues.get(target.id) ?? await services.probe(target);
         if (!alive || deciding || running || recipe.revision() !== revision || !originCurrent(target)) throw new Error("Editor changed while reading history; choose it again");
@@ -197,7 +206,7 @@ export function makeVariationEditor({ targets, services, currentOrigin, changed 
       return { ...plan, revision, id: saved.id, leaseId: saved.leaseId, record: saved };
     },
     applyRecall(plan) {
-      if (!alive || deciding || running || plan.revision !== recipe.revision() || !capturedTargets.every(originCurrent)) return { status: "stale" };
+      if (!alive || deciding || running || plan.revision !== recipe.revision() || !selectedTargets.every(originCurrent)) return { status: "stale" };
       if (!plan.patch.length) return { status: "unchanged" };
       for (const id of new Set(plan.patch.filter(field => field.domain === "images" && field.name === "items").map(field => field.id))) retireMembership(id);
       for (const field of plan.patch) write(field.domain, field.id, field.name, field.value);
@@ -424,7 +433,7 @@ export function makeVariationEditor({ targets, services, currentOrigin, changed 
         const selected = [...recipe.entries("images")].filter(([, entry]) => entry.values.enabled)
           .flatMap(([id, entry]) => entry.values.items.map(item => imageView(id, item, entry.metadata)));
         const pending = selected.some(item => item.pending), error = selected.find(item => item.error)?.error;
-        const perImage = plan.total, n = perImage * capturedTargets.length, safe = Number.isSafeInteger(n);
+        const perImage = plan.total, n = perImage * selectedTargets.length, safe = Number.isSafeInteger(n);
         const exact = !batch && !pending && !error && safe;
         const excluded = plan.axes.length ? plan.axes.reduce((number, axis) => number * axis.matches, 1) : 0;
         // One representative non-current tuple from the kernel, without allocating
@@ -451,15 +460,15 @@ export function makeVariationEditor({ targets, services, currentOrigin, changed 
         const factors = [...axes].sort((a, b) => (a.kind !== "images") - (b.kind !== "images")).map(axis =>
           `${axis.count.toLocaleString("en-US")} ${axis.kind === "images" ? `input image${axis.count === 1 ? "" : "s"}` : `${axis.name} value${axis.count === 1 ? "" : "s"}`}`);
         const breakdown = factors.join(" × ") + (excluded ? ` · ${excluded} unchanged combination${excluded === 1 ? "" : "s"} excluded` : "")
-          + (batch && axes.length ? ` · first-image estimate × ${capturedTargets.length} target images` : "");
+          + (batch && axes.length ? ` · workflow estimate × ${selectedTargets.length} target image${selectedTargets.length === 1 ? "" : "s"}` : "");
         const status = !naming.complete || error ? "invalid" : pending ? "checking" : "ready";
         const message = !naming.complete ? "Unresolved naming token: check Prefix and Suffix." : error ? `Image comparison failed: ${error}`
           : pending ? "Checking images…" : !n ? "Choose a different value or image to create variations."
           : !safe ? "Estimate exceeds safe integer precision; the full value is approximate."
-          : batch ? "Estimated from the first image; each target is checked before submission."
+          : batch ? "Estimated from the opening workflow; each remaining target is checked before submission."
           : n > 100 ? "Large sweep: this many jobs will be queued. The engine validates its existing per-run limit." : "";
         const timeEstimate = estimateGenerationTime(status === "invalid" ? null : perImage,
-          capturedTargets.map(target => originCurrent(target) ? generationTimes.get(target.id) : null));
+          selectedTargets.map(target => originCurrent(target) ? generationTimes.get(target.id) : null));
         return { n, perImage, anyEnabled: axes.length > 0, exact: exact && naming.complete, status, message, axes, excluded, breakdown, naming, timeEstimate,
           display: n >= 1e6 ? n < 1e15 ? new Intl.NumberFormat("en-US", { notation: "compact", maximumSignificantDigits: 4 }).format(n)
             : n.toExponential(2).replace("e+", " × 10^") : n.toLocaleString("en-US"),
@@ -471,7 +480,7 @@ export function makeVariationEditor({ targets, services, currentOrigin, changed 
       if (running || deciding) return { status: "busy" };
       if (!catalogueReady) { publish({ text: "Inspecting source context; your edits have been kept.", ok: false, state: "unavailable" }); return { status: "invalid" }; }
       invalidateClose();
-      const ticket = Object.freeze({ runId: createRunId(), editRevision: recipe.revision(), closeGeneration, snapshot: freeze(captureRows()), targets: capturedTargets });
+      const ticket = Object.freeze({ runId: createRunId(), editRevision: recipe.revision(), closeGeneration, snapshot: freeze(captureRows()), targets: selectedTargets, cohortMode: batch ? "bulk" : "single" });
       // Retain the captured inspection handles while they settle. Removing and
       // readding a path may replace live evidence, never this Run's evidence.
       const inspections = [...pendingInspections];

@@ -34,6 +34,7 @@ import { makeKeyboardReveal } from "./keyboard-reveal.js";
 import { UPLOAD_IMG_EXT } from "../../store/fields.js";
 import { HistoryDropdown } from "./HistoryDropdown.js";
 import { historyCount, historyDate } from "./HistoryEntry.js";
+import { BatchTargets } from "./BatchTargets.js";
 
 export function VariationsModal() {
   const store = useAppStore();
@@ -58,7 +59,7 @@ export function VariationsModal() {
       {(session) => {
         const images = [...store.state.variations.images].map(snapshotDraft);
         return <Modal class="vz-root" closeCommand="variations.close" closeArgs={{ session }}>
-          <ModalBody session={session} images={images} historyRef={snapshotDraft(store.state.variations.historyRef)} />
+          <ModalBody session={session} images={images} cohortMode={store.state.variations.cohortMode} historyRef={snapshotDraft(store.state.variations.historyRef)} />
         </Modal>;
       }}
     </Show>
@@ -72,9 +73,9 @@ function ModalBody(props) {
   // batch = more than one image: ranges become RELATIVE offsets from each
   // image's own current value (resolved by the plugin at run time), and the
   // count shows the total across the whole selection.
-  const batch = props.images.length > 1;
+  const batch = props.cohortMode === "bulk" || props.images.length > 1;
   const [version, setVersion] = createSignal(0);
-  const editor = makeVariationEditor({ targets: props.images, services,
+  const editor = makeVariationEditor({ targets: props.images, cohortMode: props.cohortMode, services,
     currentOrigin: host => sourceOrigin(host, store.state.hosts[host]),
     changed: () => setVersion(value => value + 1),
     close: () => store.handles.invoke("variations.close", { automatic: true, session: props.session }) });
@@ -88,6 +89,7 @@ function ModalBody(props) {
   let alive = true, recalling = null;
   onCleanup(() => { alive = false; });
   const read = getter => { version(); return getter(); };
+  const targets = () => read(editor.targets);
   const rows = () => read(() => editor.rows("numeric"));
   const imgRows = () => read(() => editor.rows("images"));
   const enumRows = () => read(() => editor.rows("enums"));
@@ -254,8 +256,11 @@ function ModalBody(props) {
 
   const inputSources = createMemo(() => [image.origin, ...services.inputSources().filter(origin => origin.source !== image.host)].filter(Boolean));
   const targetThumbnail = () => original ? services.historyThumbnail({ runId: original.id, resourceId: "target-0", leaseId: original.leaseId }) : services.inputThumbnail(image.host, image.filename, image.origin, "output");
+  const batchThumbnail = target => original ? services.historyThumbnail({ runId: original.id,
+    resourceId: `target-${props.images.findIndex(image => image.id === target.id)}`, leaseId: original.leaseId })
+    : services.inputThumbnail(target.host, target.filename, target.origin, "output");
   const currentThumbnail = row => original ? services.historyThumbnail({ runId: original.id, resourceId: original.targets[0].graphResources[row.id], leaseId: original.leaseId }) : services.inputThumbnail(image.host, row.current, image.origin, row.currentRoot);
-  const unavailable = () => original?.targets.find(target => target.unavailable)?.unavailable ?? (original && !props.images.every(target => sameOrigin(target.origin, sourceOrigin(target.host, store.state.hosts[target.host]))) ? "Original source unavailable or changed. Reopen this saved run after reconnecting." : null);
+  const unavailable = () => targets().find(target => target.unavailable)?.unavailable ?? (original && !targets().every(target => sameOrigin(target.origin, sourceOrigin(target.host, store.state.hosts[target.host]))) ? "Original source unavailable or changed. Reopen this saved run after reconnecting." : null);
   let initializedImages = false;
   createEffect(() => {
     if (!read(editor.ready) || !strParams().length) return;
@@ -337,7 +342,7 @@ function ModalBody(props) {
     <div class="vz-panel" data-session={props.session}>
       <div ref={editorSurface} class="vz-editor" inert={!!decision()}>
         <SingleLineText class="vz-title" value={batch
-            ? `Generate image variations · applying to ${props.images.length} images`
+            ? `Generate image variations · applying to ${targets().length} image${targets().length === 1 ? "" : "s"}`
             : "Generate image variations"} />
         <HistoryDropdown history={services.history} state={services.historyState} thumbnail={services.historyThumbnail} registerThumbnail={services.registerThumbnail}
           registerPopup={registerImagePopup} registerEditor={registerEditor} rememberFocus={rememberFocus} bulk={batch}
@@ -525,6 +530,9 @@ function ModalBody(props) {
             </div>
           </div>
         </div></div>
+        <BatchTargets targets={targets()} thumbnail={batchThumbnail} registerThumbnail={services.registerThumbnail}
+          generationTime={id => read(() => editor.generationTime(id))} removable={!running()}
+          rememberFocus={rememberFocus} onRemove={id => editor.removeTarget(id)} />
         <IconButton chrome variant="plain vz-close" title="Close"
           onAction={() => store.handles.invoke("variations.close", { session: props.session })}
           icon={iconSvg("x")} />

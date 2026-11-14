@@ -1447,7 +1447,16 @@ body:has(#diff:not([hidden])) #statusCol { bottom: 56px; }
 }
 
 /* Saved-run presentation: same native palette and CSS-pixel scale as Variations. */
-.vz-editor { grid-template-rows: auto auto minmax(0, 1fr); gap: 16px; }
+.vz-editor { grid-template-rows: auto auto minmax(0, 1fr) auto; gap: 16px; }
+.vz-batch { min-width: 0; display: grid; gap: 6px; border-top: 1px solid var(--lifted); padding-top: 10px; }
+.vz-batch-label { font-size: 12px; color: var(--foreground); }
+.vz-batch-list { display: flex; gap: 8px; overflow-x: auto; min-width: 0; padding-bottom: 4px; }
+.vz-batch-item { display: grid; grid-template-columns: 64px minmax(0, 1fr) auto; align-items: center;
+  gap: 8px; flex: 0 0 280px; padding: 6px; border: 1px solid var(--border-strong); border-radius: 4px; }
+.vz-batch-thumbnail { width: 64px; height: 64px; }
+.vz-batch-info { display: grid; gap: 6px; min-width: 0; }
+.vz-batch-name, .vz-batch-time { font-size: 12px; color: var(--foreground); }
+.vz-batch-remove { align-self: start; }
 .vh-tools { display: grid; gap: 8px; min-width: 0; }
 .vh-trigger { width: 100%; min-width: 0; text-align: start; }
 .vh-trigger > .single-line-text { padding-inline: 10px; }

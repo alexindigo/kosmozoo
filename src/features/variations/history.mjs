@@ -139,7 +139,7 @@ export function makeVariationHistory(app) {
   const api = {
     begin(body) {
       if (!body || body.format !== 1 || !historyId(body.runId) || !["single", "bulk"].includes(body.cohortMode) ||
-        !Array.isArray(body.targets) || !body.targets.length || body.cohortMode !== (body.targets.length > 1 ? "bulk" : "single") || !Array.isArray(body.resources)) throw fail("Invalid history capture");
+        !Array.isArray(body.targets) || !body.targets.length || body.cohortMode === "single" && body.targets.length !== 1 || !Array.isArray(body.resources)) throw fail("Invalid history capture");
       for (const key of Object.keys(body)) if (!["runId", "format", "cohortMode", "targets", "recipe", "resources"].includes(key)) throw fail("Unknown history capture field");
       const recipe = decodeHistoryRecipe({ format: 1, recipe: body.recipe });
       const resources = cloneJsonValue(body.resources), ids = new Set();

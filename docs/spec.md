@@ -319,6 +319,24 @@ Run, reset its close timer or change selection. Count changes derive the estimat
 again without new timing fetches. Labels remain single-line, with value below;
 the count/time share grid rows and the breakdown spans both columns.
 
+Multi-target Variations also shows a bottom batch-target strip: each target's
+thumbnail, filename, original generation duration (or `--`) and remove action.
+This is the target cohort, not a Load Image candidate set. Removing affects only
+this editor; the main gallery selection, image files and saved runs are untouched.
+Count/time and the next Run capture use exactly the remaining targets, in order.
+The strip disappears at one remaining image. Removal keeps raw edits and the
+opening workflow/range basis, participates in dirty/revision/close protection,
+and is unavailable while Run or a blocking decision owns the editor. Issued Run
+tickets stay immutable. Lazy thumbnails use the existing display owner; timing
+uses the existing readonly source/hash-fenced facts. Archived targets retain
+their original archive resource indexes for display after removal.
+
+History's `cohortMode` denotes absolute (`single`) or relative (`bulk`) recipe
+basis, independently of cardinality: `single` requires exactly one target;
+`bulk` allows one or more. Shrinking a batch never reinterprets existing ranges.
+Original saved-run openings restore that explicit basis. No schema migration or
+modification of existing saved runs is required.
+
 #### Durable Variations snapshots
 
 The engine owns version1 raw recipe snapshots, original target graphs/pixels and
