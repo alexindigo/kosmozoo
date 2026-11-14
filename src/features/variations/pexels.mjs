@@ -138,7 +138,9 @@ export class PexelsServices {
 
 const photoId = value => {
   const id = typeof value === "number" && Number.isSafeInteger(value) && value >= 0 ? String(value) : value;
-  return typeof id === "string" && /^[A-Za-z0-9_-]{1,64}$/.test(id) ? id : null;
+  // Compatible services use their own opaque IDs (e.g. "film-…:frame-…"); the
+  // ID is only ever an encoded path segment and a lookup key, never a filename.
+  return typeof id === "string" && id.length > 0 && id.length <= 256 && !controls.test(id) && id.trim() === id && id !== "." && id !== ".." ? id : null;
 };
 const text = (value, limit) => typeof value === "string" ? value.replace(/[\x00-\x1f\x7f]+/g, " ").trim().slice(0, limit) : "";
 const dimension = value => Number.isSafeInteger(value) && value > 0 ? value : null;
@@ -159,7 +161,7 @@ export function normalizePhoto(raw, base) {
   return { id, alt: text(raw.alt, 300), photographer: text(raw.photographer, 120), width: dimension(raw.width), height: dimension(raw.height), src };
 }
 
-const upstreamError = (service, status) => status === 401 || status === 403 ? fail(`${service.name} rejected the API key`, 502)
+const upstreamError = (service, status) => status === 401 || status === 403 ? fail(service.key ? `${service.name} rejected the API key` : `${service.name} needs an API key`, 502)
   : status === 429 ? fail(`${service.name} rate limit reached; try again later`, 502)
   : status === 404 ? fail(`${service.name} doesn't have this photo`, 404)
   : fail(`${service.name} answered HTTP ${status}`, 502);
@@ -213,11 +215,18 @@ export function makePexelsClient({ fetch = globalThis.fetch, timeoutMs = UPSTREA
   return {
     // Empty query browses curated photos. A compatible service without the
     // curated endpoint is a normal state, not an error.
+    // Without a curated endpoint, an empty search may still list the catalogue
+    // (self-hosted services often allow it); otherwise the picker asks for text.
     async photos(service, { query = "", page = 1, signal } = {}) {
-      const search = query.trim();
-      const { status, data } = await json(service, search ? "/v1/search" : "/v1/curated",
-        { ...(search ? { query: search } : {}), page, per_page: PEXELS_PAGE_SIZE }, signal);
-      if (!search && [404, 405, 501].includes(status)) return { mode: "curated", curated: false, page, more: false, photos: [] };
+      const search = query.trim(), params = { page, per_page: PEXELS_PAGE_SIZE };
+      let mode = search ? "search" : "curated", { status, data } = await json(service, search ? "/v1/search" : "/v1/curated",
+        { ...(search ? { query: search } : {}), ...params }, signal);
+      if (!search && [404, 405, 501].includes(status)) {
+        ({ status, data } = await json(service, "/v1/search", { query: "", ...params }, signal));
+        if (status < 200 || status >= 300 || !Array.isArray(data?.photos) || page === 1 && !data.photos.length)
+          return { mode: "curated", curated: false, page, more: false, photos: [] };
+        mode = "browse";
+      }
       if (status < 200 || status >= 300) throw upstreamError(service, status);
       if (!data || !Array.isArray(data.photos)) throw fail(`${service.name} sent no photo list`, 502);
       const seen = new Set(), list = [];
@@ -227,10 +236,12 @@ export function makePexelsClient({ fetch = globalThis.fetch, timeoutMs = UPSTREA
         seen.add(photo.id); remember(service, photo);
         list.push({ id: photo.id, alt: photo.alt, photographer: photo.photographer, width: photo.width, height: photo.height });
       }
+      // Dropped records are never presented as "no matches".
+      if (data.photos.length && !list.length) throw fail(`${service.name} sent ${data.photos.length} photos without a usable ID, image or thumbnail link`, 502);
       const more = typeof data.next_page === "string" ? !!data.next_page
         : Number.isSafeInteger(data.total_results) ? data.total_results > page * PEXELS_PAGE_SIZE
         : data.photos.length >= PEXELS_PAGE_SIZE;
-      return { mode: search ? "search" : "curated", curated: true, page, more: more && data.photos.length > 0, photos: list };
+      return { mode, curated: true, page, more: more && data.photos.length > 0, photos: list };
     },
 
     async photo(service, id, signal) {
@@ -265,6 +276,18 @@ export function makePexelsClient({ fetch = globalThis.fetch, timeoutMs = UPSTREA
       return { bytes, mime, extension: IMAGE_MIME.get(mime) };
     },
 
+    // One real first-page query, the same one the picker makes first.
+    async check(service, signal) {
+      try {
+        const first = await this.photos(service, { signal });
+        if (!first.curated) await this.photos(service, { query: "a", signal });
+        return { ok: true, browse: first.curated };
+      } catch (error) {
+        if (signal?.aborted) throw error;
+        return { ok: false, error: error.message };
+      }
+    },
+
     forget(serviceId) { for (const key of [...photos.keys()]) if (JSON.parse(key)[0] === serviceId) photos.delete(key); },
   };
 }
@@ -290,6 +313,7 @@ export function registerPexels(app, { services: injected = null, client: injecte
   route("POST", "/services", async req => Response.json(await services.create(await body(req)), { status: 201 }));
   route("PATCH", "/services/<id>", async (req, { id }) => Response.json(await services.update(id, await body(req))));
   route("DELETE", "/services/<id>", async (_req, { id }) => { await services.remove(id); return Response.json({ removed: true }); });
+  route("GET", "/services/<id>/status", async (req, { id }) => Response.json(await client.check(await services.get(id), req.signal)));
   route("GET", "/services/<id>/photos", async (req, { id }) => {
     const query = new URL(req.url).searchParams.get("query") ?? "";
     if (query.length > 200 || controls.test(query)) throw fail("Search text is too long");

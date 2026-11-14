@@ -2,6 +2,7 @@ import { assert, assertEquals, assertRejects } from "jsr:@std/assert";
 import { PexelsServices, makePexelsClient, registerPexels, serviceBase, normalizePhoto, PEXELS_PAGE_SIZE } from "../src/features/variations/pexels.mjs";
 import { makePexelsBrowse } from "../client-solid/features/variations/pexels-browse.js";
 import { makePexelsServices } from "../client-solid/features/variations/pexels-services.js";
+import { pexelsFileName } from "../client-solid/features/variations/api.js";
 import { editorRig as defaultRig, removeRecordedImages } from "./helpers/variation-editor.mjs";
 import { fakePexels, JPEG } from "./helpers/fake-pexels.mjs";
 
@@ -63,7 +64,11 @@ Deno.test("pexels: photo records keep only usable http sizes", () => {
     src: { large2x: "/img/7-large2x.jpg", medium: "javascript:alert(1)", tiny: "https://x/7-tiny.jpg" } }, "http://pexels.home/api");
   assertEquals(photo, { id: "7", alt: "a b", photographer: "P", width: 10, height: null,
     src: { large2x: "http://pexels.home/img/7-large2x.jpg", tiny: "https://x/7-tiny.jpg" } });
-  assertEquals(normalizePhoto({ id: "../x", src: { large2x: "http://a", medium: "http://a" } }, "http://a"), null);
+  for (const id of ["..", ".", "", " x", "a\nb", "x".repeat(257)]) assertEquals(normalizePhoto({ id, src: { large2x: "http://a", medium: "http://a" } }, "http://a"), null, id);
+  // A self-hosted service's opaque IDs and reduced size set are usable as-is.
+  const frame = normalizePhoto({ id: "film-4393ebe3694f6946c541ea255bee0ad6:frame-df0773d898c0fb7776f8fcb821f61324",
+    src: { original: "/api/films/f/assets/a/frame", small: "/api/films/f/assets/a/thumb" } }, "http://katana.home/api");
+  assertEquals(frame.src, { original: "http://katana.home/api/films/f/assets/a/frame", small: "http://katana.home/api/films/f/assets/a/thumb" });
   assertEquals(normalizePhoto({ id: 1, src: { medium: "http://a" } }, "http://a"), null);
 });
 
@@ -87,6 +92,7 @@ Deno.test("pexels: search and curated pages, key only on the service origin, cur
     [["cdn.example", null], ["pexels.home", "secret"]]);
 
   await assertRejects(() => client.photos({ ...service, key: "wrong" }), Error, "rejected the API key");
+  await assertRejects(() => client.photos({ ...service, key: undefined }), Error, "Home needs an API key");
   const bare = fakePexels({ curated: false }), plain = makePexelsClient({ fetch: bare.fetch });
   assertEquals(await plain.photos({ id: "b", name: "Bare", url: "http://pexels.home" }), { mode: "curated", curated: false, page: 1, more: false, photos: [] });
   assertEquals((await plain.photos({ id: "b", name: "Bare", url: "http://pexels.home" }, { query: "dogs" })).photos.length, 3);
@@ -100,7 +106,7 @@ Deno.test("pexels: bytes resolve only engine-fetched photos, refuse non-images a
   const direct = await client.bytes(service, "5", "image");
   assertEquals(direct.mime, "image/jpeg");
   assert(fake.requests.some(request => request.url === "http://pexels.home/v1/photos/5"));
-  await assertRejects(() => client.bytes(service, "../etc", "image"), Error, "Unknown photo");
+  await assertRejects(() => client.bytes(service, "..", "image"), Error, "Unknown photo");
   await assertRejects(() => client.bytes(service, "999", "image"), Error, "doesn't have this photo");
   await assertRejects(() => client.bytes(service, "13", "image"), Error, "isn't a supported image");
   await client.bytes(service, "21", "image");
@@ -183,13 +189,14 @@ Deno.test("pexels browse: a service without curated asks for a search; failures 
 });
 
 Deno.test("pexels services owner: one redacted list confirmed after each mutation", async () => {
-  let list = [];
+  let list = [], gate = null;
   const api = {
     pexelsServices: async () => ({ services: list }),
     createPexelsService: async details => { if (!details.name) throw Object.assign(new Error("400"), { detail: "Enter a name" });
       const saved = { id: "1", name: details.name, url: details.url, hasKey: !!details.key }; list = [saved]; return saved; },
     updatePexelsService: async (id, details) => { list = list.map(item => item.id === id ? { ...item, ...details, hasKey: details.key === null ? false : item.hasKey } : item); return list[0]; },
     removePexelsService: async id => { list = list.filter(item => item.id !== id); return { removed: true }; },
+    pexelsStatus: async id => (await gate, list.find(item => item.id === id)?.hasKey ? { ok: true, browse: true } : { ok: false, error: "Home needs an API key" }),
   };
   let changes = 0;
   const owner = makePexelsServices({ api, changed: () => changes++ });
@@ -198,10 +205,19 @@ Deno.test("pexels services owner: one redacted list confirmed after each mutatio
   assertEquals(await owner.create({ name: "" }), { ok: false, error: "Enter a name" });
   assertEquals((await owner.create({ name: "Home", url: "http://h", key: "k" })).ok, true);
   assertEquals(owner.state().services.map(item => [item.name, item.hasKey]), [["Home", true]]);
+  await settle();
+  assertEquals(owner.status("1"), { phase: "ok", message: "" });
   await owner.update("1", { key: null });
   assertEquals(owner.state().services[0].hasKey, false);
+  await settle();
+  assertEquals(owner.status("1"), { phase: "error", message: "Home needs an API key" });
+  let release; gate = new Promise(resolve => { release = resolve; });
+  await owner.checkAll(); assertEquals(owner.status("1"), { phase: "checking", message: "" });
+  release(); gate = null; await settle();
+  assertEquals(owner.status("1").phase, "error");
   await owner.remove("1");
   assertEquals(owner.state().services, []);
+  assertEquals(owner.status("1").phase, "unknown");
   assert(changes > 4);
   owner.dispose();
 });
@@ -243,4 +259,46 @@ Deno.test("pexels editor: a toggle withdrawn while reading adds nothing, and a f
   await editor.togglePexels(id, "svc", "2");
   assertEquals(editor.pexelsState(id, "svc", "2"), { selected: false, pending: false, error: "Photo 2: Home answered HTTP 502" });
   editor.dispose();
+});
+
+const stubService = routes => async href => {
+  const url = new URL(href), key = url.pathname + (url.searchParams.has("query") ? `?query=${url.searchParams.get("query")}` : "");
+  const route = routes[key] ?? routes[url.pathname];
+  return route ? Response.json(route.body, { status: route.status ?? 200 }) : Response.json({ error: "Unknown catalog route" }, { status: 404 });
+};
+const frameRecord = n => ({ id: `film-1:frame-${n}`, alt: `Photoshoot - frame ${n}`, src: { original: `/api/films/1/${n}/frame`, small: `/api/films/1/${n}/thumb` } });
+
+Deno.test("pexels: without curated, an empty search that lists the catalogue is browsed; otherwise the picker asks for text", async () => {
+  const katana = { id: "k", name: "katana", url: "http://katana.home/api" };
+  const browsing = makePexelsClient({ fetch: stubService({ "/api/v1/search?query=": { body: { page: 1, per_page: 40, total_results: 6375, photos: [frameRecord(1), frameRecord(2)] } } }) });
+  const listed = await browsing.photos(katana);
+  assertEquals([listed.mode, listed.curated, listed.more, listed.photos.map(photo => photo.id)], ["browse", true, true, ["film-1:frame-1", "film-1:frame-2"]]);
+  const searchOnly = makePexelsClient({ fetch: stubService({ "/api/v1/search?query=": { status: 400, body: { error: "query required" } } }) });
+  assertEquals(await searchOnly.photos(katana), { mode: "curated", curated: false, page: 1, more: false, photos: [] });
+  const empty = makePexelsClient({ fetch: stubService({ "/api/v1/search?query=": { body: { page: 1, photos: [] } } }) });
+  assertEquals((await empty.photos(katana)).curated, false);
+});
+
+Deno.test("pexels: photos that are all unusable are an error, never an empty result", async () => {
+  const client = makePexelsClient({ fetch: stubService({ "/v1/search": { body: { page: 1, photos: [{ id: 1, src: {} }, { id: "..", src: { original: "http://a/x", small: "http://a/y" } }] } } }) });
+  await assertRejects(() => client.photos({ id: "s", name: "Home", url: "http://pexels.home" }, { query: "cat" }), Error, "sent 2 photos without a usable ID");
+});
+
+Deno.test("pexels: imported file names are portable slugs of opaque photo IDs", () => {
+  assertEquals(pexelsFileName("42", "jpg"), "pexels-42.jpg");
+  assertEquals(pexelsFileName("film-1:frame-df07", "png"), "pexels-film-1-frame-df07.png");
+  assertEquals(pexelsFileName("::", "jpg"), "pexels-photo.jpg");
+  assertEquals(pexelsFileName("a/".repeat(100), "jpg").length, "pexels-".length + 80 + 4);
+});
+
+Deno.test("pexels: the connection check runs the picker's first query and reports a readable reason", async () => {
+  const fake = fakePexels({ key: "secret", curated: true }), client = makePexelsClient({ fetch: fake.fetch });
+  const service = { id: "s", name: "Home", url: "http://pexels.home", key: "secret" };
+  assertEquals(await client.check(service), { ok: true, browse: true });
+  assertEquals(await client.check({ ...service, key: undefined }), { ok: false, error: "Home needs an API key" });
+  assertEquals(await client.check({ ...service, key: "wrong" }), { ok: false, error: "Home rejected the API key" });
+  const bare = makePexelsClient({ fetch: fakePexels({ curated: false }).fetch });
+  assertEquals(await bare.check({ id: "b", name: "Bare", url: "http://pexels.home" }), { ok: true, browse: false });
+  const down = makePexelsClient({ fetch: () => Promise.reject(new TypeError("refused")) });
+  assertEquals(await down.check({ id: "d", name: "Down", url: "http://down.home" }), { ok: false, error: "Couldn't reach Down" });
 });

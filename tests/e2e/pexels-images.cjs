@@ -1,12 +1,13 @@
 // Real-browser proof: Pexels services are managed in Settings, browsed in the
 // Variations image picker, and chosen photos reach ComfyUI as uploads.
-// Needs tests/fake-pexels.mjs twice: E2E_PEXELS (key "secret", curated) and
-// E2E_PEXELS_BARE (--no-curated), plus the usual engine and fake ComfyUI.
+// Needs tests/fake-pexels.mjs three times: E2E_PEXELS (key "secret", curated),
+// E2E_PEXELS_BARE (--no-curated) and E2E_PEXELS_FRAMES (--frames, a self-hosted
+// catalogue shape), plus the usual engine and fake ComfyUI.
 const assert = require('node:assert/strict'), fs = require('node:fs');
 const { CDP, collectPageErrors } = require('./cdp.cjs');
 const { addParameter, removeRecordedImage } = require('./variation-add-helpers.cjs');
 const { openImageAdd, waitForInputPicker, waitForSelectedPreviews } = require('./image-picker-helpers.cjs');
-const B = process.env.E2E_ENGINE, F = process.env.E2E_FAKE, P = process.env.E2E_PEXELS, BARE = process.env.E2E_PEXELS_BARE;
+const B = process.env.E2E_ENGINE, F = process.env.E2E_FAKE, P = process.env.E2E_PEXELS, BARE = process.env.E2E_PEXELS_BARE, FRAMES = process.env.E2E_PEXELS_FRAMES;
 const D = process.env.E2E_EVIDENCE;
 const KZ = `(await import('/store/instance.js')).appStore`;
 const json = async (base, path, body) => {
@@ -41,12 +42,20 @@ const pexelsTrigger = '.vz-image-add .vz-input-picker:nth-child(2) .vz-input-tri
     await field('#menuSearch', 'pexels');
     await addService('Home photos', P + '/v1', 'secret');
     step('second service'); await addService('Bare', BARE);
+    await addService('Frames', FRAMES + '/v1');
     const listed = await (await fetch(B + '/api/features/variations/pexels/services')).text();
     assert(!listed.includes('secret'), 'service list never carries the key');
     const services = JSON.parse(listed).services;
-    assert.deepEqual(services.map(s => [s.name, s.url, s.hasKey]), [['Home photos', P, true], ['Bare', BARE, false]]);
+    assert.deepEqual(services.map(s => [s.name, s.url, s.hasKey]), [['Home photos', P, true], ['Bare', BARE, false], ['Frames', FRAMES, false]]);
     assert.equal(await c.evaluate(`document.querySelectorAll('.pexels-service-key').length`), 1);
+    await addService('Unreachable', 'http://127.0.0.1:20499');
+    const lights = `[...document.querySelectorAll('.pexels-service')].map(r=>[r.querySelector('.pexels-service-name').textContent,r.querySelector('.pexels-service-status').className.replace('pexels-service-status','').trim(),r.querySelector('.pexels-service-problem')?.textContent??''])`;
+    await c.poll(`JSON.stringify(${lights})===${JSON.stringify(JSON.stringify([['Home photos', 'is-ok', ''], ['Bare', 'is-ok', ''], ['Frames', 'is-ok', ''], ['Unreachable', 'is-error', "Couldn't reach Unreachable"]]))}`, 20000);
     await shot('settings-services');
+    await c.clickAt('.pexels-service:nth-child(4) [title="Remove Unreachable"]');
+    await c.poll(`!!document.querySelector('.pexels-service-confirm')`);
+    await c.evaluate(`document.querySelector('.pexels-remove').click()`);
+    await c.poll(`document.querySelectorAll('.pexels-service').length===3`);
     await c.clickAt('.pexels-service-open');
     await c.poll(`document.querySelector('.pexels-form input[type=password]')?.placeholder==='Saved key is kept'`);
     await shot('settings-edit');
@@ -68,7 +77,7 @@ const pexelsTrigger = '.vz-image-add .vz-input-picker:nth-child(2) .vz-input-tri
 
     // Curated on the keyed service, paged as the list scrolls.
     step('open the Pexels picker'); await c.clickAt(pexelsTrigger); await waitForInputPicker(c);
-    await c.poll(`document.querySelectorAll('[role=tab]').length===2 && [...document.querySelectorAll('[role=tab]')].map(t=>t.textContent).join()==='Home photos,Bare'`);
+    await c.poll(`document.querySelectorAll('[role=tab]').length===3 && [...document.querySelectorAll('[role=tab]')].map(t=>t.textContent).join()==='Home photos,Bare,Frames'`);
     await c.poll(`document.querySelectorAll('.vz-input-option').length>0 && [...document.querySelectorAll('.vz-input-option img')].every(i=>i.complete&&i.naturalWidth>0)`, 20000);
     assert.equal(await c.evaluate(`document.querySelector('.vz-input-search').placeholder`), 'Search photos...');
     assert.match(await c.evaluate(`document.querySelector('.vz-input-option').getAttribute('aria-label')`), /^Curated scene 0 - photo by Photographer 100$/);
@@ -96,18 +105,30 @@ const pexelsTrigger = '.vz-image-add .vz-input-picker:nth-child(2) .vz-input-tri
     await shot('picker-search-only');
     await c.send('Input.insertText', { text: 'dogs' });
     await c.poll(`document.querySelectorAll('.vz-input-option').length===3`, 20000);
+
+    // A self-hosted catalogue without curated photos is browsed through an
+    // empty search; its opaque IDs become portable file names.
+    await c.evaluate(`[...document.querySelectorAll('[role=tab]')].find(t=>t.textContent==='Frames').click()`);
+    await c.evaluate(`(()=>{const s=document.querySelector('.vz-input-search');s.value='';s.dispatchEvent(new Event('input',{bubbles:true}));})()`);
+    await c.poll(`document.querySelector('.vz-input-option')?.getAttribute('aria-label')==='Photoshoot - frame 200'`, 20000);
+    await c.poll(`[...document.querySelectorAll('.vz-input-option img')].slice(0,6).every(i=>i.complete&&i.naturalWidth>0)`, 20000);
+    await shot('picker-browse-frames');
+    await c.clickAt('.vz-input-option[data-input-name="film-7:frame-200"]');
+    await c.poll(`document.querySelectorAll('.vz-input-option[aria-selected=true]').length===1`, 20000);
     await c.keyTrusted('Escape', { vk: 27 });
     await c.poll(`!document.querySelector('.vz-input-search')`);
 
-    await c.poll(`[...document.querySelectorAll('.vz-image-tile')].map(t=>t.dataset.imageName).join()===${JSON.stringify(options.map(id => `pexels-${id}.png`).join())}`, 20000);
+    const names = [...options.map(id => `pexels-${id}.png`), 'pexels-film-7-frame-200.png'];
+    // Each photo joins the set when its bytes arrive, so near-simultaneous picks may settle in either order.
+    await c.poll(`[...document.querySelectorAll('.vz-image-tile')].map(t=>t.dataset.imageName).sort().join()===${JSON.stringify([...names].sort().join())}`, 20000);
     await waitForSelectedPreviews(c);
     await shot('image-set');
 
     step('run'); const run = await invoke('variations.run');
-    assert.equal(run.adopted, true, JSON.stringify(run) + ' ' + await c.evaluate(`document.querySelector('.vz-messages')?.textContent`)); assert.equal(run.submitted, 2);
+    assert.equal(run.adopted, true, JSON.stringify(run) + ' ' + await c.evaluate(`document.querySelector('.vz-messages')?.textContent`)); assert.equal(run.submitted, 3);
     const enqueues = await json(F, '/__test/enqueues');
     const values = enqueues.map(e => e.prompt?.['470']?.inputs?.image ?? e['470']?.inputs?.image).sort();
-    assert.deepEqual(values, options.map(id => `pexels-${id}.png`).sort(), JSON.stringify(enqueues).slice(0, 400));
+    assert.deepEqual(values, [...names].sort(), JSON.stringify(enqueues).slice(0, 400));
     assert.deepEqual(errors, []);
     fs.writeFileSync(`${D}/pexels-images.json`, JSON.stringify({ services, options, run, values }, null, 2));
     console.log('pexels-images: ok');

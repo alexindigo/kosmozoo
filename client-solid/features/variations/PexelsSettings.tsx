@@ -14,7 +14,8 @@ export function PexelsSettings(props) {
   const [draft, setDraft] = createSignal(null), [removing, setRemoving] = createSignal(null);
   const [busy, setBusy] = createSignal(false), [message, setMessage] = createSignal("");
   let nameField;
-  onMount(() => { owner().load(true); });
+  onMount(() => { owner().checkAll(); });
+  const statusLabel = status => status.phase === "ok" ? "Connected" : status.phase === "error" ? status.message : status.phase === "checking" ? "Checking connection..." : "Not checked";
 
   const edit = service => {
     setRemoving(null); setMessage("");
@@ -54,7 +55,7 @@ export function PexelsSettings(props) {
       <Show when={state().error}>
         <div class="pexels-settings-error">
           <SingleLineText role="status" value="Couldn't read Pexels services." hint={state().error} />
-          <button type="button" class="btn" onClick={() => owner().load(true)}>Retry</button>
+          <button type="button" class="btn" onClick={() => owner().checkAll()}>Retry</button>
         </div>
       </Show>
       <Show when={state().services.length}>
@@ -62,9 +63,14 @@ export function PexelsSettings(props) {
           <For each={state().services}>{service =>
             <li class="pexels-service" classList={{ "is-editing": draft()?.id === service.id }}>
               <Show when={removing() === service.id} fallback={<>
+                <span class="pexels-service-status" classList={{ [`is-${owner().status(service.id).phase}`]: true }} role="img"
+                  aria-label={statusLabel(owner().status(service.id))} title={statusLabel(owner().status(service.id))} />
                 <button type="button" class="pexels-service-open" title={`Edit ${service.name}`} onClick={() => edit(service)}>
                   <SingleLineText class="pexels-service-name" value={service.name} />
                   <SingleLineText class="pexels-service-url" value={service.url} />
+                  <Show when={owner().status(service.id).phase === "error"}>
+                    <SingleLineText class="pexels-service-problem" value={owner().status(service.id).message} />
+                  </Show>
                 </button>
                 <Show when={service.hasKey}><span class="pexels-service-key" role="img" aria-label="API key saved" title="API key saved" innerHTML={iconSvg("lock", 12)} /></Show>
                 <Show when={!busy()}>

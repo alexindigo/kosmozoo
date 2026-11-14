@@ -1380,13 +1380,21 @@ body:has(#diff:not([hidden])) #statusCol { bottom: 56px; }
 /* One grid for the whole list; each row is a subgrid, so the key marker and
    remove columns are shared by every row whether or not a row fills them. */
 .pexels-services { list-style: none; margin: 0; padding: 0; display: grid;
-  grid-template-columns: minmax(0, 1fr) auto auto; column-gap: 6px; row-gap: 2px; }
+  grid-template-columns: auto minmax(0, 1fr) auto auto; column-gap: 6px; row-gap: 2px; }
 .pexels-service { display: grid; grid-column: 1 / -1; grid-template-columns: subgrid; align-items: center;
   border-radius: 4px; }
 .pexels-service.is-editing { background: var(--lifted); }
-.pexels-service-key { grid-column: 2; }
-.pexels-service > .icon-button { grid-column: 3; }
-#chrome button.pexels-service-open { grid-column: 1; display: flex; flex-direction: column; align-items: stretch; min-width: 0; gap: 1px;
+.pexels-service-status { grid-column: 1; width: 8px; height: 8px; border-radius: 50%; margin-inline-start: 4px;
+  background: var(--foreground-dim); }
+.pexels-service-status.is-ok { background: var(--positive); }
+.pexels-service-status.is-error { background: var(--negative); }
+.pexels-service-status.is-checking { animation: pexels-checking 1.2s ease-in-out infinite alternate; }
+@keyframes pexels-checking { to { opacity: .3; } }
+@media (prefers-reduced-motion: reduce) { .pexels-service-status.is-checking { animation: none; } }
+.pexels-service-key { grid-column: 3; }
+.pexels-service > .icon-button { grid-column: 4; }
+.pexels-service-problem { font-size: 11px; color: var(--negative); }
+#chrome button.pexels-service-open { grid-column: 2; display: flex; flex-direction: column; align-items: stretch; min-width: 0; gap: 1px;
   padding: 3px 6px; background: none; border: 1px solid transparent; text-align: start; color: var(--foreground); }
 #chrome button.pexels-service-open:hover { border-color: var(--border-strong); }
 .pexels-service-url { font-size: 11px; color: var(--foreground); }

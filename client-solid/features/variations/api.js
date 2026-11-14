@@ -101,10 +101,14 @@ export const pexelsServices = signal => req("GET", pexelsPath(), undefined, { si
 export const createPexelsService = details => req("POST", pexelsPath(), details);
 export const updatePexelsService = (id, details) => req("PATCH", pexelsPath(id), details);
 export const removePexelsService = id => req("DELETE", pexelsPath(id));
+export const pexelsStatus = (id, signal) => req("GET", `${pexelsPath(id)}/status`, undefined, { signal });
 export const pexelsPhotos = (id, query, page, signal) =>
   req("GET", `${pexelsPath(id)}/photos?${new URLSearchParams({ query, page: String(page) })}`, undefined, { signal });
 export const pexelsThumbnail = (id, photo) => `${pexelsPath(id)}/photos/${encodeURIComponent(photo)}/thumbnail`;
 const PEXELS_EXTENSIONS = { "image/jpeg": "jpg", "image/png": "png", "image/webp": "webp", "image/gif": "gif", "image/avif": "avif" };
+// Photo IDs are opaque service data; the upload name is a portable slug of it.
+export const pexelsFileName = (photo, extension) =>
+  `pexels-${String(photo).replace(/[^A-Za-z0-9_-]+/g, "-").replace(/^-+|-+$/g, "").slice(-80) || "photo"}.${extension}`;
 export async function readPexelsPhoto(id, photo) {
   const response = await fetch(`${pexelsPath(id)}/photos/${encodeURIComponent(photo)}/image`);
   if (!response.ok) {
@@ -114,5 +118,5 @@ export async function readPexelsPhoto(id, photo) {
   }
   const blob = await response.blob(), extension = PEXELS_EXTENSIONS[blob.type];
   if (!extension) throw new Error("The service sent a file that isn't a supported image");
-  return new File([blob], `pexels-${photo}.${extension}`, { type: blob.type });
+  return new File([blob], pexelsFileName(photo, extension), { type: blob.type });
 }

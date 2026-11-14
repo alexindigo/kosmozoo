@@ -6,11 +6,15 @@
 export const JPEG = new Uint8Array([0xff, 0xd8, 0xff, 0xe0, ...new Array(60).fill(0x11), 0xff, 0xd9]);
 const PAGE = 40;
 
-export function pexelsHandler({ api = "http://pexels.home", cdn = "http://cdn.example", key = null, curated = true, image = () => JPEG } = {}) {
+// `frames` models a self-hosted catalogue: no curated route, an empty search
+// lists everything, opaque "film:frame" IDs and only original/small sizes.
+export function pexelsHandler({ api = "http://pexels.home", cdn = "http://cdn.example", key = null, curated = true, frames = false, image = () => JPEG } = {}) {
   const apiOrigin = new URL(api).origin, cdnOrigin = new URL(cdn).origin;
   const photo = (id, alt) => ({ id: Number(id), alt, photographer: `Photographer ${id}`, width: 1200, height: 800,
     src: { large2x: id === "13" ? `${apiOrigin}/img/13-text` : id === "21" ? `${apiOrigin}/redirect/21` : `${cdnOrigin}/img/${id}-large2x`,
       medium: `${apiOrigin}/img/${id}-medium` } });
+  const frame = n => ({ id: `film-7:frame-${n}`, alt: `Photoshoot - frame ${n}`, width: 320, height: 568,
+    src: { original: `/img/${n}-frame`, small: `/img/${n}-thumb` } });
   const json = (body, status = 200) => Response.json(body, { status });
   const bytes = path => { const id = path.match(/\/(\d+)/)?.[1] ?? "0", data = image(id); return new Response(data, { headers: { "Content-Type": data[0] === 0x89 ? "image/png" : "image/jpeg" } }); };
   return request => {
@@ -25,7 +29,13 @@ export function pexelsHandler({ api = "http://pexels.home", cdn = "http://cdn.ex
         ...(page < 3 ? { next_page: `${apiOrigin}/v1/curated?page=${page + 1}` } : {}) });
     }
     if (url.pathname === "/v1/search") {
-      const query = url.searchParams.get("query"), page = Number(url.searchParams.get("page")), total = query === "dogs" ? 3 : 50;
+      const query = url.searchParams.get("query") ?? "", page = Number(url.searchParams.get("page"));
+      if (frames) {
+        const matches = Array.from({ length: 60 }, (_, n) => frame(200 + n)).filter(item => item.alt.toLowerCase().includes(query.toLowerCase()));
+        return json({ page, per_page: PAGE, total_results: matches.length, photos: matches.slice((page - 1) * PAGE, page * PAGE) });
+      }
+      if (!query) return json({ error: "query is required" }, 400);
+      const total = query === "dogs" ? 3 : 50;
       const count = Math.max(0, Math.min(PAGE, total - (page - 1) * PAGE));
       return json({ page, per_page: PAGE, total_results: total,
         photos: Array.from({ length: count }, (_, n) => photo(String(1000 + page * 100 + n), `${query} photo ${n}`)) });

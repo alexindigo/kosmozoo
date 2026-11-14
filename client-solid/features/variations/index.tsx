@@ -86,7 +86,8 @@ export function install(store) {
     ports: {
       services,
       registerOwner: broker.register,
-      pexels: { state: pexelsState, load: pexels.load, create: pexels.create, update: pexels.update, remove: pexels.remove },
+      pexels: { state: pexelsState, status: id => { pexelsRevision(); return pexels.status(id); }, checkAll: pexels.checkAll,
+        load: pexels.load, create: pexels.create, update: pexels.update, remove: pexels.remove },
       open: (image) => store.handles.invoke("variations.open", { id: image.id }),
     },
   };
