@@ -13,6 +13,8 @@ import { ParameterRow } from "./ParameterRow.js";
 import { useClickOutside } from "../../lib/click-outside.js";
 import { isFileDrag, droppedFiles, classifyImageFiles, nearestImageTile, imageInsertIndex } from "./image-drop.js";
 
+const COMFY_ROOTS = [{ value: "input", label: "imported" }, { value: "output", label: "generated" }];
+
 export function ImageSetPanel(props) {
   let fileInput, content, addButton;
   const [adding, setAdding] = createSignal(false), [folder, setFolder] = createSignal(false);
@@ -49,7 +51,8 @@ export function ImageSetPanel(props) {
           {...focusMemory(props.rememberFocus)} onClick={() => setAdding(!adding())}>+</button>
       </ImageGrid>
       <div class="vz-image-add" hidden={!adding()}>
-        <Show when={props.sources.length}><InputPicker sources={props.sources} sourceInputs={props.sourceInputs} inputState={props.inputState}
+        <Show when={props.sources.length}><InputPicker label="ComfyUI images" roots={COMFY_ROOTS} noun={root => `${root === "output" ? "generated" : "imported"} images`}
+          sources={props.sources} sourceInputs={props.sourceInputs} inputState={props.inputState}
           onSource={props.onSource} onRetrySource={props.onRetrySource} registerTabKeys={props.registerTabKeys}
           current={row().current} currentRoot={row().currentRoot ?? (row().fromOutput ? "output" : "input")} positionRevision={row().images} thumbnail={props.inputThumbnail} registerThumbnail={props.registerThumbnail}
           onToggle={props.onToggleInput}

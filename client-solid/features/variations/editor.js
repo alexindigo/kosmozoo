@@ -70,6 +70,40 @@ export function makeVariationEditor({ targets, cohortMode, services, currentOrig
     map.set(key, record); return record;
   };
   const cachedInput = (origin, name, root) => sourceRecord(sourceFiles, origin, null, root)?.files.get(name);
+  const fileRecord = (files, name) => {
+    if (!files.has(name)) files.set(name, { file: null, pending: false, error: "", wanted: new Map() });
+    return files.get(name);
+  };
+  // Remote bytes become one cached immutable File per resource. A toggle while
+  // reading records/withdraws only that row's membership intent; the settled
+  // File joins every row whose ticket is still admitted.
+  const cachedFileState = (id, cached) => {
+    const item = cached?.file ? uploadImage(cached.file) : null;
+    return { selected: !!item && row("images", id).values.items.some(other => sameImage(item, other)),
+      pending: !!cached?.pending && cached.wanted.has(id) && admitsMembership(cached.wanted.get(id)), error: cached?.error ?? "" };
+  };
+  const toggleCachedFile = async (editor, id, cached, label, read, owns) => {
+    if (cached.file) {
+      cached.error = "";
+      const item = uploadImage(cached.file);
+      return cachedFileState(id, cached).selected ? editor.removeImage(id, item) : editor.addImages(id, [item]);
+    }
+    if (cached.wanted.has(id) && admitsMembership(cached.wanted.get(id))) cached.wanted.delete(id);
+    else cached.wanted.set(id, membershipTicket(id));
+    if (cached.pending) { notify(); return; }
+    cached.pending = true; cached.error = ""; notify();
+    try {
+      const file = await read();
+      if (!owns()) return;
+      cached.file = file;
+      for (const [rowId, ticket] of [...cached.wanted]) {
+        if (cached.wanted.get(rowId) !== ticket) continue;
+        cached.wanted.delete(rowId);
+        if (admitsMembership(ticket)) editor.addImages(rowId, [uploadImage(file)]);
+      }
+    } catch (error) { if (owns()) { cached.wanted.clear(); cached.error = `${label}: ${error.message}`; } }
+    finally { if (owns()) { cached.pending = false; notify(); } }
+  };
   const reference = (name, root) => ({ kind: "reference", value: resourceReferenceValue(name, root) });
   const resourceName = name => typeof name === "string" && !resourceReferenceProblem(null, name);
   const batch = cohortMode === "bulk" || capturedTargets.length > 1;
@@ -281,10 +315,10 @@ export function makeVariationEditor({ targets, cohortMode, services, currentOrig
       }
     },
     sourceInputState(id, origin, name, root = "input") {
-      const cached = cachedInput(origin, name, root), item = sameOrigin(origin, capturedTargets[0].origin)
-        ? reference(name, root) : cached?.file ? uploadImage(cached.file) : null;
-      return { selected: !!item && row("images", id).values.items.some(other => sameImage(item, other)),
-        pending: !!cached?.pending && cached.wanted.has(id) && admitsMembership(cached.wanted.get(id)), error: cached?.error ?? "" };
+      const cached = cachedInput(origin, name, root);
+      if (!sameOrigin(origin, capturedTargets[0].origin)) return cachedFileState(id, cached);
+      const item = reference(name, root);
+      return { selected: row("images", id).values.items.some(other => sameImage(item, other)), pending: false, error: cached?.error ?? "" };
     },
     async toggleSourceInput(id, origin, name, root = "input") {
       if (!alive || deciding || !["input", "output"].includes(root) || !resourceName(name) || !validOrigin(origin) || !originCurrent(capturedTargets[0]) ||
@@ -295,32 +329,13 @@ export function makeVariationEditor({ targets, cohortMode, services, currentOrig
       }
       const source = sourceRecord(sourceFiles, origin, () => ({ files: new Map() }), root);
       const ownsRead = () => alive && sourceRecord(sourceFiles, origin, null, root) === source && sameOrigin(origin, currentOrigin(origin.source));
-      if (!source.files.has(name)) source.files.set(name, { file: null, pending: false, error: "", wanted: new Map() });
-      const cached = source.files.get(name);
-      if (cached.file) {
-        cached.error = "";
-        const item = uploadImage(cached.file);
-        return this.sourceInputState(id, origin, name, root).selected ? this.removeImage(id, item) : this.addImages(id, [item]);
-      }
-      if (cached.wanted.has(id) && admitsMembership(cached.wanted.get(id))) cached.wanted.delete(id);
-      else cached.wanted.set(id, membershipTicket(id));
-      if (cached.pending) { notify(); return; }
-      cached.pending = true; cached.error = ""; notify();
-      try {
+      return toggleCachedFile(this, id, fileRecord(source.files, name), name, async () => {
         const resource = await services.readInput(origin, name, root);
-        if (!ownsRead()) return;
         if (!(resource instanceof File) || resource.name !== name) throw new Error("Invalid input image");
         // The resource port retains its full raw name. Uploads have their own
         // flat namespace; the editor owns that leaf-named File, not the API.
-        const file = name.includes("/") ? new File([resource], name.split("/").at(-1), { type: resource.type, lastModified: resource.lastModified }) : resource;
-        cached.file = file;
-        for (const [rowId, ticket] of [...cached.wanted]) {
-          if (cached.wanted.get(rowId) !== ticket) continue;
-          cached.wanted.delete(rowId);
-          if (admitsMembership(ticket)) this.addImages(rowId, [uploadImage(file)]);
-        }
-      } catch (error) { if (ownsRead()) { cached.wanted.clear(); cached.error = `${name}: ${error.message}`; } }
-      finally { if (ownsRead()) { cached.pending = false; notify(); } }
+        return name.includes("/") ? new File([resource], name.split("/").at(-1), { type: resource.type, lastModified: resource.lastModified }) : resource;
+      }, ownsRead);
     },
     catalogueFailure(error) { publish({ text: `Catalogue unavailable: ${error.message ?? error}. Your edits have been kept.`, ok: false, state: "unavailable" }); },
     invalidateClose,
