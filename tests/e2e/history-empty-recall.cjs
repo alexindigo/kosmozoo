@@ -121,6 +121,23 @@ module.exports = async ({ page, evaluate, invoke, list, write, close, open, wait
         if(['unchanged','stale','cancelled'].includes(outcome)) await page.poll(`window.recallProof.released.length===${untouched.released+1}`);
         outcomes.push({outcome,geometry,after:await snapshot()});
       }
+      // A's lease cleanup is history-owned: a held release cannot delay A's
+      // terminal result, nor let A's late completion close B's newer popup.
+      await page.evaluate('window.busyProof.holdRelease=true;window.busyProof.finishRelease=null');
+      paused=null;await choose(invalid.id);
+      for(let i=0;i<100&&!paused;i++) await new Promise(resolve=>setTimeout(resolve,20));
+      assert(paused);await page.send('Fetch.continueRequest',{requestId:paused});paused=null;
+      await page.poll('!!window.busyProof.finishRelease');
+      await page.poll('document.querySelector(".vh-trigger").getAttribute("aria-expanded")==="false"');
+      await page.evaluate('window.busyProof.holdRelease=false');
+      await choose(invalid.id);
+      for(let i=0;i<100&&!paused;i++) await new Promise(resolve=>setTimeout(resolve,20));
+      assert(paused,'B admitted while A lease release is still held');
+      await page.evaluate('window.busyProof.finishRelease();window.busyProof.finishRelease=null');
+      await page.evaluate('new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve)))');
+      assert.equal(await page.evaluate('document.querySelector(".vh-trigger").getAttribute("aria-expanded")'),'true','late A cleanup cannot close B');
+      await page.send('Fetch.continueRequest',{requestId:paused});paused=null;
+      await page.poll('document.querySelector(".vh-trigger").getAttribute("aria-expanded")==="false"');
       // A fresh explicit B selection is admitted, not a hidden queued action.
       paused=null;await choose(invalid.id);
       for(let i=0;i<100&&!paused;i++) await new Promise(resolve=>setTimeout(resolve,20));

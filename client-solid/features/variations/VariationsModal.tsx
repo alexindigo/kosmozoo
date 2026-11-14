@@ -203,9 +203,10 @@ function ModalBody(props) {
         return result;
       } finally {
         // The transition has settled. Lease cleanup remains owned by the
-        // history client and must not coalesce the next user action into this one.
+        // history client (failures stay retained for retry); it must neither
+        // delay this terminal result nor coalesce the next user action into it.
         settleRecall(promise);
-        if (!transferred) await services.history.release(saved);
+        if (!transferred) services.history.release(saved).catch(() => {});
       }
     })();
     recalling = { id, promise };
