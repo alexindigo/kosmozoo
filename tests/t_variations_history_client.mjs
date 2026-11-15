@@ -163,3 +163,28 @@ Deno.test("history plans: engine-correlated request proof is mandatory outside u
   }
   baseline.editor.dispose();
 });
+Deno.test("run end: the outcome appears together with the end of running, after the saved run is finished", async () => {
+  const baseline = editorRig();
+  for (const failing of [false, true]) {
+    const entered = deferred(), gate = deferred();
+    const history = { capture: () => ({}), plans(ticket) {
+      return [{ target: ticket.targets[0], request: { id: ticket.targets[0].id, host: "fake", filename: "image.png", ranges: { "n.denoise": { enabled: true, min: .9, max: .9, increment: .1 } }, imageParams: {}, prefix: "", suffix: "",
+        context: baseline.context, acknowledgement: { version: 2, runId: ticket.runId, requestId: createRunId() }, history: { id: ticket.runId, snapshotHash: "a".repeat(64), targetIndex: 0, planHash: "b".repeat(64) } }, expectedTotal: 1 }];
+    }, finish() { entered.resolve(); return gate.promise; } };
+    const rig = editorRig({ history, run: async request => {
+      const response = await baseline.services.run(request);
+      return { ...response, data: { ...response.data, history: request.history } };
+    } });
+    rig.editor.setEnabled("n.denoise", true);
+    const running = rig.editor.run();
+    await entered.promise;
+    assertEquals([rig.editor.result(), rig.editor.running()], [null, true], "no outcome while the run is still finishing");
+    if (failing) gate.reject(new Error("offline")); else gate.resolve();
+    await running;
+    assertEquals(rig.editor.running(), false);
+    assert(rig.editor.result().text.startsWith("submitted 1/1"), rig.editor.result().text);
+    assertEquals(rig.editor.result().text.includes("history refresh failed: offline"), failing);
+    rig.editor.dispose();
+  }
+  baseline.editor.dispose();
+});

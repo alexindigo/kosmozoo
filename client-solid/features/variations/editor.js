@@ -570,6 +570,9 @@ export function makeVariationEditor({ targets, cohortMode, destination: initialD
       let submitted = 0, total = 0, countsComplete = true, uncertain = false;
       const failures = [], uploads = new Map();
       const effects = { uploads: [], targets: [] };
+      // A Run ends in one transition: its outcome is shown together with the
+      // end of running, after the saved-run record is finished.
+      let outcome = null, show = false;
       running = true; result = null; notify();
       try {
         const saved = services.history ? await services.history.capture(ticket,
@@ -674,20 +677,24 @@ export function makeVariationEditor({ targets, cohortMode, destination: initialD
         const summary = batch ? `submitted ${submitted}/${total} across ${ticket.targets.length} images` : `submitted ${submitted}/${total}`;
         const reason = failures[0] ?? (!eligible ? deciding ? "leave decision pending; your edits have been kept" : recipe.revision() !== ticket.editRevision ? "newer edits have been kept" : "operation context changed; your edits have been kept"
           : "");
-        publish({ text: submitted || total ? summary + (reason ? ` — ${reason}` : "") : reason || "nothing submitted", reason, ok: complete,
+        show = true;
+        outcome = ({ text: submitted || total ? summary + (reason ? ` — ${reason}` : "") : reason || "nothing submitted", reason, ok: complete,
           state: eligible ? "adopted" : complete ? "kept" : "unavailable", submitted, total, adopted: eligible,
           effects: freeze(snapshotDraft(effects)), outcome: complete ? "accepted-plan" : !ticket.targets.every(originCurrent) ? "retired" : uncertain ? "uncertain-effects" : submitted ? "partial-effects" : "rejected" });
         if (canClose(ticket)) timer = setTimer(() => { timer = null; if (canClose(ticket)) close(); }, 3000);
         return { status: submitted > 0 && countsComplete && !uploadFailure ? "submitted" : "failed", submitted, total, adopted: eligible };
       } catch (error) {
-        if (owns(ticket)) publish({ text: error.message, ok: false, state: error.stale ? "stale" : "invalid", outcome: error.stale ? "retired" : "rejected", submitted, total, adopted: false, effects: freeze(snapshotDraft(effects)) });
+        show = owns(ticket);
+        outcome = { text: error.message, ok: false, state: error.stale ? "stale" : "invalid", outcome: error.stale ? "retired" : "rejected", submitted, total, adopted: false, effects: freeze(snapshotDraft(effects)) };
         return { status: owns(ticket) ? error.stale ? "stale" : "invalid" : "stale", submitted, total, adopted: false };
        } finally {
          if (services.history) {
-           try { await services.history.finish(ticket.runId, result?.ok ? null : result?.reason ?? result?.text ?? null); }
-           catch (error) { if (owns(ticket)) publish({ ...result, historyError: error.message, text: `${result?.text ?? "Run ended"}; history refresh failed: ${error.message}` }); }
+           try { await services.history.finish(ticket.runId, outcome?.ok ? null : outcome?.reason ?? outcome?.text ?? null); }
+           catch (error) { if (owns(ticket)) { show = true; outcome = { ...outcome, historyError: error.message, text: `${outcome?.text ?? "Run ended"}; history refresh failed: ${error.message}` }; } }
          }
-         if (owns(ticket)) { running = false; notify(); }
+         if (show) result = Object.freeze(outcome);
+         if (owns(ticket)) running = false;
+         notify();
        }
     },
     dispose() {
