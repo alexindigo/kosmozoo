@@ -1304,7 +1304,7 @@ body:has(#diff:not([hidden])) #statusCol { bottom: 56px; }
 .chevron-slot > svg { display: block; width: var(--control-icon-size); height: var(--control-icon-size); }
 .select-trigger { padding: 0; border: 0; border-radius: 4px; background: var(--lifted); color: var(--foreground);
   box-shadow: inset 0 0 0 1px var(--border-strong); font: inherit; cursor: pointer; }
-.select-trigger > .single-line-text { padding-inline-start: 8px; }
+.select-trigger > .single-line-text, .select-face-content > .single-line-text:first-child { padding-inline-start: 8px; }
 .select-trigger:hover { box-shadow: inset 0 0 0 1px var(--foreground-dim); }
 
 /* Optional native-select presentation: content sizes the face, never options.
@@ -1551,3 +1551,25 @@ body:has(#diff:not([hidden])) #statusCol { bottom: 56px; }
 .vh-error { color: var(--warning); }
 .vh-more { margin: 12px; }
 .vh-recall:focus-visible, .vh-inspect:focus-visible { outline: 2px solid var(--secondary); outline-offset: 1px; }
+
+/* One compact header row: title, recall (flexible), Run on, close. Controls
+   share the md control height; the title's line box takes the same height. */
+.vz-editor { grid-template-rows: auto minmax(0, 1fr) auto; }
+.vz-header { display: grid; grid-template-columns: max-content minmax(0, 1fr) minmax(120px, 220px) max-content;
+  align-items: start; gap: 12px; }
+.vz-header > .vz-title { min-height: var(--control-height-md); display: flex; align-items: center; text-align: start; }
+.vz-header .vz-close { position: static; }
+.vz-run-on { display: grid; min-width: 0; }
+.vz-run-on .select-control { width: 100%; }
+.vz-run-on-fixed { display: flex; align-items: center; padding-inline: 8px; border: 1px solid var(--border-strong); border-radius: 4px; }
+
+/* Destination conflicts: red ink, first in the catalogue. */
+.vz-catalogue-row.vz-conflict { cursor: pointer; border-color: var(--negative-dim); }
+.vz-conflict .vz-catalogue-name, .vz-conflict .vz-parameter-name .vz-label:not(:hover), .vz-conflict-reason { color: var(--negative); }
+.vz-conflict-note { display: grid; gap: 6px; min-width: 0; }
+.vz-conflict-suggestions { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; min-width: 0; }
+.vz-conflict-label { color: var(--foreground); }
+.vz-conflict-pick { max-width: 100%; padding: 2px 8px; border: 1px solid var(--border-strong); border-radius: 4px;
+  background: transparent; color: var(--foreground); font: inherit; cursor: pointer; }
+.vz-conflict-pick:hover, .vz-conflict-pick:focus-visible { border-color: var(--foreground-mid); }
+.vz-enum-missing .vz-enum-opt-name { color: var(--negative); }

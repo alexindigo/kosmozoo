@@ -120,7 +120,7 @@ export function makeHistoryClient({ api, changed = () => {} }) {
         ...(contexts.get(target.id) ?? target.context ? { context: contexts.get(target.id) ?? target.context } : {}),
         ...(target.historyRef ? { historyRef: target.historyRef } : {}) }));
       await api.historyBegin({ runId: ticket.runId, format: encoded.format, cohortMode: ticket.cohortMode ?? (targets.length > 1 ? "bulk" : "single"),
-        targets, recipe: encoded.recipe, resources: encoded.resources });
+        targets, recipe: encoded.recipe, resources: encoded.resources, ...(ticket.destination ? { destination: ticket.destination } : {}) });
       for (const target of targets) check(target);
       // Bounded, disk-backed archive uploads; never upstream materialization.
       const files = [...encoded.files]; let next = 0;
@@ -138,7 +138,8 @@ export function makeHistoryClient({ api, changed = () => {} }) {
       const plans = [];
       for (const [targetIndex, target] of ticket.targets.entries()) {
         check(target);
-        const binding = { targetIndex, origin: target.origin, snapshotHash: prepared.snapshotHash };
+        // Uploads and planning bind to where the Run executes, not where the image came from.
+        const binding = { targetIndex, origin: ticket.destination ?? target.origin, snapshotHash: prepared.snapshotHash };
         const saved = prepared.targets[targetIndex], resources = new Set(Object.values(saved.graphResources));
         for (const entry of Object.values(prepared.recipe.images)) if (entry.values.enabled) for (const item of entry.values.items) {
           resources.add(item.kind === "target" ? `target-${targetIndex}` : item.resourceId);

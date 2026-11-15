@@ -1,8 +1,8 @@
-import { createUniqueId, Show, onMount, onCleanup } from "solid-js";
+import { createUniqueId, Show, For, onMount, onCleanup } from "solid-js";
 import { SingleLineText } from "../../components/SingleLineText.js";
 import { IconButton } from "../../components/IconButton.js";
 import { iconSvg } from "/js/icons.mjs";
-import { parameterName } from "./field-filter.js";
+import { parameterName, conflictReason, conflictValue } from "./field-filter.js";
 
 // Presentation only: identity, current context, enable intent and editor slot.
 // Catalogue IDs remain opaque; a readable name never becomes a token ID.
@@ -13,7 +13,7 @@ export function ParameterRow(props) {
   let heading;
   onMount(() => { const dispose = props.registerFocus?.(() => heading.focus()); if (dispose) onCleanup(dispose); });
   return <div class={`vz-parameter ${props.class ?? ""}${props.enabled() ? " on" : " vz-off"}`}
-    classList={{ "vz-filter-hidden": !!props.filteredOut }} {...props.attributes}
+    classList={{ "vz-filter-hidden": !!props.filteredOut, "vz-conflict": !!props.row().conflict }} {...props.attributes}
     onClick={() => { if (!props.enabled()) props.onEnable(true); }}>
     <div class="vz-parameter-heading vz-imgrow-head">
       <button ref={heading} type="button" id={`${id}-name`} class="vz-parameter-name" aria-describedby={`${id}-identity`}
@@ -27,6 +27,16 @@ export function ParameterRow(props) {
       <IconButton chrome size="sm" variant="plain vz-parameter-remove" title={`Remove ${props.row().label}`}
         onAction={() => props.onEnable(false)} icon={iconSvg("x")} />
     </div>
+    <Show when={props.enabled() && props.row().conflict}>{conflict => <div class="vz-conflict-note" role="status">
+      <SingleLineText class="vz-conflict-reason" value={conflictReason(conflict())} hint={conflictReason(conflict())} />
+      <Show when={props.onResolve && conflict().suggestions?.length}>
+        <div class="vz-conflict-suggestions">
+          <SingleLineText class="vz-conflict-label" value={`Closest on ${conflict().host}:`} />
+          <For each={conflict().suggestions}>{value => <button type="button" class="vz-conflict-pick"
+            onClick={() => props.onResolve(props.row().id, value)}><SingleLineText value={conflictValue(value)} /></button>}</For>
+        </div>
+      </Show>
+    </div>}</Show>
     <Show when={props.enabled()}>{props.children}</Show>
     {props.status}
   </div>;

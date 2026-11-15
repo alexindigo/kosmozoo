@@ -76,8 +76,8 @@ export function composeOutputName(target, values = {}, prefix = "", suffix = "")
 
 // Preview and Run use this same projection; automatic contributions are derived,
 // never assigned over manual Prefix/Suffix or over the selected parameter value.
-export function variationOutputName(target, request, permutation, currentValues, aliases = {}, parameters = []) {
-  const automatic = request.automaticNaming === true ? automaticNaming(request.ranges ?? {}, currentValues, request.imageParams ?? {}).suffix : "";
+export function variationOutputName(target, request, permutation, currentValues, aliases = {}, parameters = [], { sameHost = true } = {}) {
+  const automatic = request.automaticNaming === true ? automaticNaming(request.ranges ?? {}, currentValues, request.imageParams ?? {}, { sameHost }).suffix : "";
   const prefix = templateReplaceWithProof(String(request.prefix ?? ""), permutation, currentValues, aliases, parameters);
   const suffix = templateReplaceWithProof(String(request.suffix ?? "") + automatic, permutation, currentValues, aliases, parameters);
   return { ...composeOutputName(target, permutation, prefix.text, suffix.text), prefix: prefix.text, suffix: suffix.text,
@@ -148,8 +148,12 @@ export function uploadFamily(name, names) {
 const MAX_PERMUTATION_VISITS = 100_000;
 const MAX_PERMUTATION_AXES = 128;
 
-export function generatePermutations(ranges, currentValues, imageParams = {}) {
-  const plan = permutationPlan(ranges, currentValues, imageParams);
+// The host is one of the compared parameters: the all-current tuple reproduces
+// the original image only on the image's own host. Elsewhere it is a new image.
+export const reproducesOriginal = (imageHost, runHost) => runHost == null || runHost === imageHost;
+
+export function generatePermutations(ranges, currentValues, imageParams = {}, { sameHost = true } = {}) {
+  const plan = permutationPlan(ranges, currentValues, imageParams, { sameHost });
   if (!plan.axes.length || plan.total === 0) return [];
   // Output count excludes current tuples; it cannot certify raw traversal cost.
   // Count every prefix visit before entering the synchronous generator.
@@ -167,14 +171,14 @@ export function generatePermutations(ranges, currentValues, imageParams = {}) {
       visit(index + 1, [...values, [axis.id, value]], current && axis.isCurrent(value));
     }
   };
-  visit(0, [], true);
+  visit(0, [], sameHost);
   return output;
 }
 
 // One typed axis representation owns both count and generation. Discrete sequence
 // order/multiplicity is supplied by the caller; typed normalization/deduplication
 // belongs to the compiler. Counting never allocates the Cartesian product.
-export function permutationPlan(ranges, currentValues, imageParams = {}) {
+export function permutationPlan(ranges, currentValues, imageParams = {}, { sameHost = true } = {}) {
   const { enabled, imgEnabled } = permutationAxes(ranges, imageParams);
   if (enabled.length + imgEnabled.length > MAX_PERMUTATION_AXES) throw new Error("permutation axis work budget exceeded");
   const axes = [];
@@ -225,17 +229,17 @@ export function permutationPlan(ranges, currentValues, imageParams = {}) {
     axes.push({ id, values, length: values.length, at: index => values[index], isCurrent, matches: values.filter(isCurrent).length });
   }
   const product = axes.reduce((n, axis) => n * axis.length, 1);
-  const current = axes.reduce((n, axis) => n * axis.matches, 1);
-  return { axes, total: axes.length ? product - current : 0 };
+  const excluded = sameHost && axes.length ? axes.reduce((n, axis) => n * axis.matches, 1) : 0;
+  return { axes, total: axes.length ? product - excluded : 0, excluded };
 }
 
 // Separate automatic projection: caller text is never rewritten. An axis needs
 // two distinct surviving values, after excluding the complete current tuple.
-export function automaticNaming(ranges, currentValues, imageParams = {}) {
-  const plan = permutationPlan(ranges, currentValues, imageParams);
+export function automaticNaming(ranges, currentValues, imageParams = {}, { sameHost = true } = {}) {
+  const plan = permutationPlan(ranges, currentValues, imageParams, { sameHost });
   const ids = plan.total < 2 ? [] : plan.axes.filter(axis => {
     if (axis.length < 2) return false;
-    const otherAllCurrent = plan.axes.filter(other => other !== axis).every(other => other.length === other.matches);
+    const otherAllCurrent = sameHost && plan.axes.filter(other => other !== axis).every(other => other.length === other.matches);
     if (axis.values) {
       // Direct callers may supply an unsorted/repeated discrete sequence. Only
       // distinct values that survive whole-current exclusion contribute a token.

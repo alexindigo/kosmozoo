@@ -9,8 +9,9 @@ import { historyId, decodeHistoryRecipe } from "./history-codec.mjs";
 import { imageIdentity, snapshotDraft, numericText } from "./recipe-model.mjs";
 import { compileRecipe } from "./recipe-compile.mjs";
 import { admitResourceTransfer } from "./compile.mjs";
-import { targetRunPlan, parameterIndex, permutationPlan, resolveRelativeRanges } from "./shared.mjs";
+import { targetRunPlan, parameterIndex, permutationPlan, resolveRelativeRanges, reproducesOriginal } from "./shared.mjs";
 import { inspectSource, projectInspection } from "./inspection.mjs";
+import { inspectDestination, destinationMissing } from "./destination.mjs";
 import { readImage } from "./folder-images.mjs";
 
 const fail = (message, status = 400) => Object.assign(new Error(message), { status });
@@ -50,6 +51,25 @@ export function makeVariationHistory(app) {
     const token = app.backings.capture(target.host), origin = sourceOrigin(target.host, app.backings.source(target.host));
     if (!app.backings.accepting() || !token || !validOrigin(target.origin) || !sameOrigin(target.origin, origin) || !app.backings.isCurrent(token)) throw fail("Source origin changed; work was kept", 412);
     return { token, origin };
+  };
+  // The Run destination: explicit at capture, else (older captures) the target's own source.
+  const destinationOf = (row, targetIndex) => captured(row).destination ?? data(row.targets_json)[targetIndex]?.origin;
+  const currentDestination = destination => {
+    const token = app.backings.capture(destination?.source), origin = sourceOrigin(destination?.source, app.backings.source(destination?.source));
+    if (!app.backings.accepting() || !token || !sameOrigin(destination, origin) || !app.backings.isCurrent(token)) throw fail("Run destination changed; work was kept", 412);
+    return { token, origin };
+  };
+  // Before any outbound effect: the destination must have every node class.
+  const missingAt = async (destination, target, graph, hash, inspected) => {
+    const origin = sourceOrigin(target.host, app.backings.source(target.host));
+    const originContext = sameOrigin(origin, target.origin) ? { origin, graphHash: hash } : null;
+    return destinationMissing(app, { graph, hash, name: target.filename, originContext, inspected });
+  };
+  const destinationReady = async (destination, saved, target) => {
+    if (sameOrigin(destination, target.origin)) return;
+    const r = throwInspection(await inspectSource(app, destination.source, saved.filename, { origin: destination, graphHash: saved.hash }, { graph: saved.graph, hash: saved.hash }));
+    const missing = await missingAt(destination, target, saved.graph, saved.hash, r);
+    if (missing.length) throw fail(`Not installed on ${destination.source}: ${missing.join(", ")}; no jobs were submitted`, 409);
   };
   const record = (id, leaseId = null) => {
     if (!historyId(id)) throw fail("Invalid history Run ID");
@@ -140,7 +160,8 @@ export function makeVariationHistory(app) {
     begin(body) {
       if (!body || body.format !== 1 || !historyId(body.runId) || !["single", "bulk"].includes(body.cohortMode) ||
         !Array.isArray(body.targets) || !body.targets.length || body.cohortMode === "single" && body.targets.length !== 1 || !Array.isArray(body.resources)) throw fail("Invalid history capture");
-      for (const key of Object.keys(body)) if (!["runId", "format", "cohortMode", "targets", "recipe", "resources"].includes(key)) throw fail("Unknown history capture field");
+      for (const key of Object.keys(body)) if (!["runId", "format", "cohortMode", "targets", "recipe", "resources", "destination"].includes(key)) throw fail("Unknown history capture field");
+      if (body.destination !== undefined && (!validOrigin(body.destination) || body.destination.kind !== "comfy")) throw fail("Run destination must be a ComfyUI source");
       const recipe = decodeHistoryRecipe({ format: 1, recipe: body.recipe });
       const resources = cloneJsonValue(body.resources), ids = new Set();
       for (const r of resources) {
@@ -158,7 +179,7 @@ export function makeVariationHistory(app) {
         if (target.context && (!validContext(target.context) || !sameOrigin(target.context.origin, target.origin))) throw fail("Invalid captured target context");
         if (target.historyRef) sealed(target.historyRef.runId, target.historyRef.leaseId);
       }
-      const document = { format: 1, cohortMode: body.cohortMode, recipe, resources };
+      const document = { format: 1, cohortMode: body.cohortMode, recipe, resources, ...(body.destination ? { destination: cloneJsonValue(body.destination) } : {}) };
       return store.variationBegin({ id: body.runId, format: 1, recipeJson: canonical(document), targetsJson: canonical(targets),
         summaryJson: canonical(historySummary(recipe, targets, resources)), resources: resources.map(r => ({ id: r.id, descriptorJson: canonical(r) })) });
     },
@@ -202,7 +223,16 @@ export function makeVariationHistory(app) {
           }
           current(target);
           const r = throwInspection(await inspectSource(app, target.host, target.filename, { origin: target.origin, graphHash: hash }, { graph, hash }));
-          const catalogue = projectInspection(r, target.filename), targetResource = { id: `target-${index}`, kind: "target", name: target.filename, root: "output", host: target.host };
+          let catalogue = projectInspection(r, target.filename);
+          // The snapshot records the workflow as its Run destination declares it.
+          const destination = raw.destination;
+          if (destination && !sameOrigin(destination, target.origin)) {
+            currentDestination(destination);
+            const { destination: _destination, context: _context, ...facts } = await inspectDestination(app, { graph, hash, name: target.filename, original: catalogue, originContext: r.context, destination })
+              .then(result => { if (result.error) throw fail(result.error, result.status); return result; });
+            catalogue = { ...facts, context: r.context };
+          }
+          const targetResource = { id: `target-${index}`, kind: "target", name: target.filename, root: "output", host: target.host };
           reserve(id, targetResource); await attach(id, targetResource.id, bytes); resources.push({ ...targetResource, hash });
           const graphResources = {};
           for (const p of catalogue.parameters.filter(p => p.kind === "image")) {
@@ -278,6 +308,16 @@ export function makeVariationHistory(app) {
       }
       return { ...detail, recipe, leaseId, snapshotHash: row.snapshot_hash, targets };
     },
+    // A held saved run as a chosen destination sees it; readonly, no effects.
+    async catalogue(id, leaseId, targetIndex, destination) {
+      const { snapshot } = sealed(id, leaseId), saved = snapshot.targets[targetIndex];
+      if (!saved) throw fail("Saved target unavailable", 410);
+      const origin = sourceOrigin(saved.host, app.backings.source(saved.host));
+      const originContext = origin?.address === saved.source.address && origin?.kind === saved.source.kind ? { origin, graphHash: saved.hash } : null;
+      const result = await inspectDestination(app, { graph: saved.graph, hash: saved.hash, name: saved.filename, original: saved.catalogue, originContext, destination });
+      if (result.error) throw fail(result.error, result.status);
+      return result;
+    },
     async bytes(id, resourceId, leaseId) { return app.archive.read(member(id, resourceId, leaseId).hash); },
     async release(id, leaseId) { store.variationLeaseRelease(id, leaseId); await collect(id); },
     async remove(id) {
@@ -285,13 +325,15 @@ export function makeVariationHistory(app) {
       store.variationTombstone(id); await collect(id);
     },
     materialize(id, targetIndex, resourceId, origin, snapshotHash) { return single(`upload-${id}-${targetIndex}-${resourceId}`, async () => {
-      const { row, snapshot } = sealed(id), target = data(row.targets_json)[targetIndex];
-      if (!target || !sameOrigin(target.origin, origin) || row.snapshot_hash !== snapshotHash) throw fail("Saved upload binding mismatch", 412);
-      current(target);
+      const { row, snapshot } = sealed(id), target = data(row.targets_json)[targetIndex], destination = destinationOf(row, targetIndex);
+      if (!target || !sameOrigin(destination, origin) || row.snapshot_hash !== snapshotHash) throw fail("Saved upload binding mismatch", 412);
+      currentDestination(destination);
       try { preflight(snapshot); } catch (error) { throw fail(error.message, error.status ?? 400); }
       const resource = snapshot.resources.find(r => r.id === resourceId);
       if (!resource) throw fail("Saved resource unavailable", 410);
-      const saved = snapshot.targets[targetIndex], involved = new Set(Object.entries(saved.graphResources).filter(([, rid]) => rid === resourceId).map(([pid]) => pid));
+      const saved = snapshot.targets[targetIndex];
+      if (!store.variationEffects(id).some(e => e.effect_id === `upload-${targetIndex}-${resourceId}`)) await destinationReady(destination, saved, target);
+      const involved = new Set(Object.entries(saved.graphResources).filter(([, rid]) => rid === resourceId).map(([pid]) => pid));
       for (const [pid, entry] of Object.entries(snapshot.recipe.images)) if (entry.values.enabled && entry.values.items.some(item =>
         item.kind === "target" ? resourceId === `target-${targetIndex}` : item.resourceId === resourceId)) involved.add(pid);
       if (!involved.size) throw fail("This saved resource is not an active target requirement");
@@ -301,10 +343,21 @@ export function makeVariationHistory(app) {
       if (effect.state !== "prepared") throw fail("Upload is pending or uncertain; do not automatically retry", 409);
       const bytes = await api.bytes(id, resourceId);
       let value = null;
-      if (resource.root && resource.host === target.host) {
-        const read = await app.ingest.ensure(target.host, resource.name, resource.root, { priority: "high", fresh: true });
-        current(target);
+      if (resource.root && resource.host === destination.source) {
+        const read = await app.ingest.ensure(destination.source, resource.name, resource.root, { priority: "high", fresh: true });
+        currentDestination(destination);
         if (read.status === 200 && read.hash === resource.hash) value = resource.value ?? `${resource.name} [${resource.root}]`;
+      }
+      // One destination per Run: identical bytes already delivered there for
+      // another target are reused, never uploaded twice.
+      if (value === null) {
+        const twins = new Set(snapshot.resources.filter(r => r.hash === resource.hash).map(r => r.id));
+        for (const prior of store.variationEffects(id)) {
+          const match = /^upload-\d+-(.+)$/.exec(prior.effect_id);
+          if (prior.effect_id === effectId || prior.state !== "confirmed" || !match || !twins.has(match[1]) || !prior.result_json) continue;
+          const delivered = data(prior.result_json);
+          if (sameOrigin(delivered.origin, origin)) { value = delivered.value; break; }
+        }
       }
       if (!store.variationClaimEffect(id, effectId)) throw fail("Upload was already admitted", 409);
       let outboundStarted = false;
@@ -318,8 +371,7 @@ export function makeVariationHistory(app) {
             if (!p) throw fail(`Saved image parameter ${pid} is unavailable`);
             admitResourceTransfer(p);
           }
-          if (new Set(data(row.targets_json).map(t => t.origin.address)).size > 1) throw fail("Local-file variations across different backends are unsupported");
-          const { token } = current(target), backing = app.backings.backingFor(token.address);
+          const { token } = currentDestination(destination), backing = app.backings.backingFor(token.address);
           if (!backing.write) throw fail("This source cannot materialize saved images");
           outboundStarted = true;
           const write = await backing.write(token.address, resource.name.split("/").at(-1), bytes);
@@ -328,7 +380,7 @@ export function makeVariationHistory(app) {
         }
         // Persist actual old-origin effects even if source retirement wins next.
         store.variationEffectResult(id, effectId, "confirmed", canonical(result));
-        current(target);
+        currentDestination(destination);
         return result;
       } catch (error) {
         store.variationEffectResult(id, effectId, !outboundStarted || error.status && error.status < 500 ? "rejected" : "uncertain", canonical({ error: error.message }));
@@ -336,10 +388,10 @@ export function makeVariationHistory(app) {
       } finally { await collect(id); }
     }, canonical({ origin, snapshotHash })); },
     prepareTarget(id, targetIndex, origin, snapshotHash) { return single(`plan-${id}-${targetIndex}`, async () => {
-      const { row, snapshot } = sealed(id), target = data(row.targets_json)[targetIndex], saved = snapshot.targets[targetIndex];
+      const { row, snapshot } = sealed(id), target = data(row.targets_json)[targetIndex], saved = snapshot.targets[targetIndex], destination = destinationOf(row, targetIndex);
       if (await digest(snapshot) !== row.snapshot_hash) throw fail("Saved snapshot integrity check failed", 409);
-      if (!saved || !target || !sameOrigin(target.origin, origin) || snapshotHash !== row.snapshot_hash) throw fail("Saved target binding mismatch", 412);
-      current(target);
+      if (!saved || !target || !sameOrigin(destination, origin) || snapshotHash !== row.snapshot_hash) throw fail("Saved target binding mismatch", 412);
+      currentDestination(destination);
       const prior = store.variationEffects(id).find(e => e.effect_id === `target-${targetIndex}`);
       if (prior) return data(prior.request_json);
       const graph = cloneJsonValue(saved.graph), oldParameters = parameterIndex(saved.catalogue.parameters);
@@ -348,7 +400,11 @@ export function makeVariationHistory(app) {
         if (!sameOrigin(resolved.origin, origin)) throw fail("Materialized source changed", 412);
         graph[p.nodeIds[0]].inputs[p.key] = resolved.value;
       }
-      const r = throwInspection(await inspectSource(app, target.host, target.filename, { origin, graphHash: saved.hash }, { graph, hash: saved.hash }));
+      const r = throwInspection(await inspectSource(app, destination.source, target.filename, { origin, graphHash: saved.hash }, { graph, hash: saved.hash }));
+      if (!sameOrigin(destination, target.origin)) {
+        const missing = await missingAt(destination, target, saved.graph, saved.hash, r);
+        if (missing.length) throw fail(`Not installed on ${destination.source}: ${missing.join(", ")}; no jobs were submitted`, 409);
+      }
       const catalogue = projectInspection(r, target.filename);
       const recipe = boundRecipe(snapshot, catalogue), resourceValues = new Map();
       for (const [domain, rows] of Object.entries(recipe)) for (const [pid, entry] of Object.entries(rows)) {
@@ -362,7 +418,7 @@ export function makeVariationHistory(app) {
       const compiled = compileRecipe(recipe, { catalogue, target, batch: snapshot.cohortMode === "bulk", resourceValues });
       const plan = targetRunPlan(compiled.payload, catalogue), values = Object.fromEntries(catalogue.parameters.map(p => [p.id, parameterCurrent(p)]));
       const ranges = plan.payload.relative ? resolveRelativeRanges(plan.payload.ranges, values) : plan.payload.ranges;
-      const expectedTotal = permutationPlan(ranges, values, plan.payload.imageParams).total;
+      const expectedTotal = permutationPlan(ranges, values, plan.payload.imageParams, { sameHost: reproducesOriginal(target.host, destination.source) }).total;
       if (!Number.isSafeInteger(expectedTotal) || expectedTotal <= 0 || expectedTotal > 500) throw fail("Saved configuration has no valid human-scale permutations");
       const request = { id: target.id, host: target.host, filename: target.filename, ...plan.payload, context: r.context,
         acknowledgement: { version: 2, runId: id, requestId: crypto.randomUUID() } };
@@ -386,7 +442,7 @@ export function makeVariationHistory(app) {
         throw fail("Submission is pending or uncertain; do not automatically retry", 409);
       }
       const prepared = data(effect.request_json), saved = snapshot.targets[binding.targetIndex];
-      const r = throwInspection(await inspectSource(app, body.host, body.filename, body.context, { graph: prepared.graph, hash: saved.hash }));
+      const r = throwInspection(await inspectSource(app, body.context.origin.source, body.filename, body.context, { graph: prepared.graph, hash: saved.hash }));
       const leaseId = store.variationClaimExecution(id, effect.effect_id);
       if (!leaseId) throw fail("Submission was already admitted", 409);
       try {

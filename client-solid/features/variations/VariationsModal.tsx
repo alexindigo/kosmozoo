@@ -36,6 +36,7 @@ import { UPLOAD_IMG_EXT } from "../../store/fields.js";
 import { HistoryDropdown } from "./HistoryDropdown.js";
 import { historyCount, historyDate } from "./HistoryEntry.js";
 import { BatchTargets } from "./BatchTargets.js";
+import { RunOn } from "./RunOn.js";
 
 export function VariationsModal() {
   const store = useAppStore();
@@ -76,7 +77,11 @@ function ModalBody(props) {
   // count shows the total across the whole selection.
   const batch = props.cohortMode === "bulk" || props.images.length > 1;
   const [version, setVersion] = createSignal(0);
+  // The header's selected ComfyUI is the default Run destination; otherwise the image's own.
+  const hostOrigin = host => sourceOrigin(host, store.state.hosts[host]);
+  const selectedHost = hostOrigin(store.state.host());
   const editor = makeVariationEditor({ targets: props.images, cohortMode: props.cohortMode, services,
+    destination: selectedHost?.kind === "comfy" ? selectedHost : image.origin ?? null,
     currentOrigin: host => sourceOrigin(host, store.state.hosts[host]),
     changed: () => setVersion(value => value + 1),
     close: () => store.handles.invoke("variations.close", { automatic: true, session: props.session }) });
@@ -117,6 +122,7 @@ function ModalBody(props) {
     toggle: (service, photo) => editor.togglePexels(id, service.source, photo, service.url),
   });
   const targets = () => read(editor.targets);
+  const destination = () => read(editor.destination);
   const rows = () => read(() => editor.rows("numeric"));
   const imgRows = () => read(() => editor.rows("images"));
   const enumRows = () => read(() => editor.rows("enums"));
@@ -269,18 +275,20 @@ function ModalBody(props) {
 
   // The complete recorded graph is the catalogue, independent of live schema.
   // Per-source input readiness settles separately from editable recipe work.
-  const [probe] = createResource(() => original ? Promise.resolve(null) : services.probe(image));
+  // Each Run destination needs its own catalogue: the workflow as that ComfyUI
+  // declares it, with conflicts. Only the latest destination request installs.
   const [folderCapability] = createResource(() => services.folderCapability());
-
-  let initializedProbe = false;
-  createEffect(() => {
-    if (original) return;
-    if (probe.loading) return;
-    if (initializedProbe) return;
-    initializedProbe = true;
-    if (probe.error) editor.catalogueFailure(probe.error);
-    else editor.installCatalogue(probe());
-  });
+  let catalogueGeneration = 0;
+  const loadCatalogue = () => {
+    const ticket = ++catalogueGeneration, chosen = editor.destination();
+    if (original && !chosen) return;
+    const request = original ? services.historyCatalogue(original.id, original.leaseId, 0, chosen) : services.probe(image, chosen);
+    request.then(data => { if (alive && ticket === catalogueGeneration) editor.installCatalogue(data, !!original); },
+      error => { if (alive && ticket === catalogueGeneration) editor.catalogueFailure(error); });
+  };
+  onMount(loadCatalogue);
+  const chooseDestination = host => { if (editor.setDestination(hostOrigin(host))) loadCatalogue(); };
+  const resolveConflict = (id, value) => editor.resolveConflict(id, value);
 
   const inputSources = createMemo(() => [image.origin, ...services.inputSources().filter(origin => origin.source !== image.host)].filter(Boolean));
   const targetThumbnail = () => original ? services.historyThumbnail({ runId: original.id, resourceId: "target-0", leaseId: original.leaseId }) : services.inputThumbnail(image.host, image.filename, image.origin, "output");
@@ -369,12 +377,17 @@ function ModalBody(props) {
   return (
     <div class="vz-panel" data-session={props.session}>
       <div ref={editorSurface} class="vz-editor" inert={!!decision()}>
-        <SingleLineText class="vz-title" value={batch
-            ? `Generate image variations · applying to ${targets().length} image${targets().length === 1 ? "" : "s"}`
-            : "Generate image variations"} />
-        <HistoryDropdown history={services.history} state={services.historyState} thumbnail={services.historyThumbnail} registerThumbnail={services.registerThumbnail}
-          registerPopup={registerImagePopup} registerEditor={registerEditor} rememberFocus={rememberFocus} bulk={batch}
-          caption={historyCaption()} warnings={recallWarnings()} recallStatus={recallStatus()} notice={recallNotice()} onRecall={recall} />
+        <div class="vz-header">
+          <SingleLineText class="vz-title" value="Generate image variations" />
+          <HistoryDropdown history={services.history} state={services.historyState} thumbnail={services.historyThumbnail} registerThumbnail={services.registerThumbnail}
+            registerPopup={registerImagePopup} registerEditor={registerEditor} rememberFocus={rememberFocus} bulk={batch}
+            caption={historyCaption()} warnings={recallWarnings()} recallStatus={recallStatus()} notice={recallNotice()} onRecall={recall} />
+          <RunOn destinations={services.runDestinations()} value={destination()?.source ?? ""} offline={host => !store.state.hosts[host]?.online}
+            fixed={running()} onChoose={chooseDestination} focus={focus} />
+          <IconButton chrome size="md" variant="plain vz-close" title="Close"
+            onAction={() => store.handles.invoke("variations.close", { session: props.session })}
+            icon={iconSvg("x")} />
+        </div>
         <div ref={bodyScroll} class="vz-body-scroll"><div class="vz-body">
           <div class="vz-catalogue">
             <div class="vz-filter-tools">
@@ -439,7 +452,8 @@ function ModalBody(props) {
                           onInsert={onInsertPlaceholder} nodes={read(() => editor.connectionNodes(id))}
                           onCandidate={(index, raw) => editor.candidate(id, index, raw)} onAdd={() => editor.addCandidate(id)}
                           onRemove={index => editor.removeCandidate(id, index)} onMove={(from, to) => editor.moveCandidate(id, from, to)}
-                          onPick={(raw, on) => editor.pickCandidate(id, raw, on)} onConnection={(index, node, slot) => editor.connection(id, index, node, slot)} /></Show>;
+                          onPick={(raw, on) => editor.pickCandidate(id, raw, on)} onConnection={(index, node, slot) => editor.connection(id, index, node, slot)}
+                          onResolve={resolveConflict} /></Show>;
                       }
                       if (itemId.startsWith("enum:")) {
                         const id = itemId.slice(5);
@@ -452,6 +466,7 @@ function ModalBody(props) {
                                registerFocus={panelFocusPort(id)}
                               onToggle={onEnumToggle}
                               onPick={onEnumPick}
+                              onResolve={resolveConflict}
                               onInsert={onInsertPlaceholder}
                               rememberFocus={rememberFocus}
                             />
@@ -543,7 +558,7 @@ function ModalBody(props) {
             </div>
             <div class="vz-messages" role="status">
               <div class="vz-message-content">
-                <Show when={tally().message && !result()}><p class={tally().status === "invalid" ? "vz-readiness-error" : "vz-field-help"}>{tally().message}</p></Show>
+                <Show when={tally().message && !result()}><p class={["invalid", "conflict"].includes(tally().status) ? "vz-readiness-error" : "vz-field-help"}>{tally().message}</p></Show>
                 <Show when={result()}>{value => <>
                   <Show when={Number.isSafeInteger(value().submitted) && value().total > 0}>
                     <p class={value().ok ? "vz-queued vz-ok" : "vz-queued"}>Queued {value().submitted} of {value().total} jobs</p>
@@ -562,9 +577,6 @@ function ModalBody(props) {
         <BatchTargets targets={targets()} thumbnail={batchThumbnail} registerThumbnail={services.registerThumbnail}
           generationTime={id => read(() => editor.generationTime(id))} removable={!running()}
           rememberFocus={rememberFocus} onRemove={id => editor.removeTarget(id)} />
-        <IconButton chrome variant="plain vz-close" title="Close"
-          onAction={() => store.handles.invoke("variations.close", { session: props.session })}
-          icon={iconSvg("x")} />
       </div>
       <Show when={decision()}>
         <VariationDiscardConfirmation owner={props.session} running={running()} applying={decision().type === "apply-history"} onCancel={guard.cancel} onDiscard={guard.discard} />
@@ -585,7 +597,7 @@ function EnumRow(props) {
   return (
     <ParameterRow class="vz-imgrow vz-enumrow" row={r} enabled={() => r().enabled} filteredOut={props.filteredOut}
       attributes={{ "data-enum-id": props.p.id }} onEnable={checked => props.onToggle(props.p.id, checked)}
-      registerFocus={props.registerFocus} onInsert={props.onInsert} summary={`${r().picks.length} ${r().picks.length === 1 ? "option" : "options"}`}>
+      registerFocus={props.registerFocus} onInsert={props.onInsert} onResolve={props.onResolve} summary={`${r().picks.length} ${r().picks.length === 1 ? "option" : "options"}`}>
         <div class="vz-imgrow-body vz-enum-body">
           <Show when={r().values.length > 10}>
             <div class="vz-enum-filter-line">
@@ -611,11 +623,13 @@ function EnumRow(props) {
 function EnumOptions(props) {
   const r = () => props.row();
   const compact = () => r().values.length <= 10;
+  // A picked value this host does not offer stays listed (red) so it can be unpicked.
+  const missing = createMemo(() => r().picks.filter(value => !r().values.includes(value)));
   const filtered = createMemo(() => {
     const values = r().values, current = r().current;
-    if (compact()) return values;
+    if (compact()) return [...missing(), ...values];
     const query = props.filter.trim().toLowerCase();
-    return [...values.filter(value => value === current),
+    return [...missing(), ...values.filter(value => value === current),
       ...values.filter(value => value !== current && value.toLowerCase().includes(query))];
   });
   let list, option, check;
@@ -640,7 +654,7 @@ function EnumOptions(props) {
   return <div ref={list} class={"vz-enum-list" + (compact() ? " vz-enum-grid" : "")}>
     <For each={filtered()}>
       {(v) => (
-        <label ref={option} class={"vz-enum-opt" + (v === r().current ? " vz-enum-current" : "")} classList={{ "vz-enum-picked": r().picks.includes(v) }}>
+        <label ref={option} class={"vz-enum-opt" + (v === r().current ? " vz-enum-current" : "")} classList={{ "vz-enum-picked": r().picks.includes(v), "vz-enum-missing": missing().includes(v) }}>
           <span ref={check} class="vz-enum-check">
             <Checkbox
               {...props.focus}

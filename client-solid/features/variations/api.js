@@ -24,8 +24,13 @@ export async function historyBytes(id, resourceId, file) {
   return data;
 }
 
-export const probe = (image) =>
-  req("GET", `/api/features/variations/probe/${encodeURIComponent(image.id)}${image.origin ? `?origin=${encodeURIComponent(JSON.stringify(image.origin))}` : ""}`, undefined, { json });
+export const probe = (image, destination = null) => {
+  const query = [image.origin && `origin=${encodeURIComponent(JSON.stringify(image.origin))}`,
+    destination && `destination=${encodeURIComponent(JSON.stringify(destination))}`].filter(Boolean).join("&");
+  return req("GET", `/api/features/variations/probe/${encodeURIComponent(image.id)}${query ? `?${query}` : ""}`, undefined, { json });
+};
+export const historyCatalogue = (id, leaseId, targetIndex, destination) => req("GET", historyPath(id) +
+  `/catalogue?lease=${encodeURIComponent(leaseId)}&target=${targetIndex}&destination=${encodeURIComponent(JSON.stringify(destination))}`, undefined, { json });
 
 export const generationTime = (image, { signal } = {}) =>
   req("GET", `${entryUrl(image.host, image.filename)}/meta?origin=${encodeURIComponent(JSON.stringify(image.origin))}`, undefined, { signal });

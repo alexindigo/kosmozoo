@@ -462,13 +462,15 @@ export async function objectInfo(addr, cache = new Map(), { fetcher = fetch, sig
 
 // Pure normalization of one raw catalogue for the given class scope (null: all).
 export function objectInfoView(raw, classes = null, error = null) {
-  let out = { types: null, outputClasses: null, enums: null, lazyInputs: null, dynamicCombos: null, declarations: null, outputs: null, schemaError: error };
+  let out = { types: null, outputClasses: null, enums: null, lazyInputs: null, dynamicCombos: null, declarations: null, outputs: null, installed: null, schemaError: error };
   try {
     if (raw) {
-      const candidate = { types: new Map(), outputClasses: new Set(), enums: new Map(), lazyInputs: new Map(), dynamicCombos: new Map(), declarations: new Map(), outputs: new Map(), schemaError: null };
+      const candidate = { types: new Map(), outputClasses: new Set(), enums: new Map(), lazyInputs: new Map(), dynamicCombos: new Map(), declarations: new Map(), outputs: new Map(), installed: new Set(), schemaError: null };
       const budget = schemaBudget();
       const entries = classes === null ? Object.entries(raw) : classes.filter(type => Object.hasOwn(raw, type)).map(type => [type, raw[type]]);
       for (const [type, def] of entries) {
+        // Presence in object_info is the backend's own statement that a class is installed.
+        candidate.installed.add(type);
         const schema = inputSchema(def?.input, type, budget);
         budget.set(candidate.lazyInputs, type, new Set([...schema.lazy].map(key => key.slice(type.length + 1))));
         if (def?.output_node) { budget.take(); candidate.outputClasses.add(type); }

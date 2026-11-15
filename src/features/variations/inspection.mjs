@@ -62,9 +62,11 @@ export async function inspectSource(app, collection, name, expected = null, arch
   if (!graph) return { error: "no embedded ComfyUI graph", status: 422 };
   try { stringifyExactJson(graph); }
   catch (error) { return { error: `Embedded graph cannot be represented exactly: ${error.message}`, status: 422 }; }
-  const { types, enums, outputClasses, dynamicCombos, declarations, outputs, schemaError } = await backing.objectInfo({ graph });
+  const { types, enums, outputClasses, dynamicCombos, declarations, outputs, installed, schemaError } = await backing.objectInfo({ graph });
   if (!app.backings.isCurrent(token)) return { error: "source changed during inspection", status: 409 };
-  return { graph, addr, types, enums, outputClasses, dynamicCombos, declarations, outputs, schemaError, token, backing, context: { origin, graphHash: hash } };
+  // Known only with a successful catalogue; unavailable knowledge is never "missing".
+  const missing = installed ? [...new Set(Object.values(graph).map(node => String(node?.class_type ?? "")))].filter(type => !installed.has(type)).sort() : null;
+  return { graph, addr, types, enums, outputClasses, dynamicCombos, declarations, outputs, installed, missing, schemaError, token, backing, context: { origin, graphHash: hash } };
 }
 export function projectInspection(r, name) {
   const producing = findProducingOutputNode(r.graph, name, r.outputClasses ?? new Set());

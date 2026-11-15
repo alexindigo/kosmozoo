@@ -1,5 +1,5 @@
 import { For, Show, onMount, onCleanup, createMemo, createSignal } from "solid-js";
-import { parameterInputName, parameterNodeTitle, parameterContext } from "./field-filter.js";
+import { parameterInputName, parameterNodeTitle, parameterContext, conflictReason } from "./field-filter.js";
 import { IconButton } from "../../components/IconButton.js";
 import { iconSvg } from "/js/icons.mjs";
 import { SingleLineText } from "../../components/SingleLineText.js";
@@ -23,20 +23,23 @@ function CatalogueRow(props) {
   const [dropping, setDropping] = createSignal(false);
   onMount(() => { const dispose = props.registerFocus(() => add.focus()); onCleanup(dispose); });
   const row = () => props.row();
-  return <div class="vz-catalogue-row" classList={{ "vz-catalogue-hidden": row().enabled || !props.matches(row()), "vz-image-dropping": dropping() }} data-catalogue-id={row().id}
+  // A conflict card is one action: clicking anywhere adds it to the editors.
+  return <div class="vz-catalogue-row" classList={{ "vz-catalogue-hidden": row().enabled || !props.matches(row()), "vz-image-dropping": dropping(), "vz-conflict": !!row().conflict }} data-catalogue-id={row().id}
+    onClick={event => { if (row().conflict && !event.target.closest("button")) props.onAdd(); }}
     onDragEnter={event => { if (row().domain === "images" && isFileDrag(event.dataTransfer)) { event.preventDefault(); setDropping(true); } }}
     onDragOver={event => { if (row().domain === "images" && isFileDrag(event.dataTransfer)) { event.preventDefault(); event.dataTransfer.dropEffect = "copy"; setDropping(true); } }}
     onDragLeave={() => setDropping(false)} onDrop={event => { if (row().domain !== "images" || !isFileDrag(event.dataTransfer)) return; event.preventDefault(); setDropping(false); props.onFiles(droppedFiles(event.dataTransfer)); }}>
     <div class="vz-catalogue-context">
       <SingleLineText class="vz-catalogue-node-name" value={parameterNodeTitle(row())} hint={row().label} />
       <SingleLineText class="vz-catalogue-name" value={parameterInputName(row())} hint={row().label} />
-      <Show when={row().domain === "images"} fallback={<ValuePreview class="vz-catalogue-current" value={parameterContext(row())}
+      <Show when={row().conflict}>{conflict => <SingleLineText class="vz-conflict-reason" value={conflictReason(conflict())} hint={conflictReason(conflict())} />}</Show>
+      <Show when={!row().conflict || row().conflict.kind === "node"}><Show when={row().domain === "images"} fallback={<ValuePreview class="vz-catalogue-current" value={parameterContext(row())}
         available={props.previewActive && !row().enabled && props.matches(row())} registerPopup={props.registerPopup} registerEditor={props.registerEditor} />}>
         <div class="vz-catalogue-picture" title={parameterContext(row())}>
           <Thumbnail src={props.thumbnail(row())} name={parameterContext(row())} lazy register={props.registerThumbnail}
             surface={picture => <div class="vz-thumbnail-surface" role="img" aria-label={parameterContext(row())}>{picture}</div>} />
         </div>
-      </Show>
+      </Show></Show>
     </div>
     <IconButton buttonRef={element => add = element} chrome size="sm" variant="plain vz-catalogue-add" title={`Add ${row().label}`}
       onAction={props.onAdd} icon={iconSvg("plus")} />

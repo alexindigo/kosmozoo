@@ -14,7 +14,7 @@ export function CandidateEditor(props) {
   const row = () => props.row(), focus = focusMemory(props.rememberFocus);
   return <ParameterRow class="vz-candidate-row" row={row} enabled={() => row().enabled}
     attributes={{ "data-candidate-id": row().id }} onEnable={props.onEnable} onInsert={props.onInsert}
-    registerFocus={props.registerFocus} summary={props.summary}>
+    registerFocus={props.registerFocus} summary={props.summary} onResolve={props.onResolve}>
     <div class="vz-candidate-body">
       <Show when={row().candidateKind === "boolean" || row().candidateKind === "options"}>
         <div class="vz-enum-list vz-typed-options">

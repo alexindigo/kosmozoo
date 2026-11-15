@@ -90,7 +90,7 @@ module.exports = async ({ cdp, ENGINE, FAKE, KZ, check }) => {
       await fetch(FAKE + '/__test/activity', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ captureEnqueue: true }) });
       await open({ ids: ['fake:flux-controlnet.png', 'fake:flux-basic.png'], bulk: true });
       await addParameter(cdp,'9.denoise');
-      assert(await cdp.evaluate("document.querySelector('.vz-title').textContent.includes('applying to 2 images')"));
+      assert(await cdp.evaluate("document.querySelector('.vz-batch-label').textContent==='Batch images (2)'"));
       await type('.vz-prefix', 'session-bulk_'); await capture('bulk'); const before = (await jobs()).length;
       const result = await invoke('variations.run'); assert.equal(result.adopted, true);
       const submitted = (await jobs()).slice(before); assert.equal(submitted.length, result.submitted);

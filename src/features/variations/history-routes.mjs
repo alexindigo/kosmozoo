@@ -55,6 +55,13 @@ export function registerHistory(app) {
   route("POST", "/history/<id>/prepare", async (_req, { id }) => historyResponse(await owner.prepare(id)));
   route("POST", "/history/<id>/open", async (_req, { id }) => historyResponse(await owner.open(id)));
   route("DELETE", "/history/<id>/leases/<leaseId>", async (_req, { id, leaseId }) => { await owner.release(id, leaseId); return historyResponse({ released: true }); });
+  route("GET", "/history/<id>/catalogue", async (req, { id }) => {
+    const query = new URL(req.url).searchParams, index = Number(query.get("target") ?? "0");
+    let destination;
+    try { destination = JSON.parse(query.get("destination")); } catch { destination = null; }
+    if (!Number.isSafeInteger(index) || index < 0 || !validOrigin(destination)) return historyResponse({ error: "Valid target index and Run destination required" }, 400);
+    return historyResponse(await owner.catalogue(id, query.get("lease"), index, destination));
+  });
   route("GET", "/history/<id>/resources/<resourceId>/bytes", async (req, { id, resourceId }) => {
     const bytes = await owner.bytes(id, resourceId, new URL(req.url).searchParams.get("lease"));
     const ref = app.store.variationResource(id, resourceId);
