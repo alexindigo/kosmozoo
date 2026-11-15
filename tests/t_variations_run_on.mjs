@@ -86,3 +86,21 @@ Deno.test("run on: picking only the current value is one variation on another ho
   assertEquals([r.editor.preview().n, r.editor.preview().excluded], [0, 1]);
   r.editor.dispose();
 });
+
+Deno.test("run on: a failed catalogue request says so, sends nothing and can be retried", async () => {
+  const r = rig();
+  r.editor.catalogueFailure(new Error("HTTP 502"));
+  assertEquals([r.editor.preview().status, r.editor.preview().message], ["failed", "Couldn't check other: HTTP 502"]);
+  assertEquals((await r.editor.run()).status, "invalid"); assertEquals(r.requests.length, 0);
+  assert(r.editor.result().text.endsWith("Nothing was sent."));
+  assert(r.editor.retryCatalogue());
+  assertEquals(r.editor.preview().status, "reading", "back to checking the same host");
+  assertEquals(r.editor.retryCatalogue(), false, "only after a failure");
+  r.install({});
+  assertEquals(r.editor.preview().status, "ready");
+  r.editor.catalogueFailure(Object.assign(new Error("GET /api/features/variations/probe/x: 502 \u2014 object_info timed out"), { status: 502, detail: "object_info timed out" }));
+  assertEquals(r.editor.preview().message, "Couldn't check other: object_info timed out", "the server's reason, not the request path");
+  r.editor.catalogueFailure(Object.assign(new Error("GET /x: 504"), { status: 504, detail: "" }));
+  assertEquals(r.editor.preview().message, "Couldn't check other: HTTP 504");
+  r.editor.dispose();
+});

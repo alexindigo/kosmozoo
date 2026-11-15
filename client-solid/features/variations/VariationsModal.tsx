@@ -288,6 +288,7 @@ function ModalBody(props) {
   };
   onMount(loadCatalogue);
   const chooseDestination = host => { if (editor.setDestination(hostOrigin(host))) loadCatalogue(); };
+  const retryCatalogue = () => { if (editor.retryCatalogue()) loadCatalogue(); };
   const resolveConflict = (id, value) => editor.resolveConflict(id, value);
 
   const inputSources = createMemo(() => [image.origin, ...services.inputSources().filter(origin => origin.source !== image.host)].filter(Boolean));
@@ -558,7 +559,8 @@ function ModalBody(props) {
             </div>
             <div class="vz-messages" role="status">
               <div class="vz-message-content">
-                <Show when={tally().message && !result()}><p class={["invalid", "conflict"].includes(tally().status) ? "vz-readiness-error" : "vz-field-help"}>{tally().message}</p></Show>
+                <Show when={tally().message && !result()}><p class={["invalid", "conflict", "failed"].includes(tally().status) ? "vz-readiness-error" : "vz-field-help"}>{tally().message}</p></Show>
+                <Show when={tally().status === "failed" && !result()}><button type="button" class="vz-thumbnail-retry vz-catalogue-retry" onClick={retryCatalogue}>Retry</button></Show>
                 <Show when={result()}>{value => <>
                   <Show when={Number.isSafeInteger(value().submitted) && value().total > 0}>
                     <p class={value().ok ? "vz-queued vz-ok" : "vz-queued"}>Queued {value().submitted} of {value().total} jobs</p>

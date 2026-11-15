@@ -46,8 +46,16 @@ const get = async (base, path) => (await fetch(base + path)).json();
     await choose('third');
     await c.poll(`document.querySelector('.vz-run-on .select-face')?.textContent==='Run on third'&&document.querySelector('.vz-count')?.textContent==='1'`, 20000);
     proof.hostCounted = await c.evaluate(`document.querySelector('.vz-count').textContent`);
+    // A failed destination check says so and offers Retry for the same host.
+    await c.evaluate(`(()=>{const original=window.fetch;window.fetch=(url,options)=>{if(String(url).includes('/probe/')&&String(url).includes('destination=')&&decodeURIComponent(String(url)).includes('"source":"other"')){window.fetch=original;return Promise.resolve(new Response(JSON.stringify({error:'object_info timed out'}),{status:502,headers:{'Content-Type':'application/json'}}));}return original(url,options)}})()`);
     await choose('other');
+    await c.poll(`!!document.querySelector('.vz-catalogue-retry')`, 20000);
+    proof.failed = await c.evaluate(`document.querySelector('.vz-messages .vz-readiness-error')?.textContent`);
+    assert(/^Couldn't check other: /.test(proof.failed), proof.failed);
+    await shot('run-on-check-failed');
+    await c.clickAt('.vz-catalogue-retry');
     await c.poll(`document.querySelector('.vz-catalogue-row')?.classList.contains('vz-conflict')`, 20000);
+    assert.equal(await c.evaluate(`!!document.querySelector('.vz-catalogue-retry')`), false);
     proof.other = await c.evaluate(`({rows:[...document.querySelectorAll('.vz-catalogue-row')].map(r=>({id:r.dataset.catalogueId,conflict:r.classList.contains('vz-conflict'),reason:r.querySelector('.vz-conflict-reason')?.textContent??null})),
       message:document.querySelector('.vz-messages').textContent,red:getComputedStyle(document.querySelector('.vz-catalogue-row.vz-conflict .vz-conflict-reason')).color})`);
     const first = proof.other.rows.findIndex(r => !r.conflict);
