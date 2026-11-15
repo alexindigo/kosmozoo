@@ -369,6 +369,12 @@ class before its first upload; the final graph is validated against the
 destination before any job. The saved snapshot records the destination's view
 of the workflow. The time estimate still uses original generation times.
 
+The host is one of the compared parameters. The tuple whose values all equal
+the image's current values reproduces the original only on the image's own
+host, so it is excluded there; on any other destination it is a new image and
+counts, runs and takes part in automatic naming. With no enabled parameter
+there is still nothing to vary.
+
 #### Durable Variations snapshots
 
 The engine owns version1 raw recipe snapshots, original target graphs/pixels and

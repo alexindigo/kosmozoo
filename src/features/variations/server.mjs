@@ -12,7 +12,7 @@
 import {
   generatePermutations, permutationAxes, permutationPlan, resolveRelativeRanges,
   parameterIndex, parameterCurrent, catalogueParams, parameterAliases, validRunAcknowledgement, runOperationFields, targetRunPlan,
-  composeOutputName, variationOutputName,
+  composeOutputName, variationOutputName, reproducesOriginal,
 } from "./shared.mjs";
 import { validEntryName, backingFor as defaultBackingFor } from "../../backings/index.mjs";
 import { sourceOrigin, sameOrigin, validOrigin, validContext, expectedOrigin } from "../../source-origin.mjs";
@@ -261,6 +261,7 @@ export function register(app) {
     if (!id || !host || !filename || !ranges) {
       return Response.json({ error: "missing required fields" }, { status: 400 });
     }
+    const sameHost = reproducesOriginal(host, context?.origin?.source);
     // Saved-plan requests execute on their engine-bound destination; direct
     // requests stay bound to the target's own source.
     if (!validContext(context) || !body.history && context.origin.source !== host) {
@@ -294,9 +295,9 @@ export function register(app) {
       selectedValues = compileDiscreteAxes(Object.fromEntries(axes.imgEnabled), fullInspection);
       resolvedRanges = relative ? resolveRelativeRanges(selectedRanges, currentValues) : selectedRanges;
       if (Object.keys(selectedRanges).some(id => !Object.hasOwn(resolvedRanges, id))) throw new Error("Every applicable relative range needs clamp bounds");
-      const count = permutationPlan(resolvedRanges, currentValues, selectedValues).total;
+      const count = permutationPlan(resolvedRanges, currentValues, selectedValues, { sameHost }).total;
       if (count > MAX_PERMUTATIONS) return Response.json({ error: `too many permutations (${count} > ${MAX_PERMUTATIONS})` }, { status: 413 });
-      permutations = generatePermutations(resolvedRanges, currentValues, selectedValues);
+      permutations = generatePermutations(resolvedRanges, currentValues, selectedValues, { sameHost });
     } catch (e) {
       return Response.json({ error: e.message }, { status: 400 });
     }
@@ -347,7 +348,7 @@ export function register(app) {
         // Validate every explicit output prefix, including retained dependencies,
         // without giving those dependencies new sidebar-affix writes.
         for (const target of namingTargets) if (Object.hasOwn(perm, target.parameterId)) composeOutputName(target, perm);
-        const naming = variationOutputName(firstNamingTarget, namingRequest, perm, currentValues, labelMap, fullInspection);
+        const naming = variationOutputName(firstNamingTarget, namingRequest, perm, currentValues, labelMap, fullInspection, { sameHost });
         if (!naming.complete) return rejectPlan("Unresolved naming token: check prefix and suffix; no jobs were submitted");
         const { prefix: pfx, suffix: sfx } = naming;
         const options = { targets: namingTargets, values: perm, proofs: namingProofs };

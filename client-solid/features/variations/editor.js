@@ -8,7 +8,7 @@ import { compileRecipe, parseRecipeCandidate, recipeImageView, currentRoot } fro
 import { acknowledgedHistoryFields, planHistoryOverlay, decodeHistoryRecipe } from "/shared/features/variations/history-codec.mjs";
 import { permutationPlan,
   resolveRelativeRanges, acknowledgedFields, targetRunPlan, catalogueParams, parameterIndex, parameterCurrent, parameterLabel, parameterAliases,
-   variationOutputName, uploadFamily } from "/shared/features/variations/shared.mjs";
+   variationOutputName, uploadFamily, reproducesOriginal } from "/shared/features/variations/shared.mjs";
 import { validOrigin, sameOrigin, validContext, sameContext } from "/shared/source-origin.mjs";
 import { validImageSet, mergeImages, sameImage, imageIdentity, imageReference, imageReferenceValue, uploadImage } from "./image-set.js";
 import { classifyImageFiles } from "./image-drop.js";
@@ -216,9 +216,11 @@ export function makeVariationEditor({ targets, cohortMode, destination: initialD
   };
   const compile = (snapshot, uploadReceipts = null, preview = false, lookup = evidence, target = capturedTargets[0]) =>
     compileRecipe(snapshot, { catalogue: catalogues.get(capturedTargets[0].id), target, batch, lookup, uploadReceipts, confirmedUploads, preview });
-  const count = (payload, catalogue) => {
+  // A request names both hosts: the image's own and the one it runs on.
+  const count = (request, catalogue) => {
     const values = currentValues(catalogue);
-    return permutationPlan(batch ? resolveRelativeRanges(payload.ranges, values) : payload.ranges, values, payload.imageParams).total;
+    return permutationPlan(batch ? resolveRelativeRanges(request.ranges, values) : request.ranges, values, request.imageParams,
+      { sameHost: reproducesOriginal(request.host, request.context?.origin?.source) }).total;
   };
   const compatible = ticket => owns(ticket) && ticket.editRevision === recipe.revision() && !deciding && ticket.targets.every(originCurrent);
   const canClose = ticket => compatible(ticket) && ticket.closeGeneration === closeGeneration && acceptedRevision === ticket.editRevision;
@@ -492,7 +494,9 @@ export function makeVariationEditor({ targets, cohortMode, destination: initialD
           return unavailable("invalid", `${entry.metadata.label}: ${snapshot.images[id] ? "add at least one image" : snapshot.enums[id] ? "choose at least one value" : "enter values for every template label"}.`);
         }
         const values = currentValues(first), ranges = batch ? resolveRelativeRanges(payload.ranges, values) : payload.ranges;
-        const plan = permutationPlan(ranges, values, payload.imageParams);
+        // The opening image's host is compared with the Run destination.
+        const sameHost = reproducesOriginal(capturedTargets[0].host, destination?.source);
+        const plan = permutationPlan(ranges, values, payload.imageParams, { sameHost });
         const axes = plan.axes.map(axis => {
           const entry = snapshot.numeric[axis.id] ?? snapshot.images[axis.id] ?? snapshot.enums[axis.id] ?? snapshot.texts[axis.id] ?? snapshot.candidates[axis.id];
           return { id: axis.id, count: axis.length, name: entry.metadata.key.replace(/_/g, " "),
@@ -503,11 +507,11 @@ export function makeVariationEditor({ targets, cohortMode, destination: initialD
         const pending = selected.some(item => item.pending), error = selected.find(item => item.error)?.error;
         const perImage = plan.total, n = perImage * selectedTargets.length, safe = Number.isSafeInteger(n);
         const exact = !batch && !pending && !error && safe;
-        const excluded = plan.axes.length ? plan.axes.reduce((number, axis) => number * axis.matches, 1) : 0;
+        const excluded = plan.excluded;
         // One representative non-current tuple from the kernel, without allocating
         // the Cartesian product. Numeric matches form a contiguous interval.
         const sample = Object.fromEntries(plan.axes.map(axis => [axis.id, axis.at(0)]));
-        if (plan.total && plan.axes.every(axis => axis.isCurrent(sample[axis.id]))) {
+        if (plan.total && plan.excluded && plan.axes.every(axis => axis.isCurrent(sample[axis.id]))) {
           const axis = plan.axes.find(axis => axis.matches < axis.length);
           if (axis) {
             let index = axis.matches;
@@ -521,7 +525,7 @@ export function makeVariationEditor({ targets, cohortMode, destination: initialD
         const parameters = namingParameters(first), aliases = parameterAliases(parameters);
         const basename = capturedTargets[0].filename.split("/").pop().replace(/\.[^.]+$/, "");
         const source = first.outputNaming ?? { directory: "", sourceStem: basename };
-        const projection = variationOutputName(source, { ...payload, ranges }, sample, values, aliases, parameters);
+        const projection = variationOutputName(source, { ...payload, ranges }, sample, values, aliases, parameters, { sameHost });
         const naming = { complete: projection.complete,
           example: projection.value.replace(/\0pending-\d+/g, "[upload name pending]"),
           help: "Representative first output; upload collision names and ComfyUI's added counter may differ." };

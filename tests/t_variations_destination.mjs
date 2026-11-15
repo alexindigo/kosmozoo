@@ -76,8 +76,9 @@ Deno.test("destination: a saved Run materializes and queues only on the chosen C
   serve("a", { ckpts: ["flux1-dev.safetensors"], classes: ["SaveImage", "LoadImage", "Ckpt", "Test"] });
   serve("b", { ckpts: ["flux1-dev-fp8.safetensors", "sdxl.safetensors"], classes: ["SaveImage", "LoadImage", "Ckpt", "Test"] });
   serve("c", { ckpts: ["flux1-dev.safetensors"], classes: ["SaveImage", "LoadImage", "Ckpt"] });
+  serve("d", { ckpts: ["flux1-dev.safetensors"], classes: ["SaveImage", "LoadImage", "Ckpt", "Test"] });
   const env = { HOME: dir, KOZMOZOO_STATE: dir, KOZMOZOO_CACHE: `${dir}/cache`, KOZMOZOO_PLUGINS: `${dir}/no-plugins`,
-    KOZMOZOO_HOSTS: ["a", "b", "c"].map(name => `${name}=127.0.0.1:${hosts[name].server.addr.port}`).join(",") };
+    KOZMOZOO_HOSTS: ["a", "b", "c", "d"].map(name => `${name}=127.0.0.1:${hosts[name].server.addr.port}`).join(",") };
   const engine = await buildContext({ env, start: false });
   const call = async (method, path, body) => {
     const response = await engine.router.handle(new Request(`http://localhost/api/features/variations${path}`, {
@@ -142,6 +143,32 @@ Deno.test("destination: a saved Run materializes and queues only on the chosen C
       assertEquals(uploaded.data.reused, index === 1);
     }
     assertEquals(hosts.b.uploads.length, uploadsBefore + 1);
+
+    // The host is compared too: the unchanged seed is a new image on d, and
+    // nothing to submit on the image's own host a.
+    const unchanged = destination => {
+      const raw = recipeFor(onB.data); raw.write("numeric", "n.seed", "enabled", true); raw.write("numeric", "n.seed", "mode", "value"); raw.write("numeric", "n.seed", "value", "5");
+      const runId = crypto.randomUUID(), encoded = encodeHistoryRecipe(raw.capture(), runId);
+      return { runId, body: { runId, format: 1, cohortMode: "single", targets: [target], recipe: encoded.recipe, resources: encoded.resources, destination } };
+    };
+    const dOrigin = originOf("d"), onD = unchanged(dOrigin);
+    assertEquals((await call("POST", "/history", onD.body)).status, 200);
+    const dPrepared = (await call("POST", `/history/${onD.runId}/prepare`)).data;
+    for (const resourceId of new Set(Object.values(dPrepared.targets[0].graphResources)))
+      assertEquals((await call("POST", `/history/${onD.runId}/uploads/0-${resourceId}`, { targetIndex: 0, resourceId, origin: dOrigin, snapshotHash: dPrepared.snapshotHash })).status, 200);
+    const dPlan = await call("POST", `/history/${onD.runId}/prepare-target`, { targetIndex: 0, origin: dOrigin, snapshotHash: dPrepared.snapshotHash });
+    assertEquals(dPlan.status, 200, stringifyExactJson(dPlan));
+    const dRun = await call("POST", "/run", dPlan.data.request);
+    assertEquals([dRun.status, dRun.data.submitted, dRun.data.total], [200, 1, 1], stringifyExactJson(dRun));
+    assertEquals(parseExactJson(hosts.d.jobs[0]).prompt.n.inputs.seed, 5);
+    const own = unchanged(probe.context.origin);
+    assertEquals((await call("POST", "/history", own.body)).status, 200);
+    const aPrepared = (await call("POST", `/history/${own.runId}/prepare`)).data;
+    for (const resourceId of new Set(Object.values(aPrepared.targets[0].graphResources)))
+      await call("POST", `/history/${own.runId}/uploads/0-${resourceId}`, { targetIndex: 0, resourceId, origin: probe.context.origin, snapshotHash: aPrepared.snapshotHash });
+    const aPlan = await call("POST", `/history/${own.runId}/prepare-target`, { targetIndex: 0, origin: probe.context.origin, snapshotHash: aPrepared.snapshotHash });
+    assertEquals(aPlan.status, 400, stringifyExactJson(aPlan));
+    assertEquals(hosts.a.jobs.length, 0);
 
     // A host lacking a node class rejects before any upload or job.
     const blockedId = crypto.randomUUID(), blocked = encodeHistoryRecipe(recipeFor(onC).capture(), blockedId);

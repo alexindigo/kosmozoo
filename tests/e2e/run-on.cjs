@@ -2,6 +2,7 @@
 // resolution, Run blocked until resolved, and jobs reaching only that host.
 const assert = require('node:assert/strict'), fs = require('node:fs');
 const { CDP, collectPageErrors } = require('./cdp.cjs');
+const { addParameter } = require('./variation-add-helpers.cjs');
 const B = process.env.E2E_ENGINE, F = process.env.E2E_FAKE, D = process.env.KZ_TIME_EVIDENCE;
 const KZ = `(await import('/store/instance.js')).appStore`;
 const port = new URL(F).port, image = 'flux-basic.png';
@@ -38,6 +39,13 @@ const get = async (base, path) => (await fetch(base + path)).json();
           return Math.abs(at('.vz-run-on .select-control','.vz-run-on .select-face-content > .single-line-text')-at('.vh-trigger','.vh-trigger > .single-line-text'))<0.5})()}})()`);
     assert(Object.values(proof.header).every(Boolean), JSON.stringify(proof.header));
     await shot('run-on-header');
+    // The host is a compared parameter: only the current sampler reproduces the
+    // original here (0 variations) but is a new image on another host (1).
+    await addParameter(c, '8.sampler_name');
+    await c.poll(`document.querySelectorAll('[data-enum-id="8.sampler_name"] .vz-enum-picked').length===1&&document.querySelector('.vz-count')?.textContent==='0'`, 20000);
+    await choose('third');
+    await c.poll(`document.querySelector('.vz-run-on .select-face')?.textContent==='Run on third'&&document.querySelector('.vz-count')?.textContent==='1'`, 20000);
+    proof.hostCounted = await c.evaluate(`document.querySelector('.vz-count').textContent`);
     await choose('other');
     await c.poll(`document.querySelector('.vz-catalogue-row')?.classList.contains('vz-conflict')`, 20000);
     proof.other = await c.evaluate(`({rows:[...document.querySelectorAll('.vz-catalogue-row')].map(r=>({id:r.dataset.catalogueId,conflict:r.classList.contains('vz-conflict'),reason:r.querySelector('.vz-conflict-reason')?.textContent??null})),
@@ -79,6 +87,6 @@ const get = async (base, path) => (await fetch(base + path)).json();
     await shot('run-on-submitted');
     assert.deepEqual(errors, []);
     fs.writeFileSync(D + '/result.json', JSON.stringify({ ...proof, pageErrors: errors }, null, 2));
-    console.log(JSON.stringify({ header: proof.header, suggestions: proof.suggestions, blocked: proof.blocked.status, hosts: proof.hosts, pageErrors: errors }));
+    console.log(JSON.stringify({ hostCounted: proof.hostCounted, header: proof.header, suggestions: proof.suggestions, blocked: proof.blocked.status, hosts: proof.hosts, pageErrors: errors }));
   } finally { await c.close(); }
 })().catch(e => { console.error(e); process.exitCode = 1; });

@@ -2,6 +2,7 @@ import { assert, assertEquals } from "jsr:@std/assert";
 import { makeVariationEditor } from "../client-solid/features/variations/editor.js";
 import { makeHistoryClient } from "../client-solid/features/variations/history-client.js";
 import { cataloguePresentation } from "../client-solid/features/variations/field-filter.js";
+import { permutationPlan, generatePermutations, automaticNaming, reproducesOriginal } from "../src/features/variations/shared.mjs";
 import { editorRig } from "./helpers/variation-editor.mjs";
 
 function rig() {
@@ -60,4 +61,28 @@ Deno.test("run on: the issued ticket captures the destination and history binds 
   await history.plans(ticket, prepared, () => {}).catch(() => {});
   assertEquals(bindings[0].origin, r.other);
   await history.dispose(); r.editor.dispose();
+});
+
+Deno.test("run on: the host is a compared parameter; the unchanged tuple is new on another host", () => {
+  const ranges = { "n.steps": { enabled: true, min: 19, max: 21, increment: 1 } }, current = { "n.steps": 20 };
+  assertEquals([reproducesOriginal("a", "a"), reproducesOriginal("a", null), reproducesOriginal("a", "b")], [true, true, false]);
+  assertEquals([permutationPlan(ranges, current).total, permutationPlan(ranges, current).excluded], [2, 1]);
+  const elsewhere = permutationPlan(ranges, current, {}, { sameHost: false });
+  assertEquals([elsewhere.total, elsewhere.excluded], [3, 0]);
+  assertEquals(generatePermutations(ranges, current, {}, { sameHost: false }).map(p => p["n.steps"]), [19, 20, 21]);
+  const only = { "n.pick": { enabled: true, values: ["x"] } };
+  assertEquals(generatePermutations({}, { "n.pick": "x" }, only), []);
+  assertEquals(generatePermutations({}, { "n.pick": "x" }, only, { sameHost: false }), [{ "n.pick": "x" }]);
+  assertEquals(automaticNaming({}, { "n.pick": "x" }, { "n.pick": { enabled: true, values: ["x", "y"] } }, { sameHost: false }).ids, ["n.pick"]);
+  assertEquals(permutationPlan({}, current, {}, { sameHost: false }).total, 0, "no enabled axis is still nothing to vary");
+});
+
+Deno.test("run on: picking only the current value is one variation on another host, none on its own", () => {
+  const r = rig(); r.install({});
+  r.editor.setEnabled("choice.value", true); r.editor.edit("enums", "choice.value", "picks", ["first"]);
+  assertEquals([r.editor.preview().n, r.editor.preview().excluded], [1, 0]);
+  assert(r.editor.setDestination(r.origin));
+  r.editor.installCatalogue({ ...r.catalogue, destination: { origin: r.origin, missing: [], conflicts: {} } });
+  assertEquals([r.editor.preview().n, r.editor.preview().excluded], [0, 1]);
+  r.editor.dispose();
 });

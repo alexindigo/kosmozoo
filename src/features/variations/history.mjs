@@ -9,7 +9,7 @@ import { historyId, decodeHistoryRecipe } from "./history-codec.mjs";
 import { imageIdentity, snapshotDraft, numericText } from "./recipe-model.mjs";
 import { compileRecipe } from "./recipe-compile.mjs";
 import { admitResourceTransfer } from "./compile.mjs";
-import { targetRunPlan, parameterIndex, permutationPlan, resolveRelativeRanges } from "./shared.mjs";
+import { targetRunPlan, parameterIndex, permutationPlan, resolveRelativeRanges, reproducesOriginal } from "./shared.mjs";
 import { inspectSource, projectInspection } from "./inspection.mjs";
 import { inspectDestination, destinationMissing } from "./destination.mjs";
 import { readImage } from "./folder-images.mjs";
@@ -418,7 +418,7 @@ export function makeVariationHistory(app) {
       const compiled = compileRecipe(recipe, { catalogue, target, batch: snapshot.cohortMode === "bulk", resourceValues });
       const plan = targetRunPlan(compiled.payload, catalogue), values = Object.fromEntries(catalogue.parameters.map(p => [p.id, parameterCurrent(p)]));
       const ranges = plan.payload.relative ? resolveRelativeRanges(plan.payload.ranges, values) : plan.payload.ranges;
-      const expectedTotal = permutationPlan(ranges, values, plan.payload.imageParams).total;
+      const expectedTotal = permutationPlan(ranges, values, plan.payload.imageParams, { sameHost: reproducesOriginal(target.host, destination.source) }).total;
       if (!Number.isSafeInteger(expectedTotal) || expectedTotal <= 0 || expectedTotal > 500) throw fail("Saved configuration has no valid human-scale permutations");
       const request = { id: target.id, host: target.host, filename: target.filename, ...plan.payload, context: r.context,
         acknowledgement: { version: 2, runId: id, requestId: crypto.randomUUID() } };
