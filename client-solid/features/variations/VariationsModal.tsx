@@ -113,8 +113,8 @@ function ModalBody(props) {
     retry: (service, query) => pexelsBrowse.retry(service.source, query),
     state: (service, photo) => read(() => editor.pexelsState(id, service.source, photo)),
     label: (service, photo) => browse(() => pexelsLabel(pexelsBrowse.photo(service.source, photo), photo)),
-    thumbnail: (service, photo) => services.pexelsApi.pexelsThumbnail(service.source, photo),
-    toggle: (service, photo) => editor.togglePexels(id, service.source, photo),
+    thumbnail: (service, photo) => services.pexelsApi.pexelsThumbnail(service.source, photo, service.url),
+    toggle: (service, photo) => editor.togglePexels(id, service.source, photo, service.url),
   });
   const targets = () => read(editor.targets);
   const rows = () => read(() => editor.rows("numeric"));

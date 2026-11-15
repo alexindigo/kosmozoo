@@ -372,8 +372,13 @@ export function registerPexels(app, { services: injected = null, client: injecte
     const query = new URL(req.url).searchParams.get("query") ?? "";
     return Response.json(await client.photos(await services.get(id), { query, page: page(req), signal: req.signal }));
   });
+  // Photo addresses carry the service URL they were listed from, so a cached
+  // response can never stand in for a photo after the service changes.
   for (const kind of ["thumbnail", "image"]) route("GET", `/services/<id>/photos/<photo>/${kind}`, async (req, { id, photo }) => {
-    const { bytes, mime } = await client.bytes(await services.get(id), photo, kind, req.signal);
+    const listed = new URL(req.url).searchParams.get("service"), service = await services.get(id);
+    if (listed === null) throw fail("The photo address must name its service URL");
+    if (listed !== service.url) throw fail(`${service.name} changed; reopen the picker`, 409);
+    const { bytes, mime } = await client.bytes(service, photo, kind, req.signal);
     return new Response(bytes, { headers: mediaHeaders({ "Content-Type": mime, "Cache-Control": "private, max-age=3600" }) });
   });
   return { services, client };

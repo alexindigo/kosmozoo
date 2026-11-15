@@ -104,13 +104,14 @@ export const removePexelsService = id => req("DELETE", pexelsPath(id));
 export const pexelsStatus = (id, signal) => req("GET", `${pexelsPath(id)}/status`, undefined, { signal });
 export const pexelsPhotos = (id, query, page, signal) =>
   req("GET", `${pexelsPath(id)}/photos?${new URLSearchParams({ query, page: String(page) })}`, undefined, { signal });
-export const pexelsThumbnail = (id, photo) => `${pexelsPath(id)}/photos/${encodeURIComponent(photo)}/thumbnail`;
+const pexelsPhotoPath = (id, photo, url, kind) => `${pexelsPath(id)}/photos/${encodeURIComponent(photo)}/${kind}?${new URLSearchParams({ service: url })}`;
+export const pexelsThumbnail = (id, photo, url) => pexelsPhotoPath(id, photo, url, "thumbnail");
 const PEXELS_EXTENSIONS = { "image/jpeg": "jpg", "image/png": "png", "image/webp": "webp", "image/gif": "gif", "image/avif": "avif" };
 // Photo IDs are opaque service data; the upload name is a portable slug of it.
 export const pexelsFileName = (photo, extension) =>
   `pexels-${String(photo).replace(/[^A-Za-z0-9_-]+/g, "-").replace(/^-+|-+$/g, "").slice(-80) || "photo"}.${extension}`;
-export async function readPexelsPhoto(id, photo) {
-  const response = await fetch(`${pexelsPath(id)}/photos/${encodeURIComponent(photo)}/image`);
+export async function readPexelsPhoto(id, photo, url) {
+  const response = await fetch(pexelsPhotoPath(id, photo, url, "image"));
   if (!response.ok) {
     let message = `Photo unavailable (${response.status})`;
     try { message = (await response.json()).error ?? message; } catch { /* non-JSON body */ }

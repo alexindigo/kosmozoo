@@ -1255,8 +1255,8 @@ them; keys never reach a browser. Services live in `<state>/pexels-services.json
 | 3 | `PATCH /services/<id>` `{name?,url?,key?}` | omitted `key` keeps it, `null` clears it, a string replaces it |
 | 4 | `DELETE /services/<id>` | `{removed:true}` |
 | 5 | `GET /services/<id>/photos?query=&page=` | `{mode:"search"|"curated"|"browse",curated,page,more,photos:[{id,alt,photographer,width,height}]}`, 40 per page |
-| 6 | `GET /services/<id>/photos/<photo>/thumbnail` | proxied size, preferring medium, small, tiny, then any other |
-| 7 | `GET /services/<id>/photos/<photo>/image` | proxied size, preferring large2x, large, original, then any other |
+| 6 | `GET /services/<id>/photos/<photo>/thumbnail?service=<url>` | proxied size, preferring medium, small, tiny, then any other |
+| 7 | `GET /services/<id>/photos/<photo>/image?service=<url>` | proxied size, preferring large2x, large, original, then any other |
 | 8 | `GET /services/<id>/status` | `{ok:true,browse}` or `{ok:false,error}` from the picker's own first query (plus a search when only search works) |
 
 The URL is the API root, with or without a trailing `/v1`; it must be http(s)
@@ -1272,7 +1272,9 @@ without a key and "rejected the API key" with one. The key
 is sent as `Authorization: <key>` only to URLs on the service URL's origin,
 re-evaluated at each manually followed redirect (at most five). Photo bytes are
 resolved only from photo records the engine fetched (listing cache, else
-`/v1/photos/<id>`), never from a browser-supplied URL. Image replies must sniff
+`/v1/photos/<id>`), never from a browser-supplied URL. Photo addresses carry the service URL they
+were listed from (`service`); a missing value is 400 and a changed service is 409,
+so a privately cached response can never stand in after a service changes. Image replies must sniff
 as JPEG, PNG, WebP, GIF or AVIF and stay under 50 MB; upstream calls have a
 30-second deadline for a response and for each gap while a body streams (a slow
 but progressing download never expires), and follow request abort. An unreadable services file is

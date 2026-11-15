@@ -344,12 +344,12 @@ export function makeVariationEditor({ targets, cohortMode, services, currentOrig
     retirePexelsService(service) { if (pexelsFiles.delete(service)) notify(); },
     pexelsState(id, service, photo) { return cachedFileState(id, pexelsFiles.get(service)?.get(photo)); },
     // A chosen Pexels photo is an ordinary uploaded image once its bytes arrive.
-    togglePexels(id, service, photo) {
-      if (!alive || deciding || typeof service !== "string" || typeof photo !== "string" || !row("images", id) || !originCurrent(capturedTargets[0])) return false;
+    togglePexels(id, service, photo, url) {
+      if (!alive || deciding || typeof service !== "string" || typeof photo !== "string" || typeof url !== "string" || !row("images", id) || !originCurrent(capturedTargets[0])) return false;
       if (!pexelsFiles.has(service)) pexelsFiles.set(service, new Map());
       const files = pexelsFiles.get(service);
       return toggleCachedFile(this, id, fileRecord(files, photo), `Photo ${photo}`, async () => {
-        const file = await services.readPexelsPhoto(service, photo);
+        const file = await services.readPexelsPhoto(service, photo, url);
         if (!(file instanceof File) || !file.size) throw new Error("Invalid photo");
         return file;
       }, () => alive && pexelsFiles.get(service) === files);
