@@ -1241,6 +1241,56 @@ Changed files reject with 409 and retain work; remove/add refreshes their compar
 Stale source contexts reject with 412, including completed old-origin upload detail
 when retirement occurred during a write. Real returned names, not preview names,
 still own Run provenance. Path items join the same compiler/adoption leaf as Files.
+
+Pexels-compatible photo services (pexels.com or a self-hosted service speaking
+its API) are another acquisition source. The engine alone stores and contacts
+them; keys never reach a browser. Services live in `<state>/pexels-services.json`
+(mode 0600, outside `settings.json`, whose namespaces are readable through
+`/api/settings`). Routes under `/api/features/variations/pexels`:
+
+| # | Route | Contract |
+|---|---|---|
+| 1 | `GET /services` | `{services:[{id,name,url,hasKey}]}` |
+| 2 | `POST /services` `{name,url,key?}` | 201 with the redacted service; names are unique, case-insensitive; at most 32 services |
+| 3 | `PATCH /services/<id>` `{name?,url?,key?}` | omitted `key` keeps it, `null` clears it, a string replaces it |
+| 4 | `DELETE /services/<id>` | `{removed:true}` |
+| 5 | `GET /services/<id>/photos?query=&page=` | `{mode:"search"|"curated"|"browse",curated,page,more,photos:[{id,alt,photographer,width,height}]}`, 40 per page |
+| 6 | `GET /services/<id>/photos/<photo>/thumbnail?service=<url>` | proxied size, preferring medium, small, tiny, then any other |
+| 7 | `GET /services/<id>/photos/<photo>/image?service=<url>` | proxied size, preferring large2x, large, original, then any other |
+| 8 | `GET /services/<id>/status` | `{ok:true,browse}` or `{ok:false,error}` from the picker's own first query (plus a search when only search works) |
+
+The URL is the API root, with or without a trailing `/v1`; it must be http(s)
+without credentials, query or fragment. An empty query lists `/v1/curated`; when
+a service answers that with any failure other than 401, 403 or 429, an empty search is tried: a non-empty
+first page is browsed (`mode:"browse"`), otherwise the reply is `curated:false`
+with no photos and the picker asks for a search instead of reporting an error.
+Photo IDs are opaque non-empty strings without control characters (not `.` or
+`..`, which URL parsers resolve as path steps). Any single `src` entry, of any
+name, serves both roles. `/v1/photos/<id>` replies are keyed by the requested ID. A page whose photos are all
+unusable is an error, never an empty result. 401/403 reads "needs an API key"
+without a key and "rejected the API key" with one. The key
+is sent as `Authorization: <key>` only to URLs on the service URL's origin,
+re-evaluated at each manually followed redirect (at most five). Photo bytes are
+resolved only from photo records the engine fetched (listing cache, else
+`/v1/photos/<id>`), never from a browser-supplied URL. Photo addresses carry the service URL they
+were listed from (`service`); a missing value is 400 and a changed service is 409,
+so a privately cached response can never stand in after a service changes. Image replies must sniff
+as JPEG, PNG, WebP, GIF or AVIF and stay under 50 MB; upstream calls have a
+30-second deadline for a response and for each gap while a body streams (a slow
+but progressing download never expires), and follow request abort. An unreadable services file is
+reported with HTTP 500 and never overwritten.
+
+The Settings menu lists services (name, URL, a lock marker when a key is saved)
+with add, edit and remove; the key field is write-only. Opening Settings, adding
+and editing check each service: a grey, green or red light, with the failure
+reason under its URL. In the image set's add
+menu, "Pexels photos" appears only when a service exists. It is the same picker
+as "ComfyUI images" with one tab per service and server-side search (typing waits
+300 ms; superseded searches abort; pages load as the grid nears its end). Tile
+names are the photo description and photographer. A chosen photo is read once
+per modal into a File named `pexels-<slug of id>.<ext>` and joins the set as an ordinary
+upload through the same membership tickets, comparison, collision naming,
+receipts and history archive as other Files.
 The native popup joins the modal's owned suspend/resume seam: a blocking leave
 decision hides its top-layer surface without replacing search DOM or losing
 query/caret. Both Keep editing and Escape restore it before focus restoration.

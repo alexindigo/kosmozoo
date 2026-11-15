@@ -18,12 +18,17 @@ const TILE_SIZE = 96, GAP = 6, ROW_HEIGHT = TILE_SIZE + GAP;
 
 // Presentation only: catalogue, selection, thumbnail addresses, thumbnail
 // display registration and popup scope registration are injected. The child owns focus, search and virtual geometry.
+// One picker serves every remote image catalogue. Callers supply its label,
+// optional feed tabs (`roots`), wording (`noun`) and whether search is
+// answered by the catalogue (`remoteSearch`, with paged `onMore`) or filtered here.
 export function InputPicker(props) {
   const [open, setOpen] = createSignal(false), [query, setQuery] = createSignal("");
   const [activeSource, setActiveSource] = createSignal(props.sources[0].source);
-  const [resourceRoot, setResourceRoot] = createSignal("input");
+  const [resourceRoot, setResourceRoot] = createSignal(props.roots?.[0]?.value ?? null);
   const source = createMemo(() => props.sources.find(origin => origin.source === activeSource()) ?? props.sources[0]);
-  createEffect(() => { if (open()) props.onSource(source(), resourceRoot()); });
+  const search = () => props.remoteSearch ? query().trim() : "";
+  createEffect(() => { if (open()) props.onSource(source(), resourceRoot(), search()); });
+  const catalogue = () => props.sourceInputs(source(), resourceRoot(), search());
   const [suspended, setSuspended] = createSignal(false);
   const id = `vz-image-input-${createUniqueId().replace(/[^\w-]/g, "")}`;
   let root, trigger, surface = null, requestPlacement = () => {};
@@ -75,15 +80,18 @@ export function InputPicker(props) {
   createEffect(() => { if (open()) onCleanup(props.registerPopup(close)); });
   return <div class="vz-input-picker" ref={root}>
     <ImageAction class="select-trigger control-size-md vz-input-trigger" ref={trigger}
-      aria-expanded={open()} aria-haspopup="listbox" aria-controls={id} {...focusMemory(props.rememberFocus)} onClick={() => setOpen(!open())}><SingleLineText value="ComfyUI images" /><Chevron /></ImageAction>
+      aria-expanded={open()} aria-haspopup="listbox" aria-controls={id} {...focusMemory(props.rememberFocus)} onClick={() => setOpen(!open())}><SingleLineText value={props.label} /><Chevron /></ImageAction>
     <Show when={open()}>
-      <InputOptions id={id} query={query} onQuery={setQuery} files={props.sourceInputs(source(), resourceRoot()).files}
-        context={JSON.stringify([source(), resourceRoot()])} resourceRoot={resourceRoot()} onRoot={setResourceRoot}
+      <InputOptions id={id} query={query} onQuery={setQuery} files={catalogue().files}
+        context={JSON.stringify([source(), resourceRoot(), search()])} resourceRoot={resourceRoot()} onRoot={setResourceRoot}
+        roots={props.roots} noun={props.noun(resourceRoot())} remoteSearch={!!props.remoteSearch}
+        itemLabel={name => props.itemLabel?.(source(), name) ?? name}
+        onMore={() => props.onMore?.(source(), resourceRoot(), search())}
         onGeometry={() => requestPlacement()}
-        catalogue={props.sourceInputs(source(), resourceRoot())} onRetrySource={() => props.onRetrySource(source(), resourceRoot())}
+        catalogue={catalogue()} onRetrySource={() => props.onRetrySource(source(), resourceRoot(), search())}
         sources={props.sources} source={source()} onSource={setActiveSource} registerTabKeys={props.registerTabKeys}
         state={name => props.inputState(source(), name, resourceRoot())}
-        current={sameOrigin(source(), props.sources[0]) && resourceRoot() === props.currentRoot ? props.current : null}
+        current={props.current != null && sameOrigin(source(), props.sources[0]) && resourceRoot() === props.currentRoot ? props.current : null}
         thumbnail={name => props.thumbnail(source(), name, resourceRoot())} registerThumbnail={props.registerThumbnail}
         onToggle={name => { props.onToggle(source(), name, resourceRoot()); requestPlacement(); }} rememberFocus={props.rememberFocus} registerSurface={registerSurface} />
     </Show>
@@ -92,7 +100,7 @@ export function InputPicker(props) {
 
 function InputOptions(props) {
   let panel, search, scrollElement, summary, count, feeds, tabs;
-  const feed = () => props.resourceRoot === "output" ? "generated" : "imported";
+  const sourceLabel = () => props.source.label ?? props.source.source;
   const selected = name => props.state(name).selected;
   const [placement, setPlacement] = createSignal(null);
   const [placed, setPlaced] = createSignal(false);
@@ -115,7 +123,7 @@ function InputOptions(props) {
   const [scroll, setScroll] = createSignal(null), [active, setActive] = createSignal(0), [columns, setColumns] = createSignal(3);
   const [pendingFocus, setPendingFocus] = createSignal(null);
   const files = createMemo(() => props.files);
-  const filtered = createMemo(() => files().filter(name => name.toLowerCase().includes(props.query().toLowerCase())));
+  const filtered = createMemo(() => props.remoteSearch ? files() : files().filter(name => name.toLowerCase().includes(props.query().toLowerCase())));
   const rows = createMemo(() => Array.from({ length: Math.ceil(filtered().length / columns()) }, (_, row) =>
     filtered().slice(row * columns(), (row + 1) * columns())));
   const [motion, setMotion] = createSignal(null);
@@ -143,8 +151,16 @@ function InputOptions(props) {
     if (!range) return mounted;
     return [...mounted].sort((a, b) => demandOrder(a.index, b.index, range, band().direction));
   });
-  createEffect(() => { props.context; filtered(); setPendingFocus(null); setActive(0); restoreFocus = () => search?.focus({ preventScroll: true }); virtualizer.scrollToOffset(0); });
+  // A remote catalogue's context already names its search; appended pages keep
+  // the reader's place instead of returning to the top.
+  createEffect(() => { props.context; if (!props.remoteSearch) filtered(); setPendingFocus(null); setActive(0); restoreFocus = () => search?.focus({ preventScroll: true }); virtualizer.scrollToOffset(0); });
   createEffect(() => { files().filter(selected).length; props.onGeometry(); });
+  // Paged catalogues ask for more once the mounted window nears the end.
+  createEffect(() => {
+    const mounted = virtualizer.getVirtualItems(), last = mounted.at(-1)?.index ?? -1;
+    if (!placed() || !props.catalogue.more || props.catalogue.pending || props.catalogue.error) return;
+    if (last >= rows().length - 2) props.onMore();
+  });
   createEffect(() => {
     const index = pendingFocus(), context = props.context;
     if (!placed() || index == null || !virtualizer.getVirtualItems().some(row => row.index === Math.floor(index / columns()))) return;
@@ -170,7 +186,7 @@ function InputOptions(props) {
         if (!panel.isConnected || !panel.matches(":popover-open")) return null;
         const style = getComputedStyle(panel), list = getComputedStyle(scrollElement);
         const horizontalChrome = ["paddingLeft", "paddingRight", "borderLeftWidth", "borderRightWidth"].reduce((sum, key) => sum + (parseFloat(style[key]) || 0), 0);
-        const floor = count.getBoundingClientRect().width + feeds.scrollWidth + (parseFloat(getComputedStyle(summary).columnGap) || 0) + horizontalChrome;
+        const floor = count.getBoundingClientRect().width + (feeds ? feeds.scrollWidth + (parseFloat(getComputedStyle(summary).columnGap) || 0) : 0) + horizontalChrome;
         const gridWidth = Number(style.getPropertyValue("--vz-input-columns")) * (TILE_SIZE + GAP) - GAP;
         const width = Math.max(gridWidth + horizontalChrome + scrollElement.offsetWidth - scrollElement.clientWidth, floor), listHeight = parseFloat(list.maxHeight);
         if (!Number.isFinite(width) || !Number.isFinite(listHeight)) return null;
@@ -213,7 +229,7 @@ function InputOptions(props) {
       "min-height": placement() ? `${placement().minHeight}px` : undefined }} onKeyDown={move}>
     <Show when={props.sources.length > 1}>
       <div ref={tabs} class="vz-input-tabs">
-        <Tabs label="Image source" options={props.sources.map(origin => ({ value: origin.source, label: origin.source,
+        <Tabs label="Image source" options={props.sources.map(origin => ({ value: origin.source, label: origin.label ?? origin.source,
           id: `${props.id}-tab-${encodeURIComponent(origin.source)}` }))}
           value={props.source.source} panelId={`${props.id}-source-panel`} onChange={props.onSource}
           registerKeys={props.registerTabKeys} rememberFocus={rememberFocus} />
@@ -221,13 +237,14 @@ function InputOptions(props) {
     </Show>
     <TextField ref={search} type="search" role="combobox" aria-expanded="true" aria-autocomplete="list" aria-controls={`${props.id}-list`}
       aria-activedescendant={placement() && filtered().length ? `${props.id}-option-${active()}` : undefined}
-      class="vz-input-search" placeholder={`Search ${feed()} images...`} aria-label={`Search ${feed()} images`}
+      class="vz-input-search" placeholder={`Search ${props.noun}...`} aria-label={`Search ${props.noun}`}
       {...focusMemory(rememberFocus)} value={props.query()} onInput={e => props.onQuery(e.currentTarget.value)}
       trailing={<Show when={props.query()}><IconButton chrome size="md" variant="plain vz-search-clear" title="Clear search"
         icon={iconSvg("x")} onAction={() => { props.onQuery(""); search.focus(); }} /></Show>} />
     <div class="vz-input-source-panel" id={`${props.id}-source-panel`} role="tabpanel"
-      aria-labelledby={`${props.sources.length > 1 ? `${props.id}-tab-${encodeURIComponent(props.source.source)} ` : ""}${props.id}-feed-${props.resourceRoot}`}>
-    <div class="vz-input-list" id={`${props.id}-list`} ref={scrollElement} role="listbox" aria-label={`${props.source.source} ${feed()} images`} aria-multiselectable="true">
+      aria-labelledby={[props.sources.length > 1 ? `${props.id}-tab-${encodeURIComponent(props.source.source)}` : "", props.roots ? `${props.id}-feed-${props.resourceRoot}` : ""].filter(Boolean).join(" ") || undefined}
+      aria-label={props.sources.length > 1 || props.roots ? undefined : `${sourceLabel()} ${props.noun}`}>
+    <div class="vz-input-list" id={`${props.id}-list`} ref={scrollElement} role="listbox" aria-label={`${sourceLabel()} ${props.noun}`} aria-multiselectable="true">
       <div class="vz-input-window" style={{ height: `${Math.max(0, virtualizer.getTotalSize() - GAP)}px` }}>
         <For each={placement() ? thumbnailRows() : []}>{virtual =>
           <div class="vz-input-row" role="presentation" style={{ transform: `translateY(${virtual.start}px)` }}>
@@ -244,7 +261,7 @@ function InputOptions(props) {
                  order={() => demandRank(virtual.index, virtualizer.range, band().direction)}
                 pending={props.state(name).pending} error={props.state(name).error} onRetry={() => props.onToggle(name)}
                 priority={priority} rememberFocus={rememberFocus} surface={picture => <button type="button" role="option" tabindex="-1" id={`${props.id}-option-${index()}`}
-                aria-label={name} title={name} aria-selected={selected(name)} data-input-name={name}
+                aria-label={props.itemLabel(name)} title={props.itemLabel(name)} aria-selected={selected(name)} data-input-name={name}
                 class={"vz-input-option" + (active() === index() ? " vz-input-active" : "")}
                 {...memory} onFocus={event => { setActive(index()); memory.onFocus(event); }}
                 onClick={() => { setActive(index()); props.onToggle(name); search.focus(); }}>
@@ -256,19 +273,21 @@ function InputOptions(props) {
           </div>
         }</For>
       </div>
-      <Show when={props.catalogue.pending}><SingleLineText class="vz-input-status" role="status" value={`Reading ${props.source.source} ${feed()} images...`} /></Show>
+      <Show when={props.catalogue.pending}><SingleLineText class="vz-input-status" role="status" value={`Reading ${sourceLabel()} ${props.noun}...`} /></Show>
       <div class="vz-input-status vz-input-failure" hidden={!props.catalogue.error}>
-        <SingleLineText role="status" value={props.catalogue.error ? `Couldn't list ${props.source.source}'s ${feed()} images.` : ""} hint={props.catalogue.error} />
+        <SingleLineText role="status" value={props.catalogue.error ? `Couldn't list ${sourceLabel()}'s ${props.noun}.` : ""} hint={props.catalogue.error} />
         <button type="button" class="vz-thumbnail-retry" onClick={props.onRetrySource}>Retry</button>
       </div>
-      <Show when={!filtered().length && !props.catalogue.pending && !props.catalogue.error}><p class="vz-image-empty">{files().length ? `No ${feed()} images match "${props.query()}".` : `No ${feed()} images available.`}</p></Show>
+      <Show when={!filtered().length && !props.catalogue.pending && !props.catalogue.error}><p class="vz-image-empty">{
+        props.catalogue.searchOnly ? `Search to find ${props.noun} on ${sourceLabel()}.`
+        : (props.remoteSearch ? props.query().trim() : files().length) ? `No ${props.noun} match "${props.query().trim()}".` : `No ${props.noun} available.`}</p></Show>
     </div>
     </div>
     <div ref={summary} class="vz-input-summary">
       <span ref={count} role="status">{files().filter(selected).length} selected</span>
-      <div ref={feeds} class="vz-input-feeds"><Tabs label="Image feed" options={[{ value: "input", label: "imported", id: `${props.id}-feed-input` }, { value: "output", label: "generated", id: `${props.id}-feed-output` }]}
+      <Show when={props.roots}><div ref={feeds} class="vz-input-feeds"><Tabs label="Image feed" options={props.roots.map(root => ({ ...root, id: `${props.id}-feed-${root.value}` }))}
         value={props.resourceRoot} panelId={`${props.id}-source-panel`} onChange={props.onRoot}
-        registerKeys={capability => props.registerTabKeys(capability, "feed")} rememberFocus={rememberFocus} /></div>
+        registerKeys={capability => props.registerTabKeys(capability, "feed")} rememberFocus={rememberFocus} /></div></Show>
     </div>
   </div>;
 }

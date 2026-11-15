@@ -13,6 +13,8 @@ import { ParameterRow } from "./ParameterRow.js";
 import { useClickOutside } from "../../lib/click-outside.js";
 import { isFileDrag, droppedFiles, classifyImageFiles, nearestImageTile, imageInsertIndex } from "./image-drop.js";
 
+const COMFY_ROOTS = [{ value: "input", label: "imported" }, { value: "output", label: "generated" }];
+
 export function ImageSetPanel(props) {
   let fileInput, content, addButton;
   const [adding, setAdding] = createSignal(false), [folder, setFolder] = createSignal(false);
@@ -49,7 +51,8 @@ export function ImageSetPanel(props) {
           {...focusMemory(props.rememberFocus)} onClick={() => setAdding(!adding())}>+</button>
       </ImageGrid>
       <div class="vz-image-add" hidden={!adding()}>
-        <Show when={props.sources.length}><InputPicker sources={props.sources} sourceInputs={props.sourceInputs} inputState={props.inputState}
+        <Show when={props.sources.length}><InputPicker label="ComfyUI images" roots={COMFY_ROOTS} noun={root => `${root === "output" ? "generated" : "imported"} images`}
+          sources={props.sources} sourceInputs={props.sourceInputs} inputState={props.inputState}
           onSource={props.onSource} onRetrySource={props.onRetrySource} registerTabKeys={props.registerTabKeys}
           current={row().current} currentRoot={row().currentRoot ?? (row().fromOutput ? "output" : "input")} positionRevision={row().images} thumbnail={props.inputThumbnail} registerThumbnail={props.registerThumbnail}
           onToggle={props.onToggleInput}
@@ -63,6 +66,17 @@ export function ImageSetPanel(props) {
           aria-pressed={row().items.some(item => item.kind === "target")} {...focusMemory(props.rememberFocus)} onClick={props.onToggleTarget}>
           Current image
         </ImageAction>
+        {/* External catalogues sit apart from the engine's own (trusted) sources. */}
+        <Show when={props.pexels.sources().length}><div class="vz-image-external">
+          <InputPicker label="Pexels photos" noun={() => "photos"} remoteSearch
+            sources={props.pexels.sources()} sourceInputs={(service, _root, query) => props.pexels.results(service, query)}
+            inputState={(service, photo) => props.pexels.state(service, photo)} itemLabel={props.pexels.label}
+            onSource={(service, _root, query) => props.pexels.request(service, query)} onMore={(service, _root, query) => props.pexels.more(service, query)}
+            onRetrySource={(service, _root, query) => props.pexels.retry(service, query)} registerTabKeys={props.registerTabKeys}
+            positionRevision={row().images} thumbnail={(service, photo) => props.pexels.thumbnail(service, photo)} registerThumbnail={props.registerThumbnail}
+            onToggle={(service, photo) => props.pexels.toggle(service, photo)}
+            registerPopup={props.registerPopup} registerEditor={props.registerEditor} rememberFocus={props.rememberFocus} />
+        </div></Show>
         <div class="vz-image-folder" hidden={!folder()}>
         <FolderImages onAdd={props.onAddFolder} capability={props.folderCapability} onChoose={props.onChooseFolder}
           registerEditor={props.registerEditor} rememberFocus={props.rememberFocus} />
