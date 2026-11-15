@@ -14,7 +14,7 @@ const json = async (base, path, body) => {
   const r = await fetch(base + path, body === undefined ? {} : { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
   assert(r.ok, `${path} ${r.status}`); return r.json();
 };
-const pexelsTrigger = '.vz-image-add .vz-input-picker:nth-child(2) .vz-input-trigger';
+const pexelsTrigger = '.vz-image-add .vz-image-external .vz-input-trigger';
 
 (async () => {
   fs.mkdirSync(D, { recursive: true });
@@ -74,6 +74,9 @@ const pexelsTrigger = '.vz-image-add .vz-input-picker:nth-child(2) .vz-input-tri
     await removeRecordedImage(c, '470.image');
     await openImageAdd(c);
     assert.deepEqual(await c.evaluate(`[...document.querySelectorAll('.vz-image-add .vz-input-trigger')].map(b=>b.textContent)`), ['ComfyUI images', 'Pexels photos']);
+    // External photos sit at the row's right edge, after the engine's own sources.
+    const edge = await c.evaluate(`(()=>{const row=document.querySelector('.vz-image-add').getBoundingClientRect(),ext=document.querySelector('.vz-image-external').getBoundingClientRect(),current=document.querySelector('.vz-current-image').getBoundingClientRect(),pad=parseFloat(getComputedStyle(document.querySelector('.vz-image-add')).paddingRight);return {right:row.right-pad-1-ext.right,after:ext.left>current.right}})()`);
+    assert(Math.abs(edge.right) < 1 && edge.after, JSON.stringify(edge));
 
     // Curated on the keyed service, paged as the list scrolls.
     step('open the Pexels picker'); await c.clickAt(pexelsTrigger); await waitForInputPicker(c);

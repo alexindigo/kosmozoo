@@ -1058,6 +1058,7 @@ body:has(#diff:not([hidden])) #statusCol { bottom: 56px; }
 .vz-image-add { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; padding: 8px; background: var(--focused-background); border: 1px solid var(--border); border-radius: 4px; }
 .vz-image-add[hidden], .vz-image-folder[hidden] { display: none; }
 .vz-image-folder { width: 100%; min-width: 0; }
+.vz-image-external { margin-inline-start: auto; }
 .vz-image-action { background: var(--lifted); color: var(--foreground); border: 1px solid var(--border-strong); border-radius: 4px; padding: 5px 8px; font: inherit; cursor: pointer; }
 .vz-image-action:hover { border-color: var(--foreground-dim); }
 .vz-image-action { white-space: nowrap; }

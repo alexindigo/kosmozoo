@@ -57,14 +57,6 @@ export function ImageSetPanel(props) {
           current={row().current} currentRoot={row().currentRoot ?? (row().fromOutput ? "output" : "input")} positionRevision={row().images} thumbnail={props.inputThumbnail} registerThumbnail={props.registerThumbnail}
           onToggle={props.onToggleInput}
           registerPopup={props.registerPopup} registerEditor={props.registerEditor} rememberFocus={props.rememberFocus} /></Show>
-        <Show when={props.pexels.sources().length}><InputPicker label="Pexels photos" noun={() => "photos"} remoteSearch
-          sources={props.pexels.sources()} sourceInputs={(service, _root, query) => props.pexels.results(service, query)}
-          inputState={(service, photo) => props.pexels.state(service, photo)} itemLabel={props.pexels.label}
-          onSource={(service, _root, query) => props.pexels.request(service, query)} onMore={(service, _root, query) => props.pexels.more(service, query)}
-          onRetrySource={(service, _root, query) => props.pexels.retry(service, query)} registerTabKeys={props.registerTabKeys}
-          positionRevision={row().images} thumbnail={(service, photo) => props.pexels.thumbnail(service, photo)} registerThumbnail={props.registerThumbnail}
-          onToggle={(service, photo) => props.pexels.toggle(service, photo)}
-          registerPopup={props.registerPopup} registerEditor={props.registerEditor} rememberFocus={props.rememberFocus} /></Show>
         <input type="file" ref={fileInput} class="vz-imgfilespick" hidden multiple accept="image/*" onChange={e => {
           addFiles({ files: [...e.currentTarget.files] }); e.currentTarget.value = "";
         }} />
@@ -74,6 +66,17 @@ export function ImageSetPanel(props) {
           aria-pressed={row().items.some(item => item.kind === "target")} {...focusMemory(props.rememberFocus)} onClick={props.onToggleTarget}>
           Current image
         </ImageAction>
+        {/* External catalogues sit apart from the engine's own (trusted) sources. */}
+        <Show when={props.pexels.sources().length}><div class="vz-image-external">
+          <InputPicker label="Pexels photos" noun={() => "photos"} remoteSearch
+            sources={props.pexels.sources()} sourceInputs={(service, _root, query) => props.pexels.results(service, query)}
+            inputState={(service, photo) => props.pexels.state(service, photo)} itemLabel={props.pexels.label}
+            onSource={(service, _root, query) => props.pexels.request(service, query)} onMore={(service, _root, query) => props.pexels.more(service, query)}
+            onRetrySource={(service, _root, query) => props.pexels.retry(service, query)} registerTabKeys={props.registerTabKeys}
+            positionRevision={row().images} thumbnail={(service, photo) => props.pexels.thumbnail(service, photo)} registerThumbnail={props.registerThumbnail}
+            onToggle={(service, photo) => props.pexels.toggle(service, photo)}
+            registerPopup={props.registerPopup} registerEditor={props.registerEditor} rememberFocus={props.rememberFocus} />
+        </div></Show>
         <div class="vz-image-folder" hidden={!folder()}>
         <FolderImages onAdd={props.onAddFolder} capability={props.folderCapability} onChoose={props.onChooseFolder}
           registerEditor={props.registerEditor} rememberFocus={props.rememberFocus} />
