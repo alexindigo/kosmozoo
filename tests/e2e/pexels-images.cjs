@@ -102,6 +102,49 @@ const pexelsTrigger = '.vz-image-add .vz-image-external .vz-input-trigger';
     const edge = await c.evaluate(`(()=>{const row=document.querySelector('.vz-image-add').getBoundingClientRect(),ext=document.querySelector('.vz-image-external').getBoundingClientRect(),current=document.querySelector('.vz-current-image').getBoundingClientRect(),pad=parseFloat(getComputedStyle(document.querySelector('.vz-image-add')).paddingRight);return {right:row.right-pad-1-ext.right,after:ext.left>current.right}})()`);
     assert(Math.abs(edge.right) < 1 && edge.after, JSON.stringify(edge));
 
+    // Hold each listing at the browser boundary so loading presentation cannot race the fake.
+    {
+      step('picker loading states');
+      const idle = `!document.querySelector('.vz-input-placeholder') && !document.querySelector('.vz-input-list.is-stale') && !document.querySelector('.vz-input-activity-bar.is-active') && !document.querySelector('.vz-input-activity') && !document.querySelector('.vz-input-list[aria-busy=true]')`;
+      const busy = `!!document.querySelector('.vz-input-activity-bar.is-active') && !!document.querySelector('.vz-input-list[aria-busy=true]')`;
+      const noPreviewText = async () => assert.equal(await c.evaluate(`[...document.querySelectorAll('.vz-input-popover *')].some(el=>el.textContent.includes('Loading preview'))`), false);
+      await c.evaluate(`(()=>{const original=window.fetch;window.__pxFetch=original;window.__pxHoldNext=true;window.__pxHeld=false;window.fetch=async(url,options)=>{
+        const path=new URL(typeof url==='string'?url:url.url,location.href).pathname;
+        if(window.__pxHoldNext&&path.includes('/pexels/services/')&&path.endsWith('/photos')){
+          window.__pxHoldNext=false;await new Promise(resolve=>{window.__pxRelease=resolve;window.__pxHeld=true});
+        }
+        return original(url,options);
+      }})()`);
+      try {
+        await c.clickAt(pexelsTrigger); await waitForInputPicker(c);
+        await c.poll(`window.__pxHeld && ${busy} && document.querySelector('.vz-input-activity')?.textContent==='Loading photos from Home photos…'`);
+        assert.equal(await c.evaluate(`document.querySelector('.vz-input-summary [role=status]').textContent`), '0 selected');
+        await c.poll(`document.querySelectorAll('.vz-input-placeholder').length>0`);
+        const placeholders = await c.evaluate(`[...document.querySelectorAll('.vz-input-placeholder')].map(el=>({width:el.getBoundingClientRect().width,height:el.getBoundingClientRect().height}))`);
+        assert(placeholders.length > 0);
+        for (const tile of placeholders) assert(Math.abs(tile.width - 96) < .5 && Math.abs(tile.height - 96) < .5, JSON.stringify(tile));
+        await noPreviewText();
+        await c.evaluate(`window.__pxRelease()`);
+        await c.poll(`${idle} && document.querySelectorAll('.vz-input-option').length>0`, 20000);
+
+        await c.evaluate(`(()=>{window.__pxHeld=false;window.__pxHoldNext=true})()`);
+        await field('.vz-input-search', 'cats');
+        await c.poll(`window.__pxHeld && ${busy} && !!document.querySelector('.vz-input-list.is-stale') && document.querySelector('.vz-input-activity')?.textContent==='Searching Home photos for "cats"…'`);
+        assert.equal(await c.evaluate(`document.querySelectorAll('.vz-input-placeholder').length`), 0, 'stale tiles remain instead of skeletons');
+        assert.match(await c.evaluate(`document.querySelector('.vz-input-option').getAttribute('aria-label')`), /^Curated scene/);
+        await noPreviewText();
+        await c.evaluate(`window.__pxRelease()`);
+        await c.poll(`${idle} && document.querySelector('.vz-input-option')?.getAttribute('aria-label')?.startsWith('cats photo 0')`, 20000);
+        await noPreviewText();
+        await field('.vz-input-search', '');
+        await c.poll(`${idle} && document.querySelector('.vz-input-option')?.getAttribute('aria-label')?.startsWith('Curated scene')`, 20000);
+        await c.keyTrusted('Escape', { vk: 27 });
+        await c.poll(`!document.querySelector('.vz-input-search')`);
+      } finally {
+        await c.evaluate(`(()=>{window.__pxRelease?.();window.fetch=window.__pxFetch;delete window.__pxRelease;delete window.__pxHeld;delete window.__pxHoldNext;delete window.__pxFetch})()`);
+      }
+    }
+
     // Curated on the keyed service, paged as the list scrolls.
     step('open the Pexels picker'); await c.clickAt(pexelsTrigger); await waitForInputPicker(c);
     await c.poll(`document.querySelectorAll('[role=tab]').length===3 && [...document.querySelectorAll('[role=tab]')].map(t=>t.textContent).join()==='Home photos,Bare,Frames'`);

@@ -1077,9 +1077,27 @@ body:has(#diff:not([hidden])) #statusCol { bottom: 56px; }
 .vz-input-list { --vz-input-preferred-height: max(var(--vz-input-tile-size), min(300px, 40vh));
   height: var(--vz-input-preferred-height); max-height: var(--vz-input-preferred-height);
   min-height: 0; flex: 1 1 auto; overflow-y: auto; scrollbar-gutter: stable; }
-.vz-input-window { position: relative; width: 100%; }
+.vz-input-window { position: relative; width: 100%; transition: opacity 120ms; }
+.vz-input-list.is-stale .vz-input-window { opacity: .45; }
 .vz-input-row { position: absolute; inset: 0 0 auto; display: grid;
   grid-template-columns: repeat(var(--vz-input-columns), var(--vz-input-tile-size)); gap: var(--vz-input-gap); }
+.vz-input-placeholders { display: grid; grid-template-columns: repeat(var(--vz-input-columns), var(--vz-input-tile-size)); gap: var(--vz-input-gap); }
+.vz-input-placeholders.is-appending { margin-block-start: var(--vz-input-gap); }
+.vz-input-placeholder { width: var(--vz-input-tile-size); height: var(--vz-input-tile-size); border-radius: 4px; }
+.vz-input-placeholder, .vz-thumbnail-pending:not(.vz-thumbnail-acquiring) { background: var(--lifted); opacity: .45;
+  animation: vz-placeholder-pulse 1.6s ease-in-out infinite alternate; }
+@keyframes vz-placeholder-pulse { to { opacity: .85; } }
+.vz-input-activity-bar { position: absolute; inset-inline: 0; top: 0; height: 2px; z-index: 2;
+  overflow: hidden; opacity: 0; pointer-events: none; }
+.vz-input-activity-bar.is-active { opacity: 1; }
+.vz-input-activity-bar::after { content: ""; display: block; width: 35%; height: 100%; background: var(--secondary); }
+.vz-input-activity-bar.is-active::after { animation: vz-input-activity 1.2s linear infinite; }
+@keyframes vz-input-activity { from { transform: translateX(-100%); } to { transform: translateX(300%); } }
+@media (prefers-reduced-motion: reduce) {
+  .vz-input-window { transition: none; }
+  .vz-input-placeholder, .vz-thumbnail-pending:not(.vz-thumbnail-acquiring) { animation: none; }
+  .vz-input-activity-bar.is-active::after { animation: none; width: 100%; opacity: .5; }
+}
 .vz-input-option { width: var(--vz-input-tile-size); height: var(--vz-input-tile-size); display: grid;
   border: 2px solid transparent; border-radius: 4px; padding: 0; background: var(--background-stage); color: var(--foreground); font: inherit; cursor: pointer; }
 .vz-input-option img { grid-area: 1 / 1; width: 100%; height: 100%; min-height: 0; object-fit: contain; border-radius: 2px; }
@@ -1099,6 +1117,7 @@ body:has(#diff:not([hidden])) #statusCol { bottom: 56px; }
 .vz-input-tile .vz-input-option { grid-area: 1 / 1; }
 .vz-thumbnail-pending { grid-area: 1 / 1; align-self: center; justify-self: center;
   padding: 4px; text-align: center; font: 11px/14px system-ui; color: var(--foreground-mid); }
+.vz-thumbnail-pending:not(.vz-thumbnail-acquiring) { place-self: stretch; padding: 0; border-radius: inherit; }
 .vz-thumbnail-failure { grid-area: 1 / 1; z-index: 1; min-height: 0; display: flex; flex-direction: column;
   align-items: center; padding: 6px; pointer-events: none; }
 .vz-thumbnail-failure[hidden] { display: none; }
@@ -1334,11 +1353,13 @@ body:has(#diff:not([hidden])) #statusCol { bottom: 56px; }
 .tabs-tab.is-active { background: var(--lifted); border-color: var(--secondary); }
 .tabs > .tabs-tab:focus-visible { outline: none; border-color: var(--secondary); box-shadow: inset 0 0 0 1px var(--secondary); }
 .vz-input-tabs { flex: 0 0 auto; min-width: 0; }
-.vz-input-summary { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex: 0 0 auto; overflow-x: auto; }
-.vz-input-summary > [role="status"], .vz-input-feeds { flex: 0 0 auto; white-space: nowrap; }
+.vz-input-summary { display: flex; align-items: center; gap: 12px; flex: 0 0 auto; min-width: 0; overflow-x: auto; }
+.vz-input-summary > span:first-child, .vz-input-feeds { flex: 0 0 auto; white-space: nowrap; }
 .vz-input-summary > [role="status"] { font: 12px/16px system-ui; }
+.vz-input-activity { flex: 1 1 auto; min-width: 0; color: var(--foreground-mid); }
+.vz-input-feeds { margin-inline-start: auto; }
 .vz-input-feeds .tabs { overflow: visible; }
-.vz-input-source-panel { display: flex; flex-direction: column; flex: 1 1 auto; min-height: 0; }
+.vz-input-source-panel { position: relative; display: flex; flex-direction: column; flex: 1 1 auto; min-height: 0; }
 .vz-input-status { margin: 6px 0; }
 .vz-input-failure { display: flex; align-items: center; gap: 6px; color: var(--error); }
 .vz-input-failure[hidden] { display: none; }

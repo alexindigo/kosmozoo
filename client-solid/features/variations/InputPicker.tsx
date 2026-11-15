@@ -101,6 +101,9 @@ export function InputPicker(props) {
 function InputOptions(props) {
   let panel, search, scrollElement, summary, count, feeds, tabs;
   const sourceLabel = () => props.source.label ?? props.source.source;
+  const activity = () => props.catalogue.appending ? `Loading more ${props.noun}…`
+    : props.remoteSearch && props.query().trim() ? `Searching ${sourceLabel()} for "${props.query().trim()}"…`
+    : `Loading ${props.noun} from ${sourceLabel()}…`;
   const selected = name => props.state(name).selected;
   const [placement, setPlacement] = createSignal(null);
   const [placed, setPlaced] = createSignal(false);
@@ -121,6 +124,7 @@ function InputOptions(props) {
     onCleanup(() => { alive = false; });
   });
   const [scroll, setScroll] = createSignal(null), [active, setActive] = createSignal(0), [columns, setColumns] = createSignal(3);
+  const [placeholderRows, setPlaceholderRows] = createSignal(1);
   const [pendingFocus, setPendingFocus] = createSignal(null);
   const files = createMemo(() => props.files);
   const filtered = createMemo(() => props.remoteSearch ? files() : files().filter(name => name.toLowerCase().includes(props.query().toLowerCase())));
@@ -177,6 +181,7 @@ function InputOptions(props) {
     panel.showPopover();
     const measure = () => {
       setColumns(Number(getComputedStyle(panel).getPropertyValue("--vz-input-columns")));
+      setPlaceholderRows(Math.max(1, Math.ceil(scrollElement.clientHeight / ROW_HEIGHT)));
     };
     measure();
     const observer = new ResizeObserver(measure);
@@ -244,7 +249,9 @@ function InputOptions(props) {
     <div class="vz-input-source-panel" id={`${props.id}-source-panel`} role="tabpanel"
       aria-labelledby={[props.sources.length > 1 ? `${props.id}-tab-${encodeURIComponent(props.source.source)}` : "", props.roots ? `${props.id}-feed-${props.resourceRoot}` : ""].filter(Boolean).join(" ") || undefined}
       aria-label={props.sources.length > 1 || props.roots ? undefined : `${sourceLabel()} ${props.noun}`}>
-    <div class="vz-input-list" id={`${props.id}-list`} ref={scrollElement} role="listbox" aria-label={`${sourceLabel()} ${props.noun}`} aria-multiselectable="true">
+    <div class="vz-input-activity-bar" classList={{ "is-active": !!props.catalogue.pending }} aria-hidden="true" />
+    <div class="vz-input-list" classList={{ "is-stale": !!props.catalogue.stale }} id={`${props.id}-list`} ref={scrollElement} role="listbox"
+      aria-label={`${sourceLabel()} ${props.noun}`} aria-multiselectable="true" aria-busy={props.catalogue.pending ? "true" : undefined}>
       <div class="vz-input-window" style={{ height: `${Math.max(0, virtualizer.getTotalSize() - GAP)}px` }}>
         <For each={placement() ? thumbnailRows() : []}>{virtual =>
           <div class="vz-input-row" role="presentation" style={{ transform: `translateY(${virtual.start}px)` }}>
@@ -273,7 +280,13 @@ function InputOptions(props) {
           </div>
         }</For>
       </div>
-      <Show when={props.catalogue.pending}><SingleLineText class="vz-input-status" role="status" value={`Reading ${sourceLabel()} ${props.noun}...`} /></Show>
+      <Show when={props.catalogue.pending && !props.catalogue.error && (!files().length || props.catalogue.appending)}>
+        <div class="vz-input-placeholders" classList={{ "is-appending": !!files().length }} aria-hidden="true">
+          <For each={Array.from({ length: columns() * (props.catalogue.appending ? 1 : placeholderRows()) }, (_, index) => index)}>{() =>
+            <div class="vz-input-placeholder" aria-hidden="true" />
+          }</For>
+        </div>
+      </Show>
       <div class="vz-input-status vz-input-failure" hidden={!props.catalogue.error}>
         <SingleLineText role="status" value={props.catalogue.error ? `Couldn't list ${sourceLabel()}'s ${props.noun}.` : ""} hint={props.catalogue.error} />
         <button type="button" class="vz-thumbnail-retry" onClick={props.onRetrySource}>Retry</button>
@@ -285,6 +298,7 @@ function InputOptions(props) {
     </div>
     <div ref={summary} class="vz-input-summary">
       <span ref={count} role="status">{files().filter(selected).length} selected</span>
+      <Show when={props.catalogue.pending}><SingleLineText class="vz-input-activity" role="status" value={activity()} /></Show>
       <Show when={props.roots}><div ref={feeds} class="vz-input-feeds"><Tabs label="Image feed" options={props.roots.map(root => ({ ...root, id: `${props.id}-feed-${root.value}` }))}
         value={props.resourceRoot} panelId={`${props.id}-source-panel`} onChange={props.onRoot}
         registerKeys={capability => props.registerTabKeys(capability, "feed")} rememberFocus={rememberFocus} /></div></Show>
