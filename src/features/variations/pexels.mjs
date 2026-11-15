@@ -13,6 +13,8 @@ import { readJson, mediaHeaders } from "../../routes.mjs";
 export const PEXELS_PAGE_SIZE = 40;
 export const MAX_PEXELS_SERVICES = 32;
 export const MAX_PEXELS_IMAGE_BYTES = 50 * 1024 * 1024;
+// Memory bound for a service's JSON replies; a normal page is well under 1 MB.
+export const MAX_PEXELS_JSON_BYTES = 32 * 1024 * 1024;
 const UPSTREAM_TIMEOUT_MS = 30_000;
 const MAX_REDIRECTS = 5;
 const PHOTO_CACHE_LIMIT = 4000;
@@ -65,7 +67,7 @@ const writeOwnerOnly = async (path, bytes) => {
 // Engine-owned registry. Keys never leave this module except as the
 // Authorization header of an upstream request.
 export class PexelsServices {
-  #path; #writer; #loading = null; #services = null; #changed;
+  #path; #writer; #loading = null; #services = null; #changed; #mutations = Promise.resolve();
   constructor(path, { write = writeOwnerOnly, changed = () => {} } = {}) {
     this.#path = path; this.#writer = new SerializedWriter(path, write); this.#changed = changed;
   }
@@ -88,6 +90,14 @@ export class PexelsServices {
     return this.#loading;
   }
 
+  // Each mutation reads, validates and persists inside one queue, so
+  // concurrent requests always build on the previous result.
+  #mutate(operation) {
+    const run = this.#mutations.then(async () => { await this.#load(); return operation(); });
+    this.#mutations = run.catch(() => {});
+    return run;
+  }
+
   async #save(next) {
     await this.#writer.write(new TextEncoder().encode(JSON.stringify({ version: 1, data: { services: next } }, null, 2)));
     this.#services = next;
@@ -95,19 +105,19 @@ export class PexelsServices {
 
   async list() { await this.#load(); return this.#services.map(redactService); }
 
-  async get(id) {
-    await this.#load();
+  #find(id) {
     const service = this.#services.find(item => item.id === id);
     if (!service) throw fail("This Pexels service was removed", 404);
     return { ...service };
   }
 
+  async get(id) { await this.#load(); return this.#find(id); }
+
   #unique(name, except = null) {
     if (this.#services.some(item => item.id !== except && item.name.toLowerCase() === name.toLowerCase())) throw fail("A service with this name already exists", 409);
   }
 
-  async create(body) {
-    await this.#load();
+  create(body) { return this.#mutate(async () => {
     if (!body || typeof body !== "object" || Array.isArray(body)) throw fail("Service details must be an object");
     if (this.#services.length >= MAX_PEXELS_SERVICES) throw fail(`Up to ${MAX_PEXELS_SERVICES} services can be added`);
     const name = validName(body.name), url = serviceBase(body.url);
@@ -116,11 +126,11 @@ export class PexelsServices {
     const service = { id: crypto.randomUUID(), name, url, ...(key ? { key } : {}) };
     await this.#save([...this.#services, service]);
     return redactService(service);
-  }
+  }); }
 
   // Omitted key keeps the saved one, null clears it, a string replaces it.
-  async update(id, body) {
-    const current = await this.get(id);
+  update(id, body) { return this.#mutate(async () => {
+    const current = this.#find(id);
     if (!body || typeof body !== "object" || Array.isArray(body)) throw fail("Service details must be an object");
     const next = { ...current };
     if (body.name !== undefined) next.name = validName(body.name);
@@ -131,13 +141,13 @@ export class PexelsServices {
     await this.#save(this.#services.map(item => item.id === id ? next : item));
     this.#changed(id);
     return redactService(next);
-  }
+  }); }
 
-  async remove(id) {
-    await this.get(id);
+  remove(id) { return this.#mutate(async () => {
+    this.#find(id);
     await this.#save(this.#services.filter(item => item.id !== id));
     this.#changed(id);
-  }
+  }); }
 }
 
 const photoId = value => {
@@ -183,7 +193,34 @@ const watchdog = timeoutMs => {
 
 // Upstream transport. The key accompanies a request only while its URL stays
 // on the service's own origin, including across redirects.
-export function makePexelsClient({ fetch = globalThis.fetch, timeoutMs = UPSTREAM_TIMEOUT_MS } = {}) {
+// One bounded body reader for JSON and image replies: each chunk re-arms the
+// stall deadline, and an oversized body is cancelled before it is buffered.
+async function readBody(response, { limit, dog, signal, service, what }) {
+  const tooLarge = () => fail(`${service.name} sent ${what} larger than ${Math.round(limit / 1024 / 1024)} MB`, 502);
+  const declared = Number(response.headers.get("content-length"));
+  if (Number.isFinite(declared) && declared > limit) { await response.body?.cancel(); throw tooLarge(); }
+  const chunks = [], reader = response.body?.getReader();
+  let size = 0;
+  dog.arm();
+  try {
+    while (reader) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      dog.arm();
+      size += value.byteLength;
+      if (size > limit) { await reader.cancel(); throw tooLarge(); }
+      chunks.push(value);
+    }
+  } catch (error) {
+    if (error.status || signal?.aborted) throw error;
+    throw fail(dog.expired() ? `${service.name} stopped sending ${what}` : `${service.name} broke off sending ${what}`, 502);
+  }
+  const bytes = new Uint8Array(size); let offset = 0;
+  for (const chunk of chunks) { bytes.set(chunk, offset); offset += chunk.byteLength; }
+  return bytes;
+}
+
+export function makePexelsClient({ fetch = globalThis.fetch, timeoutMs = UPSTREAM_TIMEOUT_MS, maxJsonBytes = MAX_PEXELS_JSON_BYTES } = {}) {
   const photos = new Map();
   const cacheKey = (service, id) => JSON.stringify([service.id, service.url, id]);
   const remember = (service, photo) => {
@@ -226,12 +263,9 @@ export function makePexelsClient({ fetch = globalThis.fetch, timeoutMs = UPSTREA
     try {
       const response = await request(service, url.href, signal, "application/json", dog);
       if (!response.ok) { await response.body?.cancel(); return { status: response.status }; }
-      dog.arm();
-      try { return { status: response.status, data: await response.json() }; }
-      catch (error) {
-        if (signal?.aborted) throw error;
-        throw fail(dog.expired() ? `${service.name} didn't answer in time` : `${service.name} sent an unreadable answer`, 502);
-      }
+      const bytes = await readBody(response, { limit: maxJsonBytes, dog, signal, service, what: "a reply" });
+      try { return { status: response.status, data: JSON.parse(new TextDecoder().decode(bytes)) }; }
+      catch { throw fail(`${service.name} sent an unreadable answer`, 502); }
     } finally { dog.stop(); }
   }
 
@@ -282,27 +316,13 @@ export function makePexelsClient({ fetch = globalThis.fetch, timeoutMs = UPSTREA
 
     async bytes(service, id, kind, signal) {
       const photo = await this.photo(service, id, signal);
-      const dog = watchdog(timeoutMs), chunks = []; let size = 0;
+      const dog = watchdog(timeoutMs);
+      let bytes;
       try {
         const response = await request(service, pickSize(photo.src, kind), signal, "image/*", dog);
         if (!response.ok) { await response.body?.cancel(); throw upstreamError(service, response.status); }
-        const declared = Number(response.headers.get("content-length"));
-        if (Number.isFinite(declared) && declared > MAX_PEXELS_IMAGE_BYTES) { await response.body?.cancel(); throw fail("The photo is larger than 50 MB", 502); }
-        dog.arm();
-        try {
-          for await (const chunk of response.body ?? []) {
-            dog.arm();
-            size += chunk.byteLength;
-            if (size > MAX_PEXELS_IMAGE_BYTES) throw fail("The photo is larger than 50 MB", 502);
-            chunks.push(chunk);
-          }
-        } catch (error) {
-          if (error.status || signal?.aborted) throw error;
-          throw fail(dog.expired() ? `${service.name} stopped sending the photo` : `${service.name} broke off sending the photo`, 502);
-        }
+        bytes = await readBody(response, { limit: MAX_PEXELS_IMAGE_BYTES, dog, signal, service, what: "the photo" });
       } finally { dog.stop(); }
-      const bytes = new Uint8Array(size); let offset = 0;
-      for (const chunk of chunks) { bytes.set(chunk, offset); offset += chunk.byteLength; }
       const mime = sniffMime(bytes);
       if (!IMAGE_MIME.has(mime)) throw fail(`${service.name} sent a file that isn't a supported image`, 502);
       return { bytes, mime, extension: IMAGE_MIME.get(mime) };
