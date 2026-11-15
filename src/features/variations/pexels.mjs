@@ -17,9 +17,13 @@ const UPSTREAM_TIMEOUT_MS = 30_000;
 const MAX_REDIRECTS = 5;
 const PHOTO_CACHE_LIMIT = 4000;
 const IMAGE_MIME = new Map([["image/jpeg", "jpg"], ["image/png", "png"], ["image/webp", "webp"], ["image/gif", "gif"], ["image/avif", "avif"]]);
-// Imported photos use large2x; picker tiles use medium. Each falls back to the
-// nearest documented Pexels size a compatible service may omit.
-export const PHOTO_SIZES = Object.freeze({ image: ["large2x", "large", "original"], thumbnail: ["medium", "small", "tiny", "large"] });
+// Imported photos prefer large2x; picker tiles prefer medium. A service may send
+// any subset of sizes (or its own names): every size can serve either role.
+export const PHOTO_SIZES = Object.freeze({
+  image: ["large2x", "large", "original", "landscape", "portrait", "medium", "small", "tiny"],
+  thumbnail: ["medium", "small", "tiny", "landscape", "portrait", "large", "large2x", "original"],
+});
+const pickSize = (src, kind) => PHOTO_SIZES[kind].map(size => src[size]).find(Boolean) ?? Object.values(src)[0];
 
 const fail = (message, status = 400) => Object.assign(new Error(message), { status });
 const controls = /[\x00-\x1f\x7f]/;
@@ -43,7 +47,7 @@ const validName = raw => {
 };
 const validKey = raw => {
   const key = typeof raw === "string" ? raw.trim() : "";
-  if (!key || key.length > 512 || controls.test(key)) throw fail("Enter an API key of up to 512 characters, or leave it empty");
+  if (!key || controls.test(key)) throw fail("An API key can't contain line breaks or control characters");
   return key;
 };
 export const redactService = ({ id, name, url, key }) => ({ id, name, url, hasKey: !!key });
@@ -140,7 +144,8 @@ const photoId = value => {
   const id = typeof value === "number" && Number.isSafeInteger(value) && value >= 0 ? String(value) : value;
   // Compatible services use their own opaque IDs (e.g. "film-…:frame-…"); the
   // ID is only ever an encoded path segment and a lookup key, never a filename.
-  return typeof id === "string" && id.length > 0 && id.length <= 256 && !controls.test(id) && id.trim() === id && id !== "." && id !== ".." ? id : null;
+  // "." and ".." would be resolved as path steps even when encoded.
+  return typeof id === "string" && id.length > 0 && !controls.test(id) && id !== "." && id !== ".." ? id : null;
 };
 const text = (value, limit) => typeof value === "string" ? value.replace(/[\x00-\x1f\x7f]+/g, " ").trim().slice(0, limit) : "";
 const dimension = value => Number.isSafeInteger(value) && value > 0 ? value : null;
@@ -150,14 +155,14 @@ export function normalizePhoto(raw, base) {
   const id = photoId(raw?.id);
   if (!id || !raw.src || typeof raw.src !== "object") return null;
   const src = {};
-  for (const size of new Set([...PHOTO_SIZES.image, ...PHOTO_SIZES.thumbnail])) {
-    if (typeof raw.src[size] !== "string") continue;
+  for (const [size, value] of Object.entries(raw.src)) {
+    if (typeof value !== "string") continue;
     try {
-      const url = new URL(raw.src[size], `${base}/`);
+      const url = new URL(value, `${base}/`);
       if (["http:", "https:"].includes(url.protocol) && !url.username && !url.password) src[size] = url.href;
     } catch { /* unusable size */ }
   }
-  if (!PHOTO_SIZES.image.some(size => src[size]) || !PHOTO_SIZES.thumbnail.some(size => src[size])) return null;
+  if (!Object.keys(src).length) return null;
   return { id, alt: text(raw.alt, 300), photographer: text(raw.photographer, 120), width: dimension(raw.width), height: dimension(raw.height), src };
 }
 
@@ -165,6 +170,16 @@ const upstreamError = (service, status) => status === 401 || status === 403 ? fa
   : status === 429 ? fail(`${service.name} rate limit reached; try again later`, 502)
   : status === 404 ? fail(`${service.name} doesn't have this photo`, 404)
   : fail(`${service.name} answered HTTP ${status}`, 502);
+
+// Waiting for a response, and each gap while its body streams, has a deadline.
+// A slow but steadily progressing download never expires; a stalled one does.
+const watchdog = timeoutMs => {
+  const controller = new AbortController();
+  let timer = null, expired = false;
+  return { signal: controller.signal, expired: () => expired,
+    arm() { clearTimeout(timer); timer = setTimeout(() => { expired = true; controller.abort(); }, timeoutMs); },
+    stop() { clearTimeout(timer); } };
+};
 
 // Upstream transport. The key accompanies a request only while its URL stays
 // on the service's own origin, including across redirects.
@@ -177,11 +192,12 @@ export function makePexelsClient({ fetch = globalThis.fetch, timeoutMs = UPSTREA
     while (photos.size > PHOTO_CACHE_LIMIT) photos.delete(photos.keys().next().value);
   };
 
-  async function request(service, href, signal, accept) {
-    const origin = new URL(service.url).origin, deadline = AbortSignal.timeout(timeoutMs);
-    const combined = signal ? AbortSignal.any([signal, deadline]) : deadline;
+  async function request(service, href, signal, accept, dog) {
+    const origin = new URL(service.url).origin;
+    const combined = signal ? AbortSignal.any([signal, dog.signal]) : dog.signal;
     let url = href;
     for (let hop = 0; hop <= MAX_REDIRECTS; hop++) {
+      dog.arm();
       const target = new URL(url);
       const headers = new Headers({ Accept: accept });
       if (service.key && target.origin === origin) headers.set("Authorization", service.key);
@@ -189,7 +205,7 @@ export function makePexelsClient({ fetch = globalThis.fetch, timeoutMs = UPSTREA
       try { response = await fetch(target.href, { headers, signal: combined, redirect: "manual" }); }
       catch (error) {
         if (signal?.aborted) throw error;
-        throw fail(deadline.aborted ? `${service.name} didn't answer in time` : `Couldn't reach ${service.name}`, 502);
+        throw fail(dog.expired() ? `${service.name} didn't answer in time` : `Couldn't reach ${service.name}`, 502);
       }
       const location = response.headers.get("location");
       if (response.status >= 300 && response.status < 400 && location) {
@@ -206,10 +222,17 @@ export function makePexelsClient({ fetch = globalThis.fetch, timeoutMs = UPSTREA
   async function json(service, path, params, signal) {
     const url = new URL(`${service.url}${path}`);
     for (const [key, value] of Object.entries(params)) url.searchParams.set(key, String(value));
-    const response = await request(service, url.href, signal, "application/json");
-    if (!response.ok) { await response.body?.cancel(); return { status: response.status }; }
-    try { return { status: response.status, data: await response.json() }; }
-    catch { throw fail(`${service.name} sent an unreadable answer`, 502); }
+    const dog = watchdog(timeoutMs);
+    try {
+      const response = await request(service, url.href, signal, "application/json", dog);
+      if (!response.ok) { await response.body?.cancel(); return { status: response.status }; }
+      dog.arm();
+      try { return { status: response.status, data: await response.json() }; }
+      catch (error) {
+        if (signal?.aborted) throw error;
+        throw fail(dog.expired() ? `${service.name} didn't answer in time` : `${service.name} sent an unreadable answer`, 502);
+      }
+    } finally { dog.stop(); }
   }
 
   return {
@@ -221,7 +244,7 @@ export function makePexelsClient({ fetch = globalThis.fetch, timeoutMs = UPSTREA
       const search = query.trim(), params = { page, per_page: PEXELS_PAGE_SIZE };
       let mode = search ? "search" : "curated", { status, data } = await json(service, search ? "/v1/search" : "/v1/curated",
         { ...(search ? { query: search } : {}), ...params }, signal);
-      if (!search && [404, 405, 501].includes(status)) {
+      if (!search && (status < 200 || status >= 300) && ![401, 403, 429].includes(status)) {
         ({ status, data } = await json(service, "/v1/search", { query: "", ...params }, signal));
         if (status < 200 || status >= 300 || !Array.isArray(data?.photos) || page === 1 && !data.photos.length)
           return { mode: "curated", curated: false, page, more: false, photos: [] };
@@ -250,25 +273,34 @@ export function makePexelsClient({ fetch = globalThis.fetch, timeoutMs = UPSTREA
       if (cached) return cached;
       const { status, data } = await json(service, `/v1/photos/${encodeURIComponent(id)}`, {}, signal);
       if (status < 200 || status >= 300) throw upstreamError(service, status);
-      const photo = normalizePhoto(data, service.url);
-      if (!photo || photo.id !== id) throw fail(`${service.name} sent an unusable photo`, 502);
-      remember(service, photo);
-      return photo;
+      // The requested ID names the record, however the service spells its own.
+      const normalized = normalizePhoto({ ...data, id }, service.url);
+      if (!normalized) throw fail(`${service.name} sent an unusable photo`, 502);
+      remember(service, normalized);
+      return normalized;
     },
 
     async bytes(service, id, kind, signal) {
       const photo = await this.photo(service, id, signal);
-      const href = PHOTO_SIZES[kind].map(size => photo.src[size]).find(Boolean);
-      const response = await request(service, href, signal, "image/*");
-      if (!response.ok) { await response.body?.cancel(); throw upstreamError(service, response.status); }
-      const declared = Number(response.headers.get("content-length"));
-      if (Number.isFinite(declared) && declared > MAX_PEXELS_IMAGE_BYTES) { await response.body?.cancel(); throw fail("The photo is larger than 50 MB", 502); }
-      const chunks = []; let size = 0;
-      for await (const chunk of response.body ?? []) {
-        size += chunk.byteLength;
-        if (size > MAX_PEXELS_IMAGE_BYTES) throw fail("The photo is larger than 50 MB", 502);
-        chunks.push(chunk);
-      }
+      const dog = watchdog(timeoutMs), chunks = []; let size = 0;
+      try {
+        const response = await request(service, pickSize(photo.src, kind), signal, "image/*", dog);
+        if (!response.ok) { await response.body?.cancel(); throw upstreamError(service, response.status); }
+        const declared = Number(response.headers.get("content-length"));
+        if (Number.isFinite(declared) && declared > MAX_PEXELS_IMAGE_BYTES) { await response.body?.cancel(); throw fail("The photo is larger than 50 MB", 502); }
+        dog.arm();
+        try {
+          for await (const chunk of response.body ?? []) {
+            dog.arm();
+            size += chunk.byteLength;
+            if (size > MAX_PEXELS_IMAGE_BYTES) throw fail("The photo is larger than 50 MB", 502);
+            chunks.push(chunk);
+          }
+        } catch (error) {
+          if (error.status || signal?.aborted) throw error;
+          throw fail(dog.expired() ? `${service.name} stopped sending the photo` : `${service.name} broke off sending the photo`, 502);
+        }
+      } finally { dog.stop(); }
       const bytes = new Uint8Array(size); let offset = 0;
       for (const chunk of chunks) { bytes.set(chunk, offset); offset += chunk.byteLength; }
       const mime = sniffMime(bytes);
@@ -305,7 +337,7 @@ export function registerPexels(app, { services: injected = null, client: injecte
   const body = async req => { try { return await readJson(req); } catch { throw fail("Service details must be JSON"); } };
   const page = req => {
     const value = Number(new URL(req.url).searchParams.get("page") ?? 1);
-    if (!Number.isSafeInteger(value) || value < 1 || value > 1000) throw fail("Page must be a whole number from 1");
+    if (!Number.isSafeInteger(value) || value < 1) throw fail("Page must be a whole number from 1");
     return value;
   };
 
@@ -316,7 +348,6 @@ export function registerPexels(app, { services: injected = null, client: injecte
   route("GET", "/services/<id>/status", async (req, { id }) => Response.json(await client.check(await services.get(id), req.signal)));
   route("GET", "/services/<id>/photos", async (req, { id }) => {
     const query = new URL(req.url).searchParams.get("query") ?? "";
-    if (query.length > 200 || controls.test(query)) throw fail("Search text is too long");
     return Response.json(await client.photos(await services.get(id), { query, page: page(req), signal: req.signal }));
   });
   for (const kind of ["thumbnail", "image"]) route("GET", `/services/<id>/photos/<photo>/${kind}`, async (req, { id, photo }) => {

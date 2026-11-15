@@ -38,7 +38,10 @@ Deno.test("pexels: services persist owner-only, list without keys, and keep/clea
     assertEquals((await services.get(home.id)).key, "secret-2");
     assertEquals((await services.update(home.id, { key: null })).hasKey, false);
     await assertRejects(() => services.update(home.id, { key: "" }), Error, "API key");
-    assertEquals(changed, [home.id, home.id, home.id]);
+    await assertRejects(() => services.update(home.id, { key: "a\nb" }), Error, "line breaks");
+    assertEquals((await services.update(home.id, { key: "k".repeat(4096) })).hasKey, true);
+    await services.update(home.id, { key: null });
+    assertEquals(changed, Array(5).fill(home.id));
 
     const reopened = new PexelsServices(path);
     assertEquals((await reopened.list()).map(item => [item.name, item.hasKey]), [["Home photos", false], ["Public", false]]);
@@ -64,12 +67,16 @@ Deno.test("pexels: photo records keep only usable http sizes", () => {
     src: { large2x: "/img/7-large2x.jpg", medium: "javascript:alert(1)", tiny: "https://x/7-tiny.jpg" } }, "http://pexels.home/api");
   assertEquals(photo, { id: "7", alt: "a b", photographer: "P", width: 10, height: null,
     src: { large2x: "http://pexels.home/img/7-large2x.jpg", tiny: "https://x/7-tiny.jpg" } });
-  for (const id of ["..", ".", "", " x", "a\nb", "x".repeat(257)]) assertEquals(normalizePhoto({ id, src: { large2x: "http://a", medium: "http://a" } }, "http://a"), null, id);
+  for (const id of ["..", ".", "", "a\nb"]) assertEquals(normalizePhoto({ id, src: { large2x: "http://a", medium: "http://a" } }, "http://a"), null, id);
   // A self-hosted service's opaque IDs and reduced size set are usable as-is.
   const frame = normalizePhoto({ id: "film-4393ebe3694f6946c541ea255bee0ad6:frame-df0773d898c0fb7776f8fcb821f61324",
     src: { original: "/api/films/f/assets/a/frame", small: "/api/films/f/assets/a/thumb" } }, "http://katana.home/api");
   assertEquals(frame.src, { original: "http://katana.home/api/films/f/assets/a/frame", small: "http://katana.home/api/films/f/assets/a/thumb" });
-  assertEquals(normalizePhoto({ id: 1, src: { medium: "http://a" } }, "http://a"), null);
+  // One size of any name serves both roles.
+  assertEquals(normalizePhoto({ id: 1, src: { medium: "http://a/m" } }, "http://a").src, { medium: "http://a/m" });
+  assertEquals(normalizePhoto({ id: 1, src: { custom: "http://a/c" } }, "http://a").src, { custom: "http://a/c" });
+  assertEquals(normalizePhoto({ id: 1, src: {} }, "http://a"), null);
+  assertEquals(normalizePhoto({ id: " x ".repeat(200), src: { original: "http://a/o" } }, "http://a").id, " x ".repeat(200));
 });
 
 Deno.test("pexels: search and curated pages, key only on the service origin, curated absence is not an error", async () => {
@@ -132,6 +139,8 @@ Deno.test("pexels: routes redact keys, validate input and proxy bytes", async ()
     const photos = await (await call("GET", "/pexels/services/<id>/photos", "/x?query=&page=1", { id: created.id })).json();
     assertEquals(photos.photos.length, PEXELS_PAGE_SIZE);
     assertEquals((await call("GET", "/pexels/services/<id>/photos", "/x?page=0", { id: created.id })).status, 400);
+    const deep = await call("GET", "/pexels/services/<id>/photos", `/x?page=1001&query=${"long ".repeat(100)}`, { id: created.id });
+    assertEquals([deep.status, (await deep.json()).page], [200, 1001]);
     const image = await call("GET", "/pexels/services/<id>/photos/<photo>/image", "/x", { id: created.id, photo: photos.photos[0].id });
     assertEquals([image.status, image.headers.get("content-type"), image.headers.get("x-content-type-options")], [200, "image/jpeg", "nosniff"]);
     assertEquals((await image.arrayBuffer()).byteLength, JPEG.length);
@@ -301,4 +310,60 @@ Deno.test("pexels: the connection check runs the picker's first query and report
   assertEquals(await bare.check({ id: "b", name: "Bare", url: "http://pexels.home" }), { ok: true, browse: false });
   const down = makePexelsClient({ fetch: () => Promise.reject(new TypeError("refused")) });
   assertEquals(await down.check({ id: "d", name: "Down", url: "http://down.home" }), { ok: false, error: "Couldn't reach Down" });
+});
+
+Deno.test("pexels: any non-auth curated failure falls back to browsing; auth and rate limits are reported", async () => {
+  const katana = { id: "k", name: "katana", url: "http://katana.home/api" };
+  const browse = { body: { page: 1, total_results: 2, photos: [frameRecord(1), frameRecord(2)] } };
+  for (const status of [400, 404, 500, 503]) {
+    const client = makePexelsClient({ fetch: stubService({ "/api/v1/curated": { status, body: {} }, "/api/v1/search?query=": browse }) });
+    assertEquals((await client.photos(katana)).mode, "browse", String(status));
+  }
+  for (const [status, message] of [[401, "needs an API key"], [403, "needs an API key"], [429, "rate limit"]]) {
+    const client = makePexelsClient({ fetch: stubService({ "/api/v1/curated": { status, body: {} }, "/api/v1/search?query=": browse }) });
+    await assertRejects(() => client.photos(katana), Error, message);
+  }
+});
+
+Deno.test("pexels: a single-photo lookup keeps the requested ID, however the service spells it", async () => {
+  const client = makePexelsClient({ fetch: async href => new URL(href).pathname === "/v1/photos/0042"
+    ? Response.json({ id: 42, src: { original: "http://h/42.jpg" } })
+    : new Response(JPEG, { headers: { "Content-Type": "image/jpeg" } }) });
+  const service = { id: "s", name: "Home", url: "http://h" };
+  assertEquals((await client.photo(service, "0042")).id, "0042");
+  assertEquals((await client.bytes(service, "0042", "thumbnail")).mime, "image/jpeg");
+});
+
+// A body that delivers `chunks` at `gap` ms intervals, or stalls after the first.
+const streaming = ({ chunks, gap, stall = false }) => async (href, init) => {
+  if (new URL(href).pathname.startsWith("/v1/")) return Response.json({ page: 1, photos: [{ id: 1, src: { original: "http://h/1.jpg" } }] });
+  let timer;
+  const body = new ReadableStream({
+    start(controller) {
+      let sent = 0;
+      const push = () => {
+        controller.enqueue(sent === 0 ? JPEG.slice(0, 8) : new Uint8Array(8)); sent++;
+        if (sent === chunks) { controller.enqueue(JPEG.slice(8)); controller.close(); return; }
+        if (!(stall && sent === 1)) timer = setTimeout(push, gap);
+      };
+      init.signal.addEventListener("abort", () => { clearTimeout(timer); controller.error(init.signal.reason); });
+      push();
+    },
+    cancel() { clearTimeout(timer); },
+  });
+  return new Response(body, { headers: { "Content-Type": "image/jpeg" } });
+};
+
+Deno.test("pexels: a slow but progressing download completes; a stalled one ends with a clear reason", async () => {
+  const service = { id: "s", name: "Home", url: "http://h" };
+  const slow = makePexelsClient({ fetch: streaming({ chunks: 8, gap: 30 }), timeoutMs: 80 });
+  await slow.photos(service, { query: "x" });
+  const started = performance.now(), result = await slow.bytes(service, "1", "image");
+  assert(performance.now() - started > 160, "total download time exceeded the per-gap deadline");
+  assertEquals(result.mime, "image/jpeg");
+  const stalled = makePexelsClient({ fetch: streaming({ chunks: 8, gap: 30, stall: true }), timeoutMs: 80 });
+  await stalled.photos(service, { query: "x" });
+  await assertRejects(() => stalled.bytes(service, "1", "image"), Error, "Home stopped sending the photo");
+  const silent = makePexelsClient({ fetch: (_href, init) => new Promise((_resolve, reject) => init.signal.addEventListener("abort", () => reject(init.signal.reason))), timeoutMs: 50 });
+  await assertRejects(() => silent.photos(service, { query: "x" }), Error, "Home didn't answer in time");
 });

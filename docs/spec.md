@@ -1255,17 +1255,18 @@ them; keys never reach a browser. Services live in `<state>/pexels-services.json
 | 3 | `PATCH /services/<id>` `{name?,url?,key?}` | omitted `key` keeps it, `null` clears it, a string replaces it |
 | 4 | `DELETE /services/<id>` | `{removed:true}` |
 | 5 | `GET /services/<id>/photos?query=&page=` | `{mode:"search"|"curated"|"browse",curated,page,more,photos:[{id,alt,photographer,width,height}]}`, 40 per page |
-| 6 | `GET /services/<id>/photos/<photo>/thumbnail` | proxied `src.medium` (fallback small, tiny, large) |
-| 7 | `GET /services/<id>/photos/<photo>/image` | proxied `src.large2x` (fallback large, original) |
+| 6 | `GET /services/<id>/photos/<photo>/thumbnail` | proxied size, preferring medium, small, tiny, then any other |
+| 7 | `GET /services/<id>/photos/<photo>/image` | proxied size, preferring large2x, large, original, then any other |
 | 8 | `GET /services/<id>/status` | `{ok:true,browse}` or `{ok:false,error}` from the picker's own first query (plus a search when only search works) |
 
 The URL is the API root, with or without a trailing `/v1`; it must be http(s)
 without credentials, query or fragment. An empty query lists `/v1/curated`; when
-a service answers that with 404, 405 or 501, an empty search is tried: a non-empty
+a service answers that with any failure other than 401, 403 or 429, an empty search is tried: a non-empty
 first page is browsed (`mode:"browse"`), otherwise the reply is `curated:false`
 with no photos and the picker asks for a search instead of reporting an error.
-Photo IDs are opaque printable strings up to 256 characters (not `.` or `..`);
-any one of the documented sizes per role suffices. A page whose photos are all
+Photo IDs are opaque non-empty strings without control characters (not `.` or
+`..`, which URL parsers resolve as path steps). Any single `src` entry, of any
+name, serves both roles. `/v1/photos/<id>` replies are keyed by the requested ID. A page whose photos are all
 unusable is an error, never an empty result. 401/403 reads "needs an API key"
 without a key and "rejected the API key" with one. The key
 is sent as `Authorization: <key>` only to URLs on the service URL's origin,
@@ -1273,7 +1274,8 @@ re-evaluated at each manually followed redirect (at most five). Photo bytes are
 resolved only from photo records the engine fetched (listing cache, else
 `/v1/photos/<id>`), never from a browser-supplied URL. Image replies must sniff
 as JPEG, PNG, WebP, GIF or AVIF and stay under 50 MB; upstream calls have a
-30-second deadline and follow request abort. An unreadable services file is
+30-second deadline for a response and for each gap while a body streams (a slow
+but progressing download never expires), and follow request abort. An unreadable services file is
 reported with HTTP 500 and never overwritten.
 
 The Settings menu lists services (name, URL, a lock marker when a key is saved)
