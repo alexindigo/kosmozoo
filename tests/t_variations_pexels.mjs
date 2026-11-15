@@ -427,3 +427,28 @@ Deno.test("pexels: an oversized metadata reply is refused before parsing and its
   const declared = makePexelsClient({ maxJsonBytes: 1024, fetch: async () => new Response("{}", { headers: { "Content-Length": "999999" } }) });
   await assertRejects(() => declared.photos({ id: "s", name: "Home", url: "http://h" }, { query: "x" }), Error, "larger than");
 });
+
+Deno.test("pexels: a key or rate-limit problem on the browse fallback is reported, not shown as search-only", async () => {
+  const katana = { id: "k", name: "katana", url: "http://katana.home/api" };
+  for (const [status, message] of [[401, "needs an API key"], [403, "needs an API key"], [429, "rate limit"]]) {
+    const client = makePexelsClient({ fetch: stubService({ "/api/v1/search?query=": { status, body: {} } }) });
+    await assertRejects(() => client.photos(katana), Error, message, String(status));
+  }
+});
+
+Deno.test("pexels services owner: no status check starts after disposal", async () => {
+  const list = [{ id: "1", name: "A", url: "http://a", hasKey: false }];
+  let releaseList = null;
+  const statuses = [];
+  const owner = makePexelsServices({ api: {
+    pexelsServices: () => releaseList === null ? Promise.resolve({ services: list }) : new Promise(resolve => { releaseList = () => resolve({ services: list }); }),
+    pexelsStatus: id => { statuses.push(id); return Promise.resolve({ ok: true }); },
+  } });
+  await owner.load();
+  releaseList = () => {};
+  const pending = owner.checkAll();
+  owner.dispose();
+  releaseList(); await pending; await settle();
+  assertEquals(statuses, []);
+  assertEquals(owner.status("1").phase, "unknown");
+});

@@ -280,6 +280,8 @@ export function makePexelsClient({ fetch = globalThis.fetch, timeoutMs = UPSTREA
         { ...(search ? { query: search } : {}), ...params }, signal);
       if (!search && (status < 200 || status >= 300) && ![401, 403, 429].includes(status)) {
         ({ status, data } = await json(service, "/v1/search", { query: "", ...params }, signal));
+        // A key or rate-limit problem is the real answer, never "search only".
+        if ([401, 403, 429].includes(status)) throw upstreamError(service, status);
         if (status < 200 || status >= 300 || !Array.isArray(data?.photos) || page === 1 && !data.photos.length)
           return { mode: "curated", curated: false, page, more: false, photos: [] };
         mode = "browse";

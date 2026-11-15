@@ -9,6 +9,7 @@ export function makePexelsServices({ api, changed = () => {} }) {
   // Per-service connection check: the engine runs a real first-page query.
   const checks = new Map();
   const check = id => {
+    if (!alive) return;
     checks.get(id)?.controller.abort();
     const controller = new AbortController(), entry = { controller, phase: "checking", message: "" };
     checks.set(id, entry); if (alive) changed();
