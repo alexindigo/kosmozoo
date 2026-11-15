@@ -192,3 +192,25 @@ Deno.test("run end: the outcome appears together with the end of running, after 
   }
   baseline.editor.dispose();
 });
+Deno.test("run end: a run with failures never starts the automatic close, even with no edits since an accepted run", async () => {
+  const baseline = editorRig();
+  let fail = false;
+  const history = { capture: () => ({}), plans(ticket) {
+    return [{ target: ticket.targets[0], request: { id: ticket.targets[0].id, host: "fake", filename: "image.png", ranges: { "n.denoise": { enabled: true, min: .9, max: .9, increment: .1 } }, imageParams: {}, prefix: "", suffix: "",
+      context: baseline.context, acknowledgement: { version: 2, runId: ticket.runId, requestId: createRunId() }, history: { id: ticket.runId, snapshotHash: "a".repeat(64), targetIndex: 0, planHash: "b".repeat(64) } }, expectedTotal: 1 }];
+  }, finish() {} };
+  const rig = editorRig({ history, run: async request => {
+    if (fail) return { ok: false, status: 502, data: { error: "ComfyUI 404: not found" } };
+    const response = await baseline.services.run(request);
+    return { ...response, data: { ...response.data, history: request.history } };
+  } });
+  rig.editor.setEnabled("n.denoise", true);
+  assertEquals((await rig.editor.run()).adopted, true);
+  assertEquals(rig.timers.filter(timer => timer.active).length, 1);
+  for (const timer of rig.timers) timer.active = false;
+  fail = true;
+  assertEquals((await rig.editor.run()).status, "failed");
+  assert(rig.editor.result().text.includes("ComfyUI 404"), rig.editor.result().text);
+  assertEquals(rig.timers.filter(timer => timer.active).length, 0, "the failure stays on screen");
+  rig.editor.dispose(); baseline.editor.dispose();
+});

@@ -681,7 +681,8 @@ export function makeVariationEditor({ targets, cohortMode, destination: initialD
         outcome = ({ text: submitted || total ? summary + (reason ? ` — ${reason}` : "") : reason || "nothing submitted", reason, ok: complete,
           state: eligible ? "adopted" : complete ? "kept" : "unavailable", submitted, total, adopted: eligible,
           effects: freeze(snapshotDraft(effects)), outcome: complete ? "accepted-plan" : !ticket.targets.every(originCurrent) ? "retired" : uncertain ? "uncertain-effects" : submitted ? "partial-effects" : "rejected" });
-        closable = true;
+        // Only a complete, eligible run may close itself; failures stay on screen.
+        closable = eligible;
         return { status: submitted > 0 && countsComplete && !uploadFailure ? "submitted" : "failed", submitted, total, adopted: eligible };
       } catch (error) {
         show = owns(ticket);
