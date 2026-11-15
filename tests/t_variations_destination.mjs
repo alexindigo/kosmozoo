@@ -12,6 +12,8 @@ Deno.test("destination: closest choices rank similar model names and omit weak m
   assertEquals(closestChoices("models/flux1-dev.safetensors", ["flux1-dev-fp8.safetensors", "sdxl.safetensors", "flux1-schnell.safetensors"]),
     ["flux1-dev-fp8.safetensors", "flux1-schnell.safetensors"]);
   assertEquals(closestChoices("abc", ["zzzzzzzz"]), []);
+  const huge = 10n ** 20n;
+  assertEquals(closestChoices(huge, [huge + 1n, "x"]), [huge + 1n], "exact integers never throw");
 });
 
 Deno.test("destination: conflicts are only missing classes and values outside a declared closed list", () => {

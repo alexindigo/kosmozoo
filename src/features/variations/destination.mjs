@@ -2,11 +2,11 @@
 // target image came from. Its own object_info is the authority for what can run
 // there; the workflow and images come from the target (or its saved archive).
 import { sameOrigin, validOrigin } from "../../source-origin.mjs";
-import { parameterContract, parameterCurrent, sameJsonValue } from "../../parameters.mjs";
+import { parameterContract, parameterCurrent, sameJsonValue, stringifyExactJson } from "../../parameters.mjs";
 import { inspectSource, projectInspection } from "./inspection.mjs";
 
 const CHANNELS = ["params", "stringParams", "enumParams", "textParams", "parameters"];
-const text = value => typeof value === "string" ? value : JSON.stringify(value);
+const text = value => typeof value === "string" ? value : stringifyExactJson(value);
 
 function distance(a, b) {
   const row = Array.from({ length: b.length + 1 }, (_, i) => i);
