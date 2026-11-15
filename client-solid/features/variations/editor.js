@@ -43,12 +43,16 @@ const ROW_STRATEGIES = {
     defaults: { enabled: false, candidates: [stringifyExactJson(p.valueKind === "connection" ? { node: String(parameterCurrent(p)[0]), slot: String(parameterCurrent(p)[1]) } : parameterCurrent(p))] } }) },
 };
 
-export function makeVariationEditor({ targets, cohortMode, services, currentOrigin, changed = () => {}, close = () => {},
+export function makeVariationEditor({ targets, cohortMode, destination: initialDestination = null, services, currentOrigin, changed = () => {}, close = () => {},
   setTimer = setTimeout, clearTimer = clearTimeout }) {
   const recipe = makeVariationRecipe();
   const capturedTargets = freeze(snapshotDraft(targets));
   // Opening facts and recipe basis stay stable; only the private Run cohort shrinks.
   let selectedTargets = capturedTargets;
+  // Where the Run executes, chosen independently of the targets' sources. Its
+  // catalogue's conflicts are readonly facts; until it is inspected Run waits.
+  let destination = validOrigin(initialDestination) ? freeze(snapshotDraft(initialDestination)) : null;
+  let conflicts = {}, destinationPending = !!destination;
   const catalogues = new Map();
   const generationTimes = new Map(capturedTargets.map(target => [target.id, knownGenerationTime(target.generationTimeMs) ? target.generationTimeMs : null]));
   const timingController = new AbortController();
@@ -137,7 +141,21 @@ export function makeVariationEditor({ targets, cohortMode, services, currentOrig
           return { raw, index, error, label: raw,
             node: value?.node ?? "", slot: value?.slot ?? "" };
         }) } : {}),
-       ...(domain === "images" ? { images: entry.values.items.map(item => imageView(id, item, entry.metadata)) } : {}) })])));
+       ...(domain === "images" ? { images: entry.values.items.map(item => imageView(id, item, entry.metadata)) } : {}),
+       conflict: conflictFor(id) })])));
+  const conflictFor = id => {
+    const conflict = conflicts[id];
+    if (!conflict) return null;
+    if (conflict.kind === "value") {
+      const location = locations.find(entry => entry.id === id), entry = location && row(location.domain, id);
+      const values = !entry?.values.enabled ? null : location.domain === "enums" ? entry.values.picks
+        : location.domain === "candidates" ? entry.values.candidates.map(raw => { try { return parseExactJson(raw); } catch { return undefined; } }) : null;
+      if (values?.length && values.every(value => conflict.choices.some(choice => sameJsonValue(choice, value)))) return null;
+    }
+    return { ...conflict, host: destination?.source ?? "" };
+  };
+  const unresolvedConflicts = () => locations.filter(entry => conflictFor(entry.id)).length;
+  const conflictMessage = count => `Resolve ${count} conflict${count === 1 ? "" : "s"} with ${destination?.source} before running.`;
   const dirty = () => acceptedRevision === null ? restoredWork || selectedTargets.length !== capturedTargets.length || recipe.dirty() : recipe.revision() !== acceptedRevision;
   const parseCandidate = (parameter, raw) => parseRecipeCandidate(parameter, raw, catalogues.get(capturedTargets[0].id)?.nodes);
   const candidateChoices = entry => (entry.metadata.options ?? []).map(value => ({ text: stringifyExactJson(value),
@@ -159,6 +177,7 @@ export function makeVariationEditor({ targets, cohortMode, services, currentOrig
   const retireMembership = id => { membershipGenerations.set(id, (membershipGenerations.get(id) ?? 0) + 1); };
   const check = (ticket, target) => {
     if (!owns(ticket)) throw Object.assign(new Error("Operation retired; work was kept"), { stale: true });
+    if (ticket.destination && !sameOrigin(ticket.destination, currentOrigin(ticket.destination.source))) throw Object.assign(new Error("Run destination changed; nothing more was sent. Your work has been kept."), { stale: true });
     if (!originCurrent(target)) throw Object.assign(new Error("Source origin changed; no follow-up was authorized. Your work has been kept."), { stale: true });
   };
   const physicalMatch = (a, b) => validOrigin(a) && validOrigin(b) && a.address === b.address && a.kind === b.kind && a.epoch === b.epoch;
@@ -210,6 +229,20 @@ export function makeVariationEditor({ targets, cohortMode, services, currentOrig
     rows: view,
     revision: recipe.revision,
     targets: () => selectedTargets,
+    destination: () => destination,
+    setDestination(origin) {
+      if (!alive || deciding || running || !validOrigin(origin) || origin.kind !== "comfy") return false;
+      if (sameOrigin(origin, destination)) return false;
+      destination = freeze(snapshotDraft(origin)); conflicts = {}; destinationPending = true;
+      invalidateClose(); notify(); return true;
+    },
+    resolveConflict(id, value) {
+      const conflict = conflicts[id], location = locations.find(entry => entry.id === id);
+      if (conflict?.kind !== "value" || !location || !conflict.choices.some(choice => sameJsonValue(choice, value))) return false;
+      if (location.domain === "enums") { this.setEnabled(id, true); return this.edit("enums", id, "picks", [value]); }
+      if (location.domain === "candidates") { this.setEnabled(id, true); return this.edit("candidates", id, "candidates", [stringifyExactJson(value)]); }
+      return false;
+    },
     generationTime: id => selectedTargets.some(target => target.id === id && originCurrent(target)) ? generationTimes.get(id) ?? null : null,
     removeTarget(id) {
       if (!alive || deciding || running || selectedTargets.length <= 1 || !selectedTargets.some(target => target.id === id)) return false;
@@ -417,8 +450,10 @@ export function makeVariationEditor({ targets, cohortMode, services, currentOrig
       if (!archived && (!validContext(data?.context) || !sameOrigin(data.context.origin, target.origin))) {
         publish({ text: "Source-bound catalogue unavailable; your edits have been kept.", ok: false, state: "unavailable" }); return;
       }
+      if (data.destination && !sameOrigin(data.destination.origin, destination)) return;
       parameterIndex(allParameters(data)); parameterIndex(catalogueParams(data));
-      catalogues.set(target.id, freeze(snapshotDraft(data)));
+      catalogues.set(target.id, freeze(snapshotDraft({ ...data, context: data.context ?? catalogues.get(target.id)?.context ?? null })));
+      if (data.destination) { conflicts = snapshotDraft(data.destination.conflicts ?? {}); destinationPending = false; }
       const legacy = new Map([...["params", "stringParams", "enumParams", "textParams"].flatMap((key, index) => (data[key] ?? []).map(parameter => [parameter.id, ["numeric", "images", "enums", "texts"][index]]))]);
       const names = new Map();
       for (const parameter of allParameters(data)) { const name = `${parameter.title ?? parameter.type}.${parameter.key}`; names.set(name, (names.get(name) ?? 0) + 1); }
@@ -445,6 +480,7 @@ export function makeVariationEditor({ targets, cohortMode, services, currentOrig
       const unavailable = (status, message) => ({ n: null, display: "—", fullCount: message, perImage: 0,
         anyEnabled: false, exact: false, status, message, breakdown: "", axes: [], excluded: 0, naming: { example: "", complete: false }, timeEstimate: estimateGenerationTime(null, []) });
       if (!catalogueReady) return unavailable("reading", "Reading workflow…");
+      if (destinationPending) return unavailable("reading", `Checking ${destination.source}…`);
       const snapshot = captureRows(), first = catalogues.get(capturedTargets[0].id);
       for (const [id, entry] of Object.entries(snapshot.numeric)) if (entry.values.enabled && entry.values.mode === "range" && increment(entry) === null) {
         return unavailable("invalid", `${entry.metadata.label}: enter a valid positive Step. Your text is kept.`);
@@ -493,26 +529,34 @@ export function makeVariationEditor({ targets, cohortMode, services, currentOrig
           `${axis.count.toLocaleString("en-US")} ${axis.kind === "images" ? `input image${axis.count === 1 ? "" : "s"}` : `${axis.name} value${axis.count === 1 ? "" : "s"}`}`);
         const breakdown = factors.join(" × ") + (excluded ? ` · ${excluded} unchanged combination${excluded === 1 ? "" : "s"} excluded` : "")
           + (batch && axes.length ? ` · workflow estimate × ${selectedTargets.length} target image${selectedTargets.length === 1 ? "" : "s"}` : "");
-        const status = !naming.complete || error ? "invalid" : pending ? "checking" : "ready";
-        const message = !naming.complete ? "Unresolved naming token: check Prefix and Suffix." : error ? `Image comparison failed: ${error}`
+        let status = !naming.complete || error ? "invalid" : pending ? "checking" : "ready";
+        let message = !naming.complete ? "Unresolved naming token: check Prefix and Suffix." : error ? `Image comparison failed: ${error}`
           : pending ? "Checking images…" : !n ? "Choose a different value or image to create variations."
           : !safe ? "Estimate exceeds safe integer precision; the full value is approximate."
           : batch ? "Estimated from the opening workflow; each remaining target is checked before submission."
           : n > 100 ? "Large sweep: this many jobs will be queued. The engine validates its existing per-run limit." : "";
+        const blocked = unresolvedConflicts();
+        if (blocked && status !== "invalid") { status = "conflict"; message = conflictMessage(blocked); }
         const timeEstimate = estimateGenerationTime(status === "invalid" ? null : perImage,
           selectedTargets.map(target => originCurrent(target) ? generationTimes.get(target.id) : null));
         return { n, perImage, anyEnabled: axes.length > 0, exact: exact && naming.complete, status, message, axes, excluded, breakdown, naming, timeEstimate,
           display: n >= 1e6 ? n < 1e15 ? new Intl.NumberFormat("en-US", { notation: "compact", maximumSignificantDigits: 4 }).format(n)
             : n.toExponential(2).replace("e+", " × 10^") : n.toLocaleString("en-US"),
           fullCount: `${n.toLocaleString("en-US", { maximumFractionDigits: 0 })}${exact ? " variations" : " variations (estimate)"}` };
-      } catch (error) { return unavailable("invalid", error.message); }
+      } catch (error) {
+        // A value the destination lacks is a conflict, not a recipe mistake.
+        const blocked = unresolvedConflicts();
+        return blocked ? unavailable("conflict", conflictMessage(blocked)) : unavailable("invalid", error.message);
+      }
     },
     async run() {
       if (!alive) return { status: "stale" };
       if (running || deciding) return { status: "busy" };
       if (!catalogueReady) { publish({ text: "Inspecting source context; your edits have been kept.", ok: false, state: "unavailable" }); return { status: "invalid" }; }
+      if (destinationPending) { publish({ text: `Still checking ${destination.source}; nothing was sent.`, ok: false, state: "unavailable" }); return { status: "invalid" }; }
+      if (unresolvedConflicts()) { publish({ text: `${conflictMessage(unresolvedConflicts())} Nothing was sent.`, ok: false, state: "invalid" }); return { status: "invalid" }; }
       invalidateClose();
-      const ticket = Object.freeze({ runId: createRunId(), editRevision: recipe.revision(), closeGeneration, snapshot: freeze(captureRows()), targets: selectedTargets, cohortMode: batch ? "bulk" : "single" });
+      const ticket = Object.freeze({ runId: createRunId(), editRevision: recipe.revision(), closeGeneration, snapshot: freeze(captureRows()), targets: selectedTargets, cohortMode: batch ? "bulk" : "single", destination });
       // Retain the captured inspection handles while they settle. Removing and
       // readding a path may replace live evidence, never this Run's evidence.
       const inspections = [...pendingInspections];
@@ -534,6 +578,7 @@ export function makeVariationEditor({ targets, cohortMode, services, currentOrig
         let uploadFailure = false;
         if (saved) operation.targetPlans = freeze(await services.history.plans(ticket, saved, target => check(ticket, target)));
         else {
+        if (ticket.destination && ticket.targets.some(target => !sameOrigin(ticket.destination, target.origin))) throw new Error("Running on another ComfyUI requires saved-run history; nothing was sent.");
         // Explicit narrow legacy service rigs retain their old wire contract.
         // Application installation always supplies history and rejects unbound
         // Run requests; capture failures never enter this compatibility branch.

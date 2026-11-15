@@ -11,13 +11,19 @@ export const parameterContext = row => row.valueKind === "connection"
   : row.domain === "images" ? `${row.current} (${row.currentRoot ?? "input"})`
   : typeof parameterCurrent(row) === "string" ? parameterCurrent(row) : stringifyExactJson(parameterCurrent(row));
 
-const section = row => row.domain === "images" || row.contract?.resource?.media === "image" ? "Images"
+// One wording for a destination conflict, in catalogue cards and editor cards.
+const valueText = value => typeof value === "string" ? value : stringifyExactJson(value);
+export const conflictValue = valueText;
+export const conflictReason = conflict => conflict.kind === "node" ? `${conflict.type} is not installed on ${conflict.host}`
+  : `${valueText(conflict.current)} is not on ${conflict.host}`;
+
+const section = row => row.conflict ? "Conflicts" : row.domain === "images" || row.contract?.resource?.media === "image" ? "Images"
   : row.domain === "texts" ? "Text" : row.domain === "numeric" || row.domain === "enums" ? "Adjustments" : "Other inputs";
 const priority = row => /denoise|strength/i.test(row.input ?? row.key) ? 0
   : /steps|cfg|guidance|sampler|scheduler|seed/i.test(row.input ?? row.key) ? 1 : 2;
 
 export function cataloguePresentation(rows) {
-  return ["Images", "Text", "Adjustments", "Other inputs"].map(name => {
+  return ["Conflicts", "Images", "Text", "Adjustments", "Other inputs"].map(name => {
     const nodes = new Map();
     for (const row of rows.filter(row => section(row) === name).sort((a, b) => priority(a) - priority(b))) {
       const id = row.nodeIds?.[0] ?? row.id;

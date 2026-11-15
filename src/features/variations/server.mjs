@@ -28,6 +28,7 @@ import { parameterCatalogue, findProducingOutputNode, outputNodeIndex, outputNam
   outputPath, stripExtension, inspectSource, projectInspection } from "./inspection.mjs";
 import { registerHistory, historyResponse } from "./history-routes.mjs";
 import { registerPexels } from "./pexels.mjs";
+import { inspectDestination } from "./destination.mjs";
 export { parameterCatalogue, findProducingOutputNode, outputNodeIndex, outputNamingTargets } from "./inspection.mjs";
 
 const exactResponse = (value, init = {}) => new Response(stringifyExactJson(value), {
@@ -236,9 +237,18 @@ export function register(app) {
       try { expected = { origin: JSON.parse(raw) }; } catch { return Response.json({ error: "Invalid expected origin" }, { status: 400 }); }
       if (!validOrigin(expected.origin)) return Response.json({ error: "Invalid expected origin" }, { status: 400 });
     }
+    let destination = null;
+    const rawDestination = new URL(_req.url).searchParams.get("destination");
+    if (rawDestination !== null) {
+      try { destination = JSON.parse(rawDestination); } catch { return Response.json({ error: "Invalid Run destination" }, { status: 400 }); }
+      if (!validOrigin(destination)) return Response.json({ error: "Invalid Run destination" }, { status: 400 });
+    }
     const r = await inspect(collection, name, expected);
     if (r.error) return Response.json({ error: r.error }, { status: r.status });
-    return exactResponse(projectInspection(r, name));
+    if (!destination) return exactResponse(projectInspection(r, name));
+    const d = await inspectDestination(app, { graph: r.graph, hash: r.context.graphHash, name, original: projectInspection(r, name), originContext: r.context, destination });
+    if (d.error) return Response.json({ error: d.error }, { status: d.status });
+    return exactResponse(d);
   });
 
   app.route("POST", "/run", async (req) => {
@@ -251,7 +261,9 @@ export function register(app) {
     if (!id || !host || !filename || !ranges) {
       return Response.json({ error: "missing required fields" }, { status: 400 });
     }
-    if (!validContext(context) || context.origin.source !== host) {
+    // Saved-plan requests execute on their engine-bound destination; direct
+    // requests stay bound to the target's own source.
+    if (!validContext(context) || !body.history && context.origin.source !== host) {
       return Response.json({ error: "Version2 requires the captured source/graph context" }, { status: 400 });
     }
     if (!validRunAcknowledgement(acknowledgement) || id !== `${host}:${filename}` ||

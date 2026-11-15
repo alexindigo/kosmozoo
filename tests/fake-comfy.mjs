@@ -226,7 +226,7 @@ const removed = new Set();
 let terminalHistory = history();
 let running = [], pending = [], logs = [], failures = {}, delays = {};
 let publishRevision = 0;
-let captureEnqueue = false, enqueues = [], assetsPlusDelete = false;
+let captureEnqueue = false, enqueues = [], enqueueHosts = [], assetsPlusDelete = false;
 let metadataBombs = new Set(), assetsHidden = new Set();
 const telemetryRequests = { queue: 0, history: 0, logs: 0 };
 const activeLogs = new Set();
@@ -278,7 +278,7 @@ const handleRequest = async (req) => {
     if (body.reset) {
       published.clear(); terminalHistory = history();
       removed.clear(); publishedInputs.clear(); publishedTemps.clear(); publishRevision = 0;
-      captureEnqueue = false; enqueues = []; assetsPlusDelete = false;
+      captureEnqueue = false; enqueues = []; enqueueHosts = []; assetsPlusDelete = false;
       metadataBombs = new Set(); assetsHidden = new Set();
       telemetryRequests.queue = 0; telemetryRequests.history = 0; telemetryRequests.logs = 0; activeLogs.clear();
       running = []; pending = []; logs = []; failures = {}; delays = {};
@@ -357,8 +357,10 @@ const handleRequest = async (req) => {
   }
   if (p === "/api/queue" && req.method === "GET") return Response.json({ queue_running: queueRows(running), queue_pending: queueRows(pending) });
   if (p === "/__test/enqueues" && req.method === "GET") return Response.json(enqueues);
+  // Which listening address (simulated host) received each captured prompt.
+  if (p === "/__test/enqueue-hosts" && req.method === "GET") return Response.json(enqueueHosts);
   if (p === "/api/prompt" && req.method === "POST" && captureEnqueue) {
-    enqueues.push(await req.json());
+    enqueues.push(await req.json()); enqueueHosts.push(url.hostname);
     return Response.json({ prompt_id: `captured-${enqueues.length}`, number: enqueues.length, node_errors: {} });
   }
   if (p === "/api/upload/image" && req.method === "POST") {

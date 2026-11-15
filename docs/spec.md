@@ -337,6 +337,38 @@ basis, independently of cardinality: `single` requires exactly one target;
 Original saved-run openings restore that explicit basis. No schema migration or
 modification of existing saved runs is required.
 
+#### Run destination ("Run on")
+
+The dialog header is one row: title, the recall dropdown (flexible width), the
+**Run on** ComfyUI selector and close. Run on lists every ComfyUI source and
+defaults to the ComfyUI selected in the app header (else the image's own source).
+It is dialog-private: choosing it never changes the app's selected source. The
+same rule covers card openings and saved-run recalls.
+
+`GET /probe/<id>?destination=<origin>` and
+`GET /history/<id>/catalogue?lease&target&destination` return the target's
+workflow as that destination declares it, plus `destination: { origin, missing,
+conflicts }`. The catalogue `context` stays the target's own. Conflicts exist
+only when the destination differs from the image's own source; the same-host
+behaviour is unchanged. A conflict is evidence-based: a node class absent from
+the destination's object_info (`kind: "node"`), or a current value outside a
+closed list the destination declares (`kind: "value"`, with its `choices` and up
+to three closest `suggestions` by name). Unknown/custom inputs are never
+flagged. Parameters of missing classes keep their original descriptors.
+
+Conflicting cards appear first in the catalogue in red ink; clicking one adds it
+to the editors. Value conflicts offer one-click closest replacements; a picked
+value the destination lacks stays listed in red so it can be unpicked. Until the
+destination catalogue arrives, and while any conflict is unresolved, Run sends
+nothing and says why. History capture accepts an optional `destination`
+(a ComfyUI origin) stored in the saved document; uploads, planning and enqueue
+bind to it (older captures default to the target's own source). The target image
+and Load Image inputs are archived first, so the original backend need not be
+reachable at upload time. Materialization rejects a destination missing any node
+class before its first upload; the final graph is validated against the
+destination before any job. The saved snapshot records the destination's view
+of the workflow. The time estimate still uses original generation times.
+
 #### Durable Variations snapshots
 
 The engine owns version1 raw recipe snapshots, original target graphs/pixels and

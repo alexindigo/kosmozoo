@@ -49,7 +49,6 @@ const timed = (id, ms) => ({ id, output: `batch/${id}.png`, fixture: 'flux-basic
     await c.send('Emulation.clearDeviceMetricsOverride');
     await remove('unknown');
     await c.poll(`!document.querySelector('.vz-batch')&&document.querySelector('.vz-count').textContent==='1'&&document.querySelector('.vz-time-value').textContent==='6m'`);
-    assert(await c.evaluate(`document.querySelector('.vz-title').textContent.includes('applying to 1 image')`));
     await shot('batch-one-strip-hidden'); states.push({ count: 1, hidden: true });
     const run = await invoke('variations.run'); assert.equal(run.adopted, true, JSON.stringify(run)); assert.equal(run.submitted, 1);
     const history = await req(B, '/api/features/variations/history'), saved = await req(B, '/api/features/variations/history/' + history.items[0].id);
@@ -59,7 +58,6 @@ const timed = (id, ms) => ({ id, output: `batch/${id}.png`, fixture: 'flux-basic
     await invoke('variations.history.open', { id: saved.id });
     await c.poll(`!!document.querySelector('.vz-panel')&&document.querySelectorAll('.vz-catalogue-row').length>0`);
     assert.equal(await c.evaluate(`!!document.querySelector('.vz-batch')`), false);
-    assert(await c.evaluate(`document.querySelector('.vz-title').textContent.includes('applying to 1 image')`));
     await close();
     // Membership alone is unsent work; it must pass the ordinary discard guard.
     await invoke('variations.open', { ids: ['fake:batch/a.png', 'fake:batch/b.png'], bulk: true });

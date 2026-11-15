@@ -44,8 +44,9 @@ async function verifyFileReadiness({ cdp, KZ, check }) {
       assert.equal(state, 'complete');
       assert(await cdp.evaluate(`document.querySelector('.vz-imgfilespick')===window.__fileInput && [...window.__fileInput.files].every((file,index)=>file===window.__files[index])`));
       if (name === 'mixed batch') {
-        assert.equal((await invoke('variations.run')).status, 'invalid');
-        assert(await cdp.evaluate(`document.querySelector('.vz-error').textContent.includes('different backends')`));
+        // Targets from different sources share one Run destination (the
+        // header's ComfyUI), so local Files are no longer split across backends.
+        assert.equal(await cdp.evaluate(`document.querySelector('.vz-run-on .select-face')?.textContent`), `Run on ${await cdp.evaluate(`(async()=>${KZ}.state.host())()`)}`);
         assert(await cdp.evaluate(`document.querySelector('.vz-imgfilespick')===window.__fileInput && [...window.__fileInput.files].every((file,index)=>file===window.__files[index])`));
       }
       assert.deepEqual(await cdp.evaluate('window.__fileReadyEffects'), []);
@@ -219,14 +220,18 @@ module.exports = async ({ cdp, check, FAKE, KZ }) => {
     await cdp.evaluate(`window.fetch=window.__originalFetch`);
   });
 
-  await test('mixed-backend files reject before uploads; per-target zero cannot hide under aggregate success',async()=>{
+  await test('mixed-source files run on one destination; per-target zero cannot hide under aggregate success',async()=>{
+    // Targets from two sources share the one Run on destination: every target
+    // request executes there, so local Files are never split across backends.
     await invoke('variations.open',{ids:['fake:flux-controlnet.png','another:flux-controlnet.png'],bulk:true});
     await cdp.poll(`document.querySelectorAll('.vz-catalogue-row').length>0`); await fileSetup(cdp);
-    await cdp.evaluate(`(()=>{window.__originalFetch=window.fetch;window.__sideEffects=0;window.fetch=(url,options)=>{if(options?.body instanceof FormData || String(url).includes('/features/variations/run'))window.__sideEffects++;return window.__originalFetch(url,options)}})()`);
-    assert.equal((await invoke('variations.run')).status,'invalid');
-    assert.equal(await cdp.evaluate(`window.__sideEffects`),0);
-    assert(await cdp.evaluate(`document.querySelector('.vz-error').textContent.includes('different backends') && document.querySelector('.vz-imgfilespick')===window.__fileInput`));
-    await cdp.evaluate(`window.fetch=window.__originalFetch`); await discard();
+    await cdp.evaluate(`(()=>{window.__originalFetch=window.fetch;window.__runs=[];window.fetch=(url,options)=>{if(String(url).includes('/features/variations/run'))window.__runs.push(JSON.parse(options.body).context.origin.source);return window.__originalFetch(url,options)}})()`);
+    const destination = await cdp.evaluate(`(async()=>${KZ}.state.host())()`);
+    const outcome = await invoke('variations.run');
+    const runs = await cdp.evaluate(`window.__runs`), said = await cdp.evaluate(`document.querySelector('.vz-messages')?.textContent`);
+    assert.equal(runs.length, 2, JSON.stringify({ runs, outcome, said })); assert(runs.every(source => source === destination), JSON.stringify(runs));
+    assert(await cdp.evaluate(`!document.querySelector('.vz-error').textContent.includes('different backends') && document.querySelector('.vz-imgfilespick')===window.__fileInput`));
+    await cdp.evaluate(`window.fetch=window.__originalFetch`); if (await cdp.evaluate(`!!document.querySelector('.vz-panel')`)) await discard();
     await invoke('variations.open',{ids:['fake:flux-basic.png','another:flux-basic.png'],bulk:true});
     await addParameter(cdp, '9.denoise');
     await cdp.evaluate(`(()=>{window.__originalFetch=window.fetch;window.fetch=(url,options)=>String(url).includes('/features/variations/run')?Promise.resolve(new Response(JSON.stringify(JSON.parse(options.body).host==='fake'?{submitted:1,total:1}:{submitted:0,total:0}),{status:200})):window.__originalFetch(url,options)})()`);

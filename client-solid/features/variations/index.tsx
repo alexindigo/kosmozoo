@@ -30,7 +30,11 @@ export function install(store) {
   const services = {
     // modal I/O — the feature's api.js owns the transport; the modal keeps
     // session-scoped results (probe params, file lists) in local signals
-    probe(image) { return api.probe(image); },
+    probe(image, destination) { return api.probe(image, destination); },
+    historyCatalogue: api.historyCatalogue,
+    // Every ComfyUI source can be a Run destination; the header selection is the default.
+    runDestinations: () => Object.keys(store.state.hosts).filter(host => store.state.hosts[host].kind === "comfy")
+      .map(host => sourceOrigin(host, store.state.hosts[host])).filter(validOrigin),
     generationTime: api.generationTime,
     history, historyState, historyThumbnail: api.historyThumbnail,
     inputList(hostName, origin, root = "input") { return api.inputList(hostName, origin, root); },
