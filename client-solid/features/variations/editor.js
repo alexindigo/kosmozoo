@@ -572,7 +572,7 @@ export function makeVariationEditor({ targets, cohortMode, destination: initialD
       const effects = { uploads: [], targets: [] };
       // A Run ends in one transition: its outcome is shown together with the
       // end of running, after the saved-run record is finished.
-      let outcome = null, show = false;
+      let outcome = null, show = false, closable = false;
       running = true; result = null; notify();
       try {
         const saved = services.history ? await services.history.capture(ticket,
@@ -681,7 +681,7 @@ export function makeVariationEditor({ targets, cohortMode, destination: initialD
         outcome = ({ text: submitted || total ? summary + (reason ? ` — ${reason}` : "") : reason || "nothing submitted", reason, ok: complete,
           state: eligible ? "adopted" : complete ? "kept" : "unavailable", submitted, total, adopted: eligible,
           effects: freeze(snapshotDraft(effects)), outcome: complete ? "accepted-plan" : !ticket.targets.every(originCurrent) ? "retired" : uncertain ? "uncertain-effects" : submitted ? "partial-effects" : "rejected" });
-        if (canClose(ticket)) timer = setTimer(() => { timer = null; if (canClose(ticket)) close(); }, 3000);
+        closable = true;
         return { status: submitted > 0 && countsComplete && !uploadFailure ? "submitted" : "failed", submitted, total, adopted: eligible };
       } catch (error) {
         show = owns(ticket);
@@ -690,10 +690,17 @@ export function makeVariationEditor({ targets, cohortMode, destination: initialD
        } finally {
          if (services.history) {
            try { await services.history.finish(ticket.runId, outcome?.ok ? null : outcome?.reason ?? outcome?.text ?? null); }
-           catch (error) { if (owns(ticket)) { show = true; outcome = { ...outcome, historyError: error.message, text: `${outcome?.text ?? "Run ended"}; history refresh failed: ${error.message}` }; } }
+           catch (error) {
+             // The result line shows `reason` when present: the failure must appear there too.
+             closable = false;
+             if (owns(ticket)) { show = true; const failed = `history refresh failed: ${error.message}`;
+               outcome = { ...outcome, historyError: error.message, reason: `${outcome?.reason || outcome?.text || "Run ended"}; ${failed}`, text: `${outcome?.text ?? "Run ended"}; ${failed}` }; }
+           }
          }
          if (show) result = Object.freeze(outcome);
          if (owns(ticket)) running = false;
+         // The automatic close starts only once the run has fully ended.
+         if (closable && canClose(ticket)) timer = setTimer(() => { timer = null; if (canClose(ticket)) close(); }, 3000);
          notify();
        }
     },

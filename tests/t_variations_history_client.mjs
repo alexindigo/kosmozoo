@@ -179,11 +179,15 @@ Deno.test("run end: the outcome appears together with the end of running, after 
     const running = rig.editor.run();
     await entered.promise;
     assertEquals([rig.editor.result(), rig.editor.running()], [null, true], "no outcome while the run is still finishing");
+    assertEquals(rig.timers.filter(timer => timer.active).length, 0, "no automatic close before the run has ended");
     if (failing) gate.reject(new Error("offline")); else gate.resolve();
     await running;
     assertEquals(rig.editor.running(), false);
     assert(rig.editor.result().text.startsWith("submitted 1/1"), rig.editor.result().text);
     assertEquals(rig.editor.result().text.includes("history refresh failed: offline"), failing);
+    // The result line shows `reason` when present; a history failure must be visible there too.
+    assertEquals((rig.editor.result().reason || "").includes("history refresh failed: offline"), failing);
+    assertEquals(rig.timers.filter(timer => timer.active).length, failing ? 0 : 1, "the automatic close starts once the run has fully ended, never over a history error");
     rig.editor.dispose();
   }
   baseline.editor.dispose();
