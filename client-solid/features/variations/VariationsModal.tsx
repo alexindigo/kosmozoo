@@ -100,7 +100,7 @@ function ModalBody(props) {
   const pexelsUrls = new Map();
   createEffect(() => {
     for (const { source, url } of pexelsSources()) {
-      if (pexelsUrls.has(source) && pexelsUrls.get(source) !== url) pexelsBrowse.forget(source);
+      if (pexelsUrls.has(source) && pexelsUrls.get(source) !== url) { pexelsBrowse.forget(source); editor.retirePexelsService(source); }
       pexelsUrls.set(source, url);
     }
   });

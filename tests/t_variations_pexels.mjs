@@ -7,6 +7,7 @@ import { editorRig as defaultRig, removeRecordedImages } from "./helpers/variati
 import { fakePexels, JPEG } from "./helpers/fake-pexels.mjs";
 
 const editorRig = overrides => removeRecordedImages(defaultRig(overrides));
+const uploadImageFile = name => ({ kind: "upload", name, file: new File([JPEG], name, { type: "image/jpeg" }) });
 const tempPath = async () => `${await Deno.makeTempDir({ prefix: "pexels-" })}/pexels-services.json`;
 
 Deno.test("pexels: service URL accepts the API root with or without /v1 and refuses credentials", () => {
@@ -366,4 +367,63 @@ Deno.test("pexels: a slow but progressing download completes; a stalled one ends
   await assertRejects(() => stalled.bytes(service, "1", "image"), Error, "Home stopped sending the photo");
   const silent = makePexelsClient({ fetch: (_href, init) => new Promise((_resolve, reject) => init.signal.addEventListener("abort", () => reject(init.signal.reason))), timeoutMs: 50 });
   await assertRejects(() => silent.photos(service, { query: "x" }), Error, "Home didn't answer in time");
+});
+
+Deno.test("pexels editor: a pick made during the post-Run close countdown keeps the editor open", async () => {
+  let release;
+  const rig = editorRig({ readPexelsPhoto: (_service, photo) => new Promise(resolve => { release = () => resolve(new File([JPEG], `pexels-${photo}.jpg`, { type: "image/jpeg" })); }) });
+  const { editor } = rig, id = "image.image";
+  editor.edit("numeric", "n.denoise", "enabled", false); editor.edit("images", id, "enabled", true);
+  editor.addImages(id, [uploadImageFile("first.jpg")]);
+  await editor.inspectImages();
+  assertEquals((await editor.run()).submitted, 1);
+  const pending = editor.togglePexels(id, "svc", "7");
+  rig.fireTimers();
+  assertEquals(rig.closeCount(), 0);
+  release(); await pending;
+  assertEquals(editor.rows("images")[id].items.map(item => item.name), ["first.jpg", "pexels-7.jpg"]);
+  editor.dispose();
+});
+
+Deno.test("pexels editor: retiring a service drops its cached Files and in-flight reads, never chosen images", async () => {
+  const reads = [], releases = [];
+  const rig = editorRig({ readPexelsPhoto: (service, photo) => { reads.push([service, photo]);
+    return new Promise(resolve => releases.push(() => resolve(new File([JPEG], `pexels-${photo}-${reads.length}.jpg`, { type: "image/jpeg" })))); } });
+  const { editor } = rig, id = "image.image";
+  editor.edit("images", id, "enabled", true);
+  const kept = editor.togglePexels(id, "svc", "1"); releases[0](); await kept;
+  const stale = editor.togglePexels(id, "svc", "2");
+  editor.retirePexelsService("svc");
+  releases[1](); await stale;
+  assertEquals(editor.rows("images")[id].items.map(item => item.name), ["pexels-1-1.jpg"]);
+  const fresh = editor.togglePexels(id, "svc", "1"); releases[2](); await fresh;
+  assertEquals(reads.length, 3);
+  assertEquals(editor.rows("images")[id].items.map(item => item.name), ["pexels-1-1.jpg", "pexels-1-3.jpg"]);
+  editor.dispose();
+});
+
+Deno.test("pexels: concurrent registry mutations never lose each other", async () => {
+  const path = await tempPath();
+  try {
+    const services = new PexelsServices(path);
+    const created = await Promise.all(Array.from({ length: 6 }, (_, n) => services.create({ name: `S${n}`, url: `http://s${n}` })));
+    assertEquals((await services.list()).length, 6);
+    await Promise.all([services.update(created[0].id, { name: "Renamed" }), services.remove(created[1].id), services.create({ name: "S9", url: "http://s9" })]);
+    assertEquals((await services.list()).map(item => item.name).sort(), ["Renamed", "S2", "S3", "S4", "S5", "S9"]);
+    const reopened = new PexelsServices(path);
+    assertEquals((await reopened.list()).length, 6);
+    await assertRejects(() => Promise.all([services.create({ name: "Dup", url: "http://a" }), services.create({ name: "dup", url: "http://b" })]), Error, "already exists");
+  } finally { await Deno.remove(path.replace(/\/[^/]+$/, ""), { recursive: true }); }
+});
+
+Deno.test("pexels: an oversized metadata reply is refused before parsing and its body cancelled", async () => {
+  let cancelled = false;
+  const client = makePexelsClient({ maxJsonBytes: 1024, fetch: async () => new Response(new ReadableStream({
+    pull(controller) { controller.enqueue(new TextEncoder().encode(`{"photos":[${"0,".repeat(200)}`)); },
+    cancel() { cancelled = true; },
+  }), { headers: { "Content-Type": "application/json" } }) });
+  await assertRejects(() => client.photos({ id: "s", name: "Home", url: "http://h" }, { query: "x" }), Error, "Home sent a reply larger than");
+  assert(cancelled, "body cancelled");
+  const declared = makePexelsClient({ maxJsonBytes: 1024, fetch: async () => new Response("{}", { headers: { "Content-Length": "999999" } }) });
+  await assertRejects(() => declared.photos({ id: "s", name: "Home", url: "http://h" }, { query: "x" }), Error, "larger than");
 });

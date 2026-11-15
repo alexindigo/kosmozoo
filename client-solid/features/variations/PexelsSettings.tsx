@@ -13,14 +13,16 @@ export function PexelsSettings(props) {
   const uid = `pexels-${createUniqueId().replace(/[^\w-]/g, "")}`;
   const [draft, setDraft] = createSignal(null), [removing, setRemoving] = createSignal(null);
   const [busy, setBusy] = createSignal(false), [message, setMessage] = createSignal("");
-  let nameField;
+  // Each opened form is its own draft; a save only closes the draft it began from.
+  let nameField, drafts = 0;
   onMount(() => { owner().checkAll(); });
   const statusLabel = status => status.phase === "ok" ? "Connected" : status.phase === "error" ? status.message : status.phase === "checking" ? "Checking connection..." : "Not checked";
 
   const edit = service => {
     setRemoving(null); setMessage("");
-    setDraft(service ? { id: service.id, name: service.name, url: service.url, key: "", hasKey: service.hasKey, clearKey: false }
-      : { id: null, name: "", url: "", key: "", hasKey: false, clearKey: false });
+    const generation = ++drafts;
+    setDraft(service ? { generation, id: service.id, name: service.name, url: service.url, key: "", hasKey: service.hasKey, clearKey: false }
+      : { generation, id: null, name: "", url: "", key: "", hasKey: false, clearKey: false });
     queueMicrotask(() => nameField?.focus());
   };
   const change = patch => setDraft(value => ({ ...value, ...patch }));
@@ -32,15 +34,17 @@ export function PexelsSettings(props) {
     setBusy(true); setMessage("");
     const result = value.id ? await owner().update(value.id, details) : await owner().create(details);
     setBusy(false);
-    if (!result.ok) { setMessage(result.error); return; }
-    setDraft(null); setMessage(`${result.service.name} saved`);
+    if (!result.ok) { setMessage(draft()?.generation === value.generation ? result.error : `${value.name || "New service"}: ${result.error}`); return; }
+    if (draft()?.generation === value.generation) setDraft(null);
+    setMessage(`${result.service.name} saved`);
   };
   const remove = async service => {
     setBusy(true); setMessage("");
     const result = await owner().remove(service.id);
     setBusy(false); setRemoving(null);
+    if (!result.ok) { setMessage(result.error); return; }
     if (draft()?.id === service.id) setDraft(null);
-    setMessage(result.ok ? `${service.name} removed` : result.error);
+    setMessage(`${service.name} removed`);
   };
   const keyPlaceholder = () => draft().clearKey ? "Saved key will be removed" : draft().hasKey ? "Saved key is kept" : "Optional";
 

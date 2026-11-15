@@ -90,6 +90,8 @@ export function makeVariationEditor({ targets, cohortMode, services, currentOrig
     }
     if (cached.wanted.has(id) && admitsMembership(cached.wanted.get(id))) cached.wanted.delete(id);
     else cached.wanted.set(id, membershipTicket(id));
+    // Recorded intent is an edit in progress: a post-Run countdown cannot close over it.
+    invalidateClose();
     if (cached.pending) { notify(); return; }
     cached.pending = true; cached.error = ""; notify();
     try {
@@ -337,6 +339,9 @@ export function makeVariationEditor({ targets, cohortMode, services, currentOrig
         return name.includes("/") ? new File([resource], name.split("/").at(-1), { type: resource.type, lastModified: resource.lastModified }) : resource;
       }, ownsRead);
     },
+    // A service whose configuration changed retires its cached Files and any
+    // read still in flight; images already in a set keep their own File.
+    retirePexelsService(service) { if (pexelsFiles.delete(service)) notify(); },
     pexelsState(id, service, photo) { return cachedFileState(id, pexelsFiles.get(service)?.get(photo)); },
     // A chosen Pexels photo is an ordinary uploaded image once its bytes arrive.
     togglePexels(id, service, photo) {
