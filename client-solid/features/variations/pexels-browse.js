@@ -26,13 +26,17 @@ export function makePexelsBrowse({ api, changed = () => {}, delay = SEARCH_DELAY
     return entry;
   };
 
+  // A reply belongs to its listing only while that listing is still registered
+  // and the request is its current one; forgotten listings never come back.
+  const owns = (entry, controller) => alive && listings.get(keyOf(entry.service, entry.query)) === entry && entry.controller === controller;
+
   async function load(entry) {
     if (!alive || entry.pending || !entry.more || entry.error) return;
     const controller = new AbortController(), page = entry.page + 1;
     Object.assign(entry, { pending: true, controller }); notify();
     try {
       const result = await api.pexelsPhotos(entry.service, entry.query, page, controller.signal);
-      if (!alive || entry.controller !== controller) return;
+      if (!owns(entry, controller)) return;
       if (!Array.isArray(result?.photos)) throw new Error("The service sent no photo list");
       for (const photo of result.photos) {
         if (typeof photo?.id !== "string" || entry.byId.has(photo.id)) continue;
@@ -41,7 +45,7 @@ export function makePexelsBrowse({ api, changed = () => {}, delay = SEARCH_DELAY
       Object.assign(entry, { page, more: !!result.more, curated: result.curated !== false });
       shown.set(entry.service, entry);
     } catch (error) {
-      if (alive && entry.controller === controller && !controller.signal.aborted) entry.error = errorText(error);
+      if (owns(entry, controller) && !controller.signal.aborted) entry.error = errorText(error);
     } finally {
       if (entry.controller === controller) { entry.pending = false; entry.controller = null; notify(); }
     }
@@ -86,7 +90,7 @@ export function makePexelsBrowse({ api, changed = () => {}, delay = SEARCH_DELAY
       entry.error = ""; load(entry);
     },
     forget(service) {
-      for (const [key, entry] of listings) if (entry.service === service) { entry.controller?.abort(); listings.delete(key); }
+      for (const [key, entry] of listings) if (entry.service === service) { entry.controller?.abort(); entry.controller = null; entry.pending = false; listings.delete(key); }
       shown.delete(service); notify();
     },
     dispose() {

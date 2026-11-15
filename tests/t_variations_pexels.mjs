@@ -456,3 +456,14 @@ Deno.test("pexels services owner: no status check starts after disposal", async 
   assertEquals(statuses, []);
   assertEquals(owner.status("1").phase, "unknown");
 });
+
+Deno.test("pexels browse: a reply that lands after its service is forgotten never comes back", async () => {
+  const api = { pexelsPhotos: () => Promise.resolve({ curated: true, more: false, photos: [{ id: "old-1" }] }) };
+  const browse = makePexelsBrowse({ api, timers: manualTimers() });
+  browse.request("s", "");
+  browse.forget("s");
+  await settle();
+  assertEquals(browse.results("s", "").files, []);
+  assertEquals(browse.photo("s", "old-1"), null);
+  browse.dispose();
+});
