@@ -260,6 +260,21 @@ storage-event navigation. Successful listing resolves a missing remembered image
 within retained scope; offline/loading states never erase the pair. Source pin/
 refresh flags and judgments remain SQLite-owned.
 
+Ticked feed cards belong to the Store's single `makeSourceSelection()` owner.
+Browser storage key `kosmozoo.sourceSelection.v1` holds
+`{version:1,hosts:{id:{address,names:[string]}}}`. Sets survive source switches,
+feed/page reloads and engine restarts. A different address ignores the stored set.
+Untick, source-local Clear and successful deletes remove names. Accepted complete
+inventories prune absent names; partial ComfyUI root-only coverage never prunes
+(a flat folder's root-only inventory is complete). Count and action targets use
+the same intersection with the current inventory. Folder/filter/judgment exclusion
+and virtualization never change membership, nor does a successful Variations Run.
+Read-merge-write preserves other sources; the last write for one source wins,
+without storage-event synchronization. Corrupt/future documents stay untouched;
+storage failure retains session memory and reports once: `Card selection memory
+unavailable: <reason>; using session memory`. Variations drafts remain private to
+their open dialog, not this persisted card selection.
+
 Feed URLs retain `#host[#encoded-full-name]`, with optional `folder` and `filter`
 query parameters (empty values omitted), preserving unrelated query values.
 Explicit feed/diff URLs and Back/Forward win over memory, including fileless

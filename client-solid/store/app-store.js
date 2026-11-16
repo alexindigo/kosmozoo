@@ -26,6 +26,7 @@ import {
 import { isEntryName, isFolderPath, inFolder } from "/shared/entry-path.mjs";
 import { formatVersion } from "/shared/version.mjs";
 import { makeSourceBrowse } from "./source-browse.js";
+import { makeSourceSelection } from "./source-selection.js";
 import { makeSourceFreshness } from "./source-freshness.js";
 import { makeRuntimeIdentity } from "./runtime-identity.js";
 import { makeSourceRegistry, sameSourceIdentity } from "./source-registry.js";
@@ -83,7 +84,6 @@ export function makeAppStore({ subscribeSources = typeof window !== "undefined" 
     images: [],           // [{ id, host, filename, size, meta, judgment }]
     inventory: { revision: null, coverage: null, folders: [""], loading: false,
       subfolders: { supported: null, reason: "Output inventory has not loaded" } },
-    selected: {},         // id -> true (bulk actions; session-only)
     anchors: [],          // [{ name, src(dataURL), meta? }] — local drops, persisted
     views: {},            // per-resource version2 image-space crops (legacy read below)
     // workbench: the two-sided comparator. The pair is feed current ×
@@ -183,6 +183,14 @@ export function makeAppStore({ subscribeSources = typeof window !== "undefined" 
   const filterParameters = () => parameterNames(st.images);
   const [selectedFolder, setSelectedFolder] = createSignal("");
   let sourceBrowse, browseRevision = 0, browseTarget = { folder: "", current: undefined, filter: "" };
+  let sourceSelection;
+  const [selectionRevision, setSelectionRevision] = createSignal(0);
+  const selectionChanged = () => setSelectionRevision(value => value + 1);
+  const selected = createMemo(() => {
+    selectionRevision();
+    const id = host(), names = new Set(sourceSelection?.names(id, hostsView()[id]?.address) ?? []);
+    return Object.fromEntries(st.images.filter(image => image.host === id && names.has(image.filename)).map(image => [image.id, true]));
+  });
   const [browseRestore, setBrowseRestore] = createSignal(null);
   const [hostMenuOpen, setHostMenuOpen] = createSignal(false);
   const [menuOpen, setMenuOpen] = createSignal(false);
@@ -875,6 +883,10 @@ export function makeAppStore({ subscribeSources = typeof window !== "undefined" 
           arrivalSeq: e.arrivalSeq ?? null,
         };
       })));
+      if (inventory.coverage === "recursive" || s.source?.host.kind === "folder") {
+        sourceSelection.prune(name, s.address, inventory.entries.map(entry => entry.name));
+        selectionChanged();
+      }
       s.inventoryReady = true;
       s.pendingBrowse = false;
       setSt("inventory", { revision: inventory.revision, coverage: inventory.coverage,
@@ -977,7 +989,6 @@ export function makeAppStore({ subscribeSources = typeof window !== "undefined" 
     // Compensation belongs to the outgoing feed, never the new feed's scroll.
     setSuppressSettleCurrent(false);
     setSt("images", reconcile([]));
-    setSt("selected", reconcile({}));
     window_.clear();
     if (!name) return;
     actions.status.active("load", `loading image list from ${name}…`);
@@ -1131,12 +1142,14 @@ export function makeAppStore({ subscribeSources = typeof window !== "undefined" 
         setSt("diff", "open", false);
       }
     }
+    const addresses = images.map(img => hostsView()[img.host]?.address);
     const results = await Promise.allSettled(images.map((img) => api.deleteEntry(img.host, img.filename)));
     const okIds = new Set();
     results.forEach((r, i) => {
       if (r.status === "fulfilled") {
         okIds.add(images[i].id);
-        setSt("selected", images[i].id, undefined);
+        if (hostsView()[images[i].host]?.address === addresses[i]) sourceSelection.remove(images[i].host, addresses[i], [images[i].filename]);
+        selectionChanged();
       } else {
         console.error(`delete failed: ${images[i].filename}: ${r.reason?.message ?? r.reason}`);
       }
@@ -2028,7 +2041,12 @@ export function makeAppStore({ subscribeSources = typeof window !== "undefined" 
     },
 
     selected: {
-      set(id, on) { setSt("selected", id, on ? true : undefined); },
+      set(id, on) {
+        const image = st.images[imageIdx(id)];
+        if (!image || image.host !== host()) return false;
+        sourceSelection.set(image.host, hostsView()[image.host]?.address, image.filename, on);
+        selectionChanged(); return true;
+      },
     },
 
     // per-image zoom views: zoomable.mjs reads/writes through these (the
@@ -2627,8 +2645,8 @@ export function makeAppStore({ subscribeSources = typeof window !== "undefined" 
 
     // --- bulk actions on the selection -------------------------------------------
     bulk: {
-      images() { return st.images.filter((i) => st.selected[i.id]); },
-      clear() { setSt("selected", reconcile({})); },
+      images() { return st.images.filter((i) => selected()[i.id]); },
+      clear() { sourceSelection.clear(host(), hostsView()[host()]?.address); selectionChanged(); },
       async vote(vote) {
         const ids = actions.bulk.images().map((img) => img.id);
         const results = await Promise.all(ids.map((id) => actions.judgments.setVote(id, vote)));
@@ -2722,7 +2740,7 @@ export function makeAppStore({ subscribeSources = typeof window !== "undefined" 
       const choices = st.inventory.folders;
       return choices.includes(selectedFolder()) ? choices : [...choices, selectedFolder()].sort();
     },
-    get selected() { return st.selected; },
+    get selected() { return selected(); },
     get anchors() { return st.anchors; },
     get diff() { return st.diff; },
     diffPair,
@@ -2800,6 +2818,8 @@ export function makeAppStore({ subscribeSources = typeof window !== "undefined" 
 
   sourceBrowse = makeSourceBrowse({ storage, onError: (message) => actions.status.error(message),
     validCurrent: (address, name) => isEntryName(Object.values(hostsView()).find((source) => source.address === address)?.kind, name) });
+  sourceSelection = makeSourceSelection({ storage, onError: message => actions.status.error(message) });
+  selectionChanged();
   registerCoreCommands(handles, { ops: actions, state: stateObj });
   const publicActions = commandFacades(handles, actions, stateObj);
   inputPolicy = makeInputPolicy({ handles, state: stateObj, layers: keyLayers,

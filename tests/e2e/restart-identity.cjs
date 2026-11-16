@@ -39,6 +39,10 @@ async function restart() {
   try {
     await c.goto(B + '/#fake#' + name);
     await c.poll(`(async()=>${KZ}.state.images.some(image=>image.filename===${JSON.stringify(name)}))()`, 30000);
+    await invoke('selection.clear');
+    await invoke('feed.revealEntry', { id: `fake:${name}` });
+    await c.poll(`!!document.querySelector(${JSON.stringify(`.card[data-name="${name}"] .selcb`)})`, 30000);
+    await c.clickAt(`.card[data-name="${name}"] .selcb`);
     await open(); await field('.vz-prefix', 'kept-prefix-');
     await c.evaluate(`(async()=>{const bytes=await(await fetch('/api/collections/fake/entries/flux-lora.png/bytes')).arrayBuffer(),dt=new DataTransfer();dt.items.add(new File([bytes],'kept-native.png',{type:'image/png'}));const el=document.querySelector('.vz-imgfilespick');el.files=dt.files;el.dispatchEvent(new Event('change',{bubbles:true}));})()`);
     await c.poll(`!!document.querySelector('[data-image-kind="upload"]')&&!document.querySelector('.vz-messages')?.textContent.includes('Checking images')`, 30000);
@@ -49,12 +53,15 @@ async function restart() {
     await c.poll(`(async()=>${KZ}.state.hosts.fake?.sourceVersion.epoch!==${JSON.stringify(epoch)}&&!${KZ}.state.inventory.loading)()`, 60000);
     proof.after = await c.evaluate(origin); assert.deepEqual(proof.after, proof.before);
     assert.equal(await c.evaluate(`document.documentElement===window.__restartDocument&&document.querySelector('.vz-panel')===window.__restartPanel&&document.querySelector('[data-image-kind="upload"]')===window.__restartFileTile&&document.querySelector('.vz-prefix').value==='kept-prefix-'`), true, 'restart retains the mounted raw editor and native File tile without a page reload');
+    assert.equal(await c.evaluate(`(async()=>${KZ}.state.selected[${JSON.stringify(`fake:${name}`)}]===true)()`), true);
     await c.clickAt('.vz-folder-trigger'); await field('.vz-folder-path', folder); await c.clickAt('.vz-folder-add');
     await c.poll(`document.querySelectorAll('[data-image-kind="server-path"]').length>0`, 30000);
     await c.poll(`Number(document.querySelector('.vz-count')?.textContent)>0&&!document.querySelector('.vz-messages')?.textContent.includes('Checking images')`, 30000);
     proof.run = await invoke('variations.run'); assert(proof.run.submitted > 0, JSON.stringify(proof.run));
     assert(!/origin changed|removed or changed since/.test(await c.evaluate(`document.querySelector('.vz-messages')?.textContent??''`)));
     await c.poll(`!document.querySelector('.vz-panel')`, 20000);
+    await invoke('feed.revealEntry', { id: `fake:${name}` });
+    await c.poll(`document.querySelector(${JSON.stringify(`.card[data-name="${name}"] .selcb`)})?.checked===true`);
     await open(); await c.clickAt('.vz-current-image');
     const before = (await (await fetch(F + '/__test/enqueues')).json()).length;
     // The engine never removes its last source; keep another one registered.
