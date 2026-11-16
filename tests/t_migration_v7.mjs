@@ -217,3 +217,19 @@ Deno.test("migration v7: a non-ENOENT feedback read error fails the boot — no 
   raw.close();
   await rm(dir, { recursive: true, force: true });
 });
+
+Deno.test("migration v7: folded collections get durable incarnations that survive reopening", async () => {
+  const { dir, settings, store } = await openFixture();
+  const uuid = value => typeof value === "string" && /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/.test(value);
+  try {
+    const ids = ["a", "b", "c", "d"], first = Object.fromEntries(ids.map(id => [id, store.collectionGet(id).incarnation]));
+    for (const id of ids) {
+      assert(uuid(first[id]), `${id}: folded row has a stored incarnation`);
+      assertEquals(store.collectionIncarnation(id), first[id], `${id}: the in-memory identity is the stored one`);
+    }
+    store.close();
+    const reopened = await Store.open(dir, { settings });
+    try { for (const id of ids) assertEquals(reopened.collectionIncarnation(id), first[id], `${id}: unchanged after reopening`); }
+    finally { reopened.close(); }
+  } finally { await rm(dir, { recursive: true, force: true }); }
+});

@@ -397,8 +397,9 @@ export class Store {
       s.#q = Object.fromEntries(
         Object.entries(STATEMENTS).map(([k, sql]) => [k, s.#db.prepare(sql)]),
       );
-      for (const row of s.#q.collectionsAll.all()) s.#incarnations.set(row.id, { incarnation: row.incarnation, address: row.address });
       await s.#foldV7(settings);
+      // After every boot-time row writer (migrations and the legacy fold).
+      for (const row of s.#q.collectionsAll.all()) s.#incarnations.set(row.id, { incarnation: row.incarnation, address: row.address });
       s.arrivals = new SourceArrivals(s); // in-memory only; schema/settings unchanged
       const stats = await s.#importFeedbackV1(feedbackPath, settings);
       if (stats) {
@@ -712,8 +713,8 @@ export class Store {
         // collections from the settings hosts map
         const map = settings?.get("core.hosts", "map", {}) ?? {};
         for (const [name, address] of Object.entries(map)) {
-          d.prepare("INSERT OR IGNORE INTO collection (id, kind, address, created_at) VALUES (?, ?, ?, ?)")
-            .run(name, kindFor(address), address, now);
+          d.prepare("INSERT OR IGNORE INTO collection (id, kind, address, created_at, incarnation) VALUES (?, ?, ?, ?, ?)")
+            .run(name, kindFor(address), address, now, crypto.randomUUID());
         }
         // a host the old tables know but the map doesn't gets an offline
         // placeholder: the fold cannot know its address, so kind defaults to
@@ -727,8 +728,8 @@ export class Store {
               `fold v7: host "${r.host}" appears in ${table} but not the hosts map —` +
                 ` created as an offline collection (kind comfy, no address)`,
             );
-            d.prepare("INSERT OR IGNORE INTO collection (id, kind, address, created_at) VALUES (?, 'comfy', NULL, ?)")
-              .run(r.host, now);
+            d.prepare("INSERT OR IGNORE INTO collection (id, kind, address, created_at, incarnation) VALUES (?, 'comfy', NULL, ?, ?)")
+              .run(r.host, now, crypto.randomUUID());
           }
         }
         // content: ingested rows win; address-keyed rows only fill gaps via
