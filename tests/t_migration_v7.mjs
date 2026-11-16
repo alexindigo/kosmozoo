@@ -32,6 +32,7 @@ Deno.test("migration v7: tables folded, old tables dropped, idempotent", async (
     assertEquals(store.collectionGet("a"), {
       id: "a", kind: "comfy", address: "1.2.3.4:8188", link: null,
       created_at: store.collectionGet("a").created_at,
+      incarnation: store.collectionIncarnation("a"),
       pinned: 0, auto_refresh: 0,
     });
     assertEquals(store.collectionGet("b").kind, "folder");
@@ -96,7 +97,7 @@ Deno.test("migration v7: tables folded, old tables dropped, idempotent", async (
     // the old tables are gone and the fold is idempotent on re-open
     const raw = new Database(join(dir, "metadata.db"));
     const [ver] = raw.prepare("PRAGMA user_version").value();
-    assertEquals(ver, 10);
+    assertEquals(ver, 11);
     const tables = raw.prepare("SELECT name FROM sqlite_master WHERE type = 'table' ORDER BY name").all().map((r) => r.name);
     assert(tables.includes("content") && tables.includes("collection") && tables.includes("entry") && tables.includes("kv"));
     for (const old of ["metadata", "files", "images", "input_cache"]) {
@@ -215,4 +216,20 @@ Deno.test("migration v7: a non-ENOENT feedback read error fails the boot — no 
   assertEquals(raw.prepare("SELECT v FROM kv WHERE k = 'fold.feedback.v2'").value()?.[0] ?? null, null);
   raw.close();
   await rm(dir, { recursive: true, force: true });
+});
+
+Deno.test("migration v7: folded collections get durable incarnations that survive reopening", async () => {
+  const { dir, settings, store } = await openFixture();
+  const uuid = value => typeof value === "string" && /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/.test(value);
+  try {
+    const ids = ["a", "b", "c", "d"], first = Object.fromEntries(ids.map(id => [id, store.collectionGet(id).incarnation]));
+    for (const id of ids) {
+      assert(uuid(first[id]), `${id}: folded row has a stored incarnation`);
+      assertEquals(store.collectionIncarnation(id), first[id], `${id}: the in-memory identity is the stored one`);
+    }
+    store.close();
+    const reopened = await Store.open(dir, { settings });
+    try { for (const id of ids) assertEquals(reopened.collectionIncarnation(id), first[id], `${id}: unchanged after reopening`); }
+    finally { reopened.close(); }
+  } finally { await rm(dir, { recursive: true, force: true }); }
 });

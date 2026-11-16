@@ -1,15 +1,15 @@
 // Source identity is operation ownership, not attributes or authentication.
-const keys = ["source", "address", "kind", "epoch", "incarnation"];
+const keys = ["source", "address", "kind", "incarnation"];
 const object = value => value !== null && typeof value === "object" && !Array.isArray(value);
 export function validOrigin(value) {
   return object(value) && Object.keys(value).length === keys.length && keys.every(key => Object.hasOwn(value, key)) &&
-    ["source", "address", "epoch", "incarnation"].every(key => typeof value[key] === "string" && value[key].length > 0) &&
+    ["source", "address", "incarnation"].every(key => typeof value[key] === "string" && value[key].length > 0) &&
     ["folder", "comfy"].includes(value.kind);
 }
 export function sourceOrigin(source, record) {
   const value = { source, address: record?.address, kind: record?.kind,
-    epoch: record?.sourceVersion?.epoch, incarnation: record?.incarnation };
-  return validOrigin(value) && record.sourceVersion.incarnation === value.incarnation ? Object.freeze(value) : null;
+    incarnation: record?.incarnation };
+  return validOrigin(value) && record.sourceVersion?.incarnation === value.incarnation ? Object.freeze(value) : null;
 }
 export function sameOrigin(a, b) {
   return validOrigin(a) && validOrigin(b) && keys.every(key => a[key] === b[key]);

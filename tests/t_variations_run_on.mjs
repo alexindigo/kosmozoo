@@ -7,7 +7,7 @@ import { editorRig } from "./helpers/variation-editor.mjs";
 
 function rig() {
   const base = editorRig(); base.editor.dispose();
-  const origin = base.context.origin, other = { ...origin, source: "other", address: "other:8188", epoch: "other-epoch", incarnation: "other-incarnation" };
+  const origin = base.context.origin, other = { ...origin, source: "other", address: "other:8188", incarnation: "other-incarnation" };
   const current = { [origin.source]: origin, other };
   const editor = makeVariationEditor({ targets: [{ id: "fake:image.png", host: "fake", filename: "image.png", origin }], destination: other,
     services: base.services, currentOrigin: host => current[host] });

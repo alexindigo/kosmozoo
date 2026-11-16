@@ -24,7 +24,7 @@ Deno.test("deepscan B permutations: normal range/image tuples preserve count, or
 Deno.test("deepscan B variations HTTP: tiny increments reject before any upstream enqueue", async () => {
   const graph = { n: { class_type: "Node", inputs: { value: 0 } }, out: { class_type: "SaveImage", inputs: { images: ["n", 0], filename_prefix: "image" } } };
   const lifecycle = makeCollectionLifecycle({ fake: "fixture.invalid:8188" }), token = lifecycle.capture("fake");
-  const origin = { source: "fake", address: token.address, kind: "comfy", epoch: "test", incarnation: token.incarnation };
+  const origin = { source: "fake", address: token.address, kind: "comfy", incarnation: token.incarnation };
   const handlers = new Map(), jobs = [];
   register({ store: { hashFor: () => "a".repeat(64) }, ingest: { graph: async () => graph },
     backings: { accepting: () => true, capture: lifecycle.capture, isCurrent: lifecycle.isCurrent,

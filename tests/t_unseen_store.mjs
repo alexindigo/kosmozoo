@@ -24,7 +24,7 @@ async function withStore(run){
   const snapshot=()=>{const f=sourceFrame({h:source},++revision,epoch);f.sources.h.arrivals=arrivals;return f;};
   const stream=injectedSourceStream(snapshot());
   api.collections=async()=>sourceCollections({h:source});
-  api.inventory=async()=>clientInventory(structuredClone(rows),{coverage:'recursive',origin:{source:'h',address:source.address,kind:source.kind,epoch,incarnation:source.incarnation},arrivals});
+  api.inventory=async()=>clientInventory(structuredClone(rows),{coverage:'recursive',origin:{source:'h',address:source.address,kind:source.kind,incarnation:source.incarnation},arrivals});
   api.meta=async()=>({changed:false,pending:0});api.want=async()=>({pending:0});api.nodes=async()=>({});api.settings=async()=>({});api.setSettings=async()=>({});api.prefetch=async()=>({});api.runtime=async()=>({});
   const store=createRoot(cleanup=>{dispose=cleanup;return makeAppStore({subscribeSources:stream.subscribe,storage:null});});
   const publish=async(p,nextRows=rows)=>{arrivals=p;rows=nextRows;stream.snapshot(snapshot());await store.actions.ui.refresh();await turn();};
@@ -75,7 +75,8 @@ Deno.test('unseen Store: foreign origin and older/contradictory inventory cannot
   await publish(projection(2,2),[row('old.png',1),row('new.png',2)]);
   const inventory=api.inventory,good=await inventory(),ids=store.state.images.map(e=>e.id);
   for(const reply of [
-    {...good,origin:{...good.origin,epoch:'foreign'}},
+    {...good,origin:{...good.origin,incarnation:'foreign'}},
+    {...good,origin:{...good.origin,epoch:'legacy'}},
     {...good,arrivals:projection(1,1)},
     {...good,arrivals:projection(2,2,[[1,1]])},
   ]){

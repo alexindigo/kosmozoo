@@ -71,12 +71,12 @@ Deno.test("picker feeds: foreign byte cache binds origin/root/raw name and captu
 });
 
 Deno.test("picker feeds API: opt-in images-v1 preserves legacy shapes and fences origins before/after listing", async () => {
-  const origin = { source: "c", address: "fake:8188", kind: "comfy", epoch: "e", incarnation: "i" };
+  const origin = { source: "c", address: "fake:8188", kind: "comfy", incarnation: "i" };
   let current = origin, reads = 0, gate = null;
   const files = ["nested/a.png", "movie.mp4", "sound.wav", "hidden.png", "gone.png"].map(name => ({ name, size: 1 }));
   const inventory = Object.assign(async () => { reads++; if (gate) await gate.promise; return { items: files }; }, { capture: () => current, isCurrent: token => token === current });
   const router = makeRouter({ hosts: { c: origin.address }, inventory,
-    sourceActivity: { source: () => ({ ...current, sourceVersion: { epoch: current.epoch, incarnation: current.incarnation } }) },
+    sourceActivity: { source: () => ({ ...current, sourceVersion: { epoch: "e", incarnation: current.incarnation } }) },
     backings: { backingFor: () => ({ list: async () => { reads++; if (gate) await gate.promise; return files; } }) },
     store: { entriesForCollection: () => [{ name: "hidden.png", hidden: 1 }, { name: "gone.png", state: "gone" }], arrivals: { inventory: () => null } } });
   const get = (query, expected = origin) => router.handle(new Request(`http://x/api/collections/c/entries?${query}`, { headers: expected ? { "X-Kosmozoo-Origin": JSON.stringify(expected) } : {} }));

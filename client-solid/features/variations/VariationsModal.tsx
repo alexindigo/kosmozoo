@@ -297,7 +297,7 @@ function ModalBody(props) {
     resourceId: `target-${props.images.findIndex(image => image.id === target.id)}`, leaseId: original.leaseId })
     : services.inputThumbnail(target.host, target.filename, target.origin, "output");
   const currentThumbnail = row => original ? services.historyThumbnail({ runId: original.id, resourceId: original.targets[0].graphResources[row.id], leaseId: original.leaseId }) : services.inputThumbnail(image.host, row.current, image.origin, row.currentRoot);
-  const unavailable = () => targets().find(target => target.unavailable)?.unavailable ?? (original && !targets().every(target => sameOrigin(target.origin, sourceOrigin(target.host, store.state.hosts[target.host]))) ? "Original source unavailable or changed. Reopen this saved run after reconnecting." : null);
+  const unavailable = () => targets().find(target => target.unavailable)?.unavailable ?? (original ? read(() => editor.sourceProblem()) : null);
   let initializedImages = false;
   createEffect(() => {
     if (!read(editor.ready) || !strParams().length) return;

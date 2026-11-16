@@ -32,8 +32,9 @@ export class Prefetch {
     this.settings = settings;
     this.ingest = ingest;
     this.ownsInventory = !inventory;
-    this.inventory = inventory ?? makeCollectionInventory(hosts);
-    const lifecycle = makeCollectionLifecycle(hosts);
+    const incarnationOf = (id, address) => store.collectionIncarnation?.(id, address);
+    this.inventory = inventory ?? makeCollectionInventory(hosts, { incarnationOf });
+    const lifecycle = makeCollectionLifecycle(hosts, undefined, { incarnationOf });
     this.capture = this.inventory.capture ?? lifecycle.capture;
     this.isCurrent = this.inventory.isCurrent ?? lifecycle.isCurrent;
     this.clock = clock;

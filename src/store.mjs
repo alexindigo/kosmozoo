@@ -1,4 +1,4 @@
-// src/store.mjs - the engine store: content / collection / entry (schema v10)
+// src/store.mjs - the engine store: content / collection / entry (schema v11)
 // + the discovered-node registry.
 //
 // content — what the bytes ARE: hash → meta, dims, workflow flag
@@ -18,7 +18,7 @@ import { splitHostKey } from "./collections.mjs";
 import { SourceArrivals } from "./source-arrivals.mjs";
 import { isResourceRoot } from "./parameters.mjs";
 
-const SCHEMA_VERSION = 10;
+const SCHEMA_VERSION = 11;
 const CORE_JUDGMENT_FIELDS = new Set(["vote", "favorite", "bookmark", "notes"]);
 
 const MIGRATIONS = [
@@ -208,6 +208,14 @@ MIGRATIONS.push(db => db.transaction(() => db.exec(`
   INSERT OR IGNORE INTO kv(k,v) VALUES('variations.history.revision','0');
 `))());
 
+// v10 -> v11: registration identity survives engine lifetimes and upgrade retries.
+MIGRATIONS.push(db => db.transaction(() => {
+  const columns = db.prepare("PRAGMA table_info(collection)").all();
+  if (!columns.some(column => column.name === "incarnation")) db.exec("ALTER TABLE collection ADD COLUMN incarnation TEXT");
+  const assign = db.prepare("UPDATE collection SET incarnation = ? WHERE id = ? AND incarnation IS NULL");
+  for (const row of db.prepare("SELECT id FROM collection WHERE incarnation IS NULL").all()) assign.run(crypto.randomUUID(), row.id);
+})());
+
 // Every recurring statement is prepared ONCE (audit D9: a prepare per call
 // is a compile per call — a 3000-file listing compiled ~10k statements).
 // The registry is prepared eagerly in open right after the migrations.
@@ -257,14 +265,14 @@ const STATEMENTS = {
   kvGet: "SELECT v FROM kv WHERE k = ?",
   kvSet: "INSERT INTO kv (k, v) VALUES (?, ?) ON CONFLICT(k) DO UPDATE SET v = excluded.v",
   bumpMeta: "UPDATE kv SET v = CAST(CAST(v AS INTEGER) + 1 AS TEXT) WHERE k = 'meta_version'",
-  collectionsAll: "SELECT id, kind, address, link, created_at, pinned, auto_refresh FROM collection ORDER BY rowid",
-  collectionGet: "SELECT id, kind, address, link, created_at, pinned, auto_refresh FROM collection WHERE id = ?",
+  collectionsAll: "SELECT id, kind, address, link, created_at, pinned, auto_refresh, incarnation FROM collection ORDER BY rowid",
+  collectionGet: "SELECT id, kind, address, link, created_at, pinned, auto_refresh, incarnation FROM collection WHERE id = ?",
   // a re-add with a DIFFERENT address must not silently re-point the id —
   // the route answers 409; the statement itself never updates
-  collectionAdd: "INSERT OR IGNORE INTO collection (id, kind, address, created_at, pinned, auto_refresh) VALUES (?, ?, ?, ?, ?, ?)",
+  collectionAdd: "INSERT OR IGNORE INTO collection (id, kind, address, created_at, pinned, auto_refresh, incarnation) VALUES (?, ?, ?, ?, ?, ?, ?)",
   collectionPatch: "UPDATE collection SET pinned = COALESCE(?, pinned), auto_refresh = COALESCE(?, auto_refresh) WHERE id = ?",
   collectionRemove: "DELETE FROM collection WHERE id = ?",
-  ensureCollection: "INSERT OR IGNORE INTO collection (id, kind, address, created_at) VALUES (?, 'comfy', NULL, ?)",
+  ensureCollection: "INSERT OR IGNORE INTO collection (id, kind, address, created_at, incarnation) VALUES (?, 'comfy', NULL, ?, ?)",
   nodeRegGet: "SELECT title, inputs FROM node_registry WHERE class_type = ?",
   nodeRegPut: "INSERT INTO node_registry (class_type, title, inputs, updated_at) VALUES (?, ?, ?, ?) ON CONFLICT(class_type) DO UPDATE SET title = excluded.title, inputs = excluded.inputs, updated_at = excluded.updated_at",
   nodeRegAll: "SELECT class_type, title, inputs FROM node_registry",
@@ -368,6 +376,9 @@ export class Store {
   #ready = false;
   #collectionListeners = new Set();
   #collectionRevisions = new Map();
+  // Lifecycles ask on every currency check: answer from memory, never SQL
+  // (cheap, and safe for late callbacks after close).
+  #incarnations = new Map();
   // Session-local change index over the durable cursor. Older/restarted
   // cursors receive a full snapshot; no delivery history enters the schema.
   #metaFloor = 0;
@@ -387,6 +398,8 @@ export class Store {
         Object.entries(STATEMENTS).map(([k, sql]) => [k, s.#db.prepare(sql)]),
       );
       await s.#foldV7(settings);
+      // After every boot-time row writer (migrations and the legacy fold).
+      for (const row of s.#q.collectionsAll.all()) s.#incarnations.set(row.id, { incarnation: row.incarnation, address: row.address });
       s.arrivals = new SourceArrivals(s); // in-memory only; schema/settings unchanged
       const stats = await s.#importFeedbackV1(feedbackPath, settings);
       if (stats) {
@@ -700,8 +713,8 @@ export class Store {
         // collections from the settings hosts map
         const map = settings?.get("core.hosts", "map", {}) ?? {};
         for (const [name, address] of Object.entries(map)) {
-          d.prepare("INSERT OR IGNORE INTO collection (id, kind, address, created_at) VALUES (?, ?, ?, ?)")
-            .run(name, kindFor(address), address, now);
+          d.prepare("INSERT OR IGNORE INTO collection (id, kind, address, created_at, incarnation) VALUES (?, ?, ?, ?, ?)")
+            .run(name, kindFor(address), address, now, crypto.randomUUID());
         }
         // a host the old tables know but the map doesn't gets an offline
         // placeholder: the fold cannot know its address, so kind defaults to
@@ -715,8 +728,8 @@ export class Store {
               `fold v7: host "${r.host}" appears in ${table} but not the hosts map —` +
                 ` created as an offline collection (kind comfy, no address)`,
             );
-            d.prepare("INSERT OR IGNORE INTO collection (id, kind, address, created_at) VALUES (?, 'comfy', NULL, ?)")
-              .run(r.host, now);
+            d.prepare("INSERT OR IGNORE INTO collection (id, kind, address, created_at, incarnation) VALUES (?, 'comfy', NULL, ?, ?)")
+              .run(r.host, now, crypto.randomUUID());
           }
         }
         // content: ingested rows win; address-keyed rows only fill gaps via
@@ -871,6 +884,13 @@ export class Store {
     return this.#q.collectionGet.get(id) ?? null;
   }
 
+  // An incarnation names one registration at one address; another live
+  // address for the same id is not that registration.
+  collectionIncarnation(id, address) {
+    const known = this.#incarnations.get(id);
+    return known && (address === undefined || known.address === address) ? known.incarnation : null;
+  }
+
   subscribeCollections(listener) {
     this.#collectionListeners.add(listener);
     return () => this.#collectionListeners.delete(listener);
@@ -899,7 +919,8 @@ export class Store {
 
   collectionAdd(id, address, { pinned = false, autoRefresh = false } = {}) {
     const before = this.collectionGet(id);
-    this.#q.collectionAdd.run(id, kindFor(address), address, Date.now(), pinned ? 1 : 0, autoRefresh ? 1 : 0);
+    this.#q.collectionAdd.run(id, kindFor(address), address, Date.now(), pinned ? 1 : 0, autoRefresh ? 1 : 0, crypto.randomUUID());
+    const row = this.collectionGet(id); this.#incarnations.set(id, { incarnation: row.incarnation, address: row.address });
     if (!before) this.#collectionCommitted(id, this.collectionGet(id));
   }
 
@@ -918,6 +939,7 @@ export class Store {
   collectionRemove(id) {
     const before = this.collectionGet(id);
     this.#q.collectionRemove.run(id);
+    this.#incarnations.delete(id);
     if (before) this.#collectionCommitted(id, null);
   }
 
@@ -952,7 +974,8 @@ export class Store {
   // INSERT OR IGNORE preserves placeholders too; an add never rewrites them.
   #ensureCollection(id) {
     const before = this.collectionGet(id);
-    this.#q.ensureCollection.run(id, Date.now());
+    this.#q.ensureCollection.run(id, Date.now(), crypto.randomUUID());
+    const row = this.collectionGet(id); this.#incarnations.set(id, { incarnation: row.incarnation, address: row.address });
     if (!before) this.#collectionCommitted(id, this.collectionGet(id));
   }
 

@@ -14,6 +14,7 @@ import { validImageSet, mergeImages, sameImage, imageIdentity, imageReference, i
 import { classifyImageFiles } from "./image-drop.js";
 import { connectionPresentation } from "./field-filter.js";
 import { estimateGenerationTime, knownGenerationTime } from "./time-estimate.js";
+import { staleSource, sourceFailure } from "./source-message.js";
 import { makeVariationRecipe, validRecipeValue as validValue, freezeRecipe as freeze, moveRecipeImage } from "./recipe.js";
 export { RECIPE_FIELDS as EDITOR_FIELDS } from "./recipe.js";
 const filename = value => typeof value === "string" && value.length > 0 && !/[\\/\x00-\x1f\x7f]/.test(value) && ![".", ".."].includes(value);
@@ -180,10 +181,10 @@ export function makeVariationEditor({ targets, cohortMode, destination: initialD
   const retireMembership = id => { membershipGenerations.set(id, (membershipGenerations.get(id) ?? 0) + 1); };
   const check = (ticket, target) => {
     if (!owns(ticket)) throw Object.assign(new Error("Operation retired; work was kept"), { stale: true });
-    if (ticket.destination && !sameOrigin(ticket.destination, currentOrigin(ticket.destination.source))) throw Object.assign(new Error("Run destination changed; nothing more was sent. Your work has been kept."), { stale: true });
-    if (!originCurrent(target)) throw Object.assign(new Error("Source origin changed; no follow-up was authorized. Your work has been kept."), { stale: true });
+    if (ticket.destination && !sameOrigin(ticket.destination, currentOrigin(ticket.destination.source))) throw Object.assign(new Error(staleSource(ticket.destination.source)), { stale: true });
+    if (!originCurrent(target)) throw Object.assign(new Error(staleSource(target.host)), { stale: true });
   };
-  const physicalMatch = (a, b) => validOrigin(a) && validOrigin(b) && a.address === b.address && a.kind === b.kind && a.epoch === b.epoch;
+  const physicalMatch = (a, b) => validOrigin(a) && validOrigin(b) && a.address === b.address && a.kind === b.kind && a.incarnation === b.incarnation;
   const inspectionQueue = [], pendingInspections = new Set();
   let inspecting = 0;
   const pumpInspections = () => {
@@ -203,10 +204,10 @@ export function makeVariationEditor({ targets, cohortMode, destination: initialD
       const pending = new Promise(resolve => { finish = resolve; }); pendingInspections.add(pending);
       inspectionQueue.push(async () => {
         try {
-          if (!alive || !originCurrent(target)) throw new Error("Source origin changed; your images were kept");
+          if (!alive || !originCurrent(target)) throw new Error(staleSource(target.host));
           const inspect = item.kind === "server-path" ? services.inspectPath : services.inspectImage;
           const result = await inspect(target.host, item.kind === "server-path" ? item.path : item.file, entry.metadata.current, currentRoot(entry.metadata), target.origin, uploadFamily(item.name, entry.metadata.files));
-          if (!alive || !originCurrent(target) || !sameOrigin(result?.origin, target.origin)) throw new Error("Source origin changed; your images were kept");
+          if (!alive || !originCurrent(target) || !sameOrigin(result?.origin, target.origin)) throw new Error(staleSource(target.host));
           if (!/^[a-f0-9]{64}$/.test(result.hash) || !/^[a-f0-9]{64}$/.test(result.currentHash)) throw new Error("Image comparison unavailable");
           const existing = result.existing ?? [];
           if (!Array.isArray(existing) || existing.some(item => !filename(item?.name) || !/^[a-f0-9]{64}$/.test(item.hash))) throw new Error("Upload comparison unavailable");
@@ -271,9 +272,10 @@ export function makeVariationEditor({ targets, cohortMode, destination: initialD
       if (!alive || deciding || running) throw new Error("Finish the current action before recalling history");
       const cohort = [];
       for (const target of selectedTargets) {
-        if (!originCurrent(target)) throw new Error("Source origin changed; reopen Variations before recalling");
+        if (!originCurrent(target)) throw new Error(staleSource(target.host));
         const data = catalogues.get(target.id) ?? await services.probe(target);
-        if (!alive || deciding || running || recipe.revision() !== revision || !originCurrent(target)) throw new Error("Editor changed while reading history; choose it again");
+        if (!originCurrent(target)) throw new Error(staleSource(target.host));
+        if (!alive || deciding || running || recipe.revision() !== revision) throw new Error("Editor changed while reading history; choose it again");
         cohort.push(data);
       }
       const plan = planHistoryOverlay(saved, captureRows(), cohort, batch ? "bulk" : "single");
@@ -331,6 +333,7 @@ export function makeVariationEditor({ targets, cohortMode, destination: initialD
       return { ...result, state: "kept", reason: "Newer edits have been kept.", text: `submitted ${result.submitted}/${result.total} — newer edits have been kept` };
     },
     ready: () => catalogueReady,
+    sourceProblem() { const target = selectedTargets.find(target => !originCurrent(target)); return target ? staleSource(target.host) : null; },
     sourceInputs: (origin, root = "input") => sourceRecord(inputCatalogues, origin, null, root) ?? { files: [], pending: false, error: "" },
     async loadSourceInputs(origin, retry = false, root = "input") {
       if (!alive || !["input", "output"].includes(root) || !validOrigin(origin) || !sameOrigin(origin, currentOrigin(origin.source))) return;
@@ -341,7 +344,8 @@ export function makeVariationEditor({ targets, cohortMode, destination: initialD
       try {
         const data = await services.inputList(origin.source, origin, root);
         if (!ownsRecord()) return;
-        if (!sameOrigin(data?.origin, origin) || data.root !== root || !Array.isArray(data.files)) throw new Error("Source-bound image catalogue unavailable");
+        if (!sameOrigin(data?.origin, origin)) throw new Error(staleSource(origin.source));
+        if (data.root !== root || !Array.isArray(data.files)) throw new Error("Source-bound image catalogue unavailable");
         record.files = data.files.map(file => typeof file === "string" ? file : file.name).filter(resourceName);
         record.loaded = true;
         if (root === "input" && sameOrigin(origin, capturedTargets[0].origin)) this.installInputs(data);
@@ -423,9 +427,10 @@ export function makeVariationEditor({ targets, cohortMode, destination: initialD
     async addFolder(id, path) {
       if (!alive || deciding || running) throw new Error("Finish the current action before adding a folder");
       const target = capturedTargets[0];
-      if (!originCurrent(target)) throw new Error("Source origin changed; your images were kept");
+      if (!originCurrent(target)) throw new Error(staleSource(target.host));
       const ticket = membershipTicket(id);
       const result = await services.listFolder(path);
+      if (!originCurrent(target)) throw new Error(staleSource(target.host));
       if (running || !admitsMembership(ticket)) throw new Error("The editor changed while reading the folder. Add it again when ready.");
       if (!validImageSet(result?.items) || result.items.some(item => item.kind !== "server-path")) throw new Error("Invalid folder image listing");
       this.addImages(id, result.items);
@@ -460,7 +465,7 @@ export function makeVariationEditor({ targets, cohortMode, destination: initialD
       if (!alive) return;
       const target = capturedTargets[0];
       if (!archived && (!validContext(data?.context) || !sameOrigin(data.context.origin, target.origin))) {
-        publish({ text: "Source-bound catalogue unavailable; your edits have been kept.", ok: false, state: "unavailable" }); return;
+        publish({ text: staleSource(target.host), ok: false, state: "unavailable" }); return;
       }
       if (data.destination && !sameOrigin(data.destination.origin, destination)) return;
       parameterIndex(allParameters(data)); parameterIndex(catalogueParams(data));
@@ -610,7 +615,7 @@ export function makeVariationEditor({ targets, cohortMode, destination: initialD
           check(ticket, target);
           const data = target.id === capturedTargets[0].id ? catalogues.get(target.id) : await services.probe(target);
           check(ticket, target);
-          if (!validContext(data?.context) || !sameOrigin(data.context.origin, target.origin)) throw new Error("Source-bound catalogue unavailable; your work has been kept.");
+          if (!validContext(data?.context) || !sameOrigin(data.context.origin, target.origin)) throw new Error(staleSource(target.host));
           parameterIndex(catalogueParams(data));
           // Every target admits the same plan before any transfer: carriers from
           // the count estimate, transfers by that target's own resource contract.
@@ -631,7 +636,8 @@ export function makeVariationEditor({ targets, cohortMode, destination: initialD
               const form = new FormData(); form.append("image", item.file, item.name);
               receipt = await services.uploadInput(uploadTarget.host, form, uploadTarget.origin);
             }
-            if (!filename(receipt?.name) || !sameOrigin(receipt.origin, uploadTarget.origin)) throw new Error(`${item.name}: upload acknowledgement unavailable; your image was kept`);
+            if (!sameOrigin(receipt?.origin, uploadTarget.origin)) throw new Error(staleSource(uploadTarget.host));
+            if (!filename(receipt?.name)) throw new Error(`${item.name}: upload acknowledgement unavailable; your image was kept`);
             effects.uploads.push(snapshotDraft(receipt));
             check(ticket, uploadTarget);
             uploads.set(identity, freeze(snapshotDraft(receipt)));
@@ -657,7 +663,7 @@ export function makeVariationEditor({ targets, cohortMode, destination: initialD
         await Promise.all(operation.targetPlans.map(async ({ target, request, expectedTotal }) => {
           try {
             check(ticket, target);
-            if ([...uploads.values()].some(receipt => !physicalMatch(receipt.origin, target.origin))) throw new Error("Upload resource origin changed; no follow-up was authorized");
+            if ([...uploads.values()].some(receipt => !physicalMatch(receipt.origin, target.origin))) throw new Error(staleSource(target.host));
             const context = request.context;
             let response;
             try { response = await services.run(request); }
@@ -673,7 +679,7 @@ export function makeVariationEditor({ targets, cohortMode, destination: initialD
             if (!response.ok || !Number.isSafeInteger(data?.submitted) || !Number.isSafeInteger(data?.total) || data.total <= 0 || data.submitted !== data.total ||
               !Array.isArray(data.errors ?? []) || data.errors?.length) countsComplete = false;
             check(ticket, target);
-            if (!response.ok) { failures.push(`${target.filename}: ${data?.error ?? response.text ?? `error ${response.status}`}`); return; }
+            if (!response.ok) { failures.push(sourceFailure(response.status, data?.error ?? response.text ?? `error ${response.status}`, ticket.destination?.source ?? target.host)); return; }
              const proof = request.history ? acknowledgedHistoryFields(request, data) : acknowledgedFields(request, data);
             for (const error of Array.isArray(data?.errors) ? data.errors : []) failures.push(error?.error ?? String(error));
             if (!proof || data.total !== expectedTotal || !sameContext(context, data.acknowledgement?.context)) {

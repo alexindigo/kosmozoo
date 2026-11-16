@@ -84,7 +84,7 @@ Deno.test("submission: real variations run sends every batch permutation through
   const addr = `127.0.0.1:${fake.addr.port}`, binding = comfy.createBinding(addr);
   const lifecycle = makeCollectionLifecycle({ fake: addr });
   const token = lifecycle.capture("fake");
-  const origin = { source: "fake", address: addr, kind: "comfy", epoch: "test", incarnation: token.incarnation };
+  const origin = { source: "fake", address: addr, kind: "comfy", incarnation: token.incarnation };
   register({ store: { hashFor: () => "a".repeat(64) }, ingest: { graph: async () => source },
     backings: { accepting: () => true, capture: lifecycle.capture, isCurrent: lifecycle.isCurrent,
       source: () => ({ ...origin, sourceVersion: origin }), comfy: () => ({

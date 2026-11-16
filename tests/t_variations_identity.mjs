@@ -65,7 +65,7 @@ Deno.test("identity: catalogue resolution and duplicate IDs fail before editor s
   assertThrows(() => shared.parameterIndex([p, p]), Error, "Duplicate");
   assertThrows(() => shared.parameterIndex([{ ...p, nodeIds: ["missing"] }], graph));
   assertThrows(() => server.mutateGraph(graph, { [p.id]: .2 }, [p, p]), Error, "Duplicate");
-  const origin = { source: "fake", address: "fake:8188", kind: "comfy", epoch: "epoch", incarnation: "instance" };
+  const origin = { source: "fake", address: "fake:8188", kind: "comfy", incarnation: "instance" };
   const editor = makeVariationEditor({ targets: [{ id: "fake:a.png", host: "fake", filename: "a.png", origin }],
     services: {}, currentOrigin: () => origin });
   assertThrows(() => editor.installCatalogue({ context: { origin, graphHash: "a".repeat(64) },
@@ -91,7 +91,7 @@ Deno.test("identity: equal image values/titles never merge rows or their native 
   source['76']._meta = source['81']._meta = { title: 'Reference' };
   source['76'].inputs.image = source['81'].inputs.image = 'same.png';
   const data = server.parameterCatalogue(source, { enums });
-  const origin = { source: 'fake', address: 'fake:8188', kind: 'comfy', epoch: 'epoch', incarnation: 'instance' };
+  const origin = { source: 'fake', address: 'fake:8188', kind: 'comfy', incarnation: 'instance' };
   data.context = { origin, graphHash: 'a'.repeat(64) };
   const editor = makeVariationEditor({ targets: [{ id: 'fake:a.png', host: 'fake', filename: 'a.png', origin }],
     services: {}, currentOrigin: () => origin });

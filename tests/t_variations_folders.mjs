@@ -78,7 +78,7 @@ Deno.test("folder images: readding a mutable path refreshes its evidence; late f
   editor.removeImage("image.image", item); editor.addImages("image.image", [item]); await editor.inspectImages();
   assert(!editor.rows("images")["image.image"].images[0].sameCurrent); assertEquals(calls, 2);
   const pending = editor.addFolder("image.image", "/images"); rig.replaceSource(); release({ items: [{ ...item, path: "/elsewhere/pick.png" }] });
-  await assertRejects(() => pending, Error, "editor changed"); assertEquals(editor.rows("images")["image.image"].items, [item]); editor.dispose();
+  await assertRejects(() => pending, Error, "was removed or changed since Variations opened"); assertEquals(editor.rows("images")["image.image"].items, [item]); editor.dispose();
 });
 
 Deno.test("folder images: later path reinspection cannot change the captured Run's receipt-backed graph value", async () => {

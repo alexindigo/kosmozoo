@@ -5,7 +5,7 @@ import { loadImage } from "./comfy-object-info.mjs";
 import { generatePermutations, permutationAxes, resolveRelativeRanges } from "../../src/features/variations/shared.mjs";
 
 export function editorRig(overrides = {}) {
-  let origin = { source: "fake", address: "fake:8188", kind: "comfy", epoch: "test-epoch", incarnation: "test-incarnation" };
+  let origin = { source: "fake", address: "fake:8188", kind: "comfy", incarnation: "test-incarnation" };
   const context = { origin: { ...origin }, graphHash: "a".repeat(64) };
   // Production-shaped probe: the same catalogue owner and normalized backend
   // declarations as the engine, including LoadImage's listing/upload contract.
