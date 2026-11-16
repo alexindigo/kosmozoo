@@ -130,7 +130,7 @@ export function makeHistoryClient({ api, changed = () => {} }) {
           await api.historyBytes(ticket.runId, id, file);
         }
       }));
-      const prepared = await api.historyPrepare(ticket.runId);
+      const prepared = await api.historyPrepare(ticket.runId, targets[0]?.host, ticket.destination?.source);
       for (const target of targets) check(target);
       return prepared;
     },

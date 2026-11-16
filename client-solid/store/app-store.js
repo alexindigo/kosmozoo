@@ -54,6 +54,7 @@ import { makeSourceDiscovery, knownCapabilities, enrichCapabilities } from "./so
 import { observeNativeMagnification } from "../lib/native-magnification.js";
 import { emptyFilter, normalizeFilter, compileFilter, filterConditions, parameterNames } from "/js/feed-filter-model.mjs";
 import { isContentHash } from "/shared/content-hash.mjs";
+import { sameOrigin, sourceOrigin } from "/shared/source-origin.mjs";
 import { validItemArrivals } from '/js/api.mjs';
 import { makeFeedExposure } from '../lib/feed-exposure.js';
 import { makeFaviconAttention } from '../lib/favicon-attention.js';
@@ -838,9 +839,8 @@ export function makeAppStore({ subscribeSources = typeof window !== "undefined" 
     // An injected inventory without arrival telemetry cannot acknowledge any
     // item. The real API adapter requires the negotiated modern envelope.
     if (inventory.origin === undefined && inventory.arrivals === undefined) return true;
-    const origin=inventory.origin, record=s.source;
-    return origin?.source===s.id && origin.address===record?.address && origin.kind===record.host.kind &&
-      origin.epoch===record.epoch && origin.incarnation===record.incarnation &&
+    const record=s.source;
+    return sameOrigin(inventory.origin, sourceOrigin(s.id, record?.host)) &&
       validItemArrivals(inventory.arrivals) && record.unseen.compatible(inventory.arrivals);
   }
 

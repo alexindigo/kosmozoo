@@ -15,7 +15,7 @@ async function rig(graph = fixture, filename = "Qwen_image_2.1_00330.png", outpu
   const routes = new Map(), jobs = [], requests = [], replies = [];
   const lifecycle = makeCollectionLifecycle({ comfyui: "in-memory:8188" });
   const token = lifecycle.capture("comfyui");
-  const origin = { source: "comfyui", address: token.address, kind: "comfy", epoch: "naming-test", incarnation: token.incarnation };
+  const origin = { source: "comfyui", address: token.address, kind: "comfy", incarnation: token.incarnation };
   register({ store: { hashFor: () => "a".repeat(64) }, ingest: { graph: async () => structuredClone(graph) },
     backings: { accepting: () => true, capture: lifecycle.capture, isCurrent: lifecycle.isCurrent,
       source: () => ({ ...origin, sourceVersion: origin }), comfy: () => ({

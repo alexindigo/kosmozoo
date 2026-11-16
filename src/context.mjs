@@ -66,6 +66,7 @@ export async function buildContext({ env = Deno.env.toObject(), fakes = {}, star
     env.KOZMOZOO_CACHE ?? `${env.HOME ?? "/tmp"}/.local/share/kosmozoo/cache`,
   );
   const inventory = remember("inventory", fakes.inventory ?? backings.makeCollectionInventory(hosts, {
+    incarnationOf: (id, address) => store.collectionIncarnation(id, address),
     bindingFactory: scopedBackings.createBindingFor,
     onSnapshot: (id, _address, snapshot, token) => store.arrivals.observe(id, snapshot.items.map(item => item.name), token),
     onRetire: token => store.arrivals.forget(token.id),

@@ -252,7 +252,7 @@ Deno.test("roots: Details discovery and the viewer side codec keep root + file i
 Deno.test("roots: a temp current excludes equal temp bytes and keeps its exact assignment, without upload", async () => {
   const graph = { image: { class_type: "LoadImage", inputs: { image: `${NAME} [temp]` } }, out: { class_type: "SaveImage", inputs: { images: ["image", 0], filename_prefix: "x" } } };
   const schema = objectInfoView({ LoadImage: loadImage([NAME]), SaveImage: saveImage() });
-  const origin = { source: "c", address: "c:1", kind: "comfy", epoch: "e", incarnation: "i" };
+  const origin = { source: "c", address: "c:1", kind: "comfy", incarnation: "i" };
   const catalogue = { context: { origin, graphHash: "a".repeat(64) }, ...parameterCatalogue(graph, schema),
     nodes: Object.entries(graph).map(([id, node]) => ({ id, type: node.class_type, title: null, outputs: schema.outputs.get(node.class_type) ?? null })) };
   const kinds = [], runs = [];

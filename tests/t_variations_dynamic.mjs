@@ -11,7 +11,7 @@ const mode = paramId("459:500", "sampling_mode"), temperature = paramId("459:500
 
 function rig(graph, info) {
   const routes = new Map(), jobs = [], lifecycle = makeCollectionLifecycle({ fake: "fixture.invalid:8188" });
-  const token = lifecycle.capture("fake"), origin = { source: "fake", address: token.address, kind: "comfy", epoch: "test", incarnation: token.incarnation };
+  const token = lifecycle.capture("fake"), origin = { source: "fake", address: token.address, kind: "comfy", incarnation: token.incarnation };
   register({ store: { hashFor: () => "a".repeat(64) }, ingest: { graph: async () => graph },
     backings: { accepting: () => true, capture: lifecycle.capture, isCurrent: lifecycle.isCurrent,
       source: () => ({ ...origin, sourceVersion: origin }), comfy: () => ({ objectInfo: async () => info,

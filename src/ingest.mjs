@@ -45,7 +45,7 @@ export class Ingest {
     this.#hosts = hosts;
     this.#cache = cache;
     this.#revalidateMs = revalidateMs;
-    const lifecycle = capture && isCurrent ? null : makeCollectionLifecycle(hosts);
+    const lifecycle = capture && isCurrent ? null : makeCollectionLifecycle(hosts, undefined, { incarnationOf: (id, address) => store.collectionIncarnation?.(id, address) });
     this.#capture = capture ?? lifecycle.capture;
     const current = isCurrent ?? lifecycle.isCurrent;
     this.#isCurrent = token => !lifetime?.signal.aborted && current(token);

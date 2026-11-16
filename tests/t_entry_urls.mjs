@@ -6,7 +6,7 @@ import { imageRequestUrl } from "../client-solid/lib/img-measure.js";
 import * as comfy from "../src/backings/comfy.mjs";
 
 const names = ["#athena.png", "literal%2F%25.png", "?x&y=1.png", "space café 日本.png", "literal [input].png", "x".repeat(196) + ".png", "nested/# %.png"];
-const collection = "source #?% café", origin = { source: collection, address: "127.0.0.1:1", kind: "comfy", epoch: "a", incarnation: 1 };
+const collection = "source #?% café", origin = { source: collection, address: "127.0.0.1:1", kind: "comfy", incarnation: "a" };
 
 Deno.test("entry URLs: core, node details, picker/selected thumbnails, priority and retry preserve exact identity", () => {
   for (const name of names) {

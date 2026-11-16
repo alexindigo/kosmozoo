@@ -20,7 +20,7 @@ const itemProjection = (sequence, latestVisibleSeq = sequence, revision = sequen
 const itemInventory = (id, rows, sources) => {
   const source=sourceFrame(sources).sources[id];
   return clientInventory(rows,{coverage:'recursive',arrivals:sources[id].arrivals??null,
-    origin:{source:id,address:source.address,kind:source.kind,epoch:source.sourceVersion.epoch,incarnation:source.incarnation}});
+    origin:{source:id,address:source.address,kind:source.kind,incarnation:source.incarnation}});
 };
 const waitFor = async (predicate, timeout = 1800) => {
   const deadline = performance.now() + timeout;

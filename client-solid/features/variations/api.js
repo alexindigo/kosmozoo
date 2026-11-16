@@ -1,15 +1,24 @@
 // client-solid/features/variations/api.js — the feature's endpoint paths.
 // The transport itself is the shared one from /js/api.mjs.
 
-import { req, postRaw, collectionEntriesUrl, entryUrl, entryBytesUrl } from "/js/api.mjs";
+import { req as request, postRaw, collectionEntriesUrl, entryUrl, entryBytesUrl } from "/js/api.mjs";
+import { sourceFailure } from "./source-message.js";
 import { parseExactJson, stringifyExactJson } from "/shared/parameters.mjs";
 const json = { parse: parseExactJson, stringify: stringifyExactJson };
 export const readRunResult = parseExactJson;
+const req = (method, path, body, options, host = body?.targets?.[0]?.host ?? body?.origin?.source ?? "Source", destination = body?.destination?.source) =>
+  request(method, path, body, options).catch(error => {
+    const detail = error.detail ?? error.message;
+    const message = sourceFailure(error.status, detail, /^Run destination changed/.test(detail) ? destination ?? host : host);
+    if (message !== (error.detail ?? error.message)) { error.message = message; error.detail = message; }
+    throw error;
+  });
+const responseError = (response, data, host, fallback) => Object.assign(new Error(sourceFailure(response.status, data.error || fallback, host)), { uploaded: data.uploaded });
 const historyPath = id => `/api/features/variations/history${id ? `/${encodeURIComponent(id)}` : ""}`;
 export const historyList = before => req("GET", historyPath() + (before ? `?before=${encodeURIComponent(before)}` : ""), undefined, { json });
 export const historyDetail = id => req("GET", historyPath(id), undefined, { json });
 export const historyBegin = capture => req("POST", historyPath(), capture, { json });
-export const historyPrepare = id => req("POST", historyPath(id) + "/prepare", {}, { json });
+export const historyPrepare = (id, host, destination) => req("POST", historyPath(id) + "/prepare", {}, { json }, host, destination);
 export const historyOpen = id => req("POST", historyPath(id) + "/open", {}, { json });
 export const historyRelease = (id, leaseId) => req("DELETE", historyPath(id) + `/leases/${encodeURIComponent(leaseId)}`, undefined, { json });
 export const historyRemove = id => req("DELETE", historyPath(id), undefined, { json });
@@ -27,13 +36,13 @@ export async function historyBytes(id, resourceId, file) {
 export const probe = (image, destination = null) => {
   const query = [image.origin && `origin=${encodeURIComponent(JSON.stringify(image.origin))}`,
     destination && `destination=${encodeURIComponent(JSON.stringify(destination))}`].filter(Boolean).join("&");
-  return req("GET", `/api/features/variations/probe/${encodeURIComponent(image.id)}${query ? `?${query}` : ""}`, undefined, { json });
+  return req("GET", `/api/features/variations/probe/${encodeURIComponent(image.id)}${query ? `?${query}` : ""}`, undefined, { json }, image.host, destination?.source);
 };
 export const historyCatalogue = (id, leaseId, targetIndex, destination) => req("GET", historyPath(id) +
-  `/catalogue?lease=${encodeURIComponent(leaseId)}&target=${targetIndex}&destination=${encodeURIComponent(JSON.stringify(destination))}`, undefined, { json });
+  `/catalogue?lease=${encodeURIComponent(leaseId)}&target=${targetIndex}&destination=${encodeURIComponent(JSON.stringify(destination))}`, undefined, { json }, destination?.source);
 
 export const generationTime = (image, { signal } = {}) =>
-  req("GET", `${entryUrl(image.host, image.filename)}/meta?origin=${encodeURIComponent(JSON.stringify(image.origin))}`, undefined, { signal });
+  req("GET", `${entryUrl(image.host, image.filename)}/meta?origin=${encodeURIComponent(JSON.stringify(image.origin))}`, undefined, { signal }, image.host);
 
 // raw POST: { ok, status, text }, no throw — the run report's error bodies
 // carry per-permutation detail the modal parses
@@ -43,7 +52,7 @@ const pathRequest = async (route, body, origin) => {
   const response = await fetch(`/api/features/variations/${route}`, { method: "POST", body: JSON.stringify(body),
     headers: { "Content-Type": "application/json", ...(origin ? { "X-Kosmozoo-Origin": JSON.stringify(origin) } : {}) } });
   const data = await response.json();
-  if (!response.ok) throw Object.assign(new Error(data.error || "Folder images unavailable"), { uploaded: data.uploaded });
+  if (!response.ok) throw responseError(response, data, origin?.source, "Folder images unavailable");
   return data;
 };
 export const listFolder = path => pathRequest("folder-images", { path });
@@ -66,7 +75,7 @@ export const inputThumbnail = (collection, name, origin, kind = "input") =>
 
 export const readInput = async (origin, name, root = "input") => {
   const response = await fetch(entryBytesUrl(origin.source, name, { kind: root, origin }));
-  if (!response.ok) throw new Error(`Image unavailable (${response.status})`);
+  if (!response.ok) throw responseError(response, await response.json().catch(() => ({})), origin.source, `Image unavailable (${response.status})`);
   const blob = await response.blob();
   return new File([blob], name, { type: blob.type });
 };
@@ -77,12 +86,12 @@ export const inspectImage = async (collection, file, current, kind, origin, name
   const response = await fetch(`/api/features/variations/inspect-image/${encodeURIComponent(collection)}`, {
     method: "POST", headers: { "X-Kosmozoo-Origin": JSON.stringify(origin) }, body: form,
   });
-  const data = await response.json(); if (!response.ok) throw new Error(data.error || "Image comparison unavailable"); return data;
+  const data = await response.json(); if (!response.ok) throw responseError(response, data, collection, "Image comparison unavailable"); return data;
 };
 
 export const inputList = (collection, origin, root = "input") =>
   fetch(`${collectionEntriesUrl(collection)}?kind=${encodeURIComponent(root)}&catalogue=images-v1`, { headers: { "X-Kosmozoo-Origin": JSON.stringify(origin) } })
-    .then(async response => { if (!response.ok) throw new Error(`Input catalogue: ${response.status}`); return response.json(); });
+    .then(async response => { if (!response.ok) throw responseError(response, await response.json().catch(() => ({})), collection, `Input catalogue: ${response.status}`); return response.json(); });
 
 // multipart upload — a 409 carries the conflicting name (never an overwrite)
 export const uploadInput = (collection, form, origin) =>
@@ -91,7 +100,7 @@ export const uploadInput = (collection, form, origin) =>
       if (r.ok) return r.json();
       if (r.status === 412) {
         const data = await r.json().catch(() => ({}));
-        throw Object.assign(new Error("Source changed during upload; no follow-up was authorized. Your files have been kept."), { uploaded: data.uploaded });
+        throw responseError(r, data, collection, "Source changed during upload");
       }
       if (r.status === 409) {
         const d = await r.json().catch(() => ({}));

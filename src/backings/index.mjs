@@ -39,14 +39,18 @@ export function withTransport(fetcher) {
   return { backingFor: select, createBindingFor: (addr, options) => select(addr).createBinding(addr, options) };
 }
 
-export function makeCollectionLifecycle(hosts, onRetire = () => {}) {
+export function makeCollectionLifecycle(hosts, onRetire = () => {}, { incarnationOf = () => null } = {}) {
   const members = new Map(); let stopped = false;
   const reconcile = () => {
+    // Only a stored registration can be replaced; a member created before its
+    // row existed keeps its lifetime identity until its address changes.
     for (const [id, token] of members) {
-      if (hosts[id] !== token.address || token.registered && !(id in hosts)) { members.delete(id); onRetire(token); }
+      if (hosts[id] !== token.address || token.registered && (!Object.hasOwn(hosts, id) || token.durable && incarnationOf(id, hosts[id]) !== token.incarnation)) { members.delete(id); onRetire(token); }
     }
-    for (const id of Object.keys(hosts)) if (!members.has(id)) members.set(id,
-      Object.freeze({ id, address: hosts[id], registered: true, incarnation: crypto.randomUUID() }));
+    for (const id of Object.keys(hosts)) if (!members.has(id)) {
+      const durable = incarnationOf(id, hosts[id]);
+      members.set(id, Object.freeze({ id, address: hosts[id], registered: true, durable: !!durable, incarnation: durable || crypto.randomUUID() }));
+    }
   };
   reconcile();
   return {
@@ -66,8 +70,8 @@ export function makeCollectionLifecycle(hosts, onRetire = () => {}) {
 }
 
 // Context/test rigs share this registry-owned address dispatcher and lifetime.
-export function makeCollectionInventory(hosts, { bindingFactory = createBindingFor, onSnapshot = () => {}, onRetire = () => {} } = {}) {
-  const bindings = new Map(), lifecycle = makeCollectionLifecycle(hosts, onRetire); let stopped = false;
+export function makeCollectionInventory(hosts, { bindingFactory = createBindingFor, onSnapshot = () => {}, onRetire = () => {}, incarnationOf } = {}) {
+  const bindings = new Map(), lifecycle = makeCollectionLifecycle(hosts, onRetire, { incarnationOf }); let stopped = false;
   const accepted = new WeakMap();
   const binding = (address) => {
     if (stopped) throw cancelled("Address bindings stopped");

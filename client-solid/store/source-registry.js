@@ -3,6 +3,7 @@ import { createMemo, createSignal, batch } from "solid-js";
 import { createStore, reconcile } from "solid-js/store";
 import { makeUnseenItems } from './unseen-items.js';
 
+// Stream-owned records retire on restart even when operation origins survive.
 export const sameSourceIdentity = (record, source) => !!source && source.address === record.address &&
   source.incarnation === record.incarnation && source.sourceVersion?.epoch === record.epoch;
 

@@ -139,7 +139,7 @@ async function rig(filename = exact, sourcePrefix = "Qwen_image_2.1", prefix = "
     output: { class_type: "SaveImage", inputs: { filename_prefix: sourcePrefix, images: ["sampler", 0] } },
   };
   const lifecycle = makeCollectionLifecycle({ fake: "in-memory:8188" }), token = lifecycle.capture("fake");
-  const origin = { source: "fake", address: token.address, kind: "comfy", epoch: "output-names", incarnation: token.incarnation };
+  const origin = { source: "fake", address: token.address, kind: "comfy", incarnation: token.incarnation };
   const routes = new Map(), jobs = [];
   register({ store: { hashFor: () => "a".repeat(64) }, ingest: { graph: async () => structuredClone(graph) },
     backings: { accepting: () => true, capture: lifecycle.capture, isCurrent: lifecycle.isCurrent, source: () => ({ ...origin, sourceVersion: origin }),

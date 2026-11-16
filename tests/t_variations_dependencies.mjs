@@ -48,7 +48,7 @@ Deno.test("variation dependencies: all lazy inputs, transitive output ancestors 
 function rig(graph, outputClasses = outputs, filename = "Qwen_image_2.1_00036.png") {
   const routes = new Map(), jobs = [], lifecycle = makeCollectionLifecycle({ fake: "in-memory:8188" });
   const token = lifecycle.capture("fake");
-  const origin = { source: "fake", address: token.address, kind: "comfy", epoch: "test", incarnation: token.incarnation };
+  const origin = { source: "fake", address: token.address, kind: "comfy", incarnation: token.incarnation };
   register({ store: { hashFor: () => "a".repeat(64) }, ingest: { graph: async () => graph },
     backings: { accepting: () => true, capture: lifecycle.capture, isCurrent: lifecycle.isCurrent,
       source: () => ({ ...origin, sourceVersion: origin }), comfy: () => ({

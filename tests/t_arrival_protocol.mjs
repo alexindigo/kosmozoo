@@ -67,7 +67,7 @@ Deno.test('arrival inventory: an older returning read publishes latest accepted 
     latest=snapshot(['old.png','new.png'],'I:2');await registry('a');rig.store.entryHide('a','old.png');gate.resolve();
     const reply=await (await response).json();assertEquals(reply.revision,'I:2');assertEquals(reply.entries.map(e=>[e.name,e.arrivalSeq]),[['new.png',2]]);
     assertEquals(reply.arrivals.visibleRanges,[[2,2]]);assertEquals(reply.arrivals.latestVisibleSeq,2);
-    assertEquals(reply.origin,{source:'a',address:'mock:1',kind:'comfy',epoch:ctx.sourceActivity.epoch,incarnation:registry.capture('a').incarnation});
+    assertEquals(reply.origin,{source:'a',address:'mock:1',kind:'comfy',incarnation:registry.capture('a').incarnation});
     const previous=registry.capture('a');delete rig.hosts.a;registry.reconcile();assert(!registry.isCurrent(previous));assertEquals(rig.store.arrivals.projection('a',true),null);
   }finally{ctx.sourceActivity.stop();await ctx.jobs.stop();await registry.stop();await rig.close();}
 });
@@ -82,7 +82,7 @@ Deno.test('arrival inventory: retired late snapshots cannot repopulate the repla
 
 Deno.test('production API: negotiated inventory rejects missing/malformed telemetry instead of a legacy acknowledgment fallback',async()=>{
   const previous=globalThis.fetch,inventory=api.inventory;
-  const origin={source:'a',address:'mock:1',kind:'comfy',epoch:'E',incarnation:'A'};
+  const origin={source:'a',address:'mock:1',kind:'comfy',incarnation:'A'};
   const arrivals={sequence:2,latestVisibleSeq:2,revision:1,visibleRanges:[[1,2]]};let payload;
   globalThis.fetch=(_url)=>{const url=new URL(_url,'http://fixture');assertEquals(url.searchParams.get('arrivals'),'items-v1');return Promise.resolve(Response.json(payload));};
   try{

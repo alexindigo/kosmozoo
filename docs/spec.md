@@ -163,7 +163,7 @@ within the configured relist cadence, with zero new HEADs. Initial invalidation
 coalesces a frozen follow-up target; further invalidations remain pending without
 starving that reader. Reader completion is logically bounded to 120s, including
 ignored-abort transports. Last-address removal/shutdown fences late results;
-re-add gets a new epoch. Collection-incarnation tokens additionally protect async
+re-add gets a new inventory epoch. Collection-incarnation tokens additionally protect async
 overlay, worker queues and Ingest dimension/full-read/stat/remap/stamp commits,
 including same-ID/address reuse while another alias survives. Byte single-flight/
 revalidation throttle keys include incarnation; content cache keys do not change.
@@ -172,10 +172,21 @@ or concurrently newer requests remain pending with bounded retry.
 Listing schedules no ingestion writes; the existing worker/want paths acquire
 dimensions and bytes.
 
+Each collection row stores a UUID `incarnation`, assigned once on upgrade and on
+every new registration (including address-less placeholders). Attribute changes,
+duplicate adds and engine restarts retain it; remove/re-add rotates it, even with
+the same ID and address. Context inventory, Prefetch and Ingest use that same
+stored value, read from memory, and only while the live address equals the row's
+address; a member created before its row exists keeps its lifetime identity until
+its address changes. Token currency remains object-owned within one engine lifetime;
+matching durable identity never makes another lifetime's token current.
+
 Complete inventory acceptance observes names in memory, independently of timestamps
 and ingestion. Each name gets one per-source incarnation sequence; ordinary relists,
 attribute updates and same-name content changes do not manufacture arrivals.
 Retirement discards that namespace and rejects late snapshots. Inventory entries
+and their arrival sequences remain engine-epoch scoped even when the collection's
+stored incarnation survives a restart. Inventory entries
 restored to visibility between observations receive any missing sequence before
 the next publication. Snapshot acceptance commits only after publication succeeds.
 Inventory entries
@@ -188,7 +199,7 @@ positive integer pairs: dense, ascending, disjoint, nonadjacent and within seque
 `latestVisibleSeq` is their maximum, or zero when empty. Missing/hidden/gone outputs
 are excluded. Lower-member removal changes revision even when the maximum stays
 unchanged. Contradictory equal revisions, older revisions and malformed ranges reject
-atomically. Opted-in inventory includes shared `origin` (source/address/kind/epoch/
+atomically. Opted-in inventory includes shared `origin` (source/address/kind/
 incarnation). Its entries, visibility overlay and arrival projection synchronously
 use the token's latest accepted snapshot after the awaited inventory read.
 
@@ -602,7 +613,8 @@ Jobs membership and publication; same-ID/address remove/re-add cannot coalesce a
 retirement. Compatibility collection helpers persist only; they do not write the map.
 
 Source versions are `{epoch, incarnation, attributesRevision}`, distinct from Jobs
-and inventory versions and not stored in SQLite. Discovery/mutation replies capture
+and inventory versions. Only incarnation is stored in SQLite; epoch and attribute
+revision belong to the running source stream. Discovery/mutation replies capture
 the actual row/version before probing. Bootstrap and stream share the same source
 identity. SSE `sources` events carry `id: <epoch>:<revision>` and JSON
 `{version:1,epoch,revision,sources:{id:{address,kind,incarnation,pinned,autoRefresh,
@@ -1734,7 +1746,7 @@ closing disposes it and every new opening starts with fresh defaults. A fully
 successful Run closes after its result message. Partial, failed or uncertain Runs
 leave the entire draft unchanged with result text and no automatic retry.
 
-Opening/probe/Run retain an `Origin:{source,address,kind,epoch,incarnation}`; pin and
+Opening/probe/Run retain an `Origin:{source,address,kind,incarnation}`; pin and
 refresh attribute revisions are not operation identity. Probe optionally accepts
 expected origin in `?origin=<JSON>` and returns `context:{origin,graphHash}`. Each
 target is prepared before uploads. A new effect cannot acquire a replacement source
@@ -1742,6 +1754,21 @@ under the same ID; version2 Run compares captured origin and graph hash at entry
 then fences source lifetime throughout unsent enqueues. Shutdown retires operation
 admission before backing IO. Already uploaded bytes/accepted jobs are not deleted
 or automatically retried.
+
+The engine epoch namespaces source delivery, arrival sequences and activity
+revisions only, never operation identity. An open Variations dialog survives an
+engine restart on the same state with its raw edits and native Files intact.
+Editor catalogue leases are durable SQLite pins; inspection/upload evidence is
+origin-bound hashes and receipts, not dead-engine tokens. A new explicit Run
+acquires fresh history/execution authority. In-flight effects are never replayed.
+Origins saved before this upgrade still contain epoch and are not current; saved
+runs continue to open through their stored address/kind without rewriting history.
+Detecting a different ComfyUI server at the same address remains unsupported.
+
+All stale-source paths share one single-line message in the existing feedback
+area: `<source> was removed or changed since Variations opened. Nothing more was
+sent; reopen Variations to continue. Your edits are kept until you close.` A
+changed Run destination names that destination through the same message.
 
 Input-list GET and multipart upload optionally carry `X-Kosmozoo-Origin:<JSON>`.
 The engine captures the registry token/address before awaits, checks expected
@@ -1958,7 +1985,7 @@ port. Unavailable/unknown/conflicting native app capability uses the selected-po
 ordinary-browser URL with a whitelisted transient Store-owned status notice;
 no prefs/registry/profile/lock reset or notice persistence is performed.
 
-### Schema (`metadata.db`, `PRAGMA user_version = 10`, ordered migrations)
+### Schema (`metadata.db`, `PRAGMA user_version = 11`, ordered migrations)
 
 Content is what the bytes are; a collection is a namespace of names backed
 by a host or folder; an entry is one instance's state in one collection.
@@ -1980,7 +2007,8 @@ CREATE TABLE collection (
   link TEXT,                      -- virtual → backing collection (future)
   created_at REAL NOT NULL,
   pinned INTEGER NOT NULL DEFAULT 0 CHECK (pinned IN (0, 1)),
-  auto_refresh INTEGER NOT NULL DEFAULT 0 CHECK (auto_refresh IN (0, 1))
+  auto_refresh INTEGER NOT NULL DEFAULT 0 CHECK (auto_refresh IN (0, 1)),
+  incarnation TEXT                -- durable registration UUID
 );
 CREATE TABLE entry (
   collection TEXT NOT NULL REFERENCES collection(id) ON DELETE CASCADE,
@@ -2022,6 +2050,11 @@ v9-to-v10 transactionally adds five isolated tables without altering legacy rows
 claim and actual receipt) and `variation_lease` (editor/execution pins). The separate
 `variations.history.revision` KV key never advances the inventory/metadata cursor.
 The migration is retry-safe after its separate version write. Only Store owns SQL.
+
+v10-to-v11 transactionally adds `collection.incarnation TEXT` if absent and
+backfills every NULL with a distinct UUID generated in JS. Retrying preserves
+already assigned values. New explicit and placeholder inserts supply a UUID;
+`INSERT OR IGNORE` preserves an existing registration unchanged.
 
 Durable bytes live under `<state>/archives/<ab>/<hash>`, distinct from ordinary
 cache. The context injects one hash-locked archive capability. Atomic byte writes
