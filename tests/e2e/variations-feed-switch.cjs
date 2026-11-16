@@ -197,7 +197,7 @@ const hash = bytes => crypto.createHash('sha256').update(bytes).digest('hex');
     try {
       await invoke('variations.open', { id: 'fake:' + TARGET });
       const oldInput = await take('input'); await addParameter(page, '11.image'); await openImageAdd(page); await page.clickAt('.vz-input-trigger'); await waitForInputPicker(page);
-      await page.poll(`document.querySelector('.vz-input-status[role=status]')?.textContent.includes('imported')`);
+      await page.poll(`document.querySelector('.vz-input-activity[role=status]')?.textContent.includes('imported')`);
       await feed('output'); const currentOutput = await take('output');
       await page.send('Fetch.continueRequest', { requestId: currentOutput.requestId }); await waitName(NAME);
       await fail(oldInput);

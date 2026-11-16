@@ -175,7 +175,7 @@ Deno.test("pexels browse: curated loads at once, typing waits for a pause, super
   assertEquals(browse.results("s", "").more, true);
   browse.request("s", "ca");
   assertEquals(calls.length, 1);
-  assertEquals(browse.results("s", "ca"), { files: ["c-1-1", "c-1-2"], pending: true, more: false, error: "", searchOnly: false });
+  assertEquals(browse.results("s", "ca"), { files: ["c-1-1", "c-1-2"], pending: true, more: false, error: "", searchOnly: false, stale: true, appending: false });
   browse.request("s", "cat");
   assertEquals(timers.pending.length, 1);
   timers.flush(); await settle();
@@ -188,17 +188,47 @@ Deno.test("pexels browse: curated loads at once, typing waits for a pause, super
   browse.dispose();
 });
 
+Deno.test("pexels browse: pending distinguishes first load, appended pages and stale search results", async () => {
+  const calls = [], timers = manualTimers();
+  const api = { pexelsPhotos: (service, query, page) => new Promise(resolve => calls.push({ service, query, page, resolve })) };
+  const browse = makePexelsBrowse({ api, timers });
+  const state = query => {
+    const { files, pending, stale, appending } = browse.results("s", query);
+    return { files, pending, stale, appending };
+  };
+  try {
+    browse.request("s", "");
+    assertEquals(state(""), { files: [], pending: true, stale: false, appending: false });
+    calls[0].resolve({ curated: true, more: true, photos: [{ id: "curated-1" }] }); await settle();
+    assertEquals(state(""), { files: ["curated-1"], pending: false, stale: false, appending: false });
+
+    browse.more("s", "");
+    assertEquals(calls[1].page, 2);
+    assertEquals(state(""), { files: ["curated-1"], pending: true, stale: false, appending: true });
+    calls[1].resolve({ curated: true, more: false, photos: [{ id: "curated-2" }] }); await settle();
+
+    browse.request("s", " cats ");
+    assertEquals(state("cats"), { files: ["curated-1", "curated-2"], pending: true, stale: true, appending: false });
+    assertEquals(calls.length, 2);
+    timers.flush();
+    assertEquals(calls[2].query, "cats");
+    assertEquals(state("cats"), { files: ["curated-1", "curated-2"], pending: true, stale: true, appending: false });
+    calls[2].resolve({ curated: true, more: false, photos: [{ id: "cats-1" }] }); await settle();
+    assertEquals(state("cats"), { files: ["cats-1"], pending: false, stale: false, appending: false });
+  } finally { browse.dispose(); }
+});
+
 Deno.test("pexels browse: a service without curated asks for a search; failures keep their message until Retry", async () => {
   let fail = true;
   const api = { pexelsPhotos: (_service, query) => query ? fail ? Promise.reject(Object.assign(new Error("x"), { detail: "Home answered HTTP 500" }))
     : Promise.resolve({ curated: true, more: false, photos: [{ id: "1" }] }) : Promise.resolve({ curated: false, more: false, photos: [] }) };
   const timers = manualTimers(), browse = makePexelsBrowse({ api, timers });
   browse.request("s", ""); await settle();
-  assertEquals(browse.results("s", ""), { files: [], pending: false, more: false, error: "", searchOnly: true });
+  assertEquals(browse.results("s", ""), { files: [], pending: false, more: false, error: "", searchOnly: true, stale: false, appending: false });
   browse.request("s", "dog"); timers.flush(); await settle();
   assertEquals(browse.results("s", "dog").error, "Home answered HTTP 500");
   fail = false; browse.retry("s", "dog"); await settle();
-  assertEquals(browse.results("s", "dog"), { files: ["1"], pending: false, more: false, error: "", searchOnly: false });
+  assertEquals(browse.results("s", "dog"), { files: ["1"], pending: false, more: false, error: "", searchOnly: false, stale: false, appending: false });
   browse.dispose();
 });
 

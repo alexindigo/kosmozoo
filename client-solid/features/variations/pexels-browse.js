@@ -62,10 +62,13 @@ export function makePexelsBrowse({ api, changed = () => {}, delay = SEARCH_DELAY
       const waiting = !entry || entry.pending || (scheduled === keyOf(service, query));
       const source = settled ?? entry;
       const searchOnly = !!entry && !entry.query && !entry.curated;
+      const pending = waiting && !entry?.error;
       return {
         files: searchOnly ? [] : source ? [...source.photos] : [],
-        pending: waiting && !entry?.error, more: !!entry && entry.page > 0 && entry.more,
+        pending, more: !!entry && entry.page > 0 && entry.more,
         error: entry?.error ?? "", searchOnly,
+        stale: pending && !!settled && settled !== entry,
+        appending: !!entry && entry.page > 0 && entry.pending,
       };
     },
     photo(service, id) {

@@ -53,6 +53,8 @@ export function makeVariationEditor({ targets, cohortMode, destination: initialD
   // catalogue's conflicts are readonly facts; until it is inspected Run waits.
   let destination = validOrigin(initialDestination) ? freeze(snapshotDraft(initialDestination)) : null;
   let conflicts = {}, destinationPending = !!destination;
+  // A failed catalogue request is a state with a way out, never a silent wait.
+  let catalogueError = null;
   const catalogues = new Map();
   const generationTimes = new Map(capturedTargets.map(target => [target.id, knownGenerationTime(target.generationTimeMs) ? target.generationTimeMs : null]));
   const timingController = new AbortController();
@@ -155,6 +157,7 @@ export function makeVariationEditor({ targets, cohortMode, destination: initialD
     return { ...conflict, host: destination?.source ?? "" };
   };
   const unresolvedConflicts = () => locations.filter(entry => conflictFor(entry.id)).length;
+  const catalogueProblem = () => `Couldn't check ${destination?.source ?? capturedTargets[0].host}: ${catalogueError}`;
   const conflictMessage = count => `Resolve ${count} conflict${count === 1 ? "" : "s"} with ${destination?.source} before running.`;
   const dirty = () => acceptedRevision === null ? restoredWork || selectedTargets.length !== capturedTargets.length || recipe.dirty() : recipe.revision() !== acceptedRevision;
   const parseCandidate = (parameter, raw) => parseRecipeCandidate(parameter, raw, catalogues.get(capturedTargets[0].id)?.nodes);
@@ -235,7 +238,7 @@ export function makeVariationEditor({ targets, cohortMode, destination: initialD
     setDestination(origin) {
       if (!alive || deciding || running || !validOrigin(origin) || origin.kind !== "comfy") return false;
       if (sameOrigin(origin, destination)) return false;
-      destination = freeze(snapshotDraft(origin)); conflicts = {}; destinationPending = true;
+      destination = freeze(snapshotDraft(origin)); conflicts = {}; destinationPending = true; catalogueError = null;
       invalidateClose(); notify(); return true;
     },
     resolveConflict(id, value) {
@@ -389,7 +392,14 @@ export function makeVariationEditor({ targets, cohortMode, destination: initialD
         return file;
       }, () => alive && pexelsFiles.get(service) === files);
     },
-    catalogueFailure(error) { publish({ text: `Catalogue unavailable: ${error.message ?? error}. Your edits have been kept.`, ok: false, state: "unavailable" }); },
+    // The server's own reason when it gave one; never the request path.
+    catalogueFailure(error) { if (!alive) return; catalogueError = String(error?.detail || (error?.status ? `HTTP ${error.status}` : error?.message ?? error)); result = null; notify(); },
+    // Ask the same source again after a failed catalogue request.
+    retryCatalogue() {
+      if (!alive || running || catalogueError === null) return false;
+      catalogueError = null; result = null; if (destination) destinationPending = true;
+      notify(); return true;
+    },
     invalidateClose,
     decision(value) { deciding = !!value; if (deciding) decisionGeneration++; notify(); },
     edit(domain, id, name, value) {
@@ -456,6 +466,7 @@ export function makeVariationEditor({ targets, cohortMode, destination: initialD
       parameterIndex(allParameters(data)); parameterIndex(catalogueParams(data));
       catalogues.set(target.id, freeze(snapshotDraft({ ...data, context: data.context ?? catalogues.get(target.id)?.context ?? null })));
       if (data.destination) { conflicts = snapshotDraft(data.destination.conflicts ?? {}); destinationPending = false; }
+      catalogueError = null;
       const legacy = new Map([...["params", "stringParams", "enumParams", "textParams"].flatMap((key, index) => (data[key] ?? []).map(parameter => [parameter.id, ["numeric", "images", "enums", "texts"][index]]))]);
       const names = new Map();
       for (const parameter of allParameters(data)) { const name = `${parameter.title ?? parameter.type}.${parameter.key}`; names.set(name, (names.get(name) ?? 0) + 1); }
@@ -481,6 +492,7 @@ export function makeVariationEditor({ targets, cohortMode, destination: initialD
     preview() {
       const unavailable = (status, message) => ({ n: null, display: "—", fullCount: message, perImage: 0,
         anyEnabled: false, exact: false, status, message, breakdown: "", axes: [], excluded: 0, naming: { example: "", complete: false }, timeEstimate: estimateGenerationTime(null, []) });
+      if (catalogueError !== null) return unavailable("failed", catalogueProblem());
       if (!catalogueReady) return unavailable("reading", "Reading workflow…");
       if (destinationPending) return unavailable("reading", `Checking ${destination.source}…`);
       const snapshot = captureRows(), first = catalogues.get(capturedTargets[0].id);
@@ -556,6 +568,7 @@ export function makeVariationEditor({ targets, cohortMode, destination: initialD
     async run() {
       if (!alive) return { status: "stale" };
       if (running || deciding) return { status: "busy" };
+      if (catalogueError !== null) { publish({ text: `${catalogueProblem()} Nothing was sent.`, ok: false, state: "unavailable" }); return { status: "invalid" }; }
       if (!catalogueReady) { publish({ text: "Inspecting source context; your edits have been kept.", ok: false, state: "unavailable" }); return { status: "invalid" }; }
       if (destinationPending) { publish({ text: `Still checking ${destination.source}; nothing was sent.`, ok: false, state: "unavailable" }); return { status: "invalid" }; }
       if (unresolvedConflicts()) { publish({ text: `${conflictMessage(unresolvedConflicts())} Nothing was sent.`, ok: false, state: "invalid" }); return { status: "invalid" }; }

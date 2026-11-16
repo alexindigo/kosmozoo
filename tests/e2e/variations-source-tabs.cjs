@@ -59,7 +59,7 @@ module.exports = async ({ cdp, check }) => {
     await capture('source-tabs-list-failed');
     await cdp.evaluate("window.__listMode='pending'");
     await cdp.clickAt('.vz-input-failure .vz-thumbnail-retry');
-    await cdp.poll("document.querySelector('.vz-input-status')?.textContent==='Reading another imported images...'");
+    await cdp.poll("document.querySelector('.vz-input-activity')?.textContent==='Loading imported images from another…'");
     await capture('source-tabs-list-pending');
     await cdp.evaluate("window.__listMode='ready';window.__releaseList()");
     await cdp.poll("!!document.querySelector('[data-input-name=" + JSON.stringify('remote-only.png') + "]')");

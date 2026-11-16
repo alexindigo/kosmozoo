@@ -12,7 +12,7 @@ export function Thumbnail(props) {
   const resource = createMemo(() => props.src ? { src: props.src, local: !!props.local, attempt: attempt() } : null);
   createEffect(() => { resource(); setPhase("pending"); });
   return <div class={`vz-thumbnail ${props.class ?? ""}`}>
-    <Show when={resource()} keyed fallback={<span class="vz-thumbnail-pending">Loading preview…</span>}>
+    <Show when={resource()} keyed fallback={<span class="vz-thumbnail-pending" aria-hidden="true" />}>
       {resource => <ThumbnailAttempt src={resource.local ? resource.src : imageRequestUrl(resource.src, "foreground", resource.attempt || null)}
         local={resource.local} priority={props.priority} order={props.order} lazy={props.lazy} register={props.register}
         surface={props.surface} phase={phase} onPhase={setPhase} />}
@@ -39,7 +39,7 @@ function ThumbnailAttempt(props) {
       classList={{ "vz-thumbnail-loaded": props.phase() === "loaded" }}
       fetchpriority={display.read().priority === "background" ? "low" : "auto"}
       draggable={false} onLoad={() => settle("loaded")} onError={() => settle("failed")} />
-    <Show when={props.phase() === "pending"}><span class="vz-thumbnail-pending" role="status">Loading preview…</span></Show>
+    <Show when={props.phase() === "pending"}><span class="vz-thumbnail-pending" aria-hidden="true" /></Show>
   </>;
   return props.surface ? props.surface(picture) : <div class="vz-thumbnail-surface">{picture}</div>;
 }
