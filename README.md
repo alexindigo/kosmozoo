@@ -37,7 +37,7 @@ Kosmozoo runs as a Linux desktop app or a self-hosted browser UI.
 - Run on any of your ComfyUI machines; anything the target lacks is flagged before a job is sent.
 - Every run is saved and can be recalled.
 
-![Variations dialog with a style reference, three input images, a denoise range, 12 combinations and output-naming controls](docs/screenshots/06-variations-dialog.webp)
+![Variations dialog set to run on another ComfyUI, with two input images, the Pexels photo picker searching for waves, and the variation count and estimated time](docs/screenshots/06-variations-dialog.webp)
 
 ### Open engine
 
