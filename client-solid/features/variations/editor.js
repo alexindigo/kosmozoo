@@ -397,7 +397,7 @@ export function makeVariationEditor({ targets, cohortMode, destination: initialD
     // Ask the same source again after a failed catalogue request.
     retryCatalogue() {
       if (!alive || running || catalogueError === null) return false;
-      catalogueError = null; if (destination) destinationPending = true;
+      catalogueError = null; result = null; if (destination) destinationPending = true;
       notify(); return true;
     },
     invalidateClose,

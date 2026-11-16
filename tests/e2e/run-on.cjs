@@ -53,7 +53,15 @@ const get = async (base, path) => (await fetch(base + path)).json();
     proof.failed = await c.evaluate(`document.querySelector('.vz-messages .vz-readiness-error')?.textContent`);
     assert(/^Couldn't check other: /.test(proof.failed), proof.failed);
     await shot('run-on-check-failed');
+    // A blocked Run says why and sends nothing; Retry stays available.
+    await c.evaluate(`(()=>{window.__runRequests=0;const original=window.fetch;window.__restoreRunFetch=()=>{window.fetch=original};window.fetch=(url,options)=>{if(/\\/features\\/variations\\/(run|history)/.test(String(url))&&options?.method==='POST')window.__runRequests++;return original(url,options)}})()`);
+    await c.clickAt('.vz-run');
+    await c.poll(`/Nothing was sent\\.$/.test(document.querySelector('.vz-error')?.textContent??'')`);
+    assert.equal(await c.evaluate(`window.__runRequests`), 0, 'a blocked Run sends nothing');
+    assert(await c.evaluate(`!!document.querySelector('.vz-catalogue-retry')`), 'Retry stays after a blocked Run');
+    await c.evaluate(`window.__restoreRunFetch()`);
     await c.clickAt('.vz-catalogue-retry');
+    assert.equal(await c.evaluate(`document.querySelector('.vz-error')?.textContent??''`), '', 'retry clears the blocked message');
     await c.poll(`document.querySelector('.vz-catalogue-row')?.classList.contains('vz-conflict')`, 20000);
     assert.equal(await c.evaluate(`!!document.querySelector('.vz-catalogue-retry')`), false);
     proof.other = await c.evaluate(`({rows:[...document.querySelectorAll('.vz-catalogue-row')].map(r=>({id:r.dataset.catalogueId,conflict:r.classList.contains('vz-conflict'),reason:r.querySelector('.vz-conflict-reason')?.textContent??null})),

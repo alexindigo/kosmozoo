@@ -94,6 +94,7 @@ Deno.test("run on: a failed catalogue request says so, sends nothing and can be 
   assertEquals((await r.editor.run()).status, "invalid"); assertEquals(r.requests.length, 0);
   assert(r.editor.result().text.endsWith("Nothing was sent."));
   assert(r.editor.retryCatalogue());
+  assertEquals(r.editor.result(), null, "a retry clears the blocked Run's message");
   assertEquals(r.editor.preview().status, "reading", "back to checking the same host");
   assertEquals(r.editor.retryCatalogue(), false, "only after a failure");
   r.install({});
