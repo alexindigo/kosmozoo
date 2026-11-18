@@ -2111,6 +2111,7 @@ export function makeAppStore({ subscribeSources = typeof window !== "undefined" 
     ui: {
       setFilter(v) { updateFeedFilter({ ...filter(), filename: v }); },
       editFilter(field, value) { updateFeedFilter({ ...filter(), [field]: value }); },
+      filterParameter(parameter, value) { updateFeedFilter({ ...filter(), parameter, parameterMode: "equals", parameterValue: value }); },
       clearFilter() { updateFeedFilter(emptyFilter()); },
       setResizing(v) { setResizing(!!v); },
       toggleMenu() { setMenuOpen(!menuOpen()); },

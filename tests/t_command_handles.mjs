@@ -8,6 +8,35 @@ import { makeLeaveGuard, snapshotDraft, sameDraft } from "../client-solid/featur
 import { makeVariationSession } from "../client-solid/features/variations/session.js";
 import { variationCommands } from "../client-solid/features/variations/commands.js";
 import { registerCoreCommands } from "../client-solid/store/core-commands.js";
+import { createRoot, createComputed } from "solid-js";
+
+Deno.test("filter: parameter intent replaces one whole Equals condition and opens the owned popup", () => {
+  const store = makeAppStore({ subscribeSources: null });
+  const opened = [];
+  const observed = [];
+  let stopObserving;
+  createRoot(dispose => { stopObserving = dispose; createComputed(() => observed.push(structuredClone(store.state.feedFilter()))); });
+  const retire = store.handles.own("feed.filter.open", () => opened.push(structuredClone(store.state.feedFilter())));
+  try {
+    for (const mode of ["and", "or"]) {
+      for (const [field, value] of Object.entries({ mode, filename: "fixture", directory: "area", down: "true", up: "true", favorite: "true", bookmark: "true", negativeMode: "contains", negative: "note", positiveMode: "contains", positive: "kept" }))
+        store.handles.invoke("feed.filter.edit", { field, value });
+      const before = store.state.feedFilter();
+      for (const [parameter, value] of [["T.amount", "0.123456789012345"], ["T.text", " a\r\nb\rc\n "]]) {
+        const count = observed.length;
+        store.handles.invoke("feed.filter.parameter", { parameter, value });
+        assertEquals(store.state.feedFilter(), { ...before, parameter, parameterMode: "equals", parameterValue: value });
+        assertEquals(observed.slice(count), [store.state.feedFilter()], "one reactive transition, no intermediate predicate");
+        assertEquals(opened.at(-1), store.state.feedFilter(), "opening observes only the complete replacement");
+      }
+    }
+    for (const args of [{ parameter: "", value: "a" }, { parameter: "T.value", value: "" }, { parameter: "T.value", value: 3 }, { parameter: "T.value", value: "a", event: {} }])
+      assertThrows(() => store.handles.invoke("feed.filter.parameter", args));
+    assertEquals(opened.length, 4);
+    retire();
+    assertEquals(store.handles.invoke("feed.filter.open"), false, "no popup owner is a presentation-only no-op");
+  } finally { stopObserving(); retire(); store.dispose(); }
+});
 
 Deno.test("commands: stable ports, original results/promises, unbound invocation and private executors", async () => {
   const handles = makeCommandHandles();

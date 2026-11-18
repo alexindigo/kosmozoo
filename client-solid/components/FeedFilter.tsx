@@ -22,6 +22,7 @@ export function FeedFilter(props) {
     if (expanded()) setExpanded(false);
   });
   onCleanup(props.handles.own("feed.filter.close", collapse));
+  onCleanup(props.handles.own("feed.filter.open", () => setExpanded(true)));
   onCleanup(props.handles.own("feed.filter.toggle", () => expanded() ? collapse() : setExpanded(true)));
   createEffect(() => {
     if (!expanded()) return;
@@ -81,7 +82,10 @@ export function FeedFilter(props) {
         </Select>
         <div class="filter-parameter-value"><Show when={props.model.parameter}><Select aria-label="Parameter comparison" value={props.model.parameterMode} onChange={e => edit("parameterMode", e.currentTarget.value)}>
           <option value="present">Present</option><option value="equals">Equals</option><option value="contains">Contains</option>
-        </Select><Show when={props.model.parameterMode !== "present"}>{field("parameterValue", "Parameter value", "value…")}</Show></Show></div>
+        </Select><Show when={props.model.parameterMode !== "present"}>
+          <TextField multiline id="filter-parameterValue" aria-label="Parameter value" placeholder="value..." spellcheck={false}
+            value={props.model.parameterValue} onInput={e => edit("parameterValue", e.currentTarget.value)} />
+        </Show></Show></div>
       </section>
       <footer class="filter-footer"><Show when={props.conditions.length}><button id="clearFilters" type="button" class="btn" onClick={() => props.onClear()}>Clear filters</button></Show>
         <span id="filterMatchCount">{props.count} of {props.total}</span>

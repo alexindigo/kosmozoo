@@ -124,6 +124,10 @@ export function registerCoreCommands(handles, { ops, state, clipboard = (text) =
   add("feed.filter", { value: text }, ({ value }) => ops.ui.setFilter(value));
   add("feed.filter.edit", { field: v => Object.hasOwn(state.feedFilter(), v), value: text }, ({ field, value }) => ops.ui.editFilter(field, value));
   add("feed.filter.clear", {}, () => ops.ui.clearFilter());
+  add("feed.filter.parameter", { parameter: string, value: string }, ({ parameter, value }) => {
+    ops.ui.filterParameter(parameter, value);
+    return handles.invoke("feed.filter.open");
+  }, "filter images by parameter");
   add("feed.revealEntry", { id: string }, ({ id }) => {
     const index = state.imageIdxById().get(id);
     if (index !== undefined) return ops.feed.reveal(index);
@@ -149,7 +153,7 @@ export function registerCoreCommands(handles, { ops, state, clipboard = (text) =
   add("anchor.info.close", {}, () => ops.anchors.closeInfo());
   add("collection.feedback.download", { source: string }, ({ source }) => ops.collections.downloadFeedback(source));
   handles.registerOwned({ id: "workbench.popup.toggle", validate: shape({ control: oneOf("active", "threshold", "mask") }) });
-  for (const id of ["workbench.popup.close", "feed.filter.toggle", "feed.filter.close"])
+  for (const id of ["workbench.popup.close", "feed.filter.toggle", "feed.filter.open", "feed.filter.close"])
     handles.registerOwned({ id, validate: shape({}) });
 }
 
@@ -215,6 +219,7 @@ export function commandFacades(handles, ops, state) {
   Object.assign(facade.ui, {
     setFilter: (value) => invoke("feed.filter", { value }), refresh: () => invoke("source.refresh"),
     editFilter: (field, value) => invoke("feed.filter.edit", { field, value }),
+    filterParameter: (parameter, value) => invoke("feed.filter.parameter", { parameter, value }),
     clearFilter: () => invoke("feed.filter.clear"),
     toggleMenu: () => invoke("menu.toggle"), closeMenu: () => invoke("menu.close"),
     setWorkspace: (space) => invoke("workspace.select", { space }), setInfoLayout: (layout) => invoke("metadata.layout", { layout }),

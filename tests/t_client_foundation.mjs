@@ -59,6 +59,34 @@ const REGISTRY = {
 };
 const LIST = fieldList(REGISTRY);
 
+Deno.test("fields: row filter intent retains exact scalar occurrence beside rounded display", () => {
+  const raw = 0.123456789012345, second = 0.123456789012346;
+  const text = "  first\r\n\r\nsecond\rthird\n" + "fixture text ".repeat(20);
+  const list = fieldList({ T: { inputs: { amount: "number", text: "string", flag: "boolean", empty: "string", object: "object", link: "array" } } });
+  const rows = fullFieldRows({ nodes: [
+    { id: "10", type: "T", inputs: { amount: second } },
+    { id: "2", type: "T", inputs: { amount: raw, text, flag: false, empty: "", object: { a: 1 }, link: ["1", 0] } },
+  ] }, { list });
+  const amounts = rows.filter(([label]) => label === "T — amount");
+  assertEquals(amounts.map(([, value]) => value), ["0.123456789", "0.123456789"]);
+  assertEquals(amounts.map(([, , , intent]) => intent), [
+    { parameter: "T.amount", value: String(raw) }, { parameter: "T.amount", value: String(second) },
+  ]);
+  assertEquals(rows.find(([label]) => label === "T — text")[3], { parameter: "T.text", value: text });
+  assertEquals(rows.find(([label]) => label === "T — flag")[3], { parameter: "T.flag", value: "false" });
+  assert(!rows.some(([label]) => label === "T — empty"));
+  assert(rows.filter(([label]) => / — (object|link)$/.test(label)).every(row => !row[3]));
+  assertEquals(new Set(rows.map(row => row[4])).size, rows.length, "every rendered occurrence has a distinct key");
+  const changed = fullFieldRows({ nodes: [
+    { id: "1", type: "T", inputs: { amount: 7 } },
+    { id: "2", type: "T", inputs: { amount: raw, text: text + "new text" } },
+    { id: "10", type: "T", inputs: { amount: second } },
+  ] }, { list });
+  for (const value of [String(raw), String(second)])
+    assertEquals(changed.find(row => row[3]?.value === value)[4], amounts.find(row => row[3]?.value === value)[4], "new earlier occurrences cannot re-key existing nodes");
+  assertEquals(changed.find(row => row[3]?.parameter === "T.text")[4], rows.find(row => row[3]?.parameter === "T.text")[4], "value updates preserve occurrence identity");
+});
+
 Deno.test("fields: every node input is a field; instances each get a row", () => {
   const rows = fullFieldRows({
     nodes: [

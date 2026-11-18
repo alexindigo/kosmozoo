@@ -24,6 +24,7 @@ export function DetailsBody() {
   const compareMeta = createMemo(() => store.state.entryFor(store.state.currentStack().at(-1) ?? null)?.entry?.meta ?? null);
   const images = () => store.state.currentNodeImages();
   const hasImages = () => images().length > 0;
+  const filterParameter = intent => store.handles.invoke("feed.filter.parameter", intent);
   const colsClass = () => {
     const l = store.state.infoLayout();
     return "info " + (l === "rev" ? "rev" : l === "stacked" ? "stacked" : l === "stacked-rev" ? "stacked-rev" : "split");
@@ -75,7 +76,7 @@ export function DetailsBody() {
             fallback={
               <>
                 <Head im={im()} />
-                <MetaBody meta={im()?.meta ?? null} host={im()?.host} entryId={im()?.id} identity={im()?.hash ?? im()?.meta} compareMeta={compareMeta()} />
+                <MetaBody meta={im()?.meta ?? null} host={im()?.host} entryId={im()?.id} identity={im()?.hash ?? im()?.meta} compareMeta={compareMeta()} onFilter={filterParameter} />
               </>
             }
           >
@@ -110,7 +111,7 @@ export function DetailsBody() {
               <div class="separator" ref={sepRef} />
               <div class="info-source-nodes">
                 <Head im={im()} />
-                <MetaBody meta={im()?.meta ?? null} host={im()?.host} compareMeta={compareMeta()} skipImages onImageRef={focusImage} />
+                <MetaBody meta={im()?.meta ?? null} host={im()?.host} compareMeta={compareMeta()} skipImages onImageRef={focusImage} onFilter={filterParameter} />
               </div>
             </div>
           </Show>

@@ -3,6 +3,16 @@ import { emptyFilter, normalizeFilter, parseFilter, serializeFilter, compileFilt
 import { feedUrl } from '../client/js/route-parse.mjs';
 const entry = { filename: 'a/deep/Example.png', judgment: { vote: 'down', favorite: true, bookmark: true, notes: { neg: 'Blur in face', pos: 'Good light' } },
   meta: { nodes: [{ type: 'KSampler', inputs: { seed: 42, sampler_name: 'Euler', flag: false, zero: 0 } }] } };
+
+Deno.test('filter: exact numeric and multiline scalar values round trip without display normalization', () => {
+  for (const value of [0.123456789012345, ' first\r\n\r\nsecond\rthird\n ', 'long paragraph '.repeat(100)]) {
+    const model = normalizeFilter({ parameter: 'T.value', parameterMode: 'equals', parameterValue: String(value) });
+    const restored = parseFilter(serializeFilter(model));
+    assertEquals(restored, model);
+    assertEquals(compileFilter(restored)({ meta: { nodes: [{ type: 'T', inputs: { value } }] } }), true);
+    assertEquals(compileFilter(restored)({ meta: { nodes: [{ type: 'T', inputs: { value: String(value) + 'x' } }] } }), false);
+  }
+});
 Deno.test('filter URL round trip retains all fields, legacy key, unrelated query and clears outgoing filters', () => {
   const model = normalizeFilter({ mode: 'or', filename: 'a & b', directory: 'a/', down: true, up: true, favorite: true, bookmark: true,
     negativeMode: 'contains', negative: 'blur', positiveMode: 'nonempty', positive: 'retained', parameter: 'KSampler.seed', parameterMode: 'equals', parameterValue: '42' });
