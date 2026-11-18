@@ -208,12 +208,19 @@ MIGRATIONS.push(db => db.transaction(() => db.exec(`
   INSERT OR IGNORE INTO kv(k,v) VALUES('variations.history.revision','0');
 `))());
 
+// Every collection row has a stored incarnation. Rows can arrive without one
+// from the v11 upgrade, the legacy fold or an older engine writing a schema-11
+// database, so every open assigns the missing ones; assigned values never change.
+function assignMissingIncarnations(db) {
+  const assign = db.prepare("UPDATE collection SET incarnation = ? WHERE id = ? AND incarnation IS NULL");
+  for (const row of db.prepare("SELECT id FROM collection WHERE incarnation IS NULL").all()) assign.run(crypto.randomUUID(), row.id);
+}
+
 // v10 -> v11: registration identity survives engine lifetimes and upgrade retries.
 MIGRATIONS.push(db => db.transaction(() => {
   const columns = db.prepare("PRAGMA table_info(collection)").all();
   if (!columns.some(column => column.name === "incarnation")) db.exec("ALTER TABLE collection ADD COLUMN incarnation TEXT");
-  const assign = db.prepare("UPDATE collection SET incarnation = ? WHERE id = ? AND incarnation IS NULL");
-  for (const row of db.prepare("SELECT id FROM collection WHERE incarnation IS NULL").all()) assign.run(crypto.randomUUID(), row.id);
+  assignMissingIncarnations(db);
 })());
 
 // Every recurring statement is prepared ONCE (audit D9: a prepare per call
@@ -399,6 +406,7 @@ export class Store {
       );
       await s.#foldV7(settings);
       // After every boot-time row writer (migrations and the legacy fold).
+      s.#db.transaction(() => assignMissingIncarnations(s.#db))();
       for (const row of s.#q.collectionsAll.all()) s.#incarnations.set(row.id, { incarnation: row.incarnation, address: row.address });
       s.arrivals = new SourceArrivals(s); // in-memory only; schema/settings unchanged
       const stats = await s.#importFeedbackV1(feedbackPath, settings);

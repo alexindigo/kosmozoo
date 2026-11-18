@@ -2068,7 +2068,9 @@ The migration is retry-safe after its separate version write. Only Store owns SQ
 
 v10-to-v11 transactionally adds `collection.incarnation TEXT` if absent and
 backfills every NULL with a distinct UUID generated in JS. Retrying preserves
-already assigned values. New explicit and placeholder inserts supply a UUID;
+already assigned values. Every open (after the legacy fold) assigns a UUID to any
+row still without one, e.g. a source added by an older engine on a schema-11
+database. New explicit and placeholder inserts supply a UUID;
 `INSERT OR IGNORE` preserves an existing registration unchanged.
 
 Durable bytes live under `<state>/archives/<ab>/<hash>`, distinct from ordinary
