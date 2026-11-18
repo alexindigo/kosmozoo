@@ -1,5 +1,31 @@
 # Changelog
 
+## 0.5.0 - 2026-11-18
+
+Variations can run on any configured ComfyUI, chosen in the dialog and defaulting
+to the ComfyUI selected in the header. On another machine, missing nodes and
+values outside its model or option lists are listed first in red with up to
+three closest replacements, and Run sends nothing until they are resolved. Every
+parameter kind recorded in a workflow can be edited, and every run is saved:
+recall a saved run's changes onto the current image, or reopen its original
+setup with its original images.
+
+Image sets also accept photos from Pexels or any Pexels-compatible service,
+added in Settings with keys kept on the engine. The shared image picker shows
+loading progress, placeholder tiles and dimmed earlier results while a search
+loads; a failed workflow check says which ComfyUI failed and offers Retry.
+
+Images not yet looked at are marked on their source, the navigation rail and the
+browser tab icon. Info metadata offers filter actions for parameter values.
+Ticked cards are kept per source across page reloads, engine restarts, source
+switches and Variations runs. Clicking a file name copies it over plain HTTP too,
+and a copy that fails says so.
+
+An engine restart no longer looks like a changed source: an open Variations
+dialog keeps working with its edits. Each source's identity is now stored in
+the database, so the first start upgrades it (schema 10 to 11); the upgraded
+database cannot be opened by 0.4.x.
+
 ## 0.4.1 - 2026-11-08
 
 Header popups stay above feed, selection and workspace controls without changing
