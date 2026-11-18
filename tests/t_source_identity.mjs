@@ -145,3 +145,25 @@ Deno.test("source identity: a stored incarnation names one registration at one a
     assertEquals(store.collectionIncarnation("a", "b:1"), null);
   } finally { lifecycle.stop(); store.close(); }
 }));
+
+Deno.test("source identity: a source added by an older engine gets a stored identity at the next start", () => stateFixture(async dir => {
+  let store = await Store.open(dir);
+  store.collectionAdd("a", "a:1");
+  const kept = store.collectionIncarnation("a");
+  store.close();
+  // 0.4.x opens a schema-11 database and inserts rows without an incarnation.
+  const raw = new Database(join(dir, "metadata.db"));
+  try { raw.prepare("INSERT INTO collection (id, kind, address, created_at) VALUES (?, 'comfy', ?, ?)").run("old", "old:1", Date.now()); }
+  finally { raw.close(); }
+  store = await Store.open(dir);
+  let assigned;
+  try {
+    assigned = store.collectionIncarnation("old");
+    assert(uuid(assigned), "a missing identity is assigned on open");
+    assertEquals(store.collectionGet("old").incarnation, assigned, "and stored, not only cached");
+    assertEquals(store.collectionIncarnation("a"), kept, "existing identities never change");
+  } finally { store.close(); }
+  store = await Store.open(dir);
+  try { assertEquals(store.collectionIncarnation("old"), assigned, "stable after another start"); }
+  finally { store.close(); }
+}));
