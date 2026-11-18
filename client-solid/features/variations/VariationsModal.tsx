@@ -560,6 +560,7 @@ function ModalBody(props) {
             <div class="vz-messages" role="status">
               <div class="vz-message-content">
                 <Show when={tally().message && !result()}><p class={["invalid", "conflict", "failed"].includes(tally().status) ? "vz-readiness-error" : "vz-field-help"}>{tally().message}</p></Show>
+                <Show when={tally().uncheckedMessage && !result()}><p class="vz-field-help">{tally().uncheckedMessage}</p></Show>
                 <Show when={tally().status === "failed"}><button type="button" class="vz-thumbnail-retry vz-catalogue-retry" onClick={retryCatalogue}>Retry</button></Show>
                 <Show when={result()}>{value => <>
                   <Show when={Number.isSafeInteger(value().submitted) && value().total > 0}>

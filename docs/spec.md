@@ -374,13 +374,18 @@ same rule covers card openings and saved-run recalls.
 `GET /probe/<id>?destination=<origin>` and
 `GET /history/<id>/catalogue?lease&target&destination` return the target's
 workflow as that destination declares it, plus `destination: { origin, missing,
-conflicts }`. The catalogue `context` stays the target's own. Conflicts exist
+conflicts, unchecked }`. The catalogue `context` stays the target's own. Conflicts exist
 only when the destination differs from the image's own source; the same-host
 behaviour is unchanged. A conflict is evidence-based: a node class absent from
 the destination's object_info (`kind: "node"`), or a current value outside a
 closed list the destination declares (`kind: "value"`, with its `choices` and up
-to three closest `suggestions` by name). Unknown/custom inputs are never
-flagged. Parameters of missing classes keep their original descriptors.
+to three closest `suggestions` by name). Recorded inputs without known declarations
+are listed separately by canonical ID in `unchecked`, excluding known conflicts.
+They are not incompatibilities and never block Run. The existing message area
+reports their count separately from conflict errors, with backend-validation
+guidance; it does not claim that matching declarations establish host equivalence
+or arbitrary custom-validator compatibility. Parameters of missing classes keep
+their original descriptors. Same-host review keeps both lists empty.
 
 Conflicting cards appear first in the catalogue in red ink; clicking one adds it
 to the editors. Value conflicts offer one-click closest replacements; a picked
@@ -398,8 +403,23 @@ of the workflow. The time estimate still uses original generation times.
 The host is one of the compared parameters. The tuple whose values all equal
 the image's current values reproduces the original only on the image's own
 host, so it is excluded there; on any other destination it is a new image and
-counts, runs and takes part in automatic naming. With no enabled parameter
-there is still nothing to vary.
+counts, runs and takes part in automatic naming. With every graph parameter off,
+a different destination contributes exactly one unchanged graph per applicable
+target. This is the empty identity tuple `{}`, with no invented parameter
+assignment or automatic naming token. On the original destination it remains
+zero work. Enabled-empty or invalid axes are not the identity tuple and still
+reject. Existing output naming/narrowing, archived input materialization and final
+graph validation remain in force.
+
+After sealing the archive, preflight rejects configurations known to produce no
+work before any upstream resource materialization. In bulk, an individually
+zero-count target does not veto other potentially productive targets at this
+early stage. Unresolved transfers remain unknown here: estimated upload names
+cannot reject a recipe or authorize a graph assignment. Actual receipt-backed
+target planning and independent final-write coverage still own final admission.
+Each target's materialization/planning gate also rejects a known-zero target
+before its own resource effects; aggregate potential never authorizes a no-op
+target's upload.
 
 #### Durable Variations snapshots
 
@@ -1236,6 +1256,14 @@ early typed naming or manufacturing a user-edit revision. SliderRow's raw increm
 is controlled by this owner and parsed once; view/child File/caret/gesture identity
 and stable row-ID mounting remain private. No whole row-object comparison or
 independently maintained acknowledgement path whitelist owns this flow.
+
+The shared typed tuple kernel owns destination-only identity in both preview and
+execution. An empty graph tuple on another destination requires no graph-axis
+write, but still requires normal naming, complete off-selection coverage and the
+same source/graph/history-bound v2 acknowledgement. A nonempty tuple cannot use
+that exception to hide missing or pruned writes. Destination review facts remain
+readonly and destination-fenced; unchecked input guidance is separate from known
+conflicts in the existing summary message region, without another layout or gate.
 
 Each Load Image row owns one ordered image set, initially empty. Existing ComfyUI
 input names, native browser Files and engine-host image paths can be added over multiple turns and mixed;

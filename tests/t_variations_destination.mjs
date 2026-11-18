@@ -5,8 +5,9 @@ import { makeVariationRecipe } from "../client-solid/features/variations/recipe.
 import { numericDefaults, editorDomain } from "../client-solid/features/variations/graph.mjs";
 import { encodeHistoryRecipe } from "../src/features/variations/history-codec.mjs";
 import { parameterCurrent, parseExactJson, stringifyExactJson } from "../src/parameters.mjs";
-import { closestChoices, destinationConflicts } from "../src/features/variations/destination.mjs";
+import { closestChoices, destinationConflicts, destinationUnchecked } from "../src/features/variations/destination.mjs";
 import { sourceOrigin } from "../src/source-origin.mjs";
+import { acknowledgedFields } from "../src/features/variations/shared.mjs";
 
 Deno.test("destination: closest choices rank similar model names and omit weak matches", () => {
   assertEquals(closestChoices("models/flux1-dev.safetensors", ["flux1-dev-fp8.safetensors", "sdxl.safetensors", "flux1-schnell.safetensors"]),
@@ -30,6 +31,7 @@ Deno.test("destination: conflicts are only missing classes and values outside a 
   assertEquals(conflicts["a.ckpt"].suggestions, [], "no similar name, no suggestion");
   assertEquals(conflicts["a.ckpt"].choices, ["y.safetensors"]);
   assertEquals(conflicts["b.value"], { kind: "node", type: "Fancy" });
+  assertEquals(destinationUnchecked(parameters, conflicts), ["c.text"], "unknown declarations are separate from known conflicts");
 });
 
 function recipeFor(catalogue) {
@@ -48,7 +50,7 @@ Deno.test("destination: a saved Run materializes and queues only on the chosen C
   const dir = await Deno.makeTempDir({ prefix: "kz-destination-" });
   const graph = { load: { class_type: "LoadImage", inputs: { image: "original.png" } },
     ckpt: { class_type: "Ckpt", inputs: { ckpt_name: "flux1-dev.safetensors" } },
-    n: { class_type: "Test", inputs: { seed: 5, images: ["load", 0], model: ["ckpt", 0] } },
+    n: { class_type: "Test", inputs: { seed: 5, images: ["load", 0], model: ["ckpt", 0], custom: { mode: "retained" } } },
     save: { class_type: "SaveImage", inputs: { images: ["n", 0], filename_prefix: "source" } } };
   const hosts = {};
   const serve = (name, { ckpts, classes }) => {
@@ -98,9 +100,11 @@ Deno.test("destination: a saved Run materializes and queues only on the chosen C
     assertEquals(onB.data.context, probe.context, "target context stays the image's own");
     assertEquals(onB.data.destination.origin, b);
     assertEquals(Object.keys(onB.data.destination.conflicts), ["ckpt.ckpt_name"]);
+    assertEquals(onB.data.destination.unchecked, ["n.custom"]);
     assertEquals(onB.data.destination.conflicts["ckpt.ckpt_name"].suggestions, ["flux1-dev-fp8.safetensors"]);
     const onA = (await call("GET", `/probe/a%3Asource_00001_.png?destination=${encodeURIComponent(JSON.stringify(probe.context.origin))}`)).data;
     assertEquals([onA.destination.conflicts, onA.destination.missing], [{}, []], "own source keeps today's behaviour");
+    assertEquals(onA.destination.unchecked, []);
     const onC = (await call("GET", `/probe/a%3Asource_00001_.png?destination=${encodeURIComponent(JSON.stringify(c))}`)).data;
     assertEquals(onC.destination.missing, ["Test"]);
     assert(Object.values(onC.destination.conflicts).every(conflict => conflict.kind === "node"));
@@ -146,10 +150,10 @@ Deno.test("destination: a saved Run materializes and queues only on the chosen C
     }
     assertEquals(hosts.b.uploads.length, uploadsBefore + 1);
 
-    // The host is compared too: the unchanged seed is a new image on d, and
-    // nothing to submit on the image's own host a.
+    // Destination alone is a parameter: all graph parameters remain off, with
+    // an existing graph input still materialized through actual receipts.
     const unchanged = destination => {
-      const raw = recipeFor(onB.data); raw.write("numeric", "n.seed", "enabled", true); raw.write("numeric", "n.seed", "mode", "value"); raw.write("numeric", "n.seed", "value", "5");
+      const raw = recipeFor(probe);
       const runId = crypto.randomUUID(), encoded = encodeHistoryRecipe(raw.capture(), runId);
       return { runId, body: { runId, format: 1, cohortMode: "single", targets: [target], recipe: encoded.recipe, resources: encoded.resources, destination } };
     };
@@ -162,15 +166,51 @@ Deno.test("destination: a saved Run materializes and queues only on the chosen C
     assertEquals(dPlan.status, 200, stringifyExactJson(dPlan));
     const dRun = await call("POST", "/run", dPlan.data.request);
     assertEquals([dRun.status, dRun.data.submitted, dRun.data.total], [200, 1, 1], stringifyExactJson(dRun));
-    assertEquals(parseExactJson(hosts.d.jobs[0]).prompt.n.inputs.seed, 5);
+    const unchangedJob = parseExactJson(hosts.d.jobs[0]);
+    assertEquals(unchangedJob.prompt.n, graph.n, "recorded numeric values and connections are unchanged");
+    assertEquals(unchangedJob.prompt.ckpt, graph.ckpt, "no model replacement is invented");
+    assertEquals(hosts.d.inputs.get(unchangedJob.prompt.load.inputs.image), hosts.a.inputs.get("original.png"));
+    assertEquals(hosts.d.uploads.length, 1);
+    assertEquals(unchangedJob.extra_data.extra_pnginfo.kz, { v: 1, source: target.id, params: {} }, "lineage retains original workflow identity without fabricated assignments");
+    assertEquals(dRun.data.acknowledgement.accepted[0].applied, { ranges: [], imageParams: [] });
+    assert(acknowledgedFields(dPlan.data.request, dRun.data), "empty graph writes still have exact acknowledgement coverage");
+    assertEquals(parseExactJson(engine.ctx.store.variationGet(onD.runId).snapshot_json).targets[0].graph, graph, "saved workflow identity stays original");
     const own = unchanged(probe.context.origin);
     assertEquals((await call("POST", "/history", own.body)).status, 200);
-    const aPrepared = (await call("POST", `/history/${own.runId}/prepare`)).data;
-    for (const resourceId of new Set(Object.values(aPrepared.targets[0].graphResources)))
-      await call("POST", `/history/${own.runId}/uploads/0-${resourceId}`, { targetIndex: 0, resourceId, origin: probe.context.origin, snapshotHash: aPrepared.snapshotHash });
+    const aPreparation = await call("POST", `/history/${own.runId}/prepare`);
+    assertEquals(aPreparation.status, 400, "known zero-work recipes reject before resource materialization");
+    const aPrepared = (await call("GET", `/history/${own.runId}`)).data;
+    // If upload were admitted it would have to write: the original name no
+    // longer exists. No-op admission must happen before trying that effect.
+    const original = hosts.a.inputs.get("original.png"); hosts.a.inputs.delete("original.png");
+    for (const resourceId of new Set(Object.values(aPrepared.targets[0].graphResources))) {
+      const upload = await call("POST", `/history/${own.runId}/uploads/0-${resourceId}`, { targetIndex: 0, resourceId, origin: probe.context.origin, snapshotHash: aPrepared.snapshotHash });
+      assertEquals(upload.status, 400, stringifyExactJson(upload));
+    }
+    hosts.a.inputs.set("original.png", original);
     const aPlan = await call("POST", `/history/${own.runId}/prepare-target`, { targetIndex: 0, origin: probe.context.origin, snapshotHash: aPrepared.snapshotHash });
     assertEquals(aPlan.status, 400, stringifyExactJson(aPlan));
-    assertEquals(hosts.a.jobs.length, 0);
+    assertEquals([hosts.a.jobs.length, hosts.a.uploads.length], [0, 0]);
+
+    // Early capture preflight stays cohort-aware: a no-op target cannot reject
+    // a productive target in the same bulk capture. The target-specific gate
+    // must still reject that no-op before reading or uploading its resources.
+    hosts.d.outputs.set("source_00001_.png", hosts.a.outputs.get("source_00001_.png"));
+    hosts.d.inputs.set("original.png", original);
+    await engine.ctx.ingest.ensure("d", "source_00001_.png");
+    const dProbe = (await call("GET", "/probe/d%3Asource_00001_.png")).data;
+    const mixedId = crypto.randomUUID(), mixed = encodeHistoryRecipe(recipeFor(probe).capture(), mixedId);
+    const dTarget = { ...target, id: "d:source_00001_.png", host: "d", origin: dOrigin, context: dProbe.context };
+    assertEquals((await call("POST", "/history", { runId: mixedId, format: 1, cohortMode: "bulk", targets: [target, dTarget], recipe: mixed.recipe, resources: mixed.resources, destination: probe.context.origin })).status, 200);
+    const mixedPrepared = await call("POST", `/history/${mixedId}/prepare`);
+    assertEquals(mixedPrepared.status, 200, stringifyExactJson(mixedPrepared));
+    hosts.a.inputs.delete("original.png");
+    for (const resourceId of new Set(Object.values(mixedPrepared.data.targets[0].graphResources))) {
+      const noOpUpload = await call("POST", `/history/${mixedId}/uploads/0-${resourceId}`, { targetIndex: 0, resourceId, origin: probe.context.origin, snapshotHash: mixedPrepared.data.snapshotHash });
+      assertEquals(noOpUpload.status, 400, stringifyExactJson(noOpUpload));
+    }
+    assertEquals(hosts.a.uploads.length, 0);
+    hosts.a.inputs.set("original.png", original);
 
     // A host lacking a node class rejects before any upload or job.
     const blockedId = crypto.randomUUID(), blocked = encodeHistoryRecipe(recipeFor(onC).capture(), blockedId);

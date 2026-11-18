@@ -53,7 +53,7 @@ export function makeVariationEditor({ targets, cohortMode, destination: initialD
   // Where the Run executes, chosen independently of the targets' sources. Its
   // catalogue's conflicts are readonly facts; until it is inspected Run waits.
   let destination = validOrigin(initialDestination) ? freeze(snapshotDraft(initialDestination)) : null;
-  let conflicts = {}, destinationPending = !!destination;
+  let conflicts = {}, unchecked = [], destinationPending = !!destination;
   // A failed catalogue request is a state with a way out, never a silent wait.
   let catalogueError = null;
   const catalogues = new Map();
@@ -160,6 +160,7 @@ export function makeVariationEditor({ targets, cohortMode, destination: initialD
   const unresolvedConflicts = () => locations.filter(entry => conflictFor(entry.id)).length;
   const catalogueProblem = () => `Couldn't check ${destination?.source ?? capturedTargets[0].host}: ${catalogueError}`;
   const conflictMessage = count => `Resolve ${count} conflict${count === 1 ? "" : "s"} with ${destination?.source} before running.`;
+  const destinationMessage = () => unchecked.length ? `${unchecked.length} recorded input${unchecked.length === 1 ? " is" : "s are"} unchecked on ${destination?.source}; ComfyUI will validate them at submission.` : "";
   const dirty = () => acceptedRevision === null ? restoredWork || selectedTargets.length !== capturedTargets.length || recipe.dirty() : recipe.revision() !== acceptedRevision;
   const parseCandidate = (parameter, raw) => parseRecipeCandidate(parameter, raw, catalogues.get(capturedTargets[0].id)?.nodes);
   const candidateChoices = entry => (entry.metadata.options ?? []).map(value => ({ text: stringifyExactJson(value),
@@ -239,7 +240,7 @@ export function makeVariationEditor({ targets, cohortMode, destination: initialD
     setDestination(origin) {
       if (!alive || deciding || running || !validOrigin(origin) || origin.kind !== "comfy") return false;
       if (sameOrigin(origin, destination)) return false;
-      destination = freeze(snapshotDraft(origin)); conflicts = {}; destinationPending = true; catalogueError = null;
+      destination = freeze(snapshotDraft(origin)); conflicts = {}; unchecked = []; destinationPending = true; catalogueError = null;
       invalidateClose(); notify(); return true;
     },
     resolveConflict(id, value) {
@@ -470,7 +471,7 @@ export function makeVariationEditor({ targets, cohortMode, destination: initialD
       if (data.destination && !sameOrigin(data.destination.origin, destination)) return;
       parameterIndex(allParameters(data)); parameterIndex(catalogueParams(data));
       catalogues.set(target.id, freeze(snapshotDraft({ ...data, context: data.context ?? catalogues.get(target.id)?.context ?? null })));
-      if (data.destination) { conflicts = snapshotDraft(data.destination.conflicts ?? {}); destinationPending = false; }
+      if (data.destination) { conflicts = snapshotDraft(data.destination.conflicts ?? {}); unchecked = [...(data.destination.unchecked ?? [])]; destinationPending = false; }
       catalogueError = null;
       const legacy = new Map([...["params", "stringParams", "enumParams", "textParams"].flatMap((key, index) => (data[key] ?? []).map(parameter => [parameter.id, ["numeric", "images", "enums", "texts"][index]]))]);
       const names = new Map();
@@ -548,11 +549,12 @@ export function makeVariationEditor({ targets, cohortMode, destination: initialD
           help: "Representative first output; upload collision names and ComfyUI's added counter may differ." };
         const factors = [...axes].sort((a, b) => (a.kind !== "images") - (b.kind !== "images")).map(axis =>
           `${axis.count.toLocaleString("en-US")} ${axis.kind === "images" ? `input image${axis.count === 1 ? "" : "s"}` : `${axis.name} value${axis.count === 1 ? "" : "s"}`}`);
-        const breakdown = factors.join(" × ") + (excluded ? ` · ${excluded} unchanged combination${excluded === 1 ? "" : "s"} excluded` : "")
-          + (batch && axes.length ? ` · workflow estimate × ${selectedTargets.length} target image${selectedTargets.length === 1 ? "" : "s"}` : "");
+        const breakdown = (factors.join(" × ") || (!sameHost ? `Unchanged workflow on ${destination.source}` : "Unchanged workflow"))
+          + (excluded ? ` · ${excluded} unchanged combination${excluded === 1 ? "" : "s"} excluded` : "")
+          + (batch ? ` · workflow estimate × ${selectedTargets.length} target image${selectedTargets.length === 1 ? "" : "s"}` : "");
         let status = !naming.complete || error ? "invalid" : pending ? "checking" : "ready";
         let message = !naming.complete ? "Unresolved naming token: check Prefix and Suffix." : error ? `Image comparison failed: ${error}`
-          : pending ? "Checking images…" : !n ? "Choose a different value or image to create variations."
+          : pending ? "Checking images…" : !n ? "Choose a different value, image or destination to create variations."
           : !safe ? "Estimate exceeds safe integer precision; the full value is approximate."
           : batch ? "Estimated from the opening workflow; each remaining target is checked before submission."
           : n > 100 ? "Large sweep: this many jobs will be queued. The engine validates its existing per-run limit." : "";
@@ -560,14 +562,16 @@ export function makeVariationEditor({ targets, cohortMode, destination: initialD
         if (blocked && status !== "invalid") { status = "conflict"; message = conflictMessage(blocked); }
         const timeEstimate = estimateGenerationTime(status === "invalid" ? null : perImage,
           selectedTargets.map(target => originCurrent(target) ? generationTimes.get(target.id) : null));
-        return { n, perImage, anyEnabled: axes.length > 0, exact: exact && naming.complete, status, message, axes, excluded, breakdown, naming, timeEstimate,
+        return { n, perImage, anyEnabled: axes.length > 0 || !sameHost, exact: exact && naming.complete, status, message,
+          unchecked: [...unchecked], uncheckedMessage: destinationMessage(), axes, excluded, breakdown, naming, timeEstimate,
           display: n >= 1e6 ? n < 1e15 ? new Intl.NumberFormat("en-US", { notation: "compact", maximumSignificantDigits: 4 }).format(n)
             : n.toExponential(2).replace("e+", " × 10^") : n.toLocaleString("en-US"),
           fullCount: `${n.toLocaleString("en-US", { maximumFractionDigits: 0 })}${exact ? " variations" : " variations (estimate)"}` };
       } catch (error) {
         // A value the destination lacks is a conflict, not a recipe mistake.
         const blocked = unresolvedConflicts();
-        return blocked ? unavailable("conflict", conflictMessage(blocked)) : unavailable("invalid", error.message);
+        return { ...unavailable(blocked ? "conflict" : "invalid", blocked ? conflictMessage(blocked) : error.message),
+          unchecked: [...unchecked], uncheckedMessage: destinationMessage() };
       }
     },
     async run() {

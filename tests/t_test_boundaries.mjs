@@ -18,7 +18,7 @@ Deno.test("fake Comfy listener is loopback-only even without a caller bind overr
   const client = new Agent(); // node:http connects directly, independent of HTTP_PROXY.
   try {
     ({ servers } = await import("./fake-comfy.mjs"));
-    assertEquals(servers.map(server => server.addr.hostname), ["127.0.0.1", "127.0.0.2", "127.0.0.3"]);
+    assertEquals(servers.map(server => server.addr.hostname), ["127.0.0.1", "127.0.0.2", "127.0.0.3", "127.0.0.4"]);
     for (const server of servers) {
       const status = await new Promise((resolve, reject) => {
         const request = get(`http://${server.addr.hostname}:${server.addr.port}/api/system_stats`, { agent: client }, response => {

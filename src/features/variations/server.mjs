@@ -337,7 +337,9 @@ export function register(app) {
       try { mutation = mutateGraph(graph, perm, fullInspection, r.dynamicCombos, { rangeIds: new Set(Object.keys(resolvedRanges)) }); }
       catch (error) { return rejectPlan(error.message); }
       const { graph: mutated, applied, writes } = mutation;
-      if (applied.length === 0) {
+      // Only the kernel's empty identity tuple on another destination needs no
+      // graph-axis writes. Naming/final graph/off-selection proofs still follow.
+      if (applied.length === 0 && (sameHost || Object.keys(perm).length > 0)) {
         return rejectPlan("No applicable nodes found; no jobs were submitted");
       }
 
