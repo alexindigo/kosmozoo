@@ -227,8 +227,12 @@ and native resource retirement. First-hash enrichment preserves the same content
 
 Source pills, picker rows, persistent rail segments and favicon consume that one ledger,
 including selected and unpinned sources. Reload starts quiet; no read state is persisted
-or written to the engine. Source text/edge uses `--attention` and shared "New images."
-wording, without pulsing/layout change. Rail ticks preserve judgment/current bodies and
+or written to the engine. Source attention uses `--attention` and shared "New images."
+wording, without pulsing/layout change. For a current source, only its name turns
+orange; the pill border and picker inset edge retain their normal selected colors.
+Off-current unseen sources retain orange names and edges, including the pill's
+existing whole-button attention color. Exposure restores the normal name and edge.
+Rail ticks preserve judgment/current bodies and
 one-third `--warning` unseen segments, independently of the one-shot arrival animation.
 The favicon caches the original 64px swan with a stationary 20px `--negative` upper-right
 dot and 4px `--foreground-bright` separator. Last unseen removal/exposure and adapter
