@@ -23,8 +23,8 @@ and a copy that fails says so.
 
 An engine restart no longer looks like a changed source: an open Variations
 dialog keeps working with its edits. Each source's identity is now stored in
-the database, so the first start upgrades it (schema 10 to 11); the upgraded
-database cannot be opened by 0.4.x.
+the database, so the first start upgrades it (schema 10 to 11). A source added
+by 0.4.x after that, if you go back, gets its identity at the next 0.5.0 start.
 
 ## 0.4.1 - 2026-11-08
 
