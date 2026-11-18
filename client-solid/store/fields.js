@@ -53,7 +53,7 @@ function fieldValues(meta) {
     for (const node of nodes.sort(order)) for (const [input, value] of Object.entries(node.inputs ?? {})) {
       if (value == null || value === "") continue;
       if (!inputs.has(input)) inputs.set(input, []);
-      inputs.get(input).push(typeof value === "boolean" ? String(value) : value);
+      inputs.get(input).push({ nodeId: node.id, value });
     }
   }
   return values;
@@ -64,7 +64,7 @@ function fieldValues(meta) {
 // or a scalar (single instance).
 function fieldGetter(classType, input) {
   return (m, index = fieldValues(m)) => {
-    const vals = index.get(classType)?.get(input) ?? [];
+    const vals = (index.get(classType)?.get(input) ?? []).map(({ value }) => typeof value === "boolean" ? String(value) : value);
     return vals.length > 1 ? vals : (vals[0] ?? null);
   };
 }
@@ -88,7 +88,7 @@ export function formatScalar(v) {
   return String(v);
 }
 
-// [label, text, long?] rows from meta. Rows are labeled by the actual node
+// [label, text, long?, filterIntent?, occurrenceKey] rows from meta. Rows use the actual node
 // name (class_type) — never the registry title, which any workflow renames
 // per instance.
 export function materializeRows(meta, { list }) {
@@ -101,10 +101,18 @@ export function materializeRows(meta, { list }) {
     if (v == null) continue;
     const [classType, input] = parseFieldId(id);
     const vals = Array.isArray(v) ? v : [v];
+    const originals = index.get(classType)?.get(input) ?? [];
     const label = `${classType} — ${input}`;
-    for (const text of vals) {
+    for (const [i, text] of vals.entries()) {
+      // Keep the actual occurrence beside its presentation; never recover raw
+      // values by matching rounded text or scanning the metadata a second time.
+      const occurrence = originals.length > 1 ? originals[i] : originals[0];
+      const original = occurrence?.value;
+      const intent = ["string", "number", "boolean"].includes(typeof original)
+        ? { parameter: id, value: String(original) } : null;
       const long = String(text).length > LONG_TEXT;
-      rows.push([label, long ? String(text) : formatScalar(text), long]);
+      const key = JSON.stringify([id, occurrence?.nodeId ?? i, originals.length === 1 && Array.isArray(original) ? i : 0]);
+      rows.push([label, long ? String(text) : formatScalar(text), long, intent, key]);
     }
   }
   return rows;

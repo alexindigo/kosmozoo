@@ -197,7 +197,7 @@ timeout 180s docker run --rm --user "$RUN_USER" --network host -v "$WORK":/work 
   --entrypoint node "$PW_IMAGE" /work/tests/e2e/entry-actions.cjs
 
 # Loading and rail presentation contracts share the feed stack and browser workspace.
-for spec in boot-splash stylesheet-failure source-glimmer rail-scroll rail-stripes rail-preview pinch-zoom native-magnification media-align filter-menu; do
+for spec in boot-splash stylesheet-failure source-glimmer rail-scroll rail-stripes rail-preview pinch-zoom native-magnification media-align filter-menu info-parameter-filter; do
   timeout 180s docker run --rm --user "$RUN_USER" --network host -v "$WORK":/work -w /work \
     --memory=1600m --memory-swap=1600m --pids-limit=256 --cpus=2 \
     -e HOME=/work/tests/.tmp-runtime/feed/home -e TMPDIR=/work/tests/.tmp-runtime/feed/tmp \

@@ -1460,13 +1460,26 @@ body:has(#diff:not([hidden])) #statusCol { bottom: 56px; }
 .filter-status { display: flex; align-items: center; gap: 6px; }
 .filter-feedback { display: grid; grid-template-columns: 65px minmax(0, 1fr); gap: 6px; align-items: center; }
 .filter-feedback > .text-field { grid-column: 1 / -1; }
-.filter-parameter-value { display: flex; gap: 6px; min-width: 0; min-height: var(--control-height-md); }
-.filter-parameter-value > * { flex: 1 1 0; }
+.filter-parameter-value { display: grid; gap: 6px; min-width: 0;
+  grid-template-columns: minmax(0, 1fr); grid-template-rows: var(--control-height-md) 5lh; }
+#filter-parameterValue { height: 100%; min-height: 0; overflow-y: auto; }
 .filter-footer { display: flex; align-items: center; flex-wrap: wrap; gap: 8px;
   margin-top: 12px; padding-top: 10px; border-top: 1px solid var(--border); white-space: nowrap; }
 #filterMatchCount { margin-left: auto; font-variant-numeric: tabular-nums; }
 .filter-loading { flex-basis: 100%; }
 .feed-filter-menu button:focus-visible, .feed-filter-menu select:focus-visible { outline: 2px solid var(--secondary); outline-offset: 2px; }
+
+/* Metadata actions keep their intrinsic slot while concealed, including long
+   text. Opacity retains native Tab reachability; focus-within reveals first. */
+.info-filter-row { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 6px; align-items: center; }
+.info-filter-row > .infotext { grid-column: 1 / -1; }
+.info-filter-row > .info-filter-content { min-width: 0; overflow-wrap: anywhere; }
+.info-filter-action { display: flex; align-items: center; }
+.info-filter-action .icon-button { opacity: 0; pointer-events: none; }
+.info-filter-row:is(:hover, :focus-within) > .info-filter-action .icon-button { opacity: 1; pointer-events: auto; }
+@media (hover: none) {
+  .info-filter-action .icon-button { opacity: 1; pointer-events: auto; }
+}
 .value-preview-owner { min-width: 0; }
 .value-preview-trigger { cursor: text; }
 .value-preview-owner:not(:hover) > .value-preview { visibility: hidden; pointer-events: none; }
