@@ -26,6 +26,8 @@ dialog keeps working with its edits. Each source's identity is now stored in
 the database, so the first start upgrades it (schema 10 to 11). A source added
 by 0.4.x after that, if you go back, gets its identity at the next 0.5.0 start.
 
+Official `kosmozoo-linux-x86_64` SHA-256: `9443f47244fe57ea0c638ef0691ca70f49ebe97e5430d0ed33e5501c2018dc5f`.
+
 ## 0.4.1 - 2026-11-08
 
 Header popups stay above feed, selection and workspace controls without changing
