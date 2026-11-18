@@ -65,9 +65,8 @@ export function Card(props) {
 
   const copyName = (e) => {
     e.stopPropagation();
-    store.handles.invoke("entry.copyReference", { id: props.entryId })
-      ?.then(flashCopied)
-      .catch(() => {});
+    Promise.resolve(store.handles.invoke("entry.copyReference", { id: props.entryId }))
+      .then(copied => { if (copied) flashCopied(); });
   };
 
   const del = () => store.state.hosts[image()?.host]?.capabilities?.delete ?? null;

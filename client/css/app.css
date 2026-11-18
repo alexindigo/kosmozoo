@@ -366,6 +366,8 @@ main { display: flex; flex: 1; min-height: 0; isolation: isolate; }
 .copyable { cursor: copy; }
 .copyable:hover { color: var(--secondary); }
 .copyable.copied { color: var(--secondary); }
+/* Off-screen copy buffer for insecure origins (client-solid/lib/clipboard.js). */
+.clipboard-buffer { position: fixed; inset: 0 auto auto 0; width: 1px; height: 1px; padding: 0; border: 0; opacity: 0; pointer-events: none; }
 .votebtn, .savebtn { flex: 0 0 auto; font-size: 11px;
   background: var(--lifted); color: var(--foreground-dim); border: 1px solid var(--border);
   border-radius: 4px; cursor: pointer; }
