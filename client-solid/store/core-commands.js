@@ -1,4 +1,5 @@
 // Semantic catalog over private model operations. No input/UI dependencies.
+import { copyText } from "../lib/clipboard.js";
 import { RESOURCE_ROOTS } from "/shared/parameters.mjs";
 const string = (v) => typeof v === "string" && v.length > 0;
 const text = (v) => typeof v === "string";
@@ -26,7 +27,7 @@ const judgmentIntent = (v) => {
     key === "notes" ? value == null || (typeof value === "object" && !Array.isArray(value) && Object.entries(value).every(([sign, text]) => ["pos", "neg"].includes(sign) && (text == null || typeof text === "string"))) : false) })(v);
 };
 
-export function registerCoreCommands(handles, { ops, state, clipboard = (text) => globalThis.navigator?.clipboard?.writeText(text) }) {
+export function registerCoreCommands(handles, { ops, state, clipboard = copyText }) {
   const add = (id, fields, execute, description = id, files = false) =>
     handles.register({ id, description, validate: typeof fields === "function" ? fields : shape(fields), execute, files });
   // Explicit IDs never fall back. Resolve implicit identity before any writer/await.
@@ -106,9 +107,18 @@ export function registerCoreCommands(handles, { ops, state, clipboard = (text) =
   add("entry.select", { source: string, file: string }, (a) => ops.current.set(a.source, a.file));
   add("entry.navigate", { source: string, file: string }, (a) => ops.current.navigate(a.source, a.file));
   add("entry.previous", {}, () => ops.current.pop());
+  // Resolves whether the text reached the clipboard; a failure is reported,
+  // never silent. The copy itself starts synchronously, inside the click.
   add("entry.copyReference", { id: string }, ({ id }) => {
     const image = entry(id);
-    return image ? clipboard(state.referenceName(image)) : false;
+    if (!image) return false;
+    let copying;
+    try { copying = Promise.resolve(clipboard(state.referenceName(image))); }
+    catch (error) { copying = Promise.reject(error); }
+    return copying.then(() => true, error => {
+      ops.status?.error?.(`Couldn't copy the file name: ${error?.message ?? error}`);
+      return false;
+    });
   });
   add("source.select", { id: string, options: optional((v) => v && typeof v === "object") }, (a) => ops.hosts.select(a.id, a.options));
   add("source.add", { name: text, address: text }, (a) => ops.hosts.add(a.name, a.address));
