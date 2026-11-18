@@ -24,10 +24,14 @@ function fakeWindow({ secure = false, writeText = null, execResult = true, execT
     execCommand(command) {
       log.push(["exec", command, body.children.at(-1)?.value]);
       if (execThrows) throw new Error("not allowed");
+      // Like a browser: handler data only when the event is cancelled; an
+      // uncancelled copy takes the selected buffer; cancelled without data copies nothing.
       const data = new Map();
-      const event = { clipboardData: clipboardData ? { setData: (type, value) => data.set(type, value) } : null, preventDefault() { log.push(["prevent"]); } };
+      let cancelled = false;
+      const event = { clipboardData: clipboardData ? { setData: (type, value) => data.set(type, value) } : null, preventDefault() { cancelled = true; log.push(["prevent"]); } };
       for (const listener of listeners) listener(event);
-      pasted.push(data.get("text/plain") ?? body.children.at(-1)?.value);
+      if (!cancelled) pasted.push(body.children.at(-1)?.value);
+      else if (data.has("text/plain")) pasted.push(data.get("text/plain"));
       return execResult;
     },
     getSelection: () => ({ get rangeCount() { return selectionState.ranges.length; }, getRangeAt: i => selectionState.ranges[i],
@@ -98,9 +102,10 @@ Deno.test("clipboard: the copy handler supplies the exact text, carriage returns
     await makeClipboard(win)(name);
     assertEquals(pasted, [name]);
   }
-  // Without clipboard data, a buffer that changed the text is not reported as copied.
-  const { win } = fakeWindow({ normalize: true, clipboardData: false });
+  // Without clipboard data, a buffer that changed the text is neither copied nor reported as copied.
+  const { win, pasted } = fakeWindow({ normalize: true, clipboardData: false });
   await assertRejects(() => makeClipboard(win)("odd\rname.png"), Error, "the browser blocked clipboard access");
+  assertEquals(pasted, [], "the changed text never reaches the clipboard");
   const ordinary = fakeWindow({ normalize: true, clipboardData: false });
   await makeClipboard(ordinary.win)("plain.png");
   assertEquals(ordinary.pasted, ["plain.png"]);

@@ -17,7 +17,9 @@ export function makeClipboard(win = globalThis) {
     buffer.setAttribute("readonly", ""); buffer.setAttribute("aria-hidden", "true"); buffer.tabIndex = -1;
     let supplied = false;
     const supply = event => {
-      if (!event.clipboardData) return;
+      // Without clipboard data the browser copies the buffer's selection; a
+      // buffer that changed the text must not reach the clipboard at all.
+      if (!event.clipboardData) { if (buffer.value !== text) event.preventDefault(); return; }
       event.clipboardData.setData("text/plain", text); event.preventDefault(); supplied = true;
     };
     doc.addEventListener?.("copy", supply, true);

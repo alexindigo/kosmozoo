@@ -4,8 +4,10 @@
 // read the clipboard back and to check the Clipboard API path.
 //
 // Standalone spec, not part of tests/e2e/run.sh: it needs the engine bound to a
-// non-loopback address. Run it like run-on.cjs, with the engine on 0.0.0.0, e.g.
-// E2E_ENGINE=http://127.0.0.1:19490 E2E_INSECURE_ENGINE=http://<host-ip>:19490.
+// non-loopback address and the fake ComfyUI as source `fake`. For example:
+//   deno run -A tests/fake-comfy.mjs --port 19492 --bulk 0
+//   KOZMOZOO_HOSTS=fake=127.0.0.1:19492 KOZMOZOO_BIND=0.0.0.0 KOZMOZOO_PORT=19490 deno run -A src/main.mjs
+//   E2E_ENGINE=http://127.0.0.1:19490 E2E_INSECURE_ENGINE=http://<host-ip>:19490 node tests/e2e/clipboard-insecure.cjs
 const assert = require('node:assert/strict');
 const { CDP, collectPageErrors } = require('./cdp.cjs');
 const ENGINE = process.env.E2E_ENGINE, INSECURE = process.env.E2E_INSECURE_ENGINE;
@@ -45,6 +47,12 @@ const selector = `.card[data-name=${JSON.stringify(name)}] .copyable`;
     await clickAndSeeFlash();
     assert.equal(await page.evaluate(`document.querySelectorAll('.clipboard-buffer').length`), 0, 'the copy buffer is removed');
     assert.deepEqual(await copyErrors(), errorsBefore, 'no new copy error');
+    // The card click itself put the reference on the clipboard.
+    await page.goto(ENGINE + '/');
+    await page.send('Page.bringToFront');
+    await page.poll(`(async()=>await navigator.clipboard.readText()===${JSON.stringify(expected)})()`, 10000);
+    await page.evaluate(`navigator.clipboard.writeText('awaiting-selection-copy')`);
+    await openCard(INSECURE);
 
     // A keyboard-made backward selection survives a copy with its direction.
     const selection = `(()=>{const s=getSelection();return {anchor:s.anchorNode?.textContent,anchorOffset:s.anchorOffset,focus:s.focusNode?.textContent,focusOffset:s.focusOffset}})()`;
@@ -58,11 +66,14 @@ const selector = `.card[data-name=${JSON.stringify(name)}] .copyable`;
     await page.send('Page.bringToFront');
     await page.poll(`(async()=>await navigator.clipboard.readText()===${JSON.stringify(expected)})()`, 10000);
 
-    // The secure origin keeps using the Clipboard API.
+    // The secure origin keeps using the Clipboard API, not the fallback.
     await page.evaluate(`navigator.clipboard.writeText('awaiting-secure-copy')`);
     await openCard(ENGINE);
     assert.equal(await page.evaluate(`window.isSecureContext&&!!navigator.clipboard`), true);
+    await page.evaluate(`(()=>{window.__spy={written:[],settled:[],exec:0};const write=navigator.clipboard.writeText.bind(navigator.clipboard);navigator.clipboard.writeText=text=>{window.__spy.written.push(text);return write(text).then(()=>{window.__spy.settled.push('ok')},error=>{window.__spy.settled.push('rejected');throw error})};const exec=document.execCommand.bind(document);document.execCommand=(...args)=>{window.__spy.exec++;return exec(...args)};return true})()`);
     await clickAndSeeFlash();
+    await page.poll(`window.__spy.settled.length===1`, 5000);
+    assert.deepEqual(await page.evaluate(`window.__spy`), { written: [expected], settled: ['ok'], exec: 0 }, 'the Clipboard API copied and the fallback did not run');
     await page.poll(`(async()=>await navigator.clipboard.readText()===${JSON.stringify(expected)})()`, 10000);
     assert.deepEqual(errors, []);
     console.log(`clipboard-insecure: ok (${expected})`);
