@@ -218,13 +218,14 @@ Deno.test("destination: a saved Run materializes and queues only on the chosen C
     const blockedRecipe = encodeHistoryRecipe(seeded.capture(), blockedId);
     assertEquals((await call("POST", "/history", { runId: blockedId, format: 1, cohortMode: "single", targets: [target], recipe: blockedRecipe.recipe, resources: blocked.resources, destination: c })).status, 200);
     const blockedPrepared = await call("POST", `/history/${blockedId}/prepare`);
-    assertEquals(blockedPrepared.status, 200, stringifyExactJson(blockedPrepared));
-    const resourceId = Object.values(blockedPrepared.data.targets[0].graphResources)[0];
-    const blockedUpload = await call("POST", `/history/${blockedId}/uploads/0-${resourceId}`, { targetIndex: 0, resourceId, origin: c, snapshotHash: blockedPrepared.data.snapshotHash });
-    assertEquals(blockedUpload.status, 409, stringifyExactJson(blockedUpload));
+    assertEquals(blockedPrepared.status, 400, stringifyExactJson(blockedPrepared));
+    const blockedDetail = (await call("GET", `/history/${blockedId}`)).data;
+    const resourceId = Object.values(blockedDetail.targets[0].graphResources)[0];
+    const blockedUpload = await call("POST", `/history/${blockedId}/uploads/0-${resourceId}`, { targetIndex: 0, resourceId, origin: c, snapshotHash: blockedDetail.snapshotHash });
+    assertEquals(blockedUpload.status, 400, stringifyExactJson(blockedUpload));
     assert(blockedUpload.data.error.includes("Not installed on c: Test"));
-    const blockedPlan = await call("POST", `/history/${blockedId}/prepare-target`, { targetIndex: 0, origin: c, snapshotHash: blockedPrepared.data.snapshotHash });
-    assertEquals(blockedPlan.status, 409);
+    const blockedPlan = await call("POST", `/history/${blockedId}/prepare-target`, { targetIndex: 0, origin: c, snapshotHash: blockedDetail.snapshotHash });
+    assertEquals(blockedPlan.status, 400);
     assertEquals([hosts.c.jobs.length, hosts.c.uploads.length], [0, 0]);
   } finally {
     await engine.close();

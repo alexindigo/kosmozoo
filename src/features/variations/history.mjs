@@ -6,10 +6,10 @@ import { validEntryName } from "../../backings/index.mjs";
 import { validOrigin, sameOrigin, sourceOrigin, validContext } from "../../source-origin.mjs";
 import { cloneJsonValue, parseExactJson, stringifyExactJson, resourceReference, sameJsonValue, parameterCurrent, parameterLabel } from "../../parameters.mjs";
 import { historyId, decodeHistoryRecipe } from "./history-codec.mjs";
-import { imageIdentity, snapshotDraft, numericText } from "./recipe-model.mjs";
-import { compileRecipe } from "./recipe-compile.mjs";
+import { imageIdentity, snapshotDraft } from "./recipe-model.mjs";
 import { admitResourceTransfer } from "./compile.mjs";
-import { targetRunPlan, parameterIndex, permutationPlan, resolveRelativeRanges, reproducesOriginal } from "./shared.mjs";
+import { parameterIndex } from "./shared.mjs";
+import { planCohort, planTarget, countingTarget } from "./cohort-plan.mjs";
 import { inspectSource, projectInspection } from "./inspection.mjs";
 import { inspectDestination, destinationMissing } from "./destination.mjs";
 import { readImage } from "./folder-images.mjs";
@@ -141,28 +141,11 @@ export function makeVariationHistory(app) {
     return recipe;
   };
   const preflight = (snapshot, destination, targetIndex = null) => {
-    let possiblyProductive = false;
-    for (const [indexOfTarget, saved] of snapshot.targets.entries()) {
-      const recipe = boundRecipe(snapshot, saved.catalogue);
-      for (const entry of Object.values(recipe.numeric)) if (entry.values.enabled && entry.values.mode === "range") {
-        const step = numericText(entry.values.rawIncrement);
-        if (step === null || step < entry.metadata.minIncrement) throw fail("Enter a valid positive increment; incomplete text has been kept.");
-      }
-      const compiled = compileRecipe(recipe, { catalogue: saved.catalogue, target: saved, batch: snapshot.cohortMode === "bulk", preview: true,
-        lookup: (_id, item) => ({ hash: snapshot.resources.find(r => r.id === item.resourceId)?.hash, existing: [] }) });
-      const plan = targetRunPlan(compiled.estimate, saved.catalogue), index = parameterIndex(saved.catalogue.parameters);
-      for (const pid of Object.keys(compiled.transfers)) if (index.has(pid)) admitResourceTransfer(index.get(pid));
-      // Predicted resource names cannot authorize either graph assignments or
-      // zero-work rejection. Actual receipts still own final counts. In bulk,
-      // one known-zero target must not veto other potentially productive targets.
-      const values = Object.fromEntries(saved.catalogue.parameters.map(p => [p.id, parameterCurrent(p)]));
-      const ranges = plan.payload.relative ? resolveRelativeRanges(plan.payload.ranges, values) : plan.payload.ranges;
-      const productive = Object.keys(compiled.transfers).length > 0 || permutationPlan(ranges, values, plan.payload.imageParams,
-        { sameHost: reproducesOriginal(saved.host, destination?.source) }).total > 0;
-      if (targetIndex === indexOfTarget && !productive) throw fail("Saved target has no permutations to submit; choose a different value, image or destination");
-      possiblyProductive ||= productive;
-    }
-    if (!possiblyProductive) throw fail("Saved configuration has no permutations to submit; choose a different value, image or destination");
+    const targets = snapshot.targets.map((target, index) => countingTarget(target, snapshot.recipe, snapshot.resources, destination, index));
+    const plans = planCohort({ ...snapshot, targets, destination });
+    const problem = targetIndex === null ? plans.every(plan => plan.problem) && plans[0].problem : plans[targetIndex]?.problem;
+    if (problem) throw fail(problem.message);
+    return plans;
   };
   const api = {
     begin(body) {
@@ -236,7 +219,7 @@ export function makeVariationHistory(app) {
           const destination = raw.destination;
           if (destination && !sameOrigin(destination, target.origin)) {
             currentDestination(destination);
-            const { destination: _destination, context: _context, ...facts } = await inspectDestination(app, { graph, hash, name: target.filename, original: catalogue, originContext: r.context, destination })
+            const { context: _context, ...facts } = await inspectDestination(app, { graph, hash, name: target.filename, original: catalogue, originContext: r.context, destination })
               .then(result => { if (result.error) throw fail(result.error, result.status); return result; });
             catalogue = { ...facts, context: r.context };
           }
@@ -424,11 +407,7 @@ export function makeVariationHistory(app) {
           resourceValues.set(imageIdentity(item), resolved);
         }
       }
-      const compiled = compileRecipe(recipe, { catalogue, target, batch: snapshot.cohortMode === "bulk", resourceValues });
-      const plan = targetRunPlan(compiled.payload, catalogue), values = Object.fromEntries(catalogue.parameters.map(p => [p.id, parameterCurrent(p)]));
-      const ranges = plan.payload.relative ? resolveRelativeRanges(plan.payload.ranges, values) : plan.payload.ranges;
-      const expectedTotal = permutationPlan(ranges, values, plan.payload.imageParams, { sameHost: reproducesOriginal(target.host, destination.source) }).total;
-      if (!Number.isSafeInteger(expectedTotal) || expectedTotal <= 0 || expectedTotal > 500) throw fail("Saved configuration has no valid human-scale permutations");
+      const { plan, count: expectedTotal } = planTarget({ target: { ...target, catalogue }, cohortMode: snapshot.cohortMode, recipe, destination, resourceValues });
       const request = { id: target.id, host: target.host, filename: target.filename, ...plan.payload, context: r.context,
         acknowledgement: { version: 2, runId: id, requestId: crypto.randomUUID() } };
       const planHash = await digest({ request, graph });

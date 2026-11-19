@@ -1,6 +1,6 @@
 // The sole raw-recipe compiler. Catalogue, evidence and receipts are injected;
 // this module owns no editor, mutable IO state or environment dependencies.
-import { parseExactJson, parameterCurrent } from "../../parameters.mjs";
+import { parseExactJson, parameterCurrent, sameJsonValue } from "../../parameters.mjs";
 import { compileDiscreteAxes, validateEditorValue, admitResourceTransfer } from "./compile.mjs";
 import { catalogueParams, templateValue, templateLabels, parseSemicolonList, expandTextAxes, uploadCandidate } from "./shared.mjs";
 import { recipeField, recipeDispositions, snapshotDraft, freezeRecipe,
@@ -62,7 +62,7 @@ export function previewRecipeUploads(snapshot, lookup, confirmedUploads, target,
   return names;
 }
 export function compileRecipe(snapshot, { catalogue, target, batch = false, lookup = () => undefined,
-  uploadReceipts = null, confirmedUploads = new Map(), resourceValues = new Map(), preview = false }) {
+  uploadReceipts = null, confirmedUploads = new Map(), resourceValues = new Map(), resourceIdentities = null, preview = false }) {
   const bindings = [], uploads = [], uploadHashes = new Map(), ranges = {}, imageParams = {}, transfers = {}, estimates = {};
   const parameters = catalogue.parameters ?? catalogueParams(catalogue);
   const uploadPreview = preview ? previewRecipeUploads(snapshot, lookup, confirmedUploads, target, batch) : null;
@@ -89,6 +89,14 @@ export function compileRecipe(snapshot, { catalogue, target, batch = false, look
       const assigned = [], estimate = [], unresolved = [], items = read(domain, id, "items");
       if (!preview && !items.length) throw new Error(`${entry.metadata.label}: add at least one image before Run`);
       for (const item of items) {
+        // Admission identities are count-only data, never names or assignments.
+        // Their equality is supplied by the engine's resource membership owner.
+        if (resourceIdentities?.has(imageIdentity(item))) {
+          admitResourceTransfer(entry.metadata);
+          estimate.push(resourceIdentities.get(imageIdentity(item)));
+          unresolved.push(imageIdentity(item));
+          continue;
+        }
         const state = recipeImageView(item, entry.metadata, lookup(id, item), target, batch);
         const resolved = resourceValues.get(imageIdentity(item));
         if (!resolved && !preview && (state.pending || state.error)) throw new Error(state.error || "Checking image bytes; your work was kept.");
@@ -113,7 +121,7 @@ export function compileRecipe(snapshot, { catalogue, target, batch = false, look
         assigned.push(value); estimate.push(value);
       }
       imageParams[id].values = [...new Set(assigned)];
-      if (unresolved.length) { transfers[id] = unresolved; estimates[id] = [...new Set(estimate)]; }
+      if (unresolved.length) { transfers[id] = unresolved; estimates[id] = estimate.filter((value, i) => !estimate.slice(0, i).some(other => sameJsonValue(value, other))); }
     } else if (domain === "candidates") {
       imageParams[id].values = read(domain, id, "candidates").map(raw => parseRecipeCandidate(entry.metadata, raw, catalogue.nodes));
       if (!imageParams[id].values.length) throw new Error(`${entry.metadata.label}: add at least one value before Run`);
