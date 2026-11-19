@@ -15,6 +15,7 @@ import { classifyImageFiles } from "./image-drop.js";
 import { connectionPresentation } from "./field-filter.js";
 import { estimateGenerationTime, knownGenerationTime } from "./time-estimate.js";
 import { staleSource, sourceFailure } from "./source-message.js";
+import { judgmentVisible } from "/js/image-visibility-model.mjs";
 import { makeVariationRecipe, validRecipeValue as validValue, freezeRecipe as freeze, moveRecipeImage } from "./recipe.js";
 export { RECIPE_FIELDS as EDITOR_FIELDS } from "./recipe.js";
 const filename = value => typeof value === "string" && value.length > 0 && !/[\\/\x00-\x1f\x7f]/.test(value) && ![".", ".."].includes(value);
@@ -335,10 +336,25 @@ export function makeVariationEditor({ targets, cohortMode, destination: initialD
     },
     ready: () => catalogueReady,
     sourceProblem() { const target = selectedTargets.find(target => !originCurrent(target)); return target ? staleSource(target.host) : null; },
-    sourceInputs: (origin, root = "input") => sourceRecord(inputCatalogues, origin, null, root) ?? { files: [], pending: false, error: "" },
+    sourceInputs(origin, root = "input") {
+      const record = sourceRecord(inputCatalogues, origin, null, root);
+      if (!record) return { files: [], pending: false, error: "" };
+      // Readonly discovery reprojects retained facts through the live injected
+      // authority. It never edits the recipe or the independent input evidence.
+      let files = record.files;
+      if (root === "output") {
+        const eligible = record.entries.filter(entry => services.outputVisible
+          ? services.outputVisible(origin, entry) : judgmentVisible(entry.judgment)).map(entry => entry.name);
+        // Unrelated recipe/status changes must not reset search/virtual focus.
+        if (!record.eligible || record.eligible.length !== eligible.length || eligible.some((name, i) => record.eligible[i] !== name))
+          record.eligible = Object.freeze(eligible);
+        files = record.eligible;
+      }
+      return { files, pending: record.pending, error: record.error, loaded: record.loaded };
+    },
     async loadSourceInputs(origin, retry = false, root = "input") {
       if (!alive || !["input", "output"].includes(root) || !validOrigin(origin) || !sameOrigin(origin, currentOrigin(origin.source))) return;
-      const record = sourceRecord(inputCatalogues, origin, () => ({ files: [], pending: false, error: "", loaded: false }), root);
+      const record = sourceRecord(inputCatalogues, origin, () => ({ files: [], entries: [], pending: false, error: "", loaded: false }), root);
       const ownsRecord = () => alive && sameOrigin(origin, currentOrigin(origin.source)) && sourceRecord(inputCatalogues, origin, null, root) === record;
       if (record.pending || record.loaded && !retry) return;
       record.pending = true; record.error = ""; notify();
@@ -347,7 +363,9 @@ export function makeVariationEditor({ targets, cohortMode, destination: initialD
         if (!ownsRecord()) return;
         if (!sameOrigin(data?.origin, origin)) throw new Error(staleSource(origin.source));
         if (data.root !== root || !Array.isArray(data.files)) throw new Error("Source-bound image catalogue unavailable");
-        record.files = data.files.map(file => typeof file === "string" ? file : file.name).filter(resourceName);
+        if (root === "output") record.entries = freeze(data.files.map(file => typeof file === "string" ? { name: file, judgment: null }
+          : { name: file.name, judgment: snapshotDraft(file.judgment ?? null) }).filter(entry => resourceName(entry.name)));
+        else record.files = data.files.map(file => typeof file === "string" ? file : file.name).filter(resourceName);
         record.loaded = true;
         if (root === "input" && sameOrigin(origin, capturedTargets[0].origin)) this.installInputs(data);
       } catch (error) { if (ownsRecord()) record.error = `${origin.source}: ${error.message}`; }

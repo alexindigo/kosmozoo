@@ -11,15 +11,9 @@ import { Database } from "@db/sqlite";
 import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { judgmentVisible as isVisible } from "../client/js/image-visibility-model.mjs";
 
 // --- judgment semantics (pure functions on plain objects — no DOM) ---------
-
-function isVisible(judgment, { downvoteHides = true, reveal = false } = {}) {
-  const down = judgment?.vote === "down";
-  if (!down) return true;
-  if (!downvoteHides) return true;
-  return reveal;
-}
 
 Deno.test("judgment: vote/favorite/hidden are distinct concepts", () => {
   const j = { vote: "down", favorite: true };
@@ -35,7 +29,7 @@ Deno.test("judgment: down-vote hides by default; coupling is a setting", () => {
 
 Deno.test("judgment: 'show thumbed-down' is a temporary reveal, not a deletion", () => {
   const j = { vote: "down" };
-  assertEquals(isVisible(j, { reveal: true }), true);
+  assertEquals(isVisible(j, { revealThumbedDown: true }), true);
   assertEquals(j.vote, "down");
 });
 

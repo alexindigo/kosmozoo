@@ -1269,6 +1269,14 @@ that exception to hide missing or pruned writes. Destination review facts remain
 readonly and destination-fenced; unchecked input guidance is separate from known
 conflicts in the existing summary message region, without another layout or gate.
 
+Generated/output candidates in the Variations image picker follow the feed's
+judgment visibility: downvotes hide when down-vote hides is enabled unless the
+session reveal is on, and hide-up excludes upvotes. This does not inherit the
+feed's filename/parameter filter or selected folder. Input-root resources never
+inherit an output's judgment by name or bytes. Hiding candidates never removes
+chosen image-set items, captured targets or saved-run resources, or changes their
+counts; cached catalogues reproject without refetching or editing the recipe.
+
 Each Load Image row owns one ordered image set, initially empty. Existing ComfyUI
 input names, native browser Files and engine-host image paths can be added over multiple turns and mixed;
 identity deduplication uses input name, exact File identity or absolute engine path, never filename-only

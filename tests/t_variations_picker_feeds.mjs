@@ -1,8 +1,9 @@
-import { assert, assertEquals } from "jsr:@std/assert";
+import { assert, assertEquals, assertStrictEquals } from "jsr:@std/assert";
 import { editorRig } from "./helpers/variation-editor.mjs";
 import { makeVariationEditor } from "../client-solid/features/variations/editor.js";
 import { makeRouter } from "../src/routes.mjs";
 import { resourceReference, resourceReferenceValue } from "../src/parameters.mjs";
+import { judgmentVisible } from "../client/js/image-visibility-model.mjs";
 const id = "image.image";
 const deferred = () => { let resolve, reject; const promise = new Promise((yes, no) => { resolve = yes; reject = no; }); return { promise, resolve, reject }; };
 
@@ -73,17 +74,18 @@ Deno.test("picker feeds: foreign byte cache binds origin/root/raw name and captu
 Deno.test("picker feeds API: opt-in images-v1 preserves legacy shapes and fences origins before/after listing", async () => {
   const origin = { source: "c", address: "fake:8188", kind: "comfy", incarnation: "i" };
   let current = origin, reads = 0, gate = null;
-  const files = ["nested/a.png", "movie.mp4", "sound.wav", "hidden.png", "gone.png"].map(name => ({ name, size: 1 }));
+  const files = ["nested/a.png", "down.png", "movie.mp4", "sound.wav", "hidden.png", "gone.png"].map(name => ({ name, size: 1 }));
   const inventory = Object.assign(async () => { reads++; if (gate) await gate.promise; return { items: files }; }, { capture: () => current, isCurrent: token => token === current });
   const router = makeRouter({ hosts: { c: origin.address }, inventory,
     sourceActivity: { source: () => ({ ...current, sourceVersion: { epoch: "e", incarnation: current.incarnation } }) },
     backings: { backingFor: () => ({ list: async () => { reads++; if (gate) await gate.promise; return files; } }) },
-    store: { entriesForCollection: () => [{ name: "hidden.png", hidden: 1 }, { name: "gone.png", state: "gone" }], arrivals: { inventory: () => null } } });
+    store: { entriesForCollection: () => [{ name: "hidden.png", hidden: 1 }, { name: "gone.png", state: "gone" }, { name: "down.png", vote: "down" }], arrivals: { inventory: () => null } } });
   const get = (query, expected = origin) => router.handle(new Request(`http://x/api/collections/c/entries?${query}`, { headers: expected ? { "X-Kosmozoo-Origin": JSON.stringify(expected) } : {} }));
   for (const kind of ["input", "output"]) {
     const response = await get(`kind=${kind}&catalogue=images-v1`); assertEquals(response.status, 200);
     const data = await response.json(); assertEquals([data.origin, data.root], [origin, kind]);
-    assertEquals(data.files.map(row => row.name), kind === "input" ? ["nested/a.png", "hidden.png", "gone.png"] : ["nested/a.png"]);
+    assertEquals(data.files.map(row => row.name), kind === "input" ? ["nested/a.png", "down.png", "hidden.png", "gone.png"] : ["nested/a.png", "down.png"]);
+    assertEquals(data.files.find(row => row.name === "down.png").judgment, kind === "input" ? undefined : { vote: "down" });
   }
   assert(Array.isArray(await (await get("kind=output")).json()));
   assert(Array.isArray((await (await get("inventory=1")).json()).entries));
@@ -99,6 +101,60 @@ Deno.test("picker feeds API: opt-in images-v1 preserves legacy shapes and fences
     current = { ...origin, incarnation: "replacement" }; gate.resolve();
     assertEquals((await pending).status, 412); current = origin; gate = null;
   }
+});
+
+Deno.test("picker feeds: cached judgment projection follows live prefs and optimistic votes without editing chosen work", async () => {
+  const prefs = { downvoteHides: true }, votes = new Map(); let reads = 0;
+  const rig = editorRig({
+    outputVisible: (_origin, record) => judgmentVisible(votes.has(record.name) ? votes.get(record.name) : record.judgment, prefs),
+    inputList: async (_host, origin, root) => { reads++; return { origin, root, files: [
+      { name: "down.png", judgment: { vote: "down", favorite: true, bookmark: true } }, { name: "up.png", judgment: { vote: "up" } }, "plain.png",
+    ] }; },
+  });
+  const { editor, context } = rig;
+  await editor.loadSourceInputs(context.origin, false, "output");
+  const names = () => editor.sourceInputs(context.origin, "output").files;
+  assertEquals(names(), ["up.png", "plain.png"]);
+  assertStrictEquals(names(), names(), "unchanged discovery retains its list identity");
+  assert(!editor.dirty()); assertEquals(editor.revision(), 0);
+  prefs.revealThumbedDown = true;
+  assertEquals(names(), ["down.png", "up.png", "plain.png"]);
+  editor.setEnabled(id, true); await editor.toggleSourceInput(id, context.origin, "down.png", "output");
+  const revision = editor.revision(), items = editor.rows("images")[id].items, count = editor.preview().n;
+  prefs.revealThumbedDown = false;
+  assertEquals(names(), ["up.png", "plain.png"]);
+  assert(editor.sourceInputState(id, context.origin, "down.png", "output").selected);
+  assertEquals(editor.rows("images")[id].items, items); assertEquals(editor.preview().n, count); assertEquals(editor.revision(), revision);
+  // Local optimistic downvotes override an older catalogue; rollback restores it.
+  votes.set("plain.png", { vote: "down" }); assertEquals(names(), ["up.png"]);
+  await editor.loadSourceInputs(context.origin, true, "output"); assertEquals(names(), ["up.png"]);
+  votes.delete("plain.png"); assertEquals(names(), ["up.png", "plain.png"]);
+  votes.set("down.png", null); assertEquals(names(), ["down.png", "up.png", "plain.png"], "an explicit local clear wins too");
+  prefs.hideUp = true; assertEquals(names(), ["down.png", "plain.png"]);
+  prefs.downvoteHides = false; votes.clear(); assertEquals(names(), ["down.png", "plain.png"]);
+  // Same names (and even accidental judgment fields) in the input root are unjudged.
+  await editor.loadSourceInputs(context.origin, true, "input");
+  assertEquals(editor.sourceInputs(context.origin, "input").files, ["down.png", "up.png", "plain.png"]);
+  assertEquals(reads, 3); assertEquals(editor.revision(), revision); assertEquals(editor.targets().length, 1);
+  editor.dispose();
+});
+
+Deno.test("picker feeds: default output policy applies to foreign catalogues but not input installation", async () => {
+  const rig = editorRig({ inputList: async (_host, origin, root) => ({ origin, root,
+    files: [{ name: "same.png", judgment: { vote: "down" } }, { name: "other.png", judgment: null }] }) });
+  const foreign = { ...rig.context.origin, source: "foreign" };
+  // This rig's origin accessor models both source names with their own identity.
+  rig.editor.dispose();
+  const editor = makeVariationEditor({ targets: [{ id: "fake:image.png", host: "fake", filename: "image.png", origin: rig.context.origin }],
+    services: rig.services, currentOrigin: name => name === "foreign" ? foreign : rig.context.origin });
+  editor.installCatalogue(rig.catalogue);
+  await editor.loadSourceInputs(foreign, false, "output");
+  assertEquals(editor.sourceInputs(foreign, "output").files, ["other.png"]);
+  await editor.loadSourceInputs(foreign, false, "input");
+  assertEquals(editor.sourceInputs(foreign, "input").files, ["same.png", "other.png"]);
+  editor.installInputs({ origin: rig.context.origin, files: [{ name: "same.png", judgment: { vote: "down" } }] });
+  assertEquals(editor.rows("images")[id].files, ["same.png"]); assert(!editor.dirty());
+  editor.dispose();
 });
 
 Deno.test("picker feeds: catalogue A/B/A and disposal retire success, failure and finally publication for every root", async () => {

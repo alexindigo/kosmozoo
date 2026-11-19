@@ -23,7 +23,8 @@ import {
   diffUrl,
   feedUrl,
 } from "/js/route-parse.mjs";
-import { isEntryName, isFolderPath, inFolder } from "/shared/entry-path.mjs";
+import { isEntryName, isFolderPath } from "/shared/entry-path.mjs";
+import { compileVisibility, inFolder } from "/js/image-visibility-model.mjs";
 import { formatVersion } from "/shared/version.mjs";
 import { makeSourceBrowse } from "./source-browse.js";
 import { makeSourceSelection } from "./source-selection.js";
@@ -53,7 +54,7 @@ import { entryNames } from "./entry-names.js";
 import { makeWheelArbiter } from "../lib/wheel-arbiter.js";
 import { makeSourceDiscovery, knownCapabilities, enrichCapabilities } from "./source-discovery.js";
 import { observeNativeMagnification } from "../lib/native-magnification.js";
-import { emptyFilter, normalizeFilter, compileFilter, filterConditions, parameterNames } from "/js/feed-filter-model.mjs";
+import { emptyFilter, normalizeFilter, filterConditions, parameterNames } from "/js/feed-filter-model.mjs";
 import { isContentHash } from "/shared/content-hash.mjs";
 import { sameOrigin, sourceOrigin } from "/shared/source-origin.mjs";
 import { validItemArrivals } from '/js/api.mjs';
@@ -177,7 +178,7 @@ export function makeAppStore({ subscribeSources = typeof window !== "undefined" 
   const [currentStack, setCurrentStack] = createSignal([]); // trail, oldest first
   const [filter, setFilter] = createSignal(emptyFilter());
   const filterSummary = createMemo(() => filterConditions(filter()).map(c => c.label));
-  const filterPredicate = createMemo(() => compileFilter(filter()));
+  const visibilityPredicate = createMemo(() => compileVisibility({ prefs: st.judgmentPrefs, filter: filter() }));
   // Catalogue reads belong to the open menu's reactive lifetime. A closed
   // filter must not walk the inventory on every background metadata landing.
   const filterParameters = () => parameterNames(st.images);
@@ -231,14 +232,6 @@ export function makeAppStore({ subscribeSources = typeof window !== "undefined" 
   const fieldsList = createMemo(() => fieldList(st.nodesRegistry));
 
   // --- feed view: filter + judgment visibility, derived -----------------------
-  function isVisible(img) {
-    const jp = st.judgmentPrefs;
-    if (jp.hideUp && img.judgment?.vote === "up") return false;
-    const down = img.judgment?.vote === "down";
-    if (!down) return true;
-    if (!jp.downvoteHides) return true;
-    return !!jp.revealThumbedDown || filter().down;
-  }
   // view = display order of image indices (filtered + visible)
   const folderView = createMemo(() => {
     const folder = selectedFolder(), out = [];
@@ -246,12 +239,11 @@ export function makeAppStore({ subscribeSources = typeof window !== "undefined" 
     return out;
   });
   const view = createMemo(() => {
-    const matches = filterPredicate();
+    const matches = visibilityPredicate();
     const out = [];
     for (const i of folderView()) {
       const img = st.images[i];
       if (!matches(img)) continue;
-      if (!isVisible(img)) continue;
       out.push(i);
     }
     return out;
