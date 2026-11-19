@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.5.1 - 2026-11-18
+
+Running Variations on another ComfyUI with no parameter enabled runs each image
+once there again, instead of failing with "no valid human-scale permutations";
+the destination is one of the compared parameters. The Variations image picker
+hides thumbed-down images like the feed, unless they are revealed; images
+already chosen stay chosen. The selected source keeps its border while it has
+unseen images. These fixes were tested before 0.5.0 but missed it.
+
 ## 0.5.0 - 2026-11-18
 
 Variations can run on any configured ComfyUI, chosen in the dialog and defaulting
