@@ -9,6 +9,8 @@ hides thumbed-down images like the feed, unless they are revealed; images
 already chosen stay chosen. The selected source keeps its border while it has
 unseen images. These fixes were tested before 0.5.0 but missed it.
 
+Official `kosmozoo-linux-x86_64` SHA-256: `3bbde1e20e258ea8aa003478404b08850bc6017ba4aa77b157dfb36edaf88963`.
+
 ## 0.5.0 - 2026-11-18
 
 Variations can run on any configured ComfyUI, chosen in the dialog and defaulting
