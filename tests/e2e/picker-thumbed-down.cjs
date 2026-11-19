@@ -73,6 +73,8 @@ const control = (base, body) => fetch(base + '/__test/activity', { method: 'POST
     page.ws.addEventListener('message', onPause);
     await evaluate(`(async()=>{window.visibilityVote=${KZ}.handles.invoke('judgment.apply',{id:'fake:${UP}',intent:{type:'set',patch:{vote:'down'}}});return true})()`);
     await page.poll('!' + present(UP));
+    // The optimistic patch can land before Fetch.requestPaused arrives.
+    for (const end = Date.now() + 10000; !paused && Date.now() < end;) await new Promise(resolve => setTimeout(resolve, 25));
     assert(paused, 'judgment request is held while the optimistic candidate disappears');
     await page.send('Fetch.fulfillRequest', { requestId: paused.requestId, responseCode: 500, responseHeaders: [{ name: 'Content-Type', value: 'application/json' }], body: Buffer.from('{"error":"controlled rejection"}').toString('base64') });
     await evaluate('window.visibilityVote'); await waitName(UP);
