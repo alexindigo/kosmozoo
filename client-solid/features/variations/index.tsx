@@ -7,7 +7,8 @@ import { VariationsModal } from "./VariationsModal.js";
 import * as api from "./api.js";
 import { makeVariationSession } from "./session.js";
 import { variationCommands } from "./commands.js";
-import { sourceOrigin, validOrigin } from "/shared/source-origin.mjs";
+import { sourceOrigin, validOrigin, sameOrigin } from "/shared/source-origin.mjs";
+import { judgmentVisible } from "/js/image-visibility-model.mjs";
 import { createRoot, createSignal } from "solid-js";
 import { makeHistoryClient } from "./history-client.js";
 import { HistoryPanel } from "./HistoryPanel.js";
@@ -38,6 +39,13 @@ export function install(store) {
     generationTime: api.generationTime,
     history, historyState, historyThumbnail: api.historyThumbnail,
     inputList(hostName, origin, root = "input") { return api.inputList(hostName, origin, root); },
+    outputVisible(origin, record) {
+      // Exact local entries include optimistic writes and identity-safe rollback.
+      // A foreign catalogue retains its own judgments, never a name/hash alias.
+      const local = sameOrigin(origin, sourceOrigin(origin.source, store.state.hosts[origin.source]))
+        ? store.state.entryFor({ remote: origin.source, image: record.name })?.entry : null;
+      return judgmentVisible(local?.filename === record.name && local.host === origin.source ? local.judgment : record.judgment, store.state.judgmentPrefs);
+    },
     uploadInput(hostName, form, origin) { return api.uploadInput(hostName, form, origin); },
     inspectImage: api.inspectImage,
     inputThumbnail: api.inputThumbnail,
