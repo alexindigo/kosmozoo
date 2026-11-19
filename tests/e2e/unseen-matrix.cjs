@@ -60,6 +60,108 @@ async function run(page){
   await page.evaluate(`(async()=>${KZ}.actions.hosts.patch('another',{pinned:true,autoRefresh:true}))()`);await select();await anchor();
   const original=await page.evaluate(`(()=>{const l=document.querySelector('link[rel="icon"]');return {href:l.getAttribute('href'),type:l.getAttribute('type'),sizes:l.getAttribute('sizes')};})()`);
   return owned.run(async()=>{try{
+    if(!process.env.E2E_MATRIX_FROM||process.env.E2E_MATRIX_FROM==='source-edge'){
+    // Observe the real source bindings before arrival, off-current, and after
+    // actual feed exposure. Never toggle has-new/current or substitute CSS.
+    const sourceStyles=async()=>{
+      await page.poll(`(()=>{const b=document.querySelector('.pinned-source[data-source="another"]');return b&&b.getAnimations({subtree:true}).filter(a=>a instanceof CSSTransition).every(a=>a.playState==='finished');})()`);
+      return page.evaluate(`(()=>{
+        const probe=document.createElement('span');document.body.appendChild(probe);
+        const color=token=>{probe.style.color='var('+token+')';return getComputedStyle(probe).color;};
+        const colors={attention:color('--attention'),selection:color('--secondary')};probe.remove();
+        const read=(selector,nameSelector,otherSelector)=>{
+          const el=document.querySelector(selector),name=el.querySelector(nameSelector),s=getComputedStyle(el),r=el.getBoundingClientRect();
+          return {color:s.color,name:getComputedStyle(name).color,
+            edge:{borders:['Top','Right','Bottom','Left'].map(side=>[s['border'+side+'Color'],s['border'+side+'Width'],s['border'+side+'Style']]),shadow:s.boxShadow,outline:[s.outlineColor,s.outlineWidth,s.outlineStyle]},
+            geometry:{width:r.width,height:r.height},box:r.toJSON(),nameBox:name.getBoundingClientRect().toJSON(),
+            others:[...el.querySelectorAll(otherSelector)].map(child=>getComputedStyle(child).color)};
+        };
+        return {colors,chip:read('.pinned-source[data-source="another"]','.source-name','.source-progress'),
+          row:read('.hostpick[data-source="another"]','.hname','.haddr,.hdot,.icon-button,.dl,.rm')};
+      })()`);
+    };
+    const openSource=async()=>{
+      await invoke('source.menu.open');await page.poll(`document.querySelector('#hostBtn').getAttribute('aria-expanded')==='true'`);
+      await page.evaluate(`document.querySelector('.hostpick[data-source="another"]').scrollIntoView({block:'nearest'})`);await frame();
+    };
+    const sourceCapture=async(name)=>{
+      await openSource();const styles=await sourceStyles();
+      const image=await page.send('Page.captureScreenshot',{format:'png'});
+      fs.writeFileSync(path.join(shots,name+'-open.png'),Buffer.from(image.data,'base64'));
+      // Decode the full captured frame in the browser. Verify actual painted
+      // name and edge colors, not just matching classes or computed tokens.
+      const pixels=await page.evaluate(`(async()=>{
+        const styles=${JSON.stringify(styles)},image=new Image();image.src='data:image/png;base64,${image.data}';await image.decode();
+        const c=document.createElement('canvas');c.width=image.width;c.height=image.height;const ctx=c.getContext('2d');ctx.drawImage(image,0,0);
+        const data=ctx.getImageData(0,0,c.width,c.height).data;
+        const count=(box,color,edge=false)=>{
+          const rgb=color.match(/[\\d.]+/g).slice(0,3).map(Number);let n=0;
+          for(let y=Math.max(0,Math.floor(box.top));y<Math.min(c.height,Math.ceil(box.bottom));y++)
+            for(let x=Math.max(0,Math.floor(box.left));x<Math.min(c.width,Math.ceil(box.right));x++){
+              if(edge&&!(x>box.left+box.width/4&&x<box.right-box.width/4&&(y<box.top+2||y>=box.bottom-2)))continue;
+              const i=(y*c.width+x)*4;if(rgb.every((v,k)=>Math.abs(data[i+k]-v)<=3)&&data[i+3]===255)n++;
+            }
+          return n;
+        };
+        const nameRaster=async box=>{
+          const {data}=ctx.getImageData(Math.floor(box.left),Math.floor(box.top),Math.ceil(box.right)-Math.floor(box.left),Math.ceil(box.bottom)-Math.floor(box.top));
+          return Array.from(new Uint8Array(await crypto.subtle.digest('SHA-256',data))).map(v=>v.toString(16).padStart(2,'0')).join('');
+        };
+        return Object.fromEntries(await Promise.all(['chip','row'].map(async surface=>{const s=styles[surface];return [surface,{
+          nameAttention:count(s.nameBox,styles.colors.attention),nameRaster:await nameRaster(s.nameBox),
+          edgeAttention:count(s.box,styles.colors.attention,true),edgeSelection:count(s.box,styles.colors.selection,true)}];})));
+      })()`);
+      await record(name,{styles,pixels});await invoke('source.menu.close');await frame();await shot(name+'-closed');return {styles,pixels};
+    };
+    // Park the pointer outside chrome so hover never changes either baseline.
+    await page.mouse('mouseMoved',1390,890,{buttons:0});await quiet();
+    const baseline=await sourceCapture('source-edge-quiet-selected');
+    const name=await publish('source-edge.png');await page.poll(has(name));await page.poll(attention);
+    const selected=await sourceCapture('source-edge-unseen-selected');
+    await page.evaluate(`(async()=>${KZ}.actions.hosts.select('fixture-dir'))()`);
+    const unselected=await sourceCapture('source-edge-unseen-unselected');
+    await select();await page.poll(`(async()=>!${KZ}.state.inventory.loading)()`,20000);
+    assert(await page.evaluate(has(name)),'opening the source is not exposure');
+    const returned=await sourceCapture('source-edge-unseen-selected-again');
+    await reveal(name);await page.poll(seen(name));await quiet();
+    const exposed=await sourceCapture('source-edge-exposed-selected');
+    await remove([name]);await anchor();
+    // Keep all red-run frames and exposure outcomes before the first failing
+    // assertion, so the original CSS supplies a complete visual comparison.
+    for(const surface of ['chip','row']){
+      const normal=baseline.styles[surface];
+      for(const [label,snapshot] of [['selected',selected],['selected-again',returned]]){
+        const actual=snapshot.styles[surface];
+        assert.deepEqual(actual.edge,normal.edge,surface+' '+label+' keeps its quiet selected edge');
+        assert.equal(actual.color,normal.color,surface+' '+label+' keeps parent color');
+        assert.deepEqual(actual.others,normal.others,surface+' '+label+' colors only the name');
+        assert.equal(actual.name,baseline.styles.colors.attention,surface+' '+label+' name is orange');
+        assert.deepEqual(actual.geometry,normal.geometry,surface+' '+label+' geometry unchanged');
+        assert(snapshot.pixels[surface].nameAttention>0,surface+' '+label+' paints orange name pixels');
+        assert(snapshot.pixels[surface].edgeSelection>0,surface+' '+label+' paints selected edge pixels');
+        assert.equal(snapshot.pixels[surface].edgeAttention,0,surface+' '+label+' has no orange edge pixels');
+      }
+      const off=unselected.styles[surface],after=exposed.styles[surface];
+      assert.equal(off.name,baseline.styles.colors.attention,surface+' off-current name remains orange');
+      assert(unselected.pixels[surface].nameAttention>0,surface+' off-current paints orange name');
+      assert(unselected.pixels[surface].edgeAttention>0,surface+' off-current paints orange edge');
+      assert.deepEqual(after.edge,normal.edge,surface+' exposure restores quiet edge');
+      assert.equal(after.name,normal.name,surface+' exposure restores quiet name');
+      assert.equal(after.color,normal.color,surface+' exposure restores parent color');
+      assert.deepEqual(after.others,normal.others,surface+' exposure preserves other colors');
+      assert.deepEqual(after.geometry,normal.geometry,surface+' exposure preserves geometry');
+      assert.equal(exposed.pixels[surface].nameAttention,0,surface+' exposure clears orange name pixels');
+      // Antialiased text need not contain even one solid pixel of its computed
+      // color. Compare the decoded name region with its own quiet raster.
+      assert.equal(exposed.pixels[surface].nameRaster,baseline.pixels[surface].nameRaster,surface+' exposure restores the quiet name raster');
+      assert(exposed.pixels[surface].edgeSelection>0,surface+' exposure paints selected edge');
+    }
+    assert.equal(unselected.styles.chip.color,baseline.styles.colors.attention,'off-current whole-button color remains orange');
+    assert(unselected.styles.chip.edge.borders.every(([color,width,style])=>color===baseline.styles.colors.attention&&width==='1px'&&style==='solid'),'off-current pill retains its exact orange border');
+    assert.equal(unselected.styles.row.edge.shadow,baseline.styles.colors.attention+' 0px 0px 0px 1px inset','off-current picker retains its exact orange inset shadow');
+    await record('source-edge-contract-passes');
+    if(process.env.E2E_MATRIX_FROM==='source-edge'){console.log('PASS focused source edge consumer outcomes');return records;}
+    }
     if(!['sticky','failed','single'].includes(process.env.E2E_MATRIX_FROM)){
     // Navigation, current assignment, filter remount and unpinned membership.
     const browsing=()=>page.evaluate(`(async()=>{const s=${KZ};return {current:s.state.current(),trail:s.state.currentStack(),url:location.href,top:document.querySelector('.card[data-name="bulk-00035.png"]').getBoundingClientRect().top};})()`);

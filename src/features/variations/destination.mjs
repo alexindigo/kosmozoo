@@ -52,6 +52,13 @@ export function destinationConflicts(parameters, graph, missing) {
   return conflicts;
 }
 
+// A recorded input without a usable declaration is unchecked, not incompatible.
+// Keep that evidence separate from known conflicts and never make it a Run gate.
+export function destinationUnchecked(parameters, conflicts = {}) {
+  return parameters.filter(parameter => !Object.hasOwn(conflicts, parameter.id) && parameterContract(parameter).knowledge !== "known")
+    .map(parameter => parameter.id);
+}
+
 // Classes the destination lacks that the image's own source has. When the
 // source cannot be inspected, everything the destination lacks counts.
 export async function destinationMissing(app, { graph, hash, name, originContext, inspected }) {
@@ -91,6 +98,7 @@ export async function inspectDestination(app, { graph, hash, name, original, ori
     catalogue.outputNaming ??= original.outputNaming ?? null;
     if (!catalogue.outputNamingTargets?.length) catalogue.outputNamingTargets = original.outputNamingTargets ?? [];
   }
+  const conflicts = local ? {} : destinationConflicts(catalogue.parameters, graph, missing);
   return { ...catalogue, context: originContext ?? null,
-    destination: { origin: inspected.context.origin, missing, conflicts: local ? {} : destinationConflicts(catalogue.parameters, graph, missing) } };
+    destination: { origin: inspected.context.origin, missing, conflicts, unchecked: local ? [] : destinationUnchecked(catalogue.parameters, conflicts) } };
 }

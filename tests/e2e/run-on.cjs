@@ -10,8 +10,8 @@ const post = async (base, path, body) => { const r = await fetch(base + path, { 
 const get = async (base, path) => (await fetch(base + path)).json();
 (async () => {
   fs.mkdirSync(D, { recursive: true });
-  // Two more hosts on the fake's other addresses. Both list every class the
-  // workflow uses (a real object_info lists all installed nodes) except where noted.
+  // More hosts on the fake's other addresses list every class the workflow
+  // uses (a real object_info lists all installed nodes) except where noted.
   const info = await get(F, '/api/object_info');
   await fetch(B + `/api/collections/fake/entries/${image}/bytes`);
   const probe = await get(B, `/api/features/variations/probe/${encodeURIComponent('fake:' + image)}`);
@@ -19,9 +19,10 @@ const get = async (base, path) => (await fetch(base + path)).json();
   const models = ['flux1-dev-fp8.safetensors', 'sdxl.safetensors'];
   const third = { ...info, UNETLoader: { input: { required: { ...info.UNETLoader.input.required, unet_name: [models, {}] } } } };
   const other = { ...third }; delete other.FluxGuidance;
-  await post(F, '/__test/activity', { objectInfoByHost: { '127.0.0.2': other, '127.0.0.3': third }, captureEnqueue: true });
+  await post(F, '/__test/activity', { objectInfoByHost: { '127.0.0.2': other, '127.0.0.3': third, '127.0.0.4': info }, captureEnqueue: true });
   await post(B, '/api/collections', { name: 'other', address: `127.0.0.2:${port}` });
   await post(B, '/api/collections', { name: 'third', address: `127.0.0.3:${port}` });
+  await post(B, '/api/collections', { name: 'unchanged', address: `127.0.0.4:${port}` });
   const c = await CDP.launch(19491, { windowSize: '1400,900' }), errors = await collectPageErrors(c), proof = {};
   const shot = async name => { const s = await c.send('Page.captureScreenshot', { format: 'png' }); fs.writeFileSync(D + '/' + name + '.png', Buffer.from(s.data, 'base64')); };
   const choose = host => c.evaluate(`(()=>{const s=document.querySelector('.vz-run-on-select');s.value=${JSON.stringify(host)};s.dispatchEvent(new Event('change',{bubbles:true}));})()`);
@@ -39,6 +40,32 @@ const get = async (base, path) => (await fetch(base + path)).json();
           return Math.abs(at('.vz-run-on .select-control','.vz-run-on .select-face-content > .single-line-text')-at('.vh-trigger','.vh-trigger > .single-line-text'))<0.5})()}})()`);
     assert(Object.values(proof.header).every(Boolean), JSON.stringify(proof.header));
     await shot('run-on-header');
+    // No editor card is added. The destination alone queues the original graph.
+    assert.equal(await c.evaluate(`document.querySelector('.vz-count')?.textContent`), '0');
+    const destinationBefore = (await get(F, '/__test/enqueues')).length;
+    await choose('unchanged');
+    await c.poll(`document.querySelector('.vz-count')?.textContent==='1'&&!document.querySelector('.vz-conflict')`, 20000);
+    assert.equal(await c.evaluate(`document.querySelectorAll('.vz-parameter').length`), 0);
+    if (probe.parameters.some(p => p.schema.status !== 'known')) {
+      proof.unchecked = await c.evaluate(`document.querySelector('.vz-messages .vz-field-help')?.textContent`);
+      assert(/recorded inputs? (is|are) unchecked on unchanged/.test(proof.unchecked), proof.unchecked);
+      assert.equal(await c.evaluate(`!!document.querySelector('.vz-readiness-error')`), false, 'unchecked is guidance, not a conflict');
+    }
+    await shot('run-on-destination-ready');
+    proof.destinationOnly = await c.evaluate(`(async()=>${KZ}.handles.invoke('variations.run'))()`);
+    assert.equal(proof.destinationOnly.submitted, 1, JSON.stringify(proof.destinationOnly));
+    assert.equal(proof.destinationOnly.adopted, true, 'destination-only retains exact saved-plan acceptance');
+    assert.deepEqual((await get(F, '/__test/enqueue-hosts')).slice(destinationBefore), ['127.0.0.4']);
+    const originalJob = (await get(F, '/__test/enqueues')).at(-1).prompt;
+    assert.equal(Object.values(originalJob).find(n => n.class_type === 'UNETLoader').inputs.unet_name, 'flux1-dev.safetensors');
+    const destinationSaved = await get(B, '/api/features/variations/history/' + (await get(B, '/api/features/variations/history')).items[0].id);
+    assert.equal(destinationSaved.destination.source, 'unchanged');
+    assert.equal(destinationSaved.summary.parameters.length, 0, 'destination-only does not fabricate graph parameters');
+    await shot('run-on-destination-only');
+    await c.evaluate(`(async()=>${KZ}.handles.invoke('variations.close'))()`);
+    await c.poll(`!document.querySelector('.vz-panel')`, 10000);
+    await c.evaluate(`(async()=>${KZ}.handles.invoke('variations.open',{id:'fake:${image}'}))()`);
+    await c.poll(`document.querySelector('.vz-count')?.textContent==='0'&&document.querySelectorAll('.vz-catalogue-row').length>0`, 20000);
     // The host is a compared parameter: only the current sampler reproduces the
     // original here (0 variations) but is a new image on another host (1).
     await addParameter(c, '8.sampler_name');

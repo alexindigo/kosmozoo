@@ -1,4 +1,4 @@
-import { assert, assertEquals } from "jsr:@std/assert";
+import { assert, assertEquals, assertThrows } from "jsr:@std/assert";
 import { makeVariationEditor } from "../client-solid/features/variations/editor.js";
 import { makeHistoryClient } from "../client-solid/features/variations/history-client.js";
 import { cataloguePresentation } from "../client-solid/features/variations/field-filter.js";
@@ -74,7 +74,42 @@ Deno.test("run on: the host is a compared parameter; the unchanged tuple is new 
   assertEquals(generatePermutations({}, { "n.pick": "x" }, only), []);
   assertEquals(generatePermutations({}, { "n.pick": "x" }, only, { sameHost: false }), [{ "n.pick": "x" }]);
   assertEquals(automaticNaming({}, { "n.pick": "x" }, { "n.pick": { enabled: true, values: ["x", "y"] } }, { sameHost: false }).ids, ["n.pick"]);
-  assertEquals(permutationPlan({}, current, {}, { sameHost: false }).total, 0, "no enabled axis is still nothing to vary");
+  assertEquals(permutationPlan({}, current, {}, { sameHost: false }).total, 1, "destination alone is a parameter");
+  assertEquals(generatePermutations({}, current, {}, { sameHost: false }), [{}], "the identity tuple invents no parameter assignments");
+  assertEquals(generatePermutations({}, current), []);
+  assertEquals(automaticNaming({}, current, {}, { sameHost: false }), { ids: [], suffix: "" });
+  assertEquals(permutationPlan({ "n.steps": { enabled: false } }, current, {}, { sameHost: false }).total, 1);
+  assertEquals(generatePermutations({ "n.steps": { enabled: true, min: 2, max: 1, increment: 1 } }, current, {}, { sameHost: false }), [], "an empty range is not the identity tuple");
+  assertThrows(() => permutationPlan({}, current, { "n.pick": { enabled: true, values: [] } }, { sameHost: false }));
+  assertThrows(() => permutationPlan({}, current, { "n.pick": { enabled: true } }, { sameHost: false }));
+});
+
+Deno.test("run on: every graph parameter off previews one unchanged graph elsewhere and zero on its own host", () => {
+  const r = rig(); r.install({});
+  assertEquals([r.editor.preview().n, r.editor.preview().excluded], [1, 0]);
+  assertEquals(r.editor.preview().axes, [], "no fabricated graph axis");
+  assert(r.editor.setDestination(r.origin));
+  r.editor.installCatalogue({ ...r.catalogue, destination: { origin: r.origin, missing: [], conflicts: {} } });
+  assertEquals(r.editor.preview().n, 0);
+  r.editor.dispose();
+});
+
+Deno.test("run on: unchecked inputs inform without becoming conflicts and retire with their destination", () => {
+  const r = rig();
+  r.editor.installCatalogue({ ...r.catalogue, destination: { origin: r.other, missing: [], conflicts: {}, unchecked: ["text.text"] } });
+  assertEquals(r.editor.preview().status, "ready");
+  assertEquals(r.editor.preview().unchecked, ["text.text"]);
+  assertEquals(r.editor.preview().uncheckedMessage, "1 recorded input is unchecked on other; ComfyUI will validate them at submission.");
+  assertEquals(r.editor.preview().message, "");
+  r.editor.installCatalogue({ ...r.catalogue, destination: { origin: r.other, missing: [], conflicts: { "choice.value": { kind: "value", current: "first", choices: ["second"], suggestions: [] } }, unchecked: ["text.text"] } });
+  assertEquals(r.editor.preview().status, "conflict");
+  assertEquals(r.editor.preview().message, "Resolve 1 conflict with other before running.");
+  assert(r.editor.preview().uncheckedMessage.startsWith("1 recorded input"));
+  assert(r.editor.setDestination(r.origin));
+  assertEquals(r.editor.preview().uncheckedMessage, undefined, "pending destinations cannot inherit old review facts");
+  r.editor.installCatalogue({ ...r.catalogue, destination: { origin: r.origin, missing: [], conflicts: {}, unchecked: [] } });
+  assertEquals(r.editor.preview().uncheckedMessage, "");
+  r.editor.dispose();
 });
 
 Deno.test("run on: picking only the current value is one variation on another host, none on its own", () => {

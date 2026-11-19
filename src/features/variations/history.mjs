@@ -140,8 +140,9 @@ export function makeVariationHistory(app) {
     }
     return recipe;
   };
-  const preflight = snapshot => {
-    for (const saved of snapshot.targets) {
+  const preflight = (snapshot, destination, targetIndex = null) => {
+    let possiblyProductive = false;
+    for (const [indexOfTarget, saved] of snapshot.targets.entries()) {
       const recipe = boundRecipe(snapshot, saved.catalogue);
       for (const entry of Object.values(recipe.numeric)) if (entry.values.enabled && entry.values.mode === "range") {
         const step = numericText(entry.values.rawIncrement);
@@ -151,10 +152,17 @@ export function makeVariationHistory(app) {
         lookup: (_id, item) => ({ hash: snapshot.resources.find(r => r.id === item.resourceId)?.hash, existing: [] }) });
       const plan = targetRunPlan(compiled.estimate, saved.catalogue), index = parameterIndex(saved.catalogue.parameters);
       for (const pid of Object.keys(compiled.transfers)) if (index.has(pid)) admitResourceTransfer(index.get(pid));
-      // This is applicability/type preflight only. Predicted resource names in
-      // the count estimate never enter a registered or dispatched graph.
-      if (!plan) throw fail("Target configuration unavailable");
+      // Predicted resource names cannot authorize either graph assignments or
+      // zero-work rejection. Actual receipts still own final counts. In bulk,
+      // one known-zero target must not veto other potentially productive targets.
+      const values = Object.fromEntries(saved.catalogue.parameters.map(p => [p.id, parameterCurrent(p)]));
+      const ranges = plan.payload.relative ? resolveRelativeRanges(plan.payload.ranges, values) : plan.payload.ranges;
+      const productive = Object.keys(compiled.transfers).length > 0 || permutationPlan(ranges, values, plan.payload.imageParams,
+        { sameHost: reproducesOriginal(saved.host, destination?.source) }).total > 0;
+      if (targetIndex === indexOfTarget && !productive) throw fail("Saved target has no permutations to submit; choose a different value, image or destination");
+      possiblyProductive ||= productive;
     }
+    if (!possiblyProductive) throw fail("Saved configuration has no permutations to submit; choose a different value, image or destination");
   };
   const api = {
     begin(body) {
@@ -200,7 +208,7 @@ export function makeVariationHistory(app) {
     prepare(id) { return single(`prepare-${id}`, async () => {
       const row = record(id), raw = captured(row), targets = data(row.targets_json);
       if (row.snapshot_hash) {
-        try { preflight(data(row.snapshot_json)); } catch (error) { throw fail(error.message, error.status ?? 400); }
+        try { preflight(data(row.snapshot_json), raw.destination); } catch (error) { throw fail(error.message, error.status ?? 400); }
         return api.detail(id);
       }
       if (row.capture_state !== "preparing") throw fail("Interrupted capture cannot be resumed automatically", 409);
@@ -278,7 +286,7 @@ export function makeVariationHistory(app) {
         const snapshot = { format: 1, cohortMode: raw.cohortMode, recipe: raw.recipe, targets: prepared, resources };
         const snapshotHash = await digest(snapshot);
         store.variationSeal(id, canonical(snapshot), snapshotHash, canonical(historySummary(raw.recipe, prepared, resources)));
-        try { preflight(snapshot); } catch (error) { throw fail(error.message, error.status ?? 400); }
+        try { preflight(snapshot, raw.destination); } catch (error) { throw fail(error.message, error.status ?? 400); }
         return api.detail(id);
       } catch (error) { outcome(id, error.message); throw error; }
     }); },
@@ -328,7 +336,7 @@ export function makeVariationHistory(app) {
       const { row, snapshot } = sealed(id), target = data(row.targets_json)[targetIndex], destination = destinationOf(row, targetIndex);
       if (!target || !sameOrigin(destination, origin) || row.snapshot_hash !== snapshotHash) throw fail("Saved upload binding mismatch", 412);
       currentDestination(destination);
-      try { preflight(snapshot); } catch (error) { throw fail(error.message, error.status ?? 400); }
+      try { preflight(snapshot, captured(row).destination, targetIndex); } catch (error) { throw fail(error.message, error.status ?? 400); }
       const resource = snapshot.resources.find(r => r.id === resourceId);
       if (!resource) throw fail("Saved resource unavailable", 410);
       const saved = snapshot.targets[targetIndex];
@@ -394,6 +402,7 @@ export function makeVariationHistory(app) {
       currentDestination(destination);
       const prior = store.variationEffects(id).find(e => e.effect_id === `target-${targetIndex}`);
       if (prior) return data(prior.request_json);
+      try { preflight(snapshot, captured(row).destination, targetIndex); } catch (error) { throw fail(error.message, error.status ?? 400); }
       const graph = cloneJsonValue(saved.graph), oldParameters = parameterIndex(saved.catalogue.parameters);
       for (const [parameterId, resourceId] of Object.entries(saved.graphResources)) {
         const p = oldParameters.get(parameterId), resolved = receipt(id, targetIndex, resourceId);

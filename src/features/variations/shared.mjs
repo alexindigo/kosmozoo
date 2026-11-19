@@ -122,7 +122,11 @@ function cartesianProduct(arrays) {
 // sits at its current value.
 export function permutationAxes(ranges, imageParams = {}) {
   const enabled = Object.entries(ranges).filter(([, r]) => r.enabled);
-  const imgEnabled = Object.entries(imageParams).filter(([, p]) => p.enabled && Array.isArray(p.values) && p.values.length);
+  const imgEnabled = Object.entries(imageParams).filter(([id, p]) => {
+    if (!p.enabled) return false;
+    if (!Array.isArray(p.values) || !p.values.length) throw new Error(`${id}: choose at least one value before Run`);
+    return true;
+  });
   return { enabled, imgEnabled, excluded: {
     ranges: Object.entries(ranges).filter(([, r]) => r.enabled === false).map(([id]) => id),
     imageParams: Object.entries(imageParams).filter(([, p]) => p.enabled === false).map(([id]) => id),
@@ -154,7 +158,7 @@ export const reproducesOriginal = (imageHost, runHost) => runHost == null || run
 
 export function generatePermutations(ranges, currentValues, imageParams = {}, { sameHost = true } = {}) {
   const plan = permutationPlan(ranges, currentValues, imageParams, { sameHost });
-  if (!plan.axes.length || plan.total === 0) return [];
+  if (plan.total === 0) return [];
   // Output count excludes current tuples; it cannot certify raw traversal cost.
   // Count every prefix visit before entering the synchronous generator.
   let width = 1, visits = 0;
@@ -229,8 +233,10 @@ export function permutationPlan(ranges, currentValues, imageParams = {}, { sameH
     axes.push({ id, values, length: values.length, at: index => values[index], isCurrent, matches: values.filter(isCurrent).length });
   }
   const product = axes.reduce((n, axis) => n * axis.length, 1);
-  const excluded = sameHost && axes.length ? axes.reduce((n, axis) => n * axis.matches, 1) : 0;
-  return { axes, total: axes.length ? product - excluded : 0, excluded };
+  // The empty Cartesian product is one unchanged graph, not an invented graph
+  // assignment. Its destination alone determines whether it reproduces the source.
+  const excluded = sameHost ? axes.reduce((n, axis) => n * axis.matches, 1) : 0;
+  return { axes, total: product - excluded, excluded };
 }
 
 // Separate automatic projection: caller text is never rewritten. An axis needs

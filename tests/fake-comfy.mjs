@@ -594,7 +594,7 @@ const handleRequest = async (req) => {
 // Separate loopback identities exercise address-scoped catalogues and startup
 // behavior. Bind each explicitly rather than exposing a wildcard listener.
 export const server = Deno.serve({ port, hostname: "127.0.0.1" }, handleRequest);
-export const servers = [server, ...["127.0.0.2", "127.0.0.3"].map(hostname =>
+export const servers = [server, ...["127.0.0.2", "127.0.0.3", "127.0.0.4"].map(hostname =>
   Deno.serve({ port: server.addr.port, hostname }, handleRequest))];
 
 console.log(
