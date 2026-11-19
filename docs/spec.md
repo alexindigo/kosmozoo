@@ -371,8 +371,8 @@ The Variations summary places a smaller two-line `Estimated time:` block next to
 its dominant count. Multiply each known captured original-image duration by the
 preview's per-image job count and sum. Complete timing coverage displays e.g.
 `12m`; partial coverage displays `above 12m`; no usable time/count displays `--`.
-Bulk retains its existing first-image count estimate, so time is a workload
-estimate based on that same displayed count, not a queue ETA or backend scheduler.
+Each admitted target contributes its own engine-planned count; leftovers contribute
+no time. This is a workload estimate, not a queue ETA or backend scheduler.
 Edited parameters can change speed; independent backends may execute concurrently.
 
 The private editor owns captured timing facts and one abortable acquisition of
@@ -389,7 +389,8 @@ thumbnail, filename, original generation duration (or `--`) and remove action.
 This is the target cohort, not a Load Image candidate set. Removing affects only
 this editor; the main gallery selection, image files and saved runs are untouched.
 Count/time and the next Run capture use exactly the remaining targets, in order.
-The strip disappears at one remaining image. Removal keeps raw edits and the
+The strip disappears at one remaining image unless it has a problem to highlight.
+Removal keeps raw edits and the
 opening workflow/range basis, participates in dirty/revision/close protection,
 and is unavailable while Run or a blocking decision owns the editor. Issued Run
 tickets stay immutable. Lazy thumbnails use the existing display owner; timing
@@ -429,8 +430,9 @@ their original descriptors. Same-host review keeps both lists empty.
 Conflicting cards appear first in the catalogue in red ink; clicking one adds it
 to the editors. Value conflicts offer one-click closest replacements; a picked
 value the destination lacks stays listed in red so it can be unpicked. Until the
-destination catalogue arrives, and while any conflict is unresolved, Run sends
-nothing and says why. History capture accepts an optional `destination`
+destination catalogue and cohort plan arrive, Run sends nothing and says why.
+Conflicts exclude only affected targets; Run is available when any target has work.
+History capture accepts an optional `destination`
 (a ComfyUI origin) stored in the saved document; uploads, planning and enqueue
 bind to it (older captures default to the target's own source). The target image
 and Load Image inputs are archived first, so the original backend need not be
@@ -450,15 +452,35 @@ zero work. Enabled-empty or invalid axes are not the identity tuple and still
 reject. Existing output naming/narrowing, archived input materialization and final
 graph validation remain in force.
 
-After sealing the archive, preflight rejects configurations known to produce no
-work before any upstream resource materialization. In bulk, an individually
-zero-count target does not veto other potentially productive targets at this
-early stage. Unresolved transfers remain unknown here: estimated upload names
-cannot reject a recipe or authorize a graph assignment. Actual receipt-backed
-target planning and independent final-write coverage still own final admission.
-Each target's materialization/planning gate also rejects a known-zero target
-before its own resource effects; aggregate potential never authorizes a no-op
-target's upload.
+`cohort-plan.mjs` is the engine's one effect-free workload planner. Each target's
+own graph and destination-aware catalogue pass through the shared raw compiler,
+applicability, relative-range resolution and tuple kernel. The result is ordered
+`[{index,count,problem:null|{code,message}}]`: no work, more than 500 jobs per
+target, traversal budgets, missing carriers/classes or incompatible values exclude
+only that target. Unmaterialized image resources are identities, not predicted
+receipt names or graph assignments. Preview is debounced, latest-only and aborted
+on close; it cannot change recipe edits or dirty state. The displayed exact total
+is the sum of admitted counts. Each batch tile shows its own problem; a single
+target also reports it in the summary. Run is disabled when no target has work.
+
+After the archive is sealed the same planner records durable `admission` evidence
+in the existing effects table. Materialization, target preparation and dispatch
+require that target's admission (409 otherwise). Actual receipt-backed preparation
+must equal its admitted count. Naming, final graphs and independent write proofs
+remain downstream checks; any late failure is reported as a leftover, never an
+automatic retry. Source/destination fences, archive-before-effects and durable
+claims remain unchanged. Confirmed queued targets leave the editor's batch strip;
+leftovers stay highlighted with their problem and keep the dialog open. Recipe
+edits and native fields remain intact so an explicit adjusted Run creates a new
+history entry for the rest. If the recipe changed during Run, no captured target
+is removed: the whole cohort remains available for newer unsent edits, and each
+tile reports its captured-setup outcome (queued or issue). Only an unchanged
+revision removes queued targets. Admitted targets all queued means `submitted`, even
+with known leftovers; all leftovers means `rejected`, with their problems recorded.
+The successful close countdown remains editable: a newer recipe revision during
+that countdown restores the last submitted cohort with its queued outcomes, so
+new unsent edits still have subjects. It never restores targets for an unchanged
+draft or re-adds queued siblings to a nonempty leftover cohort.
 
 #### Durable Variations snapshots
 
@@ -474,7 +496,7 @@ outside the acknowledgement. Legacy Run requests remain compatible.
 | 1 | `/history` | GET | Newest-first summary pages, `limit`1-100 (default50), opaque `before` cursor; format, independent revision, items and nextCursor. Lists never load full graphs/image sets. |
 | 2 | `/history` | POST | Begin `{runId,format:1,cohortMode,targets,recipe,resources}` before resource acquisition/effects. Same validated capture is idempotent; conflicting reuse is409. Raw incomplete editor strings remain data. |
 | 3 | `/history/<id>/resources/<resourceId>` | PUT | Octet-stream bytes for a reserved browser image occurrence. The engine hashes them; repeated changed bytes conflict. |
-| 4 | `/history/<id>/prepare` | POST | Archive ordered targets/declared graph inputs/raw selected and dormant image items, seal the immutable snapshot and preflight all target contracts. Missing bytes or invalid edits retain an inspectable failed attempt and authorize no upstream effects. |
+| 4 | `/history/<id>/prepare` | POST | Archive ordered targets/declared graph inputs/raw selected and dormant image items, seal the immutable snapshot and record per-target `admission`. Invalid edits return rejected admission/problems; missing bytes fail the archive barrier. Neither authorizes effects for those targets. |
 | 5 | `/history/<id>` | GET | Detail/raw recipe, target facts and resource manifest; incomplete attempts explicitly report their archive state. |
 | 6 | `/history/<id>/open` | POST | Acquire an editor lease, return original data and fresh matched-source contexts; missing/offline sources preserve inspection without retargeting. |
 | 7 | `/history/<id>/leases/<leaseId>` | DELETE | Release a draft pin without deleting another run's resources. |
@@ -483,6 +505,7 @@ outside the acknowledgement. Legacy Run requests remain compatible.
 | 10 | `/history/<id>/prepare-target` | POST | Same target/origin/snapshot binding; compile actual resource receipts to one stable requestId/planHash/expectedTotal and final v2 request. The graph remains engine-private. |
 | 11 | `/history/<id>/finish` | POST | Record a client error/end observation; outcome/counts derive from durable engine effects, never caller-invented success. |
 | 12 | `/history/<id>` | DELETE | Idempotent tombstone from history, retaining open-draft/admitted-work pins. Never deletes source images, jobs or judgments. |
+| 13 | `/plan` | POST | Capture-shaped `{cohortMode,targets,recipe,resources,destination?}` without browser bytes; read-only per-target workload plan. No archive, history row, upload or enqueue. |
 
 Every upload/permutation has a durable admission claim before its external call.
 Duplicate requests return stored evidence or pending/uncertain, never redispatch.

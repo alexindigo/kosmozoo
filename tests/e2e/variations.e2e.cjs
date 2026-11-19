@@ -150,6 +150,7 @@ async function main() {
         const r = document.querySelector('.vz-slider-row[data-param-key$="denoise"]');
         return !!r && !r.classList.contains('vz-off');
       })()`, 5000).then(() => true).catch(() => false);
+      await cdp.poll(`Number.isFinite(parseInt(document.querySelector('.vz-count')?.textContent, 10))`, 10000);
       const count = await cdp.evaluate(`document.querySelector('.vz-count')?.textContent`);
       const n = parseInt(count, 10);
       check("explicitly added denoise and count > 0",
@@ -223,6 +224,7 @@ async function main() {
 
     // --- per-slider increment updates count ---
     await attempt("per-slider increment change updates count", async () => {
+      await cdp.poll(`Number.isFinite(parseInt(document.querySelector('.vz-count')?.textContent, 10))`, 10000);
       const before = parseInt(await cdp.evaluate(`document.querySelector('.vz-count')?.textContent`), 10);
       // type the new increment like a user: focus, select-all, trusted
       // insertText, blur (the change event commits)
@@ -232,7 +234,7 @@ async function main() {
       })()`);
       await cdp.send("Input.insertText", { text: "0.025" });
       await cdp.evaluate(`document.querySelector('.vz-slider-row .vz-row-inc-input').blur()`);
-      await cdp.poll(`parseInt(document.querySelector('.vz-count').textContent, 10) !== ${before}`, 5000);
+      await cdp.poll(`Number.isFinite(parseInt(document.querySelector('.vz-count').textContent, 10)) && parseInt(document.querySelector('.vz-count').textContent, 10) !== ${before}`, 10000);
       const after = parseInt(await cdp.evaluate(`document.querySelector('.vz-count')?.textContent`), 10);
       check("per-slider increment change updates count", before !== after, before + " → " + after);
     });
@@ -453,6 +455,7 @@ async function main() {
       `);
       await addParameter(cdp, '9.denoise');
       await cdp.poll(`document.querySelectorAll('.vz-slider-row:not(.vz-off)').length > 0`, 5000);
+      await cdp.poll(`document.querySelector('.vz-run') && !document.querySelector('.vz-run').disabled`, 10000);
       await cdp.evaluate(`document.querySelector('.vz-run').click()`);
       const hasResult = await cdp.poll(`(document.querySelector('.vz-error')?.textContent ?? '').length > 0`, 10000)
         .then(() => true).catch(() => false);
@@ -684,6 +687,7 @@ async function main() {
 
       // pick a second value: 2 picks × the auto-enabled denoise range →
       // (denoise-only count + 1) × 2 − 1 (the current combo excluded once)
+      await cdp.poll(`Number.isFinite(parseInt(document.querySelector('.vz-count')?.textContent, 10))`, 10000);
       const c0 = parseInt(await cdp.evaluate(`document.querySelector('.vz-count')?.textContent`), 10);
       const idx = await cdp.evaluate(`(() => {
         const opts = [...document.querySelectorAll('.vz-enumrow[data-enum-id="20.lora_name"] .vz-enum-opt')];
@@ -764,6 +768,7 @@ async function main() {
       const pre = await cdp.evaluate(`document.querySelector('.vz-textrow[data-text-id="2.text"] .vz-text-values').value`);
       check("textarea pre-filled with the current text",
         pre === "a portrait, studio light", JSON.stringify(pre));
+      await cdp.poll(`Number.isFinite(parseInt(document.querySelector('.vz-count')?.textContent, 10))`, 10000);
       const c0 = parseInt(await cdp.evaluate(`document.querySelector('.vz-count')?.textContent`), 10);
       await cdp.evaluate(`(() => {
         const t = document.querySelector('.vz-textrow[data-text-id="2.text"] .vz-text-values');

@@ -92,8 +92,10 @@ export function compileRecipe(snapshot, { catalogue, target, batch = false, look
         // Admission identities are count-only data, never names or assignments.
         // Their equality is supplied by the engine's resource membership owner.
         if (resourceIdentities?.has(imageIdentity(item))) {
+          const identity = resourceIdentities.get(imageIdentity(item));
+          if (typeof identity === "string") { assigned.push(identity); estimate.push(identity); continue; }
           admitResourceTransfer(entry.metadata);
-          estimate.push(resourceIdentities.get(imageIdentity(item)));
+          estimate.push(identity);
           unresolved.push(imageIdentity(item));
           continue;
         }

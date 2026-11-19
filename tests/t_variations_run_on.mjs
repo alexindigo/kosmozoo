@@ -53,7 +53,7 @@ Deno.test("run on: value conflicts are red until resolved; node conflicts block"
 Deno.test("run on: the issued ticket captures the destination and history binds uploads/plans to it", async () => {
   const r = rig(); r.install({});
   let begun; const bindings = [];
-  const history = makeHistoryClient({ api: { historyBegin: body => { begun = body; }, historyPrepare: () => ({ snapshotHash: "a".repeat(64), targets: [{ graphResources: {} }], recipe: { images: {} } }),
+  const history = makeHistoryClient({ api: { historyBegin: body => { begun = body; }, historyPrepare: () => ({ snapshotHash: "a".repeat(64), targets: [{ graphResources: {} }], recipe: { images: {} }, admission: [{ index: 0, count: 1, problem: null }] }),
     historyMaterialize: () => ({}), historyTarget: (_id, binding) => { bindings.push(binding); throw new Error("stop after binding"); } } });
   const ticket = { runId: crypto.randomUUID(), targets: [{ id: "fake:image.png", host: "fake", filename: "image.png", origin: r.origin }], snapshot: { numeric: {}, images: {}, enums: {}, texts: {}, candidates: {}, naming: {} }, destination: r.other };
   const prepared = await history.capture(ticket, new Map(), () => {});

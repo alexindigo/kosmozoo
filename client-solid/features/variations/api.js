@@ -18,6 +18,7 @@ const historyPath = id => `/api/features/variations/history${id ? `/${encodeURIC
 export const historyList = before => req("GET", historyPath() + (before ? `?before=${encodeURIComponent(before)}` : ""), undefined, { json });
 export const historyDetail = id => req("GET", historyPath(id), undefined, { json });
 export const historyBegin = capture => req("POST", historyPath(), capture, { json });
+export const plan = (capture, signal) => req("POST", "/api/features/variations/plan", capture, { json, signal });
 export const historyPrepare = (id, host, destination) => req("POST", historyPath(id) + "/prepare", {}, { json }, host, destination);
 export const historyOpen = id => req("POST", historyPath(id) + "/open", {}, { json });
 export const historyRelease = (id, leaseId) => req("DELETE", historyPath(id) + `/leases/${encodeURIComponent(leaseId)}`, undefined, { json });

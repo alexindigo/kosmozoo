@@ -572,12 +572,13 @@ function ModalBody(props) {
             </div>
             <div class="vz-run-slot">
               <Show when={!unavailable()} fallback={<p class="vz-readiness-error" role="status">{unavailable()}</p>}><Show when={!running()} fallback={<SingleLineText class="vz-field-help" role="status" value="Queuing…" />}>
-                <button class="vz-run" onClick={() => store.handles.invoke("variations.run")}><SingleLineText value="Run" /></button>
+                <button class="vz-run" disabled={!read(editor.canRun)} onClick={() => store.handles.invoke("variations.run")}><SingleLineText value="Run" /></button>
               </Show></Show>
             </div>
           </div>
         </div></div>
         <BatchTargets targets={targets()} thumbnail={batchThumbnail} registerThumbnail={services.registerThumbnail}
+          showProblem={batch} problem={id => read(() => editor.targetProblem(id))} outcome={id => read(() => editor.targetOutcome(id))}
           generationTime={id => read(() => editor.generationTime(id))} removable={!running()}
           rememberFocus={rememberFocus} onRemove={id => editor.removeTarget(id)} />
       </div>

@@ -33,6 +33,7 @@ export function install(store) {
     // session-scoped results (probe params, file lists) in local signals
     probe(image, destination) { return api.probe(image, destination); },
     historyCatalogue: api.historyCatalogue,
+    plan: api.plan,
     // Every ComfyUI source can be a Run destination; the header selection is the default.
     runDestinations: () => Object.keys(store.state.hosts).filter(host => store.state.hosts[host].kind === "comfy")
       .map(host => sourceOrigin(host, store.state.hosts[host])).filter(validOrigin),

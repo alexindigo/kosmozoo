@@ -206,6 +206,11 @@ Deno.test("destination: a saved Run materializes and queues only on the chosen C
     const dProbe = (await call("GET", "/probe/d%3Asource_00001_.png")).data;
     const mixedId = crypto.randomUUID(), mixed = encodeHistoryRecipe(recipeFor(probe).capture(), mixedId);
     const dTarget = { ...target, id: "d:source_00001_.png", host: "d", origin: dOrigin, context: dProbe.context };
+    const beforePreview = { history: engine.ctx.store.variationList(100).length, uploads: hosts.a.uploads.length, jobs: hosts.a.jobs.length };
+    const preview = await call("POST", "/plan", { cohortMode: "bulk", targets: [target, dTarget], recipe: mixed.recipe, resources: mixed.resources, destination: probe.context.origin });
+    assertEquals(preview.status, 200, stringifyExactJson(preview));
+    assertEquals(preview.data.map(target => [target.count, target.problem?.code ?? null]), [[0, "no-work"], [1, null]]);
+    assertEquals({ history: engine.ctx.store.variationList(100).length, uploads: hosts.a.uploads.length, jobs: hosts.a.jobs.length }, beforePreview, "preview creates no history row or upstream effects");
     assertEquals((await call("POST", "/history", { runId: mixedId, format: 1, cohortMode: "bulk", targets: [target, dTarget], recipe: mixed.recipe, resources: mixed.resources, destination: probe.context.origin })).status, 200);
     const mixedPrepared = await call("POST", `/history/${mixedId}/prepare`);
     assertEquals(mixedPrepared.status, 200, stringifyExactJson(mixedPrepared));

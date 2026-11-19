@@ -41,6 +41,7 @@ const get = async (base, path) => (await fetch(base + path)).json();
     assert(Object.values(proof.header).every(Boolean), JSON.stringify(proof.header));
     await shot('run-on-header');
     // No editor card is added. The destination alone queues the original graph.
+    await c.poll(`document.querySelector('.vz-count')?.textContent==='0'`, 20000);
     assert.equal(await c.evaluate(`document.querySelector('.vz-count')?.textContent`), '0');
     const destinationBefore = (await get(F, '/__test/enqueues')).length;
     await choose('unchanged');
@@ -70,8 +71,8 @@ const get = async (base, path) => (await fetch(base + path)).json();
     // original here (0 variations) but is a new image on another host (1).
     await addParameter(c, '8.sampler_name');
     await c.poll(`document.querySelectorAll('[data-enum-id="8.sampler_name"] .vz-enum-picked').length===1&&document.querySelector('.vz-count')?.textContent==='0'`, 20000);
-    await choose('third');
-    await c.poll(`document.querySelector('.vz-run-on .select-face')?.textContent==='Run on third'&&document.querySelector('.vz-count')?.textContent==='1'`, 20000);
+    await choose('unchanged');
+    await c.poll(`document.querySelector('.vz-run-on .select-face')?.textContent==='Run on unchanged'&&document.querySelector('.vz-count')?.textContent==='1'`, 20000);
     proof.hostCounted = await c.evaluate(`document.querySelector('.vz-count').textContent`);
     // A failed destination check says so and offers Retry for the same host.
     await c.evaluate(`(()=>{const original=window.fetch;window.fetch=(url,options)=>{if(String(url).includes('/probe/')&&String(url).includes('destination=')&&decodeURIComponent(String(url)).includes('"source":"other"')){window.fetch=original;return Promise.resolve(new Response(JSON.stringify({error:'object_info timed out'}),{status:502,headers:{'Content-Type':'application/json'}}));}return original(url,options)}})()`);
@@ -82,7 +83,8 @@ const get = async (base, path) => (await fetch(base + path)).json();
     await shot('run-on-check-failed');
     // A blocked Run says why and sends nothing; Retry stays available.
     await c.evaluate(`(()=>{window.__runRequests=0;const original=window.fetch;window.__restoreRunFetch=()=>{window.fetch=original};window.fetch=(url,options)=>{if(/\\/features\\/variations\\/(run|history)/.test(String(url))&&options?.method==='POST')window.__runRequests++;return original(url,options)}})()`);
-    await c.clickAt('.vz-run');
+    assert(await c.evaluate(`document.querySelector('.vz-run').disabled`), 'Run waits for a valid engine plan');
+    await c.evaluate(`(async()=>${KZ}.handles.invoke('variations.run'))()`);
     await c.poll(`/Nothing was sent\\.$/.test(document.querySelector('.vz-error')?.textContent??'')`);
     assert.equal(await c.evaluate(`window.__runRequests`), 0, 'a blocked Run sends nothing');
     assert(await c.evaluate(`!!document.querySelector('.vz-catalogue-retry')`), 'Retry stays after a blocked Run');
@@ -90,6 +92,7 @@ const get = async (base, path) => (await fetch(base + path)).json();
     await c.clickAt('.vz-catalogue-retry');
     assert.equal(await c.evaluate(`document.querySelector('.vz-error')?.textContent??''`), '', 'retry clears the blocked message');
     await c.poll(`document.querySelector('.vz-catalogue-row')?.classList.contains('vz-conflict')`, 20000);
+    await c.poll(`document.querySelector('.vz-count')?.textContent==='0'`, 20000);
     assert.equal(await c.evaluate(`!!document.querySelector('.vz-catalogue-retry')`), false);
     proof.other = await c.evaluate(`({rows:[...document.querySelectorAll('.vz-catalogue-row')].map(r=>({id:r.dataset.catalogueId,conflict:r.classList.contains('vz-conflict'),reason:r.querySelector('.vz-conflict-reason')?.textContent??null})),
       message:document.querySelector('.vz-messages').textContent,red:getComputedStyle(document.querySelector('.vz-catalogue-row.vz-conflict .vz-conflict-reason')).color})`);
@@ -102,6 +105,7 @@ const get = async (base, path) => (await fetch(base + path)).json();
     const unet = proof.other.rows.find(r => r.reason?.startsWith('flux1-dev')).id;
     await c.clickAt(`[data-catalogue-id="${unet}"] .vz-catalogue-context`);
     await c.poll(`!!document.querySelector('[data-enum-id="${unet}"] .vz-conflict-pick')`);
+    await c.poll(`document.querySelector('.vz-messages')?.textContent.includes('conflicts with other before running.')`, 20000);
     proof.suggestions = await c.evaluate(`[...document.querySelectorAll('[data-enum-id="${unet}"] .vz-conflict-pick')].map(b=>b.textContent)`);
     assert.deepEqual(proof.suggestions, ['flux1-dev-fp8.safetensors']);
     // The missing pick is listed in red and can be unpicked; the sidebar explains the conflict.
@@ -131,5 +135,8 @@ const get = async (base, path) => (await fetch(base + path)).json();
     assert.deepEqual(errors, []);
     fs.writeFileSync(D + '/result.json', JSON.stringify({ ...proof, pageErrors: errors }, null, 2));
     console.log(JSON.stringify({ hostCounted: proof.hostCounted, header: proof.header, suggestions: proof.suggestions, blocked: proof.blocked.status, hosts: proof.hosts, pageErrors: errors }));
+  } catch (error) {
+    console.error('run-on state', await c.evaluate(`({count:document.querySelector('.vz-count')?.textContent,message:document.querySelector('.vz-messages')?.textContent,batch:document.querySelector('.vz-batch')?.textContent})`));
+    await shot('run-on-diagnostic'); throw error;
   } finally { await c.close(); }
 })().catch(e => { console.error(e); process.exitCode = 1; });

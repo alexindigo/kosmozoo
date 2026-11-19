@@ -225,6 +225,7 @@ module.exports = async ({ cdp, check, FAKE, KZ }) => {
     // request executes there, so local Files are never split across backends.
     await invoke('variations.open',{ids:['fake:flux-controlnet.png','another:flux-controlnet.png'],bulk:true});
     await cdp.poll(`document.querySelectorAll('.vz-catalogue-row').length>0`); await fileSetup(cdp);
+    await cdp.poll(`document.querySelector('.vz-run') && !document.querySelector('.vz-run').disabled`, 10000);
     await cdp.evaluate(`(()=>{window.__originalFetch=window.fetch;window.__runs=[];window.fetch=(url,options)=>{if(String(url).includes('/features/variations/run'))window.__runs.push(JSON.parse(options.body).context.origin.source);return window.__originalFetch(url,options)}})()`);
     const destination = await cdp.evaluate(`(async()=>${KZ}.state.host())()`);
     const outcome = await invoke('variations.run');
@@ -234,6 +235,7 @@ module.exports = async ({ cdp, check, FAKE, KZ }) => {
     await cdp.evaluate(`window.fetch=window.__originalFetch`); if (await cdp.evaluate(`!!document.querySelector('.vz-panel')`)) await discard();
     await invoke('variations.open',{ids:['fake:flux-basic.png','another:flux-basic.png'],bulk:true});
     await addParameter(cdp, '9.denoise');
+    await cdp.poll(`document.querySelector('.vz-run') && !document.querySelector('.vz-run').disabled`, 10000);
     await cdp.evaluate(`(()=>{window.__originalFetch=window.fetch;window.fetch=(url,options)=>String(url).includes('/features/variations/run')?Promise.resolve(new Response(JSON.stringify(JSON.parse(options.body).host==='fake'?{submitted:1,total:1}:{submitted:0,total:0}),{status:200})):window.__originalFetch(url,options)})()`);
     assert.equal((await invoke('variations.run')).status,'failed');
     await new Promise(r=>setTimeout(r,3100));

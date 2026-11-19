@@ -5,7 +5,7 @@ import { editorDomain, choiceValues, numericDefaults, numericText, sliderNumber 
 import { parseExactJson, stringifyExactJson, sameJsonValue, resourceReferenceValue, resourceReferenceProblem } from "/shared/parameters.mjs";
 import { admitResourceTransfer } from "/shared/features/variations/compile.mjs";
 import { compileRecipe, parseRecipeCandidate, recipeImageView, currentRoot } from "/shared/features/variations/recipe-compile.mjs";
-import { acknowledgedHistoryFields, planHistoryOverlay, decodeHistoryRecipe } from "/shared/features/variations/history-codec.mjs";
+import { acknowledgedHistoryFields, planHistoryOverlay, decodeHistoryRecipe, encodeHistoryRecipe } from "/shared/features/variations/history-codec.mjs";
 import { permutationPlan,
   resolveRelativeRanges, acknowledgedFields, targetRunPlan, catalogueParams, parameterIndex, parameterCurrent, parameterLabel, parameterAliases,
    variationOutputName, uploadFamily, reproducesOriginal } from "/shared/features/variations/shared.mjs";
@@ -120,11 +120,26 @@ export function makeVariationEditor({ targets, cohortMode, destination: initialD
   const batch = cohortMode === "bulk" || capturedTargets.length > 1;
   let alive = true, closeGeneration = 0, decisionGeneration = 0, deciding = false, active = null, timer = null;
   let result = null, running = false, catalogueReady = false, acceptedRevision = null, restoredWork = false;
+  let enginePlan = null, enginePlanPending = false, enginePlanError = "", planKey = null, planGeneration = 0, planTimer = null, planController = null;
+  const previewId = createRunId(), runProblems = new Map(), runOutcomes = new Map();
+  let queuedCohort = null;
   const heldRecords = new Map();
   const row = recipe.row;
   const evidence = (id, item) => imageChecks.get(id)?.get(imageIdentity(item));
   const imageView = (id, item, metadata, lookup = evidence) => recipeImageView(item, metadata, lookup(id, item), capturedTargets[0], batch);
-  const notify = () => { if (alive) changed(); };
+  const restoreQueuedCohort = () => {
+    if (selectedTargets.length || !queuedCohort) return;
+    selectedTargets = queuedCohort.targets;
+    for (const [id, outcome] of queuedCohort.outcomes) runOutcomes.set(id, outcome);
+    planKey = null;
+  };
+  const notify = () => {
+    if (!alive) return;
+    // The successful close countdown is still an editable session. A new raw
+    // revision must retain the last issued subjects, not become targetless work.
+    if (!running && queuedCohort && recipe.revision() !== queuedCohort.revision) restoreQueuedCohort();
+    reconcilePlan(); changed();
+  };
   const invalidateClose = () => { closeGeneration++; if (timer !== null) clearTimer(timer); timer = null; };
   const seed = (domain, id, metadata, defaults) => {
     if (!alive) return;
@@ -233,16 +248,85 @@ export function makeVariationEditor({ targets, cohortMode, destination: initialD
   const canClose = ticket => compatible(ticket) && ticket.closeGeneration === closeGeneration && acceptedRevision === ticket.editRevision;
   const publish = value => { result = Object.freeze(value); notify(); };
 
+  const planInput = () => {
+    const encoded = encodeHistoryRecipe(captureRows(), previewId);
+    const resources = encoded.resources.map(resource => {
+      const file = encoded.files.get(resource.id);
+      const check = [...recipe.entries("images")].flatMap(([id, entry]) => entry.values.items.map(item => ({ item, check: evidence(id, item) })))
+        .find(record => file ? record.item.file === file : resource.kind === "server-path" && record.item.path === resource.path)?.check;
+      return check?.hash ? { ...resource, hash: check.hash } : resource;
+    });
+    const targets = selectedTargets.map(target => ({ id: target.id, host: target.host, filename: target.filename, origin: target.origin,
+      ...(catalogues.get(target.id)?.context ?? target.context ? { context: catalogues.get(target.id)?.context ?? target.context } : {}),
+      ...(target.historyRef ? { historyRef: target.historyRef } : {}) }));
+    return { targets, cohortMode: batch ? "bulk" : "single", recipe: encoded.recipe, resources, ...(destination ? { destination } : {}) };
+  };
+  function reconcilePlan() {
+    if (!services.plan || !catalogueReady || destinationPending || catalogueError !== null || running) return;
+    if (!selectedTargets.length) { enginePlan = []; enginePlanPending = false; return; }
+    const selectedImages = [...recipe.entries("images")].filter(([, entry]) => entry.values.enabled)
+      .flatMap(([id, entry]) => entry.values.items.map(item => imageView(id, item, entry.metadata)));
+    if (selectedImages.some(item => item.pending || item.error)) {
+      planGeneration++; planKey = null; planController?.abort(); if (planTimer !== null) clearTimer(planTimer);
+      planTimer = null; enginePlan = null; enginePlanError = selectedImages.find(item => item.error)?.error ?? ""; enginePlanPending = !enginePlanError;
+      return;
+    }
+    let input, key;
+    try { input = planInput(); key = stringifyExactJson(input); }
+    catch (error) { enginePlanError = error.message; enginePlanPending = false; return; }
+    if (key === planKey) return;
+    planKey = key; const generation = ++planGeneration;
+    planController?.abort(); if (planTimer !== null) clearTimer(planTimer);
+    enginePlanPending = true; enginePlanError = ""; enginePlan = null;
+    planController = new AbortController();
+    planTimer = setTimer(async () => {
+      planTimer = null;
+      try {
+        const planned = await services.plan(input, planController.signal);
+        if (!alive || generation !== planGeneration) return;
+        if (!Array.isArray(planned) || planned.length !== input.targets.length || planned.some((target, index) => !target || target.index !== index ||
+          !Number.isSafeInteger(target.count) || target.count < 0 || (target.problem ? target.count !== 0 || typeof target.problem.message !== "string" : target.count <= 0))) throw new Error("Cohort plan unavailable");
+        enginePlan = freeze(snapshotDraft(planned));
+      } catch (error) { if (alive && generation === planGeneration) enginePlanError = error.message; }
+      finally { if (alive && generation === planGeneration) { enginePlanPending = false; changed(); } }
+    }, 150);
+  }
+  const withCohort = preview => {
+    if (!services.plan) return preview;
+    const pending = enginePlanPending || !enginePlan && !enginePlanError;
+    const n = pending || enginePlanError ? null : enginePlan.reduce((total, target) => total + target.count, 0);
+    const problems = enginePlan?.filter(target => target.problem) ?? [];
+    const message = enginePlanError || (pending ? "Checking every image..." : problems.length ? selectedTargets.length === 1 ? unresolvedConflicts() ? conflictMessage(unresolvedConflicts()) : problems[0].problem.message
+      : `${problems.length} image${problems.length === 1 ? " needs" : "s need"} attention; the others can run.` : "");
+    const times = (enginePlan ?? []).filter(target => target.count > 0).map(target => {
+      const duration = generationTimes.get(selectedTargets[target.index]?.id);
+      return knownGenerationTime(duration) ? duration * target.count : null;
+    });
+    return { ...preview, n, display: n === null ? "--" : n.toLocaleString("en-US"), fullCount: n === null ? message : `${n} variations`,
+      exact: n !== null, status: enginePlanError ? "failed" : pending ? "checking" : "ready", message,
+      breakdown: n === null ? "" : `${n} jobs for ${enginePlan.filter(target => target.count > 0).length} of ${selectedTargets.length} image${selectedTargets.length === 1 ? "" : "s"}`,
+      timeEstimate: estimateGenerationTime(n > 0 ? 1 : null, times) };
+  };
+  const canRun = () => !services.plan || catalogueReady && catalogueError === null && !destinationPending && !enginePlanPending && !enginePlanError && enginePlan?.some(target => !target.problem && target.count > 0);
+
   seed("naming", "root", {}, { prefix: "", suffix: "" });
   return {
     rows: view,
     revision: recipe.revision,
     targets: () => selectedTargets,
+    targetProblem(id) {
+      const retained = runProblems.get(id);
+      return retained?.revision === recipe.revision() ? retained.problem : enginePlan?.[selectedTargets.findIndex(target => target.id === id)]?.problem ?? null;
+    },
+    targetOutcome: id => runOutcomes.get(id) ?? null,
+    canRun,
     destination: () => destination,
     setDestination(origin) {
       if (!alive || deciding || running || !validOrigin(origin) || origin.kind !== "comfy") return false;
       if (sameOrigin(origin, destination)) return false;
+      restoreQueuedCohort();
       destination = freeze(snapshotDraft(origin)); conflicts = {}; unchecked = []; destinationPending = true; catalogueError = null;
+      planGeneration++; planKey = null; enginePlan = null; enginePlanPending = true; planController?.abort(); runProblems.clear(); runOutcomes.clear();
       invalidateClose(); notify(); return true;
     },
     resolveConflict(id, value) {
@@ -274,7 +358,7 @@ export function makeVariationEditor({ targets, cohortMode, destination: initialD
       const revision = recipe.revision();
       if (!alive || deciding || running) throw new Error("Finish the current action before recalling history");
       const cohort = [];
-      for (const target of selectedTargets) {
+      for (const target of selectedTargets.length ? selectedTargets : queuedCohort?.targets ?? selectedTargets) {
         if (!originCurrent(target)) throw new Error(staleSource(target.host));
         const data = catalogues.get(target.id) ?? await services.probe(target);
         if (!originCurrent(target)) throw new Error(staleSource(target.host));
@@ -420,8 +504,9 @@ export function makeVariationEditor({ targets, cohortMode, destination: initialD
     catalogueFailure(error) { if (!alive) return; catalogueError = String(error?.detail || (error?.status ? `HTTP ${error.status}` : error?.message ?? error)); result = null; notify(); },
     // Ask the same source again after a failed catalogue request.
     retryCatalogue() {
-      if (!alive || running || catalogueError === null) return false;
+      if (!alive || running || catalogueError === null && !enginePlanError) return false;
       catalogueError = null; result = null; if (destination) destinationPending = true;
+      enginePlanError = ""; planKey = null;
       notify(); return true;
     },
     invalidateClose,
@@ -581,16 +666,16 @@ export function makeVariationEditor({ targets, cohortMode, destination: initialD
         if (blocked && status !== "invalid") { status = "conflict"; message = conflictMessage(blocked); }
         const timeEstimate = estimateGenerationTime(status === "invalid" ? null : perImage,
           selectedTargets.map(target => originCurrent(target) ? generationTimes.get(target.id) : null));
-        return { n, perImage, anyEnabled: axes.length > 0 || !sameHost, exact: exact && naming.complete, status, message,
+        return withCohort({ n, perImage, anyEnabled: axes.length > 0 || !sameHost, exact: exact && naming.complete, status, message,
           unchecked: [...unchecked], uncheckedMessage: destinationMessage(), axes, excluded, breakdown, naming, timeEstimate,
           display: n >= 1e6 ? n < 1e15 ? new Intl.NumberFormat("en-US", { notation: "compact", maximumSignificantDigits: 4 }).format(n)
             : n.toExponential(2).replace("e+", " × 10^") : n.toLocaleString("en-US"),
-          fullCount: `${n.toLocaleString("en-US", { maximumFractionDigits: 0 })}${exact ? " variations" : " variations (estimate)"}` };
+          fullCount: `${n.toLocaleString("en-US", { maximumFractionDigits: 0 })}${exact ? " variations" : " variations (estimate)"}` });
       } catch (error) {
         // A value the destination lacks is a conflict, not a recipe mistake.
         const blocked = unresolvedConflicts();
-        return { ...unavailable(blocked ? "conflict" : "invalid", blocked ? conflictMessage(blocked) : error.message),
-          unchecked: [...unchecked], uncheckedMessage: destinationMessage() };
+        return withCohort({ ...unavailable(blocked ? "conflict" : "invalid", blocked ? conflictMessage(blocked) : error.message),
+          unchecked: [...unchecked], uncheckedMessage: destinationMessage() });
       }
     },
     async run() {
@@ -599,7 +684,7 @@ export function makeVariationEditor({ targets, cohortMode, destination: initialD
       if (catalogueError !== null) { publish({ text: `${catalogueProblem()} Nothing was sent.`, ok: false, state: "unavailable" }); return { status: "invalid" }; }
       if (!catalogueReady) { publish({ text: "Inspecting source context; your edits have been kept.", ok: false, state: "unavailable" }); return { status: "invalid" }; }
       if (destinationPending) { publish({ text: `Still checking ${destination.source}; nothing was sent.`, ok: false, state: "unavailable" }); return { status: "invalid" }; }
-      if (unresolvedConflicts()) { publish({ text: `${conflictMessage(unresolvedConflicts())} Nothing was sent.`, ok: false, state: "invalid" }); return { status: "invalid" }; }
+      if (services.plan ? !canRun() : unresolvedConflicts()) { publish({ text: `${services.plan ? withCohort({}).message || "No image has work to submit." : conflictMessage(unresolvedConflicts())} Nothing was sent.`, ok: false, state: "invalid" }); return { status: "invalid" }; }
       invalidateClose();
       const ticket = Object.freeze({ runId: createRunId(), editRevision: recipe.revision(), closeGeneration, snapshot: freeze(captureRows()), targets: selectedTargets, cohortMode: batch ? "bulk" : "single", destination });
       // Retain the captured inspection handles while they settle. Removing and
@@ -609,12 +694,12 @@ export function makeVariationEditor({ targets, cohortMode, destination: initialD
       const operation = { compiled: null };
       active = ticket;
       let submitted = 0, total = 0, countsComplete = true, uncertain = false;
-      const failures = [], uploads = new Map();
+      const failures = [], uploads = new Map(), leftovers = new Map();
       const effects = { uploads: [], targets: [] };
       // A Run ends in one transition: its outcome is shown together with the
       // end of running, after the saved-run record is finished.
       let outcome = null, show = false, closable = false;
-      running = true; result = null; notify();
+      running = true; result = null; queuedCohort = null; runOutcomes.clear(); notify();
       try {
         const saved = services.history ? await services.history.capture(ticket,
           new Map([...catalogues].map(([id, catalogue]) => [id, catalogue.context])), target => check(ticket, target)) : null;
@@ -624,7 +709,14 @@ export function makeVariationEditor({ targets, cohortMode, destination: initialD
         const runEvidence = (id, item) => runChecks.get(id)?.get(imageIdentity(item));
         for (const target of ticket.targets) check(ticket, target);
         let uploadFailure = false;
-        if (saved) operation.targetPlans = freeze(await services.history.plans(ticket, saved, target => check(ticket, target)));
+        if (saved) {
+          const planned = await services.history.plans(ticket, saved, target => check(ticket, target));
+          // Narrow service rigs retain their old array contract; the installed
+          // history owner always returns explicit plans and leftovers.
+          operation.targetPlans = freeze(Array.isArray(planned) ? planned : planned.plans);
+          operation.cohort = !Array.isArray(planned);
+          for (const leftover of planned.leftovers ?? []) leftovers.set(leftover.target.id, leftover);
+        }
         else {
         if (ticket.destination && ticket.targets.some(target => !sameOrigin(ticket.destination, target.origin))) throw new Error("Running on another ComfyUI requires saved-run history; nothing was sent.");
         // Explicit narrow legacy service rigs retain their old wire contract.
@@ -702,22 +794,43 @@ export function makeVariationEditor({ targets, cohortMode, destination: initialD
             if (!response.ok || !Number.isSafeInteger(data?.submitted) || !Number.isSafeInteger(data?.total) || data.total <= 0 || data.submitted !== data.total ||
               !Array.isArray(data.errors ?? []) || data.errors?.length) countsComplete = false;
             check(ticket, target);
-            if (!response.ok) { failures.push(sourceFailure(response.status, data?.error ?? response.text ?? `error ${response.status}`, ticket.destination?.source ?? target.host)); return; }
+             if (!response.ok) { throw new Error(sourceFailure(response.status, data?.error ?? response.text ?? `error ${response.status}`, ticket.destination?.source ?? target.host)); }
              const proof = request.history ? acknowledgedHistoryFields(request, data) : acknowledgedFields(request, data);
             for (const error of Array.isArray(data?.errors) ? data.errors : []) failures.push(error?.error ?? String(error));
             if (!proof || data.total !== expectedTotal || !sameContext(context, data.acknowledgement?.context)) {
               uncertain ||= data.outcome === "uncertain-effects" || data.submitted === data.total && !data.errors?.length;
               failures.push("submission acknowledgement unavailable; your edits have been kept.");
             }
-            else proofs.push(proof);
-          } catch (error) { countsComplete = false; failures.push(`${target.filename}: ${error.message}`); }
+             else proofs.push({ target, proof, count: expectedTotal });
+             if (!proof || data.total !== expectedTotal) leftovers.set(target.id, { target, problem: { code: data.outcome ?? "unconfirmed", message: failures.at(-1) ?? "Submission was not fully confirmed; inspect the result before running again." } });
+          } catch (error) { countsComplete = false; failures.push(`${target.filename}: ${error.message}`); leftovers.set(target.id, { target, problem: { code: "submission-failed", message: error.message } }); }
         }));
         if (!owns(ticket)) return { status: "stale" };
-        const complete = !uploadFailure && failures.length === 0 && proofs.length === ticket.targets.length;
-        const eligible = complete && compatible(ticket);
+        const complete = !uploadFailure && failures.length === 0 && proofs.length === operation.targetPlans.length && proofs.length > 0;
+        const eligible = complete && !leftovers.size && compatible(ticket);
         if (eligible) acceptedRevision = ticket.editRevision;
+        if (saved && operation.cohort) {
+          const newerEdits = recipe.revision() !== ticket.editRevision;
+          if (newerEdits) {
+            // These outcomes describe the captured setup, not the newer raw
+            // recipe. Keep its whole cohort so unsent edits still have targets.
+            for (const { target, count } of proofs) runOutcomes.set(target.id, freeze({ state: "queued", message: `Queued ${count} job${count === 1 ? "" : "s"}` }));
+            for (const leftover of leftovers.values()) runOutcomes.set(leftover.target.id, freeze({ state: "issue", message: leftover.problem.message }));
+          } else {
+            const queued = new Set(proofs.map(({ target }) => target.id));
+            if (complete && !leftovers.size) queuedCohort = {
+              targets: ticket.targets, revision: ticket.editRevision,
+              outcomes: proofs.map(({ target, count }) => [target.id, freeze({ state: "queued", message: `Queued ${count} job${count === 1 ? "" : "s"}` })]),
+            };
+            selectedTargets = freeze(selectedTargets.filter(target => !queued.has(target.id)));
+            for (const leftover of leftovers.values()) runProblems.set(leftover.target.id, { revision: ticket.editRevision, problem: leftover.problem });
+          }
+          planKey = null;
+        }
         const summary = batch ? `submitted ${submitted}/${total} across ${ticket.targets.length} images` : `submitted ${submitted}/${total}`;
-        const reason = failures[0] ?? (!eligible ? deciding ? "leave decision pending; your edits have been kept" : recipe.revision() !== ticket.editRevision ? "newer edits have been kept" : "operation context changed; your edits have been kept"
+        const newerEdits = recipe.revision() !== ticket.editRevision;
+        const reason = failures[0] ?? (newerEdits ? "newer edits have been kept with all captured images; target outcomes describe the captured setup."
+          : leftovers.size ? `${leftovers.size} image${leftovers.size === 1 ? " needs" : "s need"} attention. Adjust the remaining images and Run again.` : !eligible ? deciding ? "leave decision pending; your edits have been kept" : "operation context changed; your edits have been kept"
           : "");
         show = true;
         outcome = ({ text: submitted || total ? summary + (reason ? ` — ${reason}` : "") : reason || "nothing submitted", reason, ok: complete,
@@ -728,6 +841,7 @@ export function makeVariationEditor({ targets, cohortMode, destination: initialD
         return { status: submitted > 0 && countsComplete && !uploadFailure ? "submitted" : "failed", submitted, total, adopted: eligible };
       } catch (error) {
         show = owns(ticket);
+        if (show && recipe.revision() !== ticket.editRevision) for (const target of ticket.targets) runOutcomes.set(target.id, freeze({ state: "issue", message: error.message }));
         outcome = { text: error.message, ok: false, state: error.stale ? "stale" : "invalid", outcome: error.stale ? "retired" : "rejected", submitted, total, adopted: false, effects: freeze(snapshotDraft(effects)) };
         return { status: owns(ticket) ? error.stale ? "stale" : "invalid" : "stale", submitted, total, adopted: false };
        } finally {
@@ -749,6 +863,7 @@ export function makeVariationEditor({ targets, cohortMode, destination: initialD
     },
     dispose() {
       alive = false; invalidateClose(); active = null; sourceFiles.clear(); pexelsFiles.clear(); inputCatalogues.clear(); sourceLifetimes.clear();
+      planGeneration++; planController?.abort(); if (planTimer !== null) clearTimer(planTimer);
       timingController.abort(); generationTimes.clear();
       for (const record of heldRecords.values()) services.history?.release(record).catch(() => {});
       heldRecords.clear();

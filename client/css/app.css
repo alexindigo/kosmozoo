@@ -1534,6 +1534,11 @@ body:has(#diff:not([hidden])) #statusCol { bottom: 56px; }
 .vz-batch-info { display: grid; gap: 6px; min-width: 0; }
 .vz-batch-name, .vz-batch-time { font-size: 12px; color: var(--foreground); }
 .vz-batch-remove { align-self: start; }
+.vz-batch-problem { border-color: var(--negative); }
+.vz-batch-issue { color: var(--negative); font-size: 12px; }
+.vz-batch-outcome { min-width: 0; font-size: 12px; }
+.vz-batch-queued { color: var(--positive); }
+.vz-run:disabled { cursor: default; opacity: .5; filter: none; box-shadow: none; }
 .vh-tools { display: grid; gap: 8px; min-width: 0; }
 .vh-trigger { width: 100%; min-width: 0; text-align: start; }
 .vh-trigger > .single-line-text { padding-inline: 10px; }

@@ -63,3 +63,30 @@ Deno.test("cohort planner: unknown receipt names use byte identities and dedupe 
   assertEquals([...counted.resourceIdentities.values()], [{ resource: "a".repeat(64) }, { resource: "a".repeat(64) }]);
   assertEquals(planCohort({ targets: [counted], cohortMode: "single", recipe: encoded.recipe, destination: { source: "other" } }), [{ index: 0, count: 1, problem: null }]);
 });
+
+Deno.test("cohort planner: shared kernel axis/traversal budget is admission, not a late dispatch failure", async () => {
+  const { recipe, target } = await fixture();
+  const base = recipe.numeric["n.denoise"], parameter = target.catalogue.parameters.find(p => p.id === "n.denoise");
+  const parameters = Array.from({ length: 129 }, (_, index) => ({ ...parameter, id: `n.axis${index}`, key: `axis${index}` }));
+  recipe.numeric = Object.fromEntries(parameters.map(p => [p.id, { ...structuredClone(base), metadata: { ...base.metadata, ...p } }]));
+  const planned = planCohort({ targets: [{ ...target, catalogue: { ...target.catalogue, parameters } }], cohortMode: "single", recipe });
+  assertEquals(planned[0].problem.code, "work-budget");
+});
+
+Deno.test("cohort planner: a file reuses a prior selected local reference by byte identity", async () => {
+  const { recipe, target } = await fixture();
+  const runId = crypto.randomUUID();
+  recipe.images["image.image"].values.enabled = true;
+  recipe.images["image.image"].values.items = [
+    { kind: "archive", runId, resourceId: "image-0", name: "next.png" },
+    { kind: "archive", runId, resourceId: "image-1", name: "different-name.png" },
+  ];
+  const resources = [
+    { id: "image-0", host: "fake", root: "input", name: "next.png", value: "next.png", hash: "b".repeat(64) },
+    { id: "image-1", name: "different-name.png", hash: "b".repeat(64) },
+  ];
+  const counted = countingTarget(target, recipe, resources, { source: "fake" }, 0);
+  assertEquals([...counted.resourceIdentities.values()], ["next.png", "next.png"]);
+  const planned = planCohort({ targets: [counted], cohortMode: "single", recipe });
+  assertEquals(planned[0].count, 1, JSON.stringify(planned));
+});

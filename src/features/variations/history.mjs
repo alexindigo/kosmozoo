@@ -4,12 +4,12 @@ import { sha256 } from "../../cache.mjs";
 import { metaFromBytes } from "../../extractor.mjs";
 import { validEntryName } from "../../backings/index.mjs";
 import { validOrigin, sameOrigin, sourceOrigin, validContext } from "../../source-origin.mjs";
-import { cloneJsonValue, parseExactJson, stringifyExactJson, resourceReference, sameJsonValue, parameterCurrent, parameterLabel } from "../../parameters.mjs";
+import { cloneJsonValue, parseExactJson, stringifyExactJson, resourceReference, sameJsonValue, parameterCurrent } from "../../parameters.mjs";
 import { historyId, decodeHistoryRecipe } from "./history-codec.mjs";
 import { imageIdentity, snapshotDraft } from "./recipe-model.mjs";
 import { admitResourceTransfer } from "./compile.mjs";
 import { parameterIndex } from "./shared.mjs";
-import { planCohort, planTarget, countingTarget } from "./cohort-plan.mjs";
+import { planCohort, planTarget, countingTarget, bindCohortRecipe } from "./cohort-plan.mjs";
 import { inspectSource, projectInspection } from "./inspection.mjs";
 import { inspectDestination, destinationMissing } from "./destination.mjs";
 import { readImage } from "./folder-images.mjs";
@@ -123,9 +123,14 @@ export function makeVariationHistory(app) {
     summary.total = admitted ? admitted.reduce((sum, target) => sum + target.count, 0) : targets.length === expectedTargets ? known.reduce((a, b) => a + b, 0) : null;
     summary.plannedCount = summary.total;
     summary.leftovers = (cohort ?? []).filter(target => target.problem).map(target => ({ index: target.index, problem: target.problem }));
+    for (const effect of effects.filter(effect => effect.kind === "leftover" && effect.state === "confirmed")) {
+      const leftover = data(effect.result_json);
+      if (!summary.leftovers.some(target => target.index === leftover.index)) summary.leftovers.push(leftover);
+    }
     for (const target of targets.filter(effect => ["rejected", "partial", "uncertain"].includes(effect.state))) {
       const prepared = data(target.request_json), result = target.result_json ? data(target.result_json) : null;
-      summary.leftovers.push({ index: prepared.request.history.targetIndex, problem: { code: target.state,
+      const index = prepared.request.history.targetIndex;
+      if (!summary.leftovers.some(target => target.index === index)) summary.leftovers.push({ index, problem: { code: target.state,
         message: result?.data?.error ?? result?.data?.errors?.[0]?.error ?? "Submission was not fully confirmed; inspect the result before running again." } });
     }
     summary.error = error ?? summary.error;
@@ -141,16 +146,11 @@ export function makeVariationHistory(app) {
     if (!effect || effect.state !== "confirmed" || !effect.result_json) throw fail(`Image ${resourceId} is not materialized`, 409);
     return data(effect.result_json);
   };
-  const boundRecipe = (snapshot, catalogue) => {
-    const recipe = snapshotDraft(snapshot.recipe), parameters = parameterIndex(catalogue.parameters);
-    for (const rows of Object.values(recipe)) for (const [pid, entry] of Object.entries(rows)) {
-      const p = parameters.get(pid);
-      if (p) entry.metadata = { ...entry.metadata, ...p, label: parameterLabel(p) };
-    }
-    return recipe;
-  };
   const preflight = (snapshot, destination) => {
-    const targets = snapshot.targets.map((target, index) => countingTarget(target, snapshot.recipe, snapshot.resources, destination, index));
+    const targets = snapshot.targets.map((target, index) => {
+      try { return countingTarget(target, snapshot.recipe, snapshot.resources, destination, index); }
+      catch (error) { return { ...target, problem: { code: "invalid-resource", message: error.message } }; }
+    });
     return planCohort({ ...snapshot, targets, destination });
   };
   const admit = async (id, row, snapshot) => {
@@ -173,7 +173,77 @@ export function makeVariationHistory(app) {
     if (!target || target.problem || !Number.isSafeInteger(target.count) || target.count <= 0) throw fail(target?.problem?.message ?? "Target has no saved admission; start a new Run", 409);
     return target;
   };
+  const targetProblem = async (id, index, origin, snapshotHash, error) => {
+    const row = store.variationGet(id);
+    if (!row || row.deleted_at !== null || !row.recipe_json || snapshotHash !== row.snapshot_hash || !sameOrigin(destinationOf(row, index), origin)) return;
+    const effects = store.variationEffects(id), effect = effects.find(effect => effect.kind === "admission" && effect.state === "confirmed");
+    const admission = effect && data(effect.result_json).targets[index];
+    if (!admission || admission.problem || effects.some(effect => effect.effect_id === `leftover-${index}`)) return;
+    const leftover = { index, problem: { code: "preparation-failed", message: error.message } };
+    store.variationPrepareEffect(id, `leftover-${index}`, "leftover", canonical(leftover), await digest(leftover));
+    if (store.variationClaimEffect(id, `leftover-${index}`)) store.variationEffectResult(id, `leftover-${index}`, "confirmed", canonical(leftover));
+    outcome(id, error.message);
+  };
   const api = {
+    // Read-only preview uses the same inspection and resource owners as capture,
+    // but never reserves archive membership, history rows or upstream effects.
+    async plan(body) {
+      if (!body || !["single", "bulk"].includes(body.cohortMode) || !Array.isArray(body.targets) || !body.targets.length ||
+          body.cohortMode === "single" && body.targets.length !== 1 || !Array.isArray(body.resources)) throw fail("Invalid cohort plan");
+      if (body.destination && (!validOrigin(body.destination) || body.destination.kind !== "comfy")) throw fail("Invalid Run destination");
+      const recipe = decodeHistoryRecipe({ format: 1, recipe: body.recipe });
+      const resources = await Promise.all(body.resources.map(async descriptor => {
+        if (descriptor.kind === "upload") return { ...descriptor, hash: /^[a-f0-9]{64}$/.test(descriptor.hash) ? descriptor.hash : null };
+        if (descriptor.kind === "archive") return { ...descriptor, hash: member(descriptor.runId, descriptor.resourceId, descriptor.leaseId).hash };
+        if (descriptor.kind === "server-path") return { ...descriptor, hash: await sha256((await readImage(descriptor.path)).bytes) };
+        if (!["input", "reference"].includes(descriptor.kind) || !resourceReference(descriptor.value)) throw fail("Invalid image resource");
+        const target = body.targets[0]; current(target);
+        const ref = resourceReference(descriptor.value), read = await app.ingest.ensure(target.host, ref.name, ref.root, { priority: "high" });
+        current(target);
+        if (read.status !== 200) throw fail(`${ref.name}: image resource unavailable`, read.status);
+        return { ...descriptor, ...ref, host: target.host, hash: read.hash };
+      }));
+      const targets = await Promise.all(body.targets.map(async (target, index) => {
+        try {
+          current(target);
+          let archived = null;
+          if (target.historyRef) {
+            const previous = sealed(target.historyRef.runId, target.historyRef.leaseId).snapshot;
+            const saved = previous.targets[target.historyRef.targetIndex];
+            if (!saved || saved.host !== target.host || saved.filename !== target.filename || saved.source.address !== target.origin.address) throw fail("Saved target/source mismatch", 412);
+            archived = { graph: saved.graph, hash: saved.hash };
+          }
+          if (!archived) {
+            const read = await app.ingest.ensure(target.host, target.filename, "output", { priority: "high" });
+            if (read.status !== 200) throw fail(`${target.filename}: original target unavailable`, read.status);
+            current(target);
+          }
+          const r = throwInspection(await inspectSource(app, target.host, target.filename, target.context ?? { origin: target.origin }, archived));
+          const catalogue = await inspectDestination(app, { graph: r.graph, hash: r.context.graphHash, name: target.filename,
+            original: projectInspection(r, target.filename), originContext: r.context, destination: body.destination });
+          throwInspection(catalogue);
+          const graphResources = {}, targetResources = [...resources, { id: `target-${index}`, host: target.host, root: "output", name: target.filename, hash: r.context.graphHash }];
+          for (const parameter of catalogue.parameters.filter(p => p.kind === "image")) {
+            const value = parameterCurrent(parameter), ref = resourceReference(value);
+            if (!ref) throw fail(`${parameter.id}: original image reference unavailable`, 409);
+            const resourceId = `graph-${index}-${Object.keys(graphResources).length}`;
+            let hash;
+            if (target.historyRef) {
+              const saved = sealed(target.historyRef.runId, target.historyRef.leaseId).snapshot.targets[target.historyRef.targetIndex];
+              hash = member(target.historyRef.runId, saved.graphResources[parameter.id], target.historyRef.leaseId).hash;
+            } else {
+              const read = await app.ingest.ensure(target.host, ref.name, ref.root, { priority: "high" });
+              if (read.status !== 200) throw fail(`${ref.name}: declared graph input unavailable`, read.status);
+              hash = read.hash;
+            }
+            targetResources.push({ id: resourceId, ...ref, value, host: target.host, hash }); graphResources[parameter.id] = resourceId;
+          }
+          current(target); if (body.destination) currentDestination(body.destination);
+          return countingTarget({ ...target, graph: r.graph, catalogue, graphResources }, recipe, targetResources, body.destination, index);
+        } catch (error) { return { ...target, problem: { code: "unavailable", message: error.message } }; }
+      }));
+      return planCohort({ targets, cohortMode: body.cohortMode, recipe, destination: body.destination });
+    },
     begin(body) {
       if (!body || body.format !== 1 || !historyId(body.runId) || !["single", "bulk"].includes(body.cohortMode) ||
         !Array.isArray(body.targets) || !body.targets.length || body.cohortMode === "single" && body.targets.length !== 1 || !Array.isArray(body.resources)) throw fail("Invalid history capture");
@@ -405,7 +475,10 @@ export function makeVariationHistory(app) {
         store.variationEffectResult(id, effectId, !outboundStarted || error.status && error.status < 500 ? "rejected" : "uncertain", canonical({ error: error.message }));
         outcome(id, error.message); throw error;
       } finally { await collect(id); }
-    }, canonical({ origin, snapshotHash })); },
+    }, canonical({ origin, snapshotHash })).catch(async error => {
+      await targetProblem(id, targetIndex, origin, snapshotHash, error);
+      throw error;
+    }); },
     prepareTarget(id, targetIndex, origin, snapshotHash) { return single(`plan-${id}-${targetIndex}`, async () => {
       const { row, snapshot } = sealed(id), target = data(row.targets_json)[targetIndex], saved = snapshot.targets[targetIndex], destination = destinationOf(row, targetIndex);
       if (await digest(snapshot) !== row.snapshot_hash) throw fail("Saved snapshot integrity check failed", 409);
@@ -426,7 +499,7 @@ export function makeVariationHistory(app) {
         if (missing.length) throw fail(`Not installed on ${destination.source}: ${missing.join(", ")}; no jobs were submitted`, 409);
       }
       const catalogue = projectInspection(r, target.filename);
-      const recipe = boundRecipe(snapshot, catalogue), resourceValues = new Map();
+      const recipe = bindCohortRecipe(snapshot.recipe, catalogue), resourceValues = new Map();
       for (const [domain, rows] of Object.entries(recipe)) for (const [pid, entry] of Object.entries(rows)) {
         if (domain === "images" && entry.values.enabled) for (const item of entry.values.items) {
           const resourceId = item.kind === "target" ? `target-${targetIndex}` : item.resourceId;
@@ -445,7 +518,10 @@ export function makeVariationHistory(app) {
       store.variationPrepareEffect(id, `target-${targetIndex}`, "target", canonical(prepared), await digest(prepared));
       outcome(id);
       return prepared;
-    }, canonical({ origin, snapshotHash })); },
+    }, canonical({ origin, snapshotHash })).catch(async error => {
+      await targetProblem(id, targetIndex, origin, snapshotHash, error);
+      throw error;
+    }); },
     dispatch(body, execute) { return app.lifetime.run(`variation dispatch ${body.acknowledgement?.requestId}`, async () => {
       const binding = body.history;
       if (!binding || !historyId(binding.id) || !Number.isSafeInteger(binding.targetIndex)) throw fail("Invalid saved Run binding");

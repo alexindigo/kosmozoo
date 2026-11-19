@@ -135,8 +135,13 @@ export function makeHistoryClient({ api, changed = () => {} }) {
       return prepared;
     },
     async plans(ticket, prepared, check) {
-      const plans = [];
+      const plans = [], leftovers = [];
+      if (!Array.isArray(prepared.admission) || prepared.admission.length !== ticket.targets.length) throw new Error("Saved cohort admission unavailable; nothing was sent");
       for (const [targetIndex, target] of ticket.targets.entries()) {
+        const admission = prepared.admission[targetIndex];
+        if (admission.index !== targetIndex) throw new Error("Saved cohort admission mismatch");
+        if (admission.problem || admission.count <= 0) { leftovers.push({ target, problem: admission.problem ?? { code: "no-work", message: "No work for this image." } }); continue; }
+        try {
         check(target);
         // Uploads and planning bind to where the Run executes, not where the image came from.
         const binding = { targetIndex, origin: ticket.destination ?? target.origin, snapshotHash: prepared.snapshotHash };
@@ -151,8 +156,9 @@ export function makeHistoryClient({ api, changed = () => {} }) {
         if (plan.request?.history?.id !== ticket.runId || plan.request.history.snapshotHash !== prepared.snapshotHash ||
           plan.request.history.targetIndex !== targetIndex || plan.planHash !== plan.request.history.planHash) throw new Error("Saved target plan binding unavailable");
         plans.push({ ...plan, target });
+        } catch (error) { leftovers.push({ target, problem: { code: "preparation-failed", message: error.message } }); }
       }
-      return plans;
+      return { plans, leftovers };
     },
     async finish(id, message) {
       try { await api.historyFinish(id, message); }

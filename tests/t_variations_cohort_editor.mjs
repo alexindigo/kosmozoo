@@ -1,0 +1,81 @@
+import { assert, assertEquals } from "jsr:@std/assert";
+import { editorRig } from "./helpers/variation-editor.mjs";
+import { compileRecipe } from "../src/features/variations/recipe-compile.mjs";
+
+const settle = async rig => {
+  const timer = rig.timers.findLast(timer => timer.active && timer.ms === 150);
+  assert(timer); timer.active = false; await timer.callback();
+};
+Deno.test("cohort preview: pending/zero plans gate the detached Run port without history effects", async () => {
+  let count = 0, captures = 0;
+  const rig = editorRig({ plan: async () => [{ index: 0, count, problem: count ? null : { code: "no-work", message: "Choose a different value." } }],
+    history: { capture() { captures++; throw new Error("capture reached"); }, finish() {} } });
+  const requestRun = rig.editor.run;
+  assertEquals(rig.editor.canRun(), false);
+  assertEquals((await requestRun()).status, "invalid");
+  await settle(rig);
+  assertEquals([rig.editor.canRun(), rig.editor.preview().n], [false, 0]);
+  assertEquals(rig.editor.targetProblem("fake:image.png").code, "no-work");
+  assertEquals((await requestRun()).status, "invalid"); assertEquals(captures, 0);
+  count = 2; rig.editor.setEnabled("n.denoise", true);
+  await settle(rig);
+  assertEquals([rig.editor.canRun(), rig.editor.preview().n], [true, 2]);
+  assertEquals((await requestRun()).status, "invalid"); assertEquals(captures, 1);
+  rig.editor.dispose();
+});
+
+Deno.test("cohort preview: latest-only reads abort retired plans and disposal aborts pending transport", async () => {
+  const reads = [];
+  const rig = editorRig({ plan: (input, signal) => new Promise(resolve => reads.push({ input, signal, resolve })) });
+  const first = rig.timers.findLast(timer => timer.active && timer.ms === 150); first.active = false;
+  const old = first.callback();
+  rig.editor.setEnabled("n.denoise", true);
+  assert(reads[0].signal.aborted);
+  const next = rig.timers.findLast(timer => timer.active && timer.ms === 150); next.active = false;
+  const fresh = next.callback();
+  reads[1].resolve([{ index: 0, count: 3, problem: null }]); await fresh;
+  reads[0].resolve([{ index: 0, count: 99, problem: null }]); await old;
+  assertEquals(rig.editor.preview().n, 3);
+  rig.editor.dispose(); assert(reads[1].signal.aborted);
+});
+
+for (const newerEdits of [false, true]) Deno.test(`cohort settlement: ${newerEdits ? "newer edits retain the captured target and queued outcome" : "unchanged revision removes the queued target"}`, async () => {
+  const baseline = editorRig(); baseline.editor.dispose();
+  let enter, release;
+  const entered = new Promise(resolve => { enter = resolve; }), gate = new Promise(resolve => { release = resolve; });
+  const history = {
+    capture: async () => ({}),
+    plans(ticket) {
+      const target = ticket.targets[0], compiled = compileRecipe(ticket.snapshot, { catalogue: baseline.catalogue, target });
+      const request = { id: target.id, host: target.host, filename: target.filename, ...compiled.payload, context: baseline.context,
+        acknowledgement: { version: 2, runId: ticket.runId, requestId: crypto.randomUUID() },
+        history: { id: ticket.runId, snapshotHash: "a".repeat(64), targetIndex: 0, planHash: "b".repeat(64) } };
+      return { plans: [{ target, request, expectedTotal: 1 }], leftovers: [] };
+    },
+    finish() {},
+  };
+  const rig = editorRig({ history, run: async request => {
+    enter(); await gate;
+    const response = await baseline.services.run(request);
+    return { ...response, data: { ...response.data, history: request.history } };
+  } });
+  rig.editor.setEnabled("n.denoise", true);
+  rig.editor.edit("numeric", "n.denoise", "mode", "value"); rig.editor.edit("numeric", "n.denoise", "value", "0.9");
+  const running = rig.editor.run(); await entered;
+  if (newerEdits) rig.editor.edit("numeric", "n.denoise", "value", "0.8");
+  release(); const result = await running;
+  assertEquals(result.submitted, 1); assertEquals(result.adopted, !newerEdits);
+  assertEquals(rig.editor.targets().length, newerEdits ? 1 : 0);
+  assertEquals(rig.editor.targetOutcome("fake:image.png"), newerEdits ? { state: "queued", message: "Queued 1 job" } : null);
+  assertEquals(rig.editor.rows("numeric")["n.denoise"].value, newerEdits ? "0.8" : "0.9");
+  assertEquals(rig.editor.dirty(), newerEdits);
+  assertEquals(rig.timers.filter(timer => timer.active && timer.ms === 3000).length, newerEdits ? 0 : 1);
+  if (!newerEdits) {
+    rig.editor.edit("numeric", "n.denoise", "value", "0.8");
+    assertEquals(rig.editor.targets().map(target => target.id), ["fake:image.png"], "a newer edit during the successful close countdown restores its issued subject");
+    assertEquals(rig.editor.targetOutcome("fake:image.png"), { state: "queued", message: "Queued 1 job" });
+    assertEquals(rig.editor.dirty(), true);
+    assertEquals(rig.timers.filter(timer => timer.active && timer.ms === 3000).length, 0);
+  }
+  rig.editor.dispose();
+});

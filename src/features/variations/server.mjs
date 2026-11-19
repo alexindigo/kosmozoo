@@ -165,6 +165,10 @@ export function lineageTag(source, params) {
 export function register(app) {
   const backingFor = app.backings?.backingFor ?? defaultBackingFor;
   const history = registerHistory(app);
+  app.route("POST", "/plan", async req => {
+    try { return exactResponse(await history.plan(await readJson(req, { parse: parseExactJson }))); }
+    catch (error) { return exactResponse({ error: error.message }, { status: error.status ?? 400 }); }
+  });
   registerPexels(app);
   app.route("GET", "/folder-chooser", async () => Response.json(await app.desktop.capability()));
   app.route("POST", "/choose-folder", async req => {
