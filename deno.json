@@ -15,6 +15,7 @@
     "/js/api.mjs": "./client/js/api.mjs",
     "/js/route-parse.mjs": "./client/js/route-parse.mjs",
     "/js/feed-filter-model.mjs": "./client/js/feed-filter-model.mjs",
+    "/js/image-visibility-model.mjs": "./client/js/image-visibility-model.mjs",
     "/js/icons.mjs": "./client/js/icons.mjs",
     "/js/zoomable.mjs": "./client/js/zoomable.mjs",
     "/js/zoom-view.mjs": "./client/js/zoom-view.mjs",
