@@ -239,8 +239,11 @@ Deno.test("history HTTP: immutable raw capture/archive barrier, engine plan and 
     invalidRecipe.numeric["n.seed"].values.value = "1e";
     const invalid = encodeHistoryRecipe(invalidRecipe, invalidId), beforeInvalid = { jobs: jobs.length, uploads: uploads.length };
     assertEquals((await call("POST", "/history", { runId: invalidId, format: 1, cohortMode: "single", targets: [nextTarget], recipe: invalid.recipe, resources: invalid.resources })).status, 200);
-    assertEquals((await call("POST", `/history/${invalidId}/prepare`)).status, 400);
-    assertEquals((await call("POST", `/history/${invalidId}/prepare`)).status, 400);
+    const invalidPrepared = await call("POST", `/history/${invalidId}/prepare`);
+    assertEquals(invalidPrepared.status, 200);
+    assertEquals(invalidPrepared.data.outcome, "rejected");
+    assert(invalidPrepared.data.admission[0].problem.message.includes("Enter a number"));
+    assertEquals((await call("POST", `/history/${invalidId}/prepare`)).data.admission, invalidPrepared.data.admission);
     assertEquals((await call("GET", `/history/${invalidId}`)).data.recipe.numeric["n.seed"].values.value, "1e");
     assertEquals({ jobs: jobs.length, uploads: uploads.length }, beforeInvalid);
     acceptance = "confirmed";

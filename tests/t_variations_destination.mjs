@@ -178,18 +178,23 @@ Deno.test("destination: a saved Run materializes and queues only on the chosen C
     const own = unchanged(probe.context.origin);
     assertEquals((await call("POST", "/history", own.body)).status, 200);
     const aPreparation = await call("POST", `/history/${own.runId}/prepare`);
-    assertEquals(aPreparation.status, 400, "known zero-work recipes reject before resource materialization");
+    assertEquals(aPreparation.status, 200, "the archive retains rejected targets and their problems");
+    assertEquals(aPreparation.data.admission[0].problem.code, "no-work");
+    assertEquals(aPreparation.data.outcome, "rejected");
     const aPrepared = (await call("GET", `/history/${own.runId}`)).data;
     // If upload were admitted it would have to write: the original name no
     // longer exists. No-op admission must happen before trying that effect.
     const original = hosts.a.inputs.get("original.png"); hosts.a.inputs.delete("original.png");
     for (const resourceId of new Set(Object.values(aPrepared.targets[0].graphResources))) {
       const upload = await call("POST", `/history/${own.runId}/uploads/0-${resourceId}`, { targetIndex: 0, resourceId, origin: probe.context.origin, snapshotHash: aPrepared.snapshotHash });
-      assertEquals(upload.status, 400, stringifyExactJson(upload));
+      assertEquals(upload.status, 409, stringifyExactJson(upload));
     }
     hosts.a.inputs.set("original.png", original);
     const aPlan = await call("POST", `/history/${own.runId}/prepare-target`, { targetIndex: 0, origin: probe.context.origin, snapshotHash: aPrepared.snapshotHash });
-    assertEquals(aPlan.status, 400, stringifyExactJson(aPlan));
+    assertEquals(aPlan.status, 409, stringifyExactJson(aPlan));
+    const noOpDispatch = await call("POST", "/run", { ...plan.data.request, acknowledgement: { ...plan.data.request.acknowledgement, runId: own.runId },
+      history: { ...plan.data.request.history, id: own.runId, snapshotHash: aPrepared.snapshotHash, targetIndex: 0 } });
+    assertEquals(noOpDispatch.status, 409, "dispatch cannot bypass admission with a foreign prepared request");
     assertEquals([hosts.a.jobs.length, hosts.a.uploads.length], [0, 0]);
 
     // Early capture preflight stays cohort-aware: a no-op target cannot reject
@@ -204,12 +209,23 @@ Deno.test("destination: a saved Run materializes and queues only on the chosen C
     assertEquals((await call("POST", "/history", { runId: mixedId, format: 1, cohortMode: "bulk", targets: [target, dTarget], recipe: mixed.recipe, resources: mixed.resources, destination: probe.context.origin })).status, 200);
     const mixedPrepared = await call("POST", `/history/${mixedId}/prepare`);
     assertEquals(mixedPrepared.status, 200, stringifyExactJson(mixedPrepared));
+    assertEquals(mixedPrepared.data.admission.map(target => [target.count, target.problem?.code ?? null]), [[0, "no-work"], [1, null]]);
     hosts.a.inputs.delete("original.png");
     for (const resourceId of new Set(Object.values(mixedPrepared.data.targets[0].graphResources))) {
       const noOpUpload = await call("POST", `/history/${mixedId}/uploads/0-${resourceId}`, { targetIndex: 0, resourceId, origin: probe.context.origin, snapshotHash: mixedPrepared.data.snapshotHash });
-      assertEquals(noOpUpload.status, 400, stringifyExactJson(noOpUpload));
+      assertEquals(noOpUpload.status, 409, stringifyExactJson(noOpUpload));
     }
     assertEquals(hosts.a.uploads.length, 0);
+    for (const resourceId of new Set(Object.values(mixedPrepared.data.targets[1].graphResources))) {
+      assertEquals((await call("POST", `/history/${mixedId}/uploads/1-${resourceId}`, { targetIndex: 1, resourceId, origin: probe.context.origin, snapshotHash: mixedPrepared.data.snapshotHash })).status, 200);
+    }
+    const productive = await call("POST", `/history/${mixedId}/prepare-target`, { targetIndex: 1, origin: probe.context.origin, snapshotHash: mixedPrepared.data.snapshotHash });
+    assertEquals(productive.status, 200, stringifyExactJson(productive));
+    assertEquals((await call("POST", "/run", productive.data.request)).data.submitted, 1);
+    const mixedResult = (await call("GET", `/history/${mixedId}`)).data;
+    assertEquals([mixedResult.outcome, mixedResult.summary.total, mixedResult.summary.submitted], ["submitted", 1, 1]);
+    assertEquals(mixedResult.summary.leftovers.map(target => target.index), [0]);
+    assertEquals(mixedResult.effects.filter(effect => effect.kind === "upload").map(effect => effect.id.startsWith("upload-1-")), [true], "only admitted target resources reach materialization");
     hosts.a.inputs.set("original.png", original);
 
     // A host lacking a node class rejects before any upload or job.
@@ -218,14 +234,15 @@ Deno.test("destination: a saved Run materializes and queues only on the chosen C
     const blockedRecipe = encodeHistoryRecipe(seeded.capture(), blockedId);
     assertEquals((await call("POST", "/history", { runId: blockedId, format: 1, cohortMode: "single", targets: [target], recipe: blockedRecipe.recipe, resources: blocked.resources, destination: c })).status, 200);
     const blockedPrepared = await call("POST", `/history/${blockedId}/prepare`);
-    assertEquals(blockedPrepared.status, 400, stringifyExactJson(blockedPrepared));
+    assertEquals(blockedPrepared.status, 200, stringifyExactJson(blockedPrepared));
+    assertEquals(blockedPrepared.data.admission[0].problem.code, "missing-class");
     const blockedDetail = (await call("GET", `/history/${blockedId}`)).data;
     const resourceId = Object.values(blockedDetail.targets[0].graphResources)[0];
     const blockedUpload = await call("POST", `/history/${blockedId}/uploads/0-${resourceId}`, { targetIndex: 0, resourceId, origin: c, snapshotHash: blockedDetail.snapshotHash });
-    assertEquals(blockedUpload.status, 400, stringifyExactJson(blockedUpload));
+    assertEquals(blockedUpload.status, 409, stringifyExactJson(blockedUpload));
     assert(blockedUpload.data.error.includes("Not installed on c: Test"));
     const blockedPlan = await call("POST", `/history/${blockedId}/prepare-target`, { targetIndex: 0, origin: c, snapshotHash: blockedDetail.snapshotHash });
-    assertEquals(blockedPlan.status, 400);
+    assertEquals(blockedPlan.status, 409);
     assertEquals([hosts.c.jobs.length, hosts.c.uploads.length], [0, 0]);
   } finally {
     await engine.close();

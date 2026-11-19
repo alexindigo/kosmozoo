@@ -115,15 +115,24 @@ export function makeVariationHistory(app) {
     const summary = data(row.summary_json), effects = store.variationEffects(id), jobs = effects.filter(e => e.kind === "permutation");
     summary.submitted = jobs.filter(e => e.state === "confirmed" || e.state === "partial").length;
     const targets = effects.filter(e => e.kind === "target");
+    const admission = effects.find(e => e.kind === "admission" && e.state === "confirmed");
+    const cohort = admission ? data(admission.result_json).targets : null;
+    const admitted = cohort?.filter(target => !target.problem && target.count > 0);
     const known = targets.map(e => data(e.request_json).expectedTotal);
-    const expectedTargets = data(row.targets_json).length;
-    summary.total = targets.length === expectedTargets ? known.reduce((a, b) => a + b, 0) : null;
+    const expectedTargets = admitted?.length ?? data(row.targets_json).length;
+    summary.total = admitted ? admitted.reduce((sum, target) => sum + target.count, 0) : targets.length === expectedTargets ? known.reduce((a, b) => a + b, 0) : null;
     summary.plannedCount = summary.total;
+    summary.leftovers = (cohort ?? []).filter(target => target.problem).map(target => ({ index: target.index, problem: target.problem }));
+    for (const target of targets.filter(effect => ["rejected", "partial", "uncertain"].includes(effect.state))) {
+      const prepared = data(target.request_json), result = target.result_json ? data(target.result_json) : null;
+      summary.leftovers.push({ index: prepared.request.history.targetIndex, problem: { code: target.state,
+        message: result?.data?.error ?? result?.data?.errors?.[0]?.error ?? "Submission was not fully confirmed; inspect the result before running again." } });
+    }
     summary.error = error ?? summary.error;
     const uncertain = effects.some(e => ["started", "uncertain"].includes(e.state));
-    const rejected = effects.some(e => ["rejected", "partial"].includes(e.state));
-    const status = uncertain ? "uncertain" : targets.length === expectedTargets && targets.every(e => e.state === "confirmed") ? "submitted"
-      : rejected || error ? summary.submitted ? "partial" : "rejected" : "preparing";
+    const rejected = effects.some(e => e.kind !== "admission" && ["rejected", "partial"].includes(e.state));
+    const status = uncertain ? "uncertain" : expectedTargets > 0 && targets.length === expectedTargets && targets.every(e => e.state === "confirmed") ? "submitted"
+      : admitted?.length === 0 || rejected || error ? summary.submitted ? "partial" : "rejected" : "preparing";
     store.variationOutcome(id, status, canonical(summary), { submitted: summary.submitted, total: summary.total, planned: summary.plannedCount });
     return { ...summary, outcome: status };
   };
@@ -140,12 +149,29 @@ export function makeVariationHistory(app) {
     }
     return recipe;
   };
-  const preflight = (snapshot, destination, targetIndex = null) => {
+  const preflight = (snapshot, destination) => {
     const targets = snapshot.targets.map((target, index) => countingTarget(target, snapshot.recipe, snapshot.resources, destination, index));
-    const plans = planCohort({ ...snapshot, targets, destination });
-    const problem = targetIndex === null ? plans.every(plan => plan.problem) && plans[0].problem : plans[targetIndex]?.problem;
-    if (problem) throw fail(problem.message);
-    return plans;
+    return planCohort({ ...snapshot, targets, destination });
+  };
+  const admit = async (id, row, snapshot) => {
+    const prior = store.variationEffects(id).find(effect => effect.effect_id === "admission");
+    if (prior) {
+      if (prior.state !== "confirmed") throw fail("Saved admission is interrupted; start a new Run", 409);
+      return data(prior.result_json);
+    }
+    const admission = { snapshotHash: row.snapshot_hash, targets: preflight(snapshot, captured(row).destination) };
+    store.variationPrepareEffect(id, "admission", "admission", canonical(admission), await digest(admission));
+    if (!store.variationClaimEffect(id, "admission")) throw fail("Saved admission unavailable", 409);
+    store.variationEffectResult(id, "admission", "confirmed", canonical(admission));
+    outcome(id);
+    return admission;
+  };
+  const admittedTarget = (id, row, index) => {
+    const effect = store.variationEffects(id).find(effect => effect.effect_id === "admission" && effect.kind === "admission");
+    const admission = effect?.state === "confirmed" && data(effect.result_json);
+    const target = admission?.snapshotHash === row.snapshot_hash && admission.targets[index];
+    if (!target || target.problem || !Number.isSafeInteger(target.count) || target.count <= 0) throw fail(target?.problem?.message ?? "Target has no saved admission; start a new Run", 409);
+    return target;
   };
   const api = {
     begin(body) {
@@ -179,6 +205,8 @@ export function makeVariationHistory(app) {
       return { id, format: 1, createdAt: row.created_at, captureState: row.capture_state, outcome: row.outcome,
         snapshotHash: row.snapshot_hash, summary: { ...data(row.summary_json), submitted: row.submitted_count, total: row.total_count, plannedCount: row.planned_count }, ...raw,
         effects: store.variationEffects(id).map(e => ({ id: e.effect_id, kind: e.kind, state: e.state, result: e.result_json ? data(e.result_json) : null })),
+        admission: store.variationEffects(id).find(e => e.kind === "admission" && e.state === "confirmed")?.result_json
+          ? data(store.variationEffects(id).find(e => e.kind === "admission").result_json).targets : null,
         targets: row.snapshot_json ? data(row.snapshot_json).targets : data(row.targets_json),
         resources: row.snapshot_json ? data(row.snapshot_json).resources : store.variationResources(id).map(r => ({ ...data(r.descriptor_json), hash: r.hash })) };
     },
@@ -191,7 +219,7 @@ export function makeVariationHistory(app) {
     prepare(id) { return single(`prepare-${id}`, async () => {
       const row = record(id), raw = captured(row), targets = data(row.targets_json);
       if (row.snapshot_hash) {
-        try { preflight(data(row.snapshot_json), raw.destination); } catch (error) { throw fail(error.message, error.status ?? 400); }
+        await admit(id, row, data(row.snapshot_json));
         return api.detail(id);
       }
       if (row.capture_state !== "preparing") throw fail("Interrupted capture cannot be resumed automatically", 409);
@@ -269,7 +297,7 @@ export function makeVariationHistory(app) {
         const snapshot = { format: 1, cohortMode: raw.cohortMode, recipe: raw.recipe, targets: prepared, resources };
         const snapshotHash = await digest(snapshot);
         store.variationSeal(id, canonical(snapshot), snapshotHash, canonical(historySummary(raw.recipe, prepared, resources)));
-        try { preflight(snapshot, raw.destination); } catch (error) { throw fail(error.message, error.status ?? 400); }
+        await admit(id, record(id), snapshot);
         return api.detail(id);
       } catch (error) { outcome(id, error.message); throw error; }
     }); },
@@ -318,8 +346,8 @@ export function makeVariationHistory(app) {
     materialize(id, targetIndex, resourceId, origin, snapshotHash) { return single(`upload-${id}-${targetIndex}-${resourceId}`, async () => {
       const { row, snapshot } = sealed(id), target = data(row.targets_json)[targetIndex], destination = destinationOf(row, targetIndex);
       if (!target || !sameOrigin(destination, origin) || row.snapshot_hash !== snapshotHash) throw fail("Saved upload binding mismatch", 412);
+      admittedTarget(id, row, targetIndex);
       currentDestination(destination);
-      try { preflight(snapshot, captured(row).destination, targetIndex); } catch (error) { throw fail(error.message, error.status ?? 400); }
       const resource = snapshot.resources.find(r => r.id === resourceId);
       if (!resource) throw fail("Saved resource unavailable", 410);
       const saved = snapshot.targets[targetIndex];
@@ -382,10 +410,10 @@ export function makeVariationHistory(app) {
       const { row, snapshot } = sealed(id), target = data(row.targets_json)[targetIndex], saved = snapshot.targets[targetIndex], destination = destinationOf(row, targetIndex);
       if (await digest(snapshot) !== row.snapshot_hash) throw fail("Saved snapshot integrity check failed", 409);
       if (!saved || !target || !sameOrigin(destination, origin) || snapshotHash !== row.snapshot_hash) throw fail("Saved target binding mismatch", 412);
+      const admitted = admittedTarget(id, row, targetIndex);
       currentDestination(destination);
       const prior = store.variationEffects(id).find(e => e.effect_id === `target-${targetIndex}`);
       if (prior) return data(prior.request_json);
-      try { preflight(snapshot, captured(row).destination, targetIndex); } catch (error) { throw fail(error.message, error.status ?? 400); }
       const graph = cloneJsonValue(saved.graph), oldParameters = parameterIndex(saved.catalogue.parameters);
       for (const [parameterId, resourceId] of Object.entries(saved.graphResources)) {
         const p = oldParameters.get(parameterId), resolved = receipt(id, targetIndex, resourceId);
@@ -408,6 +436,7 @@ export function makeVariationHistory(app) {
         }
       }
       const { plan, count: expectedTotal } = planTarget({ target: { ...target, catalogue }, cohortMode: snapshot.cohortMode, recipe, destination, resourceValues });
+      if (expectedTotal !== admitted.count) throw fail("Receipt-backed count changed from the saved admission; work was kept. Start a new Run.", 409);
       const request = { id: target.id, host: target.host, filename: target.filename, ...plan.payload, context: r.context,
         acknowledgement: { version: 2, runId: id, requestId: crypto.randomUUID() } };
       const planHash = await digest({ request, graph });
@@ -423,6 +452,7 @@ export function makeVariationHistory(app) {
       const { row, snapshot } = sealed(binding.id), id = binding.id;
       if (await digest(snapshot) !== row.snapshot_hash) throw fail("Saved snapshot integrity check failed", 409);
       if (binding.snapshotHash !== row.snapshot_hash || body.acknowledgement?.runId !== id) throw fail("Saved snapshot binding mismatch", 409);
+      admittedTarget(id, row, binding.targetIndex);
       const effect = store.variationEffects(id).find(e => e.effect_id === `target-${binding.targetIndex}`);
       if (!effect || !sameJsonValue(data(effect.request_json).request, body)) throw fail("Run is not the engine-prepared saved plan", 409);
       if (effect.state !== "prepared") {
