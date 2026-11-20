@@ -40,6 +40,8 @@ import { RunOn } from "./RunOn.js";
 import { RunStatus } from "./RunStatus.js";
 import { variationProblem, problemText } from "/shared/features/variations/problems.mjs";
 import { ProblemFeedback } from "./ProblemFeedback.js";
+import { makeImagePeek } from "./image-peek.js";
+import { ImagePeek } from "./ImagePeek.js";
 
 export function VariationsModal() {
   const store = useAppStore();
@@ -130,6 +132,7 @@ function ModalBody(props) {
     state: (service, photo) => read(() => editor.pexelsState(id, service.source, photo)),
     label: (service, photo) => browse(() => pexelsLabel(pexelsBrowse.photo(service.source, photo), photo)),
     thumbnail: (service, photo) => services.pexelsApi.pexelsThumbnail(service.source, photo, service.url),
+    image: (service, photo) => services.pexelsApi.pexelsImage(service.source, photo, service.url),
     toggle: (service, photo) => editor.togglePexels(id, service.source, photo, service.url, service.label),
   });
   const targets = () => read(editor.targets);
@@ -348,6 +351,15 @@ function ModalBody(props) {
     const unlayer = store.actions.keys.pushLayer({ id: "variations-images", command: "variations.images.close", phase: "capture" });
     return () => { unlayer(); disown(); };
   };
+  // One Space peek owner for the picker and the chosen set; the dispatcher's
+  // capture layer admits the keydown and the owner observes its own release.
+  const [peekVersion, setPeekVersion] = createSignal(0);
+  const peek = makeImagePeek({ changed: () => setPeekVersion(value => value + 1) });
+  onCleanup(() => peek.dispose());
+  onCleanup(store.handles.own("variations.peek.start", () => peek.start()));
+  onCleanup(store.actions.keys.pushLayer({ id: "variations-peek", command: "variations.peek.start", phase: "capture",
+    keys: { " ": {} }, decline: event => !peek.admits(event) }));
+  const peekTarget = descriptor => { const target = peek.target(descriptor); onCleanup(target.retire); return target.props; };
   const registerTabKeys = (capability, group = "source") => {
     const command = group === "feed" ? "variations.feed-tabs.move" : "variations.tabs.move";
     const disown = store.handles.own(command, capability.move);
@@ -452,7 +464,7 @@ function ModalBody(props) {
                         registerThumbnail={services.registerThumbnail}
                         pathThumbnail={services.pathThumbnail} onAddFolder={path => editor.addFolder(id, path)}
                          folderCapability={() => folderCapability.error ? null : folderCapability()} folderError={() => folderCapability.error} onRetryFolder={retryFolderCapability} onChooseFolder={services.chooseFolder}
-                        pexels={pexelsPort(id)}
+                        pexels={pexelsPort(id)} peekTarget={peekTarget}
                         registerPopup={registerImagePopup} registerEditor={registerEditor} rememberFocus={rememberFocus} />
                     </Show>
                   );
@@ -600,6 +612,7 @@ function ModalBody(props) {
           generationTime={id => read(() => editor.generationTime(id))} removable={!running()}
           rememberFocus={rememberFocus} onRemove={id => editor.removeTarget(id)} />
       </div>
+      <ImagePeek state={() => { peekVersion(); return peek.state(); }} register={services.registerThumbnail} />
       <Show when={decision()}>
         <VariationDiscardConfirmation owner={props.session} running={running()} applying={decision().type === "apply-history"} onCancel={guard.cancel} onDiscard={guard.discard} />
       </Show>

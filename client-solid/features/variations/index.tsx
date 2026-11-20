@@ -71,7 +71,7 @@ export function install(store) {
     uploadPath: api.uploadPath,
     pexelsServices: pexelsState,
     loadPexelsServices: force => pexels.load(force),
-    pexelsApi: { pexelsPhotos: api.pexelsPhotos, pexelsThumbnail: api.pexelsThumbnail },
+    pexelsApi: { pexelsPhotos: api.pexelsPhotos, pexelsThumbnail: api.pexelsThumbnail, pexelsImage: api.pexelsImage },
     readPexelsPhoto: api.readPexelsPhoto,
     async run(payload) {
       if (!payload.history) throw new Error("A durable history capture is required before Run");
@@ -91,6 +91,7 @@ export function install(store) {
       ...["variations.discard.cancel", "variations.images.close"].map(id => ({ id, validate: args => Object.keys(args).length === 0 })),
       { id: "variations.tabs.move", validate: args => Object.keys(args).length === 1 && [-1, 1, "first", "last"].includes(args.step) },
       { id: "variations.feed-tabs.move", validate: args => Object.keys(args).length === 1 && [-1, 1, "first", "last"].includes(args.step) },
+      { id: "variations.peek.start", description: "peek at the hovered image while Space is held", validate: args => Object.keys(args).length === 0 },
     ],
      commands: [...variationCommands({ state: store.state, broker, report }),
       { id: "variations.history.open", description: "recall original variation run", validate: args => Object.keys(args).length === 1 && typeof args.id === "string",

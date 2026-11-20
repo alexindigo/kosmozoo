@@ -50,7 +50,7 @@ export function ImageSetPanel(props) {
       <ImageGrid images={row().images} onMove={props.onMove} registerEditor={props.registerEditor}
         dropping={dropping()} onFiles={(resources, index) => { clearDrop(); addFiles(resources, index, true); }}
         thumbnail={props.thumbnail} archiveThumbnail={props.archiveThumbnail} targetThumbnail={props.targetThumbnail} pathThumbnail={props.pathThumbnail} registerThumbnail={props.registerThumbnail}
-        rememberFocus={props.rememberFocus} onRemove={props.onRemove} onRotate={props.onRotate}>
+        rememberFocus={props.rememberFocus} onRemove={props.onRemove} onRotate={props.onRotate} peekTarget={props.peekTarget}>
         <button ref={addButton} type="button" class="vz-image-plus" aria-label="Add images" aria-expanded={adding()}
           {...focusMemory(props.rememberFocus)} onClick={() => setAdding(!adding())}>+</button>
       </ImageGrid>
@@ -61,7 +61,7 @@ export function ImageSetPanel(props) {
           sources={props.sources} sourceInputs={props.sourceInputs} inputState={props.inputState}
           onSource={props.onSource} onRetrySource={props.onRetrySource} registerTabKeys={props.registerTabKeys}
           current={row().current} currentRoot={row().currentRoot ?? (row().fromOutput ? "output" : "input")} positionRevision={row().images} thumbnail={props.inputThumbnail} registerThumbnail={props.registerThumbnail}
-          onToggle={props.onToggleInput}
+          onToggle={props.onToggleInput} peekTarget={props.peekTarget}
           registerPopup={props.registerPopup} registerEditor={props.registerEditor} rememberFocus={props.rememberFocus} /></Show>
         <input type="file" ref={fileInput} class="vz-imgfilespick" hidden multiple accept="image/*" onChange={e => {
           addFiles({ files: [...e.currentTarget.files] }); e.currentTarget.value = "";
@@ -81,6 +81,7 @@ export function ImageSetPanel(props) {
             onRetrySource={(service, _root, query) => props.pexels.retry(service, query)} registerTabKeys={props.registerTabKeys}
             positionRevision={row().images} thumbnail={(service, photo) => props.pexels.thumbnail(service, photo)} registerThumbnail={props.registerThumbnail}
             onToggle={(service, photo) => props.pexels.toggle(service, photo)}
+            fullImage={(service, photo) => props.pexels.image(service, photo)} peekTarget={props.peekTarget}
             registerPopup={props.registerPopup} registerEditor={props.registerEditor} rememberFocus={props.rememberFocus} />
         </div></Show>
         <div class="vz-image-folder" hidden={!folder()}>
@@ -209,7 +210,7 @@ function ImageGrid(props) {
           } else if (['Delete', 'Backspace'].includes(event.key)) { event.preventDefault(); props.onRemove(item()); }
         }}>
         <ImageTile item={item} thumbnail={props.thumbnail} archiveThumbnail={props.archiveThumbnail} targetThumbnail={props.targetThumbnail} pathThumbnail={props.pathThumbnail} registerThumbnail={props.registerThumbnail}
-          rememberFocus={props.rememberFocus} onRemove={() => props.onRemove(item())} alt={alt} onRotate={() => rotate(item(), tile)} />
+          rememberFocus={props.rememberFocus} onRemove={() => props.onRemove(item())} alt={alt} onRotate={() => rotate(item(), tile)} peekTarget={props.peekTarget} />
       </div>;
     }}</For>
     {props.children}
@@ -225,9 +226,11 @@ function ImageTile(props) {
     const src = URL.createObjectURL(file()); setUrl(src); onCleanup(() => URL.revokeObjectURL(src));
   });
   // Local File previews are object URLs; engine thumbnails are admitted
-  // displays, registered only while the tile is near the viewport.
+  // displays, registered only while the tile is near the viewport. The
+  // preview is this tile's peek surface: it peeks its own current picture.
+  const peek = props.peekTarget?.(() => ({ src: url(), local: !!file(), name: name() })) ?? {};
   return <>
-    <div class="vz-image-preview"><Thumbnail src={url()} name={name()} local={!!file()} lazy register={props.registerThumbnail} rememberFocus={props.rememberFocus} /></div>
+    <div class="vz-image-preview" {...peek}><Thumbnail src={url()} name={name()} local={!!file()} lazy register={props.registerThumbnail} rememberFocus={props.rememberFocus} /></div>
     <Show when={props.item()?.sameCurrent}><span class="vz-image-same" aria-hidden="true" /></Show>
     <Show when={props.item()?.each}><span class="vz-image-each">each</span></Show>
     <div class="vz-image-remove">

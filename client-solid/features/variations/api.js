@@ -138,6 +138,7 @@ export const pexelsPhotos = (id, query, page, signal) =>
   req("GET", `${pexelsPath(id)}/photos?${new URLSearchParams({ query, page: String(page) })}`, undefined, { signal });
 const pexelsPhotoPath = (id, photo, url, kind) => `${pexelsPath(id)}/photos/${encodeURIComponent(photo)}/${kind}?${new URLSearchParams({ service: url })}`;
 export const pexelsThumbnail = (id, photo, url) => pexelsPhotoPath(id, photo, url, "thumbnail");
+export const pexelsImage = (id, photo, url) => pexelsPhotoPath(id, photo, url, "image");
 const PEXELS_EXTENSIONS = { "image/jpeg": "jpg", "image/png": "png", "image/webp": "webp", "image/gif": "gif", "image/avif": "avif" };
 // Photo IDs are opaque service data; the upload name is a portable slug of it.
 export const pexelsFileName = (photo, extension) =>

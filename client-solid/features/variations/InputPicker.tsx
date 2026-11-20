@@ -95,6 +95,7 @@ export function InputPicker(props) {
         state={name => props.inputState(source(), name, resourceRoot())}
         current={props.current != null && sameOrigin(source(), props.sources[0]) && resourceRoot() === props.currentRoot ? props.current : null}
         thumbnail={name => props.thumbnail(source(), name, resourceRoot())} registerThumbnail={props.registerThumbnail}
+        full={name => (props.fullImage ?? props.thumbnail)(source(), name, resourceRoot())} peekTarget={props.peekTarget}
         onToggle={name => { props.onToggle(source(), name, resourceRoot()); requestPlacement(); }} rememberFocus={props.rememberFocus} registerSurface={registerSurface} />
     </Show>
   </div>;
@@ -261,6 +262,7 @@ function InputOptions(props) {
               const index = () => virtual.index * columns() + offset();
               const memory = focusMemory(rememberFocus);
               const markers = () => props.catalogue.markers?.get(name) ?? [];
+              const peek = props.peekTarget?.(() => ({ src: props.thumbnail(name), full: props.full(name), name: props.itemLabel(name) })) ?? {};
                // Queued demand follows visibility without replacing its keyed
                // native lifetime or aborting an already-started preload.
                 const priority = () => {
@@ -273,7 +275,7 @@ function InputOptions(props) {
                 priority={priority} rememberFocus={rememberFocus} surface={picture => <button type="button" role="option" tabindex="-1" id={`${props.id}-option-${index()}`}
                 aria-label={[props.itemLabel(name), ...markers().map(marker => marker.label)].join(", ")} title={props.itemLabel(name)} aria-selected={selected(name)} data-input-name={name}
                 class={"vz-input-option" + (active() === index() ? " vz-input-active" : "")}
-                {...memory} onFocus={event => { setActive(index()); memory.onFocus(event); }}
+                {...memory} {...peek} onFocus={event => { setActive(index()); memory.onFocus(event); }}
                 onClick={() => { setActive(index()); props.onToggle(name); search.focus(); }}>
                 {picture}
                 <Show when={markers().length}><span class="vz-input-judgments" aria-hidden="true">
