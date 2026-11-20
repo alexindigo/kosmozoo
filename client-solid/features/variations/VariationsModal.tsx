@@ -37,6 +37,7 @@ import { HistoryDropdown } from "./HistoryDropdown.js";
 import { historyCount, historyDate } from "./HistoryEntry.js";
 import { BatchTargets } from "./BatchTargets.js";
 import { RunOn } from "./RunOn.js";
+import { RunStatus } from "./RunStatus.js";
 
 export function VariationsModal() {
   const store = useAppStore();
@@ -529,7 +530,7 @@ function ModalBody(props) {
                 value={tally().status === "invalid" ? "—" : tally().display} hint={tally().fullCount} />
               <SingleLineText class="vz-time-value" value={tally().timeEstimate.display}
                 hint="Based on original image generation times and the displayed job-count estimate. Edited settings can change speed; existing queues are not included. Independent backends may run concurrently." />
-              <p class="vz-count-sub">{tally().breakdown}</p>
+              <p class="vz-count-sub" title={tally().breakdown}>{tally().breakdown}</p>
             </div>
             <div class="vz-naming-group">
               <span class="vz-rlabel">Output names</span>
@@ -549,29 +550,15 @@ function ModalBody(props) {
                 {...focus} onFocus={(e) => { setFocused("suffix"); focus.onFocus(e); }}
                 onInput={(e) => editor.edit("naming", "root", "suffix", e.currentTarget.value)}
               />
-              <Show when={tally().naming.example}>
-                <div class="vz-output-preview">
-                  <span>Example</span>
-                  <SingleLineText class="vz-output-example" value={tally().naming.example} hint={tally().naming.help} />
-                </div>
-              </Show>
-            </div>
-            </div>
-            <div class="vz-messages" role="status">
-              <div class="vz-message-content">
-                <Show when={tally().message && !result()}><p class={["invalid", "conflict", "failed"].includes(tally().status) ? "vz-readiness-error" : "vz-field-help"}>{tally().message}</p></Show>
-                <Show when={tally().uncheckedMessage && !result()}><p class="vz-field-help">{tally().uncheckedMessage}</p></Show>
-                <Show when={tally().status === "failed"}><button type="button" class="vz-thumbnail-retry vz-catalogue-retry" onClick={retryCatalogue}>Retry</button></Show>
-                <Show when={result()}>{value => <>
-                  <Show when={Number.isSafeInteger(value().submitted) && value().total > 0}>
-                    <p class={value().ok ? "vz-queued vz-ok" : "vz-queued"}>Queued {value().submitted} of {value().total} jobs</p>
-                  </Show>
-                </>}</Show>
-                <p class={"vz-error" + (result()?.ok ? " vz-neutral" : "")}>{result()?.reason ?? result()?.text ?? ""}</p>
+              <div class="vz-output-preview" classList={{ "vz-output-empty": !tally().naming.example }}>
+                <span>Example</span>
+                <SingleLineText class="vz-output-example" value={tally().naming.example ?? ""} hint={tally().naming.help} />
               </div>
             </div>
+            </div>
+            <RunStatus preview={tally()} result={result()} unavailable={unavailable()} onRetry={retryCatalogue} />
             <div class="vz-run-slot">
-              <Show when={!unavailable()} fallback={<p class="vz-readiness-error" role="status">{unavailable()}</p>}><Show when={!running()} fallback={
+              <Show when={!unavailable()}><Show when={!running()} fallback={
                 <div class="vz-submitting" role="status" aria-live="polite">
                   <span class="vz-submit-spinner" aria-hidden="true" />
                   <SingleLineText value={`Submitting ${read(editor.submission)?.sent ?? "--"} / ${read(editor.submission)?.total ?? "--"}`} />

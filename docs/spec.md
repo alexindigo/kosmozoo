@@ -403,6 +403,15 @@ basis, independently of cardinality: `single` requires exactly one target;
 Original saved-run openings restore that explicit basis. No schema migration or
 modification of existing saved runs is required.
 
+#### Stable Variations summary
+
+The Variations summary reserves a three-line status slot and a separate fixed
+Run row, shared by Run and submission progress. Count/time, breakdown and Example
+allocations do not resize with edits or status changes. Long status text clamps
+visually but remains complete in the DOM, native title and polite live region;
+catalogue Retry remains available. The summary body scrolls independently in
+short viewports. These presentation slots do not change preview or Run admission.
+
 #### Run destination ("Run on")
 
 The dialog header is one row: title, the recall dropdown (flexible width), the
