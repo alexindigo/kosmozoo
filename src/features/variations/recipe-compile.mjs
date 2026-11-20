@@ -31,7 +31,7 @@ export function recipeImageView(item, metadata, check, target, batch) {
   if (item.kind === "archive") return { ...item, pending: false, error: "", sameCurrent: false };
   const reference = imageReference(item);
   return { ...item, ...(reference ?? {}), sameCurrent: reference ? currentRoot(metadata) === reference.root && reference.name === metadata.current
-    : !!check?.hash && check.hash === check.currentHash, pending: !reference && (!check || !!check.pending), error: check?.error ?? "" };
+    : !!check?.hash && check.hash === check.currentHash, pending: !reference && (!check || !!check.pending), error: check?.error ?? "", ...(check?.problem ? { problem: check.problem } : {}) };
 }
 export function parseRecipeCandidate(parameter, raw, nodes, index) {
   let value;

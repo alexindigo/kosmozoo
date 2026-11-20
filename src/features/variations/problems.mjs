@@ -8,6 +8,16 @@ const cause = p => p.detail || "the operation did not return usable data";
 const value = v => typeof v === "bigint" ? String(v) : typeof v === "string" ? JSON.stringify(v) : String(v);
 const field = p => `${name(p)}, ${label(p)}${p.field ? `, ${p.field}` : ""}`;
 const formats = {
+  "comparison-current": p => `Cannot compare ${p.resource} for ${label(p)}: current image ${p.current} on ${p.source}/${p.root} is unavailable (HTTP ${facts(p).status}).`,
+  "comparison-existing": p => `Cannot verify ${p.resource}: existing input ${p.current} on ${p.source} could not be read (HTTP ${facts(p).status}). No upload was authorized by this check.`,
+  "comparison-request": p => `Cannot compare ${p.resource ?? name(p)} for ${label(p)}: invalid ${p.field}${p.detail ? `: ${p.detail}` : ""}. No file was uploaded by comparison.`,
+  "comparison-reply": p => `${p.resource}, ${label(p)}: comparison reply has no valid ${p.field}. Run cannot use unverified bytes.`,
+  "image-changed": p => `${p.resource} for ${label(p)} changed after comparison or lacks a verified comparison. It was not uploaded.`,
+  "source-list": p => `Cannot list ${p.source}'s ${p.root === "output" ? "generated" : "imported"} images: ${cause(p)}. Previously loaded images remain.`,
+  "source-list-shape": p => `Cannot use ${p.source}'s ${p.root === "output" ? "generated" : "imported"} catalogue: ${cause(p)}. Your chosen image set is unchanged.`,
+  "acquisition-read": p => `Cannot add ${p.resource} from ${p.source ?? "the selected source"}/${p.root ?? "image"}: ${cause(p)}. It was not added to ${label(p)}.`,
+  "preview-failed": p => `Preview for ${p.resource ?? name(p)} could not load from ${p.source ?? "its image address"}. This alone does not prove the Run failed.`,
+  "picker-selection": p => `${facts(p).visible} selected in listing; ${facts(p).total} in image set.`,
   "history-finish": p => `Could not save the final history status for Run ${p.runId}: ${cause(p)}. The Run result and backend effects are unchanged.`,
   "source-retired": p => `${name(p)}: ${p.source} changed. Your edits remain here; previously issued jobs/uploads are not reversed.${p.effects ? ` ${effectMessage(p.effects)}` : " Effect counts are unavailable for this action."}`,
   "enqueue-rejected": p => `${name(p)}, job ${facts(p).index}/${facts(p).total}: ${p.destination} rejected submission (HTTP ${facts(p).status}): ${cause(p)}.`,
@@ -124,7 +134,7 @@ const formats = {
   "acquisition-retired": p => `${p.resource ?? "Image"} was not added to ${label(p)} because ${p.source ?? "the source/editor membership"} changed while loading. Your current set is unchanged.`,
   "preview-unavailable": p => `Preview unavailable for ${p.resource ?? name(p)}: no image address is available.`,
   "drop-unreadable": p => `Could not read ${facts(p).unreadable} dropped file items from the browser. No files were added for those items.`,
-  "drop-skipped": p => `${label(p)}: added ${facts(p).added} images; skipped ${facts(p).skipped} unsupported files (${p.names?.join(", ") || "none"}); ${facts(p).folders} folders were not imported.`,
+  "drop-skipped": p => `${label(p)}: added ${facts(p).added} images; skipped ${facts(p).skipped} unsupported files (${p.names?.join(", ") || "none"}); ${facts(p).folders} folders were not imported. Supported: PNG, JPEG, WebP, GIF, AVIF, BMP.`,
   "images-merged": p => `${label(p)}: added ${facts(p).added} of ${facts(p).listed} images; ${facts(p).duplicates} were already in the set. Nothing was replaced.`,
   "pexels-unavailable": p => `Could not load Pexels services: ${cause(p)}. Your image set is unchanged; existing service data may be stale.`,
   "no-pexels": () => "No Pexels services configured.",
@@ -142,6 +152,16 @@ const formats = {
   "too-many": p => `${name(p)}: ${facts(p).count} jobs for this image; the limit is ${MAX_JOBS_PER_IMAGE} per image. Reduce the axes or increase the increment.`,
 };
 const actions = {
+  "comparison-current": "Restore it or choose another input, then retry comparison.",
+  "comparison-existing": "Restore access and retry comparison.",
+  "comparison-request": "Re-add or select the image; if repeated, update or report the client.",
+  "comparison-reply": "Remove and re-add the image to recheck, or Retry comparison.",
+  "image-changed": "Remove and re-add the file so its current bytes can be checked.",
+  "source-list": "Retry, reconnect the source, or choose another source.",
+  "source-list-shape": "Retry; if repeated, reopen or update the client and engine.",
+  "acquisition-read": "Retry loading it or choose another image.",
+  "preview-failed": "Retry preview or inspect the image's availability.",
+  "picker-selection": "Clear search or load more to find other selected images.",
   "history-finish": "Check the backend before retrying jobs; retry history synchronization, not submission.",
   "source-retired": "Inspect saved history and the backend queue before retrying, then reopen Variations against the current source.",
   "enqueue-rejected": "Correct the named input/node and inspect full validation details before retrying failed work.",

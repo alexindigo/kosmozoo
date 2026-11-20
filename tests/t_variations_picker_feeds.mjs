@@ -34,7 +34,7 @@ Deno.test("picker feeds: deferred catalogues retain exact root records, input ev
   const fail = editor.loadSourceInputs(context.origin, true, "output"); pending[2].reject(new Error("offline")); await fail;
   assert(editor.sourceInputs(context.origin, "output").error.includes("offline"));
   const retry = editor.loadSourceInputs(context.origin, true, "output"); pending[3].resolve({ origin: context.origin, root: "input", files: ["wrong.png"] }); await retry;
-  assert(editor.sourceInputs(context.origin, "output").error.includes("Source-bound"));
+  assert(editor.sourceInputs(context.origin, "output").error.includes("root or file list mismatch"));
   const late = editor.loadSourceInputs(context.origin, true, "output"); rig.replaceSource(); pending[4].reject(new Error("retired")); await late;
   assert(!editor.sourceInputs(context.origin, "output").error.includes("retired"));
   editor.dispose();

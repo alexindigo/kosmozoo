@@ -301,7 +301,7 @@ Deno.test("pexels editor: a toggle withdrawn while reading adds nothing, and a f
   assertEquals(editor.rows("images")[id].items, []);
   fail = true;
   await editor.togglePexels(id, "svc", "2", "http://svc");
-  assertEquals(editor.pexelsState(id, "svc", "2"), { selected: false, pending: false, error: "Photo 2: Home answered HTTP 502" });
+  assertEquals(editor.pexelsState(id, "svc", "2"), { selected: false, pending: false, error: "Cannot add Photo 2 from svc/photo: Home answered HTTP 502. It was not added to LoadImage #image \u00b7 image. Retry loading it or choose another image." });
   editor.dispose();
 });
 

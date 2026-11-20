@@ -101,7 +101,7 @@ export function makeVariationEditor({ targets, cohortMode, destination: initialD
     return { selected: !!item && row("images", id).values.items.some(other => sameImage(item, other)),
       pending: !!cached?.pending && cached.wanted.has(id) && admitsMembership(cached.wanted.get(id)), error: cached?.error ?? "" };
   };
-  const toggleCachedFile = async (editor, id, cached, label, read, owns) => {
+  const toggleCachedFile = async (editor, id, cached, label, read, owns, context = {}) => {
     if (cached.file) {
       cached.error = "";
       const item = uploadImage(cached.file);
@@ -112,7 +112,7 @@ export function makeVariationEditor({ targets, cohortMode, destination: initialD
     // Recorded intent is an edit in progress: a post-Run countdown cannot close over it.
     invalidateClose();
     if (cached.pending) { notify(); return; }
-    cached.pending = true; cached.error = ""; notify();
+    cached.pending = true; cached.error = ""; problems.clear(`acquire:${id}`); notify();
     try {
       const file = await read();
       if (!owns()) {
@@ -127,7 +127,13 @@ export function makeVariationEditor({ targets, cohortMode, destination: initialD
         else if (alive && ticket.decision === decisionGeneration && ticket.row === membershipGenerations.get(rowId)) report(`acquire:${rowId}`, "acquisition-retired", { phase: "acquisition", parameter: parameter(rowId), resource: label });
       }
     } catch (error) {
-      if (owns()) { cached.wanted.clear(); cached.error = `${label}: ${error.message}`; }
+      if (owns()) {
+        for (const [rowId] of cached.wanted) {
+          const problem = problemFrom(error, { code: "acquisition-read", phase: "acquisition", parameter: parameter(rowId), resource: label, ...context });
+          problems.report(`acquire:${rowId}`, problem); cached.error = problemText(problem);
+        }
+        cached.wanted.clear();
+      }
       else {
         if (alive) for (const [rowId] of cached.wanted) report(`acquire:${rowId}`, "acquisition-retired", { phase: "acquisition", parameter: parameter(rowId), resource: label });
         cached.wanted.clear();
@@ -247,11 +253,11 @@ export function makeVariationEditor({ targets, cohortMode, destination: initialD
           const inspect = item.kind === "server-path" ? services.inspectPath : services.inspectImage;
           const result = await inspect(target.host, item.kind === "server-path" ? item.path : item.file, entry.metadata.current, currentRoot(entry.metadata), target.origin, uploadFamily(item.name, entry.metadata.files));
           if (!alive || !originCurrent(target) || !sameOrigin(result?.origin, target.origin)) throw new Error(staleSource(target.host));
-          if (!/^[a-f0-9]{64}$/.test(result.hash) || !/^[a-f0-9]{64}$/.test(result.currentHash)) throw new Error("Image comparison unavailable");
+           if (!/^[a-f0-9]{64}$/.test(result.hash) || !/^[a-f0-9]{64}$/.test(result.currentHash)) throw problemError(variationProblem("comparison-reply", { phase: "comparison", resource: item.name, parameter: parameter(id), field: "hash/current-image hash" }));
           const existing = result.existing ?? [];
-          if (!Array.isArray(existing) || existing.some(item => !filename(item?.name) || !/^[a-f0-9]{64}$/.test(item.hash))) throw new Error("Upload comparison unavailable");
+           if (!Array.isArray(existing) || existing.some(item => !filename(item?.name) || !/^[a-f0-9]{64}$/.test(item.hash))) throw problemError(variationProblem("comparison-reply", { phase: "comparison", resource: item.name, parameter: parameter(id), field: "collision list" }));
           Object.assign(check, { hash: result.hash, currentHash: result.currentHash, existing });
-        } catch (error) { check.error = error.message; }
+         } catch (error) { const problem = problemFrom(error, { code: "comparison-request", phase: "comparison", target: targetIdentity(target), parameter: parameter(id), resource: item.name, field: "source/reference or comparison response" }); check.error = problemText(problem); check.problem = problem; }
         finally { check.pending = false; pendingInspections.delete(pending); finish(); notify(); }
       });
     }
@@ -266,6 +272,7 @@ export function makeVariationEditor({ targets, cohortMode, destination: initialD
     for (const id of unchecked) found.push(variationProblem("destination-unchecked", { severity: "warning", phase: "destination", target: targetIdentity(capturedTargets[0]), parameter: parameter(id), destination: destination?.source, names: [parameter(id).label] }));
     for (const [id, entry] of recipe.entries("images")) if (entry.values.enabled) {
       const states = entry.values.items.map(item => imageView(id, item, entry.metadata)), pending = states.filter(item => item.pending);
+      found.push(...states.map(item => item.problem).filter(Boolean));
       if (pending.length) found.push(variationProblem("images-checking", { severity: "warning", phase: "comparison", parameter: parameter(id), resource: pending[0].name, numbers: { pending: pending.length, selected: states.length } }));
     }
     try {
@@ -517,15 +524,15 @@ export function makeVariationEditor({ targets, cohortMode, destination: initialD
       try {
         const data = await services.inputList(origin.source, origin, root);
         if (!ownsRecord()) return;
-        if (!sameOrigin(data?.origin, origin)) throw new Error(staleSource(origin.source));
-        if (data.root !== root || !Array.isArray(data.files)) throw new Error("Source-bound image catalogue unavailable");
+        if (!sameOrigin(data?.origin, origin)) throw problemError(variationProblem("source-list-shape", { phase: "acquisition", source: origin.source, root, detail: "source origin mismatch" }));
+        if (data.root !== root || !Array.isArray(data.files)) throw problemError(variationProblem("source-list-shape", { phase: "acquisition", source: origin.source, root, detail: "root or file list mismatch" }));
         if (root === "output") record.entries = freeze(data.files.map(file => typeof file === "string" ? { name: file, judgment: null }
           : { name: file.name, judgment: snapshotDraft(file.judgment ?? null) }).filter(entry => resourceName(entry.name)));
         else record.files = data.files.map(file => typeof file === "string" ? file : file.name).filter(resourceName);
         record.listed = data.files.length; record.invalid = data.files.length - (root === "output" ? record.entries.length : record.files.length);
         record.loaded = true;
         if (root === "input" && sameOrigin(origin, capturedTargets[0].origin)) this.installInputs(data);
-      } catch (error) { if (ownsRecord()) record.error = `${origin.source}: ${error.message}`; }
+      } catch (error) { if (ownsRecord()) record.error = problemText(problemFrom(error, { code: "source-list", phase: "acquisition", source: origin.source, root })); }
       finally {
         if (!ownsRecord()) return;
         record.pending = false;
@@ -555,7 +562,7 @@ export function makeVariationEditor({ targets, cohortMode, destination: initialD
         // The resource port retains its full raw name. Uploads have their own
         // flat namespace; the editor owns that leaf-named File, not the API.
         return name.includes("/") ? new File([resource], name.split("/").at(-1), { type: resource.type, lastModified: resource.lastModified }) : resource;
-      }, ownsRead);
+      }, ownsRead, { source: origin.source, root });
     },
     // A service whose configuration changed retires its cached Files and any
     // read still in flight; images already in a set keep their own File.
@@ -574,7 +581,7 @@ export function makeVariationEditor({ targets, cohortMode, destination: initialD
         const file = await services.readPexelsPhoto(service, photo, url);
         if (!(file instanceof File) || !file.size) throw new Error("Invalid photo");
         return file;
-      }, () => alive && pexelsFiles.get(service) === files);
+      }, () => alive && pexelsFiles.get(service) === files, { source: service, root: "photo" });
     },
     // The server's own reason when it gave one; never the request path.
     catalogueFailure(error) {

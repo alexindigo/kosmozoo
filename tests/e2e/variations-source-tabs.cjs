@@ -54,7 +54,7 @@ module.exports = async ({ cdp, check }) => {
     }`);
     await cdp.clickAt('[role=tab][data-value="another"]');
     await cdp.poll("document.querySelector('.vz-input-failure')?.hidden===false");
-    assert.equal(await cdp.evaluate("document.querySelector('.vz-input-failure [role=status]').textContent"), "Couldn't list another's imported images.");
+    assert.match(await cdp.evaluate("document.querySelector('.vz-input-failure [role=status]').textContent"), /Cannot list another's imported images:.*503/);
     assert(await cdp.evaluate("document.querySelector('.vz-input-failure [role=status]').title.includes('503')"));
     await capture('source-tabs-list-failed');
     await cdp.evaluate("window.__listMode='pending'");
@@ -86,7 +86,7 @@ module.exports = async ({ cdp, check }) => {
     }`);
     await cdp.clickAt('[data-input-name="retry-image.png"]');
     await cdp.poll("!!document.querySelector('[aria-label=" + JSON.stringify('Retry image for retry-image.png') + "]')&&document.querySelectorAll('.vz-image-tile').length===0");
-    assert.equal(await cdp.evaluate("document.querySelector('[data-input-name=\"retry-image.png\"]').closest('.vz-thumbnail').querySelector('.vz-thumbnail-failed [role=status]').textContent"), "Couldn't load retry-image.png.");
+    assert.match(await cdp.evaluate("document.querySelector('[data-input-name=\"retry-image.png\"]').closest('.vz-thumbnail').querySelector('.vz-thumbnail-failed [role=status]').textContent"), /Cannot add retry-image.png from another\/input:.*502/);
     assert(await cdp.evaluate("document.querySelector('[data-input-name=\"retry-image.png\"]').closest('.vz-thumbnail').querySelector('.vz-thumbnail-failed [role=status]').title.includes('502')"));
     await cdp.evaluate("document.querySelector('[aria-label=" + JSON.stringify('Retry image for retry-image.png') + "]').focus()");
     await capture('source-tabs-image-failed');
@@ -101,6 +101,7 @@ module.exports = async ({ cdp, check }) => {
     await cdp.evaluate('window.__releaseImage()');
     await cdp.poll("document.querySelectorAll('.vz-image-tile').length===1&&!document.querySelector('.vz-image-check')");
     await cdp.poll(`document.querySelector(${JSON.stringify(tile)}).getAttribute('aria-selected')==='true'`);
+    assert.equal(await cdp.evaluate("document.querySelector('.vz-input-summary [role=status]').textContent"), '1 selected in listing; 1 in image set.');
     assert.equal(await settledCount(cdp), '1');
     await cdp.clickAt(tile); await cdp.poll("document.querySelectorAll('.vz-image-tile').length===0");
     await cdp.clickAt(tile); await cdp.poll("document.querySelectorAll('.vz-image-tile').length===1");
@@ -108,6 +109,7 @@ module.exports = async ({ cdp, check }) => {
     await cdp.evaluate("document.querySelector('[role=tab][data-value=another]').focus()");
     await cdp.keyTrusted('ArrowLeft', { vk: 37 });
     await cdp.poll("document.activeElement.dataset.value==='fake'&&document.activeElement.getAttribute('aria-selected')==='true'");
+    assert.equal(await cdp.evaluate("document.querySelector('.vz-input-summary [role=status]').textContent"), '0 selected in listing; 1 in image set.');
     await cdp.keyTrusted('ArrowRight', { vk: 39 });
     await cdp.poll("document.activeElement.dataset.value==='another'&&document.activeElement.getAttribute('aria-selected')==='true'");
     const geometry = await cdp.evaluate("(()=>{const tabs=[...document.querySelectorAll('.vz-input-tabs [role=tab]')].map(el=>el.getBoundingClientRect());return tabs.every(r=>Math.abs(r.top-tabs[0].top)<1)})()");

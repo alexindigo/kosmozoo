@@ -29,7 +29,7 @@ export const problemCases = [
   [205, "no-listing-source", {}, "No configured ComfyUI source offers image listing.", "field"],
   [207, "acquisition-retired", { resource: "input.png", source: "fake" }, "input.png was not added to Steps because fake changed while loading. Your current set is unchanged.", "field"],
   [209, "preview-unavailable", { resource: "b.png" }, "Preview unavailable for b.png: no image address is available.", "thumbnail"],
-  [213, "drop-skipped", { names: ["bad.txt"], numbers: { added: 0, skipped: 1, folders: 1 } }, "Steps: added 0 images; skipped 1 unsupported files (bad.txt); 1 folders were not imported.", "catalogue"],
+  [213, "drop-skipped", { names: ["bad.txt"], numbers: { added: 0, skipped: 1, folders: 1 } }, "Steps: added 0 images; skipped 1 unsupported files (bad.txt); 1 folders were not imported. Supported: PNG, JPEG, WebP, GIF, AVIF, BMP.", "catalogue"],
   [214, "drop-unreadable", { numbers: { unreadable: 2 } }, "Could not read 2 dropped file items from the browser. No files were added for those items.", "field"],
   [215, "images-merged", { numbers: { added: 1, listed: 3, duplicates: 2 } }, "Steps: added 1 of 3 images; 2 were already in the set. Nothing was replaced.", "field"],
   [216, "pexels-unavailable", { detail: "HTTP 503" }, "Could not load Pexels services: HTTP 503. Your image set is unchanged; existing service data may be stale.", "field"],

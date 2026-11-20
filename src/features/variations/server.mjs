@@ -205,10 +205,10 @@ export function register(app) {
   app.route("POST", "/upload-path/<host>", async (req, { host }) => {
     try {
       const { origin, token } = source(req, host), body = await readJson(req);
-      if (!/^[a-f0-9]{64}$/.test(body.hash)) return Response.json({ error: "Inspected image hash required" }, { status: 400 });
+      if (!/^[a-f0-9]{64}$/.test(body.hash)) return Response.json({ error: "Inspected image hash required", problem: variationProblem("image-changed", { phase: "upload", resource: body.path }) }, { status: 400 });
       const file = await readImage(body.path);
-      if (await sha256(file.bytes) !== body.hash) return Response.json({ error: "Image changed since it was added. Remove and add it again." }, { status: 409 });
-      if (!app.backings.isCurrent(token)) return Response.json({ error: "Source origin changed before upload" }, { status: 412 });
+      if (await sha256(file.bytes) !== body.hash) return Response.json({ error: "Image changed since it was added. Remove and add it again.", problem: variationProblem("image-changed", { phase: "upload", resource: body.path }) }, { status: 409 });
+      if (!app.backings.isCurrent(token)) return Response.json({ error: "Source origin changed before upload", problem: variationProblem("upload-retired", { phase: "upload", destination: host, resource: body.path, stage: "before" }) }, { status: 412 });
       const backing = backingFor(token.address);
       if (!backing.write) return Response.json({ error: "This source cannot upload images" }, { status: 400 });
       const receipt = await backing.write(token.address, file.name, file.bytes);
@@ -220,16 +220,17 @@ export function register(app) {
   // Readonly comparison through the existing byte/hash owner. This deliberately
   // does not upload to ComfyUI or create another input cache.
   app.route("POST", "/inspect-image/<host>", async (req, { host }) => {
+    const invalid = (error, field, resource) => Response.json({ error, problem: variationProblem("comparison-request", { phase: "comparison", source: host, field, resource }) }, { status: 400 });
     let origin;
-    try { origin = expectedOrigin(req); } catch (error) { return Response.json({ error: error.message }, { status: 400 }); }
+    try { origin = expectedOrigin(req); } catch (error) { return invalid(error.message, "source origin"); }
     const token = app.backings.capture(host);
     if (!origin || !token || !sameOrigin(origin, sourceOrigin(host, app.backings.source(host))) || !app.backings.accepting()) return Response.json({ error: "Source origin changed" }, { status: 412 });
     let form;
-    try { form = await req.formData(); } catch { return Response.json({ error: "Multipart image required" }, { status: 400 }); }
+    try { form = await req.formData(); } catch { return invalid("Multipart image required", "multipart image body"); }
     const file = form.get("image"), current = form.get("current"), kind = form.get("kind");
-    if (!(file instanceof File) || !IMAGE_EXTENSIONS.has(mediaExtension(file.name)) || !validEntryName(token.address, current) || !isResourceRoot(kind)) return Response.json({ error: "Image and current input required" }, { status: 400 });
+    if (!(file instanceof File) || !IMAGE_EXTENSIONS.has(mediaExtension(file.name)) || !validEntryName(token.address, current) || !isResourceRoot(kind)) return invalid("Image and current input required", "image file, current reference or resource root", file?.name);
     let names;
-    try { names = JSON.parse(form.get("names") ?? "[]"); } catch { return Response.json({ error: "Input names must be an array" }, { status: 400 }); }
+    try { names = JSON.parse(form.get("names") ?? "[]"); } catch { return invalid("Input names must be an array", "input name list", file.name); }
     return inspectImage(app, token, host, { name: file.name, bytes: new Uint8Array(await file.arrayBuffer()), current, kind, names }, origin);
   });
   const inspect = (collection, name, expected = null) => inspectSource(app, collection, name, expected);

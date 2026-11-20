@@ -13,6 +13,7 @@ import { Tabs } from "../../components/Tabs.js";
 import { iconSvg } from "/js/icons.mjs";
 import { sameOrigin } from "/shared/source-origin.mjs";
 import { ProblemFeedback } from "./ProblemFeedback.js";
+import { variationProblem, problemText } from "/shared/features/variations/problems.mjs";
 import { scrollSample, lookaheadBand, lookaheadRange, demandOrder, demandRank, VELOCITY_IDLE_MS } from "./lookahead.js";
 
 const TILE_SIZE = 96, GAP = 6, ROW_HEIGHT = TILE_SIZE + GAP;
@@ -83,7 +84,7 @@ export function InputPicker(props) {
     <ImageAction class="select-trigger control-size-md vz-input-trigger" ref={trigger}
       aria-expanded={open()} aria-haspopup="listbox" aria-controls={id} {...focusMemory(props.rememberFocus)} onClick={() => setOpen(!open())}><SingleLineText value={props.label} /><Chevron /></ImageAction>
     <Show when={open()}>
-      <InputOptions id={id} query={query} onQuery={setQuery} files={catalogue().files}
+      <InputOptions id={id} query={query} onQuery={setQuery} files={catalogue().files} totalSelected={props.totalSelected} parameterLabel={props.parameterLabel}
         context={JSON.stringify([source(), resourceRoot(), search()])} resourceRoot={resourceRoot()} onRoot={setResourceRoot}
         roots={props.roots} noun={props.noun(resourceRoot())} remoteSearch={!!props.remoteSearch}
         itemLabel={name => props.itemLabel?.(source(), name) ?? name}
@@ -290,7 +291,7 @@ function InputOptions(props) {
       </Show>
       <ProblemFeedback problems={props.catalogue.notices ?? []} />
       <div class="vz-input-status vz-input-failure" hidden={!props.catalogue.error}>
-        <SingleLineText role="status" value={props.catalogue.error ? `Couldn't list ${sourceLabel()}'s ${props.noun}.` : ""} hint={props.catalogue.error} />
+        <SingleLineText role="status" value={props.catalogue.error ?? ""} hint={props.catalogue.error} />
         <button type="button" class="vz-thumbnail-retry" onClick={props.onRetrySource}>Retry</button>
       </div>
       <Show when={!filtered().length && !props.catalogue.pending && !props.catalogue.error}><p class="vz-image-empty">{
@@ -299,7 +300,7 @@ function InputOptions(props) {
     </div>
     </div>
     <div ref={summary} class="vz-input-summary">
-      <span ref={count} role="status">{files().filter(selected).length} selected</span>
+      <span ref={count} role="status">{props.totalSelected !== undefined ? variationProblem("picker-selection", { phase: "acquisition", parameter: { label: props.parameterLabel ?? "this input" }, numbers: { visible: filtered().filter(selected).length, total: props.totalSelected } }).message : `${filtered().filter(selected).length} selected in this listing`}</span>
       <Show when={props.catalogue.pending}><SingleLineText class="vz-input-activity" role="status" value={activity()} /></Show>
       <Show when={props.roots}><div ref={feeds} class="vz-input-feeds"><Tabs label="Image feed" options={props.roots.map(root => ({ ...root, id: `${props.id}-feed-${root.value}` }))}
         value={props.resourceRoot} panelId={`${props.id}-source-panel`} onChange={props.onRoot}

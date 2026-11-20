@@ -2,7 +2,7 @@ import { createEffect, createMemo, createSignal, Show } from "solid-js";
 import { useImageDisplay, imageRequestUrl } from "../../lib/img-measure.js";
 import { focusMemory } from "./draft.js";
 import { SingleLineText } from "../../components/SingleLineText.js";
-import { variationProblem } from "/shared/features/variations/problems.mjs";
+import { variationProblem, problemText } from "/shared/features/variations/problems.mjs";
 import { ProblemFeedback } from "./ProblemFeedback.js";
 
 // One thumbnail presentation/native lifetime for both contact sheets. The
@@ -23,7 +23,7 @@ export function Thumbnail(props) {
         routing; only the native attempt is replaced on Retry. */}
     <Show when={props.pending}><span class="vz-thumbnail-pending vz-thumbnail-acquiring" role="status">Loading image…</span></Show>
     <div class="vz-thumbnail-failure" hidden={!props.error && (phase() !== "failed" || props.pending)}>
-      <div class="vz-thumbnail-failed"><SingleLineText role="status" value={props.error ? `Couldn't load ${props.name}.` : "Preview failed"} hint={props.error} /></div>
+      <div class="vz-thumbnail-failed"><SingleLineText role="status" value={props.error || problemText(variationProblem("preview-failed", { severity: "warning", phase: "preview", resource: props.name ?? "image", source: props.source ?? "its image address" }))} hint={props.error} /></div>
       <button type="button" class="vz-thumbnail-retry" aria-label={`Retry ${props.error ? "image" : "preview"} for ${props.name}`}
         title={`Retry ${props.error ? "image" : "preview"} for ${props.name}`} {...focusMemory(props.rememberFocus)}
         onClick={() => props.error ? props.onRetry() : setAttempt(n => n + 1)}>Retry</button>

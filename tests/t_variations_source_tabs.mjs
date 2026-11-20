@@ -76,7 +76,7 @@ Deno.test("source inputs: incarnation replacement retires byte results/cache and
   const file = editor.rows("images")[id].items[1].file;
   rig.services.inputList = async () => { throw new Error("offline"); };
   await editor.loadSourceInputs(other);
-  assert(editor.sourceInputs(other).error.includes("another: offline"));
+  assert(editor.sourceInputs(other).error.includes("Cannot list another's imported images: offline"));
   assertEquals(editor.sourceInputs(rig.context.origin).files, ["next.png"]);
   rig.services.inputList = async (_host, origin, root) => ({ origin, root, files: ["remote.png"] });
   await editor.loadSourceInputs(other, true);
