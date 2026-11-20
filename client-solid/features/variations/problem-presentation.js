@@ -1,6 +1,14 @@
 // One readonly projection for summaries, targets, parameters and saved evidence.
 // Producers retain scoped problems; views render these records, not catch strings.
 import { problemFrom, problemText, effectMessage, variationProblem } from "/shared/features/variations/problems.mjs";
+// The one summary precedence: blocking problems and conflicts, then zero-work and
+// over-limit explanations, then progress, then warnings, then ready guidance.
+// A lower tier never displaces a higher one; order within a tier is retained.
+export const STATUS_TIERS = Object.freeze(["blocking", "explanation", "progress", "warning", "ready"]);
+const EXPLANATIONS = new Set(["no-work", "too-many"]);
+export const problemTier = problem => problem.severity && problem.severity !== "error" ? "warning" : EXPLANATIONS.has(problem.code) ? "explanation" : "blocking";
+export const byPrecedence = (items, tierOf) => items.map((item, index) => ({ item, index, rank: STATUS_TIERS.indexOf(tierOf(item)) }))
+  .sort((a, b) => a.rank - b.rank || a.index - b.index).map(({ item }) => item);
 export function problemPresentation(problems = []) {
   const targets = new Map(), fields = new Map(), unique = new Map();
   for (const value of problems.filter(Boolean)) {
@@ -14,7 +22,7 @@ export function problemPresentation(problems = []) {
       map.get(id).push(problem);
     }
   }
-  const ordered = [...unique.values()].sort((a, b) => (a.severity === "error" ? 0 : 1) - (b.severity === "error" ? 0 : 1));
+  const ordered = byPrecedence([...unique.values()], problemTier);
   return { problems: ordered, targets, fields, text: ordered.map(problemText).join("\n"), blocking: ordered.some(p => p.severity === "error") };
 }
 export function makeProblemOwner(changed = () => {}) {
