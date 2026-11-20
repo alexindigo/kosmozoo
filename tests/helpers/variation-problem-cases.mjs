@@ -1,5 +1,6 @@
 // Catalogue row -> exact contract text -> production presentation location.
 // These fixtures are consumed by both unit and real Chromium rendering tests.
+import { MAX_JOBS_PER_IMAGE } from "../../src/features/variations/shared.mjs";
 const target = { index: 0, id: "fake:b.png", source: "fake", name: "b.png" };
 const parameter = { id: "n.steps", label: "Steps" };
 const base = { target, parameter, phase: "preflight" };
@@ -10,7 +11,7 @@ export const problemCases = [
   [19, "naming", { detail: "Unresolved naming token" }, "b.png: Run unavailable: Unresolved naming token. Job count is not permission to run with an invalid output name.", "status"],
   [25, "no-destination", {}, "No ComfyUI destination is configured for Run. Your setup is kept.", "field"],
   [61, "connection-empty", { expected: "IMAGE", numbers: { nodes: 2 } }, "Steps: no compatible known outputs among 2 nodes. This input needs IMAGE.", "field"],
-  [72, "large-sweep", { numbers: { jobs: 200, images: 2, maximum: 100 } }, "This Run will queue 200 jobs across 2 images (100 maximum for one image; limit 500).", "status"],
+  [72, "large-sweep", { numbers: { jobs: 200, images: 2, maximum: 100 } }, `This Run will queue 200 jobs across 2 images (100 maximum for one image; limit ${MAX_JOBS_PER_IMAGE}).`, "status"],
   [74, "deduplicated", { numbers: { selected: 3, distinct: 2, duplicates: 1 } }, "Steps: 3 selections represent 2 distinct values/images; 1 duplicates are counted once.", "field"],
   [83, "name-shortened", { numbers: { before: 300, after: 200, limit: 200 } }, "b.png: source-name/token text was shortened from 300 to 200 UTF-8 bytes to fit the 200-byte output-name budget; Prefix/Suffix remain intact.", "field"],
   [84, "naming", { detail: "Unresolved naming token" }, "b.png: Run unavailable: Unresolved naming token. Job count is not permission to run with an invalid output name.", "field"],

@@ -1,5 +1,6 @@
 import { assertEquals } from "jsr:@std/assert";
 import { planCohort, countingTarget } from "../src/features/variations/cohort-plan.mjs";
+import { MAX_JOBS_PER_IMAGE } from "../src/features/variations/shared.mjs";
 import { encodeHistoryRecipe } from "../src/features/variations/history-codec.mjs";
 import { editorRig } from "./helpers/variation-editor.mjs";
 
@@ -37,8 +38,8 @@ Deno.test("cohort planner: destination alone supplies exactly one job", async ()
 
 Deno.test("cohort planner: per-target cap and missing destination class/carrier", async () => {
   const { recipe, target } = await fixture();
-  recipe.numeric["n.denoise"].values = { ...recipe.numeric["n.denoise"].values, mode: "range", min: "0", max: "1", rawIncrement: "0.001" };
-  recipe.numeric["n.denoise"].metadata.minIncrement = .001;
+  recipe.numeric["n.denoise"].values = { ...recipe.numeric["n.denoise"].values, mode: "range", min: "0", max: "1", rawIncrement: "0.0005" };
+  recipe.numeric["n.denoise"].metadata.minIncrement = .0005;
   assertEquals(planCohort({ targets: [target], cohortMode: "single", recipe })[0].problem.code, "too-many");
   const missing = { ...target, catalogue: { ...target.catalogue, destination: { missing: ["ParameterlessNode"] } } };
   assertEquals(planCohort({ targets: [missing], cohortMode: "single", recipe })[0].problem.code, "missing-class");
@@ -124,19 +125,19 @@ Deno.test("cohort planner: a file reuses a prior selected local reference by byt
   assertEquals(planned[0].count, 1, JSON.stringify(planned));
 });
 
-Deno.test("cohort planner: adding images retains the exact count across the 500-per-image limit", async () => {
+Deno.test("cohort planner: adding images retains the exact count across the per-image limit", async () => {
   const { recipe, target } = await fixture();
   recipe.numeric["n.denoise"].values = { ...recipe.numeric["n.denoise"].values, mode: "range", min: "1", max: "17", rawIncrement: "1" };
   recipe.images["image.image"].values.enabled = true;
-  for (const [images, count] of [[22, 374], [36, 612]]) {
+  for (const [images, count] of [[22, 374], [36, 612], [60, 1020]]) {
     recipe.images["image.image"].values.items = Array.from({ length: images }, (_, i) => ({ kind: "reference", value: `added-${i}.png` }));
     const encoded = encodeHistoryRecipe(recipe, crypto.randomUUID());
     const resources = encoded.resources.map(resource => ({ ...resource, host: "fake", root: "input" }));
     const counted = countingTarget(target, encoded.recipe, resources, { source: "fake" }, 0);
     const plan = planCohort({ targets: [counted], cohortMode: "single", recipe: encoded.recipe });
     assertEquals(plan[0].count, count, JSON.stringify(plan));
-    assertEquals(plan[0].problem?.code ?? null, count > 500 ? "too-many" : null);
-    if (count > 500) assertEquals(plan[0].problem.message, "image.png: 612 jobs for this image; the limit is 500 per image. Reduce the axes or increase the increment.");
+    assertEquals(plan[0].problem?.code ?? null, count > MAX_JOBS_PER_IMAGE ? "too-many" : null);
+    if (count > MAX_JOBS_PER_IMAGE) assertEquals(plan[0].problem.message, `image.png: ${count} jobs for this image; the limit is ${MAX_JOBS_PER_IMAGE} per image. Reduce the axes or increase the increment.`);
   }
 });
 
@@ -148,7 +149,7 @@ for (const kind of ["browser-file", "server-path", "pexels", "foreign-output", "
       : kind === "target" ? { kind: "target" }
       : kind === "server-path" ? { kind: "server-path", path: `/engine/added-${i}.png`, name: `added-${i}.png` }
       : { kind: "upload", file: new File([`${kind}-${i}`], `added-${i}.png`), name: `added-${i}.png` };
-    for (const size of [2, 500, 501]) {
+    for (const size of [2, MAX_JOBS_PER_IMAGE, MAX_JOBS_PER_IMAGE + 1]) {
       // The target-relative item is singular; multiply it with a numeric axis.
       recipe.images["image.image"].values.items = Array.from({ length: kind === "target" ? 1 : size }, (_, i) => item(i));
       if (kind === "target") recipe.numeric["n.denoise"].values = { ...recipe.numeric["n.denoise"].values, mode: "range", min: "2", max: String(size + 1), rawIncrement: "1" };
@@ -159,7 +160,7 @@ for (const kind of ["browser-file", "server-path", "pexels", "foreign-output", "
       const counted = countingTarget(target, encoded.recipe, resources, null, 0);
       const [plan] = planCohort({ targets: [counted], cohortMode: "single", recipe: encoded.recipe });
       assertEquals(plan.count, size, JSON.stringify(plan));
-      assertEquals(plan.problem?.code ?? null, size > 500 ? "too-many" : null);
+      assertEquals(plan.problem?.code ?? null, size > MAX_JOBS_PER_IMAGE ? "too-many" : null);
       if (plan.problem) assertEquals(typeof plan.problem.message === "string" && plan.problem.message.trim().length > 0, true);
     }
   });

@@ -1,5 +1,6 @@
 // Environment-pure failure/evidence contract. Formatting is centralized here;
 // transports and catches retain the problem rather than rebuilding its message.
+import { MAX_JOBS_PER_IMAGE } from "./limits.mjs";
 const name = p => p.target?.name ?? "This image";
 const label = p => p.parameter?.label ?? p.parameter?.id ?? "This parameter";
 const facts = p => p.numbers ?? {};
@@ -11,7 +12,7 @@ const formats = {
   "catalogue-destination": p => `The catalogue reply belongs to ${p.actual}, not selected ${p.expected}. Run remains unavailable.`,
   "no-destination": () => "No ComfyUI destination is configured for Run. Your setup is kept.",
   "connection-empty": p => `${label(p)}: no compatible known outputs among ${facts(p).nodes} nodes. This input needs ${p.expected ?? "a compatible output"}.`,
-  "large-sweep": p => `This Run will queue ${facts(p).jobs} jobs across ${facts(p).images} images (${facts(p).maximum} maximum for one image; limit 500).`,
+  "large-sweep": p => `This Run will queue ${facts(p).jobs} jobs across ${facts(p).images} images (${facts(p).maximum} maximum for one image; limit ${MAX_JOBS_PER_IMAGE}).`,
   "deduplicated": p => `${label(p)}: ${facts(p).selected} selections represent ${facts(p).distinct} distinct values/images; ${facts(p).duplicates} duplicates are counted once.`,
   "name-shortened": p => `${name(p)}: source-name/token text was shortened from ${facts(p).before} to ${facts(p).after} UTF-8 bytes to fit the ${facts(p).limit}-byte output-name budget; Prefix/Suffix remain intact.`,
   naming: p => `${name(p)}: Run unavailable: ${cause(p)}. Job count is not permission to run with an invalid output name.`,
@@ -45,7 +46,7 @@ const formats = {
   "work-budget": p => `${name(p)}: ${cause(p).replace(/[.!]+$/, "")}.`,
   "missing-class": p => `${name(p)}: ${cause(p).replace(/[.!]+$/, "")}.`,
   "no-work": p => `${name(p)}: ${cause(p).replace(/[.!]+$/, "")}.`,
-  "too-many": p => `${name(p)}: ${facts(p).count} jobs for this image; the limit is 500 per image. Reduce the axes or increase the increment.`,
+  "too-many": p => `${name(p)}: ${facts(p).count} jobs for this image; the limit is ${MAX_JOBS_PER_IMAGE} per image. Reduce the axes or increase the increment.`,
 };
 const actions = {
   operation: "Keep your setup, inspect the cause, and retry the failed operation, not an uncertain submission.",

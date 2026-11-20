@@ -12,7 +12,7 @@
 import {
   generatePermutations, permutationAxes, permutationPlan, resolveRelativeRanges,
   parameterIndex, parameterCurrent, catalogueParams, parameterAliases, validRunAcknowledgement, runOperationFields, targetRunPlan,
-  composeOutputName, variationOutputName, reproducesOriginal,
+  composeOutputName, variationOutputName, reproducesOriginal, MAX_JOBS_PER_IMAGE,
 } from "./shared.mjs";
 import { validEntryName, backingFor as defaultBackingFor } from "../../backings/index.mjs";
 import { sourceOrigin, sameOrigin, validOrigin, validContext, expectedOrigin } from "../../source-origin.mjs";
@@ -39,7 +39,6 @@ const exactResponse = (value, init = {}) => new Response(stringifyExactJson(valu
 
 // hard cap on permutations per run — a sweep is a human-scale batch, not a
 // fork bomb (F7). Above the cap the run answers 413.
-const MAX_PERMUTATIONS = 500;
 
 // --- graph inspection (ComfyUI conventions) -----------------------------------
 
@@ -303,7 +302,7 @@ export function register(app) {
       resolvedRanges = relative ? resolveRelativeRanges(selectedRanges, currentValues) : selectedRanges;
       if (Object.keys(selectedRanges).some(id => !Object.hasOwn(resolvedRanges, id))) throw new Error("Every applicable relative range needs clamp bounds");
       const count = permutationPlan(resolvedRanges, currentValues, selectedValues, { sameHost }).total;
-      if (count > MAX_PERMUTATIONS) return Response.json({ error: `too many permutations (${count} > ${MAX_PERMUTATIONS})` }, { status: 413 });
+      if (count > MAX_JOBS_PER_IMAGE) return Response.json({ error: `too many permutations (${count} > ${MAX_JOBS_PER_IMAGE})` }, { status: 413 });
       permutations = generatePermutations(resolvedRanges, currentValues, selectedValues, { sameHost });
     } catch (e) {
       return Response.json({ error: e.message }, { status: 400 });
@@ -311,8 +310,8 @@ export function register(app) {
     if (permutations.length === 0) {
       return Response.json({ error: "no permutations to submit (enable an axis or move it off the current values)" }, { status: 400 });
     }
-    if (permutations.length > MAX_PERMUTATIONS) {
-      return Response.json({ error: `too many permutations (${permutations.length} > ${MAX_PERMUTATIONS})` }, { status: 413 });
+    if (permutations.length > MAX_JOBS_PER_IMAGE) {
+      return Response.json({ error: `too many permutations (${permutations.length} > ${MAX_JOBS_PER_IMAGE})` }, { status: 413 });
     }
     console.log(`[variations] run ${host}:${filename} — ${permutations.length} permutations over ${axes.imgEnabled.length} enum/text axes`);
 

@@ -2,6 +2,7 @@ import { assert, assertEquals } from "jsr:@std/assert";
 import { editorRig } from "./helpers/variation-editor.mjs";
 import { compileRecipe } from "../src/features/variations/recipe-compile.mjs";
 import { runStatus } from "../client-solid/features/variations/run-status.js";
+import { MAX_JOBS_PER_IMAGE } from "../src/features/variations/shared.mjs";
 
 const settle = async rig => {
   const timer = rig.timers.findLast(timer => timer.active && timer.ms === 150);
@@ -42,10 +43,10 @@ Deno.test("cohort preview: latest-only reads abort retired plans and disposal ab
 
 Deno.test("cohort preview: over-limit count is display data, never Run admission", async () => {
   let captures = 0;
-  const problem = { code: "too-many", message: "612 jobs for this image; the limit is 500 per image." };
-  const rig = editorRig({ plan: async () => [{ index: 0, count: 612, problem }], history: { capture() { captures++; } } });
+  const problem = { code: "too-many", message: `1020 jobs for this image; the limit is ${MAX_JOBS_PER_IMAGE} per image.` };
+  const rig = editorRig({ plan: async () => [{ index: 0, count: 1020, problem }], history: { capture() { captures++; } } });
   await settle(rig);
-  assertEquals(rig.editor.preview().n, 612); assertEquals(rig.editor.preview().overLimit, true);
+  assertEquals(rig.editor.preview().n, 1020); assertEquals(rig.editor.preview().overLimit, true);
   assertEquals(rig.editor.preview().message, problem.message);
   assertEquals(rig.editor.targetProblem("fake:image.png"), problem);
   assertEquals(rig.editor.canRun(), false); assertEquals((await rig.editor.run()).status, "invalid");

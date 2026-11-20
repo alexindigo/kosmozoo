@@ -464,7 +464,7 @@ graph validation remain in force.
 `cohort-plan.mjs` is the engine's one effect-free workload planner. Each target's
 own graph and destination-aware catalogue pass through the shared raw compiler,
 applicability, relative-range resolution and tuple kernel. The result is ordered
-`[{index,count,problem:null|{code,message}}]`: no work, more than 500 jobs per
+`[{index,count,problem:null|{code,message}}]`: no work, more than the shared `MAX_JOBS_PER_IMAGE` jobs per
 target, traversal budgets, missing carriers/classes or incompatible values exclude
 only that target. An over-limit target retains its exact workload `count` with a
 `too-many` problem; it is not admitted. Other failures without a count use zero
@@ -475,7 +475,8 @@ is the sum of known workload counts, including over-limit work. Over-limit count
 are marked, never replaced by zero. One presentation projection supplies each
 batch tile's problem and every target's reason in the fixed summary status slot,
 including single targets without a strip and new problems beside prior Run results.
-Over-limit reasons include the actual count and unchanged 500-per-image limit.
+Over-limit reasons include the actual count and `MAX_JOBS_PER_IMAGE` from
+`src/features/variations/limits.mjs` (also exported by `shared.mjs`).
 Only admitted counts contribute submission work and time estimates; Run is disabled
 when no target is admitted.
 

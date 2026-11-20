@@ -5,6 +5,7 @@ import { snapshotDraft, numericText, imageIdentity } from "./recipe-model.mjs";
 import { compileRecipe } from "./recipe-compile.mjs";
 import { admitResourceTransfer } from "./compile.mjs";
 import { variationProblem, problemFrom } from "./problems.mjs";
+import { MAX_JOBS_PER_IMAGE } from "./limits.mjs";
 import { targetRunPlan, parameterIndex, catalogueParams, parameterLabel, permutationPlan,
   generatePermutations, resolveRelativeRanges, reproducesOriginal, variationOutputName, parameterAliases, templateReplaceWithProof } from "./shared.mjs";
 
@@ -84,7 +85,7 @@ export function planTarget({ target, cohortMode, recipe, destination, resourceVa
     if (selected > distinct) notices.push(variationProblem("deduplicated", { severity: "warning", phase: "plan",
       parameter: { id, label: entry.metadata.label ?? id }, numbers: { selected, distinct, duplicates: selected - distinct } }));
   }
-  if (!Number.isSafeInteger(count) || count > 500) throw Object.assign(new Error(`${count} jobs for this image; the limit is 500 per image. Reduce the axes or increase the increment.`), {
+  if (!Number.isSafeInteger(count) || count > MAX_JOBS_PER_IMAGE) throw Object.assign(new Error(`${count} jobs for this image; the limit is ${MAX_JOBS_PER_IMAGE} per image. Reduce the axes or increase the increment.`), {
     code: "too-many", count: Number.isSafeInteger(count) ? count : 0, counts: { ...counts, admitted: 0 }, notices,
   });
   if (count <= 0) throw Object.assign(new Error("No work for this image; choose a different value, image or destination."), { code: "no-work", counts, notices });

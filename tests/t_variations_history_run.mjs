@@ -271,11 +271,11 @@ Deno.test("history HTTP: immutable raw capture/archive barrier, engine plan and 
     assertEquals((await call("GET", `/history/${invalidId}`)).data.recipe.numeric["n.seed"].values.value, "1e");
     assertEquals({ jobs: jobs.length, uploads: uploads.length }, beforeInvalid);
     const overId = crypto.randomUUID(), overRecipe = snapshotDraft(opened.data.recipe);
-    Object.assign(overRecipe.numeric["n.seed"].values, { mode: "range", min: "1", max: "612", rawIncrement: "1" });
+    Object.assign(overRecipe.numeric["n.seed"].values, { mode: "range", min: "1", max: "1020", rawIncrement: "1" });
     const over = encodeHistoryRecipe(overRecipe, overId);
     const overCapture = { runId: overId, format: 1, cohortMode: "single", targets: [nextTarget], recipe: over.recipe, resources: over.resources };
     const preview = await call("POST", "/plan", overCapture);
-    assertEquals(preview.data[0].count, 612, stringifyExactJson(preview));
+    assertEquals(preview.data[0].count, 1020, stringifyExactJson(preview));
     assertEquals(preview.data[0].problem.code, "too-many");
     assertEquals((await call("POST", "/history", overCapture)).status, 200);
     const overPrepared = await call("POST", `/history/${overId}/prepare`);

@@ -1,4 +1,5 @@
 import { assert, assertEquals, assertThrows } from "jsr:@std/assert";
+import { MAX_JOBS_PER_IMAGE } from "../src/features/variations/shared.mjs";
 import { variationProblem, problemFrom, effectCounts, effectMessage } from "../src/features/variations/problems.mjs";
 import { problemPresentation, historyPresentation, acquisitionProblems } from "../client-solid/features/variations/problem-presentation.js";
 import { editorRig } from "./helpers/variation-editor.mjs";
@@ -47,7 +48,7 @@ Deno.test("silent rows 61,72,261: empty compatible ports, large admission and dr
   const p = { id: "n.image", label: "Image", schema: { status: "known", type: "IMAGE" } };
   assertEquals(connectionProblem(p, [{ id: "s", outputs: [{ type: "STRING" }] }]).message, "Image: no compatible known outputs among 1 nodes. This input needs IMAGE.");
   const view = planPresentation([{ index: 0, count: 101, problem: null }], [{ id: "fake:a.png", filename: "a.png" }]);
-  assertEquals(view.notices[0].message, "This Run will queue 101 jobs across 1 images (101 maximum for one image; limit 500).");
+  assertEquals(view.notices[0].message, `This Run will queue 101 jobs across 1 images (101 maximum for one image; limit ${MAX_JOBS_PER_IMAGE}).`);
   const schema = objectInfoView({ Node: { input: { required: { grow: ["COMFY_AUTOGROW_V3", { template: {} }], pick: ["COMFY_DYNAMICCOMBO_V3", { options: [{ key: 3 }] }] } } } });
   assertEquals(schema.schemaWarnings, [{ type: "Node", input: "Node.grow", detail: "invalid autogrow template" }, { type: "Node", input: "Node.pick", detail: "1 dynamic options have invalid keys" }]);
 });

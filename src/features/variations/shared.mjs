@@ -6,6 +6,7 @@
 import { sameContext } from "../../source-origin.mjs";
 import { isCreatedEntryPath } from "../../entry-path.mjs";
 import { variationProblem, problemError } from "./problems.mjs";
+export { MAX_JOBS_PER_IMAGE } from "./limits.mjs";
 import { parseParamId, parameterIndex, cloneJsonValue, sameJsonValue, formatJsonValue } from "../../parameters.mjs";
 export { paramId, parseParamId, parameterIndex, parameterLabel, parameterAliases, parameterCurrent } from "../../parameters.mjs";
 

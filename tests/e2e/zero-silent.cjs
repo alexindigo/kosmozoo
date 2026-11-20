@@ -19,11 +19,12 @@ const request = async (base, path, body) => {
     save: { class_type: 'SaveImage', inputs: { images: ['n', 0], filename_prefix: 'zero-target' } } };
   await request(F, '/__test/activity', { objectInfo: info, captureEnqueue: true,
     publishInputs: [{ name: 'zero-original.png', width: 16, height: 16, color: [1, 2, 3, 255] },
-      ...Array.from({ length: 36 }, (_, i) => ({ name: `zero-${i}.png`, width: 16, height: 16, color: [i + 10, 25, 50, 255] }))],
+      ...Array.from({ length: 64 }, (_, i) => ({ name: `zero-${i}.png`, width: 16, height: 16, color: [i + 10, 25, 50, 255] }))],
     publish: [{ name: 'zero-target.png', graph }, { name: 'zero-output.png', graph }] });
   await request(F2, '/__test/activity', { publish: [{ name: 'zero-foreign.png', graph }] });
   await request(B, '/api/features/variations/pexels/services', { name: 'Test photos', url: P });
   const c = await CDP.launch(19897, { windowSize: '1400,900' }), errors = await collectPageErrors(c);
+  let limit;
   const observations = [];
   const invoke = (id, args = {}) => c.evaluate(`(async()=>${KZ}.handles.invoke(${JSON.stringify(id)},${JSON.stringify(args)}))()`);
   const field = (selector, value) => c.evaluate(`(()=>{const e=document.querySelector(${JSON.stringify(selector)});e.value=${JSON.stringify(value)};e.dispatchEvent(new Event('input',{bubbles:true}))})()`);
@@ -51,6 +52,7 @@ const request = async (base, path, body) => {
   const files = async (start, end) => c.evaluate(`(async()=>{const data=new DataTransfer();for(let i=${start};i<${end};i++){const bytes=await(await fetch('/api/collections/fake/entries/zero-'+i+'.png/bytes?kind=input')).arrayBuffer();data.items.add(new File([bytes],'chosen-'+i+'.png',{type:'image/png'}))}const input=document.querySelector('.vz-imgfilespick');input.files=data.files;input.dispatchEvent(new Event('change',{bubbles:true}));})()`);
   try {
     await c.goto(B + '/#fake#zero-target.png');
+    limit = await c.evaluate(`(async()=>(await import('/shared/features/variations/shared.mjs')).MAX_JOBS_PER_IMAGE)()`);
     await c.poll(`(async()=>${KZ}.state.images.some(i=>i.filename==='zero-target.png')&&!!${KZ}.state.hosts.another)()`, 20000);
     await c.evaluate(`(()=>{const original=window.fetch;window.zeroPlans=[];window.fetch=async(...args)=>{const r=await original(...args);if(String(args[0]).endsWith('/features/variations/plan'))window.zeroPlans.push(await r.clone().json());return r}})()`);
     for (const kind of ['input', 'output', 'target', 'browser-file', 'server-path', 'foreign-output', 'pexels']) {
@@ -83,11 +85,11 @@ const request = async (base, path, body) => {
     await open(); await files(0, 22);
     await settledCount(c, '374', { and: `!document.querySelector('.vz-run').disabled`, timeout: 20000 });
     await record('22 images x 17 values');
-    await files(22, 36);
+    await files(22, 64);
     await c.poll(`window.zeroPlans.at(-1)?.[0]?.problem?.code==='too-many'&&!document.querySelector('.vz-image-check')`, 20000);
-    const high = await record('36 images x 17 values'); await shot('over-limit-single-target');
-    assert.equal(high.count, '612', JSON.stringify(high)); assert(high.overLimit); assert(high.disabled); assert(!high.strip);
-    assert.match(high.status, /612 jobs for this image; the limit is 500 per image/);
+    const high = await record('64 images x 17 values'); await shot('over-limit-single-target');
+    assert.equal(high.count, '1,088', JSON.stringify(high)); assert(high.overLimit); assert(high.disabled); assert(!high.strip);
+    assert(high.status.includes(`1088 jobs for this image; the limit is ${limit} per image`));
     assert(high.title.includes(high.status.trim()));
     const before = await request(F, '/__ordered');
     assert.equal((await invoke('variations.run')).status, 'invalid');
@@ -95,7 +97,7 @@ const request = async (base, path, body) => {
     assert.deepEqual(await request(F, '/__ordered'), before, 'over-limit Run has no upload or prompt effects');
     // Existing result text must not conceal a newly computed target problem.
     await field('[data-param-key="n.steps"] .vz-range-field:nth-child(2) input', '17');
-    await settledCount(c, '576', { and: `document.querySelector('.vz-messages')?.textContent.includes('576 jobs for this image')`, timeout: 20000 });
+    await settledCount(c, '1,024', { and: `document.querySelector('.vz-messages')?.textContent.includes('1024 jobs for this image')`, timeout: 20000 });
     await record('problem after previous Run result');
     // A non-count failure also remains visible with one target and no strip.
     await c.evaluate(`(()=>{const original=window.fetch;window.fetch=(url,...rest)=>String(url).endsWith('/features/variations/plan')?Promise.resolve(new Response(JSON.stringify([{index:0,count:0,problem:{code:'unavailable',message:'Original input is unavailable; choose another image.'}}]),{headers:{'Content-Type':'application/json'}})):original(url,...rest)})()`);

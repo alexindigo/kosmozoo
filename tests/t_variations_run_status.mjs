@@ -46,7 +46,7 @@ Deno.test("Run status precedence: blocking > explanation > progress > warning > 
   assertEquals(checking.items.map(item => item.text), [problemText(blocking), "Checking every image...", "1 recorded input is unchecked.", problemText(warning)]);
   const ready = runStatus({ preview: { status: "ready", n: 4, message: "Estimated from the opening workflow." }, result: null, problems: [warning] });
   assertEquals(ready.items.map(item => item.text), [problemText(warning), "Estimated from the opening workflow."]);
-  const tooMany = variationProblem("too-many", { phase: "plan", detail: "612 jobs for this image; the limit is 500 per image." });
+  const tooMany = variationProblem("too-many", { phase: "plan", numbers: { count: 1020 } });
   const mixed = runStatus({ preview: { status: "ready", n: 3 }, result: null, problems: [warning, tooMany, blocking] });
   assertEquals(mixed.items.map(item => item.text), [problemText(blocking), problemText(tooMany), problemText(warning)]);
 });
