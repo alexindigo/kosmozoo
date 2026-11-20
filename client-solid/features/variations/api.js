@@ -75,6 +75,16 @@ export const inspectPath = (collection, path, current, kind, origin, names = [])
 export const uploadPath = (collection, path, hash, origin) =>
   pathRequest(`upload-path/${encodeURIComponent(collection)}`, { path, hash }, origin);
 
+// Whole-image bytes behind the same addresses the tiles display.
+const readImageBytes = async (url, name, fallback) => {
+  const response = await fetch(url);
+  if (!response.ok) { const data = await response.json().catch(() => ({})); throw new Error(data.error || `${fallback} (${response.status})`); }
+  const blob = await response.blob();
+  return new File([blob], name, { type: blob.type });
+};
+export const readPath = path => readImageBytes(pathThumbnail(path), path.split("/").at(-1), "Folder image unavailable");
+export const readArchive = item => readImageBytes(historyThumbnail(item), item.name, "Saved image unavailable");
+
 export const inputThumbnail = (collection, name, origin, kind = "input") =>
   entryBytesUrl(collection, name, { kind, origin });
 

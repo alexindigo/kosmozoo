@@ -114,6 +114,18 @@ const PATHS = {
   <path d="M4 17v2a2 2 0 0 0 2 2h12a2 2 0 0 0 2 -2v-2" />
   <path d="M7 11l5 5l5 -5" />
   <path d="M12 4l0 12" />`,
+  "rotate-clockwise-2": `<path d="M9 4.55a8 8 0 0 1 6 14.9m0 -4.45v5h5" />
+  <path d="M5.63 7.16l0 .01" />
+  <path d="M4.06 11l0 .01" />
+  <path d="M4.63 15.1l0 .01" />
+  <path d="M7.16 18.37l0 .01" />
+  <path d="M11 19.94l0 .01" />`,
+  "rotate-2": `<path d="M15 4.55a8 8 0 0 0 -6 14.9m0 -4.45v5h-5" />
+  <path d="M18.37 7.16l0 .01" />
+  <path d="M13 19.94l0 .01" />
+  <path d="M16.84 18.37l0 .01" />
+  <path d="M19.37 15.1l0 .01" />
+  <path d="M19.94 11l0 .01" />`,
 };
 
 export function iconSvg(name, size = 14) {

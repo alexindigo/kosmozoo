@@ -11,6 +11,7 @@ import { ImageAction } from "./ImageAction.js";
 import { SingleLineText } from "../../components/SingleLineText.js";
 import { ParameterRow } from "./ParameterRow.js";
 import { useClickOutside } from "../../lib/click-outside.js";
+import { useAltKey } from "../../lib/alt-key.js";
 import { isFileDrag, droppedFiles, classifyImageFiles, nearestImageTile, imageInsertIndex } from "./image-drop.js";
 import { acquisitionProblems } from "./problem-presentation.js";
 import { ProblemFeedback } from "./ProblemFeedback.js";
@@ -49,7 +50,7 @@ export function ImageSetPanel(props) {
       <ImageGrid images={row().images} onMove={props.onMove} registerEditor={props.registerEditor}
         dropping={dropping()} onFiles={(resources, index) => { clearDrop(); addFiles(resources, index, true); }}
         thumbnail={props.thumbnail} archiveThumbnail={props.archiveThumbnail} targetThumbnail={props.targetThumbnail} pathThumbnail={props.pathThumbnail} registerThumbnail={props.registerThumbnail}
-        rememberFocus={props.rememberFocus} onRemove={props.onRemove}>
+        rememberFocus={props.rememberFocus} onRemove={props.onRemove} onRotate={props.onRotate}>
         <button ref={addButton} type="button" class="vz-image-plus" aria-label="Add images" aria-expanded={adding()}
           {...focusMemory(props.rememberFocus)} onClick={() => setAdding(!adding())}>+</button>
       </ImageGrid>
@@ -98,6 +99,13 @@ function ImageGrid(props) {
   const gap = Symbol("native-file-gap");
   let fileGeometry = null, fileIndex = null;
   const refs = new Map(), animations = new Map();
+  const alt = useAltKey();
+  // A rotated image is a new tile at the same position; keyboard focus follows it.
+  const rotate = async (item, element) => {
+    const index = identities().indexOf(imageIdentity(item)), focused = element.contains(document.activeElement);
+    if (!await props.onRotate(item, alt() ? "ccw" : "cw") || !focused) return;
+    refs.get(identities()[index])?.querySelector('.vz-image-rotate button')?.focus({ preventScroll: true });
+  };
   const [preview, setPreview] = createSignal(null), [lifted, setLifted] = createSignal(null);
   // Readonly thumbnail/comparison updates replace view records, not the user's
   // ordered set. Only a real membership/order change can retire its held gesture.
@@ -187,7 +195,8 @@ function ImageGrid(props) {
     <For each={order()}>{identity => {
       if (identity === gap) return <div class="vz-image-drop-gap" aria-hidden="true" />;
       const item = () => props.images.find(image => imageIdentity(image) === identity);
-      return <div ref={element => { refs.set(identity, element); onCleanup(() => refs.delete(identity)); }}
+      let tile;
+      return <div ref={element => { tile = element; refs.set(identity, element); onCleanup(() => refs.delete(identity)); }}
         class={`vz-image-tile${lifted() === identity ? ' vz-image-dragging' : ''}`} tabindex="0" role="group"
         aria-label={item()?.kind === "target" ? "Current image - each selected image uses itself" : item()?.name}
         title={item()?.kind === "target" ? "Current image - each selected image uses itself" : item()?.path || item()?.name} data-image-name={item()?.name} data-image-kind={item()?.kind}
@@ -200,7 +209,7 @@ function ImageGrid(props) {
           } else if (['Delete', 'Backspace'].includes(event.key)) { event.preventDefault(); props.onRemove(item()); }
         }}>
         <ImageTile item={item} thumbnail={props.thumbnail} archiveThumbnail={props.archiveThumbnail} targetThumbnail={props.targetThumbnail} pathThumbnail={props.pathThumbnail} registerThumbnail={props.registerThumbnail}
-          rememberFocus={props.rememberFocus} onRemove={() => props.onRemove(item())} />
+          rememberFocus={props.rememberFocus} onRemove={() => props.onRemove(item())} alt={alt} onRotate={() => rotate(item(), tile)} />
       </div>;
     }}</For>
     {props.children}
@@ -224,7 +233,11 @@ function ImageTile(props) {
     <div class="vz-image-remove">
       <IconButton chrome variant="overlay" icon={iconSvg("x")} title={`Remove ${props.item()?.name}`} onAction={props.onRemove} />
     </div>
-    <Show when={props.item()?.pending}><span class="vz-image-check" role="status" aria-label="Checking image…" /></Show>
+    <Show when={props.item()?.rotating || props.item()?.pending}><span class="vz-image-check" role="status" aria-label={props.item()?.rotating ? "Rotating image…" : "Checking image…"} /></Show>
     <Show when={props.item()?.error}><SingleLineText class="vz-image-error vz-image-inspection-error" role="status" value={props.item()?.error} /></Show>
+    <Show when={props.item()?.rotatable}><div class="vz-image-rotate">
+      <IconButton chrome variant="overlay" icon={iconSvg(props.alt() ? "rotate-2" : "rotate-clockwise-2")}
+        title={props.alt() ? "Rotate counter-clockwise" : "Rotate clockwise"} onAction={props.onRotate} />
+    </div></Show>
   </>;
 }

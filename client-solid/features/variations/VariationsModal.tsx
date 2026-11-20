@@ -440,7 +440,7 @@ function ModalBody(props) {
                          onInsert={onInsertPlaceholder}
                          onFiles={(resources, index) => editor.dropImages(id, resources, name => UPLOAD_IMG_EXT.test(name), index)}
                         onAdd={(items, index) => editor.addImages(id, items, index)} onRemove={item => editor.removeImage(id, item)}
-                        onMove={(item, index) => editor.moveImage(id, item, index)}
+                        onMove={(item, index) => editor.moveImage(id, item, index)} onRotate={(item, direction) => editor.rotateImage(id, item, direction)}
                         onToggleTarget={() => editor.toggleTargetImage(id)}
                         targetThumbnail={targetThumbnail} archiveThumbnail={services.historyThumbnail}
                         thumbnail={(name, root = "input") => services.inputThumbnail(image.host, name, image.origin, root)}

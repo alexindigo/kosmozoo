@@ -1046,7 +1046,8 @@ body:has(#diff:not([hidden])) #statusCol { bottom: 56px; }
 .vz-image-preview { position: absolute; inset: 0; background: var(--background-stage); border-radius: inherit; overflow: hidden; }
 .vz-image-tile > .vz-image-same { position: absolute; inset: 0; border-radius: inherit; box-shadow: inset 0 0 0 2px var(--attention); pointer-events: none; }
 .vz-image-remove { position: absolute; top: 4px; right: 4px; opacity: 0; }
-.vz-image-tile:hover .vz-image-remove, .vz-image-tile:focus-within .vz-image-remove { opacity: 1; }
+.vz-image-rotate { position: absolute; inset: auto 4px 4px auto; opacity: 0; }
+.vz-image-tile:hover :is(.vz-image-remove, .vz-image-rotate), .vz-image-tile:focus-within :is(.vz-image-remove, .vz-image-rotate) { opacity: 1; }
 .vz-image-dragging { z-index: 2; cursor: grabbing; box-shadow: 0 8px 24px var(--backdrop); }
 .vz-image-plus { border: 1px dashed var(--border-strong); color: var(--foreground); background: transparent; font: inherit; font-size: 28px; cursor: pointer; }
 .vz-image-plus:hover { color: var(--foreground); border-color: var(--foreground-dim); }

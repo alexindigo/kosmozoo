@@ -12,6 +12,7 @@ import { permutationPlan,
 import { validOrigin, sameOrigin, validContext, sameContext } from "/shared/source-origin.mjs";
 import { validImageSet, mergeImages, sameImage, imageIdentity, imageReference, imageReferenceValue, uploadImage } from "./image-set.js";
 import { classifyImageFiles } from "./image-drop.js";
+import { composeRotation, rotatedName } from "./image-rotate.js";
 import { connectionPresentation, connectionProblem } from "./field-filter.js";
 import { estimateGenerationTime, knownGenerationTime } from "./time-estimate.js";
 import { observeSubmission } from "./submission-progress.js";
@@ -75,6 +76,9 @@ export function makeVariationEditor({ targets, cohortMode, destination: initialD
   let timingTask = null;
   let locations = [];
   const imageChecks = new Map(), confirmedUploads = new Map();
+  // Rotations compose over each original's bytes: a rotated File records its
+  // original item and quarter turns; each original caches one File per angle.
+  const rotations = new Map(), rotationSources = new Map(), rotating = new Map();
   const inputCatalogues = new Map(), sourceFiles = new Map(), pexelsFiles = new Map();
   const sourceLifetimes = new Map();
   const sourceRecord = (map, origin, create, root = "input") => {
@@ -189,7 +193,8 @@ export function makeVariationEditor({ targets, cohortMode, destination: initialD
           return { raw, index, error, label: raw,
             node: value?.node ?? "", slot: value?.slot ?? "" };
         }) } : {}),
-       ...(domain === "images" ? { images: entry.values.items.map(item => imageView(id, item, entry.metadata)) } : {}),
+       ...(domain === "images" ? { images: entry.values.items.map(item => ({ ...imageView(id, item, entry.metadata),
+          rotatable: item.kind !== "target", rotating: !!rotating.get(id)?.has(imageIdentity(item)) })) } : {}),
          problems: problems.project(validationProblems()).fields.get(id) ?? [], conflict: conflictFor(id) })])));
   const conflictFor = id => {
     const conflict = conflicts[id];
@@ -229,6 +234,27 @@ export function makeVariationEditor({ targets, cohortMode, destination: initialD
     if (!owns(ticket)) throw Object.assign(new Error("Operation retired; work was kept"), { stale: true });
     if (ticket.destination && !sameOrigin(ticket.destination, currentOrigin(ticket.destination.source))) throw Object.assign(problemError(variationProblem("source-retired", { phase: "run", target: targetIdentity(target), source: ticket.destination.source })), { stale: true });
     if (!originCurrent(target)) throw Object.assign(problemError(variationProblem("source-retired", { phase: "run", target: targetIdentity(target), source: target.host })), { stale: true });
+  };
+  const originalName = item => imageReference(item)?.name ?? item.name;
+  const originalBytes = async item => {
+    if (item.kind === "upload") return item.file;
+    const target = capturedTargets[0], reference = imageReference(item);
+    if (!originCurrent(target)) throw new Error(staleSource(target.host));
+    if (reference) return services.readInput(target.origin, reference.name, reference.root);
+    if (item.kind === "server-path") return services.readPath(item.path);
+    if (item.kind === "archive") return services.readArchive(item);
+    throw new Error("this image cannot be rotated");
+  };
+  const rotatedFile = async (original, degrees) => {
+    const key = imageIdentity(original);
+    if (!rotationSources.has(key)) rotationSources.set(key, { bytes: null, files: new Map() });
+    const source = rotationSources.get(key);
+    if (source.files.has(degrees)) return source.files.get(degrees);
+    source.bytes ??= originalBytes(original).catch(error => { source.bytes = null; throw error; });
+    const file = await services.rotateImage(await source.bytes, degrees, rotatedName(originalName(original), degrees));
+    if (!(file instanceof File) || !file.size || file.name !== rotatedName(originalName(original), degrees)) throw new Error("rotation produced no image");
+    if (!source.files.has(degrees)) { source.files.set(degrees, file); rotations.set(file, { original, degrees }); }
+    return source.files.get(degrees);
   };
   const physicalMatch = (a, b) => validOrigin(a) && validOrigin(b) && a.address === b.address && a.kind === b.kind && a.incarnation === b.incarnation;
   const inspectionQueue = [], pendingInspections = new Set();
@@ -610,7 +636,7 @@ export function makeVariationEditor({ targets, cohortMode, destination: initialD
     edit(domain, id, name, value) {
       if (!alive || deciding) return false;
       write(domain, id, name, value);
-      problems.clear(`edit:${id}`); problems.clear(`acquire:${id}`); problems.clear("last-target");
+      problems.clear(`edit:${id}`); problems.clear(`acquire:${id}`); problems.clear(`rotate:${id}`); problems.clear("last-target");
       if (domain === "images" && name === "items") inspectItems(id);
       recipe.edited(); invalidateClose(); notify(); return true;
     },
@@ -659,6 +685,40 @@ export function makeVariationEditor({ targets, cohortMode, destination: initialD
     toggleTargetImage(id) {
       const item = { kind: "target" };
       return row("images", id).values.items.some(other => sameImage(item, other)) ? this.removeImage(id, item) : this.addImages(id, [item]);
+    },
+    // One quarter turn of a picked image, composed from its original bytes.
+    // Turns requested while one is encoding join it; the result replaces the
+    // tile in place, and a full turn restores the exact original item.
+    rotateImage(id, shown, direction) {
+      const entry = row("images", id), item = shown && entry?.values.items.find(other => sameImage(shown, other));
+      if (!alive || deciding || !["cw", "ccw"].includes(direction) || !item || item.kind === "target") return Promise.resolve(false);
+      const pending = rotating.get(id) ?? new Map(), key = imageIdentity(item);
+      rotating.set(id, pending);
+      if (pending.has(key)) { const job = pending.get(key); job.degrees = composeRotation(job.degrees, direction); return job.done; }
+      const recorded = item.kind === "upload" ? rotations.get(item.file) : null, original = recorded?.original ?? item;
+      const job = { degrees: composeRotation(recorded?.degrees ?? 0, direction) }, ticket = membershipTicket(id);
+      pending.set(key, job); invalidateClose(); notify();
+      job.done = (async () => {
+        try {
+          let file = null, degrees;
+          do { degrees = job.degrees; file = degrees ? await rotatedFile(original, degrees) : null; } while (job.degrees !== degrees);
+          if (!alive) return false;
+          if (!admitsMembership(ticket)) throw new Error("the editor changed while rotating");
+          const items = row("images", id).values.items;
+          if (!items.some(other => sameImage(item, other))) return false;
+          const replacement = file ? uploadImage(file) : original;
+          const next = items.filter(other => sameImage(item, other) || !sameImage(replacement, other));
+          next[next.findIndex(other => sameImage(item, other))] = replacement;
+          return this.edit("images", id, "items", next);
+        } catch (error) {
+          if (alive) report(`rotate:${id}`, "rotation-failed", { phase: "acquisition", parameter: parameter(id), resource: originalName(original), detail: error.message });
+          return false;
+        } finally {
+          pending.delete(key); if (!pending.size) rotating.delete(id);
+          notify();
+        }
+      })();
+      return job.done;
     },
     moveImage(id, item, index) {
       const items = row("images", id).values.items, ordered = moveRecipeImage(items, item, index);
@@ -1019,7 +1079,7 @@ export function makeVariationEditor({ targets, cohortMode, destination: initialD
        }
     },
     dispose() {
-      alive = false; invalidateClose(); active = null; sourceFiles.clear(); pexelsFiles.clear(); inputCatalogues.clear(); sourceLifetimes.clear();
+      alive = false; invalidateClose(); active = null; rotations.clear(); rotationSources.clear(); rotating.clear(); sourceFiles.clear(); pexelsFiles.clear(); inputCatalogues.clear(); sourceLifetimes.clear();
       stopProgress?.(); stopProgress = null;
       planGeneration++; planController?.abort(); if (planTimer !== null) clearTimer(planTimer);
       timingController.abort(); generationTimes.clear();

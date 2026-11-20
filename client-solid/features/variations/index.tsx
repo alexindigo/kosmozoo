@@ -13,6 +13,7 @@ import { createRoot, createSignal } from "solid-js";
 import { makeHistoryClient } from "./history-client.js";
 import { HistoryPanel } from "./HistoryPanel.js";
 import { makePexelsServices } from "./pexels-services.js";
+import { rotateImageFile } from "./image-rotate.js";
 import { PexelsSettings } from "./PexelsSettings.js";
 import { problemText } from "/shared/features/variations/problems.mjs";
 
@@ -54,6 +55,9 @@ export function install(store) {
     inspectImage: api.inspectImage,
     inputThumbnail: api.inputThumbnail,
     readInput: api.readInput,
+    readPath: api.readPath,
+    readArchive: api.readArchive,
+    rotateImage: rotateImageFile,
     inputSources: () => Object.keys(store.state.hosts).filter(host => store.state.hosts[host].kind === "comfy" && store.state.hosts[host].capabilities?.list !== false)
       .map(host => sourceOrigin(host, store.state.hosts[host])).filter(validOrigin),
     // Thumbnail bytes share the feed's engine route and browser connections:
