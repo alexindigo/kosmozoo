@@ -193,12 +193,12 @@ export function makeVariationEditor({ targets, cohortMode, destination: initialD
         : location.domain === "candidates" ? entry.values.candidates.map(raw => { try { return parseExactJson(raw); } catch { return undefined; } }) : null;
       if (values?.length && values.every(value => conflict.choices.some(choice => sameJsonValue(choice, value)))) return null;
     }
-    return { ...conflict, host: destination?.source ?? "" };
+    return { ...conflict, host: destination?.source ?? "", parameter: parameter(id), target: targetIdentity(capturedTargets[0]) };
   };
   const unresolvedConflicts = () => locations.filter(entry => conflictFor(entry.id)).length;
-  const catalogueProblem = () => `Couldn't check ${destination?.source ?? capturedTargets[0].host}: ${catalogueError}`;
-  const conflictMessage = count => `Resolve ${count} conflict${count === 1 ? "" : "s"} with ${destination?.source} before running.`;
-  const destinationMessage = () => unchecked.length ? `${unchecked.length} recorded input${unchecked.length === 1 ? " is" : "s are"} unchecked on ${destination?.source}; ComfyUI will validate them at submission.` : "";
+  const catalogueProblem = () => catalogueError;
+  const conflictMessage = count => problemText(variationProblem("destination-conflicts", { phase: "destination", target: targetIdentity(capturedTargets[0]), destination: destination?.source, numbers: { conflicts: count }, names: locations.filter(entry => conflictFor(entry.id)).map(entry => parameter(entry.id).label) }));
+  const destinationMessage = () => unchecked.length ? problemText(variationProblem("destination-unchecked", { severity: "warning", phase: "destination", target: targetIdentity(capturedTargets[0]), destination: destination?.source, names: unchecked.map(id => parameter(id).label) })) : "";
   const dirty = () => acceptedRevision === null ? restoredWork || selectedTargets.length !== capturedTargets.length || recipe.dirty() : recipe.revision() !== acceptedRevision;
   const parseCandidate = (parameter, raw) => parseRecipeCandidate(parameter, raw, catalogues.get(capturedTargets[0].id)?.nodes);
   const candidateChoices = entry => (entry.metadata.options ?? []).map(value => ({ text: stringifyExactJson(value),
@@ -263,6 +263,7 @@ export function makeVariationEditor({ targets, cohortMode, destination: initialD
     if (validationCache) return validationCache;
     const found = (enginePlan ?? []).flatMap(target => [target.problem, ...(target.notices ?? [])]).filter(problem => problem?.action);
     if (!catalogueReady) return found;
+    for (const id of unchecked) found.push(variationProblem("destination-unchecked", { severity: "warning", phase: "destination", target: targetIdentity(capturedTargets[0]), parameter: parameter(id), destination: destination?.source, names: [parameter(id).label] }));
     for (const [id, entry] of recipe.entries("images")) if (entry.values.enabled) {
       const states = entry.values.items.map(item => imageView(id, item, entry.metadata)), pending = states.filter(item => item.pending);
       if (pending.length) found.push(variationProblem("images-checking", { severity: "warning", phase: "comparison", parameter: parameter(id), resource: pending[0].name, numbers: { pending: pending.length, selected: states.length } }));
@@ -361,12 +362,16 @@ export function makeVariationEditor({ targets, cohortMode, destination: initialD
     revision: recipe.revision,
     targets: () => selectedTargets,
     targetProblem(id) {
+      const unavailable = selectedTargets.find(target => target.id === id && target.unavailable);
+      if (unavailable) return variationProblem("saved-unavailable", { phase: "history", target: targetIdentity(unavailable), numbers: { unavailable: 1, total: 1 }, names: [`${unavailable.filename}: ${unavailable.unavailable}`] });
       const retained = runProblems.get(id);
       return retained?.revision === recipe.revision() ? retained.problem : cohortPresentation().problems.get(id) ??
         problems.read().find(problem => problem.target?.id === id) ?? (enginePlan ?? []).find(target => selectedTargets[target.index]?.id === id)?.notices?.[0] ?? null;
     },
     targetOutcome: id => runOutcomes.get(id) ?? null,
-    problems: () => [...problems.read(), ...validationProblems()],
+    // The destination summary already names every unchecked input once; cards
+    // keep their own one-input projection without repeating it in the status.
+    problems: () => [...problems.read(), ...validationProblems().filter(problem => problem.code !== "destination-unchecked")],
     reportProblem: (key, problem) => problems.report(key, problem),
     clearProblem: key => problems.clear(key),
     canRun,
@@ -574,8 +579,10 @@ export function makeVariationEditor({ targets, cohortMode, destination: initialD
     // The server's own reason when it gave one; never the request path.
     catalogueFailure(error) {
       if (!alive) return;
-      problems.report("catalogue", problemFrom(error, { phase: "catalogue", target: targetIdentity(capturedTargets[0]) }));
-      catalogueError = String(error?.detail || (error?.status ? `HTTP ${error.status}` : error?.message ?? error)); result = null; notify();
+      const context = { phase: "catalogue", target: targetIdentity(capturedTargets[0]), destination: destination?.source ?? capturedTargets[0].host };
+      const problem = error?.problem ? problemFrom(error, context) : variationProblem("catalogue-read", { ...context, detail: String(error?.detail || (error?.status ? `HTTP ${error.status}` : error?.message ?? error)) });
+      problems.report("catalogue", problem);
+      catalogueError = problemText(problem); result = null; notify();
     },
     // Ask the same source again after a failed catalogue request.
     retryCatalogue() {
@@ -659,7 +666,8 @@ export function makeVariationEditor({ targets, cohortMode, destination: initialD
       if (!alive) return;
       const target = capturedTargets[0];
       if (!archived && (!validContext(data?.context) || !sameOrigin(data.context.origin, target.origin))) {
-        publish({ text: staleSource(target.host), ok: false, state: "unavailable" }); return;
+        const problem = report("catalogue", "catalogue-stale", { phase: "catalogue", target: targetIdentity(target), source: target.host });
+        catalogueError = problemText(problem); notify(); return;
       }
       if (!restoring && data.destination && !sameOrigin(data.destination.origin, destination)) {
         const problem = report("catalogue", "catalogue-destination", { phase: "catalogue", actual: data.destination.origin?.source ?? "unknown destination", expected: destination?.source ?? "none" });
@@ -708,8 +716,8 @@ export function makeVariationEditor({ targets, cohortMode, destination: initialD
         anyEnabled: false, exact: false, status, message, breakdown: "", axes: [], excluded: 0, naming: { example: "", complete: false }, timeEstimate: estimateGenerationTime(null, []) });
       if (services.runDestinations && !services.runDestinations().some(origin => origin.source === (destination?.source ?? capturedTargets[0].host))) return unavailable("failed", problemText(variationProblem("no-destination", { phase: "destination" })));
       if (catalogueError !== null) return unavailable("failed", catalogueProblem());
-      if (!catalogueReady) return unavailable("reading", "Reading workflow…");
-      if (destinationPending) return unavailable("reading", `Checking ${destination.source}…`);
+      if (!catalogueReady) return unavailable("reading", problemText(variationProblem("workflow-pending", { phase: "catalogue", target: targetIdentity(capturedTargets[0]) })));
+      if (destinationPending) return unavailable("reading", problemText(variationProblem("destination-pending", { phase: "destination", destination: destination.source, numbers: { images: selectedTargets.length } })));
       const snapshot = captureRows(), first = catalogues.get(capturedTargets[0].id);
       for (const [id, entry] of Object.entries(snapshot.numeric)) if (entry.values.enabled && entry.values.mode === "range" && increment(entry) === null) {
         return unavailable("invalid", problemText(variationProblem("numeric-step", { phase: "compile", target: targetIdentity(capturedTargets[0]), parameter: parameter(id), field: "Step", value: entry.values.rawIncrement, numbers: { minimum: entry.metadata.minIncrement } })));
@@ -1006,8 +1014,8 @@ export function makeVariationEditor({ targets, cohortMode, destination: initialD
       catch (error) {
         if (!alive) return false;
         const id = method === "edit" ? args[1] : typeof args[0] === "string" ? args[0] : null;
-        const problem = variationProblem(method === "installCatalogue" ? "catalogue-install" : "edit-failed", { phase: method === "installCatalogue" ? "catalogue" : "edit",
-          target: targetIdentity(capturedTargets[0]), ...(id ? { parameter: parameter(id) } : {}), detail: error.message });
+        const context = { phase: method === "installCatalogue" ? "catalogue" : "edit", target: targetIdentity(capturedTargets[0]), ...(id ? { parameter: parameter(id) } : {}), detail: error.message };
+        const problem = error.catalogueIssue ? problemFrom(error, context) : variationProblem(method === "installCatalogue" ? "catalogue-install" : "edit-failed", context);
         if (method === "installCatalogue") catalogueError = problemText(problem);
         problems.report(method === "installCatalogue" ? "catalogue" : `edit:${id}`, problem); changed(); return false;
       }

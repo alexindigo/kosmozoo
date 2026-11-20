@@ -120,14 +120,14 @@ export function planCohort({ targets, cohortMode, recipe, destination }) {
     try {
       if (target.problem) throw Object.assign(new Error(target.problem.message), { code: target.problem.code, problem: target.problem.action ? target.problem : undefined });
       const missing = target.catalogue.destination?.missing ?? [];
-      if (missing.length) throw Object.assign(new Error(`Not installed on ${destination?.source ?? "destination"}: ${missing.join(", ")}.`), { code: "missing-class" });
+      if (missing.length) throw problemError(variationProblem("missing-class", { phase: "destination", destination: destination?.source ?? "destination", names: missing }));
       // Unchanged closed-choice conflicts are not repaired by merely selecting a
       // destination. Ordinary enabled edits must supply a compatible value.
       const bound = bindCohortRecipe(recipe, target.catalogue);
       for (const [id, conflict] of Object.entries(target.catalogue.destination?.conflicts ?? {})) {
         if (conflict.kind === "node") continue; // covered by missing classes
         const entry = Object.values(bound).map(rows => rows[id]).find(Boolean);
-        if (!entry?.values.enabled) throw new Error(`${id}: choose a value available on ${destination?.source ?? "destination"}.`);
+        if (!entry?.values.enabled) throw problemError(variationProblem("destination-value", { phase: "destination", destination: destination?.source ?? "destination", parameter: { id, label: entry?.metadata.label ?? id }, value: conflict.current, numbers: { options: conflict.choices?.length ?? 0 } }));
       }
       const { count, counts, notices } = planTarget({ target, cohortMode, recipe, destination, resourceIdentities: target.resourceIdentities });
       const identity = { index, source: target.host, name: target.filename };

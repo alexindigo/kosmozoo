@@ -28,7 +28,7 @@ const request = async (base, path, body) => {
     // Current successful transport, malformed installation. Catch must settle Run.
     await c.evaluate(`(()=>{const read=window.fetch;window.fetch=async(...args)=>{const r=await read(...args);if(String(args[0]).includes('/probe/')){window.fetch=read;const data=await r.json();data.parameters.push(data.parameters[0]);return new Response(JSON.stringify(data),{headers:{'Content-Type':'application/json'}})}return r}})()`);
     await invoke('variations.open', { id: 'fake:errors.png' });
-    await c.poll(`document.querySelector('.vz-messages')?.textContent.includes('Cannot use the workflow catalogue for errors.png')&&!!document.querySelector('.vz-catalogue-retry')`, 20000);
+    await c.poll(`document.querySelector('.vz-messages')?.textContent.includes("errors.png's catalogue has an invalid input location")&&!!document.querySelector('.vz-catalogue-retry')`, 20000);
     assert(await c.evaluate(`document.querySelector('.vz-run').disabled`)); await shot('catalogue-install-error');
     await c.clickAt('.vz-catalogue-retry');
     await settledCount(c, '0', { and: `!document.querySelector('.vz-catalogue-retry')`, timeout: 20000 });

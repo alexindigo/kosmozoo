@@ -25,7 +25,7 @@ function sort(value) {
   return value && typeof value === "object" ? Object.fromEntries(Object.keys(value).sort().map(key => [key, sort(value[key])])) : value;
 }
 const digest = value => sha256(new TextEncoder().encode(canonical(value)));
-const throwInspection = r => { if (r.error) throw fail(r.error, r.status); return r; };
+const throwInspection = r => { if (r.error) throw Object.assign(fail(r.error, r.status), { problem: r.problem }); return r; };
 
 export function historySummary(recipe, targets, resources = []) {
   const byId = new Map(resources.map(r => [r.id, r]));
@@ -334,7 +334,7 @@ export function makeVariationHistory(app) {
           if (destination && !sameOrigin(destination, target.origin)) {
             currentDestination(destination);
             const { context: _context, ...facts } = await inspectDestination(app, { graph, hash, name: target.filename, original: catalogue, originContext: r.context, destination })
-              .then(result => { if (result.error) throw fail(result.error, result.status); return result; });
+              .then(throwInspection);
             catalogue = { ...facts, context: r.context };
           }
           const targetResource = { id: `target-${index}`, kind: "target", name: target.filename, root: "output", host: target.host };
@@ -420,7 +420,7 @@ export function makeVariationHistory(app) {
       const origin = sourceOrigin(saved.host, app.backings.source(saved.host));
       const originContext = origin?.address === saved.source.address && origin?.kind === saved.source.kind ? { origin, graphHash: saved.hash } : null;
       const result = await inspectDestination(app, { graph: saved.graph, hash: saved.hash, name: saved.filename, original: saved.catalogue, originContext, destination });
-      if (result.error) throw fail(result.error, result.status);
+      throwInspection(result);
       return result;
     },
     async bytes(id, resourceId, leaseId) { return app.archive.read(member(id, resourceId, leaseId).hash); },

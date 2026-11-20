@@ -312,7 +312,10 @@ function ModalBody(props) {
     resourceId: `target-${props.images.findIndex(image => image.id === target.id)}`, leaseId: original.leaseId })
     : services.inputThumbnail(target.host, target.filename, target.origin, "output");
   const currentThumbnail = row => original ? services.historyThumbnail({ runId: original.id, resourceId: original.targets[0].graphResources[row.id], leaseId: original.leaseId }) : services.inputThumbnail(image.host, row.current, image.origin, row.currentRoot);
-  const unavailable = () => targets().find(target => target.unavailable)?.unavailable ?? (original ? read(() => editor.sourceProblem()) : null);
+  const unavailable = () => {
+    const missing = targets().filter(target => target.unavailable);
+    return missing.length ? problemText(variationProblem("saved-unavailable", { phase: "history", numbers: { unavailable: missing.length, total: targets().length }, names: missing.map(target => `${target.filename}: ${target.unavailable}`) })) : original ? read(() => editor.sourceProblem()) : null;
+  };
   let initializedImages = false;
   createEffect(() => {
     if (!read(editor.ready) || !strParams().length) return;
@@ -459,7 +462,7 @@ function ModalBody(props) {
               >
                 <Show
                   when={orderedItems().length > 0}
-                  fallback={<Show when={!fieldFilter().trim()}><SingleLineText class="vz-loading" value="this graph exposes no varyable parameters" /></Show>}
+                  fallback={<Show when={!fieldFilter().trim()}><SingleLineText class="vz-loading" value={problemText(variationProblem("catalogue-empty", { phase: "catalogue", target: { name: targets()[0]?.filename } }))} /></Show>}
                 >
                   <For each={orderedItems()}>
                     {(itemId) => {

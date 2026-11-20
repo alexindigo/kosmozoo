@@ -4,6 +4,7 @@
 import { sameOrigin, validOrigin } from "../../source-origin.mjs";
 import { parameterContract, parameterCurrent, sameJsonValue, stringifyExactJson } from "../../parameters.mjs";
 import { inspectSource, projectInspection } from "./inspection.mjs";
+import { variationProblem } from "./problems.mjs";
 
 const CHANNELS = ["params", "stringParams", "enumParams", "textParams", "parameters"];
 const text = value => typeof value === "string" ? value : stringifyExactJson(value);
@@ -72,17 +73,18 @@ export async function destinationMissing(app, { graph, hash, name, originContext
 // destination lacks keep the original descriptors, so editing stays stable and
 // the conflict (not a guessed domain) is what blocks the Run.
 export async function inspectDestination(app, { graph, hash, name, original, originContext, destination }) {
+  const failure = (code, error, status, context = {}) => ({ error, status, problem: variationProblem(code, { phase: "destination", target: { name, source: originContext?.origin?.source }, source: originContext?.origin?.source, destination: destination?.source, ...context }) });
   const local = !destination || originContext && sameOrigin(destination, originContext.origin);
   let inspected;
   if (local) {
-    if (!originContext) return { error: "The original source is unavailable; choose where to run", status: 409 };
+    if (!originContext) return failure("origin-unavailable", "The original source is unavailable; choose where to run", 409);
     inspected = await inspectSource(app, originContext.origin.source, name, originContext, { graph, hash });
   } else {
-    if (!validOrigin(destination) || destination.kind !== "comfy") return { error: "Run on requires a ComfyUI source", status: 400 };
+    if (!validOrigin(destination) || destination.kind !== "comfy") return failure("destination-invalid", "Run on requires a ComfyUI source", 400);
     inspected = await inspectSource(app, destination.source, name, { origin: destination }, { graph, hash });
   }
   if (inspected.error) return inspected;
-  if (!inspected.outputClasses) return { error: `${inspected.context.origin.source}: node information unavailable: ${inspected.schemaError ?? "unknown error"}`, status: 502 };
+  if (!inspected.outputClasses) return failure(inspected.schemaIssue?.code ?? "declarations-unavailable", `${inspected.context.origin.source}: node information unavailable: ${inspected.schemaError ?? "unknown error"}`, 502, { destination: inspected.context.origin.source, detail: inspected.schemaError, ...inspected.schemaIssue });
   // On the image's own source the workflow already ran: behaviour is unchanged.
   // Conflicts describe moving the workflow to a different host.
   const catalogue = projectInspection(inspected, name);

@@ -3,6 +3,7 @@ import { editorRig } from "./helpers/variation-editor.mjs";
 import { compileRecipe } from "../src/features/variations/recipe-compile.mjs";
 import { runStatus } from "../client-solid/features/variations/run-status.js";
 import { MAX_JOBS_PER_IMAGE } from "../src/features/variations/shared.mjs";
+const conflictMessage = names => `image.png: ${names.length} destination conflicts block Run on other: ${names.join(", ")}. Choose available values below or another destination.`;
 
 const settle = async rig => {
   const timer = rig.timers.findLast(timer => timer.active && timer.ms === 150);
@@ -69,15 +70,15 @@ Deno.test("cohort preview: actionable destination conflicts precede planner prob
     "text.text": { kind: "node", type: "Text" } };
   rig.editor.installCatalogue({ ...rig.catalogue, destination: { origin: other, conflicts, unchecked: ["n.steps"] } });
   await settle(rig);
-  assertEquals(rig.editor.preview().message, "Resolve 2 conflicts with other before running.");
+  assertEquals(rig.editor.preview().message, conflictMessage(["Choice #choice \u00b7 value", "Text #text \u00b7 text"]));
   assertEquals(rig.editor.preview().status, "conflict");
   assertEquals(rig.editor.targetProblem("fake:image.png"), problem, "target detail keeps the planner's problem");
   assertEquals((await rig.editor.run()).status, "invalid");
   assert(rig.editor.resolveConflict("choice.value", "second"));
   await settle(rig);
-  assertEquals(rig.editor.preview().message, "Resolve 1 conflict with other before running.");
+  assertEquals(rig.editor.preview().message, conflictMessage(["Text #text \u00b7 text"]));
   const status = runStatus({ preview: rig.editor.preview(), result: rig.editor.result() });
-  assertEquals(status.items[0].text, "Resolve 1 conflict with other before running.");
+  assertEquals(status.items[0].text, conflictMessage(["Text #text \u00b7 text"]));
   assertEquals(status.items[0].class, "vz-readiness-error");
   problem = null;
   rig.editor.setDestination(rig.context.origin);

@@ -5,8 +5,9 @@ import { isEntryPath } from "./entry-path.mjs";
 // Identity is graph-local, never a class/title. Dots are delimiters; nested
 // Comfy node IDs retain their readable colon separators.
 const paramPart = value => encodeURIComponent(String(value)).replace(/\./g, "%2E").replace(/%3A/g, ":");
+const locationError = (message, path) => Object.assign(new Error(message), { catalogueIssue: { path, detail: message } });
 export function paramId(nodeId, input) {
-  if (!String(nodeId).length || !String(input).length) throw new Error("Empty parameter location");
+  if (!String(nodeId).length || !String(input).length) throw locationError("Empty parameter location", `${nodeId}.${input}`);
   return `${paramPart(nodeId)}.${paramPart(input)}`;
 }
 export function parseParamId(id) {
@@ -25,12 +26,12 @@ export const parameterCurrent = parameter => Object.hasOwn(parameter, "currentVa
 export function parameterIndex(params, graph = null) {
   const index = new Map();
   for (const p of params) {
-    if (index.has(p.id)) throw new Error(`Duplicate variation parameter: ${p.id}`);
+    if (index.has(p.id)) throw locationError(`Duplicate variation parameter: ${p.id}`, p.id);
     const location = parseParamId(p.id);
     if (!location || p.key !== location.input || p.nodeIds?.length !== 1 || p.nodeIds[0] !== location.nodeId ||
-        p.nodeId !== undefined && p.nodeId !== location.nodeId) throw new Error(`Invalid parameter location: ${p.id}`);
+        p.nodeId !== undefined && p.nodeId !== location.nodeId) throw locationError(`Invalid parameter location: ${p.id}`, p.id);
     if (graph && (!Object.hasOwn(graph, location.nodeId) || !Object.hasOwn(graph[location.nodeId]?.inputs ?? {}, location.input))) {
-      throw new Error(`Unresolved parameter location: ${p.id}`);
+      throw locationError(`Unresolved parameter location: ${p.id}`, p.id);
     }
     index.set(p.id, p);
   }
@@ -142,7 +143,7 @@ export function resourceReference(value) {
   return { name: value, root: "input", annotated: false };
 }
 export const resourceReferenceValue = (name, root = "input") => {
-  if (!isResourceRoot(root)) throw new Error("Unknown resource root");
+  if (!isResourceRoot(root)) throw Object.assign(new Error("Unknown resource root"), { resourceIssue: { root } });
   const interpreted = resourceReference(name);
   return root === "input" && interpreted?.root === root && interpreted.name === name ? name : `${name} [${root}]`;
 };

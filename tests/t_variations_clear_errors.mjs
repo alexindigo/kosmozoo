@@ -5,6 +5,7 @@ import { problemPresentation, historyPresentation, acquisitionProblems } from ".
 import { editorRig } from "./helpers/variation-editor.mjs";
 import { problemCases } from "./helpers/variation-problem-cases.mjs";
 import { plannerProblemCases } from "./helpers/variation-planner-problem-cases.mjs";
+import { destinationProblemCases } from "./helpers/variation-destination-problem-cases.mjs";
 import { problemText } from "../src/features/variations/problems.mjs";
 import { makeHistoryClient } from "../client-solid/features/variations/history-client.js";
 import { connectionProblem } from "../client-solid/features/variations/field-filter.js";
@@ -32,7 +33,7 @@ for (const test of problemCases) Deno.test(`catalogue row ${test.row}: exact ${t
 Deno.test("phase 1 browser input contains all 38 exact row/location contracts", async () => {
   assertEquals(problemCases.length, 38);
   await Deno.mkdir("runtime", { recursive: true });
-  await Deno.writeTextFile("runtime/clear-errors-cases.json", JSON.stringify([...problemCases, ...plannerProblemCases].map(test => ({ ...test, problem: variationProblem(test.code, test.context) }))));
+  await Deno.writeTextFile("runtime/clear-errors-cases.json", JSON.stringify([...problemCases, ...plannerProblemCases, ...destinationProblemCases].map(test => ({ ...test, problem: variationProblem(test.code, test.context) }))));
 });
 
 Deno.test("silent rows 109,252,256: rejected public intents report without mutating recipe or targets", async () => {
@@ -155,7 +156,7 @@ Deno.test("silent rows 16,18: catalogue install and current destination mismatch
   const rig = editorRig();
   rig.editor.installCatalogue({ ...rig.catalogue, params: [...rig.catalogue.params, rig.catalogue.params[0]] });
   assertEquals(rig.editor.preview().status, "failed");
-  assert(rig.editor.preview().message.includes("Cannot use the workflow catalogue for image.png"));
+  assert(rig.editor.preview().message.includes("image.png's catalogue has an invalid input location"));
   const other = { ...rig.context.origin, source: "other", address: "other:8188" };
   rig.editor.setDestination(other);
   rig.editor.installCatalogue({ ...rig.catalogue, destination: { origin: rig.context.origin } });

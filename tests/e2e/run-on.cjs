@@ -48,7 +48,7 @@ const get = async (base, path) => (await fetch(base + path)).json();
     assert.equal(await c.evaluate(`document.querySelectorAll('.vz-parameter').length`), 0);
     if (probe.parameters.some(p => p.schema.status !== 'known')) {
       proof.unchecked = await c.evaluate(`document.querySelector('.vz-messages .vz-field-help')?.textContent`);
-      assert(/recorded inputs? (is|are) unchecked on unchanged/.test(proof.unchecked), proof.unchecked);
+      assert(/recorded inputs \(.+\) are unchecked on unchanged/.test(proof.unchecked), proof.unchecked);
       assert.equal(await c.evaluate(`!!document.querySelector('.vz-readiness-error')`), false, 'unchecked is guidance, not a conflict');
     }
     await shot('run-on-destination-ready');
@@ -77,7 +77,7 @@ const get = async (base, path) => (await fetch(base + path)).json();
     await choose('other');
     await c.poll(`!!document.querySelector('.vz-catalogue-retry')`, 20000);
     proof.failed = await c.evaluate(`document.querySelector('.vz-messages .vz-readiness-error')?.textContent`);
-    assert(/^Couldn't check other: /.test(proof.failed), proof.failed);
+    assert(/could not read|cannot read node declarations/i.test(proof.failed), proof.failed);
     await shot('run-on-check-failed');
     // A blocked Run says why and sends nothing; Retry stays available.
     await c.evaluate(`(()=>{window.__runRequests=0;const original=window.fetch;window.__restoreRunFetch=()=>{window.fetch=original};window.fetch=(url,options)=>{if(/\\/features\\/variations\\/(run|history)/.test(String(url))&&options?.method==='POST')window.__runRequests++;return original(url,options)}})()`);
@@ -96,14 +96,14 @@ const get = async (base, path) => (await fetch(base + path)).json();
       message:document.querySelector('.vz-messages').textContent,red:getComputedStyle(document.querySelector('.vz-catalogue-row.vz-conflict .vz-conflict-reason')).color})`);
     const first = proof.other.rows.findIndex(r => !r.conflict);
     assert(first > 0 && proof.other.rows.slice(first).every(r => !r.conflict), 'conflicts are first');
-    assert(proof.other.rows.some(r => r.reason === 'flux1-dev.safetensors is not on other'));
-    assert(proof.other.rows.some(r => r.reason === 'FluxGuidance is not installed on other'));
-    assert(/Resolve \d+ conflicts with other before running\./.test(proof.other.message), proof.other.message);
+    assert(proof.other.rows.some(r => r.reason?.includes('"flux1-dev.safetensors" is not available on other')));
+    assert(proof.other.rows.some(r => r.reason?.includes('other is missing 1 required node classes: FluxGuidance')));
+    assert(/\d+ destination conflicts block Run on other:/.test(proof.other.message), proof.other.message);
     await shot('run-on-conflicts');
-    const unet = proof.other.rows.find(r => r.reason?.startsWith('flux1-dev')).id;
+    const unet = proof.other.rows.find(r => r.reason?.includes('"flux1-dev.safetensors" is not available on other')).id;
     await c.clickAt(`[data-catalogue-id="${unet}"] .vz-catalogue-context`);
     await c.poll(`!!document.querySelector('[data-enum-id="${unet}"] .vz-conflict-pick')`);
-    await c.poll(`document.querySelector('.vz-messages')?.textContent.includes('conflicts with other before running.')`, 20000);
+    await c.poll(`document.querySelector('.vz-messages')?.textContent.includes('destination conflicts block Run on other:')`, 20000);
     proof.suggestions = await c.evaluate(`[...document.querySelectorAll('[data-enum-id="${unet}"] .vz-conflict-pick')].map(b=>b.textContent)`);
     assert.deepEqual(proof.suggestions, ['flux1-dev-fp8.safetensors']);
     // The missing pick is listed in red and can be unpicked; the sidebar explains the conflict.
@@ -111,7 +111,7 @@ const get = async (base, path) => (await fetch(base + path)).json();
       nameColor:getComputedStyle(document.querySelector('[data-enum-id="${unet}"] .vz-parameter-name .vz-label')).color})`);
     assert.deepEqual(proof.opened.missing, ['flux1-dev.safetensors']);
     assert.equal(proof.opened.nameColor, proof.other.red, 'the editor card names the conflict in the same red');
-    assert(/Resolve \d+ conflicts with other before running\./.test(proof.opened.message), proof.opened.message);
+    assert(/\d+ destination conflicts block Run on other:/.test(proof.opened.message), proof.opened.message);
     await shot('run-on-suggestion');
     await c.clickAt(`[data-enum-id="${unet}"] .vz-conflict-pick`);
     await c.poll(`!document.querySelector('[data-enum-id="${unet}"]').classList.contains('vz-conflict')`);

@@ -335,8 +335,8 @@ const MAX_SCHEMA_DEPTH = 32;
 const MAX_SCHEMA_ENTRIES = 100_000;
 function schemaBudget() {
   let remaining = MAX_SCHEMA_ENTRIES;
-  return { take(count = 1) {
-    if (count > remaining) throw new RangeError("ComfyUI object_info expansion budget exceeded");
+  return { path: "object_info", take(count = 1) {
+    if (count > remaining) throw Object.assign(new RangeError("ComfyUI object_info expansion budget exceeded"), { schemaIssue: { code: "schema-budget", path: this.path, numbers: { limit: MAX_SCHEMA_ENTRIES, requested: MAX_SCHEMA_ENTRIES - remaining + count } } });
     remaining -= count;
   }, set(map, key, value) { this.take(); map.set(key, value); } };
 }
@@ -375,7 +375,7 @@ function autogrowChildren(template) {
 }
 
 function inputSchema(input, prefix, budget, depth = 0) {
-  if (depth > MAX_SCHEMA_DEPTH) throw new RangeError("ComfyUI object_info nesting budget exceeded");
+  if (depth > MAX_SCHEMA_DEPTH) throw Object.assign(new RangeError("ComfyUI object_info nesting budget exceeded"), { schemaIssue: { code: "schema-depth", path: prefix, numbers: { limit: MAX_SCHEMA_DEPTH, depth } } });
   const schema = { types: new Map(), enums: new Map(), declarations: new Map(), dynamicCombos: new Map(), defaults: new Map(), lazy: new Set(), warnings: [] };
   // Child prompt keys share this prefix, so their declarations, lazy flags and
   // nested dynamic combo branches (each owning its own defaults) join the parent
@@ -388,6 +388,7 @@ function inputSchema(input, prefix, budget, depth = 0) {
   };
   for (const section of ["required", "optional"]) {
     for (const [key, spec] of Object.entries(input?.[section] ?? {})) {
+      budget.path = `${prefix}.${key}`;
       budget.take();
       const name = `${prefix}.${key}`, t = Array.isArray(spec) ? spec[0] : spec;
       const config = Array.isArray(spec) ? spec[1] : null;
@@ -400,7 +401,7 @@ function inputSchema(input, prefix, budget, depth = 0) {
       budget.set(schema.declarations, name, declaration);
       if (t === "COMFY_DYNAMICGROUP_V3" && config?.template) {
         const max = config.max ?? 20;
-        if (!Number.isSafeInteger(max) || max < 1 || max > 20) throw new Error("Invalid dynamic group bounds");
+        if (!Number.isSafeInteger(max) || max < 1 || max > 20) throw Object.assign(new Error("Invalid dynamic group bounds"), { schemaIssue: { code: "schema-group", path: name, value: max, numbers: { limit: 20 } } });
         for (let index = 0; index < max; index++) {
           adopt(inputSchema(config.template, `${name}.${index}`, budget, depth + 1));
         }
@@ -501,7 +502,7 @@ export function objectInfoView(raw, classes = null, error = null) {
       }
       out = candidate;
     }
-  } catch (error) { out.schemaError = error.message; /* No partial view is published. */ }
+  } catch (error) { out.schemaError = error.message; if (error.schemaIssue) out.schemaIssue = error.schemaIssue; /* No partial view is published. */ }
   return out;
 }
 

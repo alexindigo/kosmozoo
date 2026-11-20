@@ -31,6 +31,7 @@ import { registerPexels } from "./pexels.mjs";
 import { inspectDestination } from "./destination.mjs";
 import { submitPrompt } from "../../backings/comfy-submission.mjs";
 import { problemRoutes } from "./problem-transport.mjs";
+import { variationProblem, problemFrom } from "./problems.mjs";
 export { parameterCatalogue, findProducingOutputNode, outputNodeIndex, outputNamingTargets } from "./inspection.mjs";
 
 const exactResponse = (value, init = {}) => new Response(stringifyExactJson(value), {
@@ -235,25 +236,25 @@ export function register(app) {
 
   app.route("GET", "/probe/<id>", async (_req, { id }) => {
     const i = id.indexOf(":");
-    if (i < 0) return Response.json({ error: "id must be collection:name" }, { status: 400 });
+    if (i < 0) return Response.json({ error: "id must be collection:name", problem: variationProblem("inspection-request", { phase: "inspection", field: "image address (expected collection:name)" }) }, { status: 400 });
     const collection = id.slice(0, i), name = id.slice(i + 1);
     let expected = null;
     const raw = new URL(_req.url).searchParams.get("origin");
     if (raw !== null) {
-      try { expected = { origin: JSON.parse(raw) }; } catch { return Response.json({ error: "Invalid expected origin" }, { status: 400 }); }
-      if (!validOrigin(expected.origin)) return Response.json({ error: "Invalid expected origin" }, { status: 400 });
+      try { expected = { origin: JSON.parse(raw) }; } catch { return Response.json({ error: "Invalid expected origin", problem: variationProblem("inspection-request", { field: "source origin" }) }, { status: 400 }); }
+      if (!validOrigin(expected.origin)) return Response.json({ error: "Invalid expected origin", problem: variationProblem("inspection-request", { field: "source origin" }) }, { status: 400 });
     }
     let destination = null;
     const rawDestination = new URL(_req.url).searchParams.get("destination");
     if (rawDestination !== null) {
-      try { destination = JSON.parse(rawDestination); } catch { return Response.json({ error: "Invalid Run destination" }, { status: 400 }); }
-      if (!validOrigin(destination)) return Response.json({ error: "Invalid Run destination" }, { status: 400 });
+      try { destination = JSON.parse(rawDestination); } catch { return Response.json({ error: "Invalid Run destination", problem: variationProblem("inspection-request", { field: "Run destination" }) }, { status: 400 }); }
+      if (!validOrigin(destination)) return Response.json({ error: "Invalid Run destination", problem: variationProblem("inspection-request", { field: "Run destination" }) }, { status: 400 });
     }
     const r = await inspect(collection, name, expected);
-    if (r.error) return Response.json({ error: r.error }, { status: r.status });
+    if (r.error) return Response.json(r, { status: r.status });
     if (!destination) return exactResponse(projectInspection(r, name));
     const d = await inspectDestination(app, { graph: r.graph, hash: r.context.graphHash, name, original: projectInspection(r, name), originContext: r.context, destination });
-    if (d.error) return Response.json({ error: d.error }, { status: d.status });
+    if (d.error) return Response.json(d, { status: d.status });
     return exactResponse(d);
   });
 
@@ -279,9 +280,9 @@ export function register(app) {
     }
 
     const execute = async (r, journal = null) => {
-    if (r.error) return Response.json({ error: r.error }, { status: r.status });
+    if (r.error) return Response.json(r, { status: r.status });
     const { graph, outputClasses, token, backing } = r;
-    if (!outputClasses) return Response.json({ error: `ComfyUI node information is unavailable: ${r.schemaError ?? "could not identify output nodes"}; no jobs were submitted` }, { status: 502 });
+    if (!outputClasses) return Response.json({ error: `ComfyUI node information is unavailable: ${r.schemaError ?? "could not identify output nodes"}; no jobs were submitted`, problem: variationProblem(r.schemaIssue?.code ?? "declarations-unavailable", { phase: "destination", target: { name: filename, source: host }, destination: context.origin.source, detail: r.schemaError, ...r.schemaIssue }) }, { status: 502 });
 
     // Inspect once for current values + labels. Types come from the host's
     // object_info — the current value is not a reliable integer signal.
@@ -305,7 +306,7 @@ export function register(app) {
       if (count > MAX_JOBS_PER_IMAGE) return Response.json({ error: `too many permutations (${count} > ${MAX_JOBS_PER_IMAGE})` }, { status: 413 });
       permutations = generatePermutations(resolvedRanges, currentValues, selectedValues, { sameHost });
     } catch (e) {
-      return Response.json({ error: e.message }, { status: 400 });
+      return Response.json({ error: e.message, problem: problemFrom(e, { phase: "plan", target: { name: filename, source: host } }) }, { status: 400 });
     }
     if (permutations.length === 0) {
       return Response.json({ error: "no permutations to submit (enable an axis or move it off the current values)" }, { status: 400 });
