@@ -84,7 +84,7 @@ export function makeAppStore({ subscribeSources = typeof window !== "undefined" 
     judgmentPrefs: { downvoteHides: true, revealThumbedDown: false, hideUp: false },
     filePrefs: { sourcePrefix: true },
     images: [],           // [{ id, host, filename, size, meta, judgment }]
-    inventory: { revision: null, coverage: null, folders: [""], loading: false,
+    inventory: { revision: null, coverage: null, folders: [""], skipped: undefined, loading: false,
       subfolders: { supported: null, reason: "Output inventory has not loaded" } },
     anchors: [],          // [{ name, src(dataURL), meta? }] — local drops, persisted
     views: {},            // per-resource version2 image-space crops (legacy read below)
@@ -827,6 +827,10 @@ export function makeAppStore({ subscribeSources = typeof window !== "undefined" 
   });
 
   function inventoryReply(reply, kind) {
+    const skipped = reply?.skipped;
+    if (skipped !== undefined && (!skipped || !Number.isSafeInteger(skipped.count) || skipped.count < 0 ||
+        !Array.isArray(skipped.reasons) || skipped.reasons.some(item => !item || typeof item.reason !== "string" || !item.reason || !Number.isSafeInteger(item.count) || item.count <= 0) ||
+        skipped.reasons.reduce((sum, item) => sum + item.count, 0) !== skipped.count)) throw new Error("Invalid skipped inventory records");
     if (!reply || !Array.isArray(reply.entries) || !Array.isArray(reply.folders) ||
         !reply.folders.includes("") || reply.folders.some((folder) => !isFolderPath(folder)) ||
         reply.entries.some((entry) => !entry || !isEntryName(kind, entry.name)) ||
@@ -884,7 +888,7 @@ export function makeAppStore({ subscribeSources = typeof window !== "undefined" 
       s.inventoryReady = true;
       s.pendingBrowse = false;
       setSt("inventory", { revision: inventory.revision, coverage: inventory.coverage,
-        folders: inventory.folders, subfolders: inventory.subfolders, loading: false });
+        folders: inventory.folders, subfolders: inventory.subfolders, skipped: inventory.skipped, loading: false });
       const c = current();
       if (!c || c.remote === name) idx = applyBrowseTarget(wasReady ? { ...browseTarget, ...liveBrowseTarget() } : browseTarget);
       if (wasReady) setFeedMergeNonce((n) => n + 1);
@@ -976,7 +980,7 @@ export function makeAppStore({ subscribeSources = typeof window !== "undefined" 
     s.arrivalFloor = arrivalFloor;
     s.pendingBrowse = true;
     s.inventoryReady = false;
-    setSt("inventory", { revision: null, coverage: null, folders: [""], loading: true,
+    setSt("inventory", { revision: null, coverage: null, folders: [""], skipped: undefined, loading: true,
       subfolders: hostsView()[name]?.capabilities?.subfolders ?? { supported: null, reason: "Output inventory is loading" } });
     // a host switch must not leave the previous host's feed on screen —
     // and its per-entry error state dies with the list (id-keyed, cleared)

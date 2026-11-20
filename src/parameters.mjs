@@ -1,5 +1,6 @@
 // Complete recorded graph inputs and their names. Environment-pure; no IO or UI.
 import { inputEncoding, inputDeclaration } from "./graph.mjs";
+import { isEntryPath } from "./entry-path.mjs";
 
 // Identity is graph-local, never a class/title. Dots are delimiters; nested
 // Comfy node IDs retain their readable colon separators.
@@ -196,7 +197,7 @@ export function resourceReferenceProblem(contract, value) {
   if (typeof value !== "string" || !value.length) return "resource reference requires a file name";
   const { name } = resourceReference(value);
   // Upstream treats paths escaping the root as nonexistent; mirror only that shape.
-  if (!name || /[\x00-\x1f\x7f]/.test(name) || /^([\\/]|[A-Za-z]:)/.test(name) || name.split(/[\\/]/).includes("..")) return "invalid resource path";
+  if (!isEntryPath(name)) return "invalid resource path";
   return null;
 }
 

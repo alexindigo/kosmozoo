@@ -125,25 +125,31 @@ Deno.test("inventory: combined complete request includes roots and >200/deep/bac
   } finally { await client.disposeInventory(); }
 });
 
-Deno.test("inventory: malformed records, conflicting duplicates and truncated scans reject as a whole", () => {
+Deno.test("inventory: malformed envelopes and truncated scans reject as a whole; bad records are counted", () => {
   const valid = item("a/image.png");
-  for (const bad of [null, {}, { ...payload([valid]), has_more: true },
-    payload([valid, item("../outside.png")]), payload([valid, item("a/image.png", 2)]),
-    payload([valid, { ...valid, relpath: "b.png", size: "12" }]),
-    payload([valid, { ...valid, relpath: "b.png", mtime: null }])]) {
+  for (const bad of [null, {}, { ...payload([valid]), has_more: true }]) {
     let threw = false;
     try { normalizeInventory(bad); } catch { threw = true; }
     assert(threw, "a partial/invalid scan must not become a valid inventory");
   }
-  assertEquals(normalizeInventory(payload([valid, valid])), [{ name: "a/image.png", size: 12, mtime: 1 }]);
+  assertEquals(normalizeInventory(payload([valid, valid])), { items: [{ name: "a/image.png", size: 12, mtime: 1 }], skipped: { count: 0, reasons: [] } });
+  for (const record of [item("../outside.png"), { ...valid, relpath: "b.png", size: "12" }, { ...valid, relpath: "b.png", mtime: null }]) {
+    const result = normalizeInventory(payload([valid, record]));
+    assertEquals(result.items.length, 1); assertEquals(result.skipped.count, 1);
+  }
+  assertEquals(normalizeInventory(payload([valid, item("a/image.png", 2)])).skipped.count, 2);
 });
 
 Deno.test("inventory: stock roots retain native order/visibility and validate before union publication", () => {
   assertEquals(normalizeRootInventory(["z.png [output]", "a.png [12]", "notes.json", "a.png [12]"]),
-    [{ name: "z.png", size: null }, { name: "a.png", size: 12 }]);
-  for (const raw of [{}, [null], ["a/invalid.png"], ["../outside.png"], ["a.png [12]", "a.png [13]"]]) {
+    { items: [{ name: "z.png", size: null }, { name: "a.png", size: 12 }], skipped: { count: 0, reasons: [] } });
+  for (const raw of [{}]) {
     let threw = false; try { normalizeRootInventory(raw); } catch { threw = true; }
     assert(threw, "invalid stock roots must reject as a whole");
+  }
+  for (const raw of [[null], ["a/invalid.png"], ["../outside.png"], ["a.png [12]", "a.png [13]"]]) {
+    const result = normalizeRootInventory(raw);
+    assertEquals(result.items, []); assertEquals(result.skipped.count, raw.length);
   }
 });
 
@@ -272,7 +278,7 @@ Deno.test("inventory API: raw folders survive hidden/gone overlay, array compati
   } finally { await built.ctx.jobs.stop(); await built.ctx.inventory.stop(); await rig.close(); await server.shutdown(); }
 });
 
-Deno.test("inventory: either half failing or nested query returning roots cannot erase a good combined snapshot", async () => {
+Deno.test("inventory: either half failing retains the snapshot; wrong-scope records are isolated", async () => {
   let mode = "good";
   const client = comfyClient("fake:1", { fetcher: async (url, options) => {
     if (options?.method === "HEAD") return head();
@@ -284,10 +290,14 @@ Deno.test("inventory: either half failing or nested query returning roots cannot
   } });
   try {
     const good = await client.inventory();
-    for (mode of ["root-failure", "nested-failure", "wrong-scope"]) {
+    for (mode of ["root-failure", "nested-failure"]) {
       await assertRejects(() => client.inventory());
       assertEquals(client.peekInventory(), good);
     }
+    mode = "wrong-scope";
+    const partial = await client.inventory();
+    assertEquals(partial.items.map(item => item.name), ["root.png"]);
+    assertEquals(partial.skipped, { count: 1, reasons: [{ reason: "unexpected root record in descendant listing", count: 1 }] });
   } finally { await client.disposeInventory(); }
 });
 Deno.test("unified chronology: root and descendant share HTTP authority, fresh same-size touch/backdate replaces old order", async () => {

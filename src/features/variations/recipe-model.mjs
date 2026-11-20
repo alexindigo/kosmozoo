@@ -2,6 +2,7 @@
 // stay in the dialog; native Files remain opaque identities at this boundary.
 import { resourceReference, resourceReferenceProblem, parseExactJson, stringifyExactJson } from "../../parameters.mjs";
 import { templateLabels } from "./shared.mjs";
+import { isEntryLeaf } from "../../entry-path.mjs";
 
 const nativeFile = value => typeof File !== "undefined" && value instanceof File;
 export function snapshotDraft(value) {
@@ -36,7 +37,7 @@ export const imageReference = item => item.kind === "reference" ? resourceRefere
 export const imageReferenceValue = item => item.kind === "reference" ? item.value : item.kind === "input" ? item.name : null;
 export const imageIdentity = item => imageReference(item) ? JSON.stringify([imageReference(item).root, imageReference(item).name]) : item.kind === "target" ? targetIdentity : item.kind === "upload" ? item.file : item.kind === "archive" ? JSON.stringify(["archive", item.runId, item.resourceId]) : item.kind === "server-path" ? item.path : item.name;
 export const sameImage = (a, b) => (imageReference(a) && imageReference(b) || a.kind === b.kind) && imageIdentity(a) === imageIdentity(b);
-const filename = name => typeof name === "string" && name.length > 0 && !/[\\/\x00-\x1f\x7f]/.test(name) && ![".", ".."].includes(name);
+const filename = isEntryLeaf;
 export const validImageSet = items => Array.isArray(items) && items.every(item => item &&
   (item.kind === "target" || imageReference(item) && !resourceReferenceProblem(null, imageReferenceValue(item)) || filename(item.name) && (item.kind === "upload" && nativeFile(item.file) && item.file.name === item.name ||
     item.kind === "server-path" && typeof item.path === "string" && item.path.startsWith("/") && !/[\x00-\x1f\x7f]/.test(item.path) &&

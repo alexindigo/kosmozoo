@@ -318,7 +318,7 @@ export function makeRouter(ctx) {
     const items = url.searchParams.get('arrivals') === 'items-v1';
     return Response.json(url.searchParams.get("inventory") === "1"
       ? { revision: inventory.revision, generation: inventory.generation, coverage: inventory.coverage, subfolders: inventory.subfolders,
-          folders: inventory.folders, unavailable: inventory.unavailable, chronology: inventory.chronology, metaVersion,
+          folders: inventory.folders, unavailable: inventory.unavailable, skipped: inventory.skipped, chronology: inventory.chronology, metaVersion,
           ...(items ? { origin: sourceOrigin(id, ctx.sourceActivity.source(id)) } : {}),
           arrivals: arrivals ? { sequence: arrivals.sequence, latestVisibleSeq: arrivals.latestVisibleSeq,
             ...(items ? { revision: arrivals.revision, visibleRanges: arrivals.visibleRanges,

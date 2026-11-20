@@ -16,9 +16,10 @@ import { connectionPresentation } from "./field-filter.js";
 import { estimateGenerationTime, knownGenerationTime } from "./time-estimate.js";
 import { staleSource, sourceFailure } from "./source-message.js";
 import { judgmentVisible } from "/js/image-visibility-model.mjs";
+import { isEntryLeaf } from "/shared/entry-path.mjs";
 import { makeVariationRecipe, validRecipeValue as validValue, freezeRecipe as freeze, moveRecipeImage } from "./recipe.js";
 export { RECIPE_FIELDS as EDITOR_FIELDS } from "./recipe.js";
-const filename = value => typeof value === "string" && value.length > 0 && !/[\\/\x00-\x1f\x7f]/.test(value) && ![".", ".."].includes(value);
+const filename = isEntryLeaf;
 const allParameters = catalogue => catalogue.parameters ?? catalogueParams(catalogue);
 // Legacy-first ordering preserves existing manual aliases independently of layout.
 const namingParameters = catalogue => {

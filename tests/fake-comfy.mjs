@@ -228,6 +228,7 @@ let running = [], pending = [], logs = [], failures = {}, delays = {};
 let publishRevision = 0;
 let captureEnqueue = false, enqueues = [], enqueueHosts = [], assetsPlusDelete = false;
 let metadataBombs = new Set(), assetsHidden = new Set();
+let listingRecords = { root: [], nested: [] };
 const telemetryRequests = { queue: 0, history: 0, logs: 0 };
 const activeLogs = new Set();
 let logSequence = 0;
@@ -280,6 +281,7 @@ const handleRequest = async (req) => {
       removed.clear(); publishedInputs.clear(); publishedTemps.clear(); publishRevision = 0;
       captureEnqueue = false; enqueues = []; enqueueHosts = []; assetsPlusDelete = false;
       metadataBombs = new Set(); assetsHidden = new Set();
+      listingRecords = { root: [], nested: [] };
       telemetryRequests.queue = 0; telemetryRequests.history = 0; telemetryRequests.logs = 0; activeLogs.clear();
       running = []; pending = []; logs = []; failures = {}; delays = {};
       promptData = {}; customObjectInfo = null; objectInfoByHost = {};
@@ -305,6 +307,7 @@ const handleRequest = async (req) => {
     if (typeof body.assetsPlusDelete === "boolean") assetsPlusDelete = body.assetsPlusDelete;
     if (body.metadataBombs) metadataBombs = new Set(body.metadataBombs);
     if (body.assetsHidden) assetsHidden = new Set(body.assetsHidden);
+    if (body.listingRecords) listingRecords = structuredClone(body.listingRecords);
     for (const name of body.remove ?? []) removed.add(name);
     // Same-named resources in other roots carry their own fixture bytes.
     for (const [root, store] of [["publishInputs", publishedInputs], ["publishTemps", publishedTemps]]) for (const item of body[root] ?? []) {
@@ -412,7 +415,7 @@ const handleRequest = async (req) => {
     const has_more = limit !== 0 && items.length > limit;
     if (limit) items = items.slice(0, limit);
     const last = items.at(-1);
-    return Response.json({ items, has_more, latest_mtime, cursor: last ? `${last.mtime}:${last.relpath}` : cursor ?? "" });
+    return Response.json({ items: [...items, ...listingRecords.nested], has_more, latest_mtime, cursor: last ? `${last.mtime}:${last.relpath}` : cursor ?? "" });
   }
   if (p === "/internal/logs/raw" && req.method === "GET") return Response.json({ entries: logs, size: { cols: 80, rows: 24 } });
   if (p.startsWith("/api/history/") && req.method === "GET") {
@@ -470,7 +473,7 @@ const handleRequest = async (req) => {
   }
 
   if (p === "/internal/files/output") {
-    return Response.json(fileList());
+    return Response.json([...fileList(), ...listingRecords.root]);
   }
 
   // the input dir: the node-referenced images the fixture graphs carry

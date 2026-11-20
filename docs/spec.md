@@ -111,8 +111,10 @@ unchanged. Encode the entire name as **one** URL segment, for example
 `/api/collections/fake/entries/a%2Fimage.png/bytes`. Router captures decode once;
 literal `%2F` text is not recursively decoded into another path. Canonical Comfy
 paths reject absolute/drive-absolute paths, backslashes, empty/repeated/trailing
-segments, exact `.`/`..` segments and controls; ordinary percent, colon, hash,
-spaces and Unicode retain their exact identity. Local folder names keep their
+segments, exact `.`/`..` segments and NUL. Other control characters, including
+line breaks, carriage returns and tabs, are ordinary exact filename data, as are
+percent, colon, hash, spaces and Unicode. Listing suffix parsing handles those
+names without treating a line break as the end of a record. Local folder names keep their
 existing flat basename grammar. Named-entry and direct Ingest validation precedes
 cache/store/backing access. Comfy reads, HEAD/range/stat, input references and
 deletion split path into transport `subfolder` and leaf `filename` only at the
@@ -120,13 +122,13 @@ backing boundary. Hide-history matching also includes output type and directory.
 
 Canonical Comfy names are bounded to 4096 JavaScript string code units and 128
 slash-separated components, including the leaf filename. Over-limit names are
-invalid records: the complete inventory fails closed and retains its prior
-accepted snapshot. These per-name bounds are separate from the aggregate budget
+invalid records: they are excluded and counted without rejecting valid siblings.
+These per-name bounds are separate from the aggregate budget
 of 16,777,216 JavaScript string code units for unique ancestor folder strings.
 
 ### Output inventory and folder scope
 
-`?inventory=1` returns `{revision, generation, coverage, subfolders, folders, entries, unavailable, chronology, arrivals, metaVersion}`.
+`?inventory=1` returns `{revision, generation, coverage, subfolders, folders, entries, unavailable, skipped, chronology, arrivals, metaVersion}`.
 `metaVersion` is the metadata version the entries' rows reflect (read with them, in one turn).
 `revision` is an ephemeral address-owner epoch plus scan revision; `coverage` is
 `recursive` or `root-only`; `subfolders` is `{supported, reason}`. `folders`
@@ -149,8 +151,21 @@ using deterministic string comparison. Zero/pre-epoch times are valid; HTTP seco
 are not exact subsecond generation order, and timestamps never come from ETag,
 history, observation time or cache maxima. AssetsPlus-only hidden root files
 remain visible, as explicitly approved; Kosmozoo's own hidden/gone overlay and
-AssetsPlus descendant hiding remain honored. Whole responses validate before publication;
-conflicting duplicates, malformed records and truncation are errors. Definitive
+AssetsPlus descendant hiding remain honored. The complete envelope validates before
+publication; a malformed envelope or truncated scan is an error. Individual malformed
+records are excluded, never normalized into another name. Conflicting duplicate
+identities are excluded altogether, counting every conflicting occurrence; identical
+duplicates still deduplicate. `skipped:{count,reasons:[{reason,count}]}` retains the
+omitted-record total and counted reason categories in the immutable snapshot. A
+nonzero selected-source count renders a persistent warning:
+`N files could not be listed: <reason> (<count>) (<source>)`. Refresh replaces it,
+successful recovery clears it, and source navigation cannot carry it to another
+source. Non-media stock files are not inventory candidates and are not omissions.
+Feed, Details, anchors and shared single-line labels replace line breaks and tabs
+with spaces for display only; native titles retain exact text. Resource URLs,
+filtering, SQL, metadata, judgment, deletion and Variations references keep the raw
+identity. Downloads request exact bytes but retain the existing portable suggested
+filename projection, never raw control characters in HTTP headers. Definitive
 extension absence permits explicit stock-root coverage without a folder
 control. Unknown capability also omits that control until resolved. A known
 recursive host's outage/incompatible response cannot downgrade

@@ -2,8 +2,7 @@
 // over HTTP. One timeout for every fetch; every fetch checks r.ok.
 
 import { RENDERABLE, IMAGE_EXTENSIONS, EXT_MIME } from "./mime.mjs";
-import { assertSafeName } from "./folder.mjs";
-import { isEntryPath, splitEntryPath, inventoryFolders } from "../entry-path.mjs";
+import { isEntryPath, isEntryLeaf, splitEntryPath } from "../entry-path.mjs";
 import { makeInventoryOwner } from "./inventory-owner.mjs";
 import { makeMetadataCollector, interpretHeaders } from "./comfy-metadata.mjs";
 import { makeGenerationTimes } from "./comfy-generation.mjs";
@@ -41,16 +40,11 @@ export function parseListingEntry(n) {
   if (!text.endsWith("]")) return plain;
   // Locate the rightmost eligible opening bracket without repartitioning a
   // whitespace run. The old greedy prefix retains all but one separator char.
-  const line = text.search(/[\r\n\u2028\u2029]/);
-  let whitespaceEnd = line;
-  if (line >= 0) while (whitespaceEnd < text.length && /\s/.test(text[whitespaceEnd])) whitespaceEnd++;
   for (let at = text.length - 2; at > 0; at--) {
     if (text[at] === "]") break;
     if (text[at] !== "[" || !/\s/.test(text[at - 1])) continue;
-    if (line >= 0 && at > whitespaceEnd) continue;
-    const end = line >= 0 && line < at ? line : at - 1;
     const annotation = text.slice(at + 1, -1);
-    return { name: text.slice(0, end), size: /^\d+$/.test(annotation) ? Number(annotation) : null };
+    return { name: text.slice(0, at - 1), size: /^\d+$/.test(annotation) ? Number(annotation) : null };
   }
   return plain;
 }
@@ -63,9 +57,8 @@ export async function list(addr, kind = "output", options = {}) {
   if (!r.ok) throw new Error(`ComfyUI listing: ${r.status}`); // E8: a down host is not an empty dir
   const raw = await r.json();
   if (kind === "input") {
-    return raw
-      .map((n) => parseListingEntry(n).name)
-      .filter((n) => IMAGE_EXTENSIONS.has(n.split(".").pop().toLowerCase()) && assertSafeName(n));
+    return normalizeRootInventory(raw).items.map(item => item.name)
+      .filter((n) => IMAGE_EXTENSIONS.has(n.split(".").pop().toLowerCase()));
   }
   return raw.map(parseListingEntry);
 }
@@ -150,7 +143,7 @@ export async function read(addr, name, kind = "output", { range, idleMs = HOST_T
 // The engine's input route forwards backing conflicts; use the returned name,
 // never invent successful upload provenance from the requested filename.
 export async function write(addr, name, bytes, { fetcher = fetch } = {}) {
-  if (!validName(name) || !assertSafeName(name)) return { ok: false, status: 400, error: "bad filename" };
+  if (!isEntryLeaf(name)) return { ok: false, status: 400, error: "bad filename" };
   const form = new FormData();
   form.append("image", new Blob([bytes]), name);
   try {
@@ -159,7 +152,7 @@ export async function write(addr, name, bytes, { fetcher = fetch } = {}) {
     });
     if (!r.ok) return { ok: false, status: r.status, error: `ComfyUI ${r.status}` };
     const d = await r.json().catch(() => null);
-    if (!d || typeof d.name !== "string" || !validName(d.name) || !assertSafeName(d.name) ||
+    if (!d || !isEntryLeaf(d.name) ||
         (d.type !== undefined && d.type !== "input") || (d.subfolder !== undefined && d.subfolder !== "")) {
       return { ok: false, status: 502, error: "upload acceptance is unconfirmed: invalid returned input name; do not automatically retry" };
     }
@@ -273,39 +266,57 @@ const OBJECT_INFO_TTL_MS = 60_000;
 // Filesystem inventory is independent of retained prompt history and delete
 // preferences. The pinned AssetsPlus handler treats limit=0 as an unsliced
 // scan and negative scan_depth as unlimited depth.
-export function normalizeInventory(payload) {
+// One per-record acceptance boundary for both upstream listing shapes. Never
+// select arbitrary metadata for an ambiguous identity. Counts refer to records;
+// identical duplicates are harmless, contradictory occurrences are all omitted.
+function listingRecords(raw, decode) {
+  const entries = new Map(), counts = new Map(), conflicts = new Set(), reasons = new Map();
+  const skip = (reason, count = 1) => reasons.set(reason, (reasons.get(reason) ?? 0) + count);
+  for (const record of raw) {
+    const { item, reason } = decode(record);
+    if (reason) { skip(reason); continue; }
+    if (!item) continue; // Non-media files are not output candidates.
+    if (conflicts.has(item.name)) { skip("conflicting duplicate"); continue; }
+    const prior = entries.get(item.name), count = counts.get(item.name) ?? 0;
+    if (prior && (prior.size !== item.size || prior.mtime !== item.mtime)) {
+      entries.delete(item.name); conflicts.add(item.name); skip("conflicting duplicate", count + 1);
+    } else { entries.set(item.name, item); counts.set(item.name, count + 1); }
+  }
+  return { items: [...entries.values()], skipped: { count: [...reasons.values()].reduce((sum, n) => sum + n, 0),
+    reasons: [...reasons].map(([reason, count]) => ({ reason, count })) } };
+}
+
+function mergeSkipped(...values) {
+  const reasons = new Map();
+  for (const value of values) for (const item of value.reasons) reasons.set(item.reason, (reasons.get(item.reason) ?? 0) + item.count);
+  return { count: values.reduce((sum, value) => sum + value.count, 0), reasons: [...reasons].map(([reason, count]) => ({ reason, count })) };
+}
+
+export function normalizeInventory(payload, { descendants = false } = {}) {
   if (!payload || !Array.isArray(payload.items) || payload.has_more !== false ||
       typeof payload.cursor !== "string" || !Number.isFinite(payload.latest_mtime)) {
     throw new Error("ComfyUI inventory: malformed or incomplete scan");
   }
-  const entries = new Map();
-  for (const item of payload.items) {
-    if (!item || !validName(item.relpath) || !RENDERABLE.has(item.relpath.split(".").pop().toLowerCase()) ||
-        !Number.isSafeInteger(item.size) || item.size < 0 || !Number.isFinite(item.mtime)) {
-      throw new Error("ComfyUI inventory: invalid record");
-    }
-    const next = { name: item.relpath, size: item.size, mtime: item.mtime };
-    const prior = entries.get(next.name);
-    if (prior && (prior.size !== next.size || prior.mtime !== next.mtime)) {
-      throw new Error("ComfyUI inventory: conflicting duplicate");
-    }
-    entries.set(next.name, next);
-  }
-  return [...entries.values()];
+  return listingRecords(payload.items, item => {
+    if (!item || !validName(item.relpath)) return { reason: "invalid relative path" };
+    if (descendants && !item.relpath.includes("/")) return { reason: "unexpected root record in descendant listing" };
+    if (!RENDERABLE.has(item.relpath.split(".").pop().toLowerCase())) return { reason: "not a media file" };
+    if (!Number.isSafeInteger(item.size) || item.size < 0) return { reason: "invalid file size" };
+    if (!Number.isFinite(item.mtime)) return { reason: "invalid modification time" };
+    return { item: { name: item.relpath, size: item.size, mtime: item.mtime } };
+  });
 }
 
 export function normalizeRootInventory(raw) {
-  if (!Array.isArray(raw) || raw.some((name) => typeof name !== "string")) throw new Error("ComfyUI listing: invalid array");
-  const entries = new Map();
-  for (const item of raw.map(parseListingEntry)) {
-    if (!validName(item.name) || item.name.includes("/")) throw new Error("ComfyUI root listing: invalid name");
-    if (!RENDERABLE.has(item.name.split(".").pop().toLowerCase())) continue;
-    if (item.size !== null && (!Number.isSafeInteger(item.size) || item.size < 0)) throw new Error("ComfyUI root listing: invalid size");
-    const prior = entries.get(item.name);
-    if (prior && prior.size !== item.size) throw new Error("ComfyUI root listing: conflicting duplicate");
-    entries.set(item.name, item);
-  }
-  return [...entries.values()];
+  if (!Array.isArray(raw)) throw new Error("ComfyUI listing: invalid array");
+  return listingRecords(raw, value => {
+    if (typeof value !== "string") return { reason: "invalid listing record" };
+    const item = parseListingEntry(value);
+    if (!validName(item.name) || item.name.includes("/")) return { reason: "invalid relative path" };
+    if (!RENDERABLE.has(item.name.split(".").pop().toLowerCase())) return {};
+    if (item.size !== null && (!Number.isSafeInteger(item.size) || item.size < 0)) return { reason: "invalid file size" };
+    return { item };
+  });
 }
 
 export async function inventory(addr, { client, ...options } = {}) {
@@ -557,15 +568,14 @@ export function comfyClient(addr, { fetcher = fetch, clock = () => performance.n
         config = { at: clock(), value: support };
       } else {
         if (!r.ok) throw new Error(`ComfyUI inventory: ${r.status}`);
-        const nested = normalizeInventory(r.payload);
-        if (nested.some(({ name }) => !name.includes("/"))) throw new Error("ComfyUI descendant inventory: unexpected root entry");
-        const items = [...roots, ...nested];
+        const nested = normalizeInventory(r.payload, { descendants: true });
+        const items = [...roots.items, ...nested.items];
         assertAlive();
         recursiveKnown = true;
-        return { coverage: "recursive", subfolders: support, items };
+        return { coverage: "recursive", subfolders: support, items, skipped: mergeSkipped(roots.skipped, nested.skipped) };
       }
     }
-    return { coverage: "root-only", subfolders: support, items: roots };
+    return { coverage: "root-only", subfolders: support, items: roots.items, skipped: roots.skipped };
   }
 
   async function observeNames(names, { signal, deadlineMs }) {
@@ -604,7 +614,7 @@ export function comfyClient(addr, { fetcher = fetch, clock = () => performance.n
       else throw new InventoryError("incomplete-metadata", `No valid metadata for ${item.name}`, { path: item.name });
     }
     for (const name of firstMissing) if (!current.has(name)) unavailable.push({ name, reason: "not-found-after-reconcile", status: 404 });
-    return { records, discovered: [...discovered], unavailable, coverage: listed.coverage, subfolders: listed.subfolders };
+    return { records, discovered: [...discovered], unavailable, coverage: listed.coverage, subfolders: listed.subfolders, skipped: listed.skipped };
   }
   owner = makeInventoryOwner({ collect, clock, epoch, waveTimeoutMs, readerTimeoutMs });
   metadata = makeMetadataCollector({ urlFor: (name, kind) => viewUrl(addr, name, kind), fetcher, clock,

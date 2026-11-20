@@ -32,7 +32,7 @@ export function validateModified(value) {
   return { atMs: value.atMs, precisionMs: value.precisionMs, source: value.source };
 }
 
-export function finalizeInventory({ records, discovered, unavailable = [], coverage, subfolders, flat = false }) {
+export function finalizeInventory({ records, discovered, unavailable = [], skipped = { count: 0, reasons: [] }, coverage, subfolders, flat = false }) {
   if (!Array.isArray(records) || !Array.isArray(discovered) || !Array.isArray(unavailable) ||
       !["recursive", "root-only"].includes(coverage) || !subfolders || typeof subfolders.supported !== "boolean") {
     throw new InventoryError("invalid-inventory", "Invalid inventory candidate");
@@ -59,7 +59,7 @@ export function finalizeInventory({ records, discovered, unavailable = [], cover
   return freezeTree({ items: [...entries.values()].sort(compareInventory),
     unavailable: [...absent.values()].sort((a, b) => a.name < b.name ? -1 : a.name > b.name ? 1 : 0),
     folders: flat ? [""] : inventoryFolders([...membership].map((name) => ({ name }))),
-    coverage, subfolders: { ...subfolders }, chronology: { order: "modified-desc", complete: true } });
+    skipped, coverage, subfolders: { ...subfolders }, chronology: { order: "modified-desc", complete: true } });
 }
 
 // Logical cancellation/deadlines settle even if a transport ignores abort.

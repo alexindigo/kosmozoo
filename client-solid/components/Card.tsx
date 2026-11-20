@@ -10,6 +10,7 @@ import { createSignal, onMount, onCleanup } from "solid-js";
 import { Show } from "solid-js";
 import { useAppStore } from "../store/app-store.js";
 import { flash } from "../lib/flash.js";
+import { singleLineText } from "../lib/single-line-text.js";
 import { Zoomable } from "./Zoomable.js";
 import { EntryActions } from "./EntryActions.js";
 import { NoteBox } from "./NoteBox.js";
@@ -108,8 +109,8 @@ export function Card(props) {
                 store.handles.invoke("selection.set", { id: props.entryId, value: e.target.checked });
               }}
             />
-            <span class="copyable" classList={{ copied: copiedOn() }} title="Copy the image file name and folder path" onClick={copyName}>
-              {image()?.filename}
+            <span class="copyable" classList={{ copied: copiedOn() }} title={image()?.filename + "\nCopy the image file name and folder path"} onClick={copyName}>
+              {singleLineText(image()?.filename)}
             </span>
           </span>
           <span class="btnwrap">

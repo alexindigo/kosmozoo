@@ -29,6 +29,11 @@ export function StatusStack() {
           <StatusChip kind={chip.kind} msg={chip.msg} onDismiss={() => store.actions.status.dismiss(chip.slot)} registerOccluder={store.actions.feed.occluder} />
         )}
       </For>
+      <Show when={store.state.inventory.skipped?.count}>
+        <StatusChip kind="warning" role="status"
+          msg={`${store.state.inventory.skipped.count} files could not be listed: ${store.state.inventory.skipped.reasons.map(item => `${item.reason} (${item.count})`).join(", ")} (${store.state.host()})`}
+          registerOccluder={store.actions.feed.occluder} />
+      </Show>
       <Show when={store.state.nativeMagnification()}>
         <StatusChip kind="warning" role="status" msg="Browser magnification active. Reset with Ctrl+L, Ctrl+0, Esc." registerOccluder={store.actions.feed.occluder} />
       </Show>

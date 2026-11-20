@@ -7,11 +7,11 @@ import { mkStateRig } from "./helpers/rig.mjs";
 import { testPng } from "./helpers/png.mjs";
 
 const bad = ["", "/image.png", "C:/image.png", "C:\\image.png", "a\\image.png", "a//image.png",
-  "a/image.png/", "./image.png", "a/../image.png", "../image.png", "a/./image.png", "nul\0.png", "line\n.png", null, 1];
+  "a/image.png/", "./image.png", "a/../image.png", "../image.png", "a/./image.png", "nul\0.png", null, 1];
 
 Deno.test("entry paths: exact canonical identity, ancestor/subtree boundaries and unchanged flat-folder grammar", () => {
   for (const name of bad) assertEquals(isEntryPath(name), false, JSON.stringify(name));
-  for (const name of ["root.png", "a:b#c.png", "C:file.png", "a/image.png", "b/image.png", "a/day/image.png", "a/leaf..png", "literal%2F.png", "a/#name: café %.png", "h#real.png"]) {
+  for (const name of ["root.png", "line\n.png", "a:b#c.png", "C:file.png", "a/image.png", "b/image.png", "a/day/image.png", "a/leaf..png", "literal%2F.png", "a/#name: café %.png", "h#real.png"]) {
     assertEquals(isEntryPath(name), true, name);
   }
   assertEquals(isFolderPath(""), true);
@@ -22,7 +22,7 @@ Deno.test("entry paths: exact canonical identity, ancestor/subtree boundaries an
   assertEquals(validEntryName("folder:/tmp", "a/image.png"), false);
   assertEquals(validEntryName("folder:/tmp", "leaf..png"), false);
   assertEquals(validEntryName("comfy:1", "leaf..png"), true);
-  for (const name of ["\\leaf.png", "line\n.png"]) {
+  for (const name of ["\\leaf.png"]) {
     assertEquals(validEntryName("folder:/tmp", name), true, "the flat driver's leaf grammar stays intact");
     assertEquals(validEntryName("comfy:1", name), false);
   }
