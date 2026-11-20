@@ -299,6 +299,11 @@ export function makeVariationEditor({ targets, cohortMode, destination: initialD
   const withCohort = preview => {
     if (!services.plan) return preview;
     const presentation = cohortPresentation(), { n } = presentation;
+    const blocked = unresolvedConflicts();
+    if (blocked) {
+      const message = conflictMessage(blocked);
+      Object.assign(presentation, { status: "conflict", message, problemMessage: message });
+    }
     const times = presentation.admitted.map(target => {
       const duration = generationTimes.get(selectedTargets[target.index]?.id);
       return knownGenerationTime(duration) ? duration * target.count : null;

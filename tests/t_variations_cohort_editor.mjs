@@ -1,6 +1,7 @@
 import { assert, assertEquals } from "jsr:@std/assert";
 import { editorRig } from "./helpers/variation-editor.mjs";
 import { compileRecipe } from "../src/features/variations/recipe-compile.mjs";
+import { runStatus } from "../client-solid/features/variations/run-status.js";
 
 const settle = async rig => {
   const timer = rig.timers.findLast(timer => timer.active && timer.ms === 150);
@@ -56,6 +57,34 @@ Deno.test("cohort preview: blank problem messages reject the response instead of
   await settle(rig);
   assertEquals(rig.editor.preview().n, null); assertEquals(rig.editor.preview().message, "Cohort plan unavailable");
   assertEquals(rig.editor.canRun(), false); rig.editor.dispose();
+});
+
+Deno.test("cohort preview: actionable destination conflicts precede planner problems, including after a blocked Run", async () => {
+  let problem = { code: "missing-class", message: "Not installed on other: Text." };
+  const rig = editorRig({ plan: async () => [{ index: 0, count: problem ? 0 : 1, problem }] });
+  const other = { ...rig.context.origin, source: "other", address: "other:8188" };
+  rig.editor.setDestination(other);
+  const conflicts = { "choice.value": { kind: "value", current: "first", choices: ["second"], suggestions: ["second"] },
+    "text.text": { kind: "node", type: "Text" } };
+  rig.editor.installCatalogue({ ...rig.catalogue, destination: { origin: other, conflicts, unchecked: ["n.steps"] } });
+  await settle(rig);
+  assertEquals(rig.editor.preview().message, "Resolve 2 conflicts with other before running.");
+  assertEquals(rig.editor.preview().status, "conflict");
+  assertEquals(rig.editor.targetProblem("fake:image.png"), problem, "target detail keeps the planner's problem");
+  assertEquals((await rig.editor.run()).status, "invalid");
+  assert(rig.editor.resolveConflict("choice.value", "second"));
+  await settle(rig);
+  assertEquals(rig.editor.preview().message, "Resolve 1 conflict with other before running.");
+  const status = runStatus({ preview: rig.editor.preview(), result: rig.editor.result() });
+  assertEquals(status.items[0].text, "Resolve 1 conflict with other before running.");
+  assertEquals(status.items[0].class, "vz-readiness-error");
+  problem = null;
+  rig.editor.setDestination(rig.context.origin);
+  rig.editor.installCatalogue({ ...rig.catalogue, destination: { origin: rig.context.origin, conflicts: {}, unchecked: [] } });
+  await settle(rig);
+  assertEquals(rig.editor.preview().message, ""); assertEquals(rig.editor.preview().status, "ready");
+  assertEquals(rig.editor.preview().n, 1); assertEquals(rig.editor.canRun(), true);
+  rig.editor.dispose();
 });
 
 for (const newerEdits of [false, true]) Deno.test(`cohort settlement: ${newerEdits ? "newer edits retain the captured target and queued outcome" : "unchanged revision removes the queued target"}`, async () => {
