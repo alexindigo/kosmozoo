@@ -101,7 +101,7 @@ export function sameJsonValue(left, right) {
 export function parseExactJson(text) {
   return JSON.parse(text, (_key, value, context) => {
     if (typeof value !== "number") return value;
-    if (typeof context?.source !== "string") throw new TypeError("Exact JSON requires native reviver source support. Update your browser to a current Chrome, Firefox or Safari release; numeric precision must be preserved.");
+    if (typeof context?.source !== "string") throw Object.assign(new TypeError("Exact JSON requires native reviver source support. Update your browser to a current Chrome, Firefox or Safari release; numeric precision must be preserved."), { code: "exact-json" });
     if (!Number.isSafeInteger(value) && /^-?\d+$/.test(context.source)) return BigInt(context.source);
     if (!Number.isFinite(value)) throw new TypeError("Non-finite JSON number");
     return value;

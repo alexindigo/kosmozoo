@@ -84,7 +84,7 @@ const request = async (base, path, body) => {
       }
     }
     await shot('problem-contract-production-fields');
-    assert.equal(observations.length, 38); assert.deepEqual(errors, []);
+    assert.equal(observations.length, cases.length); assert.deepEqual(errors, []);
     fs.writeFileSync(D + '/rows.json', JSON.stringify({ observations, pageErrors: errors, integrated: [16, 19, 84] }, null, 2));
     console.log(JSON.stringify({ rows: observations.length, integrated: [16, 19, 84], pageErrors: errors }));
   } catch (error) { await shot('failure'); throw error; }

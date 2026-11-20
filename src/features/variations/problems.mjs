@@ -5,7 +5,41 @@ const name = p => p.target?.name ?? "This image";
 const label = p => p.parameter?.label ?? p.parameter?.id ?? "This parameter";
 const facts = p => p.numbers ?? {};
 const cause = p => p.detail || "the operation did not return usable data";
+const value = v => typeof v === "bigint" ? String(v) : typeof v === "string" ? JSON.stringify(v) : String(v);
+const field = p => `${name(p)}, ${label(p)}${p.field ? `, ${p.field}` : ""}`;
 const formats = {
+  "exact-json": () => "This browser cannot preserve exact JSON numbers required by Variations. Your text is kept and numbers will not be rounded.",
+  "recipe-internal": p => `Cannot prepare ${name(p)}'s recipe: internal field ${p.path} has incompatible data (${cause(p)}). Your edits remain.`,
+  "plan-binding": p => `${name(p)}: Run has an invalid source/plan binding for ${p.parameter ? label(p) : p.field ?? "the request"}: ${cause(p)}. No jobs were admitted by this request.`,
+  "plan-scope": p => facts(p).admitted ? `Run will submit ${facts(p).jobs} jobs for ${facts(p).admitted} of ${facts(p).images} images. ${facts(p).blocked} images will remain; see each image's reason below.` : `0 of ${facts(p).images} images can run; 0 jobs.`,
+  "value-encoding": p => `${field(p)}: value ${value(p.value)} cannot be preserved as ${p.expected ?? "a valid workflow value"}: ${cause(p)}. Your text is kept.`,
+  "numeric-text": p => `${field(p)}: Enter a number for ${p.field}; ${value(p.value)} is not a complete finite number${p.expected === "INT" ? " or exact integer" : ""}. Your text is kept.`,
+  "numeric-step": p => `${field(p)}: enter a valid positive Step of at least ${value(facts(p).minimum)}; received ${value(p.value)}. Your text is kept.`,
+  "numeric-order": p => `${field(p)}: Minimum exceeds maximum: From ${value(facts(p).from)} exceeds To ${value(facts(p).to)}. Both values are kept for correction.`,
+  "value-type": p => `${field(p)}${facts(p).candidate ? `, candidate ${facts(p).candidate}` : ""}: ${p.expected} requires ${p.expected === "INT" ? "an exact integer" : p.expected === "FLOAT" ? "a finite number" : p.expected === "BOOLEAN" ? "true or false" : "text"}; received ${value(p.value)} (${p.actual}). Your text is kept.`,
+  "value-choice": p => `${field(p)}: value is not a declared option: ${value(p.value)} is not one of ${facts(p).options} options${p.destination ? ` on ${p.destination}` : ""}.`,
+  "value-bound": p => `${field(p)}: value is ${p.side === "min" ? "below the declared minimum" : "above the declared maximum"}: ${value(p.value)} ${p.side === "min" ? "<" : ">"} ${value(facts(p).bound)}. Allowed range: ${value(facts(p).min ?? "unbounded")} to ${value(facts(p).max ?? "unbounded")}.`,
+  "resource-reference": p => `${field(p)}: ${value(p.value)} has no valid relative filename (${cause(p)}).`,
+  "parameter-missing": p => `${name(p)}: ${label(p)} parameter is missing from this target; no matching workflow input exists.`,
+  "transfer-unsupported": p => `${field(p)}: ${p.resource ?? "selected file"} cannot be uploaded; this input ${cause(p)}.`,
+  "template-empty": p => `${field(p)}: enter values for every template label; ${p.names.join(", ")} have 0 values, so this sweep produces 0 jobs.`,
+  "candidate-connection": p => `${field(p)}${facts(p).candidate ? `, candidate ${facts(p).candidate}` : ""}: choose an existing node and nonnegative output slot; node ${value(p.node)}, slot ${value(p.slot)} is invalid.`,
+  "graph-link": p => `${field(p)}: ${cause(p)}. ${p.node !== undefined ? `Node ${p.node}, slot ${p.slot ?? "unknown"}; ` : ""}${facts(p).outputs !== undefined ? `${facts(p).outputs} outputs available (slots 0 to ${facts(p).outputs - 1}).` : p.expected ? `Expected ${p.expected}; received ${p.actual}.` : ""}`,
+  "range-integer": p => `${field(p)}: ${p.relative ? "Exact relative integer ranges require integer offsets and bounds" : "Exact integer ranges require integer bounds/increment"}; ${p.field ?? "value"} is ${value(p.value)}.`,
+  "range-step": p => `${field(p)}: every enabled range needs a positive increment; Step ${value(p.value)} must be finite and > 0.`,
+  "range-bounds": p => `${field(p)}: range bounds must be finite; ${p.field} is ${value(p.value)}.`,
+  "range-size": p => `${field(p)}: range is too large: ${value(facts(p).from)} to ${value(facts(p).to)} by ${value(facts(p).step)} contains ${facts(p).count} values, beyond supported exact count ${facts(p).limit}.`,
+  "range-clamp": p => `${field(p)}: the destination did not provide clamp bounds for this relative sweep.`,
+  "axis-budget": p => `${name(p)}: permutation axis work budget exceeded: ${facts(p).axes} enabled axes exceed the ${facts(p).limit}-axis planning limit; remove at least ${facts(p).axes - facts(p).limit} axes.`,
+  "visit-budget": p => `${name(p)}: permutation work budget exceeded: this sweep requires at least ${facts(p).visits} planning visits, above ${facts(p).limit}. Largest axes: ${p.names.join(", ")}.`,
+  "relative-clamped": p => `${field(p)}: offsets ${value(facts(p).from)} to ${value(facts(p).to)} from ${value(facts(p).current)} clamp to ${value(facts(p).lo)} to ${value(facts(p).hi)} within ${value(facts(p).min)} to ${value(facts(p).max)}; ${facts(p).jobs} new jobs.`,
+  "plan-no-work": p => `${name(p)}: 0 jobs after excluding ${facts(p).excluded} unchanged combinations on ${p.destination}. ${p.names.length ? `${p.names.join(", ")} match the original.` : "No generation parameter differs from the original; Prefix/Suffix alone do not create a variation."}`,
+  "plan-pending": p => `Checking ${facts(p).images} images before Run; job count is not available yet. No jobs are being submitted.`,
+  "plan-failed": p => `Could not calculate jobs for ${facts(p).images} images: ${cause(p)}. Your setup is kept; Run is unavailable until this check succeeds.`,
+  "plan-invalid-reply": p => `The engine returned an invalid job plan for ${facts(p).images} images (${cause(p)}). No jobs were sent by this check.`,
+  "plan-input": p => `Cannot prepare the job-count request for ${facts(p).images} images: ${cause(p)}. Your setup is kept.`,
+  "estimate-unsafe": p => `The local estimate ${facts(p).count} exceeds exact counting precision; waiting for the engine's per-image validation. Run is unavailable until an exact admitted plan is known.`,
+  "images-checking": p => `Checking bytes for ${facts(p).pending} of ${facts(p).selected} images in ${label(p)}, including ${p.resource}. Nothing is queued by this check.`,
   operation: p => `${name(p)}: ${p.phase} failed: ${cause(p)}.`,
   "relative-absent": p => `${name(p)}: ${label(p)} is absent, so its relative sweep is not applied. ${facts(p).jobs} jobs use ${facts(p).applied} of ${facts(p).selected} selected parameters.`,
   "catalogue-install": p => `Cannot use the workflow catalogue for ${name(p)}: ${cause(p)}. Run is unavailable.`,
@@ -45,10 +79,38 @@ const formats = {
   "invalid-plan": p => `${name(p)}: ${cause(p).replace(/[.!]+$/, "")}.`,
   "work-budget": p => `${name(p)}: ${cause(p).replace(/[.!]+$/, "")}.`,
   "missing-class": p => `${name(p)}: ${cause(p).replace(/[.!]+$/, "")}.`,
-  "no-work": p => `${name(p)}: ${cause(p).replace(/[.!]+$/, "")}.`,
+  "no-work": p => Array.isArray(p.names) ? formats["plan-no-work"](p) : `${name(p)}: ${cause(p).replace(/[.!]+$/, "")}.`,
   "too-many": p => `${name(p)}: ${facts(p).count} jobs for this image; the limit is ${MAX_JOBS_PER_IMAGE} per image. Reduce the axes or increase the increment.`,
 };
 const actions = {
+  "exact-json": "Update Chrome, Firefox or Safari before continuing.",
+  "recipe-internal": "Reopen or update the client, or report this field; do not guess an internal binding fix.",
+  "plan-binding": "Recheck the workflow and start a new Run; do not guess or replay this request.",
+  "plan-scope": "Fix the reasons shown on each image or change the selection/destination.",
+  "value-encoding": "Correct this candidate without rounding, or repair the recorded value.",
+  "numeric-text": "Enter a finite number (a whole exact integer for INT); your text will not be rounded.",
+  "numeric-step": "Enter a positive increment at or above the minimum.",
+  "numeric-order": "Set From <= To.",
+  "value-type": "Correct this candidate without rounding; your text is kept.",
+  "value-choice": "Choose an available option in this field, or choose another destination.",
+  "value-bound": "Enter a value within the declared bounds.",
+  "resource-reference": "Choose a valid image reference from the source/feed or upload a supported file.",
+  "parameter-missing": "Remove this parameter for the selection, remove the image, or choose compatible targets.",
+  "transfer-unsupported": "Choose a declared existing value or an input that accepts file uploads.",
+  "template-empty": "Enter at least 1 semicolon-separated value for each missing label.",
+  "candidate-connection": "Choose an existing node and a whole output slot >= 0.",
+  "graph-link": "Choose an existing compatible node/output or repair the recorded workflow; no jobs for this invalid plan were submitted.",
+  "range-integer": "Enter whole offsets, bounds and Step without rounding.",
+  "range-step": "Enter a finite positive Step.", "range-bounds": "Enter finite From and To bounds.",
+  "range-size": "Narrow the range or increase Step.",
+  "range-clamp": "Choose a fixed Value, another compatible parameter, or a destination with that declaration.",
+  "axis-budget": "Remove enabled axes before Run.", "visit-budget": "Increase Step or reduce the largest axes.",
+  "relative-clamped": "Change the offsets or another parameter to create different jobs.",
+  "plan-no-work": "Choose another generation value, image or destination.",
+  "plan-pending": "Wait for the check to finish.", "plan-failed": "Retry the check.",
+  "plan-invalid-reply": "Retry; if repeated, reload or update the client and engine together.",
+  "plan-input": "Correct the named field, or reopen/update the client if the internal data is incompatible.",
+  "estimate-unsafe": "Wait for the engine's exact plan.", "images-checking": "Wait for comparison to finish.",
   operation: "Keep your setup, inspect the cause, and retry the failed operation, not an uncertain submission.",
   "relative-absent": "Remove this image or choose a shared parameter if all images must receive that edit.",
   "catalogue-install": "Retry; if repeated, update or report the incompatible catalogue.",
@@ -87,16 +149,21 @@ const actions = {
   "no-work": "Choose another generation value, image or destination; naming alone does not create a variation.",
   "too-many": "Check each selected parameter before running again.",
 };
+const data = value => typeof value === "bigint" || typeof value === "number" && !Number.isFinite(value) ? String(value)
+  : Array.isArray(value) ? value.map(item => data(item) ?? null)
+  : value && typeof value === "object" ? Object.fromEntries(Object.entries(value).filter(([, item]) => item !== undefined).map(([key, item]) => [key, data(item)])) : value;
 export function variationProblem(code, context = {}) {
   if (!Object.hasOwn(formats, code)) throw new Error(`Unknown variation problem code: ${code}`);
-  const problem = { code, severity: "error", phase: "preflight", ...context };
+  const problem = { ...data(context), code, severity: context.severity ?? "error", phase: context.phase ?? "preflight" };
   problem.action = actions[code]; problem.message = formats[code](problem);
   return Object.freeze(problem);
 }
 export const problemText = problem => [problem?.message, problem?.action].filter(Boolean).join(" ");
 export function problemFrom(error, context = {}) {
   const retained = error?.problem ?? (error?.code && error?.message && error?.action ? error : null);
-  return retained ? variationProblem(retained.code, { ...context, ...retained }) : variationProblem(Object.hasOwn(formats, error?.code) ? error.code : "operation", { ...context,
+  return retained ? variationProblem(retained.code, { ...context, ...retained,
+    ...(context.numbers || retained.numbers ? { numbers: { ...context.numbers, ...retained.numbers } } : {}),
+    ...(context.parameter || retained.parameter ? { parameter: { ...context.parameter, ...retained.parameter } } : {}) }) : variationProblem(Object.hasOwn(formats, error?.code) ? error.code : context.code ?? "operation", { ...context,
     detail: error?.detail ?? error?.message ?? error?.error ?? String(error ?? "Unknown failure") });
 }
 export const problemError = problem => Object.assign(new Error(problem.message), { problem, code: problem.code });

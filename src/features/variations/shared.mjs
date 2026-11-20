@@ -156,7 +156,7 @@ const namingToken = (value, kind) => foldName(tokenText(value, kind), TOKEN_NAME
 
 export function rangeValues(min, max, step) {
   const { axes: [axis] } = permutationPlan({ value: { enabled: true, min, max, increment: step } }, {});
-  if (axis.length > MAX_PERMUTATION_VISITS) throw new Error("permutation work budget exceeded");
+  if (axis.length > MAX_PERMUTATION_VISITS) throw problemError(variationProblem("visit-budget", { phase: "plan", names: [axis.id], numbers: { visits: axis.length, limit: MAX_PERMUTATION_VISITS } }));
   return Array.from({ length: axis.length }, (_, index) => axis.at(index));
 }
 
@@ -223,7 +223,7 @@ export function generatePermutations(ranges, currentValues, imageParams = {}, { 
   let width = 1, visits = 0;
   for (const axis of plan.axes) {
     width *= axis.length; visits += width;
-    if (visits > MAX_PERMUTATION_VISITS) throw new Error("permutation work budget exceeded; increase the increment or reduce the axes");
+    if (visits > MAX_PERMUTATION_VISITS) throw problemError(variationProblem("visit-budget", { phase: "plan", names: [...plan.axes].sort((a, b) => b.length - a.length).slice(0, 3).map(axis => `${axis.id} (${axis.length})`), numbers: { visits, limit: MAX_PERMUTATION_VISITS } }));
   }
   const output = [];
   const visit = (index, values, current) => {
@@ -243,19 +243,20 @@ export function generatePermutations(ranges, currentValues, imageParams = {}, { 
 // belongs to the compiler. Counting never allocates the Cartesian product.
 export function permutationPlan(ranges, currentValues, imageParams = {}, { sameHost = true } = {}) {
   const { enabled, imgEnabled } = permutationAxes(ranges, imageParams);
-  if (enabled.length + imgEnabled.length > MAX_PERMUTATION_AXES) throw new Error("permutation axis work budget exceeded");
+  if (enabled.length + imgEnabled.length > MAX_PERMUTATION_AXES) throw problemError(variationProblem("axis-budget", { phase: "plan", numbers: { axes: enabled.length + imgEnabled.length, limit: MAX_PERMUTATION_AXES } }));
   const axes = [];
   for (const [id, range] of enabled) {
+    const fail = (code, context) => problemError(variationProblem(code, { phase: "plan", parameter: { id }, ...context }));
     if ([range.min, range.max, range.increment].some(value => typeof value === "bigint") || [range.min, range.max, range.increment].every(Number.isSafeInteger)) {
       const integer = value => {
         if (typeof value === "bigint") return value;
-        if (!Number.isSafeInteger(value)) throw new Error("Exact integer ranges require integer bounds/increment");
+        if (!Number.isSafeInteger(value)) throw fail("range-integer", { value, field: Object.keys(range).find(key => range[key] === value) });
         return BigInt(value);
       };
       const min = integer(range.min), max = integer(range.max), increment = integer(range.increment);
-      if (increment <= 0n) throw new Error("every enabled range needs a positive increment");
+      if (increment <= 0n) throw fail("range-step", { value: range.increment, field: "Step" });
       const size = max < min ? 0n : ((max - min) * 2n + increment) / (increment * 2n) + 1n;
-      if (size > BigInt(Number.MAX_SAFE_INTEGER)) throw new Error("range is too large");
+      if (size > BigInt(Number.MAX_SAFE_INTEGER)) throw fail("range-size", { numbers: { from: String(min), to: String(max), step: String(increment), count: String(size), limit: Number.MAX_SAFE_INTEGER } });
       const length = Number(size), at = index => {
         const value = min + BigInt(index) * increment;
         return value >= BigInt(Number.MIN_SAFE_INTEGER) && value <= BigInt(Number.MAX_SAFE_INTEGER) ? Number(value) : value;
@@ -267,10 +268,10 @@ export function permutationPlan(ranges, currentValues, imageParams = {}, { sameH
       axes.push({ id, length, at, isCurrent, matches });
       continue;
     }
-    if (!Number.isFinite(range.increment) || range.increment <= 0) throw new Error("every enabled range needs a positive increment");
-    if (!Number.isFinite(range.min) || !Number.isFinite(range.max)) throw new Error("range bounds must be finite");
+    if (!Number.isFinite(range.increment) || range.increment <= 0) throw fail("range-step", { value: range.increment, field: "Step" });
+    if (!Number.isFinite(range.min) || !Number.isFinite(range.max)) throw fail("range-bounds", { value: !Number.isFinite(range.min) ? range.min : range.max, field: !Number.isFinite(range.min) ? "From" : "To" });
     const length = Math.max(0, Math.round((range.max - range.min) / range.increment) + 1);
-    if (!Number.isSafeInteger(length)) throw new Error("range is too large");
+    if (!Number.isSafeInteger(length)) throw fail("range-size", { numbers: { from: range.min, to: range.max, step: range.increment, count: String(length), limit: Number.MAX_SAFE_INTEGER } });
     const at = index => Math.round((range.min + index * range.increment) * 1e10) / 1e10;
     const isCurrent = value => Object.hasOwn(currentValues, id) && typeof currentValues[id] === "number" && formatValue(value) === formatValue(currentValues[id]);
     let matches = 0;
@@ -421,12 +422,13 @@ export function validRunAcknowledgement(value) {
 // Exact effective operations, derived from the request rather than a second
 // acknowledgement whitelist. Enabled-empty is invalid, never an omitted axis.
 export function runOperationFields(request) {
+  const invalid = (detail, context = {}) => problemError(variationProblem("plan-binding", { phase: "compile", detail, ...context }));
   const fields = { ranges: [], imageParams: [], naming: ["prefix", "suffix"], rangeSelections: [], imageSelections: [] };
   for (const [channel, selections] of [["ranges", "rangeSelections"], ["imageParams", "imageSelections"]]) {
-    if (!record(request[channel] ?? {})) throw new Error(`Invalid ${channel} plan`);
+    if (!record(request[channel] ?? {})) throw invalid(`Invalid ${channel} plan`, { field: channel });
     for (const [id, axis] of Object.entries(request[channel] ?? {})) {
-      if (!record(axis) || typeof axis.enabled !== "boolean") throw new Error(`Choose whether ${id} is enabled`);
-      if (Object.hasOwn(request[channel === "ranges" ? "imageParams" : "ranges"] ?? {}, id)) throw new Error(`Ambiguous operation: ${id}`);
+      if (!record(axis) || typeof axis.enabled !== "boolean") throw invalid(`Choose whether ${id} is enabled`, { parameter: { id } });
+      if (Object.hasOwn(request[channel === "ranges" ? "imageParams" : "ranges"] ?? {}, id)) throw invalid(`Ambiguous operation: ${id}`, { parameter: { id } });
       fields[selections].push(id);
       if (!axis.enabled) continue;
       if (channel === "imageParams" && (!Array.isArray(axis.values) || !axis.values.length)) throw new Error(`${id}: choose at least one value before Run`);
@@ -448,12 +450,12 @@ export function targetRunPlan(payload, catalogue) {
     operations.push({ id: `rangeSelections:${id}`, parameter: id, channel: "rangeSelections", disposition: applicable ? axis.enabled ? "apply" : "off" : "absent-relative-numeric" });
     if (axis.enabled) operations.push({ id: `ranges:${id}`, parameter: id, channel: "ranges", disposition: applicable ? "apply" : "absent-relative-numeric" });
     if (applicable) ranges[id] = axis;
-    if (applicable && axis.enabled && !numeric(index.get(id))) throw new Error(`${id}: numeric parameter is missing from this target`);
+    if (applicable && axis.enabled && !numeric(index.get(id))) throw problemError(variationProblem("parameter-missing", { phase: "compile", parameter: { id } }));
   }
   for (const [id, axis] of Object.entries(payload.imageParams)) {
     operations.push({ id: `imageSelections:${id}`, parameter: id, channel: "imageSelections", disposition: axis.enabled ? "apply" : "off" });
     if (axis.enabled) operations.push({ id: `imageParams:${id}`, parameter: id, channel: "imageParams", disposition: "apply" });
-    if (axis.enabled && !index.has(id)) throw new Error(`${id}: parameter is missing from this target`);
+    if (axis.enabled && !index.has(id)) throw problemError(variationProblem("parameter-missing", { phase: "compile", parameter: { id } }));
   }
   operations.push(...["prefix", "suffix"].map(parameter => ({ id: `naming:${parameter}`, parameter, channel: "naming", disposition: "apply" })));
   const request = { ...payload, ranges };
@@ -514,7 +516,7 @@ export function resolveRelativeRanges(ranges, currentValues) {
     if ([cur, r.min, r.max, ...r.clamp].some(value => typeof value === "bigint")) {
       const exact = value => {
         if (typeof value === "bigint") return value;
-        if (!Number.isSafeInteger(value)) throw new Error("Exact relative integer ranges require integer offsets and bounds");
+        if (!Number.isSafeInteger(value)) throw problemError(variationProblem("range-integer", { phase: "plan", parameter: { id: key }, value, relative: true }));
         return BigInt(value);
       };
       const [clo, chi] = r.clamp.map(exact), base = exact(cur);

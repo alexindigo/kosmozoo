@@ -5,6 +5,8 @@ import { compileDiscreteAxes, validateEditorValue, admitResourceTransfer } from 
 import { catalogueParams, templateValue, templateLabels, parseSemicolonList, expandTextAxes, uploadCandidate } from "./shared.mjs";
 import { recipeField, recipeDispositions, snapshotDraft, freezeRecipe,
   numericText, imageIdentity, imageReference, imageReferenceValue } from "./recipe-model.mjs";
+import { variationProblem, problemError, problemFrom } from "./problems.mjs";
+const fail = (code, metadata, context) => problemError(variationProblem(code, { phase: "compile", parameter: { id: metadata.id, label: metadata.label ?? metadata.id }, ...context }));
 
 export const currentRoot = parameter => parameter.currentRoot ?? (parameter.fromOutput ? "output" : "input");
 // Shared active numeric operation admission. Raw text remains in the recipe;
@@ -12,15 +14,15 @@ export const currentRoot = parameter => parameter.currentRoot ?? (parameter.from
 export function compileNumericOperation(values, metadata, { batch = false, preview = false } = {}) {
   if (values.mode === "value") {
     const value = numericText(values.value);
-    if (value === null) throw new Error(`${metadata.label}: Enter a number for Value. Your text is kept.`);
+    if (value === null) throw fail("numeric-text", metadata, { field: "Value", value: values.value, expected: metadata.schema?.type });
     validateEditorValue(metadata, value);
     return { min: value, max: value, increment: metadata.minIncrement, ...(batch ? { absolute: true } : {}) };
   }
   const min = numericText(values.min), max = numericText(values.max), number = numericText(values.rawIncrement);
-  if (min === null || max === null) throw new Error(`${metadata.label}: Enter a number for ${min === null ? "From" : "To"}. Your text is kept.`);
+  if (min === null || max === null) throw fail("numeric-text", metadata, { field: min === null ? "From" : "To", value: min === null ? values.min : values.max });
   const increment = number !== null && number > 0 && number >= metadata.minIncrement ? number : null;
-  if (increment === null && !preview) throw new Error("Enter a valid positive increment; incomplete text has been kept.");
-  if (min > max) throw new Error("Minimum exceeds maximum; your values have been kept.");
+  if (increment === null && !preview) throw fail("numeric-step", metadata, { field: "Step", value: values.rawIncrement, numbers: { minimum: metadata.minIncrement } });
+  if (min > max) throw fail("numeric-order", metadata, { numbers: { from: values.min, to: values.max } });
   if (!batch) for (const value of [min, max]) validateEditorValue(metadata, value);
   return { min, max, increment: increment ?? metadata.defaultIncrement };
 }
@@ -31,15 +33,16 @@ export function recipeImageView(item, metadata, check, target, batch) {
   return { ...item, ...(reference ?? {}), sameCurrent: reference ? currentRoot(metadata) === reference.root && reference.name === metadata.current
     : !!check?.hash && check.hash === check.currentHash, pending: !reference && (!check || !!check.pending), error: check?.error ?? "" };
 }
-export function parseRecipeCandidate(parameter, raw, nodes) {
+export function parseRecipeCandidate(parameter, raw, nodes, index) {
   let value;
-  try { value = parseExactJson(raw); } catch { throw new Error(`${parameter.label}: enter one complete JSON value. Your text is kept.`); }
+  try { value = parseExactJson(raw); } catch (error) { if (error.code === "exact-json") throw fail("exact-json", parameter, {}); throw new Error(`${parameter.label}: enter one complete JSON value. Your text is kept.`); }
   if (parameter.candidateKind === "connection") {
     const slot = numericText(value?.slot ?? "");
-    if (typeof value?.node !== "string" || !value.node || !Number.isSafeInteger(slot) || slot < 0) throw new Error(`${parameter.label}: choose an existing node and nonnegative output slot. Your text is kept.`);
+    if (typeof value?.node !== "string" || !value.node || !Number.isSafeInteger(slot) || slot < 0) throw fail("candidate-connection", parameter, { node: value?.node, slot: value?.slot, numbers: { candidate: index === undefined ? undefined : index + 1 } });
     value = [value.node, slot];
   }
-  validateEditorValue(parameter, value, nodes);
+  try { validateEditorValue(parameter, value, nodes); }
+  catch (error) { throw problemError(problemFrom(error, { numbers: { candidate: index === undefined ? undefined : index + 1 } })); }
   return value;
 }
 export function previewRecipeUploads(snapshot, lookup, confirmedUploads, target, batch) {
@@ -125,7 +128,7 @@ export function compileRecipe(snapshot, { catalogue, target, batch = false, look
       imageParams[id].values = [...new Set(assigned)];
       if (unresolved.length) { transfers[id] = unresolved; estimates[id] = estimate.filter((value, i) => !estimate.slice(0, i).some(other => sameJsonValue(value, other))); }
     } else if (domain === "candidates") {
-      imageParams[id].values = read(domain, id, "candidates").map(raw => parseRecipeCandidate(entry.metadata, raw, catalogue.nodes));
+      imageParams[id].values = read(domain, id, "candidates").map((raw, index) => parseRecipeCandidate(entry.metadata, raw, catalogue.nodes, index));
       if (!imageParams[id].values.length) throw new Error(`${entry.metadata.label}: add at least one value before Run`);
     } else if (domain === "enums") {
       imageParams[id].values = [...read(domain, id, "picks")];
@@ -134,7 +137,7 @@ export function compileRecipe(snapshot, { catalogue, target, batch = false, look
       const text = read(domain, id, "text");
       const substitutions = Object.fromEntries(templateLabels(text).map(label => [label, parseSemicolonList(read(domain, id, "tpl", label))]));
       imageParams[id].values = expandTextAxes(text, substitutions, { parameter: { id, label: entry.metadata.label } });
-      if (!preview && !imageParams[id].values.length) throw new Error(`${entry.metadata.label}: enter values for every template label before Run`);
+      if (!preview && !imageParams[id].values.length) throw fail("template-empty", entry.metadata, { names: Object.keys(substitutions).filter(label => !substitutions[label].length) });
     }
   }
   const payload = freezeRecipe({ ranges, imageParams: compileDiscreteAxes(imageParams, parameters, catalogue.nodes), automaticNaming: true,

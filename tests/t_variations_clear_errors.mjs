@@ -4,6 +4,7 @@ import { variationProblem, problemFrom, effectCounts, effectMessage } from "../s
 import { problemPresentation, historyPresentation, acquisitionProblems } from "../client-solid/features/variations/problem-presentation.js";
 import { editorRig } from "./helpers/variation-editor.mjs";
 import { problemCases } from "./helpers/variation-problem-cases.mjs";
+import { plannerProblemCases } from "./helpers/variation-planner-problem-cases.mjs";
 import { problemText } from "../src/features/variations/problems.mjs";
 import { makeHistoryClient } from "../client-solid/features/variations/history-client.js";
 import { connectionProblem } from "../client-solid/features/variations/field-filter.js";
@@ -31,7 +32,7 @@ for (const test of problemCases) Deno.test(`catalogue row ${test.row}: exact ${t
 Deno.test("phase 1 browser input contains all 38 exact row/location contracts", async () => {
   assertEquals(problemCases.length, 38);
   await Deno.mkdir("runtime", { recursive: true });
-  await Deno.writeTextFile("runtime/clear-errors-cases.json", JSON.stringify(problemCases.map(test => ({ ...test, problem: variationProblem(test.code, test.context) }))));
+  await Deno.writeTextFile("runtime/clear-errors-cases.json", JSON.stringify([...problemCases, ...plannerProblemCases].map(test => ({ ...test, problem: variationProblem(test.code, test.context) }))));
 });
 
 Deno.test("silent rows 109,252,256: rejected public intents report without mutating recipe or targets", async () => {

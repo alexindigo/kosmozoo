@@ -4,7 +4,7 @@ import { snapshotDraft, createRunId } from "./draft.js";
 import { editorDomain, choiceValues, numericDefaults, numericText, sliderNumber } from "./graph.mjs";
 import { parseExactJson, stringifyExactJson, sameJsonValue, resourceReferenceValue, resourceReferenceProblem } from "/shared/parameters.mjs";
 import { admitResourceTransfer } from "/shared/features/variations/compile.mjs";
-import { compileRecipe, parseRecipeCandidate, recipeImageView, currentRoot } from "/shared/features/variations/recipe-compile.mjs";
+import { compileRecipe, compileNumericOperation, parseRecipeCandidate, recipeImageView, currentRoot } from "/shared/features/variations/recipe-compile.mjs";
 import { acknowledgedHistoryFields, planHistoryOverlay, decodeHistoryRecipe, encodeHistoryRecipe } from "/shared/features/variations/history-codec.mjs";
 import { permutationPlan,
   resolveRelativeRanges, acknowledgedFields, targetRunPlan, catalogueParams, parameterIndex, parameterCurrent, parameterLabel, parameterAliases,
@@ -67,6 +67,7 @@ export function makeVariationEditor({ targets, cohortMode, destination: initialD
   let conflicts = {}, unchecked = [], destinationPending = !!destination;
   // A failed catalogue request is a state with a way out, never a silent wait.
   let catalogueError = null;
+  let validationCache = null;
   const catalogues = new Map();
   const generationTimes = new Map(capturedTargets.map(target => [target.id, knownGenerationTime(target.generationTimeMs) ? target.generationTimeMs : null]));
   const timingController = new AbortController();
@@ -154,6 +155,7 @@ export function makeVariationEditor({ targets, cohortMode, destination: initialD
   };
   const notify = () => {
     if (!alive) return;
+    validationCache = null;
     // The successful close countdown is still an editable session. A new raw
     // revision must retain the last issued subjects, not become targetless work.
     if (!running && queuedCohort && recipe.revision() !== queuedCohort.revision) restoreQueuedCohort();
@@ -181,7 +183,7 @@ export function makeVariationEditor({ targets, cohortMode, destination: initialD
             node: value?.node ?? "", slot: value?.slot ?? "" };
         }) } : {}),
        ...(domain === "images" ? { images: entry.values.items.map(item => imageView(id, item, entry.metadata)) } : {}),
-        problems: problems.project((enginePlan ?? []).flatMap(target => target.notices ?? [])).fields.get(id) ?? [], conflict: conflictFor(id) })])));
+         problems: problems.project(validationProblems()).fields.get(id) ?? [], conflict: conflictFor(id) })])));
   const conflictFor = id => {
     const conflict = conflicts[id];
     if (!conflict) return null;
@@ -257,6 +259,21 @@ export function makeVariationEditor({ targets, cohortMode, destination: initialD
   };
   const compile = (snapshot, uploadReceipts = null, preview = false, lookup = evidence, target = capturedTargets[0]) =>
     compileRecipe(snapshot, { catalogue: catalogues.get(capturedTargets[0].id), target, batch, lookup, uploadReceipts, confirmedUploads, preview });
+  const validationProblems = () => {
+    if (validationCache) return validationCache;
+    const found = (enginePlan ?? []).flatMap(target => [target.problem, ...(target.notices ?? [])]).filter(problem => problem?.action);
+    if (!catalogueReady) return found;
+    for (const [id, entry] of recipe.entries("images")) if (entry.values.enabled) {
+      const states = entry.values.items.map(item => imageView(id, item, entry.metadata)), pending = states.filter(item => item.pending);
+      if (pending.length) found.push(variationProblem("images-checking", { severity: "warning", phase: "comparison", parameter: parameter(id), resource: pending[0].name, numbers: { pending: pending.length, selected: states.length } }));
+    }
+    try {
+      const snapshot = captureRows();
+      for (const entry of Object.values(snapshot.numeric)) if (entry.values.enabled) compileNumericOperation(entry.values, entry.metadata, { batch });
+      compile(snapshot, null, true);
+    } catch (error) { if (error.problem) found.push(problemFrom(error, { target: targetIdentity(capturedTargets[0]) })); }
+    return validationCache = found;
+  };
   // A request names both hosts: the image's own and the one it runs on.
   const count = (request, catalogue) => {
     const values = currentValues(catalogue);
@@ -292,7 +309,7 @@ export function makeVariationEditor({ targets, cohortMode, destination: initialD
     }
     let input, key;
     try { input = planInput(); key = stringifyExactJson(input); }
-    catch (error) { enginePlanError = error.message; enginePlanPending = false; return; }
+    catch (error) { enginePlanError = problemText(problemFrom(error, { code: "plan-input", phase: "plan", numbers: { images: selectedTargets.length } })); enginePlanPending = false; return; }
     if (key === planKey) return;
     planKey = key; const generation = ++planGeneration;
     planController?.abort(); if (planTimer !== null) clearTimer(planTimer);
@@ -305,10 +322,10 @@ export function makeVariationEditor({ targets, cohortMode, destination: initialD
         if (!alive || generation !== planGeneration) return;
         if (!Array.isArray(planned) || planned.length !== input.targets.length || planned.some((target, index) => !target || target.index !== index ||
           !Number.isSafeInteger(target.count) || target.count < 0 || (target.problem ?
-            typeof target.problem.message !== "string" || !target.problem.message.trim() || target.count !== 0 && target.problem.code !== "too-many" : target.count <= 0))) throw new Error("Cohort plan unavailable");
+           typeof target.problem.message !== "string" || !target.problem.message.trim() || target.count !== 0 && target.problem.code !== "too-many" : target.count <= 0))) throw Object.assign(new Error("target length, index, count or problem shape mismatch"), { code: "plan-invalid-reply" });
         enginePlan = freeze(snapshotDraft(planned));
-      } catch (error) { if (alive && generation === planGeneration) enginePlanError = error.message; }
-      finally { if (alive && generation === planGeneration) { enginePlanPending = false; changed(); } }
+      } catch (error) { if (alive && generation === planGeneration) enginePlanError = problemText(variationProblem(error.code === "plan-invalid-reply" ? error.code : "plan-failed", { phase: "plan", detail: error.message, numbers: { images: input.targets.length } })); }
+      finally { if (alive && generation === planGeneration) { enginePlanPending = false; validationCache = null; changed(); } }
     }, 150);
   }
   const cohortPresentation = () => planPresentation(enginePlan, selectedTargets, { pending: enginePlanPending, error: enginePlanError });
@@ -318,6 +335,8 @@ export function makeVariationEditor({ targets, cohortMode, destination: initialD
     const blocked = unresolvedConflicts();
     if (preview.status === "invalid") {
       Object.assign(presentation, { status: "invalid", message: preview.message, problemMessage: preview.message });
+    } else if (preview.status === "checking" && preview.message?.startsWith("Checking bytes")) {
+      presentation.message = preview.message;
     } else if (blocked) {
       const message = conflictMessage(blocked);
       Object.assign(presentation, { status: "conflict", message, problemMessage: message });
@@ -347,7 +366,7 @@ export function makeVariationEditor({ targets, cohortMode, destination: initialD
         problems.read().find(problem => problem.target?.id === id) ?? (enginePlan ?? []).find(target => selectedTargets[target.index]?.id === id)?.notices?.[0] ?? null;
     },
     targetOutcome: id => runOutcomes.get(id) ?? null,
-    problems: () => problems.read(),
+    problems: () => [...problems.read(), ...validationProblems()],
     reportProblem: (key, problem) => problems.report(key, problem),
     clearProblem: key => problems.clear(key),
     canRun,
@@ -693,7 +712,7 @@ export function makeVariationEditor({ targets, cohortMode, destination: initialD
       if (destinationPending) return unavailable("reading", `Checking ${destination.source}…`);
       const snapshot = captureRows(), first = catalogues.get(capturedTargets[0].id);
       for (const [id, entry] of Object.entries(snapshot.numeric)) if (entry.values.enabled && entry.values.mode === "range" && increment(entry) === null) {
-        return unavailable("invalid", `${entry.metadata.label}: enter a valid positive Step. Your text is kept.`);
+        return unavailable("invalid", problemText(variationProblem("numeric-step", { phase: "compile", target: targetIdentity(capturedTargets[0]), parameter: parameter(id), field: "Step", value: entry.values.rawIncrement, numbers: { minimum: entry.metadata.minIncrement } })));
       }
       try {
         const compiled = compile(snapshot, null, true), payload = compiled.estimate;
@@ -746,8 +765,8 @@ export function makeVariationEditor({ targets, cohortMode, destination: initialD
           + (batch ? ` · workflow estimate × ${selectedTargets.length} target image${selectedTargets.length === 1 ? "" : "s"}` : "");
         let status = !naming.complete || error ? "invalid" : pending ? "checking" : "ready";
         let message = !naming.complete ? "Unresolved naming token: check Prefix and Suffix." : error ? `Image comparison failed: ${error}`
-          : pending ? "Checking images…" : !n ? "Choose a different value, image or destination to create variations."
-          : !safe ? "Estimate exceeds safe integer precision; the full value is approximate."
+          : pending ? problemText(validationProblems().find(problem => problem.code === "images-checking")) : !n ? "Choose a different value, image or destination to create variations."
+          : !safe ? problemText(variationProblem("estimate-unsafe", { phase: "plan", numbers: { count: n } }))
           : batch ? "Estimated from the opening workflow; each remaining target is checked before submission."
           : n > 100 ? "Large sweep: this many jobs will be queued. The engine validates its existing per-run limit." : "";
         const blocked = unresolvedConflicts();
@@ -762,7 +781,7 @@ export function makeVariationEditor({ targets, cohortMode, destination: initialD
       } catch (error) {
         // A value the destination lacks is a conflict, not a recipe mistake.
         const blocked = unresolvedConflicts();
-        return withCohort({ ...unavailable(blocked ? "conflict" : "invalid", blocked ? conflictMessage(blocked) : error.message),
+        return withCohort({ ...unavailable(blocked ? "conflict" : "invalid", blocked ? conflictMessage(blocked) : problemText(problemFrom(error, { target: targetIdentity(capturedTargets[0]) }))),
           unchecked: [...unchecked], uncheckedMessage: destinationMessage() });
       }
     },

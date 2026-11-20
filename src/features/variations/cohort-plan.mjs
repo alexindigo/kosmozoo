@@ -2,9 +2,9 @@
 // catalogue and resource identities. No result here is a graph/upload receipt.
 import { parameterCurrent, parameterContract } from "../../parameters.mjs";
 import { snapshotDraft, numericText, imageIdentity } from "./recipe-model.mjs";
-import { compileRecipe } from "./recipe-compile.mjs";
+import { compileRecipe, compileNumericOperation } from "./recipe-compile.mjs";
 import { admitResourceTransfer } from "./compile.mjs";
-import { variationProblem, problemFrom } from "./problems.mjs";
+import { variationProblem, problemFrom, problemError } from "./problems.mjs";
 import { MAX_JOBS_PER_IMAGE } from "./limits.mjs";
 import { targetRunPlan, parameterIndex, catalogueParams, parameterLabel, permutationPlan,
   generatePermutations, resolveRelativeRanges, reproducesOriginal, variationOutputName, parameterAliases, templateReplaceWithProof } from "./shared.mjs";
@@ -61,7 +61,7 @@ export function planTarget({ target, cohortMode, recipe, destination, resourceVa
   const catalogue = target.catalogue, bound = bindCohortRecipe(recipe, catalogue);
   for (const entry of Object.values(bound.numeric)) if (entry.values.enabled && entry.values.mode === "range") {
     const step = numericText(entry.values.rawIncrement);
-    if (step === null || step <= 0 || step < entry.metadata.minIncrement) throw new Error("Enter a valid positive increment; incomplete text has been kept.");
+    if (step === null || step <= 0 || step < entry.metadata.minIncrement) compileNumericOperation(entry.values, entry.metadata, { batch: cohortMode === "bulk" });
   }
   const compiled = compileRecipe(bound, { catalogue, target, batch: cohortMode === "bulk", resourceValues, resourceIdentities, preview: !!resourceIdentities });
   const plan = targetRunPlan(resourceIdentities ? compiled.estimate : compiled.payload, catalogue);
@@ -69,7 +69,7 @@ export function planTarget({ target, cohortMode, recipe, destination, resourceVa
   // Current graph resources have identities too, but only in the counting model.
   Object.assign(values, target.currentIdentities ?? {});
   const ranges = plan.payload.relative ? resolveRelativeRanges(plan.payload.ranges, values) : plan.payload.ranges;
-  if (Object.keys(plan.payload.ranges).some(id => plan.payload.ranges[id].enabled && !Object.hasOwn(ranges, id))) throw new Error("Every applicable relative range needs clamp bounds");
+  for (const id of Object.keys(plan.payload.ranges)) if (plan.payload.ranges[id].enabled && !Object.hasOwn(ranges, id)) throw problemError(variationProblem("range-clamp", { phase: "plan", parameter: { id, label: recipe.numeric[id]?.metadata.label ?? id } }));
   const options = { sameHost: reproducesOriginal(target.host, destination?.source) };
   const kernel = permutationPlan(ranges, values, plan.payload.imageParams, options), count = kernel.total;
   const enabled = Object.values(recipe).flatMap(rows => Object.entries(rows)).filter(([, entry]) => entry.values.enabled);
@@ -88,7 +88,12 @@ export function planTarget({ target, cohortMode, recipe, destination, resourceVa
   if (!Number.isSafeInteger(count) || count > MAX_JOBS_PER_IMAGE) throw Object.assign(new Error(`${count} jobs for this image; the limit is ${MAX_JOBS_PER_IMAGE} per image. Reduce the axes or increase the increment.`), {
     code: "too-many", count: Number.isSafeInteger(count) ? count : 0, counts: { ...counts, admitted: 0 }, notices,
   });
-  if (count <= 0) throw Object.assign(new Error("No work for this image; choose a different value, image or destination."), { code: "no-work", counts, notices });
+  if (plan.payload.relative) for (const [id, range] of Object.entries(ranges)) {
+    const requested = plan.payload.ranges[id];
+    if (!requested.enabled || requested.absolute || !requested.clamp) continue;
+    if (range.min === range.max && range.min == values[id]) notices.push(variationProblem("relative-clamped", { severity: "warning", phase: "plan", parameter: { id, label: recipe.numeric[id]?.metadata.label ?? id }, numbers: { from: String(requested.min), to: String(requested.max), current: String(values[id]), lo: String(range.min), hi: String(range.max), min: String(requested.clamp[0]), max: String(requested.clamp[1]), jobs: count } }));
+  }
+  if (count <= 0) throw Object.assign(problemError(variationProblem("no-work", { phase: "plan", destination: destination?.source ?? target.host, names: kernel.axes.map(axis => recipe.numeric[axis.id]?.metadata.label ?? Object.values(recipe).map(rows => rows[axis.id]?.metadata.label).find(Boolean) ?? axis.id), numbers: { excluded: kernel.excluded } })), { counts, notices });
   const permutations = generatePermutations(ranges, values, plan.payload.imageParams, options);
   // Count admission also checks every final name whose inputs are known. Transfer
   // identities remain count-only; receipt-backed planning repeats this check.
@@ -129,7 +134,7 @@ export function planCohort({ targets, cohortMode, recipe, destination }) {
       return { index, count, problem: null, counts, notices: notices.map(problem => problemFrom({ problem }, { target: identity })) };
     } catch (error) {
       const problem = problemFrom(Object.assign(error, { code: error.problem?.code ?? error.code ?? (/work budget/.test(error.message) ? "work-budget" : "invalid-plan") }), {
-        phase: "plan", target: { index, source: target.host, name: target.filename }, ...(error.count !== undefined ? { numbers: { count: error.count } } : {}) });
+        phase: "plan", destination: destination?.source ?? target.host, target: { index, source: target.host, name: target.filename }, ...(error.count !== undefined ? { numbers: { count: error.count } } : {}) });
       return { index, count: error.count ?? 0, problem, ...(error.counts ? { counts: error.counts } : {}),
         ...(error.notices?.length ? { notices: error.notices.map(problem => problemFrom({ problem }, { target: { index, source: target.host, name: target.filename } })) } : {}) };
     }

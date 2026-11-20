@@ -44,7 +44,7 @@ Deno.test("cohort planner: per-target cap and missing destination class/carrier"
   const missing = { ...target, catalogue: { ...target.catalogue, destination: { missing: ["ParameterlessNode"] } } };
   assertEquals(planCohort({ targets: [missing], cohortMode: "single", recipe })[0].problem.code, "missing-class");
   recipe.numeric["n.denoise"].values.mode = "value";
-  assertEquals(planCohort({ targets: [{ ...target, catalogue: { ...target.catalogue, parameters: [] } }], cohortMode: "single", recipe })[0].problem.code, "invalid-plan");
+  assertEquals(planCohort({ targets: [{ ...target, catalogue: { ...target.catalogue, parameters: [] } }], cohortMode: "single", recipe })[0].problem.code, "parameter-missing");
 });
 
 Deno.test("cohort planner: absent relative numeric carriers are exclusions, discrete carriers are required", async () => {
@@ -53,7 +53,7 @@ Deno.test("cohort planner: absent relative numeric carriers are exclusions, disc
   assertEquals(planCohort({ targets: [absent], cohortMode: "bulk", recipe })[0].problem.code, "no-work");
   recipe.enums["choice.value"].values.enabled = true;
   const noChoice = { ...target, catalogue: { ...target.catalogue, parameters: target.catalogue.parameters.filter(p => p.id !== "choice.value") } };
-  assertEquals(planCohort({ targets: [noChoice], cohortMode: "bulk", recipe })[0].problem.code, "invalid-plan");
+  assertEquals(planCohort({ targets: [noChoice], cohortMode: "bulk", recipe })[0].problem.code, "parameter-missing");
 });
 
 Deno.test("silent row 4: absent-relative producer retains exact notice and rejected count chain", async () => {
@@ -104,7 +104,7 @@ Deno.test("cohort planner: shared kernel axis/traversal budget is admission, not
   const parameters = Array.from({ length: 129 }, (_, index) => ({ ...parameter, id: `n.axis${index}`, key: `axis${index}` }));
   recipe.numeric = Object.fromEntries(parameters.map(p => [p.id, { ...structuredClone(base), metadata: { ...base.metadata, ...p } }]));
   const planned = planCohort({ targets: [{ ...target, catalogue: { ...target.catalogue, parameters } }], cohortMode: "single", recipe });
-  assertEquals(planned[0].problem.code, "work-budget");
+  assertEquals(planned[0].problem.code, "axis-budget");
 });
 
 Deno.test("cohort planner: a file reuses a prior selected local reference by byte identity", async () => {

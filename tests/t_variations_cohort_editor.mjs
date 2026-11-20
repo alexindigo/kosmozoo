@@ -56,7 +56,7 @@ Deno.test("cohort preview: over-limit count is display data, never Run admission
 Deno.test("cohort preview: blank problem messages reject the response instead of a silent zero", async () => {
   const rig = editorRig({ plan: async () => [{ index: 0, count: 0, problem: { code: "no-work", message: " " } }] });
   await settle(rig);
-  assertEquals(rig.editor.preview().n, null); assertEquals(rig.editor.preview().message, "Cohort plan unavailable");
+  assertEquals(rig.editor.preview().n, null); assertEquals(rig.editor.preview().message, "The engine returned an invalid job plan for 1 images (target length, index, count or problem shape mismatch). No jobs were sent by this check. Retry; if repeated, reload or update the client and engine together.");
   assertEquals(rig.editor.canRun(), false); rig.editor.dispose();
 });
 

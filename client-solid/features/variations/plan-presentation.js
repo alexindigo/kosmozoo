@@ -9,7 +9,8 @@ export function planPresentation(plan, targets, { pending = false, error = "" } 
   const overCount = problems.filter(target => target.problem.code === "too-many").length;
   const overLimit = overCount > 0;
   const problemMessage = problems.map(target => `${targets.length > 1 && !target.problem.target?.name ? `${targets[target.index].filename}: ` : ""}${problemText(target.problem)}`).join("\n");
-  const message = error || (checking ? "Checking every image..." : problemMessage);
+  const scope = !checking && !error && targets.length > 1 ? problemText(variationProblem("plan-scope", { phase: "plan", numbers: { jobs: admitted.reduce((sum, target) => sum + target.count, 0), admitted: admitted.length, images: targets.length, blocked: problems.length } })) : "";
+  const message = error || (checking ? problemText(variationProblem("plan-pending", { phase: "plan", numbers: { images: targets.length } })) : [scope, problemMessage].filter(Boolean).join("\n"));
   const notices = (plan ?? []).flatMap(target => target.notices ?? []);
   if (n > 100 && !overLimit) notices.push(variationProblem("large-sweep", { severity: "warning", phase: "plan", numbers: { jobs: admitted.reduce((sum, target) => sum + target.count, 0), images: admitted.length, maximum: Math.max(...admitted.map(target => target.count)) } }));
   const chain = (plan ?? []).filter(target => target.counts).map(target => {
