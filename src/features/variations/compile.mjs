@@ -79,7 +79,7 @@ export function validateParameterValue(graph, parameter, schema = {}) {
 // name exists only after an actual receipt. Known non-resource inputs and
 // listing-only pickers reject before any read or write; unknown stays backend-owned.
 export function admitResourceTransfer(parameter) {
-  const contract = parameterContract(parameter), name = parameter.label ?? parameter.id;
+  const contract = parameterContract(parameter);
   if (contract.knowledge !== "known") return contract;
   if (contract.role !== "resource") throw invalid("transfer-unsupported", parameter, { detail: "accepts only its declared values, not uploaded files" });
   if (!contract.resource.upload) throw invalid("transfer-unsupported", parameter, { detail: "does not accept uploaded files" });

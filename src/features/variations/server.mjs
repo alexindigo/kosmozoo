@@ -38,9 +38,6 @@ const exactResponse = (value, init = {}) => new Response(stringifyExactJson(valu
   ...init, headers: { "Content-Type": "application/json", ...init.headers },
 });
 
-// hard cap on permutations per run — a sweep is a human-scale batch, not a
-// fork bomb (F7). Above the cap the run answers 413.
-
 // --- graph inspection (ComfyUI conventions) -----------------------------------
 
 // Compatibility inspection ports all project the same descriptor pipeline.

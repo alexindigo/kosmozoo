@@ -291,12 +291,12 @@ export function makeVariationHistory(app) {
     },
     detail(id, leaseId = null) {
       const row = record(id, leaseId), raw = captured(row), effects = store.variationEffects(id);
+      const admission = effects.find(effect => effect.kind === "admission" && effect.state === "confirmed");
       return { id, format: 1, createdAt: row.created_at, captureState: row.capture_state, outcome: row.outcome,
         submission: { sent: effects.filter(e => e.kind === "permutation" && e.result_json && data(e.result_json).sent === true).length, total: row.total_count },
         snapshotHash: row.snapshot_hash, summary: summaryOf(row, effects), ...raw,
-        effects: store.variationEffects(id).map(e => ({ id: e.effect_id, kind: e.kind, state: e.state, result: e.result_json ? data(e.result_json) : null })),
-        admission: store.variationEffects(id).find(e => e.kind === "admission" && e.state === "confirmed")?.result_json
-          ? data(store.variationEffects(id).find(e => e.kind === "admission").result_json).targets : null,
+        effects: effects.map(e => ({ id: e.effect_id, kind: e.kind, state: e.state, result: e.result_json ? data(e.result_json) : null })),
+        admission: admission?.result_json ? data(admission.result_json).targets : null,
         targets: row.snapshot_json ? data(row.snapshot_json).targets : data(row.targets_json),
         resources: row.snapshot_json ? data(row.snapshot_json).resources : store.variationResources(id).map(r => ({ ...data(r.descriptor_json), hash: r.hash })) };
     },

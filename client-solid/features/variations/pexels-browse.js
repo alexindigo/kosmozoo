@@ -2,8 +2,8 @@
 // service and search text. It owns no image-set membership; the editor turns
 // a chosen photo into a File through its own acquisition lane.
 
-export const SEARCH_DELAY_MS = 300;
 import { variationProblem, problemFrom, problemText } from "/shared/features/variations/problems.mjs";
+export const SEARCH_DELAY_MS = 300;
 const RETAINED_LISTINGS = 24;
 const errorText = error => error?.detail || error?.message || String(error);
 
