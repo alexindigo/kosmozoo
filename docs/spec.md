@@ -466,11 +466,18 @@ own graph and destination-aware catalogue pass through the shared raw compiler,
 applicability, relative-range resolution and tuple kernel. The result is ordered
 `[{index,count,problem:null|{code,message}}]`: no work, more than 500 jobs per
 target, traversal budgets, missing carriers/classes or incompatible values exclude
-only that target. Unmaterialized image resources are identities, not predicted
+only that target. An over-limit target retains its exact workload `count` with a
+`too-many` problem; it is not admitted. Other failures without a count use zero
+and always supply a nonempty reason. Unmaterialized image resources are identities, not predicted
 receipt names or graph assignments. Preview is debounced, latest-only and aborted
 on close; it cannot change recipe edits or dirty state. The displayed exact total
-is the sum of admitted counts. Each batch tile shows its own problem; a single
-target also reports it in the summary. Run is disabled when no target has work.
+is the sum of known workload counts, including over-limit work. Over-limit counts
+are marked, never replaced by zero. One presentation projection supplies each
+batch tile's problem and every target's reason in the fixed summary status slot,
+including single targets without a strip and new problems beside prior Run results.
+Over-limit reasons include the actual count and unchanged 500-per-image limit.
+Only admitted counts contribute submission work and time estimates; Run is disabled
+when no target is admitted.
 
 After the archive is sealed the same planner records durable `admission` evidence
 in the existing effects table. Materialization, target preparation and dispatch

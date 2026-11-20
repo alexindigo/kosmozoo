@@ -90,3 +90,44 @@ Deno.test("cohort planner: a file reuses a prior selected local reference by byt
   const planned = planCohort({ targets: [counted], cohortMode: "single", recipe });
   assertEquals(planned[0].count, 1, JSON.stringify(planned));
 });
+
+Deno.test("cohort planner: adding images retains the exact count across the 500-per-image limit", async () => {
+  const { recipe, target } = await fixture();
+  recipe.numeric["n.denoise"].values = { ...recipe.numeric["n.denoise"].values, mode: "range", min: "1", max: "17", rawIncrement: "1" };
+  recipe.images["image.image"].values.enabled = true;
+  for (const [images, count] of [[22, 374], [36, 612]]) {
+    recipe.images["image.image"].values.items = Array.from({ length: images }, (_, i) => ({ kind: "reference", value: `added-${i}.png` }));
+    const encoded = encodeHistoryRecipe(recipe, crypto.randomUUID());
+    const resources = encoded.resources.map(resource => ({ ...resource, host: "fake", root: "input" }));
+    const counted = countingTarget(target, encoded.recipe, resources, { source: "fake" }, 0);
+    const plan = planCohort({ targets: [counted], cohortMode: "single", recipe: encoded.recipe });
+    assertEquals(plan[0].count, count, JSON.stringify(plan));
+    assertEquals(plan[0].problem?.code ?? null, count > 500 ? "too-many" : null);
+    if (count > 500) assertEquals(plan[0].problem.message, "612 jobs for this image; the limit is 500 per image. Reduce the axes or increase the increment.");
+  }
+});
+
+for (const kind of ["browser-file", "server-path", "pexels", "foreign-output", "input", "output", "target"]) {
+  Deno.test(`cohort planner: ${kind} counts before upload, including over-limit work`, async () => {
+    const { recipe, target } = await fixture();
+    recipe.images["image.image"].values.enabled = true;
+    const item = i => kind === "input" || kind === "output" ? { kind: "reference", value: `added-${i}.png [${kind}]` }
+      : kind === "target" ? { kind: "target" }
+      : kind === "server-path" ? { kind: "server-path", path: `/engine/added-${i}.png`, name: `added-${i}.png` }
+      : { kind: "upload", file: new File([`${kind}-${i}`], `added-${i}.png`), name: `added-${i}.png` };
+    for (const size of [2, 500, 501]) {
+      // The target-relative item is singular; multiply it with a numeric axis.
+      recipe.images["image.image"].values.items = Array.from({ length: kind === "target" ? 1 : size }, (_, i) => item(i));
+      if (kind === "target") recipe.numeric["n.denoise"].values = { ...recipe.numeric["n.denoise"].values, mode: "range", min: "2", max: String(size + 1), rawIncrement: "1" };
+      const encoded = encodeHistoryRecipe(recipe, crypto.randomUUID());
+      const resources = [...encoded.resources.map(resource => ({ ...resource,
+        ...(["input", "output"].includes(kind) ? { host: "fake", root: kind } : {}), hash: resource.id.padStart(64, "0") })),
+        { id: "target-0", host: "fake", root: "output", name: "image.png" }];
+      const counted = countingTarget(target, encoded.recipe, resources, null, 0);
+      const [plan] = planCohort({ targets: [counted], cohortMode: "single", recipe: encoded.recipe });
+      assertEquals(plan.count, size, JSON.stringify(plan));
+      assertEquals(plan.problem?.code ?? null, size > 500 ? "too-many" : null);
+      if (plan.problem) assertEquals(typeof plan.problem.message === "string" && plan.problem.message.trim().length > 0, true);
+    }
+  });
+}

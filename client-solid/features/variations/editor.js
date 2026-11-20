@@ -15,6 +15,7 @@ import { classifyImageFiles } from "./image-drop.js";
 import { connectionPresentation } from "./field-filter.js";
 import { estimateGenerationTime, knownGenerationTime } from "./time-estimate.js";
 import { observeSubmission } from "./submission-progress.js";
+import { planPresentation } from "./plan-presentation.js";
 import { staleSource, sourceFailure } from "./source-message.js";
 import { judgmentVisible } from "/js/image-visibility-model.mjs";
 import { isEntryLeaf } from "/shared/entry-path.mjs";
@@ -287,26 +288,22 @@ export function makeVariationEditor({ targets, cohortMode, destination: initialD
         const planned = await services.plan(input, planController.signal);
         if (!alive || generation !== planGeneration) return;
         if (!Array.isArray(planned) || planned.length !== input.targets.length || planned.some((target, index) => !target || target.index !== index ||
-          !Number.isSafeInteger(target.count) || target.count < 0 || (target.problem ? target.count !== 0 || typeof target.problem.message !== "string" : target.count <= 0))) throw new Error("Cohort plan unavailable");
+          !Number.isSafeInteger(target.count) || target.count < 0 || (target.problem ?
+            typeof target.problem.message !== "string" || !target.problem.message.trim() || target.count !== 0 && target.problem.code !== "too-many" : target.count <= 0))) throw new Error("Cohort plan unavailable");
         enginePlan = freeze(snapshotDraft(planned));
       } catch (error) { if (alive && generation === planGeneration) enginePlanError = error.message; }
       finally { if (alive && generation === planGeneration) { enginePlanPending = false; changed(); } }
     }, 150);
   }
+  const cohortPresentation = () => planPresentation(enginePlan, selectedTargets, { pending: enginePlanPending, error: enginePlanError });
   const withCohort = preview => {
     if (!services.plan) return preview;
-    const pending = enginePlanPending || !enginePlan && !enginePlanError;
-    const n = pending || enginePlanError ? null : enginePlan.reduce((total, target) => total + target.count, 0);
-    const problems = enginePlan?.filter(target => target.problem) ?? [];
-    const message = enginePlanError || (pending ? "Checking every image..." : problems.length ? selectedTargets.length === 1 ? unresolvedConflicts() ? conflictMessage(unresolvedConflicts()) : problems[0].problem.message
-      : `${problems.length} image${problems.length === 1 ? " needs" : "s need"} attention; the others can run.` : "");
-    const times = (enginePlan ?? []).filter(target => target.count > 0).map(target => {
+    const presentation = cohortPresentation(), { n } = presentation;
+    const times = presentation.admitted.map(target => {
       const duration = generationTimes.get(selectedTargets[target.index]?.id);
       return knownGenerationTime(duration) ? duration * target.count : null;
     });
-    return { ...preview, n, display: n === null ? "--" : n.toLocaleString("en-US"), fullCount: n === null ? message : `${n} variations`,
-      exact: n !== null, status: enginePlanError ? "failed" : pending ? "checking" : "ready", message,
-      breakdown: n === null ? "" : `${n} jobs for ${enginePlan.filter(target => target.count > 0).length} of ${selectedTargets.length} image${selectedTargets.length === 1 ? "" : "s"}`,
+    return { ...preview, ...presentation, exact: n !== null,
       timeEstimate: estimateGenerationTime(n > 0 ? 1 : null, times) };
   };
   const canRun = () => !services.plan || catalogueReady && catalogueError === null && !destinationPending && !enginePlanPending && !enginePlanError && enginePlan?.some(target => !target.problem && target.count > 0);
@@ -318,7 +315,7 @@ export function makeVariationEditor({ targets, cohortMode, destination: initialD
     targets: () => selectedTargets,
     targetProblem(id) {
       const retained = runProblems.get(id);
-      return retained?.revision === recipe.revision() ? retained.problem : enginePlan?.[selectedTargets.findIndex(target => target.id === id)]?.problem ?? null;
+      return retained?.revision === recipe.revision() ? retained.problem : cohortPresentation().problems.get(id) ?? null;
     },
     targetOutcome: id => runOutcomes.get(id) ?? null,
     canRun,

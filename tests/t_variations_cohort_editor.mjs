@@ -39,6 +39,25 @@ Deno.test("cohort preview: latest-only reads abort retired plans and disposal ab
   rig.editor.dispose(); assert(reads[1].signal.aborted);
 });
 
+Deno.test("cohort preview: over-limit count is display data, never Run admission", async () => {
+  let captures = 0;
+  const problem = { code: "too-many", message: "612 jobs for this image; the limit is 500 per image." };
+  const rig = editorRig({ plan: async () => [{ index: 0, count: 612, problem }], history: { capture() { captures++; } } });
+  await settle(rig);
+  assertEquals(rig.editor.preview().n, 612); assertEquals(rig.editor.preview().overLimit, true);
+  assertEquals(rig.editor.preview().message, problem.message);
+  assertEquals(rig.editor.targetProblem("fake:image.png"), problem);
+  assertEquals(rig.editor.canRun(), false); assertEquals((await rig.editor.run()).status, "invalid");
+  assertEquals(captures, 0); rig.editor.dispose();
+});
+
+Deno.test("cohort preview: blank problem messages reject the response instead of a silent zero", async () => {
+  const rig = editorRig({ plan: async () => [{ index: 0, count: 0, problem: { code: "no-work", message: " " } }] });
+  await settle(rig);
+  assertEquals(rig.editor.preview().n, null); assertEquals(rig.editor.preview().message, "Cohort plan unavailable");
+  assertEquals(rig.editor.canRun(), false); rig.editor.dispose();
+});
+
 for (const newerEdits of [false, true]) Deno.test(`cohort settlement: ${newerEdits ? "newer edits retain the captured target and queued outcome" : "unchanged revision removes the queued target"}`, async () => {
   const baseline = editorRig(); baseline.editor.dispose();
   let enter, release;

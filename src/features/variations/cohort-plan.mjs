@@ -70,7 +70,9 @@ export function planTarget({ target, cohortMode, recipe, destination, resourceVa
   if (Object.keys(plan.payload.ranges).some(id => plan.payload.ranges[id].enabled && !Object.hasOwn(ranges, id))) throw new Error("Every applicable relative range needs clamp bounds");
   const options = { sameHost: reproducesOriginal(target.host, destination?.source) };
   const count = permutationPlan(ranges, values, plan.payload.imageParams, options).total;
-  if (!Number.isSafeInteger(count) || count > 500) throw Object.assign(new Error(`Too many permutations (${count} > 500); reduce the axes or increase the increment.`), { code: "too-many" });
+  if (!Number.isSafeInteger(count) || count > 500) throw Object.assign(new Error(`${count} jobs for this image; the limit is 500 per image. Reduce the axes or increase the increment.`), {
+    code: "too-many", count: Number.isSafeInteger(count) ? count : 0,
+  });
   if (count <= 0) throw Object.assign(new Error("No work for this image; choose a different value, image or destination."), { code: "no-work" });
   generatePermutations(ranges, values, plan.payload.imageParams, options);
   return { count, plan, compiled };
@@ -92,6 +94,6 @@ export function planCohort({ targets, cohortMode, recipe, destination }) {
       }
       const { count } = planTarget({ target, cohortMode, recipe, destination, resourceIdentities: target.resourceIdentities });
       return { index, count, problem: null };
-    } catch (error) { return { index, count: 0, problem: { code: error.code ?? (/work budget/.test(error.message) ? "work-budget" : "invalid-plan"), message: error.message } }; }
+    } catch (error) { return { index, count: error.count ?? 0, problem: { code: error.code ?? (/work budget/.test(error.message) ? "work-budget" : "invalid-plan"), message: error.message || "Unable to plan this image; check its parameters and destination." } }; }
   });
 }
