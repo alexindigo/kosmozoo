@@ -2,12 +2,13 @@
 import { createMemo, createSignal, batch } from "solid-js";
 import { createStore, reconcile } from "solid-js/store";
 import { makeUnseenItems } from './unseen-items.js';
+import { containsSequence } from '/js/api.mjs';
 
 // Stream-owned records retire on restart even when operation origins survive.
 export const sameSourceIdentity = (record, source) => !!source && source.address === record.address &&
   source.incarnation === record.incarnation && source.sourceVersion?.epoch === record.epoch;
 
-export function makeSourceRegistry({ createRecord, onRetire }) {
+export function makeSourceRegistry({ createRecord, onRetire, judgmentPrefs = () => undefined }) {
   const members = new Map();
   const [membership, setMembership] = createSignal(0);
   const changed = () => setMembership(value => value + 1);
@@ -16,6 +17,7 @@ export function makeSourceRegistry({ createRecord, onRetire }) {
       arrivals: null });
     const [unseenRevision, setUnseenRevision] = createSignal(0);
     const unseen = makeUnseenItems({ changed: () => setUnseenRevision(n => n+1) });
+    const attention = createMemo(() => { unseenRevision(); return unseen.attention(judgmentPrefs()); });
     let inventorySequence = null;
     // Inventory owns reachability once observed; discovery cannot undo it.
     const host = createMemo(() => state.reachability === undefined ? state.host : { ...state.host, online: state.reachability });
@@ -28,8 +30,8 @@ export function makeSourceRegistry({ createRecord, onRetire }) {
       unseen,
       get inventorySequence() { return inventorySequence; },
       observeInventory(sequence) { if (Number.isSafeInteger(sequence)) inventorySequence = sequence; },
-      get hasNew() { unseenRevision(); return unseen.hasUnseen(); },
-      isUnseen(sequence) { unseenRevision(); return unseen.isUnseen(sequence); },
+      get hasNew() { return attention().length > 0; },
+      isUnseen(sequence) { return Number.isSafeInteger(sequence) && containsSequence(attention(), sequence); },
       acceptArrivals(value) {
         if (!unseen.accept(value)) return false;
         if (inventorySequence === null) inventorySequence = value.sequence;

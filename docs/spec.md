@@ -194,7 +194,10 @@ carry `arrivalSeq`. Default inventories and source events retain the exact legac
 `{sequence,latestVisibleSeq}` projection, or null before the first accepted inventory.
 
 `arrivals=items-v1` opts the existing inventory request and single EventSource into
-`{sequence,latestVisibleSeq,revision,visibleRanges}`. Ranges are canonical inclusive
+`{sequence,latestVisibleSeq,revision,visibleRanges,downVotedRanges,upVotedRanges}`.
+Vote ranges are disjoint subsets of visible membership and update on committed
+judgment changes without assigning new sequences. Legacy item frames without vote
+ranges remain valid and imply empty vote ranges. Ranges are canonical inclusive
 positive integer pairs: dense, ascending, disjoint, nonadjacent and within sequence.
 `latestVisibleSeq` is their maximum, or zero when empty. Missing/hidden/gone outputs
 are excluded. Lower-member removal changes revision even when the maximum stays
@@ -203,8 +206,8 @@ atomically. Opted-in inventory includes shared `origin` (source/address/kind/
 incarnation). Its entries, visibility overlay and arrival projection synchronously
 use the token's latest accepted snapshot after the awaited inventory read.
 
-Inventory/removal and committed hide/gone boundaries refresh immutable membership
-and its cached JSON fragment using name-only exclusions. Jobs progress never walks
+Inventory/removal and committed hide/gone/judgment boundaries refresh immutable membership
+and its cached JSON fragment using name-only exclusions and narrow output vote facts. Jobs progress never walks
 names, metadata or interval arrays. Demand-only event encoding keeps chunks at most
 16384 bytes and one active plus latest pending immutable frame. Fragmented membership
 has O(intervals) payload, not constant size. Legacy and opted-in delivery share the
@@ -225,7 +228,13 @@ pagehide disconnects native observation, pageshow rebinds, and replacement/dispo
 retired callbacks. Store tickets also fence source/session/name/sequence/known-content
 and native resource retirement. First-hash enrichment preserves the same content.
 
-Source pills, picker rows, persistent rail segments and favicon consume that one ledger,
+Source pills, picker rows, persistent rail segments and favicon consume one eligible
+attention projection from that ledger: raw unseen intersected with the shared judgment
+visibility policy and live session preferences, including unselected sources. Markers
+count only images the feed would show under that judgment policy; feed search/folder
+scope does not suppress source attention. Hiding never acknowledges an item: reveal,
+disabling down-vote hiding or changing its vote restores still-unseen attention.
+All surfaces share that projection,
 including selected and unpinned sources. Reload starts quiet; no read state is persisted
 or written to the engine. Source attention uses `--attention` and shared "New images."
 wording, without pulsing/layout change. For a current source, only its name turns

@@ -1,11 +1,13 @@
 import { validItemArrivals, containsSequence, insertRange, subtractRanges, equalRanges } from '/js/api.mjs';
+import { judgmentVisible } from '/js/image-visibility-model.mjs';
 
 export function makeUnseenItems({ changed = () => {} } = {}) {
   let projection = null, baseline = null, acknowledged = [], unseen = [];
   const compatible = value => value === null || validItemArrivals(value) && (!projection ||
     value.revision > projection.revision && value.sequence >= projection.sequence ||
     value.revision === projection.revision && value.sequence === projection.sequence &&
-      value.latestVisibleSeq === projection.latestVisibleSeq && equalRanges(value.visibleRanges, projection.visibleRanges));
+      value.latestVisibleSeq === projection.latestVisibleSeq &&
+      ['visibleRanges','downVotedRanges','upVotedRanges'].every(key => equalRanges(value[key] ?? [], projection[key] ?? [])));
   return {
     compatible,
     accept(value) {
@@ -13,7 +15,8 @@ export function makeUnseenItems({ changed = () => {} } = {}) {
       if (projection?.revision === value.revision) return true;
       if (baseline === null) baseline = value.sequence;
       projection = Object.freeze({ sequence: value.sequence, latestVisibleSeq: value.latestVisibleSeq, revision: value.revision,
-        visibleRanges: Object.freeze(value.visibleRanges.map(pair => Object.freeze([...pair]))) });
+        ...Object.fromEntries(['visibleRanges','downVotedRanges','upVotedRanges'].map(key =>
+          [key, Object.freeze((value[key] ?? []).map(pair => Object.freeze([...pair])))])) });
       unseen = subtractRanges(value.visibleRanges, acknowledged, baseline); changed(); return true;
     },
     acknowledge(sequence) {
@@ -23,6 +26,13 @@ export function makeUnseenItems({ changed = () => {} } = {}) {
     },
     isUnseen: sequence => Number.isSafeInteger(sequence) && containsSequence(unseen, sequence),
     hasUnseen: () => unseen.length > 0,
+    attention(prefs) {
+      let eligible = unseen;
+      for (const [vote, key] of [['down','downVotedRanges'],['up','upVotedRanges']]) {
+        if (!judgmentVisible({vote}, prefs)) eligible = subtractRanges(eligible, projection?.[key] ?? []);
+      }
+      return eligible;
+    },
     get projection() { return projection; },
   };
 }

@@ -1,5 +1,5 @@
 // Version1 authoritative source snapshots. Validation precedes every consumer write.
-import { validRanges } from './sequence-ranges.mjs';
+import { validRanges, subtractRanges, equalRanges } from './sequence-ranges.mjs';
 const integer = value => Number.isSafeInteger(value) && value >= 0;
 const text = value => typeof value === "string" && value.length > 0;
 const record = value => value && typeof value === "object" && !Array.isArray(value) &&
@@ -16,9 +16,15 @@ export function validSourceVersion(value) {
 export const validSourceCursor = value => shape(value, ["epoch", "revision"]) && text(value.epoch) && integer(value.revision);
 export const validArrivals = value => value === null || shape(value, ["sequence", "latestVisibleSeq"]) &&
   integer(value.sequence) && integer(value.latestVisibleSeq) && value.latestVisibleSeq <= value.sequence;
-export const validItemArrivals = value => value === null || shape(value, ['sequence','latestVisibleSeq','revision','visibleRanges']) &&
+export const validItemArrivals = value => value === null ||
+  (shape(value, ['sequence','latestVisibleSeq','revision','visibleRanges']) ||
+    shape(value, ['sequence','latestVisibleSeq','revision','visibleRanges','downVotedRanges','upVotedRanges'])) &&
   integer(value.sequence) && integer(value.revision) && value.revision > 0 && integer(value.latestVisibleSeq) &&
-  validRanges(value.visibleRanges, value.sequence) && value.latestVisibleSeq === (value.visibleRanges.at(-1)?.[1] ?? 0);
+  validRanges(value.visibleRanges, value.sequence) && value.latestVisibleSeq === (value.visibleRanges.at(-1)?.[1] ?? 0) &&
+  (!Object.hasOwn(value, 'downVotedRanges') ||
+    [value.downVotedRanges, value.upVotedRanges].every(ranges => validRanges(ranges, value.sequence) &&
+      subtractRanges(ranges, value.visibleRanges).length === 0) &&
+    equalRanges(subtractRanges(value.downVotedRanges, value.upVotedRanges), value.downVotedRanges));
 
 export function compareSourceVersions(a, b) {
   if (!validSourceVersion(a) || !validSourceVersion(b) || a.epoch !== b.epoch || a.incarnation !== b.incarnation) return null;

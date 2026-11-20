@@ -319,7 +319,8 @@ export function makeRouter(ctx) {
           folders: inventory.folders, unavailable: inventory.unavailable, chronology: inventory.chronology, metaVersion,
           ...(items ? { origin: sourceOrigin(id, ctx.sourceActivity.source(id)) } : {}),
           arrivals: arrivals ? { sequence: arrivals.sequence, latestVisibleSeq: arrivals.latestVisibleSeq,
-            ...(items ? { revision: arrivals.revision, visibleRanges: arrivals.visibleRanges } : {}) } : null, entries } : entries);
+            ...(items ? { revision: arrivals.revision, visibleRanges: arrivals.visibleRanges,
+              downVotedRanges: arrivals.downVotedRanges, upVotedRanges: arrivals.upVotedRanges } : {}) } : null, entries } : entries);
   });
 
   add("GET", "/api/collections/<id>/entries/<name>", async (_req, { id, name }) => {

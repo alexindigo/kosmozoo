@@ -116,6 +116,7 @@ export function makeAppStore({ subscribeSources = typeof window !== "undefined" 
   });
 
   const sourceRecords = makeSourceRegistry({
+    judgmentPrefs: () => st.judgmentPrefs,
     createRecord: (id, source) => ({ id, address: source.address, incarnation: source.incarnation,
       epoch: source.sourceVersion?.epoch, writes: 0, revision: 0,
       confirmed: { pinned: !!source.pinned, autoRefresh: !!source.autoRefresh, sourceVersion: source.sourceVersion },

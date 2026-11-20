@@ -335,6 +335,7 @@ const STATEMENTS = {
   entryGone: "UPDATE entry SET state = 'gone', last_seen = ? WHERE collection = ? AND name = ? AND kind = 'output'",
   entryHide: "UPDATE entry SET hidden = 1, last_seen = ? WHERE collection = ? AND name = ? AND kind = 'output'",
   hiddenNames: "SELECT name FROM entry WHERE collection = ? AND kind = 'output' AND hidden = 1",
+  votedNames: "SELECT name, vote FROM entry WHERE collection = ? AND kind = 'output' AND vote IN ('up', 'down')",
   contentGet: "SELECT hash, width, height, meta, has_workflow, ext, bytes, updated_at FROM content WHERE hash = ?",
   contentIngest: `INSERT INTO content (hash, bytes, width, height, updated_at) VALUES (?, ?, ?, ?, ?)
        ON CONFLICT(hash) DO UPDATE SET bytes = COALESCE(excluded.bytes, content.bytes),
@@ -1105,6 +1106,11 @@ export class Store {
     );
   }
 
+  // Narrow judgment facts for arrival publication; no content/metadata join.
+  votedNames(collection) {
+    return this.#q.votedNames.all(collection);
+  }
+
   // Hide one entry (the fallback delete on no-delete hosts).
   entryHide(collection, name) {
     this.#ensureCollection(collection);
@@ -1271,6 +1277,7 @@ export class Store {
       pruned.plugins == null ? null : JSON.stringify(pruned.plugins),
       now, host, filename,
     );
+    this.arrivals.changed(host);
     return { ok: true, judgment: this.#readJudgment(host, filename) };
   }
 
