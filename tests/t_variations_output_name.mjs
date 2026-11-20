@@ -1,4 +1,4 @@
-import { assert, assertEquals, assertThrows } from "jsr:@std/assert";
+import { assert, assertEquals, assertMatch, assertThrows } from "jsr:@std/assert";
 import * as naming from "../src/features/variations/shared.mjs";
 import { register, narrowToOneOutputNode, wrapAllOutputPrefixes } from "../src/features/variations/server.mjs";
 import { makeCollectionLifecycle } from "../src/backings/index.mjs";
@@ -57,7 +57,7 @@ Deno.test("output naming: unsafe manual templates reject before any enqueue, eve
     body.automaticNaming = true; body[field] = template;
     const result = await rig.run(body);
     assertEquals(result.status, 400, JSON.stringify(result.data)); assertEquals(result.data.submitted, 0);
-    assertEquals(result.data.error, "save.filename_prefix: output name contains a line break or control character");
+    assertMatch(result.data.error, /save\.filename_prefix: invalid composed filename_prefix path ".*" \(line break or control character\); output directory is ""\./);
     assertEquals(rig.bytes, []);
   }
 });

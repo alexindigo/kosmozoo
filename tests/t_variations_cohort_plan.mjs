@@ -79,7 +79,7 @@ Deno.test("silent rows 74,83,84: producer dedupe, shortening and name rejection 
     "image.png: source-name/token text was shortened from 240 to 187 UTF-8 bytes to fit the 200-byte output-name budget; Prefix/Suffix remain intact.");
   recipe.naming.root.values.prefix = "{missing}";
   const [invalid] = planCohort({ targets: [target], cohortMode: "single", recipe });
-  assertEquals(invalid.problem.message, "image.png: Run unavailable: Unresolved naming token: check Prefix and Suffix. Job count is not permission to run with an invalid output name.");
+  assertEquals(invalid.problem.message, 'image.png, Prefix: Unresolved naming token "{missing}" (unknown parameter).');
   assertEquals(invalid.counts.admitted, 0); assertEquals(invalid.counts.distinct, 2);
   assertEquals(invalid.notices[0].code, "deduplicated");
 });

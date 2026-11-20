@@ -104,40 +104,42 @@ export function outputName({ prefix = "", sourceStem = "", suffix = "", budget =
 // directory. It cannot change destinations or be silently folded/sanitized.
 export function composeOutputName(target, values = {}, prefix = "", suffix = "", { preliminary = false } = {}) {
   const directory = target.directory ?? "", selected = !!target.parameterId && Object.hasOwn(values, target.parameterId);
+  const fail = (code, context) => problemError(variationProblem(code, { phase: "naming", parameter: { id: target.parameterId ?? "root", label: target.parameterId ?? "Output names" }, directory, ...context }));
+  const pathProblem = value => value.split("/").find(part => !part || part === "." || part === "..") !== undefined ? "empty, absolute or dot/parent path segment"
+    : /[\u0000-\u001f\u007f-\u009f]/.test(value) ? "line break or control character" : value.includes("\\") ? "backslash" : "not a canonical relative output path";
   let sourceStem = target.sourceStem ?? "";
   if (selected) {
     const candidate = values[target.parameterId];
-    if (typeof candidate !== "string") throw new Error(`${target.parameterId}: filename_prefix requires text`);
-    if (candidate !== "" && !isCreatedEntryPath(candidate)) throw new Error(`${target.parameterId}: invalid filename_prefix path`);
+    if (typeof candidate !== "string") throw fail("output-type", { value: candidate });
+    if (candidate !== "" && !isCreatedEntryPath(candidate)) throw fail("output-path", { value: candidate, detail: pathProblem(candidate) });
     const slash = candidate.lastIndexOf("/"), candidateDirectory = slash < 0 ? "" : candidate.slice(0, slash + 1);
-    if (candidateDirectory !== directory) throw new Error(`${target.parameterId}: filename_prefix must retain the original output directory`);
+    if (candidateDirectory !== directory) throw fail("output-directory", { actual: candidateDirectory });
     sourceStem = candidate.slice(slash + 1);
     if (byteLength(prefix) + byteLength(sourceStem) + byteLength(suffix) > OUTPUT_NAME_BUDGET) {
-      throw new Error(`${target.parameterId}: composed filename_prefix exceeds ${OUTPUT_NAME_BUDGET} bytes; the selected name was not shortened`);
+      throw fail("output-budget", { value: candidate, numbers: { bytes: byteLength(prefix) + byteLength(sourceStem) + byteLength(suffix), limit: OUTPUT_NAME_BUDGET } });
     }
   }
-  if ((target.leafOnly ?? !!directory) && /[/\\]/.test(prefix + suffix)) throw new Error("Prefix/suffix must stay within the producing directory's filename leaf");
+  if ((target.leafOnly ?? !!directory) && /[/\\]/.test(prefix + suffix)) throw fail("output-separator", { field: /[/\\]/.test(prefix) ? "Prefix" : "Suffix", value: /[/\\]/.test(prefix) ? prefix : suffix, separator: /[/\\]/.exec(prefix + suffix)[0] });
   const value = directory + outputName({ prefix, sourceStem, suffix });
   // Only preliminary candidate checks may be empty; final writers and preview
   // always enforce the address grammar after all contributions are composed.
-  if (!(preliminary && selected && value === "") && !isCreatedEntryPath(value)) {
-    const reason = /[\u0000-\u001f\u007f-\u009f]/.test(value) ? "output name contains a line break or control character" : "invalid composed output name path";
-    throw new Error(`${target.parameterId ?? "filename_prefix"}: ${reason}`);
-  }
+  if (!(preliminary && selected && value === "") && !isCreatedEntryPath(value)) throw fail("output-path", { value, composed: true, detail: pathProblem(value) });
   return { value, selected, ...(selected ? { parameterId: target.parameterId, candidate: values[target.parameterId] } : {}) };
 }
 
 // Preview and Run use this same projection; automatic contributions are derived,
 // never assigned over manual Prefix/Suffix or over the selected parameter value.
+export const namingProblems = proofs => proofs.flatMap(([field, proof]) => (proof.unresolved ?? []).map(issue => variationProblem("naming-token", { phase: "naming", parameter: { id: "root", label: field }, field, token: issue.token, detail: issue.detail })));
 export function variationOutputName(target, request, permutation, currentValues, aliases = {}, parameters = [], { sameHost = true } = {}) {
   const automatic = request.automaticNaming === true ? automaticNaming(request.ranges ?? {}, currentValues, request.imageParams ?? {}, { sameHost }).suffix : "";
   const prefix = templateReplaceWithProof(String(request.prefix ?? ""), permutation, currentValues, aliases, parameters);
   const suffix = templateReplaceWithProof(String(request.suffix ?? "") + automatic, permutation, currentValues, aliases, parameters);
+  const problems = namingProblems([["Prefix", prefix], ["Suffix", suffix]]);
   const composed = composeOutputName(target, permutation, prefix.text, suffix.text);
   const before = byteLength(String(target.sourceStem ?? "")), after = byteLength(composed.value.slice((target.directory ?? "").length)) - byteLength(prefix.text) - byteLength(suffix.text);
   const shortened = [...(prefix.shortened ?? []), ...(suffix.shortened ?? [])];
   if (!composed.selected && before > after) shortened.push({ before, after, limit: OUTPUT_NAME_BUDGET });
-  return { ...composed, prefix: prefix.text, suffix: suffix.text, complete: prefix.complete && suffix.complete,
+  return { ...composed, prefix: prefix.text, suffix: suffix.text, complete: prefix.complete && suffix.complete, problems,
     notices: shortened.map(numbers => variationProblem("name-shortened", { severity: "warning", phase: "naming", numbers })) };
 }
 
@@ -388,8 +390,9 @@ export function templateReplaceWithProof(template, values, currentValues, labelM
       if (label && !aliases.has(label)) aliases.set(label, param);
     }
   }
-  const shortened = [];
+  const shortened = [], unresolved = [];
   let complete = !/[{}]/.test(template.replace(/\{[^{}]*\}/g, ""));
+  if (!complete) unresolved.push({ token: template.replace(/\{[^{}]*\}/g, ""), detail: "unbalanced braces" });
   const text = template.replace(/\{([^{}]*)\}/g, (_, key) => {
     const canonical = parseParamId(key);
     const resolved = lookup.has(key) ? key : aliases.get(key);
@@ -400,9 +403,10 @@ export function templateReplaceWithProof(template, values, currentValues, labelM
       return text;
     }
     complete = false;
+    unresolved.push({ token: `{${key}}`, detail: "unknown parameter" });
     return `{${key}}`;
   });
-  return { text, complete, ...(shortened.length ? { shortened } : {}) };
+  return { text, complete, ...(unresolved.length ? { unresolved } : {}), ...(shortened.length ? { shortened } : {}) };
 }
 
 export function templateReplace(template, values, currentValues, labelMap = {}, params = []) {

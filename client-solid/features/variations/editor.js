@@ -763,7 +763,7 @@ export function makeVariationEditor({ targets, cohortMode, destination: initialD
         const projection = variationOutputName(source, { ...payload, ranges }, sample, values, aliases, parameters, { sameHost });
          const naming = { complete: projection.complete,
            notices: projection.notices.map(problem => problemFrom({ problem }, { target: targetIdentity(capturedTargets[0]), parameter: { id: "root", label: "Output names" } })),
-           problems: !projection.complete ? [variationProblem("naming", { phase: "naming", target: targetIdentity(capturedTargets[0]), parameter: { id: "root", label: "Prefix/Suffix" }, detail: "Unresolved naming token: check Prefix and Suffix" })] : [],
+           problems: projection.problems.map(problem => problemFrom({ problem }, { target: targetIdentity(capturedTargets[0]) })),
           example: projection.value.replace(/\0pending-\d+/g, "[upload name pending]"),
           help: "Representative first output; upload collision names and ComfyUI's added counter may differ." };
         const factors = [...axes].sort((a, b) => (a.kind !== "images") - (b.kind !== "images")).map(axis =>
@@ -772,7 +772,7 @@ export function makeVariationEditor({ targets, cohortMode, destination: initialD
           + (excluded ? ` · ${excluded} unchanged combination${excluded === 1 ? "" : "s"} excluded` : "")
           + (batch ? ` · workflow estimate × ${selectedTargets.length} target image${selectedTargets.length === 1 ? "" : "s"}` : "");
         let status = !naming.complete || error ? "invalid" : pending ? "checking" : "ready";
-        let message = !naming.complete ? "Unresolved naming token: check Prefix and Suffix." : error ? `Image comparison failed: ${error}`
+        let message = !naming.complete ? naming.problems.map(problemText).join("\n") : error ? `Image comparison failed: ${error}`
           : pending ? problemText(validationProblems().find(problem => problem.code === "images-checking")) : !n ? "Choose a different value, image or destination to create variations."
           : !safe ? problemText(variationProblem("estimate-unsafe", { phase: "plan", numbers: { count: n } }))
           : batch ? "Estimated from the opening workflow; each remaining target is checked before submission."

@@ -7,7 +7,7 @@ import { admitResourceTransfer } from "./compile.mjs";
 import { variationProblem, problemFrom, problemError } from "./problems.mjs";
 import { MAX_JOBS_PER_IMAGE } from "./limits.mjs";
 import { targetRunPlan, parameterIndex, catalogueParams, parameterLabel, permutationPlan,
-  generatePermutations, resolveRelativeRanges, reproducesOriginal, variationOutputName, parameterAliases, templateReplaceWithProof } from "./shared.mjs";
+  generatePermutations, resolveRelativeRanges, reproducesOriginal, variationOutputName, namingProblems, parameterAliases, templateReplaceWithProof } from "./shared.mjs";
 
 export function bindCohortRecipe(recipe, catalogue) {
   const bound = snapshotDraft(recipe), parameters = parameterIndex(catalogue.parameters ?? catalogueParams(catalogue));
@@ -103,9 +103,12 @@ export function planTarget({ target, cohortMode, recipe, destination, resourceVa
   if (naming) for (const permutation of permutations) {
     const request = { ...plan.payload, ranges };
     try {
-      const projection = pendingNames ? { complete: [request.prefix, request.suffix].every(text => templateReplaceWithProof(String(text ?? ""), permutation, values, aliases, parameters).complete), notices: [] }
+      const projection = pendingNames ? (() => {
+        const proofs = [["Prefix", request.prefix], ["Suffix", request.suffix]].map(([field, text]) => [field, templateReplaceWithProof(String(text ?? ""), permutation, values, aliases, parameters)]);
+        return { complete: proofs.every(([, proof]) => proof.complete), notices: [], problems: namingProblems(proofs) };
+      })()
         : variationOutputName(naming, request, permutation, values, aliases, parameters, options);
-      if (!projection.complete) throw Object.assign(new Error("Unresolved naming token: check Prefix and Suffix."), { problem: variationProblem("naming", { phase: "naming", parameter: { id: "root", label: "Prefix/Suffix" }, detail: "Unresolved naming token: check Prefix and Suffix" }) });
+      if (!projection.complete) throw problemError(projection.problems?.[0] ?? variationProblem("naming", { phase: "naming", parameter: { id: "root", label: "Prefix/Suffix" }, detail: "Unresolved naming token: check Prefix and Suffix" }));
       notices.push(...projection.notices);
     } catch (error) {
       error.problem = problemFrom(error, { phase: "naming", parameter: { id: "root", label: "Prefix/Suffix" }, numbers: { jobs: count } });

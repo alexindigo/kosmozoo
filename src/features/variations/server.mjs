@@ -22,7 +22,7 @@ import { IMAGE_EXTENSIONS, mediaExtension } from "../../backings/mime.mjs";
 import { listImages, readImage, folderError } from "./folder-images.mjs";
 import { inspectImage } from "./image-inspection.mjs";
 import { readJson, mediaHeaders } from "../../routes.mjs";
-import { isResourceRoot, cloneJsonValue, sameJsonValue, parseExactJson, stringifyExactJson } from "../../parameters.mjs";
+import { isResourceRoot, cloneJsonValue, sameJsonValue, parseExactJson, stringifyExactJson, paramId } from "../../parameters.mjs";
 import { compileValue, compileDiscreteAxes, validateFinalGraph } from "./compile.mjs";
 import { parameterCatalogue, findProducingOutputNode, outputNodeIndex, outputNamingTargets,
   outputPath, stripExtension, inspectSource, projectInspection } from "./inspection.mjs";
@@ -31,7 +31,7 @@ import { registerPexels } from "./pexels.mjs";
 import { inspectDestination } from "./destination.mjs";
 import { submitPrompt } from "../../backings/comfy-submission.mjs";
 import { problemRoutes } from "./problem-transport.mjs";
-import { variationProblem, problemFrom } from "./problems.mjs";
+import { variationProblem, problemFrom, problemError } from "./problems.mjs";
 export { parameterCatalogue, findProducingOutputNode, outputNodeIndex, outputNamingTargets } from "./inspection.mjs";
 
 const exactResponse = (value, init = {}) => new Response(stringifyExactJson(value), {
@@ -69,12 +69,12 @@ export function mutateGraph(graph, permutation, params, dynamicCombos = null, { 
         const key = name.slice(type.length + 1);
         if (!Object.hasOwn(inputs, key)) continue;
         const value = selections.has(key) ? selections.get(key) : inputs[key], branch = options.get(value);
-        if (selections.has(key) && !branch) throw new Error(`Unknown dynamic option for ${nodeId}.${key}: ${value}`);
+        if (selections.has(key) && !branch) throw problemError(variationProblem("dynamic-option", { phase: "mutation", parameter: { id: paramId(nodeId, key) }, node: nodeId, value }));
         if (!branch) continue;
         if (!Object.is(inputs[key], value)) {
           for (const child of Object.keys(inputs)) if (child.startsWith(key + ".")) delete inputs[child];
           for (const [child, value] of branch.defaults) {
-            if (value === undefined) throw new Error(`No object_info default for ${nodeId}.${child.slice(type.length + 1)}`);
+            if (value === undefined) throw problemError(variationProblem("dynamic-default", { phase: "mutation", parameter: { id: paramId(nodeId, key) }, child: `${nodeId}.${child.slice(type.length + 1)}`, value: selections.get(key) }));
             inputs[child.slice(type.length + 1)] = cloneJsonValue(value);
           }
         }
@@ -119,7 +119,7 @@ function writeOutputNames(graph, targets, pfx, sfx, { values = {}, proofs = [] }
   const written = [];
   for (const target of targets) {
     const node = graph[target.nodeId];
-    if (!node?.inputs) throw new Error(`Producing output node ${target.nodeId} is missing`);
+    if (!node?.inputs) throw problemError(variationProblem("producer-missing", { phase: "naming", node: target.nodeId }));
     const result = composeOutputName(target, values, pfx, sfx);
     node.inputs.filename_prefix = result.value;
     if (result.selected) proofs.push({ ...result, nodeId: target.nodeId });
@@ -321,7 +321,8 @@ export function register(app) {
       ? findProducingOutputNode(graph, filename, outputClasses)
       : null;
     if (filename.includes("/") && !producing) {
-      return Response.json({ error: "Cannot identify an unambiguous producing output directory for this image" }, { status: 400 });
+      const directory = outputPath(filename).directory;
+      return Response.json({ error: "Cannot identify an unambiguous producing output directory for this image", problem: variationProblem("producer-ambiguous", { phase: "naming", target: { name: filename, source: host }, directory, numbers: { outputs: outputNodeIndex(graph, outputClasses).filter(id => outputPath(graph[id].inputs?.filename_prefix ?? "").directory === directory).length } }) }, { status: 400 });
     }
 
     const namingTargets = outputNamingTargets(graph, filename, producing?.id, outputClasses ?? new Set());
@@ -333,34 +334,38 @@ export function register(app) {
     const accepted = [];
     let submitted = 0, uncertain = false, retired = false;
     const prepared = [];
-    const rejectPlan = error => exactResponse({ error, outcome: "rejected", submitted: 0, total: permutations.length,
-      errors: permutations.map(permutation => ({ permutation, error: `Plan rejected: ${error}` })),
-      acknowledgement: { ...acknowledgement, target: { id, host, filename }, context: r.context, accepted: [] } }, { status: 400 });
+    const rejectPlan = error => {
+      const problem = problemFrom(error, { phase: "preflight", target: { id, name: filename, source: host }, destination: context.origin.source, numbers: { planned: permutations.length }, effects: { sent: 0, confirmed: 0, partial: 0, unknown: 0, unsent: permutations.length } });
+      const message = typeof error === "string" ? error : error.message ?? problem.message;
+      return exactResponse({ error: message, problem, outcome: "rejected", submitted: 0, total: permutations.length,
+        errors: permutations.map(permutation => ({ permutation, error: `Plan rejected: ${message}`, problem })),
+        acknowledgement: { ...acknowledgement, target: { id, host, filename }, context: r.context, accepted: [] } }, { status: 400 });
+    };
     for (const [index, perm] of permutations.entries()) {
       if (!app.backings.isCurrent(token)) {
         return rejectPlan("source changed; no jobs were submitted");
       }
       let mutation;
       try { mutation = mutateGraph(graph, perm, fullInspection, r.dynamicCombos, { rangeIds: new Set(Object.keys(resolvedRanges)) }); }
-      catch (error) { return rejectPlan(error.message); }
+      catch (error) { return rejectPlan(error); }
       const { graph: mutated, applied, writes } = mutation;
       // Only the kernel's empty identity tuple on another destination needs no
       // graph-axis writes. Naming/final graph/off-selection proofs still follow.
       if (applied.length === 0 && (sameHost || Object.keys(perm).length > 0)) {
-        return rejectPlan("No applicable nodes found; no jobs were submitted");
+        return rejectPlan(problemError(variationProblem("mutation-empty", { phase: "mutation", names: Object.keys(perm), numbers: { planned: permutations.length } })));
       }
 
       let namingWrites;
       const namingProofs = [];
       try {
-        if (!firstNamingTarget) return rejectPlan("No output node in graph");
+        if (!firstNamingTarget) return rejectPlan(problemError(variationProblem("output-missing", { phase: "naming", destination: context.origin.source })));
         // Validate every explicit output prefix, including retained dependencies,
         // without giving those dependencies new sidebar-affix writes.
         for (const target of namingTargets) if (Object.hasOwn(perm, target.parameterId)) {
           composeOutputName(target, perm, "", "", { preliminary: !producing || target.nodeId === producing.id });
         }
         const naming = variationOutputName(firstNamingTarget, namingRequest, perm, currentValues, labelMap, fullInspection, { sameHost });
-        if (!naming.complete) return rejectPlan("Unresolved naming token: check prefix and suffix; no jobs were submitted");
+        if (!naming.complete) return rejectPlan(problemError(naming.problems[0]));
         const { prefix: pfx, suffix: sfx } = naming;
         const options = { targets: namingTargets, values: perm, proofs: namingProofs };
         if (producing) {
@@ -368,14 +373,14 @@ export function register(app) {
         } else {
           namingWrites = wrapAllOutputPrefixes(mutated, pfx, sfx, outputClasses ?? new Set(), options);
           if (!namingWrites.length) {
-            return rejectPlan("No output node in graph");
+            return rejectPlan(problemError(variationProblem("output-missing", { phase: "naming", destination: context.origin.source })));
           }
         }
-      } catch (error) { return rejectPlan(error.message); }
+      } catch (error) { return rejectPlan(error); }
 
       try { validateFinalGraph(mutated, fullInspection, r); }
       catch (e) {
-        return rejectPlan(e.message);
+        return rejectPlan(e);
       }
 
       const surviving = survivingAxes(mutated, writes, fullInspection, namingProofs);
@@ -383,7 +388,7 @@ export function register(app) {
       // affixes by construction; retained dependency outputs are not targets.
       const naming = namingWrites.length ? ["prefix", "suffix"] : [];
       const missing = Object.keys(perm).filter(id => !surviving.includes(id));
-      if (missing.length) return rejectPlan(`Operation ${missing.join(", ")} was pruned or overwritten in the final graph; no jobs were submitted`);
+      if (missing.length) return rejectPlan(problemError(variationProblem("mutation-lost", { phase: "mutation", names: missing, numbers: { planned: permutations.length } })));
       const appliedPlan = {
         ranges: surviving.filter(id => resolvedRanges[id]?.enabled && !imageParams?.[id]?.enabled),
         imageParams: surviving.filter(id => imageParams?.[id]?.enabled && !resolvedRanges[id]?.enabled),
