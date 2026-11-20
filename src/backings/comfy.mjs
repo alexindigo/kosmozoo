@@ -8,6 +8,7 @@ import { makeMetadataCollector, interpretHeaders } from "./comfy-metadata.mjs";
 import { makeGenerationTimes } from "./comfy-generation.mjs";
 import { InventoryError, bounded, cancelled } from "./inventory.mjs";
 import { cloneJsonValue, parseExactJson, stringifyExactJson } from "../parameters.mjs";
+import { makePromptLane, promptRequest } from "./comfy-submission.mjs";
 
 const HOST_TIMEOUT_MS = 10_000;
 
@@ -627,6 +628,15 @@ export function comfyClient(addr, { fetcher = fetch, clock = () => performance.n
   };
   const object = (v) => v && typeof v === "object" && !Array.isArray(v);
   const generationTimes = makeGenerationTimes();
+  const submissions = makePromptLane((prompt, { signal, onSent }) => {
+    const request = promptRequest(`http://${addr}/api/prompt`, submissionBody(prompt), {
+      signal: AbortSignal.any([signal, AbortSignal.timeout(HOST_TIMEOUT_MS)]), onSent,
+    });
+    return { sent: request.sent, result: request.result.then(async ({ response, error, sent }) => {
+      try { return { ...(error ? enqueueFailure(addr, error) : await enqueueResponse(addr, response)), sent }; }
+      catch (error) { return { ...enqueueFailure(addr, error), sent }; }
+    }) };
+  }, { signal: owner.signal });
   let historyReady = false, fullHistoryTask = null;
   const readHistory = async ({ maxItems, promptId, signal } = {}) => {
     const path = promptId ? `/api/history/${encodeURIComponent(promptId)}`
@@ -681,7 +691,8 @@ export function comfyClient(addr, { fetcher = fetch, clock = () => performance.n
     hasAssetsPlus: () => hasAssetsPlus(addr, assetsPlus, { fetcher }),
     objectInfo: (options) => objectInfo(addr, objectInfoCache, { fetcher, ...options }),
     progressSocket: () => new WebSocket(`ws://${addr}/ws?clientId=${crypto.randomUUID()}`),
-    enqueue: (prompt) => enqueue(addr, prompt, { fetcher }),
+    enqueue: (prompt) => submissions.submit(prompt).result,
+    submit: (prompt, ports) => submissions.submit(prompt, ports),
     async queue({ signal } = {}) {
       const d = await telemetry("/api/queue", signal);
       const ids = (rows) => {
@@ -758,9 +769,19 @@ export async function enqueue(addr, prompt, { fetcher = fetch } = {}) {
     const resp = await fetcher(`http://${addr}/api/prompt`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: stringifyExactJson({ ...prompt, prompt: freshSubmissionGraph(prompt.prompt) }),
+      body: submissionBody(prompt),
       signal: AbortSignal.timeout(HOST_TIMEOUT_MS),
     });
+    return await enqueueResponse(addr, resp);
+  } catch (e) { return enqueueFailure(addr, e); }
+}
+
+const submissionBody = prompt => stringifyExactJson({ ...prompt, prompt: freshSubmissionGraph(prompt.prompt) });
+function enqueueFailure(addr, error) {
+  console.error(`[comfy] enqueue ${logValue(addr)} -> fetch failed: ${logValue(error.message)}`);
+  return { ok: false, status: 502, error: `fetch failed: ${error.message}` };
+}
+async function enqueueResponse(addr, resp) {
     if (!resp.ok) {
       const text = await resp.text();
       console.error(`[comfy] enqueue ${logValue(addr)} -> ${resp.status}: ${logValue(text)}`);
@@ -776,8 +797,4 @@ export async function enqueue(addr, prompt, { fetcher = fetch } = {}) {
     const partial = Object.keys(nodeErrors).length > 0;
     return { ok: true, status: resp.status, acceptance: partial ? "partial" : "confirmed",
       promptId: data.prompt_id, nodeErrors, ...(partial ? { error: "ComfyUI accepted only part of the prompt (node errors); configuration was not acknowledged" } : {}) };
-  } catch (e) {
-    console.error(`[comfy] enqueue ${logValue(addr)} -> fetch failed: ${logValue(e.message)}`);
-    return { ok: false, status: 502, error: `fetch failed: ${e.message}` };
-  }
 }

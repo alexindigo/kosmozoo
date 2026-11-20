@@ -29,6 +29,7 @@ import { parameterCatalogue, findProducingOutputNode, outputNodeIndex, outputNam
 import { registerHistory, historyResponse } from "./history-routes.mjs";
 import { registerPexels } from "./pexels.mjs";
 import { inspectDestination } from "./destination.mjs";
+import { submitPrompt } from "../../backings/comfy-submission.mjs";
 export { parameterCatalogue, findProducingOutputNode, outputNodeIndex, outputNamingTargets } from "./inspection.mjs";
 
 const exactResponse = (value, init = {}) => new Response(stringifyExactJson(value), {
@@ -391,6 +392,7 @@ export function register(app) {
     }
     // All final prompts and their exact write coverage are prepared before the
     // first irreversible enqueue. A failure in a later tuple cannot leak jobs.
+    const responses = [];
     for (const { index, perm, mutated, applied, selections, naming } of prepared) {
       if (!app.backings.isCurrent(token)) {
         retired = true; errors.push({ permutation: perm, error: "source changed; remaining jobs were not submitted" }); break;
@@ -399,7 +401,16 @@ export function register(app) {
         prompt: mutated,
         extra_data: { extra_pnginfo: lineageTag(`${host}:${filename}`, perm) },
       };
-      const res = journal ? await journal.enqueue(job, index) : await backing.enqueue(job);
+      const request = journal ? journal.submit(job, index) : submitPrompt(backing, job, { isCurrent: () => app.backings.isCurrent(token) });
+      responses.push(request.result.then(res => ({ res, index, perm, applied, selections, naming }), error => ({ error })));
+      await request.sent;
+    }
+    const results = await Promise.all(responses);
+    // Drain every admitted request before propagating an internal journal error.
+    // A failed durable write must never become an ordinary upstream rejection.
+    const failure = results.find(result => result.error);
+    if (failure) throw failure.error;
+    for (const { res, index, perm, applied, selections, naming } of results) {
       if (!res.ok) {
         console.error(`[variations] permutation failed ${stringifyExactJson(perm)} -> ${res.error}`);
         errors.push({ permutation: perm, error: res.error });

@@ -775,7 +775,7 @@ export function makeVariationEditor({ targets, cohortMode, destination: initialD
         }));
         }
         const proofs = [];
-        await Promise.all(operation.targetPlans.map(async ({ target, request, expectedTotal }) => {
+        for (const { target, request, expectedTotal } of operation.targetPlans) {
           try {
             check(ticket, target);
             if ([...uploads.values()].some(receipt => !physicalMatch(receipt.origin, target.origin))) throw new Error(staleSource(target.host));
@@ -804,7 +804,7 @@ export function makeVariationEditor({ targets, cohortMode, destination: initialD
              else proofs.push({ target, proof, count: expectedTotal });
              if (!proof || data.total !== expectedTotal) leftovers.set(target.id, { target, problem: { code: data.outcome ?? "unconfirmed", message: failures.at(-1) ?? "Submission was not fully confirmed; inspect the result before running again." } });
           } catch (error) { countsComplete = false; failures.push(`${target.filename}: ${error.message}`); leftovers.set(target.id, { target, problem: { code: "submission-failed", message: error.message } }); }
-        }));
+        }
         if (!owns(ticket)) return { status: "stale" };
         const complete = !uploadFailure && failures.length === 0 && proofs.length === operation.targetPlans.length && proofs.length > 0;
         const eligible = complete && !leftovers.size && compatible(ticket);

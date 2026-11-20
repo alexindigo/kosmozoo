@@ -514,6 +514,16 @@ become interrupted. Neither automatically resumes. Submitted means queue accepta
 not generation completion. Completed snapshot data is immutable; only outcome
 evidence changes. New Runs have new IDs. Archive failure prohibits effects.
 
+The editor dispatches admitted targets sequentially in batch-strip order. Each
+destination's existing address binding owns one prompt submission lane; within
+each target, generated permutations enter it in order. The lane durably claims
+each job before its HTTP call and advances only on `ClientRequest`'s `finish`
+(connection established and request body written), without waiting for the reply.
+Responses may overlap; acceptance, partial and uncertain evidence remain separate
+from sending. This is not a ComfyUI queue-number guarantee: rare upstream
+reordering after body receipt is accepted. Destination retirement aborts transport
+and refuses queued, unsent work; interrupted effects never replay automatically.
+
 Named-resource proof uses opt-in `Ingest.ensure(...,{fresh:true})`: fresh flights
 cannot join cache-hit flights but share the same source fences, four-read address
 gate and ingestion pipeline. Ordinary callers stay cache-first. Saved target graphs

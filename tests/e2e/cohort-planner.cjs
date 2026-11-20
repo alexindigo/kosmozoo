@@ -91,7 +91,7 @@ const graph = (name, choice) => ({
     await c.poll(`document.querySelector('.vz-count')?.textContent==='2'&&!document.querySelector('.vz-run').disabled`, 20000);
     await c.evaluate(`(()=>{const original=window.fetch;let release;const gate=new Promise(resolve=>{release=resolve});window.cohortEntered=0;window.cohortRelease=()=>{window.fetch=original;release()};window.fetch=(url,options)=>{if(String(url).endsWith('/features/variations/run')){window.cohortEntered++;return gate.then(()=>original(url,options));}return original(url,options)};})()`);
     await c.evaluate(`(async()=>{window.cohortRunning=${KZ}.handles.invoke('variations.run');return true})()`);
-    await c.poll(`window.cohortEntered===2`, 20000);
+    await c.poll(`window.cohortEntered===1`, 20000);
     await field('.vz-prefix', 'newer-');
     await c.evaluate(`window.cohortRelease()`);
     const newer = await c.evaluate(`window.cohortRunning`);

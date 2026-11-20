@@ -13,6 +13,7 @@ import { planCohort, planTarget, countingTarget, bindCohortRecipe } from "./coho
 import { inspectSource, projectInspection } from "./inspection.mjs";
 import { inspectDestination, destinationMissing } from "./destination.mjs";
 import { readImage } from "./folder-images.mjs";
+import { submitPrompt } from "../../backings/comfy-submission.mjs";
 
 const fail = (message, status = 400) => Object.assign(new Error(message), { status });
 const data = value => parseExactJson(value);
@@ -540,13 +541,19 @@ export function makeVariationHistory(app) {
       const leaseId = store.variationClaimExecution(id, effect.effect_id);
       if (!leaseId) throw fail("Submission was already admitted", 409);
       try {
-        const response = await execute(r, { enqueue: async (job, index) => {
+        const response = await execute(r, { submit: (job, index) => {
           const effectId = `job-${binding.targetIndex}-${index}`;
-          store.variationPrepareEffect(id, effectId, "permutation", canonical(job), await digest(job));
-          if (!store.variationClaimEffect(id, effectId)) throw fail("Permutation was already admitted", 409);
-          const result = await r.backing.enqueue(job);
-          store.variationEffectResult(id, effectId, result.ok && result.acceptance === "confirmed" ? "confirmed" : result.acceptance === "partial" ? "partial" : result.status && result.status < 500 ? "rejected" : "uncertain", canonical(result));
-          return result;
+          const request = submitPrompt(r.backing, job, {
+            isCurrent: () => app.backings.isCurrent(r.token),
+            beforeSend: async () => {
+              store.variationPrepareEffect(id, effectId, "permutation", canonical(job), await digest(job));
+              if (!store.variationClaimEffect(id, effectId)) throw fail("Permutation was already admitted", 409);
+            },
+          });
+          return { sent: request.sent, result: request.result.then(result => {
+            store.variationEffectResult(id, effectId, result.ok && result.acceptance === "confirmed" ? "confirmed" : result.acceptance === "partial" ? "partial" : result.status && result.status < 500 ? "rejected" : "uncertain", canonical(result));
+            return result;
+          }) };
         } });
         const result = { status: response.status, data: { ...parseExactJson(await response.text()), history: binding } };
         store.variationEffectResult(id, effect.effect_id, result.data.outcome === "accepted-plan" ? "confirmed" : result.data.outcome === "uncertain-effects" ? "uncertain" : result.data.submitted ? "partial" : "rejected", canonical(result));
