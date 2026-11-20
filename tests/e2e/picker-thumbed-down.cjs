@@ -56,6 +56,7 @@ const control = (base, body) => fetch(base + '/__test/activity', { method: 'POST
     await invoke('preference.revealDown'); await waitName(NAME);
     assert.equal(catalogues.length, reads, 'reveal reprojects the cached catalogue');
     await page.clickAt(option(NAME));
+    await page.poll(`document.querySelector('.vz-count')?.textContent==='1'&&!document.querySelector('.vz-run').disabled`, 15000);
     const chosen = await selected(), chosenCount = await count();
     assert.equal(chosen.length, 2); assert.equal(chosenCount, '1');
     await invoke('preference.revealDown');
