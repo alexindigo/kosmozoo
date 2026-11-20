@@ -42,12 +42,13 @@ export function install(store) {
     generationTime: api.generationTime,
     history, historyState, historyThumbnail: api.historyThumbnail,
     inputList(hostName, origin, root = "input") { return api.inputList(hostName, origin, root); },
-    outputVisible(origin, record) {
+    outputCandidate(origin, record) {
       // Exact local entries include optimistic writes and identity-safe rollback.
       // A foreign catalogue retains its own judgments, never a name/hash alias.
       const local = sameOrigin(origin, sourceOrigin(origin.source, store.state.hosts[origin.source]))
         ? store.state.entryFor({ remote: origin.source, image: record.name })?.entry : null;
-      return judgmentVisible(local?.filename === record.name && local.host === origin.source ? local.judgment : record.judgment, store.state.judgmentPrefs);
+      const judgment = local?.filename === record.name && local.host === origin.source ? local.judgment : record.judgment;
+      return { judgment, visible: judgmentVisible(judgment, store.state.judgmentPrefs) };
     },
     uploadInput(hostName, form, origin) { return api.uploadInput(hostName, form, origin); },
     inspectImage: api.inspectImage,

@@ -20,6 +20,7 @@ import { variationProblem, problemFrom, problemText, problemError } from "/share
 import { makeProblemOwner } from "./problem-presentation.js";
 import { staleSource, sourceFailure } from "./source-message.js";
 import { judgmentVisible } from "/js/image-visibility-model.mjs";
+import { judgmentMarkers } from "../../store/card-state.js";
 import { isEntryLeaf } from "/shared/entry-path.mjs";
 import { makeVariationRecipe, validRecipeValue as validValue, freezeRecipe as freeze, moveRecipeImage, recipeField } from "./recipe.js";
 export { RECIPE_FIELDS as EDITOR_FIELDS } from "./recipe.js";
@@ -502,9 +503,14 @@ export function makeVariationEditor({ targets, cohortMode, destination: initialD
       // Readonly discovery reprojects retained facts through the live injected
       // authority. It never edits the recipe or the independent input evidence.
       let files = record.files;
+      const markers = new Map();
       if (root === "output") {
-        const eligible = record.entries.filter(entry => services.outputVisible
-          ? services.outputVisible(origin, entry) : judgmentVisible(entry.judgment)).map(entry => entry.name);
+        const eligible = record.entries.filter(entry => {
+          const candidate = services.outputCandidate?.(origin, entry) ?? { judgment: entry.judgment, visible: judgmentVisible(entry.judgment) };
+          if (!candidate.visible) return false;
+          markers.set(entry.name, judgmentMarkers(candidate.judgment));
+          return true;
+        }).map(entry => entry.name);
         // Unrelated recipe/status changes must not reset search/virtual focus.
         if (!record.eligible || record.eligible.length !== eligible.length || eligible.some((name, i) => record.eligible[i] !== name))
           record.eligible = Object.freeze(eligible);
@@ -513,7 +519,7 @@ export function makeVariationEditor({ targets, cohortMode, destination: initialD
       const listed = record.listed ?? files.length, invalid = record.invalid ?? 0, hidden = Math.max(0, listed - invalid - files.length);
       const notices = hidden || invalid ? [variationProblem("listing-filtered", { severity: "warning", phase: "acquisition", source: origin.source, root,
         numbers: { visible: files.length, listed, hidden, invalid } })] : [];
-      return { files, pending: record.pending, error: record.error, loaded: record.loaded, notices };
+      return { files, markers, pending: record.pending, error: record.error, loaded: record.loaded, notices };
     },
     async loadSourceInputs(origin, retry = false, root = "input") {
       if (!alive || !["input", "output"].includes(root) || !validOrigin(origin) || !sameOrigin(origin, currentOrigin(origin.source))) return;

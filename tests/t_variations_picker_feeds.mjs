@@ -106,7 +106,10 @@ Deno.test("picker feeds API: opt-in images-v1 preserves legacy shapes and fences
 Deno.test("picker feeds: cached judgment projection follows live prefs and optimistic votes without editing chosen work", async () => {
   const prefs = { downvoteHides: true }, votes = new Map(); let reads = 0;
   const rig = editorRig({
-    outputVisible: (_origin, record) => judgmentVisible(votes.has(record.name) ? votes.get(record.name) : record.judgment, prefs),
+    outputCandidate: (_origin, record) => {
+      const judgment = votes.has(record.name) ? votes.get(record.name) : record.judgment;
+      return { judgment, visible: judgmentVisible(judgment, prefs) };
+    },
     inputList: async (_host, origin, root) => { reads++; return { origin, root, files: [
       { name: "down.png", judgment: { vote: "down", favorite: true, bookmark: true } }, { name: "up.png", judgment: { vote: "up" } }, "plain.png",
     ] }; },
@@ -119,6 +122,8 @@ Deno.test("picker feeds: cached judgment projection follows live prefs and optim
   assert(!editor.dirty()); assertEquals(editor.revision(), 0);
   prefs.revealThumbedDown = true;
   assertEquals(names(), ["down.png", "up.png", "plain.png"]);
+  assertEquals(editor.sourceInputs(context.origin, "output").markers.get("down.png").map(marker => marker.name), ["favorite", "bookmark"]);
+  assertEquals(editor.sourceInputs(context.origin, "output").markers.get("up.png"), [{ name: "up", label: "up-voted" }]);
   editor.setEnabled(id, true); await editor.toggleSourceInput(id, context.origin, "down.png", "output");
   const revision = editor.revision(), items = editor.rows("images")[id].items, count = editor.preview().n;
   prefs.revealThumbedDown = false;
@@ -130,11 +135,13 @@ Deno.test("picker feeds: cached judgment projection follows live prefs and optim
   await editor.loadSourceInputs(context.origin, true, "output"); assertEquals(names(), ["up.png"]);
   votes.delete("plain.png"); assertEquals(names(), ["up.png", "plain.png"]);
   votes.set("down.png", null); assertEquals(names(), ["down.png", "up.png", "plain.png"], "an explicit local clear wins too");
+  assertEquals(editor.sourceInputs(context.origin, "output").markers.get("down.png"), []);
   prefs.hideUp = true; assertEquals(names(), ["down.png", "plain.png"]);
   prefs.downvoteHides = false; votes.clear(); assertEquals(names(), ["down.png", "plain.png"]);
   // Same names (and even accidental judgment fields) in the input root are unjudged.
   await editor.loadSourceInputs(context.origin, true, "input");
   assertEquals(editor.sourceInputs(context.origin, "input").files, ["down.png", "up.png", "plain.png"]);
+  assertEquals(editor.sourceInputs(context.origin, "input").markers.size, 0);
   assertEquals(reads, 3); assertEquals(editor.revision(), revision); assertEquals(editor.targets().length, 1);
   editor.dispose();
 });

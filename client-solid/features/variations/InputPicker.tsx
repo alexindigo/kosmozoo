@@ -260,6 +260,7 @@ function InputOptions(props) {
             <For each={rows()[virtual.index]}>{(name, offset) => {
               const index = () => virtual.index * columns() + offset();
               const memory = focusMemory(rememberFocus);
+              const markers = () => props.catalogue.markers?.get(name) ?? [];
                // Queued demand follows visibility without replacing its keyed
                // native lifetime or aborting an already-started preload.
                 const priority = () => {
@@ -270,11 +271,14 @@ function InputOptions(props) {
                  order={() => demandRank(virtual.index, virtualizer.range, band().direction)}
                 pending={props.state(name).pending} error={props.state(name).error} onRetry={() => props.onToggle(name)}
                 priority={priority} rememberFocus={rememberFocus} surface={picture => <button type="button" role="option" tabindex="-1" id={`${props.id}-option-${index()}`}
-                aria-label={props.itemLabel(name)} title={props.itemLabel(name)} aria-selected={selected(name)} data-input-name={name}
+                aria-label={[props.itemLabel(name), ...markers().map(marker => marker.label)].join(", ")} title={props.itemLabel(name)} aria-selected={selected(name)} data-input-name={name}
                 class={"vz-input-option" + (active() === index() ? " vz-input-active" : "")}
                 {...memory} onFocus={event => { setActive(index()); memory.onFocus(event); }}
                 onClick={() => { setActive(index()); props.onToggle(name); search.focus(); }}>
                 {picture}
+                <Show when={markers().length}><span class="vz-input-judgments" aria-hidden="true">
+                  <For each={markers()}>{marker => <span class={`vz-input-judgment is-${marker.name}`} data-judgment={marker.name} />}</For>
+                </span></Show>
                 <Show when={name === props.current}><span class="vz-image-same" aria-hidden="true" /></Show>
                 <Show when={selected(name)}><SingleLineText class="vz-input-selected" aria-hidden="true" value="✓" /></Show>
               </button>} />;

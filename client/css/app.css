@@ -1105,7 +1105,7 @@ body:has(#diff:not([hidden])) #statusCol { bottom: 56px; }
   .vz-input-placeholder, .vz-thumbnail-pending:not(.vz-thumbnail-acquiring) { animation: none; }
   .vz-input-activity-bar.is-active::after { animation: none; width: 100%; opacity: .5; }
 }
-.vz-input-option { width: var(--vz-input-tile-size); height: var(--vz-input-tile-size); display: grid;
+.vz-input-option { position: relative; width: var(--vz-input-tile-size); height: var(--vz-input-tile-size); display: grid;
   border: 2px solid transparent; border-radius: 4px; padding: 0; background: var(--background-stage); color: var(--foreground); font: inherit; cursor: pointer; }
 .vz-input-option img { grid-area: 1 / 1; width: 100%; height: 100%; min-height: 0; object-fit: contain; border-radius: 2px; }
 .vz-input-option:hover, .vz-input-option.vz-input-active { border-color: var(--foreground-dim); }
@@ -1115,6 +1115,11 @@ body:has(#diff:not([hidden])) #statusCol { bottom: 56px; }
 .vz-input-option .vz-image-same { align-self: stretch; justify-self: stretch; margin: 0; padding: 0;
   background: transparent; border: 2px solid var(--attention); border-radius: inherit; pointer-events: none; }
 .vz-input-selected { align-self: start; justify-self: end; color: var(--secondary); font-weight: 600; }
+.vz-input-judgments { position: absolute; inset: 4px auto auto 4px; display: flex; gap: 3px; pointer-events: none; }
+.vz-input-judgment { width: 8px; height: 8px; box-sizing: border-box; border: 1px solid var(--background-stage); border-radius: 50%; }
+.vz-input-judgment.is-up { background: var(--positive); }
+.vz-input-judgment.is-favorite { background: var(--attention); }
+.vz-input-judgment.is-bookmark { background: var(--primary); }
 /* The picture/selection share one cell; Retry is a separate sibling action.
    Fixed allocation is also the virtualizer's tile/row geometry contract. */
 .vz-thumbnail { display: grid; min-width: 0; min-height: 0; width: 100%; height: 100%; }

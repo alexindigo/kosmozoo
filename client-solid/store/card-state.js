@@ -6,6 +6,13 @@ const treatments = [
   { name: "up", field: "vote", value: "up", color: "var(--positive)" },
 ];
 
+// Independent indicators retain every positive judgment, unlike border priority.
+export function judgmentMarkers(judgment) {
+  const active = cardState(judgment).active;
+  return [{ name: "up", label: "up-voted" }, { name: "favorite", label: "starred" }, { name: "bookmark", label: "bookmarked" }]
+    .filter(marker => active[marker.name]);
+}
+
 export function cardState(judgment, current = false, { surface = "card", unseen = false } = {}) {
   const active = Object.fromEntries(treatments.map((t) => [t.name, judgment?.[t.field] === t.value]));
   const treatment = treatments.find((t) => active[t.name]);
