@@ -55,7 +55,7 @@ const ROW_STRATEGIES = {
 export function makeVariationEditor({ targets, cohortMode, destination: initialDestination = null, services, currentOrigin, changed = () => {}, close = () => {},
   setTimer = setTimeout, clearTimer = clearTimeout }) {
   const recipe = makeVariationRecipe();
-  const problems = makeProblemOwner(changed);
+  const problems = makeProblemOwner(() => notify());
   const parameter = id => ({ id, label: locations.find(location => location.id === id) ? row(locations.find(location => location.id === id).domain, id).metadata.label : id });
   const targetIdentity = target => ({ index: capturedTargets.indexOf(target), id: target.id, source: target.host, name: target.filename });
   const report = (key, code, context = {}) => problems.report(key, variationProblem(code, context));
@@ -158,11 +158,20 @@ export function makeVariationEditor({ targets, cohortMode, destination: initialD
   const row = recipe.row;
   const evidence = (id, item) => imageChecks.get(id)?.get(imageIdentity(item));
   const imageView = (id, item, metadata, lookup = evidence) => recipeImageView(item, metadata, lookup(id, item), capturedTargets[0], batch);
+  // A count plan belongs to one cohort. Retire it before any synchronous
+  // problem/status publication can expose changed membership, even during Run.
+  const replaceTargets = next => {
+    selectedTargets = freeze(next);
+    planGeneration++; planKey = null; planController?.abort();
+    if (planTimer !== null) clearTimer(planTimer);
+    planTimer = null; enginePlan = next.length ? null : [];
+    enginePlanPending = !!services.plan && next.length > 0; enginePlanError = "";
+    validationCache = null;
+  };
   const restoreQueuedCohort = () => {
     if (selectedTargets.length || !queuedCohort) return;
-    selectedTargets = queuedCohort.targets;
+    replaceTargets(queuedCohort.targets);
     for (const [id, outcome] of queuedCohort.outcomes) runOutcomes.set(id, outcome);
-    planKey = null;
   };
   const notify = () => {
     if (!alive) return;
@@ -430,7 +439,7 @@ export function makeVariationEditor({ targets, cohortMode, destination: initialD
     removeTarget(id) {
       if (!alive || deciding || running || !selectedTargets.some(target => target.id === id)) return false;
       if (selectedTargets.length <= 1) { report("last-target", "last-target", { phase: "selection", target: targetIdentity(selectedTargets[0]) }); return false; }
-      selectedTargets = freeze(selectedTargets.filter(target => target.id !== id));
+      replaceTargets(selectedTargets.filter(target => target.id !== id));
       problems.clear("timing");
       recipe.edited(); invalidateClose(); notify(); return true;
     },
@@ -1026,7 +1035,7 @@ export function makeVariationEditor({ targets, cohortMode, destination: initialD
               targets: ticket.targets, revision: ticket.editRevision,
               outcomes: proofs.map(({ target, count }) => [target.id, freeze({ state: "queued", message: `Queued ${count} job${count === 1 ? "" : "s"}` })]),
             };
-            selectedTargets = freeze(selectedTargets.filter(target => !queued.has(target.id)));
+            replaceTargets(selectedTargets.filter(target => !queued.has(target.id)));
             for (const leftover of leftovers.values()) runProblems.set(leftover.target.id, { revision: ticket.editRevision, problem: leftover.problem });
           }
           planKey = null;
