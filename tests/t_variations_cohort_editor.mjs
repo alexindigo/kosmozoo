@@ -127,3 +127,19 @@ for (const newerEdits of [false, true]) Deno.test(`cohort settlement: ${newerEdi
   }
   rig.editor.dispose();
 });
+
+Deno.test("cohort preview: the count is busy from the debounced request through its reply, settled otherwise", async () => {
+  const reads = [];
+  const rig = editorRig({ plan: () => new Promise(resolve => reads.push(resolve)) });
+  assertEquals([rig.editor.preview().busy, rig.editor.preview().display], [true, "--"], "debounced, not yet sent");
+  const timer = rig.timers.findLast(timer => timer.active && timer.ms === 150); timer.active = false;
+  const sent = timer.callback();
+  assertEquals(rig.editor.preview().busy, true, "in flight");
+  reads[0]([{ index: 0, count: 0, problem: { code: "no-work", message: "Choose a different value." } }]); await sent;
+  assertEquals([rig.editor.preview().busy, rig.editor.preview().display], [false, "0"]);
+  rig.editor.setEnabled("n.denoise", true);
+  assertEquals(rig.editor.preview().busy, true, "an edit reschedules the plan");
+  rig.editor.edit("naming", "root", "prefix", "{{unknown}}");
+  assertEquals([rig.editor.preview().status, rig.editor.preview().busy], ["invalid", false], "an invalid recipe shows its final marker");
+  rig.editor.dispose();
+});

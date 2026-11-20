@@ -16,7 +16,7 @@ export function planPresentation(plan, targets, { pending = false, error = "" } 
     const c = target.counts;
     return `${targets[target.index].filename}: ${c.requested} requested parameters -> ${c.applicable} applicable -> ${c.distinct} distinct combinations -> ${c.excluded} unchanged excluded -> ${c.admitted} admitted jobs`;
   }).join("\n");
-  return { n, overLimit, problemMessage, message, admitted, notices, countChain: chain,
+  return { n, overLimit, problemMessage, message, admitted, notices, countChain: chain, pending: checking,
     problems: new Map(problems.map(target => [targets[target.index].id, target.problem])),
     status: error ? "failed" : checking ? "checking" : problems.length && !admitted.length ? "blocked" : "ready",
     display: n === null ? "--" : n.toLocaleString("en-US"),

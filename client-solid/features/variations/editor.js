@@ -329,7 +329,8 @@ export function makeVariationEditor({ targets, cohortMode, destination: initialD
     const missingTimes = presentation.admitted.filter((_, index) => !knownGenerationTime(times[index]));
     if (missingTimes.length && !enginePlanPending && !problems.read().some(problem => problem.code === "time-unavailable")) presentation.notices.push(variationProblem("time-unavailable", { severity: "warning", phase: "metadata",
       names: missingTimes.map(target => selectedTargets[target.index]?.filename), numbers: { missing: missingTimes.length, total: presentation.admitted.length }, detail: "missing metadata or unsupported computed duration" }));
-    return { ...preview, ...presentation, exact: n !== null,
+    // The shown count is settled unless the debounced engine plan is still due.
+    return { ...preview, ...presentation, exact: n !== null, busy: preview.status !== "invalid" && (presentation.pending || !!preview.busy),
       timeEstimate: estimateGenerationTime(n > 0 ? 1 : null, times) };
   };
   const canRun = () => (!services.plan || catalogueReady && catalogueError === null && !destinationPending && !enginePlanPending && !enginePlanError && enginePlan?.some(target => !target.problem && target.count > 0)) &&
@@ -684,7 +685,7 @@ export function makeVariationEditor({ targets, cohortMode, destination: initialD
       for (const [id] of recipe.entries("images")) { seed("images", id, { files, filesReady: true }, {}); inspectItems(id); }
     },
     preview() {
-      const unavailable = (status, message) => ({ n: null, display: "—", fullCount: message, perImage: 0,
+      const unavailable = (status, message) => ({ n: null, display: "—", fullCount: message, perImage: 0, busy: status === "reading",
         anyEnabled: false, exact: false, status, message, breakdown: "", axes: [], excluded: 0, naming: { example: "", complete: false }, timeEstimate: estimateGenerationTime(null, []) });
       if (services.runDestinations && !services.runDestinations().some(origin => origin.source === (destination?.source ?? capturedTargets[0].host))) return unavailable("failed", problemText(variationProblem("no-destination", { phase: "destination" })));
       if (catalogueError !== null) return unavailable("failed", catalogueProblem());
@@ -753,7 +754,7 @@ export function makeVariationEditor({ targets, cohortMode, destination: initialD
         if (blocked && status !== "invalid") { status = "conflict"; message = conflictMessage(blocked); }
         const timeEstimate = estimateGenerationTime(status === "invalid" ? null : perImage,
           selectedTargets.map(target => originCurrent(target) ? generationTimes.get(target.id) : null));
-        return withCohort({ n, perImage, anyEnabled: axes.length > 0 || !sameHost, exact: exact && naming.complete, status, message,
+        return withCohort({ n, perImage, anyEnabled: axes.length > 0 || !sameHost, exact: exact && naming.complete, status, message, busy: pending && status !== "invalid",
           unchecked: [...unchecked], uncheckedMessage: destinationMessage(), axes, excluded, breakdown, naming, timeEstimate,
           display: n >= 1e6 ? n < 1e15 ? new Intl.NumberFormat("en-US", { notation: "compact", maximumSignificantDigits: 4 }).format(n)
             : n.toExponential(2).replace("e+", " × 10^") : n.toLocaleString("en-US"),

@@ -543,7 +543,7 @@ function ModalBody(props) {
               <SingleLineText class="vz-rlabel" value={tally().overLimit ? "Variations (over limit)" : tally().exact ? "Variations" : tally().status === "invalid" ? "Check the recipe" : "Estimated variations"} />
               <span class="vz-rlabel vz-time-label">Estimated time:</span>
               <SingleLineText class={"vz-count" + (tally().n >= 1e15 ? " vz-count-large" : "") + (tally().overLimit ? " vz-count-over-limit vz-count-hot" : tally().n > 1000 ? " vz-count-hot" : tally().n > 100 ? " vz-count-warn" : "")}
-                 value={tally().status === "invalid" ? "--" : tally().display} hint={tally().fullCount} />
+                 value={tally().status === "invalid" ? "--" : tally().display} hint={tally().fullCount} aria-busy={tally().busy ? "true" : "false"} />
               <SingleLineText class="vz-time-value" value={tally().timeEstimate.display}
                 hint="Based on original image generation times and the displayed job-count estimate. Edited settings can change speed; existing queues are not included. Independent backends may run concurrently." />
                <p class="vz-count-sub" title={tally().countChain || tally().breakdown}>{tally().countChain || tally().breakdown}</p>
