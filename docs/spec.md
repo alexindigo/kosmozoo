@@ -2045,6 +2045,34 @@ no prefs/registry/profile/lock reset or notice persistence is performed.
 Content is what the bytes are; a collection is a namespace of names backed
 by a host or folder; an entry is one instance's state in one collection.
 
+Store opens SQLite with `int64: true`. Every prepared read (`get`, `all`,
+`value`), including migrations, passes through one numeric-row boundary: safe
+INTEGERs are JS Numbers and unsafe INTEGERs throw RangeError before reaching
+comparisons, arithmetic, keyset cursors or JSON. SQL TEXT/REAL/NULL values keep
+their types; exact graph integers inside JSON TEXT keep their separate codec.
+No schema/data migration is needed: stored 64-bit values were already correct.
+
+Integer-column audit (all covered by that boundary when selected):
+
+| # | Table | INTEGER columns |
+|---|---|---|
+| 1 | `content` | `width`, `height`, `has_workflow`, `ext`, `bytes` |
+| 2 | `entry` | `favorite`, `bookmark`, `hidden`, `width`, `height` |
+| 3 | `collection` | `pinned`, `auto_refresh` |
+| 4 | `variation_run` | `created_at`, `format`, `submitted_count`, `total_count`, `updated_at`, `deleted_at` |
+| 5 | `variation_asset` | `bytes`, `complete` (currently write-only) |
+| 6 | `variation_effect` | `created_at`, `updated_at` |
+| 7 | `variation_lease` | `created_at` |
+| 8 | Legacy `metadata`, `images` | `has_workflow`, `nopng`, `ext` |
+| 9 | Legacy `files` | `size` |
+| 10 | SQL-generated integers | `COUNT(*)`, rowids and PRAGMA numeric fields |
+
+`kv.v` is TEXT, including metadata/history revision counters; SQL increments
+cast back to TEXT and the existing Store getters convert to Number. Other
+timestamps are REAL. Migration folds copy integers inside SQL, without a JS
+round-trip. Direct database fixtures must opt into int64 when asserting large
+integer reads; fixture writes do not depend on the read option.
+
 ```sql
 CREATE TABLE content (
   hash TEXT PRIMARY KEY,          -- sha256 of the bytes
