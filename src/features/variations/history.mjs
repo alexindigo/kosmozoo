@@ -14,7 +14,7 @@ import { inspectSource, projectInspection } from "./inspection.mjs";
 import { inspectDestination, destinationMissing } from "./destination.mjs";
 import { readImage } from "./folder-images.mjs";
 import { submitPrompt } from "../../backings/comfy-submission.mjs";
-import { effectCounts, problemFrom } from "./problems.mjs";
+import { effectCounts, problemFrom, variationProblem, backendProblem } from "./problems.mjs";
 import { problemEnvelope } from "./problem-transport.mjs";
 
 const fail = (message, status = 400) => Object.assign(new Error(message), { status });
@@ -465,9 +465,8 @@ export function makeVariationHistory(app) {
         }
       }
       if (!store.variationClaimEffect(id, effectId)) throw fail("Upload was already admitted", 409);
-      let outboundStarted = false;
+      let outboundStarted = false, result, settled = false;
       try {
-        let result;
         if (value !== null) result = { value, name: resource.name, origin, hash: resource.hash, reused: true };
         else {
           const parameters = parameterIndex(saved.catalogue.parameters);
@@ -480,15 +479,17 @@ export function makeVariationHistory(app) {
           if (!backing.write) throw fail("This source cannot materialize saved images");
           outboundStarted = true;
           const write = await backing.write(token.address, resource.name.split("/").at(-1), bytes);
-          if (!write.ok) throw fail(write.error, write.status ?? 502);
+          if (!write.ok) throw Object.assign(fail(write.error, write.status ?? 502), { problem: backendProblem(write, { phase: "upload", runId: id, target: { index: targetIndex, name: saved.filename, source: target.host }, destination: origin.source, resource: resource.name, parameter: { id: [...involved][0], label: [...involved].join(", ") } }) });
           result = { value: write.name, name: write.name, origin, hash: resource.hash, reused: false };
         }
         // Persist actual old-origin effects even if source retirement wins next.
         store.variationEffectResult(id, effectId, "confirmed", canonical(result));
+        settled = true;
         currentDestination(destination);
         return result;
       } catch (error) {
-        store.variationEffectResult(id, effectId, !outboundStarted || error.status && error.status < 500 ? "rejected" : "uncertain", canonical({ error: error.message }));
+        if (!settled) store.variationEffectResult(id, effectId, !outboundStarted || error.status && error.status < 500 ? "rejected" : "uncertain", canonical({ error: error.message, ...(error.problem ? { problem: error.problem } : {}) }));
+        else Object.assign(error, { uploaded: result, problem: variationProblem("upload-retired", { phase: "upload", runId: id, destination: origin.source, resource: resource.name, stage: "after", uploaded: result, target: { index: targetIndex, name: saved.filename, source: target.host } }) });
         outcome(id, error); throw error;
       } finally { await collect(id); }
     }, canonical({ origin, snapshotHash })).catch(async error => {

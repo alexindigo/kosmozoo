@@ -184,9 +184,9 @@ Deno.test("run end: the outcome appears together with the end of running, after 
     await running;
     assertEquals(rig.editor.running(), false);
     assert(rig.editor.result().text.startsWith("submitted 1/1"), rig.editor.result().text);
-    assertEquals(rig.editor.result().text.includes("history refresh failed: offline"), failing);
+    assertEquals(rig.editor.result().text.includes("Could not save the final history status"), failing);
     // The result line shows `reason` when present; a history failure must be visible there too.
-    assertEquals((rig.editor.result().reason || "").includes("history refresh failed: offline"), failing);
+    assertEquals((rig.editor.result().reason || "").includes("Could not save the final history status"), failing);
     assertEquals(rig.timers.filter(timer => timer.active).length, failing ? 0 : 1, "the automatic close starts once the run has fully ended, never over a history error");
     rig.editor.dispose();
   }

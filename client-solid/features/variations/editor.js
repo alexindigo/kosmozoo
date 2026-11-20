@@ -16,7 +16,7 @@ import { connectionPresentation, connectionProblem } from "./field-filter.js";
 import { estimateGenerationTime, knownGenerationTime } from "./time-estimate.js";
 import { observeSubmission } from "./submission-progress.js";
 import { planPresentation } from "./plan-presentation.js";
-import { variationProblem, problemFrom, problemText } from "/shared/features/variations/problems.mjs";
+import { variationProblem, problemFrom, problemText, problemError } from "/shared/features/variations/problems.mjs";
 import { makeProblemOwner } from "./problem-presentation.js";
 import { staleSource, sourceFailure } from "./source-message.js";
 import { judgmentVisible } from "/js/image-visibility-model.mjs";
@@ -220,8 +220,8 @@ export function makeVariationEditor({ targets, cohortMode, destination: initialD
   const retireMembership = id => { membershipGenerations.set(id, (membershipGenerations.get(id) ?? 0) + 1); };
   const check = (ticket, target) => {
     if (!owns(ticket)) throw Object.assign(new Error("Operation retired; work was kept"), { stale: true });
-    if (ticket.destination && !sameOrigin(ticket.destination, currentOrigin(ticket.destination.source))) throw Object.assign(new Error(staleSource(ticket.destination.source)), { stale: true });
-    if (!originCurrent(target)) throw Object.assign(new Error(staleSource(target.host)), { stale: true });
+    if (ticket.destination && !sameOrigin(ticket.destination, currentOrigin(ticket.destination.source))) throw Object.assign(problemError(variationProblem("source-retired", { phase: "run", target: targetIdentity(target), source: ticket.destination.source })), { stale: true });
+    if (!originCurrent(target)) throw Object.assign(problemError(variationProblem("source-retired", { phase: "run", target: targetIdentity(target), source: target.host })), { stale: true });
   };
   const physicalMatch = (a, b) => validOrigin(a) && validOrigin(b) && a.address === b.address && a.kind === b.kind && a.incarnation === b.incarnation;
   const inspectionQueue = [], pendingInspections = new Set();
@@ -846,12 +846,12 @@ export function makeVariationEditor({ targets, cohortMode, destination: initialD
           for (const leftover of planned.leftovers ?? []) leftovers.set(leftover.target.id, leftover);
         }
         else {
-        if (ticket.destination && ticket.targets.some(target => !sameOrigin(ticket.destination, target.origin))) throw new Error("Running on another ComfyUI requires saved-run history; nothing was sent.");
+         if (ticket.destination && ticket.targets.some(target => !sameOrigin(ticket.destination, target.origin))) throw problemError(variationProblem("run-unbound", { phase: "capture", target: targetIdentity(ticket.targets[0]) }));
         // Explicit narrow legacy service rigs retain their old wire contract.
         // Application installation always supplies history and rejects unbound
         // Run requests; capture failures never enter this compatibility branch.
         operation.compiled = compile(ticket.snapshot, null, false, runEvidence);
-        if (operation.compiled.uploads.length && new Set(ticket.targets.map(target => target.origin?.address)).size > 1) throw new Error("Local-file variations across different backends are unsupported. Your files and edits have been kept.");
+         if (operation.compiled.uploads.length && new Set(ticket.targets.map(target => target.origin?.address)).size > 1) throw problemError(variationProblem("legacy-backends", { phase: "upload", numbers: { images: ticket.targets.length, backends: new Set(ticket.targets.map(target => target.origin?.address)).size, files: operation.compiled.uploads.length } }));
         for (const target of ticket.targets) check(ticket, target);
         const prepared = new Map();
         for (const target of ticket.targets) {
@@ -909,11 +909,11 @@ export function makeVariationEditor({ targets, cohortMode, destination: initialD
             if ([...uploads.values()].some(receipt => !physicalMatch(receipt.origin, target.origin))) throw new Error(staleSource(target.host));
             const context = request.context;
             let response;
-            try { response = await services.run(request); }
-            catch (error) {
-              uncertain = true;
-              effects.targets.push({ id: target.id, requestId: request.acknowledgement.requestId, outcome: "uncertain", error: error.message });
-              throw error;
+             try { response = await services.run(request); }
+             catch (error) {
+               uncertain = true;
+               effects.targets.push({ id: target.id, requestId: request.acknowledgement.requestId, outcome: "uncertain", error: error.message });
+               throw problemError(problemFrom(error, { code: "run-response-lost", phase: "submission", target: targetIdentity(target), destination: ticket.destination?.source ?? target.host, numbers: { expected: expectedTotal } }));
             }
             const data = response.data;
             effects.targets.push({ id: target.id, requestId: request.acknowledgement.requestId, status: response.status, data: snapshotDraft(data) });
@@ -922,16 +922,16 @@ export function makeVariationEditor({ targets, cohortMode, destination: initialD
             if (!response.ok || !Number.isSafeInteger(data?.submitted) || !Number.isSafeInteger(data?.total) || data.total <= 0 || data.submitted !== data.total ||
               !Array.isArray(data.errors ?? []) || data.errors?.length) countsComplete = false;
             check(ticket, target);
-             if (!response.ok) { throw new Error(sourceFailure(response.status, data?.error ?? response.text ?? `error ${response.status}`, ticket.destination?.source ?? target.host)); }
+              if (!response.ok) { throw problemError(problemFrom({ problem: data?.problem, message: data?.error ?? response.text ?? `HTTP ${response.status}` }, { code: "run-receipt", phase: "submission", target: targetIdentity(target), destination: ticket.destination?.source ?? target.host, numbers: { expected: expectedTotal } })); }
              const proof = request.history ? acknowledgedHistoryFields(request, data) : acknowledgedFields(request, data);
-            for (const error of Array.isArray(data?.errors) ? data.errors : []) failures.push(error?.error ?? String(error));
+             for (const error of Array.isArray(data?.errors) ? data.errors : []) failures.push(error?.problem ? problemText(problemFrom(error, { target: targetIdentity(target) })) : error?.error ?? String(error));
             if (!proof || data.total !== expectedTotal || !sameContext(context, data.acknowledgement?.context)) {
               uncertain ||= data.outcome === "uncertain-effects" || data.submitted === data.total && !data.errors?.length;
-              failures.push("submission acknowledgement unavailable; your edits have been kept.");
+               failures.push(problemText(variationProblem("run-receipt", { phase: "submission", target: targetIdentity(target), destination: ticket.destination?.source ?? target.host, numbers: { expected: expectedTotal }, detail: "binding, count or operation coverage mismatch" })));
             }
              else proofs.push({ target, proof, count: expectedTotal });
-             if (!proof || data.total !== expectedTotal) leftovers.set(target.id, { target, problem: { code: data.outcome ?? "unconfirmed", message: failures.at(-1) ?? "Submission was not fully confirmed; inspect the result before running again." } });
-          } catch (error) { countsComplete = false; failures.push(`${target.filename}: ${error.message}`); leftovers.set(target.id, { target, problem: { code: "submission-failed", message: error.message } }); }
+              if (!proof || data.total !== expectedTotal) leftovers.set(target.id, { target, problem: data.errors?.find(error => error.problem)?.problem ?? variationProblem("run-receipt", { phase: "submission", target: targetIdentity(target), destination: ticket.destination?.source ?? target.host, numbers: { expected: expectedTotal }, detail: "binding, count or operation coverage mismatch" }) });
+           } catch (error) { countsComplete = false; const problem = problemFrom(error, { code: "run-receipt", phase: "submission", target: targetIdentity(target), destination: ticket.destination?.source ?? target.host, numbers: { expected: expectedTotal } }); failures.push(problemText(problem)); leftovers.set(target.id, { target, problem }); }
         }
         if (!owns(ticket)) return { status: "stale" };
         const complete = !uploadFailure && failures.length === 0 && proofs.length === operation.targetPlans.length && proofs.length > 0;
@@ -957,12 +957,11 @@ export function makeVariationEditor({ targets, cohortMode, destination: initialD
         }
         const summary = batch ? `submitted ${submitted}/${total} across ${ticket.targets.length} images` : `submitted ${submitted}/${total}`;
         const newerEdits = recipe.revision() !== ticket.editRevision;
-        const reason = failures[0] ?? (newerEdits ? "newer edits have been kept with all captured images; target outcomes describe the captured setup."
-          : leftovers.size ? `${leftovers.size} image${leftovers.size === 1 ? " needs" : "s need"} attention. Adjust the remaining images and Run again.` : !eligible ? deciding ? "leave decision pending; your edits have been kept" : "operation context changed; your edits have been kept"
-          : "");
+         const scope = variationProblem("cohort-result", { phase: "submission", newer: newerEdits, numbers: { confirmed: proofs.reduce((sum, proof) => sum + proof.count, 0), successful: proofs.length, images: ticket.targets.length, failed: leftovers.size, unknown: effects.targets.reduce((sum, target) => sum + (target.data?.effectCounts?.unknown ?? target.data?.problem?.effects?.unknown ?? (proofs.some(proof => proof.target.id === target.id) ? 0 : operation.targetPlans.find(plan => plan.target.id === target.id)?.expectedTotal ?? 0)), 0), planned: saved?.admission?.reduce((sum, target) => sum + target.count, 0) ?? operation.targetPlans.reduce((sum, plan) => sum + plan.expectedTotal, 0), remaining: newerEdits ? ticket.targets.length : selectedTargets.length } });
+         const reason = [problemText(scope), ...failures, !eligible && !newerEdits && !leftovers.size ? deciding ? "leave decision pending; your edits have been kept" : "operation context changed; your edits have been kept" : ""].filter(Boolean).join("\n");
         show = true;
         outcome = ({ text: submitted || total ? summary + (reason ? ` — ${reason}` : "") : reason || "nothing submitted", reason, ok: complete,
-          state: eligible ? "adopted" : complete ? "kept" : "unavailable", submitted, total, adopted: eligible,
+          state: eligible ? "adopted" : complete ? "kept" : "unavailable", submitted, total, adopted: eligible, summaryProblem: scope,
           effects: freeze(snapshotDraft(effects)), outcome: complete ? "accepted-plan" : !ticket.targets.every(originCurrent) ? "retired" : uncertain ? "uncertain-effects" : submitted ? "partial-effects" : "rejected" });
         // Only a complete, eligible run may close itself; failures stay on screen.
         closable = eligible;
@@ -978,13 +977,20 @@ export function makeVariationEditor({ targets, cohortMode, destination: initialD
          if (services.history) {
             try {
               const finished = await services.history.finish(ticket.runId, outcome?.ok ? null : outcome?.reason ?? outcome?.text ?? null);
-              if (finished?.summary?.effects || finished?.effects) outcome = { ...outcome, effectCounts: finished.summary?.effects ?? finished.effects };
+              if (finished?.summary?.effects || finished?.effects) {
+                const effectCounts = finished.summary?.effects ?? finished.effects, previous = outcome?.summaryProblem;
+                if (previous) {
+                  const next = variationProblem(previous.code, { ...previous, numbers: { ...previous.numbers, confirmed: effectCounts.confirmed, unknown: effectCounts.unknown } });
+                  outcome = { ...outcome, summaryProblem: next, reason: outcome.reason.replace(problemText(previous), problemText(next)), text: outcome.text.replace(problemText(previous), problemText(next)) };
+                }
+                outcome = { ...outcome, effectCounts };
+              }
               if (finished?.refreshProblem && owns(ticket)) { problems.report("history-refresh", finished.refreshProblem); closable = false; }
             }
            catch (error) {
              // The result line shows `reason` when present: the failure must appear there too.
              closable = false;
-             if (owns(ticket)) { show = true; const failed = `history refresh failed: ${error.message}`;
+              if (owns(ticket)) { show = true; const failed = problemText(problemFrom(error, { code: "history-finish", phase: "history finish", runId: ticket.runId }));
                outcome = { ...outcome, historyError: error.message, reason: `${outcome?.reason || outcome?.text || "Run ended"}; ${failed}`, text: `${outcome?.text ?? "Run ended"}; ${failed}` }; }
            }
          }

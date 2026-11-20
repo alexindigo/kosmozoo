@@ -4,6 +4,7 @@
 import { req as request, postRaw, collectionEntriesUrl, entryUrl, entryBytesUrl } from "/js/api.mjs";
 import { sourceFailure } from "./source-message.js";
 import { parseExactJson, stringifyExactJson } from "/shared/parameters.mjs";
+import { variationProblem, problemError, problemFrom } from "/shared/features/variations/problems.mjs";
 const json = { parse: parseExactJson, stringify: stringifyExactJson };
 export const readRunResult = parseExactJson;
 const req = (method, path, body, options, host = body?.targets?.[0]?.host ?? body?.origin?.source ?? "Source", destination = body?.destination?.source) =>
@@ -23,7 +24,7 @@ export const historyPrepare = (id, host, destination) => req("POST", historyPath
 export const historyOpen = id => req("POST", historyPath(id) + "/open", {}, { json });
 export const historyRelease = (id, leaseId) => req("DELETE", historyPath(id) + `/leases/${encodeURIComponent(leaseId)}`, undefined, { json });
 export const historyRemove = id => req("DELETE", historyPath(id), undefined, { json });
-export const historyFinish = (id, error) => req("POST", historyPath(id) + "/finish", { error }, { json });
+export const historyFinish = (id, error) => req("POST", historyPath(id) + "/finish", { error }, { json }).catch(error => { throw problemError(problemFrom(error, { code: "history-finish", phase: "history finish", runId: id })); });
 export const historyMaterialize = (id, binding) => req("POST", historyPath(id) + `/uploads/${binding.targetIndex}-${encodeURIComponent(binding.resourceId)}`, binding, { json });
 export const historyTarget = (id, binding) => req("POST", historyPath(id) + "/prepare-target", binding, { json });
 export const historyThumbnail = item => historyPath(item.runId) + `/resources/${encodeURIComponent(item.resourceId)}/bytes${item.leaseId ? `?lease=${encodeURIComponent(item.leaseId)}` : ""}`;
@@ -95,20 +96,23 @@ export const inputList = (collection, origin, root = "input") =>
     .then(async response => { if (!response.ok) throw responseError(response, await response.json().catch(() => ({})), collection, `Input catalogue: ${response.status}`); return response.json(); });
 
 // multipart upload — a 409 carries the conflicting name (never an overwrite)
-export const uploadInput = (collection, form, origin) =>
-  fetch(collectionEntriesUrl(collection), { method: "POST", body: form, headers: { "X-Kosmozoo-Origin": JSON.stringify(origin) } })
-    .then(async (r) => {
-      if (r.ok) return r.json();
+export const uploadInput = async (collection, form, origin) => {
+  const resource = form.get("image")?.name ?? "selected file", context = { phase: "upload", destination: collection, resource };
+  try {
+      const r = await fetch(collectionEntriesUrl(collection), { method: "POST", body: form, headers: { "X-Kosmozoo-Origin": JSON.stringify(origin) } });
+      if (r.ok) return await r.json();
       if (r.status === 412) {
         const data = await r.json().catch(() => ({}));
-        throw responseError(r, data, collection, "Source changed during upload");
+        throw Object.assign(problemError(variationProblem("upload-retired", { ...context, stage: data.uploaded ? "after" : "before", uploaded: data.uploaded })), { uploaded: data.uploaded });
       }
       if (r.status === 409) {
         const d = await r.json().catch(() => ({}));
-        throw new Error(`already exists on the host: ${d.name ?? "name conflict"}`);
+        throw problemError(variationProblem("upload-conflict", { ...context, actual: d.name ?? "name conflict" }));
       }
-      throw new Error(`POST entries/${collection}: ${r.status}`);
-    });
+      const data = await r.json().catch(() => ({}));
+      throw problemError(variationProblem(r.status < 500 ? "upload-rejected" : "upload-unknown", { ...context, numbers: { status: r.status }, detail: data.error ?? `HTTP ${r.status}` }));
+  } catch (error) { if (error.problem) throw error; throw problemError(problemFrom(error, { ...context, code: "upload-unknown" })); }
+};
 
 // Pexels-compatible services: the engine owns keys and upstream requests.
 const pexelsPath = (id = null) => `/api/features/variations/pexels/services${id === null ? "" : `/${encodeURIComponent(id)}`}`;

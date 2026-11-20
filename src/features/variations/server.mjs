@@ -31,7 +31,7 @@ import { registerPexels } from "./pexels.mjs";
 import { inspectDestination } from "./destination.mjs";
 import { submitPrompt } from "../../backings/comfy-submission.mjs";
 import { problemRoutes } from "./problem-transport.mjs";
-import { variationProblem, problemFrom, problemError } from "./problems.mjs";
+import { variationProblem, problemFrom, problemError, backendProblem, effectCounts } from "./problems.mjs";
 export { parameterCatalogue, findProducingOutputNode, outputNodeIndex, outputNamingTargets } from "./inspection.mjs";
 
 const exactResponse = (value, init = {}) => new Response(stringifyExactJson(value), {
@@ -212,8 +212,8 @@ export function register(app) {
       const backing = backingFor(token.address);
       if (!backing.write) return Response.json({ error: "This source cannot upload images" }, { status: 400 });
       const receipt = await backing.write(token.address, file.name, file.bytes);
-      if (!receipt.ok) return Response.json({ error: receipt.error }, { status: receipt.status });
-      if (!app.backings.isCurrent(token)) return Response.json({ error: "Source changed after upload; no follow-up was authorized", uploaded: { name: receipt.name, origin } }, { status: 412 });
+      if (!receipt.ok) return Response.json({ error: receipt.error, problem: backendProblem(receipt, { phase: "upload", destination: host, resource: file.name }) }, { status: receipt.status });
+      if (!app.backings.isCurrent(token)) return Response.json({ error: "Source changed after upload; no follow-up was authorized", uploaded: { name: receipt.name, origin }, problem: variationProblem("upload-retired", { phase: "upload", destination: host, resource: file.name, stage: "after", uploaded: { name: receipt.name, origin } }) }, { status: 412 });
       return Response.json({ name: receipt.name, origin });
     } catch (error) { return folderError(error); }
   });
@@ -259,24 +259,25 @@ export function register(app) {
   });
 
   app.route("POST", "/run", async (req) => {
+    const invalidRequest = detail => Response.json({ error: detail, problem: variationProblem("run-request", { phase: "submission", detail }) }, { status: 400 });
     let body;
     try { body = await readJson(req, { parse: parseExactJson }); }
-    catch { return Response.json({ error: "JSON body required" }, { status: 400 }); }
+    catch { return invalidRequest("JSON body required"); }
 
-    if (!body || typeof body !== "object" || Array.isArray(body)) return Response.json({ error: "JSON object required" }, { status: 400 });
+    if (!body || typeof body !== "object" || Array.isArray(body)) return invalidRequest("JSON object required");
     const { id, host, filename, ranges, relative, imageParams, acknowledgement, context } = body;
     if (!id || !host || !filename || !ranges) {
-      return Response.json({ error: "missing required fields" }, { status: 400 });
+      return invalidRequest(`missing required fields: ${["id", "host", "filename", "ranges"].filter(key => !body[key]).join(", ")}`);
     }
     const sameHost = reproducesOriginal(host, context?.origin?.source);
     // Saved-plan requests execute on their engine-bound destination; direct
     // requests stay bound to the target's own source.
     if (!validContext(context) || !body.history && context.origin.source !== host) {
-      return Response.json({ error: "Version2 requires the captured source/graph context" }, { status: 400 });
+      return Response.json({ error: "Version2 requires the captured source/graph context", problem: variationProblem("plan-binding", { phase: "submission", detail: "Version2 requires the captured source/graph context" }) }, { status: 400 });
     }
     if (!validRunAcknowledgement(acknowledgement) || id !== `${host}:${filename}` ||
         Object.keys(ranges).some(key => ranges[key]?.enabled && imageParams?.[key]?.enabled)) {
-      return Response.json({ error: "invalid or ambiguous submission acknowledgement request" }, { status: 400 });
+      return Response.json({ error: "invalid or ambiguous submission acknowledgement request", problem: variationProblem("plan-binding", { phase: "submission", detail: "invalid or ambiguous submission acknowledgement request" }) }, { status: 400 });
     }
 
     const execute = async (r, journal = null) => {
@@ -303,16 +304,16 @@ export function register(app) {
       resolvedRanges = relative ? resolveRelativeRanges(selectedRanges, currentValues) : selectedRanges;
       if (Object.keys(selectedRanges).some(id => !Object.hasOwn(resolvedRanges, id))) throw new Error("Every applicable relative range needs clamp bounds");
       const count = permutationPlan(resolvedRanges, currentValues, selectedValues, { sameHost }).total;
-      if (count > MAX_JOBS_PER_IMAGE) return Response.json({ error: `too many permutations (${count} > ${MAX_JOBS_PER_IMAGE})` }, { status: 413 });
+      if (count > MAX_JOBS_PER_IMAGE) return Response.json({ error: `too many permutations (${count} > ${MAX_JOBS_PER_IMAGE})`, problem: variationProblem("too-many", { phase: "plan", numbers: { count } }) }, { status: 413 });
       permutations = generatePermutations(resolvedRanges, currentValues, selectedValues, { sameHost });
     } catch (e) {
       return Response.json({ error: e.message, problem: problemFrom(e, { phase: "plan", target: { name: filename, source: host } }) }, { status: 400 });
     }
     if (permutations.length === 0) {
-      return Response.json({ error: "no permutations to submit (enable an axis or move it off the current values)" }, { status: 400 });
+      return Response.json({ error: "no permutations to submit (enable an axis or move it off the current values)", problem: variationProblem("run-no-work", { phase: "plan", names: [...axes.enabled, ...axes.imgEnabled].map(([id]) => fullInspection.find(parameter => parameter.id === id)?.label ?? id) }) }, { status: 400 });
     }
     if (permutations.length > MAX_JOBS_PER_IMAGE) {
-      return Response.json({ error: `too many permutations (${permutations.length} > ${MAX_JOBS_PER_IMAGE})` }, { status: 413 });
+      return Response.json({ error: `too many permutations (${permutations.length} > ${MAX_JOBS_PER_IMAGE})`, problem: variationProblem("too-many", { phase: "plan", numbers: { count: permutations.length } }) }, { status: 413 });
     }
     console.log(`[variations] run ${host}:${filename} — ${permutations.length} permutations over ${axes.imgEnabled.length} enum/text axes`);
 
@@ -343,7 +344,7 @@ export function register(app) {
     };
     for (const [index, perm] of permutations.entries()) {
       if (!app.backings.isCurrent(token)) {
-        return rejectPlan("source changed; no jobs were submitted");
+        return rejectPlan(problemError(variationProblem("dispatch-retired", { phase: "preflight", destination: context.origin.source, stage: "before", effects: { sent: 0, confirmed: 0, partial: 0, unknown: 0, unsent: permutations.length } })));
       }
       let mutation;
       try { mutation = mutateGraph(graph, perm, fullInspection, r.dynamicCombos, { rangeIds: new Set(Object.keys(resolvedRanges)) }); }
@@ -402,29 +403,36 @@ export function register(app) {
     const responses = [];
     for (const { index, perm, mutated, applied, selections, naming } of prepared) {
       if (!app.backings.isCurrent(token)) {
-        retired = true; errors.push({ permutation: perm, error: "source changed; remaining jobs were not submitted" }); break;
+        retired = true; errors.push({ permutation: perm, error: "source changed; remaining jobs were not submitted", problem: variationProblem("dispatch-retired", { phase: "submission", target: { name: filename, source: host }, destination: context.origin.source, stage: "during" }) }); break;
       }
       const job = {
         prompt: mutated,
         extra_data: { extra_pnginfo: lineageTag(`${host}:${filename}`, perm) },
       };
       const request = journal ? journal.submit(job, index) : submitPrompt(backing, job, { isCurrent: () => app.backings.isCurrent(token) });
-      responses.push(request.result.then(res => ({ res, index, perm, applied, selections, naming }), error => ({ error })));
+      responses.push(request.result.then(res => ({ res, index, perm, applied, selections, naming }), error => ({ error, index, perm })));
       await request.sent;
     }
     const results = await Promise.all(responses);
     // Drain every admitted request before propagating an internal journal error.
     // A failed durable write must never become an ordinary upstream rejection.
     const failure = results.find(result => result.error);
-    if (failure) throw failure.error;
+    const counts = effectCounts(results.map(({ res, error }) => ({ state: error ? "unknown" : res.acceptance === "confirmed" ? "confirmed" : res.acceptance === "partial" ? "partial" : res.acceptance === "uncertain" || res.failure?.kind === "transport" || res.status >= 500 ? "unknown" : "rejected", sent: res?.sent === true })), permutations.length);
+    if (results.some(({ res }) => res?.sent === undefined)) counts.sent = null;
+    if (failure) {
+      counts.sent = null;
+      counts.unsent = permutations.length - results.length;
+      const problem = variationProblem("dispatch-tracking", { phase: "submission", target: { name: filename, source: host }, destination: context.origin.source, detail: failure.error.message, effects: counts });
+      return exactResponse({ error: problem.message, problem, effectCounts: counts, submitted: counts.confirmed, total: permutations.length, outcome: "uncertain-effects", errors: [{ error: problem.message, problem }] }, { status: 500 });
+    }
     for (const { res, index, perm, applied, selections, naming } of results) {
       if (!res.ok) {
         console.error(`[variations] permutation failed ${stringifyExactJson(perm)} -> ${res.error}`);
-        errors.push({ permutation: perm, error: res.error });
+        errors.push({ index, permutation: perm, error: res.error, problem: backendProblem(res, { phase: "submission", target: { name: filename, source: host }, destination: context.origin.source, numbers: { index: index + 1, total: permutations.length }, effects: counts }) });
       } else {
         submitted++;
-        if (!app.backings.isCurrent(token)) { retired = true; errors.push({ permutation: perm, error: "source changed after submission; configuration was not acknowledged" }); }
-        else if (res.acceptance !== "confirmed") { uncertain ||= res.acceptance !== "partial"; errors.push({ permutation: perm, error: res.error ?? "submission acceptance is unconfirmed; do not automatically resubmit" }); }
+        if (!app.backings.isCurrent(token)) { retired = true; errors.push({ index, permutation: perm, error: "source changed after submission; configuration was not acknowledged", problem: variationProblem("dispatch-retired", { phase: "submission", target: { name: filename, source: host }, destination: context.origin.source, stage: "after", numbers: { index: index + 1, total: permutations.length }, effects: counts }) }); }
+        else if (res.acceptance !== "confirmed") { uncertain ||= res.acceptance !== "partial"; errors.push({ index, permutation: perm, error: res.error ?? "submission acceptance is unconfirmed; do not automatically resubmit", problem: backendProblem(res, { phase: "submission", target: { name: filename, source: host }, destination: context.origin.source, numbers: { index: index + 1, total: permutations.length }, effects: counts }) }); }
         else {
           accepted.push({ index, promptId: res.promptId, applied, selections, naming });
         }
@@ -433,7 +441,7 @@ export function register(app) {
 
     if (errors.length) console.error(`[variations] ${host}:${filename} → submitted ${submitted}/${permutations.length}, ${errors.length} failed`);
     else console.log(`[variations] ${host}:${filename} → submitted ${submitted}/${permutations.length}`);
-    return exactResponse({ submitted, total: permutations.length, errors, operations: effectivePlan.operations,
+    return exactResponse({ submitted, total: permutations.length, errors, effectCounts: counts, operations: effectivePlan.operations,
       outcome: retired ? "retired" : uncertain ? "uncertain-effects" : errors.length ? submitted ? "partial-effects" : "rejected" : "accepted-plan",
       acknowledgement: { ...acknowledgement, target: { id, host, filename }, context: r.context, accepted },
     });
@@ -442,7 +450,7 @@ export function register(app) {
       try {
         const result = await history.dispatch(body, execute);
         return historyResponse(result.data, result.status);
-      } catch (error) { return historyResponse({ error: error.message }, error.status ?? 500); }
+      } catch (error) { return historyResponse({ error: error.message, problem: problemFrom(error, { phase: "submission", target: { name: filename, source: host }, destination: context.origin.source }) }, error.status ?? 500); }
     }
     return execute(await inspect(host, filename, context));
   });

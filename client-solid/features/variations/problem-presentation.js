@@ -1,6 +1,6 @@
 // One readonly projection for summaries, targets, parameters and saved evidence.
 // Producers retain scoped problems; views render these records, not catch strings.
-import { problemFrom, problemText, effectMessage, variationProblem } from "/shared/features/variations/problems.mjs";
+import { problemFrom, problemText, effectMessage, variationProblem, backendProblem } from "/shared/features/variations/problems.mjs";
 // The one summary precedence: blocking problems and conflicts, then zero-work and
 // over-limit explanations, then progress, then warnings, then ready guidance.
 // A lower tier never displaces a higher one; order within a tier is retained.
@@ -46,8 +46,8 @@ export function historyPresentation(entry) {
   return { counts: effects ? effectMessage(effects) : "Confirmed effect counts unavailable for this saved Run.",
     state: `Archive: ${entry.captureState ?? "unknown"}; Run: ${entry.outcome ?? "unknown"}; ${(summary.leftovers ?? []).length} images left.`,
     details: (entry.effects ?? []).map(effect => ({ id: effect.id, caption: `${effect.kind} ${effect.id}: ${effect.state}${effect.result?.name ? ` (${effect.result.name})` : ""}`,
-      problems: effect.result?.error || Object.keys(effect.result?.nodeErrors ?? {}).length ? [problemFrom(new Error(effect.result.error ?? JSON.stringify(effect.result.nodeErrors)), { phase: effect.kind,
-        target: { name: summary.targets?.[Number(/^job-(\d+)-/.exec(effect.id)?.[1])] ?? effect.id } })] : [] })),
+      problems: effect.result?.error || Object.keys(effect.result?.nodeErrors ?? {}).length ? [effect.result.problem ?? (effect.result.failure || effect.result.acceptance ? backendProblem(effect.result, { phase: effect.kind === "upload" ? "upload" : "submission", runId: entry.id, target: { name: summary.targets?.[Number(/^job-(\d+)-/.exec(effect.id)?.[1])] ?? effect.id }, destination: entry.destination?.source ?? "the saved destination", numbers: { index: Number(/^job-\d+-(\d+)/.exec(effect.id)?.[1] ?? 0) + 1, total: summary.total ?? "unknown" } }) : problemFrom(new Error(effect.result.error ?? JSON.stringify(effect.result.nodeErrors)), { phase: effect.kind,
+        target: { name: summary.targets?.[Number(/^job-(\d+)-/.exec(effect.id)?.[1])] ?? effect.id } }))] : [] })),
     ...problemPresentation(issues) };
 }
 export const acquisitionProblems = ({ sources = [], pexels, chooserError } = {}) => [

@@ -11,7 +11,7 @@ export function registerHistory(app) {
   // No SQL or archive I/O at feature registration, including legacy narrow rigs.
   const route = (method, path, handler) => app.route(method, path, (req, params) => app.lifetime.run(`history ${method} ${path}`, async () => {
     try { return await handler(req, params); }
-    catch (error) { return historyResponse({ error: error.message }, error.status ?? 500); }
+    catch (error) { return historyResponse({ error: error.message, ...(error.problem ? { problem: error.problem } : {}), ...(error.uploaded ? { uploaded: error.uploaded } : {}) }, error.status ?? 500); }
   }));
   const json = async req => {
     try { return await readJson(req, { parse: parseExactJson }); }

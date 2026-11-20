@@ -8,6 +8,25 @@ const cause = p => p.detail || "the operation did not return usable data";
 const value = v => typeof v === "bigint" ? String(v) : typeof v === "string" ? JSON.stringify(v) : String(v);
 const field = p => `${name(p)}, ${label(p)}${p.field ? `, ${p.field}` : ""}`;
 const formats = {
+  "history-finish": p => `Could not save the final history status for Run ${p.runId}: ${cause(p)}. The Run result and backend effects are unchanged.`,
+  "source-retired": p => `${name(p)}: ${p.source} changed. Your edits remain here; previously issued jobs/uploads are not reversed.${p.effects ? ` ${effectMessage(p.effects)}` : " Effect counts are unavailable for this action."}`,
+  "enqueue-rejected": p => `${name(p)}, job ${facts(p).index}/${facts(p).total}: ${p.destination} rejected submission (HTTP ${facts(p).status}): ${cause(p)}.`,
+  "enqueue-unknown": p => `${name(p)}, job ${facts(p).index}/${facts(p).total}: response from ${p.destination} was lost or incomplete (${cause(p)}). Acceptance is unknown.`,
+  "enqueue-partial": p => `${name(p)}, job ${facts(p).index}/${facts(p).total}: ${p.destination} reported partial acceptance: ${cause(p)}.`,
+  "dispatch-retired": p => `${name(p)}: ${p.destination} changed ${p.stage} submission. ${p.effects ? effectMessage(p.effects) : "Previously issued effects need checking."}`,
+  "dispatch-tracking": p => `${name(p)}: submission tracking failed after dispatch began: ${cause(p)}. ${p.effects ? effectMessage(p.effects) : "Acceptance is unknown for issued requests."}`,
+  "run-response-lost": p => `${name(p)}: lost the Run response from ${p.destination}: ${cause(p)}. Receipts for ${facts(p).expected} expected jobs could not be verified.`,
+  "run-receipt": p => `${name(p)}: could not verify receipts for the expected ${facts(p).expected} jobs (${cause(p)}). Your edits are kept.`,
+  "run-request": p => `Cannot submit ${name(p)}: the Run request is incomplete or unreadable (${cause(p)}). No jobs were admitted by this request.`,
+  "run-unbound": p => `${name(p)}: the client could not bind Run to a saved history capture. No jobs were sent by this request.`,
+  "legacy-backends": p => `${facts(p).images} target images use ${facts(p).backends} backends, but this legacy Run cannot distribute ${facts(p).files} local files. No jobs were sent.`,
+  "run-no-work": p => `${name(p)}: 0 jobs remain after applying this target's parameters and excluding unchanged combinations (${p.names?.join(", ") || "no enabled generation parameters"}).`,
+  "cohort-result": p => `Captured Run result: ${facts(p).confirmed} jobs confirmed; ${facts(p).successful} of ${facts(p).images} images fully acknowledged; ${facts(p).remaining ?? facts(p).failed} images remain, ${facts(p).unknown} jobs need verification (${facts(p).planned} jobs planned).${p.newer ? ` Your newer edits were not submitted and remain with all ${facts(p).images} images.` : ""}${facts(p).remaining === 0 ? " No images remain to run." : ""}`,
+  "upload-name": p => `${p.resource} for ${label(p)} cannot be uploaded to ${p.destination}: invalid filename (use a supported leaf filename without controls or path separators). No jobs for this target were submitted.`,
+  "upload-rejected": p => `${p.resource} for ${name(p)}/${label(p)}: ${p.destination} rejected the upload (HTTP ${facts(p).status}): ${cause(p)}.`,
+  "upload-unknown": p => `Upload response for ${p.resource} to ${p.destination} was lost or invalid (${cause(p)}); the file may already exist there. No generation jobs for this target were dispatched.`,
+  "upload-retired": p => `${p.resource}: ${p.destination} changed ${p.stage} upload. ${p.uploaded?.name ? `Confirmed uploaded as ${p.uploaded.name} on the old destination.` : p.stage === "before" ? "Not uploaded." : "Acceptance is unknown."} No follow-up was authorized.`,
+  "upload-conflict": p => `${p.resource} conflicts with existing ${p.actual} on ${p.destination}. Nothing was overwritten.`,
   "output-type": p => `${field(p)}: filename_prefix requires text; received ${value(p.value)}.`,
   "output-path": p => `${field(p)}: invalid ${p.composed ? "composed " : ""}filename_prefix path ${value(p.value)} (${cause(p)}); output directory is ${value(p.directory)}.`,
   "output-directory": p => `${field(p)}: filename_prefix must retain the original output directory ${value(p.directory)}; requested ${value(p.actual)}.`,
@@ -123,6 +142,25 @@ const formats = {
   "too-many": p => `${name(p)}: ${facts(p).count} jobs for this image; the limit is ${MAX_JOBS_PER_IMAGE} per image. Reduce the axes or increase the increment.`,
 };
 const actions = {
+  "history-finish": "Check the backend before retrying jobs; retry history synchronization, not submission.",
+  "source-retired": "Inspect saved history and the backend queue before retrying, then reopen Variations against the current source.",
+  "enqueue-rejected": "Correct the named input/node and inspect full validation details before retrying failed work.",
+  "enqueue-unknown": "Check the backend queue/history before retrying; do not automatically resubmit.",
+  "enqueue-partial": "Check which outputs/jobs exist and the named node errors before retrying.",
+  "dispatch-retired": "Inspect saved effects and the backend queue before starting a new Run against the current destination.",
+  "dispatch-tracking": "Inspect the backend queue/history before retrying; do not assume nothing was sent.",
+  "run-response-lost": "Do not Run again until you inspect saved history and the backend queue.",
+  "run-receipt": "Check queue/history before retrying; unconfirmed is not queued-confirmed.",
+  "run-request": "Reopen or update the client; your edits remain here.",
+  "run-unbound": "Reopen or update the client and retry capture; do not use an unbound Run.",
+  "legacy-backends": "Use the saved-history client or run one backend at a time.",
+  "run-no-work": "Change the named parameters or the destination, then Run again.",
+  "cohort-result": "Review current validation and each remaining image's cause; inspect uncertain effects before another Run. Edit a parameter to reuse a completed selection, or close Variations.",
+  "upload-name": "Rename or re-add the file using a supported filename.",
+  "upload-rejected": "Check destination permissions/storage or choose another image, then start a new Run.",
+  "upload-unknown": "Check the destination input directory before retrying; no automatic duplicate upload is authorized.",
+  "upload-retired": "Inspect saved upload effects before starting a new Run.",
+  "upload-conflict": "Rename or re-add the file, or select the existing input, then Run again.",
   "output-type": "Enter a text filename prefix; do not change the output directory.",
   "output-path": "Use a valid relative filename within the original directory; correct the selected name or Prefix/Suffix.",
   "output-directory": "Keep the original directory and change only the filename leaf.",
@@ -238,11 +276,24 @@ export function problemFrom(error, context = {}) {
   if (error?.resourceIssue) return variationProblem("resource-root", { ...context, ...error.resourceIssue });
   const retained = error?.problem ?? (error?.code && error?.message && error?.action ? error : null);
   return retained ? variationProblem(retained.code, { ...context, ...retained,
+    ...(context.target || retained.target ? { target: { ...context.target, ...retained.target } } : {}),
     ...(context.numbers || retained.numbers ? { numbers: { ...context.numbers, ...retained.numbers } } : {}),
     ...(context.parameter || retained.parameter ? { parameter: { ...context.parameter, ...retained.parameter } } : {}) }) : variationProblem(Object.hasOwn(formats, error?.code) ? error.code : context.code ?? "operation", { ...context,
     detail: error?.detail ?? error?.message ?? error?.error ?? String(error ?? "Unknown failure") });
 }
 export const problemError = problem => Object.assign(new Error(problem.message), { problem, code: problem.code });
+export function backendDetails(result) {
+  const describe = issue => typeof issue === "string" ? issue : [issue?.message, issue?.details].filter(Boolean).join(": ") || JSON.stringify(issue);
+  const nodes = Object.entries(result.nodeErrors ?? result.failure?.nodeErrors ?? {}).map(([id, detail]) => `${id}: ${(detail.errors ?? [detail]).map(describe).join("; ")}`);
+  return [result.failure?.reason, ...nodes].filter(Boolean).join("; ") || result.error || "backend returned no usable receipt";
+}
+export function backendProblem(result, context = {}) {
+  const upload = context.phase === "upload", kind = result.failure?.kind;
+  const code = upload ? kind === "filename" ? "upload-name" : result.status && result.status < 500 ? "upload-rejected" : "upload-unknown"
+    : result.acceptance === "partial" ? "enqueue-partial" : result.acceptance === "uncertain" || kind === "transport" || !result.status || result.status >= 500 ? "enqueue-unknown" : "enqueue-rejected";
+  return variationProblem(code, { ...context, detail: backendDetails(result), nodeErrors: result.nodeErrors ?? result.failure?.nodeErrors,
+    numbers: { ...context.numbers, status: result.failure?.status ?? result.status } });
+}
 
 // Durable per-permutation evidence, not target outcomes or optimistic counts.
 export function effectCounts(jobs, total = null) {
@@ -250,6 +301,6 @@ export function effectCounts(jobs, total = null) {
   const partial = jobs.filter(job => job.state === "partial").length;
   const unknown = jobs.filter(job => ["started", "uncertain", "unknown"].includes(job.state)).length;
   const sent = jobs.filter(job => job.sent === true || job.result?.sent === true).length;
-  return { sent, confirmed, partial, unknown, unsent: Number.isSafeInteger(total) ? Math.max(0, total - jobs.filter(job => job.sent === true || job.result?.sent === true || ["confirmed", "partial", "uncertain", "started"].includes(job.state)).length) : null };
+  return { sent, confirmed, partial, unknown, unsent: Number.isSafeInteger(total) ? Math.max(0, total - jobs.filter(job => job.sent === true || job.result?.sent === true || ["confirmed", "partial", "uncertain", "unknown", "started"].includes(job.state)).length) : null };
 }
 export const effectMessage = effects => `${effects.confirmed ?? "--"} confirmed, ${effects.partial ?? "--"} partial, ${effects.unknown ?? "--"} unknown, ${effects.unsent ?? "--"} unsent; ${effects.sent ?? "--"} sent.`;

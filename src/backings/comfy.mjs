@@ -144,22 +144,22 @@ export async function read(addr, name, kind = "output", { range, idleMs = HOST_T
 // The engine's input route forwards backing conflicts; use the returned name,
 // never invent successful upload provenance from the requested filename.
 export async function write(addr, name, bytes, { fetcher = fetch } = {}) {
-  if (!isEntryLeaf(name)) return { ok: false, status: 400, error: "bad filename" };
+  if (!isEntryLeaf(name)) return { ok: false, status: 400, error: "bad filename", failure: { kind: "filename", name } };
   const form = new FormData();
   form.append("image", new Blob([bytes]), name);
   try {
     const r = await fetcher(`http://${addr}/api/upload/image`, {
       method: "POST", body: form, signal: AbortSignal.timeout(HOST_TIMEOUT_MS),
     });
-    if (!r.ok) return { ok: false, status: r.status, error: `ComfyUI ${r.status}` };
+    if (!r.ok) { const reason = await r.text(); return { ok: false, status: r.status, error: `ComfyUI ${r.status}`, failure: { kind: "rejected", status: r.status, reason } }; }
     const d = await r.json().catch(() => null);
     if (!d || !isEntryLeaf(d.name) ||
         (d.type !== undefined && d.type !== "input") || (d.subfolder !== undefined && d.subfolder !== "")) {
-      return { ok: false, status: 502, error: "upload acceptance is unconfirmed: invalid returned input name; do not automatically retry" };
+      return { ok: false, status: 502, error: "upload acceptance is unconfirmed: invalid returned input name; do not automatically retry", failure: { kind: "receipt", reason: "invalid returned input name/type/subfolder or JSON" } };
     }
     return { ok: true, name: d.name };
   } catch (e) {
-    return { ok: false, status: 502, error: `upload failed: ${e.message}` };
+    return { ok: false, status: 502, error: `upload failed: ${e.message}`, failure: { kind: "transport", reason: e.message } };
   }
 }
 
@@ -786,20 +786,21 @@ export async function enqueue(addr, prompt, { fetcher = fetch } = {}) {
 const submissionBody = prompt => stringifyExactJson({ ...prompt, prompt: freshSubmissionGraph(prompt.prompt) });
 function enqueueFailure(addr, error) {
   console.error(`[comfy] enqueue ${logValue(addr)} -> fetch failed: ${logValue(error.message)}`);
-  return { ok: false, status: 502, error: `fetch failed: ${error.message}` };
+  return { ok: false, status: 502, error: `fetch failed: ${error.message}`, failure: { kind: "transport", reason: error.message } };
 }
 async function enqueueResponse(addr, resp) {
     if (!resp.ok) {
       const text = await resp.text();
       console.error(`[comfy] enqueue ${logValue(addr)} -> ${resp.status}: ${logValue(text)}`);
-      return { ok: false, status: resp.status, error: `ComfyUI ${resp.status}: ${text.slice(0, 200)}` };
+      let data; try { data = JSON.parse(text); } catch { /* Non-JSON bodies remain readable evidence. */ }
+      return { ok: false, status: resp.status, error: `ComfyUI ${resp.status}: ${text.slice(0, 200)}`, failure: { kind: "rejected", status: resp.status, reason: data?.error?.message ?? text, ...(data?.node_errors ? { nodeErrors: data.node_errors } : {}) } };
     }
     const data = await resp.json().catch(() => null);
     const object = value => value !== null && typeof value === "object" && !Array.isArray(value);
     const identity = object(data) && typeof data.prompt_id === "string" && data.prompt_id.trim() && data.prompt_id === data.prompt_id.trim();
     const nodeErrors = object(data?.node_errors) ? data.node_errors : null;
     if (!identity || nodeErrors === null || data.error !== undefined) {
-      return { ok: true, status: resp.status, acceptance: "uncertain", error: "submission acceptance is unconfirmed; do not automatically resubmit" };
+      return { ok: true, status: resp.status, acceptance: "uncertain", error: "submission acceptance is unconfirmed; do not automatically resubmit", failure: { kind: "receipt", reason: "missing/invalid prompt ID, node errors or error-free JSON receipt" } };
     }
     const partial = Object.keys(nodeErrors).length > 0;
     return { ok: true, status: resp.status, acceptance: partial ? "partial" : "confirmed",

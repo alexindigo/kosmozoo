@@ -241,6 +241,8 @@ Deno.test("history HTTP: immutable raw capture/archive barrier, engine plan and 
       if (mode === "storage-failure") {
         assertEquals(result.status, 500);
         assert(result.data.error.includes("receipt disk failure"));
+        assertEquals(result.data.problem.code, "dispatch-tracking");
+        assertEquals(result.data.problem.effects.unknown, 1);
         assertEquals(engine.ctx.store.variationEffects(runId).find(e => e.kind === "permutation").state, "started");
       } else {
         assertEquals(result.data.outcome, mode === "partial" ? "partial-effects" : "uncertain-effects");
@@ -395,7 +397,11 @@ Deno.test("history HTTP: immutable raw capture/archive barrier, engine plan and 
     const address = engine.ctx.hosts.fake;
     engine.ctx.hosts.fake = "127.0.0.1:1"; fencedGate.release.resolve();
     try {
-      assertEquals((await fencedUpload).status, 412);
+      const fencedResult = await fencedUpload;
+      assertEquals(fencedResult.status, 412);
+      assertEquals(fencedResult.data.problem.code, "upload-retired");
+      assertEquals(fencedResult.data.problem.stage, "after");
+      assertEquals(fencedResult.data.problem.uploaded.origin, nextTarget.origin);
       const effect = engine.ctx.store.variationEffects(fencedId).find(e => e.kind === "upload");
       assertEquals(effect.state, "confirmed", "a source fence cannot undo an actual old-origin receipt");
       assertEquals(parseExactJson(effect.result_json).origin, nextTarget.origin);

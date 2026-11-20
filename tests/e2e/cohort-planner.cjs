@@ -98,7 +98,7 @@ const graph = (name, choice) => ({
     assert.equal(newer.submitted, 2, JSON.stringify(newer)); assert.equal(newer.adopted, false);
     await c.poll(`document.querySelectorAll('.vz-batch-item').length===3&&document.querySelectorAll('.vz-batch-queued').length===2&&document.querySelectorAll('.vz-batch-outcome.vz-batch-issue').length===1`, 20000);
     assert.equal(await c.evaluate(`document.querySelector('.vz-prefix').value`), 'newer-');
-    assert(await c.evaluate(`document.querySelector('.vz-messages').textContent.includes('newer edits have been kept with all captured images')`));
+    assert(await c.evaluate(`document.querySelector('.vz-messages').textContent.includes('Your newer edits were not submitted and remain with all 3 images.')`));
     await new Promise(resolve => setTimeout(resolve, 3200));
     assert.equal(await c.evaluate(`document.querySelectorAll('.vz-batch-item').length`), 3, 'newer edits keep the cohort and prevent auto-close');
     const queuedSetup = (await request(F2, '/__test/enqueues')).slice(-2);
