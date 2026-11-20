@@ -7,6 +7,90 @@ import { typedRunRig } from "./helpers/typed-run.mjs";
 import { parseExactJson, parameterCurrent, parameterAliases } from "../src/parameters.mjs";
 import { objectInfoView } from "../src/backings/comfy.mjs";
 import { saveImage } from "./helpers/comfy-object-info.mjs";
+import { isEntryPath } from "../src/entry-path.mjs";
+
+const hash6 = async text => Array.from(new Uint8Array(await crypto.subtle.digest("SHA-256", new TextEncoder().encode(text))),
+  byte => byte.toString(16).padStart(2, "0")).join("").slice(0, 6);
+
+Deno.test("output naming: text parts clean ten characters and hash the exact full UTF-8 value", async () => {
+  for (const [text, clean, known] of [["", "text", "e3b0c4"], ["abc", "abc", "ba7816"],
+    ['\nChedi Daan from "T...', "Chedi_Daan"], ["...\n\u0085/_", "text"], ["._a b/c\\d\"e-f.ghi", "a_b_c_d_e-"]]) {
+    assertEquals(naming.textName(text), `${clean}~${known ?? await hash6(text)}`);
+    assert(isEntryPath(naming.textName(text)));
+  }
+  for (const length of [55, 56, 63, 64, 65, 127, 128, 1000]) {
+    for (const text of ["a".repeat(length), "\u00e9\ud83d\udc09".repeat(length)]) assertEquals(naming.textName(text).split("~")[1], await hash6(text));
+  }
+  const first = naming.textName("same-first-ten and more"), second = naming.textName("same-first-ten but different");
+  assertEquals(first.split("~")[0], second.split("~")[0]); assert(first !== second);
+  assertEquals(naming.templateReplace("{node.value}", { "node.value": "abc" }, {}, {}, [{ id: "node.value", kind: "boolean" }]), "abc~ba7816");
+});
+
+Deno.test("output naming: automatic and manual text tokens share safe parts without changing graph values", async () => {
+  const controls = Array.from({ length: 32 }, (_, i) => String.fromCharCode(i)).join("") +
+    Array.from({ length: 33 }, (_, i) => String.fromCharCode(127 + i)).join("") + "\u2028\u2029";
+  const values = ["\nChedi\r\nDaan\n", `\r${controls}second${controls}label${controls}\n`];
+  const graph = { node: { class_type: "Custom", inputs: { text: "original" } },
+    save: { class_type: "SaveImage", inputs: { filename_prefix: "source", images: ["node", 0] } } };
+  const rig = typedRunRig({ graph }), catalogue = await rig.probe();
+  const body = await rig.request({ "node.text": { enabled: true, values } });
+  body.prefix = "pre_{node.text}_"; body.suffix = "_manual"; body.automaticNaming = true;
+  const before = structuredClone(body), result = await rig.run(body);
+  assertEquals(result.status, 200, JSON.stringify(result.data));
+  assertEquals(result.data.submitted, 2);
+  const current = { "node.text": "original" };
+  for (const [index, clean] of ["Chedi_Daan", "second_lab"].entries()) {
+    const part = `${clean}~${await hash6(values[index])}`;
+    const actual = parseExactJson(rig.bytes[index]).prompt, expected = `pre_${part}_source_00001__manual_${part}`;
+    assertEquals(actual.save.inputs.filename_prefix, expected); assert(isEntryPath(expected));
+    assertEquals(actual.node.inputs.text, values[index]);
+    assertEquals(naming.variationOutputName(catalogue.outputNaming, body, { "node.text": values[index] }, current, {}, catalogue.parameters).value, expected);
+  }
+  assertEquals(body, before); assertEquals(graph.node.inputs.text, "original");
+});
+
+Deno.test("output naming: unsafe manual templates reject before any enqueue, even with automatic naming", async () => {
+  const graph = { node: { class_type: "Custom", inputs: { text: "original" } },
+    save: { class_type: "SaveImage", inputs: { filename_prefix: "source", images: ["node", 0] } } };
+  for (const [field, template] of [["prefix", "literal\n"], ["suffix", "\u0085literal"], ["prefix", "{node.text}\n"], ["suffix", "\r{node.text}"]]) {
+    const rig = typedRunRig({ graph }), body = await rig.request({ "node.text": { enabled: true, values: ["safe", "line\nbreak"] } });
+    body.automaticNaming = true; body[field] = template;
+    const result = await rig.run(body);
+    assertEquals(result.status, 400, JSON.stringify(result.data)); assertEquals(result.data.submitted, 0);
+    assertEquals(result.data.error, "save.filename_prefix: output name contains a line break or control character");
+    assertEquals(rig.bytes, []);
+  }
+});
+
+Deno.test("output naming: every final composition and both graph writers enforce entry paths", () => {
+  const target = { parameterId: "save.filename_prefix", directory: "", sourceStem: "source" };
+  for (const [prefix, suffix] of [["\n", ""], ["", "\r\n"], ["/absolute", ""], ["", "/../escape"], ["a\\b", ""]]) {
+    assertThrows(() => naming.composeOutputName(target, {}, prefix, suffix));
+    const graph = { save: { class_type: "SaveImage", inputs: { filename_prefix: "source" } } };
+    assertThrows(() => narrowToOneOutputNode(structuredClone(graph), "save", "source", prefix, suffix, new Set(["SaveImage"])));
+    assertThrows(() => wrapAllOutputPrefixes(structuredClone(graph), prefix, suffix, new Set(["SaveImage"])));
+  }
+  assertThrows(() => naming.composeOutputName(target, { "save.filename_prefix": "" }));
+  assertEquals(naming.composeOutputName(target, { "save.filename_prefix": "" }, "", "", { preliminary: true }).value, "");
+  assertThrows(() => naming.composeOutputName(target, { "save.filename_prefix": "a\nb" }, "", "", { preliminary: true }));
+  assertEquals(naming.composeOutputName(target, { "save.filename_prefix": "" }, "v_", "_s").value, "v__s");
+  assertEquals(naming.composeOutputName(target, { "save.filename_prefix": "  chosen  " }, "v_", "_s").value, "v_  chosen  _s");
+});
+
+Deno.test("output naming: numeric, boolean, enum and image labels keep their existing formatting", () => {
+  const target = { parameterId: "save.filename_prefix", directory: "", sourceStem: "source_00001_" };
+  for (const [value, kind] of [["ordinary  text", "enum"], [.65, "numeric"], [false, "boolean"], [null, "null"], [{ value: "ordinary" }, "object"], ["folder/original.png", "image"]]) {
+    const request = { prefix: "pre_", suffix: "_manual", automaticNaming: true,
+      imageParams: { "node.value": { enabled: true, values: [value, "other"] } } };
+    const parameters = [{ id: "node.value", kind }], permutation = { "node.value": value };
+    const token = naming.templateReplace("{node.value}", permutation, {}, {}, parameters);
+    const expected = `pre_source_00001__manual_${token}`;
+    assertEquals(naming.variationOutputName(target, request, permutation, {}, {}, parameters).value, expected);
+    assert(new TextEncoder().encode(token).length <= naming.TOKEN_NAME_BUDGET);
+  }
+  assertEquals(naming.templateReplace("{node.value}", { "node.value": "ordinary  text" }, {}, {}, [{ id: "node.value", kind: "enum" }]), "ordinary  text");
+  assertEquals(naming.templateReplace("{node.value}", { "node.value": "folder/original.png" }, {}, {}, [{ id: "node.value", kind: "image" }]), "original");
+});
 
 Deno.test("selected output name: stable producer composes every candidate, preserves manual text and exact v2 proof", async () => {
   const graph = { node: { class_type: "Custom", inputs: { value: false } },
@@ -56,6 +140,11 @@ Deno.test("selected output name: retained dependency writes stay exact; selected
   body.context = (await rejected.probe()).context;
   const failure = await rejected.run(body);
   assertEquals(failure.status, 400); assertEquals(rejected.bytes, []); assert(failure.data.error.includes("pruned"));
+  const emptyDependency = typedRunRig({ graph, schema });
+  const emptyBody = await emptyDependency.request({ "save.filename_prefix": { enabled: true, values: ["chosen"] }, "ancestor.filename_prefix": { enabled: true, values: [""] } });
+  emptyBody.prefix = "v_"; emptyBody.suffix = "_s";
+  assertEquals((await emptyDependency.run(emptyBody)).status, 400);
+  assertEquals(emptyDependency.bytes, [], "retained dependency outputs do not receive affixes, so their empty names are final and invalid");
 });
 
 Deno.test("selected output name: late unsupported types, paths or lossy names enqueue nothing", async () => {
@@ -184,12 +273,14 @@ Deno.test("output naming: only affixes alone over budget reject with actual byte
 });
 
 Deno.test("output naming: every token kind is bounded to 40 UTF-8 bytes, images lose only their extension", () => {
-  const params = ["image", "text", "enum", "numeric"].map(kind => ({ id: `${kind}.value`, kind }));
+  const params = ["image", "text", "enum"].map(kind => ({ id: `${kind}.value`, kind }));
   const aliases = { "image.value": ["image", "LoadImage.image"] };
-  for (const kind of ["image", "text", "enum", "numeric"]) {
+  for (const kind of ["image", "text", "enum"]) {
     const value = "я🐉".repeat(30) + "_00042_" + (kind === "image" ? ".png" : "");
     const result = naming.templateReplace(`{${kind}.value}`, { [`${kind}.value`]: value }, {}, aliases, params);
-    assert(bytes(result) <= 40); assert(result.includes("~")); assert(result.endsWith("_00042_"));
+    assert(bytes(result) <= 40); assert(result.includes("~"));
+    if (kind === "text") assertEquals(result, naming.textName(value));
+    else assert(result.endsWith("_00042_"));
     assert(!/[\uD800-\uDFFF]/u.test(result));
   }
   assertEquals(naming.templateReplace("{image}_{LoadImage.image}", { "image.value": "dragon.png" }, {}, aliases, params), "dragon_dragon");

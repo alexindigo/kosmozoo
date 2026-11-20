@@ -349,7 +349,9 @@ export function register(app) {
         if (!firstNamingTarget) return rejectPlan("No output node in graph");
         // Validate every explicit output prefix, including retained dependencies,
         // without giving those dependencies new sidebar-affix writes.
-        for (const target of namingTargets) if (Object.hasOwn(perm, target.parameterId)) composeOutputName(target, perm);
+        for (const target of namingTargets) if (Object.hasOwn(perm, target.parameterId)) {
+          composeOutputName(target, perm, "", "", { preliminary: !producing || target.nodeId === producing.id });
+        }
         const naming = variationOutputName(firstNamingTarget, namingRequest, perm, currentValues, labelMap, fullInspection, { sameHost });
         if (!naming.complete) return rejectPlan("Unresolved naming token: check prefix and suffix; no jobs were submitted");
         const { prefix: pfx, suffix: sfx } = naming;

@@ -1678,8 +1678,12 @@ for preview and Run. Probe's `outputNaming` and additive `outputNamingTargets`
 carry stable node/parameter IDs, original directory and fallback source stem.
 Explicit candidates require text and retain the original directory exactly; invalid
 paths or candidates requiring truncation reject the whole plan before enqueue,
-without sanitizing or dropping path text. Root empty and whitespace values remain
-exact. Compositional proof binds the actual candidate, parameter ID, stable node ID
+without sanitizing or dropping path text. Root empty and whitespace candidates remain
+exact during preliminary validation. Every final composed output name, after manual
+affixes and automatic naming, must pass the shared entry-path grammar; an empty
+candidate is allowed only when its final composition is valid. Invalid final names
+reject before any enqueue, including names from the unselected/fallback paths.
+Compositional proof binds the actual candidate, parameter ID, stable node ID
 and final composed write. It does not pretend the raw candidate equals the final
 name, certify a lost candidate or create proof for pruned operations.
 
@@ -1794,11 +1798,21 @@ varies. Explicit IDs are required to address siblings independently. Variation
 drafts and parameter choices are session-private and are not persisted, so
 there are no saved legacy parameter keys to migrate.
 
+Text values (including string candidates) use one synchronous, pure `textName`
+formatter in automatic naming and manual Prefix/Suffix tokens: `<clean10>~<hash6>`.
+For `clean10`, replace each run outside ASCII letters, digits, `.` and `-` with
+one `_`, trim leading/trailing `_` and `.`, then take the first 10 characters
+(or `text` if empty). `hash6` is the first six lowercase hex digits of SHA-256
+over the exact full original UTF-8 text, before cleaning. Preview and Run use
+the same formatter. Numeric, boolean and closed-list enum labels keep their
+existing formatting; explicit output-prefix candidates are not text tokens and
+remain exact. Graph values and lineage retain the original text.
+
 Every resolved naming-token value is bounded to **40 UTF-8 bytes**, for every
 parameter kind. Image tokens first remove the filename's last extension:
 `dragon.png` becomes `dragon`. Longer values fold deterministically to a head
 of at most 19 bytes, `~`, and a tail of at most 20 bytes, without splitting a
-Unicode code point. Short values and ordinary numeric formatting stay unchanged.
+Unicode code point. Short non-text values and ordinary numeric formatting stay unchanged.
 The bound applies only to naming substitutions: graph values, image upload names,
 raw recipe text and lineage metadata remain exact. Keeping the tail retains the
 newest counters and distinguishes long names with a shared head and different tails;

@@ -7,7 +7,61 @@ import { numericDefaults, editorDomain } from "../client-solid/features/variatio
 import { encodeHistoryRecipe } from "../src/features/variations/history-codec.mjs";
 import { parameterCurrent, parseExactJson, stringifyExactJson } from "../src/parameters.mjs";
 import { snapshotDraft } from "../src/features/variations/recipe-model.mjs";
+import { isEntryPath } from "../src/entry-path.mjs";
 const deferred = () => { let resolve; const promise = new Promise(r => { resolve = r; }); return { promise, resolve }; };
+
+Deno.test("history HTTP: newline text variations queue only addressable prefixes and retain exact values", async () => {
+  const dir = await Deno.makeTempDir({ prefix: "kz-safe-names-" }), jobs = [];
+  const graph = { text: { class_type: "Text", inputs: { value: "original" } },
+    save: { class_type: "SaveImage", inputs: { filename_prefix: "source", images: ["text", 0] } } };
+  const png = testPng(10, 10, undefined, graph);
+  const fake = Deno.serve({ hostname: "127.0.0.1", port: 0, onListen() {} }, async req => {
+    const url = new URL(req.url);
+    if (url.pathname === "/api/object_info") return Response.json({ SaveImage: { output_node: true, input: {} } });
+    if (url.pathname === "/api/view") return new Response(req.method === "HEAD" ? null : png, { headers: { ETag: '"fixture"', "Content-Length": String(png.length) } });
+    if (url.pathname === "/api/prompt") {
+      jobs.push(parseExactJson(await req.text()));
+      return Response.json({ prompt_id: `safe-${jobs.length}`, node_errors: {} });
+    }
+    return new Response(null, { status: 404 });
+  });
+  const engine = await buildContext({ start: false, env: { HOME: dir, KOZMOZOO_STATE: dir,
+    KOZMOZOO_CACHE: `${dir}/cache`, KOZMOZOO_HOSTS: `fake=127.0.0.1:${fake.addr.port}`, KOZMOZOO_PLUGINS: `${dir}/no-plugins` } });
+  const call = async (method, path, body) => {
+    const response = await engine.router.handle(new Request(`http://localhost/api/features/variations${path}`, {
+      method, headers: body === undefined ? {} : { "Content-Type": "application/json" },
+      ...(body === undefined ? {} : { body: stringifyExactJson(body) }),
+    }));
+    return { status: response.status, data: parseExactJson(await response.text()) };
+  };
+  try {
+    await engine.ctx.ingest.ensure("fake", "source_00001_.png");
+    const probe = (await call("GET", "/probe/fake%3Asource_00001_.png")).data;
+    const recipe = makeVariationRecipe();
+    recipe.seed("naming", "root", {}, { prefix: "", suffix: "" });
+    recipe.seed("texts", "text.value", probe.parameters.find(p => p.id === "text.value"),
+      { enabled: true, text: "\n{{place}}\r\nwith zero bulk.\n", tpl: { place: "Chedi Daan;Temple" } });
+    const runId = crypto.randomUUID(), encoded = encodeHistoryRecipe(recipe.capture(), runId);
+    const target = { id: "fake:source_00001_.png", host: "fake", filename: "source_00001_.png", origin: probe.context.origin, context: probe.context };
+    assertEquals((await call("POST", "/history", { runId, format: 1, cohortMode: "single", targets: [target], recipe: encoded.recipe, resources: encoded.resources })).status, 200);
+    const prepared = await call("POST", `/history/${runId}/prepare`);
+    assertEquals(prepared.status, 200, stringifyExactJson(prepared));
+    const plan = await call("POST", `/history/${runId}/prepare-target`, { targetIndex: 0, origin: target.origin, snapshotHash: prepared.data.snapshotHash });
+    assertEquals(plan.status, 200, stringifyExactJson(plan));
+    const result = await call("POST", "/run", plan.data.request);
+    assertEquals(result.status, 200, stringifyExactJson(result)); assertEquals(result.data.submitted, 2);
+    assertEquals(jobs.length, 2);
+    for (const [index, place] of ["Chedi Daan", "Temple"].entries()) {
+      const job = jobs[index];
+      assert(isEntryPath(job.prompt.save.inputs.filename_prefix));
+      const value = `\n${place}\r\nwith zero bulk.\n`;
+      const digest = Array.from(new Uint8Array(await crypto.subtle.digest("SHA-256", new TextEncoder().encode(value))), byte => byte.toString(16).padStart(2, "0")).join("").slice(0, 6);
+      assertEquals(job.prompt.save.inputs.filename_prefix, `source_00001__${place === "Chedi Daan" ? "Chedi_Daan" : "Temple_wit"}~${digest}`);
+      assertEquals(job.prompt.text.inputs.value, value);
+      assertEquals(job.extra_data.extra_pnginfo.kz.params["text.value"], job.prompt.text.inputs.value);
+    }
+  } finally { await engine.close(); await fake.shutdown(); }
+});
 
 function recipeFor(catalogue) {
   const r = makeVariationRecipe();

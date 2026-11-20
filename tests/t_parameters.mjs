@@ -82,8 +82,8 @@ Deno.test("parameters: identity/name ports are the same owner and aliases retain
   });
   const aliases = parameters.parameterAliases(ps);
   assertEquals(variations.templateReplace("{image}|{Same}|{LoadImage.image}|{92:105.image}",
-    { "92:105.image": "later.png" }, Object.fromEntries(ps.map(p => [p.id, parameters.parameterCurrent(p)])), aliases),
-  "folder/a.png [output]|folder/a.png [output]|folder/a.png [output]|later.png");
+    { "92:105.image": "later.png" }, Object.fromEntries(ps.map(p => [p.id, parameters.parameterCurrent(p)])), aliases, ps),
+  "a|a|a|later");
   const protoGraph = JSON.parse('{"__proto__":{"class_type":"Custom","inputs":{"constructor":null,"group.0.flag":false}}}');
   const own = parameters.graphParameters(protoGraph);
   assertEquals(own.map(p => parameters.parseParamId(p.id)), [
