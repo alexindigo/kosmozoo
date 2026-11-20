@@ -68,8 +68,9 @@ Deno.test("identity: catalogue resolution and duplicate IDs fail before editor s
   const origin = { source: "fake", address: "fake:8188", kind: "comfy", incarnation: "instance" };
   const editor = makeVariationEditor({ targets: [{ id: "fake:a.png", host: "fake", filename: "a.png", origin }],
     services: {}, currentOrigin: () => origin });
-  assertThrows(() => editor.installCatalogue({ context: { origin, graphHash: "a".repeat(64) },
-    params: [p, p], stringParams: [], enumParams: [], textParams: [] }), Error, "Duplicate");
+  assertEquals(editor.installCatalogue({ context: { origin, graphHash: "a".repeat(64) },
+    params: [p, p], stringParams: [], enumParams: [], textParams: [] }), false);
+  assert(editor.preview().message.includes("Duplicate"));
   assertEquals(editor.rows("numeric"), {});
   assertEquals(editor.ready(), false);
   editor.dispose();
@@ -105,7 +106,8 @@ Deno.test("identity: equal image values/titles never merge rows or their native 
   assert(editor.rows('images')['81.image'].items[1].file === second);
   assertEquals(editor.rows('images')['76.image'].label, 'Reference #76 · image');
   assertEquals(editor.rows('images')['81.image'].label, 'Reference #81 · image');
-  assertThrows(() => editor.installCatalogue({ ...data, textParams: [...data.textParams, data.params[0]] }), Error, 'Duplicate');
+  assertEquals(editor.installCatalogue({ ...data, textParams: [...data.textParams, data.params[0]] }), false);
+  assert(editor.preview().message.includes('Duplicate'));
   assert(editor.rows('images')['76.image'].items[1].file === first);
   editor.dispose();
 });

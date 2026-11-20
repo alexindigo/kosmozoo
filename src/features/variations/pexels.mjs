@@ -288,10 +288,11 @@ export function makePexelsClient({ fetch = globalThis.fetch, timeoutMs = UPSTREA
       }
       if (status < 200 || status >= 300) throw upstreamError(service, status);
       if (!data || !Array.isArray(data.photos)) throw fail(`${service.name} sent no photo list`, 502);
-      const seen = new Set(), list = [];
+      const seen = new Set(), list = []; let invalid = 0, duplicates = 0;
       for (const raw of data.photos) {
         const photo = normalizePhoto(raw, service.url);
-        if (!photo || seen.has(photo.id)) continue;
+        if (!photo) { invalid++; continue; }
+        if (seen.has(photo.id)) { duplicates++; continue; }
         seen.add(photo.id); remember(service, photo);
         list.push({ id: photo.id, alt: photo.alt, photographer: photo.photographer, width: photo.width, height: photo.height });
       }
@@ -300,7 +301,8 @@ export function makePexelsClient({ fetch = globalThis.fetch, timeoutMs = UPSTREA
       const more = typeof data.next_page === "string" ? !!data.next_page
         : Number.isSafeInteger(data.total_results) ? data.total_results > page * PEXELS_PAGE_SIZE
         : data.photos.length >= PEXELS_PAGE_SIZE;
-      return { mode, curated: true, page, more: more && data.photos.length > 0, photos: list };
+      return { mode, curated: true, page, more: more && data.photos.length > 0, photos: list,
+        ...(invalid || duplicates ? { skipped: { source: service.name, received: data.photos.length, shown: list.length, invalid, duplicates, page } } : {}) };
     },
 
     async photo(service, id, signal) {

@@ -32,14 +32,15 @@ export async function req(method, path, body, { priority, signal, raw = false, j
     priority: priority === "background" ? "low" : "auto",
   });
   if (!r.ok) {
-    let detail = "";
+    let detail = "", problem = null;
     try {
       const payload = JSON.parse(await r.text());
+      problem = payload?.problem ?? null;
       const error = typeof payload?.error === "string" ? payload.error : payload?.error?.message;
       const reason = typeof payload?.reason === "string" ? payload.reason : "";
       detail = [typeof error === "string" ? error : "", reason].filter(Boolean).join(": ").trim().slice(0, 1024);
     } catch { /* malformed/non-JSON bodies still retain their HTTP failure */ }
-    throw new ApiError(method, path, r.status, detail);
+    throw Object.assign(new ApiError(method, path, r.status, detail), problem ? { problem } : {});
   }
   return json.parse(await r.text());
 }

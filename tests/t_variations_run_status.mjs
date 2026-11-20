@@ -11,12 +11,12 @@ Deno.test("Run status keeps complete readiness and unchecked guidance in one pro
   assertEquals(status.retry, false);
 });
 
-Deno.test("Run results replace preview guidance without dropping queued counts or failure text", () => {
+Deno.test("Current failed preview precedes the labelled previous Run without claiming unconfirmed jobs queued", () => {
   const preview = { status: "failed", message: "Old preview", uncheckedMessage: "Old guidance" };
   const result = { submitted: 2, total: 3, ok: false, reason: "One image remains.\nNothing was retried." };
   const status = runStatus({ preview, result });
-  assertEquals(status.items, [{ text: "Queued 2 of 3 jobs", class: "vz-queued" }, { text: result.reason, class: "vz-error" }]);
-  assertEquals(status.fullText, "Queued 2 of 3 jobs\n" + result.reason);
+  assertEquals(status.items, [{ text: "Old preview", class: "vz-readiness-error" }, { text: "2 reported of 3 jobs; complete acceptance is not confirmed.", class: "vz-queued" }, { text: "Previous Run: " + result.reason, class: "vz-error" }]);
+  assertEquals(status.fullText, status.items.map(item => item.text).join("\n"));
   assertEquals(status.retry, true, "catalogue Retry remains available even after a blocked Run");
 });
 

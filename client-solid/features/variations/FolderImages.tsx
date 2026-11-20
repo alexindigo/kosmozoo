@@ -4,6 +4,8 @@ import { IconButton } from "../../components/IconButton.js";
 import { iconSvg } from "/js/icons.mjs";
 import { SingleLineText } from "../../components/SingleLineText.js";
 import { TextField } from "../../components/TextField.js";
+import { variationProblem } from "/shared/features/variations/problems.mjs";
+import { ProblemFeedback } from "./ProblemFeedback.js";
 
 // Presentation-only acquisition form; the private editor owns listing acceptance
 // and selection. Unadded path text never becomes a second image-set field.
@@ -32,7 +34,7 @@ export function FolderImages(props) {
     setBusy(true); setMessage("");
     try {
       const result = await props.onAdd(path());
-      if (alive) setMessage(result.count ? "" : "No images found in this folder.");
+      if (alive) setMessage(result.count ? `Added ${result.count} of ${result.listed ?? result.count} images from ${path()}.` : result.listed ? `Added 0 of ${result.listed} images; they were already in the set.` : "No images found in this folder.");
     } catch (error) { if (alive) setMessage(error.message); }
     finally { if (alive) setBusy(false); }
   };
@@ -52,6 +54,8 @@ export function FolderImages(props) {
       <Show when={path()}><button type="button" class="vz-image-action vz-folder-add" onClick={add}><SingleLineText value="Add folder" /></button></Show>
       </Show>
     </div>
+    <ProblemFeedback problems={props.capabilityError?.() ? [variationProblem("chooser-unavailable", { severity: "warning", phase: "acquisition", detail: props.capabilityError().message })] : []} />
+    <Show when={props.capabilityError?.()}><button type="button" class="vz-thumbnail-retry" onClick={props.onRetryCapability}>Retry folder chooser</button></Show>
     <Show when={message()}><span class="vz-image-error" id={`${id}-message`} role="status">{message()}</span></Show>
   </div>;
 }

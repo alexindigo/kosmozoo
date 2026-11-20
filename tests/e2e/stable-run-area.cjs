@@ -37,6 +37,7 @@ const selectors = {sidebar:'.vz-right',body:'.vz-sidebar-body',count:'.vz-count-
       const before=baseline.button,after=value.button;
       if (before && after && Object.keys(before).some(key=>Math.abs(before[key]-after[key])>.5)) failures.push({state,name:'button',before,after});
     }
+    fs.writeFileSync(D+'/geometry.json',JSON.stringify({tolerance:.5,samples,failures,pageErrors:errors},null,2));
     return value;
   };
   const field = async (selector,value) => {
@@ -100,7 +101,7 @@ const selectors = {sidebar:'.vz-right',body:'.vz-sidebar-body',count:'.vz-count-
       assert.equal(result.submitted,2,JSON.stringify(result));assert.equal(result.adopted,false);
       await c.poll(`!!document.querySelector('.vz-run')&&document.querySelectorAll('.vz-batch-problem').length===1`,20000);
       const final=await sample(`${width}:result-leftover`,baseline);
-      assert.match(final.text,/Queued 2 of/);
+      assert.match(final.text,/2 confirmed, 0 partial, 0 unknown, 0 unsent; 2 sent/);
       if(width===1400) await shot('variations-run-area-result');
       // Every clamped message remains in the DOM and in the full-text hint.
       if (!failures.length) assert(await c.evaluate(`(()=>{const s=document.querySelector('.vz-messages');return s.getAttribute('aria-live')==='polite'&&s.title.includes(s.querySelector('.vz-error').textContent)})()`));
@@ -118,7 +119,7 @@ const selectors = {sidebar:'.vz-right',body:'.vz-sidebar-body',count:'.vz-count-
       await addParameter(c,'n.steps');
       await c.clickAt('[data-param-key="n.steps"] .mode-switch button[title="Value"]');
       await field('[data-param-key="n.steps"] .vz-value-field input','-');
-      await c.poll(`document.querySelector('.vz-run').disabled&&document.querySelector('.vz-count')?.textContent==='0'`,20000);
+      await c.poll(`document.querySelector('.vz-run').disabled&&document.querySelector('.vz-count')?.textContent==='--'`,20000);
       const invalid=await sample(`${width}:invalid-numeric`,single);
       assert(invalid.text.length>0,'invalid raw input has an explanatory status');
       await closeDraft();

@@ -1,5 +1,6 @@
 import { parameterCurrent, stringifyExactJson } from "/shared/parameters.mjs";
 import { validateEditorValue } from "/shared/features/variations/compile.mjs";
+import { variationProblem } from "/shared/features/variations/problems.mjs";
 
 // Presentation over the complete catalogue, never a supported-input registry.
 export const parameterInputName = row => row.contract?.display?.display_name || row.input || row.key;
@@ -48,4 +49,9 @@ export function connectionPresentation(parameter, nodes) {
       catch { return []; }
       return [{ slot: String(slot), label: `${port.name ?? port.type ?? "Output"} (${slot})` }];
     }) })).filter(node => node.outputs === null || node.outputs.length);
+}
+export function connectionProblem(parameter, nodes) {
+  return connectionPresentation(parameter, nodes).length ? null : variationProblem("connection-empty", { severity: "warning", phase: "edit",
+    parameter: { id: parameter.id, label: parameter.label }, expected: parameter.contract?.type ?? parameter.schema?.type,
+    numbers: { nodes: nodes.length } });
 }

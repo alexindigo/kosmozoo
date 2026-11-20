@@ -173,14 +173,20 @@ Deno.test("history HTTP: immutable raw capture/archive barrier, engine plan and 
     const heldReply = { entered: deferred(), release: deferred() }; promptGates.push(heldReply);
     const sending = call("POST", "/run", plan.data.request);
     await heldReply.entered.promise;
-    const sendingDetail = (await call("GET", `/history/${id}`)).data;
-    assertEquals(sendingDetail.submission, { sent: 1, total: 1 });
-    assertEquals(sendingDetail.summary.submitted, 0, "body-written progress never claims queue acceptance");
-    assertEquals(sendingDetail.effects.find(effect => effect.kind === "permutation").state, "started");
-    heldReply.release.resolve();
+    let sendingDetail, sendingList;
+    try {
+      sendingDetail = (await call("GET", `/history/${id}`)).data;
+      assertEquals(sendingDetail.submission, { sent: 1, total: 1 });
+      assertEquals(sendingDetail.summary.submitted, 0, "body-written progress never claims queue acceptance");
+      sendingList = (await call("GET", "/history")).data.items.find(item => item.id === id);
+      assertEquals(sendingDetail.effects.find(effect => effect.kind === "permutation").state, "started");
+    } finally { heldReply.release.resolve(); }
     const submitted = await sending;
+    assertEquals(sendingDetail.summary.effects, { sent: 1, confirmed: 0, partial: 0, unknown: 1, unsent: 0 });
+    assertEquals(sendingList.summary.effects, sendingDetail.summary.effects);
     assertEquals(submitted.status, 200, stringifyExactJson(submitted));
     assertEquals(submitted.data.submitted, 1);
+    assertEquals(submitted.data.effectCounts, { sent: 1, confirmed: 1, partial: 0, unknown: 0, unsent: 0 });
     assertEquals((await call("GET", `/history/${id}`)).data.submission, { sent: 1, total: 1 });
     assertEquals(parseExactJson(jobs[0]).prompt.n.inputs.seed, 18446744073709551614n);
     assertEquals((await call("POST", "/run", plan.data.request)).data, submitted.data);
@@ -236,7 +242,16 @@ Deno.test("history HTTP: immutable raw capture/archive barrier, engine plan and 
         assertEquals(result.status, 500);
         assert(result.data.error.includes("receipt disk failure"));
         assertEquals(engine.ctx.store.variationEffects(runId).find(e => e.kind === "permutation").state, "started");
-      } else assertEquals(result.data.outcome, mode === "partial" ? "partial-effects" : "uncertain-effects");
+      } else {
+        assertEquals(result.data.outcome, mode === "partial" ? "partial-effects" : "uncertain-effects");
+        assertEquals(result.data.effectCounts, { sent: 1, confirmed: 0, partial: mode === "partial" ? 1 : 0, unknown: mode === "uncertain" ? 1 : 0, unsent: 0 });
+        assertEquals(result.data.errors[0].problem.target.name, nextTarget.filename);
+      }
+      const detail = (await call("GET", `/history/${runId}`)).data;
+      assertEquals(detail.summary.effects.confirmed, 0);
+      assertEquals(detail.summary.effects[mode === "partial" ? "partial" : "unknown"], 1);
+      assert(detail.summary.problems.length > 0);
+      assertEquals(detail.summary.problems[0].target.name, nextTarget.filename);
       assertEquals(jobs.length, before + 1);
       await call("POST", "/run", p.data.request);
       assertEquals(jobs.length, before + 1, "repeated partial/uncertain dispatch never re-enters enqueue");

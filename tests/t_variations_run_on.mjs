@@ -24,7 +24,8 @@ Deno.test("run on: the destination catalogue gates preview and Run until it is i
   assertEquals(r.editor.preview().status, "ready");
   assert(r.editor.setDestination(r.origin)); assertEquals(r.editor.preview().status, "reading");
   r.install({ "choice.value": { kind: "node", type: "Choice" } });
-  assertEquals(r.editor.preview().status, "reading", "a late reply for the previous destination cannot install");
+  assertEquals(r.editor.preview().status, "failed", "a mismatched reply reaching the current install boundary cannot install or leave an endless wait");
+  assert(r.editor.preview().message.includes("not selected fake"));
   r.editor.installCatalogue({ ...r.catalogue, destination: { origin: r.origin, missing: [], conflicts: {} } });
   assertEquals(r.editor.preview().status, "ready");
   assertEquals(r.editor.destination(), r.origin);

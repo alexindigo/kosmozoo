@@ -12,6 +12,7 @@ import { TextField } from "../../components/TextField.js";
 import { Tabs } from "../../components/Tabs.js";
 import { iconSvg } from "/js/icons.mjs";
 import { sameOrigin } from "/shared/source-origin.mjs";
+import { ProblemFeedback } from "./ProblemFeedback.js";
 import { scrollSample, lookaheadBand, lookaheadRange, demandOrder, demandRank, VELOCITY_IDLE_MS } from "./lookahead.js";
 
 const TILE_SIZE = 96, GAP = 6, ROW_HEIGHT = TILE_SIZE + GAP;
@@ -287,6 +288,7 @@ function InputOptions(props) {
           }</For>
         </div>
       </Show>
+      <ProblemFeedback problems={props.catalogue.notices ?? []} />
       <div class="vz-input-status vz-input-failure" hidden={!props.catalogue.error}>
         <SingleLineText role="status" value={props.catalogue.error ? `Couldn't list ${sourceLabel()}'s ${props.noun}.` : ""} hint={props.catalogue.error} />
         <button type="button" class="vz-thumbnail-retry" onClick={props.onRetrySource}>Retry</button>

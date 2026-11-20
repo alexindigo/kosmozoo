@@ -2,6 +2,8 @@ import { createEffect, createMemo, createSignal, Show } from "solid-js";
 import { useImageDisplay, imageRequestUrl } from "../../lib/img-measure.js";
 import { focusMemory } from "./draft.js";
 import { SingleLineText } from "../../components/SingleLineText.js";
+import { variationProblem } from "/shared/features/variations/problems.mjs";
+import { ProblemFeedback } from "./ProblemFeedback.js";
 
 // One thumbnail presentation/native lifetime for both contact sheets. The
 // optional surface slot lets a consumer wrap the picture in its own action;
@@ -12,7 +14,7 @@ export function Thumbnail(props) {
   const resource = createMemo(() => props.src ? { src: props.src, local: !!props.local, attempt: attempt() } : null);
   createEffect(() => { resource(); setPhase("pending"); });
   return <div class={`vz-thumbnail ${props.class ?? ""}`}>
-    <Show when={resource()} keyed fallback={<span class="vz-thumbnail-pending" aria-hidden="true" />}>
+    <Show when={resource()} keyed fallback={<Show when={!props.pending}><ProblemFeedback problems={[variationProblem("preview-unavailable", { severity: "warning", phase: "preview", resource: props.name ?? "image" })]} /></Show>}>
       {resource => <ThumbnailAttempt src={resource.local ? resource.src : imageRequestUrl(resource.src, "foreground", resource.attempt || null)}
         local={resource.local} priority={props.priority} order={props.order} lazy={props.lazy} register={props.register}
         surface={props.surface} phase={phase} onPhase={setPhase} />}

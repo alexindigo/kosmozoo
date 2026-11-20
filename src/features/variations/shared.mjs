@@ -5,6 +5,7 @@
 
 import { sameContext } from "../../source-origin.mjs";
 import { isCreatedEntryPath } from "../../entry-path.mjs";
+import { variationProblem, problemError } from "./problems.mjs";
 import { parseParamId, parameterIndex, cloneJsonValue, sameJsonValue, formatJsonValue } from "../../parameters.mjs";
 export { paramId, parseParamId, parameterIndex, parameterLabel, parameterAliases, parameterCurrent } from "../../parameters.mjs";
 
@@ -131,11 +132,15 @@ export function variationOutputName(target, request, permutation, currentValues,
   const automatic = request.automaticNaming === true ? automaticNaming(request.ranges ?? {}, currentValues, request.imageParams ?? {}, { sameHost }).suffix : "";
   const prefix = templateReplaceWithProof(String(request.prefix ?? ""), permutation, currentValues, aliases, parameters);
   const suffix = templateReplaceWithProof(String(request.suffix ?? "") + automatic, permutation, currentValues, aliases, parameters);
-  return { ...composeOutputName(target, permutation, prefix.text, suffix.text), prefix: prefix.text, suffix: suffix.text,
-    complete: prefix.complete && suffix.complete };
+  const composed = composeOutputName(target, permutation, prefix.text, suffix.text);
+  const before = byteLength(String(target.sourceStem ?? "")), after = byteLength(composed.value.slice((target.directory ?? "").length)) - byteLength(prefix.text) - byteLength(suffix.text);
+  const shortened = [...(prefix.shortened ?? []), ...(suffix.shortened ?? [])];
+  if (!composed.selected && before > after) shortened.push({ before, after, limit: OUTPUT_NAME_BUDGET });
+  return { ...composed, prefix: prefix.text, suffix: suffix.text, complete: prefix.complete && suffix.complete,
+    notices: shortened.map(numbers => variationProblem("name-shortened", { severity: "warning", phase: "naming", numbers })) };
 }
 
-function namingToken(value, kind) {
+function tokenText(value, kind) {
   if (typeof value === "string" && kind !== "image" && kind !== "enum") return textName(value);
   let text = formatValue(value);
   if (kind === "image") {
@@ -144,8 +149,9 @@ function namingToken(value, kind) {
     const dot = text.lastIndexOf(".");
     if (dot > text.lastIndexOf("/") + 1) text = text.slice(0, dot);
   }
-  return foldName(text, TOKEN_NAME_BUDGET, 19);
+  return text;
 }
+const namingToken = (value, kind) => foldName(tokenText(value, kind), TOKEN_NAME_BUDGET, 19);
 
 export function rangeValues(min, max, step) {
   const { axes: [axis] } = permutationPlan({ value: { enabled: true, min, max, increment: step } }, {});
@@ -352,11 +358,16 @@ export function parseSemicolonList(raw) {
 // Only explicit labels create Cartesian axes; substitution changes their tokens
 // and leaves every other character intact. Missing values keep the row
 // inert. Clearing the field yields one empty string for sweep-to-empty.
-export function expandTextAxes(text, tplValues = {}) {
+export function expandTextAxes(text, tplValues = {}, context = {}) {
   const template = String(text ?? "");
   const labels = templateLabels(template);
   const axes = labels.map(label => templateValue(tplValues, label));
   if (axes.some(values => !Array.isArray(values) || !values.length)) return [];
+  let product = 1n, visits = 0n;
+  for (const values of axes) { product *= BigInt(values.length); visits += product; }
+  const requested = product > BigInt(Number.MAX_SAFE_INTEGER) ? String(product) : Number(product);
+  if (visits > BigInt(MAX_PERMUTATION_VISITS)) throw problemError(variationProblem("template-budget", {
+    phase: "compile", ...context, names: labels, numbers: { requested, visits: String(visits), limit: MAX_PERMUTATION_VISITS } }));
   return cartesianProduct(axes).map(combo => {
     const values = Object.fromEntries(labels.map((label, index) => [label, combo[index]]));
     return template.replace(/\{\{([^{}]+?)\}\}/g, (match, name) => values[name.trim()] ?? match);
@@ -375,15 +386,21 @@ export function templateReplaceWithProof(template, values, currentValues, labelM
       if (label && !aliases.has(label)) aliases.set(label, param);
     }
   }
+  const shortened = [];
   let complete = !/[{}]/.test(template.replace(/\{[^{}]*\}/g, ""));
   const text = template.replace(/\{([^{}]*)\}/g, (_, key) => {
     const canonical = parseParamId(key);
     const resolved = lookup.has(key) ? key : aliases.get(key);
-    if ((canonical || resolved !== undefined) && lookup.has(resolved)) return namingToken(lookup.get(resolved), kinds.get(resolved));
+    if ((canonical || resolved !== undefined) && lookup.has(resolved)) {
+      const value = lookup.get(resolved), kind = kinds.get(resolved), text = namingToken(value, kind);
+      const before = byteLength(tokenText(value, kind)), after = byteLength(text);
+      if (before > after) shortened.push({ before, after, limit: TOKEN_NAME_BUDGET });
+      return text;
+    }
     complete = false;
     return `{${key}}`;
   });
-  return { text, complete };
+  return { text, complete, ...(shortened.length ? { shortened } : {}) };
 }
 
 export function templateReplace(template, values, currentValues, labelMap = {}, params = []) {

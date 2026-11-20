@@ -463,14 +463,15 @@ async function main() {
         document.querySelector('.vz-error')?.textContent ?? ''
       `);
       check("Run produces a result message", hasResult, errText);
-      // result layout: message above the Run button, centered on it, the
+      // result layout: visible status slot above Run, centered on it, the
       // button last in the column; the fake host 404s every enqueue, so the
       // result IS an error and must render the error color
       const geom = await cdp.evaluate(`(() => {
         const col = document.querySelector('.vz-right').getBoundingClientRect();
         const msg = document.querySelector('.vz-error');
         const btn = document.querySelector('.vz-run');
-        const m = msg.getBoundingClientRect(), b = btn.getBoundingClientRect();
+        const slot = document.querySelector('.vz-messages');
+        const m = slot.getBoundingClientRect(), b = btn.getBoundingClientRect();
         const probe = document.createElement('span');
         probe.style.color = 'var(--negative)';
         document.body.appendChild(probe);
@@ -482,10 +483,11 @@ async function main() {
           btnAtBottom: Math.abs(b.bottom - col.bottom),
           msgColor: getComputedStyle(msg).color, red,
           isOk: msg.classList.contains('vz-ok'),
+          retainsFullResult: slot.title.includes(msg.textContent),
         };
       })()`);
       check("result message above the Run button, centered, button at the column bottom",
-        geom.msgAbove && geom.centerDelta < 1 && geom.btnAtBottom < 1.5,
+        geom.msgAbove && geom.centerDelta < 1 && geom.btnAtBottom < 1.5 && geom.retainsFullResult,
         JSON.stringify(geom));
       check("failed run renders the error color",
         !geom.isOk && geom.msgColor === geom.red,
@@ -861,7 +863,7 @@ async function main() {
       // An incomplete enabled template is invalid, never a default-backed count.
       const c0 = 3; // the fixture's unchanged denoise-only sweep
       await setTpl(0, "cat; dog");
-      const incomplete = await cdp.evaluate(`document.querySelector('.vz-count').textContent==='—' && document.querySelector('.vz-messages').textContent.includes('every template label')`);
+      const incomplete = await cdp.evaluate(`document.querySelector('.vz-count').textContent==='--' && document.querySelector('.vz-messages').textContent.includes('every template label')`);
       check("unconfigured label has an explicit invalid-plan explanation", incomplete);
       // both labels configured: 2×2 cartesian; the current text is NOT among
       // the picks (it has no placeholders), so no current-combo exclusion

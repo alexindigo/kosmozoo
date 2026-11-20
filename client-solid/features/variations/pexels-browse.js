@@ -3,6 +3,7 @@
 // a chosen photo into a File through its own acquisition lane.
 
 export const SEARCH_DELAY_MS = 300;
+import { variationProblem } from "/shared/features/variations/problems.mjs";
 const RETAINED_LISTINGS = 24;
 const errorText = error => error?.detail || error?.message || String(error);
 
@@ -38,11 +39,17 @@ export function makePexelsBrowse({ api, changed = () => {}, delay = SEARCH_DELAY
       const result = await api.pexelsPhotos(entry.service, entry.query, page, controller.signal);
       if (!owns(entry, controller)) return;
       if (!Array.isArray(result?.photos)) throw new Error("The service sent no photo list");
+      let invalid = 0, duplicates = 0;
       for (const photo of result.photos) {
-        if (typeof photo?.id !== "string" || entry.byId.has(photo.id)) continue;
+        if (typeof photo?.id !== "string") { invalid++; continue; }
+        if (entry.byId.has(photo.id)) { duplicates++; continue; }
         entry.byId.set(photo.id, photo); entry.photos.push(photo.id);
       }
       Object.assign(entry, { page, more: !!result.more, curated: result.curated !== false });
+      const counts = { source: result.skipped?.source ?? entry.service, received: result.skipped?.received ?? result.photos.length,
+        shown: result.photos.length - invalid - duplicates, invalid: (result.skipped?.invalid ?? 0) + invalid,
+        duplicates: (result.skipped?.duplicates ?? 0) + duplicates, page };
+      entry.notices = counts.invalid || counts.duplicates ? [variationProblem("photos-skipped", { severity: "warning", phase: "acquisition", source: counts.source, numbers: counts })] : [];
       shown.set(entry.service, entry);
     } catch (error) {
       if (owns(entry, controller) && !controller.signal.aborted) entry.error = errorText(error);
@@ -69,6 +76,7 @@ export function makePexelsBrowse({ api, changed = () => {}, delay = SEARCH_DELAY
         error: entry?.error ?? "", searchOnly,
         stale: pending && !!settled && settled !== entry,
         appending: !!entry && entry.page > 0 && entry.pending,
+        ...(source?.notices?.length ? { notices: source.notices } : {}),
       };
     },
     photo(service, id) {

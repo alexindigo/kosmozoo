@@ -63,6 +63,8 @@ Deno.test("batch membership: removed target's late timing cannot publish and dec
   const editor = makeVariationEditor({ targets, currentOrigin: () => base.context.origin, changed: () => changes++,
     services: { generationTime: t => t.id === targets[0].id ? new Promise(resolve => { finish = () => resolve({ name: t.filename, hash: "a".repeat(64), generationTimeMs: 1000 }); }) : Promise.resolve(null) } });
   const reading = editor.loadGenerationTimes(); editor.decision(true); assertEquals(editor.removeTarget(targets[0].id), false); editor.decision(false);
-  assert(editor.removeTarget(targets[0].id)); const before = changes; finish(); await reading; assertEquals(changes, before);
+  assert(editor.removeTarget(targets[0].id)); const before = changes; finish(); await reading;
+  assertEquals(changes, before + 1, "only the remaining target's missing timing is reported");
+  assertEquals(editor.problems().find(problem => problem.code === "time-unavailable").names, ["b.png"]);
   assertEquals(editor.generationTime(targets[0].id), null); editor.dispose();
 });

@@ -29,7 +29,9 @@ Deno.test("cohort planner: each target owns its current tuple; mixed zero/valid 
 Deno.test("cohort planner: destination alone supplies exactly one job", async () => {
   const { recipe, target } = await fixture();
   recipe.numeric["n.denoise"].values.enabled = false;
-  assertEquals(planCohort({ targets: [target], cohortMode: "single", recipe, destination: { source: "another" } }), [{ index: 0, count: 1, problem: null }]);
+  const [planned] = planCohort({ targets: [target], cohortMode: "single", recipe, destination: { source: "another" } });
+  assertEquals([planned.index, planned.count, planned.problem], [0, 1, null]);
+  assertEquals(planned.counts, { requested: 0, applicable: 0, distinct: 1, excluded: 0, admitted: 1 });
   assertEquals(planCohort({ targets: [target], cohortMode: "single", recipe })[0].problem.code, "no-work");
 });
 
@@ -53,6 +55,34 @@ Deno.test("cohort planner: absent relative numeric carriers are exclusions, disc
   assertEquals(planCohort({ targets: [noChoice], cohortMode: "bulk", recipe })[0].problem.code, "invalid-plan");
 });
 
+Deno.test("silent row 4: absent-relative producer retains exact notice and rejected count chain", async () => {
+  const { recipe, target } = await fixture();
+  recipe.numeric["n.denoise"].metadata.label = "Denoise";
+  const absent = { ...target, catalogue: { ...target.catalogue, parameters: target.catalogue.parameters.filter(p => p.id !== "n.denoise") } };
+  const [plan] = planCohort({ targets: [absent], cohortMode: "bulk", recipe });
+  assertEquals(plan.notices[0].message, "image.png: Denoise is absent, so its relative sweep is not applied. 0 jobs use 0 of 1 selected parameters.");
+  assertEquals(plan.notices[0].target, { index: 0, source: "fake", name: "image.png" });
+  assertEquals(plan.counts, { requested: 1, applicable: 0, distinct: 1, excluded: 1, admitted: 0 });
+});
+
+Deno.test("silent rows 74,83,84: producer dedupe, shortening and name rejection preserve count evidence", async () => {
+  const { recipe, target } = await fixture();
+  recipe.enums["choice.value"].values.enabled = true;
+  recipe.enums["choice.value"].values.picks = ["first", "second", "second"];
+  target.catalogue.outputNaming = { directory: "", sourceStem: "x".repeat(240) };
+  recipe.naming.root.values.prefix = "pre"; recipe.naming.root.values.suffix = "post";
+  const [plan] = planCohort({ targets: [target], cohortMode: "single", recipe });
+  assertEquals(plan.counts, { requested: 2, applicable: 2, distinct: 2, excluded: 0, admitted: 2 });
+  assertEquals(plan.notices.find(p => p.code === "deduplicated").numbers, { selected: 3, distinct: 2, duplicates: 1 });
+  assertEquals(plan.notices.find(p => p.code === "name-shortened").message,
+    "image.png: source-name/token text was shortened from 240 to 187 UTF-8 bytes to fit the 200-byte output-name budget; Prefix/Suffix remain intact.");
+  recipe.naming.root.values.prefix = "{missing}";
+  const [invalid] = planCohort({ targets: [target], cohortMode: "single", recipe });
+  assertEquals(invalid.problem.message, "image.png: Run unavailable: Unresolved naming token: check Prefix and Suffix. Job count is not permission to run with an invalid output name.");
+  assertEquals(invalid.counts.admitted, 0); assertEquals(invalid.counts.distinct, 2);
+  assertEquals(invalid.notices[0].code, "deduplicated");
+});
+
 Deno.test("cohort planner: unknown receipt names use byte identities and dedupe without graph assignments", async () => {
   const { recipe, target } = await fixture();
   recipe.images["image.image"].values.enabled = true;
@@ -61,7 +91,10 @@ Deno.test("cohort planner: unknown receipt names use byte identities and dedupe 
   const resources = encoded.resources.map(resource => ({ ...resource, hash: "a".repeat(64) }));
   const counted = countingTarget(target, encoded.recipe, resources, { source: "other" }, 0);
   assertEquals([...counted.resourceIdentities.values()], [{ resource: "a".repeat(64) }, { resource: "a".repeat(64) }]);
-  assertEquals(planCohort({ targets: [counted], cohortMode: "single", recipe: encoded.recipe, destination: { source: "other" } }), [{ index: 0, count: 1, problem: null }]);
+  const [planned] = planCohort({ targets: [counted], cohortMode: "single", recipe: encoded.recipe, destination: { source: "other" } });
+  assertEquals([planned.index, planned.count, planned.problem], [0, 1, null]);
+  assertEquals(planned.notices[0].code, "deduplicated");
+  assertEquals(planned.notices[0].numbers, { selected: 2, distinct: 1, duplicates: 1 });
 });
 
 Deno.test("cohort planner: shared kernel axis/traversal budget is admission, not a late dispatch failure", async () => {
@@ -103,7 +136,7 @@ Deno.test("cohort planner: adding images retains the exact count across the 500-
     const plan = planCohort({ targets: [counted], cohortMode: "single", recipe: encoded.recipe });
     assertEquals(plan[0].count, count, JSON.stringify(plan));
     assertEquals(plan[0].problem?.code ?? null, count > 500 ? "too-many" : null);
-    if (count > 500) assertEquals(plan[0].problem.message, "612 jobs for this image; the limit is 500 per image. Reduce the axes or increase the increment.");
+    if (count > 500) assertEquals(plan[0].problem.message, "image.png: 612 jobs for this image; the limit is 500 per image. Reduce the axes or increase the increment.");
   }
 });
 

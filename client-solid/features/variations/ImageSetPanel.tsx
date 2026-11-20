@@ -12,6 +12,8 @@ import { SingleLineText } from "../../components/SingleLineText.js";
 import { ParameterRow } from "./ParameterRow.js";
 import { useClickOutside } from "../../lib/click-outside.js";
 import { isFileDrag, droppedFiles, classifyImageFiles, nearestImageTile, imageInsertIndex } from "./image-drop.js";
+import { acquisitionProblems } from "./problem-presentation.js";
+import { ProblemFeedback } from "./ProblemFeedback.js";
 
 const COMFY_ROOTS = [{ value: "input", label: "imported" }, { value: "output", label: "generated" }];
 
@@ -23,6 +25,7 @@ export function ImageSetPanel(props) {
   let dragDepth = 0;
   const clearDrop = () => { dragDepth = 0; setDropping(false); };
   const addFiles = (resources, index, enable = false) => {
+    if (props.onFiles) return props.onFiles(resources, index);
     const result = classifyImageFiles(resources, name => UPLOAD_IMG_EXT.test(name));
     setStatus(result.status);
     if (!result.images.length) return;
@@ -51,6 +54,8 @@ export function ImageSetPanel(props) {
           {...focusMemory(props.rememberFocus)} onClick={() => setAdding(!adding())}>+</button>
       </ImageGrid>
       <div class="vz-image-add" hidden={!adding()}>
+        <ProblemFeedback problems={acquisitionProblems({ sources: props.sources, pexels: props.pexels.status?.(), chooserError: props.folderError?.() })} />
+        <Show when={props.pexels.status?.().error}><button type="button" class="vz-thumbnail-retry" onClick={props.pexels.retryServices}>Retry Pexels services</button></Show>
         <Show when={props.sources.length}><InputPicker label="ComfyUI images" roots={COMFY_ROOTS} noun={root => `${root === "output" ? "generated" : "imported"} images`}
           sources={props.sources} sourceInputs={props.sourceInputs} inputState={props.inputState}
           onSource={props.onSource} onRetrySource={props.onRetrySource} registerTabKeys={props.registerTabKeys}
@@ -78,7 +83,7 @@ export function ImageSetPanel(props) {
             registerPopup={props.registerPopup} registerEditor={props.registerEditor} rememberFocus={props.rememberFocus} />
         </div></Show>
         <div class="vz-image-folder" hidden={!folder()}>
-        <FolderImages onAdd={props.onAddFolder} capability={props.folderCapability} onChoose={props.onChooseFolder}
+         <FolderImages onAdd={props.onAddFolder} capability={props.folderCapability} capabilityError={props.folderError} onRetryCapability={props.onRetryFolder} onChoose={props.onChooseFolder}
           registerEditor={props.registerEditor} rememberFocus={props.rememberFocus} />
         </div>
       </div>

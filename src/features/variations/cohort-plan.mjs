@@ -4,8 +4,9 @@ import { parameterCurrent, parameterContract } from "../../parameters.mjs";
 import { snapshotDraft, numericText, imageIdentity } from "./recipe-model.mjs";
 import { compileRecipe } from "./recipe-compile.mjs";
 import { admitResourceTransfer } from "./compile.mjs";
+import { variationProblem, problemFrom } from "./problems.mjs";
 import { targetRunPlan, parameterIndex, catalogueParams, parameterLabel, permutationPlan,
-  generatePermutations, resolveRelativeRanges, reproducesOriginal } from "./shared.mjs";
+  generatePermutations, resolveRelativeRanges, reproducesOriginal, variationOutputName, parameterAliases, templateReplaceWithProof } from "./shared.mjs";
 
 export function bindCohortRecipe(recipe, catalogue) {
   const bound = snapshotDraft(recipe), parameters = parameterIndex(catalogue.parameters ?? catalogueParams(catalogue));
@@ -69,19 +70,49 @@ export function planTarget({ target, cohortMode, recipe, destination, resourceVa
   const ranges = plan.payload.relative ? resolveRelativeRanges(plan.payload.ranges, values) : plan.payload.ranges;
   if (Object.keys(plan.payload.ranges).some(id => plan.payload.ranges[id].enabled && !Object.hasOwn(ranges, id))) throw new Error("Every applicable relative range needs clamp bounds");
   const options = { sameHost: reproducesOriginal(target.host, destination?.source) };
-  const count = permutationPlan(ranges, values, plan.payload.imageParams, options).total;
+  const kernel = permutationPlan(ranges, values, plan.payload.imageParams, options), count = kernel.total;
+  const enabled = Object.values(recipe).flatMap(rows => Object.entries(rows)).filter(([, entry]) => entry.values.enabled);
+  const absent = plan.operations.filter(op => op.channel === "ranges" && op.disposition === "absent-relative-numeric");
+  const notices = absent.map(op => variationProblem("relative-absent", { severity: "warning", phase: "plan",
+    parameter: { id: op.parameter, label: recipe.numeric[op.parameter]?.metadata.label ?? op.parameter },
+    numbers: { jobs: count, applied: enabled.length - absent.length, selected: enabled.length } }));
+  const counts = { requested: enabled.length, applicable: enabled.length - absent.length,
+    distinct: kernel.axes.reduce((n, axis) => n * axis.length, 1), excluded: kernel.excluded, admitted: count };
+  for (const [id, entry] of enabled) {
+    const selected = entry.values.items?.length ?? entry.values.picks?.length ?? entry.values.candidates?.length;
+    const distinct = kernel.axes.find(axis => axis.id === id)?.length;
+    if (selected > distinct) notices.push(variationProblem("deduplicated", { severity: "warning", phase: "plan",
+      parameter: { id, label: entry.metadata.label ?? id }, numbers: { selected, distinct, duplicates: selected - distinct } }));
+  }
   if (!Number.isSafeInteger(count) || count > 500) throw Object.assign(new Error(`${count} jobs for this image; the limit is 500 per image. Reduce the axes or increase the increment.`), {
-    code: "too-many", count: Number.isSafeInteger(count) ? count : 0,
+    code: "too-many", count: Number.isSafeInteger(count) ? count : 0, counts: { ...counts, admitted: 0 }, notices,
   });
-  if (count <= 0) throw Object.assign(new Error("No work for this image; choose a different value, image or destination."), { code: "no-work" });
-  generatePermutations(ranges, values, plan.payload.imageParams, options);
-  return { count, plan, compiled };
+  if (count <= 0) throw Object.assign(new Error("No work for this image; choose a different value, image or destination."), { code: "no-work", counts, notices });
+  const permutations = generatePermutations(ranges, values, plan.payload.imageParams, options);
+  // Count admission also checks every final name whose inputs are known. Transfer
+  // identities remain count-only; receipt-backed planning repeats this check.
+  const parameters = catalogue.parameters ?? catalogueParams(catalogue), aliases = parameterAliases(parameters);
+  const naming = catalogue.outputNaming;
+  const pendingNames = Object.keys(bound.images).some(id => plan.payload.imageParams[id]?.enabled && plan.payload.imageParams[id].values.some(value => typeof value !== "string"));
+  if (naming) for (const permutation of permutations) {
+    const request = { ...plan.payload, ranges };
+    try {
+      const projection = pendingNames ? { complete: [request.prefix, request.suffix].every(text => templateReplaceWithProof(String(text ?? ""), permutation, values, aliases, parameters).complete), notices: [] }
+        : variationOutputName(naming, request, permutation, values, aliases, parameters, options);
+      if (!projection.complete) throw Object.assign(new Error("Unresolved naming token: check Prefix and Suffix."), { problem: variationProblem("naming", { phase: "naming", parameter: { id: "root", label: "Prefix/Suffix" }, detail: "Unresolved naming token: check Prefix and Suffix" }) });
+      notices.push(...projection.notices);
+    } catch (error) {
+      error.problem = problemFrom(error, { phase: "naming", parameter: { id: "root", label: "Prefix/Suffix" }, numbers: { jobs: count } });
+      throw Object.assign(error, { counts: { ...counts, admitted: 0 }, notices });
+    }
+  }
+  return { count, plan, compiled, notices, counts };
 }
 
 export function planCohort({ targets, cohortMode, recipe, destination }) {
   return targets.map((target, index) => {
     try {
-      if (target.problem) throw Object.assign(new Error(target.problem.message), { code: target.problem.code });
+      if (target.problem) throw Object.assign(new Error(target.problem.message), { code: target.problem.code, problem: target.problem.action ? target.problem : undefined });
       const missing = target.catalogue.destination?.missing ?? [];
       if (missing.length) throw Object.assign(new Error(`Not installed on ${destination?.source ?? "destination"}: ${missing.join(", ")}.`), { code: "missing-class" });
       // Unchanged closed-choice conflicts are not repaired by merely selecting a
@@ -92,8 +123,14 @@ export function planCohort({ targets, cohortMode, recipe, destination }) {
         const entry = Object.values(bound).map(rows => rows[id]).find(Boolean);
         if (!entry?.values.enabled) throw new Error(`${id}: choose a value available on ${destination?.source ?? "destination"}.`);
       }
-      const { count } = planTarget({ target, cohortMode, recipe, destination, resourceIdentities: target.resourceIdentities });
-      return { index, count, problem: null };
-    } catch (error) { return { index, count: error.count ?? 0, problem: { code: error.code ?? (/work budget/.test(error.message) ? "work-budget" : "invalid-plan"), message: error.message || "Unable to plan this image; check its parameters and destination." } }; }
+      const { count, counts, notices } = planTarget({ target, cohortMode, recipe, destination, resourceIdentities: target.resourceIdentities });
+      const identity = { index, source: target.host, name: target.filename };
+      return { index, count, problem: null, counts, notices: notices.map(problem => problemFrom({ problem }, { target: identity })) };
+    } catch (error) {
+      const problem = problemFrom(Object.assign(error, { code: error.problem?.code ?? error.code ?? (/work budget/.test(error.message) ? "work-budget" : "invalid-plan") }), {
+        phase: "plan", target: { index, source: target.host, name: target.filename }, ...(error.count !== undefined ? { numbers: { count: error.count } } : {}) });
+      return { index, count: error.count ?? 0, problem, ...(error.counts ? { counts: error.counts } : {}),
+        ...(error.notices?.length ? { notices: error.notices.map(problem => problemFrom({ problem }, { target: { index, source: target.host, name: target.filename } })) } : {}) };
+    }
   });
 }

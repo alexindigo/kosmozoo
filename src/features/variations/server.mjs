@@ -30,6 +30,7 @@ import { registerHistory, historyResponse } from "./history-routes.mjs";
 import { registerPexels } from "./pexels.mjs";
 import { inspectDestination } from "./destination.mjs";
 import { submitPrompt } from "../../backings/comfy-submission.mjs";
+import { problemRoutes } from "./problem-transport.mjs";
 export { parameterCatalogue, findProducingOutputNode, outputNodeIndex, outputNamingTargets } from "./inspection.mjs";
 
 const exactResponse = (value, init = {}) => new Response(stringifyExactJson(value), {
@@ -164,6 +165,7 @@ export function lineageTag(source, params) {
 // app: { store, cache, hosts, ingest, comfy, backings, paths } — the engine surface
 // for features.
 export function register(app) {
+  app = problemRoutes(app);
   const backingFor = app.backings?.backingFor ?? defaultBackingFor;
   const history = registerHistory(app);
   app.route("POST", "/plan", async req => {

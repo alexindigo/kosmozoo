@@ -14,6 +14,8 @@ import { inspectSource, projectInspection } from "./inspection.mjs";
 import { inspectDestination, destinationMissing } from "./destination.mjs";
 import { readImage } from "./folder-images.mjs";
 import { submitPrompt } from "../../backings/comfy-submission.mjs";
+import { effectCounts, problemFrom } from "./problems.mjs";
+import { problemEnvelope } from "./problem-transport.mjs";
 
 const fail = (message, status = 400) => Object.assign(new Error(message), { status });
 const data = value => parseExactJson(value);
@@ -80,6 +82,12 @@ export function makeVariationHistory(app) {
     return row;
   };
   const captured = row => data(row.recipe_json);
+  // Summary metadata is stored, but effect truth belongs to the live journal,
+  // including body-written requests awaiting replies and restart recovery.
+  const summaryOf = (row, effects = store.variationEffects(row.id)) => ({ ...data(row.summary_json),
+    submitted: row.submitted_count, total: row.total_count, plannedCount: row.planned_count,
+    effects: effectCounts(effects.filter(effect => effect.kind === "permutation")
+      .map(effect => ({ ...effect, result: effect.result_json ? data(effect.result_json) : null })), row.total_count) });
   const sealed = (id, leaseId = null) => {
     const row = record(id, leaseId);
     if (!row.snapshot_json || row.capture_state !== "complete") throw fail("The saved archive is incomplete; missing resources remain listed", 409);
@@ -123,6 +131,7 @@ export function makeVariationHistory(app) {
     const expectedTargets = admitted?.length ?? data(row.targets_json).length;
     summary.total = admitted ? admitted.reduce((sum, target) => sum + target.count, 0) : targets.length === expectedTargets ? known.reduce((a, b) => a + b, 0) : null;
     summary.plannedCount = summary.total;
+    summary.effects = effectCounts(jobs.map(job => ({ ...job, result: job.result_json ? data(job.result_json) : null })), summary.total);
     summary.leftovers = (cohort ?? []).filter(target => target.problem).map(target => ({ index: target.index, problem: target.problem }));
     for (const effect of effects.filter(effect => effect.kind === "leftover" && effect.state === "confirmed")) {
       const leftover = data(effect.result_json);
@@ -131,10 +140,13 @@ export function makeVariationHistory(app) {
     for (const target of targets.filter(effect => ["rejected", "partial", "uncertain"].includes(effect.state))) {
       const prepared = data(target.request_json), result = target.result_json ? data(target.result_json) : null;
       const index = prepared.request.history.targetIndex;
-      if (!summary.leftovers.some(target => target.index === index)) summary.leftovers.push({ index, problem: { code: target.state,
+      if (!summary.leftovers.some(target => target.index === index)) summary.leftovers.push({ index, problem: result?.data?.problem ?? result?.data?.errors?.[0]?.problem ?? { code: target.state,
         message: result?.data?.error ?? result?.data?.errors?.[0]?.error ?? "Submission was not fully confirmed; inspect the result before running again." } });
     }
-    summary.error = error ?? summary.error;
+    summary.error = error ? typeof error === "string" ? error : error.message : summary.error;
+    summary.problems = summary.leftovers.map(leftover => problemFrom(leftover.problem, { phase: "saved Run", target: {
+      index: leftover.index, name: data(row.targets_json)[leftover.index]?.filename, source: data(row.targets_json)[leftover.index]?.host } }));
+    if (error) summary.problems.push(problemFrom(typeof error === "string" ? new Error(error) : error, { phase: "saved Run" }));
     const uncertain = effects.some(e => ["started", "uncertain"].includes(e.state));
     const rejected = effects.some(e => e.kind !== "admission" && ["rejected", "partial"].includes(e.state));
     const status = uncertain ? "uncertain" : expectedTargets > 0 && targets.length === expectedTargets && targets.every(e => e.state === "confirmed") ? "submitted"
@@ -180,7 +192,8 @@ export function makeVariationHistory(app) {
     const effects = store.variationEffects(id), effect = effects.find(effect => effect.kind === "admission" && effect.state === "confirmed");
     const admission = effect && data(effect.result_json).targets[index];
     if (!admission || admission.problem || effects.some(effect => effect.effect_id === `leftover-${index}`)) return;
-    const leftover = { index, problem: { code: "preparation-failed", message: error.message } };
+    const target = data(row.targets_json)[index];
+    const leftover = { index, problem: problemFrom(error, { phase: "preparation", target: { index, source: target?.host, name: target?.filename } }) };
     store.variationPrepareEffect(id, `leftover-${index}`, "leftover", canonical(leftover), await digest(leftover));
     if (store.variationClaimEffect(id, `leftover-${index}`)) store.variationEffectResult(id, `leftover-${index}`, "confirmed", canonical(leftover));
     outcome(id, error.message);
@@ -275,13 +288,14 @@ export function makeVariationHistory(app) {
       const row = record(id, leaseId), raw = captured(row), effects = store.variationEffects(id);
       return { id, format: 1, createdAt: row.created_at, captureState: row.capture_state, outcome: row.outcome,
         submission: { sent: effects.filter(e => e.kind === "permutation" && e.result_json && data(e.result_json).sent === true).length, total: row.total_count },
-        snapshotHash: row.snapshot_hash, summary: { ...data(row.summary_json), submitted: row.submitted_count, total: row.total_count, plannedCount: row.planned_count }, ...raw,
+        snapshotHash: row.snapshot_hash, summary: summaryOf(row, effects), ...raw,
         effects: store.variationEffects(id).map(e => ({ id: e.effect_id, kind: e.kind, state: e.state, result: e.result_json ? data(e.result_json) : null })),
         admission: store.variationEffects(id).find(e => e.kind === "admission" && e.state === "confirmed")?.result_json
           ? data(store.variationEffects(id).find(e => e.kind === "admission").result_json).targets : null,
         targets: row.snapshot_json ? data(row.snapshot_json).targets : data(row.targets_json),
         resources: row.snapshot_json ? data(row.snapshot_json).resources : store.variationResources(id).map(r => ({ ...data(r.descriptor_json), hash: r.hash })) };
     },
+    summary: row => summaryOf(row),
     async uploadBytes(id, resourceId, bytes) {
       const row = record(id), ref = store.variationResource(id, resourceId);
       if (!ref || data(ref.descriptor_json).kind !== "upload") throw fail("Image upload is not part of this capture", 410);
@@ -371,7 +385,7 @@ export function makeVariationHistory(app) {
         store.variationSeal(id, canonical(snapshot), snapshotHash, canonical(historySummary(raw.recipe, prepared, resources)));
         await admit(id, record(id), snapshot);
         return api.detail(id);
-      } catch (error) { outcome(id, error.message); throw error; }
+      } catch (error) { outcome(id, error); throw error; }
     }); },
     async open(id) {
       const { row, snapshot } = sealed(id), leaseId = crypto.randomUUID();
@@ -475,7 +489,7 @@ export function makeVariationHistory(app) {
         return result;
       } catch (error) {
         store.variationEffectResult(id, effectId, !outboundStarted || error.status && error.status < 500 ? "rejected" : "uncertain", canonical({ error: error.message }));
-        outcome(id, error.message); throw error;
+        outcome(id, error); throw error;
       } finally { await collect(id); }
     }, canonical({ origin, snapshotHash })).catch(async error => {
       await targetProblem(id, targetIndex, origin, snapshotHash, error);
@@ -553,16 +567,22 @@ export function makeVariationHistory(app) {
             onSent: () => store.variationEffectSent(id, effectId),
           });
           return { sent: request.sent, result: request.result.then(result => {
-            store.variationEffectResult(id, effectId, result.ok && result.acceptance === "confirmed" ? "confirmed" : result.acceptance === "partial" ? "partial" : result.status && result.status < 500 ? "rejected" : "uncertain", canonical(result));
+            store.variationEffectResult(id, effectId, result.ok && result.acceptance === "confirmed" ? "confirmed" : result.acceptance === "partial" ? "partial"
+              : result.acceptance === "uncertain" ? "uncertain" : result.status && result.status < 500 ? "rejected" : "uncertain", canonical(result));
             return result;
           }) };
         } });
-        const result = { status: response.status, data: { ...parseExactJson(await response.text()), history: binding } };
+        const result = { status: response.status, data: problemEnvelope({ ...parseExactJson(await response.text()), history: binding }, {
+          phase: "submission", target: { index: binding.targetIndex, source: body.host, name: body.filename } }) };
+        result.data.effectCounts = effectCounts(store.variationEffects(id).filter(job => job.kind === "permutation" && job.effect_id.startsWith(`job-${binding.targetIndex}-`))
+          .map(job => ({ ...job, result: job.result_json ? data(job.result_json) : null })), prepared.expectedTotal);
         store.variationEffectResult(id, effect.effect_id, result.data.outcome === "accepted-plan" ? "confirmed" : result.data.outcome === "uncertain-effects" ? "uncertain" : result.data.submitted ? "partial" : "rejected", canonical(result));
-        outcome(id, result.data.error ?? result.data.errors?.[0]?.error ?? null);
+        outcome(id, result.data.problem ?? result.data.errors?.[0]?.problem ?? result.data.error ?? result.data.errors?.[0]?.error ?? null);
         return result;
-      } catch (error) { outcome(id, error.message); throw error; }
-      finally {
+      } catch (error) {
+        outcome(id, problemFrom(error, { phase: "submission", target: { index: binding.targetIndex, source: body.host, name: body.filename } }));
+        throw error;
+      } finally {
         // This request is finished regardless of sibling targets. Durable
         // unresolved-effect guards, not an abandoned request pin, retain bytes.
         await api.release(id, leaseId);

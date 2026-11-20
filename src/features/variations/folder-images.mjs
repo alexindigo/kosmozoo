@@ -12,21 +12,21 @@ const absolute = path => {
 export async function listImages(path, limit = MAX_FOLDER_IMAGES) {
   const root = await Deno.realPath(absolute(path));
   if (!(await Deno.stat(root)).isDirectory) throw fail("The path is not a folder");
-  const items = [], directories = [root];
+  const items = [], directories = [root], skipped = { links: 0, other: 0 };
   while (directories.length) {
     const directory = directories.pop();
     for await (const entry of Deno.readDir(directory)) {
-      if (entry.isSymlink) continue;
+      if (entry.isSymlink) { skipped.links++; continue; }
       const path = `${directory === "/" ? "" : directory}/${entry.name}`;
       if (entry.isDirectory) directories.push(path);
       else if (entry.isFile && IMAGE_EXTENSIONS.has(mediaExtension(entry.name))) {
         items.push({ kind: "server-path", name: entry.name, path });
         if (items.length > limit) throw fail(`This folder contains more than ${limit} images. Choose a smaller folder.`, 413);
-      }
+      } else skipped.other++;
     }
   }
   items.sort((a, b) => a.path < b.path ? -1 : a.path > b.path ? 1 : 0);
-  return { path: root, items, limit };
+  return { path: root, items, limit, skipped };
 }
 
 export async function readImage(path) {

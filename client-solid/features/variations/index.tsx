@@ -14,19 +14,21 @@ import { makeHistoryClient } from "./history-client.js";
 import { HistoryPanel } from "./HistoryPanel.js";
 import { makePexelsServices } from "./pexels-services.js";
 import { PexelsSettings } from "./PexelsSettings.js";
+import { problemText } from "/shared/features/variations/problems.mjs";
 
 // Assembly injects modal services and registers owner-safe command definitions.
 export function install(store) {
   return createRoot(disposeRoot => {
   const [historyRevision, setHistoryRevision] = createSignal(0);
-  const history = makeHistoryClient({ api, changed: () => setHistoryRevision(n => n + 1) });
+   const report = problem => store.actions.status.error(problemText(problem));
+   const history = makeHistoryClient({ api, changed: () => setHistoryRevision(n => n + 1), notifyProblem: report });
   const historyState = () => { historyRevision(); return history.state(); };
   const activate = () => history.activate();
   window.addEventListener("focus", activate); window.addEventListener("pageshow", activate);
   const [pexelsRevision, setPexelsRevision] = createSignal(0);
   const pexels = makePexelsServices({ api, changed: () => setPexelsRevision(n => n + 1) });
   const pexelsState = () => { pexelsRevision(); return pexels.state(); };
-  const broker = makeVariationSession({ read: () => store.state.variations,
+   const broker = makeVariationSession({ read: () => store.state.variations, report,
     write: (opening) => store.setSt("variations", store.reconcile(opening)) });
   const services = {
     // modal I/O — the feature's api.js owns the transport; the modal keeps
@@ -85,7 +87,7 @@ export function install(store) {
       { id: "variations.tabs.move", validate: args => Object.keys(args).length === 1 && [-1, 1, "first", "last"].includes(args.step) },
       { id: "variations.feed-tabs.move", validate: args => Object.keys(args).length === 1 && [-1, 1, "first", "last"].includes(args.step) },
     ],
-    commands: [...variationCommands({ state: store.state, broker }),
+     commands: [...variationCommands({ state: store.state, broker, report }),
       { id: "variations.history.open", description: "recall original variation run", validate: args => Object.keys(args).length === 1 && typeof args.id === "string",
         async execute({ id }) {
           const opening = broker.captureOpening();

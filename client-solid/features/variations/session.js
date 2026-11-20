@@ -2,9 +2,14 @@
 // recipes and decisions belong to the mounted modal,
 // never this bridge.
 import { snapshotDraft } from "./draft.js";
-export function makeVariationSession({ read, write }) {
+import { variationProblem, problemError } from "/shared/features/variations/problems.mjs";
+import { validateHistoryOpening } from "./editor.js";
+export function makeVariationSession({ read, write, report = () => {} }) {
   let sequence = 0, owner = null;
-  const outcome = (status) => Promise.resolve({ status });
+   const outcome = (status) => {
+     if (status === "stale") report(variationProblem("session-changed", { phase: "session" }));
+     return Promise.resolve({ status });
+   };
   const install = (opening) => write({ open: true, ...opening, session: `variations-${++sequence}` });
   const closeOpening = () => write({ open: false, key: null, images: [], session: null });
   function request(opening, automatic = false, expectedSession) {
@@ -38,6 +43,10 @@ export function makeVariationSession({ read, write }) {
     },
     openHistory(record, ticket) {
       if (ticket && (ticket.generation !== sequence || ticket.session !== (read().session ?? null))) return outcome("stale");
+      // Decode/validate before the existing editor is replaced, not during mount.
+      if (record.recipe) try {
+        validateHistoryOpening(record);
+      } catch (error) { throw problemError(variationProblem("restore-failed", { phase: "recall", runId: record.id, detail: error.message })); }
       // Store reconciliation brands its own data containers. Do not let those
       // proxies/symbols enter the separately leased exact-JSON archive read model.
       const images = snapshotDraft(record.targets.map(({ id, host, filename, origin, context, historyRef, unavailable }, index) => ({ id, host, filename, origin, context, historyRef, unavailable,

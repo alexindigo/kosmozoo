@@ -376,12 +376,13 @@ function autogrowChildren(template) {
 
 function inputSchema(input, prefix, budget, depth = 0) {
   if (depth > MAX_SCHEMA_DEPTH) throw new RangeError("ComfyUI object_info nesting budget exceeded");
-  const schema = { types: new Map(), enums: new Map(), declarations: new Map(), dynamicCombos: new Map(), defaults: new Map(), lazy: new Set() };
+  const schema = { types: new Map(), enums: new Map(), declarations: new Map(), dynamicCombos: new Map(), defaults: new Map(), lazy: new Set(), warnings: [] };
   // Child prompt keys share this prefix, so their declarations, lazy flags and
   // nested dynamic combo branches (each owning its own defaults) join the parent
   // whole. Child defaults stay unmerged: group rows, autogrow names and slot
   // children exist only when present upstream, so no absent value is created.
   const adopt = child => {
+    schema.warnings.push(...child.warnings);
     for (const channel of ["types", "enums", "declarations", "dynamicCombos"]) for (const [key, value] of child[channel]) budget.set(schema[channel], key, value);
     for (const key of child.lazy) { budget.take(); schema.lazy.add(key); }
   };
@@ -406,6 +407,8 @@ function inputSchema(input, prefix, budget, depth = 0) {
       }
       if (t === "COMFY_AUTOGROW_V3") {
         const children = autogrowChildren(config?.template);
+        if (!children) schema.warnings.push({ input: name, detail: "invalid autogrow template" });
+        else if (config?.template?.names?.length > MAX_AUTOGROW_NAMES) schema.warnings.push({ input: name, detail: `${config.template.names.length} declared names with only ${MAX_AUTOGROW_NAMES} supported` });
         if (children) {
           budget.take(children.length);
           for (const [child, childSection, childSpec] of children) adopt(inputSchema({ [childSection]: { [child]: childSpec } }, name, budget, depth + 1));
@@ -422,6 +425,8 @@ function inputSchema(input, prefix, budget, depth = 0) {
       if (t === "COMFY_DYNAMICCOMBO_V3" && Array.isArray(config?.options)) {
         const branches = new Map();
         budget.take(config.options.length);
+        const invalid = config.options.filter(option => typeof option?.key !== "string").length;
+        if (invalid) schema.warnings.push({ input: name, detail: `${invalid} dynamic options have invalid keys` });
         for (const option of config.options) {
           if (typeof option?.key !== "string") continue;
           const branch = inputSchema(option.inputs, name, budget, depth + 1);
@@ -477,13 +482,14 @@ export function objectInfoView(raw, classes = null, error = null) {
   let out = { types: null, outputClasses: null, enums: null, lazyInputs: null, dynamicCombos: null, declarations: null, outputs: null, installed: null, schemaError: error };
   try {
     if (raw) {
-      const candidate = { types: new Map(), outputClasses: new Set(), enums: new Map(), lazyInputs: new Map(), dynamicCombos: new Map(), declarations: new Map(), outputs: new Map(), installed: new Set(), schemaError: null };
+      const candidate = { types: new Map(), outputClasses: new Set(), enums: new Map(), lazyInputs: new Map(), dynamicCombos: new Map(), declarations: new Map(), outputs: new Map(), installed: new Set(), schemaError: null, schemaWarnings: [] };
       const budget = schemaBudget();
       const entries = classes === null ? Object.entries(raw) : classes.filter(type => Object.hasOwn(raw, type)).map(type => [type, raw[type]]);
       for (const [type, def] of entries) {
         // Presence in object_info is the backend's own statement that a class is installed.
         candidate.installed.add(type);
         const schema = inputSchema(def?.input, type, budget);
+        candidate.schemaWarnings.push(...schema.warnings.map(warning => ({ ...warning, type })));
         budget.set(candidate.lazyInputs, type, new Set([...schema.lazy].map(key => key.slice(type.length + 1))));
         if (def?.output_node) { budget.take(); candidate.outputClasses.add(type); }
         if (Array.isArray(def?.output)) {

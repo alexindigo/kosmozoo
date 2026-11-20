@@ -5,6 +5,9 @@ import { SingleLineText } from "../../components/SingleLineText.js";
 import { ValuePreview } from "../../components/ValuePreview.js";
 import { IconButton } from "../../components/IconButton.js";
 import { Thumbnail } from "./Thumbnail.js";
+import { historyPresentation } from "./problem-presentation.js";
+import { ProblemFeedback } from "./ProblemFeedback.js";
+import { variationProblem, problemFrom, problemText } from "/shared/features/variations/problems.mjs";
 
 export const historyDate = created => new Intl.DateTimeFormat(undefined, { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit", timeZoneName: "short" }).format(new Date(created));
 export function historyCount(entry) {
@@ -13,8 +16,13 @@ export function historyCount(entry) {
 }
 export function HistoryEntry(props) {
   const [expanded, setExpanded] = createSignal(null), [pending, setPending] = createSignal(null), [message, setMessage] = createSignal("");
+  const [effects, setEffects] = createSignal(null);
   let alive = true; onCleanup(() => { alive = false; });
-  const invoke = async action => { setMessage(""); try { await action(); } catch (error) { if (alive) setMessage(error.message); } };
+   const invoke = async action => { setMessage(""); try {
+     const result = await action();
+     if (alive && result?.status === "stale") setMessage(problemText(variationProblem("session-changed", { phase: "recall", runId: props.entry.id })));
+   } catch (error) { if (alive) setMessage(problemText(problemFrom(error, { phase: "history", runId: props.entry.id }))); } };
+   const presentation = () => historyPresentation(props.entry);
   const inspect = async parameter => {
     if (expanded()?.id === parameter.id) { setExpanded(null); return; }
     setPending(parameter.id);
@@ -33,7 +41,17 @@ export function HistoryEntry(props) {
         <span class="vh-head"><strong>{historyCount(props.entry)}</strong><time dateTime={new Date(props.entry.createdAt).toISOString()}>{historyDate(props.entry.createdAt)}</time></span>
         <Show when={props.targets}><SingleLineText class="vh-target" value={props.entry.summary.targets.join(", ")} /></Show>
       </button>
-      <Show when={props.entry.outcome !== "submitted"}><span class="vh-outcome">{props.entry.outcome}{props.entry.summary.submitted ? ` (${props.entry.summary.submitted} queued)` : ""}</span></Show>
+      <Show when={props.entry.outcome !== "submitted"}><span class="vh-outcome">{props.entry.outcome}</span></Show>
+      <div class="vh-evidence" role="status">
+        <p>{presentation().counts}</p><p>{presentation().state}</p>
+        <ProblemFeedback problems={presentation().problems} />
+        <Show when={props.onInspect}><button type="button" class="vh-inspect" aria-expanded={!!effects()} onClick={() => effects() ? setEffects(null) : invoke(async () => {
+          const record = await props.onInspect(); if (alive) setEffects(historyPresentation(record));
+        })}>Inspect saved effects</button></Show>
+        <Show when={effects()}><For each={effects().details}>{effect => <div class="vh-effect" data-effect-id={effect.id}>
+          <SingleLineText value={effect.caption} /><ProblemFeedback problems={effect.problems} />
+        </div>}</For></Show>
+      </div>
       <div class="vh-parameters"><For each={props.entry.summary.parameters.filter(p => p.kind !== "images")}>{parameter =>
         <span class="vh-parameter"><span class="vh-label" title={parameter.label}>{parameter.label.replace(/^.*\u00b7\s*/, "").split(".").at(-1)}:</span>
           <ValuePreview value={parameter.value} available registerPopup={props.registerPopup ?? (() => () => {})}

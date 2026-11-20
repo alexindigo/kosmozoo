@@ -133,7 +133,7 @@ export function compileRecipe(snapshot, { catalogue, target, batch = false, look
     } else {
       const text = read(domain, id, "text");
       const substitutions = Object.fromEntries(templateLabels(text).map(label => [label, parseSemicolonList(read(domain, id, "tpl", label))]));
-      imageParams[id].values = expandTextAxes(text, substitutions);
+      imageParams[id].values = expandTextAxes(text, substitutions, { parameter: { id, label: entry.metadata.label } });
       if (!preview && !imageParams[id].values.length) throw new Error(`${entry.metadata.label}: enter values for every template label before Run`);
     }
   }

@@ -4,21 +4,22 @@ export const isFileDrag = transfer => !!transfer && ([...transfer.types].include
   [...(transfer.items ?? [])].some(item => item.kind === "file"));
 
 export function droppedFiles(transfer) {
-  const files = []; let folders = 0;
+  const files = []; let folders = 0, unreadable = 0;
   const items = [...(transfer.items ?? [])].filter(item => item.kind === "file");
   if (!items.length) return { files: [...(transfer.files ?? [])], folders };
   for (const item of items) {
     if (item.webkitGetAsEntry?.()?.isDirectory) { folders++; continue; }
     const file = item.getAsFile();
-    if (file) files.push(file);
+    if (file) files.push(file); else unreadable++;
   }
-  return { files, folders };
+  return { files, folders, ...(unreadable ? { unreadable } : {}) };
 }
 
-export function classifyImageFiles({ files, folders = 0 }, accepts) {
+export function classifyImageFiles({ files, folders = 0, unreadable = 0 }, accepts) {
   const images = files.filter(file => accepts(file.name)), skipped = files.length - images.length;
-  return { images, status: [skipped ? `${skipped} ${skipped === 1 ? "file" : "files"} skipped — not images` : "",
-    folders ? "Folders: use Add folder" : ""].filter(Boolean).join(" · ") };
+  return { images, skipped, folders, unreadable, names: files.filter(file => !accepts(file.name)).map(file => file.name),
+    status: [skipped ? `${skipped} ${skipped === 1 ? "file" : "files"} skipped - not images` : "",
+    folders ? "Folders: use Add folder" : "", unreadable ? `Could not read ${unreadable} dropped file items. Use Add files to select them again.` : ""].filter(Boolean).join("; ") };
 }
 
 // Both pointer reorder and native insertion use untransformed tile centres.

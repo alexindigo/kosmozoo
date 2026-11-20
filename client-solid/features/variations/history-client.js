@@ -2,13 +2,15 @@
 // remain in their mounted editor, never in this readonly leased-record cache.
 import { encodeHistoryRecipe } from "/shared/features/variations/history-codec.mjs";
 import { sameDraft } from "/shared/features/variations/recipe-model.mjs";
+import { variationProblem } from "/shared/features/variations/problems.mjs";
 
-export function makeHistoryClient({ api, changed = () => {} }) {
+export function makeHistoryClient({ api, changed = () => {}, notifyProblem = () => {} }) {
   let alive = true, generation = 0, reading = null, interests = 0, nextCursor = null;
   let items = [], error = "", loaded = false;
   const removed = new Set(), details = new Map(), leases = new Map(), deleting = new Set();
   const releasing = new Map(), pendingRelease = new Set();
   const acquisitions = new Set(), acknowledged = new Set(), releaseErrors = new Map();
+  const notices = new Map();
   let draining = null, retirement = null;
   const notify = () => { if (alive) changed(); };
   const refresh = (more = false) => {
@@ -37,9 +39,13 @@ export function makeHistoryClient({ api, changed = () => {} }) {
     if (releasing.has(key)) return releasing.get(key);
     leases.set(key, record); pendingRelease.add(key);
     const task = Promise.resolve().then(() => api.historyRelease(record.id, key)).then(() => {
-      acknowledged.add(key); leases.delete(key); pendingRelease.delete(key); releaseErrors.delete(key);
-    }).catch(problem => { releaseErrors.set(key, problem); error = `History lease release failed: ${problem.message}`; notify(); throw problem; })
-      .finally(() => { if (releasing.get(key) === task) releasing.delete(key); });
+      acknowledged.add(key); leases.delete(key); pendingRelease.delete(key); releaseErrors.delete(key); notices.delete(`cleanup:${key}`);
+    }).catch(problem => {
+      releaseErrors.set(key, problem);
+      const notice = variationProblem("history-cleanup", { phase: "cleanup", runId: record.id, detail: problem.message });
+      notices.set(`cleanup:${key}`, notice); notifyProblem(notice); notify(); throw problem;
+    })
+      .finally(() => { if (releasing.get(key) === task) releasing.delete(key); notify(); });
     releasing.set(key, task); return task;
   };
   const retire = (record, pass) => {
@@ -61,7 +67,10 @@ export function makeHistoryClient({ api, changed = () => {} }) {
     return task;
   };
   return {
-    state: () => ({ items, error, pending: !!reading, loaded, more: !!nextCursor, deleting: new Set(deleting) }),
+    state: () => ({ items, error: error || [...releaseErrors.values()].map(problem => `History lease release failed: ${problem.message}`).join("\n"),
+      problems: [...notices.values()], pendingCleanup: pendingRelease.size, pending: !!reading, loaded, more: !!nextCursor, deleting: new Set(deleting) }),
+    notice(id, problem) { notices.set(id, problem); notifyProblem(problem); notify(); },
+    retryCleanup: () => Promise.allSettled([...pendingRelease].map(key => release(leases.get(key)))),
     refresh, more: () => refresh(true),
     interest() { interests++; refresh(); let owned = true; return () => { if (owned) interests--; owned = false; }; },
     activate() {
@@ -168,8 +177,14 @@ export function makeHistoryClient({ api, changed = () => {} }) {
       return { plans, leftovers };
     },
     async finish(id, message) {
-      try { await api.historyFinish(id, message); }
+      let result;
+      try { result = await api.historyFinish(id, message); }
       finally { details.delete(id); if (alive) { generation++; reading = null; await refresh(); } }
+      if (error) {
+        const refreshProblem = variationProblem("history-refresh", { severity: "warning", phase: "history", runId: id, detail: error });
+        notices.set(`refresh:${id}`, refreshProblem); notify(); return { ...result, refreshProblem };
+      }
+      return result;
     },
     dispose,
   };

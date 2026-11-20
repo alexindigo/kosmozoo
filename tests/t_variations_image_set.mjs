@@ -39,8 +39,9 @@ Deno.test("image set: acquisition is additive, identity-deduplicated and removab
   const items = editor.rows("images")[id].items;
   assertEquals(items.length, 3); assert(items[1].file === a && items[2].file === b);
   editor.removeImage(id, items[0]); assertEquals(editor.rows("images")[id].items.length, 2);
-  assertThrows(() => editor.edit("images", id, "mode", "files"));
-  assertThrows(() => editor.edit("images", id, "items", [input("../bad.png")]));
+  assertEquals(editor.edit("images", id, "mode", "files"), false);
+  assertEquals(editor.edit("images", id, "items", [input("../bad.png")]), false);
+  assertEquals(editor.rows("images")[id].items.length, 2);
   editor.dispose();
 });
 

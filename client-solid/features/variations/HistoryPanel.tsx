@@ -1,5 +1,6 @@
 import { onMount, onCleanup, For, Show } from "solid-js";
 import { HistoryEntry } from "./HistoryEntry.js";
+import { ProblemFeedback } from "./ProblemFeedback.js";
 
 export function HistoryList(props) {
   return <>
@@ -9,6 +10,8 @@ export function HistoryList(props) {
       onDelete={props.deletable ? () => props.history.remove(entry.id) : null} deleting={props.state().deleting.has(entry.id)} />}</For>
     <Show when={props.state().pending}><p class="vh-status" role="status">Reading history...</p></Show>
     <Show when={props.state().error}><p class="vh-error" role="status">{props.state().error} <button onClick={() => props.history.refresh()}>Retry</button></p></Show>
+    <ProblemFeedback problems={props.state().problems ?? []} />
+    <Show when={props.state().pendingCleanup}><button class="vh-more" onClick={() => props.history.retryCleanup()}>Retry resource cleanup</button></Show>
     <Show when={props.state().loaded && !props.state().items.length && !props.state().pending}><p class="vh-status">No runs yet. Each Run is saved automatically.</p></Show>
     <Show when={props.state().more && !props.state().pending}><button class="vh-more" onClick={() => props.history.more()}>More runs</button></Show>
   </>;

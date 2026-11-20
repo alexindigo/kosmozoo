@@ -39,7 +39,7 @@ export function registerHistory(app) {
     const last = page.at(-1);
     return historyResponse({ format: 1, revision: app.store.variationRevision(),
       items: page.map(row => ({ id: row.id, createdAt: row.created_at, format: row.format, captureState: row.capture_state, outcome: row.outcome,
-        summary: { ...parseExactJson(row.summary_json), submitted: row.submitted_count, total: row.total_count, plannedCount: row.planned_count } })),
+        summary: owner.summary(row) })),
       nextCursor: hasNext ? btoa(JSON.stringify({ at: last.created_at, id: last.id })) : null });
   });
   route("POST", "/history", async req => {
