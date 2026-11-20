@@ -1,7 +1,7 @@
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const { CDP, collectPageErrors } = require('./cdp.cjs');
-const { addParameter } = require('./variation-add-helpers.cjs');
+const { addParameter, settledCount } = require('./variation-add-helpers.cjs');
 const KZ = `(await import('/store/instance.js')).appStore`;
 
 async function run({ page, errors, ENGINE, FAKE, E, scenario, phase }) {
@@ -67,7 +67,7 @@ async function run({ page, errors, ENGINE, FAKE, E, scenario, phase }) {
       assert(strength, 'fixture exposes the extra strength input');
       await addParameter(page, strength); await page.clickAt(`[data-param-key="${strength}"] .mode-switch button[title="Value"]`);
     }
-    await page.poll('document.querySelector(".vz-count").textContent==="1"');
+    await settledCount(page, '1');
     await waitRun();
     const saved = await list();
     assert.equal(saved.items.length, 1, JSON.stringify(saved));

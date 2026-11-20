@@ -2,7 +2,7 @@
 // batch/history components, plus actual modal catalogue-error and naming paths.
 const assert = require('node:assert/strict'), fs = require('node:fs');
 const { CDP, collectPageErrors } = require('./cdp.cjs');
-const { addParameter } = require('./variation-add-helpers.cjs');
+const { addParameter, settledCount } = require('./variation-add-helpers.cjs');
 const B = process.env.E2E_ENGINE, F = process.env.E2E_FAKE, D = process.env.E2E_EVIDENCE;
 const KZ = `(await import('/store/instance.js')).appStore`;
 const cases = JSON.parse(fs.readFileSync('/work/runtime/clear-errors-cases.json', 'utf8'));
@@ -31,7 +31,7 @@ const request = async (base, path, body) => {
     await c.poll(`document.querySelector('.vz-messages')?.textContent.includes('Cannot use the workflow catalogue for errors.png')&&!!document.querySelector('.vz-catalogue-retry')`, 20000);
     assert(await c.evaluate(`document.querySelector('.vz-run').disabled`)); await shot('catalogue-install-error');
     await c.clickAt('.vz-catalogue-retry');
-    await c.poll(`document.querySelector('.vz-count')?.textContent==='0'&&!document.querySelector('.vz-catalogue-retry')`, 20000);
+    await settledCount(c, '0', { and: `!document.querySelector('.vz-catalogue-retry')`, timeout: 20000 });
     await addParameter(c, 'n.steps');
     await field('[data-param-key="n.steps"] .vz-range-field:nth-child(1) input', '2');
     await field('[data-param-key="n.steps"] .vz-range-field:nth-child(2) input', '3');

@@ -2,7 +2,7 @@
 // cap keeps the workload visible without admitting effects.
 const assert = require('node:assert/strict'), fs = require('node:fs');
 const { CDP, collectPageErrors } = require('./cdp.cjs');
-const { addParameter, removeRecordedImage } = require('./variation-add-helpers.cjs');
+const { addParameter, removeRecordedImage, settledCount } = require('./variation-add-helpers.cjs');
 const { openImageAdd, openImageFolder, pickInput, waitForInputPicker } = require('./image-picker-helpers.cjs');
 const B = process.env.E2E_ENGINE, F = process.env.E2E_FAKE, F2 = process.env.E2E_FAKE2, P = process.env.E2E_PEXELS, D = process.env.E2E_EVIDENCE;
 const KZ = `(await import('/store/instance.js')).appStore`;
@@ -28,13 +28,14 @@ const request = async (base, path, body) => {
   const invoke = (id, args = {}) => c.evaluate(`(async()=>${KZ}.handles.invoke(${JSON.stringify(id)},${JSON.stringify(args)}))()`);
   const field = (selector, value) => c.evaluate(`(()=>{const e=document.querySelector(${JSON.stringify(selector)});e.value=${JSON.stringify(value)};e.dispatchEvent(new Event('input',{bubbles:true}))})()`);
   const record = async name => {
-    const state = await c.evaluate(`({count:document.querySelector('.vz-count')?.textContent,status:document.querySelector('.vz-messages')?.textContent,title:document.querySelector('.vz-messages')?.title,overLimit:document.querySelector('.vz-count')?.classList.contains('vz-count-over-limit'),disabled:document.querySelector('.vz-run')?.disabled,strip:!!document.querySelector('.vz-batch-item'),plans:window.zeroPlans})`);
+    const count = await settledCount(c, undefined, { timeout: 5000 }).catch(() => c.evaluate(`document.querySelector('.vz-count')?.textContent`));
+    const state = await c.evaluate(`({count:${JSON.stringify(count)},status:document.querySelector('.vz-messages')?.textContent,title:document.querySelector('.vz-messages')?.title,overLimit:document.querySelector('.vz-count')?.classList.contains('vz-count-over-limit'),disabled:document.querySelector('.vz-run')?.disabled,strip:!!document.querySelector('.vz-batch-item'),plans:window.zeroPlans})`);
     observations.push({ name, ...state }); fs.writeFileSync(D + '/observations.json', JSON.stringify(observations, null, 2)); return state;
   };
   const shot = async name => fs.writeFileSync(`${D}/${name}.png`, Buffer.from((await c.send('Page.captureScreenshot', { format: 'png' })).data, 'base64'));
   const open = async () => {
     await invoke('variations.open', { id: 'fake:zero-target.png' });
-    await c.poll(`document.querySelector('.vz-count')?.textContent==='0'`, 20000);
+    await settledCount(c, '0', { timeout: 20000 });
     await addParameter(c, 'n.steps');
     await field('[data-param-key="n.steps"] .vz-range-field:nth-child(1) input', '2');
     await field('[data-param-key="n.steps"] .vz-range-field:nth-child(2) input', '18');
@@ -75,12 +76,12 @@ const request = async (base, path, body) => {
         await c.poll(`document.querySelectorAll('.vz-input-option').length>0`, 20000);
         await c.clickAt('.vz-input-option'); await c.keyTrusted('Escape', { vk: 27 });
       }
-      await c.poll(`document.querySelector('.vz-count')?.textContent==='17'&&!document.querySelector('.vz-run').disabled`, 20000);
+      await settledCount(c, '17', { and: `!document.querySelector('.vz-run').disabled`, timeout: 20000 });
       const state = await record(kind); assert(!state.strip, 'single target has no strip');
       await close();
     }
     await open(); await files(0, 22);
-    await c.poll(`document.querySelector('.vz-count')?.textContent==='374'&&!document.querySelector('.vz-run').disabled`, 20000);
+    await settledCount(c, '374', { and: `!document.querySelector('.vz-run').disabled`, timeout: 20000 });
     await record('22 images x 17 values');
     await files(22, 36);
     await c.poll(`window.zeroPlans.at(-1)?.[0]?.problem?.code==='too-many'&&!document.querySelector('.vz-image-check')`, 20000);
@@ -94,12 +95,12 @@ const request = async (base, path, body) => {
     assert.deepEqual(await request(F, '/__ordered'), before, 'over-limit Run has no upload or prompt effects');
     // Existing result text must not conceal a newly computed target problem.
     await field('[data-param-key="n.steps"] .vz-range-field:nth-child(2) input', '17');
-    await c.poll(`document.querySelector('.vz-count')?.textContent==='576'&&document.querySelector('.vz-messages')?.textContent.includes('576 jobs for this image')`, 20000);
+    await settledCount(c, '576', { and: `document.querySelector('.vz-messages')?.textContent.includes('576 jobs for this image')`, timeout: 20000 });
     await record('problem after previous Run result');
     // A non-count failure also remains visible with one target and no strip.
     await c.evaluate(`(()=>{const original=window.fetch;window.fetch=(url,...rest)=>String(url).endsWith('/features/variations/plan')?Promise.resolve(new Response(JSON.stringify([{index:0,count:0,problem:{code:'unavailable',message:'Original input is unavailable; choose another image.'}}]),{headers:{'Content-Type':'application/json'}})):original(url,...rest)})()`);
     await field('.vz-prefix', 'next-');
-    await c.poll(`document.querySelector('.vz-count')?.textContent==='0'&&document.querySelector('.vz-messages')?.textContent.includes('Original input is unavailable')`, 20000);
+    await settledCount(c, '0', { and: `document.querySelector('.vz-messages')?.textContent.includes('Original input is unavailable')`, timeout: 20000 });
     const forced = await record('forced problem without strip'); assert(!forced.strip); assert(forced.disabled); await shot('problem-single-target');
     assert.deepEqual(errors, []); console.log(JSON.stringify({ cases: observations.map(({name,count}) => ({name,count})), pageErrors: errors }));
   } catch (error) { await record('failure'); await shot('failure'); throw error; }

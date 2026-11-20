@@ -3,7 +3,7 @@ const fs = require('node:fs');
 const { workPath } = require('./paths.cjs');
 const { freshRecipe } = require('./recipe-helpers.cjs');
 const { openImageAdd, waitForSelectedPreviews } = require('./image-picker-helpers.cjs');
-const { addParameter, removeRecordedImage } = require('./variation-add-helpers.cjs');
+const { addParameter, removeRecordedImage, settledCount } = require('./variation-add-helpers.cjs');
 
 module.exports = async ({ cdp, check, FAKE, KZ }) => {
   const invoke = (id, args = {}) => cdp.evaluate(`(async()=>${KZ}.handles.invoke(${JSON.stringify(id)},${JSON.stringify(args)}))()`);
@@ -73,7 +73,7 @@ module.exports = async ({ cdp, check, FAKE, KZ }) => {
     check('image drop: plus appends; mixed nonimages and folders report one line without expanding', true);
     await drop(await box('.vz-image-plus'), [append]);
     await waitForSelectedPreviews(cdp);
-    const snapshot = () => cdp.evaluate("({url:location.href,names:[...document.querySelectorAll('.vz-image-tile')].map(el=>el.dataset.imageName),suffix:document.querySelector('.vz-suffix').value,count:document.querySelector('.vz-count').textContent})");
+    const snapshot = async () => ({ ...await cdp.evaluate("({url:location.href,names:[...document.querySelectorAll('.vz-image-tile')].map(el=>el.dataset.imageName),suffix:document.querySelector('.vz-suffix').value})"), count: await settledCount(cdp) });
     const before = await snapshot();
     await drop(await box('.vz-title'), [resources[0]]);
     await drop({ x: 2, y: 2 }, [resources[0]]);

@@ -8,7 +8,7 @@
 // labels — never the slider library's internals (I3/I7).
 
 const { CDP } = require("./cdp.cjs");
-const { addParameter, toggleParameter } = require('./variation-add-helpers.cjs');
+const { addParameter, toggleParameter, settledCount } = require('./variation-add-helpers.cjs');
 
 const ENGINE = process.env.E2E_ENGINE ?? "http://127.0.0.1:18260";
 const FAKE = process.env.E2E_FAKE ?? "http://127.0.0.1:18261";
@@ -150,8 +150,7 @@ async function main() {
         const r = document.querySelector('.vz-slider-row[data-param-key$="denoise"]');
         return !!r && !r.classList.contains('vz-off');
       })()`, 5000).then(() => true).catch(() => false);
-      await cdp.poll(`Number.isFinite(parseInt(document.querySelector('.vz-count')?.textContent, 10))`, 10000);
-      const count = await cdp.evaluate(`document.querySelector('.vz-count')?.textContent`);
+      const count = await settledCount(cdp, { test: 'Number.isFinite(parseInt(count,10))' }, { timeout: 10000 });
       const n = parseInt(count, 10);
       check("explicitly added denoise and count > 0",
         denoiseOn && n > 0,
@@ -224,8 +223,7 @@ async function main() {
 
     // --- per-slider increment updates count ---
     await attempt("per-slider increment change updates count", async () => {
-      await cdp.poll(`Number.isFinite(parseInt(document.querySelector('.vz-count')?.textContent, 10))`, 10000);
-      const before = parseInt(await cdp.evaluate(`document.querySelector('.vz-count')?.textContent`), 10);
+      const before = parseInt(await settledCount(cdp, { test: 'Number.isFinite(parseInt(count,10))' }, { timeout: 10000 }), 10);
       // type the new increment like a user: focus, select-all, trusted
       // insertText, blur (the change event commits)
       await cdp.evaluate(`(() => {
@@ -234,8 +232,7 @@ async function main() {
       })()`);
       await cdp.send("Input.insertText", { text: "0.025" });
       await cdp.evaluate(`document.querySelector('.vz-slider-row .vz-row-inc-input').blur()`);
-      await cdp.poll(`Number.isFinite(parseInt(document.querySelector('.vz-count').textContent, 10)) && parseInt(document.querySelector('.vz-count').textContent, 10) !== ${before}`, 10000);
-      const after = parseInt(await cdp.evaluate(`document.querySelector('.vz-count')?.textContent`), 10);
+      const after = parseInt(await settledCount(cdp, { test: `Number.isFinite(parseInt(count,10))&&parseInt(count,10)!==${before}` }, { timeout: 10000 }), 10);
       check("per-slider increment change updates count", before !== after, before + " → " + after);
     });
 
@@ -689,16 +686,14 @@ async function main() {
 
       // pick a second value: 2 picks × the auto-enabled denoise range →
       // (denoise-only count + 1) × 2 − 1 (the current combo excluded once)
-      await cdp.poll(`Number.isFinite(parseInt(document.querySelector('.vz-count')?.textContent, 10))`, 10000);
-      const c0 = parseInt(await cdp.evaluate(`document.querySelector('.vz-count')?.textContent`), 10);
+      const c0 = parseInt(await settledCount(cdp, { test: 'Number.isFinite(parseInt(count,10))' }, { timeout: 10000 }), 10);
       const idx = await cdp.evaluate(`(() => {
         const opts = [...document.querySelectorAll('.vz-enumrow[data-enum-id="20.lora_name"] .vz-enum-opt')];
         return opts.findIndex((o) => o.querySelector('.vz-enum-opt-name')?.textContent === 'other.safetensors') + 1;
       })()`);
       await cdp.clickAt(`.vz-enumrow[data-enum-id="20.lora_name"] .vz-enum-list .vz-enum-opt:nth-of-type(${idx}) .checkbox`);
       const expected = (c0 + 1) * 2 - 1;
-      await cdp.poll(`parseInt(document.querySelector('.vz-count')?.textContent, 10) === ${expected}`, 5000);
-      const c1 = parseInt(await cdp.evaluate(`document.querySelector('.vz-count')?.textContent`), 10);
+      const c1 = parseInt(await settledCount(cdp, { test: `parseInt(count,10)===${expected}` }, { timeout: 5000 }), 10);
       check("2 picks × numeric range → the right count",
         c1 === expected, `denoise-only=${c0} with-2-picks=${c1} expected=${expected}`);
       await closeAndDiscard();
@@ -770,17 +765,16 @@ async function main() {
       const pre = await cdp.evaluate(`document.querySelector('.vz-textrow[data-text-id="2.text"] .vz-text-values').value`);
       check("textarea pre-filled with the current text",
         pre === "a portrait, studio light", JSON.stringify(pre));
-      await cdp.poll(`Number.isFinite(parseInt(document.querySelector('.vz-count')?.textContent, 10))`, 10000);
-      const c0 = parseInt(await cdp.evaluate(`document.querySelector('.vz-count')?.textContent`), 10);
+      const c0 = parseInt(await settledCount(cdp, { test: 'Number.isFinite(parseInt(count,10))' }, { timeout: 10000 }), 10);
       await cdp.evaluate(`(() => {
         const t = document.querySelector('.vz-textrow[data-text-id="2.text"] .vz-text-values');
         t.value = t.value + "\\na cyberpunk alley, rain";
         t.dispatchEvent(new Event('input', { bubbles: true }));
       })()`);
       const expected = c0 + 1;
-      await cdp.poll(`parseInt(document.querySelector('.vz-count')?.textContent, 10) === ${expected}`, 5000);
+      const c1 = parseInt(await settledCount(cdp, { test: `parseInt(count,10)===${expected}` }, { timeout: 5000 }), 10);
       check("one multiline text template × numeric range → the right count",
-        parseInt(await cdp.evaluate(`document.querySelector('.vz-count')?.textContent`), 10) === expected,
+        c1 === expected,
         `denoise-only=${c0} expected=${expected}`);
       // the enabled text row floats to the top (the prompt sink applies to
       // the disabled rows, not the enabled group)
@@ -863,18 +857,18 @@ async function main() {
       // An incomplete enabled template is invalid, never a default-backed count.
       const c0 = 3; // the fixture's unchanged denoise-only sweep
       await setTpl(0, "cat; dog");
-      const incomplete = await cdp.evaluate(`document.querySelector('.vz-count').textContent==='--' && document.querySelector('.vz-messages').textContent.includes('every template label')`);
+      const incomplete = await settledCount(cdp, '--', { timeout: 5000 }).catch(() => null) === '--' && await cdp.evaluate(`document.querySelector('.vz-messages').textContent.includes('every template label')`);
       check("unconfigured label has an explicit invalid-plan explanation", incomplete);
       // both labels configured: 2×2 cartesian; the current text is NOT among
       // the picks (it has no placeholders), so no current-combo exclusion
       await setTpl(1, "oil; ink");
       const expected4 = (c0 + 1) * 4;
-      await cdp.poll(`parseInt(document.querySelector('.vz-count')?.textContent, 10) === ${expected4}`, 5000);
+      await settledCount(cdp, { test: `parseInt(count,10)===${expected4}` }, { timeout: 5000 });
       check("2×2 labels cartesian → the right count", true, `count=${expected4}`);
       // an empty segment is a real value (the token substitutes with "")
       await setTpl(1, "oil; ; ink");
       const expected6 = (c0 + 1) * 6;
-      await cdp.poll(`parseInt(document.querySelector('.vz-count')?.textContent, 10) === ${expected6}`, 5000);
+      await settledCount(cdp, { test: `parseInt(count,10)===${expected6}` }, { timeout: 5000 });
       check("empty value counts as a value", true, `count=${expected6}`);
       // Run: the captured payload carries the fully expanded texts
       await cdp.evaluate(`document.querySelector('.vz-run').click()`);
@@ -913,7 +907,7 @@ async function main() {
         t.dispatchEvent(new Event('input', { bubbles: true }));
       })()`);
       const c0 = 3; // denoise-only count (0.85..1.0 step 0.05, current excluded)
-      await cdp.poll(`parseInt(document.querySelector('.vz-count')?.textContent, 10) === ${c0 + 1}`, 5000);
+      await settledCount(cdp, { test: `parseInt(count,10)===${c0 + 1}` }, { timeout: 5000 });
       check("cleared text row counts as one (empty) value", true, `count=${c0 + 1}`);
       await cdp.evaluate(`document.querySelector('.vz-run').click()`);
       await cdp.poll(`(document.querySelector('.vz-error')?.textContent ?? '').length > 0`, 10000);

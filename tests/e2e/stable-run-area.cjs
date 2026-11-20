@@ -2,7 +2,7 @@
 // and submission states. No private editor state or fabricated status nodes.
 const assert = require('node:assert/strict'), fs = require('node:fs');
 const { CDP, collectPageErrors } = require('./cdp.cjs');
-const { addParameter } = require('./variation-add-helpers.cjs');
+const { addParameter, settledCount } = require('./variation-add-helpers.cjs');
 const B = process.env.E2E_ENGINE, F = process.env.E2E_FAKE, D = process.env.E2E_EVIDENCE;
 const KZ = `(await import('/store/instance.js')).appStore`;
 const request = async (path, body) => {
@@ -65,12 +65,12 @@ const selectors = {sidebar:'.vz-right',body:'.vz-sidebar-body',count:'.vz-count-
       await c.goto(B+'/#fake#stable%2Fready.png');
       await c.poll(`(async()=>${KZ}.state.images.some(i=>i.filename==='stable/leftover.png'))()`,20000);
       await invoke('variations.open',{ids:['fake:stable/ready.png','fake:stable/leftover.png'],bulk:true});
-      await c.poll(`document.querySelector('.vz-count')?.textContent==='0'&&document.querySelectorAll('.vz-catalogue-row').length>0`,20000);
+      await settledCount(c, '0', { and: `document.querySelectorAll('.vz-catalogue-row').length>0`, timeout: 20000 });
       const baseline=await sample(`${width}x${height}:zero`);
       await addParameter(c,'n.choice');
       await c.clickAt('[data-enum-id="n.choice"] .vz-enum-opt:nth-child(2)');
       await c.clickAt('[data-enum-id="n.choice"] .vz-enum-opt:nth-child(3)');
-      await c.poll(`document.querySelector('.vz-count')?.textContent==='2'&&!document.querySelector('.vz-run').disabled`,20000);
+      await settledCount(c, '2', { and: `!document.querySelector('.vz-run').disabled`, timeout: 20000 });
       await sample(`${width}:ready-leftover`,baseline);
       if(width===1400) await shot('variations-run-area-short');
       // Destination reads produce the real failed/Retry and conflict states.
@@ -85,7 +85,7 @@ const selectors = {sidebar:'.vz-right',body:'.vz-sidebar-body',count:'.vz-count-
       await c.poll(`!document.querySelector('.vz-catalogue-retry')&&!!document.querySelector('.vz-conflict')&&document.querySelector('.vz-run').disabled`,20000);
       await sample(`${width}:destination-conflict`,baseline);
       await choose('fake');
-      await c.poll(`document.querySelector('.vz-count')?.textContent==='2'&&!document.querySelector('.vz-run').disabled`,20000);
+      await settledCount(c, '2', { and: `!document.querySelector('.vz-run').disabled`, timeout: 20000 });
       for(const selector of ['.vz-prefix','.vz-suffix']) {
         for(const value of ['x','a longer name with spaces '.repeat(3),'very long name with spaces '.repeat(40),'{missing}']) {
           await field(selector,value);
@@ -110,16 +110,16 @@ const selectors = {sidebar:'.vz-right',body:'.vz-sidebar-body',count:'.vz-count-
       // Single-target invalid raw input must also stay inside the same tracks;
       // mixed-cohort summaries intentionally aggregate target-specific problems.
       await invoke('variations.open',{id:'fake:stable/ready.png'});
-      await c.poll(`document.querySelector('.vz-count')?.textContent==='0'&&document.querySelectorAll('.vz-catalogue-row').length>0`,20000);
+      await settledCount(c, '0', { and: `document.querySelectorAll('.vz-catalogue-row').length>0`, timeout: 20000 });
       const single=await sample(`${width}:single-zero`);
       await addParameter(c,'n.choice');
       await c.clickAt('[data-enum-id="n.choice"] .vz-enum-opt:nth-child(2)');
-      await c.poll(`document.querySelector('.vz-count')?.textContent==='1'&&!document.querySelector('.vz-run').disabled`,20000);
+      await settledCount(c, '1', { and: `!document.querySelector('.vz-run').disabled`, timeout: 20000 });
       await sample(`${width}:single-ready`,single);
       await addParameter(c,'n.steps');
       await c.clickAt('[data-param-key="n.steps"] .mode-switch button[title="Value"]');
       await field('[data-param-key="n.steps"] .vz-value-field input','-');
-      await c.poll(`document.querySelector('.vz-run').disabled&&document.querySelector('.vz-count')?.textContent==='--'`,20000);
+      await settledCount(c, '--', { and: `document.querySelector('.vz-run').disabled`, timeout: 20000 });
       const invalid=await sample(`${width}:invalid-numeric`,single);
       assert(invalid.text.length>0,'invalid raw input has an explanatory status');
       await closeDraft();

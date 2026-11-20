@@ -2,7 +2,7 @@
 // body-written progress and overlapping responses without fabricating UI state.
 const assert = require('node:assert/strict'), fs = require('node:fs');
 const { CDP, collectPageErrors } = require('./cdp.cjs');
-const { addParameter } = require('./variation-add-helpers.cjs');
+const { addParameter, settledCount } = require('./variation-add-helpers.cjs');
 const B = process.env.E2E_ENGINE, F = process.env.E2E_FAKE, D = process.env.E2E_EVIDENCE;
 const KZ = `(await import('/store/instance.js')).appStore`;
 const get = async (base, path) => { const r = await fetch(base + path); assert(r.ok, `${path}: ${r.status}`); return r.json(); };
@@ -37,7 +37,7 @@ const post = async (base, path, body) => { const r = await fetch(base + path, {m
     await addParameter(c,'n.choice');
     await c.clickAt('[data-enum-id="n.choice"] .vz-enum-opt:nth-child(2)');
     await c.clickAt('[data-enum-id="n.choice"] .vz-enum-opt:nth-child(3)');
-    await c.poll(`document.querySelector('.vz-count')?.textContent==='6'&&!document.querySelector('.vz-run').disabled`,20000);
+    await settledCount(c, '6', { and: `!document.querySelector('.vz-run').disabled`, timeout: 20000 });
     const before = await geometry(), beforePng = await shot('ordered-before');
     await c.evaluate(`(async()=>{window.orderedRun=${KZ}.handles.invoke('variations.run');return true})()`);
     await c.poll(`document.querySelector('.vz-submitting')?.textContent==='Submitting 2 / 6'`,20000);

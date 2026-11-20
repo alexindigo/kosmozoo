@@ -3,7 +3,7 @@ const fs = require('node:fs');
 const { workPath } = require('./paths.cjs');
 const { CDP } = require('./cdp.cjs');
 const { openImageAdd, waitForInputPicker } = require('./image-picker-helpers.cjs');
-const { addParameter } = require('./variation-add-helpers.cjs');
+const { addParameter, settledCount } = require('./variation-add-helpers.cjs');
 const ENGINE = process.env.E2E_ENGINE || 'http://127.0.0.1:18260';
 const FAKE = process.env.E2E_FAKE || 'http://127.0.0.1:18261';
 const OTHER = process.env.E2E_FAKE2 || 'http://127.0.0.1:18262';
@@ -101,7 +101,7 @@ module.exports = async ({ cdp, check }) => {
     await cdp.evaluate('window.__releaseImage()');
     await cdp.poll("document.querySelectorAll('.vz-image-tile').length===1&&!document.querySelector('.vz-image-check')");
     await cdp.poll(`document.querySelector(${JSON.stringify(tile)}).getAttribute('aria-selected')==='true'`);
-    assert.equal(await cdp.evaluate("document.querySelector('.vz-count').textContent"), '1');
+    assert.equal(await settledCount(cdp), '1');
     await cdp.clickAt(tile); await cdp.poll("document.querySelectorAll('.vz-image-tile').length===0");
     await cdp.clickAt(tile); await cdp.poll("document.querySelectorAll('.vz-image-tile').length===1");
     assert.equal(await cdp.evaluate('window.__inputReads'), 1);

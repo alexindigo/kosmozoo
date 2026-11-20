@@ -1,6 +1,6 @@
 const assert = require('node:assert/strict'), fs = require('node:fs');
 const { CDP, collectPageErrors } = require('./cdp.cjs');
-const { addParameter, removeRecordedImage } = require('./variation-add-helpers.cjs');
+const { addParameter, removeRecordedImage, settledCount } = require('./variation-add-helpers.cjs');
 const B = process.env.E2E_ENGINE, F = process.env.E2E_FAKE, D = process.env.E2E_EVIDENCE ?? process.env.KZ_TIME_EVIDENCE;
 const KZ = `(await import('/store/instance.js')).appStore`;
 const names = ['selection-one.png', 'selection-two.png', 'selection-three.png'];
@@ -51,7 +51,7 @@ const post = async (base, path, body) => {
     await addParameter(c, '470.image'); await removeRecordedImage(c, '470.image');
     await c.clickAt('[data-image-id="470.image"] .vz-image-plus');
     await c.clickAt('[data-image-id="470.image"] .vz-current-image');
-    await c.poll(`document.querySelector('.vz-count')?.textContent==='3'`);
+    await settledCount(c, '3');
     const before = (await (await fetch(F + '/__test/enqueues')).json()).length;
     proof.run = await invoke('variations.run'); assert.equal(proof.run.submitted, 3, JSON.stringify(proof.run));
     const ids = Array.from({ length: 3 }, (_, index) => `captured-${before + index + 1}`);

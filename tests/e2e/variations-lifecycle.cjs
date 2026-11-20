@@ -1,7 +1,7 @@
 // Contract consumers: metadata is not editable work, and effects retain one origin.
 const assert=require('node:assert/strict');
 const { freshRecipe } = require('./recipe-helpers.cjs');
-const { addParameter } = require('./variation-add-helpers.cjs');
+const { addParameter, settledCount } = require('./variation-add-helpers.cjs');
 module.exports=async({cdp,ENGINE,FAKE,KZ,check})=>{
   const invoke=(id,args={})=>cdp.evaluate(`(async()=>${KZ}.handles.invoke(${JSON.stringify(id)},${JSON.stringify(args)}))()`);
   const http=async(base,path,method='GET',body)=>{const r=await fetch(base+path,{method,headers:body?{'Content-Type':'application/json'}:undefined,body:body?JSON.stringify(body):undefined});assert(r.ok,`${path}: ${r.status}`);return r.json()};
@@ -58,7 +58,7 @@ module.exports=async({cdp,ENGINE,FAKE,KZ,check})=>{
     await invoke('variations.open',{id:'fake:lifecycle-tuple.png'});
     for(const id of ['2.text','42.text'])await addParameter(cdp,id);
     await type('.vz-textrow[data-text-id="2.text"] .vz-text-values','a');await type('.vz-textrow[data-text-id="42.text"] .vz-text-values','b|c');
-    await cdp.poll("document.querySelector('.vz-count').textContent==='1'");const tupleStart=(await http(FAKE,'/__test/enqueues')).length;
+    await settledCount(cdp, '1');const tupleStart=(await http(FAKE,'/__test/enqueues')).length;
     assert.equal((await invoke('variations.run')).submitted,1);
     const tupleJobs=(await http(FAKE,'/__test/enqueues')).slice(tupleStart);assert.equal(tupleJobs.length,1);assert.equal(tupleJobs[0].prompt['2'].inputs.text,'a');assert.equal(tupleJobs[0].prompt['42'].inputs.text,'b|c');
     await cdp.poll("!document.querySelector('.vz-panel')",6000);check('lifecycle: distinct arbitrary-text tuples count once, reach the actual backend unchanged, and close',true);

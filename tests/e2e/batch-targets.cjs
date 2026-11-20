@@ -1,6 +1,6 @@
 const assert = require('node:assert/strict'), fs = require('node:fs');
 const { CDP, collectPageErrors } = require('./cdp.cjs');
-const { addParameter } = require('./variation-add-helpers.cjs');
+const { addParameter, settledCount } = require('./variation-add-helpers.cjs');
 const B = process.env.E2E_ENGINE, F = process.env.E2E_FAKE, D = process.env.KZ_TIME_EVIDENCE;
 const KZ = `(await import('/store/instance.js')).appStore`;
 const req = async (base, path, body) => {
@@ -40,7 +40,7 @@ const timed = (id, ms) => ({ id, output: `batch/${id}.png`, fixture: 'flux-basic
     // Removing the original workflow target must retain the existing native input.
     await c.evaluate(`window.batchField=document.querySelector(${JSON.stringify(row + ' .vz-value-field input')})`);
     await remove('a');
-    await c.poll(`document.querySelectorAll('.vz-batch-item').length===2 && document.querySelector('.vz-count').textContent==='2' && document.querySelector('.vz-time-value').textContent==='above 6m'`);
+    await settledCount(c, '2', { and: `document.querySelectorAll('.vz-batch-item').length===2&&document.querySelector('.vz-time-value').textContent==='above 6m'` });
     assert(await c.evaluate(`window.batchField===document.querySelector(${JSON.stringify(row + ' .vz-value-field input')})&&window.batchField.value==='19'`));
     await c.send('Emulation.setDeviceMetricsOverride', { width: 850, height: 600, deviceScaleFactor: 1, mobile: false });
     await c.evaluate(`(()=>{const b=document.querySelector('.vz-body-scroll');b.scrollLeft=b.scrollWidth;})()`);
@@ -48,7 +48,7 @@ const timed = (id, ms) => ({ id, output: `batch/${id}.png`, fixture: 'flux-basic
     await shot('batch-narrow-two-targets'); states.push({ count: 2, narrow: true });
     await c.send('Emulation.clearDeviceMetricsOverride');
     await remove('unknown');
-    await c.poll(`!document.querySelector('.vz-batch')&&document.querySelector('.vz-count').textContent==='1'&&document.querySelector('.vz-time-value').textContent==='6m'`);
+    await settledCount(c, '1', { and: `!document.querySelector('.vz-batch')&&document.querySelector('.vz-time-value').textContent==='6m'` });
     await shot('batch-one-strip-hidden'); states.push({ count: 1, hidden: true });
     const run = await invoke('variations.run'); assert.equal(run.adopted, true, JSON.stringify(run)); assert.equal(run.submitted, 1);
     const history = await req(B, '/api/features/variations/history'), saved = await req(B, '/api/features/variations/history/' + history.items[0].id);

@@ -3,7 +3,7 @@ const fs = require('node:fs');
 const { workPath } = require('./paths.cjs');
 const { pickInput, waitForSelectedPreviews, openImageAdd, openImageFolder, waitForInputPicker, waitForIdleInputWindow } = require('./image-picker-helpers.cjs');
 const { freshRecipe } = require('./recipe-helpers.cjs');
-const { addParameter, removeRecordedImage } = require('./variation-add-helpers.cjs');
+const { addParameter, removeRecordedImage, settledCount } = require('./variation-add-helpers.cjs');
 
 module.exports = async ({ cdp, FAKE, KZ, check }) => {
   const invoke = (id, args = {}) => cdp.evaluate(`(async()=>${KZ}.handles.invoke(${JSON.stringify(id)},${JSON.stringify(args)}))()`);
@@ -103,9 +103,9 @@ module.exports = async ({ cdp, FAKE, KZ, check }) => {
     await cdp.evaluate(`(async()=>{const current=await(await fetch('/api/collections/fake/entries/canny.png/bytes?kind=input')).arrayBuffer();const other=await(await fetch('/api/collections/fake/entries/flux-lora.png/bytes')).arrayBuffer();window.__pickerAlternate=new File([other],'picked-upload.png',{type:'image/png'});const input=document.querySelector('.vz-imgfilespick'),data=new DataTransfer();data.items.add(new File([current],'same-current.png',{type:'image/png'}));data.items.add(window.__pickerAlternate);input.files=data.files;input.dispatchEvent(new Event('change',{bubbles:true}))})()`);
     await cdp.poll("document.querySelectorAll('.vz-image-tile').length===4&&!document.querySelector('.vz-image-check')");
     assert.equal(await cdp.evaluate("document.querySelectorAll('.vz-image-tile .vz-image-same').length"), 2);
-    assert.equal(await cdp.evaluate("document.querySelector('.vz-count').textContent"), '2');
+    assert.equal(await settledCount(cdp), '2');
     await cdp.clickAt('.vz-image-tile[data-image-name="picked-upload.png"] .chrome-icon');
-    await cdp.poll("document.querySelectorAll('.vz-image-tile').length===3&&document.querySelector('.vz-count').textContent==='1'");
+    await settledCount(cdp, '1', { and: "document.querySelectorAll('.vz-image-tile').length===3" });
     await cdp.evaluate("(()=>{const input=document.querySelector('.vz-imgfilespick'),data=new DataTransfer();data.items.add(window.__pickerAlternate);input.files=data.files;input.dispatchEvent(new Event('change',{bubbles:true}))})()");
     await cdp.poll("document.querySelectorAll('.vz-image-tile').length===4&&!document.querySelector('.vz-image-check')");
     await capture('image-set-inputs-and-files');
@@ -137,7 +137,7 @@ module.exports = async ({ cdp, FAKE, KZ, check }) => {
     await addFolder(folder);
     await cdp.poll("document.querySelectorAll('.vz-image-tile').length===4&&!document.querySelector('.vz-image-check')");
     assert.equal(await cdp.evaluate("document.querySelectorAll('.vz-image-same').length"), 1);
-    assert.equal(await cdp.evaluate("document.querySelector('.vz-count').textContent"), '3');
+    assert.equal(await settledCount(cdp), '3');
     await addFolder(folder); // same paths do not duplicate the set
     assert.equal(await cdp.evaluate("document.querySelectorAll('.vz-image-tile').length"), 4);
     await addFolder('relative');
@@ -145,9 +145,9 @@ module.exports = async ({ cdp, FAKE, KZ, check }) => {
     assert.equal(await cdp.evaluate("document.querySelectorAll('.vz-image-tile').length"), 4);
     await addFolder(folder);
     await cdp.clickAt('.vz-image-tile[data-image-name="turn-folder.png"] .chrome-icon');
-    await cdp.poll("document.querySelector('.vz-count').textContent==='2'");
+    await settledCount(cdp, '2');
     await addFolder(folder);
-    await cdp.poll("document.querySelector('.vz-count').textContent==='3'&&!document.querySelector('.vz-image-check')");
+    await settledCount(cdp, '3', { and: "!document.querySelector('.vz-image-check')" });
     await waitForSelectedPreviews(cdp);
     await openImageFolder(cdp);
     const folderGeometry = await cdp.evaluate(`(()=>{const input=document.querySelector('.vz-folder-path').getBoundingClientRect(),add=document.querySelector('.vz-folder-add').getBoundingClientRect(),footer=document.querySelector('.vz-image-add').getBoundingClientRect(),grid=document.querySelector('.vz-image-grid').getBoundingClientRect();return {center:Math.abs((input.top+input.bottom-add.top-add.bottom)/2),chooserAbsent:!document.querySelector('.vz-folder-chooser'),order:input.right<=add.left&&grid.bottom<=footer.top,contained:input.left>=footer.left&&add.right<=footer.right}})()`);

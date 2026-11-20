@@ -2,7 +2,7 @@
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const { freshRecipe } = require('./recipe-helpers.cjs');
-const { addParameter } = require('./variation-add-helpers.cjs');
+const { addParameter, settledCount } = require('./variation-add-helpers.cjs');
 module.exports = async ({ cdp, check, KZ, FAKE }) => {
   const row = '[data-param-key="9.denoise"]';
   const open = async () => {
@@ -41,9 +41,9 @@ module.exports = async ({ cdp, check, KZ, FAKE }) => {
     await field(`${row} .vz-row-inc-input`, '0.1');
     await cdp.clickAt(`${row} .mode-switch button[title="Value"]`);
     assert.equal(await cdp.evaluate(`document.querySelectorAll('${row} [role="slider"]').length`),1);
-    assert.equal(await cdp.evaluate("document.querySelector('.vz-count').textContent"),'0');
+    assert.equal(await settledCount(cdp),'0');
     await field(`${row} .vz-value-field input`, '0.9');
-    await cdp.poll("document.querySelector('.vz-count').textContent==='1'");
+    await settledCount(cdp, '1');
     assert.equal(await cdp.evaluate(`document.querySelector('${row} .vz-parameter-current').textContent`),'1 value');
     assert.equal(await cdp.evaluate(`document.querySelector('${row} .vz-editor-current').textContent`),'1');
     check('numeric modes: one Value thumb contributes exactly one value; unchanged current counts zero, changed value counts one', true);
@@ -104,7 +104,7 @@ module.exports = async ({ cdp, check, KZ, FAKE }) => {
     await cdp.poll(`!!document.querySelector('${row} .vz-numeric-editor')`);
     await cdp.clickAt(`${row} .mode-switch button[title="Value"]`);
     await field(`${row} .vz-value-field input`,'0.9');
-    await cdp.poll("document.querySelector('.vz-count').textContent==='2'");
+    await settledCount(cdp, '2');
     const batchStart = (await (await fetch(FAKE+'/__test/enqueues')).json()).length;
     const result = await cdp.evaluate(`(async()=>${KZ}.handles.invoke('variations.run'))()`);
     assert.equal(result.adopted,true); assert.equal(result.submitted,2);

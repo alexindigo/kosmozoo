@@ -2,7 +2,7 @@
 // resolution, Run blocked until resolved, and jobs reaching only that host.
 const assert = require('node:assert/strict'), fs = require('node:fs');
 const { CDP, collectPageErrors } = require('./cdp.cjs');
-const { addParameter } = require('./variation-add-helpers.cjs');
+const { addParameter, settledCount } = require('./variation-add-helpers.cjs');
 const B = process.env.E2E_ENGINE, F = process.env.E2E_FAKE, D = process.env.KZ_TIME_EVIDENCE;
 const KZ = `(await import('/store/instance.js')).appStore`;
 const port = new URL(F).port, image = 'flux-basic.png';
@@ -41,11 +41,10 @@ const get = async (base, path) => (await fetch(base + path)).json();
     assert(Object.values(proof.header).every(Boolean), JSON.stringify(proof.header));
     await shot('run-on-header');
     // No editor card is added. The destination alone queues the original graph.
-    await c.poll(`document.querySelector('.vz-count')?.textContent==='0'`, 20000);
-    assert.equal(await c.evaluate(`document.querySelector('.vz-count')?.textContent`), '0');
+    assert.equal(await settledCount(c, '0', { timeout: 20000 }), '0');
     const destinationBefore = (await get(F, '/__test/enqueues')).length;
     await choose('unchanged');
-    await c.poll(`document.querySelector('.vz-count')?.textContent==='1'&&!document.querySelector('.vz-conflict')`, 20000);
+    await settledCount(c, '1', { and: `!document.querySelector('.vz-conflict')`, timeout: 20000 });
     assert.equal(await c.evaluate(`document.querySelectorAll('.vz-parameter').length`), 0);
     if (probe.parameters.some(p => p.schema.status !== 'known')) {
       proof.unchecked = await c.evaluate(`document.querySelector('.vz-messages .vz-field-help')?.textContent`);
@@ -66,14 +65,13 @@ const get = async (base, path) => (await fetch(base + path)).json();
     await c.evaluate(`(async()=>${KZ}.handles.invoke('variations.close'))()`);
     await c.poll(`!document.querySelector('.vz-panel')`, 10000);
     await c.evaluate(`(async()=>${KZ}.handles.invoke('variations.open',{id:'fake:${image}'}))()`);
-    await c.poll(`document.querySelector('.vz-count')?.textContent==='0'&&document.querySelectorAll('.vz-catalogue-row').length>0`, 20000);
+    await settledCount(c, '0', { and: `document.querySelectorAll('.vz-catalogue-row').length>0`, timeout: 20000 });
     // The host is a compared parameter: only the current sampler reproduces the
     // original here (0 variations) but is a new image on another host (1).
     await addParameter(c, '8.sampler_name');
-    await c.poll(`document.querySelectorAll('[data-enum-id="8.sampler_name"] .vz-enum-picked').length===1&&document.querySelector('.vz-count')?.textContent==='0'`, 20000);
+    await settledCount(c, '0', { and: `document.querySelectorAll('[data-enum-id="8.sampler_name"] .vz-enum-picked').length===1`, timeout: 20000 });
     await choose('unchanged');
-    await c.poll(`document.querySelector('.vz-run-on .select-face')?.textContent==='Run on unchanged'&&document.querySelector('.vz-count')?.textContent==='1'`, 20000);
-    proof.hostCounted = await c.evaluate(`document.querySelector('.vz-count').textContent`);
+    proof.hostCounted = await settledCount(c, '1', { and: `document.querySelector('.vz-run-on .select-face')?.textContent==='Run on unchanged'`, timeout: 20000 });
     // A failed destination check says so and offers Retry for the same host.
     await c.evaluate(`(()=>{const original=window.fetch;window.fetch=(url,options)=>{if(String(url).includes('/probe/')&&String(url).includes('destination=')&&decodeURIComponent(String(url)).includes('"source":"other"')){window.fetch=original;return Promise.resolve(new Response(JSON.stringify({error:'object_info timed out'}),{status:502,headers:{'Content-Type':'application/json'}}));}return original(url,options)}})()`);
     await choose('other');
@@ -92,7 +90,7 @@ const get = async (base, path) => (await fetch(base + path)).json();
     await c.clickAt('.vz-catalogue-retry');
     assert.equal(await c.evaluate(`document.querySelector('.vz-error')?.textContent??''`), '', 'retry clears the blocked message');
     await c.poll(`document.querySelector('.vz-catalogue-row')?.classList.contains('vz-conflict')`, 20000);
-    await c.poll(`document.querySelector('.vz-count')?.textContent==='0'`, 20000);
+    await settledCount(c, '0', { timeout: 20000 });
     assert.equal(await c.evaluate(`!!document.querySelector('.vz-catalogue-retry')`), false);
     proof.other = await c.evaluate(`({rows:[...document.querySelectorAll('.vz-catalogue-row')].map(r=>({id:r.dataset.catalogueId,conflict:r.classList.contains('vz-conflict'),reason:r.querySelector('.vz-conflict-reason')?.textContent??null})),
       message:document.querySelector('.vz-messages').textContent,red:getComputedStyle(document.querySelector('.vz-catalogue-row.vz-conflict .vz-conflict-reason')).color})`);
@@ -122,7 +120,7 @@ const get = async (base, path) => (await fetch(base + path)).json();
     assert.equal(proof.blocked.status, 'invalid'); assert.equal((await get(F, '/__test/enqueues')).length, before, 'node conflict sends nothing');
     // The same resolution on a host that has every node runs there only.
     await choose('third');
-    await c.poll(`document.querySelector('.vz-run-on .select-face')?.textContent==='Run on third'&&document.querySelector('.vz-count')?.textContent==='1'&&!document.querySelector('.vz-conflict')`, 20000);
+    await settledCount(c, '1', { and: `document.querySelector('.vz-run-on .select-face')?.textContent==='Run on third'&&!document.querySelector('.vz-conflict')`, timeout: 20000 });
     proof.run = await c.evaluate(`(async()=>${KZ}.handles.invoke('variations.run'))()`);
     assert.equal(proof.run.submitted, 1, JSON.stringify(proof.run));
     const hosts = await get(F, '/__test/enqueue-hosts'), jobs = await get(F, '/__test/enqueues');

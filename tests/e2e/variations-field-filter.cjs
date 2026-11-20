@@ -1,7 +1,7 @@
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const { freshRecipe } = require('./recipe-helpers.cjs');
-const { addParameter } = require('./variation-add-helpers.cjs');
+const { addParameter, settledCount } = require('./variation-add-helpers.cjs');
 
 module.exports = async ({ cdp, check, KZ }) => {
   const invoke = (command, args = {}) => cdp.evaluate(`(async()=>${KZ}.handles.invoke(${JSON.stringify(command)},${JSON.stringify(args)}))()`);
@@ -31,7 +31,7 @@ module.exports = async ({ cdp, check, KZ }) => {
     assert(focus.focused && focus.outline === 'none' && focus.border === focus.secondary && focus.contained, JSON.stringify(focus));
     check('focused filter uses its complete in-scroller secondary border without an outside outline', true, JSON.stringify(focus));
     const total = await cdp.evaluate("document.querySelectorAll('.vz-catalogue-row').length");
-    const snapshot = () => cdp.evaluate("JSON.stringify({count:document.querySelector('.vz-count').textContent,sidebar:document.querySelector('.vz-right').textContent,prefix:document.querySelector('.vz-prefix').value,suffix:document.querySelector('.vz-suffix').value})");
+    const snapshot = async () => JSON.stringify({ count: await settledCount(cdp), ...JSON.parse(await cdp.evaluate("JSON.stringify({sidebar:document.querySelector('.vz-right').textContent,prefix:document.querySelector('.vz-prefix').value,suffix:document.querySelector('.vz-suffix').value})")) });
     const row = '.vz-slider-row[data-param-key$="denoise"]';
     await addParameter(cdp,'9.denoise');
     await cdp.evaluate(`document.querySelector('${row} .vz-row-inc-input').focus();document.querySelector('${row} .vz-row-inc-input').select()`);

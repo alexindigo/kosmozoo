@@ -1,5 +1,6 @@
 // Production listing/bytes/metadata -> shared player -> native browser outcome.
 const { sleep } = require('./cdp.cjs');
+const { settledCount } = require('./variation-add-helpers.cjs');
 module.exports = async ({ page, ENGINE, KZ, check, capture, control }) => {
   const a = 'video/fixture_e2e-media-a.webm', b = 'video/fixture_e2e-media-b.webm', mp4 = 'video/fixture_e2e-media.mp4', broken = 'video/e2e-media-broken.mov';
   const real = process.env.E2E_REAL_VIDEO_FIXTURE ? 'video/e2e-media-real.mp4' : null;
@@ -196,7 +197,7 @@ module.exports = async ({ page, ENGINE, KZ, check, capture, control }) => {
     // The fixture has no denoise default axis. Explicitly enable steps so Run
     // requests non-current permutations rather than just renaming an empty set.
     await page.clickAt('.vz-slider-row[data-param-key="2.steps"] .checkbox');
-    await page.poll(`Number(document.querySelector('.vz-count').textContent)>0`);
+    await settledCount(page, { test: 'Number(count)>0' });
     await page.evaluate(`(() => { const el=document.querySelector('.vz-prefix'); if(!el)throw new Error('prefix missing'); el.value='video-test_';el.dispatchEvent(new Event('input',{bubbles:true})); })()`);
     const run = await invoke('variations.run');
     console.log('VIDEO VARIATIONS RUN', JSON.stringify(run));

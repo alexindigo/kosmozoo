@@ -1,7 +1,7 @@
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const { CDP, collectPageErrors } = require('./cdp.cjs');
-const { addParameter } = require('./variation-add-helpers.cjs');
+const { addParameter, settledCount } = require('./variation-add-helpers.cjs');
 const { captureReviewRegions } = require('./variation-capture-helpers.cjs');
 const ENGINE = process.env.E2E_ENGINE, FAKE = process.env.E2E_FAKE, E = process.env.E2E_EVIDENCE;
 const KZ = `(await import('/store/instance.js')).appStore`;
@@ -60,7 +60,7 @@ const KZ = `(await import('/store/instance.js')).appStore`;
     const output = candidate('connection') + ' select[aria-label$=" output"]';
     await cdp.evaluate(`(()=>{const el=document.querySelector('${output}');el.value='';el.dispatchEvent(new Event('change',{bubbles:true}))})()`);
     assert.equal(await cdp.evaluate(`document.querySelector('${output}').value`), '');
-    assert.equal(await cdp.evaluate('document.querySelector(".vz-count").textContent'), '—');
+    assert.equal(await settledCount(cdp), '--');
     await cdp.evaluate(`(()=>{const el=document.querySelector('${output}');el.value='0';el.dispatchEvent(new Event('change',{bubbles:true}))})()`);
     // LoadImage's MASK port must not be offered for this known IMAGE input.
     const node = candidate('connection') + ' select[aria-label$=" node"]';
@@ -79,7 +79,7 @@ const KZ = `(await import('/store/instance.js')).appStore`;
     await write('.vz-field-filter input', 'nothing-matches');
     assert.equal(await cdp.evaluate('document.querySelectorAll(".vz-parameter").length'), 11);
     await write('.vz-field-filter input', '');
-    await cdp.poll('document.querySelector(".vz-count").textContent==="2"');
+    await settledCount(cdp, '2');
     const example = await cdp.evaluate('document.querySelector(".vz-output-example").textContent');
     assert(example.startsWith('manual_selected_manual_')); assert(!example.includes('18446744073709551614'));
     await shot('typed-editors');

@@ -1,6 +1,6 @@
 // Real typing -> shared count/Run expansion -> engine -> actual fake enqueue graphs.
 const assert=require('node:assert/strict');
-const { addParameter } = require('./variation-add-helpers.cjs');
+const { addParameter, settledCount } = require('./variation-add-helpers.cjs');
 module.exports=async({cdp,FAKE,KZ,check,closeAndDiscard})=>{
   const textField='.vz-textrow[data-text-id="2.text"] .vz-text-values';
   const textToggle='.vz-textrow[data-text-id="2.text"] .vz-parameter-remove';
@@ -17,7 +17,7 @@ module.exports=async({cdp,FAKE,KZ,check,closeAndDiscard})=>{
     await addParameter(cdp, '2.text'); await cdp.poll(`!!document.querySelector(${JSON.stringify(textField)})`);
     const literal='  First paragraph.\n\nSecond paragraph.\n  Indented line.\n';
     await type(textField,literal);
-    await cdp.poll("document.querySelector('.vz-count')?.textContent==='1'");
+    await settledCount(cdp, '1');
     await control({captureEnqueue:true});const before=(await enqueues()).length;
     await cdp.clickAt('.vz-run');await cdp.poll("document.querySelector('.vz-queued')?.textContent==='1 confirmed, 0 partial, 0 unknown, 0 unsent; 1 sent.'",10000);
     const plain=(await enqueues()).slice(before);assert.equal(plain.length,1);assert.equal(plain[0].prompt['2'].inputs.text,literal);
@@ -28,7 +28,7 @@ module.exports=async({cdp,FAKE,KZ,check,closeAndDiscard})=>{
     await type(textField,template);await cdp.poll("document.querySelectorAll('.vz-textrow .vz-tpl-input').length===2");
     await type('.vz-textrow .vz-tpl-row:nth-of-type(1) .vz-tpl-input','cat; dog');
     await type('.vz-textrow .vz-tpl-row:nth-of-type(2) .vz-tpl-input','oil; ; ink');
-    await cdp.poll("document.querySelector('.vz-count')?.textContent==='6'");
+    await settledCount(cdp, '6');
     const start=(await enqueues()).length;await cdp.clickAt('.vz-run');
     await cdp.poll("document.querySelector('.vz-queued')?.textContent==='6 confirmed, 0 partial, 0 unknown, 0 unsent; 6 sent.'",10000);
     const expected=['cat','dog'].flatMap(animal=>['oil','','ink'].map(style=>`First ${animal}.\n\nSecond ${style}.\nAgain ${animal}.\n`));

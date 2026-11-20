@@ -1,5 +1,5 @@
 const assert=require('node:assert/strict'),fs=require('node:fs');
-const {addParameter,removeRecordedImage}=require('./variation-add-helpers.cjs');
+const {addParameter,removeRecordedImage,settledCount}=require('./variation-add-helpers.cjs');
 const {pickInput}=require('./image-picker-helpers.cjs');
 module.exports=async({cdp,ENGINE,FAKE,E,KZ,write})=>{
   const name='reference-current.png',current=name+' [input]',filename='reference-proof.png';
@@ -8,7 +8,7 @@ module.exports=async({cdp,ENGINE,FAKE,E,KZ,write})=>{
   await cdp.goto(ENGINE+'/#fake#'+filename);await cdp.poll('!!document.querySelector(".card .variations")',20000);
   await cdp.evaluate(`(async()=>{await fetch('/api/collections/fake/entries/${filename}/bytes');return ${KZ}.handles.invoke('variations.open',{id:'fake:${filename}'})})()`);
   await addParameter(cdp,'11.image');await removeRecordedImage(cdp,'11.image');await pickInput(cdp,name);
-  await cdp.poll('document.querySelector(".vz-count").textContent==="0"');
+  await settledCount(cdp, '0');
   await cdp.poll('document.querySelector(".vz-image-tile img")?.naturalWidth>0');
   await cdp.evaluate(`(()=>{const original=window.fetch;window.__referenceRequests=[];window.__referenceResponses=[];window.fetch=async(url,options)=>{if(String(url).includes('/features/variations/run'))window.__referenceRequests.push(options.body);const response=await original(url,options);if(String(url).includes('/features/variations/run'))window.__referenceResponses.push(await response.clone().text());return response}})()`);
   await cdp.evaluate(`(async()=>${KZ}.handles.invoke('variations.run'))()`);

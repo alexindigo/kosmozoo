@@ -6,7 +6,7 @@ const { CDP, collectPageErrors } = require('./cdp.cjs');
 const fs = require('node:fs');
 const crypto = require('node:crypto');
 const assert = require('node:assert/strict');
-const { addParameter } = require('./variation-add-helpers.cjs');
+const { addParameter, settledCount } = require('./variation-add-helpers.cjs');
 const { openImageAdd, waitForInputPicker } = require('./image-picker-helpers.cjs');
 const ENGINE = process.env.E2E_ENGINE || 'http://127.0.0.1:18260';
 const FAKE = process.env.E2E_FAKE || 'http://127.0.0.1:18261';
@@ -130,8 +130,7 @@ const control = (base, body) => fetch(base + '/__test/activity', { method: 'POST
     await page.keyTrusted('Escape', { vk: 27 });
     await page.poll("!document.querySelector('.vz-input-search')");
     await page.poll(`document.querySelectorAll('.vz-image-set .vz-image-tile').length===2&&!document.querySelector('.vz-image-set .vz-image-tile.is-pending')`, 15000).catch(() => {});
-    await page.poll(`document.querySelector('.vz-count')?.textContent.trim()==='1'`, 15000).catch(() => {});
-    const count = await page.evaluate(`document.querySelector('.vz-count')?.textContent.trim()`);
+    const count = await settledCount(page, '1', { timeout: 15000 }).catch(() => page.evaluate(`document.querySelector('.vz-count')?.textContent.trim()`));
     check('variations: the temp-equal File is excluded as current; the same-named input remains', count === '1', String(count));
     await capture('roots-variations');
     const before = await (await fetch(FAKE + '/__test/enqueues')).json();

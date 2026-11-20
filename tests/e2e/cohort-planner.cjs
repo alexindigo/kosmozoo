@@ -2,7 +2,7 @@
 // retained editor/native input, and a new explicit Run for the adjusted rest.
 const assert = require('node:assert/strict'), fs = require('node:fs');
 const { CDP, collectPageErrors } = require('./cdp.cjs');
-const { addParameter } = require('./variation-add-helpers.cjs');
+const { addParameter, settledCount } = require('./variation-add-helpers.cjs');
 const B = process.env.E2E_ENGINE, F = process.env.E2E_FAKE, F2 = process.env.E2E_FAKE2, D = process.env.E2E_EVIDENCE;
 const KZ = `(await import('/store/instance.js')).appStore`;
 const request = async (base, path, body) => {
@@ -36,19 +36,19 @@ const graph = (name, choice) => ({
     await c.goto(B + '/#fake#cohort%2Fa.png');
     await c.poll(`(async()=>${KZ}.state.images.some(image=>image.filename==='cohort/leftover.png')&&!!${KZ}.state.hosts.another)()`, 20000);
     await invoke('variations.open', { ids: ['a', 'leftover', 'b'].map(name => `fake:cohort/${name}.png`), bulk: true });
-    await c.poll(`document.querySelector('.vz-count')?.textContent==='0'`, 20000);
+    await settledCount(c, '0', { timeout: 20000 });
     assert(await c.evaluate(`document.querySelector('.vz-run').disabled`), 'all zero work disables Run');
     await c.evaluate(`(()=>{const e=document.querySelector('.vz-run-on-select');e.value='another';e.dispatchEvent(new Event('change',{bubbles:true}));})()`);
-    await c.poll(`document.querySelector('.vz-count')?.textContent==='3'&&!document.querySelector('.vz-run').disabled`, 20000);
+    await settledCount(c, '3', { and: `!document.querySelector('.vz-run').disabled`, timeout: 20000 });
     await addParameter(c, 'n.choice');
-    await c.poll(`document.querySelector('.vz-count')?.textContent==='2'&&document.querySelectorAll('.vz-batch-problem').length===1`, 20000);
+    await settledCount(c, '2', { and: `document.querySelectorAll('.vz-batch-problem').length===1`, timeout: 20000 });
     const problem = await c.evaluate(`({id:document.querySelector('.vz-batch-problem').dataset.targetId,text:document.querySelector('.vz-batch-issue').textContent})`);
     assert.equal(problem.id, 'fake:cohort/leftover.png'); assert(/missing/.test(problem.text), problem.text);
     assert.equal((await request(F2, '/__test/enqueues')).length, 0);
     assert.equal((await request(B, '/api/features/variations/history')).items.length, 0, 'preview is effect-free');
     await c.evaluate(`window.cohortPrefix=document.querySelector('.vz-prefix')`);
     await field('.vz-prefix', 'kept-');
-    await c.poll(`document.querySelector('.vz-count')?.textContent==='2'&&!document.querySelector('.vz-run').disabled`, 20000);
+    await settledCount(c, '2', { and: `!document.querySelector('.vz-run').disabled`, timeout: 20000 });
     await shot('cohort-plan-before-run');
     const first = await invoke('variations.run');
     assert.equal(first.submitted, 2, JSON.stringify(first)); assert.equal(first.adopted, false);
@@ -66,7 +66,7 @@ const graph = (name, choice) => ({
     await addParameter(c, 'n.steps');
     await c.clickAt('[data-param-key="n.steps"] .mode-switch button[title="Value"]');
     await field('[data-param-key="n.steps"] .vz-value-field input', '21');
-    await c.poll(`document.querySelector('.vz-count')?.textContent==='1'&&!document.querySelector('.vz-run').disabled&&!document.querySelector('.vz-batch-problem')`, 20000);
+    await settledCount(c, '1', { and: `!document.querySelector('.vz-run').disabled&&!document.querySelector('.vz-batch-problem')`, timeout: 20000 });
     const second = await invoke('variations.run'); assert.equal(second.submitted, 1, JSON.stringify(second)); assert.equal(second.adopted, true);
     const finalJobs = await request(F2, '/__test/enqueues'); assert.equal(finalJobs.length, 3);
     assert.equal(finalJobs[2].prompt.load.inputs.image, 'leftover-only.png'); assert.equal(finalJobs[2].prompt.n.inputs.steps, 21);
@@ -85,10 +85,10 @@ const graph = (name, choice) => ({
     await invoke('variations.open', { ids: ['a', 'leftover', 'b'].map(name => `fake:cohort/${name}.png`), bulk: true });
     await c.poll(`!!document.querySelector('.vz-run-on-select')&&document.querySelectorAll('.vz-catalogue-row').length>0`, 20000);
     await c.evaluate(`(()=>{const e=document.querySelector('.vz-run-on-select');e.value='another';e.dispatchEvent(new Event('change',{bubbles:true}));})()`);
-    await c.poll(`document.querySelector('.vz-count')?.textContent==='3'`, 20000);
+    await settledCount(c, '3', { timeout: 20000 });
     await addParameter(c, 'n.choice');
     await field('.vz-prefix', 'captured-');
-    await c.poll(`document.querySelector('.vz-count')?.textContent==='2'&&!document.querySelector('.vz-run').disabled`, 20000);
+    await settledCount(c, '2', { and: `!document.querySelector('.vz-run').disabled`, timeout: 20000 });
     await c.evaluate(`(()=>{const original=window.fetch;let release;const gate=new Promise(resolve=>{release=resolve});window.cohortEntered=0;window.cohortRelease=()=>{window.fetch=original;release()};window.fetch=(url,options)=>{if(String(url).endsWith('/features/variations/run')){window.cohortEntered++;return gate.then(()=>original(url,options));}return original(url,options)};})()`);
     await c.evaluate(`(async()=>{window.cohortRunning=${KZ}.handles.invoke('variations.run');return true})()`);
     await c.poll(`window.cohortEntered===1`, 20000);
