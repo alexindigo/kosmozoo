@@ -1,5 +1,5 @@
 import { assert, assertEquals, assertRejects } from "jsr:@std/assert";
-import { isEntryPath, isFolderPath, splitEntryPath, inventoryFolders, inFolder } from "../src/entry-path.mjs";
+import { isEntryPath, isCreatedEntryPath, isFolderPath, splitEntryPath, inventoryFolders, inFolder } from "../src/entry-path.mjs";
 import { validEntryName } from "../src/backings/index.mjs";
 import * as comfy from "../src/backings/comfy.mjs";
 import { makeRouter } from "../src/routes.mjs";
@@ -14,6 +14,12 @@ Deno.test("entry paths: exact canonical identity, ancestor/subtree boundaries an
   for (const name of ["root.png", "line\n.png", "a:b#c.png", "C:file.png", "a/image.png", "b/image.png", "a/day/image.png", "a/leaf..png", "literal%2F.png", "a/#name: café %.png", "h#real.png"]) {
     assertEquals(isEntryPath(name), true, name);
   }
+  for (const name of ["line\n.png", "tab\t.png", "a/\r.png", "next\u0085.png", "del\u007f.png"]) {
+    assertEquals(isEntryPath(name), true, JSON.stringify(name));
+    assertEquals(isCreatedEntryPath(name), false, `names Kosmozoo creates stay strict: ${JSON.stringify(name)}`);
+  }
+  for (const name of bad) assertEquals(isCreatedEntryPath(name), false, JSON.stringify(name));
+  assertEquals(isCreatedEntryPath("a/day/image.png"), true);
   assertEquals(isFolderPath(""), true);
   assertEquals(splitEntryPath("a/day/image.png"), { filename: "image.png", subfolder: "a/day" });
   assertEquals(splitEntryPath("literal%2F.png"), { filename: "literal%2F.png", subfolder: "" });

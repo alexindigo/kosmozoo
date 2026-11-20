@@ -4,7 +4,7 @@
 // to the browser via /shared/).
 
 import { sameContext } from "../../source-origin.mjs";
-import { isEntryPath } from "../../entry-path.mjs";
+import { isCreatedEntryPath } from "../../entry-path.mjs";
 import { parseParamId, parameterIndex, cloneJsonValue, sameJsonValue, formatJsonValue } from "../../parameters.mjs";
 export { paramId, parseParamId, parameterIndex, parameterLabel, parameterAliases, parameterCurrent } from "../../parameters.mjs";
 
@@ -60,7 +60,7 @@ export function composeOutputName(target, values = {}, prefix = "", suffix = "")
   if (selected) {
     const candidate = values[target.parameterId];
     if (typeof candidate !== "string") throw new Error(`${target.parameterId}: filename_prefix requires text`);
-    if (candidate !== "" && !isEntryPath(candidate)) throw new Error(`${target.parameterId}: invalid filename_prefix path`);
+    if (candidate !== "" && !isCreatedEntryPath(candidate)) throw new Error(`${target.parameterId}: invalid filename_prefix path`);
     const slash = candidate.lastIndexOf("/"), candidateDirectory = slash < 0 ? "" : candidate.slice(0, slash + 1);
     if (candidateDirectory !== directory) throw new Error(`${target.parameterId}: filename_prefix must retain the original output directory`);
     sourceStem = candidate.slice(slash + 1);
@@ -70,7 +70,7 @@ export function composeOutputName(target, values = {}, prefix = "", suffix = "")
   }
   if ((target.leafOnly ?? !!directory) && /[/\\]/.test(prefix + suffix)) throw new Error("Prefix/suffix must stay within the producing directory's filename leaf");
   const value = directory + outputName({ prefix, sourceStem, suffix });
-  if (selected && value !== "" && !isEntryPath(value)) throw new Error(`${target.parameterId}: invalid composed filename_prefix path`);
+  if (selected && value !== "" && !isCreatedEntryPath(value)) throw new Error(`${target.parameterId}: invalid composed filename_prefix path`);
   return { value, selected, ...(selected ? { parameterId: target.parameterId, candidate: values[target.parameterId] } : {}) };
 }
 

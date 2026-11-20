@@ -15,6 +15,12 @@ function validComponents(name) {
   return parts.length <= MAX_ENTRY_PATH_COMPONENTS && parts.every(part => part !== "" && part !== "." && part !== "..");
 }
 
+// Names Kosmozoo itself creates (output prefixes, uploads it names) stay strict:
+// a host may list any name (isEntryPath), but Kosmozoo never writes a line break
+// or other control character into one.
+const CONTROL = /[\u0000-\u001f\u007f-\u009f]/;
+export const isCreatedEntryPath = name => isEntryPath(name) && !CONTROL.test(name);
+
 export const isFolderPath = (folder) => folder === "" || isEntryPath(folder);
 export const isEntryLeaf = name => isEntryPath(name) && !name.includes("/");
 
