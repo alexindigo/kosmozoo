@@ -571,7 +571,12 @@ function ModalBody(props) {
               </div>
             </div>
             <div class="vz-run-slot">
-              <Show when={!unavailable()} fallback={<p class="vz-readiness-error" role="status">{unavailable()}</p>}><Show when={!running()} fallback={<SingleLineText class="vz-field-help" role="status" value="Queuing…" />}>
+              <Show when={!unavailable()} fallback={<p class="vz-readiness-error" role="status">{unavailable()}</p>}><Show when={!running()} fallback={
+                <div class="vz-submitting" role="status" aria-live="polite">
+                  <span class="vz-submit-spinner" aria-hidden="true" />
+                  <SingleLineText value={`Submitting ${read(editor.submission)?.sent ?? "--"} / ${read(editor.submission)?.total ?? "--"}`} />
+                </div>
+              }>
                 <button class="vz-run" disabled={!read(editor.canRun)} onClick={() => store.handles.invoke("variations.run")}><SingleLineText value="Run" /></button>
               </Show></Show>
             </div>

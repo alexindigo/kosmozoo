@@ -14,6 +14,7 @@ import { validImageSet, mergeImages, sameImage, imageIdentity, imageReference, i
 import { classifyImageFiles } from "./image-drop.js";
 import { connectionPresentation } from "./field-filter.js";
 import { estimateGenerationTime, knownGenerationTime } from "./time-estimate.js";
+import { observeSubmission } from "./submission-progress.js";
 import { staleSource, sourceFailure } from "./source-message.js";
 import { judgmentVisible } from "/js/image-visibility-model.mjs";
 import { isEntryLeaf } from "/shared/entry-path.mjs";
@@ -49,6 +50,7 @@ const ROW_STRATEGIES = {
 export function makeVariationEditor({ targets, cohortMode, destination: initialDestination = null, services, currentOrigin, changed = () => {}, close = () => {},
   setTimer = setTimeout, clearTimer = clearTimeout }) {
   const recipe = makeVariationRecipe();
+  let submission = null, stopProgress = null;
   const capturedTargets = freeze(snapshotDraft(targets));
   // Opening facts and recipe basis stay stable; only the private Run cohort shrinks.
   let selectedTargets = capturedTargets;
@@ -415,6 +417,7 @@ export function makeVariationEditor({ targets, cohortMode, destination: initialD
     naming: name => row("naming", "root").values[name],
     dirty,
     running: () => running,
+    submission: () => submission,
     result: () => {
       if (!result?.adopted || !dirty()) return result;
       return { ...result, state: "kept", reason: "Newer edits have been kept.", text: `submitted ${result.submitted}/${result.total} — newer edits have been kept` };
@@ -699,10 +702,20 @@ export function makeVariationEditor({ targets, cohortMode, destination: initialD
       // A Run ends in one transition: its outcome is shown together with the
       // end of running, after the saved-run record is finished.
       let outcome = null, show = false, closable = false;
-      running = true; result = null; queuedCohort = null; runOutcomes.clear(); notify();
+      running = true; submission = null; result = null; queuedCohort = null; runOutcomes.clear(); notify();
       try {
         const saved = services.history ? await services.history.capture(ticket,
           new Map([...catalogues].map(([id, catalogue]) => [id, catalogue.context])), target => check(ticket, target)) : null;
+        if (saved && owns(ticket) && services.history.progress) {
+          submission = saved.submission ?? { sent: 0, total: saved.summary?.total ?? null };
+          stopProgress = observeSubmission({ read: signal => services.history.progress(ticket.runId, signal), setTimer, clearTimer,
+            publish: value => {
+              if (!owns(ticket)) return;
+              submission = value && Number.isSafeInteger(value.sent) && value.sent >= 0 && Number.isSafeInteger(value.total) && value.total >= value.sent ? value : null;
+              notify();
+            } });
+          notify();
+        }
         await Promise.all(inspections);
         const runChecks = new Map([...capturedChecks].map(([id, checks]) => [id,
           new Map([...checks].map(([identity, value]) => [identity, freeze(snapshotDraft(value))]))]));
@@ -845,6 +858,8 @@ export function makeVariationEditor({ targets, cohortMode, destination: initialD
         outcome = { text: error.message, ok: false, state: error.stale ? "stale" : "invalid", outcome: error.stale ? "retired" : "rejected", submitted, total, adopted: false, effects: freeze(snapshotDraft(effects)) };
         return { status: owns(ticket) ? error.stale ? "stale" : "invalid" : "stale", submitted, total, adopted: false };
        } finally {
+          const stop = stopProgress; stopProgress = null;
+          if (stop) await stop();
          if (services.history) {
            try { await services.history.finish(ticket.runId, outcome?.ok ? null : outcome?.reason ?? outcome?.text ?? null); }
            catch (error) {
@@ -863,6 +878,7 @@ export function makeVariationEditor({ targets, cohortMode, destination: initialD
     },
     dispose() {
       alive = false; invalidateClose(); active = null; sourceFiles.clear(); pexelsFiles.clear(); inputCatalogues.clear(); sourceLifetimes.clear();
+      stopProgress?.(); stopProgress = null;
       planGeneration++; planController?.abort(); if (planTimer !== null) clearTimer(planTimer);
       timingController.abort(); generationTimes.clear();
       for (const record of heldRecords.values()) services.history?.release(record).catch(() => {});

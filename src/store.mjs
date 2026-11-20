@@ -281,6 +281,7 @@ const STATEMENTS = {
   variationEffectPrepare: `INSERT INTO variation_effect(run_id,effect_id,kind,request_json,request_hash,state,created_at,updated_at)
     VALUES(?,?,?,?,?,'prepared',?,?)`,
   variationEffectClaim: "UPDATE variation_effect SET state = 'started',updated_at = ? WHERE run_id = ? AND effect_id = ? AND state = 'prepared'",
+  variationEffectSent: "UPDATE variation_effect SET result_json = '{\"sent\":true}',updated_at = ? WHERE run_id = ? AND effect_id = ? AND kind = 'permutation' AND state = 'started' AND result_json IS NULL",
   variationEffectResult: "UPDATE variation_effect SET state = ?,result_json = ?,updated_at = ? WHERE run_id = ? AND effect_id = ? AND state = 'started'",
   variationRecoveryEffects: "UPDATE variation_effect SET state = 'uncertain',updated_at = ? WHERE state = 'started'",
   variationRecoveryExecutionRuns: "SELECT DISTINCT run_id FROM variation_lease WHERE kind = 'execution'",
@@ -612,6 +613,9 @@ export class Store {
     this.#db.transaction(() => {
       if (this.#q.variationEffectResult.run(state, resultJson, Date.now(), id, effectId)) this.#q.variationBump.run();
     })();
+  }
+  variationEffectSent(id, effectId) {
+    this.#q.variationEffectSent.run(Date.now(), id, effectId);
   }
   variationEffects(id) { return this.#q.variationEffects.all(id); }
 

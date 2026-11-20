@@ -524,6 +524,15 @@ from sending. This is not a ComfyUI queue-number guarantee: rare upstream
 reordering after body receipt is accepted. Destination retirement aborts transport
 and refuses queued, unsent work; interrupted effects never replay automatically.
 
+Saved-run detail exposes `submission: {sent,total}` from permutation journal
+evidence and saved cohort admission. `sent` records actual request-body completion,
+not queue acceptance; pending responses may already count as sent. The dialog
+reads that live record every 500 ms during its owned Run, aborting and fencing
+reads/timers on completion or disposal. Run's existing sidebar slot shows a spinner
+and one-line `Submitting <sent> / <total>` without shifting the layout; unavailable
+read facts display `--`, never invented progress. Terminal results and leftovers
+keep their existing acceptance/adoption behavior. No new database table is added.
+
 Named-resource proof uses opt-in `Ingest.ensure(...,{fresh:true})`: fresh flights
 cannot join cache-hit flights but share the same source fences, four-read address
 gate and ingestion pipeline. Ordinary callers stay cache-first. Saved target graphs

@@ -272,8 +272,9 @@ export function makeVariationHistory(app) {
         summaryJson: canonical(historySummary(recipe, targets, resources)), resources: resources.map(r => ({ id: r.id, descriptorJson: canonical(r) })) });
     },
     detail(id, leaseId = null) {
-      const row = record(id, leaseId), raw = captured(row);
+      const row = record(id, leaseId), raw = captured(row), effects = store.variationEffects(id);
       return { id, format: 1, createdAt: row.created_at, captureState: row.capture_state, outcome: row.outcome,
+        submission: { sent: effects.filter(e => e.kind === "permutation" && e.result_json && data(e.result_json).sent === true).length, total: row.total_count },
         snapshotHash: row.snapshot_hash, summary: { ...data(row.summary_json), submitted: row.submitted_count, total: row.total_count, plannedCount: row.planned_count }, ...raw,
         effects: store.variationEffects(id).map(e => ({ id: e.effect_id, kind: e.kind, state: e.state, result: e.result_json ? data(e.result_json) : null })),
         admission: store.variationEffects(id).find(e => e.kind === "admission" && e.state === "confirmed")?.result_json
@@ -549,6 +550,7 @@ export function makeVariationHistory(app) {
               store.variationPrepareEffect(id, effectId, "permutation", canonical(job), await digest(job));
               if (!store.variationClaimEffect(id, effectId)) throw fail("Permutation was already admitted", 409);
             },
+            onSent: () => store.variationEffectSent(id, effectId),
           });
           return { sent: request.sent, result: request.result.then(result => {
             store.variationEffectResult(id, effectId, result.ok && result.acceptance === "confirmed" ? "confirmed" : result.acceptance === "partial" ? "partial" : result.status && result.status < 500 ? "rejected" : "uncertain", canonical(result));

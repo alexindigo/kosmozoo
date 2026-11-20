@@ -16,7 +16,7 @@ const req = (method, path, body, options, host = body?.targets?.[0]?.host ?? bod
 const responseError = (response, data, host, fallback) => Object.assign(new Error(sourceFailure(response.status, data.error || fallback, host)), { uploaded: data.uploaded });
 const historyPath = id => `/api/features/variations/history${id ? `/${encodeURIComponent(id)}` : ""}`;
 export const historyList = before => req("GET", historyPath() + (before ? `?before=${encodeURIComponent(before)}` : ""), undefined, { json });
-export const historyDetail = id => req("GET", historyPath(id), undefined, { json });
+export const historyDetail = (id, signal) => req("GET", historyPath(id), undefined, { json, signal });
 export const historyBegin = capture => req("POST", historyPath(), capture, { json });
 export const plan = (capture, signal) => req("POST", "/api/features/variations/plan", capture, { json, signal });
 export const historyPrepare = (id, host, destination) => req("POST", historyPath(id) + "/prepare", {}, { json }, host, destination);

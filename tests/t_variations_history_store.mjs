@@ -75,9 +75,12 @@ Deno.test("history Store: durable claims never replay and restart marks unfinish
   store.variationPrepareEffect(id, "job-0", "permutation", "{}", "d".repeat(64));
   assertEquals(store.variationClaimEffect(id, "job-0"), true);
   assertEquals(store.variationClaimEffect(id, "job-0"), false);
+  store.variationEffectSent(id, "job-0");
+  assertEquals(JSON.parse(store.variationEffects(id)[0].result_json), { sent: true });
   assertThrows(() => store.variationPrepareEffect(id, "job-0", "permutation", '{"changed":1}', "e".repeat(64)), Error, "conflict");
   store.close(); store = await Store.open(dir);
   assertEquals(store.variationEffects(id)[0].state, "uncertain");
+  assertEquals(JSON.parse(store.variationEffects(id)[0].result_json), { sent: true }, "restart retains sent evidence, never replays it");
   assertEquals(store.variationClaimEffect(id, "job-0"), false);
   assertEquals(store.variationGet(id).capture_state, "interrupted");
   assertEquals(store.variationGet(id).outcome, "uncertain");

@@ -77,6 +77,13 @@ export function makeHistoryClient({ api, changed = () => {} }) {
       if (!alive || removed.has(id)) throw new Error("History entry unavailable");
       return result;
     },
+    async progress(id, signal) {
+      if (!alive || removed.has(id)) throw new Error("History entry unavailable");
+      // Submission observes live journal facts, never the immutable detail cache.
+      const record = await api.historyDetail(id, signal);
+      if (!alive || removed.has(id) || signal?.aborted) throw new Error("History entry unavailable");
+      return record.submission;
+    },
     async open(id) {
       if (!alive || removed.has(id)) throw new Error("History entry unavailable");
       // Track only acquisition/enrollment, never the public continuation that
