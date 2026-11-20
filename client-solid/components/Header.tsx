@@ -17,6 +17,7 @@ import { FeedbackLink } from "./FeedbackLink.js";
 import { SingleLineText } from "./SingleLineText.js";
 import { sourceProgress } from "../lib/source-progress.js";
 import { sourceNewContent } from "../lib/source-new-content.js";
+import { downVotedDeleteLabel } from "../store/down-voted-delete.js";
 import { FeatureContributions } from "../features/index.js";
 
 // layout-switcher icons (icons.mjs): a square with one divider — vertical
@@ -142,6 +143,13 @@ function Menu() {
                 class="btn"
                 title="download this collection's judgments (generated on demand)"
               >download feedback.json</FeedbackLink>
+            </div>
+          </Show>
+          <Show when={store.state.host() && matches(downVotedDeleteLabel(store.state.host()))}>
+            <div class="menurow">
+              <button id="deleteDownVoted" class="btn delete-down-voted" onClick={() => store.handles.invoke("image.deleteDownVoted.request")}>
+                <SingleLineText value={downVotedDeleteLabel(store.state.host())} />
+              </button>
             </div>
           </Show>
           <FeatureContributions store={store} slot="settingsRow" matches={matches} />

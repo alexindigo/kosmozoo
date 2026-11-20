@@ -45,6 +45,7 @@ the resources; a collection's `capabilities` answer what its backing can do.
 | `/api/collections/<id>/entries/<name>/meta` | GET | one shown entry's record `{name, hash, extracted, meta, width, height, generationTimeMs}`, independent of the delta stream; an entry without a hash is first ingested through the single-flight high lane for at most 8 s; `extracted:false` means not available yet (unreadable source or the wait elapsed); nullable generation timing is described below |
 | `/api/collections/<id>/entries` | POST | multipart upload into the input dir; **409 with the conflicting name, never an overwrite** |
 | `/api/collections/<id>/entries/<name>` | DELETE | per capability: folder → unlink; comfy + assets_plus → trash; otherwise → hide + history cleanup |
+| `/api/collections/<id>/delete-down-voted` | POST | `{preview:true}` returns `{count,names,capability}` for currently listed output entries in all folders with vote down, excluding favorite/bookmark/hidden/gone. `{names:[...]}` sequentially deletes only those names through the same entry delete owner, rechecking live eligibility immediately before effects; returns `{deleted:[name],skipped:[{name,reason}],failed:[{name,error}]}`. Optional expected source origin fences replacement; ordinary mutation/JSON/path admission applies. |
 | `/api/collections/<id>/entries/<name>/bytes` | GET | cache-first bytes of one resource root: absent `kind` or `output` (the feed entry), `?kind=input` or `?kind=temp` (referenced files); an unknown `kind` is 400, never another root. ETag is the content hash, `Cache-Control: no-cache`; single-byte ranges (§Serve path). HEAD uses the same root and reports the content length |
 | `/api/collections/<id>/entries/<name>/bytes` | HEAD | 404 when the entry's bytes are unknown, else `content-length` |
 | `/api/collections/<id>/entries/<name>/judgment` | PATCH | whitelisted fields (`vote`/`favorite`/`bookmark`/`notes`/`plugins.<ns>.*`), defaults deep-pruned, one statement |
@@ -69,6 +70,16 @@ child is a read-only identity footer, after all settings/feature rows and outsid
 their search filter: `Kosmozoo <formatted version>` or `Kosmozoo` while unknown.
 It remains visible when no rows match. The header image and wordmark have no
 native title. No loaded-client identity, asset update or reload protocol is implied.
+
+Settings offers `Delete down-voted images from <current source> source`, following
+the header's selection. Its engine-owned preview opens the shared confirmation
+dialog with the real count and trash/unlink/hide explanation. Starred and
+bookmarked entries are always kept; zero matches offers Cancel only. Cancel has
+no delete effect. Confirm captures exactly the previewed names/source, replaces
+actions with status while pending, updates the feed through the existing deletion
+projection and reports deleted/skipped/failed counts once. Transport uncertainty
+requires a new explicit preview, never automatic destructive replay. No preference
+or browser storage is added, and feed folder/filter/selection do not narrow it.
 
 Entry identity on the wire is the plain name under a collection; the
 `collection:name` string survives only inside the client as a derived

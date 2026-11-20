@@ -1269,7 +1269,8 @@ body:has(#diff:not([hidden])) #statusCol { bottom: 56px; }
 .media-seek-slot .media-seek { width: 100%; min-width: 0; margin: 0; }
 .media-time { min-width: 13ch; text-align: center; }
 .confirm-actions { min-height: 28px; align-items: center; }
-.confirm-error { color: var(--negative); font-size: 12px; }
+.confirm-error { color: var(--negative); font-size: 12px; overflow-wrap: anywhere; }
+.delete-down-voted { min-width: 0; max-width: 100%; }
 .vz-run-slot { min-height: 38px; display: grid; text-align: center; }
 .vz-run-slot > .vz-field-help { align-self: center; }
 .vz-folder-controls > .vz-field-help { margin: 0; }

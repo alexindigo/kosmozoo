@@ -74,6 +74,7 @@ export const api = {
   inputBytesUrl: (collection, name) => entryBytesUrl(collection, name, { kind: "input" }),
   setJudgment: (collection, name, fields) => req("PATCH", `${entryUrl(collection, name)}/judgment`, fields),
   deleteEntry: (collection, name) => req("DELETE", entryUrl(collection, name)),
+  deleteDownVoted: (collection, body, origin, options) => req("POST", `/api/collections/${enc(collection)}/delete-down-voted?origin=${enc(JSON.stringify(origin))}`, body, options),
   settings: (ns) => req("GET", `/api/settings/${enc(ns)}`),
   setSettings: (ns, kv) => req("PATCH", `/api/settings/${enc(ns)}`, kv),
   prefetch: (options) => req("GET", "/api/prefetch", undefined, options),

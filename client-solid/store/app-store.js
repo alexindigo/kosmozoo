@@ -30,6 +30,7 @@ import { makeSourceBrowse } from "./source-browse.js";
 import { makeSourceSelection } from "./source-selection.js";
 import { makeSourceFreshness } from "./source-freshness.js";
 import { makeRuntimeIdentity } from "./runtime-identity.js";
+import { makeDownVotedDeletion } from "./down-voted-delete.js";
 import { makeSourceRegistry, sameSourceIdentity } from "./source-registry.js";
 import { makeRailArrivals } from "./rail-arrivals.js";
 import { fieldList, nodeImages } from "./fields.js";
@@ -1119,7 +1120,7 @@ export function makeAppStore({ subscribeSources = typeof window !== "undefined" 
   // Port of the ConfirmDelete confirm path: delete, plan the pointer, scrub the
   // trail, patch the list, then navigate. Computed against the PRE-delete list
   // (adjacency needs the original indices), executed after it.
-  async function deleteImages(images) {
+  function closeDeletedWorkbench(images) {
     // the workbench may be sitting on one of these images — either side of
     // the pair (input:<host> sides name input-dir files of that host)
     if (st.diff.open) {
@@ -1135,19 +1136,35 @@ export function makeAppStore({ subscribeSources = typeof window !== "undefined" 
         setSt("diff", "open", false);
       }
     }
+  }
+
+  async function deleteImages(images) {
+    closeDeletedWorkbench(images);
     const addresses = images.map(img => hostsView()[img.host]?.address);
     const results = await Promise.allSettled(images.map((img) => api.deleteEntry(img.host, img.filename)));
     const okIds = new Set();
     results.forEach((r, i) => {
       if (r.status === "fulfilled") {
         okIds.add(images[i].id);
-        if (hostsView()[images[i].host]?.address === addresses[i]) sourceSelection.remove(images[i].host, addresses[i], [images[i].filename]);
-        selectionChanged();
       } else {
         console.error(`delete failed: ${images[i].filename}: ${r.reason?.message ?? r.reason}`);
       }
     });
     if (okIds.size === 0) return false; // nothing succeeded
+    applyDeletedImages(images.filter(image => okIds.has(image.id)), images.map((image, i) => [image.id, addresses[i]]));
+    return true;
+  }
+
+  function applyDeletedImages(images, addresses = images.map(image => [image.id, hostsView()[image.host]?.address])) {
+    const addressById = new Map(addresses);
+    const okIds = new Set(images.map(image => image.id));
+    closeDeletedWorkbench(images);
+    for (const image of images) {
+      const address = addressById.get(image.id);
+      if (hostsView()[image.host]?.address === address) sourceSelection.remove(image.host, address, [image.filename]);
+    }
+    selectionChanged();
+    if (!images.length) return;
     const hostName = images[0].host;
     const deletedFiles = new Set(images.filter((i) => okIds.has(i.id)).map((i) => i.filename));
     const plan = planDeleteCurrent(
@@ -1170,6 +1187,19 @@ export function makeAppStore({ subscribeSources = typeof window !== "undefined" 
     }
     return true;
   }
+
+  const downVotedDeletion = makeDownVotedDeletion({
+    capture() {
+      const id = host(), record = sourceRecords.get(id), origin = sourceOrigin(id, hostsView()[id]);
+      return record && origin ? { id, record, origin } : null;
+    },
+    isCurrent: source => !disposed && sourceRecords.get(source.id) === source.record,
+    read: confirmDelete, publish: setConfirmDelete,
+    preview: (source, options) => api.deleteDownVoted(source.id, { preview: true }, source.origin, options),
+    remove: (source, names) => api.deleteDownVoted(source.id, { names }, source.origin),
+    apply: (source, names) => applyDeletedImages(names.map(filename => ({ id: `${source.id}:${filename}`, host: source.id, filename }))),
+    status: message => actions.status.info(message), closeMenu: () => setMenuOpen(false),
+  });
 
   const imageIdx = (id) => imageIdxById().get(id) ?? -1;
 
@@ -1664,6 +1694,7 @@ export function makeAppStore({ subscribeSources = typeof window !== "undefined" 
     exposure.dispose(); faviconGeneration++; faviconOwner?.dispose(); faviconOwner=null;
     resolveMembership();
     runtimeIdentity.dispose();
+    downVotedDeletion.dispose();
     sourceDiscovery.dispose();
     for (const disposeFeature of featureDisposals) disposeFeature();
     featureDisposals.clear();
@@ -2192,9 +2223,11 @@ export function makeAppStore({ subscribeSources = typeof window !== "undefined" 
     },
 
     confirm: {
-      open(req) { setConfirmDelete(req); },
-      close() { setConfirmDelete(null); },
+      open(req) { if (confirmDelete()?.kind === "down-voted" && !downVotedDeletion.cancel()) return false; setConfirmDelete(req); },
+      close() { if (confirmDelete()?.kind === "down-voted") return downVotedDeletion.cancel(); setConfirmDelete(null); },
     },
+
+    downVotedDeletion,
 
     media: { register: player => players.register(player), toggle: () => players.toggle(), report: error => players.report(error) },
     diff: {

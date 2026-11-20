@@ -13,11 +13,13 @@ import { useAppStore } from "../store/app-store.js";
 import { deleteCopy } from "../lib/delete-copy.js";
 import { Modal } from "./Modal.js";
 import { SingleLineText } from "./SingleLineText.js";
+import { deletionEffect } from "../store/down-voted-delete.js";
 
 export function ConfirmDelete() {
   const store = useAppStore();
   const [busy, setBusy] = createSignal(false);
   const [message, setMessage] = createSignal("");
+  const bulk = () => store.state.confirmDelete()?.kind === "down-voted" ? store.state.confirmDelete() : null;
   const images = () => {
     const r = store.state.confirmDelete();
     return r ? (r.images ?? (r.image ? [r.image] : [])) : [];
@@ -45,8 +47,9 @@ export function ConfirmDelete() {
   createEffect(() => { if (!store.state.confirmDelete()) { setBusy(false); setMessage(""); } });
 
   return (
-    <Show when={n() > 0}>
+    <Show when={n() > 0 || bulk()}>
       <Modal overlayId="confirmOverlay" panelId="confirmPanel" closeCommand="image.delete.cancel">
+        <Show when={bulk()} fallback={<>
         <div class="confirm-title">{copy().title}</div>
         <div class="confirm-body">{copy().body(n(), images()[0].filename, images()[0].host)}</div>
         <div class="confirm-actions">
@@ -59,6 +62,25 @@ export function ConfirmDelete() {
           </Show>
         </div>
         <Show when={message()}><p class="confirm-error" role="status">{message()}</p></Show>
+        </>}>
+          <div class="confirm-title">Delete down-voted images</div>
+          <div class="confirm-body">
+            <Show when={bulk()?.count != null} fallback={<Show when={bulk()?.phase === "preview"}><p role="status">Checking down-voted images from {bulk()?.source}...</p></Show>}>
+              <p>{bulk()?.count ? `Delete ${bulk().count} down-voted images from ${bulk().source}?` : `There are no down-voted images to delete from ${bulk()?.source}.`}</p>
+              <p>{deletionEffect(bulk()?.capability)}</p>
+              <p>Starred and bookmarked images are kept.</p>
+            </Show>
+          </div>
+          <div class="confirm-actions">
+            <Show when={bulk()?.phase !== "deleting"} fallback={<SingleLineText role="status" value={`Deleting ${bulk()?.count} images...`} />}>
+              <button class="confirm-cancel" onClick={() => store.handles.invoke("image.delete.cancel")}>Cancel</button>
+              <Show when={bulk()?.phase === "ready" && bulk()?.count > 0}>
+                <button class="confirm-ok" onClick={() => store.handles.invoke("image.deleteDownVoted.confirm")}>Delete</button>
+              </Show>
+            </Show>
+          </div>
+          <Show when={bulk()?.error}><p class="confirm-error" role="status">{bulk()?.error}</p></Show>
+        </Show>
       </Modal>
     </Show>
   );

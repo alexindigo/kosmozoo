@@ -102,6 +102,8 @@ export function registerCoreCommands(handles, { ops, state, clipboard = copyText
     return images.length ? ops.images.delete([...images]) : false;
   });
   add("image.delete.cancel", {}, () => ops.confirm.close());
+  add("image.deleteDownVoted.request", {}, () => ops.downVotedDeletion.request(), "delete down-voted images from the current source");
+  add("image.deleteDownVoted.confirm", {}, () => ops.downVotedDeletion.confirm());
   add("selection.set", { id: string, value: bool }, (a) => ops.selected.set(a.id, a.value));
   add("selection.clear", {}, () => ops.bulk.clear());
   add("entry.select", { source: string, file: string }, (a) => ops.current.set(a.source, a.file));
@@ -214,6 +216,7 @@ export function commandFacades(handles, ops, state) {
   facade.images.download = (id) => invoke("image.download", { id });
   facade.images.reload = () => invoke("source.reload");
   delete facade.images.delete;
+  delete facade.downVotedDeletion;
   facade.selected.set = (id, value) => invoke("selection.set", { id, value });
   Object.assign(facade.confirm, {
     open: (req) => invoke("image.delete.request", req.image ? { id: req.image.id } : { ids: req.images.map((image) => image.id) }),

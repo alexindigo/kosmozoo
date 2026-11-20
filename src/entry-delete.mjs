@@ -16,14 +16,18 @@ export async function entryDeleteCapability(ctx, id) {
   return { address, backing, capability: caps.delete };
 }
 
-export async function deleteEntry(ctx, id, name) {
+export async function deleteEntry(ctx, id, name, { guard, ownsSource = () => true } = {}) {
   const target = await entryDeleteCapability(ctx, id);
   if (!target) return { status: 404, body: { error: "unknown collection" } };
+  // Bulk admission rechecks live judgment/source ownership after the capability
+  // probe, immediately before the first effect, not before an asynchronous gap.
+  const reason = guard?.();
+  if (reason) return { status: 409, body: { skipped: true, error: reason } };
   const { address, backing, capability } = target;
   if (capability === "unlink" || capability === "trash") {
     const result = await backing.remove(address, name);
     if (!result.ok) return { status: 409, body: { error: result.detail } };
-    ctx.store.arrivals.remove(id, name);
+    if (ownsSource()) ctx.store.arrivals.remove(id, name);
     return { status: 200, body: { deleted: true, mode: result.mode } };
   }
   ctx.store.entryHide(id, name);

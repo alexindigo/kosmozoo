@@ -14,6 +14,7 @@ import { isContentHash } from "./cache.mjs";
 import { isResourceRoot } from "./parameters.mjs";
 import { mediaKind } from "./backings/mime.mjs";
 import { deleteEntry } from "./entry-delete.mjs";
+import { deleteDownVoted } from "./delete-down-voted.mjs";
 
 // Byte routes name the resource root explicitly; absent keeps the historical
 // output meaning, an unknown root fails instead of falling back to another root.
@@ -366,6 +367,25 @@ export function makeRouter(ctx) {
 
   // Delete an entry from its source, per the collection's delete capability:
   // folder → unlink; comfy + assets_plus → trash; else hide + history cleanup.
+  add("POST", "/api/collections/<id>/delete-down-voted", async (req, { id }) => {
+    const address = addressFor(id);
+    if (!address) return Response.json({ error: "unknown collection" }, { status: 404 });
+    let body;
+    try { body = await readJson(req); }
+    catch (error) {
+      if (error instanceof UnsupportedMediaType) throw error;
+      return Response.json({ error: "JSON body: {preview: true} or {names: [...]}" }, { status: 400 });
+    }
+    if (!body || typeof body !== "object" || Array.isArray(body) || Object.keys(body).length !== 1 ||
+      !(body.preview === true || Array.isArray(body.names) && body.names.every(name => validEntryName(address, name)))) {
+      return Response.json({ error: "Expected {preview: true} or {names: [valid entry names]}" }, { status: 400 });
+    }
+    const originError = byteOriginError(req, id);
+    if (originError) return originError;
+    const result = await deleteDownVoted(ctx, id, body);
+    return Response.json(result.body, { status: result.status });
+  });
+
   add("DELETE", "/api/collections/<id>/entries/<name>", async (_req, { id, name }) => {
     const result = await deleteEntry(ctx, id, name);
     return Response.json(result.body, { status: result.status });
