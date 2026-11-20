@@ -39,7 +39,7 @@ async function run({ page, errors, ENGINE, FAKE, E, scenario, phase }) {
     await page.clickAt('.vz-run');
     await page.poll('document.querySelector(".vz-queued")?.textContent.includes("Queued 1 of 1") || !!document.querySelector(".vz-error")?.textContent', 30000);
     const message = await page.evaluate('document.querySelector(".vz-error").textContent');
-    assert(!message || message.startsWith('submitted'), message);
+    assert(!message || message.startsWith('Captured Run result: 1 jobs confirmed; 1 of 1 images fully acknowledged; 0 images remain, 0 jobs need verification (1 jobs planned).'), message);
   };
   const panel = async () => {
     if (await page.evaluate('!!document.querySelector(".vz-panel")')) { await invoke('variations.close'); await page.poll('!document.querySelector(".vz-panel")'); }

@@ -2,8 +2,11 @@
 // remain in their mounted editor, never in this readonly leased-record cache.
 import { encodeHistoryRecipe } from "/shared/features/variations/history-codec.mjs";
 import { sameDraft } from "/shared/features/variations/recipe-model.mjs";
-import { variationProblem } from "/shared/features/variations/problems.mjs";
+import { variationProblem, problemFrom, problemError, problemText } from "/shared/features/variations/problems.mjs";
 
+// Transport failures keep their HTTP status beside the server's reason.
+const withStatus = error => error?.problem || !error?.status || String(error.detail ?? "").includes(`HTTP ${error.status}`) ? error
+  : { message: `${error.detail || error.message} (HTTP ${error.status})` };
 export function makeHistoryClient({ api, changed = () => {}, notifyProblem = () => {} }) {
   let alive = true, generation = 0, reading = null, interests = 0, nextCursor = null;
   let items = [], error = "", loaded = false;
@@ -27,7 +30,7 @@ export function makeHistoryClient({ api, changed = () => {}, notifyProblem = () 
       });
       items = more ? [...items, ...incoming.filter(item => !items.some(old => old.id === item.id))] : incoming;
       nextCursor = page.nextCursor; loaded = true;
-    }).catch(problem => { if (alive && ticket === generation) error = problem.message; }).finally(() => {
+    }).catch(problem => { if (alive && ticket === generation) error = problemText(problemFrom(withStatus(problem), { code: "history-list", phase: "history", more })); }).finally(() => {
       if (reading === task) { reading = null; notify(); }
     });
     reading = task; notify(); return task;
@@ -67,7 +70,7 @@ export function makeHistoryClient({ api, changed = () => {}, notifyProblem = () 
     return task;
   };
   return {
-    state: () => ({ items, error: error || [...releaseErrors.values()].map(problem => `History lease release failed: ${problem.message}`).join("\n"),
+    state: () => ({ items, listError: error, error: error || [...notices.values()].filter(problem => problem.code === "history-cleanup").map(problemText).join("\n"),
       problems: [...notices.values()], pendingCleanup: pendingRelease.size, pending: !!reading, loaded, more: !!nextCursor, deleting: new Set(deleting) }),
     notice(id, problem) { notices.set(id, problem); notifyProblem(problem); notify(); },
     retryCleanup: () => Promise.allSettled([...pendingRelease].map(key => release(leases.get(key)))),
@@ -81,7 +84,7 @@ export function makeHistoryClient({ api, changed = () => {}, notifyProblem = () 
     },
     async detail(id) {
       if (!alive || removed.has(id)) throw new Error("History entry unavailable");
-      if (!details.has(id)) details.set(id, api.historyDetail(id).catch(error => { details.delete(id); throw error; }));
+      if (!details.has(id)) details.set(id, api.historyDetail(id).catch(error => { details.delete(id); throw problemError(problemFrom(withStatus(error), { code: "history-open", operation: "inspect", phase: "history", runId: id })); }));
       const result = await details.get(id);
       if (!alive || removed.has(id)) throw new Error("History entry unavailable");
       return result;
@@ -107,7 +110,7 @@ export function makeHistoryClient({ api, changed = () => {}, notifyProblem = () 
       acquisitions.add(acquisition);
       acquisition.then(() => acquisitions.delete(acquisition), () => acquisitions.delete(acquisition));
       try { accept(api.historyOpen(id)); } catch (problem) { reject(problem); }
-      const record = await acquisition;
+      const record = await acquisition.catch(error => { throw problemError(problemFrom(withStatus(error), { code: "history-open", operation: "open", phase: "history", runId: id })); });
       if (!alive || removed.has(id)) {
         let cause;
         if (!alive) {
@@ -126,7 +129,7 @@ export function makeHistoryClient({ api, changed = () => {}, notifyProblem = () 
         await api.historyRemove(id);
         if (!alive) return;
         generation++; reading = null; removed.add(id); details.delete(id); items = items.filter(item => item.id !== id);
-      } catch (problem) { if (alive) error = problem.message; }
+      } catch (cause) { const problem = problemFrom(withStatus(cause), { code: "history-delete", phase: "history", runId: id }); if (alive) error = problemText(problem); throw problemError(problem); }
       finally { deleting.delete(id); notify(); }
     },
     // Called synchronously from the issued Run, before awaiting inspections.
@@ -135,27 +138,36 @@ export function makeHistoryClient({ api, changed = () => {}, notifyProblem = () 
       const targets = ticket.targets.map(target => ({ id: target.id, host: target.host, filename: target.filename, origin: target.origin,
         ...(contexts.get(target.id) ?? target.context ? { context: contexts.get(target.id) ?? target.context } : {}),
         ...(target.historyRef ? { historyRef: target.historyRef } : {}) }));
-      await api.historyBegin({ runId: ticket.runId, format: encoded.format, cohortMode: ticket.cohortMode ?? (targets.length > 1 ? "bulk" : "single"),
-        targets, recipe: encoded.recipe, resources: encoded.resources, ...(ticket.destination ? { destination: ticket.destination } : {}) });
+      try { await api.historyBegin({ runId: ticket.runId, format: encoded.format, cohortMode: ticket.cohortMode ?? (targets.length > 1 ? "bulk" : "single"),
+        targets, recipe: encoded.recipe, resources: encoded.resources, ...(ticket.destination ? { destination: ticket.destination } : {}) }); }
+      catch (error) { throw problemError(problemFrom(withStatus(error), { code: "history-capture", phase: "capture", runId: ticket.runId, numbers: { images: targets.length } })); }
       for (const target of targets) check(target);
       // Bounded, disk-backed archive uploads; never upstream materialization.
-      const files = [...encoded.files]; let next = 0;
-      await Promise.all(Array.from({ length: Math.min(4, files.length) }, async () => {
+      const files = [...encoded.files]; let next = 0, completed = 0;
+      // Drain all already-admitted archive writes before publishing their count.
+      const uploads = await Promise.allSettled(Array.from({ length: Math.min(4, files.length) }, async () => {
         while (next < files.length) {
           const [id, file] = files[next++]; for (const target of targets) check(target);
-          await api.historyBytes(ticket.runId, id, file);
+          try { await api.historyBytes(ticket.runId, id, file); completed++; }
+          catch (error) {
+            const row = Object.entries(encoded.recipe.images).find(([, entry]) => [entry.values, entry.baseline].some(values => values.items.some(item => item.resourceId === id)));
+            throw problemError(problemFrom(error, { code: "history-upload", phase: "archive", runId: ticket.runId, resource: file.name,
+              parameter: { id: row?.[0], label: row?.[1].metadata.label ?? row?.[0] }, numbers: { total: files.length } }));
+          }
         }
       }));
+      const failed = uploads.find(result => result.status === "rejected");
+      if (failed) { const error = failed.reason; if (error.problem) error.problem = variationProblem(error.problem.code, { ...error.problem, numbers: { ...error.problem.numbers, saved: completed, total: files.length } }); throw error; }
       const prepared = await api.historyPrepare(ticket.runId, targets[0]?.host, ticket.destination?.source);
       for (const target of targets) check(target);
       return prepared;
     },
     async plans(ticket, prepared, check) {
       const plans = [], leftovers = [];
-      if (!Array.isArray(prepared.admission) || prepared.admission.length !== ticket.targets.length) throw new Error("Saved cohort admission unavailable; nothing was sent");
+      if (!Array.isArray(prepared.admission) || prepared.admission.length !== ticket.targets.length) throw problemError(variationProblem("history-admission-reply", { runId: ticket.runId, numbers: { received: prepared.admission?.length ?? 0, expected: ticket.targets.length }, detail: "Saved cohort admission unavailable" }));
       for (const [targetIndex, target] of ticket.targets.entries()) {
         const admission = prepared.admission[targetIndex];
-        if (admission.index !== targetIndex) throw new Error("Saved cohort admission mismatch");
+        if (admission.index !== targetIndex) throw problemError(variationProblem("history-admission-reply", { runId: ticket.runId, target: { index: targetIndex, name: target.filename, source: target.host }, numbers: { received: prepared.admission.length, expected: ticket.targets.length }, detail: `Saved cohort admission mismatch at target ${targetIndex}: received ${admission.index}` }));
         if (admission.problem || admission.count <= 0) { leftovers.push({ target, problem: admission.problem ?? { code: "no-work", message: "No work for this image." } }); continue; }
         try {
         check(target);
@@ -170,9 +182,9 @@ export function makeHistoryClient({ api, changed = () => {}, notifyProblem = () 
         const plan = await api.historyTarget(ticket.runId, binding);
         check(target);
         if (plan.request?.history?.id !== ticket.runId || plan.request.history.snapshotHash !== prepared.snapshotHash ||
-          plan.request.history.targetIndex !== targetIndex || plan.planHash !== plan.request.history.planHash) throw new Error("Saved target plan binding unavailable");
+          plan.request.history.targetIndex !== targetIndex || plan.planHash !== plan.request.history.planHash) throw problemError(variationProblem("history-binding", { runId: ticket.runId, target: { index: targetIndex, name: target.filename, source: target.host }, operation: "prepared plan", expected: `${ticket.runId}/${targetIndex}/${prepared.snapshotHash}`, actual: `${plan.request?.history?.id}/${plan.request?.history?.targetIndex}/${plan.request?.history?.snapshotHash}`, detail: "Saved target plan binding unavailable (Run ID, target index, snapshot or plan hash)" }));
         plans.push({ ...plan, target });
-        } catch (error) { leftovers.push({ target, problem: { code: "preparation-failed", message: error.message } }); }
+        } catch (error) { leftovers.push({ target, problem: problemFrom(error, { phase: "preparation", runId: ticket.runId, target: { index: targetIndex, name: target.filename, source: target.host } }) }); }
       }
       return { plans, leftovers };
     },

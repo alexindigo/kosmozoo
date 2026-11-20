@@ -170,7 +170,7 @@ export function register(app) {
   const history = registerHistory(app);
   app.route("POST", "/plan", async req => {
     try { return exactResponse(await history.plan(await readJson(req, { parse: parseExactJson }))); }
-    catch (error) { return exactResponse({ error: error.message }, { status: error.status ?? 400 }); }
+    catch (error) { return exactResponse({ error: error.message, ...(error.problem ? { problem: error.problem } : {}) }, { status: error.status ?? 400 }); }
   });
   registerPexels(app);
   app.route("GET", "/folder-chooser", async () => Response.json(await app.desktop.capability()));

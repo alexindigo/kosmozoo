@@ -31,8 +31,8 @@ export function bindCohortRecipe(recipe, catalogue) {
 export function countingTarget(target, recipe, resources, destination, index) {
   const byId = new Map(resources.map(resource => [resource.id, resource]));
   const resolved = new Map(), byHash = new Map();
-  const identity = resource => {
-    if (!resource) throw new Error("Image resource identity unavailable");
+  const identity = (resource, parameter, resourceId) => {
+    if (!resource) throw problemError(variationProblem("history-resource", { phase: "counting", target: { index, name: target.filename, source: target.host }, parameter, resource: resourceId, detail: "Image resource identity unavailable; re-add/check this image and Retry; counting cannot guess whether it is new or unchanged" }));
     if (resolved.has(resource.id)) return resolved.get(resource.id);
     const local = resource.host === (destination?.source ?? target.host) && resource.root;
     const value = local ? resource.value ?? `${resource.name} [${resource.root}]`
@@ -41,10 +41,11 @@ export function countingTarget(target, recipe, resources, destination, index) {
     if (resource.hash && !byHash.has(resource.hash)) byHash.set(resource.hash, value);
     return value;
   };
-  const currentIdentities = Object.fromEntries(Object.entries(target.graphResources ?? {}).map(([id, rid]) => [id, identity(byId.get(rid))]));
+  const currentIdentities = Object.fromEntries(Object.entries(target.graphResources ?? {}).map(([id, rid]) => [id, identity(byId.get(rid), { id }, rid)]));
   const resourceIdentities = new Map();
-  for (const entry of Object.values(recipe.images)) if (entry.values.enabled) for (const item of entry.values.items) {
-    resourceIdentities.set(imageIdentity(item), identity(byId.get(item.kind === "target" ? `target-${index}` : item.resourceId)));
+  for (const [id, entry] of Object.entries(recipe.images)) if (entry.values.enabled) for (const item of entry.values.items) {
+    const rid = item.kind === "target" ? `target-${index}` : item.resourceId;
+    resourceIdentities.set(imageIdentity(item), identity(byId.get(rid), { id, label: entry.metadata.label ?? id }, item.name ?? rid));
   }
   const parameters = parameterIndex(target.catalogue.parameters ?? catalogueParams(target.catalogue));
   for (const [id, value] of Object.entries(currentIdentities)) if (typeof value !== "string") {

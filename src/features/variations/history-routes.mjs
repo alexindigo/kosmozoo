@@ -4,6 +4,7 @@ import { bytesResponse, readJson } from "../../routes.mjs";
 import { sniffMime } from "../../extractor.mjs";
 import { validOrigin } from "../../source-origin.mjs";
 import { isContentHash } from "../../content-hash.mjs";
+import { variationProblem, problemError, problemFrom } from "./problems.mjs";
 
 export const historyResponse = (value, status = 200) => new Response(stringifyExactJson(value), { status, headers: { "Content-Type": "application/json" } });
 export function registerHistory(app) {
@@ -11,22 +12,24 @@ export function registerHistory(app) {
   // No SQL or archive I/O at feature registration, including legacy narrow rigs.
   const route = (method, path, handler) => app.route(method, path, (req, params) => app.lifetime.run(`history ${method} ${path}`, async () => {
     try { return await handler(req, params); }
-    catch (error) { return historyResponse({ error: error.message, ...(error.problem ? { problem: error.problem } : {}), ...(error.uploaded ? { uploaded: error.uploaded } : {}) }, error.status ?? 500); }
+    catch (error) { const problem = problemFrom(error, { code: "history-io", phase: "history", operation: `${method} ${path}`, runId: params?.id });
+      return historyResponse({ error: problem.message, problem, ...(error.uploaded ? { uploaded: error.uploaded } : {}) }, error.status ?? 500); }
   }));
+  const invalid = (field, detail, status = 400) => { throw Object.assign(problemError(variationProblem("history-request", { phase: "history", operation: "process request for", field, detail })), { status }); };
   const json = async req => {
     try { return await readJson(req, { parse: parseExactJson }); }
-    catch { throw Object.assign(new Error("JSON body required"), { status: 400 }); }
+    catch { invalid("JSON body", "JSON body required"); }
   };
   const targetBody = async req => {
     const body = await json(req);
     if (!body || !Number.isSafeInteger(body.targetIndex) || body.targetIndex < 0 || !validOrigin(body.origin) || !isContentHash(body.snapshotHash)) {
-      throw Object.assign(new Error("Valid target index, source origin and snapshot hash required"), { status: 400 });
+      invalid("targetIndex/origin/snapshotHash", "Valid target index, source origin and snapshot hash required");
     }
     return body;
   };
   route("GET", "/history", req => {
     const query = new URL(req.url).searchParams, raw = query.get("limit") ?? "50";
-    if (!/^\d+$/.test(raw) || Number(raw) < 1 || Number(raw) > 100) return historyResponse({ error: "Invalid page limit" }, 400);
+    if (!/^\d+$/.test(raw) || Number(raw) < 1 || Number(raw) > 100) throw Object.assign(problemError(variationProblem("history-page", { field: "limit", value: raw })), { status: 400 });
     const limit = Number(raw);
     let before;
     try {
@@ -34,7 +37,7 @@ export function registerHistory(app) {
         before = JSON.parse(atob(query.get("before")));
         if (!Number.isSafeInteger(before.at) || typeof before.id !== "string" || Object.keys(before).length !== 2) throw new Error();
       }
-    } catch { return historyResponse({ error: "Invalid history cursor" }, 400); }
+    } catch { throw Object.assign(problemError(variationProblem("history-page", { field: "cursor" })), { status: 400 }); }
     const rows = app.store.variationList(limit + 1, before), hasNext = rows.length > limit, page = rows.slice(0, limit);
     const last = page.at(-1);
     return historyResponse({ format: 1, revision: app.store.variationRevision(),
@@ -45,11 +48,11 @@ export function registerHistory(app) {
   route("POST", "/history", async req => {
     const body = await json(req);
     try { const row = owner.begin(body); return historyResponse({ id: row.id, captureState: row.capture_state }); }
-    catch (error) { return historyResponse({ error: error.message }, error.status ?? 400); }
+    catch (error) { error.status ??= 400; throw error; }
   });
   route("GET", "/history/<id>", (_req, { id }) => historyResponse(owner.detail(id)));
   route("PUT", "/history/<id>/resources/<resourceId>", async (req, { id, resourceId }) => {
-    if ((req.headers.get("Content-Type") ?? "").split(";", 1)[0] !== "application/octet-stream") return historyResponse({ error: "Image bytes required" }, 415);
+    if ((req.headers.get("Content-Type") ?? "").split(";", 1)[0] !== "application/octet-stream") invalid("Content-Type", "Image bytes required (application/octet-stream)", 415);
     return historyResponse(await owner.uploadBytes(id, resourceId, new Uint8Array(await req.arrayBuffer())));
   });
   route("POST", "/history/<id>/prepare", async (_req, { id }) => historyResponse(await owner.prepare(id)));
@@ -59,7 +62,7 @@ export function registerHistory(app) {
     const query = new URL(req.url).searchParams, index = Number(query.get("target") ?? "0");
     let destination;
     try { destination = JSON.parse(query.get("destination")); } catch { destination = null; }
-    if (!Number.isSafeInteger(index) || index < 0 || !validOrigin(destination)) return historyResponse({ error: "Valid target index and Run destination required" }, 400);
+    if (!Number.isSafeInteger(index) || index < 0 || !validOrigin(destination)) invalid("target/destination", "Valid target index and Run destination required");
     return historyResponse(await owner.catalogue(id, query.get("lease"), index, destination));
   });
   route("GET", "/history/<id>/resources/<resourceId>/bytes", async (req, { id, resourceId }) => {
@@ -69,14 +72,14 @@ export function registerHistory(app) {
   });
   route("POST", "/history/<id>/uploads/<effectId>", async (req, { id, effectId }) => {
     const body = await targetBody(req);
-    if (effectId !== `${body.targetIndex}-${body.resourceId}`) return historyResponse({ error: "Invalid upload effect identity" }, 400);
+    if (effectId !== `${body.targetIndex}-${body.resourceId}`) invalid("upload effect identity", "Invalid upload effect identity");
     return historyResponse(await owner.materialize(id, body.targetIndex, body.resourceId, body.origin, body.snapshotHash));
   });
   route("POST", "/history/<id>/prepare-target", async (req, { id }) => {
     const body = await targetBody(req);
     let plan;
     try { plan = await owner.prepareTarget(id, body.targetIndex, body.origin, body.snapshotHash); }
-    catch (error) { return historyResponse({ error: error.message }, error.status ?? 400); }
+    catch (error) { error.status ??= 400; throw error; }
     // The registered graph stays engine-private; clients receive request/proof only.
     const { graph: _graph, ...publicPlan } = plan;
     return historyResponse(publicPlan);

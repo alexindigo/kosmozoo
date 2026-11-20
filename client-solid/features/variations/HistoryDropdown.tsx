@@ -5,6 +5,7 @@ import { Chevron } from "../../components/Select.js";
 import { SingleLineText } from "../../components/SingleLineText.js";
 import { HistoryList } from "./HistoryPanel.js";
 import { focusMemory } from "./draft.js";
+import { problemText } from "/shared/features/variations/problems.mjs";
 
 export function HistoryDropdown(props) {
   const [open, setOpen] = createSignal(false), [suspended, setSuspended] = createSignal(false), [placed, setPlaced] = createSignal(null);
@@ -40,8 +41,8 @@ export function HistoryDropdown(props) {
         registerPopup={props.registerPopup} registerEditor={props.registerEditor}
         onRecall={async id => { const result = await props.onRecall(id); if (result?.status === "applied" || result?.status === "unchanged") close(); }} />
     </div></Show>
-    <Show when={props.warnings?.length || props.recallStatus === "unchanged"}><div class="vh-warning" role="status"><strong>{props.recallStatus === "unchanged" ? "No compatible changes were applied." : "Applied compatible changes. Other settings were kept."}</strong>
-      <For each={props.warnings}>{warning => <span>{warning.label}: {warning.reason}</span>}</For>
+    <Show when={props.recallStatus}><div class="vh-warning" role="status"><strong>{props.recallStatus}</strong>
+      <For each={props.warnings}>{warning => <span>{warning.problem ? problemText(warning.problem) : `${warning.label}: ${warning.reason}`}</span>}</For>
     </div></Show>
   </div>;
 }

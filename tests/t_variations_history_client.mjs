@@ -119,7 +119,8 @@ Deno.test("history client: reads coalesce, deletion fences late list results and
   const late = owner.refresh(); await Promise.resolve(); await owner.remove("a");
   resolve({ format: 1, items: [{ id: "a" }, { id: "b" }], nextCursor: null }); await late;
   assertEquals(owner.state().items, [{ id: "b" }]);
-  rejected = true; await owner.remove("b"); assertEquals(owner.state().items, [{ id: "b" }]); assertEquals(owner.state().error, "disk failed");
+  rejected = true; const failure = await assertRejects(() => owner.remove("b")); assertEquals(failure.problem.code, "history-delete");
+  assertEquals(owner.state().items, [{ id: "b" }]); assert(owner.state().error.includes("Could not delete saved Run b: disk failed"));
   owner.dispose();
 });
 Deno.test("history Run: initial immutable capture precedes waits and invalid input remains captured without dispatch", async () => {
@@ -140,7 +141,7 @@ Deno.test("history client: pagination/error recovery and retired late-open lease
     items: before ? [{ id: "b" }] : [{ id: "a" }], nextCursor: before ? null : "next" }),
     historyOpen: () => new Promise(resolve => { resolveOpen = resolve; }), historyRelease: async (id, leaseId) => { released.push([id, leaseId]); } };
   const owner = makeHistoryClient({ api });
-  await owner.refresh(); assertEquals(owner.state().error, "offline"); assertEquals(owner.state().pending, false);
+  await owner.refresh(); assertEquals(owner.state().error, "Could not load first-page saved Runs: offline. Previously loaded entries remain. Retry loading history; this does not rerun jobs."); assertEquals(owner.state().pending, false);
   failure = false; await owner.refresh(); await owner.more();
   assertEquals(owner.state().items, [{ id: "a" }, { id: "b" }]); assertEquals(owner.state().more, false);
   const pending = owner.open("a"); owner.dispose(); resolveOpen({ id: "a", leaseId: "late" });

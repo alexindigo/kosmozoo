@@ -75,6 +75,18 @@ Deno.test("history overlay: range basis, missing locations/type/choice and unres
   assertEquals(result.patch.length, 0);
   assertEquals(result.warnings.map(w => w.id).sort(), ["choice.value", "n.denoise", "n.steps", "suffix"]);
   assert(result.warnings.find(w => w.id === "n.denoise").reason.includes("basis"));
+  // Catalogue rows 164, 166, 169 and 170: exact skip causes, target and counts.
+  const messages = Object.fromEntries(result.warnings.map(w => [w.id, w.problem.message])), run = record.id;
+  assertEquals(messages, {
+    "n.denoise": `Skipped BasicScheduler #n \u00b7 denoise from saved Run ${run}: Range uses a different absolute/relative basis: saved absolute, current relative; re-enter the intended range or recall into matching mode. Existing values kept.`,
+    "n.steps": `Skipped BasicScheduler #n \u00b7 steps from saved Run ${run}: Range uses a different absolute/relative basis: saved absolute, current relative; re-enter the intended range or recall into matching mode. Existing values kept.`,
+    "choice.value": `Skipped Choice #choice \u00b7 value on image 1 from saved Run ${run}: parameter type or resource semantics changed: saved Choice/enum/string, current Different/enum/string. Existing values kept.`,
+    suffix: `Skipped Suffix from saved Run ${run}: unresolved naming token {missing.input} (unknown parameter) is unavailable for image 1; saved text "_{missing.input}". Existing values kept.`,
+  });
+  assertEquals(result.counts, { applied: 0, skipped: 4, saved: 4 });
+  const single = planHistoryOverlay(record, raw, [{ ...changed, filename: "b.png" }], "single");
+  // Row 165: the absent parameter names the target and the missing share.
+  assertEquals(single.warnings.find(w => w.id === "n.steps").problem.message, `Skipped BasicScheduler #n \u00b7 steps from saved Run ${run}: location is missing from a target: b.png (1/1 targets). Existing values kept.`);
 });
 Deno.test("original restore: archived catalogue/full raw setup seeds unsent work without probe or old accepted timers", async () => {
   const { record, raw, catalogue, context } = await savedRecipe(editor => {

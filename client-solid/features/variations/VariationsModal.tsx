@@ -208,6 +208,7 @@ function ModalBody(props) {
   const rememberFocus = (restore) => { restoreFocus = restore; };
   const focus = focusMemory(rememberFocus);
   const guard = makeLeaveGuard({ dirty: intent => intent?.type === "apply-history" ? intent.overlap : editor.dirty(),
+    failure: problem => problem ? editor.reportProblem("transition", problem) : editor.clearProblem("transition"),
     suspend: () => { for (const child of children) child.suspend(); },
     restore: () => { for (const child of children) child.resume(); restoreFocus(); },
     decision: value => { setDecision(value); editor.decision(value); }, invalidate: editor.invalidateClose });
@@ -221,7 +222,7 @@ function ModalBody(props) {
     if (!alive) return Promise.resolve({ status: "stale" });
     if (recalling) {
       if (recalling.id === id) return recalling.promise;
-      setRecallNotice("Another recall is in progress. This selection was not applied.");
+      setRecallNotice(problemText(variationProblem("recall-busy", { phase: "recall", current: recalling.id, runId: id })));
       return Promise.resolve({ status: "busy" });
     }
     setRecallNotice("");
@@ -243,7 +244,8 @@ function ModalBody(props) {
           transferred = true; setHistoryCaption(`${historyCount(saved)} | ${historyDate(saved.createdAt)}`);
         }
         if (result.status === "applied" || result.status === "unchanged") {
-          setRecallWarnings(plan.warnings); setRecallStatus(result.status);
+          setRecallWarnings(plan.warnings);
+          setRecallStatus(plan.warnings.length || result.status === "unchanged" ? problemText(variationProblem("recall-summary", { phase: "recall", runId: id, numbers: plan.counts })) : null);
         }
          if (result.status === "stale") setRecallNotice(problemText(variationProblem("recall-changed", { phase: "recall", runId: id })));
          return result;

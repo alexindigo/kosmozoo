@@ -9,6 +9,7 @@ import { destinationProblemCases } from "./helpers/variation-destination-problem
 import { namingProblemCases } from "./helpers/variation-naming-problem-cases.mjs";
 import { dispatchProblemCases } from "./helpers/variation-dispatch-problem-cases.mjs";
 import { acquisitionProblemCases } from "./helpers/variation-acquisition-problem-cases.mjs";
+import { historyProblemCases } from "./helpers/variation-history-problem-cases.mjs";
 import { problemText } from "../src/features/variations/problems.mjs";
 import { makeHistoryClient } from "../client-solid/features/variations/history-client.js";
 import { connectionProblem } from "../client-solid/features/variations/field-filter.js";
@@ -36,7 +37,7 @@ for (const test of problemCases) Deno.test(`catalogue row ${test.row}: exact ${t
 Deno.test("phase 1 browser input contains all 38 exact row/location contracts", async () => {
   assertEquals(problemCases.length, 38);
   await Deno.mkdir("runtime", { recursive: true });
-  await Deno.writeTextFile("runtime/clear-errors-cases.json", JSON.stringify([...problemCases, ...plannerProblemCases, ...destinationProblemCases, ...namingProblemCases, ...dispatchProblemCases, ...acquisitionProblemCases].map(test => ({ ...test, problem: variationProblem(test.code, test.context) }))));
+  await Deno.writeTextFile("runtime/clear-errors-cases.json", JSON.stringify([...problemCases, ...plannerProblemCases, ...destinationProblemCases, ...namingProblemCases, ...dispatchProblemCases, ...acquisitionProblemCases, ...historyProblemCases].map(test => ({ ...test, problem: variationProblem(test.code, test.context) }))));
 });
 
 Deno.test("silent rows 109,252,256: rejected public intents report without mutating recipe or targets", async () => {

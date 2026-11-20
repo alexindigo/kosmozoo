@@ -9,8 +9,8 @@ export function HistoryList(props) {
       onRecall={() => props.onRecall(entry.id)} onInspect={() => props.history.detail(entry.id)}
       onDelete={props.deletable ? () => props.history.remove(entry.id) : null} deleting={props.state().deleting.has(entry.id)} />}</For>
     <Show when={props.state().pending}><p class="vh-status" role="status">Reading history...</p></Show>
-    <Show when={props.state().error}><p class="vh-error" role="status">{props.state().error} <button onClick={() => props.history.refresh()}>Retry</button></p></Show>
-    <ProblemFeedback problems={props.state().problems ?? []} />
+    <Show when={props.state().error}><p class="vh-error" role="status">{props.state().error} <Show when={props.state().listError}><button onClick={() => props.history.refresh()}>Retry</button></Show></p></Show>
+    <ProblemFeedback problems={(props.state().problems ?? []).filter(problem => problem.code !== "history-cleanup")} />
     <Show when={props.state().pendingCleanup}><button class="vh-more" onClick={() => props.history.retryCleanup()}>Retry resource cleanup</button></Show>
     <Show when={props.state().loaded && !props.state().items.length && !props.state().pending}><p class="vh-status">No runs yet. Each Run is saved automatically.</p></Show>
     <Show when={props.state().more && !props.state().pending}><button class="vh-more" onClick={() => props.history.more()}>More runs</button></Show>

@@ -437,7 +437,7 @@ export function makeVariationEditor({ targets, cohortMode, destination: initialD
         const data = catalogues.get(target.id) ?? await services.probe(target);
         if (!originCurrent(target)) throw new Error(staleSource(target.host));
         if (!alive || deciding || running || recipe.revision() !== revision) throw new Error("Editor changed while reading history; choose it again");
-        cohort.push(data);
+        cohort.push({ ...data, filename: target.filename });
       }
       const plan = planHistoryOverlay(saved, captureRows(), cohort, batch ? "bulk" : "single");
       return { ...plan, revision, id: saved.id, leaseId: saved.leaseId, record: saved };

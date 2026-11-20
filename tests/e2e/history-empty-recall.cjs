@@ -42,7 +42,7 @@ module.exports = async ({ page, evaluate, invoke, list, write, close, open, wait
     await choose(invalid.id);
     await page.poll('document.querySelector(".vh-trigger").getAttribute("aria-expanded")==="false"');
     await shot('empty-overlay-warning');
-    assert.equal(await page.evaluate('document.querySelector(".vh-warning strong").textContent'), 'No compatible changes were applied.');
+    assert.equal(await page.evaluate('document.querySelector(".vh-warning strong").textContent'), `From saved Run ${invalid.id}, applied 0/1 parameters; skipped 1. All unrelated or incompatible current values were kept. Review skipped reasons before running this setup.`);
     await page.poll('window.recallProof.released.length===1');
     assert.equal(await page.evaluate('document.querySelector(".vh-trigger").textContent'), caption);
     assert.equal(await page.evaluate('!!document.querySelector(".vz-discard")'), false);
@@ -73,7 +73,7 @@ module.exports = async ({ page, evaluate, invoke, list, write, close, open, wait
       window.restoreBusyProbe=()=>{window.busyProof.finishRelease?.();h.open=open;h.release=release};
       return true;
     })()`);
-    const busy = 'Another recall is in progress. This selection was not applied.';
+    let busy;
     const snapshot = () => page.evaluate(`({caption:document.querySelector('.vh-trigger').textContent,fields:[...document.querySelectorAll('.vz-panel input,.vz-panel textarea')].map(e=>[e.getAttribute('aria-label'),e.value,e.checked]),message:document.querySelector('.vz-messages').textContent,timers:window.recallProof.timers.map(t=>t.cleared),opened:window.recallProof.opened.length,released:window.recallProof.released.length})`);
     const outcomes = [];
     let paused = null, opens = [];
@@ -83,6 +83,7 @@ module.exports = async ({ page, evaluate, invoke, list, write, close, open, wait
     try {
       for (const outcome of ['applied', 'error', 'unchanged', 'stale', 'cancelled']) {
         const a = outcome === 'unchanged' ? invalid.id : originalId, b = a === originalId ? invalid.id : originalId;
+        busy = `Still reading saved Run ${a}; selected Run ${b} was not applied. Wait for it to finish, then select the intended Run again.`;
         paused = null;
         const callStart = await page.evaluate('window.busyProof.calls.length'), openStart = opens.length;
         await choose(a);
@@ -110,7 +111,7 @@ module.exports = async ({ page, evaluate, invoke, list, write, close, open, wait
         if(outcome==='error') await page.send('Fetch.fulfillRequest',{requestId:paused,responseCode:503,responseHeaders:[{name:'Content-Type',value:'application/json'}],body:Buffer.from('{"error":"Fixture recall unavailable"}').toString('base64')});
         else await page.send('Fetch.continueRequest',{requestId:paused});
         if(outcome==='cancelled') { await page.poll('!!document.querySelector(".vz-discard")');await page.clickAt('.vz-keep'); }
-        await page.poll(`!document.querySelector('.vh-menu .vh-status')?.textContent.includes('Another recall')`);
+        await page.poll(`!document.querySelector('.vh-menu .vh-status')?.textContent.includes('Still reading saved Run')`);
         if(outcome==='applied') {
           await page.poll('document.querySelector(".vh-trigger").getAttribute("aria-expanded")==="false"');
           assert.equal(await page.evaluate('document.querySelector(\'[data-param-key="9.denoise"] .vz-value-field input\').value'),'0.9');

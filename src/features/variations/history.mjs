@@ -14,10 +14,12 @@ import { inspectSource, projectInspection } from "./inspection.mjs";
 import { inspectDestination, destinationMissing } from "./destination.mjs";
 import { readImage } from "./folder-images.mjs";
 import { submitPrompt } from "../../backings/comfy-submission.mjs";
-import { effectCounts, problemFrom, variationProblem, backendProblem } from "./problems.mjs";
+import { effectCounts, problemFrom, variationProblem, backendProblem, problemError } from "./problems.mjs";
 import { problemEnvelope } from "./problem-transport.mjs";
 
 const fail = (message, status = 400) => Object.assign(new Error(message), { status });
+const reject = (code, context, status = 400) => Object.assign(problemError(variationProblem(code, { phase: "saved Run", ...context })), { status });
+const targetContext = target => ({ name: target?.filename, source: target?.host });
 const data = value => parseExactJson(value);
 const canonical = value => stringifyExactJson(sort(value));
 function sort(value) {
@@ -52,14 +54,14 @@ export function makeVariationHistory(app) {
   const store = app.store, pending = new Map();
   const current = target => {
     const token = app.backings.capture(target.host), origin = sourceOrigin(target.host, app.backings.source(target.host));
-    if (!app.backings.accepting() || !token || !validOrigin(target.origin) || !sameOrigin(target.origin, origin) || !app.backings.isCurrent(token)) throw fail("Source origin changed; work was kept", 412);
+    if (!app.backings.accepting() || !token || !validOrigin(target.origin) || !sameOrigin(target.origin, origin) || !app.backings.isCurrent(token)) throw reject("source-retired", { target: targetContext(target), source: target.host }, 412);
     return { token, origin };
   };
   // The Run destination: explicit at capture, else (older captures) the target's own source.
   const destinationOf = (row, targetIndex) => captured(row).destination ?? data(row.targets_json)[targetIndex]?.origin;
   const currentDestination = destination => {
     const token = app.backings.capture(destination?.source), origin = sourceOrigin(destination?.source, app.backings.source(destination?.source));
-    if (!app.backings.accepting() || !token || !sameOrigin(destination, origin) || !app.backings.isCurrent(token)) throw fail("Run destination changed; work was kept", 412);
+    if (!app.backings.accepting() || !token || !sameOrigin(destination, origin) || !app.backings.isCurrent(token)) throw reject("source-retired", { source: destination?.source }, 412);
     return { token, origin };
   };
   // Before any outbound effect: the destination must have every node class.
@@ -72,13 +74,13 @@ export function makeVariationHistory(app) {
     if (sameOrigin(destination, target.origin)) return;
     const r = throwInspection(await inspectSource(app, destination.source, saved.filename, { origin: destination, graphHash: saved.hash }, { graph: saved.graph, hash: saved.hash }));
     const missing = await missingAt(destination, target, saved.graph, saved.hash, r);
-    if (missing.length) throw fail(`Not installed on ${destination.source}: ${missing.join(", ")}; no jobs were submitted`, 409);
+    if (missing.length) throw reject("destination-missing", { target: targetContext(target), destination: destination.source, names: missing }, 409);
   };
   const record = (id, leaseId = null) => {
-    if (!historyId(id)) throw fail("Invalid history Run ID");
+    if (!historyId(id)) throw reject("history-id", { runId: id });
     const row = store.variationGet(id);
-    if (!row || row.deleted_at !== null && !store.variationLease(id, leaseId)) throw fail("History entry unavailable", 410);
-    if (row.format !== 1 || !row.recipe_json) throw fail("Unsupported or unavailable history entry", 410);
+    if (!row || row.deleted_at !== null && !store.variationLease(id, leaseId)) throw reject("history-record", { runId: id, detail: row ? "History entry unavailable (deleted)" : "History entry unavailable (not found)" }, 410);
+    if (row.format !== 1 || !row.recipe_json) throw reject("history-record", { runId: id, detail: `Unsupported or unavailable history entry (format ${row.format}, expected 1)` }, 410);
     return row;
   };
   const captured = row => data(row.recipe_json);
@@ -90,19 +92,22 @@ export function makeVariationHistory(app) {
       .map(effect => ({ ...effect, result: effect.result_json ? data(effect.result_json) : null })), row.total_count) });
   const sealed = (id, leaseId = null) => {
     const row = record(id, leaseId);
-    if (!row.snapshot_json || row.capture_state !== "complete") throw fail("The saved archive is incomplete; missing resources remain listed", 409);
+    if (!row.snapshot_json || row.capture_state !== "complete") {
+      const resources = store.variationResources(id), missing = resources.filter(resource => !resource.hash);
+      throw reject("history-incomplete", { runId: id, numbers: { missing: missing.length, total: resources.length }, names: missing.map(resource => data(resource.descriptor_json).name ?? resource.resource_id) }, 409);
+    }
     return { row, snapshot: data(row.snapshot_json) };
   };
   const member = (id, resourceId, leaseId = null) => {
     record(id, leaseId);
     const ref = store.variationResource(id, resourceId);
-    if (!ref?.hash) throw fail("Saved image bytes unavailable", 410);
+    if (!ref?.hash) throw reject("history-resource", { runId: id, resource: ref ? data(ref.descriptor_json).name : resourceId, detail: "Saved image bytes unavailable" }, 410);
     return ref;
   };
   const single = (key, operation, identity = key) => {
     if (pending.has(key)) {
       const previous = pending.get(key);
-      if (previous.identity !== identity) return Promise.reject(fail("History operation conflict", 409));
+      if (previous.identity !== identity) return Promise.reject(reject("history-conflict", { operation: key }, 409));
       return previous.task;
     }
     const task = app.lifetime.run(`variation history ${key}`, operation);
@@ -156,25 +161,25 @@ export function makeVariationHistory(app) {
   };
   const receipt = (id, targetIndex, resourceId) => {
     const effect = store.variationEffects(id).find(e => e.effect_id === `upload-${targetIndex}-${resourceId}`);
-    if (!effect || effect.state !== "confirmed" || !effect.result_json) throw fail(`Image ${resourceId} is not materialized`, 409);
+    if (!effect || effect.state !== "confirmed" || !effect.result_json) throw reject("history-receipt", { runId: id, target: targetContext(data(record(id).targets_json)[targetIndex]), resource: store.variationResource(id, resourceId)?.descriptor_json ? data(store.variationResource(id, resourceId).descriptor_json).name : resourceId, destination: destinationOf(record(id), targetIndex)?.source }, 409);
     return data(effect.result_json);
   };
   const preflight = (snapshot, destination) => {
     const targets = snapshot.targets.map((target, index) => {
       try { return countingTarget(target, snapshot.recipe, snapshot.resources, destination, index); }
-      catch (error) { return { ...target, problem: { code: "invalid-resource", message: error.message } }; }
+      catch (error) { return { ...target, problem: problemFrom(error, { target: { ...targetContext(target), index }, phase: "counting" }) }; }
     });
     return planCohort({ ...snapshot, targets, destination });
   };
   const admit = async (id, row, snapshot) => {
     const prior = store.variationEffects(id).find(effect => effect.effect_id === "admission");
     if (prior) {
-      if (prior.state !== "confirmed") throw fail("Saved admission is interrupted; start a new Run", 409);
+      if (prior.state !== "confirmed") throw reject("history-admission", { runId: id, detail: `Saved admission is interrupted (${prior.state})` }, 409);
       return data(prior.result_json);
     }
     const admission = { snapshotHash: row.snapshot_hash, targets: preflight(snapshot, captured(row).destination) };
     store.variationPrepareEffect(id, "admission", "admission", canonical(admission), await digest(admission));
-    if (!store.variationClaimEffect(id, "admission")) throw fail("Saved admission unavailable", 409);
+    if (!store.variationClaimEffect(id, "admission")) throw reject("history-admission", { runId: id, detail: "Saved admission unavailable; another or interrupted operation owns the claim" }, 409);
     store.variationEffectResult(id, "admission", "confirmed", canonical(admission));
     outcome(id);
     return admission;
@@ -183,7 +188,7 @@ export function makeVariationHistory(app) {
     const effect = store.variationEffects(id).find(effect => effect.effect_id === "admission" && effect.kind === "admission");
     const admission = effect?.state === "confirmed" && data(effect.result_json);
     const target = admission?.snapshotHash === row.snapshot_hash && admission.targets[index];
-    if (!target || target.problem || !Number.isSafeInteger(target.count) || target.count <= 0) throw fail(target?.problem?.message ?? "Target has no saved admission; start a new Run", 409);
+    if (!target || target.problem || !Number.isSafeInteger(target.count) || target.count <= 0) throw reject("history-admission", { runId: id, target: { ...targetContext(data(row.targets_json)[index]), index }, detail: target?.problem?.message ?? "Target has no saved admission; 0 jobs for this target admitted here" }, 409);
     return target;
   };
   const targetProblem = async (id, index, origin, snapshotHash, error) => {
@@ -203,18 +208,18 @@ export function makeVariationHistory(app) {
     // but never reserves archive membership, history rows or upstream effects.
     async plan(body) {
       if (!body || !["single", "bulk"].includes(body.cohortMode) || !Array.isArray(body.targets) || !body.targets.length ||
-          body.cohortMode === "single" && body.targets.length !== 1 || !Array.isArray(body.resources)) throw fail("Invalid cohort plan");
-      if (body.destination && (!validOrigin(body.destination) || body.destination.kind !== "comfy")) throw fail("Invalid Run destination");
+           body.cohortMode === "single" && body.targets.length !== 1 || !Array.isArray(body.resources)) throw reject("history-request", { operation: "calculate", field: "cohortMode/targets/resources", detail: "Invalid cohort plan" });
+      if (body.destination && (!validOrigin(body.destination) || body.destination.kind !== "comfy")) throw reject("destination-invalid", { destination: body.destination?.source });
       const recipe = decodeHistoryRecipe({ format: 1, recipe: body.recipe });
       const resources = await Promise.all(body.resources.map(async descriptor => {
         if (descriptor.kind === "upload") return { ...descriptor, hash: /^[a-f0-9]{64}$/.test(descriptor.hash) ? descriptor.hash : null };
         if (descriptor.kind === "archive") return { ...descriptor, hash: member(descriptor.runId, descriptor.resourceId, descriptor.leaseId).hash };
         if (descriptor.kind === "server-path") return { ...descriptor, hash: await sha256((await readImage(descriptor.path)).bytes) };
-        if (!["input", "reference"].includes(descriptor.kind) || !resourceReference(descriptor.value)) throw fail("Invalid image resource");
+        if (!["input", "reference"].includes(descriptor.kind) || !resourceReference(descriptor.value)) throw reject("history-request", { operation: "calculate", field: descriptor.name ?? descriptor.id, detail: "Invalid image resource" });
         const target = body.targets[0]; current(target);
         const ref = resourceReference(descriptor.value), read = await app.ingest.ensure(target.host, ref.name, ref.root, { priority: "high" });
         current(target);
-        if (read.status !== 200) throw fail(`${ref.name}: image resource unavailable`, read.status);
+        if (read.status !== 200) throw reject("history-read", { target: targetContext(target), resource: ref.name, source: target.host, root: ref.root, numbers: { status: read.status }, detail: "image resource unavailable" }, read.status);
         return { ...descriptor, ...ref, host: target.host, hash: read.hash };
       }));
       const targets = await Promise.all(body.targets.map(async (target, index) => {
@@ -224,12 +229,12 @@ export function makeVariationHistory(app) {
           if (target.historyRef) {
             const previous = sealed(target.historyRef.runId, target.historyRef.leaseId).snapshot;
             const saved = previous.targets[target.historyRef.targetIndex];
-            if (!saved || saved.host !== target.host || saved.filename !== target.filename || saved.source.address !== target.origin.address) throw fail("Saved target/source mismatch", 412);
+            if (!saved || saved.host !== target.host || saved.filename !== target.filename || saved.source.address !== target.origin.address) throw reject("history-binding", { runId: target.historyRef.runId, target: targetContext(target), detail: "Saved target/source mismatch", expected: saved?.source.address, actual: target.origin.address }, 412);
             archived = { graph: saved.graph, hash: saved.hash };
           }
           if (!archived) {
             const read = await app.ingest.ensure(target.host, target.filename, "output", { priority: "high" });
-            if (read.status !== 200) throw fail(`${target.filename}: original target unavailable`, read.status);
+            if (read.status !== 200) throw reject("history-read", { target: targetContext(target), numbers: { status: read.status }, detail: "original target unavailable" }, read.status);
             current(target);
           }
           const r = throwInspection(await inspectSource(app, target.host, target.filename, target.context ?? { origin: target.origin }, archived));
@@ -239,7 +244,7 @@ export function makeVariationHistory(app) {
           const graphResources = {}, targetResources = [...resources, { id: `target-${index}`, host: target.host, root: "output", name: target.filename, hash: r.context.graphHash }];
           for (const parameter of catalogue.parameters.filter(p => p.kind === "image")) {
             const value = parameterCurrent(parameter), ref = resourceReference(value);
-            if (!ref) throw fail(`${parameter.id}: original image reference unavailable`, 409);
+            if (!ref) throw reject("history-resource", { target: targetContext(target), parameter, resource: String(value), detail: "original image reference unavailable; choose a valid replacement or repair the original workflow" }, 409);
             const resourceId = `graph-${index}-${Object.keys(graphResources).length}`;
             let hash;
             if (target.historyRef) {
@@ -247,37 +252,37 @@ export function makeVariationHistory(app) {
               hash = member(target.historyRef.runId, saved.graphResources[parameter.id], target.historyRef.leaseId).hash;
             } else {
               const read = await app.ingest.ensure(target.host, ref.name, ref.root, { priority: "high" });
-              if (read.status !== 200) throw fail(`${ref.name}: declared graph input unavailable`, read.status);
+              if (read.status !== 200) throw reject("history-read", { target: targetContext(target), parameter, resource: ref.name, root: ref.root, numbers: { status: read.status }, detail: "declared graph input unavailable" }, read.status);
               hash = read.hash;
             }
             targetResources.push({ id: resourceId, ...ref, value, host: target.host, hash }); graphResources[parameter.id] = resourceId;
           }
           current(target); if (body.destination) currentDestination(body.destination);
           return countingTarget({ ...target, graph: r.graph, catalogue, graphResources }, recipe, targetResources, body.destination, index);
-        } catch (error) { return { ...target, problem: { code: "unavailable", message: error.message } }; }
+        } catch (error) { return { ...target, problem: problemFrom(error, { target: { ...targetContext(target), index }, phase: "counting" }) }; }
       }));
       return planCohort({ targets, cohortMode: body.cohortMode, recipe, destination: body.destination });
     },
     begin(body) {
       if (!body || body.format !== 1 || !historyId(body.runId) || !["single", "bulk"].includes(body.cohortMode) ||
-        !Array.isArray(body.targets) || !body.targets.length || body.cohortMode === "single" && body.targets.length !== 1 || !Array.isArray(body.resources)) throw fail("Invalid history capture");
-      for (const key of Object.keys(body)) if (!["runId", "format", "cohortMode", "targets", "recipe", "resources", "destination"].includes(key)) throw fail("Unknown history capture field");
-      if (body.destination !== undefined && (!validOrigin(body.destination) || body.destination.kind !== "comfy")) throw fail("Run destination must be a ComfyUI source");
+        !Array.isArray(body.targets) || !body.targets.length || body.cohortMode === "single" && body.targets.length !== 1 || !Array.isArray(body.resources)) throw reject("history-request", { runId: body?.runId, field: "format/cohortMode/targets/resources", detail: `Invalid history capture; format ${body?.format}, expected 1` });
+      for (const key of Object.keys(body)) if (!["runId", "format", "cohortMode", "targets", "recipe", "resources", "destination"].includes(key)) throw reject("history-request", { runId: body.runId, field: key, detail: "Unknown history capture field" });
+      if (body.destination !== undefined && (!validOrigin(body.destination) || body.destination.kind !== "comfy")) throw reject("destination-invalid", { destination: body.destination?.source });
       const recipe = decodeHistoryRecipe({ format: 1, recipe: body.recipe });
       const resources = cloneJsonValue(body.resources), ids = new Set();
       for (const r of resources) {
-        if (!/^image-\d+$/.test(r.id) || ids.has(r.id) || !["upload", "input", "reference", "server-path", "archive"].includes(r.kind) || typeof r.name !== "string" || !r.name) throw fail("Invalid saved resource descriptor");
+        if (!/^image-\d+$/.test(r.id) || ids.has(r.id) || !["upload", "input", "reference", "server-path", "archive"].includes(r.kind) || typeof r.name !== "string" || !r.name) throw reject("history-request", { runId: body.runId, field: r.name ?? r.id, detail: `Invalid saved resource descriptor (ID ${r.id}${ids.has(r.id) ? " is duplicated" : ""}, kind ${r.kind})` });
         ids.add(r.id);
-        if (["input", "reference"].includes(r.kind) && !resourceReference(r.value)) throw fail("Invalid saved image reference");
+        if (["input", "reference"].includes(r.kind) && !resourceReference(r.value)) throw reject("history-request", { runId: body.runId, field: r.name, detail: "Invalid saved image reference" });
         if (r.kind === "archive") member(r.runId, r.resourceId, r.leaseId);
       }
-      for (const entry of Object.values(recipe.images)) for (const values of [entry.values, entry.baseline]) for (const item of values.items) {
-        if (item.kind !== "target" && (item.kind !== "archive" || item.runId !== body.runId || !ids.has(item.resourceId))) throw fail("Saved image is outside this capture");
+      for (const [pid, entry] of Object.entries(recipe.images)) for (const values of [entry.values, entry.baseline]) for (const item of values.items) {
+        if (item.kind !== "target" && (item.kind !== "archive" || item.runId !== body.runId || !ids.has(item.resourceId))) throw reject("history-request", { runId: body.runId, parameter: { id: pid, label: entry.metadata.label ?? pid }, field: item.name ?? item.resourceId, detail: "Saved image is outside this capture" });
       }
       const targets = cloneJsonValue(body.targets);
       for (const target of targets) {
-        if (target.id !== `${target.host}:${target.filename}` || !validOrigin(target.origin) || target.origin.source !== target.host || !validEntryName(target.origin.address, target.filename)) throw fail("Invalid captured target");
-        if (target.context && (!validContext(target.context) || !sameOrigin(target.context.origin, target.origin))) throw fail("Invalid captured target context");
+        if (target.id !== `${target.host}:${target.filename}` || !validOrigin(target.origin) || target.origin.source !== target.host || !validEntryName(target.origin.address, target.filename)) throw reject("history-request", { runId: body.runId, target: targetContext(target), field: target.id, detail: "Invalid captured target" });
+        if (target.context && (!validContext(target.context) || !sameOrigin(target.context.origin, target.origin))) throw reject("history-request", { runId: body.runId, target: targetContext(target), field: target.id, detail: "Invalid captured target context" });
         if (target.historyRef) sealed(target.historyRef.runId, target.historyRef.leaseId);
       }
       const document = { format: 1, cohortMode: body.cohortMode, recipe, resources, ...(body.destination ? { destination: cloneJsonValue(body.destination) } : {}) };
@@ -298,8 +303,8 @@ export function makeVariationHistory(app) {
     summary: row => summaryOf(row),
     async uploadBytes(id, resourceId, bytes) {
       const row = record(id), ref = store.variationResource(id, resourceId);
-      if (!ref || data(ref.descriptor_json).kind !== "upload") throw fail("Image upload is not part of this capture", 410);
-      if (row.capture_state !== "preparing" && !ref.hash) throw fail("Capture is not preparing", 409);
+      if (!ref || data(ref.descriptor_json).kind !== "upload") throw reject("history-request", { runId: id, field: resourceId, detail: "Image upload is not part of this capture" }, 410);
+      if (row.capture_state !== "preparing" && !ref.hash) throw reject("history-capture-state", { runId: id, state: row.capture_state, numbers: archiveCounts(id), detail: "Capture is not preparing" }, 409);
       return attach(id, resourceId, bytes);
     },
     prepare(id) { return single(`prepare-${id}`, async () => {
@@ -308,7 +313,7 @@ export function makeVariationHistory(app) {
         await admit(id, row, data(row.snapshot_json));
         return api.detail(id);
       }
-      if (row.capture_state !== "preparing") throw fail("Interrupted capture cannot be resumed automatically", 409);
+      if (row.capture_state !== "preparing") throw reject("history-capture-state", { runId: id, state: row.capture_state, numbers: archiveCounts(id), detail: "Interrupted capture cannot be resumed automatically" }, 409);
       try {
         const prepared = [], resources = [];
         for (const [index, target] of targets.entries()) {
@@ -316,14 +321,14 @@ export function makeVariationHistory(app) {
           let bytes, graph, hash;
           if (target.historyRef) {
             const old = sealed(target.historyRef.runId, target.historyRef.leaseId).snapshot.targets[target.historyRef.targetIndex];
-            if (!old || old.host !== target.host || old.filename !== target.filename || old.source.address !== target.origin.address || old.source.kind !== target.origin.kind) throw fail("Saved target/source mismatch", 412);
+            if (!old || old.host !== target.host || old.filename !== target.filename || old.source.address !== target.origin.address || old.source.kind !== target.origin.kind) throw reject("history-binding", { runId: id, target: targetContext(target), detail: "Saved target/source mismatch", expected: old?.source.address, actual: target.origin.address }, 412);
             bytes = await app.archive.read(member(target.historyRef.runId, `target-${target.historyRef.targetIndex}`, target.historyRef.leaseId).hash);
             graph = old.graph; hash = old.hash;
           } else {
             const read = await app.ingest.ensure(target.host, target.filename, "output", { priority: "high", fresh: true });
-            if (read.status !== 200) throw fail(`${target.filename}: original target unavailable`, read.status);
+            if (read.status !== 200) throw reject("history-read", { runId: id, target: targetContext(target), numbers: { status: read.status }, detail: "original target unavailable" }, read.status);
             ({ bytes, hash } = read);
-            if (target.context?.graphHash && target.context.graphHash !== hash) throw fail("Captured target changed", 412);
+            if (target.context?.graphHash && target.context.graphHash !== hash) throw reject("history-target-changed", { runId: id, target: targetContext(target) }, 412);
             graph = (await metaFromBytes(bytes, target.filename))[2];
           }
           current(target);
@@ -342,7 +347,7 @@ export function makeVariationHistory(app) {
           const graphResources = {};
           for (const p of catalogue.parameters.filter(p => p.kind === "image")) {
             const reference = resourceReference(parameterCurrent(p));
-            if (!reference) throw fail(`${p.id}: original image reference unavailable`, 409);
+            if (!reference) throw reject("history-resource", { runId: id, target: targetContext(target), parameter: p, resource: String(parameterCurrent(p)), detail: "original image reference unavailable; choose a valid replacement or repair the original workflow" }, 409);
             const descriptor = { id: `graph-${index}-${Object.keys(graphResources).length}`, kind: "reference", ...reference, value: parameterCurrent(p), host: target.host };
             reserve(id, descriptor);
             let original;
@@ -352,7 +357,7 @@ export function makeVariationHistory(app) {
               original = await app.archive.read(ref.hash);
             } else {
               const read = await app.ingest.ensure(target.host, reference.name, reference.root, { priority: "high", fresh: true });
-              if (read.status !== 200) throw fail(`${reference.name}: declared graph input unavailable`, 409);
+              if (read.status !== 200) throw reject("history-read", { runId: id, target: targetContext(target), parameter: p, resource: reference.name, root: reference.root, numbers: { status: read.status }, detail: "declared graph input unavailable" }, 409);
               original = read.bytes;
             }
             const archived = await attach(id, descriptor.id, original); resources.push({ ...descriptor, hash: archived.hash }); graphResources[p.id] = descriptor.id;
@@ -365,16 +370,16 @@ export function makeVariationHistory(app) {
           const ref = store.variationResource(id, descriptor.id);
           let bytes, provenance = descriptor;
           if (ref.hash) { resources.push({ ...descriptor, hash: ref.hash }); continue; }
-          if (descriptor.kind === "upload") throw fail(`${descriptor.name}: browser bytes not archived`, 409);
+          if (descriptor.kind === "upload") throw reject("history-resource", { runId: id, resource: descriptor.name, detail: `browser bytes not archived (${archiveCounts(id).saved}/${archiveCounts(id).total} resources saved); keep the browser file and editor open to retry capture` }, 409);
           if (descriptor.kind === "archive") {
             const old = sealed(descriptor.runId, descriptor.leaseId).snapshot.resources.find(r => r.id === descriptor.resourceId);
-            if (!old) throw fail("Saved image membership unavailable", 410);
+            if (!old) throw reject("history-resource", { runId: descriptor.runId, resource: descriptor.name, detail: "Saved image membership unavailable" }, 410);
             bytes = await app.archive.read(member(descriptor.runId, descriptor.resourceId, descriptor.leaseId).hash);
             provenance = { ...old, id: descriptor.id };
           } else if (descriptor.kind === "server-path") bytes = (await readImage(descriptor.path)).bytes;
           else {
             const read = await app.ingest.ensure(targets[0].host, descriptor.name, descriptor.root, { priority: "high", fresh: true });
-            if (read.status !== 200) throw fail(`${descriptor.name}: saved input unavailable`, 409);
+            if (read.status !== 200) throw reject("history-read", { runId: id, resource: descriptor.name, source: targets[0].host, root: descriptor.root, numbers: { status: read.status }, detail: "saved input unavailable" }, 409);
             bytes = read.bytes; provenance = { ...descriptor, host: targets[0].host };
           }
           const archived = await attach(id, descriptor.id, bytes); resources.push({ ...provenance, hash: archived.hash });
@@ -385,11 +390,14 @@ export function makeVariationHistory(app) {
         store.variationSeal(id, canonical(snapshot), snapshotHash, canonical(historySummary(raw.recipe, prepared, resources)));
         await admit(id, record(id), snapshot);
         return api.detail(id);
-      } catch (error) { outcome(id, error); throw error; }
+      } catch (error) {
+        error.problem = problemFrom(error, { code: "history-io", phase: "archive", runId: id, ...(error.problem ? {} : { operation: "prepare the archive" }) });
+        error.message = error.problem.message; outcome(id, error); throw error;
+      }
     }); },
     async open(id) {
       const { row, snapshot } = sealed(id), leaseId = crypto.randomUUID();
-      if (await digest(snapshot) !== row.snapshot_hash) throw fail("Saved snapshot integrity check failed", 409);
+      if (await digest(snapshot) !== row.snapshot_hash) throw reject("history-integrity", { runId: id }, 409);
       store.variationLeaseAcquire(id, "editor", leaseId);
       const targets = [];
       for (const [targetIndex, target] of snapshot.targets.entries()) {
@@ -416,7 +424,7 @@ export function makeVariationHistory(app) {
     // A held saved run as a chosen destination sees it; readonly, no effects.
     async catalogue(id, leaseId, targetIndex, destination) {
       const { snapshot } = sealed(id, leaseId), saved = snapshot.targets[targetIndex];
-      if (!saved) throw fail("Saved target unavailable", 410);
+      if (!saved) throw reject("history-target", { runId: id, numbers: { index: targetIndex, total: snapshot.targets.length } }, 410);
       const origin = sourceOrigin(saved.host, app.backings.source(saved.host));
       const originContext = origin?.address === saved.source.address && origin?.kind === saved.source.kind ? { origin, graphHash: saved.hash } : null;
       const result = await inspectDestination(app, { graph: saved.graph, hash: saved.hash, name: saved.filename, original: saved.catalogue, originContext, destination });
@@ -426,26 +434,27 @@ export function makeVariationHistory(app) {
     async bytes(id, resourceId, leaseId) { return app.archive.read(member(id, resourceId, leaseId).hash); },
     async release(id, leaseId) { store.variationLeaseRelease(id, leaseId); await collect(id); },
     async remove(id) {
-      if (!historyId(id) || !store.variationGet(id)) throw fail("History entry unavailable", 410);
+      if (!historyId(id)) throw reject("history-id", { runId: id, operation: "delete" });
+      if (!store.variationGet(id)) throw reject("history-record", { runId: id, detail: "History entry unavailable (not found)" }, 410);
       store.variationTombstone(id); await collect(id);
     },
     materialize(id, targetIndex, resourceId, origin, snapshotHash) { return single(`upload-${id}-${targetIndex}-${resourceId}`, async () => {
       const { row, snapshot } = sealed(id), target = data(row.targets_json)[targetIndex], destination = destinationOf(row, targetIndex);
-      if (!target || !sameOrigin(destination, origin) || row.snapshot_hash !== snapshotHash) throw fail("Saved upload binding mismatch", 412);
+      if (!target || !sameOrigin(destination, origin) || row.snapshot_hash !== snapshotHash) throw reject("history-binding", { runId: id, target: targetContext(target), resource: resourceId, operation: "upload", detail: "Saved upload binding mismatch", expected: `${destination?.source}/${row.snapshot_hash}`, actual: `${origin?.source}/${snapshotHash}` }, 412);
       admittedTarget(id, row, targetIndex);
       currentDestination(destination);
       const resource = snapshot.resources.find(r => r.id === resourceId);
-      if (!resource) throw fail("Saved resource unavailable", 410);
+      if (!resource) throw reject("history-resource", { runId: id, resource: resourceId, detail: "Saved resource unavailable" }, 410);
       const saved = snapshot.targets[targetIndex];
       if (!store.variationEffects(id).some(e => e.effect_id === `upload-${targetIndex}-${resourceId}`)) await destinationReady(destination, saved, target);
       const involved = new Set(Object.entries(saved.graphResources).filter(([, rid]) => rid === resourceId).map(([pid]) => pid));
       for (const [pid, entry] of Object.entries(snapshot.recipe.images)) if (entry.values.enabled && entry.values.items.some(item =>
         item.kind === "target" ? resourceId === `target-${targetIndex}` : item.resourceId === resourceId)) involved.add(pid);
-      if (!involved.size) throw fail("This saved resource is not an active target requirement");
+      if (!involved.size) throw reject("history-inactive", { runId: id, target: targetContext(target), resource: resource.name });
       const effectId = `upload-${targetIndex}-${resourceId}`, request = { resourceId, targetIndex, origin, snapshotHash };
       const effect = store.variationPrepareEffect(id, effectId, "upload", canonical(request), await digest(request));
       if (effect.state === "confirmed") return data(effect.result_json);
-      if (effect.state !== "prepared") throw fail("Upload is pending or uncertain; do not automatically retry", 409);
+      if (effect.state !== "prepared") throw reject("history-effect", { runId: id, target: targetContext(target), resource: resource.name, operation: "Upload", state: effect.state }, 409);
       const bytes = await api.bytes(id, resourceId);
       let value = null;
       if (resource.root && resource.host === destination.source) {
@@ -464,7 +473,7 @@ export function makeVariationHistory(app) {
           if (sameOrigin(delivered.origin, origin)) { value = delivered.value; break; }
         }
       }
-      if (!store.variationClaimEffect(id, effectId)) throw fail("Upload was already admitted", 409);
+      if (!store.variationClaimEffect(id, effectId)) throw reject("history-effect", { runId: id, target: targetContext(target), resource: resource.name, operation: "Upload", state: "already admitted" }, 409);
       let outboundStarted = false, result, settled = false;
       try {
         if (value !== null) result = { value, name: resource.name, origin, hash: resource.hash, reused: true };
@@ -472,11 +481,11 @@ export function makeVariationHistory(app) {
           const parameters = parameterIndex(saved.catalogue.parameters);
           for (const pid of involved) {
             const p = parameters.get(pid);
-            if (!p) throw fail(`Saved image parameter ${pid} is unavailable`);
+            if (!p) throw reject("history-resource", { runId: id, target: targetContext(target), resource: resource.name, parameter: { id: pid }, detail: `Saved image parameter ${pid} is unavailable` });
             admitResourceTransfer(p);
           }
           const { token } = currentDestination(destination), backing = app.backings.backingFor(token.address);
-          if (!backing.write) throw fail("This source cannot materialize saved images");
+          if (!backing.write) throw reject("transfer-unsupported", { runId: id, target: targetContext(target), resource: resource.name, destination: destination.source, parameter: { id: [...involved][0], label: [...involved].join(", ") }, detail: `on ${destination.source} cannot materialize saved images` });
           outboundStarted = true;
           const write = await backing.write(token.address, resource.name.split("/").at(-1), bytes);
           if (!write.ok) throw Object.assign(fail(write.error, write.status ?? 502), { problem: backendProblem(write, { phase: "upload", runId: id, target: { index: targetIndex, name: saved.filename, source: target.host }, destination: origin.source, resource: resource.name, parameter: { id: [...involved][0], label: [...involved].join(", ") } }) });
@@ -488,6 +497,8 @@ export function makeVariationHistory(app) {
         currentDestination(destination);
         return result;
       } catch (error) {
+        error.problem = problemFrom(error, { code: "history-io", phase: "upload", runId: id, target: { ...targetContext(target), index: targetIndex }, resource: resource.name, ...(error.problem ? {} : { operation: "materialize" }) });
+        error.message = error.problem.message;
         if (!settled) store.variationEffectResult(id, effectId, !outboundStarted || error.status && error.status < 500 ? "rejected" : "uncertain", canonical({ error: error.message, ...(error.problem ? { problem: error.problem } : {}) }));
         else Object.assign(error, { uploaded: result, problem: variationProblem("upload-retired", { phase: "upload", runId: id, destination: origin.source, resource: resource.name, stage: "after", uploaded: result, target: { index: targetIndex, name: saved.filename, source: target.host } }) });
         outcome(id, error); throw error;
@@ -498,8 +509,8 @@ export function makeVariationHistory(app) {
     }); },
     prepareTarget(id, targetIndex, origin, snapshotHash) { return single(`plan-${id}-${targetIndex}`, async () => {
       const { row, snapshot } = sealed(id), target = data(row.targets_json)[targetIndex], saved = snapshot.targets[targetIndex], destination = destinationOf(row, targetIndex);
-      if (await digest(snapshot) !== row.snapshot_hash) throw fail("Saved snapshot integrity check failed", 409);
-      if (!saved || !target || !sameOrigin(destination, origin) || snapshotHash !== row.snapshot_hash) throw fail("Saved target binding mismatch", 412);
+      if (await digest(snapshot) !== row.snapshot_hash) throw reject("history-integrity", { runId: id }, 409);
+      if (!saved || !target || !sameOrigin(destination, origin) || snapshotHash !== row.snapshot_hash) throw reject("history-binding", { runId: id, target: targetContext(target), operation: "plan", detail: "Saved target binding mismatch", expected: `${destination?.source}/${row.snapshot_hash}`, actual: `${origin?.source}/${snapshotHash}` }, 412);
       const admitted = admittedTarget(id, row, targetIndex);
       currentDestination(destination);
       const prior = store.variationEffects(id).find(e => e.effect_id === `target-${targetIndex}`);
@@ -507,13 +518,13 @@ export function makeVariationHistory(app) {
       const graph = cloneJsonValue(saved.graph), oldParameters = parameterIndex(saved.catalogue.parameters);
       for (const [parameterId, resourceId] of Object.entries(saved.graphResources)) {
         const p = oldParameters.get(parameterId), resolved = receipt(id, targetIndex, resourceId);
-        if (!sameOrigin(resolved.origin, origin)) throw fail("Materialized source changed", 412);
+        if (!sameOrigin(resolved.origin, origin)) throw reject("history-binding", { runId: id, target: targetContext(target), parameter: p, resource: resourceId, detail: "Materialized source changed", expected: resolved.origin?.source, actual: origin?.source }, 412);
         graph[p.nodeIds[0]].inputs[p.key] = resolved.value;
       }
       const r = throwInspection(await inspectSource(app, destination.source, target.filename, { origin, graphHash: saved.hash }, { graph, hash: saved.hash }));
       if (!sameOrigin(destination, target.origin)) {
         const missing = await missingAt(destination, target, saved.graph, saved.hash, r);
-        if (missing.length) throw fail(`Not installed on ${destination.source}: ${missing.join(", ")}; no jobs were submitted`, 409);
+        if (missing.length) throw reject("destination-missing", { target: targetContext(target), destination: destination.source, names: missing }, 409);
       }
       const catalogue = projectInspection(r, target.filename);
       const recipe = bindCohortRecipe(snapshot.recipe, catalogue), resourceValues = new Map();
@@ -521,12 +532,12 @@ export function makeVariationHistory(app) {
         if (domain === "images" && entry.values.enabled) for (const item of entry.values.items) {
           const resourceId = item.kind === "target" ? `target-${targetIndex}` : item.resourceId;
           const resolved = receipt(id, targetIndex, resourceId);
-          if (!sameOrigin(resolved.origin, origin)) throw fail("Materialized source changed", 412);
+          if (!sameOrigin(resolved.origin, origin)) throw reject("history-binding", { runId: id, target: targetContext(target), parameter: { id: pid, label: entry.metadata.label ?? pid }, resource: item.name ?? resourceId, detail: "Materialized source changed", expected: resolved.origin?.source, actual: origin?.source }, 412);
           resourceValues.set(imageIdentity(item), resolved);
         }
       }
       const { plan, count: expectedTotal } = planTarget({ target: { ...target, catalogue }, cohortMode: snapshot.cohortMode, recipe, destination, resourceValues });
-      if (expectedTotal !== admitted.count) throw fail("Receipt-backed count changed from the saved admission; work was kept. Start a new Run.", 409);
+      if (expectedTotal !== admitted.count) throw reject("history-count", { runId: id, target: targetContext(target), numbers: { actual: expectedTotal, expected: admitted.count } }, 409);
       const request = { id: target.id, host: target.host, filename: target.filename, ...plan.payload, context: r.context,
         acknowledgement: { version: 2, runId: id, requestId: crypto.randomUUID() } };
       const planHash = await digest({ request, graph });
@@ -541,21 +552,21 @@ export function makeVariationHistory(app) {
     }); },
     dispatch(body, execute) { return app.lifetime.run(`variation dispatch ${body.acknowledgement?.requestId}`, async () => {
       const binding = body.history;
-      if (!binding || !historyId(binding.id) || !Number.isSafeInteger(binding.targetIndex)) throw fail("Invalid saved Run binding");
+      if (!binding || !historyId(binding.id) || !Number.isSafeInteger(binding.targetIndex)) throw reject("history-request", { runId: binding?.id, field: "Run ID/target index", detail: "Invalid saved Run binding" });
       const { row, snapshot } = sealed(binding.id), id = binding.id;
-      if (await digest(snapshot) !== row.snapshot_hash) throw fail("Saved snapshot integrity check failed", 409);
-      if (binding.snapshotHash !== row.snapshot_hash || body.acknowledgement?.runId !== id) throw fail("Saved snapshot binding mismatch", 409);
+      if (await digest(snapshot) !== row.snapshot_hash) throw reject("history-integrity", { runId: id }, 409);
+      if (binding.snapshotHash !== row.snapshot_hash || body.acknowledgement?.runId !== id) throw reject("history-binding", { runId: id, detail: "Saved snapshot binding mismatch", expected: row.snapshot_hash, actual: binding.snapshotHash }, 409);
       admittedTarget(id, row, binding.targetIndex);
       const effect = store.variationEffects(id).find(e => e.effect_id === `target-${binding.targetIndex}`);
-      if (!effect || !sameJsonValue(data(effect.request_json).request, body)) throw fail("Run is not the engine-prepared saved plan", 409);
+      if (!effect || !sameJsonValue(data(effect.request_json).request, body)) throw reject("history-binding", { runId: id, target: { name: body.filename, source: body.host, index: binding.targetIndex }, detail: "Run is not the engine-prepared saved plan" }, 409);
       if (effect.state !== "prepared") {
         if (effect.result_json && ["confirmed", "rejected", "partial"].includes(effect.state)) return data(effect.result_json);
-        throw fail("Submission is pending or uncertain; do not automatically retry", 409);
+        throw reject("history-effect", { runId: id, target: { name: body.filename, source: body.host }, operation: "Submission", state: effect.state }, 409);
       }
       const prepared = data(effect.request_json), saved = snapshot.targets[binding.targetIndex];
       const r = throwInspection(await inspectSource(app, body.context.origin.source, body.filename, body.context, { graph: prepared.graph, hash: saved.hash }));
       const leaseId = store.variationClaimExecution(id, effect.effect_id);
-      if (!leaseId) throw fail("Submission was already admitted", 409);
+      if (!leaseId) throw reject("history-effect", { runId: id, target: { name: body.filename, source: body.host }, operation: "Submission", state: "already admitted" }, 409);
       try {
         const response = await execute(r, { submit: (job, index) => {
           const effectId = `job-${binding.targetIndex}-${index}`;
@@ -563,7 +574,7 @@ export function makeVariationHistory(app) {
             isCurrent: () => app.backings.isCurrent(r.token),
             beforeSend: async () => {
               store.variationPrepareEffect(id, effectId, "permutation", canonical(job), await digest(job));
-              if (!store.variationClaimEffect(id, effectId)) throw fail("Permutation was already admitted", 409);
+              if (!store.variationClaimEffect(id, effectId)) throw reject("history-effect", { runId: id, target: { name: body.filename, source: body.host }, operation: "Submission", state: "already admitted", numbers: { index: index + 1, total: prepared.expectedTotal } }, 409);
             },
             onSent: () => store.variationEffectSent(id, effectId),
           });
@@ -591,5 +602,33 @@ export function makeVariationHistory(app) {
     }); },
     finish(id, error = null) { record(id); return outcome(id, typeof error === "string" ? error : null); },
   };
+  // Every public boundary retains structured causes and adds operation identity.
+  // Storage exceptions receive live effect evidence, never a guessed zero-send claim.
+  const archiveCounts = id => { const refs = store.variationResources(id); return { saved: refs.filter(ref => ref.hash).length, total: refs.length }; };
+  const verbs = { plan: "calculate the job plan", begin: "create the capture", detail: "read", uploadBytes: "archive", prepare: "prepare the archive",
+    open: "open", catalogue: "inspect", bytes: "read", release: "release retained resources", remove: "delete", materialize: "materialize",
+    prepareTarget: "prepare the target plan", dispatch: "dispatch", finish: "save the final status" };
+  const resourceName = (id, resourceId) => {
+    try { const ref = historyId(id) && store.variationResource(id, resourceId); return ref ? data(ref.descriptor_json).name ?? resourceId : resourceId; }
+    catch { return resourceId; }
+  };
+  for (const operation of Object.keys(api).filter(key => !["summary"].includes(key))) {
+    const invoke = api[operation];
+    const enrich = (error, args) => {
+      const id = typeof args[0] === "string" ? args[0] : args[0]?.runId ?? args[0]?.history?.id;
+      let effects;
+      try { const row = historyId(id) ? store.variationGet(id) : null; effects = row ? summaryOf(row).effects : undefined; } catch { effects = undefined; }
+      // Structured causes keep their own operation wording; only unclassified
+      // storage/runtime failures receive this boundary's operation and resource.
+      const fallback = error?.problem ? {} : { operation: verbs[operation] ?? operation,
+        ...(["bytes", "uploadBytes", "materialize"].includes(operation) ? { resource: resourceName(id, operation === "materialize" ? args[2] : args[1]) } : {}) };
+      const problem = problemFrom(error, { code: "history-io", phase: "saved Run", runId: id, effects, ...fallback });
+      error.problem = problem; error.message = problem.message; return error;
+    };
+    api[operation] = (...args) => {
+      try { const result = invoke(...args); return result?.then ? result.catch(error => { throw enrich(error, args); }) : result; }
+      catch (error) { throw enrich(error, args); }
+    };
+  }
   return api;
 }

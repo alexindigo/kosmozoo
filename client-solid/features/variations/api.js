@@ -30,8 +30,10 @@ export const historyTarget = (id, binding) => req("POST", historyPath(id) + "/pr
 export const historyThumbnail = item => historyPath(item.runId) + `/resources/${encodeURIComponent(item.resourceId)}/bytes${item.leaseId ? `?lease=${encodeURIComponent(item.leaseId)}` : ""}`;
 export async function historyBytes(id, resourceId, file) {
   const response = await fetch(historyPath(id) + `/resources/${encodeURIComponent(resourceId)}`, { method: "PUT", headers: { "Content-Type": "application/octet-stream" }, body: file });
-  const data = parseExactJson(await response.text());
-  if (!response.ok) throw new Error(data.error ?? `Archive failed (${response.status})`);
+  let data;
+  try { data = parseExactJson(await response.text()); }
+  catch { throw problemError(variationProblem("history-upload", { runId: id, resource: file.name, numbers: { saved: "unknown", total: "unknown", status: response.status }, detail: `engine returned unreadable data (HTTP ${response.status})` })); }
+  if (!response.ok) throw Object.assign(new Error(data.error ?? `Archive failed (${response.status})`), { status: response.status, problem: data.problem });
   return data;
 }
 
