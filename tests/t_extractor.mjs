@@ -192,11 +192,10 @@ Deno.test("collectNodes: scalar inputs only, links skipped, title kept when it d
   assertEquals(nodes.map((n) => n.id), ["1", "2", "3"]);
 });
 
-Deno.test("collectNodes: long strings capped with ellipsis marker", () => {
+Deno.test("collectNodes: long string inputs are retained complete", () => {
   const graph = { "1": { class_type: "X", inputs: { text: "y".repeat(5000) } } };
   const [x] = collectNodes(graph);
-  assertEquals(x.inputs.text.length, 4097);
-  assert(x.inputs.text.endsWith("…"));
+  assertEquals(x.inputs.text, graph["1"].inputs.text);
 });
 
 Deno.test("extractMeta: meta.nodes rides along with the curated fields", () => {

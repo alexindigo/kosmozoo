@@ -2162,8 +2162,9 @@ graph reads. It returns `[meta, hasWorkflow, graph]`, with the executed API prom
 graph separate from the editor workflow. Hash-only readers select by signature.
 PNG text (including APNG `comf` chunks after IDAT), WebP EXIF prefix strings,
 QuickTime mdta keys/ilst and iTunes comment envelopes, and Matroska SimpleTags
-all produce the same metadata/lineage contract. Version5 re-extracts previously
-ingested content through the existing staleness owner. No ffmpeg/runtime decoder
+all produce the same metadata/lineage contract. String values are stored complete,
+without display truncation. Version 6 re-extracts previously truncated content
+through the existing staleness owner. No ffmpeg/runtime decoder
 dependency is introduced.
 
 Audio readers normalize FLAC Vorbis-comment blocks, Ogg Opus `OpusTags` packets
@@ -2175,7 +2176,7 @@ write `comment={"prompt":…, "workflow":…, "kz":…}` to retain them in `ICMT
 Without embedded metadata a WAV is still listed/playable, with no invented graph.
 Current stock ComfyUI SaveAudio writes FLAC/MP3/Opus, not WAV. Readers check record
 bounds, skip unsupported ID3 compression/encryption and never search encoded audio
-payloads for JSON. Audio adds no further extractor-version bump (version remains 5).
+payloads for JSON. Audio uses the same extractor version and complete-string contract.
 
 `Ingest.dims(collection, name, kind="output")` is the pre-ingest half: dims live in a
 file's first bytes (PNG IHDR, GIF descriptor, WebP VP8*, JPEG SOF), so a
