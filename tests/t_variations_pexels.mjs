@@ -57,8 +57,8 @@ Deno.test("pexels: an unreadable services file is reported and never overwritten
   try {
     await Deno.writeTextFile(path, "{ broken");
     const services = new PexelsServices(path);
-    await assertRejects(() => services.list(), Error, "unreadable");
-    await assertRejects(() => services.create({ name: "A", url: "http://a" }), Error, "unreadable");
+    await assertRejects(() => services.list(), Error, "cannot be read");
+    await assertRejects(() => services.create({ name: "A", url: "http://a" }), Error, "cannot be read");
     assertEquals(await Deno.readTextFile(path), "{ broken");
   } finally { await Deno.remove(path.replace(/\/[^/]+$/, ""), { recursive: true }); }
 });
@@ -114,9 +114,9 @@ Deno.test("pexels: bytes resolve only engine-fetched photos, refuse non-images a
   const direct = await client.bytes(service, "5", "image");
   assertEquals(direct.mime, "image/jpeg");
   assert(fake.requests.some(request => request.url === "http://pexels.home/v1/photos/5"));
-  await assertRejects(() => client.bytes(service, "..", "image"), Error, "Unknown photo");
-  await assertRejects(() => client.bytes(service, "999", "image"), Error, "doesn't have this photo");
-  await assertRejects(() => client.bytes(service, "13", "image"), Error, "isn't a supported image");
+  await assertRejects(() => client.bytes(service, "..", "image"), Error, "or its ID is invalid");
+  await assertRejects(() => client.bytes(service, "999", "image"), Error, "no longer has photo 999");
+  await assertRejects(() => client.bytes(service, "13", "image"), Error, "is not a supported image");
   await client.bytes(service, "21", "image");
   const hops = fake.requests.filter(request => request.url.includes("redirect") || request.url.includes("moved"));
   assertEquals(hops.map(request => [new URL(request.url).host, request.authorization]), [["pexels.home", "secret"], ["cdn.example", null]]);
@@ -226,7 +226,7 @@ Deno.test("pexels browse: a service without curated asks for a search; failures 
   browse.request("s", ""); await settle();
   assertEquals(browse.results("s", ""), { files: [], pending: false, more: false, error: "", searchOnly: true, stale: false, appending: false });
   browse.request("s", "dog"); timers.flush(); await settle();
-  assertEquals(browse.results("s", "dog").error, "Home answered HTTP 500");
+  assertEquals(browse.results("s", "dog").error, 'Could not search s for "dog": Home answered HTTP 500. No photos are shown for this query; your image set is unchanged. Retry, or change the query or service.');
   fail = false; browse.retry("s", "dog"); await settle();
   assertEquals(browse.results("s", "dog"), { files: ["1"], pending: false, more: false, error: "", searchOnly: false, stale: false, appending: false });
   browse.dispose();
@@ -325,7 +325,7 @@ Deno.test("pexels: without curated, an empty search that lists the catalogue is 
 
 Deno.test("pexels: photos that are all unusable are an error, never an empty result", async () => {
   const client = makePexelsClient({ fetch: stubService({ "/v1/search": { body: { page: 1, photos: [{ id: 1, src: {} }, { id: "..", src: { original: "http://a/x", small: "http://a/y" } }] } } }) });
-  await assertRejects(() => client.photos({ id: "s", name: "Home", url: "http://pexels.home" }, { query: "cat" }), Error, "sent 2 photos without a usable ID");
+  await assertRejects(() => client.photos({ id: "s", name: "Home", url: "http://pexels.home" }, { query: "cat" }), Error, "0 of 2 photos have usable IDs");
 });
 
 Deno.test("pexels: imported file names are portable slugs of opaque photo IDs", () => {
@@ -339,12 +339,13 @@ Deno.test("pexels: the connection check runs the picker's first query and report
   const fake = fakePexels({ key: "secret", curated: true }), client = makePexelsClient({ fetch: fake.fetch });
   const service = { id: "s", name: "Home", url: "http://pexels.home", key: "secret" };
   assertEquals(await client.check(service), { ok: true, browse: true });
-  assertEquals(await client.check({ ...service, key: undefined }), { ok: false, error: "Home needs an API key" });
-  assertEquals(await client.check({ ...service, key: "wrong" }), { ok: false, error: "Home rejected the API key" });
+  const shape = result => ({ ok: result.ok, error: result.error, code: result.problem?.code });
+  assertEquals(shape(await client.check({ ...service, key: undefined })), { ok: false, error: "Home needs an API key (HTTP 401); cannot load curated photos, page 1.", code: "pexels-auth" });
+  assertEquals(shape(await client.check({ ...service, key: "wrong" })), { ok: false, error: "Home rejected the API key (HTTP 401); cannot load curated photos, page 1.", code: "pexels-auth" });
   const bare = makePexelsClient({ fetch: fakePexels({ curated: false }).fetch });
   assertEquals(await bare.check({ id: "b", name: "Bare", url: "http://pexels.home" }), { ok: true, browse: false });
   const down = makePexelsClient({ fetch: () => Promise.reject(new TypeError("refused")) });
-  assertEquals(await down.check({ id: "d", name: "Down", url: "http://down.home" }), { ok: false, error: "Couldn't reach Down" });
+  assertEquals(shape(await down.check({ id: "d", name: "Down", url: "http://down.home" })), { ok: false, error: "Down could not be reached while loading curated photos, page 1: refused.", code: "pexels-unreachable" });
 });
 
 Deno.test("pexels: any non-auth curated failure falls back to browsing; auth and rate limits are reported", async () => {
@@ -398,9 +399,9 @@ Deno.test("pexels: a slow but progressing download completes; a stalled one ends
   assertEquals(result.mime, "image/jpeg");
   const stalled = makePexelsClient({ fetch: streaming({ chunks: 8, gap: 30, stall: true }), timeoutMs: 80 });
   await stalled.photos(service, { query: "x" });
-  await assertRejects(() => stalled.bytes(service, "1", "image"), Error, "Home stopped sending the photo");
+  await assertRejects(() => stalled.bytes(service, "1", "image"), Error, "Home stopped sending photo 1 after");
   const silent = makePexelsClient({ fetch: (_href, init) => new Promise((_resolve, reject) => init.signal.addEventListener("abort", () => reject(init.signal.reason))), timeoutMs: 50 });
-  await assertRejects(() => silent.photos(service, { query: "x" }), Error, "Home didn't answer in time");
+  await assertRejects(() => silent.photos(service, { query: "x" }), Error, "Home did not answer within");
 });
 
 Deno.test("pexels editor: a pick made during the post-Run close countdown keeps the editor open", async () => {
@@ -456,10 +457,10 @@ Deno.test("pexels: an oversized metadata reply is refused before parsing and its
     pull(controller) { controller.enqueue(new TextEncoder().encode(`{"photos":[${"0,".repeat(200)}`)); },
     cancel() { cancelled = true; },
   }), { headers: { "Content-Type": "application/json" } }) });
-  await assertRejects(() => client.photos({ id: "s", name: "Home", url: "http://h" }, { query: "x" }), Error, "Home sent a reply larger than");
+  await assertRejects(() => client.photos({ id: "s", name: "Home", url: "http://h" }, { query: "x" }), Error, "exceeds the 1024-byte limit");
   assert(cancelled, "body cancelled");
   const declared = makePexelsClient({ maxJsonBytes: 1024, fetch: async () => new Response("{}", { headers: { "Content-Length": "999999" } }) });
-  await assertRejects(() => declared.photos({ id: "s", name: "Home", url: "http://h" }, { query: "x" }), Error, "larger than");
+  await assertRejects(() => declared.photos({ id: "s", name: "Home", url: "http://h" }, { query: "x" }), Error, "exceeds the");
 });
 
 Deno.test("pexels: a key or rate-limit problem on the browse fallback is reported, not shown as search-only", async () => {

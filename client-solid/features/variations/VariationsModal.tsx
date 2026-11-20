@@ -104,17 +104,18 @@ function ModalBody(props) {
   // Pexels browsing is readonly presentation data for this mount; chosen
   // photos enter the image set through the editor's own File lane.
   const [browseVersion, setBrowseVersion] = createSignal(0);
-  const pexelsBrowse = makePexelsBrowse({ api: services.pexelsApi, changed: () => setBrowseVersion(value => value + 1) });
+  const pexelsBrowse = makePexelsBrowse({ api: services.pexelsApi, changed: () => setBrowseVersion(value => value + 1),
+    name: id => services.pexelsServices().services.find(service => service.id === id)?.name ?? id });
   onCleanup(() => pexelsBrowse.dispose());
   services.loadPexelsServices(true);
   const pexelsSources = createMemo(() => services.pexelsServices().services.map(service => ({ source: service.id, label: service.name, url: service.url })));
   const pexelsUrls = new Map();
   createEffect(() => {
     const active = new Set(pexelsSources().map(service => service.source));
-    for (const source of pexelsUrls.keys()) if (!active.has(source)) { pexelsBrowse.forget(source); editor.retirePexelsService(source); pexelsUrls.delete(source); }
-    for (const { source, url } of pexelsSources()) {
-      if (pexelsUrls.has(source) && pexelsUrls.get(source) !== url) { pexelsBrowse.forget(source); editor.retirePexelsService(source); }
-      pexelsUrls.set(source, url);
+    for (const [source, { label }] of pexelsUrls) if (!active.has(source)) { pexelsBrowse.forget(source); editor.retirePexelsService(source, label); pexelsUrls.delete(source); }
+    for (const { source, url, label } of pexelsSources()) {
+      if (pexelsUrls.has(source) && pexelsUrls.get(source).url !== url) { pexelsBrowse.forget(source); editor.retirePexelsService(source, label); }
+      pexelsUrls.set(source, { url, label });
     }
   });
   const browse = getter => { browseVersion(); return getter(); };
@@ -129,7 +130,7 @@ function ModalBody(props) {
     state: (service, photo) => read(() => editor.pexelsState(id, service.source, photo)),
     label: (service, photo) => browse(() => pexelsLabel(pexelsBrowse.photo(service.source, photo), photo)),
     thumbnail: (service, photo) => services.pexelsApi.pexelsThumbnail(service.source, photo, service.url),
-    toggle: (service, photo) => editor.togglePexels(id, service.source, photo, service.url),
+    toggle: (service, photo) => editor.togglePexels(id, service.source, photo, service.url, service.label),
   });
   const targets = () => read(editor.targets);
   const destination = () => read(editor.destination);

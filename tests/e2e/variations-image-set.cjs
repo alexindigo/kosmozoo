@@ -143,6 +143,10 @@ module.exports = async ({ cdp, FAKE, KZ, check }) => {
     await addFolder('relative');
     await cdp.poll("document.querySelector('.vz-folder [role=status]')?.textContent.includes('absolute')");
     assert.equal(await cdp.evaluate("document.querySelectorAll('.vz-image-tile').length"), 4);
+    // Row 184: an unreadable folder names itself and the all-or-nothing outcome.
+    await addFolder(folder + '/missing');
+    await cdp.poll(`document.querySelector('.vz-folder [role=status]')?.textContent===${JSON.stringify(`Could not import "${folder}/missing": cannot read "${folder}/missing" (not found). Nothing from this import was added. Check the engine-host path and permissions, or choose another folder.`)}`);
+    assert.equal(await cdp.evaluate("document.querySelectorAll('.vz-image-tile').length"), 4);
     await addFolder(folder);
     await cdp.clickAt('.vz-image-tile[data-image-name="turn-folder.png"] .chrome-icon');
     await settledCount(cdp, '2');

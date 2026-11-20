@@ -1417,7 +1417,7 @@ body:has(#diff:not([hidden])) #statusCol { bottom: 56px; }
 /* One grid for the whole list; each row is a subgrid, so the key marker and
    remove columns are shared by every row whether or not a row fills them. */
 .pexels-services { list-style: none; margin: 0; padding: 0; display: grid;
-  grid-template-columns: auto minmax(0, 1fr) auto auto; column-gap: 6px; row-gap: 2px; }
+  grid-template-columns: auto minmax(0, 1fr) auto auto auto; column-gap: 6px; row-gap: 2px; }
 .pexels-service { display: grid; grid-column: 1 / -1; grid-template-columns: subgrid; align-items: center;
   border-radius: 4px; }
 .pexels-service.is-editing { background: var(--lifted); }
@@ -1429,7 +1429,8 @@ body:has(#diff:not([hidden])) #statusCol { bottom: 56px; }
 @keyframes pexels-checking { to { opacity: .3; } }
 @media (prefers-reduced-motion: reduce) { .pexels-service-status.is-checking { animation: none; } }
 .pexels-service-key { grid-column: 3; }
-.pexels-service > .icon-button { grid-column: 4; }
+.pexels-service > .icon-button { grid-column: 5; }
+.pexels-service > .icon-button.pexels-recheck { grid-column: 4; }
 .pexels-service-problem { font-size: 11px; color: var(--negative); }
 #chrome button.pexels-service-open { grid-column: 2; display: flex; flex-direction: column; align-items: stretch; min-width: 0; gap: 1px;
   padding: 3px 6px; background: none; border: 1px solid transparent; text-align: start; color: var(--foreground); }
@@ -1442,6 +1443,7 @@ body:has(#diff:not([hidden])) #statusCol { bottom: 56px; }
 #chrome button.pexels-remove { color: var(--negative); border-color: var(--negative-dim); }
 .pexels-settings-empty { margin: 0; color: var(--foreground-mid); font-size: 12px; }
 .pexels-settings-error { display: flex; align-items: center; gap: 8px; color: var(--error); }
+.pexels-settings-error-text { flex: 1; margin: 0; font-size: 12px; }
 .pexels-form { display: grid; grid-template-columns: auto minmax(0, 1fr); align-items: center; gap: 6px 8px; }
 .pexels-form label { white-space: nowrap; color: var(--foreground-mid); font-size: 12px; }
 .pexels-form .text-field { min-width: 0; width: 100%; }

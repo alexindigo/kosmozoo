@@ -3,6 +3,7 @@ import { IconButton } from "../../components/IconButton.js";
 import { TextField } from "../../components/TextField.js";
 import { SingleLineText } from "../../components/SingleLineText.js";
 import { iconSvg } from "/js/icons.mjs";
+import { problemText } from "/shared/features/variations/problems.mjs";
 
 // Settings row for Pexels-compatible services. The injected owner holds the
 // redacted list and mutations; this view keeps only the unsaved form.
@@ -36,7 +37,7 @@ export function PexelsSettings(props) {
     setBusy(false);
     if (!result.ok) { setMessage(draft()?.generation === value.generation ? result.error : `${value.name || "New service"}: ${result.error}`); return; }
     if (draft()?.generation === value.generation) setDraft(null);
-    setMessage(`${result.service.name} saved`);
+    setMessage(result.reloadProblem ? problemText(result.reloadProblem) : `${result.service.name} saved`);
   };
   const remove = async service => {
     setBusy(true); setMessage("");
@@ -44,7 +45,7 @@ export function PexelsSettings(props) {
     setBusy(false); setRemoving(null);
     if (!result.ok) { setMessage(result.error); return; }
     if (draft()?.id === service.id) setDraft(null);
-    setMessage(`${service.name} removed`);
+    setMessage(result.reloadProblem ? problemText(result.reloadProblem) : `${service.name} removed`);
   };
   const keyPlaceholder = () => draft().clearKey ? "Saved key will be removed" : draft().hasKey ? "Saved key is kept" : "Optional";
 
@@ -58,7 +59,7 @@ export function PexelsSettings(props) {
       </div>
       <Show when={state().error}>
         <div class="pexels-settings-error">
-          <SingleLineText role="status" value="Couldn't read Pexels services." hint={state().error} />
+          <p class="pexels-settings-error-text" role="status">{state().problem ? problemText(state().problem) : state().error}</p>
           <button type="button" class="btn" onClick={() => owner().checkAll()}>Retry</button>
         </div>
       </Show>
@@ -77,6 +78,9 @@ export function PexelsSettings(props) {
                   </Show>
                 </button>
                 <Show when={service.hasKey}><span class="pexels-service-key" role="img" aria-label="API key saved" title="API key saved" innerHTML={iconSvg("lock", 12)} /></Show>
+                <Show when={!busy() && owner().status(service.id).phase === "error"}>
+                  <IconButton chrome size="sm" variant="plain pexels-recheck" icon={iconSvg("refresh", 14)} title={`Check ${service.name} again`} onAction={() => owner().recheck(service.id)} />
+                </Show>
                 <Show when={!busy()}>
                   <IconButton chrome size="sm" variant="plain" icon={iconSvg("x", 14)} title={`Remove ${service.name}`} onAction={() => { setMessage(""); setRemoving(service.id); }} />
                 </Show>

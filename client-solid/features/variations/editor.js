@@ -566,14 +566,14 @@ export function makeVariationEditor({ targets, cohortMode, destination: initialD
     },
     // A service whose configuration changed retires its cached Files and any
     // read still in flight; images already in a set keep their own File.
-    retirePexelsService(service) {
+    retirePexelsService(service, name = service) {
       for (const [photo, cached] of pexelsFiles.get(service) ?? []) for (const [id] of cached.wanted)
-        report(`acquire:${id}`, "acquisition-retired", { phase: "acquisition", parameter: parameter(id), resource: `Photo ${photo}`, source: service });
+        report(`acquire:${id}`, "acquisition-retired", { phase: "acquisition", parameter: parameter(id), resource: `Photo ${photo}`, source: name });
       if (pexelsFiles.delete(service)) notify();
     },
     pexelsState(id, service, photo) { return cachedFileState(id, pexelsFiles.get(service)?.get(photo)); },
     // A chosen Pexels photo is an ordinary uploaded image once its bytes arrive.
-    togglePexels(id, service, photo, url) {
+    togglePexels(id, service, photo, url, name = service) {
       if (!alive || deciding || typeof service !== "string" || typeof photo !== "string" || typeof url !== "string" || !row("images", id) || !originCurrent(capturedTargets[0])) return false;
       if (!pexelsFiles.has(service)) pexelsFiles.set(service, new Map());
       const files = pexelsFiles.get(service);
@@ -581,7 +581,7 @@ export function makeVariationEditor({ targets, cohortMode, destination: initialD
         const file = await services.readPexelsPhoto(service, photo, url);
         if (!(file instanceof File) || !file.size) throw new Error("Invalid photo");
         return file;
-      }, () => alive && pexelsFiles.get(service) === files, { source: service, root: "photo" });
+      }, () => alive && pexelsFiles.get(service) === files, { source: name, root: "photo" });
     },
     // The server's own reason when it gave one; never the request path.
     catalogueFailure(error) {
@@ -629,20 +629,23 @@ export function makeVariationEditor({ targets, cohortMode, destination: initialD
       return result.status;
     },
     async addFolder(id, path) {
-      if (!alive || deciding || running) throw new Error("Finish the current action before adding a folder");
+      const refuse = detail => problemError(variationProblem("folder-not-added", { phase: "acquisition", parameter: parameter(id), path, detail }));
+      if (!alive || deciding || running) throw refuse(`${running ? "a Run submission" : "a confirmation"} is still in progress; finish the current action before adding a folder`);
       const target = capturedTargets[0];
-      if (!originCurrent(target)) throw new Error(staleSource(target.host));
+      if (!originCurrent(target)) throw refuse(staleSource(target.host).replace(/[.\s]+$/, ""));
       const ticket = membershipTicket(id);
-      const result = await services.listFolder(path);
-      if (!originCurrent(target)) throw new Error(staleSource(target.host));
-      if (running || !admitsMembership(ticket)) throw new Error("The editor changed while reading the folder. Add it again when ready.");
-      if (!validImageSet(result?.items) || result.items.some(item => item.kind !== "server-path")) throw new Error("Invalid folder image listing");
+      let result;
+      try { result = await services.listFolder(path); }
+      catch (error) { throw problemError(problemFrom(error, { code: "folder-not-added", phase: "acquisition", parameter: parameter(id), path })); }
+      if (!originCurrent(target)) throw refuse(staleSource(target.host).replace(/[.\s]+$/, ""));
+      if (running || !admitsMembership(ticket)) throw refuse("The editor changed while reading the folder. Add it again when ready");
+      if (!validImageSet(result?.items) || result.items.some(item => item.kind !== "server-path")) throw refuse("Invalid folder image listing returned by the engine");
       const before = row("images", id).values.items.length;
       this.addImages(id, result.items);
       const added = row("images", id).values.items.length - before;
       if (result.skipped?.links || result.skipped?.other) report(`folder:${id}`, "folder-skipped", { severity: "warning", phase: "acquisition", parameter: parameter(id), path,
         numbers: { images: added, ...result.skipped } });
-      return { count: added, listed: result.items.length, skipped: result.skipped };
+      return { count: added, listed: result.items.length, skipped: result.skipped, path: result.path ?? path };
     },
     removeImage(id, item) {
       return this.edit("images", id, "items", row("images", id).values.items.filter(other => !sameImage(item, other)));

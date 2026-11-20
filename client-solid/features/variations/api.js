@@ -64,8 +64,9 @@ export const folderCapability = () => req("GET", "/api/features/variations/folde
 export const chooseFolder = async (path, signal) => {
   const response = await fetch("/api/features/variations/choose-folder", { method: "POST", signal,
     headers: { "Content-Type": "application/json" }, body: JSON.stringify({ path }) });
-  const result = await response.json();
-  if (!response.ok) throw new Error(result.error || "Folder chooser unavailable");
+  let result;
+  try { result = await response.json(); } catch { throw new Error(`the engine returned an unreadable reply (HTTP ${response.status})`); }
+  if (!response.ok) throw new Error(result.error || `Folder chooser unavailable (HTTP ${response.status})`);
   return result;
 };
 export const pathThumbnail = path => `/api/features/variations/folder-image?path=${encodeURIComponent(path)}`;
@@ -134,11 +135,11 @@ export const pexelsFileName = (photo, extension) =>
 export async function readPexelsPhoto(id, photo, url) {
   const response = await fetch(pexelsPhotoPath(id, photo, url, "image"));
   if (!response.ok) {
-    let message = `Photo unavailable (${response.status})`;
-    try { message = (await response.json()).error ?? message; } catch { /* non-JSON body */ }
-    throw new Error(message);
+    let message = `Photo unavailable (HTTP ${response.status})`, problem = null;
+    try { const body = await response.json(); message = body.error ?? message; problem = body.problem ?? null; } catch { /* non-JSON body */ }
+    throw Object.assign(new Error(message), { status: response.status, ...(problem ? { problem } : {}) });
   }
   const blob = await response.blob(), extension = PEXELS_EXTENSIONS[blob.type];
-  if (!extension) throw new Error("The service sent a file that isn't a supported image");
+  if (!extension || !blob.size) throw problemError(variationProblem("pexels-mime", { phase: "pexels", source: id, photo, detected: blob.size ? blob.type || "unrecognized content" : "empty file" }));
   return new File([blob], pexelsFileName(photo, extension), { type: blob.type });
 }

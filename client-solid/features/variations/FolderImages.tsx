@@ -4,7 +4,7 @@ import { IconButton } from "../../components/IconButton.js";
 import { iconSvg } from "/js/icons.mjs";
 import { SingleLineText } from "../../components/SingleLineText.js";
 import { TextField } from "../../components/TextField.js";
-import { variationProblem } from "/shared/features/variations/problems.mjs";
+import { variationProblem, problemFrom, problemText } from "/shared/features/variations/problems.mjs";
 import { ProblemFeedback } from "./ProblemFeedback.js";
 
 // Presentation-only acquisition form; the private editor owns listing acceptance
@@ -23,10 +23,12 @@ export function FolderImages(props) {
     chooser = controller; setChoosing(true); setMessage("");
     try {
       const result = await props.onChoose(path(), controller.signal);
-      if (alive && !suspended && !controller.signal.aborted && revision === captured && result.path !== null) {
-        setPath(result.path); revision++;
+      // Cancelling the chooser is not an error; a choice overtaken by typing is reported.
+      if (alive && !suspended && !controller.signal.aborted && result.path !== null) {
+        if (revision === captured) { setPath(result.path); revision++; }
+        else setMessage(problemText(variationProblem("chooser-stale", { severity: "warning", phase: "acquisition", path: result.path })));
       }
-    } catch (error) { if (alive && !controller.signal.aborted) setMessage(error.message); }
+    } catch (error) { if (alive && !controller.signal.aborted) setMessage(problemText(variationProblem("chooser-failed", { phase: "acquisition", detail: error.detail || error.message }))); }
     finally { if (alive && chooser === controller) { chooser = null; setChoosing(false); } }
   };
   const add = async () => {
@@ -34,8 +36,9 @@ export function FolderImages(props) {
     setBusy(true); setMessage("");
     try {
       const result = await props.onAdd(path());
-      if (alive) setMessage(result.count ? `Added ${result.count} of ${result.listed ?? result.count} images from ${path()}.` : result.listed ? `Added 0 of ${result.listed} images; they were already in the set.` : "No images found in this folder.");
-    } catch (error) { if (alive) setMessage(error.message); }
+      if (alive) setMessage(result.count ? `Added ${result.count} of ${result.listed ?? result.count} images from ${path()}.` : result.listed ? `Added 0 of ${result.listed} images; they were already in the set.`
+        : problemText(variationProblem("folder-empty", { severity: "warning", phase: "acquisition", path: result.path ?? path(), numbers: { other: result.skipped?.other ?? 0, links: result.skipped?.links ?? 0 } })));
+    } catch (error) { if (alive) setMessage(problemText(problemFrom(error, { code: "folder-not-added", phase: "acquisition", path: path() }))); }
     finally { if (alive) setBusy(false); }
   };
   return <div class="vz-folder">
