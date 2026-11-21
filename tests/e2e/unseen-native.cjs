@@ -26,7 +26,9 @@ async function run(page){
 
     await page.send('Emulation.setDeviceMetricsOverride',{width:800,height:900,deviceScaleFactor:1,mobile:false});await anchor();
     const image=`native/${run}/geometry.png`;
-    await owned.publish([{name:image,fixture:'flux-basic.png',width:20,height:20,mtime:1}]);await refresh();await page.poll(unseen(image));
+    // Put the covered item before the bulk tail: native bottom clamping must
+    // not make the requested popup/media overlap physically impossible.
+    await owned.publish([{name:image,fixture:'flux-basic.png',width:20,height:20,mtime:4102445002}]);await refresh();await page.poll(unseen(image));
     await invoke('keys.panel.toggle');await navigate(image);await invoke('source.menu.open');
     await page.evaluate(`(()=>{const a=document.querySelector('.card[data-name="${image}"] img').getBoundingClientRect(),b=document.querySelector('#hostDrop').getBoundingClientRect(),c=document.querySelector('#candidatesCol');c.scrollTop+=(a.top+a.height/2)-(b.top+b.height/2);})()`);await frame();
     const before=await page.evaluate(`(()=>{const e=document.querySelector('.card[data-name="${image}"] img'),a=e.getBoundingClientRect(),b=document.querySelector('#hostDrop').getBoundingClientRect();return {covered:a.left>=b.left&&a.right<=b.right&&a.top>=b.top&&a.bottom<=b.bottom,src:e.getAttribute('src'),scroll:document.querySelector('#candidatesCol').scrollTop,width:a.width};})()`);assert(before.covered);

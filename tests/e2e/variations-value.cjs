@@ -67,8 +67,9 @@ module.exports = async ({ cdp, check, KZ, FAKE }) => {
     // Observe the terminal graph, then verify the next session's fresh defaults.
     await fetch(FAKE+'/__test/activity',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({captureEnqueue:true})});
     const before = (await (await fetch(FAKE+'/__test/enqueues')).json()).length;
+    await settledCount(cdp, '1');
     await cdp.clickAt('.vz-run');
-    await cdp.poll("document.querySelector('.vz-queued')?.textContent==='Queued 1 of 1 jobs'");
+    await cdp.poll("document.querySelector('.vz-queued')?.textContent==='1 confirmed, 0 partial, 0 unknown, 0 unsent; 1 sent.'");
     const jobs = (await (await fetch(FAKE+'/__test/enqueues')).json()).slice(before);
     assert.equal(jobs.length,1); assert.equal(jobs[0].prompt['9'].inputs.denoise,.9);
     check('numeric modes: Value Run enqueues exactly one final graph with denoise 0.9',true);

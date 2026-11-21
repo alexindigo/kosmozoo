@@ -54,6 +54,9 @@ async function preload(cdp, check) {
   };
   await cdp.send('Network.enable');
   await cdp.send('Network.clearBrowserCache');
+  // This probe owns the resource-timing interval. Boot/module traffic can fill
+  // Chromium's finite timeline before any of these thumbnail requests start.
+  await cdp.evaluate('performance.clearResourceTimings()');
   try {
     await cdp.clickAt('.vz-input-trigger');
     await cdp.poll("document.querySelectorAll('.vz-input-option').length>0");

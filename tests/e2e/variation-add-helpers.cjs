@@ -33,4 +33,10 @@ async function settledCount(cdp, expected, { and = 'true', timeout = 20000 } = {
     throw error;
   }
 }
-module.exports = { addParameter, toggleParameter, removeRecordedImage, settledCount };
+// Scenario command port: an intended Run waits for the same public admission
+// settlement as the native button. Invalid raw values still reach Run unchanged.
+const variationInvoker = (cdp, store) => async (id, args = {}) => {
+  if (id === 'variations.run') await settledCount(cdp);
+  return cdp.evaluate(`(async()=>${store}.handles.invoke(${JSON.stringify(id)},${JSON.stringify(args)}))()`);
+};
+module.exports = { addParameter, toggleParameter, removeRecordedImage, settledCount, variationInvoker };

@@ -16,6 +16,7 @@ module.exports = async ({ cdp, check, ENGINE, FAKE, KZ }) => {
   try {
     await cdp.poll(`(async()=>!!${KZ}.state.hosts['${source}'])()`);
     await cdp.evaluate(`fetch('/api/collections/${source}/entries/${filename}/bytes').then(r=>{if(!r.ok)throw Error(r.status);return r.arrayBuffer()}).then(()=>true)`);
+    await invoke('source.select', { id: source });
     await invoke('variations.open', { id: `${source}:${filename}` });
     await cdp.poll(`!!document.querySelector('[data-catalogue-id="459:500.sampling_mode"]')`);
     await cdp.send('Emulation.setDeviceMetricsOverride', { width: 1600, height: 1000, deviceScaleFactor: 1, mobile: false });

@@ -18,8 +18,10 @@ function check(name, ok, detail = '') {
   page.ws.onmessage = event => {
     receive(event);
     const message = JSON.parse(event.data);
-    if (message.method === 'Network.responseReceived' &&
-        message.params.response.url.endsWith('/api/collections/unreachable/entries?inventory=1')) unreachableReads++;
+    if (message.method === 'Network.responseReceived') {
+      const url = new URL(message.params.response.url);
+      if (url.pathname === '/api/collections/unreachable/entries' && url.searchParams.get('inventory') === '1') unreachableReads++;
+    }
   };
   try {
     const collections = await (await fetch(ENGINE + '/api/collections')).json();
@@ -35,7 +37,7 @@ function check(name, ok, detail = '') {
         const feed=box(document.querySelector('#candidatesCol')), message=box(document.querySelector('.feed-empty p'));
         return {feed,message,dx:Math.abs(feed.x+feed.w/2-message.x-message.w/2),dy:Math.abs(feed.y+feed.h/2-message.y-message.h/2),
           text:document.querySelector('.feed-empty').textContent,errors:document.querySelectorAll('#statusStack .statuschip.error').length,
-          dialogs:document.querySelectorAll('[role="dialog"],dialog[open]').length};
+          dialogs:[...document.querySelectorAll('[role="dialog"],dialog[open]')].filter(el=>el.checkVisibility()).length};
       })()`);
       check(`empty message centered in feed at ${width}×${height}`, geometry.dx < 1 && geometry.dy < 1,
         JSON.stringify(geometry));

@@ -754,6 +754,7 @@ async function railMotion(page) {
     await page.send('Input.insertText', { text: 'pending source-refresh note' });
     await page.poll(`(async () => ${KZ}.state.drafts['fake:flux-basic.png:pos']?.includes('pending source-refresh note'))()`);
     await page.clickAt(origin + ' .variations');
+    await require('./variation-add-helpers.cjs').addParameter(page, '9.denoise');
     await page.poll(`!!document.querySelector('.vz-row-inc-input')`, 20000);
     await page.evaluate(`(() => {
       const input = document.querySelector('.vz-row-inc-input');

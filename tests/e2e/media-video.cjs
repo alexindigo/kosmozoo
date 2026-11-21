@@ -1,6 +1,6 @@
 // Production listing/bytes/metadata -> shared player -> native browser outcome.
 const { sleep } = require('./cdp.cjs');
-const { settledCount } = require('./variation-add-helpers.cjs');
+const { addParameter, settledCount } = require('./variation-add-helpers.cjs');
 module.exports = async ({ page, ENGINE, KZ, check, capture, control }) => {
   const a = 'video/fixture_e2e-media-a.webm', b = 'video/fixture_e2e-media-b.webm', mp4 = 'video/fixture_e2e-media.mp4', broken = 'video/e2e-media-broken.mov';
   const real = process.env.E2E_REAL_VIDEO_FIXTURE ? 'video/e2e-media-real.mp4' : null;
@@ -192,13 +192,14 @@ module.exports = async ({ page, ENGINE, KZ, check, capture, control }) => {
     await page.poll(`document.querySelector('#workspace .info-body').textContent.includes('A moving cosmic zoo')`, 20000);
     check('video details consume embedded parameters', await page.evaluate(`(async()=>${KZ}.state.currentEntry().entry.meta.seed===42)()`));
     await invoke('variations.open', { id: `fake:${a}` });
+    await addParameter(page, '2.steps');
     await page.poll(`document.querySelectorAll('.vz-slider-row').length>0`, 20000);
     check('video Variations probe opens editable parameters', true);
     // The fixture has no denoise default axis. Explicitly enable steps so Run
     // requests non-current permutations rather than just renaming an empty set.
-    await page.clickAt('.vz-slider-row[data-param-key="2.steps"] .checkbox');
     await settledCount(page, { test: 'Number(count)>0' });
     await page.evaluate(`(() => { const el=document.querySelector('.vz-prefix'); if(!el)throw new Error('prefix missing'); el.value='video-test_';el.dispatchEvent(new Event('input',{bubbles:true})); })()`);
+    await settledCount(page, { test: 'Number(count)>0' });
     const run = await invoke('variations.run');
     console.log('VIDEO VARIATIONS RUN', JSON.stringify(run));
     console.log('VIDEO VARIATIONS RESULT', await page.evaluate(`document.querySelector('.vz-error')?.textContent`));

@@ -3,7 +3,8 @@ module.exports = async ({ page, ENGINE, FAKE, KZ, check, capture }) => {
   const run=require('node:crypto').randomUUID();
   const names=Object.fromEntries(['new','current','off-tape','reduced'].map(key=>[key,`arrival/${run}/${key}.png`]));
   const jobs=Object.fromEntries(['first','current','reduced'].map(key=>[key,`arrival-${run}-${key}`]));
-  const other = new URL(FAKE); other.port = String(Number(other.port) + 1);
+  const other = new URL(process.env.E2E_FAKE2 ?? FAKE);
+  if (!process.env.E2E_FAKE2) other.port = String(Number(other.port) + 1);
   const control = async body => {
     const response = await fetch(other.origin + '/__test/activity', { method: 'POST',
       headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });

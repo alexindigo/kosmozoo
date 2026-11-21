@@ -77,6 +77,9 @@ const graph = (withImage, value = amount) => ({
     // unchanged 3000-item stack continues background metadata publication. This
     // also gives the row intent a non-default filename condition to preserve.
     await edit('filename', 'info-filter/');
+    // A parameter condition owns full metadata demand outside the filtered feed;
+    // ordinary background inventory only requests dimensions.
+    await edit('parameter', 'FilterFixture.amount');
     await page.poll(`document.querySelector('#workspace .info-filter-action button')`, 30000);
     await page.poll(`document.querySelector('.card[data-name="info-filter/plain.png"] img')?.naturalWidth>0`, 30000);
     const rows = '#workspace .info-filter-row[data-parameter="FilterFixture.amount"]';
@@ -220,7 +223,8 @@ const graph = (withImage, value = amount) => ({
     assert.deepEqual(errors, []);
     console.log('ok Info filter: exact occurrence, atomic replacement, feed/selection, both branches/layouts, literal CRLF, native edit, URL/Back, hover/focus/keyboard/touch geometry and reference/disclosure');
   } catch (error) {
-    console.error('fixture diagnostics', await state('({model:s.state.feedFilter(),current:s.state.current(),count:s.state.entriesWithKnownSize().length})'), errors);
+    console.error('fixture diagnostics', await state('({model:s.state.feedFilter(),current:s.state.current(),count:s.state.entriesWithKnownSize().length,late:(()=>{const e=s.state.images.find(e=>e.filename==="info-filter/registry.png");return e&&{name:e.filename,extracted:e.extracted,hasMeta:!!e.meta,hash:e.hash}})(),registry:!!s.state.nodesRegistry.LateFilterFixture})'), errors);
+    console.error('engine late registry', (await (await fetch(ENGINE+'/api/nodes')).json()).LateFilterFixture ?? null);
     throw error;
   } finally { await page.close(); }
 })().catch(error => { console.error(error); process.exitCode = 1; });

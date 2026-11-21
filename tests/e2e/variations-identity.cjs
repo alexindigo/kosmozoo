@@ -9,7 +9,7 @@ module.exports = async ({ cdp, FAKE, KZ, check }) => {
       headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) } : {});
     assert(response.ok); return response.json();
   };
-  const invoke = (id, args = {}) => cdp.evaluate(`(async()=>${KZ}.handles.invoke(${JSON.stringify(id)},${JSON.stringify(args)}))()`);
+  const invoke = require('./variation-add-helpers.cjs').variationInvoker(cdp,KZ);
   const type = async (selector, text) => {
     await cdp.clickAt(selector);
     await cdp.evaluate(`(()=>{const e=document.querySelector(${JSON.stringify(selector)});e.focus();e.select()})()`);
@@ -46,8 +46,8 @@ module.exports = async ({ cdp, FAKE, KZ, check }) => {
     await type('[data-param-key="20.strength_model"] .vz-row-inc-input', '0.3');
     for (const id of ['76.image', '81.image']) await addParameter(cdp,id);
     await cdp.poll("!!document.querySelector('[data-image-id=\"76.image\"] .vz-imgfilespick')");
-    await cdp.evaluate(`(()=>{const input=document.querySelector('[data-image-id="76.image"] .vz-imgfilespick'),dt=new DataTransfer();
-      dt.items.add(new File(['content'],'identity-content.png',{type:'image/png'}));input.files=dt.files;
+    await cdp.evaluate(`(async()=>{const input=document.querySelector('[data-image-id="76.image"] .vz-imgfilespick'),dt=new DataTransfer(),bytes=await(await fetch('/api/collections/fake/entries/flux-controlnet.png/bytes')).arrayBuffer();
+      dt.items.add(new File([bytes],'identity-content.png',{type:'image/png'}));input.files=dt.files;
       input.dispatchEvent(new Event('change',{bubbles:true}));window.__identityInput=input;window.__identityFile=input.files[0]})()`);
     // A scrolled second trigger must admit a real visible row, not merely create
     // an empty popup. Placement observes ancestor travel, never writes it.
@@ -61,6 +61,7 @@ module.exports = async ({ cdp, FAKE, KZ, check }) => {
       assert(geometry.scroll>0&&geometry.row&&geometry.visible,JSON.stringify(geometry));
     };
     await placedRow();await cdp.poll("!document.querySelector('.vz-image-check')");
+    await require('./variation-add-helpers.cjs').settledCount(cdp);
     await cdp.evaluate("new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(()=>requestAnimationFrame(resolve))))");
     await cdp.evaluate(`(()=>{const trigger=document.querySelector('[data-image-id="81.image"] .vz-input-trigger'),popup=document.querySelector('.vz-input-popover');const probe=window.__placementProbe={trigger,original:trigger.getBoundingClientRect,descriptor:Object.getOwnPropertyDescriptor(trigger,'getBoundingClientRect'),reads:0,writes:0};trigger.getBoundingClientRect=function(...args){probe.reads++;return probe.original.apply(this,args)};probe.observer=new MutationObserver(records=>probe.writes+=records.length);probe.observer.observe(popup,{attributes:true,attributeFilter:['style']})})()`);
     try{
@@ -111,7 +112,8 @@ module.exports = async ({ cdp, FAKE, KZ, check }) => {
       assert.equal(job.prompt['2'].inputs.text, 'positive-own');
       assert.equal(job.prompt['92:105'].inputs.text, 'negative-own');
       const names = Object.values(job.prompt).filter(node => node.class_type === 'SaveImage').map(node => node.inputs.filename_prefix);
-      assert(names.length); assert(names.every(name => !/[{}]/.test(name) && name.includes('_identity-content_ref_') && name.includes('_positive-own_negative-own')));
+      const textTokens=await cdp.evaluate("(async()=>{const {textName}=await import('/shared/features/variations/shared.mjs');return '_'+textName('positive-own')+'_'+textName('negative-own')})()");
+      assert(names.length); assert(names.every(name => !/[{}]/.test(name) && name.includes('_identity-content_ref_') && name.includes(textTokens)),JSON.stringify(names));
     }
     assert(await cdp.evaluate("window.__identityInput.files[0]===window.__identityFile"));
     await cdp.poll("!document.querySelector('.vz-panel')", 6000);

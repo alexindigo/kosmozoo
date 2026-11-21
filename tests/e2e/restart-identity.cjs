@@ -72,7 +72,7 @@ async function restart() {
     await post(B, '/api/collections', { name: 'fake', address: proof.before.address });
     await c.poll(`(async()=>!!${KZ}.state.hosts.fake&&${KZ}.state.hosts.fake.incarnation!==${JSON.stringify(proof.before.incarnation)})()`, 30000);
     proof.stale = await invoke('variations.run');
-    const message = 'fake was removed or changed since Variations opened. Nothing more was sent; reopen Variations to continue. Your edits are kept until you close.';
+    const message = `${name}: fake changed. Your edits remain here; previously issued jobs/uploads are not reversed.`;
     await c.poll(`document.querySelector('.vz-messages')?.textContent.includes(${JSON.stringify(message)})`);
     assert.equal((await (await fetch(F + '/__test/enqueues')).json()).length, before, 'stale registration sends no jobs');
     assert.deepEqual(errors, []);

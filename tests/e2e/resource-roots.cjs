@@ -135,7 +135,7 @@ const control = (base, body) => fetch(base + '/__test/activity', { method: 'POST
     await capture('roots-variations');
     const before = await (await fetch(FAKE + '/__test/enqueues')).json();
     await page.clickAt('.vz-run');
-    await page.poll(`(async()=>(await (await fetch(${JSON.stringify(FAKE + '/__test/enqueues')})).json()).length>${before.length})()`, 15000).catch(() => {});
+    await page.poll(`document.querySelector('.vz-queued')?.textContent==='1 confirmed, 0 partial, 0 unknown, 0 unsent; 1 sent.'`, 30000);
     const jobs = (await (await fetch(FAKE + '/__test/enqueues')).json()).slice(before.length);
     check('variations: the captured prompt assigns only the input-root name', jobs.length === 1 && jobs[0].prompt['13'].inputs.image === NAME &&
       jobs[0].prompt['11'].inputs.image === NAME && jobs[0].prompt['12'].inputs.image === `${NAME} [output]`, JSON.stringify(jobs.map(job => job.prompt['13'].inputs)));

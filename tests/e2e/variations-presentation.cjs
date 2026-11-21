@@ -93,6 +93,10 @@ const KZ = `(await import('/store/instance.js')).appStore`;
     assert.equal(await cdp.evaluate('document.querySelectorAll(".vz-parameter").length'),0);
     assert(await cdp.evaluate('[...document.querySelectorAll(".vz-catalogue-add")].every(el=>el.querySelector("svg")&&!el.textContent.includes("->"))'));
     await shot('catalogue');
+    // Geometry/focus is tested with productive work, not a disabled zero-job Run.
+    await addParameter(cdp, '92:105.object');
+    await write('[data-candidate-id="92:105.object"] textarea', '{"layout":true}');
+    await require('./variation-add-helpers.cjs').settledCount(cdp, '1');
     const layouts=[];
     for(const [width,height] of [[1600,1000],[1024,768],[768,600],[500,700],[360,640],[1024,360]]){
       await cdp.send('Emulation.setDeviceMetricsOverride',{width,height,deviceScaleFactor:1,mobile:false});

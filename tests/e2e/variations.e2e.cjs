@@ -351,12 +351,13 @@ async function main() {
         const row = document.querySelector('.vz-catalogue-row:not(.vz-catalogue-hidden)');
         if (!row) return { error: 'no off row' };
         const vis = (el) => el && getComputedStyle(el).visibility !== 'hidden' && el.getBoundingClientRect().width > 0;
+        const current = row.querySelector('.vz-catalogue-current .single-line-text') ?? row.querySelector('.vz-catalogue-current');
         return {
           rail: vis(row.querySelector('.vz-rail')),
           marker: vis(row.querySelector('.vz-marker')),
           sliderHidden: !vis(row.querySelector('.vz-slider')),
           current: row.querySelector('.vz-catalogue-current').textContent,
-          compact: row.getBoundingClientRect().height <= 52,
+          compact: getComputedStyle(current).whiteSpace === 'nowrap' && current.scrollHeight <= current.clientHeight + 1,
           editorAbsent: !row.querySelector('.vz-numeric-editor'),
         };
       })()`);

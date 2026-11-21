@@ -25,9 +25,20 @@ exports.pickInput = async (cdp, name, row = '.vz-image-set') => {
 
 // Native selected previews are viewport-owned. A field/acquisition interaction
 // may have scrolled their sheet away; reveal the consumer before checking pixels.
+exports.waitForVisibleImages = (cdp, selector) => cdp.poll(`(()=>{
+  const images=[...document.querySelectorAll(${JSON.stringify(selector)})].filter(img=>{
+    const r=img.getBoundingClientRect();let left=Math.max(0,r.left),top=Math.max(0,r.top),right=Math.min(innerWidth,r.right),bottom=Math.min(innerHeight,r.bottom);
+    for(let parent=img.parentElement;parent;parent=parent.parentElement){const style=getComputedStyle(parent),box=parent.getBoundingClientRect();
+      if(/auto|scroll|hidden|clip/.test(style.overflowX)){left=Math.max(left,box.left);right=Math.min(right,box.right)}
+      if(/auto|scroll|hidden|clip/.test(style.overflowY)){top=Math.max(top,box.top);bottom=Math.min(bottom,box.bottom)}
+    }
+    return right>left&&bottom>top;
+  });
+  return images.length>0&&images.every(img=>img.complete&&img.naturalWidth>0);
+})()`);
 exports.waitForSelectedPreviews = async cdp => {
   await cdp.evaluate("document.querySelector('.vz-image-grid').scrollIntoView({block:'center'})");
-  await cdp.poll("[...document.querySelectorAll('.vz-image-tile img')].every(img=>img.complete&&img.naturalWidth>0)");
+  await exports.waitForVisibleImages(cdp, '.vz-image-tile img');
 };
 
 // Focus can settle before native scrolling reaches the virtualizer. Observe

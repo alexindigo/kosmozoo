@@ -18,7 +18,7 @@ const selectionSetup=async(cdp,twoTexts=true)=>{
   if(twoTexts){await addParameter(cdp,'42.text');await type('.vz-textrow[data-text-id="42.text"] .vz-text-values','negative text');}
 };
 module.exports=async({cdp,FAKE,KZ,check})=>{
-  const invoke=(id,args={})=>cdp.evaluate(`(async()=>${KZ}.handles.invoke(${JSON.stringify(id)},${JSON.stringify(args)}))()`);
+  const invoke=require('./variation-add-helpers.cjs').variationInvoker(cdp,KZ);
   const type=(selector,text)=>typeText(cdp,selector,text);
   const jobs=async()=>await(await fetch(FAKE+'/__test/enqueues')).json();
   const open=async()=>{

@@ -5,7 +5,7 @@ const { freshRecipe } = require('./recipe-helpers.cjs');
 const { addParameter, removeRecordedImage } = require('./variation-add-helpers.cjs');
 
 module.exports = async ({ cdp, check, FAKE, KZ }) => {
-  const invoke = (id, args = {}) => cdp.evaluate(`(async()=>${KZ}.handles.invoke(${JSON.stringify(id)},${JSON.stringify(args)}))()`);
+  const invoke = require('./variation-add-helpers.cjs').variationInvoker(cdp,KZ);
   const order = () => cdp.evaluate("[...document.querySelectorAll('.vz-image-tile')].map(el=>el.dataset.imageName)");
   const jobs = async () => (await fetch(FAKE + '/__test/enqueues')).json();
   await fetch(FAKE + '/__test/activity', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ captureEnqueue: true }) });

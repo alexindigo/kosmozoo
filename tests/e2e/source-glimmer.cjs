@@ -2,7 +2,7 @@ const assert = require('node:assert/strict');
 const KZ = `(await import('/store/instance.js')).appStore`;
 require('./loading-harness.cjs').run(async ({ page, release, waitHeld, shot, ENGINE }) => {
   const chrome = () => page.evaluate(`['#chrome','#feedRail'].map(s=>{const r=document.querySelector(s).getBoundingClientRect();return [r.x,r.y,r.width,r.height]})`);
-  await page.send('Fetch.enable', { patterns: [{ urlPattern: '*/api/collections/fake/entries?inventory=1' }] });
+  await page.send('Fetch.enable', { patterns: [{ urlPattern: '*/api/collections/fake/entries?inventory=1*' }] });
   await page.goto(ENGINE + '/#fake');
   await page.poll(`!!document.querySelector('#chrome') && !document.querySelector('#bootSplash')`);
   assert(await page.evaluate(`!!document.querySelector('.feed-glimmer')`), 'initial source glimmer after boot');
@@ -12,7 +12,7 @@ require('./loading-harness.cjs').run(async ({ page, release, waitHeld, shot, ENG
   await page.poll(`document.querySelector('#candidatesCol').scrollTop>1000`);
   const before = await chrome();
   await shot('loading-feed-before');
-  await page.send('Fetch.enable', { patterns: [{ urlPattern: '*/api/collections/another/entries?inventory=1' }] });
+  await page.send('Fetch.enable', { patterns: [{ urlPattern: '*/api/collections/another/entries?inventory=1*' }] });
   await page.evaluate(`(async()=>{void ${KZ}.actions.hosts.select('another')})()`);
   await page.poll(`!!document.querySelector('.feed-glimmer')`);
   assert.equal(await page.evaluate(`document.querySelectorAll('#grid .card').length`), 0, 'no virtualized cards while inventory held');
@@ -52,7 +52,7 @@ require('./loading-harness.cjs').run(async ({ page, release, waitHeld, shot, ENG
   await release(); await page.send('Fetch.disable');
   await page.poll(`!document.querySelector('.feed-glimmer') && document.querySelectorAll('#grid .card').length>0`);
   assert.deepEqual(await chrome(), before, 'accepted inventory keeps chrome geometry');
-  await page.send('Fetch.enable', { patterns: [{ urlPattern: '*/api/collections/another/entries?inventory=1' }] });
+  await page.send('Fetch.enable', { patterns: [{ urlPattern: '*/api/collections/another/entries?inventory=1*' }] });
   await page.evaluate(`(async()=>{void ${KZ}.actions.ui.refresh()})()`);
   await waitHeld();
   assert.equal(await page.evaluate(`!!document.querySelector('.feed-glimmer')`), false, 'same-source refresh has no glimmer');

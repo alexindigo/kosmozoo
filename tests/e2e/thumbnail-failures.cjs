@@ -4,6 +4,8 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const { CDP, collectPageErrors, sleep } = require('./cdp.cjs');
 const { workPath } = require('./paths.cjs');
+const { addParameter, removeRecordedImage } = require('./variation-add-helpers.cjs');
+const { openImageAdd } = require('./image-picker-helpers.cjs');
 const ENGINE = process.env.E2E_ENGINE || 'http://127.0.0.1:18260';
 const FAKE = process.env.E2E_FAKE || 'http://127.0.0.1:18261';
 const names = ['thumb-#athena.png', 'thumb-%2F%25.png', 'thumb-?query.png', 'thumb-space café 日本.png',
@@ -35,6 +37,7 @@ async function thumbnails({ cdp, check }) {
   await cdp.goto(ENGINE + '/#fake#flux-controlnet.png');
   await cdp.poll("!!document.querySelector('.card')", 20000);
   await cdp.evaluate(`(async()=>${KZ}.handles.invoke('variations.open',{id:'fake:flux-controlnet.png'}))()`);
+  await addParameter(cdp, '43.image'); await removeRecordedImage(cdp, '43.image'); await openImageAdd(cdp);
   await cdp.poll("!!document.querySelector('.vz-input-trigger')");
   await cdp.clickAt('.vz-input-trigger');
   await cdp.poll("document.querySelectorAll('.vz-input-option').length>0");
@@ -93,7 +96,7 @@ async function thumbnails({ cdp, check }) {
       return;
     }
     await cdp.poll("!!document.querySelector('.vz-input-tile .vz-thumbnail-failure:not([hidden])')", 3000);
-    check('failed picker preview has explicit state and named retry', await cdp.evaluate(`(()=>{const t=document.querySelector(${JSON.stringify(option(names[0]))}).parentElement;return !t.querySelector('.vz-thumbnail-failure').hidden&&t.textContent.includes('Preview failed')&&t.querySelector('.vz-thumbnail-retry').getAttribute('aria-label')===${JSON.stringify('Retry preview for ' + names[0])}})()`));
+    check('failed picker preview has explicit state and named retry', await cdp.evaluate(`(()=>{const t=document.querySelector(${JSON.stringify(option(names[0]))}).parentElement;return !t.querySelector('.vz-thumbnail-failure').hidden&&t.textContent.includes(${JSON.stringify('Preview for ' + names[0] + ' could not load')})&&t.querySelector('.vz-thumbnail-retry').getAttribute('aria-label')===${JSON.stringify('Retry preview for ' + names[0])}})()`));
     await geometry('failed');
     await cdp.clickAt(option(names[0]));
     await cdp.poll(`${`document.querySelector(${JSON.stringify(option(names[0]))})`}.getAttribute('aria-selected')==='true'`);

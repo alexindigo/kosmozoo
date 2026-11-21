@@ -70,7 +70,7 @@ const timing = (id, output, milliseconds) => ({ id, output, fixture: 'flux-basic
     await field(row + ' .vz-range-field:nth-child(2) input', '19');
     await field(row + ' .vz-row-inc-input', '1');
     await wait('2', '24m');
-    await field(row + ' .vz-row-inc-input', '-'); await wait('—', '--');
+    await field(row + ' .vz-row-inc-input', '-'); await wait('--', '--');
     await close();
     await open(['estimate/a.png', 'estimate/b.png']); await wait('2', '18m'); await close();
     await open(['estimate/a.png', 'estimate/unknown.png']);

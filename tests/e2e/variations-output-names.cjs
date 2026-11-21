@@ -9,7 +9,7 @@ module.exports = async ({ cdp, check, FAKE, KZ }) => {
     '9': { class_type: 'BasicScheduler', inputs: { denoise: 1 } },
     '461': { class_type: 'SaveImage', inputs: { filename_prefix: 'Qwen_image_2.1', images: ['470', 0] } },
   };
-  const invoke = (id, args = {}) => cdp.evaluate(`(async()=>${KZ}.handles.invoke(${JSON.stringify(id)},${JSON.stringify(args)}))()`);
+  const invoke = require('./variation-add-helpers.cjs').variationInvoker(cdp,KZ);
   const jobs = async () => (await fetch(FAKE + '/__test/enqueues')).json();
   const type = async (selector, text) => {
     await cdp.evaluate(`(()=>{const e=document.querySelector(${JSON.stringify(selector)});e.focus();e.select()})()`);

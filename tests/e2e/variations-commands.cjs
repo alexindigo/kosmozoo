@@ -3,12 +3,12 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const { workPath } = require('./paths.cjs');
 const { freshRecipe } = require('./recipe-helpers.cjs');
-const { addParameter } = require('./variation-add-helpers.cjs');
+const { addParameter, settledCount } = require('./variation-add-helpers.cjs');
 const fileControl = '.vz-imgrow:not(.vz-enumrow):not(.vz-textrow) .vz-parameter-remove';
 const fileSetup = async (cdp) => {
   await addParameter(cdp, '43.image');
   await cdp.poll(`!!document.querySelector('.vz-imgfilespick')`);
-  await cdp.evaluate(`(()=>{const e=document.querySelector('.vz-imgfilespick'),dt=new DataTransfer();dt.items.add(new File(['a'],'a.png',{type:'image/png'}));dt.items.add(new File(['b'],'b.png',{type:'image/png'}));e.files=dt.files;e.dispatchEvent(new Event('change',{bubbles:true}));window.__fileInput=e;window.__files=[...e.files]})()`);
+  await cdp.evaluate(`(async()=>{const e=document.querySelector('.vz-imgfilespick'),dt=new DataTransfer(),key=crypto.randomUUID();for(const [name,fixture]of [['a','flux-lora.png'],['b','flux-controlnet.png']]){const bytes=await(await fetch('/api/collections/fake/entries/'+fixture+'/bytes')).arrayBuffer();dt.items.add(new File([bytes],name+'-'+key+'.png',{type:'image/png'}))}e.files=dt.files;e.dispatchEvent(new Event('change',{bubbles:true}));window.__fileInput=e;window.__files=[...e.files]})()`);
 };
 
 async function verifyFileReadiness({ cdp, KZ, check }) {
@@ -261,25 +261,32 @@ module.exports = async ({ cdp, check, FAKE, KZ }) => {
     await open('flux-controlnet.png'); await fileSetup(cdp);
     await addParameter(cdp, '2.text');
     await type('.vz-text-values','before upload text');
-    await cdp.evaluate(`(()=>{window.__originalFetch=window.fetch;window.__bodies=[];window.fetch=(url,options)=>{
-      if(options?.body instanceof FormData)return new Promise(resolve=>window.__upload=()=>resolve(new Response(JSON.stringify({name:options.body.get('image').name,origin:JSON.parse(options.headers['X-Kosmozoo-Origin'])}),{status:200})));
-      if(String(url).includes('/features/variations/run')){window.__bodies.push(JSON.parse(options.body));return Promise.resolve(new Response(JSON.stringify({submitted:1,total:1}),{status:200}))}
+    await fetch(`${FAKE}/__test/activity`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({captureEnqueue:true})});
+    await cdp.evaluate(`(()=>{window.__originalFetch=window.fetch;window.__bodies=[];window.__uploads=[];window.fetch=(url,options)=>{
+      if(options?.method==='PUT'&&String(url).includes('/features/variations/history/')&&String(url).includes('/resources/'))return new Promise(resolve=>window.__uploads.push(()=>resolve(window.__originalFetch(url,options))));
+      if(String(url).includes('/features/variations/run'))window.__bodies.push(JSON.parse(options.body));
       return window.__originalFetch(url,options)}})()`);
+    try {
     await type('.vz-prefix','before-upload');
+    await settledCount(cdp, { test: 'Number(count)>0' });
     await cdp.evaluate(`(async()=>{window.__run=${KZ}.handles.invoke('variations.run');return true})()`);
-    await cdp.poll(`typeof window.__upload==='function'`);
+    await cdp.poll(`window.__uploads.length===2`);
     await type('.vz-prefix','after-upload');
     await type('.vz-text-values','after upload text');
-    // Two picked files: release both upload awaits independently.
-    await cdp.evaluate(`window.__upload();window.__upload=null`);
-    await cdp.poll(`typeof window.__upload==='function'`);
-    await cdp.evaluate(`window.__upload()`);
+    // Archive writes are concurrent; neither has reached the engine before
+    // release. Upstream materialization and acceptance stay entirely real.
+    await cdp.evaluate(`window.__uploads.forEach(release=>release())`);
     assert.equal((await cdp.evaluate('window.__run')).status,'submitted');
     assert.equal(await cdp.evaluate(`window.__bodies[0].prefix`),'before-upload');
     assert.deepEqual(await cdp.evaluate(`Object.values(window.__bodies[0].imageParams).find(p=>p.values.includes('before upload text'))?.values`),['before upload text']);
     assert.equal(await cdp.evaluate(`document.querySelector('.vz-prefix').value`),'after-upload');
     await new Promise(r=>setTimeout(r,3200)); assert(await cdp.evaluate(`!!document.querySelector('.vz-panel')`));
-    await cdp.evaluate(`window.fetch=(url,options)=>String(url).includes('/features/variations/run')?new Promise(resolve=>window.__finish=()=>resolve(new Response(JSON.stringify({submitted:1,total:1}),{status:200}))):options?.body instanceof FormData?Promise.resolve(new Response(JSON.stringify({name:options.body.get('image').name,origin:JSON.parse(options.headers['X-Kosmozoo-Origin'])}),{status:200})):window.__originalFetch(url,options)`);
+    // The stale-terminal scenario owns a fresh draft and fresh input names.
+    // Earlier real uploads are completed effects, not fixtures to overwrite.
+    await cdp.evaluate(`window.fetch=window.__originalFetch`);
+    await discard(); await open('flux-controlnet.png'); await fileSetup(cdp);
+    await cdp.evaluate(`window.__finish=null;window.fetch=(url,options)=>{const response=window.__originalFetch(url,options);return String(url).includes('/features/variations/run')?response.then(value=>new Promise(resolve=>window.__finish=()=>resolve(value))):response}`);
+    await settledCount(cdp, { test: 'Number(count)>0' });
     await cdp.evaluate(`(async()=>{window.__oldRun=${KZ}.handles.invoke('variations.run');return true})()`);
     await cdp.poll(`typeof window.__finish==='function'`);
     await cdp.evaluate(`(async()=>{window.__replacement=${KZ}.handles.invoke('variations.open',{id:'fake:flux-basic.png'});return true})()`);
@@ -291,13 +298,18 @@ module.exports = async ({ cdp, check, FAKE, KZ }) => {
     await cdp.evaluate(`window.__finish()`);
     assert.equal((await cdp.evaluate('window.__oldRun')).status,'stale');
     assert.equal((await state()).session,reopenedA);
-    assert.equal(await cdp.evaluate(`document.querySelector('.vz-error').textContent`),'');
-    await cdp.evaluate(`window.fetch=window.__originalFetch`); await discard();
+    assert.equal(await cdp.evaluate(`document.querySelector('.vz-error')?.textContent??''`),'');
+    await discard();
+    } finally {
+      await cdp.evaluate(`window.fetch=window.__originalFetch`);
+      await fetch(`${FAKE}/__test/activity`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({captureEnqueue:false})});
+    }
   });
 
   await test('partial/zero/malformed counts stay open; acknowledged edited fields manually close; clean success auto-closes', async () => {
     for(const response of [{submitted:1,total:2},{submitted:0,total:0},{submitted:1},{submitted:1,total:1,errors:[{error:'failed permutation'}]}]){
       await open();
+      await settledCount(cdp, { test: 'Number(count)>0' });
       await cdp.evaluate(`(()=>{window.__originalFetch=window.fetch;window.fetch=(url,options)=>String(url).includes('/features/variations/run')?Promise.resolve(new Response(${JSON.stringify(JSON.stringify(response))},{status:200})):window.__originalFetch(url,options)})()`);
       assert.equal((await invoke('variations.run')).status,'failed');
       await new Promise(r=>setTimeout(r,3100));
@@ -306,12 +318,14 @@ module.exports = async ({ cdp, check, FAKE, KZ }) => {
     }
     await fetch(`${FAKE}/__test/activity`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({captureEnqueue:true})});
     await open(); await type('.vz-prefix','edited-acknowledged');
+    await settledCount(cdp, { test: 'Number(count)>0' });
     assert.equal((await invoke('variations.run')).status,'submitted');
     const jobs=await(await fetch(`${FAKE}/__test/enqueues`)).json();
     assert(jobs.length>0); assert(jobs.every(job=>job.prompt && job.extra_data));
     await requestClose(); await cdp.poll(`!document.querySelector('.vz-panel')`);
     assert.equal(await cdp.evaluate(`!!document.querySelector('.vz-discard')`),false);
-    await open(); assert.equal((await invoke('variations.run')).status,'submitted');
+    await open(); await settledCount(cdp, { test: 'Number(count)>0' });
+    assert.equal((await invoke('variations.run')).status,'submitted');
     await cdp.poll(`!document.querySelector('.vz-panel')`,6000);
     await fetch(`${FAKE}/__test/activity`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({captureEnqueue:false})});
   });

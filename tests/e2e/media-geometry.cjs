@@ -38,7 +38,11 @@ module.exports = async ({ page, KZ, check, capture, control }) => {
         await page.evaluate(`new Promise(r=>requestAnimationFrame(()=>requestAnimationFrame(r)))`);
         const result=await page.evaluate(`(()=>{const rect=e=>{const r=e.getBoundingClientRect();return{x:r.x,y:r.y,w:r.width,h:r.height,right:r.right,bottom:r.bottom}},stage=rect(document.getElementById('diffStage')),bar=rect(document.getElementById('diffBar')),dock=document.getElementById('diffMedia');return{stage,bar,dock:dock.hidden?null:rect(dock),play:!!document.querySelector('#diff .media-play'),layers:[...document.querySelectorAll('#diffStage .dz-a,#diffStage .dz-b')].map(e=>{const n=e.querySelector('img,video,audio'),m=n.tagName==='AUDIO'?e.querySelector('.media-audio-face'):n;return{cell:rect(e),media:rect(m),natural:n.tagName==='AUDIO'?[1024,160]:[n.videoWidth||n.naturalWidth,n.videoHeight||n.naturalHeight]}})}})()`);
         const near=(a,b)=>Math.abs(a-b)<=1;
-        check(kind+' '+mode+': no centre play and dock/toolbar have exact adjacent boundaries',!result.play&&(result.dock?near(result.stage.bottom,result.dock.y)&&near(result.dock.bottom,result.bar.y):near(result.stage.bottom,result.bar.y)),JSON.stringify(result));
+        // Installed still-image controls occupy their own real row between the
+        // media/dock and toolbar. Prove every boundary, not an assumed empty gap.
+        const featureRows=await page.evaluate(`Array.from(document.querySelectorAll('#diff > .face-controls-slot')).filter(e=>e.checkVisibility()).map(e=>{const r=e.getBoundingClientRect();return{y:r.y,bottom:r.bottom}})`);
+        const rows=[result.stage,...(result.dock?[result.dock]:[]),...featureRows,result.bar];
+        check(kind+' '+mode+': no centre play and every media/control/toolbar row is adjacent',!result.play&&rows.slice(1).every((row,i)=>near(rows[i].bottom,row.y)),JSON.stringify({...result,featureRows}));
         if(mode!=='difference'){
           check(kind+' '+mode+': each layer fits and centres its displayed natural rectangle',result.layers.every(({cell:c,media:m,natural:[w,h]})=>{const f=Math.min(1,c.w/w,c.h/h);return m.x>=c.x-1&&m.y>=c.y-1&&m.right<=c.right+1&&m.bottom<=c.bottom+1&&near(m.x+m.w/2,c.x+c.w/2)&&near(m.y+m.h/2,c.y+c.h/2)&&near(m.w,w*f)&&near(m.h,h*f)}),JSON.stringify(result));
         }else{

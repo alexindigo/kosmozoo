@@ -5,6 +5,7 @@ const fs = require('node:fs');
 const { CDP, collectPageErrors } = require('./cdp.cjs');
 const { workPath } = require('./paths.cjs');
 const { openImageFolder } = require('./image-picker-helpers.cjs');
+const { addParameter, toggleParameter, settledCount } = require('./variation-add-helpers.cjs');
 const ENGINE = process.env.E2E_ENGINE ?? 'http://127.0.0.1:18780';
 const FAKE = process.env.E2E_FAKE ?? 'http://127.0.0.1:18781';
 const KZ = '(await import("/store/instance.js")).appStore';
@@ -19,7 +20,8 @@ const KZ = '(await import("/store/instance.js")).appStore';
     records.push({ name, result }); if (!result) failures.push(name);
     console.log(`${result ? 'PASS' : 'FAIL'} ${name}`);
   };
-  const clean = selector => `![...document.querySelectorAll(${JSON.stringify(selector)})].some(e=>e.matches('[disabled],[aria-disabled]'))`;
+  // Run alone retains the documented count-admission disabled state.
+  const clean = selector => `![...document.querySelectorAll(${JSON.stringify(selector)})].some(e=>!e.matches('.vz-run')&&e.matches('[disabled],[aria-disabled]'))`;
   const capture = async name => {
     await frame(); const shot = await page.send('Page.captureScreenshot', { format: 'png' });
     fs.writeFileSync(workPath('artifacts', `available-${name}.png`), Buffer.from(shot.data, 'base64'));
@@ -80,8 +82,8 @@ const KZ = '(await import("/store/instance.js")).appStore';
 
     await page.evaluate("fetch('/api/collections/fake/entries/flux-controlnet.png/bytes').then(r=>r.arrayBuffer()).then(()=>true)");
     await invoke('variations.open', { id: 'fake:flux-controlnet.png' });
+    await addParameter(page, '43.image'); await addParameter(page, '9.denoise');
     await page.poll("!!document.querySelector('.vz-image-set')&&!!document.querySelector('.vz-row-inc-input')");
-    if (!await page.evaluate("document.querySelector('.vz-image-set .checkbox').checked")) await page.clickAt('.vz-image-set .checkbox');
     await openImageFolder(page);
     await check('actual browser folder form has no unavailable actions or disabled controls', `!document.querySelector('.vz-folder-chooser')&&!document.querySelector('.vz-folder-add')&&${clean('.vz-panel *, #chrome .folder-picker *')}`);
     await capture('folder');
@@ -90,11 +92,12 @@ const KZ = '(await import("/store/instance.js")).appStore';
     await page.evaluate("(()=>{const e=document.querySelector('.vz-row-inc-input');e.value='0.02';e.dispatchEvent(new Event('input',{bubbles:true}))})()");
     await check('halve step above its floor is available', "!!document.querySelector('.vz-row-inc [title=\"Halve step\"]')");
     await page.evaluate(`(()=>{const original=window.fetch;window.__availableRestore=()=>window.fetch=original;window.fetch=(url,options)=>String(url).includes('/features/variations/run')?new Promise(resolve=>window.__availableRun=()=>resolve(new Response(JSON.stringify({error:'Availability test rejection'}),{status:400}))):original(url,options)})()`);
-    // Disable the empty image axis so the request reaches the transport.
-    await page.clickAt('.vz-image-set .checkbox');
+    // Remove the image axis and wait for the real count-admission boundary.
+    await toggleParameter(page, '43.image');
+    await settledCount(page, { test: 'Number(count)>0' });
     await page.evaluate(`(async()=>{window.__availablePending=${KZ}.handles.invoke('variations.run');return true})()`);
     await page.poll('!!window.__availableRun');
-    await check('queuing status replaces Run in the final sidebar slot', `!document.querySelector('button.vz-run')&&document.querySelector('.vz-run-slot [role=status]')?.textContent==='Queuing…'&&${clean('.vz-panel *')}`);
+    await check('submission status replaces Run in the final sidebar slot', `!document.querySelector('button.vz-run')&&document.querySelector('.vz-run-slot [role=status]')?.textContent.startsWith('Submitting ')&&!!document.querySelector('.vz-run-slot .vz-submit-spinner')&&${clean('.vz-panel *')}`);
     await page.evaluate('__availableRun()'); await page.poll("!!document.querySelector('button.vz-run')");
     await page.evaluate('__availableRestore()');
     await page.evaluate(`(async()=>{${KZ}.handles.invoke('variations.close');return true})()`);
@@ -106,17 +109,18 @@ const KZ = '(await import("/store/instance.js")).appStore';
     await page.poll(`(async()=>!!${KZ}.state.hosts['availability-owner'])()`);
     await page.evaluate("fetch('/api/collections/availability-owner/entries/flux-basic.png/bytes').then(r=>r.arrayBuffer()).then(()=>true)");
     await invoke('variations.open', { id: 'availability-owner:flux-basic.png' }); await page.poll("!!document.querySelector('.vz-prefix')");
-    await page.poll("document.querySelectorAll('.vz-slider-row').length>0");
+    await addParameter(page, '9.denoise');
     await page.clickAt('.vz-prefix'); await page.send('Input.insertText', { text: 'retained-prefix' });
     await page.poll("document.querySelector('.vz-prefix').value==='retained-prefix'");
     // A real accepted fake run closes and releases this draft.
+    await settledCount(page, { test: 'Number(count)>0' });
     await invoke('variations.run'); await page.poll("!document.querySelector('.vz-panel')", 6000);
     const old = await page.evaluate(`(async()=>${KZ}.state.hosts['availability-owner'].sourceVersion.incarnation)()`);
     await http(ENGINE, '/api/collections/availability-owner', 'DELETE');
     await http(ENGINE, '/api/collections', 'POST', { name: 'availability-owner', address: new URL(FAKE).host });
     await page.poll(`(async()=>${KZ}.state.hosts['availability-owner']?.sourceVersion.incarnation!==${JSON.stringify(old)}&&!!${KZ}.state.hosts['availability-owner'])()`);
     await page.evaluate("fetch('/api/collections/availability-owner/entries/flux-basic.png/bytes').then(r=>r.arrayBuffer()).then(()=>true)");
-    await invoke('variations.open', { id: 'availability-owner:flux-basic.png' }); await page.poll("document.querySelectorAll('.vz-slider-row').length>0");
+    await invoke('variations.open', { id: 'availability-owner:flux-basic.png' }); await page.poll("document.querySelectorAll('.vz-catalogue-row').length>0");
     await check('source replacement opens fresh naming inputs and Run without recipe recovery controls', `!!document.querySelector('.vz-naming-group input')&&!!document.querySelector('button.vz-run')&&document.querySelector('.vz-prefix').value===''&&!document.querySelector('.vz-workspace-new,.vz-workspace-status')&&${clean('.vz-panel *')}`);
     await capture('fresh-session'); await invoke('variations.close'); await page.poll("!document.querySelector('.vz-panel')");
 
@@ -140,7 +144,7 @@ const KZ = '(await import("/store/instance.js")).appStore';
     records.push({ name: 'viewer geometry', paired, single, result: viewerStable }); if (!viewerStable) failures.push('viewer toolbar shifts without pair');
     await check('single-item viewer omits comparison controls/modes without disabled leftovers', `!document.querySelector('#diffModes')&&!document.querySelector('#diffCtl button')&&${clean('#diffBar *')}`);
     await invoke('workbench.close');
-    const exceptions = new Set(['components/HostPicker.tsx', 'components/IconButton.tsx', 'components/Checkbox.tsx']);
+    const exceptions = new Set(['components/HostPicker.tsx', 'components/IconButton.tsx', 'components/Checkbox.tsx', 'features/variations/VariationsModal.tsx']);
     const disabled = fs.readdirSync(workPath('client-solid'), { recursive: true }).filter(path => /\.(tsx|js)$/.test(path) && /\bdisabled\s*=/.test(fs.readFileSync(workPath('client-solid', path), 'utf8')));
     const unexpected = disabled.filter(path => !exceptions.has(path));
     records.push({ name: 'source availability contract', disabled, unexpected, result: !unexpected.length });

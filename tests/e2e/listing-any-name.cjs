@@ -1,11 +1,16 @@
 // Exact name data through real inventory, feed, native display and actions.
 const assert = require('node:assert/strict'), fs = require('node:fs'), path = require('node:path');
 const { CDP, collectPageErrors } = require('./cdp.cjs');
-const { addParameter, removeRecordedImage } = require('./variation-add-helpers.cjs');
+const { addParameter, removeRecordedImage, settledCount } = require('./variation-add-helpers.cjs');
 const { openImageAdd, waitForInputPicker } = require('./image-picker-helpers.cjs');
 const B = process.env.E2E_ENGINE, F = process.env.E2E_FAKE, E = process.env.E2E_EVIDENCE;
 const KZ = `(await import('/store/instance.js')).appStore`;
 const names = ['line\nbreak.png', 'carriage\rreturn.png', 'tab\tname.png', 'dir\nname/leaf\r\t.png', 'quotes"[name]#%.png'];
+const target = 'listing-reference.png';
+const graphFor = prefix => ({
+  '1': { class_type: 'LoadImage', inputs: { image: 'ref.png' } },
+  '2': { class_type: 'SaveImage', inputs: { images: ['1', 0], filename_prefix: prefix } },
+});
 const post = async (base, url, body) => {
   const r = await fetch(base + url, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
   assert.equal(r.status, 200, await r.clone().text()); return r.json();
@@ -16,10 +21,9 @@ const card = name => `[...document.querySelectorAll('.card')].find(el=>el.datase
   assert(B && F && E);
   fs.mkdirSync(E, { recursive: true });
   await post(F, '/__test/activity', { captureEnqueue: true, assetsPlusDelete: true,
-    publish: names.map((name, i) => ({ name, width: 180, height: 100, color: [i * 40, 80, 120, 255], graph: {
-      '1': { class_type: 'LoadImage', inputs: { image: 'ref.png' } },
-      '2': { class_type: 'SaveImage', inputs: { images: ['1', 0], filename_prefix: name.slice(0, -4) } },
-    } })), listingRecords: { root: ['nul\0.png', '../bad.png'], nested: [{ relpath: 'dir/../bad.png', size: 12, mtime: 1 }] } });
+    publish: [...names.map((name, i) => ({ name, width: 180, height: 100, color: [i * 40, 80, 120, 255], graph: graphFor(name.slice(0, -4)) })),
+      { name: target, width: 180, height: 100, graph: graphFor(target.slice(0, -4)) }],
+    listingRecords: { root: ['nul\0.png', '../bad.png'], nested: [{ relpath: 'dir/../bad.png', size: 12, mtime: 1 }] } });
   const page = await CDP.launch(19561, { windowSize: '1400,1000' }), errors = await collectPageErrors(page), proof = [];
   const invoke = (id, args = {}) => page.evaluate(`(async()=>${KZ}.handles.invoke(${JSON.stringify(id)},${JSON.stringify(args)}))()`);
   const shot = async name => fs.writeFileSync(path.join(E, name + '.png'), Buffer.from((await page.send('Page.captureScreenshot', { format: 'png' })).data, 'base64'));
@@ -66,6 +70,12 @@ const card = name => `[...document.querySelectorAll('.card')].find(el=>el.datase
       await page.poll(`!document.querySelector('#diff:not([hidden])')`);
       await invoke('variations.open', { id: 'fake:' + name });
       await page.poll(`!!document.querySelector('[data-catalogue-id="1.image"]')`, 20000);
+      assert.equal(await page.evaluate(`(async()=>${KZ}.state.variations.images[0].filename)()`), name);
+      await invoke('variations.close'); await page.poll(`!document.querySelector('.vz-panel')`);
+      // Existing reference names stay exact, but newly created output names
+      // deliberately remain strict. Use a safe producing target for this Run.
+      await invoke('variations.open', { id: 'fake:' + target });
+      await page.poll(`!!document.querySelector('[data-catalogue-id="1.image"]')`, 20000);
       await addParameter(page, '1.image'); await removeRecordedImage(page, '1.image');
       await openImageAdd(page); await page.clickAt('.vz-image-set .vz-input-trigger'); await waitForInputPicker(page);
       await page.clickAt('.vz-input-feeds [data-value="output"]');
@@ -73,12 +83,12 @@ const card = name => `[...document.querySelectorAll('.card')].find(el=>el.datase
       await page.poll(`!!(${option})`, 20000); await page.evaluate(`(${option}).click()`);
       await page.keyTrusted('Escape', { vk: 27 });
       await page.poll(`!document.querySelector('.vz-input-search')`);
-      await page.poll(`document.querySelector('.vz-count')?.textContent==='1'`, 20000);
+      await settledCount(page, '1');
       const result = await invoke('variations.run');
       assert.equal(result.submitted, 1, JSON.stringify(result)); assert.equal(result.adopted, true, JSON.stringify(result));
       const job = (await (await fetch(F + '/__test/enqueues')).json()).at(-1).prompt;
       assert.equal(job['1'].inputs.image, name + ' [output]');
-      assert(job['2'].inputs.filename_prefix.startsWith(name.slice(0, -4)));
+      assert.equal(job['2'].inputs.filename_prefix, target.slice(0, -4));
       proof.push({ name, title, submitted: result.submitted, input: job['1'].inputs.image });
       await invoke('variations.close'); await page.poll(`!document.querySelector('.vz-panel')`);
       await page.evaluate(`(${card(name)}).querySelector('.delete').click()`);
@@ -86,7 +96,7 @@ const card = name => `[...document.querySelectorAll('.card')].find(el=>el.datase
       await page.clickAt('#confirmPanel .confirm-ok');
       await page.poll(`(async()=>!${KZ}.state.images.some(e=>e.filename===${JSON.stringify(name)}))()`, 20000);
     }
-    await post(F, '/__test/activity', { listingRecords: { root: [], nested: [] } });
+    await post(F, '/__test/activity', { remove: [target], listingRecords: { root: [], nested: [] } });
     await page.evaluate(`(async()=>${KZ}.actions.ui.refresh())()`);
     await page.poll(`![...document.querySelectorAll('#statusStack .warning')].some(el=>el.textContent.includes('could not be listed'))`);
     await shot('listing-recovered');

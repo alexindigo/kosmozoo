@@ -35,8 +35,8 @@ module.exports = async ({ cdp, check, KZ, FAKE }) => {
     const received = (await jobs()).slice(before);
     console.log('numeric invalid Run:', JSON.stringify({ result, received }));
     check(`${label}: header/sidebar invalid; Run rejects with zero prompts`,
-      state.header === '— values' && state.count === '—' && state.sidebar.includes('Check the recipe') &&
-      state.messages.includes(label) && !state.runDisabled && result.status === 'invalid' && received.length === 0);
+      state.header === '— values' && state.count === '--' && state.sidebar.includes('Check the recipe') &&
+      state.messages.includes(label) && state.runDisabled && result.status === 'invalid' && received.length === 0);
   };
   await cdp.send('Emulation.setDeviceMetricsOverride', { width: 1600, height: 1000, deviceScaleFactor: 1, mobile: false });
   try {

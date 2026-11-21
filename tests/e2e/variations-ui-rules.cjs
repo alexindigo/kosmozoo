@@ -2,7 +2,7 @@
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const { CDP, collectPageErrors } = require('./cdp.cjs');
-const { openImageAdd } = require('./image-picker-helpers.cjs');
+const { openImageAdd, waitForVisibleImages } = require('./image-picker-helpers.cjs');
 const { workPath } = require('./paths.cjs');
 const { addParameter } = require('./variation-add-helpers.cjs');
 const ENGINE = process.env.E2E_ENGINE ?? 'http://127.0.0.1:18260';
@@ -33,6 +33,7 @@ const KZ = '(await import("/store/instance.js")).appStore';
     await page.goto(ENGINE + '/#fake#flux-controlnet.png');
     await page.poll('!!document.querySelector(".card")');
     await page.evaluate("fetch('/api/collections/ui-rules/entries/flux-controlnet.png/bytes').then(r => r.arrayBuffer()).then(() => true)");
+    await invoke('source.select', { id: 'ui-rules' });
     await invoke('variations.open', { id: 'ui-rules:flux-controlnet.png' });
     await addParameter(page, '43.image'); await addParameter(page, '9.denoise');
     await addParameter(page, '8.sampler_name');
@@ -110,8 +111,8 @@ const KZ = '(await import("/store/instance.js")).appStore';
     await page.evaluate("document.querySelector('.vz-sliders').scrollTop = 0");
     await page.clickAt('.vz-input-trigger');
     await page.poll('document.activeElement.matches(".vz-input-search") && getComputedStyle(document.querySelector(".vz-input-popover")).opacity === "1"');
-    await page.poll('[...document.querySelectorAll(".vz-image-tile img, .vz-input-option img")].every(img => img.complete && img.naturalWidth > 0)');
     await page.evaluate("document.querySelector('.vz-sliders').scrollTop = 0");
+    await waitForVisibleImages(page, '.vz-image-tile img, .vz-input-option img');
     await page.evaluate('new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)))');
     const exposed = await page.evaluate(`(() => {
       const button = document.querySelector('[data-param-key="9.denoise"] .mode-switch button'), box = button.getBoundingClientRect();

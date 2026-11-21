@@ -34,7 +34,7 @@ module.exports = async ({ ENGINE, FAKE, check }) => {
       assert.equal(record.extracted, true);
       assert.equal(!!record.meta, !!item.token);
     }
-    const inventory = await json(`${ENGINE}/api/collections/${source}/entries?inventory=1`);
+    const inventory = await json(`${ENGINE}/api/collections/${source}/entries?inventory=1&arrivals=items-v1`);
     // This is the already-consumed negative snapshot, not the entry's record.
     for (const item of inventory.entries) if (cases.some(c => c.name === item.name)) item.meta = null;
     proxy = http.createServer((req, res) => {

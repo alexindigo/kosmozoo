@@ -17,7 +17,8 @@ module.exports = async ({ cdp, check, FAKE, KZ }) => {
   const text = workPath('artifacts', 'skip.txt'); fs.writeFileSync(text, 'not an image');
   const text2 = workPath('artifacts', 'skip2.txt'); fs.writeFileSync(text2, 'not an image either');
   const mixed = workPath('artifacts', 'mixed.png'), append = workPath('artifacts', 'append.png');
-  fs.copyFileSync(resources[1], mixed); fs.copyFileSync(resources[2], append);
+  const { testPng } = await import('../helpers/png.mjs');
+  fs.writeFileSync(mixed,testPng(48,32,[20,80,140,255]));fs.writeFileSync(append,testPng(48,32,[140,80,20,255]));
   const folder = workPath('artifacts', 'folder.png'); fs.mkdirSync(folder, { recursive: true });
   const drag = async (type, point, files) => cdp.send('Input.dispatchDragEvent', {
     type, ...point, data: { items: [], files, dragOperationsMask: 1 },
@@ -65,10 +66,10 @@ module.exports = async ({ cdp, check, FAKE, KZ }) => {
     assert.deepEqual(await names(), inserted);
     check('image drop: three PNGs insert between tiles; blue card and tile-sized gap are transient', true);
     await drop(await box('.vz-image-plus'), [text, text2, mixed]);
-    await cdp.poll("document.querySelectorAll('.vz-image-tile').length===6&&document.querySelector('.vz-image-drop-status')?.textContent==='2 files skipped — not images'");
+    await cdp.poll("document.querySelectorAll('.vz-image-tile').length===6&&document.querySelector('[data-problem-code=drop-skipped]')?.textContent.includes('skipped 2 unsupported files')");
     assert.equal((await names()).at(-1), 'mixed.png');
     await drop(await box('.vz-image-plus'), [folder]);
-    await cdp.poll("document.querySelector('.vz-image-drop-status')?.textContent==='Folders: use Add folder'");
+    await cdp.poll("document.querySelector('[data-problem-code=drop-skipped]')?.textContent.includes('1 folders were not imported')");
     assert.equal((await names()).length, 6);
     check('image drop: plus appends; mixed nonimages and folders report one line without expanding', true);
     await drop(await box('.vz-image-plus'), [append]);
