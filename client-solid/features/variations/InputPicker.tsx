@@ -102,7 +102,7 @@ export function InputPicker(props) {
 }
 
 function InputOptions(props) {
-  let panel, search, scrollElement, summary, count, feeds, tabs;
+  let panel, search, scrollElement, summary, tabs;
   const sourceLabel = () => props.source.label ?? props.source.source;
   const activity = () => props.catalogue.appending ? `Loading more ${props.noun}…`
     : props.remoteSearch && props.query().trim() ? `Searching ${sourceLabel()} for "${props.query().trim()}"…`
@@ -194,9 +194,10 @@ function InputOptions(props) {
         if (!panel.isConnected || !panel.matches(":popover-open")) return null;
         const style = getComputedStyle(panel), list = getComputedStyle(scrollElement);
         const horizontalChrome = ["paddingLeft", "paddingRight", "borderLeftWidth", "borderRightWidth"].reduce((sum, key) => sum + (parseFloat(style[key]) || 0), 0);
-        const floor = count.getBoundingClientRect().width + (feeds ? feeds.scrollWidth + (parseFloat(getComputedStyle(summary).columnGap) || 0) : 0) + horizontalChrome;
         const gridWidth = Number(style.getPropertyValue("--vz-input-columns")) * (TILE_SIZE + GAP) - GAP;
-        const width = Math.max(gridWidth + horizontalChrome + scrollElement.offsetWidth - scrollElement.clientWidth, floor), listHeight = parseFloat(list.maxHeight);
+        // Footer text fits the allocation; a width already derived from this
+        // popup cannot become its own preferred-width input on a later measure.
+        const width = gridWidth + horizontalChrome + scrollElement.offsetWidth - scrollElement.clientWidth, listHeight = parseFloat(list.maxHeight);
         if (!Number.isFinite(width) || !Number.isFinite(listHeight)) return null;
         const chrome = search.getBoundingClientRect().height + summary.getBoundingClientRect().height + (tabs?.getBoundingClientRect().height ?? 0) + (parseFloat(style.rowGap) || 0) * (tabs ? 2 : 1) + ["paddingTop", "paddingBottom", "borderTopWidth", "borderBottomWidth", "rowGap"]
           .reduce((sum, key) => sum + (parseFloat(style[key]) || 0), 0);
@@ -306,9 +307,9 @@ function InputOptions(props) {
     </div>
     </div>
     <div ref={summary} class="vz-input-summary">
-      <span ref={count} role="status">{props.totalSelected !== undefined ? variationProblem("picker-selection", { phase: "acquisition", parameter: { label: props.parameterLabel ?? "this input" }, numbers: { visible: filtered().filter(selected).length, total: props.totalSelected } }).message : `${filtered().filter(selected).length} selected in this listing`}</span>
+      <span role="status">{props.totalSelected !== undefined ? variationProblem("picker-selection", { phase: "acquisition", parameter: { label: props.parameterLabel ?? "this input" }, numbers: { visible: filtered().filter(selected).length, total: props.totalSelected } }).message : `${filtered().filter(selected).length} selected in this listing`}</span>
       <Show when={props.catalogue.pending}><SingleLineText class="vz-input-activity" role="status" value={activity()} /></Show>
-      <Show when={props.roots}><div ref={feeds} class="vz-input-feeds"><Tabs label="Image feed" options={props.roots.map(root => ({ ...root, id: `${props.id}-feed-${root.value}` }))}
+      <Show when={props.roots}><div class="vz-input-feeds"><Tabs label="Image feed" options={props.roots.map(root => ({ ...root, id: `${props.id}-feed-${root.value}` }))}
         value={props.resourceRoot} panelId={`${props.id}-source-panel`} onChange={props.onRoot}
         registerKeys={capability => props.registerTabKeys(capability, "feed")} rememberFocus={rememberFocus} /></div></Show>
     </div>

@@ -60,6 +60,7 @@ module.exports = async ({ cdp, check }) => {
     await cdp.evaluate("window.__listMode='pending'");
     await cdp.clickAt('.vz-input-failure .vz-thumbnail-retry');
     await cdp.poll("document.querySelector('.vz-input-activity')?.textContent==='Loading imported images from another…'");
+    assert(await cdp.evaluate(`(()=>{const footer=document.querySelector('.vz-input-summary'),count=footer.firstElementChild.getBoundingClientRect(),activity=footer.querySelector('.vz-input-activity').getBoundingClientRect(),tabs=footer.querySelector('.vz-input-feeds').getBoundingClientRect(),popup=document.querySelector('.vz-input-popover').getBoundingClientRect();return count.width>=100&&count.height<=32&&activity.top>=Math.max(count.bottom,tabs.bottom)&&activity.bottom<=popup.bottom&&popup.bottom<=innerHeight})()`), 'pending activity owns a full-width row without crushing the count or escaping the viewport');
     await capture('source-tabs-list-pending');
     await cdp.evaluate("window.__listMode='ready';window.__releaseList()");
     await cdp.poll("!!document.querySelector('[data-input-name=" + JSON.stringify('remote-only.png') + "]')");

@@ -1116,7 +1116,7 @@ body:has(#diff:not([hidden])) #statusCol { bottom: 56px; }
 .vz-input-option .vz-image-same { align-self: stretch; justify-self: stretch; margin: 0; padding: 0;
   background: transparent; border: 2px solid var(--attention); border-radius: inherit; pointer-events: none; }
 .vz-input-selected { align-self: start; justify-self: end; color: var(--secondary); font-weight: 600; }
-.vz-input-judgments { position: absolute; inset: 4px auto auto 4px; display: flex; gap: 3px; pointer-events: none; }
+.vz-input-judgments { position: absolute; inset: 4px auto auto 4px; display: flex; gap: 0; pointer-events: none; }
 .vz-input-judgment { width: 8px; height: 8px; box-sizing: border-box; border: 1px solid var(--background-stage); border-radius: 50%; }
 .vz-input-judgment.is-up { background: var(--positive); }
 .vz-input-judgment.is-favorite { background: var(--attention); }
@@ -1387,10 +1387,11 @@ body:has(#diff:not([hidden])) #statusCol { bottom: 56px; }
 .tabs-tab.is-active { background: var(--lifted); border-color: var(--secondary); }
 .tabs > .tabs-tab:focus-visible { outline: none; border-color: var(--secondary); box-shadow: inset 0 0 0 1px var(--secondary); }
 .vz-input-tabs { flex: 0 0 auto; min-width: 0; }
-.vz-input-summary { display: flex; align-items: center; gap: 12px; flex: 0 0 auto; min-width: 0; overflow-x: auto; }
-.vz-input-summary > span:first-child, .vz-input-feeds { flex: 0 0 auto; white-space: nowrap; }
+.vz-input-summary { display: flex; flex-wrap: wrap; align-items: center; gap: 12px; flex: 0 0 auto; min-width: 0; overflow-x: auto; }
+.vz-input-summary > span:first-child { flex: 1 1 0; min-width: 0; overflow-wrap: anywhere; }
+.vz-input-feeds { flex: 0 0 auto; white-space: nowrap; }
 .vz-input-summary > [role="status"] { font: 12px/16px system-ui; }
-.vz-input-activity { flex: 1 1 auto; min-width: 0; color: var(--foreground-mid); }
+.vz-input-activity { order: 1; flex: 1 0 100%; min-width: 0; color: var(--foreground-mid); }
 .vz-input-feeds { margin-inline-start: auto; }
 .vz-input-feeds .tabs { overflow: visible; }
 .vz-input-source-panel { position: relative; display: flex; flex-direction: column; flex: 1 1 auto; min-height: 0; }
@@ -1573,7 +1574,7 @@ body:has(#diff:not([hidden])) #statusCol { bottom: 56px; }
 .vz-run:disabled { cursor: default; opacity: .5; filter: none; box-shadow: none; }
 .vh-tools { display: grid; gap: 8px; min-width: 0; }
 .vh-trigger { width: 100%; min-width: 0; text-align: start; }
-.vh-trigger > .single-line-text { padding-inline: 10px; }
+.vh-trigger > .single-line-text { padding-inline: var(--vz-recall-text-inset, 10px); }
 .vh-menu { margin: 0; padding: 0; border: 1px solid var(--border-strong); border-radius: 6px;
   background: var(--focused-background); color: var(--foreground); box-shadow: 0 8px 24px var(--backdrop); overflow: auto; }
 .vh-menu-label { padding: 10px 12px; border-bottom: 1px solid var(--border); font-size: 12px; }
@@ -1628,9 +1629,11 @@ body:has(#diff:not([hidden])) #statusCol { bottom: 56px; }
 .vh-recall:focus-visible, .vh-inspect:focus-visible { outline: 2px solid var(--secondary); outline-offset: 1px; }
 
 /* One compact header row: title, recall (flexible), Run on, close. Controls
-   share the md control height; the title's line box takes the same height. */
+   share the md control height; the title's line box takes the same height.
+   Recall reserves its chevron slot and the same label insets used below. */
 .vz-editor { grid-template-rows: auto minmax(0, 1fr) auto; }
-.vz-header { display: grid; grid-template-columns: max-content minmax(0, 1fr) minmax(120px, 220px) max-content;
+.vz-header { --vz-recall-text-inset: 10px; display: grid;
+  grid-template-columns: minmax(0, max-content) minmax(calc(var(--control-height-md) + 2 * var(--vz-recall-text-inset)), 1fr) minmax(0, 220px) max-content;
   align-items: start; gap: 12px; }
 .vz-header > .vz-title { min-height: var(--control-height-md); display: flex; align-items: center; text-align: start; }
 .vz-header .vz-close { position: static; }

@@ -62,7 +62,7 @@ const control = (base, body) => fetch(base + '/__test/activity', { method: 'POST
       for (let d = 0; d < actual.dots.length; d++) {
         const dot = actual.dots[d]; assert.equal(dot.color, colors[dot.name]);
         assert.equal(dot.width, 8); assert.equal(dot.height, 8); assert.equal(dot.pointer, 'none');
-        assert.equal(dot.x, 6 + d * 11); assert.equal(dot.y, 6);
+        assert.equal(dot.x, 6 + d * 8); assert.equal(dot.y, 6);
       }
       combinations.push(actual);
     }
