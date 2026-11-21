@@ -21,7 +21,7 @@ import { problemText } from "/shared/features/variations/problems.mjs";
 export function install(store) {
   return createRoot(disposeRoot => {
   const [historyRevision, setHistoryRevision] = createSignal(0);
-   const report = problem => store.actions.status.error(problemText(problem));
+   const report = problem => store.reportError(problemText(problem));
    const history = makeHistoryClient({ api, changed: () => setHistoryRevision(n => n + 1), notifyProblem: report });
   const historyState = () => { historyRevision(); return history.state(); };
   const activate = () => history.activate();

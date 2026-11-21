@@ -1768,6 +1768,7 @@ export function makeAppStore({ subscribeSources = typeof window !== "undefined" 
       register(f) {
         if (registeredFeatures.some((x) => x.name === f.name)) return;
         const installed = f.install?.({ state: stateObj, handles, setSt, reconcile, surfaceDisplay,
+          reportError: message => { if (!disposed) return actions.status.error(message); },
           comparison: { context: comparisonContext, accepted: () => displayReader()?.() ?? {} } });
         if (installed) {
           spaces.register(installed.workspaceSpaces ?? []); setSpacesRevision(n => n + 1);
