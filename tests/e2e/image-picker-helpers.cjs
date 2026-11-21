@@ -1,8 +1,7 @@
 // Drive the real acquisition surface; no synthetic mode/select compatibility.
 exports.waitForInputPicker = cdp => cdp.poll("!!document.querySelector('.vz-input-popover.is-placed:popover-open:not([inert])')");
 exports.openImageAdd = async (cdp, row = '.vz-image-set') => {
-  if (!await cdp.evaluate(`document.querySelector(${JSON.stringify(row + ' .vz-image-plus')}).getAttribute('aria-expanded')==='true'`))
-    await cdp.clickAt(row + ' .vz-image-plus');
+  await cdp.poll(`document.querySelector(${JSON.stringify(row + ' .vz-image-add')})?.getBoundingClientRect().height>0`);
 };
 exports.openImageFolder = async (cdp, row = '.vz-image-set') => {
   await exports.openImageAdd(cdp, row);

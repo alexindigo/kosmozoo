@@ -13,7 +13,6 @@ module.exports=async({page,evaluate,invoke,list,write,FAKE,E})=>{
   await page.clickAt('[data-param-key="9.steps"] .mode-switch button[title="Value"]');
   await write('[data-param-key="9.steps"] .vz-value-field input','30');
   await page.clickAt('[data-image-id="43.image"] [data-image-kind="reference"] .vz-image-remove button');
-  await page.clickAt('[data-image-id="43.image"] .vz-image-plus');
   await page.clickAt('[data-image-id="43.image"] .vz-current-image');
   await settledCount(page, '6');
   await page.clickAt('.vz-run');

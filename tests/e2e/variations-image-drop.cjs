@@ -43,7 +43,7 @@ module.exports = async ({ cdp, check, FAKE, KZ }) => {
     await openImageAdd(cdp);
     await cdp.evaluate(`(()=>{const dt=new DataTransfer();dt.items.add(new File([Uint8Array.from(atob(${JSON.stringify(fs.readFileSync(workPath('tests/fixtures/flux-pulid.png')).toString('base64'))}),c=>c.charCodeAt(0))],'last.png',{type:'image/png'}));const input=document.querySelector('.vz-imgfilespick');input.files=dt.files;input.dispatchEvent(new Event('change',{bubbles:true}));})()`);
     await cdp.poll("document.querySelectorAll('.vz-image-tile').length===2");
-    await cdp.clickAt('.vz-image-plus'); await waitForSelectedPreviews(cdp);
+    await waitForSelectedPreviews(cdp);
     const between = await cdp.evaluate("(()=>{const a=document.querySelectorAll('.vz-image-tile')[0].getBoundingClientRect(),b=document.querySelectorAll('.vz-image-tile')[1].getBoundingClientRect();return{x:(a.right+b.left)/2,y:a.y+a.height/2}})()");
     const original = await names();
     await drag('dragEnter', between, resources); await drag('dragOver', between, resources);
@@ -65,14 +65,14 @@ module.exports = async ({ cdp, check, FAKE, KZ }) => {
     const inserted = ['drop-1.png', 'drop-1.png', 'drop-2.png', 'drop-3.png', 'last.png'];
     assert.deepEqual(await names(), inserted);
     check('image drop: three PNGs insert between tiles; blue card and tile-sized gap are transient', true);
-    await drop(await box('.vz-image-plus'), [text, text2, mixed]);
+    await drop(await box('.vz-image-add'), [text, text2, mixed]);
     await cdp.poll("document.querySelectorAll('.vz-image-tile').length===6&&document.querySelector('[data-problem-code=drop-skipped]')?.textContent.includes('skipped 2 unsupported files')");
     assert.equal((await names()).at(-1), 'mixed.png');
-    await drop(await box('.vz-image-plus'), [folder]);
+    await drop(await box('.vz-image-add'), [folder]);
     await cdp.poll("document.querySelector('[data-problem-code=drop-skipped]')?.textContent.includes('1 folders were not imported')");
     assert.equal((await names()).length, 6);
-    check('image drop: plus appends; mixed nonimages and folders report one line without expanding', true);
-    await drop(await box('.vz-image-plus'), [append]);
+    check('image drop: toolbar drop appends; mixed nonimages and folders report one line without expanding', true);
+    await drop(await box('.vz-image-add'), [append]);
     await waitForSelectedPreviews(cdp);
     const snapshot = async () => ({ ...await cdp.evaluate("({url:location.href,names:[...document.querySelectorAll('.vz-image-tile')].map(el=>el.dataset.imageName),suffix:document.querySelector('.vz-suffix').value})"), count: await settledCount(cdp) });
     const before = await snapshot();

@@ -156,7 +156,7 @@ module.exports = async ({ cdp, FAKE, KZ, check }) => {
     await settledCount(cdp, '3', { and: "!document.querySelector('.vz-image-check')" });
     await waitForSelectedPreviews(cdp);
     await openImageFolder(cdp);
-    const folderGeometry = await cdp.evaluate(`(()=>{const input=document.querySelector('.vz-folder-path').getBoundingClientRect(),add=document.querySelector('.vz-folder-add').getBoundingClientRect(),footer=document.querySelector('.vz-image-add').getBoundingClientRect(),grid=document.querySelector('.vz-image-grid').getBoundingClientRect();return {center:Math.abs((input.top+input.bottom-add.top-add.bottom)/2),chooserAbsent:!document.querySelector('.vz-folder-chooser'),order:input.right<=add.left&&grid.bottom<=footer.top,contained:input.left>=footer.left&&add.right<=footer.right}})()`);
+    const folderGeometry = await cdp.evaluate(`(()=>{const input=document.querySelector('.vz-folder-path').getBoundingClientRect(),add=document.querySelector('.vz-folder-add').getBoundingClientRect(),footer=document.querySelector('.vz-image-add').getBoundingClientRect(),grid=document.querySelector('.vz-image-grid').getBoundingClientRect();return {center:Math.abs((input.top+input.bottom-add.top-add.bottom)/2),chooserAbsent:!document.querySelector('.vz-folder-chooser'),order:input.right<=add.left&&footer.bottom<=grid.top,contained:input.left>=footer.left&&add.right<=footer.right}})()`);
     assert(folderGeometry.center < 1 && folderGeometry.chooserAbsent && folderGeometry.order && folderGeometry.contained, JSON.stringify(folderGeometry));
     await cdp.send('Emulation.setDeviceMetricsOverride', { width: 1280, height: 900, deviceScaleFactor: 1, mobile: false });
     try {

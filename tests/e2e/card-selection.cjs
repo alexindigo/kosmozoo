@@ -49,7 +49,6 @@ const post = async (base, path, body) => {
     await invoke('source.select', { id: 'fake' }); await check(); proof.switched = await c.evaluate(selection);
     await invoke('variations.open', { target: 'selected' });
     await addParameter(c, '470.image'); await removeRecordedImage(c, '470.image');
-    await c.clickAt('[data-image-id="470.image"] .vz-image-plus');
     await c.clickAt('[data-image-id="470.image"] .vz-current-image');
     await settledCount(c, '3');
     const before = (await (await fetch(F + '/__test/enqueues')).json()).length;

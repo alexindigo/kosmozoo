@@ -73,7 +73,6 @@ const control = body => fetch(FAKE + '/__test/activity', { method: 'POST', heade
       dt.items.add(new File([plain],'plain.png',{type:'image/png'}));
       const input=document.querySelector(${JSON.stringify(ROW + ' .vz-imgfilespick')});input.files=dt.files;input.dispatchEvent(new Event('change',{bubbles:true}));return true})()`);
     await page.poll(`document.querySelectorAll(${JSON.stringify(ROW + ' .vz-image-tile')}).length===3`); await settled();
-    await page.clickAt(`${ROW} .vz-image-plus`);
     assert.deepEqual(await names(), ['wide.png', 'photo.png', 'plain.png']);
     const original = await pixels(Buffer.from(await evaluate('window.rotatePhoto'), 'base64'), 'photo');
     assert.deepEqual([original.width, original.height], [96, 64]);

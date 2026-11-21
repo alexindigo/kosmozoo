@@ -34,7 +34,7 @@ async function restart() {
   const field = (selector, value) => c.evaluate(`(()=>{const el=document.querySelector(${JSON.stringify(selector)});el.value=${JSON.stringify(value)};el.dispatchEvent(new Event('input',{bubbles:true}));})()`);
   const open = async () => {
     await invoke('variations.open', { id: `fake:${name}` }); await addParameter(c, '470.image');
-    await removeRecordedImage(c, '470.image'); await c.clickAt('[data-image-id="470.image"] .vz-image-plus');
+    await removeRecordedImage(c, '470.image');
   };
   try {
     await c.goto(B + '/#fake#' + name);
