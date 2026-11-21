@@ -21,7 +21,7 @@ export function Thumbnail(props) {
     </Show>
     {/* Keep the clicked action connected through document outside-click
         routing; only the native attempt is replaced on Retry. */}
-    <Show when={props.pending}><span class="vz-thumbnail-pending vz-thumbnail-acquiring" role="status">Loading image…</span></Show>
+    <Show when={props.pending}><span class="vz-thumbnail-pending vz-thumbnail-acquiring" role="status" aria-label={`Loading ${props.name}`}><span class="vz-submit-spinner" aria-hidden="true" /></span></Show>
     <div class="vz-thumbnail-failure" hidden={!props.error && (phase() !== "failed" || props.pending)}>
       <div class="vz-thumbnail-failed"><SingleLineText role="status" value={props.error || problemText(variationProblem("preview-failed", { severity: "warning", phase: "preview", resource: props.name ?? "image", source: props.source ?? "its image address" }))} hint={props.error} /></div>
       <button type="button" class="vz-thumbnail-retry" aria-label={`Retry ${props.error ? "image" : "preview"} for ${props.name}`}

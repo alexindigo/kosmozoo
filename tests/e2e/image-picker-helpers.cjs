@@ -13,7 +13,8 @@ exports.pickInput = async (cdp, name, row = '.vz-image-set') => {
   await exports.openImageAdd(cdp, row);
   await cdp.clickAt(row + ' .vz-input-trigger');
   await exports.waitForInputPicker(cdp);
-  await cdp.poll("document.activeElement.matches('.vz-input-search') && getComputedStyle(document.querySelector('.vz-input-popover')).opacity === '1'");
+  await cdp.poll("document.activeElement.matches('.vz-input-list') && getComputedStyle(document.querySelector('.vz-input-popover')).opacity === '1'");
+  await cdp.clickAt('.vz-input-search');
   await cdp.evaluate("document.querySelector('.vz-input-search').select()");
   await cdp.send('Input.insertText', { text: name });
   const option = '.vz-input-option[data-input-name=' + JSON.stringify(name) + ']';

@@ -57,7 +57,7 @@ export function ImageSetPanel(props) {
       <div class="vz-image-add" hidden={!adding()}>
         <ProblemFeedback problems={acquisitionProblems({ sources: props.sources, pexels: props.pexels.status?.(), chooserError: props.folderError?.() })} />
         <Show when={props.pexels.status?.().error}><button type="button" class="vz-thumbnail-retry" onClick={props.pexels.retryServices}>Retry Pexels services</button></Show>
-        <Show when={props.sources.length}><InputPicker label="ComfyUI images" totalSelected={row().items.length} parameterLabel={row().label} roots={COMFY_ROOTS} noun={root => `${root === "output" ? "generated" : "imported"} images`}
+        <Show when={props.sources.length}><InputPicker label="ComfyUI images" totalSelected={row().items.length + row().acquiring} parameterLabel={row().label} roots={COMFY_ROOTS} noun={root => `${root === "output" ? "generated" : "imported"} images`}
           sources={props.sources} sourceInputs={props.sourceInputs} inputState={props.inputState}
           onSource={props.onSource} onRetrySource={props.onRetrySource} registerTabKeys={props.registerTabKeys}
           current={row().current} currentRoot={row().currentRoot ?? (row().fromOutput ? "output" : "input")} positionRevision={row().images} thumbnail={props.inputThumbnail} registerThumbnail={props.registerThumbnail}
@@ -74,7 +74,7 @@ export function ImageSetPanel(props) {
         </ImageAction>
         {/* External catalogues sit apart from the engine's own (trusted) sources. */}
         <Show when={props.pexels.sources().length}><div class="vz-image-external">
-          <InputPicker label="Pexels photos" totalSelected={row().items.length} parameterLabel={row().label} noun={() => "photos"} remoteSearch
+          <InputPicker label="Pexels photos" totalSelected={row().items.length + row().acquiring} parameterLabel={row().label} noun={() => "photos"} remoteSearch
             sources={props.pexels.sources()} sourceInputs={(service, _root, query) => props.pexels.results(service, query)}
             inputState={(service, photo) => props.pexels.state(service, photo)} itemLabel={props.pexels.label}
             onSource={(service, _root, query) => props.pexels.request(service, query)} onMore={(service, _root, query) => props.pexels.more(service, query)}

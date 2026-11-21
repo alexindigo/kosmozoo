@@ -53,7 +53,8 @@ module.exports = async ({ cdp, FAKE, KZ, check }) => {
     // an empty popup. Placement observes ancestor travel, never writes it.
     await require('./image-picker-helpers.cjs').openImageAdd(cdp, '[data-image-id="81.image"]');
     await cdp.clickAt('[data-image-id="81.image"] .vz-input-trigger');
-    await cdp.poll("document.activeElement.matches('.vz-input-search') && getComputedStyle(document.querySelector('.vz-input-popover')).opacity === '1'");
+    await cdp.poll("document.activeElement.matches('.vz-input-list') && getComputedStyle(document.querySelector('.vz-input-popover')).opacity === '1'");
+    await cdp.clickAt('.vz-input-search');
     await cdp.evaluate("document.querySelector('.vz-input-search').select()");await cdp.send('Input.insertText',{text:'ref.png'});
     const placedRow = async () => {
       await cdp.poll("!!document.querySelector('.vz-input-option[data-input-name=\"ref.png\"]')");

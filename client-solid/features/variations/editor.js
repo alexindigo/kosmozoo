@@ -95,57 +95,105 @@ export function makeVariationEditor({ targets, cohortMode, destination: initialD
     map.set(key, record); return record;
   };
   const cachedInput = (origin, name, root) => sourceRecord(sourceFiles, origin, null, root)?.files.get(name);
+  let acquisitionSerial = 0, acquiring = 0, drainingPicks = false;
+  const acquisitionQueue = [], orderedPicks = new Map();
+  const pumpAcquisitions = () => {
+    while (acquiring < 4 && acquisitionQueue.length) {
+      const task = acquisitionQueue.shift();
+      if (!alive || !task.owns()) { task.resolve(null); continue; }
+      acquiring++;
+      const run = async () => {
+        try { task.resolve(await task.read()); } catch (error) { task.reject(error); }
+        finally { acquiring--; pumpAcquisitions(); }
+      };
+      run();
+    }
+  };
+  const acquire = (read, owns) => new Promise((resolve, reject) => {
+    acquisitionQueue.push({ read, owns, resolve, reject }); pumpAcquisitions();
+  });
   const fileRecord = (files, name) => {
-    if (!files.has(name)) files.set(name, { file: null, pending: false, error: "", wanted: new Map() });
+    if (!files.has(name)) files.set(name, { key: ++acquisitionSerial, file: null, pending: false, error: "", wanted: new Map() });
     return files.get(name);
   };
-  // Remote bytes become one cached immutable File per resource. A toggle while
-  // reading records/withdraws only that row's membership intent; the settled
-  // File joins every row whose ticket is still admitted.
+  // Pending membership is editor-private intent, never a pretend File/recipe
+  // value. Both remote catalogues share bounded reads and one click-order lane
+  // per row. Cancellation retires only that choice; cached bytes remain reusable.
+  const livePick = pick => pick.cached.wanted.get(pick.id) === pick && admitsMembership(pick) && pick.owns();
+  const pendingPicks = (enabledOnly = false) => [...orderedPicks].flatMap(([id, picks]) =>
+    enabledOnly && !row("images", id)?.values.enabled ? [] : picks.filter(livePick));
+  const drainPicks = () => {
+    if (drainingPicks) return;
+    drainingPicks = true;
+    try {
+      for (const [id, picks] of orderedPicks) {
+        while (picks.length) {
+          const pick = picks[0], live = livePick(pick);
+          if (live && !pick.cached.file) break;
+          picks.shift();
+          if (pick.cached.wanted.get(id) === pick) pick.cached.wanted.delete(id);
+          if (live) {
+            const item = uploadImage(pick.cached.file), identity = imageIdentity(item);
+            const items = row("images", id).values.items;
+            const next = items.findIndex(other => !pick.before.has(imageIdentity(other)));
+            // Synchronous choices made after this click keep their later place,
+            // too. No unresolved placeholder enters the recipe or compiler.
+            for (const later of picks) later.before.add(identity);
+            pick.editor.addImages(id, [item], next < 0 ? items.length : next);
+          }
+        }
+        if (!picks.length) orderedPicks.delete(id);
+      }
+    } finally { drainingPicks = false; }
+  };
   const cachedFileState = (id, cached) => {
     const item = cached?.file ? uploadImage(cached.file) : null;
-    return { selected: !!item && row("images", id).values.items.some(other => sameImage(item, other)),
-      pending: !!cached?.pending && cached.wanted.has(id) && admitsMembership(cached.wanted.get(id)), error: cached?.error ?? "" };
+    const pending = !!cached?.wanted.get(id) && livePick(cached.wanted.get(id));
+    return { selected: pending || !!item && row("images", id).values.items.some(other => sameImage(item, other)),
+      pending, error: cached?.error ?? "" };
   };
   const toggleCachedFile = async (editor, id, cached, label, read, owns, context = {}) => {
-    if (cached.file) {
+    const problemKey = rowId => `acquire:${rowId}:${cached.key}`;
+    if (cachedFileState(id, cached).selected) {
       cached.error = "";
-      const item = uploadImage(cached.file);
-      return cachedFileState(id, cached).selected ? editor.removeImage(id, item) : editor.addImages(id, [item]);
+      problems.clear(problemKey(id));
+      if (cached.wanted.has(id)) {
+        cached.wanted.delete(id); recipe.edited(); invalidateClose(); drainPicks(); notify(); return true;
+      }
+      return editor.removeImage(id, uploadImage(cached.file));
     }
-    if (cached.wanted.has(id) && admitsMembership(cached.wanted.get(id))) cached.wanted.delete(id);
-    else cached.wanted.set(id, membershipTicket(id));
+    const pick = { ...membershipTicket(id), cached, editor, owns,
+      before: new Set(row("images", id).values.items.map(imageIdentity)) };
+    cached.wanted.set(id, pick);
+    if (!orderedPicks.has(id)) orderedPicks.set(id, []);
+    orderedPicks.get(id).push(pick);
     // Recorded intent is an edit in progress: a post-Run countdown cannot close over it.
-    invalidateClose();
-    if (cached.pending) { notify(); return; }
-    cached.pending = true; cached.error = ""; problems.clear(`acquire:${id}`); notify();
+    recipe.edited(); invalidateClose(); cached.error = ""; problems.clear(problemKey(id));
+    drainPicks();
+    if (cached.file || cached.pending) { notify(); return; }
+    cached.pending = true; notify();
     try {
-      const file = await read();
+      const file = await acquire(read, () => owns() && [...cached.wanted.values()].some(livePick));
       if (!owns()) {
-        if (alive) for (const [rowId] of cached.wanted) report(`acquire:${rowId}`, "acquisition-retired", { phase: "acquisition", parameter: parameter(rowId), resource: label });
+        if (alive) for (const [rowId] of cached.wanted) report(problemKey(rowId), "acquisition-retired", { phase: "acquisition", parameter: parameter(rowId), resource: label });
         cached.wanted.clear(); return;
       }
       cached.file = file;
-      for (const [rowId, ticket] of [...cached.wanted]) {
-        if (cached.wanted.get(rowId) !== ticket) continue;
-        cached.wanted.delete(rowId);
-        if (admitsMembership(ticket)) editor.addImages(rowId, [uploadImage(file)]);
-        else if (alive && ticket.decision === decisionGeneration && ticket.row === membershipGenerations.get(rowId)) report(`acquire:${rowId}`, "acquisition-retired", { phase: "acquisition", parameter: parameter(rowId), resource: label });
-      }
+      drainPicks();
     } catch (error) {
       if (owns()) {
-        for (const [rowId] of cached.wanted) {
+        for (const [rowId, pick] of cached.wanted) if (livePick(pick)) {
           const problem = problemFrom(error, { code: "acquisition-read", phase: "acquisition", parameter: parameter(rowId), resource: label, ...context });
-          problems.report(`acquire:${rowId}`, problem); cached.error = problemText(problem);
+          cached.error = problemText(problem); problems.report(problemKey(rowId), problem);
         }
         cached.wanted.clear();
       }
       else {
-        if (alive) for (const [rowId] of cached.wanted) report(`acquire:${rowId}`, "acquisition-retired", { phase: "acquisition", parameter: parameter(rowId), resource: label });
+        if (alive) for (const [rowId] of cached.wanted) report(problemKey(rowId), "acquisition-retired", { phase: "acquisition", parameter: parameter(rowId), resource: label });
         cached.wanted.clear();
       }
     }
-    finally { cached.pending = false; if (owns()) notify(); }
+    finally { cached.pending = false; drainPicks(); notify(); }
   };
   const reference = (name, root) => ({ kind: "reference", value: resourceReferenceValue(name, root) });
   const resourceName = name => typeof name === "string" && !resourceReferenceProblem(null, name);
@@ -176,6 +224,7 @@ export function makeVariationEditor({ targets, cohortMode, destination: initialD
   };
   const notify = () => {
     if (!alive) return;
+    drainPicks();
     validationCache = null;
     // The successful close countdown is still an editable session. A new raw
     // revision must retain the last issued subjects, not become targetless work.
@@ -203,7 +252,7 @@ export function makeVariationEditor({ targets, cohortMode, destination: initialD
           return { raw, index, error, label: raw,
             node: value?.node ?? "", slot: value?.slot ?? "" };
         }) } : {}),
-       ...(domain === "images" ? { images: entry.values.items.map(item => ({ ...imageView(id, item, entry.metadata),
+        ...(domain === "images" ? { acquiring: pendingPicks().filter(pick => pick.id === id).length, images: entry.values.items.map(item => ({ ...imageView(id, item, entry.metadata),
           rotatable: item.kind !== "target", rotating: !!rotating.get(id)?.has(imageIdentity(item)) })) } : {}),
          problems: problems.project(validationProblems()).fields.get(id) ?? [], conflict: conflictFor(id) })])));
   const conflictFor = id => {
@@ -221,7 +270,7 @@ export function makeVariationEditor({ targets, cohortMode, destination: initialD
   const catalogueProblem = () => catalogueError;
   const conflictMessage = count => problemText(variationProblem("destination-conflicts", { phase: "destination", target: targetIdentity(capturedTargets[0]), destination: destination?.source, numbers: { conflicts: count }, names: locations.filter(entry => conflictFor(entry.id)).map(entry => parameter(entry.id).label) }));
   const destinationMessage = () => unchecked.length ? problemText(variationProblem("destination-unchecked", { severity: "warning", phase: "destination", target: targetIdentity(capturedTargets[0]), destination: destination?.source, names: unchecked.map(id => parameter(id).label) })) : "";
-  const dirty = () => acceptedRevision === null ? restoredWork || selectedTargets.length !== capturedTargets.length || recipe.dirty() : recipe.revision() !== acceptedRevision;
+  const dirty = () => pendingPicks().length > 0 || (acceptedRevision === null ? restoredWork || selectedTargets.length !== capturedTargets.length || recipe.dirty() : recipe.revision() !== acceptedRevision);
   const parseCandidate = (parameter, raw) => parseRecipeCandidate(parameter, raw, catalogues.get(capturedTargets[0].id)?.nodes);
   const candidateChoices = entry => (entry.metadata.options ?? []).map(value => ({ text: stringifyExactJson(value),
     label: stringifyExactJson(value),
@@ -347,7 +396,7 @@ export function makeVariationEditor({ targets, cohortMode, destination: initialD
     if (!selectedTargets.length) { enginePlan = []; enginePlanPending = false; return; }
     const selectedImages = [...recipe.entries("images")].filter(([, entry]) => entry.values.enabled)
       .flatMap(([id, entry]) => entry.values.items.map(item => imageView(id, item, entry.metadata)));
-    if (selectedImages.some(item => item.pending || item.error)) {
+    if (pendingPicks(true).length || selectedImages.some(item => item.pending || item.error)) {
       planGeneration++; planKey = null; planController?.abort(); if (planTimer !== null) clearTimer(planTimer);
       planTimer = null; enginePlan = null; enginePlanError = selectedImages.find(item => item.error)?.error ?? ""; enginePlanPending = !enginePlanError;
       return;
@@ -397,7 +446,7 @@ export function makeVariationEditor({ targets, cohortMode, destination: initialD
     return { ...preview, ...presentation, exact: n !== null, busy: preview.status !== "invalid" && (presentation.pending || !!preview.busy),
       timeEstimate: estimateGenerationTime(n > 0 ? 1 : null, times) };
   };
-  const canRun = () => (!services.plan || catalogueReady && catalogueError === null && !destinationPending && !enginePlanPending && !enginePlanError && enginePlan?.some(target => !target.problem && target.count > 0)) &&
+  const canRun = () => !pendingPicks(true).length && (!services.plan || catalogueReady && catalogueError === null && !destinationPending && !enginePlanPending && !enginePlanError && enginePlan?.some(target => !target.problem && target.count > 0)) &&
     !["invalid", "failed", "conflict"].includes(editor.preview().status);
 
   seed("naming", "root", {}, { prefix: "", suffix: "" });
@@ -808,6 +857,7 @@ export function makeVariationEditor({ targets, cohortMode, destination: initialD
       if (catalogueError !== null) return unavailable("failed", catalogueProblem());
       if (!catalogueReady) return unavailable("reading", problemText(variationProblem("workflow-pending", { phase: "catalogue", target: targetIdentity(capturedTargets[0]) })));
       if (destinationPending) return unavailable("reading", problemText(variationProblem("destination-pending", { phase: "destination", destination: destination.source, numbers: { images: selectedTargets.length } })));
+      if (pendingPicks(true).length) return unavailable("reading", `Loading ${pendingPicks(true).length} selected images. Nothing will be sent until they are ready.`);
       const snapshot = captureRows(), first = catalogues.get(capturedTargets[0].id);
       for (const [id, entry] of Object.entries(snapshot.numeric)) if (entry.values.enabled && entry.values.mode === "range" && increment(entry) === null) {
         return unavailable("invalid", problemText(variationProblem("numeric-step", { phase: "compile", target: targetIdentity(capturedTargets[0]), parameter: parameter(id), field: "Step", value: entry.values.rawIncrement, numbers: { minimum: entry.metadata.minIncrement } })));
@@ -887,6 +937,7 @@ export function makeVariationEditor({ targets, cohortMode, destination: initialD
       if (!alive) return { status: "stale" };
       if (running || deciding) { report("busy", "busy", { phase: "run", detail: running ? "submission" : "confirmation" }); return { status: "busy" }; }
       problems.clear("busy");
+      if (pendingPicks(true).length) { publish({ text: "Selected images are still loading. Nothing was sent.", ok: false, state: "unavailable" }); return { status: "invalid" }; }
       if (catalogueError !== null) { publish({ text: `${catalogueProblem()} Nothing was sent.`, ok: false, state: "unavailable" }); return { status: "invalid" }; }
       if (!catalogueReady) { publish({ text: "Inspecting source context; your edits have been kept.", ok: false, state: "unavailable" }); return { status: "invalid" }; }
       if (destinationPending) { publish({ text: `Still checking ${destination.source}; nothing was sent.`, ok: false, state: "unavailable" }); return { status: "invalid" }; }
@@ -1095,6 +1146,7 @@ export function makeVariationEditor({ targets, cohortMode, destination: initialD
     },
     dispose() {
       alive = false; invalidateClose(); active = null; rotations.clear(); rotationSources.clear(); rotating.clear(); sourceFiles.clear(); pexelsFiles.clear(); inputCatalogues.clear(); sourceLifetimes.clear();
+      orderedPicks.clear(); pumpAcquisitions();
       stopProgress?.(); stopProgress = null;
       planGeneration++; planController?.abort(); if (planTimer !== null) clearTimer(planTimer);
       timingController.abort(); generationTimes.clear();

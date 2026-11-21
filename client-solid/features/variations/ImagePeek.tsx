@@ -10,6 +10,7 @@ export function ImagePeek(props) {
   let layer, backdrop, frameElement, seq = 0, origin = null, lastTarget = null, motion = [], closing = false;
   const [frames, setFrames] = createSignal([]);
   const [opened, setOpened] = createSignal(false);
+  const [presented, setPresented] = createSignal(false), [name, setName] = createSignal("image");
   const [viewport, setViewport] = createSignal({ width: innerWidth, height: innerHeight });
   const reduced = () => matchMedia("(prefers-reduced-motion: reduce)").matches;
   const shown = () => frames().findLast(frame => frame.natural()) ?? null;
@@ -22,14 +23,15 @@ export function ImagePeek(props) {
     const [natural, setNatural] = createSignal(null), [failure, setFailure] = createSignal(false);
     return { id: ++seq, src, next, local: !!descriptor.local, name: descriptor.name ?? "image", natural, setNatural, failed: failure, setFailure };
   };
-  const want = target => {
-    const descriptor = target.descriptor(), latest = frames().at(-1);
+  const want = descriptor => {
+    setName(descriptor?.name ?? "image");
+    const latest = frames().at(-1);
     if (!descriptor?.src || (latest && [descriptor.src, descriptor.full].includes(latest.src))) return;
     const full = descriptor.full && descriptor.full !== descriptor.src ? descriptor.full : null;
     setFrames(list => [...list, frame(descriptor.src, full, descriptor)]);
   };
   const finish = () => {
-    stop(); closing = false; setOpened(false); setFrames([]); origin = null;
+    stop(); closing = false; setOpened(false); setPresented(false); setFrames([]); origin = null;
     if (visible()) layer.hidePopover();
     removeEventListener("resize", resize);
   };
@@ -51,17 +53,19 @@ export function ImagePeek(props) {
   const failedFrame = record => {
     if (!frames().includes(record)) return;
     record.setFailure(true);
+    // A failed thumbnail must not strand a usable full-image request.
+    if (record.next && frames().at(-1) === record) setFrames(list => [...list, frame(record.next, null, record)]);
     // A held picture outlives a failed replacement; alone, the failure shows.
     if (frames().some(other => other !== record && other.natural())) setFrames(list => list.filter(other => other !== record));
     else if (!opened()) setOpened(true);
   };
-  const show = target => {
+  const show = (target, descriptor) => {
     // A new press during the closing motion starts a fresh opening from its tile.
     if (closing || !visible()) {
       finish(); origin = target.rect(); layer.showPopover();
       resize(); addEventListener("resize", resize);
     }
-    lastTarget = target; want(target);
+    setPresented(true); lastTarget = target; want(descriptor);
   };
   const hide = () => {
     if (!visible() || closing) return;
@@ -78,16 +82,18 @@ export function ImagePeek(props) {
   };
   createEffect(() => {
     const state = props.state();
-    untrack(() => state.open && state.target ? show(state.target) : hide());
+    const descriptor = state.open && state.target?.descriptor();
+    untrack(() => state.open && state.target ? show(state.target, descriptor) : hide());
   });
   onCleanup(finish);
   return <div ref={layer} popover="manual" class="vz-peek" aria-hidden="true">
-    <div ref={backdrop} class="vz-peek-backdrop" classList={{ "is-open": opened() }} />
-    <div ref={frameElement} class="vz-peek-frame" classList={{ "is-failed": failed() }}
+    <div ref={backdrop} class="vz-peek-backdrop" classList={{ "is-open": presented() }} />
+    <div ref={frameElement} class="vz-peek-frame" classList={{ "is-empty": !shown(), "is-failed": failed() }}
       style={box() ? { width: `${box().width}px`, height: `${box().height}px` } : undefined}>
       <For each={frames()}>{record =>
         <PeekPicture record={record} shown={shown() === record} register={props.register}
           onLoad={image => loaded(record, image)} onError={() => failedFrame(record)} />}</For>
+      <Show when={!shown() && !failed()}><div class="vz-peek-loading" role="status"><span class="vz-submit-spinner" aria-hidden="true" /><SingleLineText value={`Loading ${name()}`} /></div></Show>
       <Show when={failed()}><SingleLineText class="vz-peek-failure" role="status" value={`Couldn't load ${frames()[0]?.name}.`} /></Show>
     </div>
   </div>;

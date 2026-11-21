@@ -71,6 +71,8 @@ const control = (base, body) => fetch(base + '/__test/activity', { method: 'POST
 
     console.log('step 1');
     // 1. Space typed into the search box is text, never a peek.
+    assert(!await evaluate(`document.activeElement.matches('.vz-input-search')`));
+    await page.clickAt('.vz-input-search');
     assert(await evaluate(`document.activeElement.matches('.vz-input-search')`));
     await hover(option(WIDE));
     await space('keyDown'); await space('keyUp');

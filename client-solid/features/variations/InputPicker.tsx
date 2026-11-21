@@ -115,7 +115,7 @@ function InputOptions(props) {
   const [placed, setPlaced] = createSignal(false);
   // Both first focus and the modal's retained caret restoration belong to this
   // surface. No focus callback may run until its visible placement is committed.
-  let restoreFocus = () => search.focus({ preventScroll: true });
+  let restoreFocus = () => scrollElement.focus({ preventScroll: true });
   const rememberFocus = restore => props.rememberFocus?.(() => {
     if (placed()) restore();
     else restoreFocus = restore;
@@ -163,7 +163,7 @@ function InputOptions(props) {
   });
   // A remote catalogue's context already names its search; appended pages keep
   // the reader's place instead of returning to the top.
-  createEffect(() => { props.context; if (!props.remoteSearch) filtered(); setPendingFocus(null); setActive(0); restoreFocus = () => search?.focus({ preventScroll: true }); virtualizer.scrollToOffset(0); });
+  createEffect(() => { props.context; if (!props.remoteSearch) filtered(); setPendingFocus(null); setActive(0); virtualizer.scrollToOffset(0); });
   createEffect(() => { files().filter(selected).length; props.onGeometry(); });
   // Paged catalogues ask for more once the mounted window nears the end.
   createEffect(() => {
@@ -225,7 +225,7 @@ function InputOptions(props) {
       const next = Math.max(0, Math.min(filtered().length - 1, active() + delta));
       // A scroll event may mount the destination on a later frame. Keep a
       // stable key target until that row exists, rather than focusing a retired tile.
-      search.focus({ preventScroll: true });
+      scrollElement.focus({ preventScroll: true });
       setActive(next); setPendingFocus(next);
       virtualizer.scrollToIndex(Math.floor(next / columns()), { align: "auto" });
     }
@@ -266,7 +266,7 @@ function InputOptions(props) {
       aria-labelledby={[props.sources.length > 1 ? `${props.id}-tab-${encodeURIComponent(props.source.source)}` : "", props.roots ? `${props.id}-feed-${props.resourceRoot}` : ""].filter(Boolean).join(" ") || undefined}
       aria-label={props.sources.length > 1 || props.roots ? undefined : `${sourceLabel()} ${props.noun}`}>
     <div class="vz-input-activity-bar" classList={{ "is-active": !!props.catalogue.pending }} aria-hidden="true" />
-    <div class="vz-input-list" classList={{ "is-stale": !!props.catalogue.stale }} id={`${props.id}-list`} ref={scrollElement} role="listbox"
+    <div class="vz-input-list" classList={{ "is-stale": !!props.catalogue.stale }} id={`${props.id}-list`} ref={scrollElement} role="listbox" tabindex="0" {...focusMemory(rememberFocus)}
       aria-label={`${sourceLabel()} ${props.noun}`} aria-multiselectable="true" aria-busy={props.catalogue.pending ? "true" : undefined}>
       <div class="vz-input-window" style={{ height: `${Math.max(0, virtualizer.getTotalSize() - GAP)}px` }}>
         <For each={placement() ? thumbnailRows() : []}>{virtual =>
@@ -285,17 +285,17 @@ function InputOptions(props) {
                return <Thumbnail class="vz-input-tile" name={name} src={props.thumbnail(name)} register={props.registerThumbnail}
                  order={() => demandRank(virtual.index, virtualizer.range, band().direction)}
                 pending={props.state(name).pending} error={props.state(name).error} onRetry={() => props.onToggle(name)}
-                priority={priority} rememberFocus={rememberFocus} surface={picture => <button type="button" role="option" tabindex="-1" id={`${props.id}-option-${index()}`}
+                 priority={priority} rememberFocus={rememberFocus} surface={picture => <button type="button" role="option" tabindex={active() === index() ? "0" : "-1"} id={`${props.id}-option-${index()}`}
                 aria-label={[props.itemLabel(name), ...markers().map(marker => marker.label)].join(", ")} title={props.itemLabel(name)} aria-selected={selected(name)} data-input-name={name}
                 class={"vz-input-option" + (active() === index() ? " vz-input-active" : "")}
                 {...memory} {...peek} onFocus={event => { setActive(index()); memory.onFocus(event); }}
-                onClick={() => { setActive(index()); props.onToggle(name); search.focus(); }}>
+                 onClick={() => { setActive(index()); props.onToggle(name); }}>
                 {picture}
                 <Show when={markers().length}><span class="vz-input-judgments" aria-hidden="true">
                   <For each={markers()}>{marker => <span class={`vz-input-judgment is-${marker.name}`} data-judgment={marker.name} />}</For>
                 </span></Show>
                 <Show when={name === props.current}><span class="vz-image-same" aria-hidden="true" /></Show>
-                <Show when={selected(name)}><SingleLineText class="vz-input-selected" aria-hidden="true" value="✓" /></Show>
+                 <Show when={selected(name)}><span class="vz-input-selected" aria-hidden="true" innerHTML={iconSvg("check")} /></Show>
               </button>} />;
             }}</For>
           </div>

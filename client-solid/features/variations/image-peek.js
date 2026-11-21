@@ -28,7 +28,7 @@ export function flipTransform(from, box) {
 
 export function makeImagePeek({ changed = () => {}, typing = typingTarget, host = globalThis } = {}) {
   let hovered = null, target = null, open = false, alive = true, serial = 0, detach = null;
-  const usable = registration => !!registration && !!registration.descriptor()?.src;
+  const usable = registration => !!registration && !registration.retired && !!registration.descriptor();
   const end = () => {
     if (!open) return;
     open = false; detach?.(); detach = null; changed();

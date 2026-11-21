@@ -274,7 +274,7 @@ Deno.test("pexels editor: a chosen photo joins the set as an uploaded File throu
   const { editor } = rig, id = "image.image";
   editor.edit("numeric", "n.denoise", "enabled", false); editor.edit("images", id, "enabled", true);
   const pending = editor.togglePexels(id, "svc", "42", "http://svc");
-  assertEquals(editor.pexelsState(id, "svc", "42"), { selected: false, pending: true, error: "" });
+  assertEquals(editor.pexelsState(id, "svc", "42"), { selected: true, pending: true, error: "" });
   release(); await pending;
   assertEquals(editor.pexelsState(id, "svc", "42"), { selected: true, pending: false, error: "" });
   assertEquals(editor.rows("images")[id].items.map(item => [item.kind, item.name]), [["upload", "pexels-42.jpg"]]);

@@ -34,7 +34,9 @@ Deno.test("image peek owner: hover admission, repeat, switch, release, blur and 
   const aSurface = element({ left: 1, top: 2, width: 3, height: 4 }), bSurface = element({ left: 5, top: 6, width: 7, height: 8 });
   assert(!peek.admits(key()), "nothing hovered");
   empty.props.onPointerEnter({ currentTarget: element({}) });
-  assert(!peek.admits(key()), "a tile without a picture cannot peek");
+  assert(peek.admits(key()), "a tile awaiting its URL can show a loading placeholder");
+  assert(peek.start());
+  assertEquals(peek.state().target.descriptor().name, "pending"); peek.end();
   a.props.onPointerEnter({ currentTarget: aSurface });
   assert(peek.admits(key()));
   assert(!peek.admits(key({ target: { type: "search", matches: selector => selector === "input" } })), "typing keeps Space");
