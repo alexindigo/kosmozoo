@@ -9,6 +9,29 @@ const settle = async rig => {
   const timer = rig.timers.findLast(timer => timer.active && timer.ms === 150);
   assert(timer); timer.active = false; await timer.callback();
 };
+for (const newerEdits of [false, true]) Deno.test(`cohort preparation: target causes reach the Run status and saved result with newer edits ${newerEdits}`, async () => {
+  let savedReason, calls = 0, rig;
+  const problem = { code: "source-retired", message: "Captured source changed after image upload; no prompt was sent." };
+  rig = editorRig({ history: {
+    capture: async () => ({}),
+    plans(ticket) {
+      if (newerEdits) rig.editor.edit("numeric", "n.denoise", "value", "0.8");
+      return { plans: [], leftovers: [{ target: ticket.targets[0], problem }] };
+    },
+    finish(_id, reason) { savedReason = reason; },
+  }, run() { calls++; throw new Error("preparation failure cannot dispatch"); } });
+  rig.editor.setEnabled("n.denoise", true);
+  rig.editor.edit("numeric", "n.denoise", "mode", "value");
+  rig.editor.edit("numeric", "n.denoise", "value", "0.9");
+  assertEquals((await rig.editor.run()).status, "failed");
+  assertEquals(calls, 0);
+  assert(rig.editor.result().reason.includes(problem.message));
+  assert(savedReason.includes(problem.message));
+  const status = runStatus({ preview: rig.editor.preview(), result: rig.editor.result() });
+  assert(status.fullText.includes(problem.message));
+  assertEquals(rig.editor.rows("numeric")["n.denoise"].value, newerEdits ? "0.8" : "0.9");
+  rig.editor.dispose();
+});
 Deno.test("cohort preview: pending/zero plans gate the detached Run port without history effects", async () => {
   let count = 0, captures = 0;
   const rig = editorRig({ plan: async () => [{ index: 0, count, problem: count ? null : { code: "no-work", message: "Choose a different value." } }],
